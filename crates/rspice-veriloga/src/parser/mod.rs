@@ -1152,7 +1152,9 @@ impl<'a> Parser<'a> {
         } else if self.match_token(TokenKind::String) {
             (ParamType::String, true)
         } else {
-            (ParamType::Real, false) // language default for scalar parameters
+            // Retain the historical analog placeholder; digital lowering
+            // infers an untyped parameter from its assigned expression.
+            (ParamType::Real, false)
         };
 
         // Pull desc/units out of any preceding attribute instance

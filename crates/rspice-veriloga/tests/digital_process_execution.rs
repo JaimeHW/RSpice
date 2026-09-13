@@ -58,6 +58,158 @@ fn parse_value(spelling: &str) -> FourStateValue {
 }
 
 #[test]
+fn digital_parameters_are_values_in_arithmetic_selects_and_local_scopes() {
+    let mut harness = Harness::from_source(
+        "module parameters;
+        parameter WIDTH=8; localparam NEXT=WIDTH+1; parameter integer NEG=-2;
+        reg [7:0] bits, sum; reg selected, negative; reg [39:0] packed;
+        reg [63:0] extended; reg [31:0] shadow, module_value;
+        initial begin
+            bits=8'b10000000; selected=bits[WIDTH-1]; sum=NEXT+3;
+            negative=NEG<0; extended=NEG; packed={8'ha5,WIDTH};
+            begin : inner integer WIDTH; WIDTH=3; shadow=WIDTH; module_value=NEXT; end
+        end endmodule",
+    );
+    let outcome = harness.start(0);
+    assert!(
+        matches!(outcome, DigitalProcessOutcome::Finished),
+        "{outcome:?}"
+    );
+    assert_eq!(harness.get("selected"), "1");
+    assert_eq!(harness.get("sum"), "00001100");
+    assert_eq!(harness.get("negative"), "1");
+    assert_eq!(harness.get("extended"), format!("{:064b}", u64::MAX - 1));
+    assert_eq!(
+        harness.get("packed"),
+        format!("{:040b}", (0xa5_u64 << 32) | 8)
+    );
+    assert_eq!(harness.get("shadow"), format!("{:032b}", 3));
+    assert_eq!(harness.get("module_value"), format!("{:032b}", 9));
+}
+
+#[test]
+fn digital_parameters_keep_literal_width_signedness_and_exact_bits() {
+    let mut harness = Harness::from_source(
+        "module parameters;
+        parameter U=8'hff; parameter S=8'shff;
+        parameter LARGE=64'h0020000000000000+1;
+        parameter WRAPPED=(4'd15*4'd15)/4'd3;
+        reg [15:0] packed; reg [63:0] signed_value, exact; reg [3:0] wrapped;
+        initial begin packed={U,S}; signed_value=S; exact=LARGE; wrapped=WRAPPED; end
+        endmodule",
+    );
+    assert!(matches!(harness.start(0), DigitalProcessOutcome::Finished));
+    assert_eq!(harness.get("packed"), "1111111111111111");
+    assert_eq!(harness.get("signed_value"), "1".repeat(64));
+    assert_eq!(
+        harness.get("exact"),
+        format!("{:064b}", 9_007_199_254_740_993_u64)
+    );
+    assert_eq!(harness.get("wrapped"), "0000");
+}
+
+#[test]
+fn digital_untyped_parameters_infer_the_expression_domain() {
+    let mut harness = Harness::from_source(
+        "module parameters;
+        parameter GAIN=0.25; localparam HALF=2.0*GAIN; parameter COUNT=3;
+        real answer; reg [7:0] rounded;
+        initial begin answer=HALF*COUNT; rounded=GAIN+0.5; end endmodule",
+    );
+    assert!(matches!(harness.start(0), DigitalProcessOutcome::Finished));
+    assert_eq!(harness.get_real("answer"), 1.5);
+    assert_eq!(harness.get("rounded"), "00000001");
+}
+
+#[test]
+fn digital_parameters_resolve_initializers_and_event_expression_operands() {
+    let mut harness = Harness::from_source(
+        "module parameters; parameter INIT=7; parameter OFFSET=2;
+        parameter WIDTH=8; parameter BIAS=3; reg [7:0] d, captured; reg done;
+        initial begin : scope
+            integer value=INIT; reg [WIDTH-1:0] local_bits=BIAS;
+            captured=value+local_bits;
+            @(d+OFFSET) done=1;
+        end endmodule",
+    );
+    harness.set("d", "00000000");
+    let suspension = expect_suspended(harness.start(0));
+    assert_eq!(harness.get("captured"), "00001010");
+    harness.set("d", "00000001");
+    expect_finished(harness.resume(0, suspension.resume_state()));
+    assert_eq!(harness.get("done"), "1");
+}
+
+#[test]
+fn digital_real_parameter_conversions_follow_integral_expression_widths() {
+    let mut harness = Harness::from_source(
+        "module parameters; parameter U=8'hff;
+        parameter real R=(4'd15*4'd15)/4'd3;
+        parameter real S=8'shff;
+        parameter real FROM=U;
+        real r,s,copied; initial begin r=R; s=S; copied=FROM; end endmodule",
+    );
+    expect_finished(harness.start(0));
+    assert_eq!(harness.get_real("r"), 0.0);
+    assert_eq!(harness.get_real("s"), -1.0);
+    assert_eq!(harness.get_real("copied"), 255.0);
+}
+
+#[test]
+fn digital_parameter_math_and_time_queries_use_the_declaring_module() {
+    let mut harness = Harness::from_source(
+        "`timescale 10ps/1fs
+        module parameters;
+        parameter real SQUARE=sqrt((4'd15*4'd15)+4'd3);
+        parameter real SELECTED=1 ? SQUARE : ln(-1.0);
+        parameter UNIT=$simparam(\"timeUnit\");
+        parameter PRECISION=$simparam(\"timePrecision\");
+        real square, chosen, unit, precision;
+        initial begin square=SQUARE; chosen=SELECTED; unit=UNIT; precision=PRECISION; end
+        endmodule",
+    );
+    expect_finished(harness.start(0));
+    assert_eq!(harness.get_real("square"), 2.0);
+    assert_eq!(harness.get_real("chosen"), 2.0);
+    assert_eq!(harness.get_real("unit"), 1e-11);
+    assert_eq!(harness.get_real("precision"), 1e-15);
+}
+
+#[test]
+fn digital_parameter_failures_retain_the_name_and_shadowed_defaults_are_unused() {
+    for value in ["inf", "ln(-1.0)", "$realtime"] {
+        let source = format!(
+            "module parameters; parameter real BAD={value}; real seen; initial seen=BAD; endmodule"
+        );
+        let error = VerilogACompiler::new(CompilerOptions::default())
+            .compile_canonical_ir(&source)
+            .expect_err("a nonfinite or runtime-dependent parameter must be refused")
+            .to_string();
+        assert!(error.contains("BAD"), "{error}");
+    }
+    let mut harness = Harness::from_source(
+        "module parameters; parameter BAD=1.0/0.0; reg [31:0] seen;
+        initial begin : scope integer BAD=3; seen=BAD; end endmodule",
+    );
+    expect_finished(harness.start(0));
+    assert_eq!(harness.get("seen"), format!("{:032b}", 3));
+}
+
+#[test]
+fn digital_instance_parameter_values_keep_the_child_scope() {
+    let mut design = Design::new(
+        "module child(q); output [7:0] q; parameter WIDTH=3; assign q=WIDTH+1; endmodule
+        module top; parameter WIDTH=9; wire [7:0] a,b;
+        child instance1(a); assign b=WIDTH+1; endmodule",
+        "top",
+    );
+    design.start_all();
+    design.settle();
+    assert_eq!(design.get("a"), "00000100");
+    assert_eq!(design.get("b"), "00001010");
+}
+
+#[test]
 fn digital_clock_queries_preserve_integer_bits_rounding_and_resume_time() {
     use rspice_veriloga::canonical_ir::{CfgValueKind, CfgValueType, DigitalClock};
     let source = "`timescale 10ns/1ps\nmodule clocked;

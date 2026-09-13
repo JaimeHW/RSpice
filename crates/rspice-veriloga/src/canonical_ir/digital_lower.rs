@@ -99,6 +99,9 @@
 //! two sets of drivers a resolver can tell apart, rather than one body lowered
 //! twice.
 
+mod constants;
+use constants::ResolvedConstants;
+
 use super::cfg::{CfgTerminator, CfgValueKind, CfgValueType, CfgVariable, DigitalWait, SsaBuilder};
 use super::diagnostic::{CompilerPhase, IrDiagnostic, SourceSpanRef};
 use super::digital::{
@@ -367,7 +370,25 @@ fn lower_with_analog_variables(
     // it belongs to neither scope: this pass wrote it, in elaborated names, and
     // the only expressions in one are a name and a select whose bounds are
     // already literals.
-    let no_constants = DigitalConstants::default();
+    let module_constants = constants::resolve(
+        &digital.constants,
+        digital.time_scale,
+        &digital.processes,
+        &digital.continuous_assigns,
+    )?;
+    let instance_constants = digital
+        .instances
+        .iter()
+        .map(|instance| {
+            constants::resolve(
+                &instance.constants,
+                instance.time_scale,
+                &instance.processes,
+                &instance.continuous_assigns,
+            )
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let no_constants = ResolvedConstants::default();
     let no_analog_variables = HashMap::new();
 
     let mut processes = Vec::new();
@@ -383,7 +404,7 @@ fn lower_with_analog_variables(
             allocate(),
             &signals,
             &module_scope,
-            &digital.constants,
+            &module_constants,
             analog_variables,
             &mut probes,
             digital.time_scale,
@@ -397,7 +418,7 @@ fn lower_with_analog_variables(
             assignment,
             &signals,
             &module_scope,
-            &digital.constants,
+            &module_constants,
             analog_variables,
             allocate(),
             &mut drivers,
@@ -408,14 +429,19 @@ fn lower_with_analog_variables(
             Err(mut errors) => diagnostics.append(&mut errors),
         }
     }
-    for (instance, scope) in digital.instances.iter().zip(&frame_scopes) {
+    for ((instance, scope), constants) in digital
+        .instances
+        .iter()
+        .zip(&frame_scopes)
+        .zip(&instance_constants)
+    {
         for process in &instance.processes {
             match lower_process(
                 process,
                 allocate(),
                 &signals,
                 scope,
-                &instance.constants,
+                constants,
                 &no_analog_variables,
                 &mut probes,
                 instance.time_scale,
@@ -429,7 +455,7 @@ fn lower_with_analog_variables(
                 assignment,
                 &signals,
                 scope,
-                &instance.constants,
+                constants,
                 &no_analog_variables,
                 allocate(),
                 &mut drivers,
@@ -561,7 +587,7 @@ fn lower_continuous_assign(
     assignment: &crate::semantic::AnalyzedContinuousAssign,
     signals: &[DigitalSignal],
     index: &HashMap<&str, DigitalSignalId>,
-    constants: &DigitalConstants,
+    constants: &ResolvedConstants,
     analog_variables: &HashMap<SmolStr, super::digital::DigitalAnalogQuantity>,
     id: DigitalProcessId,
     drivers: &mut Vec<DigitalDriver>,
@@ -569,6 +595,7 @@ fn lower_continuous_assign(
     time_scale: crate::time_scale::ModuleTimeScale,
 ) -> Result<CfgDigitalProcess, Vec<DigitalLoweringDiagnostic>> {
     let mut lowerer = ProcessLowerer {
+        constant_expression: false,
         time_scale,
         signals,
         index,
@@ -727,12 +754,13 @@ fn lower_process(
     id: DigitalProcessId,
     signals: &[DigitalSignal],
     index: &HashMap<&str, DigitalSignalId>,
-    constants: &DigitalConstants,
+    constants: &ResolvedConstants,
     analog_variables: &HashMap<SmolStr, super::digital::DigitalAnalogQuantity>,
     probes: &mut Vec<DigitalAnalogProbe>,
     time_scale: crate::time_scale::ModuleTimeScale,
 ) -> Result<CfgDigitalProcess, Vec<DigitalLoweringDiagnostic>> {
     let mut lowerer = ProcessLowerer {
+        constant_expression: false,
         time_scale,
         signals,
         index,
@@ -1026,6 +1054,8 @@ impl ProcessBuilder {
 }
 
 struct ProcessLowerer<'a> {
+    /// Closed parameter expressions may use pure analog math intrinsics.
+    constant_expression: bool,
     time_scale: crate::time_scale::ModuleTimeScale,
     signals: &'a [DigitalSignal],
     index: &'a HashMap<&'a str, DigitalSignalId>,
@@ -1037,7 +1067,7 @@ struct ProcessLowerer<'a> {
     /// scope rather than being read out of one place: an instance frame's body
     /// is lowered against an empty table so a child's `WIDTH` can never be
     /// folded with a parent's.
-    constants: &'a DigitalConstants,
+    constants: &'a ResolvedConstants,
     analog_variables: &'a HashMap<SmolStr, super::digital::DigitalAnalogQuantity>,
     /// The plan's continuous-net probe table, appended to as probes appear.
     ///
@@ -2488,6 +2518,14 @@ impl ProcessLowerer<'_> {
     /// neither is a logical operator or a reduction.
     fn is_real_expression(&self, expression: &Expression) -> bool {
         match expression {
+            Expression::Identifier(identifier)
+                if self.constant_expression && identifier.name == "inf" =>
+            {
+                true
+            }
+            Expression::Call(call) if self.constant_expression => {
+                constants::math_call(&call.name).is_some()
+            }
             Expression::Number(number) => is_real_literal(&number.raw),
             Expression::Identifier(identifier) => match self.lookup_local(&identifier.name) {
                 Some(local) => self.local_is_real(local),
@@ -2500,10 +2538,11 @@ impl ProcessLowerer<'_> {
                     // name that denotes a signal is a runtime value and is
                     // never a constant, whatever else shares its spelling.
                     None => {
-                        self.analog_variables.get(&identifier.name)
-                            == Some(&super::digital::DigitalAnalogQuantity::RealVariable)
-                            || self.constants.real(&identifier.name).is_some()
-                            || self.constants.non_finite_real(&identifier.name).is_some()
+                        !self.constants.bits.contains_key(&identifier.name)
+                            && (self.analog_variables.get(&identifier.name)
+                                == Some(&super::digital::DigitalAnalogQuantity::RealVariable)
+                                || self.constants.real(&identifier.name).is_some()
+                                || self.constants.non_finite_real(&identifier.name).is_some())
                     }
                 },
             },
@@ -2677,6 +2716,16 @@ impl ProcessLowerer<'_> {
 
     /// Lower an expression that must produce a real.
     fn real_expression(&mut self, block: BlockId, expression: &Expression) -> ValueId {
+        if self.constant_expression
+            && matches!(expression, Expression::Identifier(identifier) if identifier.name == "inf")
+        {
+            return self.real_constant(f64::INFINITY);
+        }
+        if self.constant_expression
+            && let Expression::Call(call) = expression
+        {
+            return constants::lower_math_call(self, block, call);
+        }
         if !self.is_real_expression(expression) {
             let signed = self.self_signed(expression);
             let input = self.expression(block, expression);
@@ -3454,8 +3503,12 @@ impl ProcessLowerer<'_> {
                 Some(local) => self.local_signed(local),
                 None => self.index.get(identifier.name.as_str()).map_or_else(
                     || {
-                        self.analog_variables.get(&identifier.name)
-                            == Some(&super::digital::DigitalAnalogQuantity::IntegerVariable)
+                        self.constants
+                            .bits
+                            .get(&identifier.name)
+                            .is_some_and(|(_, signed)| *signed)
+                            || self.analog_variables.get(&identifier.name)
+                                == Some(&super::digital::DigitalAnalogQuantity::IntegerVariable)
                     },
                     |signal| self.signed_signal(*signal),
                 ),
@@ -3574,7 +3627,9 @@ impl ProcessLowerer<'_> {
                 Some(local) => self.local_width(local),
                 None => self.index.get(identifier.name.as_str()).map_or_else(
                     || {
-                        if self.analog_variables.contains_key(&identifier.name) {
+                        if let Some((value, _)) = self.constants.bits.get(&identifier.name) {
+                            value.width()
+                        } else if self.analog_variables.contains_key(&identifier.name) {
                             32
                         } else {
                             1
@@ -4095,6 +4150,15 @@ impl ProcessLowerer<'_> {
                     CfgValueKind::DigitalSignalRead { signal: *signal },
                 )
             }
+            None if self.constants.bits.contains_key(name) => {
+                let (value, _) = &self.constants.bits[name];
+                self.builder.push_leaf(
+                    CfgValueType::FourState {
+                        width: value.width(),
+                    },
+                    CfgValueKind::FourStateConstant(value.clone()),
+                )
+            }
             None if self.analog_variables.contains_key(name) => {
                 self.analog_variable(block, name, span)
             }
@@ -4321,6 +4385,11 @@ fn collect_expression_reads(expression: &Expression, reads: &mut BTreeSet<String
         }
         Expression::SystemFunction(function) => {
             for argument in &function.args {
+                collect_expression_reads(argument, reads);
+            }
+        }
+        Expression::Call(call) => {
+            for argument in &call.args {
                 collect_expression_reads(argument, reads);
             }
         }

@@ -1410,6 +1410,70 @@ fn validate_process_membership(
     Ok(())
 }
 
+/// Evaluate a closed compiler expression through the process arithmetic rules.
+/// No clock, net, analog input, state write or deferred effect is available.
+pub(crate) fn evaluate_constant_expression(
+    function: CfgFunction,
+    result: ValueId,
+    span: super::SourceSpanRef,
+) -> Result<DigitalScalar, DigitalEvalError> {
+    struct ConstantEnvironment {
+        wrote: bool,
+    }
+    impl DigitalEnvironment for ConstantEnvironment {
+        fn read_clock(&self) -> Option<DigitalClock> {
+            None
+        }
+        fn read_signal(&self, _: DigitalSignalId) -> Option<FourStateValue> {
+            None
+        }
+        fn write_signal(&mut self, _: DigitalSignalId, _: FourStateValue) {
+            self.wrote = true;
+        }
+        fn defer_update(&mut self, _: DigitalDeferredUpdate) {
+            self.wrote = true;
+        }
+        fn write_real_signal(&mut self, _: DigitalSignalId, _: f64) {
+            self.wrote = true;
+        }
+        fn read_real_signal(&self, _: DigitalSignalId) -> Option<f64> {
+            None
+        }
+        fn read_analog_potential(&self, _: DigitalAnalogProbeId) -> Option<f64> {
+            None
+        }
+        fn drive_real_signal(&mut self, _: DigitalRealDrive) {
+            self.wrote = true;
+        }
+        fn drive_signal(&mut self, _: DigitalDrive) {
+            self.wrote = true;
+        }
+    }
+    let process = CfgDigitalProcess {
+        time_scale: Default::default(),
+        id: 0usize.into(),
+        kind: super::digital::DigitalProcessKind::Initial,
+        function,
+        static_sensitivity: None,
+        span,
+    };
+    let plan = CanonicalDigitalPlan::default();
+    let mut environment = ConstantEnvironment { wrote: false };
+    let mut scratch = DigitalEvalScratch::new();
+    let outcome = Interpreter::new(&plan, &process, &mut environment, &mut scratch)
+        .run(process.function.entry, process.function.blocks.len());
+    if !matches!(outcome?, DigitalProcessOutcome::Finished) || environment.wrote {
+        return Err(DigitalEvalError::InvalidEventExpression {
+            value: result,
+            detail: "a parameter expression must finish without runtime effects".into(),
+        });
+    }
+    scratch
+        .table
+        .get(&process.function, result)
+        .map(ScalarRef::into_owned)
+}
+
 struct Interpreter<'a, 's, E: ?Sized> {
     plan: &'a CanonicalDigitalPlan,
     process: &'a CfgDigitalProcess,
@@ -1788,6 +1852,15 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
     fn compute(&mut self, id: ValueId) -> Result<DigitalScalar, DigitalEvalError> {
         let kind = &self.function().value(id).kind;
         match kind {
+            // These pure math nodes occur only in the closed compiler
+            // expressions evaluated above. Published process validation
+            // excludes analog CFG nodes from digital execution plans.
+            CfgValueKind::Unary { op, input } => Ok(DigitalScalar::Real(
+                super::cfg_eval::apply_unary(*op, self.real(*input)?),
+            )),
+            CfgValueKind::Binary { op, left, right } => Ok(DigitalScalar::Real(
+                super::cfg_eval::apply_binary(*op, self.real(*left)?, self.real(*right)?),
+            )),
             CfgValueKind::DigitalExpression { function, result } => {
                 let mut storage = self.scratch.expression.take().unwrap_or_default();
                 storage.arguments.clear();

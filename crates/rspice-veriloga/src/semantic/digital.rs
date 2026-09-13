@@ -76,19 +76,17 @@ pub struct AnalyzedDigital {
 /// each question in the domain that asked it.
 #[derive(Debug, Clone, Default)]
 pub struct DigitalConstants {
+    /// Scalar declarations retained for typed digital constant evaluation.
+    pub(crate) definitions: Vec<ParameterDecl>,
     /// Parameters whose default is a whole finite number, as that number.
     ///
     /// A non-integer default is absent rather than rounded: every place this is
     /// consulted wants a bit position or a repetition count, and there is no
     /// defensible integer for `parameter GAIN = 2.5`.
     pub integers: HashMap<SmolStr, i64>,
-    /// Parameters the author declared `parameter real`, as their default.
-    ///
-    /// Explicitly typed only. An untyped `parameter WIDTH = 8;` takes
-    /// Verilog-AMS's real default type, so admitting untyped parameters here
-    /// would make every existing bit-width parameter a real operand and change
-    /// what `q = WIDTH;` means. `parameter real K = 0.25;` says which domain it
-    /// belongs in, and this table holds exactly the parameters that said so.
+    /// Real parameter values. Semantic analysis seeds explicitly real
+    /// declarations; digital lowering also infers untyped defaults from their
+    /// expressions and evaluates integral operands before conversion to real.
     pub reals: HashMap<SmolStr, f64>,
     /// The same declarations whose default folds to an infinity or a NaN, as
     /// that value.
@@ -107,7 +105,7 @@ impl DigitalConstants {
         self.integers.get(name).copied()
     }
 
-    /// The real a name denotes, if it was declared `parameter real`.
+    /// The real a name denotes, whether explicitly declared or inferred.
     pub fn real(&self, name: &str) -> Option<f64> {
         self.reals.get(name).copied()
     }
@@ -1023,6 +1021,11 @@ impl SemanticAnalyzer {
         let mut constants = DigitalConstants::default();
         let declarations = module.parameters.iter().chain(&module.localparams);
         for parameter in declarations {
+            // Retain the authored expression even when the analog scalar
+            // evaluator cannot represent its digital width or four-state value.
+            if parameter.dimensions.is_empty() {
+                constants.definitions.push(parameter.clone());
+            }
             let Some(default) = &parameter.default else {
                 continue;
             };
