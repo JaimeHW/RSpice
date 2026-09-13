@@ -2466,6 +2466,99 @@ endmodule
     }
 
     #[test]
+    fn wasm_delay_preserves_sub_ulp_time_and_cancellation() {
+        use super::abi::FRAME_RESULT_OFFSET;
+        let source = include_str!("../../tests/fixtures/precision_delay.va");
+        let report = VerilogACompiler::default()
+            .compile_runtime(source, None)
+            .unwrap();
+        let control_entry = report.model.stamp_programs[0]
+            .jacobian_programs
+            .iter()
+            .position(|entry| matches!(entry.col_axis, crate::codegen::ColumnAxis::Node(2)))
+            .unwrap();
+        for postfix in [false, true] {
+            for (delay, anchor, middle, trial, expected, direct, control) in [
+                (
+                    2.0_f64.powi(-80),
+                    1.0,
+                    Some(1.0),
+                    0.0,
+                    2.0_f64.powi(-79),
+                    1.0,
+                    2.0,
+                ),
+                (
+                    f64::from_bits(1),
+                    1.0,
+                    Some(1.0),
+                    0.0,
+                    f64::from_bits(2),
+                    1.0,
+                    2.0,
+                ),
+                (
+                    0.5_f64.next_down(),
+                    0.0,
+                    Some(0.0),
+                    1.0,
+                    2.0_f64.powi(-53),
+                    2.0_f64.powi(-53),
+                    -2.0,
+                ),
+                (
+                    1.0 / 3.0,
+                    2.0,
+                    None,
+                    -1.0,
+                    -2.0_f64.powi(-54),
+                    1.0 - 1.0 / 3.0,
+                    3.0,
+                ),
+            ] {
+                let mut harness =
+                    FusedKernelHarness::for_source_with_plan(source, "precision_delay", postfix);
+                harness.reset();
+                let value = harness.stamp_value_export(0);
+                let jacobian = harness.jacobian_export(0, 0);
+                let control_jacobian = harness.jacobian_export(0, control_entry);
+                let mut samples = vec![(0.0, anchor)];
+                if let Some(value) = middle {
+                    samples.push((0.5, value));
+                }
+                samples.push((1.0, trial));
+                for (time, voltage) in samples {
+                    let context = harness.store.data_mut().context_mut();
+                    context.analysis_type = 2;
+                    context.time = time;
+                    context.begin_stateful_evaluation();
+                    harness.write_f64(FusedKernelHarness::VOLTAGES as usize, voltage);
+                    harness.write_f64(FusedKernelHarness::VOLTAGES as usize + 16, delay);
+                    harness.call_assignments();
+                    harness.call_prelude();
+                    assert_eq!(harness.call(&value), 0);
+                    if time == 1.0 {
+                        assert_eq!(
+                            harness.read_f64(FRAME_RESULT_OFFSET as usize).to_bits(),
+                            expected.to_bits()
+                        );
+                        assert_eq!(harness.call(&jacobian), 0);
+                        assert_eq!(harness.read_f64(FRAME_RESULT_OFFSET as usize), direct);
+                        assert_eq!(harness.call(&control_jacobian), 0);
+                        assert_eq!(harness.read_f64(FRAME_RESULT_OFFSET as usize), control);
+                    }
+                    harness
+                        .store
+                        .data_mut()
+                        .context_mut()
+                        .advance_state()
+                        .unwrap();
+                }
+            }
+        }
+    }
+
+    #[test]
     fn static_dae_wasm_delay_retains_waveform_and_control_jacobian() {
         use super::abi::FRAME_RESULT_OFFSET;
         use crate::vm::VerilogAEvaluationMode as Mode;

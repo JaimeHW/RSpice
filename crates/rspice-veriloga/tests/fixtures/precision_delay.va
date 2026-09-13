@@ -1,0 +1,6 @@
+`include "disciplines.vams"
+module precision_delay(p, n, d);
+    inout p, n, d;
+    electrical p, n, d;
+    analog I(p, n) <+ absdelay(V(p, n), V(d, n), 4.0);
+endmodule

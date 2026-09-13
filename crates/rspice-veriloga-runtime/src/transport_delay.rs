@@ -8,6 +8,74 @@
 
 use std::collections::VecDeque;
 
+use crate::arithmetic::{product_div, product_sum_div, sum_products_ratio};
+
+/// A clamped delayed time, held exactly as two binary64
+/// words. Rounding the absolute target alone can lose a physical delay or
+/// select the opposite side of an accepted interpolation knot.
+#[derive(Clone, Copy)]
+struct DelayTarget {
+    high: f64,
+    low: f64,
+}
+
+impl DelayTarget {
+    fn new(time: f64, delay: f64) -> Self {
+        if time <= delay {
+            return Self {
+                high: 0.0,
+                low: 0.0,
+            };
+        }
+        // Error-free TwoDiff. All operands are finite and 0 < delay < time,
+        // so the high difference and reconstruction cannot overflow.
+        let high = time - delay;
+        let recovered_delay = time - high;
+        let recovered_time = high + recovered_delay;
+        let low = (time - recovered_time) + (recovered_delay - delay);
+        Self { high, low }
+    }
+
+    fn at_or_after(self, sample: f64) -> bool {
+        self.high > sample || (self.high == sample && self.low >= 0.0)
+    }
+
+    fn after(self, sample: f64) -> f64 {
+        (self.high - sample) + self.low
+    }
+
+    fn before(self, sample: f64) -> f64 {
+        (sample - self.high) - self.low
+    }
+
+    /// Retain cancellation before rounding either interpolation weight or
+    /// large absolute-time products. This uses the shared exact scalar
+    /// arithmetic only when opposite-sign endpoints can cancel.
+    fn interpolate_cancellation(
+        self,
+        left_time: f64,
+        left_value: f64,
+        right_time: f64,
+        right_value: f64,
+    ) -> Result<f64, String> {
+        sum_products_ratio(
+            [
+                (self.high, right_value),
+                (self.low, right_value),
+                (-left_time, right_value),
+                (right_time, left_value),
+                (-self.high, left_value),
+                (-self.low, left_value),
+            ]
+            .into_iter(),
+            [(right_time, 1.0), (left_time, -1.0)].into_iter(),
+        )
+        .map_err(|error| {
+            format!("absdelay interpolation cancellation is not representable: {error:?}")
+        })
+    }
+}
+
 /// Maximum number of accepted samples retained by one `absdelay` site.
 ///
 /// The time horizon is normally the tighter bound, but an adaptive solver can
@@ -356,14 +424,8 @@ impl DelayBuffer {
             });
         }
 
-        let unclamped_target = time - effective_delay;
-        if unclamped_target > 0.0 && unclamped_target == time {
-            return Err(format!(
-                "absdelay td {effective_delay} is not representable relative to time {time}"
-            ));
-        }
-        let target = unclamped_target.max(0.0);
-        let target_delay_derivative = if unclamped_target > 0.0 {
+        let target = DelayTarget::new(time, effective_delay);
+        let target_delay_derivative = if time > effective_delay {
             -delay_scale
         } else {
             // The time-zero clamp and its exact kink are deterministic: the
@@ -375,7 +437,7 @@ impl DelayBuffer {
 
     fn interpolate(
         &self,
-        target: f64,
+        target: DelayTarget,
         candidate: (f64, f64),
         target_delay_derivative: f64,
     ) -> Result<DelayEvaluation, String> {
@@ -383,7 +445,9 @@ impl DelayBuffer {
         // deque's wrap. Find the first strictly later sample in logarithmic
         // time without copying or rotating the retained history. Equality
         // stays on the left so exact knots retain their right-hand slope.
-        let right_index = self.samples.partition_point(|sample| sample.0 <= target);
+        let right_index = self
+            .samples
+            .partition_point(|sample| target.at_or_after(sample.0));
         let mut left = right_index
             .checked_sub(1)
             .and_then(|index| self.samples.get(index))
@@ -392,7 +456,7 @@ impl DelayBuffer {
             .samples
             .get(right_index)
             .map(|&(time, value)| (time, value, 0.0));
-        if candidate.0 <= target {
+        if target.at_or_after(candidate.0) {
             left = Some((candidate.0, candidate.1, 1.0));
         } else if right.is_none() {
             right = Some((candidate.0, candidate.1, 1.0));
@@ -407,15 +471,53 @@ impl DelayBuffer {
                 if !(interval.is_finite() && interval > 0.0) {
                     return Err("absdelay interpolation interval is not representable".into());
                 }
-                let alpha = ((target - left_time) / interval).clamp(0.0, 1.0);
-                let one_minus_alpha = 1.0 - alpha;
-                let output = alpha.mul_add(right_value, one_minus_alpha * left_value);
+                let from_left = target.after(left_time).clamp(0.0, interval);
+                let from_right = target.before(right_time).clamp(0.0, interval);
+                // Compute the smaller weight directly. Subtracting a weight
+                // near one would discard the tiny but physically meaningful
+                // contribution from the other endpoint.
+                let (alpha, one_minus_alpha) = if from_left <= from_right {
+                    let alpha = from_left / interval;
+                    (alpha, 1.0 - alpha)
+                } else {
+                    let beta = from_right / interval;
+                    (1.0 - beta, beta)
+                };
+                let output = if left_value.to_bits() == right_value.to_bits() {
+                    left_value
+                } else if left_value != 0.0
+                    && right_value != 0.0
+                    && left_value.is_sign_negative() != right_value.is_sign_negative()
+                {
+                    target.interpolate_cancellation(
+                        left_time,
+                        left_value,
+                        right_time,
+                        right_value,
+                    )?
+                } else if !alpha.is_normal() && from_left != 0.0 {
+                    // The weight can underflow before multiplication by a
+                    // large endpoint would recover a representable signal.
+                    one_minus_alpha
+                        .mul_add(left_value, product_div(from_left, right_value, interval))
+                } else if !one_minus_alpha.is_normal() && from_right != 0.0 {
+                    alpha.mul_add(right_value, product_div(from_right, left_value, interval))
+                } else {
+                    alpha.mul_add(right_value, one_minus_alpha * left_value)
+                };
                 let input_coefficient = alpha.mul_add(right_input, one_minus_alpha * left_input);
-                let slope = (right_value - left_value) / interval;
+                let delay_coefficient = if target_delay_derivative == 0.0 {
+                    // A fixed/saturated delay has no delay-operand action.
+                    // Its unused slope need not fit in binary64.
+                    0.0
+                } else {
+                    product_sum_div(right_value, 1.0, left_value, -1.0, interval)
+                        * target_delay_derivative
+                };
                 DelayEvaluation {
                     output,
                     input_coefficient,
-                    delay_coefficient: slope * target_delay_derivative,
+                    delay_coefficient,
                 }
             }
             (Some((_, output, input_coefficient)), None)
