@@ -1286,6 +1286,8 @@ impl Engine {
         matrix: &mut crate::solver::StaticMatrix,
         solution: &[Value],
         rhs: &[Value],
+        xyce_one_step_order2: bool,
+        xyce_static_history: Option<&[Value]>,
     ) -> bool {
         if self.config.spice_dialect != SpiceDialect::Xyce {
             return self.residual_convergence_met(circuit, matrix, solution, rhs);
@@ -1294,38 +1296,50 @@ impl Engine {
         if circuit.xyce_core_trial_invalid() {
             return false;
         }
-
-        let core_branch_converged = if circuit.has_xyce_core_inductors() {
-            let rows = circuit
-                .xyce_core_transient_residuals
-                .iter()
-                .map(|&(row, _)| row)
-                .collect::<Vec<_>>();
-            let physical_residual_converged = matrix
-                .residual_vector(solution, rhs)
-                .ok()
-                .is_some_and(|residual| {
-                    let tolerance = circuit.xyce_core_branch_residual_tolerance();
-                    circuit
-                        .xyce_core_transient_residuals
-                        .iter()
-                        .all(|&(row, _)| {
-                            residual
-                                .get(row)
-                                .is_some_and(|value| value.abs() <= tolerance)
-                        })
-                });
-            physical_residual_converged
-                && matrix
-                    .componentwise_backward_error_by_rows(solution, rhs, &rows)
-                    .is_ok_and(|ratio| ratio <= 1.0)
-        } else {
-            true
+        if !circuit.has_xyce_core_inductors() {
+            return matrix
+                .raw_residual_inf_norm(solution, rhs)
+                .is_ok_and(|norm| norm.is_finite() && norm < self.transient_nonlinear_rhstol());
+        }
+        if solution.iter().any(|value| !value.is_finite()) {
+            return false;
+        }
+        let Ok(mut residual) = matrix.residual_vector(solution, rhs) else {
+            return false;
         };
-        matrix
-            .raw_residual_inf_norm(solution, rhs)
-            .is_ok_and(|norm| norm.is_finite() && norm < self.transient_nonlinear_rhstol())
-            && core_branch_converged
+        // Reconstructing the affine companion row can erase the actual
+        // constitutive error, or invent one when its large terms cancel.
+        // Use the same complete b-Ax residual as the Newton correction,
+        // including the separate accepted static history for OneStep order 2.
+        for value in &mut residual {
+            *value = -*value;
+        }
+        circuit.overwrite_xyce_core_transient_correction_rhs(
+            &mut residual,
+            xyce_one_step_order2,
+            xyce_static_history,
+        );
+        let rows: Vec<_> = circuit
+            .xyce_core_transient_residuals
+            .iter()
+            .map(|&(row, _)| row)
+            .collect();
+        let tolerance = circuit.xyce_core_branch_residual_tolerance();
+        let core_branch_converged = rows.iter().all(|&row| {
+            residual
+                .get(row)
+                .is_some_and(|value| value.is_finite() && value.abs() <= tolerance)
+        });
+        // The global RHSTOL must inspect those same physical rows; checking
+        // the rounded affine rows again would reintroduce false rejections.
+        let physical_norm = residual.iter().try_fold(0.0_f64, |norm, value| {
+            value.is_finite().then(|| norm.max(value.abs()))
+        });
+        core_branch_converged
+            && physical_norm.is_some_and(|norm| norm < self.transient_nonlinear_rhstol())
+            && matrix
+                .componentwise_backward_error_by_rows(solution, rhs, &rows)
+                .is_ok_and(|ratio| ratio <= 1.0)
     }
 
     /// Assemble the complete transient system `A(x)·x = b(x)` at `solution`
@@ -2500,7 +2514,14 @@ impl Engine {
                 crate::device::veriloga_builtins::GeneratedEvaluationMode::StaticProbe,
             )?;
         }
-        Ok(self.transient_residual_convergence_met(circuit, matrix, solution, rhs))
+        Ok(self.transient_residual_convergence_met(
+            circuit,
+            matrix,
+            solution,
+            rhs,
+            ctx.xyce_one_step_order2,
+            ctx.xyce_static_history,
+        ))
     }
 
     #[inline]
@@ -2563,9 +2584,11 @@ mod tests {
             &mut matrix,
             &[0.0],
             &[0.249_999],
+            false,
+            None,
         ));
         assert!(
-            !engine.transient_residual_convergence_met(&circuit, &mut matrix, &[0.0], &[0.25],)
+            !engine.transient_residual_convergence_met(&circuit, &mut matrix, &[0.0], &[0.25], false, None)
         );
     }
 

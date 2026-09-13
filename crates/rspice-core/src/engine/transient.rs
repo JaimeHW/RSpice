@@ -8336,6 +8336,8 @@ impl Engine {
                         &mut matrix,
                         &new_solution,
                         &rhs,
+                        xyce_one_step_order2,
+                        xyce_static_history.as_deref(),
                     );
                     let max_dv = Self::max_abs_delta_prefix(&solution, &new_solution, num_nodes);
                     let update_norm = self
