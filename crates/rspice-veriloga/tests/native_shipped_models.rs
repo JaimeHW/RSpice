@@ -24,9 +24,34 @@ use rspice_veriloga::device::VerilogADevice;
 use rspice_veriloga::native::SHIPPED_MODEL_NATIVE_CODE_SIZE_BUDGET_BYTES;
 use rspice_veriloga::{CompilerOptions, VerilogACompiler};
 
+/// Release tests have no application logger. Preserve the compiler's route
+/// refusals alongside each census row so an oversized image can be attributed
+/// to the plan that actually produced it.
+struct CompilerDiagnostics;
+
+impl log::Log for CompilerDiagnostics {
+    fn enabled(&self, metadata: &log::Metadata<'_>) -> bool {
+        metadata.level() <= log::Level::Warn
+    }
+
+    fn log(&self, record: &log::Record<'_>) {
+        if self.enabled(record.metadata()) {
+            eprintln!(
+                "native-compiler target={} {}",
+                record.target(),
+                record.args()
+            );
+        }
+    }
+
+    fn flush(&self) {}
+}
+
 #[test]
 #[ignore = "release qualification for the shipped device census; run with --release --features native -- --ignored --nocapture"]
 fn shipped_models_compile_and_execute_through_the_public_native_jit() {
+    log::set_logger(&CompilerDiagnostics).expect("one compiler logger per census process");
+    log::set_max_level(log::LevelFilter::Warn);
     let cases = [
         (
             "juncap200",
