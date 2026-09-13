@@ -124,10 +124,12 @@ const LAUNCHER_DESKTOP_WIDTH: f32 = 1180.0;
 const LAUNCHER_DESKTOP_HEIGHT: f32 = 650.0;
 const LAUNCHER_VIEWPORT_INSET: f32 = 28.0;
 const LAUNCHER_EDGE_TO_EDGE_MAX_WIDTH: f32 = 760.0;
-const LAUNCHER_HEADER_HEIGHT: f32 = 58.0;
-const LAUNCHER_STATUS_HEIGHT: f32 = 30.0;
+/// One line: brand mark, wordmark, and the 28 pt close control.
+const LAUNCHER_HEADER_HEIGHT: f32 = 48.0;
+/// The 44 pt touch close control with 4 pt above and below it.
 const LAUNCHER_COMPACT_HEADER_HEIGHT: f32 = 52.0;
-const LAUNCHER_COMPACT_STATUS_HEIGHT: f32 = 28.0;
+const LAUNCHER_VERSION_LABEL: &str =
+    concat!(env!("CARGO_PKG_VERSION"), " · ", env!("RSPICE_BUILD_HASH"));
 const LAUNCHER_NAV_WIDTH: f32 = 184.0;
 const LAUNCHER_COMPACT_NAV_HEIGHT: f32 = 42.0;
 const LAUNCHER_PAGE_HEADING_MIN_HEIGHT: f32 = 76.0;
@@ -141,7 +143,6 @@ const LAUNCHER_SORT_WIDTH: f32 = 145.0;
 const LAUNCHER_ROW_MIN_HEIGHT: f32 = 47.0;
 const LAUNCHER_GROUP_HEIGHT: f32 = 27.0;
 const LAUNCHER_SEGMENT_MIN_WIDTH: f32 = 54.0;
-const LAUNCHER_HEADER_COPY_GAP: f32 = 2.0;
 const SAFE_MODE_OPTION_HEIGHT: f32 = 54.0;
 
 fn handle_launcher_netlist_drop(ctx: &Context, app: &mut RSpiceApp) -> bool {
@@ -229,28 +230,21 @@ struct LauncherLayout {
     compact: bool,
     phone: bool,
     header_height: f32,
-    status_height: f32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct LauncherSurfaceRegions {
     header: Rect,
-    status: Rect,
     body: Rect,
 }
 
 impl LauncherSurfaceRegions {
-    fn resolve(surface: Rect, header_height: f32, status_height: f32) -> Self {
+    fn resolve(surface: Rect, header_height: f32) -> Self {
         let header_bottom = (surface.top() + header_height.max(0.0)).min(surface.bottom());
-        let status_bottom = (header_bottom + status_height.max(0.0)).min(surface.bottom());
         Self {
             header: Rect::from_min_max(surface.min, egui::pos2(surface.right(), header_bottom)),
-            status: Rect::from_min_max(
-                egui::pos2(surface.left(), header_bottom),
-                egui::pos2(surface.right(), status_bottom),
-            ),
             body: Rect::from_min_max(
-                egui::pos2(surface.left(), status_bottom),
+                egui::pos2(surface.left(), header_bottom),
                 surface.right_bottom(),
             ),
         }
@@ -304,11 +298,6 @@ impl LauncherLayout {
             } else {
                 LAUNCHER_HEADER_HEIGHT
             },
-            status_height: if compact {
-                LAUNCHER_COMPACT_STATUS_HEIGHT
-            } else {
-                LAUNCHER_STATUS_HEIGHT
-            },
         }
     }
 }
@@ -348,8 +337,13 @@ pub(in crate::workbench) fn show(ctx: &Context, app: &mut RSpiceApp) {
     let surface_rect = layout.surface;
     let edge_to_edge = layout.edge_to_edge;
     let size = surface_rect.size();
-    let regions =
-        LauncherSurfaceRegions::resolve(surface_rect, layout.header_height, layout.status_height);
+    // A touch-sized close control needs the compact track at any width.
+    let header_height = if large_targets {
+        layout.header_height.max(LAUNCHER_COMPACT_HEADER_HEIGHT)
+    } else {
+        layout.header_height
+    };
+    let regions = LauncherSurfaceRegions::resolve(surface_rect, header_height);
 
     let area = egui::Area::new(Id::new("workbench.project_launcher"))
         .kind(UiKind::Modal)
@@ -395,7 +389,7 @@ pub(in crate::workbench) fn show(ctx: &Context, app: &mut RSpiceApp) {
             })
             .show(&mut surface, |ui| {
                 // Establish the modal's immutable outer geometry before any
-                // content is measured. Header, status, and body then render in
+                // content is measured. Header and body then render in
                 // independent exact tracks and cannot consume one another.
                 ui.set_min_size(size);
                 ui.spacing_mut().item_spacing = Vec2::ZERO;
@@ -408,27 +402,17 @@ pub(in crate::workbench) fn show(ctx: &Context, app: &mut RSpiceApp) {
                     &mut header_ui,
                     regions.header.height(),
                     large_targets,
-                    layout.edge_to_edge,
+                    layout,
+                    app.state.workbench.safe_mode.active,
                 );
                 close_control_id = Some(header.id);
                 if header.clicked() {
                     action = Some(LauncherAction::Close);
                 }
-                let mut status_ui = ui.new_child(
-                    egui::UiBuilder::new()
-                        .max_rect(regions.status)
-                        .layout(egui::Layout::top_down(Align::Min)),
-                );
-                launcher_status(&mut status_ui, app, regions.status.height(), layout.compact);
                 launcher_layout(ui, app, &mut action, layout, regions.body);
                 ui.painter().hline(
                     regions.header.x_range(),
                     regions.header.bottom(),
-                    Stroke::new(1.0, t.color.border),
-                );
-                ui.painter().hline(
-                    regions.status.x_range(),
-                    regions.status.bottom(),
                     Stroke::new(1.0, t.color.border),
                 );
             });
@@ -446,12 +430,13 @@ pub(in crate::workbench) fn show(ctx: &Context, app: &mut RSpiceApp) {
     });
     area_response
         .response
-        .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Window, true, "Start RSpice"));
+        .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Window, true, "Projects"));
     ctx.accesskit_node_builder(area_response.response.id, |node| {
         node.set_role(egui::accesskit::Role::Dialog);
-        node.set_label("Start RSpice");
+        node.set_label("Projects");
         node.set_description(
-            "Open, create, recover, or configure an RSpice project and local session.",
+            "Open a recent, pinned, or shared project, create a project or open a SPICE deck, \
+             recover interrupted work, or start this launch in safe mode.",
         );
         node.set_modal();
     });
@@ -808,64 +793,57 @@ fn launcher_page(
     }
 }
 
-fn launcher_header(ui: &mut Ui, height: f32, large_targets: bool, edge_to_edge: bool) -> Response {
+/// The launcher's page-neutral identity line, shared by every page: brand
+/// mark, wordmark, build (desktop only), and the launch's safe-mode state.
+fn launcher_header(
+    ui: &mut Ui,
+    height: f32,
+    large_targets: bool,
+    layout: LauncherLayout,
+    safe_mode: bool,
+) -> Response {
     let t = Tokens::get(ui.ctx());
     let mut close = None;
     let header = Frame::new()
         .fill(t.color.bg_panel)
         .corner_radius(egui::CornerRadius {
-            nw: if edge_to_edge { 0 } else { 6 },
-            ne: if edge_to_edge { 0 } else { 6 },
+            nw: if layout.edge_to_edge { 0 } else { 6 },
+            ne: if layout.edge_to_edge { 0 } else { 6 },
             sw: 0,
             se: 0,
         })
-        .inner_margin(Margin::symmetric(15, 0))
+        // The phone inset matches the page heading's, so the mark and the
+        // page title below it share one left edge.
+        .inner_margin(Margin::symmetric(if layout.phone { 11 } else { 15 }, 0))
         .show(ui, |ui| {
             // This is a fixed launcher track. A minimum alone leaves the
             // child UI with the modal's full remaining height, so centered
             // contents drift into the middle of the 650 px surface.
             ui.set_height(height);
             ui.with_layout(egui::Layout::left_to_right(Align::Center), |ui| {
-                let (icon_rect, _) = ui.allocate_exact_size(Vec2::splat(27.0), Sense::hover());
-                paint_brand_logo(ui.painter(), icon_rect);
-                ui.add_space(11.0);
-                let eyebrow_font = theme::mono(tokens::FS_0, FontWeight::Medium);
-                let title_font = theme::sans(20.0, FontWeight::SemiBold);
-                let eyebrow_size = ui
-                    .painter()
-                    .layout_no_wrap(
-                        "RSPICE COMMERCIAL WORKBENCH".to_owned(),
-                        eyebrow_font,
-                        t.color.text_faint,
-                    )
-                    .size();
-                let title_size = ui
-                    .painter()
-                    .layout_no_wrap("Start RSpice".to_owned(), title_font, t.color.text)
-                    .size();
-                let copy_size = vec2(
-                    eyebrow_size.x.max(title_size.x) + 1.0,
-                    eyebrow_size.y + LAUNCHER_HEADER_COPY_GAP + title_size.y,
+                ui.spacing_mut().item_spacing.x = 10.0;
+                let (mark, _) = ui.allocate_exact_size(Vec2::splat(24.0), Sense::hover());
+                paint_brand_logo(ui.painter(), mark);
+                let wordmark = ui.label(
+                    egui::RichText::new("RSpice")
+                        .font(theme::sans(20.0, FontWeight::SemiBold))
+                        .color(t.color.text),
                 );
-                ui.allocate_ui_with_layout(copy_size, egui::Layout::top_down(Align::Min), |ui| {
-                    ui.spacing_mut().item_spacing.y = LAUNCHER_HEADER_COPY_GAP;
-                    ui.label(
-                        egui::RichText::new("RSPICE COMMERCIAL WORKBENCH")
-                            .font(theme::mono(tokens::FS_0, FontWeight::Medium))
-                            .color(t.color.text_faint)
-                            .extra_letter_spacing(0.09 * tokens::FS_0),
-                    );
-                    let heading = ui.label(
-                        egui::RichText::new("Start RSpice")
-                            .font(theme::sans(20.0, FontWeight::SemiBold))
-                            .color(t.color.text),
-                    );
-                    ui.ctx().accesskit_node_builder(heading.id, |node| {
-                        node.set_role(egui::accesskit::Role::Heading);
-                        node.set_label("Start RSpice");
-                        node.set_level(2);
-                    });
+                ui.ctx().accesskit_node_builder(wordmark.id, |node| {
+                    node.set_role(egui::accesskit::Role::Heading);
+                    node.set_label("RSpice");
+                    node.set_level(2);
                 });
+                if !layout.compact {
+                    ui.label(
+                        egui::RichText::new(LAUNCHER_VERSION_LABEL)
+                            .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                            .color(t.color.text_faint),
+                    );
+                }
+                if safe_mode {
+                    safe_mode_tag(ui);
+                }
                 ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
                     close = Some(
                         IconButton::new(Icon::Close)
@@ -919,54 +897,30 @@ fn paint_brand_logo(painter: &egui::Painter, rect: Rect) {
     ));
 }
 
-fn launcher_status(ui: &mut Ui, app: &RSpiceApp, height: f32, compact: bool) {
+/// Safe mode changes how this launch behaves on every page, so the header
+/// states it for as long as it is active. Painted in place: a `Frame` in this
+/// centred row would inherit the row's layout and grow to the track height.
+fn safe_mode_tag(ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
-    let status = Frame::new()
-        .fill(t.color.bg_inset)
-        .inner_margin(Margin::symmetric(15, 0))
-        .show(ui, |ui| {
-            ui.set_height(height);
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 9.0;
-                let (dot, _) = ui.allocate_exact_size(Vec2::splat(9.0), Sense::hover());
-                let (license_text, color) = app.state.license.as_ref().map_or_else(
-                    || ("Activation required".to_owned(), t.color.warn),
-                    |_| ("Commercial entitlement active".to_owned(), t.color.ok),
-                );
-                ui.painter().circle_filled(dot.center(), 3.0, color);
-                ui.label(
-                    egui::RichText::new(license_text)
-                        .font(theme::mono(tokens::FS_0, FontWeight::SemiBold))
-                        .color(t.color.text),
-                );
-                if !compact {
-                    ui.label(
-                        egui::RichText::new(concat!(
-                            "RSpice Desktop ",
-                            env!("CARGO_PKG_VERSION"),
-                            " · engine ",
-                            env!("RSPICE_BUILD_HASH")
-                        ))
-                        .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                        .color(t.color.text_dim),
-                    );
-                    ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
-                        ui.label(
-                            egui::RichText::new(if app.state.workbench.safe_mode.active {
-                                "Safe mode · local session isolation"
-                            } else {
-                                "Local runtime"
-                            })
-                            .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                            .color(t.color.text_dim),
-                        );
-                    });
-                }
-            });
-        });
-    ui.ctx().accesskit_node_builder(status.response.id, |node| {
+    let galley = ui.painter().layout_no_wrap(
+        "Safe mode".to_owned(),
+        theme::mono(tokens::FS_0, FontWeight::Medium),
+        t.color.warn,
+    );
+    let (rect, response) = ui.allocate_exact_size(galley.size() + vec2(12.0, 4.0), Sense::hover());
+    ui.painter().rect(
+        rect,
+        t.radius,
+        t.color.warn.gamma_multiply(0.10),
+        Stroke::new(1.0, t.color.warn.gamma_multiply(0.65)),
+        egui::StrokeKind::Inside,
+    );
+    ui.painter()
+        .galley(rect.center() - galley.size() * 0.5, galley, t.color.warn);
+    response.widget_info(|| WidgetInfo::labeled(WidgetType::Label, true, "Safe mode"));
+    ui.ctx().accesskit_node_builder(response.id, |node| {
         node.set_role(egui::accesskit::Role::Status);
-        node.set_label("RSpice startup status");
+        node.set_description("Safe mode is active for this launch");
     });
 }
 
@@ -984,26 +938,25 @@ fn launcher_body(
             Margin::symmetric(16, 10)
         })
         .show(ui, |ui| {
-            ui.set_height(
-                (if layout.phone {
-                    LAUNCHER_PHONE_HEADING_MIN_HEIGHT
-                } else {
-                    LAUNCHER_PAGE_HEADING_MIN_HEIGHT
-                }) - if layout.phone { 18.0 } else { 20.0 },
-            );
             if layout.compact {
                 project_heading_copy(ui);
                 ui.add_space(8.0);
                 ui.horizontal_wrapped(|ui| project_heading_actions(ui, action, false));
             } else {
-                ui.horizontal(|ui| {
-                    project_heading_copy(ui);
-                    ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
-                        // Right-to-left allocation right-aligns the button group, so
-                        // allocate in reverse to preserve the mockup's visible order.
-                        project_heading_actions(ui, action, true);
-                    });
-                });
+                // One control-height track, so the title centres on the buttons
+                // at touch sizes as well as desktop ones.
+                ui.allocate_ui_with_layout(
+                    vec2(ui.available_width(), t.metrics.ctl_h),
+                    egui::Layout::left_to_right(Align::Center),
+                    |ui| {
+                        project_heading_copy(ui);
+                        ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+                            // Right-to-left allocation right-aligns the button group, so
+                            // allocate in reverse to preserve the mockup's visible order.
+                            project_heading_actions(ui, action, true);
+                        });
+                    },
+                );
             }
         });
     ui.painter().hline(
@@ -1030,29 +983,15 @@ fn launcher_body(
 
 fn project_heading_copy(ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
-    ui.vertical(|ui| {
-        ui.spacing_mut().item_spacing.y = 3.0;
-        ui.label(
-            egui::RichText::new("PROJECT LAUNCHER · LOCAL AND SHARED")
-                .font(theme::mono(tokens::FS_0, FontWeight::Medium))
-                .color(t.color.text_faint)
-                .extra_letter_spacing(0.09 * tokens::FS_0),
-        );
-        let heading = ui.label(
-            egui::RichText::new("Open engineering work")
-                .font(theme::sans(15.0, FontWeight::SemiBold))
-                .color(t.color.text),
-        );
-        ui.ctx().accesskit_node_builder(heading.id, |node| {
-            node.set_role(egui::accesskit::Role::Heading);
-            node.set_label("Open engineering work");
-            node.set_level(3);
-        });
-        ui.label(
-            egui::RichText::new("Recent, pinned, and shared projects use one searchable launcher.")
-                .font(theme::sans(tokens::FS_2, FontWeight::Regular))
-                .color(t.color.text_dim),
-        );
+    let heading = ui.label(
+        egui::RichText::new("Projects")
+            .font(theme::sans(15.0, FontWeight::SemiBold))
+            .color(t.color.text),
+    );
+    ui.ctx().accesskit_node_builder(heading.id, |node| {
+        node.set_role(egui::accesskit::Role::Heading);
+        node.set_label("Projects");
+        node.set_level(3);
     });
 }
 
@@ -2026,30 +1965,23 @@ mod tests {
         assert!(!layout.edge_to_edge);
         assert_eq!(layout.surface.size(), Vec2::new(1180.0, 650.0));
         assert_eq!(layout.surface.center(), viewport.center());
-        assert_eq!(LAUNCHER_HEADER_HEIGHT, 58.0);
-        assert_eq!(LAUNCHER_STATUS_HEIGHT, 30.0);
+        assert_eq!(layout.header_height, 48.0);
         assert_eq!(LAUNCHER_NAV_WIDTH, 184.0);
     }
 
     #[test]
-    fn launcher_surface_tracks_have_exact_mockup_geometry() {
+    fn launcher_surface_is_one_header_track_over_the_body() {
         let surface = Rect::from_min_size(egui::pos2(130.0, 125.0), vec2(1180.0, 650.0));
-        let regions = LauncherSurfaceRegions::resolve(
-            surface,
-            LAUNCHER_HEADER_HEIGHT,
-            LAUNCHER_STATUS_HEIGHT,
-        );
+        let regions = LauncherSurfaceRegions::resolve(surface, LAUNCHER_HEADER_HEIGHT);
 
         assert_eq!(
             regions.header,
-            Rect::from_min_size(surface.min, vec2(1180.0, 58.0))
+            Rect::from_min_size(surface.min, vec2(1180.0, 48.0))
         );
-        assert_eq!(regions.status.top(), regions.header.bottom());
-        assert_eq!(regions.status.height(), 30.0);
-        assert_eq!(regions.body.top(), regions.status.bottom());
+        assert_eq!(regions.body.top(), regions.header.bottom());
         assert_eq!(regions.body.bottom(), surface.bottom());
         assert_eq!(
-            regions.header.height() + regions.status.height() + regions.body.height(),
+            regions.header.height() + regions.body.height(),
             surface.height()
         );
     }
@@ -2074,16 +2006,12 @@ mod tests {
 
     #[test]
     fn launcher_surface_tracks_clamp_without_overlap_on_short_viewports() {
-        let surface = Rect::from_min_size(egui::pos2(4.0, 7.0), vec2(390.0, 64.0));
-        let regions = LauncherSurfaceRegions::resolve(
-            surface,
-            LAUNCHER_COMPACT_HEADER_HEIGHT,
-            LAUNCHER_COMPACT_STATUS_HEIGHT,
-        );
+        let surface = Rect::from_min_size(egui::pos2(4.0, 7.0), vec2(390.0, 40.0));
+        let regions = LauncherSurfaceRegions::resolve(surface, LAUNCHER_COMPACT_HEADER_HEIGHT);
 
-        assert_eq!(regions.header.height(), 52.0);
-        assert_eq!(regions.status.height(), 12.0);
+        assert_eq!(regions.header.height(), 40.0);
         assert_eq!(regions.body.height(), 0.0);
+        assert_eq!(regions.body.top(), surface.bottom());
         assert_eq!(regions.body.bottom(), surface.bottom());
     }
 
@@ -2128,7 +2056,6 @@ mod tests {
             assert_eq!(layout.surface, viewport);
             assert!(layout.compact);
             assert_eq!(layout.header_height, LAUNCHER_COMPACT_HEADER_HEIGHT);
-            assert_eq!(layout.status_height, LAUNCHER_COMPACT_STATUS_HEIGHT);
         }
     }
 
@@ -2156,7 +2083,80 @@ mod tests {
         assert!(phone.phone);
         assert!(!narrow_tablet.phone);
         assert_eq!(desktop.header_height, LAUNCHER_HEADER_HEIGHT);
-        assert_eq!(desktop.status_height, LAUNCHER_STATUS_HEIGHT);
+        assert_eq!(compact.header_height, LAUNCHER_COMPACT_HEADER_HEIGHT);
+    }
+
+    /// Every string the Projects page paints, with the rect it was painted in.
+    fn painted_projects_page(size: Vec2, safe_mode: bool) -> Vec<(String, Rect)> {
+        let ctx = Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let mut app = RSpiceApp::test_instance();
+        app.state.workbench.open_project_launcher();
+        app.state.workbench.safe_mode.active = safe_mode;
+        let mut output = None;
+        for _ in 0..3 {
+            output = Some(ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, size)),
+                    ..Default::default()
+                },
+                |ui| show(ui.ctx(), &mut app),
+            ));
+        }
+        output
+            .expect("three passes ran")
+            .shapes
+            .iter()
+            .filter_map(|clipped| match &clipped.shape {
+                egui::epaint::Shape::Text(text) => Some((
+                    text.galley.text().to_owned(),
+                    Rect::from_min_size(text.pos, text.galley.size()),
+                )),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn launcher_header_names_the_product_and_states_safe_mode_only_while_active() {
+        for size in [vec2(1280.0, 800.0), vec2(390.0, 844.0)] {
+            let layout = LauncherLayout::resolve(Rect::from_min_size(egui::Pos2::ZERO, size));
+            let header_bottom = layout.surface.top() + layout.header_height;
+            for safe_mode in [false, true] {
+                let painted = painted_projects_page(size, safe_mode);
+                let context = format!("{}x{}, safe mode {safe_mode}: {painted:?}", size.x, size.y);
+                let header: Vec<&str> = painted
+                    .iter()
+                    .filter(|(_, rect)| rect.center().y < header_bottom)
+                    .map(|(text, _)| text.as_str())
+                    .collect();
+
+                assert!(header.contains(&"RSpice"), "{context}");
+                assert_eq!(header.contains(&"Safe mode"), safe_mode, "{context}");
+                assert_eq!(
+                    header.contains(&LAUNCHER_VERSION_LABEL),
+                    !layout.compact,
+                    "{context}"
+                );
+                assert!(
+                    painted
+                        .iter()
+                        .any(|(text, rect)| text == "Projects" && rect.center().y > header_bottom),
+                    "{context}"
+                );
+                for (text, _) in &painted {
+                    for retired in [
+                        "Continue without a project",
+                        "Activation required",
+                        "COMMERCIAL",
+                        "Start RSpice",
+                        "Open engineering work",
+                    ] {
+                        assert!(!text.contains(retired), "{retired:?} painted; {context}");
+                    }
+                }
+            }
+        }
     }
 
     #[test]
