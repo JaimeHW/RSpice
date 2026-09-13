@@ -8267,6 +8267,17 @@ impl Engine {
                             let residual = matrix.residual_vector(&new_solution, &rhs);
                             let backward = matrix.componentwise_backward_error_by_rows(
                                 &new_solution, &rhs, &rows);
+                            let mut stable_core_rhs = vec![0.0; new_solution.len()];
+                            circuit.overwrite_xyce_core_transient_correction_rhs(
+                                &mut stable_core_rhs,
+                                xyce_one_step_order2,
+                                xyce_static_history.as_deref(),
+                            );
+                            log::trace!(
+                                "LEAD_HISTORY attempt={} t={:.17e} endpoint={:.17e} dt={:.17e} newton={} one_step_order2={} stable_core_rhs={:?} static_history={:?}",
+                                total_step_attempts, t, step_time, dt, _iter + 1,
+                                xyce_one_step_order2, stable_core_rhs, xyce_static_history,
+                            );
                             log::trace!(
                                 "LEAD_SHARED attempt={} t={:.17e} endpoint={:.17e} dt={:.17e} newton={} update_ok={} update={:?} device={} behavioral={} residual_ok={} norms={:?} residual={:?} backward={:?} branch_tolerance={:.17e} core_rows={:?} accepted={:?} candidate={:?}",
                                 total_step_attempts, t, step_time, dt, _iter + 1,
