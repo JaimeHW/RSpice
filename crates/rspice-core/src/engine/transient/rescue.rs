@@ -161,6 +161,7 @@ impl Engine {
                     ctx,
                     vbic_snapshot_cache,
                     true,
+                    residual::CoreEvaluation::NewCandidate,
                     extra_gmin,
                 )?;
                 let line_search_base_state = circuit.nonlinear_state_snapshot();
@@ -209,6 +210,7 @@ impl Engine {
                     ctx,
                     vbic_snapshot_cache,
                     true,
+                    residual::CoreEvaluation::ReuseCandidate,
                     extra_gmin,
                     crate::device::veriloga_builtins::GeneratedEvaluationMode::StaticProbe,
                 )?;
@@ -235,6 +237,7 @@ impl Engine {
                         ctx,
                         vbic_snapshot_cache,
                         true,
+                        residual::CoreEvaluation::ReuseCandidate,
                         extra_gmin,
                         crate::device::veriloga_builtins::GeneratedEvaluationMode::StaticProbe,
                     )?;
@@ -271,6 +274,7 @@ impl Engine {
                     ctx,
                     vbic_snapshot_cache,
                     true,
+                    residual::CoreEvaluation::NewCandidate,
                     extra_gmin,
                 )?;
 

@@ -7371,6 +7371,11 @@ impl Engine {
                         &transient_system_context,
                         &mut vbic_snapshot_cache,
                         !nonlinear_state_matches_new_solution,
+                        if uses_xyce_damped_solver && nonlinear_state_matches_new_solution {
+                            residual::CoreEvaluation::ReuseCandidate
+                        } else {
+                            residual::CoreEvaluation::NewCandidate
+                        },
                         0.0,
                     ));
                 }
@@ -7840,6 +7845,7 @@ impl Engine {
                                     &transient_system_context,
                                     &mut vbic_snapshot_cache,
                                     true,
+                                    residual::CoreEvaluation::NewCandidate,
                                     0.0,
                                     crate::device::veriloga_builtins::GeneratedEvaluationMode::NewtonLimited,
                                 ));
@@ -8299,6 +8305,8 @@ impl Engine {
                         &mut matrix,
                         &new_solution,
                         &rhs,
+                        xyce_one_step_order2,
+                        xyce_static_history.as_deref(),
                     );
                     let max_dv = Self::max_abs_delta_prefix(&solution, &new_solution, num_nodes);
                     let update_norm = self

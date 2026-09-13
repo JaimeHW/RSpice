@@ -8,6 +8,81 @@
 use super::*;
 use crate::device::passive::{XyceCoreStep, XyceCoreTrial};
 
+/// Accumulate a constant charge coefficient's endpoint difference without
+/// rounding the two endpoint products before subtracting them. The product
+/// tails also preserve small changes beside large accepted currents.
+#[inline]
+fn accumulate_charge_difference(
+    sum: &mut Value,
+    correction: &mut Value,
+    coefficient: Value,
+    current: Value,
+    previous: Value,
+) {
+    let current_hi = coefficient * current;
+    let previous_hi = coefficient * previous;
+    let current_lo = coefficient.mul_add(current, -current_hi);
+    let previous_lo = coefficient.mul_add(previous, -previous_hi);
+    for term in [current_hi, -previous_hi, current_lo, -previous_lo] {
+        crate::numerics::compensated_add(sum, correction, term);
+    }
+}
+
+/// The constant-Q residual change from rounding a current to its nearest
+/// representable coordinate. The outward ULP also bounds a binade boundary.
+#[inline]
+fn current_coordinate_roundoff(current: Value, charge_derivative: Value) -> Option<Value> {
+    if !current.is_finite() || !charge_derivative.is_finite() {
+        return None;
+    }
+    let magnitude = current.abs();
+    let upper = magnitude.next_up() - magnitude;
+    let spacing = if upper.is_finite() {
+        upper
+    } else {
+        magnitude - magnitude.next_down()
+    };
+    let bound = charge_derivative.abs() * spacing * 0.5;
+    bound.is_finite().then_some(bound)
+}
+
+/// Compare the ideal winding voltage law in bounded turns coordinates.
+/// Eight epsilons cover the two divisions, voltage differences and weighted
+/// products. Include the node magnitudes when subtracting a large common mode.
+fn ideal_winding_voltage_converged(
+    first_turns: Value,
+    first_nodes: [Value; 2],
+    turns: Value,
+    nodes: [Value; 2],
+) -> bool {
+    if !first_turns.is_finite()
+        || first_turns <= 0.0
+        || !turns.is_finite()
+        || turns <= 0.0
+        || first_nodes
+            .iter()
+            .chain(&nodes)
+            .any(|value| !value.is_finite())
+    {
+        return false;
+    }
+    let scale = first_turns.max(turns);
+    let own_weight = first_turns / scale;
+    let first_weight = turns / scale;
+    if own_weight == 0.0 || first_weight == 0.0 {
+        return false;
+    }
+    let own = own_weight * (nodes[0] - nodes[1]);
+    let reference = first_weight * (first_nodes[0] - first_nodes[1]);
+    let magnitude = own_weight * nodes[0].abs()
+        + own_weight * nodes[1].abs()
+        + first_weight * first_nodes[0].abs()
+        + first_weight * first_nodes[1].abs();
+    let limit = 1e-13 * own_weight.min(first_weight) + 8.0 * Value::EPSILON * magnitude;
+    let error = own - reference;
+    error.is_finite() && limit.is_finite() && error.abs() <= limit
+}
+
 #[inline]
 fn node_voltage(solution: &[Value], node_pos: NodeId, node_neg: NodeId) -> Value {
     let pos = if node_pos == 0 {
@@ -226,8 +301,8 @@ impl CircuitData {
     /// Core branch is a constitutive closure equation whose Q/F cancellation
     /// directly appears as a winding voltage.  Letting that row stop at the
     /// global RHS norm can therefore leave a finite voltage on an otherwise
-    /// ideal coupled winding.  LEVEL=2 is solved in the full electrical
-    /// correction system and reaches the direct double-precision floor.  A
+    /// ideal coupled winding. Shared LEVEL=2 also accounts for representable
+    /// current coordinates and independently checks its ideal voltage law. A
     /// shared LEVEL=1 Core is Schur-reduced through hidden M/R coordinates;
     /// its deliberately scaled electrical row has a larger, model-conditioned
     /// round-off floor when the vacuum coefficient is near rank deficiency.
@@ -271,6 +346,7 @@ impl CircuitData {
         // substitute for the Xyce Core DAE.
         self.xyce_core_trial_invalid = false;
         self.xyce_core_transient_residuals.clear();
+        self.xyce_core_transient_roundoff.clear();
         let hidden_base = self.num_nodes + self.num_branches;
         // The hidden-M residual is assembled in integrated form,
         // `M-M_old-(dt/Path)P*R`.  Scale that row by Xyce's m-equation
@@ -929,6 +1005,11 @@ impl CircuitData {
                 let mut q_current = 0.0;
                 let mut q_previous_reconstructed = 0.0;
                 let mut q_previous_previous = 0.0;
+                let mut current_roundoff = 0.0;
+                let mut q_delta = 0.0;
+                let mut q_delta_correction = 0.0;
+                let mut q_previous_delta = 0.0;
+                let mut q_previous_delta_correction = 0.0;
                 for j in 0..group.windings.len() {
                     let winding_j = &group.windings[j];
                     let l0 = group.device.xyce_core_vacuum_mutual_inductance(
@@ -936,23 +1017,55 @@ impl CircuitData {
                         winding_j.turns,
                         1.0,
                     );
-                    // Xyce stores each winding's dense LO current sum as Q
-                    // history.  Accumulate Q at each accepted endpoint before
-                    // differencing; summing `LO*(I-I_prev)` instead loses the
-                    // source operation order at sharp reversals.
+                    // Retain the stored dense-Q route for LEVEL=1. Shared
+                    // LEVEL=2 closure also needs the low product terms:
+                    // subtracting rounded Q endpoints creates a residual
+                    // quantum proportional to ulp(Q)/dt at small timesteps.
                     q_current += l0 * currents[j];
                     q_previous_reconstructed += l0 * previous[j];
                     q_previous_previous += l0 * previous_previous[j];
+                    if group.device.is_xyce_core_level2() {
+                        // Half an outward current ULP, propagated through the
+                        // constant-Q derivative. Accepted currents remain fixed.
+                        current_roundoff +=
+                            current_coordinate_roundoff(currents[j], charge_coeff * l0 / dt)
+                                .unwrap_or(Value::NAN);
+                        accumulate_charge_difference(
+                            &mut q_delta,
+                            &mut q_delta_correction,
+                            l0,
+                            currents[j],
+                            previous[j],
+                        );
+                        if !one_step_order2 && coeff.needs_two_history {
+                            accumulate_charge_difference(
+                                &mut q_previous_delta,
+                                &mut q_previous_delta_correction,
+                                l0,
+                                previous[j],
+                                previous_previous[j],
+                            );
+                        }
+                    }
                 }
                 let q_previous = group
                     .xyce_q_history
                     .get(i)
                     .copied()
                     .unwrap_or(q_previous_reconstructed);
-                let mut charge_difference = charge_coeff * (q_current - q_previous);
+                let mut charge_difference = charge_coeff
+                    * if group.device.is_xyce_core_level2() {
+                        q_delta + q_delta_correction
+                    } else {
+                        q_current - q_previous
+                    };
                 if !one_step_order2 && coeff.needs_two_history {
-                    charge_difference +=
-                        coeff.coeff_v_n_minus_1 * (q_previous - q_previous_previous);
+                    charge_difference += coeff.coeff_v_n_minus_1
+                        * if group.device.is_xyce_core_level2() {
+                            q_previous_delta + q_previous_delta_correction
+                        } else {
+                            q_previous - q_previous_previous
+                        };
                 }
                 let charge_derivative = if one_step {
                     (1.0 / dt) * charge_difference
@@ -977,6 +1090,27 @@ impl CircuitData {
                 } else {
                     static_branch - charge_derivative + history
                 };
+                if group.device.is_xyce_core_level2() {
+                    // Current-coordinate quantization is confined to the
+                    // dynamic flux mode. Independently qualify the ideal
+                    // winding voltage law before allowing that rounding bound.
+                    let node_pair = |index: usize| {
+                        [
+                            node_voltage(solution, self.inductors.node_pos[index], 0),
+                            node_voltage(solution, self.inductors.node_neg[index], 0),
+                        ]
+                    };
+                    let bound = (current_roundoff.is_finite()
+                        && ideal_winding_voltage_converged(
+                            first_turns,
+                            node_pair(first_index),
+                            winding_i.turns,
+                            node_pair(index_i),
+                        ))
+                    .then_some(current_roundoff);
+                    self.xyce_core_transient_roundoff
+                        .push((branch_i - 1, bound));
+                }
                 if f0.is_finite() {
                     self.xyce_core_transient_residuals.push((branch_i - 1, f0));
                 }
@@ -1846,5 +1980,126 @@ impl CircuitData {
         for binding in &mut self.multi_winding_transformers {
             binding.device.update_state_from_solution(solution);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        accumulate_charge_difference, current_coordinate_roundoff, ideal_winding_voltage_converged,
+    };
+
+    #[test]
+    fn current_roundoff_is_a_half_ulp_in_charge_equation_units() {
+        let current = 2.0_f64.powi(52);
+        let derivative = 2.0_f64.powi(-20);
+        for sign in [-1.0, 1.0] {
+            assert_eq!(
+                current_coordinate_roundoff(sign * current, -derivative),
+                Some(2.0_f64.powi(-21))
+            );
+            assert_eq!(
+                current_coordinate_roundoff(sign * current.next_down(), derivative),
+                Some(2.0_f64.powi(-22))
+            );
+        }
+        assert_eq!(current_coordinate_roundoff(0.0, 1.0), Some(0.0));
+        assert!(
+            current_coordinate_roundoff(f64::MAX, f64::MIN_POSITIVE)
+                .unwrap()
+                .is_finite()
+        );
+        for invalid in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert_eq!(current_coordinate_roundoff(invalid, 1.0), None);
+            assert_eq!(current_coordinate_roundoff(1.0, invalid), None);
+        }
+    }
+
+    #[test]
+    fn ideal_winding_voltage_guard_distinguishes_roundoff_from_physical_error() {
+        for turns_scale in [1e-200, 1.0, 1e200] {
+            for sign in [-1.0, 1.0] {
+                assert!(ideal_winding_voltage_converged(
+                    10.0 * turns_scale,
+                    [sign * 2.8, 0.0],
+                    100.0 * turns_scale,
+                    [sign * 28.0, 0.0]
+                ));
+                assert!(!ideal_winding_voltage_converged(
+                    10.0 * turns_scale,
+                    [sign * 2.8, 0.0],
+                    100.0 * turns_scale,
+                    [sign * 28.001, 0.0]
+                ));
+            }
+        }
+        // Equal translated node pairs have subtraction uncertainty from
+        // their common mode, rather than from the small branch voltage alone.
+        assert!(ideal_winding_voltage_converged(
+            10.0,
+            [1e12 + 2.8, 1e12],
+            100.0,
+            [1e12 + 28.0, 1e12]
+        ));
+        assert!(!ideal_winding_voltage_converged(
+            10.0,
+            [1e12 + 2.8, 1e12],
+            100.0,
+            [1e12 + 28.1, 1e12]
+        ));
+        for invalid in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert!(!ideal_winding_voltage_converged(
+                10.0,
+                [invalid, 0.0],
+                100.0,
+                [28.0, 0.0]
+            ));
+            assert!(!ideal_winding_voltage_converged(
+                invalid,
+                [2.8, 0.0],
+                100.0,
+                [28.0, 0.0]
+            ));
+        }
+        assert!(!ideal_winding_voltage_converged(
+            0.0,
+            [0.0, 0.0],
+            100.0,
+            [0.0, 0.0]
+        ));
+    }
+
+    #[test]
+    fn charge_difference_retains_the_endpoint_product_tail() {
+        let coefficient = 1.0 + f64::EPSILON;
+        let previous = 2.0_f64.powi(52);
+        let current = previous + 1.0;
+        assert_eq!(coefficient * current - coefficient * previous, 1.0);
+        let (mut sum, mut correction) = (0.0, 0.0);
+        accumulate_charge_difference(&mut sum, &mut correction, coefficient, current, previous);
+        assert_eq!(sum + correction, coefficient);
+    }
+
+    #[test]
+    fn charge_difference_preserves_cancellation_between_windings() {
+        let previous = 2.0_f64.powi(52);
+        let (mut sum, mut correction) = (0.0, 0.0);
+        accumulate_charge_difference(
+            &mut sum,
+            &mut correction,
+            1.0 + f64::EPSILON,
+            previous + 1.0,
+            previous,
+        );
+        accumulate_charge_difference(&mut sum, &mut correction, 1.0, 0.0, 1.0);
+        assert_eq!(sum + correction, f64::EPSILON);
+    }
+
+    #[test]
+    fn charge_difference_handles_a_reversal_without_overflowing_current_delta() {
+        let (mut sum, mut correction) = (0.0, 0.0);
+        assert!((f64::MAX - -f64::MAX).is_infinite());
+        accumulate_charge_difference(&mut sum, &mut correction, 0.25, f64::MAX, -f64::MAX);
+        assert_eq!(sum + correction, f64::MAX * 0.5);
     }
 }
