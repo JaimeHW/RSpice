@@ -1422,12 +1422,13 @@ fn a_content_height_dialog_settles_in_one_pass_and_stops_moving() {
 /// render reads.
 ///
 /// The modal fades in, and the rasterizer's few passes leave that fade
-/// unfinished, so the authored colour is not what lands on the canvas. The
-/// ink is therefore asserted as identity: the final row must read back
-/// pixel-for-pixel as the first row does, and both must be the red the rows
-/// were painted in — dominant in its red channel however far the fade has
-/// come — rather than the grey of the surface or footer fill that covers a
-/// clipped row.
+/// unfinished, so the authored colour is not what lands on the canvas: the
+/// still-translucent surface lets the shadow beneath it through, unevenly
+/// near its edge, so neighbouring pixels of one row differ by a few levels.
+/// The ink is therefore asserted by hue: every pixel of the first and the
+/// final row must read as the red the rows were painted in — dominant in its
+/// red channel however far the fade has come — rather than the grey of the
+/// surface or footer fill that covers a clipped row.
 #[test]
 fn a_dialog_seeded_a_row_short_of_its_content_paints_its_final_row() {
     const ROWS: usize = 8;
@@ -1485,29 +1486,27 @@ fn a_dialog_seeded_a_row_short_of_its_content_paints_its_final_row() {
             });
     });
 
+    let ink = |pixel: &egui::Color32| pixel.r() > pixel.g() + 40 && pixel.r() > pixel.b() + 40;
     // Inset past the tessellator's one-pixel feathering, and past the half
     // pixel a centred surface can sit off the pixel grid by.
     let first_pixels: Vec<egui::Color32> = canvas.pixels_in(first_row.shrink(2.0)).collect();
-    let ink = *first_pixels
-        .first()
-        .expect("the first row lies off the canvas");
     assert!(
-        ink.r() > ink.g() + 40 && ink.r() > ink.b() + 40,
-        "the first row did not read back as the red it was painted in: {ink:?}"
+        !first_pixels.is_empty(),
+        "the first row lies off the canvas"
     );
     assert!(
-        first_pixels.iter().all(|pixel| *pixel == ink),
-        "the first row is not uniform ink"
+        first_pixels.iter().all(ink),
+        "the first row did not read back as the red it was painted in: {:?}",
+        first_pixels.iter().find(|pixel| !ink(pixel))
     );
 
-    let final_region = final_row.shrink(2.0);
-    let final_pixels: Vec<egui::Color32> = canvas.pixels_in(final_region).collect();
+    let final_pixels: Vec<egui::Color32> = canvas.pixels_in(final_row.shrink(2.0)).collect();
     assert!(
         !final_pixels.is_empty(),
         "the final row lies off the canvas"
     );
     assert!(
-        final_pixels.iter().all(|pixel| *pixel == ink),
+        final_pixels.iter().all(ink),
         "a dialog seeded a row short of its content clipped its final row: \
          the surface settled on the seed instead of the content"
     );

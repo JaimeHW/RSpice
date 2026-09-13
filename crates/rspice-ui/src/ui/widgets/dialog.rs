@@ -1004,17 +1004,18 @@ impl<'a> Dialog<'a> {
                 // height in the first place, and the region inside it that does
                 // scroll is its owner's to lay out.
                 let body_width = (content.x - ui.spacing().scroll.allocated_width()).max(1.0);
+                // The body is painted once, by the surface beneath it. Its
+                // frame used to repeat the surface's fill over a rect only as
+                // wide as its content; at full opacity the two coincide, but
+                // the modal is drawn below full opacity while it fades in, and
+                // there the doubled rect composites lighter — a band behind
+                // the text as wide as the text.
                 if self.manual_body_scroll {
                     let body_output = ui.allocate_ui_with_layout(
                         vec2(ui.available_width(), body_max_height),
                         egui::Layout::top_down(egui::Align::Min),
                         |ui| {
                             Frame::NONE
-                                .fill(if layout.app_background {
-                                    c.bg_app
-                                } else {
-                                    c.bg_elevated
-                                })
                                 .inner_margin(if self.flush_body {
                                     Margin::same(0)
                                 } else {
@@ -1052,11 +1053,6 @@ impl<'a> Dialog<'a> {
                     let body_output = body_scroll.show(ui, |ui| {
                         ui.set_width(body_width);
                         Frame::NONE
-                            .fill(if layout.app_background {
-                                c.bg_app
-                            } else {
-                                c.bg_elevated
-                            })
                             .inner_margin(if self.flush_body {
                                 Margin::same(0)
                             } else {
