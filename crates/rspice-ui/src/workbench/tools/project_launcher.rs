@@ -25,7 +25,7 @@ use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::{RecentFile, RecentKind};
 
 use crate::workbench::commands::vocabulary::Command;
-use crate::workbench::design_system::WorkbenchIcon;
+use crate::workbench::design_system::{WorkbenchIcon, painted_label};
 use crate::workbench::lifecycle::recovery::{
     RecoveryCandidate, RecoveryIntegrity, RecoveryNoticeTone, diagnostics_folder_supported,
     discard_checkpoint, open_comparison, open_diagnostics_folder,
@@ -1533,36 +1533,40 @@ fn project_row(ui: &mut Ui, entry: &ProjectEntry, layout: LauncherLayout) -> egu
         egui::Layout::top_down(Align::Min),
         |ui| {
             ui.spacing_mut().item_spacing.y = 2.0;
-            ui.add(
-                egui::Label::new(
-                    egui::RichText::new(&entry.name)
-                        .font(theme::sans(tokens::FS_2, FontWeight::SemiBold))
-                        .color(t.color.text),
-                )
-                .truncate(),
+            // Painted, not labels: a label over the row takes the presses on its text.
+            painted_label(
+                ui,
+                egui::RichText::new(&entry.name)
+                    .font(theme::sans(tokens::FS_2, FontWeight::SemiBold))
+                    .color(t.color.text),
+                egui::TextWrapMode::Truncate,
             );
             let detail = entry.owner.as_ref().map_or_else(
                 || entry.path_text.clone(),
                 |owner| format!("{} · {owner}", entry.path_text),
             );
-            ui.add(
-                egui::Label::new(
-                    egui::RichText::new(detail)
-                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                        .color(t.color.text_dim),
-                )
-                .truncate(),
+            painted_label(
+                ui,
+                egui::RichText::new(detail)
+                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                    .color(t.color.text_dim),
+                egui::TextWrapMode::Truncate,
             );
         },
     );
     if !layout.compact {
-        row.add_sized(
-            [125.0, 37.0],
-            egui::Label::new(
-                egui::RichText::new(recent_age(entry.opened_at_unix_ms))
-                    .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                    .color(t.color.text_dim),
-            ),
+        row.allocate_ui_with_layout(
+            vec2(125.0, 37.0),
+            egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
+            |ui| {
+                painted_label(
+                    ui,
+                    egui::RichText::new(recent_age(entry.opened_at_unix_ms))
+                        .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                        .color(t.color.text_dim),
+                    egui::TextWrapMode::Extend,
+                )
+            },
         );
     }
     let (state, color) = if !entry.available && cfg!(target_arch = "wasm32") {
@@ -1576,13 +1580,18 @@ fn project_row(ui: &mut Ui, entry: &ProjectEntry, layout: LauncherLayout) -> egu
     } else {
         ("local", t.color.text_dim)
     };
-    row.add_sized(
-        [if layout.compact { 62.0 } else { 70.0 }, 37.0],
-        egui::Label::new(
-            egui::RichText::new(state)
-                .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                .color(color),
-        ),
+    row.allocate_ui_with_layout(
+        vec2(if layout.compact { 62.0 } else { 70.0 }, 37.0),
+        egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
+        |ui| {
+            painted_label(
+                ui,
+                egui::RichText::new(state)
+                    .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                    .color(color),
+                egui::TextWrapMode::Extend,
+            )
+        },
     );
     response.widget_info(|| {
         egui::WidgetInfo::labeled(

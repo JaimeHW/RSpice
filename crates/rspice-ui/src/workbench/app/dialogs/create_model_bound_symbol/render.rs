@@ -348,10 +348,13 @@ fn pin_row(
             .layout(Layout::left_to_right(Align::Center)),
     );
     order_ui.spacing_mut().item_spacing.x = 1.0;
-    order_ui.label(
+    // Painted, not a label: a label over the row takes the presses on its text.
+    crate::workbench::design_system::painted_label(
+        &mut order_ui,
         egui::RichText::new((index + 1).to_string())
             .font(theme::mono(tokens::FS_0, FontWeight::Regular))
             .color(t.color.text),
+        egui::TextWrapMode::Extend,
     );
     if IconButton::new(Icon::ChevronUp)
         .enabled(index > 0)

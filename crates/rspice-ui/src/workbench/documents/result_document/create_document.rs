@@ -588,15 +588,22 @@ fn family_card(ui: &mut Ui, family: ResultDocumentFamily, selected: bool) -> egu
                 .layout(egui::Layout::top_down(egui::Align::Min)),
             |ui| {
                 ui.spacing_mut().item_spacing.y = 2.0;
-                ui.label(RichText::new(family.label()).strong().color(if selected {
-                    t.color.text
-                } else {
-                    mix(t.color.text, t.color.text_dim, 0.15)
-                }));
-                ui.label(
+                // Painted, not labels: a label over the card takes the presses on its text.
+                crate::workbench::design_system::painted_label(
+                    ui,
+                    RichText::new(family.label()).strong().color(if selected {
+                        t.color.text
+                    } else {
+                        mix(t.color.text, t.color.text_dim, 0.15)
+                    }),
+                    egui::TextWrapMode::Wrap,
+                );
+                crate::workbench::design_system::painted_label(
+                    ui,
                     RichText::new(family.description())
                         .small()
                         .color(t.color.text_dim),
+                    egui::TextWrapMode::Wrap,
                 );
             },
         );

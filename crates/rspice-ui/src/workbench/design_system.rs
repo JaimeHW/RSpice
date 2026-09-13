@@ -1835,6 +1835,30 @@ pub fn centered_content_rect(rect: Rect, minimum_gutter: f32, max_width: f32) ->
 /// Height of a landing action row before the touch target raises it.
 const ACTION_ROW_HEIGHT: f32 = 51.0;
 
+/// Text laid out and placed exactly as an `egui::Label` would be, but inert.
+///
+/// A label is a widget of its own, and selectable by default. Laid over a
+/// control that allocated its click-sensing rect first, it sits above that
+/// rect in egui's hit test and takes every press that lands on the text, so
+/// the control never sees the click. This claims the label's own slot with a
+/// hover sense, which the hit test passes over, and paints the galley into it.
+pub(crate) fn painted_label(
+    ui: &mut Ui,
+    text: impl Into<egui::WidgetText>,
+    wrap_mode: egui::TextWrapMode,
+) -> Response {
+    let galley = text.into().into_galley(
+        ui,
+        Some(wrap_mode),
+        ui.available_width(),
+        egui::FontSelection::Default,
+    );
+    let (rect, response) = ui.allocate_exact_size(galley.size(), Sense::hover());
+    ui.painter()
+        .galley(rect.min, galley, ui.visuals().text_color());
+    response
+}
+
 /// One landing-style action row: an icon, a title, and a one-line detail.
 ///
 /// This is the shared action idiom of the workbench landing surfaces — the
@@ -1888,21 +1912,20 @@ pub fn action_row(
             .layout(egui::Layout::top_down(egui::Align::Min)),
     );
     copy.spacing_mut().item_spacing.y = 1.0;
-    copy.add(
-        egui::Label::new(
-            egui::RichText::new(title)
-                .font(theme::sans(tokens::FS_1, FontWeight::SemiBold))
-                .color(t.color.text),
-        )
-        .truncate(),
+    // Painted, not labels: a label over the row takes the presses on its text.
+    painted_label(
+        &mut copy,
+        egui::RichText::new(title)
+            .font(theme::sans(tokens::FS_1, FontWeight::SemiBold))
+            .color(t.color.text),
+        egui::TextWrapMode::Truncate,
     );
-    copy.add(
-        egui::Label::new(
-            egui::RichText::new(detail)
-                .font(theme::sans(tokens::FS_MICRO, FontWeight::Regular))
-                .color(t.color.text_faint),
-        )
-        .truncate(),
+    painted_label(
+        &mut copy,
+        egui::RichText::new(detail)
+            .font(theme::sans(tokens::FS_MICRO, FontWeight::Regular))
+            .color(t.color.text_faint),
+        egui::TextWrapMode::Truncate,
     );
     response.widget_info(|| {
         egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), title.to_owned())
@@ -2022,6 +2045,84 @@ mod tests {
         assert!(
             measured_width <= 578.0,
             "title content escaped the 594 px visible pane: {measured_width}"
+        );
+    }
+
+    fn painted_text_rect(shape: &Shape, wanted: &str) -> Option<Rect> {
+        match shape {
+            Shape::Text(text) if text.galley.text() == wanted => {
+                Some(Rect::from_min_size(text.pos, text.galley.size()))
+            }
+            Shape::Vec(shapes) => shapes
+                .iter()
+                .find_map(|shape| painted_text_rect(shape, wanted)),
+            _ => None,
+        }
+    }
+
+    /// A press on an action row's title is the row's click. egui hands a
+    /// press to the topmost widget under it, so a selectable label laid over
+    /// the row takes every press that lands on the text.
+    #[test]
+    fn an_action_row_takes_a_click_that_lands_on_its_title() {
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let mut title = Rect::NOTHING;
+        let mut clicked = false;
+        // Two passes to lay the row out against the fonts, then one that
+        // presses and releases on the centre of the painted title.
+        for pass in 0..3 {
+            let at = title.center();
+            let events = if pass == 2 {
+                vec![
+                    egui::Event::PointerMoved(at),
+                    egui::Event::PointerButton {
+                        pos: at,
+                        button: egui::PointerButton::Primary,
+                        pressed: true,
+                        modifiers: egui::Modifiers::default(),
+                    },
+                    egui::Event::PointerButton {
+                        pos: at,
+                        button: egui::PointerButton::Primary,
+                        pressed: false,
+                        modifiers: egui::Modifiers::default(),
+                    },
+                ]
+            } else {
+                Vec::new()
+            };
+            let output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(480.0, 200.0))),
+                    events,
+                    ..Default::default()
+                },
+                |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        clicked |= action_row(
+                            ui,
+                            "New project",
+                            "Analog, RF or mixed-signal · blank top cell",
+                            WorkbenchIcon::Add,
+                            true,
+                        )
+                        .clicked();
+                    });
+                },
+            );
+            if pass < 2 {
+                title = output
+                    .shapes
+                    .iter()
+                    .find_map(|clipped| painted_text_rect(&clipped.shape, "New project"))
+                    .unwrap_or(Rect::NOTHING);
+            }
+        }
+        assert!(title.is_positive(), "the title was never painted");
+        assert!(
+            clicked,
+            "a press on the title at {title:?} did not click the row"
         );
     }
 

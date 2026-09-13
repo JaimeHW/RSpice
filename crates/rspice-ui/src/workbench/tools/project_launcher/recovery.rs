@@ -675,12 +675,16 @@ pub(super) fn safe_mode_option(
         }
         ui.vertical(|ui| {
             ui.spacing_mut().item_spacing.y = 2.0;
-            ui.label(
+            // Painted, not labels: a label over the row takes the presses on its text.
+            crate::workbench::design_system::painted_label(
+                ui,
                 egui::RichText::new(title)
                     .font(theme::sans(tokens::FS_2, FontWeight::SemiBold))
                     .color(text_color),
+                egui::TextWrapMode::Wrap,
             );
-            ui.label(
+            crate::workbench::design_system::painted_label(
+                ui,
                 egui::RichText::new(detail)
                     .font(theme::sans(tokens::FS_0, FontWeight::Regular))
                     .color(if enabled {
@@ -688,6 +692,7 @@ pub(super) fn safe_mode_option(
                     } else {
                         t.color.text_faint
                     }),
+                egui::TextWrapMode::Wrap,
             );
         });
     });

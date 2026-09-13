@@ -179,18 +179,20 @@ fn layout_template_card(ui: &mut Ui, label: &str, detail: &str, selected: bool) 
             .max_rect(rect.shrink2(vec2(12.0, 8.0)))
             .layout(egui::Layout::top_down(egui::Align::Min)),
     );
-    content.label(
+    // Painted, not labels: a label over the card takes the presses on its text.
+    crate::workbench::design_system::painted_label(
+        &mut content,
         egui::RichText::new(label)
             .font(theme::sans(tokens::FS_1, FontWeight::SemiBold))
             .color(t.color.text),
+        egui::TextWrapMode::Wrap,
     );
-    content.add(
-        egui::Label::new(
-            egui::RichText::new(detail)
-                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                .color(t.color.text_dim),
-        )
-        .wrap(),
+    crate::workbench::design_system::painted_label(
+        &mut content,
+        egui::RichText::new(detail)
+            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+            .color(t.color.text_dim),
+        egui::TextWrapMode::Wrap,
     );
     response.widget_info(|| {
         egui::WidgetInfo::selected(egui::WidgetType::RadioButton, true, selected, label)

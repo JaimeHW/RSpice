@@ -843,16 +843,21 @@ fn pane_header(
             .max_rect(rect.shrink2(vec2(8.0, 3.0)))
             .layout(Layout::left_to_right(Align::Center)),
         |ui| {
-            ui.label(
+            // Painted, not labels: a label over the tab takes the presses on its text.
+            crate::workbench::design_system::painted_label(
+                ui,
                 RichText::new(display_title)
                     .font(theme::sans(tokens::FS_1, FontWeight::Medium))
                     .color(t.color.text),
+                egui::TextWrapMode::Extend,
             );
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                ui.label(
+                crate::workbench::design_system::painted_label(
+                    ui,
                     RichText::new(viewer_title)
                         .font(theme::mono(tokens::FS_0, FontWeight::Regular))
                         .color(t.color.text_faint),
+                    egui::TextWrapMode::Extend,
                 );
             });
         },
