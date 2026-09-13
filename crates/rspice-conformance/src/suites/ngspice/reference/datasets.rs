@@ -888,26 +888,40 @@ impl TestRunner {
                 let segment_aligned = reference_segments.len() > 1
                     && reference_segments.len() == simulation_segments.len()
                     && actual_series.len() == x_sim.len();
-                let samples = if segment_aligned {
-                    reference_segments
-                        .iter()
-                        .zip(&simulation_segments)
-                        .flat_map(|(reference_segment, simulation_segment)| {
-                            reference_segment.clone().map(|index| {
-                                let actual = Self::interpolate_series(
-                                    &x_sim[simulation_segment.clone()],
-                                    &actual_series[simulation_segment.clone()],
-                                    expected_series.x[index],
-                                );
-                                (index, actual)
-                            })
+                if !segment_aligned || expected_series.x.len() != expected_series.y.len() {
+                    // Position is not a substitute for a sweep coordinate.
+                    // Otherwise equal values from unrelated outer sweeps can
+                    // pass, and real mismatches acquire the wrong bias label.
+                    mismatches.push(ValueMismatch {
+                        x_value: expected_series.x.first().copied().unwrap_or(f64::NAN),
+                        node: format!(
+                            "{var} (incompatible sweep shape: reference {} segments / {} coordinates / {} values; simulation {} segments / {} coordinates / {} values)",
+                            reference_segments.len(), expected_series.x.len(), expected_series.y.len(),
+                            simulation_segments.len(), x_sim.len(), actual_series.len(),
+                        ),
+                        expected: f64::NAN,
+                        actual: f64::NAN,
+                        relative_error: f64::INFINITY,
+                    });
+                    if mismatches.len() >= self.config.max_mismatches {
+                        return mismatches;
+                    }
+                    continue;
+                }
+                let samples = reference_segments
+                    .iter()
+                    .zip(&simulation_segments)
+                    .flat_map(|(reference_segment, simulation_segment)| {
+                        reference_segment.clone().map(|index| {
+                            let actual = Self::interpolate_series(
+                                &x_sim[simulation_segment.clone()],
+                                &actual_series[simulation_segment.clone()],
+                                expected_series.x[index],
+                            );
+                            (index, actual)
                         })
-                        .collect::<Vec<_>>()
-                } else {
-                    (0..expected_series.y.len().max(actual_series.len()))
-                        .map(|index| (index, actual_series.get(index).copied()))
-                        .collect::<Vec<_>>()
-                };
+                    })
+                    .collect::<Vec<_>>();
                 for (i, actual) in samples {
                     let Some(&expected) = expected_series.y.get(i) else {
                         mismatches.push(ValueMismatch {
@@ -1018,6 +1032,64 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
+    fn multidimensional_sweep_rejects_matching_values_on_incompatible_axes() {
+        // Equal row values do not establish agreement if they belong to a
+        // different outer sweep, or if a value is missing its coordinate.
+        for (x_ref, x_sim) in [
+            (vec![0.0, 0.25, 0.5, 0.75], vec![0.0, 0.5, 0.0, 0.5]),
+            (
+                vec![0.0, 0.5, 1.0, 0.0, 0.5, 1.0],
+                vec![0.0, 1.0, 0.0, 1.0, 0.0, 1.0],
+            ),
+            (vec![0.0, 1.0, 0.0, 1.0], vec![0.0, 0.5, 1.0, 0.0, 0.5, 1.0]),
+        ] {
+            let values: Vec<f64> = (0..x_ref.len()).map(|row| row as f64 + 1.0).collect();
+            let reference = ReferenceTable {
+                x_name: "v-sweep".to_string(),
+                variables: BTreeMap::from([(
+                    "v(out)".to_string(),
+                    ReferenceSeries {
+                        x: x_ref.clone(),
+                        y: values.clone(),
+                    },
+                )]),
+            };
+            let runner =
+                TestRunner::new_checked_in_oracle(Path::new("."), TestRunnerConfig::default());
+            let mismatches =
+                runner.compare_reference_dataset(&reference, &x_sim, |_| Some(values.clone()));
+            assert!(
+                !mismatches.is_empty(),
+                "unrelated grids must not pass: reference={x_ref:?}, simulation={x_sim:?}"
+            );
+            assert!(mismatches[0].node.contains("incompatible sweep shape"));
+        }
+    }
+
+    #[test]
+    fn multidimensional_sweep_rejects_reference_values_without_coordinates() {
+        let reference = ReferenceTable {
+            x_name: "v-sweep".to_string(),
+            variables: BTreeMap::from([(
+                "v(out)".to_string(),
+                ReferenceSeries {
+                    x: vec![0.0, 1.0, 0.0, 1.0],
+                    y: vec![0.0, 1.0, 10.0, 11.0, 99.0],
+                },
+            )]),
+        };
+        let runner = TestRunner::new_checked_in_oracle(Path::new("."), TestRunnerConfig::default());
+        let mismatches =
+            runner.compare_reference_dataset(&reference, &[0.0, 1.0, 0.0, 1.0], |_| {
+                Some(vec![0.0, 1.0, 10.0, 11.0])
+            });
+        assert!(
+            !mismatches.is_empty(),
+            "the extra reference value must not be ignored"
+        );
+    }
+
+    #[test]
     fn multidimensional_sweep_alignment_tolerates_reference_downsampling() {
         let mut reference = ReferenceTable {
             x_name: "v-sweep".to_string(),
@@ -1030,14 +1102,22 @@ mod tests {
                 y: vec![0.0, 1.0, 10.0, 11.0],
             },
         );
-        let x_sim = vec![0.0, 0.5, 1.0, 0.0, 0.5, 1.0];
+        let mut x_sim = vec![0.0, 0.5, 1.0, 0.0, 0.5, 1.0];
         let actual = vec![0.0, 0.5, 1.0, 10.0, 10.5, 11.0];
-        let runner = TestRunner::new(Path::new("."), TestRunnerConfig::default());
+        let runner = TestRunner::new_checked_in_oracle(Path::new("."), TestRunnerConfig::default());
 
-        let mismatches =
-            runner.compare_reference_dataset(&reference, &x_sim, |_| Some(actual.clone()));
-
-        assert!(mismatches.is_empty(), "{mismatches:?}");
+        for _ in 0..2 {
+            let mismatches =
+                runner.compare_reference_dataset(&reference, &x_sim, |_| Some(actual.clone()));
+            assert!(mismatches.is_empty(), "{mismatches:?}");
+            // The same interpolation contract applies in descending sweeps.
+            for value in &mut x_sim {
+                *value = -*value;
+            }
+            for value in &mut reference.variables.get_mut("v(out)").unwrap().x {
+                *value = -*value;
+            }
+        }
     }
 
     #[test]
