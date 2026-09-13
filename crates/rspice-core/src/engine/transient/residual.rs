@@ -1326,11 +1326,18 @@ impl Engine {
             .collect();
         let tolerance = circuit.xyce_core_branch_residual_tolerance();
         let core_branch_converged = rows.iter().all(|&row| {
-            let rounding = circuit.xyce_core_transient_roundoff.iter()
-                .find_map(|&(index, bound)| (index == row).then_some(bound)).unwrap_or(0.0);
+            let rounding = circuit
+                .xyce_core_transient_roundoff
+                .iter()
+                .find_map(|&(index, bound)| (index == row).then_some(bound))
+                .unwrap_or(Some(0.0));
             residual.get(row).is_some_and(|value| {
-                value.is_finite() && rounding.is_finite() && rounding >= 0.0
-                    && value.abs() <= tolerance + rounding
+                value.is_finite()
+                    && rounding.is_some_and(|rounding| {
+                        rounding.is_finite()
+                            && rounding >= 0.0
+                            && value.abs() <= tolerance + rounding
+                    })
             })
         });
         // The global RHSTOL must inspect those same physical rows; checking
@@ -2791,6 +2798,75 @@ mod tests {
             &rhs,
             false,
             None,
+        ));
+    }
+
+    #[test]
+    fn xyce_core_roundoff_cannot_waive_physical_or_global_guards() {
+        let (engine, mut circuit, row) = xyce_core_residual_fixture();
+        let size = circuit.matrix_size();
+        let entries: Vec<_> = (0..size).map(|i| (i, i, 1.0)).collect();
+        let mut matrix = crate::solver::StaticMatrix::from_triplets(size, size, &entries).unwrap();
+        let solution = vec![0.0; size];
+        let rhs = solution.clone();
+        let floor = circuit.xyce_core_branch_residual_tolerance();
+        circuit.xyce_core_transient_residuals = vec![(row, 2.0 * floor)];
+        for bound in [
+            None,
+            Some(0.0),
+            Some(-floor),
+            Some(Value::NAN),
+            Some(Value::INFINITY),
+        ] {
+            circuit.xyce_core_transient_roundoff = vec![(row, bound)];
+            assert!(!engine.transient_residual_convergence_met(
+                &circuit,
+                &mut matrix,
+                &solution,
+                &rhs,
+                false,
+                None
+            ));
+        }
+        circuit.xyce_core_transient_roundoff = vec![(row, Some(floor))];
+        assert!(engine.transient_residual_convergence_met(
+            &circuit,
+            &mut matrix,
+            &solution,
+            &rhs,
+            false,
+            None
+        ));
+        circuit.xyce_core_transient_residuals[0].1 = (2.0 * floor).next_up();
+        assert!(!engine.transient_residual_convergence_met(
+            &circuit,
+            &mut matrix,
+            &solution,
+            &rhs,
+            false,
+            None
+        ));
+        // Even a large, finite coordinate bound cannot waive authored RHSTOL.
+        circuit.xyce_core_transient_roundoff[0].1 = Some(1.0);
+        circuit.xyce_core_transient_residuals[0].1 = 1e-7;
+        assert!(!engine.transient_residual_convergence_met(
+            &circuit,
+            &mut matrix,
+            &solution,
+            &rhs,
+            false,
+            None
+        ));
+        // A failed winding-voltage check rejects even a zero dynamic residual.
+        circuit.xyce_core_transient_residuals[0].1 = 0.0;
+        circuit.xyce_core_transient_roundoff[0].1 = None;
+        assert!(!engine.transient_residual_convergence_met(
+            &circuit,
+            &mut matrix,
+            &solution,
+            &rhs,
+            false,
+            None
         ));
     }
 

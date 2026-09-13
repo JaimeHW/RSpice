@@ -28,6 +28,61 @@ fn accumulate_charge_difference(
     }
 }
 
+/// The constant-Q residual change from rounding a current to its nearest
+/// representable coordinate. The outward ULP also bounds a binade boundary.
+#[inline]
+fn current_coordinate_roundoff(current: Value, charge_derivative: Value) -> Option<Value> {
+    if !current.is_finite() || !charge_derivative.is_finite() {
+        return None;
+    }
+    let magnitude = current.abs();
+    let upper = magnitude.next_up() - magnitude;
+    let spacing = if upper.is_finite() {
+        upper
+    } else {
+        magnitude - magnitude.next_down()
+    };
+    let bound = charge_derivative.abs() * spacing * 0.5;
+    bound.is_finite().then_some(bound)
+}
+
+/// Compare the ideal winding voltage law in bounded turns coordinates.
+/// Eight epsilons cover the two divisions, voltage differences and weighted
+/// products. Include the node magnitudes when subtracting a large common mode.
+fn ideal_winding_voltage_converged(
+    first_turns: Value,
+    first_nodes: [Value; 2],
+    turns: Value,
+    nodes: [Value; 2],
+) -> bool {
+    if !first_turns.is_finite()
+        || first_turns <= 0.0
+        || !turns.is_finite()
+        || turns <= 0.0
+        || first_nodes
+            .iter()
+            .chain(&nodes)
+            .any(|value| !value.is_finite())
+    {
+        return false;
+    }
+    let scale = first_turns.max(turns);
+    let own_weight = first_turns / scale;
+    let first_weight = turns / scale;
+    if own_weight == 0.0 || first_weight == 0.0 {
+        return false;
+    }
+    let own = own_weight * (nodes[0] - nodes[1]);
+    let reference = first_weight * (first_nodes[0] - first_nodes[1]);
+    let magnitude = own_weight * nodes[0].abs()
+        + own_weight * nodes[1].abs()
+        + first_weight * first_nodes[0].abs()
+        + first_weight * first_nodes[1].abs();
+    let limit = 1e-13 * own_weight.min(first_weight) + 8.0 * Value::EPSILON * magnitude;
+    let error = own - reference;
+    error.is_finite() && limit.is_finite() && error.abs() <= limit
+}
+
 #[inline]
 fn node_voltage(solution: &[Value], node_pos: NodeId, node_neg: NodeId) -> Value {
     let pos = if node_pos == 0 {
@@ -246,8 +301,8 @@ impl CircuitData {
     /// Core branch is a constitutive closure equation whose Q/F cancellation
     /// directly appears as a winding voltage.  Letting that row stop at the
     /// global RHS norm can therefore leave a finite voltage on an otherwise
-    /// ideal coupled winding.  LEVEL=2 is solved in the full electrical
-    /// correction system and reaches the direct double-precision floor.  A
+    /// ideal coupled winding. Shared LEVEL=2 also accounts for representable
+    /// current coordinates and independently checks its ideal voltage law. A
     /// shared LEVEL=1 Core is Schur-reduced through hidden M/R coordinates;
     /// its deliberately scaled electrical row has a larger, model-conditioned
     /// round-off floor when the vacuum coefficient is near rank deficiency.
@@ -972,9 +1027,9 @@ impl CircuitData {
                     if group.device.is_xyce_core_level2() {
                         // Half an outward current ULP, propagated through the
                         // constant-Q derivative. Accepted currents remain fixed.
-                        let magnitude = currents[j].abs();
-                        let spacing = magnitude.next_up() - magnitude;
-                        current_roundoff += (charge_coeff * l0 / dt).abs() * spacing * 0.5;
+                        current_roundoff +=
+                            current_coordinate_roundoff(currents[j], charge_coeff * l0 / dt)
+                                .unwrap_or(Value::NAN);
                         accumulate_charge_difference(
                             &mut q_delta,
                             &mut q_delta_correction,
@@ -1039,26 +1094,22 @@ impl CircuitData {
                     // Current-coordinate quantization is confined to the
                     // dynamic flux mode. Independently qualify the ideal
                     // winding voltage law before allowing that rounding bound.
-                    let turn_scale = first_turns.abs().max(winding_i.turns.abs());
-                    let own_weight = first_turns / turn_scale;
-                    let first_weight = winding_i.turns / turn_scale;
-                    let own = own_weight * entry;
-                    let reference = first_weight * first_voltage;
-                    let voltage_error = own - reference;
-                    let voltage_limit = 1.0e-13 * own_weight.abs().min(first_weight.abs())
-                        + 8.0 * Value::EPSILON * (own.abs() + reference.abs());
-                    let bound = if turn_scale.is_finite()
-                        && turn_scale > 0.0
-                        && current_roundoff.is_finite()
-                        && voltage_error.is_finite()
-                        && voltage_limit.is_finite()
-                        && voltage_error.abs() <= voltage_limit
-                    {
-                        current_roundoff
-                    } else {
-                        Value::NAN
+                    let node_pair = |index: usize| {
+                        [
+                            node_voltage(solution, self.inductors.node_pos[index], 0),
+                            node_voltage(solution, self.inductors.node_neg[index], 0),
+                        ]
                     };
-                    self.xyce_core_transient_roundoff.push((branch_i - 1, bound));
+                    let bound = (current_roundoff.is_finite()
+                        && ideal_winding_voltage_converged(
+                            first_turns,
+                            node_pair(first_index),
+                            winding_i.turns,
+                            node_pair(index_i),
+                        ))
+                    .then_some(current_roundoff);
+                    self.xyce_core_transient_roundoff
+                        .push((branch_i - 1, bound));
                 }
                 if f0.is_finite() {
                     self.xyce_core_transient_residuals.push((branch_i - 1, f0));
@@ -1934,7 +1985,89 @@ impl CircuitData {
 
 #[cfg(test)]
 mod tests {
-    use super::accumulate_charge_difference;
+    use super::{
+        accumulate_charge_difference, current_coordinate_roundoff, ideal_winding_voltage_converged,
+    };
+
+    #[test]
+    fn current_roundoff_is_a_half_ulp_in_charge_equation_units() {
+        let current = 2.0_f64.powi(52);
+        let derivative = 2.0_f64.powi(-20);
+        for sign in [-1.0, 1.0] {
+            assert_eq!(
+                current_coordinate_roundoff(sign * current, -derivative),
+                Some(2.0_f64.powi(-21))
+            );
+            assert_eq!(
+                current_coordinate_roundoff(sign * current.next_down(), derivative),
+                Some(2.0_f64.powi(-22))
+            );
+        }
+        assert_eq!(current_coordinate_roundoff(0.0, 1.0), Some(0.0));
+        assert!(
+            current_coordinate_roundoff(f64::MAX, f64::MIN_POSITIVE)
+                .unwrap()
+                .is_finite()
+        );
+        for invalid in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert_eq!(current_coordinate_roundoff(invalid, 1.0), None);
+            assert_eq!(current_coordinate_roundoff(1.0, invalid), None);
+        }
+    }
+
+    #[test]
+    fn ideal_winding_voltage_guard_distinguishes_roundoff_from_physical_error() {
+        for turns_scale in [1e-200, 1.0, 1e200] {
+            for sign in [-1.0, 1.0] {
+                assert!(ideal_winding_voltage_converged(
+                    10.0 * turns_scale,
+                    [sign * 2.8, 0.0],
+                    100.0 * turns_scale,
+                    [sign * 28.0, 0.0]
+                ));
+                assert!(!ideal_winding_voltage_converged(
+                    10.0 * turns_scale,
+                    [sign * 2.8, 0.0],
+                    100.0 * turns_scale,
+                    [sign * 28.001, 0.0]
+                ));
+            }
+        }
+        // Equal translated node pairs have subtraction uncertainty from
+        // their common mode, rather than from the small branch voltage alone.
+        assert!(ideal_winding_voltage_converged(
+            10.0,
+            [1e12 + 2.8, 1e12],
+            100.0,
+            [1e12 + 28.0, 1e12]
+        ));
+        assert!(!ideal_winding_voltage_converged(
+            10.0,
+            [1e12 + 2.8, 1e12],
+            100.0,
+            [1e12 + 28.1, 1e12]
+        ));
+        for invalid in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert!(!ideal_winding_voltage_converged(
+                10.0,
+                [invalid, 0.0],
+                100.0,
+                [28.0, 0.0]
+            ));
+            assert!(!ideal_winding_voltage_converged(
+                invalid,
+                [2.8, 0.0],
+                100.0,
+                [28.0, 0.0]
+            ));
+        }
+        assert!(!ideal_winding_voltage_converged(
+            0.0,
+            [0.0, 0.0],
+            100.0,
+            [0.0, 0.0]
+        ));
+    }
 
     #[test]
     fn charge_difference_retains_the_endpoint_product_tail() {
