@@ -605,12 +605,16 @@ fn gates() -> Vec<Gate> {
     let pss_polls = poll_count("PSS", |abort| {
         engine.run_pss_with_abort(&netlist, PssConfig::new(1.0e6), abort)
     });
+    // The forced-solution path added a cancellation check before every
+    // Newton solve. Call-site attribution accounts for 4,088 of this fixture's
+    // 16,420 polls at that entry; they are cancellation work, not extra Newton
+    // iterations. Independent-state stabilization saves another 291 steps.
     gates.push(Gate {
         metric: "pss.abort_polls",
         unit: "polls",
         value: pss_polls as f64,
         tolerance: POLL_TOLERANCE,
-        note: "abort polls for PSS, including a solved doubled grid for waveform accuracy qualification",
+        note: "abort polls for PSS, including cancellation before every Newton solve and a solved doubled grid for waveform accuracy qualification",
     });
     let pss = serialized(|| engine.run_pss_with_abort(&netlist, PssConfig::new(1.0e6), &NoAbort))
         .expect("the PSS fixture solves");
