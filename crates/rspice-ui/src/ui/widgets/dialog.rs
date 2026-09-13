@@ -10,9 +10,11 @@
 //!   geometry, fill, corner radius, viewport gutter, and narrow behavior; no
 //!   retired generic small/medium/large shell remains.
 //! - **Header / footer** — mono uppercase kicker + semibold title + close
-//!   on top; footer is `[ghost] [secondary] [primary]` with the primary
-//!   always rightmost, always exactly one, accent-filled (or `err` when
-//!   destructive), plus an optional mono hint on the left.
+//!   on top (a prompt carries its title alone); footer is
+//!   `[ghost] [secondary] [primary]`, or `[secondary] … [ghost] [primary]`
+//!   when the secondary is set apart, with the primary always rightmost,
+//!   always exactly one, accent-filled (or `err` when destructive), plus an
+//!   optional mono hint on the left.
 //! - **Body** — the scrolling middle region, laid out inside a stable
 //!   scrollbar gutter: the bar's track is withheld from the body whether or
 //!   not a bar is showing, so the body's width answers to the surface's width
@@ -317,6 +319,11 @@ impl DialogSize {
 }
 
 const WORKFLOW_HEADER_MIN_HEIGHT: f32 = 57.0;
+/// A prompt's header: its title alone, centred in the row.
+const PROMPT_HEADER_MIN_HEIGHT: f32 = 48.0;
+/// The narrowest surface on which a footer with its secondary set apart
+/// stays split; narrower surfaces stack their verbs full-width.
+const SPLIT_FOOTER_MIN_WIDTH: f32 = 440.0;
 const WORKFLOW_HEADER_TEXT_MIN_HEIGHT: f32 = 33.0;
 /// The single measure of lead a title-first header uses above the title,
 /// between the two lines, and below the subtitle.
@@ -591,7 +598,7 @@ struct DialogTransactionState {
 
 /// Declarative description of one modal frame.
 pub struct Dialog<'a> {
-    kicker: String,
+    kicker: Option<String>,
     title: String,
     description: Option<String>,
     size: DialogSize,
@@ -602,6 +609,7 @@ pub struct Dialog<'a> {
     destructive: bool,
     secondary: Option<String>,
     secondary_enabled: bool,
+    secondary_leading: bool,
     ghost: Option<String>,
     ghost_enabled: bool,
     hint: Option<String>,
@@ -625,7 +633,7 @@ impl<'a> Dialog<'a> {
         primary: impl Into<String>,
     ) -> Self {
         Self {
-            kicker: kicker.into(),
+            kicker: Some(kicker.into()),
             title: title.into(),
             description: None,
             size: DialogSize::Transaction,
@@ -636,6 +644,7 @@ impl<'a> Dialog<'a> {
             destructive: false,
             secondary: None,
             secondary_enabled: true,
+            secondary_leading: false,
             ghost: None,
             ghost_enabled: true,
             hint: None,
@@ -648,6 +657,16 @@ impl<'a> Dialog<'a> {
             initial_focus: DialogInitialFocus::Container,
             initial_height: None,
             fixed_height: None,
+        }
+    }
+
+    /// A prompt: a short standard question, such as whether to save changes,
+    /// whose title already says what a kicker would, so the header carries
+    /// the title alone.
+    pub fn prompt(title: impl Into<String>, primary: impl Into<String>) -> Self {
+        Self {
+            kicker: None,
+            ..Self::new("", title, primary)
         }
     }
 
@@ -721,6 +740,15 @@ impl<'a> Dialog<'a> {
     /// Enable or disable the optional secondary action.
     pub fn secondary_enabled(mut self, enabled: bool) -> Self {
         self.secondary_enabled = enabled;
+        self
+    }
+
+    /// Set the secondary action apart at the footer's leading edge, with the
+    /// ghost and the primary together at the trailing edge: the save-changes
+    /// grouping, where "Don't save" must not sit beside the primary it could
+    /// be mistaken for. A stacked footer keeps the canonical order.
+    pub fn secondary_leading(mut self) -> Self {
+        self.secondary_leading = true;
         self
     }
 
@@ -1242,8 +1270,10 @@ impl<'a> Dialog<'a> {
                 let header_width = ui.available_width();
                 let row_min_height = if title_first {
                     0.0
-                } else {
+                } else if self.kicker.is_some() {
                     WORKFLOW_HEADER_MIN_HEIGHT
+                } else {
+                    PROMPT_HEADER_MIN_HEIGHT
                 };
                 ui.allocate_ui_with_layout(
                     vec2(header_width, row_min_height),
@@ -1275,22 +1305,25 @@ impl<'a> Dialog<'a> {
                             vec2(DIALOG_CLOSE_TARGET_WIDTH, DIALOG_CLOSE_TARGET_HEIGHT)
                         };
                         let text_width = (ui.available_width() - close_size.x - 10.0).max(1.0);
-                        let mut eyebrow = egui::text::LayoutJob::default();
-                        eyebrow.append(
-                            &self.kicker.to_uppercase(),
-                            0.0,
-                            egui::TextFormat {
-                                font_id: theme::mono(tokens::FS_0, FontWeight::Medium),
-                                color: c.text_faint,
-                                extra_letter_spacing: 0.09 * tokens::FS_0,
-                                // Line box hugging the glyphs. With the font's
-                                // own leading, three geometrically equal gaps
-                                // still read as a larger one at the top,
-                                // because part of it sits inside the line box.
-                                line_height: title_first.then_some(tokens::FS_0),
-                                ..Default::default()
-                            },
-                        );
+                        let eyebrow = self.kicker.as_deref().map(|kicker| {
+                            let mut eyebrow = egui::text::LayoutJob::default();
+                            eyebrow.append(
+                                &kicker.to_uppercase(),
+                                0.0,
+                                egui::TextFormat {
+                                    font_id: theme::mono(tokens::FS_0, FontWeight::Medium),
+                                    color: c.text_faint,
+                                    extra_letter_spacing: 0.09 * tokens::FS_0,
+                                    // Line box hugging the glyphs. With the font's
+                                    // own leading, three geometrically equal gaps
+                                    // still read as a larger one at the top,
+                                    // because part of it sits inside the line box.
+                                    line_height: title_first.then_some(tokens::FS_0),
+                                    ..Default::default()
+                                },
+                            );
+                            eyebrow
+                        });
                         let mut title_job = egui::text::LayoutJob::default();
                         title_job.append(
                             self.title.as_str(),
@@ -1302,6 +1335,17 @@ impl<'a> Dialog<'a> {
                                 ..Default::default()
                             },
                         );
+                        let text_min_height = if title_first {
+                            0.0
+                        } else if eyebrow.is_some() {
+                            WORKFLOW_HEADER_TEXT_MIN_HEIGHT
+                        } else {
+                            // A title alone is centred by its own laid-out
+                            // height, wrapped or not.
+                            let mut measured = title_job.clone();
+                            measured.wrap.max_width = text_width;
+                            ui.fonts_mut(|fonts| fonts.layout_job(measured)).size().y
+                        };
                         ui.allocate_ui_with_layout(
                             // A zero-height child is aligned by its empty
                             // rectangle and then grows downward, which pushed
@@ -1310,14 +1354,7 @@ impl<'a> Dialog<'a> {
                             // stack its real minimum height; wrapped narrow
                             // titles may still grow it when necessary. A
                             // title-first header sizes to its own lead instead.
-                            vec2(
-                                text_width,
-                                if title_first {
-                                    0.0
-                                } else {
-                                    WORKFLOW_HEADER_TEXT_MIN_HEIGHT
-                                },
-                            ),
+                            vec2(text_width, text_min_height),
                             egui::Layout::top_down(egui::Align::Min),
                             |ui| {
                                 ui.set_width(text_width);
@@ -1328,9 +1365,13 @@ impl<'a> Dialog<'a> {
                                 };
                                 if title_first {
                                     ui.add(egui::Label::new(title_job).wrap());
-                                    ui.add(egui::Label::new(eyebrow).wrap());
+                                    if let Some(eyebrow) = eyebrow {
+                                        ui.add(egui::Label::new(eyebrow).wrap());
+                                    }
                                 } else {
-                                    ui.add(egui::Label::new(eyebrow).wrap());
+                                    if let Some(eyebrow) = eyebrow {
+                                        ui.add(egui::Label::new(eyebrow).wrap());
+                                    }
                                     ui.add(egui::Label::new(title_job).wrap());
                                 }
                             },
@@ -1393,6 +1434,11 @@ impl<'a> Dialog<'a> {
     fn footer_stacks(&self, surface_width: f32) -> bool {
         if self.size == DialogSize::ComponentEditor {
             return false;
+        }
+        // A split footer reads as two groups only with room between them; on
+        // a phone-width surface it stacks instead, primary first.
+        if self.secondary_leading && surface_width < SPLIT_FOOTER_MIN_WIDTH {
+            return true;
         }
         let button_width = |label: &str| label.chars().count() as f32 * 6.4 + 20.0;
         let mut required = button_width(&self.primary);
@@ -1631,6 +1677,17 @@ impl<'a> Dialog<'a> {
                 }
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 6.0;
+                    if self.secondary_leading
+                        && let Some(label) = self.secondary.as_deref()
+                    {
+                        let secondary = crate::ui::widgets::Button::new(label)
+                            .enabled(self.secondary_enabled)
+                            .show(ui);
+                        secondary_id = self.secondary_enabled.then_some(secondary.id);
+                        if secondary.clicked() {
+                            choice = DialogChoice::Secondary;
+                        }
+                    }
                     if let Some(hint) = self.hint.as_deref() {
                         let label = egui::Label::new(
                             egui::RichText::new(hint)
@@ -1661,7 +1718,9 @@ impl<'a> Dialog<'a> {
                         if primary.clicked() {
                             choice = DialogChoice::Primary;
                         }
-                        if let Some(label) = self.secondary.as_deref() {
+                        if !self.secondary_leading
+                            && let Some(label) = self.secondary.as_deref()
+                        {
                             let secondary = crate::ui::widgets::Button::new(label)
                                 .enabled(self.secondary_enabled)
                                 .show(ui);
