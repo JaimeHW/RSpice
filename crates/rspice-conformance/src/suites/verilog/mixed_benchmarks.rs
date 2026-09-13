@@ -749,7 +749,8 @@ fn pll_reference_deck() -> String {
 
 /// The first time after which the control voltage stays inside a band around
 /// its settled value, measured on one-microsecond means so the phase
-/// detector's own ripple does not decide the answer.
+/// detector's own ripple does not decide the answer. Means are dated at their
+/// window starts; interpolate the final band entrance between adjacent means.
 fn pll_lock_time(result: &TransientResult, band: f64) -> Result<(f64, f64), String> {
     let window = 1.0 / PLL_REF_HZ;
     let steps = (PLL_TSTOP / window) as usize;
@@ -763,17 +764,29 @@ fn pll_lock_time(result: &TransientResult, band: f64) -> Result<(f64, f64), Stri
         )?);
     }
     let settled = *means.last().ok_or("the run produced no windows")?;
-    let mut lock = f64::NAN;
-    for (step, mean) in means.iter().enumerate() {
-        if (mean - settled).abs() > band * settled.abs() {
-            lock = f64::NAN;
-        } else if lock.is_nan() {
-            lock = step as f64 * window;
+    let radius = band * settled.abs();
+    let lock = match means
+        .iter()
+        .rposition(|mean| (mean - settled).abs() > radius)
+    {
+        Some(step) => {
+            let before = means[step];
+            let after = *means
+                .get(step + 1)
+                .ok_or("the loop never settled inside the band")?;
+            let threshold = if before > settled {
+                settled + radius
+            } else {
+                settled - radius
+            };
+            let fraction = (threshold - before) / (after - before);
+            if !fraction.is_finite() || !(0.0..=1.0).contains(&fraction) {
+                return Err("the final lock-band entrance has no valid bracket".to_string());
+            }
+            (step as f64 + fraction) * window
         }
-    }
-    if lock.is_nan() {
-        return Err("the loop never settled inside the band".to_string());
-    }
+        None => 0.0,
+    };
     Ok((lock, settled))
 }
 
@@ -1228,6 +1241,31 @@ mod tests {
         let start = 1.0_f64.next_up();
         let mean = windowed_mean(&result, "vctrl", start, 0.5).unwrap();
         assert!((mean - 0.110025).abs() < 1e-16, "{mean}");
+    }
+
+    #[test]
+    fn pll_lock_time_resolves_the_last_window_mean_band_crossing() {
+        // A 50 kV/s ramp toward 0.5 V enters its 10% band at 9 us.
+        // Its forward one-microsecond mean enters at window start 8.5 us.
+        // A later excursion must replace the first entrance, in either direction.
+        for (time, voltage, expected) in [
+            (&[0.0, 10e-6, 60e-6][..], &[1.0, 0.5, 0.5][..], 8.5e-6),
+            (
+                &[0.0, 10e-6, 20e-6, 30e-6, 40e-6, 60e-6][..],
+                &[1.0, 0.5, 0.5, 1.0, 0.5, 0.5][..],
+                38.5e-6,
+            ),
+            (
+                &[0.0, 10e-6, 20e-6, 30e-6, 40e-6, 60e-6][..],
+                &[0.0, 0.5, 0.5, 0.0, 0.5, 0.5][..],
+                38.5e-6,
+            ),
+        ] {
+            let result = waveform(time, voltage);
+            let (lock, settled) = pll_lock_time(&result, PLL_LOCK_BAND).unwrap();
+            assert!((settled - 0.5).abs() < 1e-15, "{settled}");
+            assert!((lock - expected).abs() < 1e-18, "{lock} != {expected}");
+        }
     }
 
     #[test]
