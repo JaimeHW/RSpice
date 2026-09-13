@@ -291,7 +291,25 @@ const FINGERPRINTED_FIXTURES: &[(&str, &str, Fingerprint)] = &[
         Fingerprint {
             points: 88,
             grid_hash: 0x7128_f749_178c_4a38,
-            volt_hash: 0xc781_f898_d407_8ce1,
+            // Raw binary64 self-agreement is qualified per platform: Rust's
+            // f64::sin does not promise identical platform math. Linux x64 GNU
+            // and Windows x64 MSVC traces have the same 88 time/step words,
+            // events and CA/QA/QB voltages. Only CLK samples 38 and 55 differ
+            // by one ULP. At angles 0x4002bb2ea8b66d08/0x4004f1a6ca8803ce,
+            // independent 100-digit sine evaluation rounds to Linux's
+            // 0x3fe6f5b1bdc3a35a/0x3fdfffffe224cbe2. Windows is <0.558 ULP
+            // from that high-precision value. Both Linux execution routes
+            // agree. Keep exact child-process checks and crossing physics;
+            // do not quantize waveforms or widen the solver's tolerances.
+            volt_hash: if cfg!(all(
+                target_os = "linux",
+                target_arch = "x86_64",
+                target_env = "gnu"
+            )) {
+                0xcf57_3f88_0596_171d
+            } else {
+                0xc781_f898_d407_8ce1
+            },
         },
     ),
     (
@@ -3188,6 +3206,23 @@ endmodule
         model.deck_path()
     );
     let result = run(&deck, 1.0e-9, 75.0e-12);
+
+    // Independent waveform form, including phase-rounding error near zero.
+    // This remains a physical check on CLK on every platform; the raw hash
+    // separately checks reproducibility of the platform's source evaluation.
+    let clock = result
+        .node_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case("clk"))
+        .expect("CLK has an analog voltage");
+    assert_eq!(result.voltages[clock].len(), result.time.len());
+    for (&time, &voltage) in result.time.iter().zip(&result.voltages[clock]) {
+        let expected = -(std::f64::consts::TAU * 1.0e9 * time).cos();
+        assert!(
+            (voltage - expected).abs() <= 8.0 * f64::EPSILON,
+            "CLK at {time:e}: {voltage:e}, expected {expected:e}"
+        );
+    }
 
     let rising = |net: &str| -> f64 {
         let points = digital_points(&result, net);
