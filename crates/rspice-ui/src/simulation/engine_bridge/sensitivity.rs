@@ -459,7 +459,9 @@ mod tests {
         ] {
             let netlist = rspice_core::Netlist::parse(source).unwrap();
             for ac_mode in [false, true] {
-                let required = 1 + usize::from(ac_mode) + 5 * parameter_count;
+                // The nominal DC/AC probes and each analytic parameter solve
+                // share one budget across the entire study.
+                let required = 1 + usize::from(ac_mode) + parameter_count;
                 for limit in [required - 1, required] {
                     let mut engine_config = rspice_core::SimulationConfig::default();
                     engine_config.resource_limits.max_batch_runs = limit;
@@ -475,12 +477,103 @@ mod tests {
                             &NoAbort,
                         );
                     if limit < required {
-                        assert!(
-                            matches!(result, Err(SimulationError::ResourceLimit { .. })),
-                            "{result:?}"
-                        );
+                        let Err(SimulationError::ResourceLimit {
+                            resource,
+                            requested,
+                            limit: reported_limit,
+                        }) = result
+                        else {
+                            panic!("expected study budget refusal: {result:?}");
+                        };
+                        assert_eq!(resource, "batch_runs");
+                        assert_eq!(requested, required);
+                        assert_eq!(reported_limit, limit);
                     } else {
-                        assert!(result.is_ok(), "{result:?}");
+                        let SimulationResult::Sensitivity {
+                            sensitivities,
+                            normalized,
+                            ..
+                        } = result.unwrap()
+                        else {
+                            panic!("expected sensitivity data");
+                        };
+                        assert_eq!(sensitivities.len(), parameter_count);
+                        assert_eq!(normalized.len(), parameter_count);
+                        // I(V1)=-drive/load in DC; AC reports its magnitude.
+                        let drive_derivative = if ac_mode { 0.5 } else { -0.5 };
+                        assert!(
+                            (sensitivities["DRIVE"].value().unwrap() - drive_derivative).abs()
+                                < 1e-12
+                        );
+                        assert!((normalized["DRIVE"].value().unwrap() - 1.0).abs() < 1e-12);
+                        if parameter_count == 2 {
+                            assert!(
+                                (sensitivities["LOAD"].value().unwrap() + drive_derivative).abs()
+                                    < 1e-12
+                            );
+                            assert!((normalized["LOAD"].value().unwrap() + 1.0).abs() < 1e-12);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn sensitivity_refinement_spends_the_shared_study_budget() {
+        // Behavioral sources require replay/refinement. This smooth product
+        // resolves with one nominal solve and two central pairs per parameter.
+        let netlist = rspice_core::Netlist::parse(
+            "Refined study budget\n.param gain=2 scale=3\nV1 in 0 DC 1 AC 1\nB1 out 0 V={gain*scale*V(in)}\n.end\n",
+        )
+        .unwrap();
+        for ac_mode in [false, true] {
+            let nominal_runs = 1 + usize::from(ac_mode);
+            let required = nominal_runs + 5 * 2;
+            // All these limits admit preflight. Exhaustion must propagate
+            // from a trial, including after one parameter has already finished.
+            for limit in [nominal_runs + 2, nominal_runs + 5, required - 1, required] {
+                let mut engine_config = rspice_core::SimulationConfig::default();
+                engine_config.resource_limits.max_batch_runs = limit;
+                let result = EngineBridge::try_with_config(engine_config)
+                    .unwrap()
+                    .run_sensitivity(
+                        &netlist,
+                        &SensitivityConfig {
+                            output_var: "V(out)".to_owned(),
+                            ac_mode,
+                            frequency: ac_mode.then_some(1.0),
+                        },
+                        &NoAbort,
+                    );
+                if limit < required {
+                    let Err(SimulationError::ResourceLimit {
+                        resource,
+                        requested,
+                        limit: reported_limit,
+                    }) = result
+                    else {
+                        panic!("expected refinement budget refusal: {result:?}");
+                    };
+                    assert_eq!(resource, "batch_runs");
+                    assert_eq!(requested, limit + 1);
+                    assert_eq!(reported_limit, limit);
+                } else {
+                    let SimulationResult::Sensitivity {
+                        sensitivities,
+                        normalized,
+                        ..
+                    } = result.unwrap()
+                    else {
+                        panic!("expected sensitivity data");
+                    };
+                    assert_eq!(sensitivities.len(), 2);
+                    assert_eq!(normalized.len(), 2);
+                    for (parameter, expected) in [("GAIN", 3.0), ("SCALE", 2.0)] {
+                        assert!(
+                            (sensitivities[parameter].value().unwrap() - expected).abs() < 1e-9
+                        );
+                        assert!((normalized[parameter].value().unwrap() - 1.0).abs() < 1e-9);
                     }
                 }
             }
