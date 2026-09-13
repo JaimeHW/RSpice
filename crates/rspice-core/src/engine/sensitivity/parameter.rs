@@ -10,7 +10,7 @@ use crate::netlist::{Element, ElementParameterDirection};
 /// frequency, and their derivative with respect to the swept parameter.
 pub(super) type LinearParameterResponse = (Vec<Complex64>, Vec<Complex64>);
 
-fn linear_element(kind: &ElementKind) -> bool {
+fn linear_element(kind: &ElementKind, ac: bool) -> bool {
     match kind {
         ElementKind::Resistor {
             value,
@@ -64,10 +64,7 @@ fn linear_element(kind: &ElementKind) -> bool {
                 && multiplicity.value.is_finite()
         }
         ElementKind::VoltageSource(spec) | ElementKind::CurrentSource(spec) => {
-            matches!(
-                spec,
-                SourceSpec::Dc(_) | SourceSpec::Ac { .. } | SourceSpec::DcAc { .. }
-            )
+            spec.supports_parameter_direction(ac)
         }
         _ => false,
     }
@@ -206,8 +203,18 @@ fn add_element_direction(
                         ac_magnitude: magnitude,
                         ac_phase: phase,
                         ..
+                    }
+                    | SourceSpec::AcTransient {
+                        ac_magnitude: magnitude,
+                        ac_phase: phase,
+                        ..
+                    }
+                    | SourceSpec::DcAcTransient {
+                        ac_magnitude: magnitude,
+                        ac_phase: phase,
+                        ..
                     } => (*magnitude, *phase),
-                    SourceSpec::Dc(_) => (0.0, 0.0),
+                    SourceSpec::Dc(_) | SourceSpec::DcTransient { .. } => (0.0, 0.0),
                     _ => unreachable!("source qualification"),
                 };
                 let (sin, cos) = angle.sin_cos();
@@ -254,7 +261,7 @@ impl Engine {
             || !netlist.ast_overlay.device_parameters.is_empty()
             || !netlist.spectre_statistics.variations.is_empty()
             || !netlist.elements.iter().all(|element| {
-                linear_element(&element.kind)
+                linear_element(&element.kind, frequencies.is_some())
                     || matches!(element.kind, ElementKind::Subcircuit { .. })
             })
         {
@@ -293,7 +300,8 @@ impl Engine {
         };
         if capture.has_uncaptured_dependencies
             || !capture.owners.iter().all(|element| {
-                linear_element(&element.kind) && capture.elements.contains_key(&element.name)
+                linear_element(&element.kind, frequencies.is_some())
+                    && capture.elements.contains_key(&element.name)
             })
         {
             return Ok(None);
@@ -472,10 +480,22 @@ mod tests {
             ),
             ("V1 out 0 DC {1+1e-8*p} AC {1+1e-8*p} 30", slope, slope),
             (
+                "V1 out 0 DC {1+1e-8*p} SIN(0 1 1k) AC {1+1e-8*p} 30",
+                slope,
+                slope,
+            ),
+            ("V1 out 0 DC {1+1e-8*p} SIN(0 1 1k)", slope, 0.0),
+            (
                 "I1 0 out DC {1+1e-8*p} AC {1+1e-8*p} 30\nR1 out 0 1",
                 slope,
                 slope,
             ),
+            (
+                "I1 0 out DC {1+1e-8*p} SIN(0 1 1k) AC {1+1e-8*p} 30\nR1 out 0 1",
+                slope,
+                slope,
+            ),
+            ("I1 0 out DC {1+1e-8*p} SIN(0 1 1k)\nR1 out 0 1", slope, 0.0),
             (
                 ".param r={1+1e-8*p}\nV1 in 0 DC 1 AC 1\nR1 in out r\nR2 out 0 1",
                 -0.25 * slope,

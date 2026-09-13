@@ -1267,10 +1267,8 @@ pub(super) fn parse_voltage_source(
         Err(err) => return Err(err),
     };
 
-    if matches!(
-        source_spec,
-        SourceSpec::Dc(_) | SourceSpec::Ac { .. } | SourceSpec::DcAc { .. }
-    ) && let Some(capture) = parameter_direction
+    if source_spec.supports_parameter_direction(true)
+        && let Some(capture) = parameter_direction
     {
         let [dc, magnitude, phase] = directions.into_inner();
         capture.elements.insert(
@@ -1349,10 +1347,8 @@ pub(super) fn parse_current_source(
         Err(err) => return Err(err),
     };
 
-    if matches!(
-        source_spec,
-        SourceSpec::Dc(_) | SourceSpec::Ac { .. } | SourceSpec::DcAc { .. }
-    ) && let Some(capture) = parameter_direction
+    if source_spec.supports_parameter_direction(true)
+        && let Some(capture) = parameter_direction
     {
         let [dc, magnitude, phase] = directions.into_inner();
         capture.elements.insert(

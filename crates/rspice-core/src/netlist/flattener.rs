@@ -2278,10 +2278,7 @@ impl<'a> Flattener<'a> {
                         )
                     }),
                 ElementKind::VoltageSource(spec) | ElementKind::CurrentSource(spec)
-                    if matches!(
-                        spec,
-                        SourceSpec::Dc(_) | SourceSpec::Ac { .. } | SourceSpec::DcAc { .. }
-                    ) =>
+                    if spec.supports_parameter_direction(true) =>
                 {
                     let [dc, magnitude, phase] = source_directions
                         .expect("selected field capture")

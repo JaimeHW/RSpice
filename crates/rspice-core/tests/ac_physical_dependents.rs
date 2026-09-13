@@ -44,6 +44,106 @@ fn assert_relative(actual: f64, expected: f64, relative_tolerance: f64, quantity
 }
 
 #[test]
+fn ac_parameter_sensitivity_with_transient_sources_matches_rc_reference() {
+    // H = 1/(1+j*w*R*C). A transient waveform must not force this linear
+    // derivative onto a finite-difference path that loses its low-frequency
+    // resistance dependence in rounded output phasors.
+    let frequencies = [1.0, 100.0, 1.0e4, 1.0e6];
+    let engine = physical_engine();
+    for hierarchical in [false, true] {
+        for source in [
+            "SIN({offset} 1 1meg) AC {drive} 30",
+            "DC {offset} SIN(0 1 1meg) AC {drive} 30",
+        ] {
+            let network = format!("V1 in 0 {source}\nR1 in out {{rval}}\nC1 out 0 1n\n");
+            let network = if hierarchical {
+                format!(".subckt filter out\n{network}.ends filter\nX1 out filter\n")
+            } else {
+                network
+            };
+            let netlist = Netlist::parse(&format!(
+                "AC and transient parameter directions\n\
+                 .param rval=1k drive=2 offset=0.25\n{network}.end\n"
+            ))
+            .unwrap();
+            let output = node_id(&engine, &netlist, "out");
+            for (parameter, nominal) in [("rval", 1.0e3), ("drive", 2.0)] {
+                let derivatives = engine
+                    .run_sensitivity_ac(&netlist, output, parameter, nominal, &frequencies, None)
+                    .unwrap_or_else(|error| {
+                        panic!("{source}, hierarchical={hierarchical}, {parameter}: {error}")
+                    });
+                assert_eq!(derivatives.len(), frequencies.len());
+                for (&frequency, derivative) in frequencies.iter().zip(derivatives) {
+                    let omega_c = 2.0 * std::f64::consts::PI * frequency * 1.0e-9;
+                    let norm_squared = 1.0 + (omega_c * 1.0e3).powi(2);
+                    let expected = if parameter == "rval" {
+                        -2.0 * omega_c.powi(2) * 1.0e3 / norm_squared.powf(1.5)
+                    } else {
+                        1.0 / norm_squared.sqrt()
+                    };
+                    if parameter == "rval" {
+                        // The adjoint forcing uses Vin-Vout. Near DC its
+                        // roundoff contributes O(epsilon*|Vin|/R) to the
+                        // magnitude derivative, even as the true derivative
+                        // falls with frequency squared. Bound that absolute
+                        // error separately from the resolved relative error.
+                        let tolerance =
+                            expected.abs() * 1.0e-10 + 16.0 * f64::EPSILON * 2.0 / 1.0e3;
+                        assert!(
+                            derivative.is_finite() && (derivative - expected).abs() <= tolerance,
+                            "{source}, hierarchical={hierarchical}, f={frequency}: \
+                             d|Vout|/dR={derivative:.17e}, expected={expected:.17e}, \
+                             tolerance={tolerance:.3e}"
+                        );
+                    } else {
+                        assert_relative(derivative, expected, 1.0e-10, parameter);
+                    }
+                }
+            }
+            // AC qualification must not erase the waveform's implicit DC bias.
+            assert_relative(
+                engine
+                    .run_sensitivity(&netlist, output, "offset", 0.25, None)
+                    .unwrap(),
+                1.0,
+                1.0e-8,
+                "DC offset sensitivity with a transient source",
+            );
+        }
+    }
+}
+
+#[test]
+fn ac_transient_source_phase_directions_match_phasor_interference() {
+    let engine = physical_engine();
+    for dc in ["", "DC 0.25 "] {
+        for (source, reference) in [
+            ("V1 a 0", "V2 out a AC 1 90"),
+            ("I1 0 out", "I2 0 out AC 1 90\nR1 out 0 1"),
+        ] {
+            let netlist = Netlist::parse(&format!(
+                "Source phase direction\n.param phase=0\n\
+                 {source} {dc}SIN(0 1 1meg) AC 1 {{phase}}\n{reference}\n.end\n"
+            ))
+            .unwrap();
+            let output = node_id(&engine, &netlist, "out");
+            let derivative = engine
+                .run_sensitivity_ac(&netlist, output, "phase", 0.0, &[1.0], None)
+                .unwrap()[0];
+            // |exp(j*phase)+j| = sqrt(2+2*sin(phase)), with source phase
+            // authored in degrees and differentiated at zero.
+            assert_relative(
+                derivative,
+                std::f64::consts::PI / 180.0 / 2.0_f64.sqrt(),
+                1.0e-10,
+                "AC phase sensitivity with a transient source",
+            );
+        }
+    }
+}
+
+#[test]
 fn parameter_ac_magnitude_sensitivity_reports_the_null_cusp() {
     let netlist =
         Netlist::parse("AC output null\n.param gain=1\nV1 in 0 AC 1\nE1 out 0 in 0 {gain}\n.end\n")

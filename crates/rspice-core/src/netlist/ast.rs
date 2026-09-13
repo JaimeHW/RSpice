@@ -1920,6 +1920,22 @@ pub enum SourceSpec {
 }
 
 impl SourceSpec {
+    /// Whether the DC/AC fields captured by the parameter reader completely
+    /// describe this source's direction for the requested analysis. An AC-only
+    /// wrapper uses its waveform's initial value for DC bias; that waveform
+    /// derivative is not captured, so it remains on the DC refinement path.
+    pub(crate) fn supports_parameter_direction(&self, ac: bool) -> bool {
+        match self {
+            Self::Dc(_)
+            | Self::Ac { .. }
+            | Self::DcAc { .. }
+            | Self::DcTransient { .. }
+            | Self::DcAcTransient { .. } => true,
+            Self::AcTransient { .. } => ac,
+            _ => false,
+        }
+    }
+
     /// File read when this waveform is instantiated, including wrapped DC/AC,
     /// distortion and RF-port specifications. Inspect after scope resolution
     /// when the source card contains deferred parameter expressions.
