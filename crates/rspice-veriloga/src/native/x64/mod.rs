@@ -4608,12 +4608,82 @@ endmodule
     }
 
     #[test]
+    fn finite_oracle_uses_source_evaluation_for_task_arguments() {
+        let name = "task_source_oracle";
+        let source = "module task_source_oracle(p,n); inout p,n; electrical p,n;
+                 real x,y; analog begin x=V(p,n)*V(p,n)*V(p,n);
+                 y=ddx(x,V(p,n)); $finish(y>0 ? 1 : 2); I(p,n)<+V(p,n); end endmodule";
+        let runtime = VerilogACompiler::default()
+            .compile_runtime(source, Some(name))
+            .unwrap();
+        let native =
+            compile_model_with_canonical_ir(&runtime.model, &runtime.canonical_ir).unwrap();
+        assert!(native.publishes_observable_variables());
+        let mut context = native_model_benchmark_context(&runtime.model, name);
+        context.voltages[0] = 1.25;
+        context.begin_stateful_evaluation();
+        let frame = eval_context_from_vm_context(&mut context);
+        run_assignment_and_prelude(&native, &frame, context.variables.as_mut_ptr());
+        require_clean_native_context(&frame, "analytic task argument").unwrap();
+        for (name, expected) in [("x", 1.953125), ("y", 4.6875)] {
+            let index = runtime
+                .model
+                .variable_names
+                .iter()
+                .position(|value| value == name)
+                .unwrap();
+            assert_eq!(context.variables[index], expected);
+        }
+        assert_eq!(
+            native.run_stamp_value(0, &frame, context.variables.as_ptr()),
+            Some(1.25)
+        );
+        let stats = assert_native_matches_bytecode_finite_entries(
+            &runtime.model,
+            &runtime.canonical_ir,
+            &native,
+            context.clone(),
+            name,
+        )
+        .expect("canonical source values and terminal entries agree with the reference");
+        assert!(stats.variables >= 2 && stats.stamps > 0 && stats.jacobians > 0);
+        assert_eq!(stats.skipped_nonfinite, 0);
+        // A wrong executable must still fail on a named derivative readback
+        // or a physical entry. Only scratch unused by this route is omitted.
+        for (original, replacement, diagnostic) in [
+            ("y=ddx(x,V(p,n));", "y=ddx(x,V(p,n))+1;", "(y)"),
+            ("I(p,n)<+V(p,n);", "I(p,n)<+2*V(p,n);", "stamp 0"),
+        ] {
+            let wrong = VerilogACompiler::default()
+                .compile_runtime(&source.replace(original, replacement), Some(name))
+                .unwrap();
+            assert_eq!(wrong.model.variable_names, runtime.model.variable_names);
+            let wrong_native =
+                compile_model_with_canonical_ir(&wrong.model, &wrong.canonical_ir).unwrap();
+            let error = assert_native_matches_bytecode_finite_entries(
+                &runtime.model,
+                &runtime.canonical_ir,
+                &wrong_native,
+                context.clone(),
+                name,
+            )
+            .err()
+            .expect("incorrect executable must fail the oracle");
+            assert!(
+                error.contains(diagnostic) && error.contains("mismatch"),
+                "{error}"
+            );
+        }
+    }
+
+    #[test]
     fn finite_oracle_keeps_postfix_fallback_derivative_storage() {
         let name = "fallback_observation_oracle";
         let runtime = VerilogACompiler::default()
             .compile_runtime(
                 "module fallback_observation_oracle(p,n); inout p,n; electrical p,n;
                  real x,y; analog begin x=V(p,n)*V(p,n); y=ddx(x,V(p,n));
+                 $finish(y>0 ? 1 : 2);
                  case (ddt(V(p,n))>0.0)
                    1: I(p,n)<+y; default: I(p,n)<+2.0*y;
                  endcase end endmodule",
@@ -5673,6 +5743,10 @@ endmodule
             .map_err(|error| error.to_string())?;
         let policy = if refused.is_some() {
             AssignmentRootPolicy::PostfixEntries
+        } else if crate::jit::plan_builder::requires_source_evaluation(model) {
+            // This route publishes source values and evaluates task arguments
+            // in the prelude, without replaying their postfix derivative slots.
+            AssignmentRootPolicy::CfgSourceEvaluation
         } else {
             AssignmentRootPolicy::CfgPreludeSlots
         };
