@@ -293,12 +293,35 @@ impl VoltageSources {
         context: Option<TransientSourceContext>,
         pwl_waveform: Option<&crate::device::pwl_file::PwlWaveform>,
     ) -> Value {
+        Self::source_time_component_on_side::<DERIVATIVE>(
+            spec,
+            time,
+            context,
+            pwl_waveform,
+            SourceTimeSide::Published,
+        )
+    }
+
+    #[inline]
+    pub(super) fn source_time_component_on_side<const DERIVATIVE: bool>(
+        spec: &crate::netlist::SourceSpec,
+        time: Value,
+        context: Option<TransientSourceContext>,
+        pwl_waveform: Option<&crate::device::pwl_file::PwlWaveform>,
+        side: SourceTimeSide,
+    ) -> Value {
         use crate::netlist::SourceSpec;
         use std::f64::consts::PI;
 
         match spec {
             SourceSpec::Distortion { inner, .. } => {
-                Self::source_time_component::<DERIVATIVE>(inner, time, context, pwl_waveform)
+                Self::source_time_component_on_side::<DERIVATIVE>(
+                    inner,
+                    time,
+                    context,
+                    pwl_waveform,
+                    side,
+                )
             }
             // A port that declares a power or a frequency is a large-signal RF
             // generator, and its drive rides on whatever the source itself was
@@ -306,16 +329,21 @@ impl VoltageSources {
             // the node by the bias between the operating point and the first
             // transient sample, so the DC is kept.
             SourceSpec::RfPort { inner, port } => {
-                Self::source_time_component::<DERIVATIVE>(inner, time, context, pwl_waveform)
-                    + if DERIVATIVE {
-                        port.drive_tone()
-                            .map_or(0.0, |(amplitude, frequency, phase)| {
-                                let omega = 2.0 * PI * frequency;
-                                -amplitude * omega * (omega * time + phase).sin()
-                            })
-                    } else {
-                        port.drive_at(time).unwrap_or(0.0)
-                    }
+                Self::source_time_component_on_side::<DERIVATIVE>(
+                    inner,
+                    time,
+                    context,
+                    pwl_waveform,
+                    side,
+                ) + if DERIVATIVE {
+                    port.drive_tone()
+                        .map_or(0.0, |(amplitude, frequency, phase)| {
+                            let omega = 2.0 * PI * frequency;
+                            -amplitude * omega * (omega * time + phase).sin()
+                        })
+                } else {
+                    port.drive_at(time).unwrap_or(0.0)
+                }
             }
             SourceSpec::Dc(v) => {
                 if DERIVATIVE {
@@ -345,7 +373,13 @@ impl VoltageSources {
             SourceSpec::DcTransient { transient, .. }
             | SourceSpec::AcTransient { transient, .. }
             | SourceSpec::DcAcTransient { transient, .. } => {
-                Self::source_time_component::<DERIVATIVE>(transient, time, context, pwl_waveform)
+                Self::source_time_component_on_side::<DERIVATIVE>(
+                    transient,
+                    time,
+                    context,
+                    pwl_waveform,
+                    side,
+                )
             }
             SourceSpec::Pulse {
                 v1,
@@ -369,6 +403,15 @@ impl VoltageSources {
                     *width_defaults_to_zero,
                     context,
                 );
+                if !DERIVATIVE && side != SourceTimeSide::Published {
+                    return Self::pulse_limit(
+                        [*v1, *v2],
+                        [delay, rise, fall, width, period],
+                        *pulse_count,
+                        time,
+                        side,
+                    );
+                }
                 if time < delay {
                     return if DERIVATIVE { 0.0 } else { *v1 };
                 }
@@ -498,7 +541,13 @@ impl VoltageSources {
                 points,
                 delay,
                 repeat_from,
-            } => Self::pwl_time_component::<DERIVATIVE>(points, time, *delay, *repeat_from),
+            } => {
+                if !DERIVATIVE && side != SourceTimeSide::Published {
+                    Self::pwl_limit(points, time, *delay, *repeat_from, side)
+                } else {
+                    Self::pwl_time_component::<DERIVATIVE>(points, time, *delay, *repeat_from)
+                }
+            }
             SourceSpec::PwlFile {
                 path,
                 time_scale,
@@ -509,6 +558,9 @@ impl VoltageSources {
                 repeat_from,
             } => {
                 if let Some(waveform) = pwl_waveform {
+                    if !DERIVATIVE && side != SourceTimeSide::Published {
+                        return Self::pwl_file_limit(waveform, time, *delay, *repeat_from, side);
+                    }
                     return if time < *delay {
                         0.0
                     } else {
@@ -533,6 +585,15 @@ impl VoltageSources {
                     resource_limits,
                 ) {
                     Ok(waveform) => {
+                        if !DERIVATIVE && side != SourceTimeSide::Published {
+                            return Self::pwl_file_limit(
+                                &waveform,
+                                time,
+                                *delay,
+                                *repeat_from,
+                                side,
+                            );
+                        }
                         if time < *delay {
                             0.0
                         } else {
@@ -588,6 +649,9 @@ impl VoltageSources {
             } => {
                 let (td1, tau1, td2, tau2) =
                     Self::resolve_exp_timing(*td1, *tau1, *td2, *tau2, context);
+                if !DERIVATIVE && side != SourceTimeSide::Published {
+                    return Self::exp_limit([*v1, *v2], [td1, tau1, td2, tau2], time, side);
+                }
                 if DERIVATIVE {
                     return if time < td1 {
                         0.0
@@ -651,7 +715,7 @@ impl VoltageSources {
                         amplitude * angle.cos() * (carrier + mdi * modulation * angle_m.cos())
                     };
                 }
-                if t <= 0.0 {
+                if t < 0.0 || (t == 0.0 && side != SourceTimeSide::RightLimit) {
                     0.0
                 } else {
                     let phasec = phase_carrier.to_radians();
@@ -690,7 +754,7 @@ impl VoltageSources {
                             + envelope * carrier * angle_c.cos()
                     };
                 }
-                if t <= 0.0 {
+                if t < 0.0 || (t == 0.0 && side != SourceTimeSide::RightLimit) {
                     0.0
                 } else {
                     let phasec = phase_carrier.to_radians();

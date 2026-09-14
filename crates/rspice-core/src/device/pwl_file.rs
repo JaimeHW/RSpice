@@ -150,6 +150,57 @@ impl PwlWaveform {
         self.time_component::<false>(time)
     }
 
+    /// Physical one-sided value at a repeat seam. Negative time scaling
+    /// reverses which raw-clock side belongs to the outgoing physical interval.
+    pub(crate) fn limit_at_repeating(
+        &self,
+        time: Value,
+        repeat_from: Option<Value>,
+        right: bool,
+        source_delay: Value,
+    ) -> Value {
+        if let Some((start, raw_period)) = crate::numerics::pwl_repeat_geometry(
+            self.times[0],
+            self.times[self.times.len() - 1],
+            repeat_from,
+        ) {
+            let period = raw_period * self.time_scale;
+            let end = self.time_range().1;
+            let end_clock = end + source_delay;
+            let cycle = ((time - end_clock) / period).round();
+            if period.is_finite()
+                && period != 0.0
+                && cycle.is_finite()
+                && cycle >= 0.0
+                && time == end_clock + period * cycle
+            {
+                return self.scaled_raw_value(if right == (period > 0.0) {
+                    start
+                } else {
+                    self.times[self.times.len() - 1]
+                });
+            }
+        }
+        self.value_at_repeating(time - source_delay, repeat_from)
+    }
+
+    pub(crate) fn physical_repeat_geometry(
+        &self,
+        repeat_from: Option<Value>,
+    ) -> Option<(Value, Value)> {
+        crate::numerics::pwl_repeat_geometry(
+            self.times[0],
+            self.times[self.times.len() - 1],
+            repeat_from,
+        )
+        .map(|(start, period)| {
+            (
+                start * self.time_scale + self.time_offset,
+                period * self.time_scale,
+            )
+        })
+    }
+
     /// Right-hand source slope in output units per second. A repeat boundary
     /// with a value jump has no finite slope at its published value.
     pub(crate) fn right_derivative_at_repeating(
@@ -238,8 +289,8 @@ impl PwlWaveform {
         }
 
         // Binary search for the interval
-        let position = self.times.binary_search_by(|probe| probe.total_cmp(&t));
         if DERIVATIVE {
+            let position = self.times.binary_search_by(|probe| probe.total_cmp(&t));
             let upper = match position {
                 Ok(index) if self.time_scale > 0.0 => index + 1,
                 Ok(index) | Err(index) => index,
@@ -255,12 +306,24 @@ impl PwlWaveform {
                     / self.time_scale
             };
         }
-        match position {
+        self.scaled_raw_value(t)
+    }
+
+    /// Evaluate an authored raw-clock knot without a lossy forward/inverse
+    /// time-scaling round trip at an event boundary.
+    fn scaled_raw_value(&self, t: Value) -> Value {
+        match self.times.binary_search_by(|probe| probe.total_cmp(&t)) {
             Ok(idx) => {
                 // Exact match
                 self.values[idx] * self.value_scale + self.value_offset
             }
             Err(idx) => {
+                if idx == 0 {
+                    return self.values[0] * self.value_scale + self.value_offset;
+                }
+                if idx == self.times.len() {
+                    return self.values[idx - 1] * self.value_scale + self.value_offset;
+                }
                 // Interpolate between idx-1 and idx
                 let t0 = self.times[idx - 1];
                 let t1 = self.times[idx];

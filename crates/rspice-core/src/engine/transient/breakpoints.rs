@@ -449,18 +449,11 @@ impl Engine {
                     .iter()
                     .copied()
                     .fold(Value::NEG_INFINITY, Value::max);
-                let base_cycle_start = td;
-                let first_cycle_start = if per_valid {
-                    let earliest_relevant_start = -maximum_offset;
-                    if base_cycle_start >= earliest_relevant_start {
-                        base_cycle_start
-                    } else {
-                        let phase = (base_cycle_start - earliest_relevant_start).rem_euclid(per);
-                        earliest_relevant_start + phase
-                    }
-                } else {
-                    base_cycle_start
-                };
+                let first_cycle_start = crate::circuit::VoltageSources::first_pulse_event_cycle(
+                    td,
+                    per,
+                    maximum_offset,
+                );
                 // A bounded train produces no edges past its final period, so
                 // scheduling them would force timesteps at times where the
                 // waveform is flat.
@@ -536,8 +529,10 @@ impl Engine {
                 Self::add_repeating_pwl_breakpoints(
                     breakpoints,
                     times,
-                    *repeat_from,
-                    *delay,
+                    points.first().zip(points.last()).and_then(|(first, last)| {
+                        crate::numerics::pwl_repeat_geometry(first.0, last.0, *repeat_from)
+                            .map(|(start, period)| (start + *delay, period))
+                    }),
                     tstop,
                     abort,
                     max_points,
@@ -560,8 +555,8 @@ impl Engine {
                             SourceBreakpointGeometry::Authored
                         ))
                         .map(|time| time + *delay),
-                        repeat_from.map(|value| value * *time_scale),
-                        *delay + *time_offset,
+                        wf.physical_repeat_geometry(*repeat_from)
+                            .map(|(start, period)| (start + *delay, period)),
                         tstop,
                         abort,
                         max_points,
@@ -578,8 +573,8 @@ impl Engine {
                                 SourceBreakpointGeometry::Authored
                             ))
                             .map(|time| time + *delay),
-                            repeat_from.map(|value| value * *time_scale),
-                            *delay + *time_offset,
+                            wf.physical_repeat_geometry(*repeat_from)
+                                .map(|(start, period)| (start + *delay, period)),
                             tstop,
                             abort,
                             max_points,
@@ -719,8 +714,7 @@ impl Engine {
     fn add_repeating_pwl_breakpoints<I>(
         breakpoints: &mut BreakpointManager,
         times: I,
-        repeat_from: Option<Value>,
-        time_offset: Value,
+        repeat: Option<(Value, Value)>,
         tstop: Value,
         abort: &dyn crate::abort_signal::AbortSignal,
         max_points: usize,
@@ -739,20 +733,19 @@ impl Engine {
             Self::add_breakpoint_if_in_range(breakpoints, time, tstop);
         }
 
-        let Some(repeat_from) = repeat_from else {
+        let Some((repeat_start, period)) = repeat else {
             return Self::check_source_breakpoint_collection(breakpoints, abort, max_points);
         };
         let Some(&last) = times.last() else {
             return Self::check_source_breakpoint_collection(breakpoints, abort, max_points);
         };
-        let first = times[0];
-        let repeat_start = (time_offset + repeat_from).max(first);
-        if !repeat_start.is_finite() || repeat_start >= last {
+        if !repeat_start.is_finite() || !period.is_finite() || period <= 0.0 {
             return Self::check_source_breakpoint_collection(breakpoints, abort, max_points);
         }
-        let period = last - repeat_start;
-        if !period.is_finite() || period <= 0.0 {
-            return Self::check_source_breakpoint_collection(breakpoints, abort, max_points);
+        if repeat_start >= last {
+            return Err(crate::engine::SimulationError::Circuit(format!(
+                "transient PWL period {period:.17e} cannot advance a represented source-event clock near {last:.17e}"
+            )));
         }
 
         let repeating_knots = times
@@ -764,14 +757,23 @@ impl Engine {
             return Self::check_source_breakpoint_collection(breakpoints, abort, max_points);
         }
         let mut cycle = 1.0;
+        let mut previous_seam = last;
         loop {
             if (cycle as usize).is_multiple_of(1024) {
                 Self::check_source_breakpoint_collection(breakpoints, abort, max_points)?;
             }
             let cycle_offset = period * cycle;
+            let next_seam = last + cycle_offset;
+            if previous_seam < tstop && next_seam <= previous_seam {
+                return Err(crate::engine::SimulationError::Circuit(format!(
+                    "transient PWL period {period:.17e} cannot advance a represented source-event clock near {previous_seam:.17e}"
+                )));
+            }
+            previous_seam = next_seam;
             let mut added = false;
             for &time in &repeating_knots {
-                let repeated = time + cycle_offset;
+                let repeated =
+                    crate::numerics::pwl_event_clock(time, repeat_start, last, period, cycle);
                 if repeated > tstop {
                     continue;
                 }

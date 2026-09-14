@@ -10,7 +10,19 @@ use super::*;
 use crate::circuit::{CircuitError, projection_changed};
 
 mod periodicity;
+mod sides;
 mod waveform;
+
+/// How a source value is selected at an exact event time. Published retains
+/// the dialect's point convention; limits describe the incoming/outgoing
+/// physical intervals without perturbing the clock.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum SourceTimeSide {
+    #[default]
+    Published,
+    LeftLimit,
+    RightLimit,
+}
 
 /// What an independent source is driving with: its DC operating value, the
 /// small-signal magnitude and phase an `.AC` sweep excites it at, and the
@@ -995,19 +1007,40 @@ impl VoltageSources {
         time: Value,
         get_branch_idx: impl Fn(usize) -> usize,
     ) {
+        self.update_transient_rhs_on_side(rhs, time, get_branch_idx, SourceTimeSide::Published);
+    }
+
+    /// Assemble ideal-source constraints for one side of a source event.
+    pub(crate) fn update_transient_rhs_on_side(
+        &self,
+        rhs: &mut [Value],
+        time: Value,
+        get_branch_idx: impl Fn(usize) -> usize,
+        side: SourceTimeSide,
+    ) {
         for i in 0..self.names.len() {
             let br = get_branch_idx(self.branch_indices[i]);
-            rhs[br - 1] = self.transient_value_at(i, time);
+            rhs[br - 1] = self.transient_value_at_on_side(i, time, side);
         }
     }
 
     pub(crate) fn transient_value_at(&self, index: usize, time: Value) -> Value {
+        self.transient_value_at_on_side(index, time, SourceTimeSide::Published)
+    }
+
+    pub(crate) fn transient_value_at_on_side(
+        &self,
+        index: usize,
+        time: Value,
+        side: SourceTimeSide,
+    ) -> Value {
         match &self.source_specs[index] {
-            Some(spec) => Self::evaluate_source_at_time_with_context_and_pwl(
+            Some(spec) => Self::source_time_component_on_side::<false>(
                 spec,
                 time,
                 self.transient_context,
                 self.pwl_waveforms[index].as_deref(),
+                side,
             ),
             None => self.dc_values[index],
         }
@@ -1548,16 +1581,27 @@ impl VoltageSources {
         solution: &mut [Value],
         time: Value,
     ) -> Result<bool, CircuitError> {
+        self.enforce_voltage_constraints_on_side(solution, time, SourceTimeSide::Published)
+    }
+
+    /// Use the same side for ideal-constraint projection as for source stamping.
+    pub(crate) fn enforce_voltage_constraints_on_side(
+        &self,
+        solution: &mut [Value],
+        time: Value,
+        side: SourceTimeSide,
+    ) -> Result<bool, CircuitError> {
         self.project_constraint_components(solution, |source_index| {
             let dc_value = self.dc_values.get(source_index).copied()?;
             Some(match self.source_specs.get(source_index)? {
-                Some(spec) => Self::evaluate_source_at_time_with_context_and_pwl(
+                Some(spec) => Self::source_time_component_on_side::<false>(
                     spec,
                     time,
                     self.transient_context,
                     self.pwl_waveforms
                         .get(source_index)
                         .and_then(Option::as_deref),
+                    side,
                 ),
                 None => dc_value,
             })
@@ -1943,16 +1987,26 @@ impl CurrentSources {
     }
 
     pub fn value_at_time(&self, index: usize, time: Value) -> Value {
+        self.value_at_time_on_side(index, time, SourceTimeSide::Published)
+    }
+
+    pub(crate) fn value_at_time_on_side(
+        &self,
+        index: usize,
+        time: Value,
+        side: SourceTimeSide,
+    ) -> Value {
         let Some(dc_value) = self.dc_values.get(index).copied() else {
             return 0.0;
         };
         let dc_value = if dc_value.is_finite() { dc_value } else { 0.0 };
         match self.source_specs.get(index).and_then(Option::as_ref) {
-            Some(spec) => VoltageSources::evaluate_source_at_time_with_context_and_pwl(
+            Some(spec) => VoltageSources::source_time_component_on_side::<false>(
                 spec,
                 time,
                 self.transient_context,
                 self.pwl_waveforms[index].as_deref(),
+                side,
             ),
             None => dc_value,
         }
@@ -2249,6 +2303,16 @@ impl CurrentSources {
     /// specification cannot cancel a small waveform through a rounded delta.
     #[inline]
     pub fn stamp_transient_rhs(&self, rhs: &mut [Value], time: Value) {
+        self.stamp_transient_rhs_on_side(rhs, time, SourceTimeSide::Published);
+    }
+
+    /// Assemble current-source incidence for one side of a source event.
+    pub(crate) fn stamp_transient_rhs_on_side(
+        &self,
+        rhs: &mut [Value],
+        time: Value,
+        side: SourceTimeSide,
+    ) {
         for i in 0..self.names.len() {
             let np = self.node_pos[i];
             let nn = self.node_neg[i];
@@ -2257,7 +2321,7 @@ impl CurrentSources {
             if np == nn {
                 continue;
             }
-            let value = self.value_at_time(i, time);
+            let value = self.value_at_time_on_side(i, time, side);
             if value == 0.0 {
                 continue;
             }

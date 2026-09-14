@@ -550,12 +550,10 @@ pub(crate) fn pwl_repeated_time(
     last: Value,
     repeat_from: Option<Value>,
 ) -> Value {
-    let Some(start) = repeat_from.filter(|start| start.is_finite()) else {
+    let Some((start, period)) = pwl_repeat_geometry(first, last, repeat_from) else {
         return time;
     };
-    let start = start.max(first);
-    let period = last - start;
-    if !time.is_finite() || time <= last || !period.is_finite() || period <= 0.0 {
+    if !time.is_finite() || time <= last {
         return time;
     }
     let elapsed = time - last;
@@ -568,6 +566,34 @@ pub(crate) fn pwl_repeated_time(
         last
     } else {
         start + remainder
+    }
+}
+
+/// Resolve a repeat span before applying any offset to its source clock.
+pub(crate) fn pwl_repeat_geometry(
+    first: Value,
+    last: Value,
+    repeat_from: Option<Value>,
+) -> Option<(Value, Value)> {
+    let start = repeat_from.filter(|start| start.is_finite())?.max(first);
+    let period = last - start;
+    (period.is_finite() && period > 0.0).then_some((start, period))
+}
+
+/// One represented clock for a repeated seam, shared by source-side evaluation
+/// and scheduling. Adding a period independently to both endpoint clocks can
+/// otherwise split one seam into adjacent floating-point timestamps.
+pub(crate) fn pwl_event_clock(
+    point: Value,
+    start: Value,
+    end: Value,
+    period: Value,
+    cycle: Value,
+) -> Value {
+    if point == start && cycle > 0.0 {
+        end + period * (cycle - 1.0)
+    } else {
+        point + period * cycle
     }
 }
 
