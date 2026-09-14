@@ -29,6 +29,26 @@ fn levels(calls: &[AnalogTaskInvocation]) -> Vec<i64> {
 }
 
 #[test]
+fn task_argument_functions_keep_authored_names_and_accepted_call_order() {
+    let fixture = DeviceFixture::compile(include_str!("fixtures/task_argument_functions.va"));
+    let mut device = fixture.device("FUNCTION_TASKS", &[1, 0]);
+    for voltage in [1.0, 0.5] {
+        device.update_voltages(&[voltage]);
+        assert_eq!(device.try_evaluate().unwrap(), vec![voltage + 0.25]);
+        fixture.observe(&mut device);
+        device.try_compute_jacobian().unwrap();
+        fixture.observe(&mut device);
+        assert_eq!(device.variable("__fn1_identity__x"), Some(0.25));
+        assert_eq!(device.drain_accepted_analog_tasks().count(), 0);
+    }
+    device.try_advance_state().unwrap();
+    let calls = device.drain_accepted_analog_tasks().collect::<Vec<_>>();
+    assert_eq!(levels(&calls), vec![0, 1, 2]);
+    assert_eq!(calls[0].site, calls[1].site);
+    assert_ne!(calls[0].site, calls[2].site);
+}
+
+#[test]
 fn task_only_models_keep_identical_calls_on_every_loop_trip() {
     let fixture = DeviceFixture::compile(
         "module task_only(p,n); inout p,n; electrical p,n; integer i;
