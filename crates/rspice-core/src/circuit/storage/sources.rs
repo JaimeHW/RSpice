@@ -230,6 +230,44 @@ impl crate::circuit::CircuitData {
         }
     }
 
+    /// Physical clocks must use the same prepared defaults and dialect as
+    /// sided source evaluation, even when scheduling a shorter run segment.
+    pub(crate) fn independent_source_event_basis(
+        &self,
+    ) -> Result<(SourceTimeBasis, crate::config::SpiceDialect), String> {
+        let mut selected = None;
+        for (count, context) in [
+            (
+                self.voltage_sources.len(),
+                self.voltage_sources.transient_context,
+            ),
+            (
+                self.current_sources.len(),
+                self.current_sources.transient_context,
+            ),
+        ] {
+            if count == 0 {
+                continue;
+            }
+            let context =
+                context.ok_or("physical source events require prepared analysis defaults")?;
+            let basis = SourceTimeBasis {
+                tstep: context.tstep,
+                tstop: context.tstop,
+            };
+            basis.validate()?;
+            let candidate = (basis, context.dialect);
+            if selected.is_some_and(|previous| previous != candidate) {
+                return Err(
+                    "physical source events require matching voltage/current defaults and dialects"
+                        .into(),
+                );
+            }
+            selected = Some(candidate);
+        }
+        selected.ok_or_else(|| "physical source events have no source owner".into())
+    }
+
     pub(crate) fn independent_sources_need_time_basis(
         &self,
         dialect: crate::config::SpiceDialect,
@@ -1553,8 +1591,25 @@ impl VoltageSources {
         tau2: Value,
         context: Option<TransientSourceContext>,
     ) -> (Value, Value, Value, Value) {
-        let step = Self::pulse_step_default(context);
-        if context.is_some_and(|context| context.dialect == crate::config::SpiceDialect::Xyce) {
+        Self::resolve_exp_timing_with_defaults(
+            td1,
+            tau1,
+            td2,
+            tau2,
+            Self::pulse_step_default(context),
+            Self::pulse_dialect(context),
+        )
+    }
+
+    pub(crate) fn resolve_exp_timing_with_defaults(
+        td1: Value,
+        tau1: Value,
+        td2: Value,
+        tau2: Value,
+        step: Value,
+        dialect: crate::config::SpiceDialect,
+    ) -> (Value, Value, Value, Value) {
+        if dialect == crate::config::SpiceDialect::Xyce {
             let td1 = if td1.is_finite() { td1 } else { 0.0 };
             let tau1 = if tau1.is_finite() { tau1 } else { step };
             let td2 = if td2.is_finite() { td2 } else { td1 + step };

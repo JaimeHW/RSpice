@@ -20,12 +20,39 @@ pub(in crate::engine) enum SourceBreakpointGeometry {
     #[default]
     Authored,
     PhysicalCorners,
+    /// Original physical clocks, including activations omitted by a dialect's
+    /// ordinary step controller. Only the exact event owner selects this.
+    ExactPhysicalEvents,
 }
 
 #[derive(Clone, Copy, Default)]
-struct SourceBreakpointContext {
-    basis: Option<crate::circuit::SourceTimeBasis>,
-    geometry: SourceBreakpointGeometry,
+pub(super) struct SourceBreakpointContext {
+    pub(super) basis: Option<crate::circuit::SourceTimeBasis>,
+    pub(super) geometry: SourceBreakpointGeometry,
+}
+
+/// Clock extraction can feed either the ordinary tolerant controller or a
+/// bounded exact event owner. The waveform geometry is shared.
+pub(super) trait SourceClockSink {
+    fn insert_clock(&mut self, time: Value);
+    fn clock_count(&self) -> usize;
+    fn minimum_clock(&self) -> Value {
+        0.0
+    }
+    fn add_in_range(&mut self, time: Value, stop: Value) {
+        if time.is_finite() && time >= 0.0 && time <= stop {
+            self.insert_clock(time);
+        }
+    }
+}
+
+impl SourceClockSink for BreakpointManager {
+    fn insert_clock(&mut self, time: Value) {
+        self.add(time);
+    }
+    fn clock_count(&self) -> usize {
+        self.times().len()
+    }
 }
 
 /// A transmission-line arrival that may deserve a breakpoint.
@@ -257,6 +284,10 @@ impl Engine {
         }
     }
 
+    fn add_source_clock_if_in_range(clocks: &mut impl SourceClockSink, time: Value, stop: Value) {
+        clocks.add_in_range(time, stop);
+    }
+
     /// Replace the runtime breakpoint list with what the event-driven devices
     /// now ask for.
     ///
@@ -328,8 +359,8 @@ impl Engine {
         .expect("unbounded non-cancellable breakpoint collection cannot fail");
     }
 
-    fn add_source_spec_breakpoints_with_pwl(
-        breakpoints: &mut BreakpointManager,
+    pub(super) fn add_source_spec_breakpoints_with_pwl(
+        breakpoints: &mut impl SourceClockSink,
         spec: &crate::netlist::SourceSpec,
         pwl_waveform: Option<&crate::device::pwl_file::PwlWaveform>,
         window: BreakpointWindow,
@@ -346,6 +377,10 @@ impl Engine {
             tstep: tstep_hint,
             tstop,
         });
+        let exact = matches!(
+            context.geometry,
+            SourceBreakpointGeometry::ExactPhysicalEvents
+        );
         use crate::netlist::SourceSpec;
 
         match spec {
@@ -433,7 +468,10 @@ impl Engine {
                 // negative period maps every nonnegative simulation time to a
                 // nonpositive local time, so PulseData remains at V1 and has
                 // no physical source edges to schedule.
-                if dialect == crate::engine::SpiceDialect::Xyce && per.is_finite() && per < 0.0 {
+                if (exact || dialect == crate::engine::SpiceDialect::Xyce)
+                    && per.is_finite()
+                    && per < 0.0
+                {
                     return Self::check_source_breakpoint_collection(
                         breakpoints,
                         abort,
@@ -462,6 +500,9 @@ impl Engine {
                 } else {
                     Value::INFINITY
                 };
+                if exact {
+                    Self::add_source_clock_if_in_range(breakpoints, train_end, tstop);
+                }
                 let last_relevant_start = (tstop - minimum_offset).min(train_end);
                 let mut previous_cycle_start = None;
 
@@ -501,7 +542,16 @@ impl Engine {
                     }
                     previous_cycle_start = Some(cycle_start);
                     for offset in edge_offsets {
-                        Self::add_breakpoint_if_in_range(breakpoints, cycle_start + offset, tstop);
+                        if exact
+                            && ((per_valid && offset > per) || cycle_start + offset > train_end)
+                        {
+                            continue;
+                        }
+                        Self::add_source_clock_if_in_range(
+                            breakpoints,
+                            cycle_start + offset,
+                            tstop,
+                        );
                     }
                     if !per_valid {
                         break;
@@ -512,8 +562,8 @@ impl Engine {
                 // Xyce 7.10 SinData inherits SourceData's no-op breakpoint
                 // implementation.  Its delay remains part of the waveform,
                 // but it is not registered with StepErrorControl.
-                if dialect != crate::engine::SpiceDialect::Xyce {
-                    Self::add_breakpoint_if_in_range(breakpoints, *delay, tstop);
+                if exact || dialect != crate::engine::SpiceDialect::Xyce {
+                    Self::add_source_clock_if_in_range(breakpoints, *delay, tstop);
                 }
             }
             SourceSpec::Pwl {
@@ -521,9 +571,16 @@ impl Engine {
                 delay,
                 repeat_from,
             } => {
+                if exact && !points.is_empty() {
+                    Self::add_source_clock_if_in_range(breakpoints, *delay, tstop);
+                }
                 let times = crate::numerics::pwl_event_points(
                     points.iter().copied(),
-                    matches!(context.geometry, SourceBreakpointGeometry::Authored),
+                    matches!(
+                        context.geometry,
+                        SourceBreakpointGeometry::Authored
+                            | SourceBreakpointGeometry::ExactPhysicalEvents
+                    ),
                 )
                 .map(|(time, _)| time + *delay);
                 Self::add_repeating_pwl_breakpoints(
@@ -536,6 +593,7 @@ impl Engine {
                     tstop,
                     abort,
                     max_points,
+                    exact,
                 )?;
             }
             SourceSpec::PwlFile {
@@ -546,31 +604,23 @@ impl Engine {
                 value_offset,
                 delay,
                 repeat_from,
-            } => match pwl_waveform {
-                Some(wf) => {
-                    Self::add_repeating_pwl_breakpoints(
-                        breakpoints,
-                        wf.scaled_event_knot_times(matches!(
-                            context.geometry,
-                            SourceBreakpointGeometry::Authored
-                        ))
-                        .map(|time| time + *delay),
-                        wf.physical_repeat_geometry(*repeat_from)
-                            .map(|(start, period)| (start + *delay, period)),
-                        tstop,
-                        abort,
-                        max_points,
-                    )?;
+            } => {
+                if exact {
+                    Self::add_source_clock_if_in_range(breakpoints, *delay, tstop);
+                    if pwl_waveform.is_none() {
+                        return Err(SimulationError::Circuit(format!(
+                            "physical source events require the circuit-owned PWL snapshot for '{path}'"
+                        )));
+                    }
                 }
-                None => match crate::device::pwl_file::load_pwl_file(path) {
-                    Ok(wf) => {
-                        let wf =
-                            wf.with_scaling(*time_scale, *value_scale, *time_offset, *value_offset);
+                match pwl_waveform {
+                    Some(wf) => {
                         Self::add_repeating_pwl_breakpoints(
                             breakpoints,
                             wf.scaled_event_knot_times(matches!(
                                 context.geometry,
                                 SourceBreakpointGeometry::Authored
+                                    | SourceBreakpointGeometry::ExactPhysicalEvents
                             ))
                             .map(|time| time + *delay),
                             wf.physical_repeat_geometry(*repeat_from)
@@ -578,17 +628,43 @@ impl Engine {
                             tstop,
                             abort,
                             max_points,
+                            exact,
                         )?;
                     }
-                    Err(err) => {
-                        log::warn!(
-                            "Failed to load PWL file '{}' for breakpoint extraction: {}",
-                            path,
-                            err
-                        );
-                    }
-                },
-            },
+                    None => match crate::device::pwl_file::load_pwl_file(path) {
+                        Ok(wf) => {
+                            let wf = wf.with_scaling(
+                                *time_scale,
+                                *value_scale,
+                                *time_offset,
+                                *value_offset,
+                            );
+                            Self::add_repeating_pwl_breakpoints(
+                                breakpoints,
+                                wf.scaled_event_knot_times(matches!(
+                                    context.geometry,
+                                    SourceBreakpointGeometry::Authored
+                                        | SourceBreakpointGeometry::ExactPhysicalEvents
+                                ))
+                                .map(|time| time + *delay),
+                                wf.physical_repeat_geometry(*repeat_from)
+                                    .map(|(start, period)| (start + *delay, period)),
+                                tstop,
+                                abort,
+                                max_points,
+                                exact,
+                            )?;
+                        }
+                        Err(err) => {
+                            log::warn!(
+                                "Failed to load PWL file '{}' for breakpoint extraction: {}",
+                                path,
+                                err
+                            );
+                        }
+                    },
+                }
+            }
             SourceSpec::Pat {
                 vhi,
                 vlo,
@@ -606,6 +682,11 @@ impl Engine {
                     || *fall <= 0.0
                     || *sample <= 0.0
                 {
+                    if exact {
+                        return Err(SimulationError::Circuit(
+                            "physical PAT event geometry is invalid".into(),
+                        ));
+                    }
                     return Ok(());
                 }
 
@@ -620,11 +701,16 @@ impl Engine {
                     |source_time, _| source_times.push(source_time),
                 );
                 if source_times.is_empty() {
+                    if exact {
+                        return Err(SimulationError::Circuit(
+                            "physical PAT event pattern is empty".into(),
+                        ));
+                    }
                     return Ok(());
                 }
 
                 for &source_time in &source_times {
-                    Self::add_breakpoint_if_in_range(breakpoints, *delay + source_time, tstop);
+                    Self::add_source_clock_if_in_range(breakpoints, *delay + source_time, tstop);
                 }
 
                 if *repeat_count == 0 {
@@ -661,7 +747,7 @@ impl Engine {
                         break;
                     }
                     for &source_time in &source_times {
-                        Self::add_breakpoint_if_in_range(
+                        Self::add_source_clock_if_in_range(
                             breakpoints,
                             *delay + offset + source_time,
                             tstop,
@@ -670,6 +756,24 @@ impl Engine {
                 }
             }
             SourceSpec::Exp { td1, td2, .. } => {
+                if exact {
+                    let (td1, _, td2, _) =
+                        crate::circuit::VoltageSources::resolve_exp_timing_with_defaults(
+                            *td1,
+                            Value::NAN,
+                            *td2,
+                            Value::NAN,
+                            defaults.tstep.max(1e-18),
+                            dialect,
+                        );
+                    Self::add_source_clock_if_in_range(breakpoints, td1, tstop);
+                    Self::add_source_clock_if_in_range(breakpoints, td2, tstop);
+                    return Self::check_source_breakpoint_collection(
+                        breakpoints,
+                        abort,
+                        max_points,
+                    );
+                }
                 // Xyce 7.10 ExpData inherits SourceData's no-op breakpoint
                 // implementation.  Preserve ngspice/native edge scheduling,
                 // but do not introduce timestep boundaries that Xyce itself
@@ -690,47 +794,67 @@ impl Engine {
                 } else {
                     td1 + step_default
                 };
-                Self::add_breakpoint_if_in_range(breakpoints, td1, tstop);
-                Self::add_breakpoint_if_in_range(breakpoints, td2, tstop);
+                Self::add_source_clock_if_in_range(breakpoints, td1, tstop);
+                Self::add_source_clock_if_in_range(breakpoints, td2, tstop);
             }
             // SFFM is exactly 0 until TD and generally discontinuous there
             // (ngspice vsrcload.c), so native/ngspice operation schedules the
             // switch-on instant. Xyce 7.10 SFFMData inherits SourceData's
             // no-op breakpoint implementation.
             SourceSpec::Sffm { delay, .. } => {
-                if dialect != crate::engine::SpiceDialect::Xyce {
-                    Self::add_breakpoint_if_in_range(breakpoints, *delay, tstop);
+                if exact || dialect != crate::engine::SpiceDialect::Xyce {
+                    Self::add_source_clock_if_in_range(breakpoints, *delay, tstop);
                 }
             }
             // AM is an ngspice/RSpice extension rather than a Xyce 7.10
             // SourceData family, so retain its established edge scheduling.
             SourceSpec::Am { delay, .. } => {
-                Self::add_breakpoint_if_in_range(breakpoints, *delay, tstop);
+                Self::add_source_clock_if_in_range(breakpoints, *delay, tstop);
             }
         }
         Self::check_source_breakpoint_collection(breakpoints, abort, max_points)
     }
 
     fn add_repeating_pwl_breakpoints<I>(
-        breakpoints: &mut BreakpointManager,
+        breakpoints: &mut impl SourceClockSink,
         times: I,
         repeat: Option<(Value, Value)>,
         tstop: Value,
         abort: &dyn crate::abort_signal::AbortSignal,
         max_points: usize,
+        exact: bool,
     ) -> Result<(), crate::engine::SimulationError>
     where
         I: IntoIterator<Item = Value>,
     {
-        let times = times
-            .into_iter()
-            .filter(|time| time.is_finite())
-            .collect::<Vec<_>>();
+        if exact {
+            return Self::add_exact_pwl_clock_stream(
+                breakpoints,
+                times,
+                repeat,
+                tstop,
+                abort,
+                max_points,
+            );
+        }
+        let mut retained_times = Vec::new();
+        for (index, time) in times.into_iter().enumerate() {
+            if index.is_multiple_of(1024) {
+                Self::check_source_breakpoint_collection(breakpoints, abort, max_points)?;
+            }
+            if time.is_finite() {
+                retained_times.push(time);
+            }
+        }
+        let times = retained_times;
         if times.is_empty() {
             return Ok(());
         }
-        for &time in &times {
-            Self::add_breakpoint_if_in_range(breakpoints, time, tstop);
+        for (index, &time) in times.iter().enumerate() {
+            if index.is_multiple_of(1024) {
+                Self::check_source_breakpoint_collection(breakpoints, abort, max_points)?;
+            }
+            Self::add_source_clock_if_in_range(breakpoints, time, tstop);
         }
 
         let Some((repeat_start, period)) = repeat else {
@@ -777,7 +901,7 @@ impl Engine {
                 if repeated > tstop {
                     continue;
                 }
-                Self::add_breakpoint_if_in_range(breakpoints, repeated, tstop);
+                Self::add_source_clock_if_in_range(breakpoints, repeated, tstop);
                 added = true;
             }
             if !added || repeat_start + cycle_offset > tstop {
@@ -797,15 +921,139 @@ impl Engine {
         Self::check_source_breakpoint_collection(breakpoints, abort, max_points)
     }
 
+    fn add_exact_pwl_clock_stream<I: IntoIterator<Item = Value>>(
+        clocks: &mut impl SourceClockSink,
+        times: I,
+        repeat: Option<(Value, Value)>,
+        stop: Value,
+        abort: &dyn AbortSignal,
+        max_points: usize,
+    ) -> Result<(), SimulationError> {
+        let mut last = None;
+        for (index, time) in times.into_iter().enumerate() {
+            if index.is_multiple_of(1024) {
+                Self::check_source_breakpoint_collection(clocks, abort, max_points)?;
+            }
+            if !time.is_finite() {
+                continue;
+            }
+            last = Some(time); // Original raw-clock order, including reverse file scaling.
+            clocks.add_in_range(time, stop);
+            if let Some((start, period)) = repeat
+                && period.is_finite()
+                && period != 0.0
+                && time != start
+                && (if period > 0.0 {
+                    time > start
+                } else {
+                    time < start
+                })
+            {
+                Self::add_exact_source_clock_train(
+                    clocks,
+                    (time, period, 1.0),
+                    stop,
+                    abort,
+                    max_points,
+                )?;
+            }
+        }
+        if let (Some(last), Some((start, period))) = (last, repeat)
+            && period != 0.0
+        {
+            if !start.is_finite()
+                || !period.is_finite()
+                || (if period > 0.0 {
+                    start >= last
+                } else {
+                    start <= last
+                })
+            {
+                return Err(SimulationError::Circuit(format!(
+                    "physical PWL period {period:.17e} cannot advance a represented source-event clock near {last:.17e}"
+                )));
+            }
+            // A fractional repeat start need not coincide with an input knot.
+            // Its reset still owns the exact last + period*k seam clock.
+            Self::add_exact_source_clock_train(
+                clocks,
+                (last, period, 0.0),
+                stop,
+                abort,
+                max_points,
+            )?;
+        }
+        Self::check_source_breakpoint_collection(clocks, abort, max_points)
+    }
+
+    fn add_exact_source_clock_train(
+        clocks: &mut impl SourceClockSink,
+        geometry: (Value, Value, Value),
+        stop: Value,
+        abort: &dyn AbortSignal,
+        max_points: usize,
+    ) -> Result<(), SimulationError> {
+        let (origin, period, first_cycle) = geometry;
+        let lower = clocks.minimum_clock();
+        if lower > stop {
+            return Self::check_source_breakpoint_collection(clocks, abort, max_points);
+        }
+        let forward = period > 0.0;
+        let edge = if forward { lower } else { stop };
+        let distance = (edge - origin) / period;
+        if !distance.is_finite() {
+            return Err(SimulationError::Circuit(
+                "physical PWL initial cycle is not representable".into(),
+            ));
+        }
+        // Skip an inactive prefix, retaining a neighbouring cycle to protect
+        // the boundary against rounding of the quotient. Preserve the same
+        // multiply-then-add event clock as sided waveform evaluation.
+        let mut cycle = (distance.floor() - 1.0).max(first_cycle);
+        for iteration in 0..=1_000_000_usize {
+            Self::check_source_breakpoint_collection(clocks, abort, max_points)?;
+            let at = origin + period * cycle;
+            if (forward && at > stop) || (!forward && at < lower) {
+                break;
+            }
+            if iteration == 1_000_000 {
+                return Err(SimulationError::Circuit(
+                    "physical PWL schedule exceeds 1000000 active cycles".into(),
+                ));
+            }
+            if !at.is_finite() {
+                return Err(SimulationError::Circuit(
+                    "physical PWL event clock is not finite".into(),
+                ));
+            }
+            clocks.add_in_range(at, stop);
+            if (forward && at == stop) || (!forward && at == lower) {
+                break;
+            }
+            let next_cycle = cycle + 1.0;
+            let next = origin + period * next_cycle;
+            if next_cycle <= cycle
+                || !next.is_finite()
+                || (if forward { next <= at } else { next >= at })
+            {
+                return Err(SimulationError::Circuit(format!(
+                    "physical PWL period {period:.17e} cannot advance a represented source-event clock near {at:.17e}"
+                )));
+            }
+            cycle = next_cycle;
+        }
+        Self::check_source_breakpoint_collection(clocks, abort, max_points)
+    }
+
     fn check_source_breakpoint_collection(
-        breakpoints: &BreakpointManager,
+        breakpoints: &impl SourceClockSink,
         abort: &dyn crate::abort_signal::AbortSignal,
         max_points: usize,
     ) -> Result<(), crate::engine::SimulationError> {
         if abort.is_aborted() {
             return Err(crate::engine::SimulationError::Aborted);
         }
-        let count = breakpoints.times().len();
+        let count = breakpoints.clock_count();
         if count > max_points {
             return Err(crate::engine::SimulationError::Circuit(format!(
                 "transient source-event schedule requires more than the configured {max_points} analysis points"

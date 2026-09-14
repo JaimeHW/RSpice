@@ -737,8 +737,12 @@ use step_control::{SourceActivityDeltas, StepBiasFloors};
 
 mod acceptance;
 mod breakpoints;
+// Exact source-root ownership is prepared separately from the ordinary
+// controller; main physical-event dispatch is integrated after propagation.
 mod checkpoint;
 mod companion_stamps;
+#[cfg_attr(not(test), allow(dead_code))]
+mod source_events;
 use companion_stamps::{CompactTwoTerminalStampSlots, TwoTerminalStampSlots};
 mod charge_stamper;
 // The physical event operator is qualified independently before the main
