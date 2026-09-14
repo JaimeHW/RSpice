@@ -222,6 +222,7 @@ pub(in crate::engine::transient) struct BjtCompanionSystem<'a> {
     pub z_e: &'a mut [Value; BJT_EXTERNAL_STATE_DIM],
 }
 
+pub(in crate::engine::transient) mod arrival;
 mod event_context;
 pub(in crate::engine::transient) mod interpolation;
 pub(in crate::engine) use event_context::BjtPhaseContext;

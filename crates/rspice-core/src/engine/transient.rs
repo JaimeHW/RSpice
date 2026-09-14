@@ -6360,6 +6360,9 @@ impl Engine {
         // four assignments that makes it finite is immediately followed by a
         // capture, which refreshes the buffer from the circuit as it stands now.
         let mut last_stamped_rollback: Option<TransientMeritRollback> = None;
+        // Model membership is fixed, including after checkpoint restoration.
+        // Ordinary zero-PTF circuits need no per-attempt phase-history scan.
+        let has_bjt_phase_history = bjt_history.phase.iter().any(Option::is_some);
 
         // Adaptive integration may legitimately take far more attempts than
         // `TSTOP / DELMAX`: rejected local trials and accepted steps below the
@@ -6414,6 +6417,21 @@ impl Engine {
                     )?);
                 }
             }
+            // Transport arrivals are mandatory physical clocks. Source
+            // breakpoint tolerances and the Verilog-A floor grid do not own
+            // them; unsupported subminimum gaps must refuse explicitly.
+            let phase_arrival = if has_bjt_phase_history {
+                bjt::arrival::next(&circuit, &bjt_history, t, tstop, abort)?
+            } else {
+                None
+            };
+            if let Some(arrival) = phase_arrival {
+                arrival.ensure_reachable(&circuit, t, timestep.hard_min_dt())?;
+            }
+            let pending_exact_event_time = pending_veriloga_event_time
+                .into_iter()
+                .chain(phase_arrival.map(|arrival| arrival.time))
+                .reduce(Value::min);
             // Progress logging every 2 seconds
             if last_progress_log
                 .as_ref()
@@ -6465,10 +6483,9 @@ impl Engine {
             // A model's larger integration floor must not silently consume
             // additional targets: an unsupported interval still needs refusal.
             if let Some(grid) = locked_grid.as_ref() {
-                while grid
-                    .get(locked_cursor)
-                    .is_some_and(|&target| target - t < dialect_min_dt)
-                {
+                while grid.get(locked_cursor).is_some_and(|&target| {
+                    target <= t || (!has_bjt_phase_history && target - t < dialect_min_dt)
+                }) {
                     locked_cursor += 1;
                 }
             }
@@ -6553,7 +6570,11 @@ impl Engine {
                     {
                         step_target = step_target.min(t + hinted_max_step);
                     }
-                    locked_step_lands_on_grid = (step_target - target).abs() <= tolerance;
+                    locked_step_lands_on_grid = if has_bjt_phase_history {
+                        step_target == target
+                    } else {
+                        (step_target - target).abs() <= tolerance
+                    };
                     let mut locked_dt = step_target - t;
                     if locked_schedule_aligned
                         && locked_step_lands_on_grid
@@ -6589,20 +6610,18 @@ impl Engine {
             } else {
                 dt.min(remaining)
             };
-            // The step this iteration intended before any event cut it. Three
-            // things below can cut it to an event — the direct landing here,
-            // the model-interval fit, and the source-activity bias that undoes
-            // one — so the intent is taken once, and kept only if the step
-            // turns out to be a landing.
+            // Preserve the proposal before event landing, interval fitting,
+            // and source bias change it. Restart recovery keeps that intent
+            // only when the final candidate actually lands an event.
             let proposal_before_event_cut = timestep.dt().max(dt);
-            let mut exact_veriloga_event_time = None;
-            if let Some(target) = pending_veriloga_event_time
+            let mut exact_device_event_time = None;
+            if let Some(target) = pending_exact_event_time
                 && target > t
                 && target <= tstop
                 && target - t <= dt
             {
                 dt = target - t;
-                exact_veriloga_event_time = Some(target);
+                exact_device_event_time = Some(target);
                 at_breakpoint = true;
                 locked_step_lands_on_grid = locked_grid
                     .as_ref()
@@ -6620,6 +6639,13 @@ impl Engine {
             });
             if locked_grid.is_some()
                 && pending_veriloga_event_time.is_none()
+                && phase_arrival.is_none_or(|arrival| {
+                    canonical_transient_step_time(
+                        t,
+                        timestep.dt().min(max_step).min(tstop - t),
+                        tstop,
+                    ) < arrival.time
+                })
                 && (retry_count > 0 || locked_contraction_replay)
                 && let (Some(grid), Some(steps)) =
                     (locked_grid.as_ref(), locked_step_sizes.as_ref())
@@ -6646,11 +6672,25 @@ impl Engine {
                 dt = timestep.dt().min(max_step).min(tstop - t);
                 locked_replay_hidden_attempt = dt > scheduled_dt;
             }
+            // A retained phase history cannot be solved at an approximate
+            // endpoint and then renamed to a recorded grid clock on acceptance.
+            let exact_grid_time = if has_bjt_phase_history
+                && locked_step_lands_on_grid
+                && !locked_replay_hidden_attempt
+            {
+                locked_grid
+                    .as_ref()
+                    .and_then(|grid| grid.get(locked_cursor))
+                    .copied()
+                    .filter(|target| *target <= tstop)
+            } else {
+                None
+            };
             let mut candidate_step_time = canonical_transient_step_time_with_device_event(
                 t,
                 dt,
                 tstop,
-                exact_veriloga_event_time,
+                exact_device_event_time.or(exact_grid_time),
             );
             let mut expected_source_delta =
                 Self::max_expected_source_delta(&circuit, t, candidate_step_time);
@@ -6683,18 +6723,18 @@ impl Engine {
                 );
                 if biased_dt + 1e-30 < dt {
                     dt = biased_dt;
-                    exact_veriloga_event_time = None;
+                    exact_device_event_time = None;
                     candidate_step_time = canonical_transient_step_time(t, dt, tstop);
                     at_breakpoint = breakpoints.at_breakpoint(candidate_step_time);
                     expected_source_delta =
                         Self::max_expected_source_delta(&circuit, t, candidate_step_time);
                 }
             }
-            if locked_grid.is_none() && model_min_dt > 0.0 {
+            if locked_grid.is_none() && (model_min_dt > 0.0 || phase_arrival.is_some()) {
                 let target = breakpoints
                     .next_after(t)
                     .into_iter()
-                    .chain(pending_veriloga_event_time)
+                    .chain(pending_exact_event_time)
                     .filter(|target| *target > t)
                     .fold(tstop, Value::min);
                 let candidate_maximum = circuit
@@ -6711,23 +6751,50 @@ impl Engine {
                     timestep.hard_min_dt(),
                     max_step,
                     candidate_maximum,
-                    target == tstop && pending_veriloga_event_time != Some(target),
+                    target == tstop && pending_exact_event_time != Some(target),
                 )?;
+                if phase_arrival.is_some_and(|arrival| arrival.time == target)
+                    && fitted > candidate_maximum
+                {
+                    return Err(SimulationError::Circuit(format!(
+                        "GP phase arrival at {target:.17e} s requires step {fitted:.17e} s exceeding the current bound {candidate_maximum:.17e} s"
+                    )));
+                }
                 if fitted != dt {
                     dt = fitted;
-                    exact_veriloga_event_time = pending_veriloga_event_time
+                    exact_device_event_time = pending_exact_event_time
                         .filter(|event| *event == target && dt >= target - t);
                     candidate_step_time = canonical_transient_step_time_with_device_event(
                         t,
                         dt,
                         tstop,
-                        exact_veriloga_event_time,
+                        exact_device_event_time.or(exact_grid_time),
                     );
-                    at_breakpoint = exact_veriloga_event_time.is_some()
+                    at_breakpoint = exact_device_event_time.is_some()
                         || breakpoints.at_breakpoint(candidate_step_time);
                     expected_source_delta =
                         Self::max_expected_source_delta(&circuit, t, candidate_step_time);
                 }
+            }
+            // Reapply after replay, source bias and interval fitting. Even an
+            // addition rounded onto the deadline must use its original clock.
+            if let Some(arrival) = phase_arrival
+                && let Some(limited) = arrival.limit_step(
+                    &circuit,
+                    t,
+                    dt,
+                    candidate_step_time,
+                    timestep.hard_min_dt(),
+                )?
+            {
+                dt = limited;
+                exact_device_event_time = Some(arrival.time);
+                at_breakpoint = true;
+                locked_step_lands_on_grid = locked_grid
+                    .as_ref()
+                    .and_then(|grid| grid.get(locked_cursor))
+                    .is_some_and(|target| *target == arrival.time);
+                expected_source_delta = Self::max_expected_source_delta(&circuit, t, arrival.time);
             }
             if fixed_method.is_none() {
                 trapgear.set_at_breakpoint(at_breakpoint);
@@ -6738,24 +6805,25 @@ impl Engine {
                 t,
                 dt,
                 tstop,
-                exact_veriloga_event_time,
+                exact_device_event_time.or(exact_grid_time),
             );
-            let landed_veriloga_event = exact_veriloga_event_time.is_some();
+            let landed_device_event = exact_device_event_time.is_some();
             // Where the clock stood before this attempt. The accepted time is
-            // not `t + dt`: a breakpoint snap can pull it back inside the step,
-            // and it is the realized advance — not the attempted width — that
-            // says whether the run is progressing.
+            // not necessarily `t + dt`: exact clocks survive arithmetic
+            // roundoff, and ordinary non-phase paths may snap breakpoints.
+            // The realized advance determines whether the run progresses.
             let step_started_at = t;
-            if landed_veriloga_event {
+            if landed_device_event {
                 // Landing on an event is the other way this step gets cut, and
                 // a run of landings hands the restart the width of the last
-                // one exactly as a refinement chase does. An event closer than
-                // the solver's hard minimum lands one hard minimum away, so
+                // one exactly as a refinement chase does. A Verilog-A event
+                // below the hard minimum lands one hard minimum away, so
                 // without this the restart after it is a tenth of the floor —
                 // clamped back up to the floor, and doubled out of it one
                 // accepted point at a time. `get_or_insert` keeps the first
                 // proposal of a run of landings, which is the one an event
-                // actually interrupted.
+                // actually interrupted. GP arrivals share restart bookkeeping
+                // but retain their physical clocks and refuse subminimum gaps.
                 veriloga_refinement_approach_step.get_or_insert(proposal_before_event_cut);
             }
             let analysis_initial_step = false;
@@ -9450,12 +9518,16 @@ impl Engine {
                     t = step_time;
                     let scheduled_breakpoint = breakpoints.at_breakpoint(t);
                     let mut hit_breakpoint = accepted_step_hits_breakpoint(
-                        landed_veriloga_event,
+                        landed_device_event,
                         at_breakpoint,
                         scheduled_breakpoint,
                     );
                     if hit_breakpoint {
-                        if scheduled_breakpoint && !landed_veriloga_event && !analysis_final_step {
+                        if scheduled_breakpoint
+                            && !landed_device_event
+                            && !has_bjt_phase_history
+                            && !analysis_final_step
+                        {
                             let snapped = breakpoints.snap_to_breakpoint(t);
                             // The endpoint needs its own final-step solve.
                             if snapped != tstop {
@@ -9466,7 +9538,7 @@ impl Engine {
                         if let Some(step) = approach {
                             breakpoints.restore_approach_step(step);
                         }
-                        let restart_dt = if landed_veriloga_event {
+                        let restart_dt = if landed_device_event {
                             breakpoints.mark_external_breakpoint_solved(
                                 t,
                                 approach.map_or(dt, |step| step.max(dt)),
@@ -9478,12 +9550,13 @@ impl Engine {
                             approach.map_or(timestep.dt(), |step| step.max(timestep.dt()));
                         timestep.force_step(restart_dt.min(controller_dt).min(max_step));
                     }
-                    if !landed_veriloga_event {
+                    if !landed_device_event {
                         // A step that is not one of the chase's own landings
                         // ends it, whether or not it hit a breakpoint.
                         veriloga_refinement_approach_step = None;
                     }
 
+                    bjt::arrival::validate_clock(has_bjt_phase_history, step_time, t)?;
                     let method_after_step = current_integration_method(&trapgear);
                     let accepted_step_trap_order =
                         if native_predictor_local && current_method == IntegrationMethod::Gear2 {
@@ -10167,14 +10240,14 @@ impl Engine {
                     locked_cursor += 1;
                 }
                 accepted_step_hits_breakpoint(
-                    landed_veriloga_event,
+                    landed_device_event,
                     false,
                     lte_estimator.uses_accepted_solution_reference()
                         && breakpoints.at_breakpoint(t),
                 )
             } else {
                 accepted_step_hits_breakpoint(
-                    landed_veriloga_event,
+                    landed_device_event,
                     at_breakpoint,
                     breakpoints.at_breakpoint(t),
                 )
@@ -10186,7 +10259,8 @@ impl Engine {
             // device root instead retains the source point for a strict follow-up
             // solve because its candidate was evaluated at the root's own time.
             if hit_breakpoint
-                && !landed_veriloga_event
+                && !landed_device_event
+                && !has_bjt_phase_history
                 && !locked_step_lands_on_grid
                 && !analysis_final_step
             {
@@ -10196,6 +10270,7 @@ impl Engine {
                     t = snapped;
                 }
             }
+            bjt::arrival::validate_clock(has_bjt_phase_history, step_time, t)?;
             let method_after_step = current_integration_method(&trapgear);
             if circuit.has_nonlinear_devices() && !nonlinear_state_matches_new_solution {
                 self.update_transient_nonlinear_devices(&mut circuit, &new_solution)?;
@@ -10545,7 +10620,7 @@ impl Engine {
                 if let Some(step) = approach {
                     breakpoints.restore_approach_step(step);
                 }
-                let restart_dt = if landed_veriloga_event || veriloga_discontinuity {
+                let restart_dt = if landed_device_event || veriloga_discontinuity {
                     breakpoints.mark_external_breakpoint_solved(
                         t,
                         approach.map_or(dt, |step| step.max(dt)),
@@ -10566,7 +10641,7 @@ impl Engine {
                     lte_warmup_skips = lte_warmup_skips.max(2);
                 }
             }
-            if !landed_veriloga_event {
+            if !landed_device_event {
                 // A step that is not one of the chase's own landings ends it,
                 // whether or not it hit a breakpoint: a chase that resolved
                 // its root away from one must not raise a later restart.
