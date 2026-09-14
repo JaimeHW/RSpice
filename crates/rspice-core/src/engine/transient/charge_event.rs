@@ -14,6 +14,7 @@ mod stamp;
 pub(super) use stamp::{EventSample, EventStamp};
 mod rows;
 pub(super) use rows::EventBranchEquation;
+mod circuit;
 mod solve;
 #[cfg(test)]
 mod tests;
