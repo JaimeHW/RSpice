@@ -72,6 +72,32 @@ pub(in crate::engine::transient) fn next(
     stop: Value,
     abort: &dyn AbortSignal,
 ) -> Result<Option<PhaseArrival>, SimulationError> {
+    let mut earliest: Option<PhaseArrival> = None;
+    visit_next(circuit, history, time, stop, abort, |arrival| {
+        match &mut earliest {
+            Some(previous) if previous.time == arrival.time => {
+                previous.order = previous.order.merge(arrival.order);
+            }
+            previous if previous.is_none_or(|previous| arrival.time < previous.time) => {
+                *previous = Some(arrival);
+            }
+            _ => {}
+        }
+        Ok(())
+    })?;
+    Ok(earliest)
+}
+
+/// Retain each device's cause before a simultaneous arrival is reduced to a
+/// global deadline. Propagation depends on that device's physical incidence.
+pub(in crate::engine::transient) fn visit_next(
+    circuit: &crate::CircuitData,
+    history: &BjtTransientHistory,
+    time: Value,
+    stop: Value,
+    abort: &dyn AbortSignal,
+    mut visit: impl FnMut(PhaseArrival) -> Result<(), SimulationError>,
+) -> Result<(), SimulationError> {
     if abort.is_aborted() {
         return Err(SimulationError::Aborted);
     }
@@ -85,7 +111,6 @@ pub(in crate::engine::transient) fn next(
             "GP phase arrival history does not match the BJT population".into(),
         ));
     }
-    let mut earliest: Option<PhaseArrival> = None;
     for (index, (bjt, phase)) in circuit.bjts.devices.iter().zip(&history.phase).enumerate() {
         if index != 0 && index.is_multiple_of(64) && abort.is_aborted() {
             return Err(SimulationError::Aborted);
@@ -125,23 +150,15 @@ pub(in crate::engine::transient) fn next(
                 ));
             }
             if arrival.time <= stop {
-                match &mut earliest {
-                    Some(previous) if previous.time == arrival.time => {
-                        previous.order = previous.order.merge(arrival.order);
-                    }
-                    previous if previous.is_none_or(|previous| arrival.time < previous.time) => {
-                        *previous = Some(PhaseArrival {
-                            time: arrival.time,
-                            device_index: index,
-                            order: arrival.order,
-                        });
-                    }
-                    _ => {}
-                }
+                visit(PhaseArrival {
+                    time: arrival.time,
+                    device_index: index,
+                    order: arrival.order,
+                })?;
             }
         }
     }
-    Ok(earliest)
+    Ok(())
 }
 
 /// Accepted transport samples must retain the time used in their equations.

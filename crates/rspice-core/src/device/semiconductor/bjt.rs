@@ -11,6 +11,7 @@ use std::cell::{Cell, RefCell};
 use intrinsic::BjtNodeVoltages;
 
 mod dynamic;
+mod event_regularity;
 mod intrinsic;
 mod mna;
 mod params;

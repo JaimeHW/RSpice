@@ -5,17 +5,15 @@
 use super::*;
 use crate::circuit::SourceTimeSide;
 use charge_event::circuit::{EventPhase, PreparedEventCircuit};
+mod orders;
+pub(in crate::engine::transient) use orders::PhysicalEventOrders;
 
 pub(in crate::engine::transient) struct PhysicalEventStep<'a> {
     pub incoming: &'a [Value],
     pub time: Value,
     pub dt: Value,
-    /// Per-device physical input events classified by the solver's event
-    /// owner. Some(Unknown) retains an event without a smoothness certificate;
-    /// None is an ordinary sample. Positive bounds require exactly equal
-    /// solved input values and an independent derivative/regularity argument.
-    /// This preparation does not derive order from interpolation or coupling.
-    pub phase_events: &'a [Option<DelayEventOrder>],
+    /// Explicit declarations or solver-owned source/history cause propagation.
+    pub phase_events: PhysicalEventOrders<'a>,
 }
 
 #[must_use]
@@ -164,11 +162,7 @@ impl Engine {
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }
-        if !step.dt.is_finite()
-            || step.dt <= 0.0
-            || step.phase_events.len() != circuit.bjts.len()
-            || history.phase.len() != circuit.bjts.len()
-        {
+        if !step.dt.is_finite() || step.dt <= 0.0 || history.phase.len() != circuit.bjts.len() {
             return Err(failure(
                 "invalid incoming interval or physical event population",
             ));
@@ -191,6 +185,8 @@ impl Engine {
                 )),
             })
             .collect::<Result<_, _>>()?;
+        let topology = sampler.topology(step.time, SourceTimeSide::RightLimit, options, abort)?;
+        let classified = orders::classify(circuit, history, &step, &sampler, &topology, abort)?;
         let incoming = sampler.sample(
             step.time,
             SourceTimeSide::LeftLimit,
@@ -199,23 +195,55 @@ impl Engine {
             options,
             abort,
         )?;
-        let topology = sampler.topology(step.time, SourceTimeSide::RightLimit, options, abort)?;
-        let state = topology.solve(
-            step.incoming,
-            incoming.charge_values(),
-            options,
-            abort,
-            |solution, abort| {
-                sampler.sample(
-                    step.time,
-                    SourceTimeSide::RightLimit,
-                    solution,
-                    &phases,
-                    options,
-                    abort,
-                )
-            },
-        )?;
+        // A continuity certificate cannot repair an inaccurate incoming limit
+        // by changing its coordinates. Audit the incoming equations first,
+        // including ideal-source constraints and finite-rate regularity.
+        if classified.continuous {
+            let left = sampler.topology(step.time, SourceTimeSide::LeftLimit, options, abort)?;
+            left.solve_continuous(
+                step.incoming,
+                incoming.charge_values(),
+                options,
+                abort,
+                |solution, abort| {
+                    sampler.sample(
+                        step.time,
+                        SourceTimeSide::LeftLimit,
+                        solution,
+                        &phases,
+                        options,
+                        abort,
+                    )
+                },
+            )?;
+        }
+        let sample = |solution: &[Value], abort: &dyn AbortSignal| {
+            sampler.sample(
+                step.time,
+                SourceTimeSide::RightLimit,
+                solution,
+                &phases,
+                options,
+                abort,
+            )
+        };
+        let state = if classified.continuous {
+            topology.solve_continuous(
+                step.incoming,
+                incoming.charge_values(),
+                options,
+                abort,
+                sample,
+            )?
+        } else {
+            topology.solve(
+                step.incoming,
+                incoming.charge_values(),
+                options,
+                abort,
+                sample,
+            )?
+        };
         let mut phase_current_couplings = Vec::with_capacity(sampler.models().len());
         for model in sampler.models() {
             if abort.is_aborted() {
@@ -327,7 +355,7 @@ impl Engine {
                     terminal[i] -= current;
                 }
             }
-            let selected = step.phase_events[index];
+            let selected = classified.orders[index];
             let phase_sample = if let Some(phase) = phases[index] {
                 let forward = model
                     .legacy_forward_transport_branch(&internal)

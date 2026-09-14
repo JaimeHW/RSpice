@@ -12,6 +12,33 @@ impl ChargeEventTopology {
         abort: &dyn AbortSignal,
         mut sample: impl FnMut(&[Value], &dyn AbortSignal) -> Result<EventSample>,
     ) -> Result<ChargeEventState> {
+        self.solve_coordinates((incoming, incoming_q, false), options, abort, &mut sample)
+    }
+
+    /// Audit an invariant physical coordinate limit without projecting it to
+    /// a nearby Newton solution. The caller must establish unchanged jump
+    /// constraints and a C1 constitutive domain independently. Factorization,
+    /// residual/update checks and all original storage/KCL audits still run.
+    /// Source branch slots become finite outgoing currents only in finish.
+    pub(in crate::engine::transient) fn solve_continuous(
+        &self,
+        incoming: &[Value],
+        incoming_q: &[Value],
+        options: &EventOptions,
+        abort: &dyn AbortSignal,
+        mut sample: impl FnMut(&[Value], &dyn AbortSignal) -> Result<EventSample>,
+    ) -> Result<ChargeEventState> {
+        self.solve_coordinates((incoming, incoming_q, true), options, abort, &mut sample)
+    }
+
+    fn solve_coordinates(
+        &self,
+        coordinates: (&[Value], &[Value], bool),
+        options: &EventOptions,
+        abort: &dyn AbortSignal,
+        sample: &mut impl FnMut(&[Value], &dyn AbortSignal) -> Result<EventSample>,
+    ) -> Result<ChargeEventState> {
+        let (incoming, incoming_q, preserve) = coordinates;
         check_abort(abort)?;
         options.validate()?;
         ResourceLimitError::ensure(
@@ -66,6 +93,11 @@ impl ChargeEventTopology {
             if residual <= 1.0 && update <= 1.0 {
                 self.audit_storage(&trial, incoming_q, &physical, options, abort)?;
                 return self.finish(trial, physical, iteration + 1, options, abort);
+            }
+            if preserve {
+                return Err(error(
+                    "continuous event limit fails the unchanged jump equations",
+                ));
             }
             let mut accepted = None;
             let mut alpha: Value = 1.0;
