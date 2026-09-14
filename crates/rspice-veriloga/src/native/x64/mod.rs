@@ -3750,6 +3750,11 @@ endmodule
                 None,
             ),
             (
+                "ekv26",
+                shipped_veriloga_model_path(&["ekv26_2.6", "ekv26_SDext_Verilog-A.va"]),
+                Some("ekv_va"),
+            ),
+            (
                 "bsimcmg",
                 shipped_cmc_model_path(&["BSIM-CMG_112.1.0_04282026", "code", "bsimcmg.va"]),
                 Some("bsimcmg_va"),
