@@ -33,6 +33,7 @@ __all__ = [
     "SimulationResult",
     "DeviceOperatingPoint",
     "TransientResult",
+    "CurrentImpulseTrace",
     "DigitalEvent",
     "DigitalBus",
     "BusEvent",
