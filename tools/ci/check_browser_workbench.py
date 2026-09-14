@@ -248,12 +248,11 @@ def model_validation_clock(browser):
     # an invalid receipt left in memory by the failed operation.
     choose_command(browser, "Open recovery center")
     before = checkpoint_records(browser)
+    started_ms = time.time_ns() // 1_000_000
     browser.click("Checkpoint now…", "button")
-    records = wait_for(lambda: (current if (current := checkpoint_records(browser)) != before else None),
-                       "the checkpoint after failed model validation")
-    added = {key: value for key, value in records.items() if key not in before}
-    snapshots = [json.loads(bytes(value)) for key, value in added.items() if key.endswith(".snapshot")]
-    if len(snapshots) != 1 or snapshots[0]["execution_context"].get("model_validation_receipt") != receipt:
+    records = wait_for_checkpoint_publication(browser, before, "the checkpoint after failed model validation")
+    _, _, project = verify_checkpoint(records, started_ms, time.time_ns() // 1_000_000)
+    if project["execution_context"].get("model_validation_receipt") != receipt:
         raise AssertionError("Failed validation changed the working model receipt")
     browser.capture("model-validation-retained")
     choose_command(browser, "Corners & sections")
@@ -399,10 +398,8 @@ def run_with_saved_provider(browser, decision):
     before = checkpoint_records(browser)
     started_ms = time.time_ns() // 1_000_000
     browser.click("Checkpoint now…", "button")
-    records = wait_for(lambda: (current if (current := checkpoint_records(browser)) != before else None),
-                       "the saved-provider result checkpoint")
-    added = {key: value for key, value in records.items() if key not in before}
-    _, raw, project = verify_checkpoint(added, started_ms, time.time_ns() // 1_000_000)
+    records = wait_for_checkpoint_publication(browser, before, "the saved-provider result checkpoint")
+    _, raw, project = verify_checkpoint(records, started_ms, time.time_ns() // 1_000_000)
     if project["execution_context"]["model_resolution_records"] != [decision]:
         raise AssertionError("Simulation changed the restored provider decision")
     runs = project["simulation_results"]["runs"]
@@ -508,6 +505,15 @@ def checkpoint_records(browser):
     return result["records"]
 
 
+def wait_for_checkpoint_publication(browser, before, description, timeout=30):
+    """Wait for the commit manifest; the snapshot is published in an earlier transaction."""
+    def published():
+        added = {key: value for key, value in checkpoint_records(browser).items() if key not in before}
+        return added if any(key.endswith(".manifest") for key in added) else None
+
+    return wait_for(published, description, timeout)
+
+
 def verify_checkpoint(records, started_ms, finished_ms):
     manifests = [(key, json.loads(value)) for key, value in records.items()
                  if key.endswith(".manifest")]
@@ -518,7 +524,10 @@ def verify_checkpoint(records, started_ms, finished_ms):
         raise AssertionError(f"Unexpected checkpoint identity: {manifest}")
     if not started_ms <= manifest["created_unix_ms"] <= finished_ms:
         raise AssertionError(f"Checkpoint wall time is outside the observed creation interval: {manifest}")
-    raw = bytes(records[key.removesuffix(".manifest") + ".snapshot"])
+    snapshot_key = key.removesuffix(".manifest") + ".snapshot"
+    if snapshot_key not in records:
+        raise AssertionError("Checkpoint manifest has no matching snapshot")
+    raw = bytes(records[snapshot_key])
     if len(raw) != manifest["snapshot_byte_len"]:
         raise AssertionError("Checkpoint length differs from its durable manifest")
     if hashlib.sha256(raw).hexdigest() != manifest["snapshot_digest"]:
@@ -620,11 +629,7 @@ def run(browser):
     started_ms = time.time_ns() // 1_000_000
     browser.click("Checkpoint now…", "button")
 
-    def published():
-        records = checkpoint_records(browser)
-        return records if any(key.endswith(".manifest") for key in records) else None
-
-    records = wait_for(published, "durable checkpoint publication")
+    records = wait_for_checkpoint_publication(browser, {}, "durable checkpoint publication")
     (browser.output / "checkpoint-records.json").write_text(json.dumps(records, indent=2), encoding="utf-8")
     manifest, raw, project = verify_checkpoint(records, started_ms, time.time_ns() // 1_000_000)
     verify_review(project, review_intervals)

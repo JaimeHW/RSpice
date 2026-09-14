@@ -9,10 +9,13 @@ import functools
 import http.server
 import threading
 import urllib.request
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from browser_workbench import WorkbenchBrowser, controls
-from check_browser_workbench import verify_checkpoint, verify_clock_rejection, verify_recovery_copy
+from check_browser_workbench import (
+    run_with_saved_provider, verify_checkpoint, verify_clock_rejection, verify_recovery_copy,
+    wait_for_checkpoint_publication,
+)
 from check_browser_release import ReleaseHandler, playground_result, startup_ready, verify_worker_urls
 from check_wasm_jit_browser import qualification_worker
 
@@ -154,11 +157,46 @@ class BrowserWorkbenchTests(unittest.TestCase):
             ({**records, "checkpoint.snapshot": list(raw + b" ")}, 100, 110),
             ({**records, "checkpoint.snapshot": list(raw.replace(b"1", b"2"))}, 100, 110),
             ({**records, "old.manifest": json.dumps(manifest)}, 100, 110),
+            ({"checkpoint.manifest": json.dumps(manifest), "wrong.snapshot": list(raw)}, 100, 110),
             (records, 106, 110), (records, 100, 104),
         ):
             with self.subTest(records=changed, start=start, end=end):
                 with self.assertRaises(AssertionError):
                     verify_checkpoint(changed, start, end)
+
+    def test_saved_provider_waits_for_manifest_after_snapshot_publication(self):
+        decision = {"provider": "retained"}
+        project = {"workspace": {"project": {"id": "source", "name": "Source", "revision": 1}},
+                   "execution_context": {"model_resolution_records": [decision]},
+                   "simulation_results": {"runs": [{"success": True, "lifecycle": "completed",
+                       "analyses": [{"success": True, "waveforms": [
+                           {"name": "V(out)", "x": [0.0, 0.001], "y": [5.0, 5.0]}]}]}]}}
+        raw = json.dumps(project).encode("utf-8")
+        manifest = {"schema_version": 1, "reason": "manual", "created_unix_ms": 105,
+                    "project_id": "source", "project_name": "Source", "project_revision": 1,
+                    "snapshot_byte_len": len(raw), "snapshot_digest": hashlib.sha256(raw).hexdigest()}
+        before = {"old.manifest": "old manifest", "old.snapshot": [1, 2, 3]}
+        snapshot_only = {**before, "new.snapshot": list(raw)}
+        published = {**snapshot_only, "new.manifest": json.dumps(manifest)}
+        with tempfile.TemporaryDirectory() as directory:
+            browser = Mock(output=Path(directory))
+            with (patch("check_browser_workbench.choose_command"),
+                  patch("check_browser_workbench.controls", return_value=[{"value": "Run 1 completed"}]),
+                  patch("check_browser_workbench.time.time_ns", return_value=105_000_000),
+                  patch("check_browser_workbench.checkpoint_records",
+                        side_effect=[before, before, snapshot_only, published]) as read):
+                result = run_with_saved_provider(browser, decision)
+            self.assertEqual(read.call_count, 4)
+            self.assertEqual(result, {"worker_run": "passed", "waveforms": {"V(out)": 2}})
+            self.assertEqual((Path(directory) / "model-provider-results.rspiceproj").read_bytes(), raw)
+
+    def test_checkpoint_wait_rejects_missing_publication_and_old_manifests(self):
+        before = {"old.manifest": "old manifest", "old.snapshot": [1, 2, 3]}
+        for current in (before, {**before, "new.snapshot": [4, 5, 6]}):
+            with self.subTest(current=current):
+                with (patch("check_browser_workbench.checkpoint_records", return_value=current),
+                      self.assertRaisesRegex(AssertionError, "Timed out waiting for checkpoint publication")):
+                    wait_for_checkpoint_publication(Mock(), before, "checkpoint publication", timeout=0)
 
     def test_recovery_copy_requires_new_identity_and_exact_content(self):
         import copy
