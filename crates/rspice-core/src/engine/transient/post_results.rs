@@ -104,7 +104,13 @@ pub fn evaluate_transient_fourier_results(
             FourierAnalysis::new(FourierConfig::new(fundamental).with_harmonics(harmonic_count));
         for (output, physical_type, waveform) in columns {
             let spectrum = analysis
-                .analyze_with_abort(&result.time, &waveform, abort)
+                .analyze_transient_output_with_abort(
+                    Some(netlist),
+                    result,
+                    &output,
+                    &waveform,
+                    abort,
+                )
                 .map_err(|error| match error {
                     FourierError::Aborted => SimulationError::Aborted,
                     error => SimulationError::Circuit(format!(

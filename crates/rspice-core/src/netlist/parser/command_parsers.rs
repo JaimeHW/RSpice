@@ -425,9 +425,12 @@ pub(super) fn parse_four_command(
     let mut outputs = Vec::new();
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
         skip_commas(stream);
-        if matches!(stream.peek().kind, TokenKind::Ident(_)) {
+        if matches!(
+            stream.peek().kind,
+            TokenKind::Ident(_) | TokenKind::Expression(_) | TokenKind::StringLit(_)
+        ) {
             // Probe specs like V(out) span several tokens; reuse the .MEAS
-            // signal parser so the node is not silently dropped.
+            // signal parser for probes and authored expressions alike.
             outputs.push(super::commands::parse_meas_signal(
                 stream, line_num, params,
             )?);

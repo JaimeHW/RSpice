@@ -26,6 +26,8 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
+pub(crate) mod current_observation;
+
 /// Whether the first adjacent pair that differs is ascending.
 ///
 /// `slice::windows(2)` yields exactly two samples, and matching on that shape
@@ -2336,6 +2338,7 @@ fn direct_output_values<'a>(
         SaveSignal::Voltage(node) => Some(format!("V({node})")),
         SaveSignal::VoltageDiff(positive, negative) => Some(format!("V({positive},{negative})")),
         SaveSignal::Current(device) => Some(format!("I({device})")),
+        SaveSignal::Raw(raw) if split_equation_output_operator(raw).is_some() => Some(raw.clone()),
         _ => None,
     };
     if let Some(canonical_probe) = raw_probe {

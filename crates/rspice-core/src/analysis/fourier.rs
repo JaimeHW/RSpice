@@ -18,6 +18,7 @@
 //! Uses trapezoidal Fourier integration over the last configured period(s) of
 //! the waveform.
 
+use super::measure_signals::current_observation::{self, CurrentImpulseContribution};
 use crate::Value;
 use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::numerics::compensated_add;
@@ -74,6 +75,9 @@ impl FourierConfig {
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 #[non_exhaustive]
 pub enum FourierError {
+    /// A requested current lacks coverage or has undefined impulse algebra.
+    #[error("Fourier current observation: {detail}")]
+    CurrentObservation { detail: String },
     /// Cooperative cancellation was requested while qualifying or
     /// integrating the retained waveform.
     #[error("Fourier analysis aborted")]
@@ -181,7 +185,9 @@ impl FourierAnalysis {
         Self { config }
     }
 
-    /// Perform Fourier analysis on a waveform
+    /// Perform Fourier analysis on a finite sampled waveform.
+    /// For a retained result with charge impulses, use
+    /// [`Self::analyze_transient_output_with_abort`] to include its singular current.
     ///
     /// # Arguments
     /// * `time` - Time points
@@ -201,43 +207,58 @@ impl FourierAnalysis {
         values: &[Value],
         abort: &dyn AbortSignal,
     ) -> Result<FourierResult, FourierError> {
+        self.analyze_observation(time, values, &[], abort)
+    }
+
+    /// Transform an output column already resolved from `result` and `spec`.
+    ///
+    /// `values` must be the finite column produced by the shared transient
+    /// output resolver for this specification. Complete current observations
+    /// additionally contribute their charge impulses analytically. The window
+    /// excludes impulses at its start and includes its end (`(start, end]`),
+    /// so adjacent and resumed intervals count each accepted impulse once. Affine current
+    /// expressions accept time-independent real coefficients; undefined
+    /// impulse products and nonlinear projections return explicit errors.
+    ///
+    /// Results without an impulse section retain the historical sampled-only
+    /// interpretation; they do not certify complete physical-current history.
+    /// With an impulse section, missing/incomplete current coverage is an error.
+    pub fn analyze_transient_output_with_abort(
+        &self,
+        netlist: Option<&crate::Netlist>,
+        result: &super::transient::TransientResult,
+        spec: &str,
+        values: &[Value],
+        abort: &dyn AbortSignal,
+    ) -> Result<FourierResult, FourierError> {
+        if abort.is_aborted() {
+            return Err(FourierError::Aborted);
+        }
+        self.validate_configuration()?;
+        let start = self.window_start(&result.time)?;
+        let stop = result
+            .time
+            .last()
+            .copied()
+            .ok_or(FourierError::EmptyWaveform)?;
+        let impulses = current_observation::resolve(netlist, result, spec, (start, stop), abort)?;
+        self.analyze_observation(&result.time, values, &impulses, abort)
+    }
+
+    fn analyze_observation(
+        &self,
+        time: &[Value],
+        values: &[Value],
+        impulses: &[CurrentImpulseContribution<'_>],
+        abort: &dyn AbortSignal,
+    ) -> Result<FourierResult, FourierError> {
         if abort.is_aborted() {
             return Err(FourierError::Aborted);
         }
         self.validate_configuration()?;
         validate_waveform(time, values, abort)?;
 
-        // Find analysis window (last periods of waveform)
-        let window_duration = self.config.window_duration();
-        if !window_duration.is_finite() || window_duration <= 0.0 {
-            return Err(FourierError::InvalidWindowDuration {
-                duration: window_duration,
-            });
-        }
-        let t_end = time[time.len() - 1];
-        let available_duration = t_end - time[0];
-        if !available_duration.is_finite() || available_duration <= 0.0 {
-            return Err(FourierError::InvalidTimeSpan {
-                start: time[0],
-                end: t_end,
-            });
-        }
-        let duration_tolerance = 64.0
-            * Value::EPSILON
-            * available_duration
-                .max(window_duration)
-                .max(Value::MIN_POSITIVE);
-        if available_duration + duration_tolerance < window_duration {
-            return Err(FourierError::InsufficientDuration {
-                available: available_duration,
-                required: window_duration,
-            });
-        }
-        let t_start = if available_duration <= window_duration {
-            time[0]
-        } else {
-            t_end - window_duration
-        };
+        let t_start = self.window_start(time)?;
 
         // Retain an exact-period window. When its leading edge lies between
         // samples, interpolate the boundary instead of silently shortening
@@ -305,7 +326,7 @@ impl FourierAnalysis {
                     frequency: freq,
                 });
             }
-            let (mag, phase) = quadrature.component(freq, n, abort)?;
+            let (mag, phase) = quadrature.component_with_impulses(freq, n, impulses, abort)?;
 
             harmonics.push(HarmonicComponent {
                 harmonic_number: n,
@@ -342,6 +363,41 @@ impl FourierAnalysis {
             dc_component: dc,
             harmonics,
             thd,
+        })
+    }
+
+    fn window_start(&self, time: &[Value]) -> Result<Value, FourierError> {
+        // Find analysis window (last periods of waveform)
+        let window_duration = self.config.window_duration();
+        if !window_duration.is_finite() || window_duration <= 0.0 {
+            return Err(FourierError::InvalidWindowDuration {
+                duration: window_duration,
+            });
+        }
+        let first = time.first().copied().ok_or(FourierError::EmptyWaveform)?;
+        let t_end = time.last().copied().ok_or(FourierError::EmptyWaveform)?;
+        let available_duration = t_end - first;
+        if !available_duration.is_finite() || available_duration <= 0.0 {
+            return Err(FourierError::InvalidTimeSpan {
+                start: first,
+                end: t_end,
+            });
+        }
+        let duration_tolerance = 64.0
+            * Value::EPSILON
+            * available_duration
+                .max(window_duration)
+                .max(Value::MIN_POSITIVE);
+        if available_duration + duration_tolerance < window_duration {
+            return Err(FourierError::InsufficientDuration {
+                available: available_duration,
+                required: window_duration,
+            });
+        }
+        Ok(if available_duration <= window_duration {
+            first
+        } else {
+            t_end - window_duration
         })
     }
 
@@ -415,6 +471,16 @@ impl<'a> FourierQuadrature<'a> {
         harmonic: usize,
         abort: &dyn AbortSignal,
     ) -> Result<(Value, Value), FourierError> {
+        self.component_with_impulses(frequency, harmonic, &[], abort)
+    }
+
+    fn component_with_impulses(
+        &self,
+        frequency: Value,
+        harmonic: usize,
+        impulses: &[CurrentImpulseContribution<'_>],
+        abort: &dyn AbortSignal,
+    ) -> Result<(Value, Value), FourierError> {
         if abort.is_aborted() {
             return Err(FourierError::Aborted);
         }
@@ -425,7 +491,33 @@ impl<'a> FourierQuadrature<'a> {
                 frequency,
             });
         }
-        if self.scale == 0.0 {
+        // Normalize finite and singular contributions together. Choosing a
+        // scale from the finite waveform alone can overflow a valid charge
+        // contribution when that waveform is tiny or identically zero.
+        let mut scale = self.scale;
+        for term in impulses {
+            for (index, point) in term.trace.points.iter().enumerate() {
+                if index.is_multiple_of(256) && abort.is_aborted() {
+                    return Err(FourierError::Aborted);
+                }
+                if point.time <= self.time[0] || point.time > self.time[self.time.len() - 1] {
+                    continue;
+                }
+                let rate = crate::numerics::scaled_exp_product(
+                    &[point.charge_coulombs, term.weight],
+                    &[self.duration],
+                    0.0,
+                );
+                ensure_finite_coefficient(rate, harmonic, "impulse charge per period")?;
+                if rate == 0.0 && point.charge_coulombs != 0.0 && term.weight != 0.0 {
+                    return Err(FourierError::CurrentObservation {
+                        detail: "impulse charge per period is below the representable range".into(),
+                    });
+                }
+                scale = scale.max(rate.abs().min(1.0));
+            }
+        }
+        if scale == 0.0 {
             return Ok((0.0, 0.0));
         }
 
@@ -446,7 +538,7 @@ impl<'a> FourierQuadrature<'a> {
             let before = index.saturating_sub(1);
             let after = (index + 1).min(self.time.len() - 1);
             let span = self.time[after] - self.time[before];
-            let value = self.values[index] / self.scale;
+            let value = self.values[index] / scale;
             let sample = self.weighted_sample(0.5 * value, span);
             let (cosine, sine) = if harmonic == 0 {
                 (1.0, 0.0)
@@ -466,14 +558,43 @@ impl<'a> FourierQuadrature<'a> {
                 compensated_add(&mut sine_integral, &mut sine_correction, sample * sine);
             }
         }
+        for term in impulses {
+            for (index, point) in term.trace.points.iter().enumerate() {
+                if index.is_multiple_of(256) && abort.is_aborted() {
+                    return Err(FourierError::Aborted);
+                }
+                if point.time <= self.time[0] || point.time > self.time[self.time.len() - 1] {
+                    continue;
+                }
+                let sample = crate::numerics::scaled_exp_product(
+                    &[point.charge_coulombs, term.weight],
+                    &[self.duration, scale],
+                    0.0,
+                );
+                let (cosine, sine) = if harmonic == 0 {
+                    (1.0, 0.0)
+                } else {
+                    let (sine, cosine) = phase(point.time).sin_cos();
+                    (cosine, sine)
+                };
+                compensated_add(
+                    &mut cosine_integral,
+                    &mut cosine_correction,
+                    sample * cosine,
+                );
+                if harmonic != 0 {
+                    compensated_add(&mut sine_integral, &mut sine_correction, sample * sine);
+                }
+            }
+        }
         if harmonic == 0 {
-            let dc = (cosine_integral + cosine_correction) * self.scale;
+            let dc = (cosine_integral + cosine_correction) * scale;
             ensure_finite_coefficient(dc, harmonic, "DC component")?;
             return Ok((dc, 0.0));
         }
         let a_n = 2.0 * (cosine_integral + cosine_correction);
         let b_n = 2.0 * (sine_integral + sine_correction);
-        let magnitude = a_n.hypot(b_n) * self.scale;
+        let magnitude = a_n.hypot(b_n) * scale;
         let phase = (-b_n).atan2(a_n) * 180.0 / PI;
         ensure_finite_coefficient(magnitude, harmonic, "magnitude")?;
         ensure_finite_coefficient(phase, harmonic, "phase")?;

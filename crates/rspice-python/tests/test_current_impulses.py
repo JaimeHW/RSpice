@@ -19,6 +19,28 @@ def with_impulses(result, rows, version=1):
     return restore(*state[:-1], (version, rows))
 
 
+def test_fourier_current_includes_charge_after_pickle(engine):
+    deck = rspice.Netlist.parse("* charge Fourier\nV1 out 0 0\nR1 out 0 1000\n.end\n")
+    transient = engine.run_tran(deck, stop_time=1.0, max_step=1.0 / 256)
+    branch = transient.branch_names[0]
+    charge = 2e-3
+    restored = pickle.loads(pickle.dumps(with_impulses(
+        transient, [("branch", branch, None, True, [(0.0, 7.0), (0.25, charge)])], 2
+    )))
+    # Q/T DC and 2Q/T peak at a quarter-period event: -90 degree phase.
+    # The impulse at the starting endpoint belongs to the preceding period.
+    for fourier in [restored.fourier_current(branch, 1.0, 4),
+                    restored.fourier_of(f"i({branch.swapcase()})", 1.0, 4)]:
+        assert fourier.dc_component == pytest.approx(charge, rel=2e-14)
+        assert fourier.harmonics[0].magnitude == pytest.approx(2 * charge, rel=2e-14)
+        assert fourier.harmonics[0].phase_degrees == pytest.approx(-90.0, abs=2e-12)
+    for rows, version in [([], 2), ([(branch, [(0.25, charge)])], 1)]:
+        incomplete = with_impulses(transient, rows, version)
+        with pytest.raises(ValueError, match="impulse history"):
+            incomplete.fourier_current(branch, 1.0, 4)
+    assert transient.fourier_current(branch, 1.0, 4).dc_component == 0.0
+
+
 def test_current_impulses_pickle_preserves_availability_and_legacy_shape(result):
     assert result.current_impulses is None
     restore, state = result.__reduce__()

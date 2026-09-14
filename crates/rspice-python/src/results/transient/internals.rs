@@ -160,9 +160,14 @@ impl PyTransientResult {
         }
         let analysis =
             FourierAnalysis::new(FourierConfig::new(fundamental).with_harmonics(num_harmonics));
-        let time = self.inner.time.as_slice();
         let qualified = crate::abort::run_interruptible_unregistered(py, |abort| {
-            match analysis.analyze_with_abort(time, waveform, abort) {
+            match analysis.analyze_transient_output_with_abort(
+                None,
+                &self.inner,
+                output,
+                waveform,
+                abort,
+            ) {
                 // Cancellation is the worker's business; every other outcome
                 // is this waveform's own and stays a value error below.
                 Err(FourierError::Aborted) => Err(rspice_core::SimulationError::Aborted),

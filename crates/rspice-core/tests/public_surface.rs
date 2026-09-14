@@ -866,7 +866,9 @@ use rspice_core::analysis::harmonic_balance::{
 /// Per-trace validation and resource helpers remain crate-private.
 /// +1: CurrentImpulseOwner distinguishes branch and device-lead identities
 /// without parsing display strings. Coverage is carried by each trace.
-const MAX_PUBLIC_ITEMS: usize = 5012;
+/// +1: FourierAnalysis::analyze_transient_output_with_abort shares physical
+/// current Fourier interpretation across retained, CLI and Python results.
+const MAX_PUBLIC_ITEMS: usize = 5013;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

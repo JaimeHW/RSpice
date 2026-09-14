@@ -347,6 +347,10 @@ impl PyTransientResult {
     /// The `.FOUR` card accepts the full probe grammar, so this accessor does
     /// too: `V(out)`, `V(outp,outn)`, `I(V1)`, `@m1[id]`, or a bare node name,
     /// resolved by the same core resolver `.FOUR` uses.
+    /// Complete current histories include their charge impulses over the
+    /// final period's (start, end] window. Recorded but incomplete histories
+    /// raise ValueError. Results without an impulse section retain the
+    /// historical sampled-only interpretation.
     ///
     /// Args:
     ///     spec: Output specification string
@@ -375,6 +379,9 @@ impl PyTransientResult {
     ///
     /// The `.FOUR` counterpart of `fourier` for `I(element)` outputs. Branch
     /// currents exist for voltage sources and inductors.
+    /// Complete impulse histories contribute their signed charge analytically
+    /// over (start, end]; missing coverage in a recorded impulse section is
+    /// an error. Legacy results without that section use finite samples only.
     ///
     /// Args:
     ///     element: Element name (e.g. "V1", "L2")

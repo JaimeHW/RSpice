@@ -1,10 +1,10 @@
 //! `.FOUR` spectra derived from transient waveforms.
 //!
 //! These live apart from the small-signal frequency-domain results because they
-//! are a post-processing step over a time-domain run, not an analysis in their
-//! own right: the harmonics come from a DFT of a sampled waveform, so their
-//! accuracy is governed by the transient timestep rather than by a solver
-//! tolerance.
+//! are a post-processing step over a time-domain run. Finite-waveform
+//! coefficients use the retained sample grid; complete current observations
+//! additionally contribute sparse charge impulses analytically. Both waveform
+//! resolution and the quality of the underlying simulation evidence matter.
 
 use super::*;
 

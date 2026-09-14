@@ -36,10 +36,10 @@ pub(super) fn evaluate_pending_fourier(
         match out.tran.last() {
             Some(tran_obj) => {
                 let tran_ref = tran_obj.borrow(py);
+                let transient = &tran_ref.inner;
                 // Borrowed, not copied, across the worker's GIL release:
                 // `TransientResult` exposes no mutating method, so nothing
                 // Python can call meanwhile invalidates this grid.
-                let time = tran_ref.inner.time.as_slice();
                 for output in &outputs {
                     // `.four` shares the ordered output resolver with
                     // `.PRINT`: node voltages, differential pairs, branch and
@@ -71,7 +71,13 @@ pub(super) fn evaluate_pending_fourier(
                             // skipped directive.
                             let qualified =
                                 crate::abort::run_interruptible_unregistered(py, |abort| {
-                                    match analysis.analyze_with_abort(time, &waveform, abort) {
+                                    match analysis.analyze_transient_output_with_abort(
+                                        Some(netlist),
+                                        transient,
+                                        output,
+                                        &waveform,
+                                        abort,
+                                    ) {
                                         Err(
                                             rspice_core::analysis::fourier::FourierError::Aborted,
                                         ) => Err(rspice_core::SimulationError::Aborted),

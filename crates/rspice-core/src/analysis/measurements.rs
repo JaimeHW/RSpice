@@ -2585,7 +2585,8 @@ fn qualified_fft_scaling(
 fn map_fourier_measurement_error(error: FourierError) -> MeasurementError {
     let message = format!("THD qualification failed: {error}");
     match error {
-        FourierError::EmptyWaveform
+        FourierError::CurrentObservation { .. }
+        | FourierError::EmptyWaveform
         | FourierError::LengthMismatch { .. }
         | FourierError::NonFiniteTime { .. }
         | FourierError::NonFiniteValue { .. }

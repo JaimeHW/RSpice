@@ -100,8 +100,10 @@ pub(super) fn run_fourier(
             })?;
             for (output, physical_type, waveform) in columns {
                 let result = fourier
-                    .analyze_with_abort(
-                        &retained.result.time,
+                    .analyze_transient_output_with_abort(
+                        Some(ctx.netlist),
+                        &retained.result,
+                        &output,
                         &waveform,
                         &crate::abort::ProcessAbort,
                     )
