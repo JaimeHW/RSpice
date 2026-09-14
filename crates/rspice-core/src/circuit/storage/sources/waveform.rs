@@ -313,6 +313,15 @@ impl VoltageSources {
         use crate::netlist::SourceSpec;
         use std::f64::consts::PI;
 
+        if DERIVATIVE
+            && side != SourceTimeSide::Published
+            && matches!(spec, SourceSpec::PwlFile { .. } | SourceSpec::Pat { .. })
+        {
+            // Their transformed/repeated event clocks still need a sided
+            // slope selector. Do not mistake the published outgoing slope
+            // for an incoming derivative or a certified regular event rate.
+            return Value::NAN;
+        }
         match spec {
             SourceSpec::Distortion { inner, .. } => {
                 Self::source_time_component_on_side::<DERIVATIVE>(
@@ -403,8 +412,8 @@ impl VoltageSources {
                     *width_defaults_to_zero,
                     context,
                 );
-                if !DERIVATIVE && side != SourceTimeSide::Published {
-                    return Self::pulse_limit(
+                if side != SourceTimeSide::Published {
+                    return Self::pulse_limit::<DERIVATIVE>(
                         [*v1, *v2],
                         [delay, rise, fall, width, period],
                         *pulse_count,
@@ -513,7 +522,9 @@ impl VoltageSources {
                 phase,
             } => {
                 let frequency = Self::resolve_sin_frequency(*frequency, context);
-                if time < *delay {
+                if time < *delay
+                    || (DERIVATIVE && time == *delay && side == SourceTimeSide::LeftLimit)
+                {
                     // ngspice holds VO + VA*sin(PHASE) before the delay,
                     // not the bare offset (vsrcload.c).
                     if DERIVATIVE {
@@ -542,8 +553,8 @@ impl VoltageSources {
                 delay,
                 repeat_from,
             } => {
-                if !DERIVATIVE && side != SourceTimeSide::Published {
-                    Self::pwl_limit(points, time, *delay, *repeat_from, side)
+                if side != SourceTimeSide::Published {
+                    Self::pwl_limit::<DERIVATIVE>(points, time, *delay, *repeat_from, side)
                 } else {
                     Self::pwl_time_component::<DERIVATIVE>(points, time, *delay, *repeat_from)
                 }
@@ -649,8 +660,13 @@ impl VoltageSources {
             } => {
                 let (td1, tau1, td2, tau2) =
                     Self::resolve_exp_timing(*td1, *tau1, *td2, *tau2, context);
-                if !DERIVATIVE && side != SourceTimeSide::Published {
-                    return Self::exp_limit([*v1, *v2], [td1, tau1, td2, tau2], time, side);
+                if side != SourceTimeSide::Published {
+                    return Self::exp_limit::<DERIVATIVE>(
+                        [*v1, *v2],
+                        [td1, tau1, td2, tau2],
+                        time,
+                        side,
+                    );
                 }
                 if DERIVATIVE {
                     return if time < td1 {
@@ -707,9 +723,12 @@ impl VoltageSources {
                     let modulation = 2.0 * PI * fm;
                     let angle_m = modulation * t + phase_modulation.to_radians();
                     let angle = carrier * t + phase_carrier.to_radians() + mdi * angle_m.sin();
-                    return if t < 0.0 {
+                    return if t < 0.0 || (t == 0.0 && side == SourceTimeSide::LeftLimit) {
                         0.0
-                    } else if t == 0.0 && offset + amplitude * angle.sin() != 0.0 {
+                    } else if t == 0.0
+                        && side == SourceTimeSide::Published
+                        && offset + amplitude * angle.sin() != 0.0
+                    {
                         Value::NAN
                     } else {
                         amplitude * angle.cos() * (carrier + mdi * modulation * angle_m.cos())
@@ -745,9 +764,12 @@ impl VoltageSources {
                     let angle_m = modulation * t + phase_modulation.to_radians();
                     let angle_c = carrier * t + phase_carrier.to_radians();
                     let envelope = modulation_offset + modulation_amplitude * angle_m.sin();
-                    return if t < 0.0 {
+                    return if t < 0.0 || (t == 0.0 && side == SourceTimeSide::LeftLimit) {
                         0.0
-                    } else if t == 0.0 && offset + envelope * angle_c.sin() != 0.0 {
+                    } else if t == 0.0
+                        && side == SourceTimeSide::Published
+                        && offset + envelope * angle_c.sin() != 0.0
+                    {
                         Value::NAN
                     } else {
                         modulation_amplitude * modulation * angle_m.cos() * angle_c.sin()

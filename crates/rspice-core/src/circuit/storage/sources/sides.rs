@@ -28,6 +28,30 @@ fn interpolate_at(time: Value, left: (Value, Value), right: (Value, Value)) -> V
     interpolate(left.1, right.1, weight)
 }
 
+fn slope(left: Value, right: Value, width: Value) -> Value {
+    rspice_veriloga_runtime::arithmetic::sum_products_ratio(
+        [(right, 1.0), (left, -1.0)].into_iter(),
+        [(width, 1.0)].into_iter(),
+    )
+    .unwrap_or(Value::NAN)
+}
+
+fn segment_component<const DERIVATIVE: bool>(
+    time: Value,
+    left: (Value, Value),
+    right: (Value, Value),
+) -> Value {
+    if DERIVATIVE {
+        rspice_veriloga_runtime::arithmetic::sum_products_ratio(
+            [(right.1, 1.0), (left.1, -1.0)].into_iter(),
+            [(right.0, 1.0), (left.0, -1.0)].into_iter(),
+        )
+        .unwrap_or(Value::NAN)
+    } else {
+        interpolate_at(time, left, right)
+    }
+}
+
 impl VoltageSources {
     /// Shared origin for the exact PULSE event clock. Skip wholly negative
     /// cycles without enumerating them; retain any cycle with an edge at t>=0.
@@ -110,7 +134,7 @@ impl VoltageSources {
             .or_else(|| preceding_start.map(|base| time - base))
     }
 
-    pub(super) fn pulse_limit(
+    pub(super) fn pulse_limit<const DERIVATIVE: bool>(
         levels: [Value; 2],
         timing: [Value; 5],
         count: Value,
@@ -120,12 +144,12 @@ impl VoltageSources {
         let [low, high] = levels;
         let [delay, rise, fall, width, period] = timing;
         if before(time, delay, side) || period < 0.0 {
-            return low;
+            return if DERIVATIVE { 0.0 } else { low };
         }
         let elapsed = time - delay;
         let repeating = period.is_finite() && period > 0.0;
         if repeating && count > 0.0 && !before(time, delay + count * period, side) {
-            return low;
+            return if DERIVATIVE { 0.0 } else { low };
         }
         let mut phase = elapsed;
         if repeating && elapsed >= period {
@@ -141,19 +165,27 @@ impl VoltageSources {
         let plateau_end = rise + width;
         let end = plateau_end + fall;
         if before(phase, 0.0, side) || !before(phase, end, side) {
-            low
+            if DERIVATIVE { 0.0 } else { low }
         } else if rise != 0.0 && before(phase, rise, side) {
-            interpolate(low, high, phase / rise)
+            if DERIVATIVE {
+                slope(low, high, rise)
+            } else {
+                interpolate(low, high, phase / rise)
+            }
         } else if before(phase, plateau_end, side) {
-            high
+            if DERIVATIVE { 0.0 } else { high }
         } else if fall != 0.0 {
-            interpolate(high, low, (phase - plateau_end) / fall)
+            if DERIVATIVE {
+                slope(high, low, fall)
+            } else {
+                interpolate(high, low, (phase - plateau_end) / fall)
+            }
         } else {
-            low
+            if DERIVATIVE { 0.0 } else { low }
         }
     }
 
-    pub(super) fn pwl_limit(
+    pub(super) fn pwl_limit<const DERIVATIVE: bool>(
         points: &[(Value, Value)],
         time: Value,
         delay: Value,
@@ -200,8 +232,12 @@ impl VoltageSources {
             })
         };
         let tail = &points[first_index..];
-        let upper = tail.partition_point(|point| clock(point.0) < time);
-        if let Some(&(at, value)) = tail.get(upper)
+        let upper = tail.partition_point(|point| {
+            let at = clock(point.0);
+            at < time || (DERIVATIVE && side == SourceTimeSide::RightLimit && at == time)
+        });
+        if !DERIVATIVE
+            && let Some(&(at, value)) = tail.get(upper)
             && clock(at) == time
         {
             return if side == SourceTimeSide::LeftLimit {
@@ -212,20 +248,29 @@ impl VoltageSources {
         }
         if upper == 0 {
             let Some((start, _)) = active else {
-                return points[0].1;
+                return if DERIVATIVE { 0.0 } else { points[0].1 };
             };
             let value = Self::pwl_raw_limit(points, start, SourceTimeSide::RightLimit);
-            if time <= base {
+            if !DERIVATIVE && time <= base {
                 return value;
             }
-            return interpolate_at(time, (base, value), (clock(tail[0].0), tail[0].1));
+            if DERIVATIVE {
+                return segment_component::<true>(start, (start, value), tail[0]);
+            }
+            return segment_component::<false>(time, (base, value), (clock(tail[0].0), tail[0].1));
         }
         if upper == tail.len() {
-            return tail[upper - 1].1;
+            return if DERIVATIVE { 0.0 } else { tail[upper - 1].1 };
         }
         let (t0, v0) = tail[upper - 1];
         let (t1, v1) = tail[upper];
-        interpolate_at(time, (clock(t0), v0), (clock(t1), v1))
+        if DERIVATIVE {
+            // Absolute event clocks choose the side, but rounding a large
+            // delay into those clocks must not change the authored slope.
+            segment_component::<true>(time, (t0, v0), (t1, v1))
+        } else {
+            segment_component::<false>(time, (clock(t0), v0), (clock(t1), v1))
+        }
     }
 
     fn pwl_raw_limit(points: &[(Value, Value)], time: Value, side: SourceTimeSide) -> Value {
@@ -267,7 +312,7 @@ impl VoltageSources {
         }
     }
 
-    pub(super) fn exp_limit(
+    pub(super) fn exp_limit<const DERIVATIVE: bool>(
         levels: [Value; 2],
         timing: [Value; 4],
         time: Value,
@@ -276,7 +321,30 @@ impl VoltageSources {
         let [low, high] = levels;
         let [td1, tau1, td2, tau2] = timing;
         if before(time, td1, side) {
-            return low;
+            return if DERIVATIVE { 0.0 } else { low };
+        }
+        if DERIVATIVE {
+            use rspice_veriloga_runtime::arithmetic::ScaledValue as S;
+            let regular = |delay: Value, tau: Value| {
+                if before(time, delay, side) || tau == 0.0 {
+                    return Ok(S::new(0.0));
+                }
+                let decay = S::new((-(time - delay) / tau).exp());
+                S::sum_products_div(
+                    [[S::new(high), decay], [S::new(-low), decay]].into_iter(),
+                    S::new(tau),
+                )
+            };
+            return regular(td1, tau1)
+                .and_then(|rise| {
+                    regular(td2, tau2).and_then(|fall| {
+                        S::sum_products_div(
+                            [[rise, S::new(1.0)], [fall.negated(), S::new(1.0)]].into_iter(),
+                            S::new(1.0),
+                        )
+                    })
+                })
+                .map_or(Value::NAN, |value| value.binary64());
         }
         let response = |delay: Value, tau: Value| {
             if before(time, delay, side) {
@@ -287,7 +355,8 @@ impl VoltageSources {
                 -(-(time - delay) / tau).exp_m1()
             }
         };
-        interpolate(low, high, response(td1, tau1) - response(td2, tau2))
+        let weight = response(td1, tau1) - response(td2, tau2);
+        interpolate(low, high, weight)
     }
 }
 

@@ -1052,6 +1052,39 @@ impl VoltageSources {
         time: Value,
         order: usize,
     ) -> Option<Value> {
+        self.time_derivative_at_on_side(index, time, order, SourceTimeSide::Published)
+    }
+
+    /// Regular one-sided derivative at the original physical timestamp.
+    /// Impulses are separate from these finite left/right slopes. Higher
+    /// distributional derivatives require an owning descriptor and are not
+    /// inferred from a value on either side of a discontinuity.
+    pub(crate) fn time_derivative_at_on_side(
+        &self,
+        index: usize,
+        time: Value,
+        order: usize,
+        side: SourceTimeSide,
+    ) -> Option<Value> {
+        if side != SourceTimeSide::Published {
+            if !time.is_finite() {
+                return None;
+            }
+            return match order {
+                0 => Some(self.transient_value_at_on_side(index, time, side)),
+                1 => self.source_specs[index].as_ref().map_or(Some(0.0), |spec| {
+                    let value = VoltageSources::source_time_component_on_side::<true>(
+                        spec,
+                        time,
+                        self.transient_context,
+                        self.pwl_waveforms[index].as_deref(),
+                        side,
+                    );
+                    value.is_finite().then_some(value)
+                }),
+                _ => None,
+            };
+        }
         match order {
             0 => Some(self.transient_value_at(index, time)),
             1 => Some(self.right_derivative_at_time(index, time)),
@@ -2024,6 +2057,39 @@ impl CurrentSources {
         time: Value,
         order: usize,
     ) -> Option<Value> {
+        self.time_derivative_at_on_side(index, time, order, SourceTimeSide::Published)
+    }
+
+    /// Regular one-sided derivative at the original physical timestamp.
+    /// Impulses are separate from these finite left/right slopes. Higher
+    /// distributional derivatives require an owning descriptor and are not
+    /// inferred from a value on either side of a discontinuity.
+    pub(crate) fn time_derivative_at_on_side(
+        &self,
+        index: usize,
+        time: Value,
+        order: usize,
+        side: SourceTimeSide,
+    ) -> Option<Value> {
+        if side != SourceTimeSide::Published {
+            if !time.is_finite() {
+                return None;
+            }
+            return match order {
+                0 => Some(self.value_at_time_on_side(index, time, side)),
+                1 => self.source_specs[index].as_ref().map_or(Some(0.0), |spec| {
+                    let value = VoltageSources::source_time_component_on_side::<true>(
+                        spec,
+                        time,
+                        self.transient_context,
+                        self.pwl_waveforms[index].as_deref(),
+                        side,
+                    );
+                    value.is_finite().then_some(value)
+                }),
+                _ => None,
+            };
+        }
         match order {
             0 => Some(self.value_at_time(index, time)),
             1 => Some(self.right_derivative_at_time(index, time)),

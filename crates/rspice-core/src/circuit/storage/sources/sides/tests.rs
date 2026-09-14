@@ -2,6 +2,8 @@ use super::*;
 use crate::config::SpiceDialect;
 use crate::netlist::SourceSpec;
 
+mod derivatives;
+
 fn sources(spec: SourceSpec, dialect: SpiceDialect) -> (VoltageSources, CurrentSources) {
     let excitation = || SourceExcitation {
         dc_value: 17.0,
