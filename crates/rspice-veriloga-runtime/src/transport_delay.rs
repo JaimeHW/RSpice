@@ -374,6 +374,31 @@ impl DelayBuffer {
         delay: f64,
         max_delay: Option<f64>,
     ) -> Result<DelayDifferenceEvaluation, String> {
+        self.difference_at_discontinuity_on_side(
+            time,
+            left,
+            right,
+            delay,
+            max_delay,
+            DelayTimeSide::Outgoing,
+        )
+    }
+
+    /// Read delayed-minus-present with an independently solved input endpoint
+    /// held fixed, selecting the incoming or outgoing delayed-history side.
+    /// This is also the physical F/J read after an incoming electrical solve:
+    /// moving a present coordinate must not move its retained interpolation
+    /// endpoint. The result is formed directly, preserving cancellation with
+    /// the present input. No history or speculative sample is modified.
+    pub fn difference_at_discontinuity_on_side(
+        &self,
+        time: f64,
+        left: f64,
+        right: f64,
+        delay: f64,
+        max_delay: Option<f64>,
+        side: DelayTimeSide,
+    ) -> Result<DelayDifferenceEvaluation, String> {
         if !left.is_finite() {
             return Err("delay left limit must be finite".into());
         }
@@ -383,7 +408,14 @@ impl DelayBuffer {
         {
             return Err("delay probe left limit differs from its accepted knot".into());
         }
-        self.difference_evaluation(time, right, delay, max_delay, Some(left), false)
+        self.difference_evaluation(
+            time,
+            right,
+            delay,
+            max_delay,
+            Some(left),
+            side == DelayTimeSide::Incoming,
+        )
     }
 
     fn difference_evaluation(
