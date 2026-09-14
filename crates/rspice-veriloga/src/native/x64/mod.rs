@@ -2798,6 +2798,227 @@ endmodule
     }
 
     #[test]
+    fn canonical_mixed_derivatives_match_analytic_math() {
+        // Independent closed forms at zero: no bytecode, finite-difference
+        // approximation, or other compiler route supplies the expected value.
+        let root3 = 3.0_f64.sqrt();
+        let cases = [
+            ("exp(V(p))", 1.0, 1.0),
+            ("limexp(V(p))", 1.0, 1.0),
+            ("__rspice_limited_exp(V(p))", 1.0, 1.0),
+            ("sin(V(p))", -1.0, 0.0),
+            ("cos(V(p))", 0.0, 1.0),
+            ("tan(V(p))", 2.0, 0.0),
+            ("sinh(V(p))", 1.0, 0.0),
+            ("cosh(V(p))", 0.0, 1.0),
+            ("tanh(V(p))", -2.0, 0.0),
+            ("asin(V(p))", 1.0, 0.0),
+            ("acos(V(p))", -1.0, 0.0),
+            ("atan(V(p))", -2.0, 0.0),
+            ("asinh(V(p))", -1.0, 0.0),
+            ("atanh(V(p))", 2.0, 0.0),
+            ("acosh(2+V(p))", 1.0 / root3, -22.0 / (9.0 * root3)),
+            ("ln(2+V(p))", 0.25, -0.375),
+            (
+                "log10(2+V(p))",
+                0.25 / std::f64::consts::LN_10,
+                -0.375 / std::f64::consts::LN_10,
+            ),
+            (
+                "sqrt(2+V(p))",
+                0.375 * 2.0_f64.powf(-2.5),
+                -0.9375 * 2.0_f64.powf(-3.5),
+            ),
+            ("abs(pow(1+V(p),4))", 24.0, 24.0),
+            ("floor(exp(V(p)))", 0.0, 0.0),
+            ("ceil(exp(V(p)))", 0.0, 0.0),
+            ("min(exp(V(p)),10)", 1.0, 1.0),
+            ("max(exp(V(p)),-10)", 1.0, 1.0),
+            ("hypot(V(p),2)", 0.0, -0.375),
+            ("atan2(V(p),2)", -0.25, 0.0),
+            ("pow(2+V(p),7)", 3360.0, 6720.0),
+            ("pow(1+V(p),4)%10", 24.0, 24.0),
+            ("1/(2+V(p))", -0.375, 0.75),
+            ("1e308/(1e308*(1+V(p)))", -6.0, 24.0),
+            ("atan2(1e308*V(p),1e308)", -2.0, 0.0),
+            ("hypot(1e307*V(p),1e307)", 0.0, -3e307),
+            ("V(p)>=0 ? exp(V(p)) : sqrt(V(p)-2)", 1.0, 1.0),
+        ];
+        for (expression, third, fourth) in cases {
+            let source = format!(
+                "module analytic(p,n); inout p,n; electrical p,n; analog I(p,n)<+{expression}; endmodule"
+            );
+            let artifact = VerilogACompiler::new(CompilerOptions::default())
+                .compile_canonical_ir(&source)
+                .unwrap();
+            for (order, expected) in [(3, third), (4, fourth)] {
+                let axes = vec![CanonicalDerivativeAxis::Node(NodeId::from(0)); order];
+                let program = NativeProgram::from_mir_expression_mixed_derivative(
+                    "analytic",
+                    EntryKind::Jacobian,
+                    &artifact.mir,
+                    crate::canonical_ir::EquationId::new(0),
+                    artifact.mir.equations[0].expression.id,
+                    &axes,
+                    NativeLoweringLimits::new(2, 0, 0, 0, 0),
+                )
+                .unwrap_or_else(|error| panic!("{expression}, order {order}: {error}"));
+                let bytes = super::codegen::compile_value_function(&program).unwrap();
+                let memory = ExecutableMemory::allocate(&bytes).unwrap();
+                let function: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+                    unsafe { std::mem::transmute(memory.ptr_at(0).unwrap()) };
+                let ctx = eval_context(&[], &[0.0, 0.0]);
+                let actual = function(&ctx, std::ptr::null());
+                assert!(
+                    actual.is_finite()
+                        && (actual - expected).abs() <= 1e-10 * expected.abs().max(1.0),
+                    "{expression}, order {order}: {actual} != {expected}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn canonical_abs_second_derivative_preserves_nonlinear_operand() {
+        for expression in ["abs(pow(1+V(p),4))", "abs(-pow(1+V(p),4))"] {
+            let source = format!(
+                "module curvature(p,n); inout p,n; electrical p,n; analog I(p,n)<+{expression}; endmodule"
+            );
+            let artifact = VerilogACompiler::default()
+                .compile_canonical_ir(&source)
+                .unwrap();
+            let axes = [CanonicalDerivativeAxis::Node(NodeId::from(0)); 2];
+            let program = NativeProgram::from_mir_expression_mixed_derivative(
+                "curvature",
+                EntryKind::Jacobian,
+                &artifact.mir,
+                crate::canonical_ir::EquationId::new(0),
+                artifact.mir.equations[0].expression.id,
+                &axes,
+                NativeLoweringLimits::new(2, 0, 0, 0, 0),
+            )
+            .unwrap();
+            let bytes = super::codegen::compile_value_function(&program).unwrap();
+            let memory = ExecutableMemory::allocate(&bytes).unwrap();
+            let function: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+                unsafe { std::mem::transmute(memory.ptr_at(0).unwrap()) };
+            let ctx = eval_context(&[], &[0.0, 0.0]);
+            assert_eq!(function(&ctx, std::ptr::null()), 12.0, "{expression}");
+        }
+    }
+
+    #[test]
+    fn canonical_bounded_ddx_ignores_transport_arithmetic() {
+        fn poison(program: &mut BytecodeProgram) -> usize {
+            let mut count = 0;
+            for instruction in &mut program.instructions {
+                if matches!(instruction, Instruction::PushConst(_)) {
+                    *instruction = Instruction::PushConst(99.0);
+                    count += 1;
+                }
+            }
+            count
+        }
+        fn poison_steps(steps: &mut [AssignmentStep]) -> usize {
+            steps
+                .iter_mut()
+                .map(|step| match step {
+                    AssignmentStep::Assign(write) => poison(&mut write.program),
+                    AssignmentStep::AssignIndexed { index, value, .. } => {
+                        poison(index) + poison(value)
+                    }
+                    AssignmentStep::Initialization { body, .. }
+                    | AssignmentStep::Loop { body, .. } => poison_steps(body),
+                    AssignmentStep::Task(_) => 0,
+                })
+                .sum()
+        }
+        let source = include_str!("../../../tests/fixtures/bounded_derivative_loop.va");
+        let report = VerilogACompiler::default()
+            .compile_runtime(source, Some("bounded_ddx"))
+            .unwrap();
+        let mut model = report.model;
+        let poisoned = poison_steps(&mut model.assignment_steps);
+        assert!(
+            poisoned > 10,
+            "must replace computed derivative arithmetic, not just one constant"
+        );
+        poison_jacobian_bytecode(&mut model, 99.0);
+        let plan = crate::jit::plan_builder::build_model_plan_with_canonical_ir(
+            &model,
+            &report.canonical_ir,
+        )
+        .unwrap();
+        let native = super::compile_model_plan(&model, &plan).unwrap();
+        let mut context = native_model_benchmark_context(&model, "bounded_ddx");
+        for order in [0_i32, 1, 4, 6, -2] {
+            for slot in [0, 1] {
+                context.parameters[0] = f64::from(order);
+                context.parameters[1] = f64::from(slot);
+                context.voltages[0] = 0.3;
+                context.voltages[1] = 0.0;
+                let ctx = eval_context_from_vm_context(&mut context);
+                ctx.clear_runtime_error();
+                run_assignment_and_prelude(&native, &ctx, context.variables.as_mut_ptr());
+                assert!(ctx.take_runtime_error().is_none());
+                let expected = 2.0_f64.powi(order.max(0)) * 0.6_f64.exp();
+                let actual = native
+                    .run_stamp_value(0, &ctx, context.variables.as_ptr())
+                    .unwrap();
+                assert!(
+                    (actual - expected).abs() < expected * 1e-11,
+                    "order={order}, slot={slot}: {actual} != {expected}"
+                );
+                assert_jacobian_axis_approx(
+                    &model,
+                    &native,
+                    &ctx,
+                    context.variables.as_ptr(),
+                    0,
+                    |axis| matches!(axis, ColumnAxis::Node(0)),
+                    2.0 * expected,
+                    1e-10,
+                    "poisoned transport",
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn canonical_seventh_mixed_derivative_preserves_axis_order() {
+        let source = "module mixed(p,n); inout p,n; electrical p,n; analog I(p,n)<+exp(2*V(p)+3*V(n)); endmodule";
+        let artifact = VerilogACompiler::new(CompilerOptions::default())
+            .compile_canonical_ir(source)
+            .unwrap();
+        for indices in [[0, 1, 0, 1, 0, 1, 0], [1, 0, 0, 1, 0, 0, 1]] {
+            let axes = indices.map(|index| CanonicalDerivativeAxis::Node(NodeId::from(index)));
+            let program = NativeProgram::from_mir_expression_mixed_derivative(
+                "mixed",
+                EntryKind::Jacobian,
+                &artifact.mir,
+                crate::canonical_ir::EquationId::new(0),
+                artifact.mir.equations[0].expression.id,
+                &axes,
+                NativeLoweringLimits::new(2, 0, 0, 0, 0),
+            )
+            .unwrap();
+            let bytes = super::codegen::compile_value_function(&program).unwrap();
+            let memory = ExecutableMemory::allocate(&bytes).unwrap();
+            let function: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+                unsafe { std::mem::transmute(memory.ptr_at(0).unwrap()) };
+            for (p, n) in [(0.0_f64, 0.0_f64), (0.25, -0.3), (-0.7, 0.4)] {
+                let ctx = eval_context(&[], &[p, n]);
+                let expected = 432.0 * (2.0 * p + 3.0 * n).exp();
+                let actual = function(&ctx, std::ptr::null());
+                assert!(
+                    (actual - expected).abs() < expected * 1e-12,
+                    "{indices:?}: {actual} != {expected}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn canonical_ddx_second_derivative_lowers_third_order_product_rule() {
         let source = r#"
 module native_canonical_ddx_third_product(p, n);
