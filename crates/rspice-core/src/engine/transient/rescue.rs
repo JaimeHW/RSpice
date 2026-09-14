@@ -217,8 +217,7 @@ impl Engine {
                 let base_merit = self
                     .residual_inf_norm(circuit, matrix, &iterate, rhs)
                     .unwrap_or(Value::INFINITY);
-                let mut best_point: Option<Vec<Value>> = None;
-                let mut best_merit = Value::INFINITY;
+                let mut accepted_trial: Option<(Vec<Value>, Value)> = None;
                 let mut alpha: Value = 1.0;
                 for _trial in 0..RESCUE_LINE_SEARCH_TRIALS {
                     if abort.is_aborted() {
@@ -244,19 +243,21 @@ impl Engine {
                     let trial_merit = self
                         .residual_inf_norm(circuit, matrix, &trial, rhs)
                         .unwrap_or(Value::INFINITY);
-                    if trial_merit < best_merit {
-                        best_merit = trial_merit;
-                        best_point = Some(trial);
-                    }
                     let armijo_ok = trial_merit <= 1.0
                         || trial_merit <= base_merit * (1.0 - RESCUE_LINE_SEARCH_ARMIJO_C1 * alpha);
                     if armijo_ok {
+                        accepted_trial = Some((trial, trial_merit));
                         break;
                     }
                     alpha *= 0.5;
                 }
-                let accepted = best_point.unwrap_or(full_step);
-                let accepted_merit = best_merit;
+                // An exhausted line search has no acceptable Newton iterate.
+                // Retry the continuation interval from its last converged
+                // state instead of accepting a rejected trial and repeating
+                // uphill or stagnant steps until the iteration budget expires.
+                let Some((accepted, accepted_merit)) = accepted_trial else {
+                    break;
+                };
 
                 // Every merit trial starts from the same base state and uses
                 // raw generated-device equations. Commit exactly one limited
@@ -361,6 +362,73 @@ impl Engine {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gmin_rescue_rejects_a_discontinuous_load_with_no_root() {
+        // F(v)=(1+gmin)*v+sign(v), with sign(0)=-1, has no zero for
+        // any nonnegative shunt. Every damping trial from v=0 increases
+        // |F|. Recovery must refuse instead of iterating rejected trials.
+        let engine = Engine::default();
+        let netlist =
+            Netlist::parse("discontinuous load\nR1 n 0 1\nB1 n 0 I={if(V(n)>0,1,-1)}\n.end\n")
+                .unwrap();
+        let mut circuit = engine.build_circuit(&netlist).unwrap();
+        let mut matrix = engine.build_matrix(&circuit).unwrap();
+        circuit.link_indices(&matrix);
+        let seed = [0.0];
+        circuit.update_nonlinear(&seed);
+        let accepted = circuit.behavioral_sources.clone();
+        let coeff = CompanionCoefficients::backward_euler();
+        let ctx = residual::TransientSystemContext {
+            coeff: &coeff,
+            xyce_one_step: false,
+            xyce_one_step_order2: false,
+            xyce_static_history: None,
+            bsim4_trnqs_coeff: &coeff,
+            bjt_history: &Default::default(),
+            jfet_history: &Default::default(),
+            diode_history: &Default::default(),
+            diode_attempt_cache: None,
+            mosfet_history: &Default::default(),
+            mosfet_companion_slots: &[],
+            vdmos_history: &Default::default(),
+            vdmos_companion_slots: &[],
+            b3soi_history: &Default::default(),
+            b3soi_zero_first_transient_charge_derivative: false,
+            bsim3_history: &Default::default(),
+            bsim4_history: &Default::default(),
+            ekv26_history: &Default::default(),
+            suppress_gate_charge: false,
+            baseline_diag_gmin: 0.0,
+            tline_dc_refs: &[],
+            coupled_tline_refs: &[],
+            analysis_initial_step: false,
+            analysis_final_step: false,
+        };
+        // A generous deterministic work bound, not a wall-clock assertion.
+        // The old fallback exhausts this budget despite having no root.
+        let abort = crate::abort_signal::CountingAbort::new(64);
+        let result = engine
+            .rescue_transient_step_with_gmin_continuation(
+                &mut circuit,
+                &mut matrix,
+                &mut [0.0],
+                &seed,
+                1e-9,
+                1e-9,
+                &ctx,
+                &mut [],
+                &abort,
+            )
+            .expect("unsatisfiable continuation must refuse before cancellation");
+        assert!(result.is_none());
+        assert_eq!(abort.observed_at(), None);
+        // A failed line search must not retain the final probe's device state.
+        assert_eq!(
+            format!("{:?}", circuit.behavioral_sources),
+            format!("{accepted:?}")
+        );
+    }
 
     #[test]
     fn gmin_rescue_cancellation_restores_device_and_charge_cache() {
