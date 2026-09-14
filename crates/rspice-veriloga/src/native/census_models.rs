@@ -76,7 +76,7 @@ use crate::rust_backend::{discover_veriloga_sources, parse_generated_builtin_man
 use crate::{CompilerOptions, VerilogACompiler};
 
 /// Bump by hand whenever [`CachedEntry`] changes shape.
-const CACHE_SCHEMA_VERSION: u32 = 1;
+const CACHE_SCHEMA_VERSION: u32 = 2;
 
 const CACHE_DIR_NAME: &str = "veriloga-census-cache";
 

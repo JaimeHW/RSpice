@@ -1118,7 +1118,7 @@ fn census_model(shipped: &CensusModel, tally: &mut Tally) -> Option<String> {
                 model.internal_nodes,
                 &branch_unknowns,
                 state_len,
-                0,
+                model.event_state_variables.len(),
             )
             .with_initial_step()
             // The CFG plan's prelude publishes into these, and every value
@@ -1169,9 +1169,10 @@ fn census_model(shipped: &CensusModel, tally: &mut Tally) -> Option<String> {
         context.currents_len = storage.currents.len();
         context.branch_currents = storage.branch_currents.as_mut_ptr();
         context.branch_currents_len = storage.branch_currents.len();
-        // The assignment passes are the same programs in both plans, so filling
-        // the variable array once with the shipped one is not a bias toward it.
+        // Each plan owns its source evaluation. They share immutable accepted
+        // inputs, but neither may seed its variables from the other's output.
         let mut variables = vec![0.0_f64; model.num_variables + 64];
+        let mut cfg_variables = vec![0.0_f64; model.num_variables + 64];
         context.clear_runtime_error();
         mir_native.run_assignments(&context, variables.as_mut_ptr());
         if let Some(error) = context.take_runtime_error() {
@@ -1180,10 +1181,14 @@ fn census_model(shipped: &CensusModel, tally: &mut Tally) -> Option<String> {
                 "{module}: point={index} native assignments failed: {error}"
             ));
         }
-        // The CFG plan's own assignment pass, in the position the device runs
-        // it: after the variables are filled and before any entry is read. The
-        // shipped plan has none, and its entries do not read a slot.
-        cfg_native.run_prelude(&context, variables.as_ptr());
+        cfg_native.run_assignments(&context, cfg_variables.as_mut_ptr());
+        if let Some(error) = context.take_runtime_error() {
+            tally.preparation_errors += 1;
+            return Some(format!(
+                "{module}: point={index} CFG assignments failed: {error}"
+            ));
+        }
+        cfg_native.run_prelude(&context, cfg_variables.as_ptr());
         if let Some(error) = context.take_runtime_error() {
             tally.preparation_errors += 1;
             return Some(format!(
@@ -1199,7 +1204,7 @@ fn census_model(shipped: &CensusModel, tally: &mut Tally) -> Option<String> {
             let entry = *entry;
             let (Some(mir), Some(cfg)) = (
                 run_entry(&mir_native, entry, &context, variables.as_ptr()),
-                run_entry(&cfg_native, entry, &context, variables.as_ptr()),
+                run_entry(&cfg_native, entry, &context, cfg_variables.as_ptr()),
             ) else {
                 tally.runtime_errors += 1;
                 continue;

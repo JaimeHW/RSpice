@@ -110,7 +110,7 @@ pub(super) struct OperatingPoint {
     /// Accepted event-controlled procedural state, in dense slot order. The
     /// interpreter refuses a slot it was not given, and every value is zero
     /// because a static evaluation has no accepted history.
-    event_state_slots: usize,
+    evaluation_state_inputs: Vec<f64>,
     /// Whether `@(initial_step)` is active here. See
     /// [`OperatingPoint::with_initial_step`].
     initial_step: bool,
@@ -178,7 +178,7 @@ impl OperatingPoint {
             analysis,
             state: vec![0.0; state_len],
             state_flags: vec![0; state_len],
-            event_state_slots,
+            evaluation_state_inputs: vec![0.0; event_state_slots],
             initial_step: false,
             prelude_slots: Vec::new(),
         }
@@ -239,7 +239,7 @@ impl OperatingPoint {
             parameters: self.parameters.clone(),
             parameter_given: self.parameter_given.iter().map(|byte| *byte != 0).collect(),
             port_connected: self.port_connected.iter().map(|byte| *byte != 0).collect(),
-            event_state: vec![0.0; self.event_state_slots],
+            event_state: self.evaluation_state_inputs.clone(),
             node_potentials,
             branch_flows: vec![0.0; branch_count],
             branch_unknown_flows: self.branch_unknowns.clone(),
@@ -341,7 +341,7 @@ impl OperatingPoint {
             branch_unknowns: &self.runtime_branch_unknowns,
             currents,
             branch_currents,
-            evaluation_state_inputs: &[],
+            evaluation_state_inputs: &self.evaluation_state_inputs,
             temperature: self.temperature,
             time: self.time,
             multiplicity: self.multiplicity,
@@ -371,6 +371,8 @@ impl OperatingPoint {
         context.time = self.time;
         context.analysis_type = self.analysis;
         context.analysis_initial_step = u8::from(self.initial_step);
+        context.evaluation_state_inputs = self.evaluation_state_inputs.as_ptr();
+        context.evaluation_state_inputs_len = self.evaluation_state_inputs.len();
         context.integration_active = 0;
         let values = self.state.as_mut_ptr();
         let flags = self.state_flags.as_mut_ptr();
