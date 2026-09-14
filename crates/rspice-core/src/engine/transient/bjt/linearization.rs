@@ -11,6 +11,7 @@ impl Engine {
         step: BjtChargeStep<'_>,
     ) -> Option<BjtTransientLinearization> {
         let BjtChargeStep {
+            phase,
             coeff,
             dt,
             q_prev,
@@ -36,6 +37,49 @@ impl Engine {
         let qbx_branch = snapshot.branches[BJT_QBCX_BRANCH_INDEX];
         let qcs_branch = snapshot.branches[BJT_QBCP_BRANCH_INDEX];
         let mut has_dynamic_charge = false;
+        if let Some(phase) = phase {
+            let corrections = [
+                Some(
+                    phase
+                        .correction(bjt, &snapshot.reduction.internal_voltages)
+                        .ok()?,
+                ),
+                bjt.legacy_base_resistance_jacobian_correction(
+                    &snapshot.reduction.internal_voltages,
+                ),
+            ];
+            for correction in corrections.into_iter().flatten() {
+                let source = correction.linearization_dot(
+                    &snapshot.reduction.internal_voltages,
+                    &snapshot.reduction.external_voltages,
+                ) - correction.current;
+                if !source.is_finite() {
+                    return None;
+                }
+                let incidence = BjtChargeBranch {
+                    pos_internal: correction.pos_internal,
+                    neg_internal: correction.neg_internal,
+                    pos_external: correction.pos_external,
+                    neg_external: correction.neg_external,
+                    ..Default::default()
+                };
+                Self::stamp_legacy_bjt_companion(
+                    &incidence,
+                    &correction.d_internal,
+                    &correction.d_external,
+                    source,
+                    BjtCompanionSystem {
+                        g_ii: &mut g_ii,
+                        g_ie: &mut g_ie,
+                        g_ei: &mut g_ei,
+                        g_ee: &mut g_ee,
+                        z_i: &mut z_i,
+                        z_e: &mut z_e,
+                    },
+                );
+            }
+            has_dynamic_charge = true;
+        }
 
         if qbe_branch.is_active() {
             let cqbe = Self::jfet_companion_ccap(
@@ -531,19 +575,21 @@ impl Engine {
         step: BjtChargeStep<'_>,
     ) -> Result<[Value; BJT_EXTERNAL_STATE_DIM], SimulationError> {
         let BjtChargeStep {
+            phase,
             coeff,
             dt,
             q_prev,
             q_prev_prev,
             cq_prev,
         } = step;
-        if !snapshot.branches.iter().any(BjtChargeBranch::is_active) {
+        if phase.is_none() && !snapshot.branches.iter().any(BjtChargeBranch::is_active) {
             return Ok(bjt.operating_point_terminal_currents());
         }
         let linearization = Self::assemble_legacy_bjt_transient_linearization(
             bjt,
             snapshot,
             BjtChargeStep {
+                phase,
                 coeff,
                 dt,
                 q_prev,
@@ -724,6 +770,7 @@ mod tests {
                         &bjt,
                         &snapshot,
                         BjtChargeStep {
+                            phase: None,
                             coeff: &coeff,
                             dt,
                             q_prev: &previous,

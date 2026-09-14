@@ -1014,6 +1014,7 @@ impl Engine {
                 bjt,
                 [vc, vb, ve, vs],
                 BjtChargeStep {
+                    phase: None,
                     coeff,
                     dt,
                     q_prev: &history.charge_q_prev[idx],
@@ -1043,6 +1044,7 @@ impl Engine {
                 bjt,
                 &snapshot,
                 BjtChargeStep {
+                    phase: None,
                     coeff,
                     dt,
                     q_prev: &history.charge_q_prev[idx],

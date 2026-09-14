@@ -43,6 +43,47 @@ pub(in crate::engine::transient) struct BjtChargeStep<'a> {
     pub q_prev: &'a [Value; BJT_DYNAMIC_CHARGE_COUNT],
     pub q_prev_prev: &'a [Value; BJT_DYNAMIC_CHARGE_COUNT],
     pub cq_prev: &'a [Value; BJT_DYNAMIC_CHARGE_COUNT],
+    pub phase: Option<BjtPhaseTrial<'a>>,
+}
+
+/// Accepted transport memory read by one speculative electrical timepoint.
+/// The nonlinear solve cannot append, replace, or prune that memory.
+#[derive(Clone, Copy)]
+pub(in crate::engine::transient) struct BjtPhaseTrial<'a> {
+    pub history: &'a rspice_veriloga_runtime::transport_delay::DelayBuffer,
+    pub time: Value,
+}
+
+impl BjtPhaseTrial<'_> {
+    fn correction(
+        self,
+        bjt: &crate::device::Bjt,
+        internal: &[Value; BJT_INTERNAL_STATE_DIM],
+    ) -> Result<crate::device::semiconductor::BjtCurrentBranch, String> {
+        let mut branch = bjt
+            .legacy_forward_transport_branch(internal)
+            .ok_or_else(|| {
+                "GP transport history was attached to a different BJT model".to_owned()
+            })?;
+        let delay = bjt.legacy_excess_phase_delay();
+        if !delay.is_finite() || delay <= 0.0 {
+            return Err("GP transport requires a finite positive nominal phase delay".into());
+        }
+        let retained_delay =
+            self.history
+                .small_signal_delay(self.time, branch.current, delay, None)?;
+        if retained_delay.to_bits() != delay.to_bits() {
+            return Err("GP transport history belongs to a different nominal phase delay".into());
+        }
+        let evaluation =
+            self.history
+                .difference_with_coefficients(self.time, branch.current, delay, None)?;
+        branch.current = evaluation.output;
+        for derivative in branch.d_internal.iter_mut().chain(&mut branch.d_external) {
+            *derivative = evaluation.apply_input_derivative(*derivative)?;
+        }
+        Ok(branch)
+    }
 }
 
 /// Accepted state for the private BJT predictor: the latest internal nodes,
@@ -71,3 +112,6 @@ pub(in crate::engine::transient) struct BjtCompanionSystem<'a> {
 
 mod linearization;
 mod snapshot;
+
+#[cfg(test)]
+mod phase_tests;

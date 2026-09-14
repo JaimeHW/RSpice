@@ -12,7 +12,7 @@ pub(crate) use bjt::{
     AcceptedBjtChargeSnapshotCheckpoint, AcceptedBjtNonlinearCheckpoint,
     BJT_ACCEPTED_CHARGE_SNAPSHOT_STATE_VALUE_COUNT, BJT_ACCEPTED_NONLINEAR_STATE_VALUE_COUNT,
     BJT_DYNAMIC_CHARGE_COUNT, BJT_EXTERNAL_STATE_DIM, BJT_INTERNAL_STATE_DIM, BjtChargeBranch,
-    BjtChargeSnapshot, VBIC_ACCEPTED_NONLINEAR_STATE_VALUE_COUNT,
+    BjtChargeSnapshot, BjtCurrentBranch, VBIC_ACCEPTED_NONLINEAR_STATE_VALUE_COUNT,
 };
 pub use bjt::{Bjt, BjtType};
 pub(crate) use diode::{

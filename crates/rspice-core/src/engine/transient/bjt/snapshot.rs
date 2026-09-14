@@ -72,6 +72,7 @@ impl Engine {
         seed: [Value; BJT_INTERNAL_STATE_DIM],
     ) -> Option<BjtChargeSnapshot> {
         let BjtChargeStep {
+            phase,
             coeff,
             dt,
             q_prev,
@@ -84,6 +85,7 @@ impl Engine {
             bjt,
             &snapshot,
             BjtChargeStep {
+                phase,
                 coeff,
                 dt,
                 q_prev,
@@ -138,6 +140,7 @@ impl Engine {
                         bjt,
                         &candidate_snapshot,
                         BjtChargeStep {
+                            phase,
                             coeff,
                             dt,
                             q_prev,
@@ -202,7 +205,8 @@ impl Engine {
             let snapshot = bjt.charge_snapshot(external[0], external[1], external[2], external[3]);
             // A chargeless device legitimately has no dynamic companion.
             // An active charge solve must not fall back to its DC root.
-            (!snapshot.branches.iter().any(BjtChargeBranch::is_active)).then_some(snapshot)
+            (step.phase.is_none() && !snapshot.branches.iter().any(BjtChargeBranch::is_active))
+                .then_some(snapshot)
         })
     }
 
@@ -449,6 +453,7 @@ mod tests {
                             &bjt,
                             polarity,
                             BjtChargeStep {
+                                phase: None,
                                 coeff: &coeff,
                                 dt: 15e-9,
                                 q_prev: &zero,
@@ -478,6 +483,7 @@ mod tests {
         let be = CompanionCoefficients::backward_euler();
         let trap = CompanionCoefficients::trapezoidal();
         let step = BjtChargeStep {
+            phase: None,
             coeff: &be,
             dt: 15e-9,
             q_prev: &zero,

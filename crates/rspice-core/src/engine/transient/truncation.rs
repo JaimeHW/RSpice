@@ -1073,6 +1073,7 @@ impl Engine {
                     bjt,
                     candidate_external,
                     BjtChargeStep {
+                        phase: None,
                         coeff: &coeff,
                         dt,
                         q_prev: &history.charge_q_prev[idx],

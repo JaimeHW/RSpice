@@ -11,6 +11,72 @@ pub(crate) struct LegacyBjtThermalNoise {
 }
 
 impl Bjt {
+    /// Nonlinear forward transport in physical collector-to-emitter
+    /// orientation. Both junction partials belong to the delayed signal;
+    /// this is distinct from the legacy AC compatibility gm+go correction.
+    pub(crate) fn legacy_forward_transport_branch(
+        &self,
+        internal: &[Value; BJT_INTERNAL_STATE_DIM],
+    ) -> Option<BjtCurrentBranch> {
+        if !self.uses_legacy_gummel_poon() {
+            return None;
+        }
+        let p = self.polarity();
+        let transport = self.legacy_transport_charge_state(
+            p * (internal[IDX_VBI] - internal[IDX_VEI]),
+            p * (internal[IDX_VBI] - internal[IDX_VCI]),
+        );
+        let collector = self.legacy_charge_collector_terminal();
+        let emitter = self.legacy_charge_emitter_terminal();
+        let mut branch = BjtCurrentBranch {
+            current: p * transport.itzf,
+            pos_internal: collector.0,
+            pos_external: collector.1,
+            neg_internal: emitter.0,
+            neg_external: emitter.1,
+            ..Default::default()
+        };
+        branch.d_internal[IDX_VBI] = transport.ditzf_dvbe_eff + transport.ditzf_dvbc_eff;
+        branch.d_internal[IDX_VCI] = -transport.ditzf_dvbc_eff;
+        branch.d_internal[IDX_VEI] = -transport.ditzf_dvbe_eff;
+        Some(branch)
+    }
+
+    /// Complete the derivative of the physical base-spreading resistance
+    /// for a coherent transient operator. Legacy SPICE Newton/AC freezes R
+    /// at each bias; this correction changes its tangent, not its current.
+    pub(crate) fn legacy_base_resistance_jacobian_correction(
+        &self,
+        internal: &[Value; BJT_INTERNAL_STATE_DIM],
+    ) -> Option<BjtCurrentBranch> {
+        if !self.uses_legacy_gummel_poon() || !Self::series_active(self.rbi) {
+            return None;
+        }
+        let (linearized, _) = self.linearize_currents_with_branches(
+            internal[IDX_VBI] - internal[IDX_VEI],
+            internal[IDX_VBX] - internal[IDX_VEI],
+            internal[IDX_VBI] - internal[IDX_VCI],
+        );
+        let resistance = self.legacy_gp_base_resistance_law::<true>(
+            linearized,
+            self.guarded_series_resistance(self.rbi),
+        );
+        let current = (internal[IDX_VBX] - internal[IDX_VBI]) / resistance.current;
+        let private_outer = Self::series_active(self.rbx);
+        let mut correction = BjtCurrentBranch {
+            pos_internal: private_outer.then_some(IDX_VBX),
+            pos_external: (!private_outer).then_some(EXT_B),
+            neg_internal: Some(IDX_VBI),
+            ..Default::default()
+        };
+        for (derivative, resistance_derivative) in
+            correction.d_internal.iter_mut().zip(resistance.d_internal)
+        {
+            *derivative = -current * (resistance_derivative / resistance.current);
+        }
+        Some(correction)
+    }
+
     /// Forward transconductance affected by GP PTF, before private-node
     /// elimination. ngspice bjtacld.c rotates gm+go, which is dIc/dVbe;
     /// reverse transport, output conductance and charge are not rotated.
