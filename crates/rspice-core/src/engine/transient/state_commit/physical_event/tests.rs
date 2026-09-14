@@ -270,6 +270,10 @@ fn physical_event_acceptance_keeps_native_gp_charge_rates_and_total_lead_current
                 )
                 .unwrap();
             assert_eq!(history, before);
+            assert_eq!(
+                point.phase_current_couplings(),
+                &[Some(charge_event::CurrentJumpCoupling::Cancels)]
+            );
             let expected_currents = point.bjt.values[0].currents;
             let expected_charges = point.bjt.values[0].charges;
             let mut solution = point.state.solution.clone();

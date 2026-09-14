@@ -94,6 +94,16 @@ pub(super) struct ChargeEventState {
     pub iterations: usize,
 }
 
+/// Structural coupling of a prescribed, charge-free nodal current to the
+/// jump constraints. This describes equations, not their regularity or a
+/// license to discard propagated events. Ideal-source finite currents may
+/// jump even when the forcing cancels from the jump equations.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::engine::transient) enum CurrentJumpCoupling {
+    Cancels,
+    Present,
+}
+
 pub(super) struct ChargeEventTopology {
     nodes: usize,
     size: usize,
@@ -108,6 +118,32 @@ pub(super) struct ChargeEventTopology {
 }
 
 impl ChargeEventTopology {
+    /// A current contributes +u and -u to its terminal KCL rows. Only
+    /// ungrounded group sums retain F in the jump system; equal group roots
+    /// cancel this incidence identically, including all its derivatives.
+    /// No numerical zero, current magnitude or capacitance threshold enters
+    /// this test. Different groups conservatively retain direct coupling.
+    ///
+    /// With unchanged source constraints and locally smooth, nonsingular
+    /// jump/rate equations, cancellation lets a current discontinuity affect
+    /// coordinate rates without changing nodal values. Singular systems and
+    /// higher-index/unsupported descriptors need a separate analysis; the
+    /// ordinary event solve still has to establish its local regularity.
+    pub(in crate::engine::transient) fn current_jump_coupling(
+        &self,
+        positive: usize,
+        negative: usize,
+    ) -> Result<CurrentJumpCoupling> {
+        if positive > self.nodes || negative > self.nodes {
+            return Err(error("current event port outside the node population"));
+        }
+        Ok(if self.roots[positive] == self.roots[negative] {
+            CurrentJumpCoupling::Cancels
+        } else {
+            CurrentJumpCoupling::Present
+        })
+    }
+
     pub(in crate::engine::transient) fn source_branches(
         &self,
     ) -> impl ExactSizeIterator<Item = usize> + '_ {

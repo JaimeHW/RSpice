@@ -1,5 +1,7 @@
 use super::*;
 
+mod current_coupling;
+
 #[test]
 fn prepared_event_circuit_solves_biased_gp_jump_with_canonical_rbi_ports() {
     for (kind, polarity) in [("NPN", 1.0), ("PNP", -1.0)] {
@@ -159,6 +161,13 @@ fn bug805(text: &str) {
     let topology = sampler
         .topology(0.0, SourceTimeSide::RightLimit, &options, &NoAbort)
         .unwrap();
+    let (p, n) = sampler.models()[0]
+        .legacy_forward_transport_nodes()
+        .unwrap();
+    assert_eq!(
+        topology.current_jump_coupling(p, n).unwrap(),
+        CurrentJumpCoupling::Cancels
+    );
     let outgoing = topology
         .solve(&incoming, &left.q.values, &options, &NoAbort, |state, _| {
             sampler.sample(

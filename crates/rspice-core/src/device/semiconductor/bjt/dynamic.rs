@@ -11,6 +11,26 @@ pub(crate) struct LegacyBjtThermalNoise {
 }
 
 impl Bjt {
+    /// Physical incidence of GP forward transport, without evaluating its
+    /// value or Jacobian at a particular bias. Private terminals must have
+    /// been promoted before they can identify global equation nodes.
+    pub(crate) fn legacy_forward_transport_nodes(&self) -> Option<(NodeId, NodeId)> {
+        if !self.uses_legacy_gummel_poon() {
+            return None;
+        }
+        let external = self.external_terminal_nodes();
+        let node = |terminal: (Option<usize>, Option<usize>)| {
+            terminal.1.map(|index| external[index]).or_else(|| {
+                terminal
+                    .0
+                    .filter(|_| self.mna_promoted())
+                    .map(|index| self.mna_internal_node(index))
+            })
+        };
+        node(self.legacy_charge_collector_terminal())
+            .zip(node(self.legacy_charge_emitter_terminal()))
+    }
+
     /// Nonlinear forward transport in physical collector-to-emitter
     /// orientation. Both junction partials belong to the delayed signal;
     /// this is distinct from the legacy AC compatibility gm+go correction.

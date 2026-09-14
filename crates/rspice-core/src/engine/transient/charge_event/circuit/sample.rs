@@ -233,14 +233,10 @@ fn stamp_phase(
         model.node_emitter,
         model.node_substrate,
     ];
-    for (internal, external, sign) in [
-        (branch.pos_internal, branch.pos_external, 1.0),
-        (branch.neg_internal, branch.neg_external, -1.0),
-    ] {
-        let row = internal
-            .map(|index| model.mna_internal_node(index))
-            .or_else(|| external.map(|index| terminals[index]))
-            .unwrap_or(0);
+    let (positive, negative) = model
+        .legacy_forward_transport_nodes()
+        .ok_or_else(|| failure("missing prepared GP current port".into()))?;
+    for (row, sign) in [(positive, 1.0), (negative, -1.0)] {
         sample.f.stamp_rhs(row, -sign * branch.current);
         for (index, &derivative) in branch.d_internal.iter().enumerate() {
             sample

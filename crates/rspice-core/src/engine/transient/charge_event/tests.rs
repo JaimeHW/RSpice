@@ -2,6 +2,7 @@ use super::*;
 use crate::abort_signal::NoAbort;
 use crate::device::MatrixStamper;
 
+mod current_coupling;
 mod flux;
 mod native;
 
