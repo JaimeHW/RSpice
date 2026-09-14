@@ -289,7 +289,16 @@ impl CfgPrelude {
         // Prune to every output at once. This is the union the census names as
         // the numerator of the fix, and taking it here is what makes the whole
         // prelude one slice rather than one slice per entry.
-        let (pruned, pruned_outputs) = prune_cfg_to_outputs(function, &outputs);
+        let (mut pruned, pruned_outputs) = prune_cfg_to_outputs(function, &outputs);
+        if !variables.effects.is_empty() {
+            super::cfg_task_dispatch::guard_task_only_computations(
+                &mut pruned,
+                &pruned_outputs[..slot_count + variables.values.len()],
+            );
+            pruned.validate().map_err(|error| {
+                refuse(CfgPlanRefusal::Lowering, format!("task dispatch: {error}"))
+            })?;
+        }
         let publications: Vec<(ValueId, usize)> = pruned_outputs
             .iter()
             .copied()

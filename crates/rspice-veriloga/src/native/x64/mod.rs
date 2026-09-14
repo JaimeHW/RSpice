@@ -2370,6 +2370,42 @@ endmodule
     }
 
     #[test]
+    fn native_task_argument_function_observations_skip_private_loop_inputs() {
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let report = compiler
+            .compile_runtime(
+                include_str!("../../../tests/fixtures/task_argument_functions.va"),
+                None,
+            )
+            .unwrap();
+        let native = compile_model_with_canonical_ir(&report.model, &report.canonical_ir).unwrap();
+        let mut variables = vec![0.0; native.num_variables.max(1)];
+        let mut voltages = [0.5, 0.0];
+        let mut context = VmContext::new(2);
+        context.begin_stateful_evaluation();
+        let mut frame = eval_context(&[], &voltages);
+        frame.analog_effects = context.analog_effects_ptr();
+        run_assignment_and_prelude(&native, &frame, variables.as_mut_ptr());
+        assert!(frame.take_runtime_error().is_none());
+        let pending = context.candidate_analog_tasks().unwrap().to_vec();
+        assert_eq!(pending.len(), 3);
+        context.begin_stateful_observation();
+        frame.analog_effects = context.analog_effects_ptr();
+        voltages[0] = 0.0;
+        frame.voltages = voltages.as_ptr();
+        run_assignment_and_prelude(&native, &frame, variables.as_mut_ptr());
+        assert!(frame.take_runtime_error().is_none());
+        assert_eq!(context.candidate_analog_tasks().unwrap(), pending);
+        let authored = report
+            .model
+            .variable_names
+            .iter()
+            .position(|name| name == "__fn1_identity__x")
+            .unwrap();
+        assert_eq!(variables[authored], 0.25);
+    }
+
+    #[test]
     fn compile_model_with_canonical_ir_lowers_assignments_from_hir_not_bytecode() {
         let source = r#"
 module native_canonical_assignment_source(p, n);

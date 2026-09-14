@@ -2570,7 +2570,7 @@ impl CfgFunction {
 /// Also what decides, when a body is split by invalidation class, whether a
 /// value crossing a stage boundary needs a cache slot or is simply rebuilt: a
 /// leaf reads nothing, so rebuilding it is free and costs no slot.
-pub(super) fn is_leaf_kind(kind: &CfgValueKind) -> bool {
+pub(crate) fn is_leaf_kind(kind: &CfgValueKind) -> bool {
     is_leaf(kind)
 }
 

@@ -14,6 +14,7 @@ pub(crate) mod cfg_plan_builder;
 pub(crate) mod cfg_prelude;
 #[path = "../native/cfg_program.rs"]
 pub(crate) mod cfg_program;
+mod cfg_task_dispatch;
 pub(crate) mod coverage;
 pub(crate) mod current_dependencies;
 #[path = "../native/error.rs"]

@@ -5297,9 +5297,13 @@ impl SemanticAnalyzer {
         self.local_counter += 1;
         let call_id = self.local_counter;
         let prefix = format!("__fn{call_id}_{}", func.name);
-        let make_name = |name: &SmolStr| -> SmolStr { SmolStr::from(format!("{prefix}__{name}")) };
+        // Function call storage belongs to the compiler's private namespace.
+        // Unlike a textual prefix, '@' cannot collide with an authored variable
+        // and does not make a task-only argument into a public readback root.
+        let make_name =
+            |name: &SmolStr| -> SmolStr { SmolStr::from(format!("{prefix}@local_{name}")) };
 
-        let return_name: SmolStr = format!("{prefix}__return").into();
+        let return_name: SmolStr = format!("{prefix}@result").into();
         self.register_function_temp(module, return_name.clone(), func.return_type, func.span)?;
 
         let mut frame = HashMap::new();

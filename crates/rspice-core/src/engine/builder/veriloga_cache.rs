@@ -317,7 +317,9 @@ use super::*;
 // inferred real/integral values, including localparams (HIR 61).
 // Version 96 records event-owned derivative slots, which start each numerical
 // evaluation at zero while observations retain the current candidate's slope.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 96;
+// Version 97 preserves private inlined-function storage rather than treating
+// task-only call inputs as externally observable variables (HIR 62).
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 97;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]

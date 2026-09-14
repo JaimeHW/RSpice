@@ -143,7 +143,8 @@ pub const WASM_JIT_ABI_VERSION: u32 = 17;
 /// Version 50 publishes switch-branch candidates from the canonical prelude.
 /// Version 51 evaluates event-owned readbacks in the canonical source body.
 /// Version 52 captures task arguments and ordered calls in the canonical prelude.
-pub const WASM_JIT_EMITTER_VERSION: u32 = 52;
+/// Version 53 gates task-only inlined computations before argument conversion.
+pub const WASM_JIT_EMITTER_VERSION: u32 = 53;
 
 /// Hard ceiling for one qualified shipped model's generated module.
 pub const SHIPPED_MODEL_WASM_CODE_SIZE_BUDGET_BYTES: usize = 32 * 1024 * 1024;
@@ -2989,6 +2990,149 @@ endmodule
                 .candidate_analog_tasks()
                 .unwrap(),
             pending
+        );
+    }
+
+    #[test]
+    fn wasm_task_argument_function_observation_skips_invalid_input_conversion() {
+        for (body, call_count) in [
+            ("identity=x;", 1),
+            ("$finish(1); identity=x;", 2),
+            ("if(x>1) $finish(1); else $finish(2); identity=x;", 2),
+            ("for(k=0;k<x;k=k+1) $finish(k); identity=x;", 2),
+            (
+                "for(k=0;k<x;k=k+1) for(j=0;j<x;j=j+1) $finish(k+j); identity=x;",
+                2,
+            ),
+        ] {
+            let source = format!(
+                "module task_function_probe(p,n); inout p,n; electrical p,n;
+             analog function integer identity;
+                 input x; integer x,k,j; begin {body} end endfunction
+             analog begin $finish(identity(1/V(p,n))); I(p,n)<+V(p,n); end endmodule"
+            );
+            let mut harness = FusedKernelHarness::for_source(&source, "task_function_probe");
+            harness.reset();
+            harness
+                .store
+                .data_mut()
+                .context_mut()
+                .begin_stateful_evaluation();
+            harness.write_f64(FusedKernelHarness::VOLTAGES as usize, 1.0);
+            harness.call_assignments();
+            harness.call_prelude();
+            let pending = harness
+                .store
+                .data()
+                .context()
+                .candidate_analog_tasks()
+                .unwrap()
+                .to_vec();
+            assert_eq!(pending.len(), call_count);
+            harness
+                .store
+                .data_mut()
+                .context_mut()
+                .begin_stateful_observation();
+            harness.write_f64(FusedKernelHarness::VOLTAGES as usize, 0.0);
+            harness.call_assignments();
+            let prelude = harness.artifact.prelude_export().unwrap().to_owned();
+            assert_eq!(
+                harness.call(&prelude),
+                0,
+                "observation of function body: {body}"
+            );
+            assert_eq!(
+                harness
+                    .store
+                    .data()
+                    .context()
+                    .candidate_analog_tasks()
+                    .unwrap(),
+                pending
+            );
+        }
+    }
+
+    #[test]
+    fn wasm_task_argument_shared_function_output_preserves_numerical_failures() {
+        for body in [
+            "out=x; $finish(1); identity=x;",
+            "out=0; for(k=0;k<x;k=k+1) begin out=out+k+1; $finish(k); end identity=x;",
+        ] {
+            let source = format!(
+                "module task_shared(p,n); inout p,n; electrical p,n; real y;
+             analog function integer identity;
+             input x; output out; integer x,k; real out;
+             begin {body} end endfunction
+             analog begin $finish(identity(1/V(p,n), y)); I(p,n)<+y*V(p,n); end endmodule"
+            );
+            let mut harness = FusedKernelHarness::for_source(&source, "task_shared");
+            harness.reset();
+            harness
+                .store
+                .data_mut()
+                .context_mut()
+                .begin_stateful_evaluation();
+            harness.write_f64(FusedKernelHarness::VOLTAGES as usize, 1.0);
+            harness.call_assignments();
+            harness.call_prelude();
+            assert_eq!(
+                harness
+                    .store
+                    .data()
+                    .context()
+                    .candidate_analog_tasks()
+                    .unwrap()
+                    .len(),
+                2
+            );
+            harness
+                .store
+                .data_mut()
+                .context_mut()
+                .begin_stateful_observation();
+            harness.write_f64(FusedKernelHarness::VOLTAGES as usize, 0.0);
+            harness.call_assignments();
+            let prelude = harness.artifact.prelude_export().unwrap().to_owned();
+            assert_ne!(
+                harness.call(&prelude),
+                0,
+                "shared numerical conversion must still fail"
+            );
+        }
+    }
+
+    #[test]
+    fn wasm_task_argument_conversion_fails_before_a_nested_call() {
+        let mut harness = FusedKernelHarness::for_source(
+            "module task_failure_order(p,n); inout p,n; electrical p,n;
+             analog function integer identity;
+             input x; integer x; begin $finish(99); identity=x; end endfunction
+             analog begin $finish(identity(1/V(p,n))); I(p,n)<+V(p,n); end endmodule",
+            "task_failure_order",
+        );
+        harness.reset();
+        harness
+            .store
+            .data_mut()
+            .context_mut()
+            .begin_stateful_evaluation();
+        harness.write_f64(FusedKernelHarness::VOLTAGES as usize, 0.0);
+        harness.call_assignments();
+        let prelude = harness.artifact.prelude_export().unwrap().to_owned();
+        assert_ne!(harness.call(&prelude), 0);
+        // The emitted integer check fails before reaching the host task helper.
+        // A call of $finish(99) would leave a host error and an invalid journal.
+        assert!(harness.store.data_mut().take_error().is_none());
+        assert!(
+            harness
+                .store
+                .data()
+                .context()
+                .candidate_analog_tasks()
+                .unwrap()
+                .is_empty()
         );
     }
 

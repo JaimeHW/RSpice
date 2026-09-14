@@ -530,7 +530,7 @@ fn raise_ambiguous_projections(function: &CfgFunction, schedule: &mut Schedule) 
 }
 
 /// The blocks of each natural loop, keyed by nothing — one set per back edge.
-fn natural_loops(function: &CfgFunction) -> Vec<HashSet<BlockId>> {
+pub(crate) fn natural_loops(function: &CfgFunction) -> Vec<HashSet<BlockId>> {
     let mut predecessors: Vec<Vec<BlockId>> = vec![Vec::new(); function.blocks.len()];
     for block in &function.blocks {
         for successor in block.successors() {

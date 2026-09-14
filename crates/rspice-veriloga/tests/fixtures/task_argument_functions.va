@@ -1,0 +1,19 @@
+module task_argument_functions(p,n);
+inout p,n;
+electrical p,n;
+real __fn1_identity__x;
+analog function integer identity;
+input d1;
+integer d1,x,k;
+begin
+    x=d1;
+    for(k=0;k<x;k=k+1) $finish(k);
+    identity=x;
+end
+endfunction
+analog begin
+    __fn1_identity__x=0.25;
+    $finish(identity(1/V(p,n)));
+    I(p,n)<+V(p,n)+__fn1_identity__x;
+end
+endmodule

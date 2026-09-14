@@ -84,13 +84,23 @@ pub fn prune_to_outputs(
     function: &CfgFunction,
     outputs: &[ValueId],
 ) -> (CfgFunction, Vec<ValueId>) {
+    let (function, outputs, _) = prune_to_outputs_with_tracking(function, outputs, &[]);
+    (function, outputs)
+}
+
+/// Follow values through liveness pruning without making them roots or applying CSE.
+pub(crate) fn prune_to_outputs_with_tracking(
+    function: &CfgFunction,
+    outputs: &[ValueId],
+    tracked: &[ValueId],
+) -> (CfgFunction, Vec<ValueId>, Vec<Option<ValueId>>) {
     let mut optimizer = Optimizer {
         entry: function.entry,
         values: function.values.clone(),
         blocks: function.blocks.clone(),
         shapes: function.shapes.clone(),
         outputs: outputs.to_vec(),
-        tracked: Vec::new(),
+        tracked: tracked.iter().copied().map(Some).collect(),
         replacement: vec![None; function.values.len()],
     };
     optimizer.eliminate_dead_code();
@@ -105,6 +115,7 @@ pub fn prune_to_outputs(
             shapes: optimizer.shapes,
         },
         optimizer.outputs,
+        optimizer.tracked,
     )
 }
 
