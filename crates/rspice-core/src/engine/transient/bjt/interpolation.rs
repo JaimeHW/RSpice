@@ -12,7 +12,10 @@ pub(in crate::engine::transient) struct PhaseInterpolationControl {
 }
 
 impl PhaseInterpolationControl {
-    pub fn ensure_acceptable(self, circuit: &crate::CircuitData) -> Result<(), SimulationError> {
+    pub(in crate::engine::transient) fn ensure_acceptable(
+        self,
+        circuit: &crate::CircuitData,
+    ) -> Result<(), SimulationError> {
         if self.normalized_error > 1.0 {
             return Err(SimulationError::Circuit(format!(
                 "BJT '{}' phase-history interpolation error exceeds the configured current tolerance by {:.6e}; the interval cannot be accepted",
@@ -23,7 +26,7 @@ impl PhaseInterpolationControl {
     }
 
     /// A prescribed grid or exhausted retry budget cannot waive this error.
-    pub fn retry_step(
+    pub(in crate::engine::transient) fn retry_step(
         self,
         attempted: Value,
         minimum: Value,
