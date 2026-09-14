@@ -113,6 +113,20 @@ impl Bjt {
         vbx: Value,
         vcs: Value,
     ) -> LegacyTransientChargeState {
+        self.legacy_transient_charge_state_with_forward_limit(vbe, vbc, vbx, vcs, false)
+    }
+
+    /// At VBE=0 the two diffusion laws have the same charge but may have
+    /// different tangents. A physical event supplies its outgoing direction;
+    /// ordinary Newton/AC callers retain the model's point convention.
+    pub(in crate::device::semiconductor::bjt) fn legacy_transient_charge_state_with_forward_limit(
+        &self,
+        vbe: Value,
+        vbc: Value,
+        vbx: Value,
+        vcs: Value,
+        forward_limit: bool,
+    ) -> LegacyTransientChargeState {
         let p = self.polarity();
         let vbe_eff = p * vbe;
         let vbc_eff = p * vbc;
@@ -121,11 +135,12 @@ impl Bjt {
         let substrate_polarity = p * substrate_sign;
         let vsub_eff = -substrate_polarity * vcs;
         let transport = self.legacy_transport_charge_state(vbe_eff, vbc_eff);
+        let forward = vbe_eff > 0.0 || (vbe_eff == 0.0 && forward_limit);
 
         let mut argtf = 0.0;
         let mut arg2 = 0.0;
         let mut arg3 = 0.0;
-        if self.tf != 0.0 && vbe_eff > 0.0 && self.xtf != 0.0 {
+        if self.tf != 0.0 && forward && self.xtf != 0.0 {
             argtf = self.xtf;
             let mut ovtf = 0.0;
             if self.vtf > 0.0 {
@@ -142,8 +157,7 @@ impl Bjt {
         }
 
         let qb = transport.qb.max(1e-18);
-        let (qbe_diffusion_current, gbe_dynamic, geqcb_dynamic) = if self.tf != 0.0 && vbe_eff > 0.0
-        {
+        let (qbe_diffusion_current, gbe_dynamic, geqcb_dynamic) = if self.tf != 0.0 && forward {
             let qbe_diffusion_current = transport.ifi * (1.0 + argtf) / qb;
             let gbe_dynamic = (transport.gfi * (1.0 + arg2)
                 - qbe_diffusion_current * transport.dqb_dvbe_eff)

@@ -145,9 +145,14 @@ impl PreparedEventCircuit<'_> {
                 }
             }
         }
-        for (model, history) in self.models.iter_mut().zip(phase) {
+        for (index, (model, history)) in self.models.iter_mut().zip(phase).enumerate() {
             check_abort(abort)?;
-            model.stamp_periodic_fq(state, &mut sample.f, &mut sample.q);
+            model.stamp_periodic_fq_with_forward_limit(
+                state,
+                &mut sample.f,
+                &mut sample.q,
+                source_side == SourceTimeSide::RightLimit && self.forward_charge_limits[index],
+            );
             if let Some(column) = model.mna_rbi_branch_matrix_node(nodes) {
                 current_port(
                     &mut sample.f,

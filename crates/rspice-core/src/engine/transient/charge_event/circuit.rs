@@ -23,6 +23,7 @@ pub(in crate::engine::transient) struct EventPhase<'a> {
 pub(in crate::engine::transient) struct PreparedEventCircuit<'a> {
     circuit: &'a crate::CircuitData,
     models: Vec<Bjt>,
+    forward_charge_limits: Vec<bool>,
     ports: Vec<(usize, usize)>,
     equations: Vec<EventBranchEquation>,
     constant_sources: Vec<EventVoltageSource>,
@@ -39,6 +40,28 @@ fn side(side: SourceTimeSide) -> Result<DelayTimeSide> {
 }
 
 impl PreparedEventCircuit<'_> {
+    pub(in crate::engine::transient) fn forward_charge_limit(&self, index: usize) -> bool {
+        self.forward_charge_limits[index]
+    }
+
+    pub(in crate::engine::transient) fn select_outgoing_charge_limits(
+        &mut self,
+        state: &ChargeEventState,
+        abort: &dyn AbortSignal,
+    ) -> Result<bool> {
+        check_abort(abort)?;
+        let mut changed = false;
+        for (model, selected) in self.models.iter().zip(&mut self.forward_charge_limits) {
+            check_abort(abort)?;
+            let outgoing = model
+                .legacy_event_forward_charge_limit(&state.solution, &state.coordinate_rates)
+                .map_err(|detail| error(format!("BJT '{}': {detail}", model.name)))?;
+            changed |= *selected != outgoing;
+            *selected = outgoing;
+        }
+        Ok(changed)
+    }
+
     pub(in crate::engine::transient) fn models(&self) -> &[Bjt] {
         &self.models
     }

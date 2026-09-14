@@ -6,6 +6,7 @@ use super::*;
 use crate::circuit::SourceTimeSide;
 use charge_event::circuit::{EventPhase, PreparedEventCircuit};
 mod orders;
+mod startup;
 pub(in crate::engine::transient) use orders::PhysicalEventOrders;
 
 pub(in crate::engine::transient) struct PhysicalEventStep<'a> {
@@ -110,7 +111,8 @@ impl PreparedPhysicalEvent {
         context: bjt::BjtPhaseContext<'_>,
     ) -> Result<(), SimulationError> {
         context.bind(history)?;
-        if self.time.to_bits() != step.accepted_time.to_bits()
+        if self.dt == 0.0
+            || self.time.to_bits() != step.accepted_time.to_bits()
             || self.dt.to_bits() != step.dt.to_bits()
             || self.state.solution.len() != step.accepted_solution.len()
             || !self
@@ -162,14 +164,29 @@ impl Engine {
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }
-        if !step.dt.is_finite() || step.dt <= 0.0 || history.phase.len() != circuit.bjts.len() {
+        let startup = matches!(step.phase_events, PhysicalEventOrders::Startup);
+        let valid_interval = if startup {
+            step.time == 0.0 && step.dt == 0.0
+        } else {
+            step.dt.is_finite() && step.dt > 0.0
+        };
+        if !valid_interval || history.phase.len() != circuit.bjts.len() {
             return Err(failure(
                 "invalid incoming interval or physical event population",
             ));
         }
         bjt::BjtPhaseContext::default().bind(history)?;
         let mut sampler = PreparedEventCircuit::new(circuit, flux_tolerance, options, abort)?;
-        let inputs = sampler.forward_inputs(step.incoming, abort)?;
+        let seed = if startup {
+            Some(startup::seed(circuit, history, &sampler, abort)?)
+        } else {
+            None
+        };
+        let inputs = if let Some(seed) = &seed {
+            seed.inputs.clone()
+        } else {
+            sampler.forward_inputs(step.incoming, abort)?
+        };
         let phases: Vec<_> = history
             .phase
             .iter()
@@ -187,14 +204,21 @@ impl Engine {
             .collect::<Result<_, _>>()?;
         let topology = sampler.topology(step.time, SourceTimeSide::RightLimit, options, abort)?;
         let classified = orders::classify(circuit, history, &step, &sampler, &topology, abort)?;
-        let incoming = sampler.sample(
-            step.time,
-            SourceTimeSide::LeftLimit,
-            step.incoming,
-            &phases,
-            options,
-            abort,
-        )?;
+        let incoming_q = if let Some(seed) = seed {
+            seed.charges
+        } else {
+            sampler
+                .sample(
+                    step.time,
+                    SourceTimeSide::LeftLimit,
+                    step.incoming,
+                    &phases,
+                    options,
+                    abort,
+                )?
+                .charge_values()
+                .to_vec()
+        };
         // A continuity certificate cannot repair an inaccurate incoming limit
         // by changing its coordinates. Audit the incoming equations first,
         // including ideal-source constraints and finite-rate regularity.
@@ -202,7 +226,7 @@ impl Engine {
             let left = sampler.topology(step.time, SourceTimeSide::LeftLimit, options, abort)?;
             left.solve_continuous(
                 step.incoming,
-                incoming.charge_values(),
+                &incoming_q,
                 options,
                 abort,
                 |solution, abort| {
@@ -217,32 +241,34 @@ impl Engine {
                 },
             )?;
         }
-        let sample = |solution: &[Value], abort: &dyn AbortSignal| {
-            sampler.sample(
-                step.time,
-                SourceTimeSide::RightLimit,
-                solution,
-                &phases,
-                options,
-                abort,
-            )
-        };
-        let state = if classified.continuous {
-            topology.solve_continuous(
-                step.incoming,
-                incoming.charge_values(),
-                options,
-                abort,
-                sample,
-            )?
-        } else {
-            topology.solve(
-                step.incoming,
-                incoming.charge_values(),
-                options,
-                abort,
-                sample,
-            )?
+        let mut chart_trials = 0;
+        let state = loop {
+            if chart_trials == options.iterations {
+                return Err(failure("outgoing GP charge directions did not settle"));
+            }
+            chart_trials += 1;
+            let sample = |solution: &[Value], abort: &dyn AbortSignal| {
+                sampler.sample(
+                    step.time,
+                    SourceTimeSide::RightLimit,
+                    solution,
+                    &phases,
+                    options,
+                    abort,
+                )
+            };
+            let state = if classified.continuous {
+                topology.solve_continuous(step.incoming, &incoming_q, options, abort, sample)?
+            } else {
+                topology.solve(step.incoming, &incoming_q, options, abort, sample)?
+            };
+            // A piecewise charge law needs the chart reached by these actual
+            // outgoing rates. Re-solve and audit the coupled system until the
+            // chart and its rates agree; never perturb the physical clock or
+            // voltage to approximate a one-sided derivative.
+            if !sampler.select_outgoing_charge_limits(&state, abort)? {
+                break state;
+            }
         };
         let mut phase_current_couplings = Vec::with_capacity(sampler.models().len());
         for model in sampler.models() {
@@ -286,7 +312,11 @@ impl Engine {
                 return Err(SimulationError::Aborted);
             }
             let solution = &state.solution;
-            let (branches, internal, external) = model.mna_charge_state_at_solution(solution);
+            let (branches, internal, external) = model
+                .mna_charge_state_at_solution_with_forward_limit(
+                    solution,
+                    sampler.forward_charge_limit(index),
+                );
             let internal_rates: Vec<_> = (0..BJT_INTERNAL_STATE_DIM)
                 .map(|node| rate(&state.coordinate_rates, model.mna_internal_node(node)))
                 .collect::<Result<_, _>>()?;
@@ -377,7 +407,13 @@ impl Engine {
                     delay,
                     event,
                 };
-                sample.validate(phase.history, step.time).map_err(failure)?;
+                if startup {
+                    sample
+                        .validate(&DelayBuffer::new(4), 0.0)
+                        .map_err(failure)?;
+                } else {
+                    sample.validate(phase.history, step.time).map_err(failure)?;
+                }
                 left_limits.push(event.map(|event| event.left_limit));
                 Some(sample)
             } else {
@@ -420,12 +456,14 @@ impl Engine {
             dt: step.dt,
             accepted_time: step.time,
         };
-        if let Some(control) = bjt.phase_step_control(
-            circuit,
-            history,
-            self.transient_lte_reltol(),
-            self.current_abstol(),
-        )? {
+        if !startup
+            && let Some(control) = bjt.phase_step_control(
+                circuit,
+                history,
+                self.transient_lte_reltol(),
+                self.current_abstol(),
+            )?
+        {
             control.ensure_acceptable(circuit)?;
         }
         Ok(PreparedPhysicalEvent {

@@ -7,6 +7,44 @@
 use super::*;
 
 impl Bjt {
+    /// Select the analytic outgoing diffusion-charge tangent at the VBE=0
+    /// join. The finite rate solve must agree with the selected chart; this
+    /// is not a higher-order smoothness certificate.
+    pub(crate) fn legacy_event_forward_charge_limit(
+        &self,
+        solution: &[Value],
+        rates: &[Option<Value>],
+    ) -> Result<bool, &'static str> {
+        if !self.uses_legacy_gummel_poon() || self.tf == 0.0 {
+            return Ok(false);
+        }
+        let internal = self.mna_internal_state_at_solution(solution);
+        if internal[IDX_VBI] != internal[IDX_VEI] {
+            return Ok(false);
+        }
+        let rate = |index| {
+            let node = self.mna_internal_node(index);
+            if node == 0 {
+                return Ok(0.0);
+            }
+            rates
+                .get(node - 1)
+                .copied()
+                .flatten()
+                .filter(|v| v.is_finite())
+                .ok_or("missing physical BJT junction rate")
+        };
+        let base = rate(IDX_VBI)?;
+        let emitter = rate(IDX_VEI)?;
+        // Compare before subtracting: two finite rates can have a difference
+        // outside binary64 even though their direction is unambiguous.
+        Ok(if self.polarity() > 0.0 {
+            base > emitter
+        } else {
+            base < emitter
+        })
+    }
+
     pub(crate) fn legacy_event_locally_c1(&self, solution: &[Value]) -> bool {
         if !self.uses_legacy_gummel_poon()
             || !self.mna_promoted()

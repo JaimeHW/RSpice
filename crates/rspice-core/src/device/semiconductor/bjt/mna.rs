@@ -1194,9 +1194,25 @@ impl Bjt {
         [Value; BJT_INTERNAL_STATE_DIM],
         [Value; EXTERNAL_DIM],
     ) {
+        self.mna_charge_state_at_solution_with_forward_limit(voltages, false)
+    }
+
+    pub(crate) fn mna_charge_state_at_solution_with_forward_limit(
+        &self,
+        voltages: &[Value],
+        forward_limit: bool,
+    ) -> (
+        [BjtChargeBranch; BJT_DYNAMIC_CHARGE_COUNT],
+        [Value; BJT_INTERNAL_STATE_DIM],
+        [Value; EXTERNAL_DIM],
+    ) {
         let external = self.external_terminal_voltages(voltages);
         let internal = self.mna_internal_state_at_solution(voltages);
-        let branches = self.dynamic_charge_branches_at_bias(external, internal);
+        let branches = if forward_limit && self.uses_legacy_gummel_poon() {
+            self.legacy_dynamic_charge_branches_with_forward_limit(external, internal, true)
+        } else {
+            self.dynamic_charge_branches_at_bias(external, internal)
+        };
         (branches, internal, external)
     }
 
@@ -1255,6 +1271,16 @@ impl Bjt {
         static_part: &mut impl MatrixStamper,
         charge_part: &mut impl MatrixStamper,
     ) {
+        self.stamp_periodic_fq_with_forward_limit(solution, static_part, charge_part, false);
+    }
+
+    pub(crate) fn stamp_periodic_fq_with_forward_limit(
+        &mut self,
+        solution: &[Value],
+        static_part: &mut impl MatrixStamper,
+        charge_part: &mut impl MatrixStamper,
+        forward_limit: bool,
+    ) {
         self.update_mna_static_probe(solution);
         self.stamp_mna_at(
             &mut PeriodicJacobian {
@@ -1267,7 +1293,15 @@ impl Bjt {
         );
         self.stamp_periodic_static_terms(static_part);
         let external_nodes = self.external_terminal_nodes();
-        let (branches, _, _) = self.mna_charge_state();
+        let branches = if forward_limit && self.uses_legacy_gummel_poon() {
+            self.legacy_dynamic_charge_branches_with_forward_limit(
+                self.mna_external_state(),
+                self.mna_internal_state(),
+                true,
+            )
+        } else {
+            self.mna_charge_state().0
+        };
         for (index, branch) in branches.iter().enumerate() {
             let polarity = self.charge_branch_polarity(index);
             let node = |internal: Option<usize>, external: Option<usize>| {

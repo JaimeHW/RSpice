@@ -308,6 +308,7 @@ impl<'a> PreparedEventCircuit<'a> {
             .ok_or_else(|| error("MNA branch has no physical event owner"))?;
         Ok(Self {
             circuit,
+            forward_charge_limits: vec![false; models.len()],
             models,
             ports,
             equations,

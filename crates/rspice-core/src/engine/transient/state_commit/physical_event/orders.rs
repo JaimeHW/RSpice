@@ -6,6 +6,9 @@ use super::*;
 use crate::engine::transient::source_events::{PhysicalSourceEvents, PhysicalSourceOwner};
 
 pub(in crate::engine::transient) enum PhysicalEventOrders<'a> {
+    /// The selected DC/IC history precedes the first outgoing transient
+    /// point. Its waveform continuity is not a DC-to-transient certificate.
+    Startup,
     /// An independently justified declaration, retained for explicit event
     /// owners and their acceptance-contract tests.
     Declared(&'a [Option<DelayEventOrder>]),
@@ -35,6 +38,19 @@ pub(super) fn classify(
     topology: &charge_event::ChargeEventTopology,
     abort: &dyn AbortSignal,
 ) -> Result<ClassifiedOrders, SimulationError> {
+    if matches!(step.phase_events, PhysicalEventOrders::Startup) {
+        return Ok(ClassifiedOrders {
+            orders: sampler
+                .models()
+                .iter()
+                .map(|model| {
+                    (model.legacy_excess_phase_delay() != 0.0)
+                        .then_some(DelayEventOrder::AtLeast(0))
+                })
+                .collect(),
+            continuous: false,
+        });
+    }
     if let PhysicalEventOrders::Declared(orders) = &step.phase_events {
         if orders.len() != circuit.bjts.len() {
             return Err(failure("invalid physical event population"));
