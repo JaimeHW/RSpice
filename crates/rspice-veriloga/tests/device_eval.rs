@@ -9,6 +9,8 @@ use rspice_veriloga::codegen::{BytecodeProgram, Instruction};
 use rspice_veriloga::device::VerilogADevice;
 use std::collections::HashMap;
 
+#[path = "support/bounded_ddx.rs"]
+mod bounded_ddx;
 mod support;
 
 use support::DeviceFixture;

@@ -4528,6 +4528,44 @@ assert_eq!(active_again[1], -3.0, "reactive cache restores after re-enable: {act
 }
 
 #[test]
+fn generated_bounded_ddx_preserves_parameter_overrides() {
+    let (state, stamp, noise) = generated_parts(
+        include_str!("fixtures/bounded_derivative_loop.va"),
+        "bounded derivative loop",
+    );
+    run_generated_main(
+        "bounded derivative loop",
+        &state,
+        &stamp,
+        &noise,
+        r#"
+let mut instance=device::state::Instance::new(&[0,1]);
+instance.finalize_parameters().unwrap();
+for order in [0_i32,1,4,6,2,-2] {
+    instance.set_parameter("order",f64::from(order)).unwrap();
+    for slot in [0,1] {
+        instance.set_parameter("slot",f64::from(slot)).unwrap();
+        for voltage in [-0.4_f64,0.0,0.3] {
+            let voltages=[voltage,0.0];
+            let ctx=runtime::GeneratedEvalContext {voltages:&voltages,temperature:300.15};
+            let mut sink=[0.0;12];
+            instance.begin_stateful_evaluation();
+            instance.stamp(&ctx,&mut runtime::GeneratedStamper {sink:Some(&mut sink)});
+            let expected=2.0_f64.powi(order.max(0))*(2.0*voltage).exp();
+            assert!((sink[9]-expected).abs()<1e-10*expected,"current: order={order} {sink:?}");
+            assert!((sink[10]-2.0*expected).abs()<1e-10*expected,"Jacobian: {sink:?}");
+            assert!((sink[11]+2.0*expected).abs()<1e-10*expected,"opposite terminal: {sink:?}");
+            assert!(!ctx.evaluation_failed());
+        }
+    }
+    assert!(instance.set_parameter("order",7.0).is_err());
+}
+"#,
+    )
+    .unwrap_or_else(|report| panic!("{report}"));
+}
+
+#[test]
 fn generated_event_derivatives_preserve_source_order_and_rollback() {
     let (state, stamp, noise) = generated_parts(
         include_str!("fixtures/event_derivative_readback.va"),
