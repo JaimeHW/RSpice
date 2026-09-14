@@ -2342,6 +2342,45 @@ assert_eq!(&*instance.event_state_candidate, &[8.0, 3.0]);
 }
 
 #[test]
+fn generated_higher_order_task_arguments_preserve_order_and_rollback() {
+    let (state, stamp, noise) = generated_parts(
+        include_str!("fixtures/canonical_task_arguments.va"),
+        "higher-order task arguments",
+    );
+    run_generated_main(
+        "higher-order task arguments", &state, &stamp, &noise,
+        r#"
+let mut instance=device::state::Instance::new(&[0,1]);
+instance.finalize_parameters().unwrap();
+for initial in [true,false] {
+    runtime::set_analysis_steps(initial,false);
+    let accepted=instance.capture_rollback_state();
+    for voltage in [-0.5_f64,0.75] {
+        instance.restore_rollback_state(&accepted);
+        instance.begin_stateful_evaluation();
+        let voltages=[voltage,0.0];
+        let ctx=runtime::GeneratedEvalContext {voltages:&voltages,temperature:300.15};
+        let mut sink=[0.0;12];
+        instance.stamp(&ctx,&mut runtime::GeneratedStamper {sink:Some(&mut sink)});
+        let gain=if initial {1.0} else {2.0};
+        assert_eq!(sink[9],gain*voltage);
+        assert_eq!(sink[10],gain);
+        assert_eq!(sink[11],-gain);
+        assert!(!ctx.evaluation_failed());
+    }
+    instance.validate_advance_state().unwrap();
+    instance.apply_validated_advance_state();
+    let levels:Vec<_>=instance.drain_analog_tasks().map(|call| {
+        let [runtime::AnalogTaskArgument::Integer(level)]=&*call.arguments else {panic!("integer argument")};
+        *level
+    }).collect();
+    assert_eq!(levels,if initial {vec![2,0,1,2]} else {vec![]});
+}
+"#,
+    ).unwrap_or_else(|report| panic!("{report}"));
+}
+
+#[test]
 fn generated_system_tasks_follow_acceptance_rollback_and_observation_boundaries() {
     let (state, stamp, noise) = generated_parts(
         r#"

@@ -29,6 +29,152 @@ fn levels(calls: &[AnalogTaskInvocation]) -> Vec<i64> {
 }
 
 #[test]
+fn task_only_models_keep_identical_calls_on_every_loop_trip() {
+    let fixture = DeviceFixture::compile(
+        "module task_only(p,n); inout p,n; electrical p,n; integer i;
+         parameter integer repetitions=3;
+         analog for(i=0;i<repetitions;i=i+1) begin $finish(1); $finish(1); end endmodule",
+    );
+    let mut device = fixture.device("TASK_ONLY", &[1, 0]);
+    assert!(device.try_evaluate().unwrap().is_empty());
+    fixture.observe(&mut device);
+    device.try_compute_jacobian().unwrap();
+    device.try_advance_state().unwrap();
+    let calls = device.drain_accepted_analog_tasks().collect::<Vec<_>>();
+    assert_eq!(levels(&calls), vec![1; 6]);
+    assert_ne!(calls[0].site, calls[1].site);
+    assert!(
+        calls
+            .chunks_exact(2)
+            .all(|pair| { pair[0].site == calls[0].site && pair[1].site == calls[1].site })
+    );
+}
+
+#[test]
+fn task_guards_skip_singular_arguments_and_replace_failed_candidates() {
+    let fixture = fixture("$finish(1); if(V(p,n)!=0) $finish(1/V(p,n));");
+    let mut device = fixture.device("GUARDED_TASK", &[1, 0]);
+    for (voltage, expected) in [(0.0, vec![1]), (1.0, vec![1, 1])] {
+        device.update_voltages(&[voltage]);
+        device.try_evaluate().unwrap();
+        device.try_advance_state().unwrap();
+        assert_eq!(
+            levels(&device.drain_accepted_analog_tasks().collect::<Vec<_>>()),
+            expected
+        );
+    }
+    device.update_voltages(&[0.01]);
+    assert!(device.try_evaluate().is_err());
+    assert!(device.try_advance_state().is_err());
+    assert_eq!(device.drain_accepted_analog_tasks().count(), 0);
+    device.update_voltages(&[0.0]);
+    device.try_evaluate().unwrap();
+    device.try_advance_state().unwrap();
+    assert_eq!(
+        levels(&device.drain_accepted_analog_tasks().collect::<Vec<_>>()),
+        vec![1]
+    );
+}
+
+#[test]
+fn canonical_task_arguments_preserve_loop_calls_source_values_and_rollback() {
+    let fixture = DeviceFixture::compile(include_str!("fixtures/canonical_task_arguments.va"));
+    let mut device = fixture.device("LOOP_TASKS", &[1, 0]);
+    device.try_set_analysis_step(true, false).unwrap();
+    for voltage in [-0.5_f64, 0.75] {
+        device.update_voltages(&[voltage]);
+        assert_eq!(device.try_evaluate().unwrap(), vec![voltage]);
+        fixture.observe(&mut device);
+        device.try_compute_jacobian().unwrap();
+        fixture.observe(&mut device);
+        assert_eq!(device.variable("before"), Some(0.0));
+        assert_eq!(device.variable("after"), Some(1.0));
+        assert!((device.variable("reported").unwrap() - voltage.exp()).abs() < 1e-12);
+        assert_eq!(device.drain_accepted_analog_tasks().count(), 0);
+    }
+    device.try_advance_state().unwrap();
+    let calls = device.drain_accepted_analog_tasks().collect::<Vec<_>>();
+    assert_eq!(levels(&calls), vec![2, 0, 1, 2]);
+    assert!(calls[1..].iter().all(|call| call.site == calls[1].site));
+    assert_ne!(calls[0].site, calls[1].site);
+    device.try_set_analysis_step(false, false).unwrap();
+    let accepted = device.checkpoint_state().unwrap();
+    for voltage in [-1.0, 0.25] {
+        device.validate_checkpoint_state(&accepted).unwrap();
+        device.apply_validated_checkpoint_state(&accepted);
+        device.try_set_analysis_step(false, false).unwrap();
+        device.update_voltages(&[voltage]);
+        assert_eq!(device.try_evaluate().unwrap(), vec![2.0 * voltage]);
+        fixture.observe(&mut device);
+        assert_eq!(device.variable("count"), Some(1.0));
+        device.try_advance_state().unwrap();
+        assert_eq!(device.drain_accepted_analog_tasks().count(), 0);
+    }
+}
+
+#[test]
+fn event_task_arguments_capture_higher_order_source_values() {
+    let fixture = DeviceFixture::compile(
+        "module task_derivative_argument(p,n); inout p,n; electrical p,n;
+         real count=0,reported;
+         analog begin reported=ddx(ddx(ddx(exp(V(p,n)),V(p,n)),V(p,n)),V(p,n));
+         @(initial_step) begin count=count+1; $finish(reported); end
+         I(p,n)<+count*V(p,n); end endmodule",
+    );
+    let mut device = fixture.device("DERIVATIVE_ARGUMENT", &[1, 0]);
+    #[cfg(feature = "native")]
+    assert!(device.is_using_native());
+    device.try_set_analysis_step(true, false).unwrap();
+    for voltage in [-0.5_f64, 0.75] {
+        device.update_voltages(&[voltage]);
+        assert_eq!(device.try_evaluate().unwrap(), vec![voltage]);
+        fixture.observe(&mut device);
+        assert!((device.variable("reported").unwrap() - voltage.exp()).abs() < 1e-12);
+        assert_eq!(device.drain_accepted_analog_tasks().count(), 0);
+    }
+    device.try_advance_state().unwrap();
+    assert_eq!(
+        levels(&device.drain_accepted_analog_tasks().collect::<Vec<_>>()),
+        vec![2]
+    );
+}
+
+#[test]
+fn event_higher_order_readback_keeps_task_capture_and_acceptance_order() {
+    let fixture = DeviceFixture::compile(
+        "module event_task_derivative(p,n); inout p,n; electrical p,n;
+         real count=0,reported;
+         analog begin @(initial_step) begin count=count+1; $finish(count); end
+         reported=ddx(ddx(ddx(exp(V(p,n)),V(p,n)),V(p,n)),V(p,n));
+         I(p,n)<+count*V(p,n); end endmodule",
+    );
+    let mut device = fixture.device("EVENT_DERIVATIVE_TASK", &[1, 0]);
+    device.try_set_analysis_step(true, false).unwrap();
+    for voltage in [-0.5_f64, 0.75] {
+        device.update_voltages(&[voltage]);
+        assert_eq!(device.try_evaluate().unwrap(), vec![voltage]);
+        fixture.observe(&mut device);
+        device.try_compute_jacobian().unwrap();
+        fixture.observe(&mut device);
+        assert!((device.variable("reported").unwrap() - voltage.exp()).abs() < 1e-12);
+        assert_eq!(device.variable("count"), Some(1.0));
+        assert_eq!(device.drain_accepted_analog_tasks().count(), 0);
+    }
+    device.try_advance_state().unwrap();
+    assert_eq!(
+        levels(&device.drain_accepted_analog_tasks().collect::<Vec<_>>()),
+        vec![1]
+    );
+    device.try_set_analysis_step(false, false).unwrap();
+    device.update_voltages(&[-0.25]);
+    assert_eq!(device.try_evaluate().unwrap(), vec![-0.25]);
+    fixture.observe(&mut device);
+    assert!((device.variable("reported").unwrap() - (-0.25_f64).exp()).abs() < 1e-12);
+    device.try_advance_state().unwrap();
+    assert_eq!(device.drain_accepted_analog_tasks().count(), 0);
+}
+
+#[test]
 fn event_readback_and_tasks_publish_one_accepted_source_ordered_effect() {
     let fixture = DeviceFixture::compile(
         "module event_tasks(p,n); inout p,n; electrical p,n; real count=0;
