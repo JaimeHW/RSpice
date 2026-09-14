@@ -341,7 +341,23 @@ impl DelayBuffer {
         delay: f64,
         max_delay: Option<f64>,
     ) -> Result<DelayDifferenceEvaluation, String> {
-        self.difference_evaluation(time, value, delay, max_delay, None)
+        self.difference_evaluation(time, value, delay, max_delay, None, false)
+    }
+
+    /// Read the incoming side of any declared fixed-delay events whose exact
+    /// arrivals round causally onto `time`. If several arrivals share this
+    /// binary64 clock, the earliest event supplies the incoming value. The
+    /// outgoing read remains the ordinary physical-time interpolation: it can
+    /// already have advanced past the final event when the sum is inexact.
+    /// No arrival at this clock means the ordinary candidate evaluation.
+    pub fn difference_before_arrival(
+        &self,
+        time: f64,
+        value: f64,
+        delay: f64,
+        max_delay: Option<f64>,
+    ) -> Result<DelayDifferenceEvaluation, String> {
+        self.difference_evaluation(time, value, delay, max_delay, None, true)
     }
 
     /// Read a right-side Newton candidate with its already solved left limit
@@ -364,7 +380,7 @@ impl DelayBuffer {
         {
             return Err("delay probe left limit differs from its accepted knot".into());
         }
-        self.difference_evaluation(time, right, delay, max_delay, Some(left))
+        self.difference_evaluation(time, right, delay, max_delay, Some(left), false)
     }
 
     fn difference_evaluation(
@@ -374,12 +390,19 @@ impl DelayBuffer {
         delay: f64,
         max_delay: Option<f64>,
         left_limit: Option<f64>,
+        before_arrival: bool,
     ) -> Result<DelayDifferenceEvaluation, String> {
         self.validate_runtime(time, value, delay, max_delay)?;
         if self.samples.back().is_some_and(|sample| time < sample.0) {
             return Err("transport correction time precedes the latest accepted sample".into());
         }
-        let (_, effective_delay, delay_scale) = self.resolve_configuration(delay, max_delay)?;
+        let (configuration, effective_delay, delay_scale) =
+            self.resolve_configuration(delay, max_delay)?;
+        if before_arrival && !matches!(configuration, DelayConfiguration::Fixed { .. }) {
+            return Err(
+                "variable-delay arrivals require the owning solver's delay trajectory".into(),
+            );
+        }
         if self.samples.is_empty() {
             if time != 0.0 {
                 return Err("transport correction requires an accepted time-zero anchor".into());
@@ -388,6 +411,18 @@ impl DelayBuffer {
                 output: 0.0,
                 delay_coefficient: 0.0,
                 input_numerator: 0.0,
+                input_denominator: 1.0,
+            });
+        }
+        if before_arrival && let Some(left) = self.arriving_left_limit(time, effective_delay)? {
+            let output = left - value;
+            if !output.is_finite() {
+                return Err("incoming transport correction is not representable".into());
+            }
+            return Ok(DelayDifferenceEvaluation {
+                output,
+                delay_coefficient: 0.0,
+                input_numerator: -1.0,
                 input_denominator: 1.0,
             });
         }
@@ -764,7 +799,7 @@ impl DelayBuffer {
             return Err("delay candidate configuration differs from accepted configuration".into());
         }
 
-        let cutoff = (candidate.time - candidate.configuration.retention()).max(0.0);
+        let cutoff = Self::retention_cutoff(candidate.time, candidate.configuration);
         let retained = self.retained_sample_count(cutoff);
         let first = self
             .samples
@@ -889,6 +924,29 @@ impl DelayBuffer {
             .map(|sample| sample.1)
     }
 
+    fn arriving_left_limit(&self, time: f64, delay: f64) -> Result<Option<f64>, String> {
+        let previous = DelayTarget::new(time.next_down().max(0.0), delay);
+        if self
+            .samples
+            .front()
+            .is_some_and(|&(first, _)| first != 0.0 && !previous.at_or_after(first))
+        {
+            return Err(
+                "incoming delay arrival requires a retained bracket before its represented event group"
+                    .into(),
+            );
+        }
+        let target = DelayTarget::new(time, delay);
+        let first = self
+            .left_limits
+            .partition_point(|sample| previous.at_or_after(sample.0));
+        Ok(self
+            .left_limits
+            .get(first)
+            .filter(|sample| target.at_or_after(sample.0))
+            .map(|sample| sample.1))
+    }
+
     /// Next representable time at or after an accepted jump's exact fixed-delay
     /// arrival. The scheduler must land this event; interpolation-knot spacing
     /// itself is not an event and places no timestep-at-most-delay requirement.
@@ -947,7 +1005,19 @@ impl DelayBuffer {
         if let Some(left) = candidate.left_limit {
             self.left_limits.push_back((candidate.time, left));
         }
-        self.prune(candidate.time, candidate.configuration.retention());
+        self.prune(candidate.time, candidate.configuration);
+    }
+
+    fn retention_cutoff(time: f64, configuration: DelayConfiguration) -> f64 {
+        // Preserve the incoming bracket for every physical arrival inside the
+        // last represented clock interval, including a group of many events.
+        // Keeping only the bracket at time-delay could discard its first left
+        // limit before an accepted-point observation or checkpoint replay.
+        let time = match configuration {
+            DelayConfiguration::Fixed { .. } => time.next_down().max(0.0),
+            DelayConfiguration::Bounded { .. } => time,
+        };
+        (time - configuration.retention()).max(0.0)
     }
 
     fn retained_sample_count(&self, cutoff: f64) -> usize {
@@ -960,8 +1030,8 @@ impl DelayBuffer {
         self.samples.len() - removable
     }
 
-    fn prune(&mut self, accepted_time: f64, retention: f64) {
-        let cutoff = (accepted_time - retention).max(0.0);
+    fn prune(&mut self, accepted_time: f64, configuration: DelayConfiguration) {
+        let cutoff = Self::retention_cutoff(accepted_time, configuration);
         while self.samples.len() >= 2 && self.samples[1].0 < cutoff {
             self.samples.pop_front();
         }
