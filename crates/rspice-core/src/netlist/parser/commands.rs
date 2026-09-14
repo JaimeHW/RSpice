@@ -1553,7 +1553,7 @@ pub fn parse_save_probe(raw: &str) -> Option<super::SaveSignal> {
     }
 
     if let Some(inner) = wrapped('n') {
-        if let Some((device, param)) = inner.split_once(':') {
+        if let Some((device, param)) = inner.rsplit_once(':') {
             let device = device.trim();
             let param = param.trim();
             if !device.is_empty() && !param.is_empty() {

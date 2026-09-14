@@ -2358,6 +2358,44 @@ fn protect_xyce_output_operands(
             index = index.saturating_add(1);
             continue;
         }
+        if byte(bytes, index) == Some(b'@') {
+            let start = index;
+            index += 1;
+            while byte(bytes, index).is_some_and(|value| {
+                is_output_parameter_char(value as char) && value != b'[' && value != b']'
+            }) {
+                if index.is_multiple_of(64) && abort.is_aborted() {
+                    return Err(OutputOperandProtectionError::Aborted);
+                }
+                index += 1;
+            }
+            if byte(bytes, index) == Some(b'[') {
+                index += 1;
+                while byte(bytes, index).is_some_and(|value| {
+                    is_output_parameter_char(value as char) && value != b'[' && value != b']'
+                }) {
+                    if index.is_multiple_of(64) && abort.is_aborted() {
+                        return Err(OutputOperandProtectionError::Aborted);
+                    }
+                    index += 1;
+                }
+                if byte(bytes, index) == Some(b']') {
+                    index += 1;
+                    if let Some(super::SaveSignal::DeviceParam { device, param }) =
+                        super::parse_save_probe(&source[start..index])
+                    {
+                        validate_output_device_parameter(
+                            &format!("{device}:{param}"),
+                            flattened_elements,
+                        )?;
+                        protected.push_str(&source[copied_through..start]);
+                        protected.push('0');
+                        copied_through = index;
+                    }
+                }
+            }
+            continue;
+        }
         if !byte(bytes, index).is_some_and(|value| (value as char).is_ascii_alphabetic()) {
             index += 1;
             continue;

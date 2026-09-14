@@ -338,7 +338,7 @@ impl<'a> Resolver<'a, '_> {
     }
 }
 
-fn current_parameter(parameter: &str) -> bool {
+pub(super) fn current_parameter(parameter: &str) -> bool {
     let parameter = parameter.to_ascii_uppercase();
     parameter == "I" || is_device_lead_current_accessor(&parameter)
 }

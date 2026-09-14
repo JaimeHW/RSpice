@@ -1069,6 +1069,7 @@ struct LiveRawOutputOperator {
     canonical_signal: String,
     voltage: Option<LiveVoltageOutputOperator>,
     current: Option<LiveCurrentOutputOperator>,
+    internal_candidates: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -1128,6 +1129,21 @@ impl LiveRawOutputOperator {
         } else {
             None
         };
+        let mut internal_candidates = Vec::new();
+        if prefix == "N" {
+            let [symbol] = arguments.as_slice() else {
+                return Err("N() in continuous measure requires exactly one argument".to_string());
+            };
+            // Preserve the same node-first lookup for an expression probe as
+            // for a direct output request, then try the device parameter.
+            internal_candidates.push(canonical_measure_signal_name(&format!("V({symbol})")));
+            internal_candidates.push(canonical_measure_signal_name(symbol));
+            if let Some((device, parameter)) = symbol.rsplit_once(':') {
+                internal_candidates.push(canonical_measure_signal_name(&format!(
+                    "@{device}[{parameter}]"
+                )));
+            }
+        }
         let current = if is_current_projection_accessor(&prefix) {
             let [device] = arguments.as_slice() else {
                 return Err(format!(
@@ -1148,6 +1164,7 @@ impl LiveRawOutputOperator {
             canonical_signal: canonical_measure_signal_name(authored),
             voltage,
             current,
+            internal_candidates,
         })
     }
 
@@ -1163,6 +1180,13 @@ impl LiveRawOutputOperator {
             row,
         )? {
             return Ok(value);
+        }
+        for candidate in &self.internal_candidates {
+            if let Some(value) =
+                lookup_equation_signal_canonical_optional(signals, &self.authored, candidate, row)?
+            {
+                return Ok(value);
+            }
         }
         if let Some(current) = &self.current
             && let Some(value) = lookup_equation_signal_canonical_optional(
@@ -2124,6 +2148,9 @@ fn output_column_kind(signal: &SaveSignal) -> OutputColumnKind {
     match signal {
         SaveSignal::Voltage(_) | SaveSignal::VoltageDiff(_, _) => OutputColumnKind::Voltage,
         SaveSignal::Current(_) => OutputColumnKind::Current,
+        SaveSignal::DeviceParam { param, .. } if current_observation::current_parameter(param) => {
+            OutputColumnKind::Current
+        }
         SaveSignal::DeviceParam { .. } => OutputColumnKind::Scalar,
         SaveSignal::Raw(name) if name.contains(':') || name.starts_with('@') => {
             OutputColumnKind::Scalar
@@ -2133,8 +2160,36 @@ fn output_column_kind(signal: &SaveSignal) -> OutputColumnKind {
     }
 }
 
-fn expression_output_column_kind(expression: &NetExpr) -> OutputColumnKind {
-    let NetExpr::FnCall { name, .. } = expression else {
+fn resolved_output_column_kind(
+    authored: &str,
+    signal: &SaveSignal,
+    signals: &CanonicalMeasureSignalIndex<'_>,
+) -> OutputColumnKind {
+    // N(...) is node-first: a literal node such as marker:IC must not
+    // acquire amperes from the suffix of its name.
+    if let Some((operator, arguments)) = split_equation_output_operator(authored)
+        && operator.eq_ignore_ascii_case("N")
+        && let [node] = arguments.as_slice()
+        && signals
+            .get(&format!("V({node})"))
+            .is_ok_and(|value| value.is_some())
+    {
+        return OutputColumnKind::Voltage;
+    }
+    output_column_kind(signal)
+}
+
+fn expression_output_column_kind(
+    expression: &NetExpr,
+    signals: &CanonicalMeasureSignalIndex<'_>,
+) -> OutputColumnKind {
+    if let NetExpr::Param(name) = expression
+        && let Some(signal @ SaveSignal::DeviceParam { .. }) =
+            crate::netlist::parse_save_probe(name)
+    {
+        return output_column_kind(&signal);
+    }
+    let NetExpr::FnCall { name, args } = expression else {
         return OutputColumnKind::Scalar;
     };
     let operator = name.to_ascii_uppercase();
@@ -2142,6 +2197,13 @@ fn expression_output_column_kind(expression: &NetExpr) -> OutputColumnKind {
         OutputColumnKind::Current
     } else if matches!(operator.as_str(), "V" | "VR" | "VI" | "VM" | "VP" | "VDB") {
         OutputColumnKind::Voltage
+    } else if operator == "N"
+        && args.len() == 1
+        && let Some(argument) = equation_probe_argument(args.first())
+        && let Some(signal @ SaveSignal::DeviceParam { .. }) =
+            crate::netlist::parse_save_probe(&format!("N({argument})"))
+    {
+        resolved_output_column_kind(&format!("N({argument})"), &signal, signals)
     } else {
         OutputColumnKind::Scalar
     }
@@ -2265,7 +2327,7 @@ pub(crate) fn evaluate_output_operand(
             }
             Ok(OutputColumn {
                 name: authored.to_string(),
-                kind: output_column_kind(signal),
+                kind: resolved_output_column_kind(authored, signal, signal_index),
                 values,
             })
         }
@@ -2304,7 +2366,7 @@ pub(crate) fn evaluate_output_operand(
                         (None, format!("failed to parse expression: {error}")).into()
                     }
                 })?;
-            let column_kind = expression_output_column_kind(&parsed);
+            let column_kind = expression_output_column_kind(&parsed, signal_index);
             let mut prepared = LivePreparedExpression::compile_with_abort(&parsed, params, abort)
                 .map_err(|error| match error {
                 LivePreparedExpressionCompileError::Aborted => {

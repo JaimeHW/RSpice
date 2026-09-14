@@ -427,7 +427,10 @@ pub(super) fn parse_four_command(
         skip_commas(stream);
         if matches!(
             stream.peek().kind,
-            TokenKind::Ident(_) | TokenKind::Expression(_) | TokenKind::StringLit(_)
+            TokenKind::Ident(_)
+                | TokenKind::AtSign
+                | TokenKind::Expression(_)
+                | TokenKind::StringLit(_)
         ) {
             // Probe specs like V(out) span several tokens; reuse the .MEAS
             // signal parser for probes and authored expressions alike.

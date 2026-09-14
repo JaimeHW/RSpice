@@ -665,6 +665,44 @@ impl<'a> ExprParser<'a> {
     fn parse_ident_or_fn(&mut self) -> Result<Expr, ExprError> {
         let start = self.pos;
 
+        // Device parameters are atomic probe names. Keep their brackets and
+        // hierarchy separators inside the leaf instead of treating them as
+        // arithmetic syntax. An ordinary @-prefixed identifier remains valid.
+        if self.check('@') {
+            let mut end = self.pos;
+            let remaining = &self.input[self.pos..];
+            for ch in remaining.chars() {
+                if self.poll_abort() {
+                    return Err(ExprError::UnexpectedChar('\0'));
+                }
+                if !(is_expr_ident_continue(ch) || ch == ':') {
+                    break;
+                }
+                end += ch.len_utf8();
+            }
+            if self.input[end..].starts_with('[') {
+                while self.pos < end {
+                    if self.advance().is_none() {
+                        return Err(ExprError::UnexpectedChar('\0'));
+                    }
+                }
+                self.advance();
+                let parameter_start = self.pos;
+                while let Some(ch) = self.peek() {
+                    if !is_expr_ident_continue(ch) {
+                        break;
+                    }
+                    if self.advance().is_none() {
+                        return Err(ExprError::UnexpectedChar('\0'));
+                    }
+                }
+                if end == start + 1 || self.pos == parameter_start || !self.consume(']') {
+                    return Err(ExprError::UnexpectedChar(self.peek().unwrap_or('\0')));
+                }
+                return Ok(Expr::Param(self.input[start..self.pos].to_uppercase()));
+            }
+        }
+
         self.advance();
         while let Some(c) = self.peek() {
             if is_expr_ident_continue(c) {
@@ -758,20 +796,22 @@ fn is_expr_ident_continue(c: char) -> bool {
 }
 
 fn is_raw_probe_accessor(name: &str) -> bool {
-    matches!(
-        name,
-        "V" | "VM"
-            | "VR"
-            | "VI"
-            | "VP"
-            | "VDB"
-            | "I"
-            | "IM"
-            | "IR"
-            | "II"
-            | "IP"
-            | "IDB"
-            | "DNO"
-            | "DNI"
-    )
+    (name != "IF" && crate::netlist::is_device_lead_current_accessor(name))
+        || matches!(
+            name,
+            "N" | "V"
+                | "VM"
+                | "VR"
+                | "VI"
+                | "VP"
+                | "VDB"
+                | "I"
+                | "IM"
+                | "IR"
+                | "II"
+                | "IP"
+                | "IDB"
+                | "DNO"
+                | "DNI"
+        )
 }
