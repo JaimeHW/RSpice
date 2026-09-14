@@ -2809,7 +2809,11 @@ impl StaticMatrix {
             let Some(ws) = lu.as_mut() else {
                 return Err(SolverError::SingularMatrix);
             };
-            if ws.factored_values.as_slice() != values.as_slice() {
+            if ws.factored_values.is_empty() || ws.factored_values.as_slice() != values.as_slice() {
+                // An empty cache also denotes a workspace that has never
+                // factored, including a structurally empty matrix. Invalidate
+                // before factorization can partially overwrite numeric LU.
+                ws.factored_values.clear();
                 equilibrate_sparse_system(
                     csc,
                     values,
@@ -3141,7 +3145,8 @@ impl StaticMatrix {
             return Err(SolverError::SingularMatrix);
         };
 
-        if ws.factored_values.as_slice() != values.as_slice() {
+        if ws.factored_values.is_empty() || ws.factored_values.as_slice() != values.as_slice() {
+            ws.factored_values.clear();
             equilibrate_sparse_system(
                 csc,
                 values,
