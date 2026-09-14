@@ -114,11 +114,12 @@ impl PyTransientResult {
 
 #[pymethods]
 impl PyTransientResult {
-    /// Sparse branch current impulses as (branch, [(seconds, coulombs)]).
-    /// None means unavailable; an empty list means recorded with no impulses.
-    /// These charges are separate from finite current waveform samples.
+    /// Typed current owners and sparse (seconds, coulombs) observations.
+    /// Only an empty complete trace proves no impulses for that owner.
+    /// None and omitted owners provide no coverage claim. Charges are
+    /// separate from finite current waveform samples.
     #[getter]
-    fn current_impulses(&self) -> ImpulseRows {
+    fn current_impulses(&self) -> Option<Vec<PyCurrentImpulseTrace>> {
         impulse_rows(self.inner.current_impulses.as_deref())
     }
 
@@ -759,7 +760,7 @@ impl PyTransientResult {
         store_traces: Vec<(String, Vec<f64>)>,
         fft_state: Option<TransientFftPersistenceState>,
         event_state: Option<VersionedTransientEventState>,
-        impulse_state: Option<ImpulsePersistenceState>,
+        impulse_state: Option<VersionedImpulseState>,
     ) -> PyResult<Self> {
         Ok(Self::restored(restore_transient_result(
             time,

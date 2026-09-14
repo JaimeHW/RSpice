@@ -64,8 +64,10 @@ mod fft;
 mod fourier;
 mod hb;
 mod impulse_state;
+pub(crate) use impulse_state::PyCurrentImpulseTrace;
 use impulse_state::{
-    ImpulsePersistenceState, ImpulseRows, impulse_persistence_state, impulse_rows, restore_impulses,
+    ImpulsePersistenceState, VersionedImpulseState, impulse_persistence_state, impulse_rows,
+    restore_impulses,
 };
 mod monte_carlo;
 mod noise;

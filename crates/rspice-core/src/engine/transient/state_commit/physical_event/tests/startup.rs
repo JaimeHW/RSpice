@@ -27,9 +27,9 @@ fn physical_startup_observation_preflight_refusal_preserves_all_model_targets() 
         &options(),
         1e-20,
         &NoAbort,
-        |charges| {
+        |point| {
             observed = true;
-            assert!(charges.iter().any(|(_, charge)| *charge != 0.0));
+            assert!(point.impulses().any(|(_, charge)| charge != 0.0));
             crate::resource::ResourceLimitError::ensure(
                 crate::resource::ResourceKind::ResultValues,
                 11,

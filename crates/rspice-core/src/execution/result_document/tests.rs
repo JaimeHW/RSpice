@@ -144,7 +144,10 @@ fn current_impulse_document_preserves_charge_availability_and_versions() {
     let unavailable = document(&result);
     let base_count = unavailable.total_value_count();
     result.current_impulses = Some(vec![crate::CurrentImpulseTrace {
-        branch_name: "v1".into(),
+        owner: crate::CurrentImpulseOwner::Branch {
+            branch_name: "v1".into(),
+        },
+        complete: false,
         points: vec![
             crate::CurrentImpulsePoint {
                 time: 0.0,
@@ -157,11 +160,18 @@ fn current_impulse_document_preserves_charge_availability_and_versions() {
         ],
     }]);
     let recorded = document(&result);
-    assert_eq!(recorded.total_value_count(), base_count + 5);
+    assert_eq!(recorded.total_value_count(), base_count + 6);
     let json = recorded.to_json().unwrap();
     assert_eq!(AnalysisResultDocument::from_json(&json).unwrap(), recorded);
     assert!(json.contains("chargeCoulombs"));
     assert!(!json.contains("Infinity"));
+    let mut legacy: serde_json::Value = serde_json::from_str(&json).unwrap();
+    legacy["schemaVersion"] = 6.into();
+    let decoded = AnalysisResultDocument::from_json(&legacy.to_string()).unwrap();
+    let ResultPayload::Tran(payload) = decoded.payload() else {
+        panic!("transient")
+    };
+    assert!(!payload.current_impulses.as_ref().unwrap()[0].complete);
     for version in 1..6 {
         let mut old: serde_json::Value = serde_json::from_str(&json).unwrap();
         old["schemaVersion"] = version.into();
@@ -189,6 +199,49 @@ fn current_impulse_document_preserves_charge_availability_and_versions() {
     };
     payload.current_impulses.as_mut().unwrap()[0].points[1].time = 3.0e-6;
     assert!(malformed.to_json().is_err());
+}
+
+#[test]
+fn current_impulse_document_requires_version_seven_for_owned_coverage() {
+    let mut result = transient_result();
+    result.current_impulses = Some(vec![
+        crate::CurrentImpulseTrace {
+            owner: crate::CurrentImpulseOwner::Branch {
+                branch_name: "v1".into(),
+            },
+            complete: true,
+            points: vec![],
+        },
+        crate::CurrentImpulseTrace {
+            owner: crate::CurrentImpulseOwner::DeviceLead {
+                device_name: "Q1".into(),
+                parameter: "ic".into(),
+            },
+            complete: true,
+            points: vec![],
+        },
+    ]);
+    let document = AnalysisResultDocument::from_transient(
+        instance(AnalysisKind::Tran),
+        &result,
+        None,
+        Vec::new(),
+    )
+    .unwrap()
+    .build()
+    .unwrap();
+    let json = document.to_json().unwrap();
+    assert_eq!(AnalysisResultDocument::from_json(&json).unwrap(), document);
+    // No finite device-current channel is needed to preserve a lead owner.
+    for trace in result.current_impulses.as_ref().unwrap() {
+        let mut wire: serde_json::Value = serde_json::from_str(&json).unwrap();
+        wire["payload"]["currentImpulses"] = serde_json::json!([trace]);
+        wire["schemaVersion"] = 6.into();
+        assert!(AnalysisResultDocument::from_json(&wire.to_string()).is_err());
+    }
+    let mut wire: serde_json::Value = serde_json::from_str(&json).unwrap();
+    wire["payload"]["currentImpulses"][1]["branchName"] = "v1".into();
+    assert!(AnalysisResultDocument::from_json(&wire.to_string()).is_err());
 }
 
 fn noise_points() -> Vec<NoiseResult> {

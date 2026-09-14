@@ -9,7 +9,7 @@ struct Progress {
     accepted_time: AtomicU64,
     points: AtomicUsize,
     initial: std::sync::Mutex<Vec<(Vec<Value>, Vec<Value>)>>,
-    impulses: std::sync::Mutex<Vec<(String, crate::CurrentImpulsePoint)>>,
+    impulses: std::sync::Mutex<Vec<(crate::CurrentImpulseOwner, crate::CurrentImpulsePoint)>>,
 }
 
 impl AbortSignal for Progress {
@@ -48,7 +48,7 @@ impl AbortSignal for Progress {
                     self.impulses
                         .lock()
                         .unwrap()
-                        .push((trace.branch_name.clone(), point));
+                        .push((trace.owner.clone(), point));
                 }
             }
         }
@@ -167,12 +167,12 @@ fn run_with_configuration(
             trace
                 .points
                 .iter()
-                .map(|point| (trace.branch_name.clone(), *point))
+                .map(|point| (trace.owner.clone(), *point))
         })
         .collect::<Vec<_>>();
     let mut live = progress.impulses.lock().unwrap().clone();
-    let order = |a: &(String, crate::CurrentImpulsePoint),
-                 b: &(String, crate::CurrentImpulsePoint)| {
+    let order = |a: &(crate::CurrentImpulseOwner, crate::CurrentImpulsePoint),
+                 b: &(crate::CurrentImpulseOwner, crate::CurrentImpulsePoint)| {
         a.1.time.total_cmp(&b.1.time).then_with(|| a.0.cmp(&b.0))
     };
     impulses.sort_by(order);
@@ -309,7 +309,7 @@ fn physical_dispatch_impulses_preserve_signed_charge_and_do_not_replay_checkpoin
             .as_ref()
             .unwrap()
             .iter()
-            .find(|trace| trace.branch_name.eq_ignore_ascii_case("Vc"))
+            .find(|trace| matches!(&trace.owner, crate::CurrentImpulseOwner::Branch { branch_name } if branch_name.eq_ignore_ascii_case("Vc")))
             .unwrap();
         let mut expected = vec![(1e-9_f64, -1e-12), (2e-9, 2e-12)];
         if uic {
@@ -323,6 +323,15 @@ fn physical_dispatch_impulses_preserve_signed_charge_and_do_not_replay_checkpoin
         for (point, (time, charge)) in trace.points.iter().zip(expected) {
             assert_eq!(point.time.to_bits(), time.to_bits());
             assert!((point.charge_coulombs - charge).abs() < 1e-24);
+        }
+        let capacitor = baseline.current_impulses.as_ref().unwrap().iter().find(|trace| {
+            matches!(&trace.owner, crate::CurrentImpulseOwner::Branch { branch_name } if branch_name.eq_ignore_ascii_case("C1"))
+        }).unwrap();
+        assert!(capacitor.complete);
+        assert_eq!(capacitor.points.len(), trace.points.len());
+        for (capacitor, source) in capacitor.points.iter().zip(&trace.points) {
+            assert_eq!(capacitor.time.to_bits(), source.time.to_bits());
+            assert!((capacitor.charge_coulombs + source.charge_coulombs).abs() < 1e-24);
         }
         let source = baseline
             .branch_names
@@ -348,7 +357,7 @@ fn physical_dispatch_impulses_preserve_signed_charge_and_do_not_replay_checkpoin
                 .as_ref()
                 .unwrap()
                 .iter()
-                .find(|trace| trace.branch_name.eq_ignore_ascii_case("Rzero"))
+                .find(|trace| matches!(&trace.owner, crate::CurrentImpulseOwner::Branch { branch_name } if branch_name.eq_ignore_ascii_case("Rzero")))
                 .unwrap();
             assert_eq!(resistor.points.len(), trace.points.len());
             for (resistor, source) in resistor.points.iter().zip(&trace.points) {
@@ -370,7 +379,7 @@ fn physical_dispatch_impulses_preserve_signed_charge_and_do_not_replay_checkpoin
             for trace in &mut expected {
                 trace.points.retain(|point| point.time > checkpoint.time);
             }
-            expected.retain(|trace| !trace.points.is_empty());
+            expected.retain(|trace| trace.complete || !trace.points.is_empty());
             assert_eq!(resumed.current_impulses.as_ref().unwrap(), &expected);
             let seam = baseline
                 .time
@@ -399,7 +408,186 @@ fn physical_dispatch_continuous_corner_has_recorded_empty_impulse_history() {
         3e-9,
         1e-10,
     );
-    assert_eq!(result.current_impulses, Some(Vec::new()));
+    assert!(
+        result
+            .current_impulses
+            .as_ref()
+            .unwrap()
+            .iter()
+            .all(|trace| trace.complete && trace.points.is_empty())
+    );
+}
+
+#[test]
+fn physical_dispatch_capacitor_impulse_excludes_incoming_interval_and_survives_save_selection() {
+    let result = run(
+        "Ramp before physical jump\nVc c 0 DC 0 PWL(0 0 1n 1 1n 2 2n 2)\nC1 c 0 1p\nR1 c 0 1k\nVb b 0 .6\nQ1 0 b 0 qm\n.model qm NPN(IS=1e-16 TF=1n PTF=30)\n.save V(c)\n.tran .17n 2n\n.end\n",
+        2e-9,
+        0.17e-9,
+    );
+    let ordinal = result
+        .branch_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case("C1"))
+        .unwrap();
+    assert!(
+        result.branch_currents[ordinal].is_empty(),
+        "unselected finite current must stay unretained"
+    );
+    let trace = result.current_impulses.as_ref().unwrap().iter().find(|trace| {
+        matches!(&trace.owner, crate::CurrentImpulseOwner::Branch { branch_name } if branch_name.eq_ignore_ascii_case("C1"))
+    }).unwrap();
+    assert!(trace.complete);
+    assert_eq!(trace.points.len(), 1);
+    assert_eq!(trace.points[0].time, 1e-9);
+    assert!((trace.points[0].charge_coulombs - 1e-12).abs() < 1e-24);
+    let seam = result.time.iter().position(|&time| time == 1e-9).unwrap();
+    assert!(result.time[seam - 1] < 1e-9);
+}
+
+#[test]
+fn physical_dispatch_gp_terminal_impulses_match_independent_linear_junction_charges() {
+    for (kind, polarity) in [("NPN", 1.0), ("PNP", -1.0)] {
+        let text = format!(
+            "GP terminal charge\nVc c 0 {}\nVb b 0 PWL(0 {} 1n {} 1n {} 2n {})\nVe e 0 0\nVs s 0 0\nQ1 c b e s qm\n.model qm {kind}(IS=1e-12 BF=100 BR=1 TF=1n PTF=30 CJE=1p MJE=0 CJC=2p MJC=0 XCJC=.3 CJS=1p MJS=0 TNOM=27)\n.options temp=27 gmin=0 reltol=1e-12 abstol=1e-20 vntol=1e-12 chgtol=1e-26\n.save V(b)\n.tran .13n 2n\n.end\n",
+            2.0 * polarity,
+            0.2 * polarity,
+            0.2 * polarity,
+            0.3 * polarity,
+            0.3 * polarity,
+        );
+        let (baseline, checkpoints) = run_with_checkpoint(&text, 2e-9, 0.13e-9, None, &[1e-9]);
+        let vt = crate::constants::XYCE_K_BOLTZMANN * 300.15 / crate::constants::XYCE_Q_ELECTRON;
+        let qbe = polarity * (1e-13 + 1e-21 * ((0.3 / vt).exp() - (0.2 / vt).exp()));
+        let qbc = polarity * 2e-13;
+        // GP defaults to a vertical NPN and lateral PNP. The latter's
+        // substrate junction connects to the base, so it also sees this jump.
+        let qbs = if kind == "PNP" { polarity * 1e-13 } else { 0.0 };
+        let mut total = 0.0;
+        for (parameter, expected, source) in [
+            ("ic", -qbc, "Vc"),
+            ("ib", qbe + qbc + qbs, "Vb"),
+            ("ie", -qbe, "Ve"),
+            ("is", -qbs, "Vs"),
+        ] {
+            let trace = baseline.current_impulses.as_ref().unwrap().iter().find(|trace| {
+                matches!(&trace.owner, crate::CurrentImpulseOwner::DeviceLead { device_name, parameter: actual } if device_name.eq_ignore_ascii_case("Q1") && actual == parameter)
+            }).unwrap();
+            assert!(trace.complete);
+            let actual: Value = trace
+                .points
+                .iter()
+                .filter(|point| point.time == 1e-9)
+                .map(|point| point.charge_coulombs)
+                .sum();
+            assert!(
+                (actual - expected).abs() < 1e-24,
+                "{kind} {parameter}: {actual:e} != {expected:e}"
+            );
+            total += actual;
+            let source = baseline.current_impulses.as_ref().unwrap().iter().find(|trace| {
+                matches!(&trace.owner, crate::CurrentImpulseOwner::Branch { branch_name } if branch_name.eq_ignore_ascii_case(source))
+            }).unwrap();
+            let supplied: Value = source
+                .points
+                .iter()
+                .filter(|point| point.time == 1e-9)
+                .map(|point| point.charge_coulombs)
+                .sum();
+            assert!(
+                (supplied + actual).abs() < 1e-24,
+                "{kind} source/lead charge conservation for {parameter}: source={supplied:e}, lead={actual:e}, residual={:e}",
+                supplied + actual
+            );
+        }
+        assert!(total.abs() < 1e-24);
+        let checkpoint = &checkpoints[0].checkpoint;
+        for encoding in [
+            TransientCheckpointEncoding::Packed,
+            TransientCheckpointEncoding::Unpacked,
+        ] {
+            let checkpoint =
+                TransientCheckpoint::from_bytes(&checkpoint.to_bytes(encoding).unwrap()).unwrap();
+            let (resumed, _) = run_with_checkpoint(&text, 2e-9, 0.13e-9, Some(&checkpoint), &[]);
+            assert!(
+                resumed
+                    .current_impulses
+                    .as_ref()
+                    .unwrap()
+                    .iter()
+                    .all(|trace| trace.complete
+                        && trace
+                            .points
+                            .iter()
+                            .all(|point| point.time > checkpoint.time))
+            );
+        }
+    }
+}
+
+#[test]
+fn physical_dispatch_gp_base_resistance_routes_only_external_bc_charge_to_the_lead() {
+    for (kind, polarity) in [("NPN", 1.0), ("PNP", -1.0)] {
+        let text = format!(
+            "GP external BC charge\nVc c 0 {}\nVb b 0 PWL(0 {} 1n {} 1n {} 2n {})\nVe e 0 0\nQ1 c b e qm\n.model qm {kind}(IS=1e-12 BF=100 TF=1n PTF=30 RB=100 CJE=1p MJE=0 CJC=2p MJC=0 XCJC=.3 TNOM=27)\n.options temp=27 gmin=0 reltol=1e-12 abstol=1e-20 vntol=1e-12 chgtol=1e-26\n.save V(b)\n.tran .13n 2n\n.end\n",
+            2.0 * polarity,
+            0.2 * polarity,
+            0.2 * polarity,
+            0.3 * polarity,
+            0.3 * polarity,
+        );
+        let result = run(&text, 2e-9, 0.13e-9);
+        // RB carries finite current, so intrinsic junction charge is continuous
+        // at the imposed external-base jump. Only (1-XCJC)*CJC sees that jump.
+        let qbcx = polarity * 0.7 * 2e-12 * 0.1;
+        for (parameter, expected) in [("ic", -qbcx), ("ib", qbcx), ("ie", 0.0), ("is", 0.0)] {
+            let trace = result.current_impulses.as_ref().unwrap().iter().find(|trace| {
+                matches!(&trace.owner, crate::CurrentImpulseOwner::DeviceLead { device_name, parameter: actual }
+                    if device_name.eq_ignore_ascii_case("Q1") && actual == parameter)
+            }).unwrap();
+            assert!(trace.complete);
+            let actual: Value = trace
+                .points
+                .iter()
+                .filter(|point| point.time == 1e-9)
+                .map(|point| point.charge_coulombs)
+                .sum();
+            assert!(
+                (actual - expected).abs() < 1e-24,
+                "{kind} {parameter}: {actual:e} != {expected:e}"
+            );
+        }
+    }
+}
+
+#[test]
+fn physical_dispatch_gp_startup_impulse_uses_selected_initial_charge() {
+    let vt = crate::constants::XYCE_K_BOLTZMANN * 300.15 / crate::constants::XYCE_Q_ELECTRON;
+    let qbe = 3e-13 + 1e-21 * ((0.3 / vt).exp() - 1.0);
+    for mode in ["", "UIC"] {
+        let text = format!(
+            "GP selected startup charge\nVc c 0 2\nVb b 0 .3\nVe e 0 0\nQ1 c b e qm\n.model qm NPN(IS=1e-12 BF=100 TF=1n PTF=30 CJE=1p MJE=0 TNOM=27)\n.options temp=27 gmin=0 reltol=1e-12 abstol=1e-20 vntol=1e-12 chgtol=1e-26\n.tran .2n 1n {mode}\n.end\n"
+        );
+        let result = run(&text, 1e-9, 0.2e-9);
+        for (parameter, expected) in [("ic", 0.0), ("ib", qbe), ("ie", -qbe), ("is", 0.0)] {
+            let trace = result.current_impulses.as_ref().unwrap().iter().find(|trace| {
+                matches!(&trace.owner, crate::CurrentImpulseOwner::DeviceLead { device_name, parameter: actual }
+                    if device_name.eq_ignore_ascii_case("Q1") && actual == parameter)
+            }).unwrap();
+            assert!(trace.complete);
+            let actual: Value = trace
+                .points
+                .iter()
+                .filter(|point| point.time == 0.0)
+                .map(|point| point.charge_coulombs)
+                .sum();
+            let expected = if mode == "UIC" { expected } else { 0.0 };
+            assert!(
+                (actual - expected).abs() < 1e-24,
+                "{mode} {parameter}: {actual:e} != {expected:e}"
+            );
+        }
+    }
 }
 
 #[test]
@@ -608,8 +796,9 @@ fn run_original(text: &str, stop: Value, max_step: Value) {
                 .copied()
                 .filter(|point| point.time > checkpoint.time)
                 .collect();
-            (!points.is_empty()).then(|| crate::CurrentImpulseTrace {
-                branch_name: trace.branch_name.clone(),
+            (trace.complete || !points.is_empty()).then(|| crate::CurrentImpulseTrace {
+                owner: trace.owner.clone(),
+                complete: trace.complete,
                 points,
             })
         })
@@ -620,10 +809,10 @@ fn run_original(text: &str, stop: Value, max_step: Value) {
         assert_eq!(
             actual_impulses
                 .iter()
-                .find(|candidate| candidate.branch_name == trace.branch_name),
+                .find(|candidate| candidate.owner == trace.owner),
             Some(trace),
             "original restart impulse suffix for {}",
-            trace.branch_name
+            trace.owner
         );
     }
     eprintln!(

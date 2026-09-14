@@ -328,9 +328,10 @@ pub struct AcPayload {}
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TransientPayload {
-    /// Sparse branch current impulses in coulombs, independent of finite
-    /// current samples. Absent/None means unavailable; an empty array means
-    /// recorded with no impulses. Available only from document version 6.
+    /// Sparse current impulses in coulombs, independent of finite samples.
+    /// Absent owners have no coverage claim. An empty complete trace proves
+    /// no impulses for its owner. Branch observations require version 6;
+    /// device ownership and complete coverage require version 7.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub current_impulses: Option<Vec<crate::CurrentImpulseTrace>>,
 

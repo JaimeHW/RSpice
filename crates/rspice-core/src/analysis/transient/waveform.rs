@@ -814,6 +814,7 @@ impl TransientResultIdentity {
 pub struct TransientResultCompressed {
     /// Sparse current impulses carried exactly, without resampling or
     /// decimation. `None` means their history was unavailable or unrecorded.
+    /// Each trace retains its owner's coverage; omitted owners remain unknown.
     pub current_impulses: Option<Vec<crate::CurrentImpulseTrace>>,
     /// Retained time points, a subset of the accepted solver grid with their
     /// exact IEEE-754 values.

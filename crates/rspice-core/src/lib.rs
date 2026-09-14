@@ -151,7 +151,7 @@ pub use engine::{
 pub use netlist::Netlist;
 pub use resource::{ResourceKind, ResourceLimitError, ResourceLimits};
 pub use solver::{SimulationResult, Simulator, SparseLuSolver, StaticMatrix, TripletMatrix};
-pub use transient_observation::{CurrentImpulsePoint, CurrentImpulseTrace};
+pub use transient_observation::{CurrentImpulseOwner, CurrentImpulsePoint, CurrentImpulseTrace};
 pub use xspice::{CmContext, CodeModel, CodeModelRegistry, XspiceInstance};
 
 /// Error types for the simulation engine

@@ -864,7 +864,9 @@ use rspice_core::analysis::harmonic_balance::{
 /// and TransientResult::validate_current_impulses. Python persists and
 /// validates them; the GUI carries their named charges through output windows.
 /// Per-trace validation and resource helpers remain crate-private.
-const MAX_PUBLIC_ITEMS: usize = 5011;
+/// +1: CurrentImpulseOwner distinguishes branch and device-lead identities
+/// without parsing display strings. Coverage is carried by each trace.
+const MAX_PUBLIC_ITEMS: usize = 5012;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

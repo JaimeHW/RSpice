@@ -476,7 +476,8 @@ fn evaluate_transient_measurements(
             traces
                 .iter()
                 .map(|trace| rspice_core::CurrentImpulseTrace {
-                    branch_name: trace.branch_name.clone(),
+                    owner: trace.owner.clone(),
+                    complete: trace.complete,
                     // An impulse is an action at its original time, not held
                     // current state to be copied to the output boundary.
                     points: trace
@@ -486,7 +487,7 @@ fn evaluate_transient_measurements(
                         .filter(|point| point.time >= start)
                         .collect(),
                 })
-                .filter(|trace| !trace.points.is_empty())
+                .filter(|trace| trace.complete || !trace.points.is_empty())
                 .collect()
         }),
         time: filtered_time.to_vec(),

@@ -34,10 +34,11 @@ impl CarriesDocumentEvidence for PyCompressedTransientResult {
 
 #[pymethods]
 impl PyCompressedTransientResult {
-    /// Sparse (branch, [(seconds, coulombs)]) impulses, preserved without
-    /// analog compression. None means unavailable, an empty list means none occurred.
+    /// Typed current owners and sparse (seconds, coulombs) observations,
+    /// preserved without analog compression. Only an empty complete trace
+    /// proves no impulses for that owner; omitted owners have no coverage claim.
     #[getter]
-    fn current_impulses(&self) -> ImpulseRows {
+    fn current_impulses(&self) -> Option<Vec<PyCurrentImpulseTrace>> {
         impulse_rows(self.inner.current_impulses.as_deref())
     }
 
@@ -719,7 +720,7 @@ impl PyCompressedTransientResult {
         fft_state: Option<TransientFftPersistenceState>,
         analog_state: Option<VersionedCompressedTransientAnalogState>,
         compression_state: Option<CompressionReportPersistenceState>,
-        impulse_state: Option<ImpulsePersistenceState>,
+        impulse_state: Option<VersionedImpulseState>,
     ) -> PyResult<Self> {
         rebuild_compressed_transient(
             time,

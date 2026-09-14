@@ -45,7 +45,7 @@ pub(super) fn restore_transient_result(
     store_traces: Vec<(String, Vec<f64>)>,
     fft_state: Option<TransientFftPersistenceState>,
     event_state: Option<VersionedTransientEventState>,
-    impulse_state: Option<ImpulsePersistenceState>,
+    impulse_state: Option<VersionedImpulseState>,
 ) -> PyResult<TransientResult> {
     let (digital_traces, digital_buses, real_traces) =
         rebuild_transient_event_traces(event_state).map_err(crate::errors::value_error)?;
@@ -304,7 +304,7 @@ pub(crate) fn clip_transient_to_start(
             // Impulses are newly accepted actions, never held state at TSTART.
             trace.points.retain(|point| point.time >= retained_start);
         }
-        traces.retain(|trace| !trace.points.is_empty());
+        traces.retain(|trace| trace.complete || !trace.points.is_empty());
     }
     result.time.drain(..start_index);
     for series in &mut result.voltages {
@@ -391,7 +391,10 @@ mod structural_tests {
         use rspice_core::{CurrentImpulsePoint, CurrentImpulseTrace};
         let mut result = two_point_result();
         result.current_impulses = Some(vec![CurrentImpulseTrace {
-            branch_name: "V1".into(),
+            owner: rspice_core::CurrentImpulseOwner::Branch {
+                branch_name: "V1".into(),
+            },
+            complete: false,
             points: vec![
                 CurrentImpulsePoint {
                     time: 0.0,

@@ -146,7 +146,7 @@ def test_every_family_publishes_the_shared_document(results):
         assert document["schema"] == "rspice-analysis-result", kind
         # Version 6 adds sparse current impulse observations; older readers must
         # reject it before trying to decode the new payload fields.
-        assert document["schemaVersion"] == 6, kind
+        assert document["schemaVersion"] == 7, kind
         assert document["resultKind"] == kind, kind
         assert document["analysis"]["tag"], kind
 

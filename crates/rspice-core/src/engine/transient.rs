@@ -1773,7 +1773,16 @@ impl Engine {
         // An empty save set means the public engine API retains every vector.
         // Measurements are evaluated after integration and may reference a
         // current absent from .PRINT/.SAVE, so remain conservative for them.
-        let retain_all = netlist.saves.keeps_everything() || !netlist.measurements.is_empty();
+        // Physical impulse owners must remain named even when their finite
+        // current columns are not selected. The capture plan still controls
+        // per-sample analog storage independently.
+        let retain_all = netlist.saves.keeps_everything()
+            || !netlist.measurements.is_empty()
+            || circuit
+                .bjts
+                .devices
+                .iter()
+                .any(|model| model.legacy_excess_phase_delay() > 0.0);
         let requests_derived_current = netlist
             .saves
             .signals
@@ -5713,9 +5722,24 @@ impl Engine {
         let physical_flux_tolerance = 1e-24;
         // A resume observes newly accepted actions only, not the past impulse
         // at its already accepted checkpoint seam.
-        let physical_impulse_branches = circuit.num_branches();
-        result.current_impulses = physical_sources.as_ref().map(|_| Vec::new());
-        if resume.is_none() && physical_sources.is_some() {
+        let physical_impulse_plan = if physical_sources.is_some() {
+            let (plan, added_values) = impulses::initialize(
+                &mut result,
+                &circuit,
+                &derived_branch_currents,
+                &physical_options,
+                physical_flux_tolerance,
+                retained_result_values.saturating_add(retained_scheduled_checkpoint_values),
+                abort,
+            )?;
+            retained_result_values = retained_result_values.saturating_add(added_values);
+            Some(plan)
+        } else {
+            None
+        };
+        if resume.is_none()
+            && let Some(plan) = &physical_impulse_plan
+        {
             let (startup, observation) = self.transition_physical_startup_with_observation(
                 state_commit::physical_event::PhysicalStartupTargets {
                     circuit: &mut circuit,
@@ -5725,12 +5749,10 @@ impl Engine {
                 &physical_options,
                 physical_flux_tolerance,
                 abort,
-                |charges| {
-                    impulses::prepare(
+                |point| {
+                    plan.prepare(
                         &mut result,
-                        0.0,
-                        physical_impulse_branches,
-                        charges.iter().copied(),
+                        point,
                         retained_result_values.saturating_add(retained_scheduled_checkpoint_values),
                         &self.config.resource_limits,
                         abort,
@@ -10088,17 +10110,22 @@ impl Engine {
                                 .saturating_add(result.store_traces.len())
                                 .saturating_add(result.device_op_traces.len())
                                 .saturating_add(1);
-                            impulses::prepare(
-                                &mut result,
-                                t,
-                                physical_impulse_branches,
-                                event.impulses(),
-                                retained_result_values
-                                    .saturating_add(retained_scheduled_checkpoint_values)
-                                    .saturating_add(pending_sample_values),
-                                &self.config.resource_limits,
-                                abort,
-                            )
+                            physical_impulse_plan
+                                .as_ref()
+                                .ok_or_else(|| {
+                                    SimulationError::Circuit(
+                                        "physical current observation plan is missing".into(),
+                                    )
+                                })?
+                                .prepare(
+                                    &mut result,
+                                    event,
+                                    retained_result_values
+                                        .saturating_add(retained_scheduled_checkpoint_values)
+                                        .saturating_add(pending_sample_values),
+                                    &self.config.resource_limits,
+                                    abort,
+                                )
                         })
                         .transpose()?;
                     let accepted_phase_context = outgoing_event
@@ -10652,17 +10679,22 @@ impl Engine {
                         .saturating_add(result.store_traces.len())
                         .saturating_add(result.device_op_traces.len())
                         .saturating_add(1);
-                    impulses::prepare(
-                        &mut result,
-                        t,
-                        physical_impulse_branches,
-                        event.impulses(),
-                        retained_result_values
-                            .saturating_add(retained_scheduled_checkpoint_values)
-                            .saturating_add(pending_sample_values),
-                        &self.config.resource_limits,
-                        abort,
-                    )
+                    physical_impulse_plan
+                        .as_ref()
+                        .ok_or_else(|| {
+                            SimulationError::Circuit(
+                                "physical current observation plan is missing".into(),
+                            )
+                        })?
+                        .prepare(
+                            &mut result,
+                            event,
+                            retained_result_values
+                                .saturating_add(retained_scheduled_checkpoint_values)
+                                .saturating_add(pending_sample_values),
+                            &self.config.resource_limits,
+                            abort,
+                        )
                 })
                 .transpose()?;
             let accepted_phase_context = outgoing_event
@@ -14739,7 +14771,10 @@ D1 D 0 DMOD
             .collect::<Vec<_>>();
         let result = TransientResult {
             current_impulses: Some(vec![crate::CurrentImpulseTrace {
-                branch_name: "VINPUT".into(),
+                owner: crate::CurrentImpulseOwner::Branch {
+                    branch_name: "VINPUT".into(),
+                },
+                complete: false,
                 points: vec![
                     crate::CurrentImpulsePoint {
                         time: time[1],
@@ -14787,14 +14822,17 @@ D1 D 0 DMOD
         let live = result.observable_sample(&[], &[], &[]);
         assert_eq!(live.current_impulses, result.current_impulses.as_deref());
         let mut malformed = compressed.clone();
-        malformed.current_impulses.as_mut().unwrap()[0].branch_name = "missing".into();
+        malformed.current_impulses.as_mut().unwrap()[0].owner =
+            crate::CurrentImpulseOwner::Branch {
+                branch_name: "missing".into(),
+            };
         assert!(malformed.validate().is_err());
         assert!(malformed.try_into_transient().is_err());
         let mut no_impulses = result.clone();
         no_impulses.current_impulses = None;
         assert_eq!(
             Engine::transient_result_value_count(&result),
-            Engine::transient_result_value_count(&no_impulses) + 5
+            Engine::transient_result_value_count(&no_impulses) + 6
         );
         compressed.validate().expect("compressed inventory aligns");
         assert_eq!(compressed.node_names(), result.node_names);

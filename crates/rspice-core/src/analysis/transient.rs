@@ -765,8 +765,9 @@ pub struct TransientResult {
     /// Branch names aligned with `branch_currents`
     pub branch_names: Vec<String>,
     /// Newly accepted current impulses, in coulombs. `None` means unavailable
-    /// or unrecorded; `Some` preserves the complete sparse event history for
-    /// this run segment, independently of finite current waveforms.
+    /// or unrecorded. Coverage belongs to each trace: only an empty complete
+    /// trace proves no impulses for that owner in this run segment.
+    /// Omitted owners provide no coverage claim, even when this is `Some`.
     pub current_impulses: Option<Vec<crate::CurrentImpulseTrace>>,
     /// XSPICE digital node histories captured at accepted transient points.
     pub digital_traces: Vec<DigitalTrace>,

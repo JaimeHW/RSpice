@@ -2640,6 +2640,44 @@ impl Bjt {
         Ok(currents)
     }
 
+    /// Map intrinsic charge actions to the authored C/B/E/S leads. An
+    /// externalized finite resistor cannot carry a Dirac current. External
+    /// base-collector storage bypasses RB but remains behind an external RC.
+    pub(crate) fn authored_transient_lead_impulses(
+        &self,
+        intrinsic: [Value; 4],
+        external_bc_charge: Value,
+    ) -> Result<[Value; 4], String> {
+        let mut charges = intrinsic;
+        for (index, lead) in [
+            self.legacy_collector_lead,
+            self.legacy_base_lead,
+            self.legacy_emitter_lead,
+        ]
+        .iter()
+        .enumerate()
+        {
+            if lead.is_some() {
+                charges[index] = 0.0;
+            }
+        }
+        if self.legacy_external_bc_charge_nodes().is_some() {
+            for (terminal, sign) in [(1, 1.0), (0, -1.0)] {
+                if terminal == 0 && self.legacy_collector_lead.is_some() {
+                    continue;
+                }
+                charges[terminal] = rspice_veriloga_runtime::arithmetic::sum_products(
+                    [(charges[terminal], 1.0), (external_bc_charge, sign)].into_iter(),
+                )
+                .map_err(|_| format!("BJT '{}' has an unrepresentable lead impulse", self.name))?;
+            }
+        }
+        if charges.iter().any(|value| !value.is_finite()) {
+            return Err(format!("BJT '{}' has a nonfinite lead impulse", self.name));
+        }
+        Ok(charges)
+    }
+
     /// Apply instance-level BJT scaling and thermal overrides.
     ///
     /// Supported keys:

@@ -5,8 +5,10 @@
 use super::*;
 use crate::circuit::SourceTimeSide;
 use charge_event::circuit::{EventPhase, PreparedEventCircuit};
+mod impulses;
 mod orders;
 mod startup;
+pub(in crate::engine::transient) use impulses::PhysicalDeviceImpulses;
 pub(in crate::engine::transient) use orders::PhysicalEventOrders;
 pub(in crate::engine::transient) use startup::PhysicalStartupTargets;
 
@@ -29,6 +31,7 @@ pub(in crate::engine::transient) struct PreparedPhysicalEvent {
     pub(super) capacitors: Vec<CapacitorAcceptedState>,
     left_limits: Vec<Option<Value>>,
     phase_anchors: Vec<Option<(usize, Value, Value)>>,
+    device_impulses: PhysicalDeviceImpulses,
 }
 
 fn phase_anchors(history: &BjtTransientHistory) -> Vec<Option<(usize, Value, Value)>> {
@@ -95,6 +98,14 @@ impl PreparedPhysicalEvent {
             .iter()
             .copied()
             .zip(self.state.source_impulses.iter().copied())
+    }
+
+    pub(in crate::engine::transient) fn device_impulses(&self) -> &PhysicalDeviceImpulses {
+        &self.device_impulses
+    }
+
+    pub(in crate::engine::transient) fn time(&self) -> Value {
+        self.time
     }
 
     pub(in crate::engine::transient) fn phase_context(&self) -> bjt::BjtPhaseContext<'_> {
@@ -330,6 +341,11 @@ impl Engine {
             };
             phase_current_couplings.push(coupling);
         }
+        let mut device_impulses = PhysicalDeviceImpulses::prepare(
+            classified.continuous,
+            circuit.capacitors.len(),
+            circuit.bjts.len(),
+        )?;
         let mut capacitors = Vec::with_capacity(circuit.capacitors.len());
         for (index, stamp) in circuit.capacitors.stamps.iter().enumerate() {
             if index.is_multiple_of(64) && abort.is_aborted() {
@@ -338,8 +354,19 @@ impl Engine {
             let p = stamp.pp.row;
             let n = stamp.nn.row;
             let c = circuit.capacitors.capacitances[index];
+            let outgoing_voltage = Self::differential_voltage(&state.solution, p, n);
+            if let PhysicalDeviceImpulses::Jumps { capacitors, .. } = &mut device_impulses {
+                let incoming_voltage = if startup {
+                    circuit.capacitors.v_prev[index]
+                } else {
+                    Self::differential_voltage(step.incoming, p, n)
+                };
+                capacitors.push(sum(
+                    [(c, outgoing_voltage), (-c, incoming_voltage)].into_iter()
+                )?);
+            }
             capacitors.push(CapacitorAcceptedState {
-                voltage: Self::differential_voltage(&state.solution, p, n),
+                voltage: outgoing_voltage,
                 current: sum([
                     (rate(&state.coordinate_rates, p)?, c),
                     (rate(&state.coordinate_rates, n)?, -c),
@@ -401,6 +428,17 @@ impl Engine {
                     ),
                 ]
                 .into_iter())?;
+            }
+            if let PhysicalDeviceImpulses::Jumps { bjt_terminals, .. } = &mut device_impulses {
+                bjt_terminals.push(impulses::bjt_terminal_charges(
+                    model,
+                    step.incoming,
+                    startup.then_some(&history.charge_q_prev[index]),
+                    &charges,
+                    &branches
+                        .each_ref()
+                        .map(|branch| (branch.pos_external, branch.neg_external)),
+                )?);
             }
             let mut terminal = model.mna_terminal_currents_at_solution(solution);
             if let Some(phase) = phases[index] {
@@ -531,6 +569,7 @@ impl Engine {
             capacitors,
             left_limits,
             phase_anchors: phase_anchors(history),
+            device_impulses,
         })
     }
 }

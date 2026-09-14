@@ -206,7 +206,7 @@ use crate::execution::topology::TopologyFingerprint;
 pub const ANALYSIS_RESULT_DOCUMENT_SCHEMA: &str = "rspice-analysis-result";
 
 /// Schema version this build produces.
-pub const ANALYSIS_RESULT_DOCUMENT_VERSION: u32 = 6;
+pub const ANALYSIS_RESULT_DOCUMENT_VERSION: u32 = 7;
 
 /// Every schema version this build decodes, oldest first.
 ///
@@ -228,7 +228,9 @@ pub const ANALYSIS_RESULT_DOCUMENT_VERSION: u32 = 6;
 /// require a rerun because their zeros do not distinguish undefined values.
 /// Version 6 adds sparse current impulses. Older transient documents decode
 /// with unavailable impulse history, without asserting that no impulse occurred.
-const DECODABLE_ANALYSIS_RESULT_DOCUMENT_VERSIONS: [u32; 6] = [1, 2, 3, 4, 5, 6];
+/// Version 7 names device-lead impulse owners and explicit per-current coverage.
+/// Version-6 rows retain their data with unqualified completeness.
+const DECODABLE_ANALYSIS_RESULT_DOCUMENT_VERSIONS: [u32; 7] = [1, 2, 3, 4, 5, 6, 7];
 
 /// First version whose transient payload may declare a digital bus.
 const FIRST_DIGITAL_BUS_DOCUMENT_VERSION: u32 = 2;
@@ -288,6 +290,17 @@ impl AnalysisResultDocument {
                 "current impulse observations require document version 6".into(),
             ));
         }
+        if self.schema_version < 7
+            && traces.iter().any(|trace| {
+                trace.complete
+                    || matches!(trace.owner, crate::CurrentImpulseOwner::DeviceLead { .. })
+            })
+        {
+            return Err(malformed(
+                "device current impulse owners and complete coverage require document version 7"
+                    .into(),
+            ));
+        }
         let times = self
             .axes
             .iter()
@@ -302,7 +315,10 @@ impl AnalysisResultDocument {
             Some(traces),
             times.first().copied(),
             times.last().copied(),
-            traces.iter().map(|trace| trace.branch_name.as_str()),
+            traces.iter().filter_map(|trace| match &trace.owner {
+                crate::CurrentImpulseOwner::Branch { branch_name } => Some(branch_name.as_str()),
+                crate::CurrentImpulseOwner::DeviceLead { .. } => None,
+            }),
         )
         .map_err(malformed)
     }

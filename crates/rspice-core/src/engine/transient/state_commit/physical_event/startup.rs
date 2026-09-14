@@ -222,7 +222,7 @@ impl Engine {
         options: &charge_event::EventOptions,
         flux_tolerance: Value,
         abort: &dyn AbortSignal,
-        prepare_observation: impl FnOnce(&[(usize, Value)]) -> Result<T, SimulationError>,
+        prepare_observation: impl FnOnce(&PreparedPhysicalEvent) -> Result<T, SimulationError>,
     ) -> Result<(PhysicalStartupReport, T), SimulationError> {
         let PhysicalStartupTargets {
             circuit,
@@ -270,7 +270,7 @@ impl Engine {
             ));
         }
         let impulses: Vec<_> = point.impulses().collect();
-        let observation = prepare_observation(&impulses)?;
+        let observation = prepare_observation(&point)?;
         let mut outgoing = history.clone();
         // The incoming anchor was a private prehistory seed. Build the first
         // accepted sided knot in fresh buffers; appending another t=0 sample
