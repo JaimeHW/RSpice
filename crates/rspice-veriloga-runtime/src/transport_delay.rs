@@ -10,6 +10,9 @@ use std::collections::VecDeque;
 
 use crate::arithmetic::{product_div, product_sum_div, sum_products_ratio};
 
+mod slope;
+pub use slope::DelayTimeSide;
+
 /// A clamped delayed time, held exactly as two binary64
 /// words. Rounding the absolute target alone can lose a physical delay or
 /// select the opposite side of an accepted interpolation knot.
@@ -414,7 +417,7 @@ impl DelayBuffer {
                 input_denominator: 1.0,
             });
         }
-        if before_arrival && let Some(left) = self.arriving_left_limit(time, effective_delay)? {
+        if before_arrival && let Some((_, left)) = self.arriving_event(time, effective_delay)? {
             let output = left - value;
             if !output.is_finite() {
                 return Err("incoming transport correction is not representable".into());
@@ -924,7 +927,7 @@ impl DelayBuffer {
             .map(|sample| sample.1)
     }
 
-    fn arriving_left_limit(&self, time: f64, delay: f64) -> Result<Option<f64>, String> {
+    fn arriving_event(&self, time: f64, delay: f64) -> Result<Option<(f64, f64)>, String> {
         let previous = DelayTarget::new(time.next_down().max(0.0), delay);
         if self
             .samples
@@ -944,7 +947,7 @@ impl DelayBuffer {
             .left_limits
             .get(first)
             .filter(|sample| target.at_or_after(sample.0))
-            .map(|sample| sample.1))
+            .copied())
     }
 
     /// Next representable time at or after an accepted jump's exact fixed-delay
