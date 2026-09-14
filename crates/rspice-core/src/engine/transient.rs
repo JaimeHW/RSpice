@@ -9895,6 +9895,7 @@ impl Engine {
                             },
                             bsim4_trnqs_coeff: &bsim4_trnqs_coeff,
                             snapshots: AcceptedReactiveSnapshots {
+                                physical_event: None,
                                 bjt_phase: Default::default(),
                                 xyce_one_step_order2,
                                 vbic_snapshots: Some(vbic_snapshot_cache.as_slice()),
@@ -10395,6 +10396,7 @@ impl Engine {
                     },
                     bsim4_trnqs_coeff: &bsim4_trnqs_coeff,
                     snapshots: AcceptedReactiveSnapshots {
+                        physical_event: None,
                         bjt_phase: Default::default(),
                         xyce_one_step_order2,
                         vbic_snapshots: Some(vbic_snapshot_cache.as_slice()),

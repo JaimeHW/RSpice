@@ -2,6 +2,13 @@
 
 use super::*;
 
+// The main stepper still needs physical event classification and incoming-side
+// orchestration; this acceptance participant can already validate/commit a
+// prepared point without routing its impulse through a finite companion.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(super) mod physical_event;
+pub(super) use physical_event::PreparedPhysicalEvent;
+
 /// The accepted step whose reactive history is being committed: the solution
 /// that was accepted, the time it lands at, the step size, and the companion
 /// coefficients the devices stamped with (BSIM4's non-quasi-static branch uses
@@ -22,6 +29,7 @@ pub(super) struct AcceptedReactiveStep<'a> {
 /// reference states.
 #[derive(Clone, Copy)]
 pub(super) struct AcceptedReactiveSnapshots<'a> {
+    pub physical_event: Option<&'a PreparedPhysicalEvent>,
     pub bjt_phase: bjt::BjtPhaseContext<'a>,
     pub xyce_one_step_order2: bool,
     pub vbic_snapshots: Option<&'a [Option<BjtChargeSnapshot>]>,
@@ -45,6 +53,7 @@ pub(super) struct ReactiveBreakpointScheduling<'a> {
 
 /// Newly evaluated values only; older history levels stay in their SoA arrays
 /// until every BJT has reconstructed a valid candidate.
+#[derive(Clone)]
 struct AcceptedBjtValues {
     phase_sample: Option<AcceptedBjtPhaseSample>,
     charges: [Value; BJT_DYNAMIC_CHARGE_COUNT],
@@ -62,6 +71,7 @@ struct AcceptedBjtPhaseSample {
     left_limit: Option<Value>,
 }
 
+#[derive(Clone)]
 #[must_use]
 pub(super) struct PreparedBjtHistory {
     values: Vec<AcceptedBjtValues>,
@@ -723,16 +733,21 @@ impl Engine {
         } else {
             None
         };
-        let bjt = Self::prepare_bjt_history(
-            circuit,
-            histories.bjt,
-            step.accepted_solution,
-            step.coeff,
-            step.dt,
-            step.accepted_time,
-            snapshots.vbic_snapshots,
-            snapshots.bjt_phase,
-        )?;
+        let bjt = if let Some(event) = snapshots.physical_event {
+            event.validate(circuit, histories.bjt, step, snapshots.bjt_phase)?;
+            event.bjt.clone()
+        } else {
+            Self::prepare_bjt_history(
+                circuit,
+                histories.bjt,
+                step.accepted_solution,
+                step.coeff,
+                step.dt,
+                step.accepted_time,
+                snapshots.vbic_snapshots,
+                snapshots.bjt_phase,
+            )?
+        };
         let behavioral = circuit
             .behavioral_sources
             .prepare_transient_step(step.accepted_solution, step.accepted_time)
@@ -802,6 +817,7 @@ impl Engine {
             current_abstol,
         } = scheduling;
         let AcceptedReactiveSnapshots {
+            physical_event,
             bjt_phase: _,
             xyce_one_step_order2,
             vbic_snapshots: _,
@@ -831,7 +847,9 @@ impl Engine {
             bsim4_trnqs_coeff,
         } = step;
         let num_nodes = circuit.num_nodes();
-        let capacitor_accepted_states = capacitor_accepted_states
+        let capacitor_accepted_states = physical_event
+            .map(|event| event.capacitors.as_slice())
+            .or(capacitor_accepted_states)
             .filter(|states| states.len() == circuit.capacitors.stamps.len());
         for (cap_idx, cap) in circuit.capacitors.stamps.iter().enumerate() {
             if circuit
@@ -1851,6 +1869,7 @@ mod tests {
                 ekv26: &mut Ekv26TransientHistory::default(),
             },
             AcceptedReactiveSnapshots {
+                physical_event: None,
                 bjt_phase: Default::default(),
                 xyce_one_step_order2: false,
                 vbic_snapshots: None,

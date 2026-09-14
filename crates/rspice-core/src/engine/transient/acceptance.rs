@@ -78,6 +78,9 @@ impl Engine {
                           solution: &mut [Value],
                           projected: &[(usize, Value)],
                           mixed_static: Option<&[Value]>| {
+                let physical_event = native
+                    .as_ref()
+                    .is_some_and(|native| native.snapshots.physical_event.is_some());
                 if !projected.is_empty()
                     && let Some(native) = native.as_mut()
                 {
@@ -90,6 +93,7 @@ impl Engine {
                 // invalidates numerical candidates, while static observation must
                 // retain the complete final candidate for subsequent acceptance.
                 if capture_static_history
+                    || physical_event
                     || (!projected.is_empty() && circuit.has_nonlinear_devices())
                 {
                     self.update_transient_nonlinear_devices(circuit, solution)?;
@@ -107,13 +111,24 @@ impl Engine {
                         .map_err(SimulationError::Circuit)?;
                 }
                 let static_history = if capture_static_history {
-                    let mut history = self.capture_xyce_static_residual(
-                        circuit,
-                        matrix,
-                        solution,
-                        time,
-                        baseline_diag_gmin,
-                    )?;
+                    let mut history = if physical_event {
+                        self.capture_xyce_static_residual_on_side(
+                            circuit,
+                            matrix,
+                            solution,
+                            time,
+                            baseline_diag_gmin,
+                            crate::circuit::SourceTimeSide::RightLimit,
+                        )
+                    } else {
+                        self.capture_xyce_static_residual(
+                            circuit,
+                            matrix,
+                            solution,
+                            time,
+                            baseline_diag_gmin,
+                        )
+                    }?;
                     if let Some(mixed) = mixed_static {
                         if history.len() != mixed.len() {
                             return Err(SimulationError::Circuit(
@@ -187,7 +202,7 @@ impl Engine {
                 if has_xspice {
                     circuit.accept_xspice_timestep();
                 }
-                Ok((discontinuity, static_history))
+                Ok((discontinuity || physical_event, static_history))
             };
             #[cfg(feature = "veriloga")]
             let coupled = circuit.has_coupled_event_nets();
@@ -1114,6 +1129,7 @@ mod tests {
                 },
                 bsim4_trnqs_coeff: &coefficients,
                 snapshots: AcceptedReactiveSnapshots {
+                    physical_event: None,
                     bjt_phase: Default::default(),
                     xyce_one_step_order2: false,
                     vbic_snapshots: None,

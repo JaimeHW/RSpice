@@ -14,7 +14,7 @@ mod stamp;
 pub(super) use stamp::{EventSample, EventStamp};
 mod rows;
 pub(super) use rows::EventBranchEquation;
-mod circuit;
+pub(super) mod circuit;
 mod solve;
 #[cfg(test)]
 mod tests;
@@ -108,6 +108,12 @@ pub(super) struct ChargeEventTopology {
 }
 
 impl ChargeEventTopology {
+    pub(in crate::engine::transient) fn source_branches(
+        &self,
+    ) -> impl ExactSizeIterator<Item = usize> + '_ {
+        self.sources.iter().map(|source| source.branch)
+    }
+
     pub(super) fn new(
         nodes: usize,
         size: usize,

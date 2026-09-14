@@ -69,6 +69,7 @@ fn commit(
             ekv26: &mut Default::default(),
         },
         AcceptedReactiveSnapshots {
+            physical_event: None,
             bjt_phase: phase_context,
             xyce_one_step_order2: false,
             vbic_snapshots: None,

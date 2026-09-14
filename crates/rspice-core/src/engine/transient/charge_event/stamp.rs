@@ -111,6 +111,10 @@ pub(in crate::engine::transient) struct EventSample {
 }
 
 impl EventSample {
+    pub(in crate::engine::transient) fn charge_values(&self) -> &[Value] {
+        &self.q.values
+    }
+
     pub(super) fn nonfinite(&self, size: usize) -> Result<bool> {
         // Domain-invalid Newton probes may backtrack, but a simultaneous
         // structural/resource fault must still reach the caller immediately.

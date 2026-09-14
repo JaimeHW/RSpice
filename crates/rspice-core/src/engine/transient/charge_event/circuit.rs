@@ -39,6 +39,10 @@ fn side(side: SourceTimeSide) -> Result<DelayTimeSide> {
 }
 
 impl PreparedEventCircuit<'_> {
+    pub(in crate::engine::transient) fn models(&self) -> &[Bjt] {
+        &self.models
+    }
+
     pub(in crate::engine::transient) fn topology(
         &self,
         time: Value,
