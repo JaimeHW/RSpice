@@ -906,7 +906,9 @@ impl Engine {
         history: &BjtTransientHistory,
         vbic_snapshot_cache: &mut [Option<BjtChargeSnapshot>],
         xyce_one_step_order2: bool,
+        phase_context: bjt::BjtPhaseContext<'_>,
     ) -> Result<(), SimulationError> {
+        let phase = phase_context.bind(history)?;
         let TransientCompanionStamp {
             circuit,
             matrix,
@@ -963,7 +965,7 @@ impl Engine {
                     matrix: &mut *matrix,
                     rhs: &mut *rhs,
                 };
-                if let Some(phase) = history.phase_trial(idx, time) {
+                if let Some(phase) = phase.trial(idx, time) {
                     phase
                         .stamp_promoted(bjt, &mut stamper, xyce_one_step_order2)
                         .map_err(|error| {
@@ -1028,7 +1030,7 @@ impl Engine {
                 bjt,
                 [vc, vb, ve, vs],
                 BjtChargeStep {
-                    phase: history.phase_trial(idx, time),
+                    phase: phase.trial(idx, time),
                     coeff,
                     dt,
                     q_prev: &history.charge_q_prev[idx],
@@ -1060,7 +1062,7 @@ impl Engine {
                 bjt,
                 &snapshot,
                 BjtChargeStep {
-                    phase: history.phase_trial(idx, time),
+                    phase: phase.trial(idx, time),
                     coeff,
                     dt,
                     q_prev: &history.charge_q_prev[idx],

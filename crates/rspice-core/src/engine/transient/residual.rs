@@ -62,6 +62,7 @@ pub(super) struct TransientSystemContext<'a> {
     /// Independent-source equation convention for this trial, also used by
     /// physical residual proofs and source-constraint projection.
     pub(super) source_time_side: SourceTimeSide,
+    pub(super) bjt_phase: bjt::BjtPhaseContext<'a>,
     pub(super) coeff: &'a CompanionCoefficients,
     /// Xyce's OneStep method uses a backward-Euler reactive companion for
     /// both order-one and order-two steps. Order two additionally splits the
@@ -1616,6 +1617,7 @@ impl Engine {
             ctx.bjt_history,
             vbic_snapshot_cache,
             ctx.xyce_one_step_order2,
+            ctx.bjt_phase,
         )?;
         Self::stamp_jfet_transient_companions(
             TransientCompanionStamp {
@@ -3080,6 +3082,7 @@ D2 in out DMOD
         let coeff = CompanionCoefficients::backward_euler();
         let baseline_diag_gmin = engine.config.convergence_config.gmin_target.max(0.0);
         let mut ctx = TransientSystemContext {
+            bjt_phase: Default::default(),
             source_time_side,
             coeff: &coeff,
             xyce_one_step: false,
@@ -3300,6 +3303,7 @@ M1 d g 0 0 NM W=10u L=1u
         let coeff = CompanionCoefficients::backward_euler();
         let baseline_diag_gmin = engine.config.convergence_config.gmin_target.max(0.0);
         let mut ctx = TransientSystemContext {
+            bjt_phase: Default::default(),
             source_time_side,
             coeff: &coeff,
             xyce_one_step: false,
@@ -3887,6 +3891,7 @@ Q1 C B E 0 QN
         let mosfet_companion_slots = Engine::link_mosfet_companion_slots(&circuit, &matrix);
         let vdmos_companion_slots = Engine::link_vdmos_companion_slots(&circuit, &matrix);
         let ctx = TransientSystemContext {
+            bjt_phase: Default::default(),
             source_time_side: crate::circuit::SourceTimeSide::Published,
             coeff: &coeff,
             xyce_one_step: false,
@@ -4333,6 +4338,7 @@ Q1 C B E 0 QN
             let mosfet_companion_slots = Engine::link_mosfet_companion_slots(&circuit, &matrix);
             let vdmos_companion_slots = Engine::link_vdmos_companion_slots(&circuit, &matrix);
             let ctx = TransientSystemContext {
+                bjt_phase: Default::default(),
                 source_time_side: crate::circuit::SourceTimeSide::Published,
                 coeff: &coeff,
                 xyce_one_step: false,

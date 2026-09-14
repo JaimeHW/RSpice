@@ -69,6 +69,26 @@ fn sample_cached(
     time: Value,
     one_step: bool,
 ) -> Sample {
+    sample_cached_on_side(
+        circuit,
+        solution,
+        history,
+        coeff,
+        time,
+        one_step,
+        Default::default(),
+    )
+}
+
+fn sample_cached_on_side(
+    circuit: &mut crate::CircuitData,
+    solution: &[Value],
+    history: &BjtTransientHistory,
+    coeff: &CompanionCoefficients,
+    time: Value,
+    one_step: bool,
+    phase_context: BjtPhaseContext<'_>,
+) -> Sample {
     let delay = circuit.bjts.devices[0].legacy_excess_phase_delay();
     let dt = time - 2.0 * delay;
     let mut matrix = Engine::default().build_matrix(circuit).unwrap();
@@ -103,6 +123,7 @@ fn sample_cached(
         history,
         &mut [None],
         one_step,
+        phase_context,
     )
     .unwrap();
     // This checks the real builder's frozen sparsity pattern as well as values.
@@ -510,6 +531,103 @@ fn gp_right_trial_promoted_stamp_matches_physical_current_and_tangent() {
                         assert!(
                             (actual.a[row][column] - tangent).abs() < 2e-12 + 2e-7 * tangent.abs(),
                             "polarity={polarity} private={private} one_step={one_step} row={row} column={column}"
+                        );
+                    }
+                }
+            }
+            assert_eq!(history, accepted);
+        }
+    }
+}
+
+#[test]
+fn gp_phase_event_context_reaches_complete_promoted_companion_assembly() {
+    let coeff = CompanionCoefficients::backward_euler();
+    for polarity in [1.0, -1.0] {
+        for private in [false, true] {
+            let device = transistor(polarity, private, 1.0);
+            let left_state = device.charge_snapshot(polarity * 2.0, polarity * 0.67, 0.0, 0.0);
+            let mut circuit = promoted_circuit(&device);
+            let initial = initial_state(&circuit, &left_state);
+            let mut history = accepted_history(&circuit, &initial);
+            let anchor = history.phase[0]
+                .as_ref()
+                .unwrap()
+                .accepted_samples()
+                .next_back()
+                .unwrap()
+                .1;
+            let delay = device.legacy_excess_phase_delay();
+            let mut buffer = DelayBuffer::new(0);
+            buffer.accept_sample(0.0, anchor, delay, None).unwrap();
+            buffer
+                .accept_discontinuity(2.0 * delay, anchor, 3.0 * anchor, delay, None)
+                .unwrap();
+            let arrival = buffer
+                .next_discontinuity_after(2.0 * delay)
+                .unwrap()
+                .unwrap();
+            history.phase[0] = Some(buffer);
+            let accepted = history.clone();
+            let right = device.charge_snapshot(polarity * 2.0, polarity * 0.69, 0.0, 0.0);
+            let solution = initial_state(&circuit, &right);
+            circuit.bjts.devices[0].update_mna_static_probe(&solution);
+            let (_, internal, _) = circuit.bjts.devices[0].mna_charge_state_at_solution(&solution);
+            let current = forward_reference(&device, polarity, &internal);
+            let collector = circuit.bjts.devices[0].mna_internal_node(BJT_VCX_STATE_INDEX) - 1;
+            let emitter = circuit.bjts.devices[0].mna_internal_node(BJT_VEI_STATE_INDEX) - 1;
+            let limits = [Some(anchor)];
+            for one_step in [false, true] {
+                let weight = if one_step { 0.5 } else { 1.0 };
+                for (time, context, difference) in [
+                    (
+                        arrival,
+                        BjtPhaseContext {
+                            incoming_arrival: true,
+                            input_left_limits: None,
+                        },
+                        -2.0 * anchor,
+                    ),
+                    (
+                        4.5 * delay,
+                        BjtPhaseContext {
+                            incoming_arrival: false,
+                            input_left_limits: Some(&limits),
+                        },
+                        0.6 * (anchor - current),
+                    ),
+                ] {
+                    let ordinary = sample_cached_on_side(
+                        &mut circuit,
+                        &solution,
+                        &history,
+                        &coeff,
+                        time,
+                        one_step,
+                        Default::default(),
+                    );
+                    let sided = sample_cached_on_side(
+                        &mut circuit,
+                        &solution,
+                        &history,
+                        &coeff,
+                        time,
+                        one_step,
+                        context,
+                    );
+                    for row in 0..solution.len() {
+                        let sign = if row == collector {
+                            1.0
+                        } else if row == emitter {
+                            -1.0
+                        } else {
+                            0.0
+                        };
+                        let actual = sided.residual[row] - ordinary.residual[row];
+                        let expected = sign * weight * difference;
+                        assert!(
+                            (actual - expected).abs() < 1e-13,
+                            "polarity={polarity} private={private} order2={one_step} row={row}: {actual} != {expected}"
                         );
                     }
                 }

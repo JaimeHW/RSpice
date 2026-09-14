@@ -4124,6 +4124,7 @@ impl Engine {
                 bjt_history,
                 bjt_snapshot_cache,
                 false,
+                Default::default(),
             )?;
             Self::stamp_jfet_transient_companions(
                 super::transient::TransientCompanionStamp {

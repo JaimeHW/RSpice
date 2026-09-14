@@ -27,6 +27,7 @@ fn source_event_sides_solve_and_prove_distinct_analog_equilibria() {
     let coeff = CompanionCoefficients::backward_euler();
     let static_history = vec![0.0; size];
     let mut ctx = TransientSystemContext {
+        bjt_phase: Default::default(),
         source_time_side: SourceTimeSide::Published,
         coeff: &coeff,
         xyce_one_step: false,

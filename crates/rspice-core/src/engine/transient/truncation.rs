@@ -1005,6 +1005,7 @@ impl Engine {
         found_branch.then_some(limit)
     }
 
+    #[allow(clippy::too_many_arguments)]
     #[inline]
     pub(super) fn legacy_bjt_ngspice_truncation_limit(
         circuit: &crate::circuit::CircuitData,
@@ -1014,7 +1015,9 @@ impl Engine {
         history: &BjtTransientHistory,
         vbic_snapshot_cache: &[Option<BjtChargeSnapshot>],
         tolerances: NgspiceTruncationTolerances,
+        phase_context: bjt::BjtPhaseContext<'_>,
     ) -> Option<Value> {
+        let phase = phase_context.bind(history).ok()?;
         let TruncationStep {
             method,
             trap_order,
@@ -1074,7 +1077,7 @@ impl Engine {
                     bjt,
                     candidate_external,
                     BjtChargeStep {
-                        phase: history.phase_trial(idx, time),
+                        phase: phase.trial(idx, time),
                         coeff: &coeff,
                         dt,
                         q_prev: &history.charge_q_prev[idx],
@@ -1161,6 +1164,7 @@ impl Engine {
         found_branch.then_some(limit)
     }
 
+    #[allow(clippy::too_many_arguments)]
     #[inline]
     pub(super) fn bjt_ngspice_truncation_limit(
         circuit: &crate::circuit::CircuitData,
@@ -1170,6 +1174,7 @@ impl Engine {
         history: &BjtTransientHistory,
         vbic_snapshot_cache: &[Option<BjtChargeSnapshot>],
         tolerances: NgspiceTruncationTolerances,
+        phase_context: bjt::BjtPhaseContext<'_>,
     ) -> Option<Value> {
         let TruncationStep {
             method,
@@ -1222,6 +1227,7 @@ impl Engine {
                 charge_abstol,
                 trtol,
             },
+            phase_context,
         ) {
             limit = limit.min(legacy_limit);
             found_branch = true;
@@ -2901,6 +2907,7 @@ impl Engine {
         ekv26_history: &Ekv26TransientHistory,
         suppress_gate_charge: bool,
         tolerances: NgspiceTruncationTolerances,
+        phase_context: bjt::BjtPhaseContext<'_>,
     ) -> Option<Value> {
         let TruncationStep {
             method,
@@ -2976,6 +2983,7 @@ impl Engine {
                     charge_abstol,
                     trtol,
                 },
+                phase_context,
             )
             .filter(|limit| limit.is_finite() && *limit > 0.0)
         } else {
@@ -3389,6 +3397,7 @@ impl Engine {
         voltage_lte: VoltageLteConfig<'_>,
         vbic_snapshot_cache: &[Option<BjtChargeSnapshot>],
         tolerances: NgspiceTruncationTolerances,
+        phase_context: bjt::BjtPhaseContext<'_>,
     ) -> Option<TrapezoidalOrderTrial> {
         let VoltageLteConfig {
             estimator: voltage_lte_estimator,
@@ -3441,6 +3450,7 @@ impl Engine {
                     charge_abstol,
                     trtol,
                 },
+                phase_context,
             );
             let b3soi_limit = circuit
                 .has_b3soi_devices()
@@ -4096,6 +4106,7 @@ Q1 n n 0 0 qmod
                     charge_abstol: 1.0e-14,
                     trtol: 7.0,
                 },
+                Default::default(),
             )
             .expect("charged legacy BJT branches report a limit");
             assert!(
@@ -4152,6 +4163,7 @@ Q1 n n 0 0 qmod
                 charge_abstol: 1.0e-14,
                 trtol: 7.0,
             },
+            Default::default(),
         )
         .expect("BJTtrunc walks CKTterr on a zero charge state too");
         assert!(
@@ -5195,6 +5207,7 @@ M1 d g s 0 VTRUNC W=1 L=1u
                 charge_abstol: 1.0e-14,
                 trtol: 7.0,
             },
+            Default::default(),
         );
 
         assert!(
@@ -5285,6 +5298,7 @@ VB b 0 -1
                 charge_abstol: 1.0e-14,
                 trtol: 7.0,
             },
+            Default::default(),
         );
 
         assert!(
@@ -5366,6 +5380,7 @@ J1 d g s PS area=1
                 charge_abstol: 1.0e-14,
                 trtol: 7.0,
             },
+            Default::default(),
         );
 
         assert!(

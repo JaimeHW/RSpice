@@ -7289,6 +7289,7 @@ impl Engine {
                     Self::adaptive_transient_newton_delta_limit(newton_step_delta_limit, _iter);
                 let newton_stamp_start = DiagnosticTimer::start(diagnostic_timing_enabled);
                 let transient_system_context = residual::TransientSystemContext {
+                    bjt_phase: Default::default(),
                     source_time_side: crate::circuit::SourceTimeSide::Published,
                     coeff: &coeff,
                     xyce_one_step,
@@ -8162,6 +8163,7 @@ impl Engine {
                                     step_time,
                                     dt,
                                     &residual::TransientSystemContext {
+                                        bjt_phase: Default::default(),
                                         source_time_side: crate::circuit::SourceTimeSide::Published,
                                         coeff: &coeff,
                                         xyce_one_step,
@@ -8377,6 +8379,7 @@ impl Engine {
                         step_time,
                         dt,
                         &residual::TransientSystemContext {
+                            bjt_phase: Default::default(),
                             source_time_side: crate::circuit::SourceTimeSide::Published,
                             coeff: &coeff,
                             xyce_one_step,
@@ -8614,6 +8617,7 @@ impl Engine {
                         charge_abstol: self.charge_abstol(),
                         trtol: self.transient_trtol(),
                     },
+                    Default::default(),
                 )
                 .filter(|limit| limit.is_finite() && *limit > 0.0)
             } else {
@@ -9016,6 +9020,7 @@ impl Engine {
                         bsim4_trnqs_coeff: &bsim4_trnqs_coeff,
                     },
                     &vbic_snapshot_cache,
+                    Default::default(),
                 )?
             };
             if let Some(control) = phase_step_control
@@ -9504,6 +9509,7 @@ impl Engine {
                                 charge_abstol: self.charge_abstol(),
                                 trtol: self.transient_trtol(),
                             },
+                            Default::default(),
                         )
                         .filter(|limit| limit.is_finite() && *limit > 0.0)
                     } else {
@@ -9812,6 +9818,7 @@ impl Engine {
                             },
                             bsim4_trnqs_coeff: &bsim4_trnqs_coeff,
                             snapshots: AcceptedReactiveSnapshots {
+                                bjt_phase: Default::default(),
                                 xyce_one_step_order2,
                                 vbic_snapshots: Some(vbic_snapshot_cache.as_slice()),
                                 capacitor_accepted_states: None,
@@ -10247,6 +10254,7 @@ impl Engine {
                             charge_abstol: self.charge_abstol(),
                             trtol: self.transient_trtol(),
                         },
+                        Default::default(),
                     )
                 }
             } else {
@@ -10308,6 +10316,7 @@ impl Engine {
                     },
                     bsim4_trnqs_coeff: &bsim4_trnqs_coeff,
                     snapshots: AcceptedReactiveSnapshots {
+                        bjt_phase: Default::default(),
                         xyce_one_step_order2,
                         vbic_snapshots: Some(vbic_snapshot_cache.as_slice()),
                         capacitor_accepted_states: capacitor_accepted_states_valid

@@ -1114,6 +1114,7 @@ mod tests {
                 },
                 bsim4_trnqs_coeff: &coefficients,
                 snapshots: AcceptedReactiveSnapshots {
+                    bjt_phase: Default::default(),
                     xyce_one_step_order2: false,
                     vbic_snapshots: None,
                     capacitor_accepted_states: Some(&capacitor_candidate),

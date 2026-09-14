@@ -133,6 +133,7 @@ fn phase_interpolation_rejects_before_history_capture_and_cannot_waive_a_floor_o
                 bsim4_trnqs_coeff: &coeff,
             },
             &[],
+            Default::default(),
         )
         .unwrap()
         .unwrap();

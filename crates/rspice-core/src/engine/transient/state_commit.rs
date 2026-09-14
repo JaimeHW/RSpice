@@ -22,6 +22,7 @@ pub(super) struct AcceptedReactiveStep<'a> {
 /// reference states.
 #[derive(Clone, Copy)]
 pub(super) struct AcceptedReactiveSnapshots<'a> {
+    pub bjt_phase: bjt::BjtPhaseContext<'a>,
     pub xyce_one_step_order2: bool,
     pub vbic_snapshots: Option<&'a [Option<BjtChargeSnapshot>]>,
     pub capacitor_accepted_states: Option<&'a [CapacitorAcceptedState]>,
@@ -45,13 +46,20 @@ pub(super) struct ReactiveBreakpointScheduling<'a> {
 /// Newly evaluated values only; older history levels stay in their SoA arrays
 /// until every BJT has reconstructed a valid candidate.
 struct AcceptedBjtValues {
-    phase_sample: Option<(Value, Value)>,
+    phase_sample: Option<AcceptedBjtPhaseSample>,
     charges: [Value; BJT_DYNAMIC_CHARGE_COUNT],
     currents: [Value; BJT_DYNAMIC_CHARGE_COUNT],
     internal: [Value; BJT_INTERNAL_STATE_DIM],
     linear: Option<BjtPredictorLinearBranchState>,
     voltages: [Value; 3],
     lead_currents: Option<[Value; BJT_EXTERNAL_STATE_DIM]>,
+}
+
+#[derive(Clone, Copy)]
+struct AcceptedBjtPhaseSample {
+    current: Value,
+    delay: Value,
+    left_limit: Option<Value>,
 }
 
 #[must_use]
@@ -71,7 +79,7 @@ impl PreparedBjtHistory {
     ) -> Result<Option<bjt::interpolation::PhaseInterpolationControl>, SimulationError> {
         let mut limiting: Option<bjt::interpolation::PhaseInterpolationControl> = None;
         for (index, value) in self.values.iter().enumerate() {
-            let Some((current, _)) = value.phase_sample else {
+            let Some(sample) = value.phase_sample else {
                 continue;
             };
             let control = bjt::interpolation::phase_interpolation_control(
@@ -79,7 +87,7 @@ impl PreparedBjtHistory {
                     .as_ref()
                     .expect("prepared phase history"),
                 self.accepted_time,
-                current,
+                sample.left_limit.unwrap_or(sample.current),
                 reltol,
                 abstol,
                 index,
@@ -117,7 +125,9 @@ impl Engine {
         history: &BjtTransientHistory,
         step: AcceptedReactiveStep<'_>,
         snapshots: &[Option<BjtChargeSnapshot>],
+        phase_context: bjt::BjtPhaseContext<'_>,
     ) -> Result<Option<bjt::interpolation::PhaseInterpolationControl>, SimulationError> {
+        phase_context.bind(history)?;
         if !history.phase.iter().any(Option::is_some) {
             return Ok(None);
         }
@@ -129,6 +139,7 @@ impl Engine {
             step.dt,
             step.accepted_time,
             Some(snapshots),
+            phase_context,
         )?
         .phase_step_control(
             circuit,
@@ -307,11 +318,13 @@ impl Engine {
             dt,
             accepted_time,
             vbic_snapshots,
+            Default::default(),
         )?;
         Self::commit_bjt_history(history, prepared);
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn prepare_bjt_history(
         circuit: &crate::circuit::CircuitData,
         history: &BjtTransientHistory,
@@ -320,7 +333,9 @@ impl Engine {
         dt: Value,
         accepted_time: Value,
         vbic_snapshots: Option<&[Option<BjtChargeSnapshot>]>,
+        phase_context: bjt::BjtPhaseContext<'_>,
     ) -> Result<PreparedBjtHistory, SimulationError> {
+        let phase_view = phase_context.bind(history)?;
         let mut values = Vec::with_capacity(circuit.bjts.devices.len());
         for (idx, bjt) in circuit.bjts.devices.iter().enumerate() {
             let vc = Self::node_voltage(solution, bjt.node_collector);
@@ -355,7 +370,7 @@ impl Engine {
                     bjt,
                     external,
                     BjtChargeStep {
-                        phase: history.phase_trial(idx, accepted_time),
+                        phase: phase_view.trial(idx, accepted_time),
                         coeff,
                         dt,
                         q_prev: &history.charge_q_prev[idx],
@@ -384,7 +399,7 @@ impl Engine {
                     bjt,
                     &snapshot,
                     BjtChargeStep {
-                        phase: history.phase_trial(idx, accepted_time),
+                        phase: phase_view.trial(idx, accepted_time),
                         coeff,
                         dt,
                         q_prev: &history.charge_q_prev[idx],
@@ -426,7 +441,7 @@ impl Engine {
             });
             if bjt.uses_legacy_gummel_poon() && bjt.mna_promoted() {
                 let mut terminal = bjt.mna_terminal_currents_at_solution(solution);
-                if let Some(phase) = history.phase_trial(idx, accepted_time) {
+                if let Some(phase) = phase_view.trial(idx, accepted_time) {
                     let correction = phase.correction(bjt, &internal).map_err(|error| {
                         SimulationError::Circuit(format!(
                             "BJT '{}' accepted phase current: {error}",
@@ -471,8 +486,26 @@ impl Engine {
                         .legacy_forward_transport_branch(&internal)
                         .ok_or_else(|| format!("BJT '{}' has no GP forward transport", bjt.name))?;
                     let delay = bjt.legacy_excess_phase_delay();
-                    phase.validate_sample(accepted_time, forward.current, delay, None)?;
-                    Ok::<_, String>((forward.current, delay))
+                    let left_limit = phase_view
+                        .trial(idx, accepted_time)
+                        .expect("phase owner exists")
+                        .left_limit;
+                    if let Some(left) = left_limit {
+                        phase.validate_discontinuity(
+                            accepted_time,
+                            left,
+                            forward.current,
+                            delay,
+                            None,
+                        )?;
+                    } else {
+                        phase.validate_sample(accepted_time, forward.current, delay, None)?;
+                    }
+                    Ok::<_, String>(AcceptedBjtPhaseSample {
+                        current: forward.current,
+                        delay,
+                        left_limit,
+                    })
                 })
                 .transpose()
                 .map_err(|error| {
@@ -500,14 +533,22 @@ impl Engine {
 
     fn commit_bjt_history(history: &mut BjtTransientHistory, prepared: PreparedBjtHistory) {
         for (idx, value) in prepared.values.into_iter().enumerate() {
-            if let Some((current, delay)) = value.phase_sample {
+            if let Some(sample) = value.phase_sample {
                 // Preparation validated this exact sample against this unchanged
                 // accepted buffer; no model work runs during the commit.
-                history.phase[idx]
-                    .as_mut()
-                    .expect("prepared phase owner")
-                    .accept_sample(prepared.accepted_time, current, delay, None)
-                    .expect("prepared phase sample remains valid until commit");
+                let phase = history.phase[idx].as_mut().expect("prepared phase owner");
+                let result = if let Some(left) = sample.left_limit {
+                    phase.accept_discontinuity(
+                        prepared.accepted_time,
+                        left,
+                        sample.current,
+                        sample.delay,
+                        None,
+                    )
+                } else {
+                    phase.accept_sample(prepared.accepted_time, sample.current, sample.delay, None)
+                };
+                result.expect("prepared phase sample remains valid until commit");
             }
             history.accepted_terminal_currents[idx] = value.lead_currents;
             history.charge_q_prev_prev_prev[idx] = history.charge_q_prev_prev[idx];
@@ -614,6 +655,11 @@ impl Engine {
         histories: &TransientDeviceHistories<'_>,
         snapshots: AcceptedReactiveSnapshots<'_>,
     ) -> Result<PreparedReactiveHistory<'engine>, SimulationError> {
+        if snapshots.bjt_phase.incoming_arrival {
+            return Err(SimulationError::Circuit(
+                "an incoming GP phase trial cannot be accepted as the outgoing state".into(),
+            ));
+        }
         #[cfg(feature = "parallel")]
         let mos_workers = self.classic_mos_parallel_worker_count(circuit.mosfets.devices.len());
         #[cfg(feature = "parallel")]
@@ -685,6 +731,7 @@ impl Engine {
             step.dt,
             step.accepted_time,
             snapshots.vbic_snapshots,
+            snapshots.bjt_phase,
         )?;
         let behavioral = circuit
             .behavioral_sources
@@ -755,6 +802,7 @@ impl Engine {
             current_abstol,
         } = scheduling;
         let AcceptedReactiveSnapshots {
+            bjt_phase: _,
             xyce_one_step_order2,
             vbic_snapshots: _,
             capacitor_accepted_states,
@@ -1737,6 +1785,9 @@ impl Engine {
 }
 
 #[cfg(test)]
+mod phase_event_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -1800,6 +1851,7 @@ mod tests {
                 ekv26: &mut Ekv26TransientHistory::default(),
             },
             AcceptedReactiveSnapshots {
+                bjt_phase: Default::default(),
                 xyce_one_step_order2: false,
                 vbic_snapshots: None,
                 capacitor_accepted_states: None,

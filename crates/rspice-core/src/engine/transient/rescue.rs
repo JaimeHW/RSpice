@@ -384,6 +384,7 @@ mod tests {
         let accepted = circuit.behavioral_sources.clone();
         let coeff = CompanionCoefficients::backward_euler();
         let ctx = residual::TransientSystemContext {
+            bjt_phase: Default::default(),
             source_time_side: crate::circuit::SourceTimeSide::Published,
             coeff: &coeff,
             xyce_one_step: false,
@@ -462,6 +463,7 @@ mod tests {
             .unwrap();
         let coeff = CompanionCoefficients::backward_euler();
         let ctx = residual::TransientSystemContext {
+            bjt_phase: Default::default(),
             source_time_side: crate::circuit::SourceTimeSide::Published,
             coeff: &coeff,
             xyce_one_step: false,

@@ -48,6 +48,7 @@ fn check_core_evaluation_ownership(shared: bool) {
     let ekv = Engine::initialize_ekv26_history(&circuit, &solution);
     let coeff = CompanionCoefficients::backward_euler();
     let ctx = TransientSystemContext {
+        bjt_phase: Default::default(),
         source_time_side: crate::circuit::SourceTimeSide::Published,
         coeff: &coeff,
         xyce_one_step: true,
