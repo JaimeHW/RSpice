@@ -144,7 +144,8 @@ pub const WASM_JIT_ABI_VERSION: u32 = 17;
 /// Version 51 evaluates event-owned readbacks in the canonical source body.
 /// Version 52 captures task arguments and ordered calls in the canonical prelude.
 /// Version 53 gates task-only inlined computations before argument conversion.
-pub const WASM_JIT_EMITTER_VERSION: u32 = 53;
+/// Version 54 consumes guarded parameter-bounded derivative expansion (HIR 63).
+pub const WASM_JIT_EMITTER_VERSION: u32 = 54;
 
 /// Hard ceiling for one qualified shipped model's generated module.
 pub const SHIPPED_MODEL_WASM_CODE_SIZE_BUDGET_BYTES: usize = 32 * 1024 * 1024;
@@ -3177,6 +3178,41 @@ endmodule
                 .unwrap(),
             pending
         );
+    }
+
+    #[test]
+    fn wasm_bounded_ddx_preserves_parameter_overrides() {
+        use super::abi::FRAME_RESULT_OFFSET;
+        let source = include_str!("../../tests/fixtures/bounded_derivative_loop.va");
+        let mut harness = FusedKernelHarness::for_source(source, "bounded_ddx");
+        harness.reset();
+        let value = harness.stamp_value_export(0);
+        let jacobian = harness.jacobian_export(0, 0);
+        for order in [0_i32, 1, 4, 6, 2, -2] {
+            harness.write_f64(FusedKernelHarness::PARAMETERS as usize, f64::from(order));
+            for slot in [0, 1] {
+                harness.write_f64(FusedKernelHarness::PARAMETERS as usize + 8, f64::from(slot));
+                for voltage in [-0.4_f64, 0.0, 0.3] {
+                    harness.write_f64(FusedKernelHarness::VOLTAGES as usize, voltage);
+                    harness.write_f64(FusedKernelHarness::VOLTAGES as usize + 8, 0.0);
+                    harness.call_assignments();
+                    harness.call_prelude();
+                    let expected = 2.0_f64.powi(order.max(0)) * (2.0 * voltage).exp();
+                    assert_eq!(harness.call(&value), 0);
+                    let actual = harness.read_f64(FRAME_RESULT_OFFSET as usize);
+                    assert!(
+                        (actual - expected).abs() < 1e-10 * expected,
+                        "current: order={order}, slot={slot}: {actual} != {expected}"
+                    );
+                    assert_eq!(harness.call(&jacobian), 0);
+                    let actual = harness.read_f64(FRAME_RESULT_OFFSET as usize);
+                    assert!(
+                        (actual - 2.0 * expected).abs() < 1e-10 * expected,
+                        "Jacobian: {actual}"
+                    );
+                }
+            }
+        }
     }
 
     #[test]

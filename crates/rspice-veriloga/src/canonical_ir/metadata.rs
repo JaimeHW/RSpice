@@ -14,6 +14,7 @@ use smol_str::SmolStr;
 /// never deserialize a structurally different artifact merely because its HIR
 /// and metadata happen to repeat the same stale version number.
 ///
+/// Version 63 bounds recursive derivatives with guarded parameter-range expansion.
 /// Version 62 keeps inlined analog-function storage in the private namespace.
 /// Version 61 resolves typed digital parameter values before process lowering.
 /// Version 60 adds checked runtime-index selection to canonical SSA.
@@ -64,7 +65,7 @@ use smol_str::SmolStr;
 /// Version 19 rejects unrepresentable digital select and delay constants instead
 /// of clamping them. Earlier artifacts must be rebuilt from source. Version 18
 /// fixed constant integer comparisons; version 17 fixed digital range arithmetic.
-pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 62;
+pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 63;
 
 /// Collision-resistant identity of one exact preprocessed source closure.
 pub fn source_identity(source_text: &str) -> String {

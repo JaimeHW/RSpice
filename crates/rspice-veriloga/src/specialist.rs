@@ -183,6 +183,22 @@ pub(crate) fn analyze(
     analyze_instance_evidence(&analyzed.source, module_name, &mut evidence);
     analyze_portability(targets, requested, &mut findings);
 
+    // Elaboration can copy one source site into several executable regions.
+    // Report a source diagnostic once while retaining the full region census.
+    // Match the identity that validation enforces; distinct spans and details
+    // remain independent findings, including different variables at one site.
+    let mut identities = BTreeSet::new();
+    findings.retain(|finding| {
+        identities.insert((
+            finding.check,
+            finding.code.clone(),
+            finding.span.source_id,
+            finding.span.byte_start,
+            finding.span.byte_end,
+            finding.detail.clone(),
+        ))
+    });
+
     let mut counts = BTreeMap::new();
     for finding in &findings {
         *counts.entry(finding.check).or_insert(0_usize) += 1;
@@ -739,6 +755,51 @@ endmodule
             .filter(|finding| finding.code == "VA-DISCONTINUITY-UNSMOOTHED")
             .map(|finding| finding.detail.clone())
             .collect()
+    }
+
+    #[test]
+    fn repeated_source_sites_report_each_finding_once() {
+        let source = "module repeated(p,n); inout p,n; electrical p,n; integer k;
+            analog begin for(k=0;k<3;k=k+1) if(V(p,n)>0) I(p,n)<+exp(V(p,n));
+            I(p,n)<+exp(2*V(p,n)); end endmodule";
+        let report = VerilogACompiler::default()
+            .compile_runtime(source, Some("repeated"))
+            .expect("unrolling must not invalidate specialist diagnostics");
+        report.validate_integrity().unwrap();
+        assert_eq!(report.specialist.evidence.contributions, 4);
+        assert_eq!(
+            report
+                .specialist
+                .findings
+                .iter()
+                .filter(|finding| finding.code == "VA-CONVERGENCE-RAW-EXP")
+                .count(),
+            2
+        );
+        assert_eq!(
+            report
+                .specialist
+                .findings
+                .iter()
+                .filter(|finding| finding.code == "VA-DISCONTINUITY-UNSMOOTHED")
+                .count(),
+            1
+        );
+        let mut duplicated = report.specialist.clone();
+        let finding = duplicated.findings[0].clone();
+        duplicated
+            .checks
+            .iter_mut()
+            .find(|check| check.kind == finding.check)
+            .unwrap()
+            .findings += 1;
+        duplicated.findings.push(finding);
+        assert!(
+            duplicated
+                .validate("repeated")
+                .unwrap_err()
+                .contains("duplicate finding")
+        );
     }
 
     #[test]

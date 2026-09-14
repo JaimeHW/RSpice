@@ -370,6 +370,7 @@ const EDGE_EVENT_AS_CROSS_CODE: &str = "VA-SEM-EDGE-EVENT-AS-CROSS";
 pub(crate) const MAX_DIGITAL_VECTOR_WIDTH: u32 = 65_536;
 
 mod analyzed;
+mod bounded_loop;
 mod digital;
 mod digital_elaborate;
 mod digital_walk;
@@ -3346,6 +3347,9 @@ impl SemanticAnalyzer {
             } else {
                 self.lower_runtime_for(for_stmt, module, sink)
             }
+        } else if let Some(iterations) = self.parameter_bounded_ddx_iterations(for_stmt, init_value)
+        {
+            self.unroll_guarded_for(for_stmt, iterations, module, sink)
         } else {
             self.lower_runtime_for(for_stmt, module, sink)
         }

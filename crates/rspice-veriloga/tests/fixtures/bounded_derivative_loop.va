@@ -1,0 +1,13 @@
+module bounded_ddx(p,n);
+inout p,n; electrical p,n;
+parameter integer order=4 from [-2:6];
+parameter integer slot=1 from [0:1];
+real a[0:1]; integer k;
+analog begin
+    a[0]=exp(2*V(p,n)); a[1]=a[0];
+    for(k=0;k<order;k=k+1) begin
+        a[slot]=ddx(a[slot],V(p,n));
+    end
+    I(p,n)<+a[slot];
+end
+endmodule
