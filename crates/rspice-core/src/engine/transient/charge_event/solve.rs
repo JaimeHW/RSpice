@@ -1,7 +1,7 @@
 use super::*;
 
 impl ChargeEventTopology {
-    /// Solve the outgoing charge constraints and its finite rate/current
+    /// Solve the outgoing charge/flux constraints and its finite rate/current
     /// equations at one physical time. The sampler operates on private model
     /// scratch and a fixed, independently solved incoming history endpoint.
     pub(in crate::engine::transient) fn solve(
@@ -33,9 +33,13 @@ impl ChargeEventTopology {
         {
             return Err(error("invalid incoming physical state/charge"));
         }
-        if incoming_q[self.nodes..].iter().any(|value| *value != 0.0) {
+        if incoming_q[self.nodes..]
+            .iter()
+            .zip(&self.branch_equations)
+            .any(|(&value, row)| value != 0.0 && row.flux_tolerance().is_none())
+        {
             return Err(error(
-                "incoming non-nodal storage requires a flux/descriptor event operator",
+                "incoming non-nodal storage has no prepared flux equation",
             ));
         }
         let mut trial = self.physical_probe(incoming);
@@ -60,7 +64,7 @@ impl ChargeEventTopology {
                 update = update.max(change.abs() / scale);
             }
             if residual <= 1.0 && update <= 1.0 {
-                self.audit_charge(&trial, incoming_q, &physical, options, abort)?;
+                self.audit_storage(&trial, incoming_q, &physical, options, abort)?;
                 return self.finish(trial, physical, iteration + 1, options, abort);
             }
             let mut accepted = None;
@@ -95,7 +99,7 @@ impl ChargeEventTopology {
         Err(SimulationError::ConvergenceFailed(options.iterations))
     }
 
-    fn audit_charge(
+    fn audit_storage(
         &self,
         trial: &[Value],
         incoming_q: &[Value],
@@ -103,22 +107,31 @@ impl ChargeEventTopology {
         options: &EventOptions,
         abort: &dyn AbortSignal,
     ) -> Result<()> {
-        for (row, &old_charge) in incoming_q.iter().take(self.nodes).enumerate() {
+        for (row, &old_charge) in incoming_q.iter().enumerate() {
             if row % 64 == 0 {
                 check_abort(abort)?;
             }
-            let impulses = self.source_incidence[row]
-                .iter()
+            let Some(absolute) = self.storage_tolerance(row, options) else {
+                continue;
+            };
+            let impulses = self
+                .source_incidence
+                .get(row)
+                .into_iter()
+                .flatten()
                 .map(|&(column, sign)| (trial[column], sign));
             let residual = sum([(physical.q.values[row], 1.0), (old_charge, -1.0)]
                 .into_iter()
                 .chain(impulses))?;
-            let tolerance = options.charge_tolerance
+            let tolerance = absolute
                 + options.relative_tolerance * physical.q.scales[row].max(old_charge.abs());
             if residual.abs() > tolerance {
-                return Err(error(format!(
-                    "nodal charge conservation failed at row {row}"
-                )));
+                let kind = if row < self.nodes {
+                    "nodal charge"
+                } else {
+                    "branch flux"
+                };
+                return Err(error(format!("{kind} conservation failed at row {row}")));
             }
         }
         Ok(())

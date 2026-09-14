@@ -2,6 +2,7 @@ use super::*;
 use crate::abort_signal::NoAbort;
 use crate::device::MatrixStamper;
 
+mod flux;
 mod native;
 
 fn options() -> EventOptions {
@@ -51,7 +52,7 @@ fn charge_event_recovers_divider_voltage_rate_finite_current_and_source_impulse(
         3,
         &[(1, 2), (2, 0)],
         vec![source(1, 0, 3.0, 0.0)],
-        vec![options.voltage_tolerance],
+        vec![EventBranchEquation::Algebraic(options.voltage_tolerance)],
         &options,
         &NoAbort,
     )
@@ -90,7 +91,7 @@ fn charge_event_differentiates_floating_common_mode_and_source_constraints() {
             3,
             &[(1, 2)],
             vec![source(1, 2, 3.0, source_slope)],
-            vec![options.voltage_tolerance],
+            vec![EventBranchEquation::Algebraic(options.voltage_tolerance)],
             &options,
             &NoAbort,
         )
@@ -127,7 +128,7 @@ fn charge_event_audits_discarded_charge_rows_and_refuses_singular_constraints() 
         3,
         &[],
         vec![source(1, 0, 3.0, 0.0)],
-        vec![options.voltage_tolerance],
+        vec![EventBranchEquation::Algebraic(options.voltage_tolerance)],
         &options,
         &NoAbort,
     )
@@ -159,14 +160,25 @@ fn charge_event_audits_discarded_charge_rows_and_refuses_singular_constraints() 
 fn charge_event_bounds_assembly_and_rejects_unowned_branch_dependencies() {
     let mut options = options();
     options.limits.max_matrix_unknowns = 2;
-    assert!(ChargeEventTopology::new(2, 3, &[], vec![], vec![1e-12], &options, &NoAbort).is_err());
+    assert!(
+        ChargeEventTopology::new(
+            2,
+            3,
+            &[],
+            vec![],
+            vec![EventBranchEquation::Algebraic(1e-12)],
+            &options,
+            &NoAbort
+        )
+        .is_err()
+    );
     options.limits.max_matrix_unknowns = 3;
     let topology = ChargeEventTopology::new(
         2,
         3,
         &[(1, 2)],
         vec![source(1, 0, 1.0, 0.0)],
-        vec![options.voltage_tolerance],
+        vec![EventBranchEquation::Algebraic(options.voltage_tolerance)],
         &options,
         &NoAbort,
     )

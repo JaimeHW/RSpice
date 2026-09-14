@@ -1,9 +1,10 @@
-//! Charge-event equations and separate finite-current reconstruction.
+//! Charge/flux event equations and separate finite-current reconstruction.
 //!
 //! This operator consumes a prepared charge-incidence topology and physical
 //! F/Q stamps. It does not infer device support or modify accepted history.
-//! Flux constraints and controlled-source impulse paths need their own
-//! topology preparation before they can use an event operator.
+//! Non-nodal flux equations preserve physical linkage at finite-voltage
+//! events. Voltage impulses and controlled-source impulse paths still need
+//! a descriptor transition with independently prepared topology.
 
 use super::{AbortSignal, SimulationError, Value};
 use crate::resource::{ResourceKind, ResourceLimitError, ResourceLimits};
@@ -11,6 +12,8 @@ use crate::solver::{SolverOptions, StaticMatrix};
 
 mod stamp;
 pub(super) use stamp::{EventSample, EventStamp};
+mod rows;
+pub(super) use rows::EventBranchEquation;
 mod solve;
 #[cfg(test)]
 mod tests;
@@ -100,9 +103,7 @@ pub(super) struct ChargeEventTopology {
     /// Sparse source incidence for nodal audits; scanning every source for
     /// every node would make validation quadratic on source-rich circuits.
     source_incidence: Vec<Vec<(usize, Value)>>,
-    /// Units belong to the constitutive equation (often volts), not to the
-    /// current coordinate occupying that MNA row.
-    algebraic_tolerances: Vec<Value>,
+    branch_equations: Vec<EventBranchEquation>,
 }
 
 impl ChargeEventTopology {
@@ -111,7 +112,7 @@ impl ChargeEventTopology {
         size: usize,
         charge_ports: &[(usize, usize)],
         sources: Vec<EventVoltageSource>,
-        algebraic_tolerances: Vec<Value>,
+        branch_equations: Vec<EventBranchEquation>,
         options: &EventOptions,
         abort: &dyn AbortSignal,
     ) -> Result<Self> {
@@ -131,10 +132,8 @@ impl ChargeEventTopology {
         )?;
         if size == 0
             || nodes > size
-            || algebraic_tolerances.len() != size - nodes
-            || !algebraic_tolerances
-                .iter()
-                .all(|x| x.is_finite() && *x > 0.0)
+            || branch_equations.len() != size - nodes
+            || !branch_equations.iter().all(|row| row.valid())
         {
             return Err(error("invalid dimensions, tolerances or iteration budgets"));
         }
@@ -149,6 +148,9 @@ impl ChargeEventTopology {
                 || source.branch < nodes
                 || source.branch >= size
                 || source_columns[source.branch]
+                || branch_equations[source.branch - nodes]
+                    .flux_tolerance()
+                    .is_some()
                 || !source.value.is_finite()
                 || !source.slope.is_finite()
             {
@@ -211,7 +213,7 @@ impl ChargeEventTopology {
             groups,
             source_columns,
             source_incidence,
-            algebraic_tolerances,
+            branch_equations,
         })
     }
 
@@ -219,11 +221,11 @@ impl ChargeEventTopology {
         row < self.nodes && self.roots[row + 1] == row + 1
     }
 
-    fn static_tolerance(&self, row: usize, options: &EventOptions) -> Value {
+    fn storage_tolerance(&self, row: usize, options: &EventOptions) -> Option<Value> {
         if row < self.nodes {
-            options.current_tolerance
+            Some(options.charge_tolerance)
         } else {
-            self.algebraic_tolerances[row - self.nodes]
+            self.branch_equations[row - self.nodes].flux_tolerance()
         }
     }
 
@@ -252,13 +254,14 @@ impl ChargeEventTopology {
                 }
                 if index == 1
                     && row >= self.nodes
+                    && self.branch_equations[row - self.nodes]
+                        .flux_tolerance()
+                        .is_none()
                     && (stamp.values[row] != 0.0
                         || sample.q_time[row] != 0.0
                         || entries.iter().any(|(_, value)| *value != 0.0))
                 {
-                    return Err(error(
-                        "non-nodal storage requires a flux/descriptor event operator",
-                    ));
+                    return Err(error("non-nodal storage has no prepared flux equation"));
                 }
             }
         }
@@ -284,15 +287,15 @@ impl ChargeEventTopology {
                     equations.add_row(row, &sample.f, node)?;
                 }
                 equations.absolute[row] = options.current_tolerance;
-            } else if row < self.nodes {
+            } else if let Some(tolerance) = self.storage_tolerance(row, options) {
                 equations.add_row(row, &sample.q, row)?;
                 equations.values[row] =
                     sum([(sample.q.values[row], 1.0), (old_charge, -1.0)].into_iter())?;
                 equations.scales[row] = sample.q.scales[row].max(old_charge.abs());
-                equations.absolute[row] = options.charge_tolerance;
+                equations.absolute[row] = tolerance;
             } else {
                 equations.add_row(row, &sample.f, row)?;
-                equations.absolute[row] = self.static_tolerance(row, options);
+                equations.absolute[row] = self.branch_equations[row - self.nodes].jump_tolerance();
             }
         }
         for source in &self.sources {
@@ -332,11 +335,15 @@ impl ChargeEventTopology {
                 equations.values[row] = sum(self.groups[row + 1]
                     .iter()
                     .map(|&node| (sample.f_time[node], 1.0)))?;
-            } else if row < self.nodes {
+            } else if self.storage_tolerance(row, options).is_some() {
                 equations.add_row(row, &sample.q, row)?;
                 equations.values[row] =
                     sum([(sample.f.values[row], 1.0), (sample.q_time[row], 1.0)].into_iter())?;
-                equations.absolute[row] = options.current_tolerance;
+                equations.absolute[row] = if row < self.nodes {
+                    options.current_tolerance
+                } else {
+                    self.branch_equations[row - self.nodes].rate_tolerance()
+                };
             } else {
                 equations.add_row(row, &sample.f, row)?;
                 equations.values[row] = sample.f_time[row];
