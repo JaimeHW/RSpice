@@ -145,7 +145,8 @@ pub const WASM_JIT_ABI_VERSION: u32 = 17;
 /// Version 52 captures task arguments and ordered calls in the canonical prelude.
 /// Version 53 gates task-only inlined computations before argument conversion.
 /// Version 54 consumes guarded parameter-bounded derivative expansion (HIR 63).
-pub const WASM_JIT_EMITTER_VERSION: u32 = 54;
+/// Version 55 differentiates higher-order canonical postfix expressions with shared AD.
+pub const WASM_JIT_EMITTER_VERSION: u32 = 55;
 
 /// Hard ceiling for one qualified shipped model's generated module.
 pub const SHIPPED_MODEL_WASM_CODE_SIZE_BUDGET_BYTES: usize = 32 * 1024 * 1024;
@@ -3184,33 +3185,169 @@ endmodule
     fn wasm_bounded_ddx_preserves_parameter_overrides() {
         use super::abi::FRAME_RESULT_OFFSET;
         let source = include_str!("../../tests/fixtures/bounded_derivative_loop.va");
-        let mut harness = FusedKernelHarness::for_source(source, "bounded_ddx");
-        harness.reset();
-        let value = harness.stamp_value_export(0);
-        let jacobian = harness.jacobian_export(0, 0);
-        for order in [0_i32, 1, 4, 6, 2, -2] {
-            harness.write_f64(FusedKernelHarness::PARAMETERS as usize, f64::from(order));
-            for slot in [0, 1] {
-                harness.write_f64(FusedKernelHarness::PARAMETERS as usize + 8, f64::from(slot));
-                for voltage in [-0.4_f64, 0.0, 0.3] {
+        for postfix in [false, true] {
+            let mut harness =
+                FusedKernelHarness::for_source_with_plan(source, "bounded_ddx", postfix);
+            harness.reset();
+            let value = harness.stamp_value_export(0);
+            let jacobian = harness.jacobian_export(0, 0);
+            for order in [0_i32, 1, 4, 6, 2, -2] {
+                harness.write_f64(FusedKernelHarness::PARAMETERS as usize, f64::from(order));
+                for slot in [0, 1] {
+                    harness.write_f64(FusedKernelHarness::PARAMETERS as usize + 8, f64::from(slot));
+                    for voltage in [-0.4_f64, 0.0, 0.3] {
+                        harness.write_f64(FusedKernelHarness::VOLTAGES as usize, voltage);
+                        harness.write_f64(FusedKernelHarness::VOLTAGES as usize + 8, 0.0);
+                        harness.call_assignments();
+                        harness.call_prelude();
+                        let expected = 2.0_f64.powi(order.max(0)) * (2.0 * voltage).exp();
+                        assert_eq!(harness.call(&value), 0);
+                        let actual = harness.read_f64(FRAME_RESULT_OFFSET as usize);
+                        assert!(
+                            (actual - expected).abs() < 1e-10 * expected,
+                            "current: order={order}, slot={slot}: {actual} != {expected}"
+                        );
+                        assert_eq!(harness.call(&jacobian), 0);
+                        let actual = harness.read_f64(FRAME_RESULT_OFFSET as usize);
+                        assert!(
+                            (actual - 2.0 * expected).abs() < 1e-10 * expected,
+                            "Jacobian: {actual}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn wasm_reversed_ground_ddx_preserves_repeated_projection() {
+        use super::abi::FRAME_RESULT_OFFSET;
+        for (probe, sign) in [("V(p,0)", 1.0), ("V(0,p)", -1.0), ("V(reverse)", -1.0)] {
+            let source = format!(
+                "module oriented_jet(p); inout p; electrical p,g; ground g; branch(g,p) reverse; real x; integer k; analog begin x=exp(V(p)); for(k=0;k<3;k=k+1) x=ddx(x,{probe}); I(p)<+x; end endmodule"
+            );
+            for postfix in [false, true] {
+                let mut harness =
+                    FusedKernelHarness::for_source_with_plan(&source, "oriented_jet", postfix);
+                harness.reset();
+                let value = harness.stamp_value_export(0);
+                let jacobian = harness.jacobian_export(0, 0);
+                for voltage in [-0.3_f64, 0.0, 0.4] {
+                    harness.write_f64(FusedKernelHarness::VOLTAGES as usize, voltage);
+                    harness.call_assignments();
+                    harness.call_prelude();
+                    for entry in [&value, &jacobian] {
+                        assert_eq!(harness.call(entry), 0);
+                        let actual = harness.read_f64(FRAME_RESULT_OFFSET as usize);
+                        let expected = sign * voltage.exp();
+                        assert!(
+                            (actual - expected).abs() < 1e-11,
+                            "{probe}, postfix={postfix}, {entry}: {actual} != {expected}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn wasm_higher_derivative_state_actions_preserve_dc_gain() {
+        use super::abi::FRAME_RESULT_OFFSET;
+        for (expression, gain) in [
+            ("ddt(exp(V(p,n)))", 0.0),
+            ("idt(exp(V(p,n)),2*exp(V(p,n)))", 2.0),
+            ("idtmod(exp(V(p,n)),exp(V(p,n)),100,0)", 1.0),
+            ("transition(exp(V(p,n)),0,0,0)", 1.0),
+            ("slew(exp(V(p,n)),10,-10)", 1.0),
+            ("laplace_nd(exp(V(p,n)),'{2},'{1})", 2.0),
+            ("zi_nd(exp(V(p,n)),'{2},'{1},1,0,0)", 2.0),
+        ] {
+            let source = format!(
+                "module state_jet(p,n); inout p,n; electrical p,n; real x; integer k; analog begin x={expression}; for(k=0;k<3;k=k+1) x=ddx(x,V(p,n)); I(p,n)<+x; end endmodule"
+            );
+            for postfix in [false, true] {
+                let mut harness =
+                    FusedKernelHarness::for_source_with_plan(&source, "state_jet", postfix);
+                harness.reset();
+                let value = harness.stamp_value_export(0);
+                let jacobian = harness.jacobian_export(0, 0);
+                for voltage in [-0.2_f64, 0.0, 0.3] {
+                    harness
+                        .store
+                        .data_mut()
+                        .context_mut()
+                        .begin_stateful_evaluation();
                     harness.write_f64(FusedKernelHarness::VOLTAGES as usize, voltage);
                     harness.write_f64(FusedKernelHarness::VOLTAGES as usize + 8, 0.0);
                     harness.call_assignments();
                     harness.call_prelude();
-                    let expected = 2.0_f64.powi(order.max(0)) * (2.0 * voltage).exp();
-                    assert_eq!(harness.call(&value), 0);
-                    let actual = harness.read_f64(FRAME_RESULT_OFFSET as usize);
-                    assert!(
-                        (actual - expected).abs() < 1e-10 * expected,
-                        "current: order={order}, slot={slot}: {actual} != {expected}"
-                    );
-                    assert_eq!(harness.call(&jacobian), 0);
-                    let actual = harness.read_f64(FRAME_RESULT_OFFSET as usize);
-                    assert!(
-                        (actual - 2.0 * expected).abs() < 1e-10 * expected,
-                        "Jacobian: {actual}"
-                    );
+                    for entry in [&jacobian, &value] {
+                        assert_eq!(harness.call(entry), 0, "{expression}, postfix={postfix}");
+                        let actual = harness.read_f64(FRAME_RESULT_OFFSET as usize);
+                        let expected = gain * voltage.exp();
+                        assert!(
+                            (actual - expected).abs() < 1e-10,
+                            "{expression}, postfix={postfix}, V={voltage}, {entry}: {actual} != {expected}"
+                        );
+                    }
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn wasm_higher_ddt_derivatives_preserve_trial_and_probe_state() {
+        use super::abi::FRAME_RESULT_OFFSET;
+        use crate::vm::VerilogAEvaluationMode as Mode;
+        let source = "module jet_ddt(p,n); inout p,n; electrical p,n; real x; integer k; analog begin x=ddt(exp(V(p,n))); for(k=0;k<3;k=k+1) x=ddx(x,V(p,n)); I(p,n)<+x; end endmodule";
+        for postfix in [false, true] {
+            let mut harness = FusedKernelHarness::for_source_with_plan(source, "jet_ddt", postfix);
+            harness.reset();
+            let value = harness.stamp_value_export(0);
+            let jacobian = harness.jacobian_export(0, 0);
+            let context = harness.store.data_mut().context_mut();
+            context.analysis_type = 2;
+            context.set_timestep(0.25);
+            for initialized in [false, true] {
+                for voltage in [-0.2_f64, 0.0, 0.3] {
+                    harness
+                        .store
+                        .data_mut()
+                        .context_mut()
+                        .begin_stateful_evaluation();
+                    harness.write_f64(FusedKernelHarness::VOLTAGES as usize, voltage);
+                    harness.write_f64(FusedKernelHarness::VOLTAGES as usize + 8, 0.0);
+                    harness.call_assignments();
+                    harness.call_prelude();
+                    for entry in [&jacobian, &value] {
+                        assert_eq!(harness.call(entry), 0);
+                        let actual = harness.read_f64(FRAME_RESULT_OFFSET as usize);
+                        let expected = if initialized {
+                            4.0 * voltage.exp()
+                        } else {
+                            0.0
+                        };
+                        assert!(
+                            (actual - expected).abs() < 1e-10,
+                            "postfix={postfix}, initialized={initialized}: {actual} != {expected}"
+                        );
+                    }
+                }
+                let context = harness.store.data_mut().context_mut();
+                let states = context.state_values.clone();
+                let valid = context.state_candidate_valid.clone();
+                context.evaluation_mode = Mode::StaticDaeProbe;
+                context.begin_stateful_evaluation();
+                harness.write_f64(FusedKernelHarness::VOLTAGES as usize, 0.8);
+                harness.call_assignments();
+                harness.call_prelude();
+                assert_eq!(harness.call(&jacobian), 0);
+                assert_eq!(harness.read_f64(FRAME_RESULT_OFFSET as usize), 0.0);
+                let context = harness.store.data_mut().context_mut();
+                assert_eq!(context.state_values, states);
+                assert_eq!(context.state_candidate_valid, valid);
+                context.evaluation_mode = Mode::NewtonLimited;
+                context.advance_state().unwrap();
             }
         }
     }

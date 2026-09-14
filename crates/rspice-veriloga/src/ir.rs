@@ -4360,7 +4360,28 @@ pub mod autodiff {
         shadows: &ShadowContext,
     ) -> NodeId {
         let primal_len = arena.len();
-        let derivative = differentiate_raw(arena, expr, wrt, shadows);
+        let derivative = differentiate_raw(arena, expr, wrt, shadows, None);
+        simplify_from(arena, derivative, Some(primal_len))
+    }
+
+    /// Apply the shared algebra rules to an expression whose caller owns the
+    /// derivative of each opaque variable. The supplied values belong to this
+    /// arena. This lets canonical MIR retain its own variable/state bindings
+    /// without copying the algebra rules or importing executable bytecode.
+    #[cfg(any(feature = "native", feature = "wasm-jit"))]
+    pub(crate) fn differentiate_with_variable_derivatives(
+        arena: &mut ExprArena,
+        expr: NodeId,
+        derivatives: &HashMap<crate::ir::arena::NameId, NodeId>,
+    ) -> NodeId {
+        let primal_len = arena.len();
+        let derivative = differentiate_raw(
+            arena,
+            expr,
+            &DerivativeWrt::Voltage(0),
+            &ShadowContext::empty(),
+            Some(derivatives),
+        );
         simplify_from(arena, derivative, Some(primal_len))
     }
 
@@ -4369,6 +4390,7 @@ pub mod autodiff {
         expr: NodeId,
         wrt: &DerivativeWrt,
         shadows: &ShadowContext,
+        variable_derivatives: Option<&HashMap<crate::ir::arena::NameId, NodeId>>,
     ) -> NodeId {
         let primal_len = arena.len();
         macro_rules! constant {
@@ -4383,7 +4405,7 @@ pub mod autodiff {
         }
         macro_rules! differentiate {
             ($child:expr) => {
-                differentiate_raw(arena, $child, wrt, shadows)
+                differentiate_raw(arena, $child, wrt, shadows, variable_derivatives)
             };
         }
 
@@ -4406,6 +4428,12 @@ pub mod autodiff {
             // variable that cannot vary along this axis differentiates to
             // zero without a shadow slot ever existing.
             Node::Var(name) => {
+                if let Some(derivatives) = variable_derivatives {
+                    return derivatives
+                        .get(&name)
+                        .copied()
+                        .unwrap_or_else(|| constant!(0.0));
+                }
                 let name = arena.name(name).clone();
                 if shadows.is_shadowed_on(&name, wrt) {
                     let shadow = ShadowContext::shadow_name(&name, wrt);

@@ -29,6 +29,9 @@ use crate::vm::{CURRENT_PAIR_GROUND, terminal_pair_current_index};
 use smol_str::SmolStr;
 use std::collections::HashMap;
 
+#[path = "expr/higher_derivatives.rs"]
+mod higher_derivatives;
+
 /// Lift the VM's structured forward branches back to expression selects. The
 /// executable SSA lowering restores branches around operations that can fail.
 fn postfix_bytecode(
@@ -324,7 +327,7 @@ pub(crate) struct PriorCurrentProbe {
     pub(crate) inverted: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum CanonicalDerivativeAxis {
     Node(NodeId),
     Branch(usize),
@@ -2500,15 +2503,13 @@ impl NativeProgram {
         })
     }
 
-    pub(crate) fn from_mir_expression_third_derivative(
+    pub(crate) fn from_mir_expression_mixed_derivative(
         model: impl Into<SmolStr>,
         entry_kind: EntryKind,
         mir: &MirModel,
         equation_id: EquationId,
         expr_id: ExprId,
-        first: CanonicalDerivativeAxis,
-        second: CanonicalDerivativeAxis,
-        third: CanonicalDerivativeAxis,
+        axes: &[CanonicalDerivativeAxis],
         limits: NativeLoweringLimits<'_>,
     ) -> JitResult<Self> {
         let model = model.into();
@@ -2516,7 +2517,7 @@ impl NativeProgram {
 
         let mut lowerer =
             MirEquationLowerer::new(model.clone(), entry_kind, mir, equation_id, limits);
-        lowerer.lower_third_derivative(expr_id, first, second, third)?;
+        lowerer.lower_mixed_derivative(expr_id, axes)?;
 
         if lowerer.depth != 1 {
             return Err(stack_error(
@@ -2990,124 +2991,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 args.len()
             )));
         };
-        self.lower_ddx_projection(*expr, *probe)
-    }
-
-    fn lower_ddx_projection(&mut self, expr: ExprId, probe: ExprId) -> JitResult<()> {
-        self.lower(expr)?;
-        match self.ddx_probe_projection(probe)? {
-            DdxProjection::Potential(pos, neg) => {
-                if let Some(pos) = pos {
-                    self.lower_derivative(expr, CanonicalDerivativeAxis::Node(pos))?;
-                } else {
-                    self.push(NativeOp::Const(0.0))?;
-                }
-                if let Some(neg) = neg {
-                    self.lower_derivative(expr, CanonicalDerivativeAxis::Node(neg))?;
-                    self.append_arithmetic("Sub")?;
-                    self.push(NativeOp::Const(0.5))?;
-                    self.append_arithmetic("Mul")?;
-                }
-            }
-            DdxProjection::Branch {
-                runtime_index,
-                inverted,
-            } => {
-                self.lower_derivative(expr, CanonicalDerivativeAxis::Branch(runtime_index))?;
-                if inverted {
-                    self.append_unary(NativeOp::Neg)?;
-                }
-            }
-        }
-        self.append_checked_value()
-    }
-
-    fn lower_ddx_projection_derivative(
-        &mut self,
-        expr: ExprId,
-        probe: ExprId,
-        wrt: CanonicalDerivativeAxis,
-    ) -> JitResult<()> {
-        self.lower(expr)?;
-        match self.ddx_probe_projection(probe)? {
-            DdxProjection::Potential(pos, neg) => {
-                if let Some(pos) = pos {
-                    self.lower_second_derivative(expr, CanonicalDerivativeAxis::Node(pos), wrt)?;
-                } else {
-                    self.push(NativeOp::Const(0.0))?;
-                }
-                if let Some(neg) = neg {
-                    self.lower_second_derivative(expr, CanonicalDerivativeAxis::Node(neg), wrt)?;
-                    self.append_arithmetic("Sub")?;
-                    self.push(NativeOp::Const(0.5))?;
-                    self.append_arithmetic("Mul")?;
-                }
-            }
-            DdxProjection::Branch {
-                runtime_index,
-                inverted,
-            } => {
-                self.lower_second_derivative(
-                    expr,
-                    CanonicalDerivativeAxis::Branch(runtime_index),
-                    wrt,
-                )?;
-                if inverted {
-                    self.append_unary(NativeOp::Neg)?;
-                }
-            }
-        }
-        self.append_checked_value()
-    }
-
-    fn lower_ddx_projection_second_derivative(
-        &mut self,
-        expr: ExprId,
-        probe: ExprId,
-        first: CanonicalDerivativeAxis,
-        second: CanonicalDerivativeAxis,
-    ) -> JitResult<()> {
-        self.lower(expr)?;
-        match self.ddx_probe_projection(probe)? {
-            DdxProjection::Potential(pos, neg) => {
-                if let Some(pos) = pos {
-                    self.lower_third_derivative(
-                        expr,
-                        CanonicalDerivativeAxis::Node(pos),
-                        first,
-                        second,
-                    )?;
-                } else {
-                    self.push(NativeOp::Const(0.0))?;
-                }
-                if let Some(neg) = neg {
-                    self.lower_third_derivative(
-                        expr,
-                        CanonicalDerivativeAxis::Node(neg),
-                        first,
-                        second,
-                    )?;
-                    self.append_arithmetic("Sub")?;
-                    self.push(NativeOp::Const(0.5))?;
-                    self.append_arithmetic("Mul")?;
-                }
-            }
-            DdxProjection::Branch {
-                runtime_index,
-                inverted,
-            } => {
-                self.lower_third_derivative(
-                    expr,
-                    CanonicalDerivativeAxis::Branch(runtime_index),
-                    first,
-                    second,
-                )?;
-                if inverted {
-                    self.append_unary(NativeOp::Neg)?;
-                }
-            }
-        }
-        self.append_checked_value()
+        self.lower_ddx_projection_mixed(*expr, *probe, &[])
     }
 
     fn ddx_probe_projection(&self, probe: ExprId) -> JitResult<DdxProjection> {
@@ -3294,194 +3178,6 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 self.lower_analog_operator_second_derivative(op, first, second)
             }
         }
-    }
-
-    fn lower_third_derivative(
-        &mut self,
-        expr_id: ExprId,
-        first: CanonicalDerivativeAxis,
-        second: CanonicalDerivativeAxis,
-        third: CanonicalDerivativeAxis,
-    ) -> JitResult<()> {
-        let expression = self.expression(expr_id)?;
-        match &expression.kind {
-            HirExprKind::NullArgument
-            | HirExprKind::Number { .. }
-            | HirExprKind::StringLiteral { .. }
-            | HirExprKind::ArrayLiteral { .. }
-            | HirExprKind::NoiseSource { .. }
-            | HirExprKind::BranchAccess { .. }
-            | HirExprKind::NamedBranchAccess { .. } => self.push(NativeOp::Const(0.0)),
-            HirExprKind::Identifier { name } => {
-                self.lower_identifier_third_derivative(name.as_str(), first, second, third)
-            }
-            HirExprKind::Unary { op, operand } => match op.as_str() {
-                "Pos" => self.lower_third_derivative(*operand, first, second, third),
-                "Neg" => {
-                    self.lower_third_derivative(*operand, first, second, third)?;
-                    self.append_unary(NativeOp::Neg)
-                }
-                "Not" | "BitNot" | "ToInteger" | FROZEN_DERIVATIVE_UNARY => {
-                    self.push(NativeOp::Const(0.0))
-                }
-                _ => Err(self.unsupported(format!("third derivative of unary operator {op}"))),
-            },
-            HirExprKind::Binary { op, left, right } => match op.as_str() {
-                "Add" | "Sub" => {
-                    self.lower_third_derivative(*left, first, second, third)?;
-                    self.lower_third_derivative(*right, first, second, third)?;
-                    self.append_arithmetic(op.as_str())
-                }
-                "Mul" => self.lower_mul_third_derivative(*left, *right, first, second, third),
-                "Div" => self.lower_div_third_derivative(*left, *right, first, second, third),
-                "Mod" => {
-                    let left_zero = self.expr_derivative_is_zero(*left, first)?
-                        || self.expr_derivative_is_zero(*left, second)?
-                        || self.expr_derivative_is_zero(*left, third)?;
-                    let right_zero = self.expr_derivative_is_zero(*right, first)?
-                        || self.expr_derivative_is_zero(*right, second)?
-                        || self.expr_derivative_is_zero(*right, third)?;
-                    self.lower_mod_derivative(*left, *right, left_zero, right_zero, |this, id| {
-                        this.lower_third_derivative(id, first, second, third)
-                    })
-                }
-                "CheckedValue" => self.lower_third_derivative(*right, first, second, third),
-                "IntAdd" | "IntSub" | "IntMul" | "IntDiv" | "IntMod" | "IntPow" | "Eq" | "Ne"
-                | "Lt" | "Le" | "Gt" | "Ge" | "And" | "Or" | "BitAnd" | "BitOr" | "BitXor"
-                | "Shl" | "Shr" => self.push(NativeOp::Const(0.0)),
-                _ => Err(self.unsupported(format!("third derivative of binary operator {op}"))),
-            },
-            HirExprKind::Conditional {
-                condition,
-                then_expr,
-                else_expr,
-            } => {
-                self.lower(*condition)?;
-                self.lower_third_derivative(*then_expr, first, second, third)?;
-                self.lower_third_derivative(*else_expr, first, second, third)?;
-                self.append_ifelse()
-            }
-            HirExprKind::ArrayAccess { array, index } => self.lower_array_access_third_derivative(
-                array.as_str(),
-                *index,
-                first,
-                second,
-                third,
-            ),
-            HirExprKind::SystemFunction { name, args } | HirExprKind::Call { name, args } => {
-                match normalize_intrinsic_name(name).as_str() {
-                    query if electrically_independent_query(query) => {
-                        self.push(NativeOp::Const(0.0))
-                    }
-                    "vt" | "thermal_vt" => self.lower_thermal_voltage_intrinsic(
-                        name,
-                        args,
-                        NativeOp::Const(0.0),
-                        |this, temperature| {
-                            this.lower_third_derivative(temperature, first, second, third)
-                        },
-                    ),
-                    "simparam" => self.lower_simparam_action(name, args, true, |this, fallback| {
-                        this.lower_third_derivative(fallback, first, second, third)
-                    }),
-                    "laplace_zp" | "laplace_zd" | "laplace_np" | "laplace_nd" => {
-                        self.require_intrinsic_arity(name, args, 3)?;
-                        let slot = self.laplace_slot(expr_id)?;
-                        self.lower_third_derivative(args[0], first, second, third)?;
-                        self.append_unary(NativeOp::LaplaceStateDerivative(slot))
-                    }
-                    _ => Err(self
-                        .unsupported(format!("third derivative of intrinsic function '{name}'"))),
-                }
-            }
-            HirExprKind::AnalogOperator { op } => Err(self.unsupported(format!(
-                "third derivative of analog operator {}",
-                analog_operator_name(op)
-            ))),
-        }
-    }
-
-    fn lower_mul_third_derivative(
-        &mut self,
-        left: ExprId,
-        right: ExprId,
-        first: CanonicalDerivativeAxis,
-        second: CanonicalDerivativeAxis,
-        third: CanonicalDerivativeAxis,
-    ) -> JitResult<()> {
-        self.lower_third_derivative(left, first, second, third)?;
-        self.lower(right)?;
-        self.append_arithmetic("Mul")?;
-
-        self.lower_second_derivative(left, first, second)?;
-        self.lower_derivative(right, third)?;
-        self.append_arithmetic("Mul")?;
-        self.append_arithmetic("Add")?;
-
-        self.lower_second_derivative(left, first, third)?;
-        self.lower_derivative(right, second)?;
-        self.append_arithmetic("Mul")?;
-        self.append_arithmetic("Add")?;
-
-        self.lower_derivative(left, first)?;
-        self.lower_second_derivative(right, second, third)?;
-        self.append_arithmetic("Mul")?;
-        self.append_arithmetic("Add")?;
-
-        self.lower_second_derivative(left, second, third)?;
-        self.lower_derivative(right, first)?;
-        self.append_arithmetic("Mul")?;
-        self.append_arithmetic("Add")?;
-
-        self.lower_derivative(left, second)?;
-        self.lower_second_derivative(right, first, third)?;
-        self.append_arithmetic("Mul")?;
-        self.append_arithmetic("Add")?;
-
-        self.lower_derivative(left, third)?;
-        self.lower_second_derivative(right, first, second)?;
-        self.append_arithmetic("Mul")?;
-        self.append_arithmetic("Add")?;
-
-        self.lower(left)?;
-        self.lower_third_derivative(right, first, second, third)?;
-        self.append_arithmetic("Mul")?;
-        self.append_arithmetic("Add")
-    }
-
-    /// A quotient's third derivative, for a divisor no axis moves.
-    ///
-    /// That is the quotient this order actually reaches: `$realtime` divides
-    /// `$abstime` by the module's time unit and `$vt()` divides by the electron
-    /// charge, both constants, and a third derivative of either arrives here
-    /// only because two `ddx` calls and a filter derivative stack up on the
-    /// numerator. With `r` independent of all three axes every derivative of it
-    /// vanishes and the quotient rule collapses to `l_abc / r`.
-    ///
-    /// [`Self::expr_derivative_is_zero`] is a structural independence test, so
-    /// a divisor it clears on an axis has no derivative of any order along it.
-    /// A divisor that does move still refuses by name, as it did before this
-    /// case existed.
-    fn lower_div_third_derivative(
-        &mut self,
-        left: ExprId,
-        right: ExprId,
-        first: CanonicalDerivativeAxis,
-        second: CanonicalDerivativeAxis,
-        third: CanonicalDerivativeAxis,
-    ) -> JitResult<()> {
-        let divisor_is_constant = self.expr_derivative_is_zero(right, first)?
-            && self.expr_derivative_is_zero(right, second)?
-            && self.expr_derivative_is_zero(right, third)?;
-        if !divisor_is_constant {
-            return Err(self.unsupported(
-                "third derivative of binary operator Div with a solution-dependent divisor"
-                    .to_string(),
-            ));
-        }
-        self.lower_third_derivative(left, first, second, third)?;
-        self.lower(right)?;
-        self.append_arithmetic("Div")
     }
 
     fn expr_derivative_is_zero(
@@ -3862,7 +3558,12 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 _ => Ok(false),
             },
             "white_noise" | "flicker_noise" | "noise_table" | "noise_table_log" | "floor"
-            | "ceil" | "abs" | "fabs" => Ok(true),
+            | "ceil" => Ok(true),
+            "abs" | "fabs" if args.len() == 1 => {
+                // The sign is locally fixed, but a nonlinear operand retains
+                // its curvature on either side of zero.
+                self.expr_second_derivative_is_zero(args[0], first, second)
+            }
             "slew" | "idt" | "idtmod" if (1..=4).contains(&args.len()) => {
                 for argument in args {
                     if !self.expr_second_derivative_is_zero(*argument, first, second)? {
@@ -4046,39 +3747,6 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 self.push(NativeOp::LoadVariable(shadow_index))
             }
             None => Err(self.unsupported(format!("second derivative of identifier {name}"))),
-        }
-    }
-
-    fn lower_identifier_third_derivative(
-        &mut self,
-        name: &str,
-        first: CanonicalDerivativeAxis,
-        second: CanonicalDerivativeAxis,
-        third: CanonicalDerivativeAxis,
-    ) -> JitResult<()> {
-        match self.limits.identifier_slot(self.mir, name) {
-            Some(NativeIdentifierSlot::Parameter(_)) => self.push(NativeOp::Const(0.0)),
-            Some(NativeIdentifierSlot::Variable(_)) => {
-                let shadow_name = format!(
-                    "{name}@{}@{}@{}",
-                    first.shadow_suffix(),
-                    second.shadow_suffix(),
-                    third.shadow_suffix()
-                );
-                let Some(NativeIdentifierSlot::Variable(shadow_index)) =
-                    self.limits.identifier_slot(self.mir, &shadow_name)
-                else {
-                    return self.push(NativeOp::Const(0.0));
-                };
-                validate_index(
-                    self.model.clone(),
-                    "canonical variable third-derivative shadow",
-                    shadow_index,
-                    self.limits.variable_count,
-                )?;
-                self.push(NativeOp::LoadVariable(shadow_index))
-            }
-            None => Err(self.unsupported(format!("third derivative of identifier {name}"))),
         }
     }
 
@@ -4918,10 +4586,10 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                         args.len()
                     )));
                 };
-                self.lower_ddx_projection_derivative(*expr, *probe, wrt)
+                self.lower_ddx_projection_mixed(*expr, *probe, &[wrt])
             }
-            "ddt" => self.lower_ddt_derivative(expr_id, name, args, wrt, None),
-            "idt" | "idtmod" => self.lower_idt_derivative(expr_id, name, args, wrt, None),
+            "ddt" => self.lower_ddt_derivative(expr_id, name, args, &[wrt]),
+            "idt" | "idtmod" => self.lower_idt_derivative(expr_id, name, args, &[wrt]),
             "slew" => {
                 let (expr, max_rise, max_fall) = match args {
                     [expr] => (*expr, None, None),
@@ -4934,9 +4602,9 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                         )));
                     }
                 };
-                self.lower_slew_derivative_operator(expr_id, expr, max_rise, max_fall, wrt)
+                self.lower_slew_derivative_operator(expr_id, expr, max_rise, max_fall, &[wrt])
             }
-            "transition" => self.lower_transition_operator(expr_id, args, Some((wrt, None))),
+            "transition" => self.lower_transition_operator(expr_id, args, Some(&[wrt])),
             "absdelay" => {
                 let (expr, delay, max_delay) = match args {
                     [expr, delay] => (*expr, *delay, None),
@@ -4954,7 +4622,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 self.lower_laplace_call_derivative(expr_id, name, args, wrt)
             }
             "zi_zp" | "zi_zd" | "zi_np" | "zi_nd" => {
-                self.lower_zi_call_derivative(expr_id, name, args, wrt)
+                self.lower_zi_call_derivative(expr_id, name, args, &[wrt])
             }
             "limit" => self.lower_limit_derivative(expr_id, name, args, wrt),
             "table_model" => self.lower_table_model_derivative(expr_id, name, args, wrt),
@@ -5134,10 +4802,10 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                         args.len()
                     )));
                 };
-                self.lower_ddx_projection_second_derivative(*expr, *probe, first, second)
+                self.lower_ddx_projection_mixed(*expr, *probe, &[first, second])
             }
-            "idt" | "idtmod" => self.lower_idt_derivative(expr_id, name, args, first, Some(second)),
-            "ddt" => self.lower_ddt_derivative(expr_id, name, args, first, Some(second)),
+            "idt" | "idtmod" => self.lower_idt_derivative(expr_id, name, args, &[first, second]),
+            "ddt" => self.lower_ddt_derivative(expr_id, name, args, &[first, second]),
             "slew" => {
                 let (expr, max_rise, max_fall) = match args {
                     [expr] => (*expr, None, None),
@@ -5150,13 +4818,15 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                         )));
                     }
                 };
-                self.lower_slew_second_derivative_operator(
-                    expr_id, expr, max_rise, max_fall, first, second,
+                self.lower_slew_derivative_operator(
+                    expr_id,
+                    expr,
+                    max_rise,
+                    max_fall,
+                    &[first, second],
                 )
             }
-            "transition" => {
-                self.lower_transition_operator(expr_id, args, Some((first, Some(second))))
-            }
+            "transition" => self.lower_transition_operator(expr_id, args, Some(&[first, second])),
             "absdelay" => Err(self.unsupported(format!(
                 "second derivative of absdelay at expression {expr_id}"
             ))),
@@ -5164,7 +4834,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 self.lower_laplace_call_second_derivative(expr_id, name, args, first, second)
             }
             "zi_zp" | "zi_zd" | "zi_np" | "zi_nd" => {
-                self.lower_zi_call_second_derivative(expr_id, name, args, first, second)
+                self.lower_zi_call_derivative(expr_id, name, args, &[first, second])
             }
             "limit" => {
                 self.require_intrinsic_arity_range(name, args, 1, 2)?;
@@ -5976,19 +5646,14 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         expr_id: ExprId,
         name: &str,
         args: &[ExprId],
-        wrt: CanonicalDerivativeAxis,
-        second: Option<CanonicalDerivativeAxis>,
+        axes: &[CanonicalDerivativeAxis],
     ) -> JitResult<()> {
         self.require_intrinsic_arity(name, args, 1)?;
         let slot = self.limits.canonical_ddt_slot(expr_id).ok_or_else(|| {
             self.unsupported(format!("{name} derivative at {expr_id} has no state slot"))
         })?;
         self.lower(expr_id)?;
-        if let Some(second) = second {
-            self.lower_second_derivative(args[0], wrt, second)?;
-        } else {
-            self.lower_derivative(args[0], wrt)?;
-        }
+        self.lower_mixed_derivative(args[0], axes)?;
         self.depth -= 1;
         self.ops.push(NativeOp::DdtDerivativeState(slot));
         Ok(())
@@ -5999,8 +5664,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         expr_id: ExprId,
         name: &str,
         args: &[ExprId],
-        wrt: CanonicalDerivativeAxis,
-        second: Option<CanonicalDerivativeAxis>,
+        axes: &[CanonicalDerivativeAxis],
     ) -> JitResult<()> {
         self.require_intrinsic_arity_range(name, args, 1, 4)?;
         let wrapped = normalize_intrinsic_name(name) == "idtmod" && args.len() >= 3;
@@ -6021,13 +5685,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 self.push(NativeOp::Const(0.0))?;
             }
         }
-        let derivative = |this: &mut Self, argument| {
-            if let Some(second) = second {
-                this.lower_second_derivative(argument, wrt, second)
-            } else {
-                this.lower_derivative(argument, wrt)
-            }
-        };
+        let derivative = |this: &mut Self, argument| this.lower_mixed_derivative(argument, axes);
         derivative(self, args[0])?;
         if let Some(ic) = args.get(1) {
             derivative(self, *ic)?;
@@ -6255,7 +5913,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         expr_id: ExprId,
         name: &str,
         args: &[ExprId],
-        wrt: CanonicalDerivativeAxis,
+        axes: &[CanonicalDerivativeAxis],
     ) -> JitResult<()> {
         if !(4..=6).contains(&args.len()) {
             return Err(self.unsupported(format!(
@@ -6267,38 +5925,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         let (numerator, denominator) = self.lower_zi_call_definition(name, args)?;
         self.lower(args[3])?;
         self.lower_optional_zi_constant(args.get(5).copied(), 0.0)?;
-        self.lower_derivative(args[0], wrt)?;
-        self.lower_optional_zi_constant(args.get(4).copied(), self.mir.default_transition)?;
-        self.append_zi_state(
-            ZiRuntimeLayout {
-                filter_id: slot,
-                numerator,
-                denominator,
-                direct_assignment: self.zi_site_is_direct(),
-            },
-            true,
-        )
-    }
-
-    fn lower_zi_call_second_derivative(
-        &mut self,
-        expr_id: ExprId,
-        name: &str,
-        args: &[ExprId],
-        first: CanonicalDerivativeAxis,
-        second: CanonicalDerivativeAxis,
-    ) -> JitResult<()> {
-        if !(4..=6).contains(&args.len()) {
-            return Err(self.unsupported(format!(
-                "analog operator {name} expects four to six operands, found {}",
-                args.len()
-            )));
-        }
-        let slot = self.zi_derivative_slot(expr_id)?;
-        let (numerator, denominator) = self.lower_zi_call_definition(name, args)?;
-        self.lower(args[3])?;
-        self.lower_optional_zi_constant(args.get(5).copied(), 0.0)?;
-        self.lower_second_derivative(args[0], first, second)?;
+        self.lower_mixed_derivative(args[0], axes)?;
         self.lower_optional_zi_constant(args.get(4).copied(), self.mir.default_transition)?;
         self.append_zi_state(
             ZiRuntimeLayout {
@@ -6549,7 +6176,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         &mut self,
         expr_id: ExprId,
         args: &[ExprId],
-        derivative: Option<(CanonicalDerivativeAxis, Option<CanonicalDerivativeAxis>)>,
+        derivative: Option<&[CanonicalDerivativeAxis]>,
     ) -> JitResult<()> {
         // The fifth operand is `time_tol`, which this lowering does not honour.
         let (expr, delay, rise, fall) = match args {
@@ -6572,14 +6199,10 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             )));
         };
         self.lower(expr)?;
-        if let Some((first, second)) = derivative {
-            // The runtime helper is a branch oracle: apply its local gain to
-            // either the first or second derivative of the authored input.
-            if let Some(second) = second {
-                self.lower_second_derivative(expr, first, second)?;
-            } else {
-                self.lower_derivative(expr, first)?;
-            }
+        if let Some(axes) = derivative {
+            // Preserve the primal branch and apply its local gain to the
+            // requested input derivative, at every order.
+            self.lower_mixed_derivative(expr, axes)?;
         }
         if let Some(delay) = delay {
             self.lower(delay)?;
@@ -6671,10 +6294,10 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         expr: ExprId,
         max_rise: Option<ExprId>,
         max_fall: Option<ExprId>,
-        wrt: CanonicalDerivativeAxis,
+        axes: &[CanonicalDerivativeAxis],
     ) -> JitResult<()> {
         if max_rise.is_none() && max_fall.is_none() {
-            return self.lower_derivative(expr, wrt);
+            return self.lower_mixed_derivative(expr, axes);
         }
         let Some(slot) = self.limits.canonical_slew_slot(expr_id) else {
             return Err(self.unsupported(format!(
@@ -6685,72 +6308,22 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             self.unsupported("slew negative rate cannot be authored without a positive rate")
         })?;
         self.lower(expr)?;
-        self.lower_derivative(expr, wrt)?;
+        self.lower_mixed_derivative(expr, axes)?;
         self.lower(max_rise)?;
-        self.lower_derivative(max_rise, wrt)?;
+        self.lower_mixed_derivative(max_rise, axes)?;
         if let Some(max_fall) = max_fall {
             self.lower(max_fall)?;
-            self.lower_derivative(max_fall, wrt)?;
+            self.lower_mixed_derivative(max_fall, axes)?;
         } else {
             self.lower(max_rise)?;
             self.append_unary(NativeOp::Neg)?;
-            self.lower_derivative(max_rise, wrt)?;
+            self.lower_mixed_derivative(max_rise, axes)?;
             self.append_unary(NativeOp::Neg)?;
         }
         require_stack(
             self.model.clone(),
             self.entry_kind,
             "canonical slew derivative",
-            self.depth,
-            6,
-        )?;
-        self.depth -= 5;
-        self.ops.push(NativeOp::SlewStateDerivative(slot));
-        Ok(())
-    }
-
-    fn lower_slew_second_derivative_operator(
-        &mut self,
-        expr_id: ExprId,
-        expr: ExprId,
-        max_rise: Option<ExprId>,
-        max_fall: Option<ExprId>,
-        first: CanonicalDerivativeAxis,
-        second: CanonicalDerivativeAxis,
-    ) -> JitResult<()> {
-        if max_rise.is_none() && max_fall.is_none() {
-            return self.lower_second_derivative(expr, first, second);
-        }
-        let Some(slot) = self.limits.canonical_slew_slot(expr_id) else {
-            return Err(self.unsupported(format!(
-                "analog operator slew expression {expr_id} second-derivative filter slot"
-            )));
-        };
-        let max_rise = max_rise.ok_or_else(|| {
-            self.unsupported("slew negative rate cannot be authored without a positive rate")
-        })?;
-
-        // SlewStateDerivative is a branch oracle as well as a first-order
-        // action. Supplying second derivatives as its payload evaluates the
-        // exact fixed-branch second derivative without depending on a primal
-        // helper having executed earlier in this pass.
-        self.lower(expr)?;
-        self.lower_second_derivative(expr, first, second)?;
-        self.lower(max_rise)?;
-        self.lower_second_derivative(max_rise, first, second)?;
-        if let Some(max_fall) = max_fall {
-            self.lower(max_fall)?;
-            self.lower_second_derivative(max_fall, first, second)?;
-        } else {
-            self.lower(max_rise)?;
-            self.append_unary(NativeOp::Neg)?;
-            self.lower_second_derivative(max_rise, first, second)?;
-            self.append_unary(NativeOp::Neg)?;
-        }
-        require_stack(
-            self.model.clone(),
-            self.entry_kind,
-            "canonical slew second derivative",
             self.depth,
             6,
         )?;
@@ -7747,35 +7320,6 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         Ok(())
     }
 
-    fn lower_array_access_third_derivative(
-        &mut self,
-        array: &str,
-        index: ExprId,
-        first: CanonicalDerivativeAxis,
-        second: CanonicalDerivativeAxis,
-        third: CanonicalDerivativeAxis,
-    ) -> JitResult<()> {
-        let Some((base, len, lower)) =
-            self.resolve_array_third_derivative_variable_range(array, first, second, third)?
-        else {
-            return self.push(NativeOp::Const(0.0));
-        };
-        validate_range(
-            self.model.clone(),
-            "canonical array third-derivative variable range",
-            base,
-            len,
-            self.limits.variable_count,
-        )?;
-        self.lower(index)?;
-        if lower_constant_dynamic_variable_read(&mut self.ops, base, len, lower) {
-            return Ok(());
-        }
-        self.ops
-            .push(NativeOp::LoadVariableDyn { base, len, lower });
-        Ok(())
-    }
-
     fn resolve_array_derivative_variable_range(
         &self,
         array: &str,
@@ -7794,23 +7338,6 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
     ) -> JitResult<Option<(usize, usize, i64)>> {
         let prefix = format!("{array}[");
         let suffix = format!("]@{}@{}", first.shadow_suffix(), second.shadow_suffix());
-        self.resolve_variable_range_with_affixes(array, &prefix, &suffix)
-    }
-
-    fn resolve_array_third_derivative_variable_range(
-        &self,
-        array: &str,
-        first: CanonicalDerivativeAxis,
-        second: CanonicalDerivativeAxis,
-        third: CanonicalDerivativeAxis,
-    ) -> JitResult<Option<(usize, usize, i64)>> {
-        let prefix = format!("{array}[");
-        let suffix = format!(
-            "]@{}@{}@{}",
-            first.shadow_suffix(),
-            second.shadow_suffix(),
-            third.shadow_suffix()
-        );
         self.resolve_variable_range_with_affixes(array, &prefix, &suffix)
     }
 

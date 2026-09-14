@@ -320,7 +320,8 @@ use super::*;
 // Version 97 preserves private inlined-function storage rather than treating
 // task-only call inputs as externally observable variables (HIR 62).
 // Version 98 records guarded parameter-bounded derivative loops (HIR 63).
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 98;
+// Version 99 qualifies higher-order canonical postfix derivatives (Wasm emitter 55).
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 99;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]

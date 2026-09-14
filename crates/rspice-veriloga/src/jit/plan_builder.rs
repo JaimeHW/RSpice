@@ -4206,46 +4206,15 @@ fn lower_canonical_shadow_program(
     let slots =
         CanonicalExpressionStateSlots::for_expression(model, mir, expr_id, bytecode_program)?;
     let limits = slots.apply(limits);
-    match axes {
-        [axis] => NativeProgram::from_mir_expression_derivative(
-            model.name.clone(),
-            EntryKind::Assignment,
-            mir,
-            EquationId::new(0),
-            expr_id,
-            *axis,
-            limits,
-        ),
-        [first, second] => NativeProgram::from_mir_expression_second_derivative(
-            model.name.clone(),
-            EntryKind::Assignment,
-            mir,
-            EquationId::new(0),
-            expr_id,
-            *first,
-            *second,
-            limits,
-        ),
-        [first, second, third] => NativeProgram::from_mir_expression_third_derivative(
-            model.name.clone(),
-            EntryKind::Assignment,
-            mir,
-            EquationId::new(0),
-            expr_id,
-            *first,
-            *second,
-            *third,
-            limits,
-        ),
-        _ => Err(JitError::InvalidCanonicalIr {
-            model: model.name.clone(),
-            detail: format!(
-                "canonical assignment derivative shadow has unsupported order {}",
-                axes.len()
-            )
-            .into(),
-        }),
-    }
+    NativeProgram::from_mir_expression_mixed_derivative(
+        model.name.clone(),
+        EntryKind::Assignment,
+        mir,
+        EquationId::new(0),
+        expr_id,
+        axes,
+        limits,
+    )
 }
 
 pub(crate) fn derivative_shadow_axes_from_suffix(
