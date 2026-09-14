@@ -62,7 +62,7 @@ semver.workspace = true
 toml.workspace = true
 rspice-publication-contract.workspace = true
 csv = "1.3"
-rust_xlsxwriter = { version = "0.92", default-features = false }
+rust_xlsxwriter = { version = "0.99", default-features = false }
 # arrow-rs 59 is the first release whose parquet drops the `thrift` crate
 # (GHSA-2f9f-gq7v-9h6m); every parquet <= 58 pins the unpatched `thrift ^0.17`.
 arrow-array = "59"
