@@ -82,7 +82,7 @@ impl DelayTarget {
 /// accept arbitrarily many points inside a finite interval. Refusing an
 /// over-budget candidate is preferable to either unbounded allocation or
 /// silently discarding interpolation data.
-const MAX_DELAY_HISTORY_SAMPLES: usize = 1_048_576;
+pub const MAX_DELAY_HISTORY_SAMPLES: usize = 1_048_576;
 
 /// The definition frozen by the first accepted transient evaluation.
 ///
@@ -157,7 +157,7 @@ impl DelayDifferenceEvaluation {
 /// not mutate trajectory history. Accepted history is pruned to the configured
 /// delay horizon while retaining the predecessor needed for exact linear
 /// interpolation.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct DelayBuffer {
     samples: VecDeque<(f64, f64)>,
     configuration: Option<DelayConfiguration>,
@@ -680,6 +680,14 @@ impl DelayBuffer {
         let Some(candidate) = self.candidate else {
             return Ok(());
         };
+        self.validate_candidate_commit(candidate, accepted_time)
+    }
+
+    fn validate_candidate_commit(
+        &self,
+        candidate: DelayCandidate,
+        accepted_time: f64,
+    ) -> Result<(), String> {
         if candidate.time != accepted_time {
             return Err(format!(
                 "delay candidate time {} does not equal accepted time {accepted_time}",
@@ -713,6 +721,53 @@ impl DelayBuffer {
                 "delay history requires more than the supported {MAX_DELAY_HISTORY_SAMPLES} accepted samples inside its configured horizon"
             ));
         }
+        Ok(())
+    }
+
+    fn direct_sample(
+        &self,
+        time: f64,
+        value: f64,
+        delay: f64,
+        max_delay: Option<f64>,
+    ) -> Result<DelayCandidate, String> {
+        self.validate_runtime(time, value, delay, max_delay)?;
+        let (configuration, _, _) = self.resolve_configuration(delay, max_delay)?;
+        let sample = DelayCandidate {
+            time,
+            value,
+            configuration,
+        };
+        self.validate_candidate_commit(sample, time)?;
+        Ok(sample)
+    }
+
+    /// Validate a native solver's accepted sample without staging it or
+    /// copying retained history. This shares the VM commit contract.
+    pub fn validate_sample(
+        &self,
+        time: f64,
+        value: f64,
+        delay: f64,
+        max_delay: Option<f64>,
+    ) -> Result<(), String> {
+        self.direct_sample(time, value, delay, max_delay)
+            .map(|_| ())
+    }
+
+    /// Append a selected accepted sample after validation. Failure preserves
+    /// both accepted history and any staged VM candidate; success replaces
+    /// that candidate with the sample selected by the caller.
+    pub fn accept_sample(
+        &mut self,
+        time: f64,
+        value: f64,
+        delay: f64,
+        max_delay: Option<f64>,
+    ) -> Result<(), String> {
+        let sample = self.direct_sample(time, value, delay, max_delay)?;
+        self.candidate = Some(sample);
+        self.apply_validated_commit();
         Ok(())
     }
 
@@ -773,6 +828,17 @@ impl DelayBuffer {
         self.samples.len()
     }
 
+    pub fn accepted_configuration(&self) -> Option<DelayConfiguration> {
+        self.configuration
+    }
+
+    /// Iterate accepted samples without allocating a checkpoint copy.
+    pub fn accepted_samples(
+        &self,
+    ) -> impl DoubleEndedIterator<Item = (f64, f64)> + ExactSizeIterator + '_ {
+        self.samples.iter().copied()
+    }
+
     pub fn checkpoint(&self) -> DelayCheckpoint {
         DelayCheckpoint {
             configuration: self.configuration,
@@ -783,6 +849,28 @@ impl DelayBuffer {
     pub fn validate_checkpoint_ready(&self) -> Result<(), String> {
         if self.candidate.is_some() {
             return Err("delay has an in-flight Newton candidate".into());
+        }
+        Ok(())
+    }
+
+    /// Check that a solver capture ends at its accepted time and retains the
+    /// left interpolation bracket needed at that time. Runtime construction
+    /// and restoration already enforce finite, strictly increasing samples.
+    pub fn validate_accepted_time(&self, time: f64) -> Result<(), String> {
+        self.validate_checkpoint_ready()?;
+        let configuration = self
+            .configuration
+            .ok_or("delay history has no accepted definition")?;
+        let &(last_time, _) = self
+            .samples
+            .back()
+            .ok_or("delay history has no accepted samples")?;
+        if !time.is_finite() || time < 0.0 || last_time.to_bits() != time.to_bits() {
+            return Err("delay history does not end at the solver's accepted time".into());
+        }
+        let first_time = self.samples.front().expect("nonempty accepted history").0;
+        if !DelayTarget::new(time, configuration.retention()).at_or_after(first_time) {
+            return Err("delay history is missing its retained interpolation bracket".into());
         }
         Ok(())
     }
@@ -839,6 +927,16 @@ impl DelayBuffer {
         self.configuration = checkpoint.configuration;
         self.candidate = None;
         Ok(())
+    }
+
+    /// Take a validated checkpoint's sample allocation without a second copy.
+    pub fn from_checkpoint(checkpoint: DelayCheckpoint) -> Result<Self, String> {
+        Self::validate_checkpoint(&checkpoint)?;
+        Ok(Self {
+            samples: checkpoint.samples.into(),
+            configuration: checkpoint.configuration,
+            candidate: None,
+        })
     }
 }
 
