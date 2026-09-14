@@ -41,6 +41,36 @@ def test_fourier_current_includes_charge_after_pickle(engine):
     assert transient.fourier_current(branch, 1.0, 4).dc_component == 0.0
 
 
+def test_current_measurements_include_charge_before_dependent_equations(engine):
+    deck = rspice.Netlist.parse(
+        "* charge measurements\nV1 out 0 0\nR1 out 0 1000\n"
+        ".meas tran charge INTEG I(V1)\n"
+        ".meas tran mean AVG IR(V1)\n"
+        ".meas tran dependent EQN {2*charge}\n"
+        ".meas tran squared RMS I(V1)\n"
+        ".meas tran voltage AVG V(out)\n.end\n"
+    )
+    transient = engine.run_tran(deck, stop_time=1.0, max_step=1.0 / 256)
+    branch = transient.branch_names[0]
+    restored = pickle.loads(pickle.dumps(with_impulses(
+        transient, [("branch", branch, None, True,
+                     [(0.0, 7.0), (0.25, 2e-3), (1.0, -1e-3)])], 2
+    )))
+    measured = {m.name.lower(): m for m in engine.measure(deck, restored)}
+    for name, expected in [("charge", 1e-3), ("mean", 1e-3),
+                           ("dependent", 2e-3), ("voltage", 0.0)]:
+        assert measured[name].passed, measured[name]
+        assert measured[name].value == pytest.approx(expected, rel=2e-14, abs=1e-18)
+    assert not measured["squared"].passed
+    assert measured["squared"].raw_value is None
+    incomplete = with_impulses(transient, [], 2)
+    measured = {m.name.lower(): m for m in engine.measure(deck, incomplete)}
+    for name in ["charge", "mean", "dependent", "squared"]:
+        assert not measured[name].passed
+        assert measured[name].raw_value is None
+    assert measured["voltage"].passed
+
+
 def test_current_impulses_pickle_preserves_availability_and_legacy_shape(result):
     assert result.current_impulses is None
     restore, state = result.__reduce__()

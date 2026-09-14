@@ -3928,6 +3928,35 @@ pub(super) fn parse_meas_signal(
     if let Some(expression) = parse_measure_expression_operand(stream, line_num)? {
         return Ok(expression);
     }
+    if stream.consume(&TokenKind::AtSign) {
+        // `expect_ident` accepts contiguous DEV-name punctuation, including
+        // brackets. Here brackets delimit the parameter and must stay tokens.
+        let TokenKind::Ident(device) = stream.advance().kind.clone() else {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: "Expected device name after '@' in .MEAS operand".into(),
+            });
+        };
+        if !stream.consume(&TokenKind::LBracket) {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: "Expected '[' after device name in .MEAS operand".into(),
+            });
+        }
+        let TokenKind::Ident(parameter) = stream.advance().kind.clone() else {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: "Expected device parameter inside .MEAS brackets".into(),
+            });
+        };
+        if !stream.consume(&TokenKind::RBracket) {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: "Expected ']' after device parameter in .MEAS operand".into(),
+            });
+        }
+        return Ok(format!("@{device}[{parameter}]"));
+    }
     if params.expression_dialect() == crate::config::ExpressionDialect::Xyce
         && let TokenKind::Ident(name) = &stream.peek().kind
         && matches!(stream.peek_n(1).kind, TokenKind::LParen)

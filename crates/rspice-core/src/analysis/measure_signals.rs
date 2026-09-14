@@ -26,6 +26,7 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
+mod current_measure;
 pub(crate) mod current_observation;
 
 /// Whether the first adjacent pair that differs is ascending.
@@ -585,7 +586,9 @@ struct LiveMeasureProgram<'a> {
     values: Vec<Value>,
     valid: Vec<bool>,
     store_trace: bool,
-    has_file_error_dependency: bool,
+    requires_live_evaluation: bool,
+    observation: Option<current_measure::Integral<'a>>,
+    strict_failures: bool,
     failure: Option<String>,
 }
 
@@ -631,17 +634,34 @@ struct LiveSelectionRow {
 }
 
 impl LiveMeasureReadContext<'_, '_> {
-    fn read_measure(&mut self, canonical_name: &str) -> Option<Value> {
+    fn read_measure(&mut self, canonical_name: &str) -> Result<Option<Value>, String> {
         if let Some(&program_index) = self.program_indices.get(canonical_name)
             && let Some(program) = self.programs.get_mut(program_index)
-            && freeze_live_file_error(program, self.row, self.axis)
         {
-            let (name, current) = (program.canonical_name.clone(), program.current);
-            if let Some(slot) = self.current_values.get_mut(&name) {
-                *slot = current;
+            if program.strict_failures
+                && let Some(error) = &program.failure
+            {
+                return Err(format!(
+                    "measurement '{}' is unavailable: {error}",
+                    program.statement.name
+                ));
+            }
+            if freeze_live_file_error(program, self.row, self.axis) {
+                let (name, current) = (program.canonical_name.clone(), program.current);
+                if let Some(slot) = self.current_values.get_mut(&name) {
+                    *slot = current;
+                }
+            }
+            if program.strict_failures
+                && let Some(error) = &program.failure
+            {
+                return Err(format!(
+                    "measurement '{}' is unavailable: {error}",
+                    program.statement.name
+                ));
             }
         }
-        self.current_values.get(canonical_name).copied()
+        Ok(self.current_values.get(canonical_name).copied())
     }
 }
 
@@ -652,6 +672,8 @@ struct LiveMeasureOperand {
     canonical_signal: String,
     is_axis_symbol: bool,
     expression: Option<Box<LivePreparedExpression>>,
+    raw_operator: Option<Box<LiveRawOutputOperator>>,
+    alternate_signal: Option<String>,
     dependencies: Vec<String>,
 }
 
@@ -832,7 +854,9 @@ impl LivePreparedExpression {
                     return Ok(None);
                 };
                 if !parameter.is_axis_symbol
-                    && let Some(value) = reads.read_measure(&parameter.canonical_measure)
+                    && let Some(value) = reads
+                        .read_measure(&parameter.canonical_measure)
+                        .map_err(crate::netlist::expr::ExprError::InvalidArgument)?
                 {
                     return Ok(Some(ComplexValue::from(value)));
                 }
@@ -847,7 +871,9 @@ impl LivePreparedExpression {
                     return Ok(Some(ComplexValue::from(value)));
                 }
                 if parameter.is_axis_symbol
-                    && let Some(value) = reads.read_measure(&parameter.canonical_measure)
+                    && let Some(value) = reads
+                        .read_measure(&parameter.canonical_measure)
+                        .map_err(crate::netlist::expr::ExprError::InvalidArgument)?
                 {
                     return Ok(Some(ComplexValue::from(value)));
                 }
@@ -895,6 +921,13 @@ impl LiveMeasureOperand {
             canonical_signal,
             is_axis_symbol,
             expression,
+            raw_operator: LiveRawOutputOperator::compile(authored).ok().map(Box::new),
+            alternate_signal: match crate::netlist::parse_save_probe(authored) {
+                Some(SaveSignal::DeviceParam { device, param }) => Some(
+                    canonical_measure_signal_name(&format!("@{device}[{param}]")),
+                ),
+                _ => None,
+            },
             dependencies,
         })
     }
@@ -907,7 +940,7 @@ impl LiveMeasureOperand {
         params: &crate::netlist::ParamContext,
     ) -> Result<Value, String> {
         if !self.is_axis_symbol
-            && let Some(value) = reads.read_measure(&self.canonical_authored)
+            && let Some(value) = reads.read_measure(&self.canonical_authored)?
         {
             return Ok(value);
         }
@@ -920,9 +953,18 @@ impl LiveMeasureOperand {
             return Ok(value);
         }
         if self.is_axis_symbol
-            && let Some(value) = reads.read_measure(&self.canonical_authored)
+            && let Some(value) = reads.read_measure(&self.canonical_authored)?
         {
             return Ok(value);
+        }
+        if let Some(alias) = &self.alternate_signal
+            && let Some(value) =
+                lookup_equation_signal_canonical_optional(signals, &self.authored, alias, row)?
+        {
+            return Ok(value);
+        }
+        if let Some(operator) = &self.raw_operator {
+            return operator.value(row, signals);
         }
         let Some(expression) = &mut self.expression else {
             return Err(format!("Signal '{}' not found", self.authored));
@@ -1325,9 +1367,35 @@ pub fn evaluate_tran_equation_measurements(
         InterfaceNodeAliasProjection::new(netlist, OutputAnalysisKind::Tran, result.time.len())?;
     let mut signals = transient_signal_map(result);
     alias_projection.augment(&mut signals)?;
-    evaluate_equation_measurements(netlist, "TRAN", &result.time, &signals, -1.0, None)
-        .map(|traces| retain_equation_traces(netlist, "TRAN", traces))
-        .map_err(|error| event_only_signal_miss(&error, result).unwrap_or(error))
+    let evaluation = evaluate_equation_measurements_with_observations(
+        netlist,
+        "TRAN",
+        &result.time,
+        &signals,
+        -1.0,
+        None,
+        Some(result),
+        &NoAbort,
+    )
+    .map_err(|error| match error {
+        EquationMeasurementEvaluationError::Aborted => {
+            "current measurement evaluation aborted".to_string()
+        }
+        EquationMeasurementEvaluationError::Detail(error) => {
+            event_only_signal_miss(&error, result).unwrap_or(error)
+        }
+    })?;
+    for statement in measurements_for_analysis(netlist, "TRAN") {
+        if matches!(statement.measure_type, MeasureType::Equation { .. })
+            && let Some(failed) = evaluation
+                .overrides
+                .get(&statement.name.to_ascii_uppercase())
+            && let Some(error) = &failed.error
+        {
+            return Err(error.clone());
+        }
+    }
+    Ok(retain_equation_traces(netlist, "TRAN", evaluation.traces))
 }
 
 /// Evaluate Xyce continuous equation measurements over a DC sweep.
@@ -2666,44 +2734,97 @@ fn evaluate_equation_measurements_with_abort(
     dc_sweep_ascending: Option<bool>,
     abort: &dyn AbortSignal,
 ) -> Result<Vec<EquationMeasureTrace>, EquationMeasurementEvaluationError> {
+    evaluate_equation_measurements_with_observations(
+        netlist,
+        analysis,
+        axis,
+        signals,
+        implicit_default,
+        dc_sweep_ascending,
+        None,
+        abort,
+    )
+    .map(|evaluation| evaluation.traces)
+}
+
+#[derive(Default)]
+struct LiveMeasurementEvaluation {
+    traces: Vec<EquationMeasureTrace>,
+    overrides: HashMap<String, MeasureResult>,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn evaluate_equation_measurements_with_observations(
+    netlist: &Netlist,
+    analysis: &str,
+    axis: &[Value],
+    signals: &HashMap<String, &[Value]>,
+    implicit_default: Value,
+    dc_sweep_ascending: Option<bool>,
+    current_result: Option<&TransientResult>,
+    abort: &dyn AbortSignal,
+) -> Result<LiveMeasurementEvaluation, EquationMeasurementEvaluationError> {
     if abort.is_aborted() {
         return Err(EquationMeasurementEvaluationError::Aborted);
     }
-    let mut programs = netlist
+    let current_result = current_result.filter(|result| result.current_impulses.is_some());
+    let mut programs = Vec::new();
+    for statement in netlist
         .measurements
         .iter()
         .filter(|statement| statement.analysis.eq_ignore_ascii_case(analysis))
-        .map(|statement| {
-            let equation = matches!(statement.measure_type, MeasureType::Equation { .. });
-            Ok::<_, String>(LiveMeasureProgram {
-                statement,
-                canonical_name: statement.name.to_ascii_uppercase(),
-                state: Some(compile_live_measure_state(
-                    statement,
-                    analysis,
-                    axis,
-                    dc_sweep_ascending,
-                    netlist.options.measure_use_lttm(),
-                    &netlist.params,
-                )?),
-                current: netlist
-                    .options
-                    .measure_default_value
-                    .or(statement.default_value)
-                    .unwrap_or(if equation { implicit_default } else { 0.0 }),
-                initialized: false,
-                values: Vec::new(),
-                valid: Vec::new(),
-                store_trace: false,
-                has_file_error_dependency: false,
-                failure: None,
-            })
-        })
-        .collect::<Result<Vec<_>, String>>()
-        .map_err(EquationMeasurementEvaluationError::Detail)?;
-
+    {
+        if abort.is_aborted() {
+            return Err(EquationMeasurementEvaluationError::Aborted);
+        }
+        let equation = matches!(statement.measure_type, MeasureType::Equation { .. });
+        let (state, mut failure) = match compile_live_measure_state(
+            statement,
+            analysis,
+            axis,
+            dc_sweep_ascending,
+            netlist.options.measure_use_lttm(),
+            &netlist.params,
+        ) {
+            Ok(state) => (Some(state), None),
+            Err(error) if current_result.is_some() => (None, Some(error)),
+            Err(error) => return Err(EquationMeasurementEvaluationError::Detail(error)),
+        };
+        let observation = if let (Some(result), Some(state)) = (current_result, state.as_ref()) {
+            match current_measure::compile(netlist, result, statement, state, abort) {
+                Ok(observation) => observation,
+                Err(current_observation::CurrentObservationError::Aborted) => {
+                    return Err(EquationMeasurementEvaluationError::Aborted);
+                }
+                Err(error) => {
+                    failure = Some(error.to_string());
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        programs.push(LiveMeasureProgram {
+            statement,
+            canonical_name: statement.name.to_ascii_uppercase(),
+            state,
+            current: netlist
+                .options
+                .measure_default_value
+                .or(statement.default_value)
+                .unwrap_or(if equation { implicit_default } else { 0.0 }),
+            initialized: false,
+            values: Vec::new(),
+            valid: Vec::new(),
+            store_trace: false,
+            requires_live_evaluation: observation.is_some(),
+            observation,
+            strict_failures: current_result.is_some(),
+            failure,
+        });
+    }
     if programs.is_empty() {
-        return Ok(Vec::new());
+        return Ok(LiveMeasurementEvaluation::default());
     }
     let all_dependencies = programs
         .iter()
@@ -2749,14 +2870,15 @@ fn evaluate_equation_measurements_with_abort(
         if index.is_multiple_of(64) && abort.is_aborted() {
             return Err(EquationMeasurementEvaluationError::Aborted);
         }
-        program.has_file_error_dependency = dependencies.iter().any(|dependency| {
+        program.requires_live_evaluation |= dependencies.iter().any(|dependency| {
             program_indices
                 .get(dependency)
                 .is_some_and(|&dependency_index| {
-                    file_error_programs
-                        .get(dependency_index)
-                        .copied()
-                        .unwrap_or(false)
+                    program.strict_failures
+                        || file_error_programs
+                            .get(dependency_index)
+                            .copied()
+                            .unwrap_or(false)
                 })
         });
     }
@@ -2776,7 +2898,7 @@ fn evaluate_equation_measurements_with_abort(
             let Some(program) = programs.get_mut(program_index) else {
                 break;
             };
-            if !program.store_trace && !program.has_file_error_dependency {
+            if !program.store_trace && !program.requires_live_evaluation {
                 continue;
             }
             let has_failed = program.failure.is_some();
@@ -2784,6 +2906,13 @@ fn evaluate_equation_measurements_with_abort(
                 matches!(program.statement.measure_type, MeasureType::Equation { .. });
             let Some(mut state) = program.state.take() else {
                 continue;
+            };
+            let mut observation = program.observation.take();
+            let previous_axis = match &state {
+                LiveMeasureState::IntegralStatistic { previous, .. } => {
+                    previous.map(|(axis, _)| axis)
+                }
+                _ => None,
             };
             let update = if has_failed {
                 Ok(None)
@@ -2806,9 +2935,22 @@ fn evaluate_equation_measurements_with_abort(
                     dc_sweep_ascending,
                 )
             };
+            let update = match (&mut observation, update) {
+                (Some(observation), Ok(value)) => {
+                    match observation.advance(&state, previous_axis, axis_value, value, abort) {
+                        Ok(value) => Ok(value),
+                        Err(current_observation::CurrentObservationError::Aborted) => {
+                            return Err(EquationMeasurementEvaluationError::Aborted);
+                        }
+                        Err(error) => Err(error.to_string()),
+                    }
+                }
+                (_, update) => update,
+            };
             let Some(program) = programs.get_mut(program_index) else {
                 break;
             };
+            program.observation = observation;
             program.state = Some(state);
             match update {
                 Ok(Some(value)) => {
@@ -2816,7 +2958,7 @@ fn evaluate_equation_measurements_with_abort(
                     program.initialized = true;
                 }
                 Ok(None) => {}
-                Err(error) if is_equation => {
+                Err(error) if is_equation && !program.strict_failures => {
                     return Err(EquationMeasurementEvaluationError::Detail(format!(
                         "continuous measure '{}' evaluation failed at row {row}: {error}",
                         program.statement.name
@@ -2829,7 +2971,10 @@ fn evaluate_equation_measurements_with_abort(
             }
             if program.store_trace {
                 program.values.push(program.current);
-                program.valid.push(!program.current.is_nan());
+                program.valid.push(
+                    !program.current.is_nan()
+                        && (!program.strict_failures || program.failure.is_none()),
+                );
             }
         }
     }
@@ -2837,16 +2982,35 @@ fn evaluate_equation_measurements_with_abort(
     if abort.is_aborted() {
         return Err(EquationMeasurementEvaluationError::Aborted);
     }
-    Ok(programs
-        .into_iter()
-        .filter(|program| program.store_trace)
-        .map(|program| EquationMeasureTrace {
-            name: program.statement.name.clone(),
-            values: program.values,
-            valid: program.valid,
-            initialized: program.initialized,
-        })
-        .collect())
+    let mut evaluation = LiveMeasurementEvaluation::default();
+    for program in programs {
+        if program.strict_failures {
+            if let Some(error) = &program.failure {
+                evaluation.overrides.insert(
+                    program.canonical_name,
+                    MeasureResult::failed_for_statement(program.statement, error),
+                );
+            } else if program.initialized
+                && (program.observation.is_some()
+                    || matches!(program.statement.measure_type, MeasureType::Param { .. }))
+            {
+                evaluation.overrides.insert(
+                    program.canonical_name,
+                    MeasureResult::success(&program.statement.name, program.current)
+                        .check_contract(program.statement),
+                );
+            }
+        }
+        if program.store_trace {
+            evaluation.traces.push(EquationMeasureTrace {
+                name: program.statement.name.clone(),
+                values: program.values,
+                valid: program.valid,
+                initialized: program.initialized,
+            });
+        }
+    }
+    Ok(evaluation)
 }
 
 fn compile_live_equation_source(
@@ -4232,7 +4396,7 @@ fn lookup_compiled_raw_equation_reference(
     signals: &CanonicalMeasureSignalIndex<'_>,
     reads: &mut LiveMeasureReadContext<'_, '_>,
 ) -> Result<Value, String> {
-    if let Some(value) = reads.read_measure(canonical_measure) {
+    if let Some(value) = reads.read_measure(canonical_measure)? {
         return Ok(value);
     }
     lookup_equation_signal_canonical_optional(signals, authored, canonical_signal, row)?
@@ -5798,12 +5962,14 @@ fn materialize_measure_expression_signals(
     signals: &HashMap<String, &[Value]>,
     params: &crate::netlist::ParamContext,
 ) -> Vec<(String, Vec<Value>)> {
+    let signal_index = CanonicalMeasureSignalIndex::new(signals);
     let mut names = Vec::new();
     let mut add = |name: &str| {
-        if name.starts_with('{')
-            && name.ends_with('}')
-            && !names.iter().any(|candidate| candidate == name)
-        {
+        let expression = name.starts_with('{') && name.ends_with('}');
+        let missing_probe = (name.starts_with('@')
+            || split_equation_output_operator(name).is_some())
+            && matches!(signal_index.get(name), Ok(None));
+        if (expression || missing_probe) && !names.iter().any(|candidate| candidate == name) {
             names.push(name.to_string());
         }
     };
@@ -5856,10 +6022,16 @@ fn materialize_measure_expression_signals(
         }
     }
 
-    let signal_index = CanonicalMeasureSignalIndex::new(signals);
     names
         .into_iter()
         .filter_map(|name| {
+            if !(name.starts_with('{') && name.ends_with('}')) {
+                let kind = OutputOperandKind::Probe(crate::netlist::parse_save_probe(&name)?);
+                let column =
+                    evaluate_output_operand(&name, &kind, axis, &signal_index, params, &NoAbort)
+                        .ok()?;
+                return Some((name, column.values));
+            }
             let expression = name.strip_prefix('{')?.strip_suffix('}')?;
             let expression = crate::netlist::expr::parse_expression(expression).ok()?;
             let mut waveform = Vec::with_capacity(axis.len());
@@ -6128,8 +6300,13 @@ pub fn evaluate_tran_measurements_with_abort(
         return Err(SimulationError::Aborted);
     }
     let signals = transient_signal_map(result);
-    let mut measurements =
-        evaluate_tran_measurements_with_signals_and_abort(netlist, &result.time, &signals, abort)?;
+    let mut measurements = evaluate_tran_measurements_with_signals_and_abort(
+        netlist,
+        &result.time,
+        &signals,
+        Some(result),
+        abort,
+    )?;
     for measurement in &mut measurements {
         let refusal = measurement
             .error
@@ -6274,8 +6451,13 @@ fn evaluate_tran_measurements_with_signals(
     time: &[Value],
     source_signals: &HashMap<String, &[Value]>,
 ) -> Vec<MeasureResult> {
-    match evaluate_tran_measurements_with_signals_and_abort(netlist, time, source_signals, &NoAbort)
-    {
+    match evaluate_tran_measurements_with_signals_and_abort(
+        netlist,
+        time,
+        source_signals,
+        None,
+        &NoAbort,
+    ) {
         Ok(results) => results,
         Err(error) => {
             let statements = measurements_for_analysis(netlist, "TRAN");
@@ -6288,6 +6470,7 @@ fn evaluate_tran_measurements_with_signals_and_abort(
     netlist: &Netlist,
     time: &[Value],
     source_signals: &HashMap<String, &[Value]>,
+    current_result: Option<&TransientResult>,
     abort: &dyn AbortSignal,
 ) -> Result<Vec<MeasureResult>, SimulationError> {
     if abort.is_aborted() {
@@ -6336,10 +6519,21 @@ fn evaluate_tran_measurements_with_signals_and_abort(
     for (name, waveform) in &differential_signals {
         insert_case_variants(&mut signals, name, waveform);
     }
-    let live_traces = match evaluate_equation_measurements_with_abort(
-        netlist, "TRAN", time, &signals, -1.0, None, abort,
+    let mut current_overrides = HashMap::new();
+    let live_traces = match evaluate_equation_measurements_with_observations(
+        netlist,
+        "TRAN",
+        time,
+        &signals,
+        -1.0,
+        None,
+        current_result,
+        abort,
     ) {
-        Ok(traces) => Ok(traces),
+        Ok(evaluation) => {
+            current_overrides = evaluation.overrides;
+            Ok(evaluation.traces)
+        }
         Err(EquationMeasurementEvaluationError::Aborted) => {
             return Err(SimulationError::Aborted);
         }
@@ -6368,6 +6562,11 @@ fn evaluate_tran_measurements_with_signals_and_abort(
         ),
     };
     overlay_continuous_equation_results(&statements, &mut results, live_traces, "TRAN");
+    for result in &mut results {
+        if let Some(replacement) = current_overrides.remove(&result.name.to_ascii_uppercase()) {
+            *result = replacement;
+        }
+    }
     if abort.is_aborted() {
         Err(SimulationError::Aborted)
     } else {
@@ -6419,7 +6618,55 @@ pub fn evaluate_tran_continuous_measurements(
     for (name, waveform) in &differential_signals {
         insert_case_variants(&mut signals, name, waveform);
     }
-    evaluate_continuous_statements(&statements, &result.time, signals, &netlist.params, &[])
+    let failures = statements
+        .iter()
+        .map(|statement| {
+            result.current_impulses.as_ref()?;
+            compile_live_measure_state(
+                statement,
+                "TRAN",
+                &result.time,
+                None,
+                netlist.options.measure_use_lttm(),
+                &netlist.params,
+            )
+            .and_then(|state| {
+                current_measure::compile(netlist, result, statement, &state, &NoAbort)
+                    .map(|_| ())
+                    .map_err(|error| error.to_string())
+            })
+            .err()
+        })
+        .collect::<Vec<_>>();
+    let supported = statements
+        .iter()
+        .zip(&failures)
+        .filter_map(|(statement, failure)| failure.is_none().then_some(*statement))
+        .collect::<Vec<_>>();
+    let mut evaluated =
+        evaluate_continuous_statements(&supported, &result.time, signals, &netlist.params, &[])
+            .into_iter();
+    statements
+        .iter()
+        .zip(failures)
+        .map(|(statement, failure)| {
+            if let Some(failure) = failure {
+                ContinuousMeasureResult {
+                    name: statement.name.clone(),
+                    records: Vec::new(),
+                    failure: Some(failure),
+                    failure_metadata: None,
+                }
+            } else {
+                evaluated.next().unwrap_or_else(|| ContinuousMeasureResult {
+                    name: statement.name.clone(),
+                    records: Vec::new(),
+                    failure: Some("continuous current measurement result was not produced".into()),
+                    failure_metadata: None,
+                })
+            }
+        })
+        .collect()
 }
 
 /// Evaluate vector-valued `.MEASURE DC_CONT` point-event statements.

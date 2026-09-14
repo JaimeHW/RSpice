@@ -5,9 +5,25 @@
 //! complete coverage. Empty complete histories and missing histories differ.
 
 use super::*;
-use crate::analysis::fourier::FourierError;
 use crate::netlist::expr::{BinOpKind, UnaryOpKind};
 use crate::{CurrentImpulseOwner, CurrentImpulseTrace};
+
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum CurrentObservationError {
+    #[error("current observation evaluation aborted")]
+    Aborted,
+    #[error("{detail}")]
+    Invalid { detail: String },
+}
+
+impl From<CurrentObservationError> for crate::analysis::fourier::FourierError {
+    fn from(error: CurrentObservationError) -> Self {
+        match error {
+            CurrentObservationError::Aborted => Self::Aborted,
+            CurrentObservationError::Invalid { detail } => Self::CurrentObservation { detail },
+        }
+    }
+}
 
 #[derive(Clone, Copy)]
 pub(crate) struct CurrentImpulseContribution<'a> {
@@ -15,8 +31,8 @@ pub(crate) struct CurrentImpulseContribution<'a> {
     pub(crate) weight: Value,
 }
 
-fn failure(detail: impl Into<String>) -> FourierError {
-    FourierError::CurrentObservation {
+fn failure(detail: impl Into<String>) -> CurrentObservationError {
+    CurrentObservationError::Invalid {
         detail: detail.into(),
     }
 }
@@ -30,7 +46,7 @@ struct Form<'a> {
 }
 
 impl Form<'_> {
-    fn scale(&mut self, weight: Value) -> Result<(), FourierError> {
+    fn scale(&mut self, weight: Value) -> Result<(), CurrentObservationError> {
         for term in &mut self.terms {
             let scaled = term.weight * weight;
             if !scaled.is_finite() || (scaled == 0.0 && term.weight != 0.0 && weight != 0.0) {
@@ -57,7 +73,7 @@ struct Resolver<'a, 'b> {
 }
 
 impl<'a> Resolver<'a, '_> {
-    fn probe(&self, authored: &str) -> Result<Form<'a>, FourierError> {
+    fn probe(&self, authored: &str) -> Result<Form<'a>, CurrentObservationError> {
         let canonical = canonical_measure_signal_name(authored);
         let (lookup, projection) = match split_equation_output_operator(&canonical) {
             Some((prefix, args))
@@ -138,9 +154,9 @@ impl<'a> Resolver<'a, '_> {
         Ok(form)
     }
 
-    fn expression(&self, expression: &NetExpr) -> Result<Form<'a>, FourierError> {
+    fn expression(&self, expression: &NetExpr) -> Result<Form<'a>, CurrentObservationError> {
         if self.abort.is_aborted() {
-            return Err(FourierError::Aborted);
+            return Err(CurrentObservationError::Aborted);
         }
         let mut form = match expression {
             NetExpr::Param(name) => {
@@ -325,9 +341,9 @@ pub(crate) fn resolve<'a>(
     spec: &str,
     window: (Value, Value),
     abort: &dyn AbortSignal,
-) -> Result<Vec<CurrentImpulseContribution<'a>>, FourierError> {
+) -> Result<Vec<CurrentImpulseContribution<'a>>, CurrentObservationError> {
     if abort.is_aborted() {
-        return Err(FourierError::Aborted);
+        return Err(CurrentObservationError::Aborted);
     }
     let Some(traces) = result.current_impulses.as_deref() else {
         return Ok(Vec::new());
@@ -343,7 +359,7 @@ pub(crate) fn resolve<'a>(
         .map_err(|_| failure("cannot allocate current impulse aliases"))?;
     for (index, trace) in traces.iter().enumerate() {
         if abort.is_aborted() {
-            return Err(FourierError::Aborted);
+            return Err(CurrentObservationError::Aborted);
         }
         let names = match &trace.owner {
             CurrentImpulseOwner::Branch { branch_name } => vec![format!("I({branch_name})")],
@@ -381,7 +397,7 @@ pub(crate) fn resolve<'a>(
         .map_err(|_| failure("cannot allocate current trace aliases"))?;
     for trace in &result.device_op_traces {
         if abort.is_aborted() {
-            return Err(FourierError::Aborted);
+            return Err(CurrentObservationError::Aborted);
         }
         if current_parameter(&trace.parameter) {
             let device = &trace.device_name;
@@ -404,16 +420,12 @@ pub(crate) fn resolve<'a>(
         params,
         abort,
         extent: (
-            result
-                .time
-                .first()
-                .copied()
-                .ok_or(FourierError::EmptyWaveform)?,
-            result
-                .time
-                .last()
-                .copied()
-                .ok_or(FourierError::EmptyWaveform)?,
+            result.time.first().copied().ok_or(failure(
+                "current observations require a nonempty time extent",
+            ))?,
+            result.time.last().copied().ok_or(failure(
+                "current observations require a nonempty time extent",
+            ))?,
         ),
         window,
     };
@@ -431,13 +443,15 @@ pub(crate) fn resolve<'a>(
             body, params, &protected, abort,
         )
         .map_err(|error| match error {
-            crate::netlist::expr::BehavioralPreparationError::Aborted => FourierError::Aborted,
+            crate::netlist::expr::BehavioralPreparationError::Aborted => {
+                CurrentObservationError::Aborted
+            }
             crate::netlist::expr::BehavioralPreparationError::Semantic(detail) => failure(detail),
         })?;
         let parsed = crate::netlist::expr::parse_expression_with_abort(&expanded, abort).map_err(
             |error| match error {
                 crate::netlist::expr::ParseExpressionWithAbortError::Aborted => {
-                    FourierError::Aborted
+                    CurrentObservationError::Aborted
                 }
                 crate::netlist::expr::ParseExpressionWithAbortError::Parse(error) => {
                     failure(error.to_string())
@@ -452,7 +466,7 @@ pub(crate) fn resolve<'a>(
         resolver.probe(trimmed)?.terms
     };
     if abort.is_aborted() {
-        return Err(FourierError::Aborted);
+        return Err(CurrentObservationError::Aborted);
     }
     Ok(terms)
 }
@@ -461,7 +475,7 @@ pub(crate) fn resolve<'a>(
 mod tests {
     use super::*;
     use crate::CurrentImpulsePoint;
-    use crate::analysis::{FourierAnalysis, FourierConfig};
+    use crate::analysis::{FourierAnalysis, FourierConfig, FourierError};
 
     fn fixture() -> TransientResult {
         let time = (0..=256).map(|n| n as Value / 128.0).collect::<Vec<_>>();
@@ -515,7 +529,7 @@ mod tests {
         netlist: Option<&Netlist>,
     ) -> Result<crate::analysis::FourierResult, FourierError> {
         let finite = evaluate_transient_probe_with_abort(netlist, result, spec, &NoAbort)
-            .map_err(|error| failure(error.to_string()))?;
+            .map_err(|error| FourierError::from(failure(error.to_string())))?;
         FourierAnalysis::new(FourierConfig::new(1.0).with_harmonics(4))
             .analyze_transient_output_with_abort(netlist, result, spec, &finite, &NoAbort)
     }
@@ -761,7 +775,7 @@ mod tests {
         }
         assert!(matches!(
             resolve(None, &result, "I(X1.V1)", (1.0, 2.0), &Cancel),
-            Err(FourierError::Aborted)
+            Err(CurrentObservationError::Aborted)
         ));
     }
 
