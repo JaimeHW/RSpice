@@ -362,6 +362,20 @@ impl Engine {
             });
             if bjt.uses_legacy_gummel_poon() && bjt.mna_promoted() {
                 let mut terminal = bjt.mna_terminal_currents_at_solution(solution);
+                if let Some(phase) = history.phase_trial(idx, accepted_time) {
+                    let correction = phase.correction(bjt, &internal).map_err(|error| {
+                        SimulationError::Circuit(format!(
+                            "BJT '{}' accepted phase current: {error}",
+                            bjt.name
+                        ))
+                    })?;
+                    if let Some(index) = correction.pos_external {
+                        terminal[index] += correction.current;
+                    }
+                    if let Some(index) = correction.neg_external {
+                        terminal[index] -= correction.current;
+                    }
+                }
                 let (branches, _, _) = bjt.mna_charge_state_at_solution(solution);
                 for (branch, current) in branches.iter().zip(currents) {
                     if let Some(index) = branch.pos_external {

@@ -963,6 +963,16 @@ impl Engine {
                     matrix: &mut *matrix,
                     rhs: &mut *rhs,
                 };
+                if let Some(phase) = history.phase_trial(idx, time) {
+                    phase
+                        .stamp_promoted(bjt, &mut stamper, xyce_one_step_order2)
+                        .map_err(|error| {
+                            SimulationError::Circuit(format!(
+                                "BJT '{}' phase companion: {error}",
+                                bjt.name
+                            ))
+                        })?;
+                }
                 for (branch_idx, branch) in branches.iter().enumerate() {
                     if !branch.is_active() {
                         continue;

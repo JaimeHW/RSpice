@@ -4,6 +4,8 @@ use super::*;
 use crate::device::Bjt;
 use rspice_veriloga_runtime::transport_delay::{DelayBuffer, DelayCheckpoint, DelayConfiguration};
 
+mod promoted;
+
 #[test]
 fn gp_phase_history_acceptance_uses_actual_time_and_survives_integration_restarts() {
     let netlist = Netlist::parse("phase acceptance\nQ1 c b 0 qm\nRc c 0 1k\nRb b 0 1k\n.model qm NPN(IS=1e-16 TF=1n PTF=30 CJE=1p CJC=0.2p VAF=20)\n.end\n").unwrap();

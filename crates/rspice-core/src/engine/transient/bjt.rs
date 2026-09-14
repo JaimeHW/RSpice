@@ -101,7 +101,47 @@ pub(in crate::engine::transient) struct BjtPhaseTrial<'a> {
 }
 
 impl BjtPhaseTrial<'_> {
-    fn correction(
+    /// The previous accepted phase current is a physical static DAE term.
+    /// OneStep's half-current history must include it even though the generic
+    /// static device sampler has no access to the engine's transport memory.
+    fn accepted_correction_current(self, bjt: &crate::device::Bjt) -> Result<Value, String> {
+        let (time, forward) = self
+            .history
+            .accepted_samples()
+            .next_back()
+            .ok_or("GP phase has no accepted forward-current sample")?;
+        Ok(self
+            .history
+            .difference_with_coefficients(time, forward, bjt.legacy_excess_phase_delay(), None)?
+            .output)
+    }
+
+    pub(in crate::engine::transient) fn stamp_promoted(
+        self,
+        bjt: &crate::device::Bjt,
+        stamper: &mut impl crate::device::MatrixStamper,
+        xyce_one_step_order2: bool,
+    ) -> Result<(), String> {
+        let (_, internal, _) = bjt.mna_charge_state();
+        let mut correction = self.correction(bjt, &internal)?;
+        let weight = if xyce_one_step_order2 {
+            correction.current =
+                0.5 * correction.current + 0.5 * self.accepted_correction_current(bjt)?;
+            for derivative in correction
+                .d_internal
+                .iter_mut()
+                .chain(&mut correction.d_external)
+            {
+                *derivative *= 0.5;
+            }
+            0.5
+        } else {
+            1.0
+        };
+        bjt.stamp_legacy_mna_phase_correction(stamper, &correction, weight)
+    }
+
+    pub(in crate::engine::transient) fn correction(
         self,
         bjt: &crate::device::Bjt,
         internal: &[Value; BJT_INTERNAL_STATE_DIM],

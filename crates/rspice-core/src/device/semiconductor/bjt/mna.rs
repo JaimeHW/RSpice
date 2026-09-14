@@ -1530,6 +1530,96 @@ impl Bjt {
         }
     }
 
+    /// Add a physical GP transport correction at the cached limited bias.
+    /// The ordinary static load freezes RBI; its independent-current equation
+    /// needs -I*dR/dV to complete the coherent transient tangent. This does
+    /// not alter the resistance current or use VBIC residual row orientations.
+    pub(crate) fn stamp_legacy_mna_phase_correction(
+        &self,
+        stamper: &mut impl MatrixStamper,
+        correction: &BjtCurrentBranch,
+        static_weight: Value,
+    ) -> Result<(), String> {
+        if !self.mna_promoted() || !self.uses_legacy_gummel_poon() {
+            return Err("GP phase correction requires a promoted GP device".into());
+        }
+        let internal = self.mna_internal_state();
+        let external = self.mna_external_state();
+        let source = correction.linearization_dot(&internal, &external) - correction.current;
+        let mut resistance_gradient = BranchLinearization::default();
+        if Self::series_active(self.rbi) {
+            if self.mna_rbi_matrix_node == 0 {
+                return Err("GP phase correction requires its bound RBI current unknown".into());
+            }
+            let eval = self
+                .mna_eval
+                .ok_or("GP phase correction has no cached model evaluation")?;
+            let resistance = self.mna_rbi_stamp_resistance(eval.linearized, true);
+            if !resistance.current.is_finite() || resistance.current <= 0.0 {
+                return Err("GP phase base resistance is not finite and positive".into());
+            }
+            for (gradient, derivative) in resistance_gradient
+                .d_internal
+                .iter_mut()
+                .zip(resistance.d_internal)
+            {
+                *gradient = -self.mna_rbi_current * (static_weight * derivative);
+            }
+        }
+        let resistance_source =
+            resistance_gradient.source(internal[..INTERNAL_DIM].try_into().unwrap(), &external);
+        if !source.is_finite()
+            || !resistance_source.is_finite()
+            || correction
+                .d_internal
+                .iter()
+                .chain(&correction.d_external)
+                .chain(&resistance_gradient.d_internal)
+                .any(|value| !value.is_finite())
+        {
+            return Err("GP phase companion is not representable".into());
+        }
+        let external_nodes = self.external_terminal_nodes();
+        let node = |internal: Option<usize>, external: Option<usize>| {
+            internal
+                .map(|index| self.mna_internal_node(index))
+                .or_else(|| external.map(|index| external_nodes[index]))
+                .unwrap_or(0)
+        };
+        for (row, sign) in [
+            (node(correction.pos_internal, correction.pos_external), 1.0),
+            (node(correction.neg_internal, correction.neg_external), -1.0),
+        ] {
+            if row == 0 {
+                continue;
+            }
+            for (column, derivative) in correction.d_internal.iter().enumerate() {
+                if *derivative != 0.0 {
+                    stamper.stamp(row, self.mna_internal_node(column), sign * derivative);
+                }
+            }
+            for (column, derivative) in external_nodes.iter().zip(&correction.d_external) {
+                if *derivative != 0.0 {
+                    stamper.stamp(row, *column, sign * derivative);
+                }
+            }
+            stamper.stamp_rhs(row, sign * source);
+        }
+        if self.mna_rbi_matrix_node != 0 {
+            for (column, derivative) in resistance_gradient.d_internal.iter().enumerate() {
+                if *derivative != 0.0 {
+                    stamper.stamp(
+                        self.mna_rbi_matrix_node,
+                        self.mna_internal_node(column),
+                        *derivative,
+                    );
+                }
+            }
+            stamper.stamp_rhs(self.mna_rbi_matrix_node, resistance_source);
+        }
+        Ok(())
+    }
+
     fn stamp_mna_rbi_current(
         &self,
         stamper: &mut impl MatrixStamper,
