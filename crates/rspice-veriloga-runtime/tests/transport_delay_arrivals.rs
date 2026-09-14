@@ -188,6 +188,7 @@ fn coalesced_event_retention_obeys_the_combined_history_budget() {
         left_limits.push((time, 0.0));
     }
     let mut history = DelayBuffer::from_checkpoint(DelayCheckpoint {
+        event_orders: Vec::new(),
         configuration: Some(DelayConfiguration::Fixed { delay }),
         samples,
         left_limits,

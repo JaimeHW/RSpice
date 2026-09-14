@@ -173,6 +173,7 @@ fn charge_event_solves_native_coupled_bjt_charge_and_held_transport_history() {
         let mut history = DelayBuffer::new(0);
         history
             .restore_checkpoint(&DelayCheckpoint {
+                event_orders: Vec::new(),
                 configuration: Some(DelayConfiguration::Fixed { delay }),
                 samples: vec![(0.0, forward)],
                 left_limits: vec![],

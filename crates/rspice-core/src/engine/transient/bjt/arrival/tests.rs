@@ -42,11 +42,64 @@ fn advance(circuit: &crate::CircuitData, history: &mut BjtTransientHistory, time
 }
 
 #[test]
+fn gp_phase_arrival_merges_event_orders_across_devices_and_checkpoint_restore() {
+    use rspice_veriloga_runtime::transport_delay::DelayEvent;
+    let (circuit, mut history) = fixture();
+    for (index, order) in [(1, 3), (2, 1)] {
+        let delay = circuit.bjts.devices[index].legacy_excess_phase_delay();
+        let mut phase = DelayBuffer::new(0);
+        phase
+            .accept_event(
+                0.0,
+                DelayEvent {
+                    left: 2.0,
+                    right: 2.0,
+                    order: DelayEventOrder::AtLeast(order),
+                },
+                delay,
+                None,
+            )
+            .unwrap();
+        phase.accept_sample(0.5, 2.0, delay, None).unwrap();
+        history.phase[index] = Some(phase);
+    }
+    let before = history.clone();
+    let event = next(&circuit, &history, 0.5, 20.0, &NoAbort)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        event.time,
+        circuit.bjts.devices[1].legacy_excess_phase_delay()
+    );
+    assert_eq!(event.device_index, 1);
+    assert_eq!(event.order, DelayEventOrder::AtLeast(1));
+    assert_eq!(history, before);
+    for phase in history.phase.iter_mut().flatten() {
+        *phase = DelayBuffer::from_checkpoint(phase.checkpoint()).unwrap();
+    }
+    assert_eq!(
+        next(&circuit, &history, 0.5, 20.0, &NoAbort).unwrap(),
+        Some(event)
+    );
+    let mut legacy = history.phase[2].as_ref().unwrap().checkpoint();
+    legacy.event_orders.clear();
+    history.phase[2] = Some(DelayBuffer::from_checkpoint(legacy).unwrap());
+    assert_eq!(
+        next(&circuit, &history, 0.5, 20.0, &NoAbort)
+            .unwrap()
+            .unwrap()
+            .order,
+        DelayEventOrder::Unknown
+    );
+}
+
+#[test]
 fn gp_phase_arrival_owns_earliest_corner_jump_ties_and_checkpoint_replay() {
     let (circuit, mut history) = fixture();
     let fast = circuit.bjts.devices[1].legacy_excess_phase_delay();
     let slow = circuit.bjts.devices[0].legacy_excess_phase_delay();
     let expected = Some(PhaseArrival {
+        order: DelayEventOrder::Unknown,
         time: fast,
         device_index: 1,
     });
@@ -77,6 +130,7 @@ fn gp_phase_arrival_owns_earliest_corner_jump_ties_and_checkpoint_replay() {
     assert_eq!(
         next(&circuit, &history, fast, 20.0, &NoAbort).unwrap(),
         Some(PhaseArrival {
+            order: DelayEventOrder::Unknown,
             time: slow,
             device_index: 0
         })
@@ -272,6 +326,7 @@ fn gp_phase_arrival_preserves_sub_ulp_delays_and_exact_equation_clocks() {
     // At a large absolute clock, addition can reach the event even though
     // the integration width is less than its subtracted clock gap.
     let arrival = PhaseArrival {
+        order: DelayEventOrder::Unknown,
         time: 1e12_f64.next_up(),
         device_index: 0,
     };
@@ -299,6 +354,7 @@ fn gp_phase_arrival_preserves_an_exact_target_when_addition_misses_it() {
     let target = Value::from_bits(0x3e42_ffcc_ca47_13bf);
     assert_ne!(accepted + (target - accepted), target);
     let arrival = PhaseArrival {
+        order: DelayEventOrder::Unknown,
         time: target,
         device_index: 0,
     };

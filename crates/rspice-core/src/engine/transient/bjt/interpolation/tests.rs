@@ -3,6 +3,7 @@ use rspice_veriloga_runtime::transport_delay::{DelayCheckpoint, DelayConfigurati
 
 fn history(samples: &[(Value, Value)], delay: Value) -> DelayBuffer {
     DelayBuffer::from_checkpoint(DelayCheckpoint {
+        event_orders: Vec::new(),
         left_limits: Vec::new(),
         configuration: Some(DelayConfiguration::Fixed { delay }),
         samples: samples.to_vec(),

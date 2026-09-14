@@ -186,7 +186,9 @@ fn checkpoint_operation_result<T>(
 /// Version 44 records implementation-only unknowns excluded from the Xyce LTE domain.
 /// Version 45 retains fixed GP transport histories independently of charge-integration epochs.
 /// Version 46 retains separate left limits at native and runtime transport jumps.
-const FORMAT_VERSION: u32 = 46;
+/// Version 47 retains known transport event orders; earlier sided events stay unknown.
+const FORMAT_VERSION: u32 = 47;
+const TRANSPORT_EVENT_ORDER_FORMAT_VERSION: u32 = 47;
 const SIDED_TRANSPORT_FORMAT_VERSION: u32 = 46;
 const BJT_PHASE_HISTORY_FORMAT_VERSION: u32 = 45;
 // Generated circular integrators retain an exact dyadic wrap origin.
@@ -2784,7 +2786,43 @@ fn read_bjt_phase_history(
                 read_finite_value_field(&mut fields, "accepted BJT phase", "left-limit current")?,
             ));
         }
+        let order_count = if version >= TRANSPORT_EVENT_ORDER_FORMAT_VERSION {
+            fields
+                .next()
+                .ok_or("missing accepted BJT phase event-order count")?
+                .parse::<usize>()
+                .map_err(|_| "invalid accepted BJT phase event-order count")?
+        } else {
+            0
+        };
+        if order_count > left_count
+            || order_count > MAX_DELAY_HISTORY_SAMPLES - count - left_count
+            || order_count > line.len() / 3
+        {
+            return Err(
+                "accepted BJT phase event-order count exceeds available data or history limits"
+                    .into(),
+            );
+        }
+        let mut event_orders =
+            allocate_checkpoint_capacity(order_count, "accepted BJT phase event orders", budget)?;
+        for index in 0..order_count {
+            if index.is_multiple_of(CHECKPOINT_ABORT_POLL_INTERVAL)
+                && lines.abort.is_some_and(AbortSignal::is_aborted)
+            {
+                return Err("accepted BJT phase history parsing aborted".into());
+            }
+            let time =
+                read_finite_value_field(&mut fields, "accepted BJT phase", "event-order time")?;
+            let order = fields
+                .next()
+                .ok_or("missing accepted BJT phase event order")?
+                .parse::<u32>()
+                .map_err(|_| "invalid accepted BJT phase event order")?;
+            event_orders.push((time, order));
+        }
         Some(DelayBuffer::from_checkpoint(DelayCheckpoint {
+            event_orders,
             left_limits,
             configuration: Some(DelayConfiguration::Fixed { delay }),
             samples,
@@ -4030,6 +4068,7 @@ fn read_runtime_veriloga_states(
             continue;
         }
         let upgrade_v11 = checkpoint_version < SIDED_TRANSPORT_FORMAT_VERSION;
+        let upgrade_v12 = !upgrade_v11 && checkpoint_version < TRANSPORT_EVENT_ORDER_FORMAT_VERSION;
         let state = if upgrade_v11 {
             if state_version != 11 {
                 return Err(format!(
@@ -4037,6 +4076,19 @@ fn read_runtime_veriloga_states(
                 ));
             }
             VerilogADeviceCheckpoint::from_legacy_v11_words(
+                instance.into(),
+                model.into(),
+                source.into(),
+                shape.into(),
+                &words,
+            )?
+        } else if upgrade_v12 {
+            if state_version != 12 {
+                return Err(format!(
+                    "runtime state row {row} requires version 12 for checkpoint format {checkpoint_version}"
+                ));
+            }
+            VerilogADeviceCheckpoint::from_legacy_v12_words(
                 instance.into(),
                 model.into(),
                 source.into(),
@@ -4052,7 +4104,7 @@ fn read_runtime_veriloga_states(
                 &words,
             )?
         };
-        if !upgrade_v11 && state.state_version != state_version {
+        if !upgrade_v11 && !upgrade_v12 && state.state_version != state_version {
             return Err(format!(
                 "runtime state row {row} header version {state_version} disagrees with payload version {}",
                 state.state_version
@@ -8034,6 +8086,11 @@ impl TransientCheckpoint {
                         poll_checkpoint_abort(abort, sample_index)?;
                         push_values(&mut out, &[time, left]);
                     }
+                    out.push_str(&format!(" {}", phase.accepted_event_orders().len()));
+                    for (sample_index, (time, order)) in phase.accepted_event_orders().enumerate() {
+                        poll_checkpoint_abort(abort, sample_index)?;
+                        out.push_str(&format!(" {time} {order}"));
+                    }
                     out.push('\n');
                 }
                 None => out.push_str("accepted_bjt_transport 0\n"),
@@ -10039,6 +10096,7 @@ mod tests {
             super::super::GP_PHASE_TRANSIENT_HISTORY_RUNTIME_TAG.into();
         original.accepted_junction_history.bjt_history.phase[0] = Some(
             DelayBuffer::from_checkpoint(DelayCheckpoint {
+                event_orders: Vec::new(),
                 configuration: Some(DelayConfiguration::Fixed { delay: time * 0.75 }),
                 samples: vec![(0.0, -0.0), (time * 0.5, 1e-12), (time, -3e-4)],
                 left_limits: vec![(time * 0.5, -0.0), (time, 2e-4)],
@@ -10076,14 +10134,14 @@ mod tests {
             "accepted_bjt_transport 0 extra".to_owned(),
             "accepted_bjt_transport 18446744073709551615".into(),
             "accepted_bjt_transport 1048577".into(),
-            format!("accepted_bjt_transport 2 {} 0 1 0 2 0", time),
-            format!("accepted_bjt_transport 1 {} {} 1 0", time, time),
-            format!("accepted_bjt_transport 1 {} 0 NaN 0", time),
-            format!("accepted_bjt_transport 1 -1 {} 1 0", time),
-            format!("accepted_bjt_transport 1 {} 0 1 0", time),
-            format!("accepted_bjt_transport 2 {time} 0 1 {time} 2 2 {time} 2 {time} 3"),
+            format!("accepted_bjt_transport 2 {} 0 1 0 2 0 0", time),
+            format!("accepted_bjt_transport 1 {} {} 1 0 0", time, time),
+            format!("accepted_bjt_transport 1 {} 0 NaN 0 0", time),
+            format!("accepted_bjt_transport 1 -1 {} 1 0 0", time),
+            format!("accepted_bjt_transport 1 {} 0 1 0 0", time),
+            format!("accepted_bjt_transport 2 {time} 0 1 {time} 2 2 {time} 2 {time} 3 0"),
             format!(
-                "accepted_bjt_transport 2 {time} 0 1 {time} 2 1 {} 4",
+                "accepted_bjt_transport 2 {time} 0 1 {time} 2 1 {} 4 0",
                 time * 0.5
             ),
             "accepted_bjt_transport 0".into(),
@@ -10102,6 +10160,117 @@ mod tests {
             original
                 .to_bytes(TransientCheckpointEncoding::Unpacked)
                 .is_err()
+        );
+    }
+
+    #[test]
+    fn gp_phase_event_order_checkpoint_round_trip_and_v46_unknown_migration() {
+        use rspice_veriloga_runtime::transport_delay::{DelayBuffer, DelayEvent, DelayEventOrder};
+        let mut original = sample();
+        let time = original.time;
+        original.accepted_junction_history = sample_junction_history();
+        original.accepted_junction_history.bjt_runtime_tags[0] =
+            super::super::GP_PHASE_TRANSIENT_HISTORY_RUNTIME_TAG.into();
+        let mut phase = DelayBuffer::new(0);
+        let delay = time * 0.75;
+        phase
+            .accept_event(
+                0.0,
+                DelayEvent {
+                    left: -0.0,
+                    right: 0.0,
+                    order: DelayEventOrder::AtLeast(u32::MAX),
+                },
+                delay,
+                None,
+            )
+            .unwrap();
+        phase
+            .accept_event(
+                time * 0.5,
+                DelayEvent {
+                    left: 1e-12,
+                    right: 1e-12,
+                    order: DelayEventOrder::AtLeast(2),
+                },
+                delay,
+                None,
+            )
+            .unwrap();
+        phase.accept_sample(time, 2e-12, delay, None).unwrap();
+        let mut old_phase = phase.checkpoint();
+        old_phase.event_orders.clear();
+        original.accepted_junction_history.bjt_history.phase[0] = Some(phase);
+        for encoding in [
+            TransientCheckpointEncoding::Unpacked,
+            TransientCheckpointEncoding::Packed,
+        ] {
+            let restored =
+                TransientCheckpoint::from_bytes(&original.to_bytes(encoding).unwrap()).unwrap();
+            assert_eq!(
+                restored.accepted_junction_history,
+                original.accepted_junction_history
+            );
+            let restored_phase = restored.accepted_junction_history.bjt_history.phase[0]
+                .as_ref()
+                .unwrap();
+            assert_eq!(
+                restored_phase
+                    .next_event_after(time)
+                    .unwrap()
+                    .unwrap()
+                    .order,
+                DelayEventOrder::AtLeast(2)
+            );
+            assert_eq!(
+                restored_phase
+                    .accepted_left_limits()
+                    .next()
+                    .unwrap()
+                    .1
+                    .to_bits(),
+                (-0.0_f64).to_bits()
+            );
+        }
+        let text = original.to_text();
+        let row = text
+            .lines()
+            .find(|line| line.starts_with("accepted_bjt_transport "))
+            .unwrap();
+        let fields: Vec<_> = row.split_whitespace().collect();
+        let samples = fields[1].parse::<usize>().unwrap();
+        let left_index = 3 + 2 * samples;
+        let order_index = left_index + 1 + 2 * fields[left_index].parse::<usize>().unwrap();
+        let prefix = fields[..order_index].join(" ");
+        for tail in [
+            "18446744073709551615".to_owned(),
+            format!("1 {} 2", time * 0.25),
+            "1 0 4294967296".into(),
+            "2 0 1 0 2".into(),
+            "1 NaN 2".into(),
+        ] {
+            let bad = text.replace(row, &format!("{prefix} {tail}"));
+            assert!(
+                TransientCheckpoint::from_text(&bad).is_err(),
+                "accepted {tail}"
+            );
+        }
+        original.accepted_junction_history.bjt_history.phase[0] =
+            Some(DelayBuffer::from_checkpoint(old_phase).unwrap());
+        let restored = TransientCheckpoint::from_text(&legacy_text(&original, 46)).unwrap();
+        assert_eq!(
+            restored.accepted_junction_history,
+            original.accepted_junction_history
+        );
+        assert_eq!(
+            restored.accepted_junction_history.bjt_history.phase[0]
+                .as_ref()
+                .unwrap()
+                .next_event_after(time)
+                .unwrap()
+                .unwrap()
+                .order,
+            DelayEventOrder::Unknown
         );
     }
 
@@ -10149,7 +10318,7 @@ mod tests {
         for index in 0..257 {
             text.push_str(&format!(" {} {}", index as Value * 0.001, index));
         }
-        text.push_str(" 0\n");
+        text.push_str(" 0 0\n");
         let bytes = 257 * std::mem::size_of::<(Value, Value)>();
         let mut budget = CheckpointParseBudget::new(bytes - 1);
         let error = read_bjt_phase_history(
@@ -10176,6 +10345,49 @@ mod tests {
         let mut lines = CheckpointLines::new(&text);
         lines.abort = Some(&abort);
         let mut budget = CheckpointParseBudget::new(bytes);
+        assert!(
+            read_bjt_phase_history(&mut lines, &mut budget, FORMAT_VERSION)
+                .unwrap_err()
+                .contains("aborted")
+        );
+
+        let mut ordered = text.strip_suffix(" 0 0\n").unwrap().to_owned();
+        for orders in [false, true] {
+            ordered.push_str(" 257");
+            for index in 0..257 {
+                ordered.push_str(&format!(
+                    " {} {}",
+                    index as Value * 0.001,
+                    if orders { 2 } else { index }
+                ));
+            }
+        }
+        ordered.push('\n');
+        let all_bytes = 2 * bytes + 257 * std::mem::size_of::<(Value, u32)>();
+        let mut budget = CheckpointParseBudget::new(all_bytes - 1);
+        assert!(
+            read_bjt_phase_history(
+                &mut CheckpointLines::new(&ordered),
+                &mut budget,
+                FORMAT_VERSION
+            )
+            .unwrap_err()
+            .contains("parsed-memory limit")
+        );
+        let mut budget = CheckpointParseBudget::new(all_bytes);
+        let history = read_bjt_phase_history(
+            &mut CheckpointLines::new(&ordered),
+            &mut budget,
+            FORMAT_VERSION,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(history.accepted_event_orders().len(), 257);
+        assert_eq!(budget.used, all_bytes);
+        let abort = crate::abort_signal::CountingAbort::new(6);
+        let mut lines = CheckpointLines::new(&ordered);
+        lines.abort = Some(&abort);
+        let mut budget = CheckpointParseBudget::new(all_bytes);
         assert!(
             read_bjt_phase_history(&mut lines, &mut budget, FORMAT_VERSION)
                 .unwrap_err()
@@ -10828,6 +11040,27 @@ mod tests {
                 let end = if count == 0 { 2 } else { 3 + 2 * count };
                 if count != 0 {
                     assert_eq!(fields[end], "0", "legacy fixture cannot discard jump sides");
+                }
+                output.push_str(&fields[..end].join(" "));
+                output.push('\n');
+                continue;
+            }
+            if version < TRANSPORT_EVENT_ORDER_FORMAT_VERSION
+                && line.starts_with("accepted_bjt_transport ")
+            {
+                let fields = line.split_whitespace().collect::<Vec<_>>();
+                let count = fields[1].parse::<usize>().unwrap();
+                let end = if count == 0 {
+                    2
+                } else {
+                    let left_index = 3 + 2 * count;
+                    left_index + 1 + 2 * fields[left_index].parse::<usize>().unwrap()
+                };
+                if count != 0 {
+                    assert_eq!(
+                        fields[end], "0",
+                        "legacy fixture cannot discard known event orders"
+                    );
                 }
                 output.push_str(&fields[..end].join(" "));
                 output.push('\n');
@@ -11528,6 +11761,9 @@ mod tests {
         ]);
         if state_version >= 12 {
             words.push(0); // left limits
+        }
+        if state_version >= 13 {
+            words.push(0); // known event orders
         }
         words.extend([
             0, // transition filters
@@ -13172,7 +13408,7 @@ mod tests {
     /// asserting current-format behaviour after two renumberings moved it into
     /// the legacy ladder.
     #[cfg(feature = "veriloga")]
-    const RUNTIME_VERILOGA_FORMAT_STATE_CONTRACTS: [(u32, u32); 30] = [
+    const RUNTIME_VERILOGA_FORMAT_STATE_CONTRACTS: [(u32, u32); 31] = [
         (17, 1),
         (18, 1),
         (19, 1),
@@ -13203,6 +13439,7 @@ mod tests {
         (44, 11),
         (45, 11),
         (46, 12),
+        (47, 13),
     ];
 
     #[cfg(feature = "veriloga")]
@@ -13247,8 +13484,10 @@ mod tests {
                         "unsupported runtime Verilog-A state version {inner_version}; \
                          expected version {required_version}"
                     )
-                } else if required_version == 11 {
-                    format!("requires version 11 for checkpoint format {outer_version}")
+                } else if required_version == 11 || required_version == 12 {
+                    format!(
+                        "requires version {required_version} for checkpoint format {outer_version}"
+                    )
                 } else {
                     format!(
                         "uses state version {inner_version}, \
@@ -13564,18 +13803,21 @@ mod tests {
     fn runtime_transport_sides_round_trip_and_v43_through_v45_upgrade_v11() {
         let checkpoint = sample();
         let old_words = runtime_veriloga_absdelay_words(11, checkpoint.time);
-        let current_words = runtime_veriloga_absdelay_words(12, checkpoint.time);
+        let current_version = rspice_veriloga::device::RUNTIME_CHECKPOINT_STATE_VERSION;
+        let current_words = runtime_veriloga_absdelay_words(current_version, checkpoint.time);
         let current = TransientCheckpoint::from_text(&replace_empty_runtime_veriloga_tail(
             checkpoint.to_text(),
-            12,
+            current_version,
             &current_words,
         ))
         .unwrap();
-        for version in [43, 44, 45] {
+        for version in [43, 44, 45, 46] {
+            let runtime_version = if version == 46 { 12 } else { 11 };
+            let legacy_words = runtime_veriloga_absdelay_words(runtime_version, checkpoint.time);
             let upgraded = TransientCheckpoint::from_text(&replace_empty_runtime_veriloga_tail(
                 legacy_text(&checkpoint, version),
-                11,
-                &old_words,
+                runtime_version,
+                &legacy_words,
             ))
             .unwrap();
             assert!(upgraded.runtime_veriloga_state_available);
@@ -13589,6 +13831,10 @@ mod tests {
             .accepted
             .delay_buffers[0]
             .left_limits = vec![(checkpoint.time, -0.0)];
+        sided.runtime_veriloga_instance_states[0]
+            .accepted
+            .delay_buffers[0]
+            .event_orders = vec![(checkpoint.time, 0)];
         for encoding in [
             TransientCheckpointEncoding::Unpacked,
             TransientCheckpointEncoding::Packed,
@@ -13611,6 +13857,21 @@ mod tests {
         }
         let invalid = replace_empty_runtime_veriloga_tail(checkpoint.to_text(), 11, &old_words);
         assert!(TransientCheckpoint::from_text(&invalid).is_err());
+        let mut v12_sides = runtime_veriloga_absdelay_words(12, checkpoint.time);
+        assert_eq!(v12_sides[16], 0); // Left-limit count in this explicit wire fixture.
+        v12_sides[16] = 1;
+        v12_sides.splice(17..17, [checkpoint.time.to_bits(), (-0.0_f64).to_bits()]);
+        let restored = TransientCheckpoint::from_text(&replace_empty_runtime_veriloga_tail(
+            legacy_text(&checkpoint, 46),
+            12,
+            &v12_sides,
+        ))
+        .unwrap();
+        let phase = &restored.runtime_veriloga_instance_states[0]
+            .accepted
+            .delay_buffers[0];
+        assert_eq!(phase.left_limits[0].1.to_bits(), (-0.0_f64).to_bits());
+        assert!(phase.event_orders.is_empty());
     }
 
     #[test]

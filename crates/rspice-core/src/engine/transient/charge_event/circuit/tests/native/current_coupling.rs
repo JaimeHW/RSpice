@@ -25,6 +25,7 @@ fn current_event_coupling_gp_delay_has_storage_and_algebraic_feedback_cases() {
                 // or a finite-duration transient companion.
                 history
                     .restore_checkpoint(&DelayCheckpoint {
+                        event_orders: Vec::new(),
                         configuration: Some(DelayConfiguration::Fixed { delay }),
                         samples: vec![(0.0, input), (delay, input + delta)],
                         left_limits: vec![(delay, input)],

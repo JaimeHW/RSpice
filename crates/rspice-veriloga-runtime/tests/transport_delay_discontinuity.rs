@@ -180,6 +180,7 @@ fn sided_history_replays_prunes_and_rejects_invalid_state_atomically() {
 fn jump_sides_share_the_existing_history_resource_ceiling() {
     let count = MAX_DELAY_HISTORY_SAMPLES - 1;
     let mut history = DelayBuffer::from_checkpoint(DelayCheckpoint {
+        event_orders: Vec::new(),
         configuration: Some(DelayConfiguration::Fixed {
             delay: 2.0 * count as f64,
         }),

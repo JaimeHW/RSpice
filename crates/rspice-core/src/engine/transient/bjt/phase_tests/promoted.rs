@@ -410,6 +410,7 @@ fn gp_phase_promoted_one_step_includes_previous_physical_phase_current() {
             .1;
         history.phase[0] = Some(
             DelayBuffer::from_checkpoint(DelayCheckpoint {
+                event_orders: Vec::new(),
                 left_limits: Vec::new(),
                 configuration: Some(DelayConfiguration::Fixed { delay }),
                 samples: vec![(0.0, 0.8 * forward), (2.0 * delay, forward)],

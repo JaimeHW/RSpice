@@ -2,11 +2,13 @@
 //! of the source breakpoint manager's approximate matching and restart policy.
 
 use super::*;
+use rspice_veriloga_runtime::transport_delay::DelayEventOrder;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(in crate::engine::transient) struct PhaseArrival {
     pub time: Value,
     pub device_index: usize,
+    pub order: DelayEventOrder,
 }
 
 impl PhaseArrival {
@@ -116,17 +118,26 @@ pub(in crate::engine::transient) fn next(
                 "history belongs to a different nominal phase delay".to_owned(),
             ));
         }
-        if let Some(arrival) = phase.next_discontinuity_after(time).map_err(refuse)? {
-            if arrival <= time {
+        if let Some(arrival) = phase.next_event_after(time).map_err(refuse)? {
+            if arrival.time <= time {
                 return Err(refuse(
                     "arrival does not advance the accepted clock".to_owned(),
                 ));
             }
-            if arrival <= stop && earliest.is_none_or(|previous| arrival < previous.time) {
-                earliest = Some(PhaseArrival {
-                    time: arrival,
-                    device_index: index,
-                });
+            if arrival.time <= stop {
+                match &mut earliest {
+                    Some(previous) if previous.time == arrival.time => {
+                        previous.order = previous.order.merge(arrival.order);
+                    }
+                    previous if previous.is_none_or(|previous| arrival.time < previous.time) => {
+                        *previous = Some(PhaseArrival {
+                            time: arrival.time,
+                            device_index: index,
+                            order: arrival.order,
+                        });
+                    }
+                    _ => {}
+                }
             }
         }
     }

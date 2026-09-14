@@ -310,16 +310,19 @@ mod runtime_checkpoint_codec_tests {
                 idtmod_origins: Vec::new(),
                 delay_buffers: vec![
                     DelayCheckpoint {
+                        event_orders: Vec::new(),
                         left_limits: Vec::new(),
                         configuration: None,
                         samples: Vec::new(),
                     },
                     DelayCheckpoint {
+                        event_orders: Vec::new(),
                         left_limits: Vec::new(),
                         configuration: Some(DelayConfiguration::Fixed { delay: 0.25 }),
                         samples: vec![(0.0, 1.0), (1.0, 2.0)],
                     },
                     DelayCheckpoint {
+                        event_orders: Vec::new(),
                         left_limits: Vec::new(),
                         configuration: Some(DelayConfiguration::Bounded { max_delay: 2.0 }),
                         samples: vec![(0.5, -1.0), (2.0, 4.0)],
@@ -451,6 +454,74 @@ mod runtime_checkpoint_codec_tests {
     }
 
     #[test]
+    fn accepted_runtime_event_order_words_preserve_bounds_and_upgrade_v12_as_unknown() {
+        let mut checkpoint = checkpoint_with_slew_entries();
+        checkpoint.accepted.delay_buffers[1].left_limits = vec![(0.0, 1.0), (1.0, 2.0)];
+        let legacy = checkpoint.clone();
+        let old_words = legacy.to_words_with_format(12, true, true);
+        let upgraded = VerilogADeviceCheckpoint::from_legacy_v12_words(
+            legacy.instance_name.clone(),
+            legacy.model_name.clone(),
+            legacy.source_digest.clone(),
+            legacy.shape_identity.clone(),
+            &old_words,
+        )
+        .unwrap();
+        assert_eq!(upgraded, legacy);
+        assert!(upgraded.accepted.delay_buffers[1].event_orders.is_empty());
+        checkpoint.accepted.delay_buffers[1].event_orders = vec![(0.0, u32::MAX), (1.0, 2)];
+        let decode = |words: &[u64]| {
+            VerilogADeviceCheckpoint::from_words(
+                checkpoint.instance_name.clone(),
+                checkpoint.model_name.clone(),
+                checkpoint.source_digest.clone(),
+                checkpoint.shape_identity.clone(),
+                words,
+            )
+        };
+        let words = checkpoint.to_words();
+        assert_eq!(decode(&words).unwrap(), checkpoint);
+        assert!(decode(&old_words).is_err());
+        let index = words
+            .iter()
+            .position(|word| *word == u64::from(u32::MAX))
+            .unwrap();
+        assert_eq!(
+            words
+                .iter()
+                .filter(|word| **word == u64::from(u32::MAX))
+                .count(),
+            1
+        );
+        let mut invalid_words = words.clone();
+        invalid_words[index] += 1;
+        assert!(decode(&invalid_words).unwrap_err().contains("bound"));
+        invalid_words = words.clone();
+        assert_eq!(invalid_words[index - 2], 2); // The sparse order-record count.
+        invalid_words[index - 2] = u64::MAX;
+        assert!(decode(&invalid_words).is_err());
+        for records in [
+            vec![(0.5, 1)],
+            vec![(0.0, 1), (0.0, 2)],
+            vec![(1.0, 1), (0.0, 2)],
+        ] {
+            let mut invalid = checkpoint.clone();
+            invalid.accepted.delay_buffers[1].event_orders = records;
+            assert!(decode(&invalid.to_words()).unwrap_err().contains("delay 1"));
+        }
+        assert!(
+            VerilogADeviceCheckpoint::from_legacy_v12_words(
+                checkpoint.instance_name,
+                checkpoint.model_name,
+                checkpoint.source_digest,
+                checkpoint.shape_identity,
+                &words,
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
     fn accepted_runtime_word_payload_round_trips_ieee_bits_and_rejects_trailing_data() {
         let checkpoint = checkpoint_with_slew_entries();
         let words = checkpoint.to_words();
@@ -504,8 +575,8 @@ mod runtime_checkpoint_codec_tests {
         let checkpoint = checkpoint_with_slew_entries();
         let words = checkpoint.to_words();
         let delay_section = words
-            .windows(5)
-            .position(|window| window == [3, 0, 0, 0, 1])
+            .windows(6)
+            .position(|window| window == [3, 0, 0, 0, 0, 1])
             .expect("delay section contains None followed by Fixed configuration");
 
         let mut invalid_tag = words.clone();
@@ -1144,7 +1215,8 @@ pub struct VerilogADevice {
 /// saved its unused integration history instead, so they cannot resume it.
 /// Version 11 retains exact circular-integrator origins when the modulus changes.
 /// Version 12 retains left limits at accepted transport-delay discontinuities.
-pub const RUNTIME_CHECKPOINT_STATE_VERSION: u32 = 12;
+/// Version 13 retains explicitly known lower bounds on transport event order.
+pub const RUNTIME_CHECKPOINT_STATE_VERSION: u32 = 13;
 
 /// What one charge slot held immediately before an accepted-state rotation.
 ///
@@ -1254,6 +1326,13 @@ impl VerilogADeviceCheckpoint {
                 for &(time, left) in &delay.left_limits {
                     encoder.float(time);
                     encoder.float(left);
+                }
+            }
+            if state_version >= 13 {
+                encoder.word(delay.event_orders.len() as u64);
+                for &(time, order) in &delay.event_orders {
+                    encoder.float(time);
+                    encoder.word(u64::from(order));
                 }
             }
         }
@@ -1370,7 +1449,7 @@ impl VerilogADeviceCheckpoint {
     }
 
     /// Version 11 could only store continuous delay knots. Its complete state
-    /// upgrades exactly by adding empty left-limit arrays; no history is inferred.
+    /// upgrades by adding empty left-limit/order arrays; no history is inferred.
     pub fn from_legacy_v11_words(
         instance_name: SmolStr,
         model_name: SmolStr,
@@ -1385,6 +1464,28 @@ impl VerilogADeviceCheckpoint {
             shape_identity,
             words,
             11,
+        )?;
+        checkpoint.state_version = RUNTIME_CHECKPOINT_STATE_VERSION;
+        Ok(checkpoint)
+    }
+
+    /// Version 12 retains event sides but has no derivative-order metadata.
+    /// Migration preserves those events with explicitly unknown order; their
+    /// values must never be used to infer a missing smoothness certificate.
+    pub fn from_legacy_v12_words(
+        instance_name: SmolStr,
+        model_name: SmolStr,
+        source_digest: SmolStr,
+        shape_identity: SmolStr,
+        words: &[u64],
+    ) -> Result<Self, String> {
+        let mut checkpoint = Self::from_words_with_expected_version(
+            instance_name,
+            model_name,
+            source_digest,
+            shape_identity,
+            words,
+            12,
         )?;
         checkpoint.state_version = RUNTIME_CHECKPOINT_STATE_VERSION;
         Ok(checkpoint)
@@ -1471,7 +1572,25 @@ impl VerilogADeviceCheckpoint {
                     decoder.float(&format!("delay {index} left limit {sample} value"))?,
                 ));
             }
+            let order_count = if state_version >= 13 {
+                decoder.length(&format!("delay {index} event orders"), 2)?
+            } else {
+                0
+            };
+            if order_count > left_count || order_count > sample_limit - count - left_count {
+                return Err(format!(
+                    "delay {index} exceeds the supported event-order history limit"
+                ));
+            }
+            let mut event_orders = Vec::with_capacity(order_count);
+            for sample in 0..order_count {
+                event_orders.push((
+                    decoder.float(&format!("delay {index} event order {sample} time"))?,
+                    decoder.u32(&format!("delay {index} event order {sample} bound"))?,
+                ));
+            }
             let checkpoint = DelayCheckpoint {
+                event_orders,
                 left_limits,
                 configuration,
                 samples,
@@ -1484,6 +1603,7 @@ impl VerilogADeviceCheckpoint {
                 // absdelay definition. Validate every byte of their retained
                 // history without manufacturing resumable current state.
                 validation_checkpoint = DelayCheckpoint {
+                    event_orders: Vec::new(),
                     left_limits: Vec::new(),
                     configuration: Some(DelayConfiguration::Fixed {
                         delay: f64::MIN_POSITIVE,

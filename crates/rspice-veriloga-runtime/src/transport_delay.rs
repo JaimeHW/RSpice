@@ -12,6 +12,8 @@ use crate::arithmetic::{product_div, product_sum_div, sum_products_ratio};
 
 mod slope;
 pub use slope::DelayTimeSide;
+mod event;
+pub use event::{DelayEvent, DelayEventArrival, DelayEventOrder};
 
 /// A clamped delayed time, held exactly as two binary64
 /// words. Rounding the absolute target alone can lose a physical delay or
@@ -86,7 +88,7 @@ impl DelayTarget {
 }
 
 /// Maximum number of accepted sample records retained by one `absdelay` site,
-/// counting both ordinary right samples and any separate jump left limits.
+/// counting ordinary right samples, separate left limits and known-order records.
 ///
 /// The time horizon is normally the tighter bound, but an adaptive solver can
 /// accept arbitrarily many points inside a finite interval. Refusing an
@@ -121,6 +123,7 @@ struct DelayCandidate {
     time: f64,
     value: f64,
     left_limit: Option<f64>,
+    event_order: Option<u32>,
     configuration: DelayConfiguration,
 }
 
@@ -172,19 +175,24 @@ impl DelayDifferenceEvaluation {
 pub struct DelayBuffer {
     samples: VecDeque<(f64, f64)>,
     left_limits: VecDeque<(f64, f64)>,
+    event_orders: VecDeque<(f64, u32)>,
     configuration: Option<DelayConfiguration>,
     candidate: Option<DelayCandidate>,
 }
 
 /// Accepted transport-delay state. Speculative Newton candidates are never
 /// part of a checkpoint.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct DelayCheckpoint {
     pub configuration: Option<DelayConfiguration>,
     pub samples: Vec<(f64, f64)>,
     /// Left values at explicitly declared events; `samples` retains right values.
     /// Equal sides preserve a continuous corner that also needs an arrival.
     pub left_limits: Vec<(f64, f64)>,
+    /// Sparse, explicitly supplied lower bounds on discontinuity order.
+    /// Each time must identify a left-limit record. Missing metadata means
+    /// unknown order, including events imported from older checkpoint formats.
+    pub event_orders: Vec<(f64, u32)>,
 }
 
 impl DelayBuffer {
@@ -193,6 +201,7 @@ impl DelayBuffer {
         Self {
             samples: VecDeque::with_capacity(capacity.min(MAX_DELAY_HISTORY_SAMPLES)),
             left_limits: VecDeque::new(),
+            event_orders: VecDeque::new(),
             configuration: None,
             candidate: None,
         }
@@ -236,6 +245,7 @@ impl DelayBuffer {
                 time,
                 value,
                 left_limit: None,
+                event_order: None,
                 configuration,
             });
         } else {
@@ -287,6 +297,7 @@ impl DelayBuffer {
             time,
             value,
             left_limit: None,
+            event_order: None,
             configuration,
         });
         Ok(evaluation)
@@ -842,7 +853,14 @@ impl DelayBuffer {
             .map_or(candidate.time, |sample| sample.0);
         let retained_left =
             self.left_limits.len() - self.left_limits.partition_point(|sample| sample.0 < first);
-        if retained + retained_left + 1 + usize::from(candidate.left_limit.is_some())
+        let retained_orders =
+            self.event_orders.len() - self.event_orders.partition_point(|sample| sample.0 < first);
+        if retained
+            + retained_left
+            + retained_orders
+            + 1
+            + usize::from(candidate.left_limit.is_some())
+            + usize::from(candidate.event_order.is_some())
             > MAX_DELAY_HISTORY_SAMPLES
         {
             return Err(format!(
@@ -865,6 +883,7 @@ impl DelayBuffer {
             time,
             value,
             left_limit: None,
+            event_order: None,
             configuration,
         };
         self.validate_candidate_commit(sample, time)?;
@@ -908,13 +927,16 @@ impl DelayBuffer {
         delay: f64,
         max_delay: Option<f64>,
     ) -> Result<DelayCandidate, String> {
-        if !left.is_finite() {
-            return Err("delay left limit must be finite".into());
-        }
-        let mut sample = self.direct_sample(time, right, delay, max_delay)?;
-        sample.left_limit = Some(left);
-        self.validate_candidate_commit(sample, time)?;
-        Ok(sample)
+        self.event_sample(
+            time,
+            DelayEvent {
+                left,
+                right,
+                order: DelayEventOrder::Unknown,
+            },
+            delay,
+            max_delay,
+        )
     }
 
     /// Preflight both sides of an event without changing accepted or staged
@@ -1040,6 +1062,9 @@ impl DelayBuffer {
         if let Some(left) = candidate.left_limit {
             self.left_limits.push_back((candidate.time, left));
         }
+        if let Some(order) = candidate.event_order {
+            self.event_orders.push_back((candidate.time, order));
+        }
         self.prune(candidate.time, candidate.configuration);
     }
 
@@ -1078,6 +1103,13 @@ impl DelayBuffer {
             {
                 self.left_limits.pop_front();
             }
+            while self
+                .event_orders
+                .front()
+                .is_some_and(|sample| sample.0 < first)
+            {
+                self.event_orders.pop_front();
+            }
         }
     }
 
@@ -1085,13 +1117,14 @@ impl DelayBuffer {
     pub fn clear(&mut self) {
         self.samples.clear();
         self.left_limits.clear();
+        self.event_orders.clear();
         self.configuration = None;
         self.candidate = None;
     }
 
     /// Allocated sample slots, for solver memory accounting.
     pub fn allocation_capacity(&self) -> usize {
-        self.samples.capacity() + self.left_limits.capacity()
+        self.samples.capacity() + self.left_limits.capacity() + self.event_orders.capacity()
     }
 
     /// Number of retained accepted samples; the candidate is excluded.
@@ -1131,6 +1164,7 @@ impl DelayBuffer {
             configuration: self.configuration,
             samples: self.samples.iter().copied().collect(),
             left_limits: self.left_limits.iter().copied().collect(),
+            event_orders: self.event_orders.iter().copied().collect(),
         }
     }
 
@@ -1170,6 +1204,7 @@ impl DelayBuffer {
             .samples
             .len()
             .saturating_add(checkpoint.left_limits.len())
+            .saturating_add(checkpoint.event_orders.len())
             > MAX_DELAY_HISTORY_SAMPLES
         {
             return Err(format!(
@@ -1186,7 +1221,10 @@ impl DelayBuffer {
                     return Err("configured delay checkpoint has no accepted samples".into());
                 }
             }
-            None if !checkpoint.samples.is_empty() || !checkpoint.left_limits.is_empty() => {
+            None if !checkpoint.samples.is_empty()
+                || !checkpoint.left_limits.is_empty()
+                || !checkpoint.event_orders.is_empty() =>
+            {
                 return Err("unconfigured delay checkpoint contains accepted samples".into());
             }
             None => return Ok(()),
@@ -1227,6 +1265,7 @@ impl DelayBuffer {
             }
             previous_left = Some(time);
         }
+        Self::validate_event_orders(checkpoint)?;
         Ok(())
     }
 
@@ -1239,6 +1278,9 @@ impl DelayBuffer {
         self.left_limits.clear();
         self.left_limits
             .extend(checkpoint.left_limits.iter().copied());
+        self.event_orders.clear();
+        self.event_orders
+            .extend(checkpoint.event_orders.iter().copied());
         self.configuration = checkpoint.configuration;
         self.candidate = None;
         Ok(())
@@ -1250,6 +1292,7 @@ impl DelayBuffer {
         Ok(Self {
             samples: checkpoint.samples.into(),
             left_limits: checkpoint.left_limits.into(),
+            event_orders: checkpoint.event_orders.into(),
             configuration: checkpoint.configuration,
             candidate: None,
         })

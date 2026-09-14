@@ -23,6 +23,7 @@ fn prepared_event_circuit_solves_biased_gp_jump_with_canonical_rbi_ports() {
         let mut history = DelayBuffer::new(0);
         history
             .restore_checkpoint(&DelayCheckpoint {
+                event_orders: Vec::new(),
                 configuration: Some(DelayConfiguration::Fixed {
                     delay: original.legacy_excess_phase_delay(),
                 }),
@@ -121,6 +122,7 @@ fn bug805(text: &str) {
     let mut history = DelayBuffer::new(0);
     history
         .restore_checkpoint(&DelayCheckpoint {
+            event_orders: Vec::new(),
             configuration: Some(DelayConfiguration::Fixed { delay }),
             samples: vec![(0.0, forward)],
             left_limits: vec![],
@@ -246,6 +248,7 @@ fn prepared_event_circuit_gp_uses_held_physical_jacobian_and_both_history_sides(
         let mut history = DelayBuffer::new(0);
         history
             .restore_checkpoint(&DelayCheckpoint {
+                event_orders: Vec::new(),
                 configuration: Some(DelayConfiguration::Fixed { delay }),
                 samples: vec![(0.0, start)],
                 left_limits: vec![],
@@ -315,6 +318,7 @@ fn prepared_event_circuit_gp_uses_held_physical_jacobian_and_both_history_sides(
         let mut wrong = DelayBuffer::new(0);
         wrong
             .restore_checkpoint(&DelayCheckpoint {
+                event_orders: Vec::new(),
                 configuration: Some(DelayConfiguration::Fixed { delay: 2.0 * delay }),
                 samples: vec![(0.0, start)],
                 left_limits: vec![],
