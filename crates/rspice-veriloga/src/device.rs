@@ -310,14 +310,17 @@ mod runtime_checkpoint_codec_tests {
                 idtmod_origins: Vec::new(),
                 delay_buffers: vec![
                     DelayCheckpoint {
+                        left_limits: Vec::new(),
                         configuration: None,
                         samples: Vec::new(),
                     },
                     DelayCheckpoint {
+                        left_limits: Vec::new(),
                         configuration: Some(DelayConfiguration::Fixed { delay: 0.25 }),
                         samples: vec![(0.0, 1.0), (1.0, 2.0)],
                     },
                     DelayCheckpoint {
+                        left_limits: Vec::new(),
                         configuration: Some(DelayConfiguration::Bounded { max_delay: 2.0 }),
                         samples: vec![(0.5, -1.0), (2.0, 4.0)],
                     },
@@ -400,6 +403,54 @@ mod runtime_checkpoint_codec_tests {
     }
 
     #[test]
+    fn accepted_runtime_transport_sides_round_trip_and_v11_upgrades_exactly() {
+        let mut checkpoint = checkpoint_with_slew_entries();
+        let old_words = checkpoint.to_words_with_format(11, true, true);
+        let upgraded = VerilogADeviceCheckpoint::from_legacy_v11_words(
+            checkpoint.instance_name.clone(),
+            checkpoint.model_name.clone(),
+            checkpoint.source_digest.clone(),
+            checkpoint.shape_identity.clone(),
+            &old_words,
+        )
+        .unwrap();
+        assert_eq!(upgraded, checkpoint);
+        checkpoint.accepted.delay_buffers[1].left_limits = vec![(0.0, -0.0), (1.0, 3.0)];
+        let decode = |state: &VerilogADeviceCheckpoint| {
+            VerilogADeviceCheckpoint::from_words(
+                state.instance_name.clone(),
+                state.model_name.clone(),
+                state.source_digest.clone(),
+                state.shape_identity.clone(),
+                &state.to_words(),
+            )
+        };
+        let restored = decode(&checkpoint).unwrap();
+        assert_eq!(restored, checkpoint);
+        assert_eq!(
+            restored.accepted.delay_buffers[1].left_limits[0]
+                .1
+                .to_bits(),
+            (-0.0_f64).to_bits()
+        );
+        for bad in [(0.5, 7.0), (1.0, f64::NAN), (0.0, 2.0)] {
+            let mut invalid = checkpoint.clone();
+            invalid.accepted.delay_buffers[1].left_limits[1] = bad;
+            assert!(decode(&invalid).unwrap_err().contains("delay 1"));
+        }
+        assert!(
+            VerilogADeviceCheckpoint::from_legacy_v11_words(
+                checkpoint.instance_name.clone(),
+                checkpoint.model_name.clone(),
+                checkpoint.source_digest.clone(),
+                checkpoint.shape_identity.clone(),
+                &checkpoint.to_words(),
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
     fn accepted_runtime_word_payload_round_trips_ieee_bits_and_rejects_trailing_data() {
         let checkpoint = checkpoint_with_slew_entries();
         let words = checkpoint.to_words();
@@ -453,8 +504,8 @@ mod runtime_checkpoint_codec_tests {
         let checkpoint = checkpoint_with_slew_entries();
         let words = checkpoint.to_words();
         let delay_section = words
-            .windows(4)
-            .position(|window| window == [3, 0, 0, 1])
+            .windows(5)
+            .position(|window| window == [3, 0, 0, 0, 1])
             .expect("delay section contains None followed by Fixed configuration");
 
         let mut invalid_tag = words.clone();
@@ -1092,7 +1143,8 @@ pub struct VerilogADevice {
 /// Version 10 retains each limiter's previous Newton value. Earlier payloads
 /// saved its unused integration history instead, so they cannot resume it.
 /// Version 11 retains exact circular-integrator origins when the modulus changes.
-pub const RUNTIME_CHECKPOINT_STATE_VERSION: u32 = 11;
+/// Version 12 retains left limits at accepted transport-delay discontinuities.
+pub const RUNTIME_CHECKPOINT_STATE_VERSION: u32 = 12;
 
 /// What one charge slot held immediately before an accepted-state rotation.
 ///
@@ -1196,6 +1248,13 @@ impl VerilogADeviceCheckpoint {
             for &(time, value) in &delay.samples {
                 encoder.float(time);
                 encoder.float(value);
+            }
+            if state_version >= 12 {
+                encoder.word(delay.left_limits.len() as u64);
+                for &(time, left) in &delay.left_limits {
+                    encoder.float(time);
+                    encoder.float(left);
+                }
             }
         }
         encoder.word(self.accepted.transition_filters.len() as u64);
@@ -1310,6 +1369,27 @@ impl VerilogADeviceCheckpoint {
         )
     }
 
+    /// Version 11 could only store continuous delay knots. Its complete state
+    /// upgrades exactly by adding empty left-limit arrays; no history is inferred.
+    pub fn from_legacy_v11_words(
+        instance_name: SmolStr,
+        model_name: SmolStr,
+        source_digest: SmolStr,
+        shape_identity: SmolStr,
+        words: &[u64],
+    ) -> Result<Self, String> {
+        let mut checkpoint = Self::from_words_with_expected_version(
+            instance_name,
+            model_name,
+            source_digest,
+            shape_identity,
+            words,
+            11,
+        )?;
+        checkpoint.state_version = RUNTIME_CHECKPOINT_STATE_VERSION;
+        Ok(checkpoint)
+    }
+
     fn from_words_with_expected_version(
         instance_name: SmolStr,
         model_name: SmolStr,
@@ -1361,6 +1441,12 @@ impl VerilogADeviceCheckpoint {
                 None
             };
             let count = decoder.length(&format!("delay {index} samples"), 2)?;
+            let sample_limit = rspice_veriloga_runtime::transport_delay::MAX_DELAY_HISTORY_SAMPLES;
+            if count > sample_limit {
+                return Err(format!(
+                    "delay {index} exceeds the supported history sample limit"
+                ));
+            }
             let mut samples = Vec::with_capacity(count);
             for sample in 0..count {
                 samples.push((
@@ -1368,7 +1454,25 @@ impl VerilogADeviceCheckpoint {
                     decoder.float(&format!("delay {index} sample {sample} value"))?,
                 ));
             }
+            let left_count = if state_version >= 12 {
+                decoder.length(&format!("delay {index} left limits"), 2)?
+            } else {
+                0
+            };
+            if left_count > sample_limit - count {
+                return Err(format!(
+                    "delay {index} exceeds the supported history sample limit"
+                ));
+            }
+            let mut left_limits = Vec::with_capacity(left_count);
+            for sample in 0..left_count {
+                left_limits.push((
+                    decoder.float(&format!("delay {index} left limit {sample} time"))?,
+                    decoder.float(&format!("delay {index} left limit {sample} value"))?,
+                ));
+            }
             let checkpoint = DelayCheckpoint {
+                left_limits,
                 configuration,
                 samples,
             };
@@ -1380,6 +1484,7 @@ impl VerilogADeviceCheckpoint {
                 // absdelay definition. Validate every byte of their retained
                 // history without manufacturing resumable current state.
                 validation_checkpoint = DelayCheckpoint {
+                    left_limits: Vec::new(),
                     configuration: Some(DelayConfiguration::Fixed {
                         delay: f64::MIN_POSITIVE,
                     }),

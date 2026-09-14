@@ -7,6 +7,7 @@ fn history(samples: &[(f64, f64)], delay: f64) -> DelayBuffer {
     let mut buffer = DelayBuffer::new(0);
     buffer
         .restore_checkpoint(&DelayCheckpoint {
+            left_limits: Vec::new(),
             configuration: Some(DelayConfiguration::Fixed { delay }),
             samples: samples.to_vec(),
         })
@@ -119,6 +120,7 @@ fn current_and_delay_actions_match_independent_perturbations() {
     let mut buffer = DelayBuffer::new(0);
     buffer
         .restore_checkpoint(&DelayCheckpoint {
+            left_limits: Vec::new(),
             configuration: Some(DelayConfiguration::Bounded { max_delay: 4.0 }),
             samples: vec![(0.0, 2.0), (0.5, 3.0)],
         })
@@ -151,6 +153,7 @@ fn bounded_delay_recovers_a_finite_slope_and_rejects_invalid_results() {
     let mut buffer = DelayBuffer::new(0);
     buffer
         .restore_checkpoint(&DelayCheckpoint {
+            left_limits: Vec::new(),
             configuration: Some(DelayConfiguration::Bounded { max_delay: 4.0 }),
             samples: vec![(0.0, -f64::MAX)],
         })

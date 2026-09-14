@@ -185,7 +185,9 @@ fn checkpoint_operation_result<T>(
 /// Version 42 retains external BJT BC displacement current across integration resets.
 /// Version 44 records implementation-only unknowns excluded from the Xyce LTE domain.
 /// Version 45 retains fixed GP transport histories independently of charge-integration epochs.
-const FORMAT_VERSION: u32 = 45;
+/// Version 46 retains separate left limits at native and runtime transport jumps.
+const FORMAT_VERSION: u32 = 46;
+const SIDED_TRANSPORT_FORMAT_VERSION: u32 = 46;
 const BJT_PHASE_HISTORY_FORMAT_VERSION: u32 = 45;
 // Generated circular integrators retain an exact dyadic wrap origin.
 const GENERATED_IDTMOD_STATE_FORMAT_VERSION: u32 = 43;
@@ -2717,6 +2719,7 @@ fn read_history_bool(
 fn read_bjt_phase_history(
     lines: &mut CheckpointLines<'_>,
     budget: &mut CheckpointParseBudget,
+    version: u32,
 ) -> Result<Option<rspice_veriloga_runtime::transport_delay::DelayBuffer>, String> {
     use rspice_veriloga_runtime::transport_delay::{
         DelayBuffer, DelayCheckpoint, DelayConfiguration, MAX_DELAY_HISTORY_SAMPLES,
@@ -2753,7 +2756,36 @@ fn read_bjt_phase_history(
                 read_finite_value_field(&mut fields, "accepted BJT phase", "sample current")?;
             samples.push((time, value));
         }
+        let left_count = if version >= SIDED_TRANSPORT_FORMAT_VERSION {
+            fields
+                .next()
+                .ok_or("missing accepted BJT phase left-limit count")?
+                .parse::<usize>()
+                .map_err(|_| "invalid accepted BJT phase left-limit count")?
+        } else {
+            0
+        };
+        if left_count > MAX_DELAY_HISTORY_SAMPLES - count || left_count > line.len() / 3 {
+            return Err(
+                "accepted BJT phase left-limit count exceeds available data or history limits"
+                    .into(),
+            );
+        }
+        let mut left_limits =
+            allocate_checkpoint_capacity(left_count, "accepted BJT phase left limits", budget)?;
+        for index in 0..left_count {
+            if index.is_multiple_of(CHECKPOINT_ABORT_POLL_INTERVAL)
+                && lines.abort.is_some_and(AbortSignal::is_aborted)
+            {
+                return Err("accepted BJT phase history parsing aborted".into());
+            }
+            left_limits.push((
+                read_finite_value_field(&mut fields, "accepted BJT phase", "left-limit time")?,
+                read_finite_value_field(&mut fields, "accepted BJT phase", "left-limit current")?,
+            ));
+        }
         Some(DelayBuffer::from_checkpoint(DelayCheckpoint {
+            left_limits,
             configuration: Some(DelayConfiguration::Fixed { delay }),
             samples,
         })?)
@@ -3062,7 +3094,7 @@ fn read_accepted_junction_transient_history(
         bjt_history
             .phase
             .push(if version >= BJT_PHASE_HISTORY_FORMAT_VERSION {
-                read_bjt_phase_history(lines, budget)?
+                read_bjt_phase_history(lines, budget, version)?
             } else {
                 None
             });
@@ -3997,14 +4029,30 @@ fn read_runtime_veriloga_states(
             })?;
             continue;
         }
-        let state = VerilogADeviceCheckpoint::from_words(
-            instance.into(),
-            model.into(),
-            source.into(),
-            shape.into(),
-            &words,
-        )?;
-        if state.state_version != state_version {
+        let upgrade_v11 = checkpoint_version < SIDED_TRANSPORT_FORMAT_VERSION;
+        let state = if upgrade_v11 {
+            if state_version != 11 {
+                return Err(format!(
+                    "runtime state row {row} requires version 11 for checkpoint format {checkpoint_version}"
+                ));
+            }
+            VerilogADeviceCheckpoint::from_legacy_v11_words(
+                instance.into(),
+                model.into(),
+                source.into(),
+                shape.into(),
+                &words,
+            )?
+        } else {
+            VerilogADeviceCheckpoint::from_words(
+                instance.into(),
+                model.into(),
+                source.into(),
+                shape.into(),
+                &words,
+            )?
+        };
+        if !upgrade_v11 && state.state_version != state_version {
             return Err(format!(
                 "runtime state row {row} header version {state_version} disagrees with payload version {}",
                 state.state_version
@@ -7981,6 +8029,11 @@ impl TransientCheckpoint {
                         poll_checkpoint_abort(abort, sample_index)?;
                         push_values(&mut out, &[time, current]);
                     }
+                    out.push_str(&format!(" {}", phase.accepted_left_limits().len()));
+                    for (sample_index, (time, left)) in phase.accepted_left_limits().enumerate() {
+                        poll_checkpoint_abort(abort, sample_index)?;
+                        push_values(&mut out, &[time, left]);
+                    }
                     out.push('\n');
                 }
                 None => out.push_str("accepted_bjt_transport 0\n"),
@@ -9988,6 +10041,7 @@ mod tests {
             DelayBuffer::from_checkpoint(DelayCheckpoint {
                 configuration: Some(DelayConfiguration::Fixed { delay: time * 0.75 }),
                 samples: vec![(0.0, -0.0), (time * 0.5, 1e-12), (time, -3e-4)],
+                left_limits: vec![(time * 0.5, -0.0), (time, 2e-4)],
             })
             .unwrap(),
         );
@@ -10022,11 +10076,16 @@ mod tests {
             "accepted_bjt_transport 0 extra".to_owned(),
             "accepted_bjt_transport 18446744073709551615".into(),
             "accepted_bjt_transport 1048577".into(),
-            format!("accepted_bjt_transport 2 {} 0 1 0 2", time),
-            format!("accepted_bjt_transport 1 {} {} 1", time, time),
-            format!("accepted_bjt_transport 1 {} 0 NaN", time),
-            format!("accepted_bjt_transport 1 -1 {} 1", time),
-            format!("accepted_bjt_transport 1 {} 0 1", time),
+            format!("accepted_bjt_transport 2 {} 0 1 0 2 0", time),
+            format!("accepted_bjt_transport 1 {} {} 1 0", time, time),
+            format!("accepted_bjt_transport 1 {} 0 NaN 0", time),
+            format!("accepted_bjt_transport 1 -1 {} 1 0", time),
+            format!("accepted_bjt_transport 1 {} 0 1 0", time),
+            format!("accepted_bjt_transport 2 {time} 0 1 {time} 2 2 {time} 2 {time} 3"),
+            format!(
+                "accepted_bjt_transport 2 {time} 0 1 {time} 2 1 {} 4",
+                time * 0.5
+            ),
             "accepted_bjt_transport 0".into(),
         ] {
             let bad = text.replace(row, &replacement);
@@ -10064,21 +10123,50 @@ mod tests {
     }
 
     #[test]
+    fn gp_phase_v45_continuous_history_upgrades_without_inventing_sides() {
+        use rspice_veriloga_runtime::transport_delay::DelayBuffer;
+        let mut original = sample();
+        original.accepted_junction_history = sample_junction_history();
+        original.accepted_junction_history.bjt_runtime_tags[0] =
+            super::super::GP_PHASE_TRANSIENT_HISTORY_RUNTIME_TAG.into();
+        let mut phase = DelayBuffer::new(2);
+        phase.accept_sample(0.0, 1.0, original.time, None).unwrap();
+        phase
+            .accept_sample(original.time, 2.0, original.time, None)
+            .unwrap();
+        original.accepted_junction_history.bjt_history.phase[0] = Some(phase);
+        let restored = TransientCheckpoint::from_text(&legacy_text(&original, 45)).unwrap();
+        assert_eq!(
+            restored.accepted_junction_history,
+            original.accepted_junction_history
+        );
+        assert_eq!(restored.to_text(), original.to_text());
+    }
+
+    #[test]
     fn gp_phase_checkpoint_sample_storage_is_bounded_and_parsing_is_cancellable() {
         let mut text = String::from("accepted_bjt_transport 257 1");
         for index in 0..257 {
             text.push_str(&format!(" {} {}", index as Value * 0.001, index));
         }
-        text.push('\n');
+        text.push_str(" 0\n");
         let bytes = 257 * std::mem::size_of::<(Value, Value)>();
         let mut budget = CheckpointParseBudget::new(bytes - 1);
-        let error =
-            read_bjt_phase_history(&mut CheckpointLines::new(&text), &mut budget).unwrap_err();
+        let error = read_bjt_phase_history(
+            &mut CheckpointLines::new(&text),
+            &mut budget,
+            FORMAT_VERSION,
+        )
+        .unwrap_err();
         assert!(error.contains("parsed-memory limit"), "{error}");
         let mut budget = CheckpointParseBudget::new(bytes);
-        let history = read_bjt_phase_history(&mut CheckpointLines::new(&text), &mut budget)
-            .unwrap()
-            .unwrap();
+        let history = read_bjt_phase_history(
+            &mut CheckpointLines::new(&text),
+            &mut budget,
+            FORMAT_VERSION,
+        )
+        .unwrap()
+        .unwrap();
         assert_eq!(history.accepted_sample_count(), 257);
         assert_eq!(
             budget.used, bytes,
@@ -10089,7 +10177,7 @@ mod tests {
         lines.abort = Some(&abort);
         let mut budget = CheckpointParseBudget::new(bytes);
         assert!(
-            read_bjt_phase_history(&mut lines, &mut budget)
+            read_bjt_phase_history(&mut lines, &mut budget, FORMAT_VERSION)
                 .unwrap_err()
                 .contains("aborted")
         );
@@ -10730,6 +10818,19 @@ mod tests {
             if version < BJT_PHASE_HISTORY_FORMAT_VERSION
                 && line.starts_with("accepted_bjt_transport ")
             {
+                continue;
+            }
+            if version < SIDED_TRANSPORT_FORMAT_VERSION
+                && line.starts_with("accepted_bjt_transport ")
+            {
+                let fields = line.split_whitespace().collect::<Vec<_>>();
+                let count = fields[1].parse::<usize>().unwrap();
+                let end = if count == 0 { 2 } else { 3 + 2 * count };
+                if count != 0 {
+                    assert_eq!(fields[end], "0", "legacy fixture cannot discard jump sides");
+                }
+                output.push_str(&fields[..end].join(" "));
+                output.push('\n');
                 continue;
             }
             if version < BJT_EXTERNAL_BC_CURRENT_FORMAT_VERSION
@@ -11424,6 +11525,11 @@ mod tests {
             1.0_f64.to_bits(),
             accepted_time.to_bits(),
             4.0_f64.to_bits(),
+        ]);
+        if state_version >= 12 {
+            words.push(0); // left limits
+        }
+        words.extend([
             0, // transition filters
             0, // slew filters
             0, // cross detectors
@@ -13066,7 +13172,7 @@ mod tests {
     /// asserting current-format behaviour after two renumberings moved it into
     /// the legacy ladder.
     #[cfg(feature = "veriloga")]
-    const RUNTIME_VERILOGA_FORMAT_STATE_CONTRACTS: [(u32, u32); 28] = [
+    const RUNTIME_VERILOGA_FORMAT_STATE_CONTRACTS: [(u32, u32); 30] = [
         (17, 1),
         (18, 1),
         (19, 1),
@@ -13095,6 +13201,8 @@ mod tests {
         (42, 10),
         (43, 11),
         (44, 11),
+        (45, 11),
+        (46, 12),
     ];
 
     #[cfg(feature = "veriloga")]
@@ -13139,6 +13247,8 @@ mod tests {
                         "unsupported runtime Verilog-A state version {inner_version}; \
                          expected version {required_version}"
                     )
+                } else if required_version == 11 {
+                    format!("requires version 11 for checkpoint format {outer_version}")
                 } else {
                     format!(
                         "uses state version {inner_version}, \
@@ -13447,6 +13557,60 @@ mod tests {
         assert!(delay.configuration.is_some());
         assert_eq!(delay.samples, vec![(0.0, 1.0), (checkpoint.time, 4.0)]);
         assert_eq!(restored.to_text(), fixture);
+    }
+
+    #[cfg(feature = "veriloga")]
+    #[test]
+    fn runtime_transport_sides_round_trip_and_v43_through_v45_upgrade_v11() {
+        let checkpoint = sample();
+        let old_words = runtime_veriloga_absdelay_words(11, checkpoint.time);
+        let current_words = runtime_veriloga_absdelay_words(12, checkpoint.time);
+        let current = TransientCheckpoint::from_text(&replace_empty_runtime_veriloga_tail(
+            checkpoint.to_text(),
+            12,
+            &current_words,
+        ))
+        .unwrap();
+        for version in [43, 44, 45] {
+            let upgraded = TransientCheckpoint::from_text(&replace_empty_runtime_veriloga_tail(
+                legacy_text(&checkpoint, version),
+                11,
+                &old_words,
+            ))
+            .unwrap();
+            assert!(upgraded.runtime_veriloga_state_available);
+            assert_eq!(
+                upgraded.runtime_veriloga_instance_states,
+                current.runtime_veriloga_instance_states
+            );
+        }
+        let mut sided = current;
+        sided.runtime_veriloga_instance_states[0]
+            .accepted
+            .delay_buffers[0]
+            .left_limits = vec![(checkpoint.time, -0.0)];
+        for encoding in [
+            TransientCheckpointEncoding::Unpacked,
+            TransientCheckpointEncoding::Packed,
+        ] {
+            let restored =
+                TransientCheckpoint::from_bytes(&sided.to_bytes(encoding).unwrap()).unwrap();
+            assert_eq!(
+                restored.runtime_veriloga_instance_states,
+                sided.runtime_veriloga_instance_states
+            );
+            assert_eq!(
+                restored.runtime_veriloga_instance_states[0]
+                    .accepted
+                    .delay_buffers[0]
+                    .left_limits[0]
+                    .1
+                    .to_bits(),
+                (-0.0_f64).to_bits()
+            );
+        }
+        let invalid = replace_empty_runtime_veriloga_tail(checkpoint.to_text(), 11, &old_words);
+        assert!(TransientCheckpoint::from_text(&invalid).is_err());
     }
 
     #[test]

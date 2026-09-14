@@ -109,6 +109,7 @@ fn gp_phase_rejects_history_from_another_nominal_delay() {
     let mut history = DelayBuffer::new(0);
     history
         .restore_checkpoint(&DelayCheckpoint {
+            left_limits: Vec::new(),
             configuration: Some(DelayConfiguration::Fixed {
                 delay: delay.next_up(),
             }),
@@ -177,6 +178,7 @@ fn delay_history(bjt: &Bjt, anchor: Value) -> DelayBuffer {
     let mut history = DelayBuffer::new(0);
     history
         .restore_checkpoint(&DelayCheckpoint {
+            left_limits: Vec::new(),
             configuration: Some(DelayConfiguration::Fixed { delay }),
             samples: vec![(0.0, anchor), (2.0 * delay, anchor)],
         })

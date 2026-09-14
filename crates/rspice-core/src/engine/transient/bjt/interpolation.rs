@@ -67,8 +67,8 @@ pub(in crate::engine::transient) fn phase_interpolation_control(
             "phase interpolation requires finite time/current and valid current tolerances".into(),
         );
     }
-    let mut samples = history.accepted_samples().rev();
-    let (previous_time, previous) = samples
+    let mut samples = history.accepted_knots().rev();
+    let (previous_time, _, previous) = samples
         .next()
         .ok_or("phase interpolation has no accepted anchor")?;
     let dt = time - previous_time;
@@ -77,7 +77,17 @@ pub(in crate::engine::transient) fn phase_interpolation_control(
     }
     let s = ScaledValue::new;
     let tolerance = s(abstol).plus(s(reltol).multiply(s(current.abs().max(previous.abs()))));
-    let (error, order) = if let Some((older_time, older)) = samples.next() {
+    // A slope before a declared jump or corner cannot predict the next interval.
+    let older_sample = if history
+        .accepted_left_limits()
+        .next_back()
+        .is_some_and(|(time, _)| time == previous_time)
+    {
+        None
+    } else {
+        samples.next()
+    };
+    let (error, order) = if let Some((older_time, _, older)) = older_sample {
         let previous_dt = previous_time - older_time;
         if !previous_dt.is_finite() || previous_dt <= 0.0 {
             return Err("phase interpolation history has no positive previous interval".into());

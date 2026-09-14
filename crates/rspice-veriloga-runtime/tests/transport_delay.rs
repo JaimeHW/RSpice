@@ -102,6 +102,7 @@ fn oversized_public_checkpoint_is_refused_before_it_replaces_state() {
     let mut delay = seeded();
     let before = delay.checkpoint();
     let oversized = DelayCheckpoint {
+        left_limits: Vec::new(),
         configuration: Some(DelayConfiguration::Fixed { delay: 1.0 }),
         samples: vec![(0.0, 0.0); 1_048_577],
     };

@@ -6,6 +6,7 @@ fn history(samples: Vec<(f64, f64)>, delay: f64, bounded: bool) -> DelayBuffer {
     let mut buffer = DelayBuffer::new(0);
     buffer
         .restore_checkpoint(&DelayCheckpoint {
+            left_limits: Vec::new(),
             configuration: Some(if bounded {
                 DelayConfiguration::Bounded { max_delay: 4.0 }
             } else {

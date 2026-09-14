@@ -109,6 +109,7 @@ fn direct_acceptance_selects_accepted_sample_without_leaking_trial() {
 fn accepted_capture_rejects_stale_time_trial_and_missing_exact_bracket() {
     let delay = 0.5_f64.next_up();
     let mut history = DelayBuffer::from_checkpoint(DelayCheckpoint {
+        left_limits: Vec::new(),
         configuration: Some(DelayConfiguration::Fixed { delay }),
         samples: vec![(0.0, 1.0), (0.5, 2.0), (1.0, 3.0)],
     })
@@ -123,6 +124,7 @@ fn accepted_capture_rejects_stale_time_trial_and_missing_exact_bracket() {
             .contains("in-flight")
     );
     let missing = DelayBuffer::from_checkpoint(DelayCheckpoint {
+        left_limits: Vec::new(),
         configuration: Some(DelayConfiguration::Fixed { delay }),
         samples: vec![(0.5, 2.0), (1.0, 3.0)],
     })
@@ -135,6 +137,7 @@ fn accepted_capture_rejects_stale_time_trial_and_missing_exact_bracket() {
     );
     assert!(
         DelayBuffer::from_checkpoint(DelayCheckpoint {
+            left_limits: Vec::new(),
             configuration: Some(DelayConfiguration::Fixed { delay }),
             samples: vec![(0.0, 1.0), (0.0, 2.0)],
         })

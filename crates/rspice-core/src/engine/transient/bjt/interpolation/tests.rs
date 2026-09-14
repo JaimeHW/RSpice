@@ -3,6 +3,7 @@ use rspice_veriloga_runtime::transport_delay::{DelayCheckpoint, DelayConfigurati
 
 fn history(samples: &[(Value, Value)], delay: Value) -> DelayBuffer {
     DelayBuffer::from_checkpoint(DelayCheckpoint {
+        left_limits: Vec::new(),
         configuration: Some(DelayConfiguration::Fixed { delay }),
         samples: samples.to_vec(),
     })
@@ -80,6 +81,28 @@ fn phase_interpolation_controls_startup_and_refuses_invalid_candidates_without_m
         assert!(phase_interpolation_control(&buffer, time, value, rel, abs, 0).is_err());
     }
     assert_eq!(buffer, before);
+}
+
+#[test]
+fn phase_interpolation_uses_the_post_jump_anchor_without_a_pre_jump_slope() {
+    let mut buffer = DelayBuffer::new(4);
+    buffer.accept_sample(0.0, 0.0, 4.0, None).unwrap();
+    buffer
+        .accept_discontinuity(1.0, 1.0, 100.0, 4.0, None)
+        .unwrap();
+    let constant = phase_interpolation_control(&buffer, 2.0, 100.0, 0.0, 1e-6, 0).unwrap();
+    assert_eq!(constant.normalized_error, 0.0);
+    let changed = phase_interpolation_control(&buffer, 2.0, 100.25, 0.0, 0.25, 0).unwrap();
+    assert_eq!(changed.normalized_error, 1.0);
+    assert_eq!(changed.next_step, 0.9);
+    buffer.accept_sample(2.0, 100.25, 4.0, None).unwrap();
+    let affine = phase_interpolation_control(&buffer, 3.0, 100.5, 0.0, 1e-6, 0).unwrap();
+    assert_eq!(affine.normalized_error, 0.0);
+    buffer
+        .accept_discontinuity(3.0, 100.5, 100.5, 4.0, None)
+        .unwrap();
+    let corner = phase_interpolation_control(&buffer, 4.0, 100.5, 0.0, 1e-6, 0).unwrap();
+    assert_eq!(corner.normalized_error, 0.0);
 }
 
 #[test]

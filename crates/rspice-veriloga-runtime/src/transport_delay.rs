@@ -17,6 +17,7 @@ use crate::arithmetic::{product_div, product_sum_div, sum_products_ratio};
 struct DelayTarget {
     high: f64,
     low: f64,
+    prehistory: bool,
 }
 
 impl DelayTarget {
@@ -25,6 +26,7 @@ impl DelayTarget {
             return Self {
                 high: 0.0,
                 low: 0.0,
+                prehistory: time < delay,
             };
         }
         // Error-free TwoDiff. All operands are finite and 0 < delay < time,
@@ -33,11 +35,15 @@ impl DelayTarget {
         let recovered_delay = time - high;
         let recovered_time = high + recovered_delay;
         let low = (time - recovered_time) + (recovered_delay - delay);
-        Self { high, low }
+        Self {
+            high,
+            low,
+            prehistory: false,
+        }
     }
 
     fn at_or_after(self, sample: f64) -> bool {
-        self.high > sample || (self.high == sample && self.low >= 0.0)
+        !self.prehistory && (self.high > sample || (self.high == sample && self.low >= 0.0))
     }
 
     fn after(self, sample: f64) -> f64 {
@@ -76,7 +82,8 @@ impl DelayTarget {
     }
 }
 
-/// Maximum number of accepted samples retained by one `absdelay` site.
+/// Maximum number of accepted sample records retained by one `absdelay` site,
+/// counting both ordinary right samples and any separate jump left limits.
 ///
 /// The time horizon is normally the tighter bound, but an adaptive solver can
 /// accept arbitrarily many points inside a finite interval. Refusing an
@@ -110,6 +117,7 @@ impl DelayConfiguration {
 struct DelayCandidate {
     time: f64,
     value: f64,
+    left_limit: Option<f64>,
     configuration: DelayConfiguration,
 }
 
@@ -160,6 +168,7 @@ impl DelayDifferenceEvaluation {
 #[derive(Debug, Clone, PartialEq)]
 pub struct DelayBuffer {
     samples: VecDeque<(f64, f64)>,
+    left_limits: VecDeque<(f64, f64)>,
     configuration: Option<DelayConfiguration>,
     candidate: Option<DelayCandidate>,
 }
@@ -170,6 +179,9 @@ pub struct DelayBuffer {
 pub struct DelayCheckpoint {
     pub configuration: Option<DelayConfiguration>,
     pub samples: Vec<(f64, f64)>,
+    /// Left values at explicitly declared events; `samples` retains right values.
+    /// Equal sides preserve a continuous corner that also needs an arrival.
+    pub left_limits: Vec<(f64, f64)>,
 }
 
 impl DelayBuffer {
@@ -177,6 +189,7 @@ impl DelayBuffer {
     pub fn new(capacity: usize) -> Self {
         Self {
             samples: VecDeque::with_capacity(capacity.min(MAX_DELAY_HISTORY_SAMPLES)),
+            left_limits: VecDeque::new(),
             configuration: None,
             candidate: None,
         }
@@ -219,6 +232,7 @@ impl DelayBuffer {
             self.candidate = Some(DelayCandidate {
                 time,
                 value,
+                left_limit: None,
                 configuration,
             });
         } else {
@@ -269,6 +283,7 @@ impl DelayBuffer {
         self.candidate = Some(DelayCandidate {
             time,
             value,
+            left_limit: None,
             configuration,
         });
         Ok(evaluation)
@@ -326,6 +341,40 @@ impl DelayBuffer {
         delay: f64,
         max_delay: Option<f64>,
     ) -> Result<DelayDifferenceEvaluation, String> {
+        self.difference_evaluation(time, value, delay, max_delay, None)
+    }
+
+    /// Read a right-side Newton candidate with its already solved left limit
+    /// held fixed. The incoming interpolation interval ends at `left`; its
+    /// value does not acquire a derivative with respect to the right candidate.
+    pub fn difference_at_discontinuity(
+        &self,
+        time: f64,
+        left: f64,
+        right: f64,
+        delay: f64,
+        max_delay: Option<f64>,
+    ) -> Result<DelayDifferenceEvaluation, String> {
+        if !left.is_finite() {
+            return Err("delay left limit must be finite".into());
+        }
+        if let Some(&(accepted_time, accepted_right)) = self.samples.back()
+            && time == accepted_time
+            && left.to_bits() != self.left_value(time).unwrap_or(accepted_right).to_bits()
+        {
+            return Err("delay probe left limit differs from its accepted knot".into());
+        }
+        self.difference_evaluation(time, right, delay, max_delay, Some(left))
+    }
+
+    fn difference_evaluation(
+        &self,
+        time: f64,
+        value: f64,
+        delay: f64,
+        max_delay: Option<f64>,
+        left_limit: Option<f64>,
+    ) -> Result<DelayDifferenceEvaluation, String> {
         self.validate_runtime(time, value, delay, max_delay)?;
         if self.samples.back().is_some_and(|sample| time < sample.0) {
             return Err("transport correction time precedes the latest accepted sample".into());
@@ -343,7 +392,8 @@ impl DelayBuffer {
             });
         }
         let target = DelayTarget::new(time, effective_delay);
-        let [left, right] = self.interpolation_endpoints(target, (time, value));
+        let candidate = left_limit.map_or((time, value, 1.0), |left| (time, left, 0.0));
+        let [left, right] = self.interpolation_endpoints(target, candidate);
         let result = match (left, right) {
             (Some((lt, lv, li)), Some((rt, rv, ri))) => {
                 let interval = rt - lt;
@@ -560,7 +610,7 @@ impl DelayBuffer {
     fn interpolation_endpoints(
         &self,
         target: DelayTarget,
-        candidate: (f64, f64),
+        candidate: (f64, f64, f64),
     ) -> [Option<(f64, f64, f64)>; 2] {
         // Accepted times are strictly increasing, including across the
         // deque's wrap. Find the first strictly later sample in logarithmic
@@ -576,11 +626,11 @@ impl DelayBuffer {
         let mut right = self
             .samples
             .get(right_index)
-            .map(|&(time, value)| (time, value, 0.0));
+            .map(|&(time, value)| (time, self.left_value(time).unwrap_or(value), 0.0));
         if target.at_or_after(candidate.0) {
-            left = Some((candidate.0, candidate.1, 1.0));
+            left = Some(candidate);
         } else if right.is_none() {
-            right = Some((candidate.0, candidate.1, 1.0));
+            right = Some(candidate);
         }
         [left, right]
     }
@@ -591,7 +641,7 @@ impl DelayBuffer {
         candidate: (f64, f64),
         target_delay_derivative: f64,
     ) -> Result<DelayEvaluation, String> {
-        let [left, right] = self.interpolation_endpoints(target, candidate);
+        let [left, right] = self.interpolation_endpoints(target, (candidate.0, candidate.1, 1.0));
         let evaluation = match (left, right) {
             (
                 Some((left_time, left_value, left_input)),
@@ -716,7 +766,15 @@ impl DelayBuffer {
 
         let cutoff = (candidate.time - candidate.configuration.retention()).max(0.0);
         let retained = self.retained_sample_count(cutoff);
-        if retained >= MAX_DELAY_HISTORY_SAMPLES {
+        let first = self
+            .samples
+            .get(self.samples.len() - retained)
+            .map_or(candidate.time, |sample| sample.0);
+        let retained_left =
+            self.left_limits.len() - self.left_limits.partition_point(|sample| sample.0 < first);
+        if retained + retained_left + 1 + usize::from(candidate.left_limit.is_some())
+            > MAX_DELAY_HISTORY_SAMPLES
+        {
             return Err(format!(
                 "delay history requires more than the supported {MAX_DELAY_HISTORY_SAMPLES} accepted samples inside its configured horizon"
             ));
@@ -736,6 +794,7 @@ impl DelayBuffer {
         let sample = DelayCandidate {
             time,
             value,
+            left_limit: None,
             configuration,
         };
         self.validate_candidate_commit(sample, time)?;
@@ -771,6 +830,100 @@ impl DelayBuffer {
         Ok(())
     }
 
+    fn discontinuity_sample(
+        &self,
+        time: f64,
+        left: f64,
+        right: f64,
+        delay: f64,
+        max_delay: Option<f64>,
+    ) -> Result<DelayCandidate, String> {
+        if !left.is_finite() {
+            return Err("delay left limit must be finite".into());
+        }
+        let mut sample = self.direct_sample(time, right, delay, max_delay)?;
+        sample.left_limit = Some(left);
+        self.validate_candidate_commit(sample, time)?;
+        Ok(sample)
+    }
+
+    /// Preflight both sides of an event without changing accepted or staged
+    /// state. The owning solver must supply the actual left and settled right
+    /// limits; this buffer does not infer a jump from sample differences.
+    pub fn validate_discontinuity(
+        &self,
+        time: f64,
+        left: f64,
+        right: f64,
+        delay: f64,
+        max_delay: Option<f64>,
+    ) -> Result<(), String> {
+        self.discontinuity_sample(time, left, right, delay, max_delay)
+            .map(|_| ())
+    }
+
+    /// Atomically append a declared event with left and right limits. Equal
+    /// values retain a continuous corner as an explicit event. The left
+    /// value closes the incoming interval; the right value starts the outgoing
+    /// interval and is selected exactly at the knot. A time-zero left value
+    /// defines prehistory, including queries strictly before its delayed arrival.
+    pub fn accept_discontinuity(
+        &mut self,
+        time: f64,
+        left: f64,
+        right: f64,
+        delay: f64,
+        max_delay: Option<f64>,
+    ) -> Result<(), String> {
+        let sample = self.discontinuity_sample(time, left, right, delay, max_delay)?;
+        self.candidate = Some(sample);
+        self.apply_validated_commit();
+        Ok(())
+    }
+
+    fn left_value(&self, time: f64) -> Option<f64> {
+        let index = self.left_limits.partition_point(|sample| sample.0 < time);
+        self.left_limits
+            .get(index)
+            .filter(|sample| sample.0 == time)
+            .map(|sample| sample.1)
+    }
+
+    /// Next representable time at or after an accepted jump's exact fixed-delay
+    /// arrival. The scheduler must land this event; interpolation-knot spacing
+    /// itself is not an event and places no timestep-at-most-delay requirement.
+    pub fn next_discontinuity_after(&self, time: f64) -> Result<Option<f64>, String> {
+        if !time.is_finite() || time < 0.0 {
+            return Err("delay arrival query time must be finite and non-negative".into());
+        }
+        let delay = match self.configuration {
+            Some(DelayConfiguration::Fixed { delay }) => delay,
+            Some(DelayConfiguration::Bounded { .. }) => {
+                return Err(
+                    "variable-delay arrivals require the owning solver's delay trajectory".into(),
+                );
+            }
+            None => return Ok(None),
+        };
+        let target = DelayTarget::new(time, delay);
+        let index = self
+            .left_limits
+            .partition_point(|sample| target.at_or_after(sample.0));
+        let Some(&(source_time, _)) = self.left_limits.get(index) else {
+            return Ok(None);
+        };
+        let high = source_time + delay;
+        if !high.is_finite() {
+            return Ok(None);
+        }
+        // Error-free TwoSum: round upward only if binary64 addition landed
+        // before the physical arrival, including delays below the source ulp.
+        let recovered_delay = high - source_time;
+        let low = (source_time - (high - recovered_delay)) + (delay - recovered_delay);
+        let arrival = if low > 0.0 { high.next_up() } else { high };
+        Ok(arrival.is_finite().then_some(arrival))
+    }
+
     /// Commit a candidate for direct users that do not use the VM's two-phase
     /// accepted-state transaction.
     pub fn commit(&mut self) -> Result<(), String> {
@@ -791,6 +944,9 @@ impl DelayBuffer {
             self.configuration = Some(candidate.configuration);
         }
         self.samples.push_back((candidate.time, candidate.value));
+        if let Some(left) = candidate.left_limit {
+            self.left_limits.push_back((candidate.time, left));
+        }
         self.prune(candidate.time, candidate.configuration.retention());
     }
 
@@ -809,18 +965,28 @@ impl DelayBuffer {
         while self.samples.len() >= 2 && self.samples[1].0 < cutoff {
             self.samples.pop_front();
         }
+        if let Some(&(first, _)) = self.samples.front() {
+            while self
+                .left_limits
+                .front()
+                .is_some_and(|sample| sample.0 < first)
+            {
+                self.left_limits.pop_front();
+            }
+        }
     }
 
     /// Clear accepted definition, history, and speculative state.
     pub fn clear(&mut self) {
         self.samples.clear();
+        self.left_limits.clear();
         self.configuration = None;
         self.candidate = None;
     }
 
     /// Allocated sample slots, for solver memory accounting.
     pub fn allocation_capacity(&self) -> usize {
-        self.samples.capacity()
+        self.samples.capacity() + self.left_limits.capacity()
     }
 
     /// Number of retained accepted samples; the candidate is excluded.
@@ -839,10 +1005,27 @@ impl DelayBuffer {
         self.samples.iter().copied()
     }
 
+    /// Accepted (time, left, right) knots, without copying retained history.
+    pub fn accepted_knots(
+        &self,
+    ) -> impl DoubleEndedIterator<Item = (f64, f64, f64)> + ExactSizeIterator + '_ {
+        self.samples
+            .iter()
+            .map(|&(time, right)| (time, self.left_value(time).unwrap_or(right), right))
+    }
+
+    /// Stored left limits only, in strictly increasing accepted-time order.
+    pub fn accepted_left_limits(
+        &self,
+    ) -> impl DoubleEndedIterator<Item = (f64, f64)> + ExactSizeIterator + '_ {
+        self.left_limits.iter().copied()
+    }
+
     pub fn checkpoint(&self) -> DelayCheckpoint {
         DelayCheckpoint {
             configuration: self.configuration,
             samples: self.samples.iter().copied().collect(),
+            left_limits: self.left_limits.iter().copied().collect(),
         }
     }
 
@@ -869,14 +1052,21 @@ impl DelayBuffer {
             return Err("delay history does not end at the solver's accepted time".into());
         }
         let first_time = self.samples.front().expect("nonempty accepted history").0;
-        if !DelayTarget::new(time, configuration.retention()).at_or_after(first_time) {
+        if first_time != 0.0
+            && !DelayTarget::new(time, configuration.retention()).at_or_after(first_time)
+        {
             return Err("delay history is missing its retained interpolation bracket".into());
         }
         Ok(())
     }
 
     pub fn validate_checkpoint(checkpoint: &DelayCheckpoint) -> Result<(), String> {
-        if checkpoint.samples.len() > MAX_DELAY_HISTORY_SAMPLES {
+        if checkpoint
+            .samples
+            .len()
+            .saturating_add(checkpoint.left_limits.len())
+            > MAX_DELAY_HISTORY_SAMPLES
+        {
             return Err(format!(
                 "delay checkpoint exceeds the supported {MAX_DELAY_HISTORY_SAMPLES} samples"
             ));
@@ -891,7 +1081,7 @@ impl DelayBuffer {
                     return Err("configured delay checkpoint has no accepted samples".into());
                 }
             }
-            None if !checkpoint.samples.is_empty() => {
+            None if !checkpoint.samples.is_empty() || !checkpoint.left_limits.is_empty() => {
                 return Err("unconfigured delay checkpoint contains accepted samples".into());
             }
             None => return Ok(()),
@@ -915,6 +1105,23 @@ impl DelayBuffer {
         {
             return Err("delay checkpoint contains a negative sample time".into());
         }
+        let mut previous_left = None;
+        for &(time, left) in &checkpoint.left_limits {
+            if !time.is_finite()
+                || !left.is_finite()
+                || previous_left.is_some_and(|previous| time <= previous)
+            {
+                return Err("delay left limits must be finite and strictly increasing".into());
+            }
+            let index = checkpoint.samples.partition_point(|sample| sample.0 < time);
+            let Some(&(right_time, _)) = checkpoint.samples.get(index) else {
+                return Err("delay left limit has no accepted right sample".into());
+            };
+            if time.to_bits() != right_time.to_bits() {
+                return Err("delay left limit must match an accepted right sample".into());
+            }
+            previous_left = Some(time);
+        }
         Ok(())
     }
 
@@ -924,6 +1131,9 @@ impl DelayBuffer {
         Self::validate_checkpoint(checkpoint)?;
         self.samples.clear();
         self.samples.extend(checkpoint.samples.iter().copied());
+        self.left_limits.clear();
+        self.left_limits
+            .extend(checkpoint.left_limits.iter().copied());
         self.configuration = checkpoint.configuration;
         self.candidate = None;
         Ok(())
@@ -934,6 +1144,7 @@ impl DelayBuffer {
         Self::validate_checkpoint(&checkpoint)?;
         Ok(Self {
             samples: checkpoint.samples.into(),
+            left_limits: checkpoint.left_limits.into(),
             configuration: checkpoint.configuration,
             candidate: None,
         })
