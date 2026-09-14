@@ -3637,7 +3637,17 @@ impl Engine {
             return Err(SimulationError::Aborted);
         }
         Self::ensure_bjt_transient_phase_support(circuit, abort)?;
+        Self::admitted_transient_checkpoint_capability_for_circuit(circuit, abort)
+    }
 
+    /// State-owner census after the caller has performed public admission.
+    fn admitted_transient_checkpoint_capability_for_circuit(
+        circuit: &crate::circuit::CircuitData,
+        abort: &dyn AbortSignal,
+    ) -> Result<TransientCheckpointCapability, SimulationError> {
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
         let mut blockers = Vec::new();
         let mut push = |source, message| {
             blockers.push(TransientCheckpointBlocker::new(source, message));
@@ -4022,12 +4032,34 @@ impl Engine {
         ),
         SimulationError,
     > {
+        Self::ensure_bjt_transient_phase_support(&prepared.circuit, abort)?;
+        self.run_tran_admitted(netlist, checkpoint_netlist, window, abort, plan, prepared)
+    }
+
+    /// The production integration body, after public capability admission.
+    /// Private qualification exercises this same body before expanding admission.
+    #[inline(never)]
+    fn run_tran_admitted(
+        &self,
+        netlist: &Netlist,
+        checkpoint_netlist: &Netlist,
+        window: TransientRunWindow,
+        abort: &dyn AbortSignal,
+        plan: TransientResumePlan<'_>,
+        prepared: PreparedTransientCircuit,
+    ) -> Result<
+        (
+            TransientResult,
+            Option<TransientCheckpoint>,
+            Vec<ScheduledTransientCheckpoint>,
+        ),
+        SimulationError,
+    > {
         let PreparedTransientCircuit {
             mut circuit,
             modified_trapezoidal_coefficients,
             resume_continuation,
         } = prepared;
-        Self::ensure_bjt_transient_phase_support(&circuit, abort)?;
         let TransientRunWindow {
             tstop,
             max_step,
@@ -4070,7 +4102,7 @@ impl Engine {
             // produce: a capability refusal, not a malformed circuit, and one
             // a frontend reports against the roadmap rather than back at the
             // author.
-            Self::transient_checkpoint_capability_for_circuit(&circuit, abort)?
+            Self::admitted_transient_checkpoint_capability_for_circuit(&circuit, abort)?
                 .require_resumable()
                 .map_err(|detail| {
                     SimulationError::unsupported_capability(
@@ -5201,11 +5233,18 @@ impl Engine {
         }
         let mut retained_result_values = Self::transient_result_value_count(&result);
         self.ensure_transient_result_limits(&result, retained_result_values)?;
-        abort.observe_transient_sample(result.observable_sample(
-            &digital_event_codes,
-            &sample_buses,
-            &real_snapshot,
-        ));
+        if !circuit
+            .bjts
+            .devices
+            .iter()
+            .any(|bjt| bjt.legacy_excess_phase_delay() != 0.0)
+        {
+            abort.observe_transient_sample(result.observable_sample(
+                &digital_event_codes,
+                &sample_buses,
+                &real_snapshot,
+            ));
+        }
         let mut t = resume_time;
         let force_accept_protected_nodes = circuit.force_accept_protected_nodes();
         let mut voltage_lte_excluded_nodes = circuit.transient_voltage_lte_excluded_nodes();
@@ -5639,7 +5678,62 @@ impl Engine {
             vbic_snapshot_cache = restored.vbic_snapshot_cache;
         }
 
-        if resume.is_some() {
+        let physical_sources = if bjt_history.phase.iter().any(Option::is_some) {
+            Some(Self::collect_physical_source_events(
+                &circuit,
+                tstop,
+                &self.config.resource_limits,
+                abort,
+            )?)
+        } else {
+            None
+        };
+        let physical_options = charge_event::EventOptions {
+            limits: self.config.resource_limits,
+            solver: matrix.solver_options(),
+            nodal_gmin: transient_baseline_diag_gmin,
+            iterations: self.transient_newton_iteration_budget(false),
+            backtracks: 32,
+            voltage_tolerance: self.voltage_abstol(),
+            current_tolerance: self.current_abstol(),
+            charge_tolerance: self.charge_abstol(),
+            relative_tolerance: self.voltage_reltol(),
+        };
+        // Absolute linkage tolerance in webers, independent of charge/current units.
+        let physical_flux_tolerance = 1e-24;
+        if resume.is_none() && physical_sources.is_some() {
+            let startup = self.transition_physical_startup(
+                &mut circuit,
+                &mut solution,
+                &mut bjt_history,
+                &physical_options,
+                physical_flux_tolerance,
+                abort,
+            )?;
+            log::debug!(
+                "Physical startup source impulses (MNA coordinate, C): {:?}",
+                startup.impulses
+            );
+            self.update_transient_nonlinear_devices(&mut circuit, &solution)?;
+            trapgear.restart_from(&solution);
+            lte_estimator.restart_history_from(&solution);
+            for (trace, value) in result.voltages.iter_mut().zip(&solution[..num_nodes]) {
+                if let Some(first) = trace.first_mut() {
+                    *first = *value;
+                }
+            }
+            for (trace, value) in result
+                .branch_currents
+                .iter_mut()
+                .zip(&solution[num_nodes..])
+            {
+                if let Some(first) = trace.first_mut() {
+                    *first = *value;
+                }
+            }
+        }
+
+        if resume.is_some() || physical_sources.is_some() {
             // Derived branches are initialized before checkpoint injection
             // and before integration-owned junction history exists. Rebuild
             // the seam only after both state owners are authoritative so a
@@ -5661,7 +5755,7 @@ impl Engine {
             }
         }
 
-        if resume.is_some() && record_device_op_traces {
+        if (resume.is_some() || physical_sources.is_some()) && record_device_op_traces {
             // The initial seam report was created before checkpoint injection
             // and before the accepted terminal-current history was installed.
             // Recording at the same sample index overwrites it in place with
@@ -5685,6 +5779,14 @@ impl Engine {
                 ),
             );
             self.ensure_transient_result_limits(&result, retained_result_values)?;
+        }
+
+        if physical_sources.is_some() {
+            abort.observe_transient_sample(result.observable_sample(
+                &digital_event_codes,
+                &sample_buses,
+                &real_snapshot,
+            ));
         }
 
         // Companion stamp slots resolved once against the frozen pattern:
@@ -6062,23 +6164,27 @@ impl Engine {
                     && $hit_breakpoint
                     && !$analysis_final_step
                 {
-                    Self::reseed_reactive_histories_for_restart(
-                        &mut circuit,
-                        &solution,
-                        0.0,
-                        AcceptedJunctionHistoryRestart::Preserve,
-                        TransientDeviceHistories {
-                            bjt: &mut bjt_history,
-                            jfet: &mut jfet_history,
-                            diode: &mut diode_history,
-                            mosfet: &mut mosfet_history,
-                            vdmos: &mut vdmos_history,
-                            b3soi: &mut b3soi_history,
-                            bsim3: &mut bsim3_history,
-                            bsim4: &mut bsim4_history,
-                            ekv26: &mut ekv26_history,
-                        },
-                    );
+                    if physical_sources.is_some() {
+                        Self::restart_physical_event_history(&mut circuit, &mut bjt_history);
+                    } else {
+                        Self::reseed_reactive_histories_for_restart(
+                            &mut circuit,
+                            &solution,
+                            0.0,
+                            AcceptedJunctionHistoryRestart::Preserve,
+                            TransientDeviceHistories {
+                                bjt: &mut bjt_history,
+                                jfet: &mut jfet_history,
+                                diode: &mut diode_history,
+                                mosfet: &mut mosfet_history,
+                                vdmos: &mut vdmos_history,
+                                b3soi: &mut b3soi_history,
+                                bsim3: &mut bsim3_history,
+                                bsim4: &mut bsim4_history,
+                                ekv26: &mut ekv26_history,
+                            },
+                        );
+                    }
                     vbic_snapshot_cache.fill(None);
                     xyce_static_history = None;
                     xyce_direct_static_history = None;
@@ -6436,9 +6542,23 @@ impl Engine {
             if let Some(arrival) = phase_arrival {
                 arrival.ensure_reachable(&circuit, t, timestep.hard_min_dt())?;
             }
-            let pending_exact_event_time = pending_veriloga_event_time
+            let source_event_time = physical_sources
+                .as_ref()
+                .map(|sources| sources.next_after(t, tstop))
+                .transpose()?
+                .flatten();
+            let physical_event_time = source_event_time
                 .into_iter()
                 .chain(phase_arrival.map(|arrival| arrival.time))
+                .reduce(Value::min);
+            if physical_event_time.is_some_and(|time| time - t < timestep.hard_min_dt()) {
+                return Err(SimulationError::Circuit(
+                    "physical source/GP event is below the minimum integration interval".into(),
+                ));
+            }
+            let pending_exact_event_time = pending_veriloga_event_time
+                .into_iter()
+                .chain(physical_event_time)
                 .reduce(Value::min);
             // Progress logging every 2 seconds
             if last_progress_log
@@ -6786,23 +6906,29 @@ impl Engine {
             }
             // Reapply after replay, source bias and interval fitting. Even an
             // addition rounded onto the deadline must use its original clock.
-            if let Some(arrival) = phase_arrival
-                && let Some(limited) = arrival.limit_step(
-                    &circuit,
-                    t,
-                    dt,
-                    candidate_step_time,
-                    timestep.hard_min_dt(),
-                )?
+            if let Some(deadline) = physical_event_time
+                && candidate_step_time >= deadline
             {
-                dt = limited;
-                exact_device_event_time = Some(arrival.time);
+                dt = if let Some(arrival) = phase_arrival.filter(|arrival| arrival.time == deadline)
+                {
+                    arrival
+                        .limit_step(&circuit, t, dt, candidate_step_time, timestep.hard_min_dt())?
+                        .expect("proposal reached the physical deadline")
+                } else {
+                    dt.min(deadline - t)
+                };
+                if dt < timestep.hard_min_dt() {
+                    return Err(SimulationError::Circuit(
+                        "physical event proposal is below the minimum step".into(),
+                    ));
+                }
+                exact_device_event_time = Some(deadline);
                 at_breakpoint = true;
                 locked_step_lands_on_grid = locked_grid
                     .as_ref()
                     .and_then(|grid| grid.get(locked_cursor))
-                    .is_some_and(|target| *target == arrival.time);
-                expected_source_delta = Self::max_expected_source_delta(&circuit, t, arrival.time);
+                    .is_some_and(|target| *target == deadline);
+                expected_source_delta = Self::max_expected_source_delta(&circuit, t, deadline);
             }
             if fixed_method.is_none() {
                 trapgear.set_at_breakpoint(at_breakpoint);
@@ -6816,6 +6942,18 @@ impl Engine {
                 exact_device_event_time.or(exact_grid_time),
             );
             let landed_device_event = exact_device_event_time.is_some();
+            let physical_event = physical_event_time == Some(step_time);
+            let trial_phase_context = bjt::BjtPhaseContext {
+                incoming_arrival: physical_event,
+                input_left_limits: None,
+            };
+            let trial_source_side = if physical_event {
+                crate::circuit::SourceTimeSide::LeftLimit
+            } else if has_bjt_phase_history {
+                crate::circuit::SourceTimeSide::RightLimit
+            } else {
+                crate::circuit::SourceTimeSide::Published
+            };
             // Where the clock stood before this attempt. The accepted time is
             // not necessarily `t + dt`: exact clocks survive arithmetic
             // roundoff, and ordinary non-phase paths may snap breakpoints.
@@ -6987,7 +7125,7 @@ impl Engine {
                     dt,
                     &coeff,
                     xyce_one_step,
-                    crate::circuit::SourceTimeSide::Published,
+                    trial_source_side,
                 );
             }
             if let Some(cache) = diode_stamp_cache.as_mut() {
@@ -7000,7 +7138,7 @@ impl Engine {
                     dt,
                     &coeff,
                     xyce_one_step,
-                    crate::circuit::SourceTimeSide::Published,
+                    trial_source_side,
                 );
             }
             let mut rejected_attempt_nonlinear_state = if circuit.has_nonlinear_devices() {
@@ -7185,7 +7323,11 @@ impl Engine {
             } else {
                 new_solution.clone_from(&solution);
             }
-            circuit.enforce_ideal_voltage_constraints(&mut new_solution, step_time)?;
+            circuit.enforce_ideal_voltage_constraints_on_side(
+                &mut new_solution,
+                step_time,
+                trial_source_side,
+            )?;
             for (i, value) in new_solution.iter_mut().enumerate() {
                 if !value.is_finite() {
                     *value = solution[i];
@@ -7200,7 +7342,11 @@ impl Engine {
                     &force_accept_protected_nodes,
                 );
                 if damped {
-                    circuit.enforce_ideal_voltage_constraints(&mut new_solution, step_time)?;
+                    circuit.enforce_ideal_voltage_constraints_on_side(
+                        &mut new_solution,
+                        step_time,
+                        trial_source_side,
+                    )?;
                 }
                 Self::clip_ideal_output_common_modes(
                     &solution,
@@ -7365,8 +7511,8 @@ impl Engine {
                     Self::adaptive_transient_newton_delta_limit(newton_step_delta_limit, _iter);
                 let newton_stamp_start = DiagnosticTimer::start(diagnostic_timing_enabled);
                 let transient_system_context = residual::TransientSystemContext {
-                    bjt_phase: Default::default(),
-                    source_time_side: crate::circuit::SourceTimeSide::Published,
+                    bjt_phase: trial_phase_context,
+                    source_time_side: trial_source_side,
                     coeff: &coeff,
                     xyce_one_step,
                     xyce_one_step_order2,
@@ -7567,9 +7713,10 @@ impl Engine {
                                     &rollback,
                                 );
                                 new_solution = trial;
-                                circuit.enforce_ideal_voltage_constraints(
+                                circuit.enforce_ideal_voltage_constraints_on_side(
                                     &mut new_solution,
                                     step_time,
+                                    trial_source_side,
                                 )?;
                                 nonlinear_state_matches_new_solution = false;
                                 merit_backtrack = Some((search, rollback));
@@ -7616,7 +7763,11 @@ impl Engine {
                             &rollback,
                         );
                         new_solution = trial;
-                        circuit.enforce_ideal_voltage_constraints(&mut new_solution, step_time)?;
+                        circuit.enforce_ideal_voltage_constraints_on_side(
+                            &mut new_solution,
+                            step_time,
+                            trial_source_side,
+                        )?;
                         nonlinear_state_matches_new_solution = false;
                         merit_backtrack = Some((search, rollback));
                         total_merit_nanos += merit_phase_start.elapsed().as_nanos();
@@ -7867,7 +8018,11 @@ impl Engine {
                                 &force_accept_protected_nodes,
                             );
                             if damped {
-                                circuit.enforce_ideal_voltage_constraints(sol, step_time)?;
+                                circuit.enforce_ideal_voltage_constraints_on_side(
+                                    sol,
+                                    step_time,
+                                    trial_source_side,
+                                )?;
                             }
                             Self::clip_ideal_output_common_modes(
                                 &solution,
@@ -8239,8 +8394,8 @@ impl Engine {
                                     step_time,
                                     dt,
                                     &residual::TransientSystemContext {
-                                        bjt_phase: Default::default(),
-                                        source_time_side: crate::circuit::SourceTimeSide::Published,
+                                        bjt_phase: trial_phase_context,
+                                        source_time_side: trial_source_side,
                                         coeff: &coeff,
                                         xyce_one_step,
                                         xyce_one_step_order2,
@@ -8455,8 +8610,8 @@ impl Engine {
                         step_time,
                         dt,
                         &residual::TransientSystemContext {
-                            bjt_phase: Default::default(),
-                            source_time_side: crate::circuit::SourceTimeSide::Published,
+                            bjt_phase: trial_phase_context,
+                            source_time_side: trial_source_side,
                             coeff: &coeff,
                             xyce_one_step,
                             xyce_one_step_order2,
@@ -8693,7 +8848,7 @@ impl Engine {
                         charge_abstol: self.charge_abstol(),
                         trtol: self.transient_trtol(),
                     },
-                    Default::default(),
+                    trial_phase_context,
                 )
                 .filter(|limit| limit.is_finite() && *limit > 0.0)
             } else {
@@ -9096,7 +9251,7 @@ impl Engine {
                         bsim4_trnqs_coeff: &bsim4_trnqs_coeff,
                     },
                     &vbic_snapshot_cache,
-                    Default::default(),
+                    trial_phase_context,
                 )?
             };
             if let Some(control) = phase_step_control
@@ -9420,6 +9575,7 @@ impl Engine {
                         &solution,
                         &new_solution,
                         step_time,
+                        trial_source_side,
                         ForceAcceptLimits {
                             num_nodes,
                             force_accept_delta_limit,
@@ -9554,6 +9710,11 @@ impl Engine {
                         } else {
                             breakpoints.mark_breakpoint_solved(t)
                         };
+                        let restart_dt = if physical_event {
+                            approach.unwrap_or(dt)
+                        } else {
+                            restart_dt
+                        };
                         let controller_dt =
                             approach.map_or(timestep.dt(), |step| step.max(timestep.dt()));
                         timestep.force_step(restart_dt.min(controller_dt).min(max_step));
@@ -9590,7 +9751,7 @@ impl Engine {
                                 charge_abstol: self.charge_abstol(),
                                 trtol: self.transient_trtol(),
                             },
-                            Default::default(),
+                            trial_phase_context,
                         )
                         .filter(|limit| limit.is_finite() && *limit > 0.0)
                     } else {
@@ -9873,6 +10034,27 @@ impl Engine {
                     let acceptance_phase_start = DiagnosticTimer::start(diagnostic_timing_enabled);
                     let has_external_models =
                         circuit.has_xspice_devices() || circuit.has_any_veriloga_devices();
+                    let outgoing_event = if physical_event {
+                        Some(self.prepare_physical_event(
+                            &circuit, &bjt_history,
+                            state_commit::physical_event::PhysicalEventStep {
+                                incoming: &new_solution, time: t, dt,
+                                phase_events: state_commit::physical_event::PhysicalEventOrders::FromCauses {
+                                    sources: physical_sources.as_ref().expect("physical source owner"),
+                                    accepted_time: step_started_at,
+                                },
+                            },
+                            &physical_options, physical_flux_tolerance, abort,
+                        )?)
+                    } else {
+                        None
+                    };
+                    if let Some(event) = &outgoing_event {
+                        new_solution.clone_from(&event.state().solution);
+                    }
+                    let accepted_phase_context = outgoing_event
+                        .as_ref()
+                        .map_or(trial_phase_context, |event| event.phase_context());
                     let (veriloga_discontinuity, static_history) = self.accept_transient_models(
                         &mut circuit,
                         &mut matrix,
@@ -9899,8 +10081,8 @@ impl Engine {
                             },
                             bsim4_trnqs_coeff: &bsim4_trnqs_coeff,
                             snapshots: AcceptedReactiveSnapshots {
-                                physical_event: None,
-                                bjt_phase: Default::default(),
+                                physical_event: outgoing_event.as_ref(),
+                                bjt_phase: accepted_phase_context,
                                 xyce_one_step_order2,
                                 vbic_snapshots: Some(vbic_snapshot_cache.as_slice()),
                                 capacitor_accepted_states: None,
@@ -10219,8 +10401,19 @@ impl Engine {
             }
 
             // Keep ideal source constraints exact before LTE and state updates.
-            let projected_voltage_sources = circuit
-                .enforce_prescribed_transient_voltage_constraints(&mut new_solution, step_time)?;
+            let projected_voltage_sources =
+                if trial_source_side == crate::circuit::SourceTimeSide::Published {
+                    circuit.enforce_prescribed_transient_voltage_constraints(
+                        &mut new_solution,
+                        step_time,
+                    )?
+                } else {
+                    circuit.enforce_prescribed_transient_voltage_constraints_on_side(
+                        &mut new_solution,
+                        step_time,
+                        trial_source_side,
+                    )?
+                };
             if projected_voltage_sources {
                 nonlinear_state_matches_new_solution = false;
             }
@@ -10338,7 +10531,7 @@ impl Engine {
                             charge_abstol: self.charge_abstol(),
                             trtol: self.transient_trtol(),
                         },
-                        Default::default(),
+                        trial_phase_context,
                     )
                 }
             } else {
@@ -10374,6 +10567,33 @@ impl Engine {
             .then_some(mosfet_companion_charges_scratch.as_slice());
             let has_external_models =
                 circuit.has_xspice_devices() || circuit.has_any_veriloga_devices();
+            let outgoing_event = if physical_event {
+                Some(self.prepare_physical_event(
+                    &circuit,
+                    &bjt_history,
+                    state_commit::physical_event::PhysicalEventStep {
+                        incoming: &new_solution,
+                        time: t,
+                        dt,
+                        phase_events:
+                            state_commit::physical_event::PhysicalEventOrders::FromCauses {
+                                sources: physical_sources.as_ref().expect("physical source owner"),
+                                accepted_time: step_started_at,
+                            },
+                    },
+                    &physical_options,
+                    physical_flux_tolerance,
+                    abort,
+                )?)
+            } else {
+                None
+            };
+            if let Some(event) = &outgoing_event {
+                new_solution.clone_from(&event.state().solution);
+            }
+            let accepted_phase_context = outgoing_event
+                .as_ref()
+                .map_or(trial_phase_context, |event| event.phase_context());
             let (veriloga_discontinuity, static_history) = self.accept_transient_models(
                 &mut circuit,
                 &mut matrix,
@@ -10400,8 +10620,8 @@ impl Engine {
                     },
                     bsim4_trnqs_coeff: &bsim4_trnqs_coeff,
                     snapshots: AcceptedReactiveSnapshots {
-                        physical_event: None,
-                        bjt_phase: Default::default(),
+                        physical_event: outgoing_event.as_ref(),
+                        bjt_phase: accepted_phase_context,
                         xyce_one_step_order2,
                         vbic_snapshots: Some(vbic_snapshot_cache.as_slice()),
                         capacitor_accepted_states: capacitor_accepted_states_valid
@@ -10638,6 +10858,14 @@ impl Engine {
                 } else {
                     breakpoints.mark_breakpoint_solved(t)
                 };
+                // Landing on a physical clock clips an otherwise valid
+                // proposal. The outgoing state has its own solved rates;
+                // restore the interrupted proposal and test its new interval.
+                let restart_dt = if physical_event {
+                    approach.unwrap_or(dt)
+                } else {
+                    restart_dt
+                };
                 let span_ceiling =
                     xyce_breakpoint_span_ceiling.anchor(t, breakpoints.next_after(t), tstop);
                 let restarted_max_step = self
@@ -10658,6 +10886,7 @@ impl Engine {
                 veriloga_refinement_approach_step = None;
             }
             if locked_grid.is_none()
+                && !physical_event
                 && let Some(control) = phase_step_control
                 && control.next_step.is_finite()
                 && control.next_step < timestep.dt()
@@ -11937,6 +12166,9 @@ fn validate_transient_window(tstop: Value, max_step: Value) -> Result<(), Simula
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod physical_dispatch_tests;
 
 #[cfg(test)]
 mod tests {

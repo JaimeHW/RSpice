@@ -152,6 +152,47 @@ impl PreparedPhysicalEvent {
 }
 
 impl Engine {
+    /// Start an integration epoch from accepted outgoing storage, retaining
+    /// finite charge rates and lead currents for observations and restoration.
+    pub(in crate::engine::transient) fn restart_physical_event_history(
+        circuit: &mut crate::CircuitData,
+        history: &mut BjtTransientHistory,
+    ) {
+        circuit
+            .capacitors
+            .v_prev_prev
+            .clone_from(&circuit.capacitors.v_prev);
+        circuit
+            .capacitors
+            .v_prev_prev_prev
+            .clone_from(&circuit.capacitors.v_prev);
+        circuit
+            .inductors
+            .i_prev_prev
+            .clone_from(&circuit.inductors.i_prev);
+        circuit
+            .inductors
+            .i_prev_prev_prev
+            .clone_from(&circuit.inductors.i_prev);
+        history
+            .charge_q_prev_prev
+            .clone_from(&history.charge_q_prev);
+        history
+            .charge_q_prev_prev_prev
+            .clone_from(&history.charge_q_prev);
+        history
+            .dynamic_internal_prev_prev
+            .clone_from(&history.dynamic_internal_prev);
+        history
+            .dynamic_linear_prev_prev
+            .clone_from(&history.dynamic_linear_prev);
+        history.vbe_prev_prev.clone_from(&history.vbe_prev);
+        history.vbc_prev_prev.clone_from(&history.vbc_prev);
+        history.vcs_prev_prev.clone_from(&history.vcs_prev);
+        history.accepted_dt_prev = 0.0;
+        history.accepted_dt_prev_prev = 0.0;
+    }
+
     pub(in crate::engine::transient) fn prepare_physical_event(
         &self,
         circuit: &crate::CircuitData,
@@ -387,10 +428,22 @@ impl Engine {
             }
             let selected = classified.orders[index];
             let phase_sample = if let Some(phase) = phases[index] {
-                let forward = model
+                let input = model
                     .legacy_forward_transport_branch(&internal)
-                    .ok_or_else(|| failure("missing GP input equation"))?
-                    .current;
+                    .ok_or_else(|| failure("missing GP input equation"))?;
+                let outgoing_slope = sum(input
+                    .d_internal
+                    .iter()
+                    .copied()
+                    .zip(internal_rates.iter().copied())
+                    .chain(
+                        input
+                            .d_external
+                            .iter()
+                            .copied()
+                            .zip(external_rates.iter().copied()),
+                    ))?;
+                let forward = input.current;
                 if selected.is_none() && forward != phase.endpoint {
                     return Err(failure(format!(
                         "BJT '{}' changed input without a physical event record",
@@ -403,6 +456,7 @@ impl Engine {
                 });
                 let delay = model.legacy_excess_phase_delay();
                 let sample = AcceptedBjtPhaseSample {
+                    outgoing_slope: Some(outgoing_slope),
                     current: forward,
                     delay,
                     event,

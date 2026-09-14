@@ -223,6 +223,8 @@ impl JfetTransientHistory {
 pub(in crate::engine) struct BjtTransientHistory {
     /// Physical transport memory is independent of Q/CQ integration epochs.
     pub(super) phase: Vec<Option<rspice_veriloga_runtime::transport_delay::DelayBuffer>>,
+    /// Analytic outgoing input slope at the latest physical event anchor.
+    pub(super) phase_outgoing_slopes: Vec<Option<Value>>,
     pub(super) vbe_prev: Vec<Value>,
     pub(super) vbe_prev_prev: Vec<Value>,
     pub(super) ibe_prev: Vec<Value>,
@@ -558,6 +560,7 @@ impl Engine {
             bjt_count,
             &[
                 ("phase", bjt.phase.len()),
+                ("phase_outgoing_slopes", bjt.phase_outgoing_slopes.len()),
                 ("vbe_prev", bjt.vbe_prev.len()),
                 ("vbe_prev_prev", bjt.vbe_prev_prev.len()),
                 ("ibe_prev", bjt.ibe_prev.len()),
@@ -593,6 +596,14 @@ impl Engine {
         )?;
         for (index, device) in circuit.bjts.devices.iter().enumerate() {
             let delay = device.legacy_excess_phase_delay();
+            if let Some(slope) = bjt.phase_outgoing_slopes[index]
+                && (!slope.is_finite() || bjt.phase[index].is_none())
+            {
+                return Err(format!(
+                    "BJT '{}' has an invalid outgoing phase slope",
+                    device.name
+                ));
+            }
             match (&bjt.phase[index], delay == 0.0) {
                 (None, true) => {}
                 (Some(phase), false) => {
@@ -1089,6 +1100,7 @@ D1 b 0 DM
         let circuit = engine.build_circuit(&netlist).expect("fixture builds");
         let bjt_history = BjtTransientHistory {
             phase: vec![None],
+            phase_outgoing_slopes: vec![None],
             vbe_prev: vec![1.0],
             vbe_prev_prev: vec![2.0],
             ibe_prev: vec![3.0],

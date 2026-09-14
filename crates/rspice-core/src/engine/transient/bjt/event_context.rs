@@ -17,6 +17,19 @@ impl<'a> BjtPhaseContext<'a> {
         self,
         history: &'h BjtTransientHistory,
     ) -> Result<BjtPhaseHistoryView<'h, 'a>, SimulationError> {
+        if history.phase_outgoing_slopes.len() != history.phase.len()
+            || history
+                .phase_outgoing_slopes
+                .iter()
+                .zip(&history.phase)
+                .any(|(slope, phase)| {
+                    slope.is_some_and(|slope| !slope.is_finite() || phase.is_none())
+                })
+        {
+            return Err(SimulationError::Circuit(
+                "GP outgoing slopes do not match accepted phase history".into(),
+            ));
+        }
         if self.incoming_arrival && self.input_left_limits.is_some() {
             return Err(SimulationError::Circuit(
                 "incoming GP phase context cannot hold outgoing input limits".into(),

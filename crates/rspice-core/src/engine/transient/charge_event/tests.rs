@@ -10,6 +10,7 @@ fn options() -> EventOptions {
     EventOptions {
         limits: ResourceLimits::default(),
         solver: SolverOptions::default(),
+        nodal_gmin: 0.0,
         iterations: 80,
         backtracks: 32,
         voltage_tolerance: 1e-11,

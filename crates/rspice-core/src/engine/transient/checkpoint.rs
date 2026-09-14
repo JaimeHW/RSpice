@@ -187,7 +187,9 @@ fn checkpoint_operation_result<T>(
 /// Version 45 retains fixed GP transport histories independently of charge-integration epochs.
 /// Version 46 retains separate left limits at native and runtime transport jumps.
 /// Version 47 retains known transport event orders; earlier sided events stay unknown.
-const FORMAT_VERSION: u32 = 47;
+/// Version 48 retains analytic outgoing GP anchor slopes for phase error control.
+const FORMAT_VERSION: u32 = 48;
+const BJT_PHASE_SLOPE_FORMAT_VERSION: u32 = 48;
 const TRANSPORT_EVENT_ORDER_FORMAT_VERSION: u32 = 47;
 const SIDED_TRANSPORT_FORMAT_VERSION: u32 = 46;
 const BJT_PHASE_HISTORY_FORMAT_VERSION: u32 = 45;
@@ -2610,6 +2612,7 @@ fn allocate_bjt_transient_history(
     }
     Ok(BjtTransientHistory {
         phase: values!("accepted BJT phase"),
+        phase_outgoing_slopes: values!("accepted BJT outgoing phase slopes"),
         vbe_prev: values!("accepted BJT vbe_prev"),
         vbe_prev_prev: values!("accepted BJT vbe_prev_prev"),
         ibe_prev: values!("accepted BJT ibe_prev"),
@@ -2866,7 +2869,9 @@ fn read_accepted_junction_transient_history(
         .next()
         .ok_or_else(|| "missing 'accepted_bjt_transient_histories' section".to_string())?;
     let bjt_count = parse_count_header(bjt_header, "accepted_bjt_transient_histories")?;
-    let rows_per_bjt = if version >= BJT_PHASE_HISTORY_FORMAT_VERSION {
+    let rows_per_bjt = if version >= BJT_PHASE_SLOPE_FORMAT_VERSION {
+        4
+    } else if version >= BJT_PHASE_HISTORY_FORMAT_VERSION {
         3
     } else {
         2
@@ -3136,6 +3141,30 @@ fn read_accepted_junction_transient_history(
             } else {
                 None
             });
+        let slope = if version >= BJT_PHASE_SLOPE_FORMAT_VERSION {
+            let line = lines.next().ok_or("missing outgoing GP phase slope")?;
+            let mut fields = line.split_whitespace();
+            if fields.next() != Some("accepted_bjt_transport_slope") {
+                return Err("malformed outgoing GP phase slope".into());
+            }
+            let present = read_history_bool(&mut fields, "BJT", row, "outgoing slope")?;
+            let slope = if present {
+                Some(read_finite_value_field(
+                    &mut fields,
+                    "BJT phase",
+                    "outgoing slope",
+                )?)
+            } else {
+                None
+            };
+            if fields.next().is_some() {
+                return Err("extra outgoing GP phase slope field".into());
+            }
+            slope
+        } else {
+            None
+        };
+        bjt_history.phase_outgoing_slopes.push(slope);
     }
 
     let bjt_dt_line = lines
@@ -3363,6 +3392,7 @@ fn accepted_junction_history_payload_is_empty(
         && checkpoint.bjt_runtime_tags.is_empty()
         && checkpoint.vbic_snapshot_cache.is_empty()
         && bjt.phase.is_empty()
+        && bjt.phase_outgoing_slopes.is_empty()
         && bjt.vbe_prev.is_empty()
         && bjt.vbe_prev_prev.is_empty()
         && bjt.ibe_prev.is_empty()
@@ -3442,6 +3472,7 @@ fn validate_accepted_junction_transient_history_numeric_state(
     let bjt = &checkpoint.bjt_history;
     for (field, actual) in [
         ("phase", bjt.phase.len()),
+        ("phase_outgoing_slopes", bjt.phase_outgoing_slopes.len()),
         ("vbe_prev", bjt.vbe_prev.len()),
         ("vbe_prev_prev", bjt.vbe_prev_prev.len()),
         ("ibe_prev", bjt.ibe_prev.len()),
@@ -3482,6 +3513,13 @@ fn validate_accepted_junction_transient_history_numeric_state(
             return Err(format!(
                 "accepted BJT transient-history field '{field}' has {actual} entries; identity requires {bjt_count}"
             ));
+        }
+    }
+    for (slope, phase) in bjt.phase_outgoing_slopes.iter().zip(&bjt.phase) {
+        if slope.is_some_and(|slope| !slope.is_finite() || phase.is_none()) {
+            return Err(
+                "outgoing GP phase slope requires a finite value and accepted history".into(),
+            );
         }
     }
     if bjt
@@ -7536,6 +7574,7 @@ impl TransientCheckpoint {
             count = count.saturating_add(column.len());
         }
         count = count
+            .saturating_add(bjt.phase_outgoing_slopes.len().saturating_mul(2))
             .saturating_add(bjt.vbe_prev.len())
             .saturating_add(bjt.vbe_prev_prev.len())
             .saturating_add(bjt.ibe_prev.len())
@@ -8094,6 +8133,10 @@ impl TransientCheckpoint {
                     out.push('\n');
                 }
                 None => out.push_str("accepted_bjt_transport 0\n"),
+            }
+            match history.phase_outgoing_slopes[index] {
+                Some(slope) => out.push_str(&format!("accepted_bjt_transport_slope 1 {slope}\n")),
+                None => out.push_str("accepted_bjt_transport_slope 0\n"),
             }
         }
         out.push_str(&format!(
@@ -10084,6 +10127,59 @@ mod tests {
     use crate::engine::Engine;
 
     #[test]
+    fn gp_phase_checkpoint_preserves_outgoing_slope_and_old_unknown_state() {
+        let mut original = sample();
+        original.accepted_junction_history = sample_junction_history();
+        original.accepted_junction_history.bjt_runtime_tags[0] =
+            super::super::GP_PHASE_TRANSIENT_HISTORY_RUNTIME_TAG.into();
+        let mut phase = rspice_veriloga_runtime::transport_delay::DelayBuffer::new(4);
+        phase.accept_sample(0.0, 0.5, original.time, None).unwrap();
+        phase
+            .accept_sample(original.time, 0.75, original.time, None)
+            .unwrap();
+        original.accepted_junction_history.bjt_history.phase[0] = Some(phase);
+        original
+            .accepted_junction_history
+            .bjt_history
+            .phase_outgoing_slopes[0] = Some(-1.25e7);
+        let text = original.to_text();
+        let restored = TransientCheckpoint::from_text(&text).unwrap();
+        assert_eq!(
+            restored.accepted_junction_history.bjt_history,
+            original.accepted_junction_history.bjt_history
+        );
+        let legacy = TransientCheckpoint::from_text(&legacy_text(&original, 47)).unwrap();
+        assert_eq!(
+            legacy
+                .accepted_junction_history
+                .bjt_history
+                .phase_outgoing_slopes,
+            vec![None]
+        );
+        assert_eq!(
+            legacy.accepted_junction_history.bjt_history.phase,
+            original.accepted_junction_history.bjt_history.phase
+        );
+        for fields in ["1 NaN", "1 inf", "2 0", "1", "0 2"] {
+            assert!(
+                TransientCheckpoint::from_text(&text.replace(
+                    "accepted_bjt_transport_slope 1 -12500000",
+                    &format!("accepted_bjt_transport_slope {fields}")
+                ))
+                .is_err(),
+                "{fields}"
+            );
+        }
+        original.accepted_junction_history.bjt_history.phase[0] = None;
+        assert!(
+            original
+                .validate_numeric_state()
+                .unwrap_err()
+                .contains("slope")
+        );
+    }
+
+    #[test]
     fn gp_phase_checkpoint_round_trip_and_wire_validation() {
         use rspice_veriloga_runtime::transport_delay::{
             DelayBuffer, DelayCheckpoint, DelayConfiguration,
@@ -10548,6 +10644,7 @@ mod tests {
             bjt_runtime_tags: vec![super::super::BJT_TRANSIENT_HISTORY_RUNTIME_TAG.to_string()],
             bjt_history: BjtTransientHistory {
                 phase: vec![None],
+                phase_outgoing_slopes: vec![None],
                 vbe_prev: vec![0.61],
                 vbe_prev_prev: vec![0.60],
                 ibe_prev: vec![-1.0e-9],
@@ -11027,6 +11124,11 @@ mod tests {
         let mut output = String::new();
         let mut lines = text.lines();
         while let Some(line) = lines.next() {
+            if version < BJT_PHASE_SLOPE_FORMAT_VERSION
+                && line.starts_with("accepted_bjt_transport_slope ")
+            {
+                continue;
+            }
             if version < BJT_PHASE_HISTORY_FORMAT_VERSION
                 && line.starts_with("accepted_bjt_transport ")
             {
@@ -12567,6 +12669,7 @@ mod tests {
             ..AcceptedJunctionTransientHistoryCheckpoint::default()
         };
         let mandatory_bjt_values = 10
+            + 2 // optional outgoing phase slope, including its presence state
             + 4 * BJT_DYNAMIC_CHARGE_COUNT
             + 2 * BJT_INTERNAL_STATE_DIM
             + 2 * BJT_TRANSIENT_LINEAR_BRANCH_VALUE_COUNT;
@@ -13408,7 +13511,7 @@ mod tests {
     /// asserting current-format behaviour after two renumberings moved it into
     /// the legacy ladder.
     #[cfg(feature = "veriloga")]
-    const RUNTIME_VERILOGA_FORMAT_STATE_CONTRACTS: [(u32, u32); 31] = [
+    const RUNTIME_VERILOGA_FORMAT_STATE_CONTRACTS: [(u32, u32); 32] = [
         (17, 1),
         (18, 1),
         (19, 1),
@@ -13440,6 +13543,7 @@ mod tests {
         (45, 11),
         (46, 12),
         (47, 13),
+        (48, 13),
     ];
 
     #[cfg(feature = "veriloga")]

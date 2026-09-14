@@ -56,6 +56,8 @@ pub(super) struct EventVoltageSource {
 pub(super) struct EventOptions {
     pub limits: ResourceLimits,
     pub solver: SolverOptions,
+    /// The actual transient numerical conductance on electrical nodal rows.
+    pub nodal_gmin: Value,
     pub iterations: usize,
     pub backtracks: usize,
     pub voltage_tolerance: Value,
@@ -66,6 +68,9 @@ pub(super) struct EventOptions {
 
 impl EventOptions {
     fn validate(&self) -> Result<()> {
+        if !self.nodal_gmin.is_finite() || self.nodal_gmin < 0.0 {
+            return Err(error("invalid transient nodal conditioning floor"));
+        }
         if self.iterations == 0
             || self.backtracks == 0
             || ![

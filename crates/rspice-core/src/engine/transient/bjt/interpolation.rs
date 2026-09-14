@@ -51,6 +51,7 @@ impl PhaseInterpolationControl {
 /// accepted timestamps, not integration-order history, determine the estimate.
 /// This is a smooth-signal estimator; discontinuities need sided samples and
 /// scheduled arrivals, and cannot be exempted from history validation.
+#[cfg(test)]
 pub(in crate::engine::transient) fn phase_interpolation_control(
     history: &DelayBuffer,
     time: Value,
@@ -59,7 +60,28 @@ pub(in crate::engine::transient) fn phase_interpolation_control(
     abstol: Value,
     device_index: usize,
 ) -> Result<PhaseInterpolationControl, String> {
-    if !time.is_finite()
+    phase_interpolation_control_with_slope(
+        history,
+        None,
+        time,
+        current,
+        reltol,
+        abstol,
+        device_index,
+    )
+}
+
+pub(in crate::engine::transient) fn phase_interpolation_control_with_slope(
+    history: &DelayBuffer,
+    outgoing_slope: Option<Value>,
+    time: Value,
+    current: Value,
+    reltol: Value,
+    abstol: Value,
+    device_index: usize,
+) -> Result<PhaseInterpolationControl, String> {
+    if outgoing_slope.is_some_and(|slope| !slope.is_finite())
+        || !time.is_finite()
         || !current.is_finite()
         || !reltol.is_finite()
         || reltol < 0.0
@@ -114,6 +136,23 @@ pub(in crate::engine::transient) fn phase_interpolation_control(
         )
         .map_err(|error| format!("phase interpolation divided difference: {error:?}"))?;
         (error, 2)
+    } else if let Some(slope) = outgoing_slope {
+        // An outgoing physical rate belongs to this anchor, even when the
+        // incoming derivative jumped. For f=f0+s*h+a*h*h, the linear
+        // interpolant's midpoint error is (f-f0-s*h)/4. This is the same
+        // quadratic error model as the smooth three-knot estimate above.
+        // Never substitute an incoming secant across a corner for this rate.
+        let defect = ScaledValue::sum_triple_products_ratio(
+            [
+                [s(current), s(1.0), s(1.0)],
+                [s(-previous), s(1.0), s(1.0)],
+                [s(-slope), s(dt), s(1.0)],
+            ]
+            .into_iter(),
+            [[s(4.0), s(1.0), s(1.0)]].into_iter(),
+        )
+        .map_err(|error| format!("phase outgoing-slope interpolation: {error:?}"))?;
+        (defect, 2)
     } else {
         // OP/UIC gives a constant prehistory, not a measured input slope. The
         // first interval is controlled by its change from that anchor. Once

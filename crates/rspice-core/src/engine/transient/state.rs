@@ -313,6 +313,7 @@ impl Engine {
         let n = circuit.bjts.devices.len();
         let mut history = BjtTransientHistory {
             phase: vec![None; n],
+            phase_outgoing_slopes: vec![None; n],
             vbe_prev: Vec::with_capacity(n),
             vbe_prev_prev: Vec::with_capacity(n),
             ibe_prev: Vec::with_capacity(n),
@@ -2196,6 +2197,7 @@ mod tests {
         };
         let mut bjt_history = BjtTransientHistory {
             phase: vec![None],
+            phase_outgoing_slopes: vec![None],
             vbe_prev: vec![1.0],
             vbe_prev_prev: vec![-1.0],
             ibe_prev: vec![101.0],

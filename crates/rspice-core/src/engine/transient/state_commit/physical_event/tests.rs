@@ -5,6 +5,7 @@ fn options() -> charge_event::EventOptions {
     charge_event::EventOptions {
         limits: crate::resource::ResourceLimits::default(),
         solver: crate::solver::SolverOptions::default(),
+        nodal_gmin: 0.0,
         iterations: 80,
         backtracks: 32,
         voltage_tolerance: 1e-11,

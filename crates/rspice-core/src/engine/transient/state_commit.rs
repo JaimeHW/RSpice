@@ -67,6 +67,7 @@ struct AcceptedBjtValues {
 
 #[derive(Clone, Copy)]
 struct AcceptedBjtPhaseSample {
+    outgoing_slope: Option<Value>,
     current: Value,
     delay: Value,
     event: Option<AcceptedBjtPhaseEvent>,
@@ -90,6 +91,9 @@ impl AcceptedBjtPhaseSample {
     }
 
     fn validate(self, phase: &DelayBuffer, time: Value) -> Result<(), String> {
+        if self.outgoing_slope.is_some_and(|slope| !slope.is_finite()) {
+            return Err("nonfinite outgoing GP input slope".into());
+        }
         if let Some(event) = self.runtime_event() {
             phase.validate_event(time, event, self.delay, None)
         } else {
@@ -119,10 +123,11 @@ impl PreparedBjtHistory {
             let Some(sample) = value.phase_sample else {
                 continue;
             };
-            let control = bjt::interpolation::phase_interpolation_control(
+            let control = bjt::interpolation::phase_interpolation_control_with_slope(
                 history.phase[index]
                     .as_ref()
                     .expect("prepared phase history"),
+                history.phase_outgoing_slopes[index],
                 self.accepted_time,
                 sample
                     .event
@@ -530,6 +535,7 @@ impl Engine {
                         .expect("phase owner exists")
                         .left_limit;
                     let sample = AcceptedBjtPhaseSample {
+                        outgoing_slope: None,
                         current: forward.current,
                         delay,
                         event: left_limit.map(|left_limit| AcceptedBjtPhaseEvent {
@@ -566,6 +572,8 @@ impl Engine {
 
     fn commit_bjt_history(history: &mut BjtTransientHistory, prepared: PreparedBjtHistory) {
         for (idx, value) in prepared.values.into_iter().enumerate() {
+            history.phase_outgoing_slopes[idx] =
+                value.phase_sample.and_then(|sample| sample.outgoing_slope);
             if let Some(sample) = value.phase_sample {
                 // Preparation validated this exact sample against this unchanged
                 // accepted buffer; no model work runs during the commit.

@@ -27,6 +27,7 @@ pub(super) fn seed(
         circuit.bjts.len(),
         &[
             history.phase.len(),
+            history.phase_outgoing_slopes.len(),
             history.vbe_prev.len(),
             history.vbe_prev_prev.len(),
             history.ibe_prev.len(),

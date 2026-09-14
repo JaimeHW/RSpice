@@ -34,6 +34,7 @@ impl Engine {
                 })?;
             phase.push(Some(buffer));
         }
+        history.phase_outgoing_slopes = vec![None; phase.len()];
         history.phase = phase;
         Ok(())
     }

@@ -199,6 +199,7 @@ impl Engine {
         previous_solution: &[Value],
         candidate_solution: &[Value],
         accepted_time: Value,
+        source_side: crate::circuit::SourceTimeSide,
         limits: ForceAcceptLimits<'_>,
     ) -> Result<Vec<Value>, SimulationError> {
         let ForceAcceptLimits {
@@ -218,7 +219,11 @@ impl Engine {
                 bounded[i] = old + delta.signum() * force_accept_delta_limit;
             }
         }
-        circuit.enforce_ideal_voltage_constraints(&mut bounded, accepted_time)?;
+        circuit.enforce_ideal_voltage_constraints_on_side(
+            &mut bounded,
+            accepted_time,
+            source_side,
+        )?;
         // Force-accept is a last-resort recovery path, so keep every ideal
         // output supernode close to the previous accepted common mode instead of
         // letting protected source nodes drag a nonphysical midpoint into the

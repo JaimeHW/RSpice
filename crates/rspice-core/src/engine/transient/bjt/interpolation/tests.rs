@@ -12,6 +12,57 @@ fn history(samples: &[(Value, Value)], delay: Value) -> DelayBuffer {
 }
 
 #[test]
+fn phase_interpolation_uses_analytic_outgoing_slope_after_a_corner() {
+    for time_scale in [1e-100, 1.0, 1e100] {
+        for signal_scale in [1e-100, 1.0, 1e100] {
+            for polarity in [-1.0, 1.0] {
+                let buffer = DelayBuffer::from_checkpoint(DelayCheckpoint {
+                    configuration: Some(DelayConfiguration::Fixed {
+                        delay: 4.0 * time_scale,
+                    }),
+                    samples: vec![
+                        (0.0, -10.0 * polarity * signal_scale),
+                        (time_scale, 2.0 * polarity * signal_scale),
+                    ],
+                    left_limits: vec![(time_scale, 100.0 * polarity * signal_scale)],
+                    event_orders: Vec::new(),
+                })
+                .unwrap();
+                let before = buffer.clone();
+                let control = phase_interpolation_control_with_slope(
+                    &buffer,
+                    Some(polarity * signal_scale / time_scale),
+                    1.5 * time_scale,
+                    2.625 * polarity * signal_scale,
+                    0.0,
+                    0.03125 * signal_scale,
+                    0,
+                )
+                .unwrap();
+                // Outgoing f(u)=2+u+u²/2. At u=.25 the chord to u=.5
+                // differs by .03125; the arbitrary incoming slope is irrelevant.
+                assert!(
+                    (control.normalized_error - 1.0).abs() < 1e-12,
+                    "{control:?}"
+                );
+                assert_eq!(buffer, before);
+            }
+        }
+    }
+}
+
+#[test]
+fn phase_interpolation_refuses_nonfinite_outgoing_slope() {
+    let buffer = history(&[(0.0, 1.0)], 1.0);
+    for slope in [Value::NAN, Value::INFINITY, Value::NEG_INFINITY] {
+        assert!(
+            phase_interpolation_control_with_slope(&buffer, Some(slope), 0.1, 1.1, 1e-3, 1e-9, 0)
+                .is_err()
+        );
+    }
+}
+
+#[test]
 fn phase_interpolation_matches_quadratic_midpoint_error_across_units_and_grids() {
     for time_scale in [1e-200, 1.0, 1e200] {
         for signal_scale in [Value::MIN_POSITIVE, 1e-180, 1.0, 1e180] {
