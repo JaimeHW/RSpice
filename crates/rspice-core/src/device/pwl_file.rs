@@ -201,6 +201,101 @@ impl PwlWaveform {
         })
     }
 
+    /// Regular slope on a physical event side, excluding any impulse at a
+    /// repeat seam. Select by forward event clocks; inverse time scaling can
+    /// move an exact knot to the wrong segment after rounding.
+    pub(crate) fn derivative_limit_at_repeating(
+        &self,
+        time: Value,
+        repeat_from: Option<Value>,
+        right: bool,
+        source_delay: Value,
+    ) -> Value {
+        if ![
+            time,
+            source_delay,
+            self.time_scale,
+            self.time_offset,
+            self.value_scale,
+        ]
+        .into_iter()
+        .all(Value::is_finite)
+        {
+            return Value::NAN;
+        }
+        if self.time_scale == 0.0 || self.value_scale == 0.0 {
+            return 0.0;
+        }
+        let forward = self.time_scale > 0.0;
+        let raw_right = right == forward;
+        let physical = |raw: Value| (raw * self.time_scale + self.time_offset) + source_delay;
+        let last = self.times[self.times.len() - 1];
+        let end_clock = physical(last);
+        let repeat = crate::numerics::pwl_repeat_geometry(self.times[0], last, repeat_from)
+            .map(|(start, period)| (start, period * self.time_scale));
+        let mut cycle = 0.0;
+        if let Some((_, period)) = repeat.filter(|(_, p)| p.is_finite() && *p != 0.0) {
+            let center = ((time - end_clock) / period).round() + 1.0;
+            for delta in [-1.0, 0.0, 1.0] {
+                let candidate = center + delta;
+                let at = end_clock + period * (candidate - 1.0);
+                if candidate.is_finite()
+                    && candidate >= 1.0
+                    && candidate > cycle
+                    && (if forward { at < time } else { at > time } || (at == time && raw_right))
+                {
+                    cycle = candidate;
+                }
+            }
+        }
+        let active = if cycle > 0.0 { repeat } else { None };
+        let first_index = active.map_or(0, |(start, _)| {
+            self.times.partition_point(|&raw| raw < start)
+        });
+        let upper = first_index
+            + self.times[first_index..].partition_point(|&raw| {
+                let at = active.map_or_else(
+                    || physical(raw),
+                    |(start, period)| {
+                        crate::numerics::pwl_event_clock(
+                            physical(raw),
+                            physical(start),
+                            end_clock,
+                            period,
+                            cycle,
+                        )
+                    },
+                );
+                (if forward { at < time } else { at > time }) || (at == time && raw_right)
+            });
+        // A fractional repeat start lies inside its original segment. Its
+        // slope is that segment's slope, without rounding an interpolated
+        // virtual endpoint or allocating a transformed waveform.
+        if upper == 0 || upper == self.times.len() {
+            return 0.0;
+        }
+        use rspice_veriloga_runtime::arithmetic::ScaledValue as S;
+        S::sum_products_div(
+            [
+                [S::new(self.times[upper]), S::new(1.0)],
+                [S::new(-self.times[upper - 1]), S::new(1.0)],
+            ]
+            .into_iter(),
+            S::new(1.0),
+        )
+        .and_then(|width| {
+            S::sum_products_div(
+                [
+                    [S::new(self.values[upper]), S::new(self.value_scale)],
+                    [S::new(-self.values[upper - 1]), S::new(self.value_scale)],
+                ]
+                .into_iter(),
+                width.multiply(S::new(self.time_scale)),
+            )
+        })
+        .map_or(Value::NAN, |value| value.binary64())
+    }
+
     /// Right-hand source slope in output units per second. A repeat boundary
     /// with a value jump has no finite slope at its published value.
     pub(crate) fn right_derivative_at_repeating(

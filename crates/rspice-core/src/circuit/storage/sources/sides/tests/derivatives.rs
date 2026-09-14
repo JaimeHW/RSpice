@@ -240,7 +240,7 @@ fn physical_source_slopes_do_not_invent_higher_distributional_derivatives() {
 }
 
 #[test]
-fn physical_source_slopes_refuse_unqualified_event_clocks_and_invalid_times() {
+fn physical_source_slopes_refuse_missing_files_invalid_patterns_and_invalid_times() {
     let specs = [
         SourceSpec::PwlFile {
             path: "not-loaded-for-an-unqualified-slope.csv".into(),
@@ -258,7 +258,7 @@ fn physical_source_slopes_refuse_unqualified_event_clocks_and_invalid_times() {
             rise: 0.1,
             fall: 0.1,
             sample: 1.0,
-            data: "B10".into(),
+            data: "B1X".into(),
             repeat_count: -1,
         },
     ];

@@ -2,6 +2,8 @@
 
 use super::*;
 
+mod pat;
+
 fn before(time: Value, boundary: Value, side: SourceTimeSide) -> bool {
     time < boundary || (time == boundary && side == SourceTimeSide::LeftLimit)
 }
@@ -50,6 +52,24 @@ fn segment_component<const DERIVATIVE: bool>(
     } else {
         interpolate_at(time, left, right)
     }
+}
+
+fn shifted_segment_value(
+    time: Value,
+    delay: Value,
+    period: Value,
+    cycle: Value,
+    left: (Value, Value),
+    right: (Value, Value),
+) -> Value {
+    // Event clocks select the interval. Evaluate the ramp in authored time:
+    // adding a large delay to its endpoints must not change its duration.
+    let weight = rspice_veriloga_runtime::arithmetic::sum_products_ratio(
+        [(time, 1.0), (delay, -1.0), (left.0, -1.0), (period, -cycle)].into_iter(),
+        [(right.0, 1.0), (left.0, -1.0)].into_iter(),
+    )
+    .unwrap_or(Value::NAN);
+    interpolate(left.1, right.1, weight)
 }
 
 impl VoltageSources {
@@ -247,7 +267,7 @@ impl VoltageSources {
             };
         }
         if upper == 0 {
-            let Some((start, _)) = active else {
+            let Some((start, period)) = active else {
                 return if DERIVATIVE { 0.0 } else { points[0].1 };
             };
             let value = Self::pwl_raw_limit(points, start, SourceTimeSide::RightLimit);
@@ -257,7 +277,7 @@ impl VoltageSources {
             if DERIVATIVE {
                 return segment_component::<true>(start, (start, value), tail[0]);
             }
-            return segment_component::<false>(time, (base, value), (clock(tail[0].0), tail[0].1));
+            return shifted_segment_value(time, delay, period, cycle, (start, value), tail[0]);
         }
         if upper == tail.len() {
             return if DERIVATIVE { 0.0 } else { tail[upper - 1].1 };
@@ -269,7 +289,14 @@ impl VoltageSources {
             // delay into those clocks must not change the authored slope.
             segment_component::<true>(time, (t0, v0), (t1, v1))
         } else {
-            segment_component::<false>(time, (clock(t0), v0), (clock(t1), v1))
+            shifted_segment_value(
+                time,
+                delay,
+                active.map_or(0.0, |(_, period)| period),
+                cycle,
+                (t0, v0),
+                (t1, v1),
+            )
         }
     }
 
@@ -293,7 +320,7 @@ impl VoltageSources {
         interpolate_at(time, points[upper - 1], points[upper])
     }
 
-    pub(super) fn pwl_file_limit(
+    pub(super) fn pwl_file_limit<const DERIVATIVE: bool>(
         waveform: &crate::device::pwl_file::PwlWaveform,
         time: Value,
         delay: Value,
@@ -302,6 +329,13 @@ impl VoltageSources {
     ) -> Value {
         if before(time, delay, side) {
             0.0
+        } else if DERIVATIVE {
+            waveform.derivative_limit_at_repeating(
+                time,
+                repeat_from,
+                side == SourceTimeSide::RightLimit,
+                delay,
+            )
         } else {
             waveform.limit_at_repeating(
                 time,

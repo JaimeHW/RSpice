@@ -313,15 +313,6 @@ impl VoltageSources {
         use crate::netlist::SourceSpec;
         use std::f64::consts::PI;
 
-        if DERIVATIVE
-            && side != SourceTimeSide::Published
-            && matches!(spec, SourceSpec::PwlFile { .. } | SourceSpec::Pat { .. })
-        {
-            // Their transformed/repeated event clocks still need a sided
-            // slope selector. Do not mistake the published outgoing slope
-            // for an incoming derivative or a certified regular event rate.
-            return Value::NAN;
-        }
         match spec {
             SourceSpec::Distortion { inner, .. } => {
                 Self::source_time_component_on_side::<DERIVATIVE>(
@@ -569,8 +560,14 @@ impl VoltageSources {
                 repeat_from,
             } => {
                 if let Some(waveform) = pwl_waveform {
-                    if !DERIVATIVE && side != SourceTimeSide::Published {
-                        return Self::pwl_file_limit(waveform, time, *delay, *repeat_from, side);
+                    if side != SourceTimeSide::Published {
+                        return Self::pwl_file_limit::<DERIVATIVE>(
+                            waveform,
+                            time,
+                            *delay,
+                            *repeat_from,
+                            side,
+                        );
                     }
                     return if time < *delay {
                         0.0
@@ -596,8 +593,8 @@ impl VoltageSources {
                     resource_limits,
                 ) {
                     Ok(waveform) => {
-                        if !DERIVATIVE && side != SourceTimeSide::Published {
-                            return Self::pwl_file_limit(
+                        if side != SourceTimeSide::Published {
+                            return Self::pwl_file_limit::<DERIVATIVE>(
                                 &waveform,
                                 time,
                                 *delay,
@@ -639,17 +636,30 @@ impl VoltageSources {
                 sample,
                 data,
                 repeat_count,
-            } => Self::pat_time_component::<DERIVATIVE>(
-                *vhi,
-                *vlo,
-                *delay,
-                *rise,
-                *fall,
-                *sample,
-                data,
-                *repeat_count,
-                time,
-            ),
+            } => {
+                if side != SourceTimeSide::Published {
+                    Self::pat_limit::<DERIVATIVE>(
+                        [*vhi, *vlo],
+                        [*delay, *rise, *fall, *sample],
+                        data,
+                        *repeat_count,
+                        time,
+                        side,
+                    )
+                } else {
+                    Self::pat_time_component::<DERIVATIVE>(
+                        *vhi,
+                        *vlo,
+                        *delay,
+                        *rise,
+                        *fall,
+                        *sample,
+                        data,
+                        *repeat_count,
+                        time,
+                    )
+                }
+            }
             SourceSpec::Exp {
                 v1,
                 v2,

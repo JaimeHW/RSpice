@@ -2,6 +2,7 @@ use super::*;
 use crate::config::SpiceDialect;
 use crate::netlist::SourceSpec;
 
+mod clock_paths;
 mod derivatives;
 
 fn sources(spec: SourceSpec, dialect: SpiceDialect) -> (VoltageSources, CurrentSources) {
