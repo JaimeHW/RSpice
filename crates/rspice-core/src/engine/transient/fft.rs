@@ -11,6 +11,10 @@ use crate::{ResourceKind, ResourceLimitError, Value};
 use rustfft::{FftPlanner, num_complex::Complex};
 use std::f64::consts::PI;
 
+#[cfg(test)]
+mod current_impulse_tests;
+mod current_impulses;
+
 pub(super) const FFT_RETAINED_VALUES_PER_BIN: usize = 5;
 pub(super) const FFT_RETAINED_VALUES_PER_HARMONIC: usize = 4;
 pub(super) const FFT_RETAINED_METRIC_VALUES: usize = 8;
@@ -113,6 +117,7 @@ pub(super) fn evaluate(
             physical_type,
             &result.time,
             &values,
+            Some((netlist, result)),
             transient_stop,
             &mut planner,
             abort,
@@ -198,6 +203,7 @@ fn evaluate_one(
     physical_type: &'static str,
     time: &[Value],
     values: &[Value],
+    current_record: Option<(&Netlist, &TransientResult)>,
     transient_stop: Value,
     planner: &mut FftPlanner<Value>,
     abort: &dyn AbortSignal,
@@ -230,6 +236,32 @@ fn evaluate_one(
     } else {
         TransientFftStatus::Complete
     };
+    let impulses = if status.is_complete()
+        && let Some((netlist, result)) = current_record
+    {
+        use crate::analysis::measure_signals::current_observation;
+        let spec = match &analysis.output {
+            crate::netlist::FftOutput::Probe(spec) => spec.clone(),
+            crate::netlist::FftOutput::Expression(expression) => format!("{{{expression}}}"),
+        };
+        let observation = current_observation::resolve_with_coverage(
+            Some(netlist),
+            result,
+            &spec,
+            (start, stop),
+            abort,
+        )
+        .map_err(|error| current_observation_error(index, error))?;
+        // Finite DFT samples stop one spacing before STOP. Complete current
+        // coverage additionally needs every accepted event through STOP.
+        if observation.observes_current && stop > history_stop {
+            return Err(request_error(index,
+                "current impulse history does not cover the entire requested (START, STOP] interval".into()));
+        }
+        observation.terms
+    } else {
+        Vec::new()
+    };
 
     let mut input = Vec::new();
     input
@@ -246,7 +278,7 @@ fn evaluate_one(
         if sample.is_multiple_of(64) && abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }
-        let window = window_coefficient(analysis.window, sample, point_count, denominator);
+        let window = window_coefficient(analysis.window, sample, denominator);
         window_sum += window;
         if !status.is_complete() {
             continue;
@@ -310,6 +342,16 @@ fn evaluate_one(
             };
             *coefficient *= one_sided_scale;
         }
+        current_impulses::add_to_bins(
+            &mut input,
+            &impulses,
+            analysis,
+            mode,
+            transient_stop,
+            coherent_gain,
+            abort,
+        )
+        .map_err(|error| current_observation_error(index, error))?;
         if format == FftFormat::Normalized {
             let largest = input
                 .iter()
@@ -615,16 +657,20 @@ fn interpolate_at(
     Some(values[interval] + fraction * (values[next] - values[interval]))
 }
 
-fn window_coefficient(window: FftWindow, index: usize, points: usize, denominator: Value) -> Value {
+fn window_coefficient(window: FftWindow, index: usize, denominator: Value) -> Value {
+    window_coefficient_at_position(window, index as Value, denominator)
+}
+
+fn window_coefficient_at_position(window: FftWindow, index: Value, denominator: Value) -> Value {
     if window == FftWindow::Rectangular {
         return 1.0;
     }
-    let x = index as Value / denominator;
+    let x = index / denominator;
     let cosine = |multiple: Value| (multiple * 2.0 * PI * x).cos();
     match window {
         FftWindow::Rectangular => 1.0,
         FftWindow::Bartlett => {
-            if (index as Value) < 0.5 * (points - 1) as Value {
+            if index < 0.5 * denominator {
                 2.0 * x
             } else {
                 2.0 - 2.0 * x
@@ -674,7 +720,7 @@ pub fn transient_fft_window_coherent_gain(
         if index.is_multiple_of(64) && abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }
-        window_sum += window_coefficient(window, index, points, denominator);
+        window_sum += window_coefficient(window, index, denominator);
     }
     let coherent_gain = window_sum / points as Value;
     if !coherent_gain.is_finite() || coherent_gain <= 0.0 {
@@ -723,6 +769,18 @@ fn request_error(index: usize, detail: String) -> SimulationError {
     SimulationError::Circuit(format!(".FFT request {}: {detail}", index + 1))
 }
 
+fn current_observation_error(
+    index: usize,
+    error: crate::analysis::measure_signals::current_observation::CurrentObservationError,
+) -> SimulationError {
+    match error {
+        crate::analysis::measure_signals::current_observation::CurrentObservationError::Aborted => {
+            SimulationError::Aborted
+        }
+        error => request_error(index, error.to_string()),
+    }
+}
+
 fn allocation_error(allocation: &str) -> SimulationError {
     SimulationError::Circuit(format!(
         ".FFT could not reserve memory for its {allocation}"
@@ -755,7 +813,7 @@ mod tests {
         ];
         for window in windows {
             let coefficients = (0..64)
-                .map(|index| window_coefficient(window, index, 64, 63.0))
+                .map(|index| window_coefficient(window, index, 63.0))
                 .collect::<Vec<_>>();
             assert!(
                 coefficients
@@ -848,6 +906,7 @@ mod tests {
             "voltage",
             &time,
             &values,
+            None,
             1.0,
             &mut planner,
             &NoAbort,

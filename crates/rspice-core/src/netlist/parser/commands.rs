@@ -3679,6 +3679,7 @@ fn parse_fft_command(
             stream.advance();
             FftOutput::Expression(expression)
         }
+        TokenKind::AtSign => FftOutput::Probe(parse_meas_signal(stream, line_num, params)?),
         TokenKind::Ident(_) => {
             let probe = parse_meas_signal(stream, line_num, params)?;
             validate_fft_probe(&probe, line_num)?;

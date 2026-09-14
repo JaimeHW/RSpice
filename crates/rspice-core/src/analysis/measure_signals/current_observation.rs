@@ -31,6 +31,12 @@ pub(crate) struct CurrentImpulseContribution<'a> {
     pub(crate) weight: Value,
 }
 
+#[derive(Default)]
+pub(crate) struct ResolvedCurrentObservation<'a> {
+    pub(crate) terms: Vec<CurrentImpulseContribution<'a>>,
+    pub(crate) observes_current: bool,
+}
+
 fn failure(detail: impl Into<String>) -> CurrentObservationError {
     CurrentObservationError::Invalid {
         detail: detail.into(),
@@ -70,6 +76,7 @@ struct Resolver<'a, 'b> {
     abort: &'b dyn AbortSignal,
     extent: (Value, Value),
     window: (Value, Value),
+    observes_current: std::cell::Cell<bool>,
 }
 
 impl<'a> Resolver<'a, '_> {
@@ -122,6 +129,7 @@ impl<'a> Resolver<'a, '_> {
             }
             return Ok(Form::default());
         };
+        self.observes_current.set(true);
         if !trace.complete {
             return Err(failure(format!(
                 "current '{authored}' has an incomplete impulse history"
@@ -342,11 +350,21 @@ pub(crate) fn resolve<'a>(
     window: (Value, Value),
     abort: &dyn AbortSignal,
 ) -> Result<Vec<CurrentImpulseContribution<'a>>, CurrentObservationError> {
+    resolve_with_coverage(netlist, result, spec, window, abort).map(|resolved| resolved.terms)
+}
+
+pub(crate) fn resolve_with_coverage<'a>(
+    netlist: Option<&Netlist>,
+    result: &'a TransientResult,
+    spec: &str,
+    window: (Value, Value),
+    abort: &dyn AbortSignal,
+) -> Result<ResolvedCurrentObservation<'a>, CurrentObservationError> {
     if abort.is_aborted() {
         return Err(CurrentObservationError::Aborted);
     }
     let Some(traces) = result.current_impulses.as_deref() else {
-        return Ok(Vec::new());
+        return Ok(ResolvedCurrentObservation::default());
     };
     let mut aliases: HashMap<String, Option<usize>> = HashMap::new();
     aliases
@@ -428,6 +446,7 @@ pub(crate) fn resolve<'a>(
             ))?,
         ),
         window,
+        observes_current: std::cell::Cell::new(false),
     };
     let trimmed = spec.trim();
     let terms = if let Some(body) = trimmed
@@ -468,7 +487,10 @@ pub(crate) fn resolve<'a>(
     if abort.is_aborted() {
         return Err(CurrentObservationError::Aborted);
     }
-    Ok(terms)
+    Ok(ResolvedCurrentObservation {
+        terms,
+        observes_current: resolver.observes_current.get(),
+    })
 }
 
 #[cfg(test)]

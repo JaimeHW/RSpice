@@ -617,6 +617,11 @@ impl TransientFftStatus {
 }
 
 /// Typed result of one source-authored transient `.FFT` directive.
+///
+/// Physical current observations include exact charge-event contributions on
+/// `(start_time, stop_time]`, before normalization and metrics. Finite samples
+/// retain the DFT record below. Both contributions use the same coherent gain
+/// and one-sided calibration (DC and the final Nyquist bin are not doubled).
 #[derive(Debug, Clone, PartialEq)]
 pub struct TransientFftResult {
     /// Incomplete requests retain their identity and transform configuration,
