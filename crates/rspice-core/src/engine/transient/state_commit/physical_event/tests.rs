@@ -224,7 +224,7 @@ fn physical_event_acceptance_requires_a_record_for_a_changed_gp_input() {
                 incoming: &incoming,
                 time: 1.0,
                 dt: 1.0,
-                phase_events: &[false],
+                phase_events: &[None],
             },
             &options(),
             1e-20,
@@ -262,7 +262,7 @@ fn physical_event_acceptance_keeps_native_gp_charge_rates_and_total_lead_current
                         incoming: &incoming,
                         time: 1.0,
                         dt: 1.0,
-                        phase_events: &[true],
+                        phase_events: &[Some(DelayEventOrder::Unknown)],
                     },
                     &options(),
                     1e-20,
@@ -324,7 +324,7 @@ fn physical_event_acceptance_rejects_stale_state_and_phase_without_history_rotat
                 incoming: &incoming,
                 time: 1.0,
                 dt: 1.0,
-                phase_events: &[true],
+                phase_events: &[Some(DelayEventOrder::Unknown)],
             },
             &options(),
             1e-20,
@@ -369,4 +369,270 @@ fn physical_event_acceptance_rejects_stale_state_and_phase_without_history_rotat
     );
     assert_eq!(history, advanced);
     assert_eq!(circuit.capacitors.i_prev, cap_before);
+}
+
+#[test]
+fn physical_event_acceptance_preserves_per_device_orders_and_ordinary_samples() {
+    use DelayEventOrder::{AtLeast, Unknown};
+    for (kind, polarity) in [("NPN", 1.0), ("PNP", -1.0)] {
+        let (engine, mut circuit, mut matrix, incoming, mut history) = fixture(&format!(
+            "ordered GP source corners\nVc c 0 0\nV1 b1 0 PWL(0 0 1 0 2 {})\nV2 b2 0 PWL(0 0 1 0 2 {})\nV3 b3 0 PWL(0 0 1 0 2 {})\nV4 b4 0 0\nQ1 c b1 0 qm\nQ2 c b2 0 qm\nQ3 c b3 0 qm\nQ4 c b4 0 qm\nQ5 c b4 0 plain\nC1 b1 0 1p\n.model qm {kind}(IS=1e-16 TF=1n PTF=30 CJE=1p CJC=.2p)\n.model plain {kind}(IS=1e-16)\n.end\n",
+            0.1 * polarity,
+            0.2 * polarity,
+            0.3 * polarity
+        ));
+        // The three ideal base voltages are continuous at the start of their
+        // ramps, so the GP forward input is continuous. Bound zero and Unknown
+        // deliberately retain less information than this fixture establishes.
+        let orders = [
+            Some(AtLeast(1)),
+            Some(AtLeast(0)),
+            Some(Unknown),
+            None,
+            None,
+        ];
+        let before = history.clone();
+        let point = engine
+            .prepare_physical_event(
+                &circuit,
+                &history,
+                PhysicalEventStep {
+                    incoming: &incoming,
+                    time: 1.0,
+                    dt: 1.0,
+                    phase_events: &orders,
+                },
+                &options(),
+                1e-20,
+                &NoAbort,
+            )
+            .unwrap();
+        assert_eq!(history, before);
+        for (index, slope) in [0.1, 0.2, 0.3].into_iter().enumerate() {
+            let base = circuit.bjts.devices[index].node_base - 1;
+            close(
+                point.state.coordinate_rates[base].unwrap(),
+                slope * polarity,
+                1e-14,
+            );
+        }
+        let mut solution = point.state.solution.clone();
+        assert!(
+            accept(
+                &engine,
+                &mut circuit,
+                &mut matrix,
+                &mut history,
+                &point,
+                &mut solution
+            )
+            .unwrap()
+            .0
+        );
+        for (index, expected) in orders[..4].iter().copied().enumerate() {
+            let phase = history.phase[index].as_ref().unwrap();
+            let image = phase.checkpoint();
+            assert_eq!(image.left_limits.len(), usize::from(expected.is_some()));
+            assert_eq!(
+                image.event_orders,
+                match expected {
+                    Some(AtLeast(order)) => vec![(1.0, order)],
+                    _ => vec![],
+                }
+            );
+            let restored = DelayBuffer::from_checkpoint(image.clone()).unwrap();
+            assert_eq!(restored.checkpoint(), image);
+            let arrival = phase.next_event_after(1.0).unwrap();
+            assert_eq!(arrival, restored.next_event_after(1.0).unwrap());
+            assert_eq!(arrival.map(|event| event.order), expected);
+            if let Some(arrival) = arrival {
+                assert!(arrival.time > 1.0);
+            }
+        }
+        assert!(history.phase[4].is_none());
+        // This known current is reconstructed from the outgoing ramp rate,
+        // despite an exactly zero capacitor voltage at the corner.
+        close(circuit.capacitors.i_prev[0], polarity * 1e-13, 1e-25);
+    }
+}
+
+#[test]
+fn physical_event_acceptance_rejects_positive_order_on_a_later_gp_value_jump() {
+    use DelayEventOrder::AtLeast;
+    let (engine, mut circuit, mut matrix, incoming, mut history) = fixture(
+        "inconsistent GP event order\nVc c 0 0\nV1 b1 0 PWL(0 0 1 0 2 .1)\nV2 b2 0 PWL(0 0 1 0 1 .01)\nQ1 c b1 0 qm\nQ2 c b2 0 qm\nC1 b1 0 1p\n.model qm NPN(IS=1e-16 TF=1n PTF=30 CJE=1p CJC=.2p)\n.end\n",
+    );
+    let before = history.clone();
+    let caps = format!("{:?}", circuit.capacitors);
+    let prepare = |orders: &[Option<DelayEventOrder>]| {
+        engine.prepare_physical_event(
+            &circuit,
+            &history,
+            PhysicalEventStep {
+                incoming: &incoming,
+                time: 1.0,
+                dt: 1.0,
+                phase_events: orders,
+            },
+            &options(),
+            1e-20,
+            &NoAbort,
+        )
+    };
+    let error = prepare(&[Some(AtLeast(1)), Some(AtLeast(1))])
+        .err()
+        .unwrap();
+    assert!(
+        error
+            .to_string()
+            .contains("positive delay event order requires equal"),
+        "{error}"
+    );
+    assert_eq!(history, before);
+    assert_eq!(format!("{:?}", circuit.capacitors), caps);
+    let point = prepare(&[Some(AtLeast(1)), Some(AtLeast(0))]).unwrap();
+    let mut solution = point.state.solution.clone();
+    accept(
+        &engine,
+        &mut circuit,
+        &mut matrix,
+        &mut history,
+        &point,
+        &mut solution,
+    )
+    .unwrap();
+    for (index, order) in [1, 0].into_iter().enumerate() {
+        let image = history.phase[index].as_ref().unwrap().checkpoint();
+        assert_eq!(image.event_orders, vec![(1.0, order)]);
+        assert_eq!(image.left_limits.len(), 1);
+        if order == 0 {
+            assert_ne!(image.left_limits[0].1, image.samples.last().unwrap().1);
+        }
+    }
+}
+
+#[test]
+fn physical_event_acceptance_keeps_order_metadata_private_until_final_validation() {
+    let (engine, mut circuit, mut matrix, incoming, mut history) = fixture(
+        "ordered GP rejected acceptance\nVc c 0 0\nVb b 0 PWL(0 0 1 0 2 .1)\nQ1 c b 0 qm\nC1 b 0 1p\n.model qm NPN(IS=1e-16 TF=1n PTF=30 CJE=1p CJC=.2p)\n.end\n",
+    );
+    let point = engine
+        .prepare_physical_event(
+            &circuit,
+            &history,
+            PhysicalEventStep {
+                incoming: &incoming,
+                time: 1.0,
+                dt: 1.0,
+                phase_events: &[Some(DelayEventOrder::AtLeast(1))],
+            },
+            &options(),
+            1e-20,
+            &NoAbort,
+        )
+        .unwrap();
+    let before = history.clone();
+    let caps = format!("{:?}", circuit.capacitors);
+    let mut solution = point.state.solution.clone();
+    let base = circuit.bjts.devices[0].node_base - 1;
+    solution[base] = 0.01;
+    let error = accept(
+        &engine,
+        &mut circuit,
+        &mut matrix,
+        &mut history,
+        &point,
+        &mut solution,
+    )
+    .unwrap_err();
+    assert!(
+        error.to_string().contains("prepared event does not match"),
+        "{error}"
+    );
+    assert_eq!(history, before);
+    assert_eq!(format!("{:?}", circuit.capacitors), caps);
+    assert!(
+        history.phase[0]
+            .as_ref()
+            .unwrap()
+            .next_event_after(0.0)
+            .unwrap()
+            .is_none()
+    );
+    solution.clone_from(&point.state.solution);
+    accept(
+        &engine,
+        &mut circuit,
+        &mut matrix,
+        &mut history,
+        &point,
+        &mut solution,
+    )
+    .unwrap();
+    let image = history.phase[0].as_ref().unwrap().checkpoint();
+    assert_eq!(image.event_orders, vec![(1.0, 1)]);
+    assert_eq!(image.left_limits, vec![(1.0, 0.0)]);
+    assert_eq!(image.samples.len(), 2);
+}
+
+#[test]
+fn physical_event_acceptance_preflights_order_storage_before_history_rotation() {
+    use rspice_veriloga_runtime::transport_delay::MAX_DELAY_HISTORY_SAMPLES;
+    let (engine, mut circuit, mut matrix, incoming, mut history) = fixture(
+        "ordered GP storage budget\nVc c 0 0\nV1 b1 0 PWL(0 0 1 0 2 .1)\nV2 b2 0 PWL(0 0 1 0 2 .1)\nQ1 c b1 0 qm\nQ2 c b2 0 qm\nC1 b1 0 1p\n.model qm NPN(IS=1e-16 TF=4 PTF=30 CJE=1p CJC=.2p)\n.end\n",
+    );
+    let mut image = history.phase[1].as_ref().unwrap().checkpoint();
+    // Both the existing samples and the new event are inside the configured
+    // horizon. Two slots fit a right sample and left limit; the known-order
+    // record needs a third slot and must be rejected during preparation.
+    let count = MAX_DELAY_HISTORY_SAMPLES - 2;
+    image.samples = (0..count)
+        .map(|i| (i as Value / (2 * count) as Value, 0.0))
+        .collect();
+    history.phase[1] = Some(DelayBuffer::from_checkpoint(image).unwrap());
+    let before = history.clone();
+    let caps = format!("{:?}", circuit.capacitors);
+    let prepare = |order| {
+        engine.prepare_physical_event(
+            &circuit,
+            &history,
+            PhysicalEventStep {
+                incoming: &incoming,
+                time: 1.0,
+                dt: 1.0,
+                phase_events: &[Some(DelayEventOrder::AtLeast(1)), Some(order)],
+            },
+            &options(),
+            1e-20,
+            &NoAbort,
+        )
+    };
+    let error = prepare(DelayEventOrder::AtLeast(1)).err().unwrap();
+    assert!(
+        error
+            .to_string()
+            .contains("delay history requires more than"),
+        "{error}"
+    );
+    assert_eq!(history, before);
+    assert_eq!(format!("{:?}", circuit.capacitors), caps);
+    let point = prepare(DelayEventOrder::Unknown).unwrap();
+    let mut solution = point.state.solution.clone();
+    accept(
+        &engine,
+        &mut circuit,
+        &mut matrix,
+        &mut history,
+        &point,
+        &mut solution,
+    )
+    .unwrap();
+    assert_eq!(
+        history.phase[0].as_ref().unwrap().checkpoint().event_orders,
+        vec![(1.0, 1)]
+    );
+    let phase = history.phase[1].as_ref().unwrap();
+    assert_eq!(phase.accepted_sample_count(), count + 1);
+    assert_eq!(phase.accepted_left_limits().count(), 1);
+    assert_eq!(phase.accepted_event_orders().count(), 0);
 }

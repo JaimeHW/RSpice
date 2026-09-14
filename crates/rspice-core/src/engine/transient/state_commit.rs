@@ -1,6 +1,7 @@
 //! Accepted-step reactive-history commit logic.
 
 use super::*;
+use rspice_veriloga_runtime::transport_delay::{DelayBuffer, DelayEvent, DelayEventOrder};
 
 // The main stepper still needs physical event classification and incoming-side
 // orchestration; this acceptance participant can already validate/commit a
@@ -68,7 +69,33 @@ struct AcceptedBjtValues {
 struct AcceptedBjtPhaseSample {
     current: Value,
     delay: Value,
-    left_limit: Option<Value>,
+    event: Option<AcceptedBjtPhaseEvent>,
+}
+
+/// Sided value and smoothness provenance belong to one accepted event. A
+/// numerical phase context alone supplies no derivative certificate.
+#[derive(Clone, Copy)]
+struct AcceptedBjtPhaseEvent {
+    left_limit: Value,
+    order: DelayEventOrder,
+}
+
+impl AcceptedBjtPhaseSample {
+    fn runtime_event(self) -> Option<DelayEvent> {
+        self.event.map(|event| DelayEvent {
+            left: event.left_limit,
+            right: self.current,
+            order: event.order,
+        })
+    }
+
+    fn validate(self, phase: &DelayBuffer, time: Value) -> Result<(), String> {
+        if let Some(event) = self.runtime_event() {
+            phase.validate_event(time, event, self.delay, None)
+        } else {
+            phase.validate_sample(time, self.current, self.delay, None)
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -97,7 +124,9 @@ impl PreparedBjtHistory {
                     .as_ref()
                     .expect("prepared phase history"),
                 self.accepted_time,
-                sample.left_limit.unwrap_or(sample.current),
+                sample
+                    .event
+                    .map_or(sample.current, |event| event.left_limit),
                 reltol,
                 abstol,
                 index,
@@ -500,22 +529,16 @@ impl Engine {
                         .trial(idx, accepted_time)
                         .expect("phase owner exists")
                         .left_limit;
-                    if let Some(left) = left_limit {
-                        phase.validate_discontinuity(
-                            accepted_time,
-                            left,
-                            forward.current,
-                            delay,
-                            None,
-                        )?;
-                    } else {
-                        phase.validate_sample(accepted_time, forward.current, delay, None)?;
-                    }
-                    Ok::<_, String>(AcceptedBjtPhaseSample {
+                    let sample = AcceptedBjtPhaseSample {
                         current: forward.current,
                         delay,
-                        left_limit,
-                    })
+                        event: left_limit.map(|left_limit| AcceptedBjtPhaseEvent {
+                            left_limit,
+                            order: DelayEventOrder::Unknown,
+                        }),
+                    };
+                    sample.validate(phase, accepted_time)?;
+                    Ok::<_, String>(sample)
                 })
                 .transpose()
                 .map_err(|error| {
@@ -547,14 +570,8 @@ impl Engine {
                 // Preparation validated this exact sample against this unchanged
                 // accepted buffer; no model work runs during the commit.
                 let phase = history.phase[idx].as_mut().expect("prepared phase owner");
-                let result = if let Some(left) = sample.left_limit {
-                    phase.accept_discontinuity(
-                        prepared.accepted_time,
-                        left,
-                        sample.current,
-                        sample.delay,
-                        None,
-                    )
+                let result = if let Some(event) = sample.runtime_event() {
+                    phase.accept_event(prepared.accepted_time, event, sample.delay, None)
                 } else {
                     phase.accept_sample(prepared.accepted_time, sample.current, sample.delay, None)
                 };

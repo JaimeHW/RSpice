@@ -10,9 +10,12 @@ pub(in crate::engine::transient) struct PhysicalEventStep<'a> {
     pub incoming: &'a [Value],
     pub time: Value,
     pub dt: Value,
-    /// Physical input events identified by the event owner, including equal
-    /// value corners. Ordinary accepted interpolation knots are not events.
-    pub phase_events: &'a [bool],
+    /// Per-device physical input events classified by the solver's event
+    /// owner. Some(Unknown) retains an event without a smoothness certificate;
+    /// None is an ordinary sample. Positive bounds require exactly equal
+    /// solved input values and an independent derivative/regularity argument.
+    /// This preparation does not derive order from interpolation or coupling.
+    pub phase_events: &'a [Option<DelayEventOrder>],
 }
 
 #[must_use]
@@ -141,18 +144,7 @@ impl PreparedPhysicalEvent {
                 if delay.to_bits() != sample.delay.to_bits() {
                     return Err(failure("prepared phase delay has changed"));
                 }
-                if let Some(left) = sample.left_limit {
-                    history.validate_discontinuity(
-                        self.time,
-                        left,
-                        sample.current,
-                        sample.delay,
-                        None,
-                    )
-                } else {
-                    history.validate_sample(self.time, sample.current, sample.delay, None)
-                }
-                .map_err(failure)?;
+                sample.validate(history, self.time).map_err(failure)?;
             }
         }
         Ok(())
@@ -341,32 +333,27 @@ impl Engine {
                     .legacy_forward_transport_branch(&internal)
                     .ok_or_else(|| failure("missing GP input equation"))?
                     .current;
-                if !selected && forward != phase.endpoint {
+                if selected.is_none() && forward != phase.endpoint {
                     return Err(failure(format!(
                         "BJT '{}' changed input without a physical event record",
                         model.name
                     )));
                 }
-                let left_limit = selected.then_some(phase.endpoint);
+                let event = selected.map(|order| AcceptedBjtPhaseEvent {
+                    left_limit: phase.endpoint,
+                    order,
+                });
                 let delay = model.legacy_excess_phase_delay();
-                if let Some(left) = left_limit {
-                    phase
-                        .history
-                        .validate_discontinuity(step.time, left, forward, delay, None)
-                } else {
-                    phase
-                        .history
-                        .validate_sample(step.time, forward, delay, None)
-                }
-                .map_err(failure)?;
-                left_limits.push(left_limit);
-                Some(AcceptedBjtPhaseSample {
+                let sample = AcceptedBjtPhaseSample {
                     current: forward,
                     delay,
-                    left_limit,
-                })
+                    event,
+                };
+                sample.validate(phase.history, step.time).map_err(failure)?;
+                left_limits.push(event.map(|event| event.left_limit));
+                Some(sample)
             } else {
-                if selected {
+                if selected.is_some() {
                     return Err(failure(
                         "physical phase event attached to a model without delay",
                     ));
