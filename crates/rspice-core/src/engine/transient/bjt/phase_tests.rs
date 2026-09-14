@@ -122,6 +122,7 @@ fn gp_phase_rejects_history_from_another_nominal_delay() {
         history: &history,
         time: delay,
         left_limit: None,
+        incoming_arrival: false,
     };
     assert!(
         trial
@@ -256,6 +257,7 @@ fn gp_phase_companion_has_conservative_current_and_matrix_incidence() {
                 history: &history,
                 time,
                 left_limit: None,
+                incoming_arrival: false,
             };
             let changed = Engine::assemble_legacy_bjt_transient_linearization(
                 &bjt,
@@ -339,6 +341,7 @@ fn gp_phase_reduced_jacobian_matches_resolved_terminal_currents() {
                     history: &history,
                     time,
                     left_limit,
+                    incoming_arrival: false,
                 }),
             };
             let solve = |external| {

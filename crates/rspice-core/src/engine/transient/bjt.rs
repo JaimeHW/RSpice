@@ -75,6 +75,7 @@ impl BjtTransientHistory {
             history,
             time,
             left_limit: None,
+            incoming_arrival: false,
         })
     }
 }
@@ -105,6 +106,9 @@ pub(in crate::engine::transient) struct BjtPhaseTrial<'a> {
     /// solve, reduction and promoted stamp. It is never a mutable history or
     /// a value inferred from the current right-side iterate.
     pub left_limit: Option<Value>,
+    /// Select the incoming side of delayed events during the left equation
+    /// solve. An incoming solve has no held outgoing input endpoint.
+    pub incoming_arrival: bool,
 }
 
 impl BjtPhaseTrial<'_> {
@@ -153,6 +157,9 @@ impl BjtPhaseTrial<'_> {
         bjt: &crate::device::Bjt,
         internal: &[Value; BJT_INTERNAL_STATE_DIM],
     ) -> Result<crate::device::semiconductor::BjtCurrentBranch, String> {
+        if self.incoming_arrival && self.left_limit.is_some() {
+            return Err("incoming GP phase trial cannot hold an outgoing input endpoint".into());
+        }
         let mut branch = bjt
             .legacy_forward_transport_branch(internal)
             .ok_or_else(|| {
@@ -168,7 +175,10 @@ impl BjtPhaseTrial<'_> {
         if retained_delay.to_bits() != delay.to_bits() {
             return Err("GP transport history belongs to a different nominal phase delay".into());
         }
-        let evaluation = if let Some(left) = self.left_limit {
+        let evaluation = if self.incoming_arrival {
+            self.history
+                .difference_before_arrival(self.time, branch.current, delay, None)?
+        } else if let Some(left) = self.left_limit {
             self.history.difference_at_discontinuity(
                 self.time,
                 left,

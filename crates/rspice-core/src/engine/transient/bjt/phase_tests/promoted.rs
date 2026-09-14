@@ -450,6 +450,7 @@ fn gp_right_trial_promoted_stamp_matches_physical_current_and_tangent() {
                 history: &history,
                 time: 2.5 * delay,
                 left_limit: Some(left),
+                incoming_arrival: false,
             };
             let mut circuit = promoted_circuit(&device);
             let right = device.charge_snapshot(polarity * 2.0, polarity * 0.69, 0.0, 0.0);
