@@ -1,0 +1,13 @@
+# Independent uniform RLGC telegrapher solution; units seconds and volts.
+# Source circuit: tests/paranoia/TransmissionLines/cpl_ibm2.sp.
+# Generator: tools/qualification/cpl_ibm2_telegrapher.py.
+# R=0.5 ohm/m; L common/differential=278.95/215.65 nH/m;
+# C common/differential=28.95/33.85 pF/m; G=0; length=0.3048 m.
+# Near terminations 50/10 ohm, far 100/100 ohm; original 1 V pulse.
+# Inverse Laplace damping 4e8 /s, window 160 ns, N=524288.
+# Fourier refinements N=65536/131072/262144 at 80 ns move samples by
+# 169/23 nV respectively. N=524288 at 160 ns moves them by <1 nV.
+# time v(v1) v(v2) v(v3) v(v4)
+1.0050000000000000e-8 -6.329310502209534e-4 1.8723668575329033e-4 3.912849098252548e-4 -1.631862193180927e-3
+1.0150000000000000e-8 -5.364922391722800e-4 1.5883181870063554e-4 4.2092015178384377e-4 -1.5478067438750717e-3
+1.0250000000000000e-8 -4.401166204765147e-4 1.3045362865588778e-4 3.8332004012095846e-4 -1.4406909067414696e-3

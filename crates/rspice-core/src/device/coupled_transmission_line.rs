@@ -50,13 +50,13 @@ impl CplBranchCurrents {
     }
 }
 
-/// Native ngspice-faithful convolution runtime state for a coupled line.
+/// Native convolution runtime state for a coupled line.
 ///
 /// `runtime` holds the *accepted* convolution state advanced up to
 /// `last_committed_ps` (ngspice `cp`/cplines). Each step the stamp is computed
 /// against a clone of this state so the accepted state is only mutated when a
 /// step is committed.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 struct CplNativeState {
     runtime: NativeCplRuntime,
     history: NativeCplViHistory,
@@ -64,12 +64,10 @@ struct CplNativeState {
     near_v: Vec<Value>,
     /// Latest accepted far-end port voltages (ngspice `out_node->V`).
     far_v: Vec<Value>,
-    /// Integer-picosecond time of the last committed history sample.
-    last_committed_ps: i64,
-    /// Last accepted solver time before picosecond truncation. ngspice's CPL
-    /// keeps the same mixed clock as TXL (cplload.c): convolution
-    /// exponentials advance by the fractional `CKTdelta` while the history
-    /// grid and slopes run on truncated integer picoseconds.
+    /// Continuous picosecond coordinate of the last committed history sample.
+    last_committed_ps: Value,
+    /// Last accepted solver time. Convolutions and history advance together,
+    /// including when multiple accepted points fall inside one picosecond.
     last_real_seconds: Value,
     /// Set once the DC operating point has seeded the convolution state.
     dc_seeded: bool,
@@ -433,7 +431,7 @@ impl CoupledTransmissionLine {
         // zero branch currents.
         history
             .push_sample(NativeCplViSample::new(
-                0,
+                0.0,
                 near_dc.to_vec(),
                 far_dc.to_vec(),
                 vec![0.0; conductors],
@@ -446,7 +444,7 @@ impl CoupledTransmissionLine {
             history,
             near_v: near_dc.to_vec(),
             far_v: far_dc.to_vec(),
-            last_committed_ps: 0,
+            last_committed_ps: 0.0,
             last_real_seconds: 0.0,
             dc_seeded: true,
         });
@@ -469,16 +467,10 @@ impl CoupledTransmissionLine {
             return None;
         }
         let t1_ps = native.last_committed_ps;
-        // ngspice keeps time bookkeeping in truncated integer picoseconds. A
-        // step shorter than 1 ps (e.g. a breakpoint nudge) would otherwise
-        // collapse to a zero interval; clamp to at least 1 ps past the last
-        // committed sample so the delayed-sample interpolation stays
-        // well-defined (the convolution math still uses the true
-        // `dt_seconds`).
-        let mut t2_ps = (t2_seconds * 1e12).trunc() as i64;
-        if t2_ps <= t1_ps {
-            t2_ps = t1_ps + 1;
-        }
+        // Retain fractional picoseconds. Rounding this clock to integers
+        // changes propagation and drops accepted history when a tolerance
+        // refinement makes the solver's step shorter than one picosecond.
+        let t2_ps = t2_seconds * 1e12;
         // The history pruning inside the plan needs a mutable view; clone the
         // history for this evaluation so the accepted history is untouched until
         // commit (ngspice prunes only via the accepted `cp->vi_head`).
@@ -524,17 +516,9 @@ impl CoupledTransmissionLine {
         if !(h_exp_seconds.is_finite() && h_exp_seconds > 0.0) {
             return;
         }
-        let time_ps = (accepted_time_seconds * 1e12).trunc() as i64;
-        if time_ps <= native.last_committed_ps {
-            // ngspice merges accepted points whose truncated-picosecond label
-            // does not advance: no history commit and no convolution update,
-            // but the fractional clock still moves so the next step's
-            // exponentials only span the remaining sub-interval.
-            native.last_real_seconds = accepted_time_seconds;
-            return;
-        }
+        let time_ps = accepted_time_seconds * 1e12;
         let t1_ps = native.last_committed_ps;
-        let h_grid_seconds = (time_ps - t1_ps) as f64 * 1e-12;
+        let h_grid_seconds = h_exp_seconds;
 
         let start_near = native.near_v.clone();
         let start_far = native.far_v.clone();
@@ -543,9 +527,8 @@ impl CoupledTransmissionLine {
         // mirroring ngspice's per-load right_consts/update_cnv/update_delayed_cnv
         // ordering. The history must NOT yet contain the new (t2) sample when the
         // delayed samples for [t1, t2] are evaluated (ngspice adds the t2 sample
-        // only at the start of the *next* load). The exponentials advance by the
-        // solver's fractional step; the slope spans run on the integer grid
-        // (ngspice's mixed clock).
+        // only at the start of the *next* load). Exponentials and slope spans
+        // use the same accepted interval, without integer-clock quantization.
         if let Err(err) = native.runtime.commit_step(
             t1_ps,
             time_ps,
@@ -777,4 +760,48 @@ fn transpose(matrix: &[Vec<Value>]) -> Vec<Vec<Value>> {
         }
     }
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cpl_subpicosecond_commits_preserve_trial_isolation() {
+        let mut line = CoupledTransmissionLine::new(
+            "P1".into(),
+            vec![1, 2],
+            0,
+            vec![3, 4],
+            0,
+            &[vec![2.25, 0.0], vec![0.0, 2.25]],
+            &[vec![0.6e-6, 0.05e-6], vec![0.05e-6, 0.6e-6]],
+            &[vec![1.2e-9, -0.11e-9], vec![-0.11e-9, 1.2e-9]],
+            &[vec![0.0; 2], vec![0.0; 2]],
+            0.03,
+        )
+        .unwrap();
+        line.set_native_branch_matrix_indices(vec![5, 6], vec![7, 8])
+            .unwrap();
+        line.native_seed_dc(&[0.0; 2], &[0.0; 2]).unwrap();
+        for index in 1..=4 {
+            let time = f64::from(index) * 0.125e-12;
+            let near = [f64::from(index) * 0.1, 0.0];
+            line.native_commit_accepted(time, &near, &[0.0; 2], &[0.0; 2], &[0.0; 2]);
+            let committed = line.native.as_ref().unwrap();
+            assert_eq!(committed.last_real_seconds, time);
+            assert_eq!(committed.last_committed_ps, time * 1e12);
+            assert_eq!(committed.near_v, near);
+        }
+        let accepted = line.native.clone();
+        let expected_retry = line.native_step_plan(0.625e-12, 0.125e-12).unwrap();
+        // A larger trial may prune its private history but is then rejected.
+        assert!(line.native_step_plan(0.75e-12, 0.25e-12).is_some());
+        assert_eq!(line.native, accepted);
+        assert_eq!(
+            line.native_step_plan(0.625e-12, 0.125e-12).unwrap(),
+            expected_retry
+        );
+        assert_eq!(line.native, accepted);
+    }
 }

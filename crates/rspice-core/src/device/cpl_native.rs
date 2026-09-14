@@ -1,9 +1,11 @@
 //! Native CPL constants and runtime helpers.
 //!
-//! This is a direct, private port of the ngspice CPL setup math that produces
+//! This is a private port of the ngspice CPL setup math that produces
 //! the CPLine constant tables (cplsetup.c), plus the transient convolution
 //! runtime (cplload.c: right_consts/update_cnv/update_delayed_cnv/get_pvs_vi).
 //! The runtime is driven by [`crate::device::CoupledTransmissionLine`].
+//! History retains continuous solver time; real-pole ramp integrals avoid the
+//! cancellation and cumulative slope scaling in the historical implementation.
 
 use std::{collections::VecDeque, fmt};
 
@@ -405,13 +407,14 @@ pub(crate) enum NativeCplError {
         actual: usize,
     },
     NonMonotonicHistory {
-        previous_ps: i64,
-        next_ps: i64,
+        previous_ps: f64,
+        next_ps: f64,
     },
     EmptyHistory,
+    InvalidHistoryTime(f64),
     InvalidHistoryTimeStep {
-        previous_ps: i64,
-        current_ps: i64,
+        previous_ps: f64,
+        current_ps: f64,
     },
     InvalidTransientStep(f64),
     InsufficientHistory {
@@ -473,6 +476,10 @@ impl fmt::Display for NativeCplError {
                 "native CPL VI history times must increase strictly ({previous_ps} ps then {next_ps} ps)"
             ),
             Self::EmptyHistory => write!(f, "native CPL VI history is empty"),
+            Self::InvalidHistoryTime(time) => write!(
+                f,
+                "native CPL history time must be nonnegative and finite, found {time} ps"
+            ),
             Self::InvalidHistoryTimeStep {
                 previous_ps,
                 current_ps,
@@ -700,14 +707,14 @@ impl NativeCplRuntime {
     /// before `right_consts`), then evaluates the RHS constants and the matrix
     /// coefficient matrices used to stamp the branch rows.
     ///
-    /// - `t1_ps`/`t2_ps` are the integer-picosecond start/end of the step.
+    /// - `t1_ps`/`t2_ps` are continuous start/end times expressed in picoseconds.
     /// - `dt_seconds` is the step `h` (= CKTdelta).
     /// - `input_voltage`/`output_voltage` are the latest accepted near/far port
     ///   voltages (ngspice `in_node->V`/`out_node->V`, the committed t1 values).
     pub(crate) fn step_stamp_plan(
         &self,
-        t1_ps: i64,
-        t2_ps: i64,
+        t1_ps: f64,
+        t2_ps: f64,
         dt_seconds: f64,
         input_voltage: &[f64],
         output_voltage: &[f64],
@@ -773,17 +780,17 @@ impl NativeCplRuntime {
     ///   3. `update_delayed_convolutions` adds the extrapolation tail when the
     ///      step's delayed samples reached past the previous accepted time.
     ///
-    /// - `t1_ps`/`t2_ps`: integer-picosecond start/end of the accepted step.
-    /// - `dt_seconds`: the accepted step `h`.
+    /// - `t1_ps`/`t2_ps`: continuous start/end times expressed in picoseconds.
+    /// - `h_exp_seconds`/`h_grid_seconds`: the accepted step `h`. Historical
+    ///   trace tests retain separate exponential and quantized grid intervals.
     /// - `start_near`/`start_far`: port voltages at `t1` (ngspice `in_node->V`).
     /// - `end_near`/`end_far`/`end_near_i`/`end_far_i`: accepted port voltages
     ///   and branch currents at `t2`.
     #[allow(clippy::too_many_arguments)]
-    #[allow(clippy::too_many_arguments)]
     pub(crate) fn commit_step(
         &mut self,
-        t1_ps: i64,
-        t2_ps: i64,
+        t1_ps: f64,
+        t2_ps: f64,
         h_exp_seconds: f64,
         h_grid_seconds: f64,
         start_near: &[f64],
@@ -798,9 +805,7 @@ impl NativeCplRuntime {
 
         // (1) Advance h2/h3 (and record h1e) for the just-completed step. This
         // is the persistent counterpart of the step's right_consts on cp2 and
-        // runs entirely on the solver's fractional step (cplload.c keeps the
-        // exponentials on CKTdelta while the grid spans are integer
-        // picoseconds).
+        // runs on the solver's accepted interval.
         let rc = self.right_consts(
             h_exp_seconds,
             0.5 * h_exp_seconds,
@@ -809,8 +814,7 @@ impl NativeCplRuntime {
             &delayed,
         )?;
 
-        // (2) Advance the h1 poles: exponentials on the fractional step, the
-        // accepted slope across the integer-picosecond span.
+        // (2) Integrate the accepted linear voltage ramp over the same interval.
         self.update_accepted_voltage_convolutions(
             h_exp_seconds,
             h_grid_seconds,
@@ -820,8 +824,7 @@ impl NativeCplRuntime {
             end_far,
         )?;
 
-        // (3) Add the delayed extrapolation tail when the step was external
-        // (grid span, matching ngspice's `h *= 0.5e-12` on the integer delta).
+        // (3) Add the delayed extrapolation tail when the step was external.
         if rc.ext {
             let tail = NativeCplViSample::new(
                 t2_ps,
@@ -910,7 +913,7 @@ impl NativeCplRuntime {
                     );
                     update_accepted_real_term(
                         &mut tms.tm[0],
-                        h_grid_seconds,
+                        h_exp_seconds,
                         previous_input,
                         current_input,
                         previous_output,
@@ -920,18 +923,18 @@ impl NativeCplRuntime {
                     self.h1e[row][col] = [e, er, ei];
                 } else {
                     let mut exponentials = [0.0; 3];
-                    let mut input_slope = (current_input - previous_input) / h_grid_seconds;
-                    let mut output_slope = (current_output - previous_output) / h_grid_seconds;
                     for (pole, term) in tms.tm.iter_mut().enumerate() {
                         let e = (term.x * h_exp_seconds).exp();
                         exponentials[pole] = e;
-                        let scale = term.c / term.x;
-                        input_slope *= scale;
-                        output_slope *= scale;
-                        term.cnv_i = (term.cnv_i - input_slope * h_grid_seconds) * e
-                            + (e - 1.0) * (current_input * scale + input_slope / term.x);
-                        term.cnv_o = (term.cnv_o - output_slope * h_grid_seconds) * e
-                            + (e - 1.0) * (current_output * scale + output_slope / term.x);
+                        update_accepted_real_term(
+                            term,
+                            h_exp_seconds,
+                            previous_input,
+                            current_input,
+                            previous_output,
+                            current_output,
+                            e,
+                        );
                     }
                     self.h1e[row][col] = exponentials;
                 }
@@ -1005,7 +1008,7 @@ pub(crate) struct NativeCplStampPlan {
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct NativeCplViSample {
-    pub(crate) time_ps: i64,
+    pub(crate) time_ps: f64,
     pub(crate) v_i: Vec<f64>,
     pub(crate) v_o: Vec<f64>,
     pub(crate) i_i: Vec<f64>,
@@ -1014,7 +1017,7 @@ pub(crate) struct NativeCplViSample {
 
 impl NativeCplViSample {
     pub(crate) fn new(
-        time_ps: i64,
+        time_ps: f64,
         v_i: Vec<f64>,
         v_o: Vec<f64>,
         i_i: Vec<f64>,
@@ -1068,6 +1071,9 @@ impl NativeCplViHistory {
     }
 
     pub(crate) fn push_sample(&mut self, sample: NativeCplViSample) -> Result<(), NativeCplError> {
+        if !sample.time_ps.is_finite() || sample.time_ps < 0.0 {
+            return Err(NativeCplError::InvalidHistoryTime(sample.time_ps));
+        }
         validate_history_vector("v_i", &sample.v_i, self.no_l)?;
         validate_history_vector("v_o", &sample.v_o, self.no_l)?;
         validate_history_vector("i_i", &sample.i_i, self.no_l)?;
@@ -1085,17 +1091,21 @@ impl NativeCplViHistory {
     }
 
     #[cfg(test)]
-    pub(crate) fn head_time_ps(&self) -> Option<i64> {
+    pub(crate) fn head_time_ps(&self) -> Option<f64> {
         self.samples.front().map(|sample| sample.time_ps)
     }
 
     pub(crate) fn delayed_vi_samples_ps(
         &mut self,
-        previous_time_ps: i64,
-        current_time_ps: i64,
+        previous_time_ps: f64,
+        current_time_ps: f64,
         taul_ps: &[f64],
     ) -> Result<NativeCplDelayedVi, NativeCplError> {
-        if current_time_ps <= previous_time_ps {
+        if !previous_time_ps.is_finite()
+            || previous_time_ps < 0.0
+            || !current_time_ps.is_finite()
+            || current_time_ps <= previous_time_ps
+        {
             return Err(NativeCplError::InvalidHistoryTimeStep {
                 previous_ps: previous_time_ps,
                 current_ps: current_time_ps,
@@ -1119,8 +1129,8 @@ impl NativeCplViHistory {
             i2_o: zero_matrix(self.no_l),
         };
 
-        let previous_time = previous_time_ps as f64;
-        let current_time = current_time_ps as f64;
+        let previous_time = previous_time_ps;
+        let current_time = current_time_ps;
         let step = current_time - previous_time;
         let mut prune_to = None;
         let mut min_ta = f64::INFINITY;
@@ -1201,7 +1211,7 @@ impl NativeCplViHistory {
         for index in 0..self.samples.len().saturating_sub(1) {
             let lower = &self.samples[index];
             let upper = &self.samples[index + 1];
-            if (lower.time_ps as f64) <= target_ps && target_ps <= (upper.time_ps as f64) {
+            if lower.time_ps <= target_ps && target_ps <= upper.time_ps {
                 return Ok(index);
             }
         }
@@ -1222,14 +1232,14 @@ impl NativeCplViHistory {
             .samples
             .get(lower_index + 1)
             .ok_or(NativeCplError::InsufficientHistory { target_ps })?;
-        let span = (upper.time_ps - lower.time_ps) as f64;
+        let span = upper.time_ps - lower.time_ps;
         if span <= 0.0 {
             return Err(NativeCplError::NonMonotonicHistory {
                 previous_ps: lower.time_ps,
                 next_ps: upper.time_ps,
             });
         }
-        let f = (target_ps - lower.time_ps as f64) / span;
+        let f = (target_ps - lower.time_ps) / span;
         for conductor in 0..self.no_l {
             set_value(
                 conductor,
@@ -2157,22 +2167,44 @@ fn zero_time_series_convolutions(tms: &mut NativeCplTimeSeries) {
     }
 }
 
+/// Integrals of an exponential against a constant and a linear ramp:
+/// phi1(z) = (exp(z)-1)/z and phi2(z) = (exp(z)-1-z)/z^2.
+/// Their limits at zero are finite. A short series avoids subtracting almost
+/// equal values, including when exp(z) itself rounds to exactly one.
+fn exponential_ramp_moments(z: f64) -> (f64, f64) {
+    if z.abs() <= 0.5 {
+        let mut phi1 = 1.0;
+        let mut phi2 = 0.5;
+        let mut term = 1.0;
+        for order in 1..=20 {
+            term *= z / f64::from(order + 1);
+            phi1 += term;
+            phi2 += term / f64::from(order + 2);
+        }
+        (phi1, phi2)
+    } else {
+        let phi1 = z.exp_m1() / z;
+        (phi1, (phi1 - 1.0) / z)
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 fn update_accepted_real_term(
     term: &mut NativeCplTerm,
-    h_seconds: f64,
+    h_exp_seconds: f64,
     previous_input: f64,
     current_input: f64,
     previous_output: f64,
     current_output: f64,
     e: f64,
 ) {
-    let scale = term.c / term.x;
-    let input_slope = (current_input - previous_input) * scale / h_seconds;
-    let output_slope = (current_output - previous_output) * scale / h_seconds;
-    term.cnv_i = (term.cnv_i - input_slope * h_seconds) * e
-        + (e - 1.0) * (current_input * scale + input_slope / term.x);
-    term.cnv_o = (term.cnv_o - output_slope * h_seconds) * e
-        + (e - 1.0) * (current_output * scale + output_slope / term.x);
+    let (phi1, phi2) = exponential_ramp_moments(term.x * h_exp_seconds);
+    let current_weight = h_exp_seconds * phi2;
+    let previous_weight = h_exp_seconds * phi1 - current_weight;
+    term.cnv_i = term.cnv_i * e
+        + term.c * (previous_input * previous_weight + current_input * current_weight);
+    term.cnv_o = term.cnv_o * e
+        + term.c * (previous_output * previous_weight + current_output * current_weight);
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2858,7 +2890,7 @@ mod tests {
 
     fn sample(time_ps: i64, base: f64) -> NativeCplViSample {
         NativeCplViSample::new(
-            time_ps,
+            time_ps as f64,
             vec![base + 1.0, base + 2.0],
             vec![base + 11.0, base + 12.0],
             vec![base + 21.0, base + 22.0],
@@ -2884,7 +2916,7 @@ mod tests {
         history.push_sample(sample(0, 0.0)).expect("initial sample");
 
         let delayed = history
-            .delayed_vi_samples_ps(10, 20, &[40.0, 60.0])
+            .delayed_vi_samples_ps(10.0, 20.0, &[40.0, 60.0])
             .expect("delay samples");
 
         assert!(!delayed.ext);
@@ -2895,7 +2927,7 @@ mod tests {
         assert_slice_close(&delayed.v2_o[1], &[10.5, 11.5]);
         assert_slice_close(&delayed.i1_i[0], &[0.0, 0.0]);
         assert_slice_close(&delayed.i2_o[1], &[0.0, 0.0]);
-        assert_eq!(history.head_time_ps(), Some(0));
+        assert_eq!(history.head_time_ps(), Some(0.0));
     }
 
     #[test]
@@ -2903,7 +2935,7 @@ mod tests {
         let mut history = history_with_samples();
 
         let delayed = history
-            .delayed_vi_samples_ps(40, 50, &[12.0, 5.0])
+            .delayed_vi_samples_ps(40.0, 50.0, &[12.0, 5.0])
             .expect("delay samples");
 
         assert!(delayed.ext);
@@ -2927,7 +2959,7 @@ mod tests {
         assert_slice_close(&delayed.i2_i[1], &[210.5, 211.0]);
         assert_slice_close(&delayed.i2_o[1], &[215.5, 216.0]);
 
-        assert_eq!(history.head_time_ps(), Some(20));
+        assert_eq!(history.head_time_ps(), Some(20.0));
     }
 
     #[test]
@@ -3048,6 +3080,124 @@ mod tests {
             &[h3.tm[0].cnv_o, h3.tm[1].cnv_o, h3.tm[2].cnv_o],
             &[11.0, 20.5, 66.5],
         );
+    }
+
+    #[test]
+    fn cpl_real_pole_preserves_sub_ulp_exponential_increments() {
+        let mut pole = term(2.0, -1.0, 0.0, 0.0);
+        let h = 1e-18_f64;
+        update_accepted_real_term(&mut pole, h, 0.0, 1.0, 0.0, -1.0, (-h).exp());
+        // Integral of 2*(s/h)*exp(-(h-s)) over [0,h] is
+        // h - h^2/3 + O(h^3). Its binary64 value rounds to h here.
+        assert!((pole.cnv_i - h).abs() < 1e-32, "{}", pole.cnv_i);
+        assert!((pole.cnv_o + h).abs() < 1e-32, "{}", pole.cnv_o);
+    }
+
+    #[test]
+    fn cpl_real_poles_match_independent_ramp_quadrature() {
+        // Composite Simpson integration of the defining convolution, using
+        // normalized time. This does not evaluate the production phi functions.
+        // For |z| <= 10 the 8192-panel truncation bound is below 3e-13;
+        // 2e-12 also covers accumulated binary64 summation error. Scale the
+        // budget by c*h so tiny steps cannot pass on a fixed absolute floor.
+        fn integral(z: f64, previous: f64, current: f64) -> f64 {
+            const PANELS: u32 = 8192;
+            let mut sum = 0.0;
+            for index in 0..=PANELS {
+                let s = f64::from(index) / f64::from(PANELS);
+                let weight = if index == 0 || index == PANELS {
+                    1.0
+                } else if index % 2 == 0 {
+                    2.0
+                } else {
+                    4.0
+                };
+                sum += weight * (previous + s * (current - previous)) * (z * (1.0 - s)).exp();
+            }
+            sum / (3.0 * f64::from(PANELS))
+        }
+
+        for h in [1e-18, 1e-12, 0.125] {
+            for z in [0.0, -1e-18, -1e-9, -0.5, -2.0, -10.0] {
+                let poles = [2.0, -3.0, 0.5].map(|c| term(c, z / h, 0.7 * c * h, -0.3 * c * h));
+                let mut runtime = empty_runtime(2);
+                runtime.h1t[0][0] = Some(tms(false, 0.0, poles));
+                let mut reversed = runtime.clone();
+                reversed.h1t[0][0].as_mut().unwrap().tm.reverse();
+                for candidate in [&mut runtime, &mut reversed] {
+                    candidate
+                        .update_accepted_voltage_convolutions(
+                            h,
+                            h,
+                            &[0.25, 0.0],
+                            &[1.25, 0.0],
+                            &[-0.5, 0.0],
+                            &[0.25, 0.0],
+                        )
+                        .unwrap();
+                }
+                let updated = &runtime.h1t[0][0].as_ref().unwrap().tm;
+                for (index, (before, after)) in poles.iter().zip(updated).enumerate() {
+                    let expected_in =
+                        before.cnv_i * z.exp() + before.c * h * integral(z, 0.25, 1.25);
+                    let expected_out =
+                        before.cnv_o * z.exp() + before.c * h * integral(z, -0.5, 0.25);
+                    let limit = 2e-12 * (before.c * h).abs();
+                    assert!(
+                        (after.cnv_i - expected_in).abs() < limit,
+                        "h={h}, z={z}, pole={index}: input {} vs {expected_in}",
+                        after.cnv_i
+                    );
+                    assert!(
+                        (after.cnv_o - expected_out).abs() < limit,
+                        "h={h}, z={z}, pole={index}: output {} vs {expected_out}",
+                        after.cnv_o
+                    );
+                    assert_eq!(
+                        after,
+                        &reversed.h1t[0][0].as_ref().unwrap().tm[2 - index],
+                        "a pole's convolution must not depend on its position in the sum"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn cpl_history_preserves_fractional_times_and_rejects_invalid_updates_atomically() {
+        let mut history = NativeCplViHistory::new(2, vec![0.0; 2], vec![0.0; 2]).unwrap();
+        let fractional_sample = |time| {
+            NativeCplViSample::new(
+                time,
+                vec![time, 2.0 * time],
+                vec![-time, -2.0 * time],
+                vec![3.0 * time, 4.0 * time],
+                vec![-3.0 * time, -4.0 * time],
+            )
+        };
+        for time in [0.0, 0.125, 0.25, 0.375] {
+            history.push_sample(fractional_sample(time)).unwrap();
+        }
+        let accepted = history.clone();
+        for time in [-0.125, f64::NAN, f64::INFINITY, 0.25, 0.375] {
+            assert!(history.push_sample(fractional_sample(time)).is_err());
+            assert_eq!(history, accepted);
+        }
+        for (previous, current) in [(0.375, 0.375), (0.375, f64::NAN), (-0.125, 0.5)] {
+            assert!(
+                history
+                    .delayed_vi_samples_ps(previous, current, &[0.25, 0.3125])
+                    .is_err()
+            );
+            assert_eq!(history, accepted);
+        }
+        let samples = history
+            .delayed_vi_samples_ps(0.375, 0.5, &[0.25, 0.3125])
+            .unwrap();
+        assert!(!samples.ext);
+        assert_eq!(samples.v1_i, vec![vec![0.125, 0.25], vec![0.0625, 0.125]]);
+        assert_eq!(samples.v2_i, vec![vec![0.25, 0.5], vec![0.1875, 0.375]]);
+        assert_eq!(samples.i2_o, vec![vec![-0.75, -1.0], vec![-0.5625, -0.75]]);
     }
 
     #[test]
@@ -3391,6 +3541,53 @@ mod tests {
 mod oracle_replay {
     use super::*;
 
+    // Historical ngspice update_cnv, used ONLY to supply h1 state to the
+    // captured delayed-history replay below. It deliberately retains both
+    // cancellation in exp(z)-1 and cumulative slope scaling across real poles.
+    // Production h1 integration is checked against independent quadrature.
+    // Source: ngspice/src/spicelib/devices/cpl/cplload.c, update_cnv.
+    fn historical_ngspice_h1(
+        runtime: &mut NativeCplRuntime,
+        h_exp: f64,
+        h_grid: f64,
+        previous_near: &[f64],
+        current_near: &[f64],
+        previous_far: &[f64],
+        current_far: &[f64],
+    ) {
+        for row in &mut runtime.h1t {
+            for (col, series) in row.iter_mut().enumerate() {
+                let Some(series) = series else { continue };
+                if series.if_img {
+                    let (er, ei) = exp_complex(series.tm[1].x, series.tm[2].x, h_exp);
+                    update_accepted_complex_time_series(
+                        series,
+                        h_grid,
+                        previous_near[col],
+                        current_near[col],
+                        previous_far[col],
+                        current_far[col],
+                        er,
+                        ei,
+                    );
+                }
+                let count = if series.if_img { 1 } else { 3 };
+                let mut near_slope = (current_near[col] - previous_near[col]) / h_grid;
+                let mut far_slope = (current_far[col] - previous_far[col]) / h_grid;
+                for pole in &mut series.tm[..count] {
+                    let e = (pole.x * h_exp).exp();
+                    let scale = pole.c / pole.x;
+                    near_slope *= scale;
+                    far_slope *= scale;
+                    pole.cnv_i = (pole.cnv_i - near_slope * h_grid) * e
+                        + (e - 1.0) * (current_near[col] * scale + near_slope / pole.x);
+                    pole.cnv_o = (pole.cnv_o - far_slope * h_grid) * e
+                        + (e - 1.0) * (current_far[col] * scale + far_slope / pole.x);
+                }
+            }
+        }
+    }
+
     /// Replay ngspice's committed (v, i) history for cpl3_4_line's P1 element
     /// and compare the branch rhs vectors point by point.
     ///
@@ -3400,12 +3597,14 @@ mod oracle_replay {
     /// v_i/v_o/i_i/i_o) and per-load branch rhs at cplload.c:578 (fractional
     /// time and CKTdelta, per-conductor ff/gg; the last record per truncated
     /// label is the accepted iterate). Driving the runtime with the oracle's
-    /// own inputs pins the multiconductor convolution - including the mixed
-    /// integer-picosecond/fractional-delta clock - independently of solver
-    /// grid differences. All accepted steps reproduce the oracle's ff/gg
-    /// vectors to sub-1e-9 relative error.
+    /// own inputs pins delayed interpolation, h2/h3 convolution, extrapolation
+    /// tails and branch assembly independently of solver grid differences.
+    /// The trace includes erroneous h1 integration, so inject its historical
+    /// h1 state explicitly. Correct h1 integration is separately checked against
+    /// the defining integral and must not be forced to reproduce this artifact.
+    /// Captured values and the original 1e-6 relative bound are unchanged.
     #[test]
-    fn replay_oracle_cpl34_p1() {
+    fn replay_oracle_cpl34_p1_delayed_history_with_historical_h1() {
         let hv_text = include_str!("transmission_line/testdata/cpl34_p1_hv.dat");
         let in_text = include_str!("transmission_line/testdata/cpl34_p1_in.dat");
 
@@ -3475,7 +3674,7 @@ mod oracle_replay {
         let mut history = NativeCplViHistory::new(N, dc1.clone(), dc2.clone()).unwrap();
         history
             .push_sample(NativeCplViSample::new(
-                0,
+                0.0,
                 dc1.clone(),
                 dc2.clone(),
                 vec![0.0; N],
@@ -3500,8 +3699,8 @@ mod oracle_replay {
                 let mut trial_history = history.clone();
                 let plan = rt
                     .step_stamp_plan(
-                        t1_ps,
-                        sample.t_ps,
+                        t1_ps as f64,
+                        sample.t_ps as f64,
                         *dt_oracle,
                         &prev_v_i,
                         &prev_v_o,
@@ -3532,9 +3731,19 @@ mod oracle_replay {
             }
 
             let h_grid = (sample.t_ps - t1_ps) as f64 * 1.0e-12;
+            let mut historical = rt.clone();
+            historical_ngspice_h1(
+                &mut historical,
+                *dt_oracle,
+                h_grid,
+                &prev_v_i,
+                &sample.v_i,
+                &prev_v_o,
+                &sample.v_o,
+            );
             rt.commit_step(
-                t1_ps,
-                sample.t_ps,
+                t1_ps as f64,
+                sample.t_ps as f64,
                 *dt_oracle,
                 h_grid,
                 &prev_v_i,
@@ -3546,9 +3755,10 @@ mod oracle_replay {
                 &mut history,
             )
             .unwrap();
+            rt.h1t = historical.h1t;
             history
                 .push_sample(NativeCplViSample::new(
-                    sample.t_ps,
+                    sample.t_ps as f64,
                     sample.v_i.clone(),
                     sample.v_o.clone(),
                     sample.i_i.clone(),
