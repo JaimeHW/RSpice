@@ -61,6 +61,43 @@ pub(super) struct PreparedBjtHistory {
     accepted_time: Value,
 }
 
+impl PreparedBjtHistory {
+    fn phase_step_control(
+        &self,
+        circuit: &crate::CircuitData,
+        history: &BjtTransientHistory,
+        reltol: Value,
+        abstol: Value,
+    ) -> Result<Option<bjt::interpolation::PhaseInterpolationControl>, SimulationError> {
+        let mut limiting: Option<bjt::interpolation::PhaseInterpolationControl> = None;
+        for (index, value) in self.values.iter().enumerate() {
+            let Some((current, _)) = value.phase_sample else {
+                continue;
+            };
+            let control = bjt::interpolation::phase_interpolation_control(
+                history.phase[index]
+                    .as_ref()
+                    .expect("prepared phase history"),
+                self.accepted_time,
+                current,
+                reltol,
+                abstol,
+                index,
+            )
+            .map_err(|error| {
+                SimulationError::Circuit(format!(
+                    "BJT '{}' phase interpolation: {error}",
+                    circuit.bjts.devices[index].name
+                ))
+            })?;
+            if limiting.is_none_or(|previous| control.next_step < previous.next_step) {
+                limiting = Some(control);
+            }
+        }
+        Ok(limiting)
+    }
+}
+
 /// Fallible native work evaluated before any accepted history is rotated.
 #[must_use]
 pub(super) struct PreparedReactiveHistory<'engine> {
@@ -74,6 +111,33 @@ pub(super) struct PreparedReactiveHistory<'engine> {
 }
 
 impl Engine {
+    pub(super) fn bjt_phase_step_control(
+        &self,
+        circuit: &crate::CircuitData,
+        history: &BjtTransientHistory,
+        step: AcceptedReactiveStep<'_>,
+        snapshots: &[Option<BjtChargeSnapshot>],
+    ) -> Result<Option<bjt::interpolation::PhaseInterpolationControl>, SimulationError> {
+        if !history.phase.iter().any(Option::is_some) {
+            return Ok(None);
+        }
+        Self::prepare_bjt_history(
+            circuit,
+            history,
+            step.accepted_solution,
+            step.coeff,
+            step.dt,
+            step.accepted_time,
+            Some(snapshots),
+        )?
+        .phase_step_control(
+            circuit,
+            history,
+            self.transient_lte_reltol(),
+            self.current_abstol(),
+        )
+    }
+
     /// Commit all accepted JFET charge and trap histories. Trial evaluations
     /// borrow these histories; transient and shooting share the same commit.
     pub(in crate::engine) fn accept_jfet_history(
@@ -626,6 +690,17 @@ impl Engine {
             .behavioral_sources
             .prepare_transient_step(step.accepted_solution, step.accepted_time)
             .map_err(|error| SimulationError::Circuit(error.to_string()))?;
+        // Settling can project a different final electrical solution after
+        // the stepper checked LTE. Recheck the prepared physical samples at
+        // the all-device barrier, before any accepted history is advanced.
+        if let Some(control) = bjt.phase_step_control(
+            circuit,
+            histories.bjt,
+            self.transient_lte_reltol(),
+            self.current_abstol(),
+        )? {
+            control.ensure_acceptable(circuit)?;
+        }
         Ok(PreparedReactiveHistory {
             bjt,
             behavioral,
@@ -1808,6 +1883,19 @@ mod tests {
             .unwrap_err();
         solution[bad] = 0.0;
         solution[input] = 0.0;
+        let error = native_candidate(&engine, &mut circuit, &mut bjt, &solution, 2e-9).unwrap_err();
+        assert!(
+            error.to_string().contains("phase-history interpolation"),
+            "{error}"
+        );
+        assert_eq!(
+            bjt, before,
+            "inaccurate final phase samples crossed the commit barrier"
+        );
+        assert_eq!(format!("{:?}", circuit.capacitors), capacitor_before);
+        assert_eq!(format!("{:?}", circuit.inductors), inductor_before);
+        solution[b1] = 0.0;
+        solution[b2] = 0.0;
         native_candidate(&engine, &mut circuit, &mut bjt, &solution, 2e-9).unwrap();
         assert_ne!(bjt, before);
         assert_eq!(bjt.accepted_dt_prev, 1e-9);

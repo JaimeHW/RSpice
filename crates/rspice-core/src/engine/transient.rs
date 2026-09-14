@@ -8983,6 +8983,47 @@ impl Engine {
             let candidate_model_discontinuity =
                 reject_for_veriloga_event_refinement!(&new_solution, step_time, middle_phase_start);
 
+            // Phase history must be accurate when its new interval is stored;
+            // a later delayed query cannot repair an already accepted bracket.
+            // Charge-LTE exemptions, fixed grids, startup, and retry-floor
+            // recovery therefore cannot silently waive this physical-current
+            // check. The acceptance barrier checks again after mixed settling.
+            let phase_step_control = if locked_replay_hidden_attempt {
+                // This replay-only Newton probe is unconditionally rejected
+                // below; it is not proposing an interval for stored history.
+                None
+            } else {
+                self.bjt_phase_step_control(
+                    &circuit,
+                    &bjt_history,
+                    AcceptedReactiveStep {
+                        accepted_solution: &new_solution,
+                        accepted_time: step_time,
+                        dt,
+                        coeff: &coeff,
+                        bsim4_trnqs_coeff: &bsim4_trnqs_coeff,
+                    },
+                    &vbic_snapshot_cache,
+                )?
+            };
+            if let Some(control) = phase_step_control
+                && let Some(retry_dt) = control.retry_step(
+                    dt,
+                    timestep.hard_min_dt(),
+                    locked_grid.is_some(),
+                    retry_count >= MAX_RETRIES,
+                    &circuit,
+                )?
+            {
+                retry_count += 1;
+                self.record_convergence(|quality| quality.record_timestep_reduction());
+                trap_order = Self::trapezoidal_order_after_timestep_control_reject(step_trap_order);
+                timestep.force_step(retry_dt);
+                restore_rejected_transient_nonlinear_state!();
+                total_middle_nanos += middle_phase_start.elapsed().as_nanos();
+                continue;
+            }
+
             if !xyce_iteration_error_control
                 && !candidate_model_discontinuity
                 && locked_grid.is_none()
@@ -10509,6 +10550,13 @@ impl Engine {
                 // whether or not it hit a breakpoint: a chase that resolved
                 // its root away from one must not raise a later restart.
                 veriloga_refinement_approach_step = None;
+            }
+            if locked_grid.is_none()
+                && let Some(control) = phase_step_control
+                && control.next_step.is_finite()
+                && control.next_step < timestep.dt()
+            {
+                timestep.force_step(control.next_step.max(timestep.hard_min_dt()));
             }
             if !xyce_iteration_error_control
                 && !first_accepted_transient_step

@@ -196,6 +196,7 @@ pub(in crate::engine::transient) struct BjtCompanionSystem<'a> {
     pub z_e: &'a mut [Value; BJT_EXTERNAL_STATE_DIM],
 }
 
+pub(in crate::engine::transient) mod interpolation;
 mod linearization;
 mod snapshot;
 
