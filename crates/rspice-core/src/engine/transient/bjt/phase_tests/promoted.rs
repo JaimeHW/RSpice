@@ -432,3 +432,88 @@ fn gp_phase_promoted_one_step_includes_previous_physical_phase_current() {
         }
     }
 }
+
+#[test]
+fn gp_right_trial_promoted_stamp_matches_physical_current_and_tangent() {
+    for polarity in [1.0, -1.0] {
+        for private in [false, true] {
+            let device = transistor(polarity, private, 1.0);
+            let incoming = device.charge_snapshot(polarity * 2.0, polarity * 0.67, 0.0, 0.0);
+            let left = forward_reference(&device, polarity, &incoming.reduction.internal_voltages);
+            let delay = device.legacy_excess_phase_delay();
+            let mut history = DelayBuffer::new(0);
+            history
+                .accept_sample(0.0, 0.25 * left, delay, None)
+                .unwrap();
+            let accepted = history.clone();
+            let phase = BjtPhaseTrial {
+                history: &history,
+                time: 2.5 * delay,
+                left_limit: Some(left),
+            };
+            let mut circuit = promoted_circuit(&device);
+            let right = device.charge_snapshot(polarity * 2.0, polarity * 0.69, 0.0, 0.0);
+            let solution = initial_state(&circuit, &right);
+            let collector = circuit.bjts.devices[0].mna_internal_node(BJT_VCX_STATE_INDEX) - 1;
+            let emitter = circuit.bjts.devices[0].mna_internal_node(BJT_VEI_STATE_INDEX) - 1;
+            for one_step in [false, true] {
+                let weight = if one_step { 0.5 } else { 1.0 };
+                let (_, internal, _) =
+                    circuit.bjts.devices[0].mna_charge_state_at_solution(&solution);
+                let expected =
+                    weight * (0.7 * left - forward_reference(&device, polarity, &internal));
+                let mut sample = |values: &[Value]| {
+                    let mut matrix = Engine::default().build_matrix(&circuit).unwrap();
+                    circuit.link_indices(&matrix);
+                    // The builder seeds a diagonal GMIN. This fixture reads
+                    // the phase stamp alone, so retain its pattern but clear
+                    // the unrelated baseline conductance before loading it.
+                    matrix.values_mut().fill(0.0);
+                    circuit.bjts.devices[0].update_mna_static_probe(values);
+                    let mut rhs = vec![0.0; values.len()];
+                    phase
+                        .stamp_promoted(
+                            &circuit.bjts.devices[0],
+                            &mut StaticMatrixChargeStamper {
+                                matrix: &mut matrix,
+                                rhs: &mut rhs,
+                            },
+                            one_step,
+                        )
+                        .unwrap();
+                    let residual = matrix.residual_vector(values, &rhs).unwrap();
+                    let mut a = vec![vec![0.0; values.len()]; values.len()];
+                    let positions: Vec<_> = matrix.stored_positions().collect();
+                    for (row, column) in positions {
+                        let offset = matrix.get_index(row, column).unwrap().offset();
+                        a[row][column] = matrix.values_mut()[offset];
+                    }
+                    Sample { a, residual }
+                };
+                let actual = sample(&solution);
+                for (row, sign) in [(collector, 1.0), (emitter, -1.0)] {
+                    assert!(
+                        (actual.residual[row] - sign * expected).abs() < 1e-14,
+                        "polarity={polarity} private={private} one_step={one_step} row={row}: {} != {}",
+                        actual.residual[row],
+                        sign * expected
+                    );
+                    for column in 0..solution.len() {
+                        let h = 1e-7;
+                        let mut plus = solution.clone();
+                        let mut minus = solution.clone();
+                        plus[column] += h;
+                        minus[column] -= h;
+                        let tangent = (sample(&plus).residual[row] - sample(&minus).residual[row])
+                            / (2.0 * h);
+                        assert!(
+                            (actual.a[row][column] - tangent).abs() < 2e-12 + 2e-7 * tangent.abs(),
+                            "polarity={polarity} private={private} one_step={one_step} row={row} column={column}"
+                        );
+                    }
+                }
+            }
+            assert_eq!(history, accepted);
+        }
+    }
+}

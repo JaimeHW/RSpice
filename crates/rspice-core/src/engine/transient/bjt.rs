@@ -71,9 +71,11 @@ impl BjtTransientHistory {
         index: usize,
         time: Value,
     ) -> Option<BjtPhaseTrial<'_>> {
-        self.phase[index]
-            .as_ref()
-            .map(|history| BjtPhaseTrial { history, time })
+        self.phase[index].as_ref().map(|history| BjtPhaseTrial {
+            history,
+            time,
+            left_limit: None,
+        })
     }
 }
 
@@ -98,6 +100,11 @@ pub(in crate::engine::transient) struct BjtChargeStep<'a> {
 pub(in crate::engine::transient) struct BjtPhaseTrial<'a> {
     pub history: &'a rspice_veriloga_runtime::transport_delay::DelayBuffer,
     pub time: Value,
+    /// Forward transport from a separately solved incoming electrical state.
+    /// Right-side Newton probes hold this value fixed through every private
+    /// solve, reduction and promoted stamp. It is never a mutable history or
+    /// a value inferred from the current right-side iterate.
+    pub left_limit: Option<Value>,
 }
 
 impl BjtPhaseTrial<'_> {
@@ -161,9 +168,18 @@ impl BjtPhaseTrial<'_> {
         if retained_delay.to_bits() != delay.to_bits() {
             return Err("GP transport history belongs to a different nominal phase delay".into());
         }
-        let evaluation =
+        let evaluation = if let Some(left) = self.left_limit {
+            self.history.difference_at_discontinuity(
+                self.time,
+                left,
+                branch.current,
+                delay,
+                None,
+            )?
+        } else {
             self.history
-                .difference_with_coefficients(self.time, branch.current, delay, None)?;
+                .difference_with_coefficients(self.time, branch.current, delay, None)?
+        };
         branch.current = evaluation.output;
         for derivative in branch.d_internal.iter_mut().chain(&mut branch.d_external) {
             *derivative = evaluation.apply_input_derivative(*derivative)?;

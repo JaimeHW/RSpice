@@ -4,6 +4,7 @@ use super::*;
 use crate::device::Bjt;
 use rspice_veriloga_runtime::transport_delay::{DelayBuffer, DelayCheckpoint, DelayConfiguration};
 
+mod event_trials;
 mod promoted;
 
 #[test]
@@ -120,6 +121,7 @@ fn gp_phase_rejects_history_from_another_nominal_delay() {
     let trial = BjtPhaseTrial {
         history: &history,
         time: delay,
+        left_limit: None,
     };
     assert!(
         trial
@@ -253,6 +255,7 @@ fn gp_phase_companion_has_conservative_current_and_matrix_incidence() {
             let phase = BjtPhaseTrial {
                 history: &history,
                 time,
+                left_limit: None,
             };
             let changed = Engine::assemble_legacy_bjt_transient_linearization(
                 &bjt,
@@ -319,7 +322,12 @@ fn gp_phase_reduced_jacobian_matches_resolved_terminal_currents() {
         let q = previous.branches.map(|branch| branch.charge);
         let zero = [0.0; BJT_DYNAMIC_CHARGE_COUNT];
         let coeff = CompanionCoefficients::backward_euler();
-        for factor in [2.5, 4.0] {
+        for (factor, left_limit) in [
+            (2.5, None),
+            (4.0, None),
+            (2.5, Some(1.2 * forward.current)),
+            (4.0, Some(1.2 * forward.current)),
+        ] {
             let time = factor * bjt.legacy_excess_phase_delay();
             let step = BjtChargeStep {
                 coeff: &coeff,
@@ -330,6 +338,7 @@ fn gp_phase_reduced_jacobian_matches_resolved_terminal_currents() {
                 phase: Some(BjtPhaseTrial {
                     history: &history,
                     time,
+                    left_limit,
                 }),
             };
             let solve = |external| {
@@ -371,7 +380,7 @@ fn gp_phase_reduced_jacobian_matches_resolved_terminal_currents() {
                     let expected = (plus[row] - minus[row]) / (2.0 * h);
                     assert!(
                         (jacobian[row][column] - expected).abs() < 2e-9 + 5e-6 * expected.abs(),
-                        "p={p} factor={factor} row={row} column={column}: {} != {expected}",
+                        "p={p} factor={factor} left={left_limit:?} row={row} column={column}: {} != {expected}",
                         jacobian[row][column]
                     );
                 }
