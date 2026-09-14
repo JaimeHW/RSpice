@@ -4,6 +4,40 @@ use super::*;
 use crate::device::BjtType;
 
 impl Engine {
+    pub(in crate::engine) fn initialize_bjt_phase_history(
+        circuit: &crate::circuit::CircuitData,
+        history: &mut BjtTransientHistory,
+    ) -> Result<(), SimulationError> {
+        let mut phase = Vec::with_capacity(circuit.bjts.devices.len());
+        for (index, bjt) in circuit.bjts.devices.iter().enumerate() {
+            let delay = bjt.legacy_excess_phase_delay();
+            if delay == 0.0 {
+                phase.push(None);
+                continue;
+            }
+            let forward = bjt
+                .legacy_forward_transport_branch(&history.dynamic_internal_prev[index])
+                .ok_or_else(|| {
+                    SimulationError::Circuit(format!(
+                        "BJT '{}' has no GP forward transport",
+                        bjt.name
+                    ))
+                })?;
+            let mut buffer = rspice_veriloga_runtime::transport_delay::DelayBuffer::new(4);
+            buffer
+                .accept_sample(0.0, forward.current, delay, None)
+                .map_err(|error| {
+                    SimulationError::Circuit(format!(
+                        "BJT '{}' phase initialization: {error}",
+                        bjt.name
+                    ))
+                })?;
+            phase.push(Some(buffer));
+        }
+        history.phase = phase;
+        Ok(())
+    }
+
     /// GP PTF currently has an AC/noise operator but no transient history.
     /// Refuse before startup effects, integration, or checkpoint publication.
     /// Remove this admission boundary only with delay residuals, accepted
@@ -28,6 +62,18 @@ impl Engine {
             }
         }
         Ok(())
+    }
+}
+
+impl BjtTransientHistory {
+    pub(in crate::engine::transient) fn phase_trial(
+        &self,
+        index: usize,
+        time: Value,
+    ) -> Option<BjtPhaseTrial<'_>> {
+        self.phase[index]
+            .as_ref()
+            .map(|history| BjtPhaseTrial { history, time })
     }
 }
 

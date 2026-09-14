@@ -5611,6 +5611,7 @@ impl Engine {
             ReactiveHistorySeed::SolvedBias
         };
         let mut bjt_history = Self::initialize_bjt_history(&circuit, &solution, reactive_seed);
+        Self::initialize_bjt_phase_history(&circuit, &mut bjt_history)?;
         let mut vbic_snapshot_cache = vec![None; circuit.bjts.devices.len()];
         // On a fresh run, ngspice seeds CKTdeltaOld[] with maxstep before the
         // first transient point. Mirror that only at startup so early
@@ -8587,6 +8588,7 @@ impl Engine {
                 Self::bjt_ngspice_truncation_limit(
                     &circuit,
                     &new_solution,
+                    step_time,
                     TruncationStep {
                         method: current_method,
                         trap_order: step_trap_order,
@@ -9435,6 +9437,7 @@ impl Engine {
                         Self::bjt_ngspice_truncation_limit(
                             &circuit,
                             &new_solution,
+                            step_time,
                             TruncationStep {
                                 method: current_method,
                                 trap_order: accepted_step_trap_order,
@@ -10166,6 +10169,7 @@ impl Engine {
                     Self::trapezoidal_order_trial_timestep_limit(
                         &circuit,
                         &new_solution,
+                        step_time,
                         current_method,
                         dt,
                         is_strictly_linear_transient,

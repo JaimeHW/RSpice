@@ -184,7 +184,9 @@ fn checkpoint_operation_result<T>(
 /// Version 41 retains runtime Verilog-A limiter history across checkpoint restore.
 /// Version 42 retains external BJT BC displacement current across integration resets.
 /// Version 44 records implementation-only unknowns excluded from the Xyce LTE domain.
-const FORMAT_VERSION: u32 = 44;
+/// Version 45 retains fixed GP transport histories independently of charge-integration epochs.
+const FORMAT_VERSION: u32 = 45;
+const BJT_PHASE_HISTORY_FORMAT_VERSION: u32 = 45;
 // Generated circular integrators retain an exact dyadic wrap origin.
 const GENERATED_IDTMOD_STATE_FORMAT_VERSION: u32 = 43;
 #[cfg(feature = "veriloga")]
@@ -2603,6 +2605,7 @@ fn allocate_bjt_transient_history(
         };
     }
     Ok(BjtTransientHistory {
+        phase: values!("accepted BJT phase"),
         vbe_prev: values!("accepted BJT vbe_prev"),
         vbe_prev_prev: values!("accepted BJT vbe_prev_prev"),
         ibe_prev: values!("accepted BJT ibe_prev"),
@@ -2711,6 +2714,56 @@ fn read_history_bool(
     }
 }
 
+fn read_bjt_phase_history(
+    lines: &mut CheckpointLines<'_>,
+    budget: &mut CheckpointParseBudget,
+) -> Result<Option<rspice_veriloga_runtime::transport_delay::DelayBuffer>, String> {
+    use rspice_veriloga_runtime::transport_delay::{
+        DelayBuffer, DelayCheckpoint, DelayConfiguration, MAX_DELAY_HISTORY_SAMPLES,
+    };
+    let line = lines.next().ok_or("missing accepted BJT phase history")?;
+    let mut fields = line.split_whitespace();
+    if fields.next() != Some("accepted_bjt_transport") {
+        return Err("malformed accepted BJT phase history".into());
+    }
+    let count = fields
+        .next()
+        .ok_or("missing accepted BJT phase sample count")?
+        .parse::<usize>()
+        .map_err(|_| "invalid accepted BJT phase sample count")?;
+    if count > MAX_DELAY_HISTORY_SAMPLES || count > line.len() / 3 {
+        return Err(
+            "accepted BJT phase sample count exceeds available data or history limits".into(),
+        );
+    }
+    let result = if count == 0 {
+        None
+    } else {
+        let delay = read_finite_value_field(&mut fields, "accepted BJT phase", "delay")?;
+        let mut samples =
+            allocate_checkpoint_capacity(count, "accepted BJT phase samples", budget)?;
+        for index in 0..count {
+            if index.is_multiple_of(CHECKPOINT_ABORT_POLL_INTERVAL)
+                && lines.abort.is_some_and(AbortSignal::is_aborted)
+            {
+                return Err("accepted BJT phase history parsing aborted".into());
+            }
+            let time = read_finite_value_field(&mut fields, "accepted BJT phase", "sample time")?;
+            let value =
+                read_finite_value_field(&mut fields, "accepted BJT phase", "sample current")?;
+            samples.push((time, value));
+        }
+        Some(DelayBuffer::from_checkpoint(DelayCheckpoint {
+            configuration: Some(DelayConfiguration::Fixed { delay }),
+            samples,
+        })?)
+    };
+    if fields.next().is_some() {
+        return Err("accepted BJT phase history has extra fields".into());
+    }
+    Ok(result)
+}
+
 fn read_accepted_junction_transient_history(
     lines: &mut CheckpointLines<'_>,
     budget: &mut CheckpointParseBudget,
@@ -2743,12 +2796,17 @@ fn read_accepted_junction_transient_history(
         .next()
         .ok_or_else(|| "missing 'accepted_bjt_transient_histories' section".to_string())?;
     let bjt_count = parse_count_header(bjt_header, "accepted_bjt_transient_histories")?;
-    let minimum_bjt_rows = bjt_count.checked_mul(2).ok_or_else(|| {
+    let rows_per_bjt = if version >= BJT_PHASE_HISTORY_FORMAT_VERSION {
+        3
+    } else {
+        2
+    };
+    let minimum_bjt_rows = bjt_count.checked_mul(rows_per_bjt).ok_or_else(|| {
         "accepted BJT transient-history row count overflows allocation limits".to_string()
     })?;
     if minimum_bjt_rows > lines.remaining() {
         return Err(format!(
-            "'accepted_bjt_transient_histories' declares {bjt_count} states but only {} checkpoint rows remain; each state requires two rows",
+            "'accepted_bjt_transient_histories' declares {bjt_count} states but only {} checkpoint rows remain; each state requires {rows_per_bjt} rows",
             lines.remaining()
         ));
     }
@@ -3001,6 +3059,13 @@ fn read_accepted_junction_transient_history(
             ));
         }
         vbic_snapshot_cache.push(snapshot);
+        bjt_history
+            .phase
+            .push(if version >= BJT_PHASE_HISTORY_FORMAT_VERSION {
+                read_bjt_phase_history(lines, budget)?
+            } else {
+                None
+            });
     }
 
     let bjt_dt_line = lines
@@ -3227,6 +3292,7 @@ fn accepted_junction_history_payload_is_empty(
         && checkpoint.jfet_history.accepted_dt_prev_prev.to_bits() == 0.0_f64.to_bits()
         && checkpoint.bjt_runtime_tags.is_empty()
         && checkpoint.vbic_snapshot_cache.is_empty()
+        && bjt.phase.is_empty()
         && bjt.vbe_prev.is_empty()
         && bjt.vbe_prev_prev.is_empty()
         && bjt.ibe_prev.is_empty()
@@ -3296,6 +3362,8 @@ fn validate_accepted_junction_transient_history_numeric_state(
         &[
             super::BJT_TRANSIENT_HISTORY_RUNTIME_TAG,
             super::GP_MNA_TRANSIENT_HISTORY_RUNTIME_TAG,
+            super::GP_PHASE_TRANSIENT_HISTORY_RUNTIME_TAG,
+            super::GP_MNA_PHASE_TRANSIENT_HISTORY_RUNTIME_TAG,
             super::VBIC_TRANSIENT_HISTORY_RUNTIME_TAG,
         ],
         budget,
@@ -3303,6 +3371,7 @@ fn validate_accepted_junction_transient_history_numeric_state(
     let bjt_count = checkpoint.bjt_names.len();
     let bjt = &checkpoint.bjt_history;
     for (field, actual) in [
+        ("phase", bjt.phase.len()),
         ("vbe_prev", bjt.vbe_prev.len()),
         ("vbe_prev_prev", bjt.vbe_prev_prev.len()),
         ("ibe_prev", bjt.ibe_prev.len()),
@@ -5903,6 +5972,38 @@ impl TransientCheckpoint {
             &self.accepted_junction_history,
             &mut budget,
         )?;
+        for (index, phase) in self
+            .accepted_junction_history
+            .bjt_history
+            .phase
+            .iter()
+            .enumerate()
+        {
+            let tag = self.accepted_junction_history.bjt_runtime_tags[index].as_str();
+            let phase_tag = matches!(
+                tag,
+                super::GP_PHASE_TRANSIENT_HISTORY_RUNTIME_TAG
+                    | super::GP_MNA_PHASE_TRANSIENT_HISTORY_RUNTIME_TAG
+            );
+            if phase.is_some() != phase_tag {
+                return Err(format!(
+                    "BJT phase history {index} presence does not match its runtime tag"
+                ));
+            }
+            if let Some(phase) = phase {
+                if !matches!(
+                    phase.accepted_configuration(),
+                    Some(
+                        rspice_veriloga_runtime::transport_delay::DelayConfiguration::Fixed { .. }
+                    )
+                ) {
+                    return Err(format!("BJT phase history {index} requires a fixed delay"));
+                }
+                phase
+                    .validate_accepted_time(self.time)
+                    .map_err(|error| format!("BJT phase history {index}: {error}"))?;
+            }
+        }
         if !self.lte_signal_global_reference.is_finite()
             || self.lte_signal_global_reference < 0.0
             || self
@@ -7863,6 +7964,26 @@ impl TransientCheckpoint {
                     out.push('\n');
                 }
                 None => out.push_str("accepted_bjt_charge_snapshot 0\n"),
+            }
+            match &history.phase[index] {
+                Some(phase) => {
+                    let Some(rspice_veriloga_runtime::transport_delay::DelayConfiguration::Fixed {
+                        delay,
+                    }) = phase.accepted_configuration()
+                    else {
+                        unreachable!("validated GP phase definition")
+                    };
+                    out.push_str(&format!(
+                        "accepted_bjt_transport {} {delay}",
+                        phase.accepted_sample_count()
+                    ));
+                    for (sample_index, (time, current)) in phase.accepted_samples().enumerate() {
+                        poll_checkpoint_abort(abort, sample_index)?;
+                        push_values(&mut out, &[time, current]);
+                    }
+                    out.push('\n');
+                }
+                None => out.push_str("accepted_bjt_transport 0\n"),
             }
         }
         out.push_str(&format!(
@@ -9852,6 +9973,128 @@ mod tests {
     use super::*;
     use crate::engine::Engine;
 
+    #[test]
+    fn gp_phase_checkpoint_round_trip_and_wire_validation() {
+        use rspice_veriloga_runtime::transport_delay::{
+            DelayBuffer, DelayCheckpoint, DelayConfiguration,
+        };
+        let mut original = sample();
+        let time = original.time;
+        assert!(time > 0.0);
+        original.accepted_junction_history = sample_junction_history();
+        original.accepted_junction_history.bjt_runtime_tags[0] =
+            super::super::GP_PHASE_TRANSIENT_HISTORY_RUNTIME_TAG.into();
+        original.accepted_junction_history.bjt_history.phase[0] = Some(
+            DelayBuffer::from_checkpoint(DelayCheckpoint {
+                configuration: Some(DelayConfiguration::Fixed { delay: time * 0.75 }),
+                samples: vec![(0.0, -0.0), (time * 0.5, 1e-12), (time, -3e-4)],
+            })
+            .unwrap(),
+        );
+        let text = original.to_text();
+        for encoding in [
+            TransientCheckpointEncoding::Unpacked,
+            TransientCheckpointEncoding::Packed,
+        ] {
+            let restored =
+                TransientCheckpoint::from_bytes(&original.to_bytes(encoding).unwrap()).unwrap();
+            assert_eq!(
+                restored.accepted_junction_history,
+                original.accepted_junction_history
+            );
+            assert_eq!(
+                restored.accepted_junction_history.bjt_history.phase[0]
+                    .as_ref()
+                    .unwrap()
+                    .accepted_samples()
+                    .next()
+                    .unwrap()
+                    .1
+                    .to_bits(),
+                (-0.0f64).to_bits()
+            );
+        }
+        let row = text
+            .lines()
+            .find(|line| line.starts_with("accepted_bjt_transport "))
+            .unwrap();
+        for replacement in [
+            "accepted_bjt_transport 0 extra".to_owned(),
+            "accepted_bjt_transport 18446744073709551615".into(),
+            "accepted_bjt_transport 1048577".into(),
+            format!("accepted_bjt_transport 2 {} 0 1 0 2", time),
+            format!("accepted_bjt_transport 1 {} {} 1", time, time),
+            format!("accepted_bjt_transport 1 {} 0 NaN", time),
+            format!("accepted_bjt_transport 1 -1 {} 1", time),
+            format!("accepted_bjt_transport 1 {} 0 1", time),
+            "accepted_bjt_transport 0".into(),
+        ] {
+            let bad = text.replace(row, &replacement);
+            assert!(
+                TransientCheckpoint::from_text(&bad).is_err(),
+                "accepted malformed phase row: {replacement}"
+            );
+        }
+        let phase = original.accepted_junction_history.bjt_history.phase[0]
+            .as_mut()
+            .unwrap();
+        phase.eval(time * 1.1, 1.0, time * 0.75, None).unwrap();
+        assert!(
+            original
+                .to_bytes(TransientCheckpointEncoding::Unpacked)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn gp_phase_checkpoint_keeps_zero_phase_v44_readable_and_refuses_lost_phase() {
+        let mut original = sample();
+        original.accepted_junction_history = sample_junction_history();
+        let legacy = legacy_text(&original, 44);
+        let restored = TransientCheckpoint::from_text(&legacy).unwrap();
+        assert_eq!(
+            restored.accepted_junction_history,
+            original.accepted_junction_history
+        );
+        let bad = legacy.replace(
+            super::super::BJT_TRANSIENT_HISTORY_RUNTIME_TAG,
+            super::super::GP_PHASE_TRANSIENT_HISTORY_RUNTIME_TAG,
+        );
+        assert!(TransientCheckpoint::from_text(&bad).is_err());
+    }
+
+    #[test]
+    fn gp_phase_checkpoint_sample_storage_is_bounded_and_parsing_is_cancellable() {
+        let mut text = String::from("accepted_bjt_transport 257 1");
+        for index in 0..257 {
+            text.push_str(&format!(" {} {}", index as Value * 0.001, index));
+        }
+        text.push('\n');
+        let bytes = 257 * std::mem::size_of::<(Value, Value)>();
+        let mut budget = CheckpointParseBudget::new(bytes - 1);
+        let error =
+            read_bjt_phase_history(&mut CheckpointLines::new(&text), &mut budget).unwrap_err();
+        assert!(error.contains("parsed-memory limit"), "{error}");
+        let mut budget = CheckpointParseBudget::new(bytes);
+        let history = read_bjt_phase_history(&mut CheckpointLines::new(&text), &mut budget)
+            .unwrap()
+            .unwrap();
+        assert_eq!(history.accepted_sample_count(), 257);
+        assert_eq!(
+            budget.used, bytes,
+            "consuming restore must not allocate a second sample buffer"
+        );
+        let abort = crate::abort_signal::CountingAbort::new(3);
+        let mut lines = CheckpointLines::new(&text);
+        lines.abort = Some(&abort);
+        let mut budget = CheckpointParseBudget::new(bytes);
+        assert!(
+            read_bjt_phase_history(&mut lines, &mut budget)
+                .unwrap_err()
+                .contains("aborted")
+        );
+    }
+
     fn sample_restart_normalized_runtime(
         checkpoint_time: Value,
         accepted_interval_count: usize,
@@ -10004,6 +10247,7 @@ mod tests {
             bjt_names: vec!["qcheck".to_string()],
             bjt_runtime_tags: vec![super::super::BJT_TRANSIENT_HISTORY_RUNTIME_TAG.to_string()],
             bjt_history: BjtTransientHistory {
+                phase: vec![None],
                 vbe_prev: vec![0.61],
                 vbe_prev_prev: vec![0.60],
                 ibe_prev: vec![-1.0e-9],
@@ -10483,6 +10727,11 @@ mod tests {
         let mut output = String::new();
         let mut lines = text.lines();
         while let Some(line) = lines.next() {
+            if version < BJT_PHASE_HISTORY_FORMAT_VERSION
+                && line.starts_with("accepted_bjt_transport ")
+            {
+                continue;
+            }
             if version < BJT_EXTERNAL_BC_CURRENT_FORMAT_VERSION
                 && line.starts_with("accepted_bjt_transient_history ")
             {
@@ -14963,7 +15212,7 @@ mod tests {
             text.push_str(" 0");
         }
         text.push_str(
-            "\naccepted_bjt_transient_dt 0 0\n\
+            "\naccepted_bjt_transport 0\naccepted_bjt_transient_dt 0 0\n\
              accepted_diode_transient_histories 0\n\
              accepted_diode_transient_dt 0 0\n",
         );
@@ -15060,7 +15309,7 @@ mod tests {
         let err = read_accepted_junction_transient_history(&mut lines, &mut budget, FORMAT_VERSION)
             .expect_err("outer accepted BJT history counts must be bounded before allocation");
         assert!(
-            err.contains("row count overflows") || err.contains("each state requires two rows"),
+            err.contains("row count overflows") || err.contains("each state requires 3 rows"),
             "unexpected error: {err}"
         );
 

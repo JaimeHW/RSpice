@@ -221,6 +221,8 @@ impl JfetTransientHistory {
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(in crate::engine) struct BjtTransientHistory {
+    /// Physical transport memory is independent of Q/CQ integration epochs.
+    pub(super) phase: Vec<Option<rspice_veriloga_runtime::transport_delay::DelayBuffer>>,
     pub(super) vbe_prev: Vec<Value>,
     pub(super) vbe_prev_prev: Vec<Value>,
     pub(super) ibe_prev: Vec<Value>,
@@ -253,9 +255,20 @@ pub(super) const BJT_TRANSIENT_HISTORY_RUNTIME_TAG: &str =
     "legacy-gummel-poon-transient-history-v2";
 pub(super) const GP_MNA_TRANSIENT_HISTORY_RUNTIME_TAG: &str =
     "promoted-gummel-poon-transient-history-v1";
+pub(super) const GP_PHASE_TRANSIENT_HISTORY_RUNTIME_TAG: &str =
+    "legacy-gummel-poon-exact-phase-history-v1";
+pub(super) const GP_MNA_PHASE_TRANSIENT_HISTORY_RUNTIME_TAG: &str =
+    "promoted-gummel-poon-exact-phase-history-v1";
 pub(super) const VBIC_TRANSIENT_HISTORY_RUNTIME_TAG: &str = "promoted-vbic-transient-history-v1";
 
 fn bjt_history_runtime_tag(bjt: &crate::device::Bjt) -> &'static str {
+    if bjt.legacy_excess_phase_delay() != 0.0 {
+        return if bjt.mna_promoted() {
+            GP_MNA_PHASE_TRANSIENT_HISTORY_RUNTIME_TAG
+        } else {
+            GP_PHASE_TRANSIENT_HISTORY_RUNTIME_TAG
+        };
+    }
     if bjt.mna_promoted() {
         if bjt.uses_legacy_gummel_poon() {
             GP_MNA_TRANSIENT_HISTORY_RUNTIME_TAG
@@ -544,6 +557,7 @@ impl Engine {
             "BJT",
             bjt_count,
             &[
+                ("phase", bjt.phase.len()),
                 ("vbe_prev", bjt.vbe_prev.len()),
                 ("vbe_prev_prev", bjt.vbe_prev_prev.len()),
                 ("ibe_prev", bjt.ibe_prev.len()),
@@ -577,6 +591,30 @@ impl Engine {
                 ),
             ],
         )?;
+        for (index, device) in circuit.bjts.devices.iter().enumerate() {
+            let delay = device.legacy_excess_phase_delay();
+            match (&bjt.phase[index], delay == 0.0) {
+                (None, true) => {}
+                (Some(phase), false) => {
+                    phase.validate_checkpoint_ready()?;
+                    if !matches!(phase.accepted_configuration(),
+                        Some(rspice_veriloga_runtime::transport_delay::DelayConfiguration::Fixed { delay: retained })
+                            if retained.to_bits() == delay.to_bits())
+                    {
+                        return Err(format!(
+                            "BJT '{}' phase history has a different nominal delay",
+                            device.name
+                        ));
+                    }
+                }
+                _ => {
+                    return Err(format!(
+                        "BJT '{}' phase history presence does not match its model",
+                        device.name
+                    ));
+                }
+            }
+        }
         for (field, values) in [
             ("bjt.vbe_prev", bjt.vbe_prev.as_slice()),
             ("bjt.vbe_prev_prev", bjt.vbe_prev_prev.as_slice()),
@@ -1050,6 +1088,7 @@ D1 b 0 DM
         let engine = Engine::default().resolved_for_netlist(&netlist);
         let circuit = engine.build_circuit(&netlist).expect("fixture builds");
         let bjt_history = BjtTransientHistory {
+            phase: vec![None],
             vbe_prev: vec![1.0],
             vbe_prev_prev: vec![2.0],
             ibe_prev: vec![3.0],

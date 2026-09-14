@@ -1564,6 +1564,7 @@ impl Engine {
                 coeff: &companion_coeff,
                 dt,
             },
+            time,
             ctx.bjt_history,
             vbic_snapshot_cache,
             ctx.xyce_one_step_order2,

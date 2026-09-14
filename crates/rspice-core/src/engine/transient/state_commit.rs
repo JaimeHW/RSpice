@@ -45,6 +45,7 @@ pub(super) struct ReactiveBreakpointScheduling<'a> {
 /// Newly evaluated values only; older history levels stay in their SoA arrays
 /// until every BJT has reconstructed a valid candidate.
 struct AcceptedBjtValues {
+    phase_sample: Option<(Value, Value)>,
     charges: [Value; BJT_DYNAMIC_CHARGE_COUNT],
     currents: [Value; BJT_DYNAMIC_CHARGE_COUNT],
     internal: [Value; BJT_INTERNAL_STATE_DIM],
@@ -57,6 +58,7 @@ struct AcceptedBjtValues {
 pub(super) struct PreparedBjtHistory {
     values: Vec<AcceptedBjtValues>,
     dt: Value,
+    accepted_time: Value,
 }
 
 /// Fallible native work evaluated before any accepted history is rotated.
@@ -230,6 +232,7 @@ impl Engine {
         accepted_solution: &[Value],
         coeff: &CompanionCoefficients,
         dt: Value,
+        accepted_time: Value,
         vbic_snapshots: Option<&[Option<BjtChargeSnapshot>]>,
     ) -> Result<(), SimulationError> {
         let prepared = Self::prepare_bjt_history(
@@ -238,6 +241,7 @@ impl Engine {
             accepted_solution,
             coeff,
             dt,
+            accepted_time,
             vbic_snapshots,
         )?;
         Self::commit_bjt_history(history, prepared);
@@ -250,6 +254,7 @@ impl Engine {
         solution: &[Value],
         coeff: &CompanionCoefficients,
         dt: Value,
+        accepted_time: Value,
         vbic_snapshots: Option<&[Option<BjtChargeSnapshot>]>,
     ) -> Result<PreparedBjtHistory, SimulationError> {
         let mut values = Vec::with_capacity(circuit.bjts.devices.len());
@@ -286,7 +291,7 @@ impl Engine {
                     bjt,
                     external,
                     BjtChargeStep {
-                        phase: None,
+                        phase: history.phase_trial(idx, accepted_time),
                         coeff,
                         dt,
                         q_prev: &history.charge_q_prev[idx],
@@ -315,7 +320,7 @@ impl Engine {
                     bjt,
                     &snapshot,
                     BjtChargeStep {
-                        phase: None,
+                        phase: history.phase_trial(idx, accepted_time),
                         coeff,
                         dt,
                         q_prev: &history.charge_q_prev[idx],
@@ -381,7 +386,25 @@ impl Engine {
                     bjt.name
                 )));
             }
+            let phase_sample = history.phase[idx]
+                .as_ref()
+                .map(|phase| {
+                    let forward = bjt
+                        .legacy_forward_transport_branch(&internal)
+                        .ok_or_else(|| format!("BJT '{}' has no GP forward transport", bjt.name))?;
+                    let delay = bjt.legacy_excess_phase_delay();
+                    phase.validate_sample(accepted_time, forward.current, delay, None)?;
+                    Ok::<_, String>((forward.current, delay))
+                })
+                .transpose()
+                .map_err(|error| {
+                    SimulationError::Circuit(format!(
+                        "BJT '{}' accepted phase history: {error}",
+                        bjt.name
+                    ))
+                })?;
             values.push(AcceptedBjtValues {
+                phase_sample,
                 charges,
                 currents,
                 internal,
@@ -390,11 +413,24 @@ impl Engine {
                 lead_currents,
             });
         }
-        Ok(PreparedBjtHistory { values, dt })
+        Ok(PreparedBjtHistory {
+            values,
+            dt,
+            accepted_time,
+        })
     }
 
     fn commit_bjt_history(history: &mut BjtTransientHistory, prepared: PreparedBjtHistory) {
         for (idx, value) in prepared.values.into_iter().enumerate() {
+            if let Some((current, delay)) = value.phase_sample {
+                // Preparation validated this exact sample against this unchanged
+                // accepted buffer; no model work runs during the commit.
+                history.phase[idx]
+                    .as_mut()
+                    .expect("prepared phase owner")
+                    .accept_sample(prepared.accepted_time, current, delay, None)
+                    .expect("prepared phase sample remains valid until commit");
+            }
             history.accepted_terminal_currents[idx] = value.lead_currents;
             history.charge_q_prev_prev_prev[idx] = history.charge_q_prev_prev[idx];
             history.charge_q_prev_prev[idx] = history.charge_q_prev[idx];
@@ -569,6 +605,7 @@ impl Engine {
             step.accepted_solution,
             step.coeff,
             step.dt,
+            step.accepted_time,
             snapshots.vbic_snapshots,
         )?;
         let behavioral = circuit
@@ -1700,7 +1737,7 @@ mod tests {
 
     #[test]
     fn native_preparation_preserves_all_earlier_histories_when_bjt_or_expression_fails() {
-        let deck = Netlist::parse("native preparation\nRin in 0 1k\nRbad bad 0 1k\nBfirst integral 0 V=sdt(v(in))\nBlater out 0 I={sdt(v(in))+v(bad)}\nRout out 0 1k\nRintegral integral 0 1k\nQfirst c b1 0 qm\nQlater c b2 0 qm\nRc c 0 1k\nRb1 b1 0 1k\nRb2 b2 0 1k\nC1 in 0 1n\nL1 c 0 1n\n.model qm NPN(IS=1e-14 CJE=1p CJC=1p TF=1n RC=1 RB=1 RE=1)\n.end\n").unwrap();
+        let deck = Netlist::parse("native preparation\nRin in 0 1k\nRbad bad 0 1k\nBfirst integral 0 V=sdt(v(in))\nBlater out 0 I={sdt(v(in))+v(bad)}\nRout out 0 1k\nRintegral integral 0 1k\nQfirst c b1 0 qm\nQlater c b2 0 qm\nRc c 0 1k\nRb1 b1 0 1k\nRb2 b2 0 1k\nC1 in 0 1n\nL1 c 0 1n\n.model qm NPN(IS=1e-14 CJE=1p CJC=1p TF=1n PTF=30 RC=1 RB=1 RE=1)\n.end\n").unwrap();
         let engine = Engine::default();
         let mut circuit = engine.build_circuit(&deck).unwrap();
         let mut solution = vec![0.0; circuit.matrix_size()];
@@ -1710,6 +1747,7 @@ mod tests {
             .unwrap();
         let mut bjt =
             Engine::initialize_bjt_history(&circuit, &solution, ReactiveHistorySeed::SolvedBias);
+        Engine::initialize_bjt_phase_history(&circuit, &mut bjt).unwrap();
         let before = bjt.clone();
         // Snapshot every mutable passive history generation.
         let capacitor_before = format!("{:?}", circuit.capacitors);

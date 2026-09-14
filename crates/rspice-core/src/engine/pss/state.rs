@@ -963,6 +963,7 @@ impl PssCircuit {
                     coeff: &coeff,
                     dt: 1.0,
                 },
+                0.0,
                 &self.bjt_history,
                 &mut self.bjt_snapshot_cache,
                 false,

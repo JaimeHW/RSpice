@@ -5,6 +5,101 @@ use crate::device::Bjt;
 use rspice_veriloga_runtime::transport_delay::{DelayBuffer, DelayCheckpoint, DelayConfiguration};
 
 #[test]
+fn gp_phase_history_acceptance_uses_actual_time_and_survives_integration_restarts() {
+    let netlist = Netlist::parse("phase acceptance\nQ1 c b 0 qm\nRc c 0 1k\nRb b 0 1k\n.model qm NPN(IS=1e-16 TF=1n PTF=30 CJE=1p CJC=0.2p VAF=20)\n.end\n").unwrap();
+    let engine = Engine::default();
+    let mut circuit = engine.build_circuit(&netlist).unwrap();
+    assert!(!circuit.bjts.devices[0].mna_promoted());
+    let mut solution = vec![0.0; circuit.matrix_size()];
+    let base = circuit.bjts.devices[0].node_base - 1;
+    solution[circuit.bjts.devices[0].node_collector - 1] = 2.0;
+    solution[base] = 0.6;
+    let mut history =
+        Engine::initialize_bjt_history(&circuit, &solution, ReactiveHistorySeed::SolvedBias);
+    Engine::initialize_bjt_phase_history(&circuit, &mut history).unwrap();
+    let delay = circuit.bjts.devices[0].legacy_excess_phase_delay();
+    let coeff = CompanionCoefficients::backward_euler();
+    for (index, time) in [0.7 * delay, 1.3 * delay, 4.2 * delay]
+        .into_iter()
+        .enumerate()
+    {
+        solution[base] += 0.01;
+        let before = history.clone();
+        let phase = history.phase_trial(0, time).unwrap();
+        phase
+            .correction(&circuit.bjts.devices[0], &history.dynamic_internal_prev[0])
+            .unwrap();
+        assert_eq!(
+            history, before,
+            "speculative phase evaluation changed history"
+        );
+        // Deliberately distinct from the absolute clock: using dt or summing
+        // accepted widths would store the wrong landing time.
+        Engine::accept_bjt_history(
+            &circuit,
+            &mut history,
+            &solution,
+            &coeff,
+            0.4 * delay,
+            time,
+            None,
+        )
+        .unwrap();
+        let forward = circuit.bjts.devices[0]
+            .legacy_forward_transport_branch(&history.dynamic_internal_prev[0])
+            .unwrap();
+        let buffer = history.phase[0].as_ref().unwrap();
+        assert_eq!(
+            buffer.accepted_samples().next_back(),
+            Some((time, forward.current))
+        );
+        buffer.validate_accepted_time(time).unwrap();
+        assert!(buffer.accepted_sample_count() <= index + 2);
+        let accepted = history.clone();
+        assert!(
+            Engine::accept_bjt_history(
+                &circuit,
+                &mut history,
+                &solution,
+                &coeff,
+                delay,
+                time,
+                None
+            )
+            .is_err()
+        );
+        assert_eq!(history, accepted, "duplicate acceptance rotated history");
+    }
+    let accepted = history.phase.clone();
+    for restart in [
+        AcceptedJunctionHistoryRestart::Preserve,
+        AcceptedJunctionHistoryRestart::Reinitialize,
+    ] {
+        Engine::reseed_reactive_histories_for_restart(
+            &mut circuit,
+            &solution,
+            delay,
+            restart,
+            TransientDeviceHistories {
+                bjt: &mut history,
+                jfet: &mut JfetTransientHistory::default(),
+                diode: &mut DiodeTransientHistory::default(),
+                mosfet: &mut MosfetTransientHistory::default(),
+                vdmos: &mut VdmosTransientHistory::default(),
+                b3soi: &mut B3SoiTransientHistory::default(),
+                bsim3: &mut Bsim3TransientHistory::default(),
+                bsim4: &mut Bsim4TransientHistory::default(),
+                ekv26: &mut Ekv26TransientHistory::default(),
+            },
+        );
+        assert_eq!(
+            history.phase, accepted,
+            "integration restart erased physical memory"
+        );
+    }
+}
+
+#[test]
 fn gp_phase_rejects_history_from_another_nominal_delay() {
     let bjt = transistor(1.0, false, 1.0);
     let snapshot = bjt.charge_snapshot(2.0, 0.68, 0.0, 0.0);

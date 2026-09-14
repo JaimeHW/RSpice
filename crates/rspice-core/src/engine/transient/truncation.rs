@@ -1009,6 +1009,7 @@ impl Engine {
     pub(super) fn legacy_bjt_ngspice_truncation_limit(
         circuit: &crate::circuit::CircuitData,
         candidate_solution: &[Value],
+        time: Value,
         step: TruncationStep,
         history: &BjtTransientHistory,
         vbic_snapshot_cache: &[Option<BjtChargeSnapshot>],
@@ -1073,7 +1074,7 @@ impl Engine {
                     bjt,
                     candidate_external,
                     BjtChargeStep {
-                        phase: None,
+                        phase: history.phase_trial(idx, time),
                         coeff: &coeff,
                         dt,
                         q_prev: &history.charge_q_prev[idx],
@@ -1164,6 +1165,7 @@ impl Engine {
     pub(super) fn bjt_ngspice_truncation_limit(
         circuit: &crate::circuit::CircuitData,
         candidate_solution: &[Value],
+        time: Value,
         step: TruncationStep,
         history: &BjtTransientHistory,
         vbic_snapshot_cache: &[Option<BjtChargeSnapshot>],
@@ -1206,6 +1208,7 @@ impl Engine {
         if let Some(legacy_limit) = Self::legacy_bjt_ngspice_truncation_limit(
             circuit,
             candidate_solution,
+            time,
             TruncationStep {
                 method,
                 trap_order,
@@ -2887,6 +2890,7 @@ impl Engine {
     pub(super) fn ngspice_device_truncation_limit(
         circuit: &crate::circuit::CircuitData,
         candidate_solution: &[Value],
+        time: Value,
         step: TruncationStep,
         bjt_history: &BjtTransientHistory,
         vbic_snapshot_cache: &[Option<BjtChargeSnapshot>],
@@ -2958,6 +2962,7 @@ impl Engine {
             Self::bjt_ngspice_truncation_limit(
                 circuit,
                 candidate_solution,
+                time,
                 TruncationStep {
                     method,
                     trap_order,
@@ -3368,6 +3373,7 @@ impl Engine {
     pub(super) fn trapezoidal_order_trial_timestep_limit(
         circuit: &crate::circuit::CircuitData,
         accepted_solution: &[Value],
+        time: Value,
         method: IntegrationMethod,
         dt: Value,
         is_strictly_linear_transient: bool,
@@ -3415,6 +3421,7 @@ impl Engine {
             let base_limit = Self::ngspice_device_truncation_limit(
                 circuit,
                 accepted_solution,
+                time,
                 TruncationStep {
                     method,
                     trap_order: 2,
@@ -4075,6 +4082,7 @@ Q1 n n 0 0 qmod
             let limit = Engine::legacy_bjt_ngspice_truncation_limit(
                 &circuit,
                 &candidate,
+                0.0,
                 TruncationStep {
                     method: IntegrationMethod::Trapezoidal,
                     trap_order: 1,
@@ -4130,6 +4138,7 @@ Q1 n n 0 0 qmod
         let limit = Engine::bjt_ngspice_truncation_limit(
             &circuit,
             &candidate,
+            0.0,
             TruncationStep {
                 method: IntegrationMethod::Trapezoidal,
                 trap_order: 1,
@@ -5166,6 +5175,7 @@ M1 d g s 0 VTRUNC W=1 L=1u
         let limit = Engine::ngspice_device_truncation_limit(
             &circuit,
             &candidate,
+            0.0,
             TruncationStep {
                 method: IntegrationMethod::Trapezoidal,
                 trap_order: 1,
@@ -5255,6 +5265,7 @@ VB b 0 -1
         let limit = Engine::ngspice_device_truncation_limit(
             &circuit,
             &candidate,
+            0.0,
             TruncationStep {
                 method: IntegrationMethod::Trapezoidal,
                 trap_order: 1,
@@ -5335,6 +5346,7 @@ J1 d g s PS area=1
         let limit = Engine::ngspice_device_truncation_limit(
             &circuit,
             &candidate,
+            0.0,
             TruncationStep {
                 method: IntegrationMethod::Trapezoidal,
                 trap_order: 1,

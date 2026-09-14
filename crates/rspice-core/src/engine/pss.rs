@@ -4120,6 +4120,7 @@ impl Engine {
                     coeff,
                     dt,
                 },
+                t_next,
                 bjt_history,
                 bjt_snapshot_cache,
                 false,
@@ -4502,6 +4503,7 @@ impl Engine {
                     &new_solution,
                     &coeff,
                     dt,
+                    t,
                     Some(bjt_snapshot_cache),
                 )?;
                 Self::accept_jfet_history(circuit, jfet_history, &new_solution, &coeff, dt, false);

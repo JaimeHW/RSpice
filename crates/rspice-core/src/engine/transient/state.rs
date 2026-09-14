@@ -231,7 +231,9 @@ impl Engine {
                 jfet_history.normalize_for_order_one(hinted_max_step);
             }
             AcceptedJunctionHistoryRestart::Reinitialize => {
+                let phase = std::mem::take(&mut bjt_history.phase);
                 *bjt_history = Self::initialize_bjt_history(circuit, solution, seed);
+                bjt_history.phase = phase;
                 bjt_history.accepted_dt_prev = hinted_max_step;
                 bjt_history.accepted_dt_prev_prev = hinted_max_step;
                 *diode_history = Self::initialize_diode_history(circuit, solution, seed);
@@ -310,6 +312,7 @@ impl Engine {
     ) -> BjtTransientHistory {
         let n = circuit.bjts.devices.len();
         let mut history = BjtTransientHistory {
+            phase: vec![None; n],
             vbe_prev: Vec::with_capacity(n),
             vbe_prev_prev: Vec::with_capacity(n),
             ibe_prev: Vec::with_capacity(n),
@@ -899,6 +902,7 @@ impl Engine {
     #[inline]
     pub(in crate::engine) fn stamp_bjt_transient_companions(
         stamp: TransientCompanionStamp<'_, '_>,
+        time: Value,
         history: &BjtTransientHistory,
         vbic_snapshot_cache: &mut [Option<BjtChargeSnapshot>],
         xyce_one_step_order2: bool,
@@ -1014,7 +1018,7 @@ impl Engine {
                 bjt,
                 [vc, vb, ve, vs],
                 BjtChargeStep {
-                    phase: None,
+                    phase: history.phase_trial(idx, time),
                     coeff,
                     dt,
                     q_prev: &history.charge_q_prev[idx],
@@ -1036,7 +1040,9 @@ impl Engine {
                 )));
             };
 
-            if !snapshot.branches.iter().any(BjtChargeBranch::is_active) {
+            if history.phase[idx].is_none()
+                && !snapshot.branches.iter().any(BjtChargeBranch::is_active)
+            {
                 vbic_snapshot_cache[idx] = None;
                 continue;
             }
@@ -1044,7 +1050,7 @@ impl Engine {
                 bjt,
                 &snapshot,
                 BjtChargeStep {
-                    phase: None,
+                    phase: history.phase_trial(idx, time),
                     coeff,
                     dt,
                     q_prev: &history.charge_q_prev[idx],
@@ -2177,6 +2183,7 @@ mod tests {
             vrs: 47.0,
         };
         let mut bjt_history = BjtTransientHistory {
+            phase: vec![None],
             vbe_prev: vec![1.0],
             vbe_prev_prev: vec![-1.0],
             ibe_prev: vec![101.0],
