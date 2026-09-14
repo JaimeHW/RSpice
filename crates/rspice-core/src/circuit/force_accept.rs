@@ -517,7 +517,17 @@ impl CircuitData {
         solution: &mut [Value],
         time: Value,
     ) -> Result<bool, CircuitError> {
-        let mut changed = self.enforce_prescribed_transient_voltage_constraints(solution, time)?;
+        self.enforce_ideal_voltage_constraints_on_side(solution, time, SourceTimeSide::Published)
+    }
+
+    pub(crate) fn enforce_ideal_voltage_constraints_on_side(
+        &self,
+        solution: &mut [Value],
+        time: Value,
+        side: SourceTimeSide,
+    ) -> Result<bool, CircuitError> {
+        let mut changed =
+            self.enforce_prescribed_transient_voltage_constraints_on_side(solution, time, side)?;
         changed |= self.enforce_dependent_voltage_constraints(solution);
         Ok(changed)
     }
@@ -529,9 +539,22 @@ impl CircuitData {
         solution: &mut [Value],
         time: Value,
     ) -> Result<bool, CircuitError> {
+        self.enforce_prescribed_transient_voltage_constraints_on_side(
+            solution,
+            time,
+            SourceTimeSide::Published,
+        )
+    }
+
+    pub(crate) fn enforce_prescribed_transient_voltage_constraints_on_side(
+        &self,
+        solution: &mut [Value],
+        time: Value,
+        side: SourceTimeSide,
+    ) -> Result<bool, CircuitError> {
         let mut changed = self
             .voltage_sources
-            .enforce_voltage_constraints(solution, time)?;
+            .enforce_voltage_constraints_on_side(solution, time, side)?;
         changed |= self.enforce_prescribed_behavioral_voltage_constraints(solution, time);
         Ok(changed)
     }

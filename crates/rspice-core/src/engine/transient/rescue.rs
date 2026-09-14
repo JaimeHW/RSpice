@@ -187,7 +187,11 @@ impl Engine {
                     needs_constraint_projection = true;
                 }
                 if needs_constraint_projection {
-                    circuit.enforce_ideal_voltage_constraints(&mut sol, time)?;
+                    circuit.enforce_ideal_voltage_constraints_on_side(
+                        &mut sol,
+                        time,
+                        ctx.source_time_side,
+                    )?;
                 }
 
                 // Merit line search on the deformed system (the DC gmin
@@ -380,6 +384,7 @@ mod tests {
         let accepted = circuit.behavioral_sources.clone();
         let coeff = CompanionCoefficients::backward_euler();
         let ctx = residual::TransientSystemContext {
+            source_time_side: crate::circuit::SourceTimeSide::Published,
             coeff: &coeff,
             xyce_one_step: false,
             xyce_one_step_order2: false,
@@ -457,6 +462,7 @@ mod tests {
             .unwrap();
         let coeff = CompanionCoefficients::backward_euler();
         let ctx = residual::TransientSystemContext {
+            source_time_side: crate::circuit::SourceTimeSide::Published,
             coeff: &coeff,
             xyce_one_step: false,
             xyce_one_step_order2: false,

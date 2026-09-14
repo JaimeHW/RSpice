@@ -31,4 +31,4 @@ pub use passive::{
 };
 pub(crate) use passive::{ResistorValues, SolutionDependentCompanionStep};
 pub use sources::{CurrentSources, VoltageSources};
-pub(crate) use sources::{SourceExcitation, SourceTimeBasis};
+pub(crate) use sources::{SourceExcitation, SourceTimeBasis, SourceTimeSide};

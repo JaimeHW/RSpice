@@ -198,6 +198,23 @@ impl CircuitData {
         nodal_gmin: Value,
         vectors: &mut XyceDaeVectors,
     ) -> Result<(), String> {
+        self.load_direct_xyce_level2_core_dae_on_side(
+            solution,
+            time,
+            nodal_gmin,
+            vectors,
+            super::SourceTimeSide::Published,
+        )
+    }
+
+    pub(crate) fn load_direct_xyce_level2_core_dae_on_side(
+        &self,
+        solution: &[Value],
+        time: Value,
+        nodal_gmin: Value,
+        vectors: &mut XyceDaeVectors,
+        side: super::SourceTimeSide,
+    ) -> Result<(), String> {
         if !self.supports_direct_xyce_level2_core_dae() {
             return Err("direct Xyce Level-2 Core DAE is unsupported for this circuit".into());
         }
@@ -291,7 +308,9 @@ impl CircuitData {
         }
 
         for &source_index in self.xyce_load_plan.current_sources() {
-            let source = self.current_sources.value_at_time(source_index, time);
+            let source = self
+                .current_sources
+                .value_at_time_on_side(source_index, time, side);
             if !source.is_finite() {
                 return Err(format!(
                     "direct Xyce current source {source_index} is non-finite at time {time}"
@@ -401,6 +420,48 @@ mod tests {
             "B={:?}",
             vectors.b()
         );
+    }
+
+    #[test]
+    fn direct_core_dae_source_event_sides_preserve_physical_q_and_f() {
+        let deck = BH_LEVEL2_DECK
+            .replace("I1 1 0 SIN(0 .1 1 1)", "I1 1 0 PWL(0 0 1 .1 1 .3 2 .3)")
+            .replace("I2 1 0 SIN(0 .2 1 2)", "I2 0 1 PWL(0 0 1 .2 1 .7 2 .7)")
+            .replace(
+                "I3 1 0 SIN(0 .8 1 3)",
+                "I3 1 1 PWL(0 0 1 1e100 1 2e100 2 2e100)",
+            );
+        let netlist = Netlist::parse(&deck).unwrap();
+        let mut circuit =
+            Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce))
+                .build_circuit(&netlist)
+                .unwrap();
+        assert!(circuit.supports_direct_xyce_level2_core_dae());
+        let device = &mut circuit.jiles_atherton_inductors[0].device;
+        let trial = device.xyce_core_trial_with_update(0.0, 0.0, 0.0).unwrap();
+        device.cache_xyce_core_trial_endpoint(0.0, 0.0, trial);
+        let solution = vec![0.0; circuit.matrix_size()];
+        let row = circuit.get_node_by_name("1").unwrap() - 1;
+        let mut left = XyceDaeVectors::new(circuit.matrix_size());
+        let mut right = XyceDaeVectors::new(circuit.matrix_size());
+        for (side, vectors, expected) in [
+            (super::super::SourceTimeSide::LeftLimit, &mut left, 0.1),
+            (super::super::SourceTimeSide::RightLimit, &mut right, 0.4),
+        ] {
+            circuit
+                .load_direct_xyce_level2_core_dae_on_side(&solution, 1.0, 0.0, vectors, side)
+                .unwrap();
+            assert!((vectors.b()[row] - expected).abs() < 1e-15);
+            assert!(
+                vectors
+                    .b()
+                    .iter()
+                    .enumerate()
+                    .all(|(index, &value)| index == row || value == 0.0)
+            );
+        }
+        assert_eq!(left.q(), right.q());
+        assert_eq!(left.f(), right.f());
     }
 
     #[test]

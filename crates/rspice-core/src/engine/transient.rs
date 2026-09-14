@@ -6911,6 +6911,7 @@ impl Engine {
                     dt,
                     &coeff,
                     xyce_one_step,
+                    crate::circuit::SourceTimeSide::Published,
                 );
             }
             if let Some(cache) = diode_stamp_cache.as_mut() {
@@ -6923,6 +6924,7 @@ impl Engine {
                     dt,
                     &coeff,
                     xyce_one_step,
+                    crate::circuit::SourceTimeSide::Published,
                 );
             }
             let mut rejected_attempt_nonlinear_state = if circuit.has_nonlinear_devices() {
@@ -7287,6 +7289,7 @@ impl Engine {
                     Self::adaptive_transient_newton_delta_limit(newton_step_delta_limit, _iter);
                 let newton_stamp_start = DiagnosticTimer::start(diagnostic_timing_enabled);
                 let transient_system_context = residual::TransientSystemContext {
+                    source_time_side: crate::circuit::SourceTimeSide::Published,
                     coeff: &coeff,
                     xyce_one_step,
                     xyce_one_step_order2,
@@ -7393,7 +7396,13 @@ impl Engine {
                         .as_mut()
                         .expect("direct Xyce DAE vectors are allocated for the gated path");
                     circuit
-                        .load_direct_xyce_level2_core_dae(&new_solution, step_time, 0.0, vectors)
+                        .load_direct_xyce_level2_core_dae_on_side(
+                            &new_solution,
+                            step_time,
+                            0.0,
+                            vectors,
+                            transient_system_context.source_time_side,
+                        )
                         .map_err(SimulationError::Circuit)?;
                     let previous_q = xyce_direct_accepted_q.as_deref().ok_or_else(|| {
                         SimulationError::Circuit("direct Xyce accepted Q history is missing".into())
@@ -7858,11 +7867,12 @@ impl Engine {
                                     "direct Xyce DAE vectors are allocated for the gated path",
                                 );
                                 circuit
-                                    .load_direct_xyce_level2_core_dae(
+                                    .load_direct_xyce_level2_core_dae_on_side(
                                         &new_solution,
                                         step_time,
                                         0.0,
                                         vectors,
+                                        transient_system_context.source_time_side,
                                     )
                                     .map_err(SimulationError::Circuit)?;
                                 let previous_q =
@@ -8152,6 +8162,7 @@ impl Engine {
                                     step_time,
                                     dt,
                                     &residual::TransientSystemContext {
+                                        source_time_side: crate::circuit::SourceTimeSide::Published,
                                         coeff: &coeff,
                                         xyce_one_step,
                                         xyce_one_step_order2,
@@ -8366,6 +8377,7 @@ impl Engine {
                         step_time,
                         dt,
                         &residual::TransientSystemContext {
+                            source_time_side: crate::circuit::SourceTimeSide::Published,
                             coeff: &coeff,
                             xyce_one_step,
                             xyce_one_step_order2,

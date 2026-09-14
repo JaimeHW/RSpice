@@ -7,7 +7,7 @@
 
 use super::state::MosfetCompanionBiasSource;
 use super::*;
-use crate::circuit::XyceCoreCompanionMode;
+use crate::circuit::{SourceTimeSide, XyceCoreCompanionMode};
 
 #[cfg(feature = "parallel")]
 const PARALLEL_CLASSIC_MOS_THRESHOLD: usize = 2_048;
@@ -42,11 +42,26 @@ pub(super) enum CoreEvaluation {
     ReuseCandidate,
 }
 
+fn require_cached_source_side(
+    cached: Option<SourceTimeSide>,
+    requested: SourceTimeSide,
+) -> Result<(), SimulationError> {
+    if cached != Some(requested) {
+        return Err(SimulationError::Circuit(format!(
+            "transient source cache has event side {cached:?}, requested {requested:?}"
+        )));
+    }
+    Ok(())
+}
+
 /// Per-step invariants of the transient system assembly. Holds borrows of
 /// the integration coefficients and the per-device-family histories, so a
 /// context is constructed locally at each use site (the histories are
 /// mutated when a step is accepted) and dropped before the commit walks.
 pub(super) struct TransientSystemContext<'a> {
+    /// Independent-source equation convention for this trial, also used by
+    /// physical residual proofs and source-constraint projection.
+    pub(super) source_time_side: SourceTimeSide,
     pub(super) coeff: &'a CompanionCoefficients,
     /// Xyce's OneStep method uses a backward-Euler reactive companion for
     /// both order-one and order-two steps. Order two additionally splits the
@@ -99,6 +114,7 @@ pub(super) struct TransientSystemContext<'a> {
 /// and conduction terms remain candidate-dependent and are stamped normally.
 #[derive(Default)]
 pub(super) struct DiodeTransientStampCache {
+    attempt_source_side: Option<SourceTimeSide>,
     static_values: Vec<Value>,
     static_rhs: Vec<Value>,
     attempt_values: Vec<Value>,
@@ -123,7 +139,13 @@ impl DiodeTransientStampCache {
     }
 
     #[inline]
-    fn capture_attempt(&mut self, matrix: &mut crate::solver::StaticMatrix, rhs: &[Value]) {
+    fn capture_attempt(
+        &mut self,
+        matrix: &mut crate::solver::StaticMatrix,
+        rhs: &[Value],
+        side: SourceTimeSide,
+    ) {
+        self.attempt_source_side = Some(side);
         self.attempt_values.clear();
         self.attempt_values.extend_from_slice(matrix.values_mut());
         self.attempt_rhs.clear();
@@ -148,6 +170,7 @@ impl DiodeTransientStampCache {
 /// adds only MOS charge and conduction terms.
 #[derive(Default)]
 pub(super) struct ClassicMosTransientStampCache {
+    attempt_source_side: Option<SourceTimeSide>,
     static_values: Vec<Value>,
     static_rhs: Vec<Value>,
     attempt_values: Vec<Value>,
@@ -238,7 +261,13 @@ impl ClassicMosTransientStampCache {
     }
 
     #[inline]
-    fn capture_attempt(&mut self, matrix: &mut crate::solver::StaticMatrix, rhs: &[Value]) {
+    fn capture_attempt(
+        &mut self,
+        matrix: &mut crate::solver::StaticMatrix,
+        rhs: &[Value],
+        side: SourceTimeSide,
+    ) {
+        self.attempt_source_side = Some(side);
         self.attempt_values.clear();
         self.attempt_values.extend_from_slice(matrix.values_mut());
         self.attempt_rhs.clear();
@@ -488,15 +517,21 @@ impl Engine {
         dt: Value,
         coeff: &CompanionCoefficients,
         xyce_one_step: bool,
+        source_time_side: SourceTimeSide,
     ) {
         debug_assert!(circuit.has_cacheable_diode_transient_base());
         cache.restore_static(matrix, rhs);
 
         let num_nodes = circuit.num_nodes();
+        circuit.voltage_sources.update_transient_rhs_on_side(
+            rhs,
+            time,
+            |br_ordinal| num_nodes + br_ordinal,
+            source_time_side,
+        );
         circuit
-            .voltage_sources
-            .update_transient_rhs(rhs, time, |br_ordinal| num_nodes + br_ordinal);
-        circuit.current_sources.stamp_transient_rhs(rhs, time);
+            .current_sources
+            .stamp_transient_rhs_on_side(rhs, time, source_time_side);
         let companion_coeff = if xyce_one_step {
             CompanionCoefficients::backward_euler()
         } else {
@@ -505,7 +540,7 @@ impl Engine {
         circuit
             .capacitors
             .stamp_transient_companion(matrix, rhs, dt, &companion_coeff, num_nodes);
-        cache.capture_attempt(matrix, rhs);
+        cache.capture_attempt(matrix, rhs, source_time_side);
     }
 
     /// Choose a bounded width for the short, memory-bound classic-MOS kernel.
@@ -666,15 +701,21 @@ impl Engine {
         dt: Value,
         coeff: &CompanionCoefficients,
         xyce_one_step: bool,
+        source_time_side: SourceTimeSide,
     ) {
         debug_assert!(circuit.has_cacheable_classic_mos_transient_base());
         cache.restore_static(matrix, rhs);
 
         let num_nodes = circuit.num_nodes();
+        circuit.voltage_sources.update_transient_rhs_on_side(
+            rhs,
+            time,
+            |br_ordinal| num_nodes + br_ordinal,
+            source_time_side,
+        );
         circuit
-            .voltage_sources
-            .update_transient_rhs(rhs, time, |br_ordinal| num_nodes + br_ordinal);
-        circuit.current_sources.stamp_transient_rhs(rhs, time);
+            .current_sources
+            .stamp_transient_rhs_on_side(rhs, time, source_time_side);
         let companion_coeff = if xyce_one_step {
             CompanionCoefficients::backward_euler()
         } else {
@@ -683,7 +724,7 @@ impl Engine {
         circuit
             .capacitors
             .stamp_transient_companion(matrix, rhs, dt, &companion_coeff, num_nodes);
-        cache.capture_attempt(matrix, rhs);
+        cache.capture_attempt(matrix, rhs, source_time_side);
     }
 
     /// Assemble one classic-MOS Newton or exact-candidate residual system from
@@ -709,6 +750,7 @@ impl Engine {
     ) -> Result<(), SimulationError> {
         debug_assert!(circuit.has_cacheable_classic_mos_transient_base());
         debug_assert!(!ctx.xyce_one_step_order2);
+        require_cached_source_side(cache.attempt_source_side, ctx.source_time_side)?;
         cache.restore_attempt(matrix, rhs);
 
         let static_probe = evaluation_mode
@@ -1425,6 +1467,7 @@ impl Engine {
             && ctx.diode_attempt_cache.is_some();
         if let Some(cache) = ctx.diode_attempt_cache.filter(|_| used_diode_attempt_cache) {
             debug_assert!(circuit.has_cacheable_diode_transient_base());
+            require_cached_source_side(cache.attempt_source_side, ctx.source_time_side)?;
             cache.restore_attempt(matrix, rhs);
             // The cache itself is a construction-time capability token for a
             // diode/ordinary-RC topology: every other nonlinear, behavioral,
@@ -1461,10 +1504,15 @@ impl Engine {
             // Stamp linear devices (R, V, I) for transient; tline transient
             // behavior is stamped separately via companions.
             circuit.stamp_transient_linear_direct(matrix, rhs);
+            circuit.voltage_sources.update_transient_rhs_on_side(
+                rhs,
+                time,
+                |br_ordinal| num_nodes + br_ordinal,
+                ctx.source_time_side,
+            );
             circuit
-                .voltage_sources
-                .update_transient_rhs(rhs, time, |br_ordinal| num_nodes + br_ordinal);
-            circuit.current_sources.stamp_transient_rhs(rhs, time);
+                .current_sources
+                .stamp_transient_rhs_on_side(rhs, time, ctx.source_time_side);
 
             // Xyce's OneStep order-2 residual scales the complete static DAE
             // contribution by one half.  The reactive Q contribution is stamped
@@ -2374,6 +2422,25 @@ impl Engine {
         time: Value,
         baseline_diag_gmin: Value,
     ) -> Result<Vec<Value>, SimulationError> {
+        self.capture_xyce_static_residual_on_side(
+            circuit,
+            matrix,
+            solution,
+            time,
+            baseline_diag_gmin,
+            SourceTimeSide::Published,
+        )
+    }
+
+    pub(super) fn capture_xyce_static_residual_on_side(
+        &self,
+        circuit: &mut crate::circuit::CircuitData,
+        matrix: &mut crate::solver::StaticMatrix,
+        solution: &[Value],
+        time: Value,
+        baseline_diag_gmin: Value,
+        side: SourceTimeSide,
+    ) -> Result<Vec<Value>, SimulationError> {
         circuit.update_bjt_static_linearizations(solution);
         circuit.update_b3soi_static_linearizations(solution);
         circuit.update_jfet_static_linearizations(solution);
@@ -2382,10 +2449,15 @@ impl Engine {
         matrix.with_probe_values(|probe, probe_rhs| {
             Self::stamp_nodal_gmin(circuit, probe, baseline_diag_gmin.max(0.0));
             circuit.stamp_transient_linear_direct(probe, probe_rhs);
+            circuit.voltage_sources.update_transient_rhs_on_side(
+                probe_rhs,
+                time,
+                |br_ordinal| num_nodes + br_ordinal,
+                side,
+            );
             circuit
-                .voltage_sources
-                .update_transient_rhs(probe_rhs, time, |br_ordinal| num_nodes + br_ordinal);
-            circuit.current_sources.stamp_transient_rhs(probe_rhs, time);
+                .current_sources
+                .stamp_transient_rhs_on_side(probe_rhs, time, side);
             circuit.stamp_generic_switches_with_solution(probe, probe_rhs, solution, time);
             circuit.stamp_xyce_core_static_residual(probe, solution);
             if circuit.has_nonlinear_devices() {
@@ -2447,6 +2519,7 @@ impl Engine {
 
         let refresh_nonlinear = !circuit.has_classic_mos_only_transient_nonlinearity();
         if let Some(cache) = classic_mos_cache {
+            require_cached_source_side(cache.attempt_source_side, ctx.source_time_side)?;
             let direct_companion_terms = classic_mos_companion_terms.filter(|terms| {
                 terms.len() == circuit.mosfets.devices.len()
                     && classic_mos_caps_out
@@ -2575,6 +2648,9 @@ impl Engine {
 
 #[cfg(test)]
 mod core_state_tests;
+
+#[cfg(test)]
+mod source_side_tests;
 
 #[cfg(test)]
 mod tests {
@@ -2929,6 +3005,17 @@ mod tests {
 
     #[test]
     fn cached_diode_assembly_matches_canonical_static_probe_exactly() {
+        check_cached_diode_assembly(SourceTimeSide::Published);
+    }
+
+    #[test]
+    fn cached_diode_source_event_sides_match_canonical_and_refuse_stale_side() {
+        for side in [SourceTimeSide::LeftLimit, SourceTimeSide::RightLimit] {
+            check_cached_diode_assembly(side);
+        }
+    }
+
+    fn check_cached_diode_assembly(source_time_side: SourceTimeSide) {
         const DECK: &str = "\
 Diode transient cache equivalence
 VDD vdd 0 5
@@ -2942,7 +3029,19 @@ D2 in out DMOD
 .MODEL DMOD D IS=1e-14 N=1.05 RS=2 CJO=0.3p M=0.4 VJ=0.8 TT=20p
 .END
 ";
-        let netlist = Netlist::parse(DECK).expect("deck parses");
+        let deck = if source_time_side == SourceTimeSide::Published {
+            DECK.to_owned()
+        } else {
+            DECK.replace(
+                "PULSE(0 1.2 1n 100p 100p 4n 10n)",
+                "PWL(0 0 1.3n 0.4 1.3n 1.2 10n 1.2)",
+            )
+            .replace(
+                "PULSE(0 10u 1.1n 100p 100p 4n 10n)",
+                "PWL(0 0 1.3n 4u 1.3n 10u 10n 10u)",
+            )
+        };
+        let netlist = Netlist::parse(&deck).expect("deck parses");
         let engine = Engine::default().resolved_for_netlist(&netlist);
         let mut circuit = engine.build_circuit(&netlist).expect("circuit builds");
         assert!(circuit.has_cacheable_diode_transient_base());
@@ -2981,6 +3080,7 @@ D2 in out DMOD
         let coeff = CompanionCoefficients::backward_euler();
         let baseline_diag_gmin = engine.config.convergence_config.gmin_target.max(0.0);
         let mut ctx = TransientSystemContext {
+            source_time_side,
             coeff: &coeff,
             xyce_one_step: false,
             xyce_one_step_order2: false,
@@ -3045,6 +3145,7 @@ D2 in out DMOD
             dt,
             &coeff,
             false,
+            source_time_side,
         );
         ctx.diode_attempt_cache = Some(&cache);
         engine
@@ -3066,10 +3167,72 @@ D2 in out DMOD
 
         assert_eq!(matrix.values_mut(), canonical_values);
         assert_eq!(rhs, canonical_rhs);
+
+        // No restamp or direct residual shortcut may reuse an attempt prepared
+        // for a different source side, even with the same physical timestamp.
+        ctx.source_time_side = if source_time_side == SourceTimeSide::LeftLimit {
+            SourceTimeSide::RightLimit
+        } else {
+            SourceTimeSide::LeftLimit
+        };
+        let error = engine
+            .stamp_transient_system_with_generated_mode(
+                &mut circuit,
+                &mut matrix,
+                &mut rhs,
+                &solution,
+                time,
+                dt,
+                &ctx,
+                &mut vbic_snapshot_cache,
+                true,
+                CoreEvaluation::ReuseCandidate,
+                0.0,
+                crate::device::veriloga_builtins::GeneratedEvaluationMode::NewtonLimited,
+            )
+            .unwrap_err();
+        assert!(error.to_string().contains("source cache has event side"));
+        assert_eq!(matrix.values_mut(), canonical_values);
+        assert_eq!(rhs, canonical_rhs);
+        let mut proof_ax = vec![123.0];
+        let mut proof_rhs = vec![456.0];
+        let error = engine
+            .transient_nonlinear_residual_converged(
+                &mut circuit,
+                &mut matrix,
+                &mut rhs,
+                &solution,
+                time,
+                dt,
+                &ctx,
+                None,
+                &mut vbic_snapshot_cache,
+                None,
+                None,
+                None,
+                Some((&mut proof_ax, &mut proof_rhs)),
+            )
+            .unwrap_err();
+        assert!(error.to_string().contains("source cache has event side"));
+        assert_eq!(matrix.values_mut(), canonical_values);
+        assert_eq!(rhs, canonical_rhs);
+        assert_eq!(proof_ax, [123.0]);
+        assert_eq!(proof_rhs, [456.0]);
     }
 
     #[test]
     fn cached_classic_mos_assembly_matches_canonical_static_probe_exactly() {
+        check_cached_classic_mos_assembly(SourceTimeSide::Published);
+    }
+
+    #[test]
+    fn cached_classic_mos_source_event_sides_match_canonical_and_refuse_stale_side() {
+        for side in [SourceTimeSide::LeftLimit, SourceTimeSide::RightLimit] {
+            check_cached_classic_mos_assembly(side);
+        }
+    }
+
+    fn check_cached_classic_mos_assembly(source_time_side: SourceTimeSide) {
         const DECK: &str = "\
 Classic MOS transient cache equivalence
 VDD vdd 0 5
@@ -3081,7 +3244,19 @@ M1 d g 0 0 NM W=10u L=1u
 .MODEL NM NMOS LEVEL=1 VTO=0.7 KP=100u LAMBDA=0.02 CGSO=2e-10 CGDO=1e-10
 .END
 ";
-        let netlist = Netlist::parse(DECK).expect("deck parses");
+        let deck = if source_time_side == SourceTimeSide::Published {
+            DECK.to_owned()
+        } else {
+            DECK.replace(
+                "PULSE(0 2 1n 100p 100p 4n 10n)",
+                "PWL(0 0 1.3n 0.5 1.3n 2 10n 2)",
+            )
+            .replace(
+                "PULSE(0 10u 1.1n 100p 100p 4n 10n)",
+                "PWL(0 0 1.3n 4u 1.3n 10u 10n 10u)",
+            )
+        };
+        let netlist = Netlist::parse(&deck).expect("deck parses");
         let engine = Engine::default().resolved_for_netlist(&netlist);
         let mut circuit = engine.build_circuit(&netlist).expect("circuit builds");
         assert!(circuit.has_cacheable_classic_mos_transient_base());
@@ -3125,6 +3300,7 @@ M1 d g 0 0 NM W=10u L=1u
         let coeff = CompanionCoefficients::backward_euler();
         let baseline_diag_gmin = engine.config.convergence_config.gmin_target.max(0.0);
         let mut ctx = TransientSystemContext {
+            source_time_side,
             coeff: &coeff,
             xyce_one_step: false,
             xyce_one_step_order2: false,
@@ -3187,6 +3363,7 @@ M1 d g 0 0 NM W=10u L=1u
             dt,
             &coeff,
             false,
+            source_time_side,
         );
         assert!(cache.supports_direct_residual_proof());
         let mut direct_ax = Vec::new();
@@ -3245,6 +3422,60 @@ M1 d g 0 0 NM W=10u L=1u
 
         assert_eq!(matrix.values_mut(), canonical_values);
         assert_eq!(rhs, canonical_rhs);
+
+        // No restamp or direct residual shortcut may reuse an attempt prepared
+        // for a different source side, even with the same physical timestamp.
+        ctx.source_time_side = if source_time_side == SourceTimeSide::LeftLimit {
+            SourceTimeSide::RightLimit
+        } else {
+            SourceTimeSide::LeftLimit
+        };
+        let error = engine
+            .stamp_classic_mos_transient_system_from_cache(
+                &cache,
+                &mut circuit,
+                &mut matrix,
+                &mut rhs,
+                &solution,
+                dt,
+                &ctx,
+                true,
+                crate::device::veriloga_builtins::GeneratedEvaluationMode::NewtonLimited,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .unwrap_err();
+        assert!(error.to_string().contains("source cache has event side"));
+        assert_eq!(matrix.values_mut(), canonical_values);
+        assert_eq!(rhs, canonical_rhs);
+        let mut proof_ax = vec![123.0];
+        let mut proof_rhs = vec![456.0];
+        let error = engine
+            .transient_nonlinear_residual_converged(
+                &mut circuit,
+                &mut matrix,
+                &mut rhs,
+                &solution,
+                time,
+                dt,
+                &ctx,
+                Some(&cache),
+                &mut vbic_snapshot_cache,
+                None,
+                None,
+                None,
+                Some((&mut proof_ax, &mut proof_rhs)),
+            )
+            .unwrap_err();
+        assert!(error.to_string().contains("source cache has event side"));
+        assert_eq!(matrix.values_mut(), canonical_values);
+        assert_eq!(rhs, canonical_rhs);
+        assert_eq!(proof_ax, [123.0]);
+        assert_eq!(proof_rhs, [456.0]);
+        ctx.source_time_side = source_time_side;
 
         let compact_mosfet_companion_slots =
             Engine::link_compact_mosfet_companion_slots(&circuit, &matrix);
@@ -3656,6 +3887,7 @@ Q1 C B E 0 QN
         let mosfet_companion_slots = Engine::link_mosfet_companion_slots(&circuit, &matrix);
         let vdmos_companion_slots = Engine::link_vdmos_companion_slots(&circuit, &matrix);
         let ctx = TransientSystemContext {
+            source_time_side: crate::circuit::SourceTimeSide::Published,
             coeff: &coeff,
             xyce_one_step: false,
             xyce_one_step_order2: false,
@@ -4101,6 +4333,7 @@ Q1 C B E 0 QN
             let mosfet_companion_slots = Engine::link_mosfet_companion_slots(&circuit, &matrix);
             let vdmos_companion_slots = Engine::link_vdmos_companion_slots(&circuit, &matrix);
             let ctx = TransientSystemContext {
+                source_time_side: crate::circuit::SourceTimeSide::Published,
                 coeff: &coeff,
                 xyce_one_step: false,
                 xyce_one_step_order2: false,

@@ -23,6 +23,7 @@ pub use storage::{
 };
 pub(crate) use storage::{
     ResistorValues, SolutionDependentCompanionStep, SourceExcitation, SourceTimeBasis,
+    SourceTimeSide,
 };
 // The nonlinear device arrays are stamping machinery that no frontend names,
 // so they stay reachable inside the crate only. `Diodes` is re-exported above
