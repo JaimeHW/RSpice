@@ -124,6 +124,32 @@ pub struct DelayEvaluation {
     pub delay_coefficient: f64,
 }
 
+/// A directly evaluated delayed-minus-present signal. The current-input
+/// action retains its ratio until applied to a device derivative: rounding
+/// a tiny interpolation weight first can erase a representable Jacobian.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DelayDifferenceEvaluation {
+    pub output: f64,
+    pub delay_coefficient: f64,
+    input_numerator: f64,
+    input_denominator: f64,
+}
+
+impl DelayDifferenceEvaluation {
+    /// Apply the local current-input action to one device derivative.
+    /// Accepted samples are constants; their derivatives do not propagate.
+    pub fn apply_input_derivative(&self, derivative: f64) -> Result<f64, String> {
+        if !derivative.is_finite() {
+            return Err("transport correction input derivative must be finite".into());
+        }
+        let result = product_div(self.input_numerator, derivative, self.input_denominator);
+        if !result.is_finite() {
+            return Err("transport correction derivative is not representable".into());
+        }
+        Ok(result)
+    }
+}
+
 /// Accepted/candidate state for the Verilog-A `absdelay` operator.
 ///
 /// Accepted samples are strictly increasing and begin at time zero. The
@@ -289,6 +315,102 @@ impl DelayBuffer {
         Ok(evaluation)
     }
 
+    /// Read `delayed(value) - value` directly, without rounding the delayed
+    /// value first. Neither accepted history nor a staged candidate changes.
+    /// The owning device stages its input with `eval_with_coefficients` only
+    /// when preparing the eventual accepted-state transaction.
+    pub fn difference_with_coefficients(
+        &self,
+        time: f64,
+        value: f64,
+        delay: f64,
+        max_delay: Option<f64>,
+    ) -> Result<DelayDifferenceEvaluation, String> {
+        self.validate_runtime(time, value, delay, max_delay)?;
+        if self.samples.back().is_some_and(|sample| time < sample.0) {
+            return Err("transport correction time precedes the latest accepted sample".into());
+        }
+        let (_, effective_delay, delay_scale) = self.resolve_configuration(delay, max_delay)?;
+        if self.samples.is_empty() {
+            if time != 0.0 {
+                return Err("transport correction requires an accepted time-zero anchor".into());
+            }
+            return Ok(DelayDifferenceEvaluation {
+                output: 0.0,
+                delay_coefficient: 0.0,
+                input_numerator: 0.0,
+                input_denominator: 1.0,
+            });
+        }
+        let target = DelayTarget::new(time, effective_delay);
+        let [left, right] = self.interpolation_endpoints(target, (time, value));
+        let result = match (left, right) {
+            (Some((lt, lv, li)), Some((rt, rv, ri))) => {
+                let interval = rt - lt;
+                if !(interval.is_finite() && interval > 0.0) {
+                    return Err("transport correction interval is not representable".into());
+                }
+                let from_right = target.before(rt).clamp(0.0, interval);
+                let output = if ri == 1.0 {
+                    // The right endpoint is the present input. Cancel it
+                    // algebraically before applying the small delay fraction.
+                    product_sum_div(lv, from_right, value, -from_right, interval)
+                } else {
+                    // Retain the target's low word and cancellation against
+                    // the present input across an entirely accepted bracket.
+                    sum_products_ratio(
+                        [
+                            (target.high, rv),
+                            (target.low, rv),
+                            (-lt, rv),
+                            (rt, lv),
+                            (-target.high, lv),
+                            (-target.low, lv),
+                            (-rt, value),
+                            (lt, value),
+                        ]
+                        .into_iter(),
+                        [(rt, 1.0), (lt, -1.0)].into_iter(),
+                    )
+                    .map_err(|error| {
+                        format!("transport correction is not representable: {error:?}")
+                    })?
+                };
+                let input_numerator = if ri == 1.0 {
+                    -from_right
+                } else if li == 1.0 {
+                    -target.after(lt).clamp(0.0, interval)
+                } else {
+                    -interval
+                };
+                let delay_coefficient = if time <= effective_delay || delay_scale == 0.0 {
+                    0.0
+                } else {
+                    -delay_scale * product_sum_div(rv, 1.0, lv, -1.0, interval)
+                };
+                DelayDifferenceEvaluation {
+                    output,
+                    delay_coefficient,
+                    input_numerator,
+                    input_denominator: interval,
+                }
+            }
+            (Some((_, output, input)), None) | (None, Some((_, output, input))) => {
+                DelayDifferenceEvaluation {
+                    output: output - value,
+                    delay_coefficient: 0.0,
+                    input_numerator: input - 1.0,
+                    input_denominator: 1.0,
+                }
+            }
+            (None, None) => return Err("transport correction has no accepted anchor".into()),
+        };
+        if !result.output.is_finite() || !result.delay_coefficient.is_finite() {
+            return Err("transport correction produced an unrepresentable result".into());
+        }
+        Ok(result)
+    }
+
     fn validate_runtime(
         &self,
         time: f64,
@@ -435,12 +557,11 @@ impl DelayBuffer {
         self.interpolate(target, (time, value), target_delay_derivative)
     }
 
-    fn interpolate(
+    fn interpolation_endpoints(
         &self,
         target: DelayTarget,
         candidate: (f64, f64),
-        target_delay_derivative: f64,
-    ) -> Result<DelayEvaluation, String> {
+    ) -> [Option<(f64, f64, f64)>; 2] {
         // Accepted times are strictly increasing, including across the
         // deque's wrap. Find the first strictly later sample in logarithmic
         // time without copying or rotating the retained history. Equality
@@ -461,7 +582,16 @@ impl DelayBuffer {
         } else if right.is_none() {
             right = Some((candidate.0, candidate.1, 1.0));
         }
+        [left, right]
+    }
 
+    fn interpolate(
+        &self,
+        target: DelayTarget,
+        candidate: (f64, f64),
+        target_delay_derivative: f64,
+    ) -> Result<DelayEvaluation, String> {
+        let [left, right] = self.interpolation_endpoints(target, candidate);
         let evaluation = match (left, right) {
             (
                 Some((left_time, left_value, left_input)),
