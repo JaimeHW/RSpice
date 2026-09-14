@@ -154,6 +154,10 @@ fn compiled_model_layout_identity(model: &CompiledModel) -> CompiledModelLayoutI
     for &slot in &model.evaluation_input_derivatives {
         usize_field(&mut hasher, slot);
     }
+    usize_field(&mut hasher, model.event_state_derivatives.len());
+    for &slot in &model.event_state_derivatives {
+        usize_field(&mut hasher, slot);
+    }
     usize_field(&mut hasher, model.switch_branch_variables.len());
     for &slot in &model.switch_branch_variables {
         usize_field(&mut hasher, slot);
@@ -2908,6 +2912,7 @@ impl VerilogADevice {
         context.configure_evaluation_inputs(
             &model.evaluation_input_variables,
             &model.evaluation_input_derivatives,
+            &model.event_state_derivatives,
         )?;
         if model
             .switch_branch_variables
@@ -10871,6 +10876,7 @@ endmodule
             .configure_evaluation_inputs(
                 &model.evaluation_input_variables,
                 &model.evaluation_input_derivatives,
+                &model.event_state_derivatives,
             )
             .expect("native test model evaluation-input layout configures");
         context.lookup_tables = model.lookup_tables.clone();

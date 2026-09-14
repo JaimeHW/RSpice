@@ -1,0 +1,14 @@
+module event_derivative_readback(p,n);
+inout p,n; electrical p,n;
+real count=2,before,after,held,reported;
+analog begin
+    before=count;
+    @(initial_step) begin
+        count=count+1;
+        held=ddx(ddx(ddx(exp(V(p,n)),V(p,n)),V(p,n)),V(p,n));
+    end
+    after=count;
+    reported=ddx(ddx(ddx(ddx(exp(V(p,n)),V(p,n)),V(p,n)),V(p,n)),V(p,n));
+    I(p,n)<+(before+after)*V(p,n)+held;
+end
+endmodule

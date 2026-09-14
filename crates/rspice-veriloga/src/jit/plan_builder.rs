@@ -61,6 +61,8 @@ pub(crate) enum AssignmentRootPolicy {
     /// What still reads a variable under this plan is named by
     /// [`mark_cfg_plan_variable_roots`].
     CfgPreludeSlots,
+    /// The canonical body owns source-ordered assignments and publications.
+    CfgSourceEvaluation,
     /// Nothing in this plan reads a variable: the plan *is* the variables.
     ///
     /// This is the observation pass — the program
@@ -106,7 +108,12 @@ pub(crate) fn build_model_plan_with_canonical_ir_for_cfg(
     artifact: &CanonicalIrArtifact,
 ) -> JitResult<NativeModelPlan> {
     validate_canonical_artifact_for_model(model, artifact)?;
-    build_model_plan_inner(model, Some(artifact), AssignmentRootPolicy::CfgPreludeSlots)
+    let policy = if requires_eager_event_observations(model) {
+        AssignmentRootPolicy::CfgSourceEvaluation
+    } else {
+        AssignmentRootPolicy::CfgPreludeSlots
+    };
+    build_model_plan_inner(model, Some(artifact), policy)
 }
 
 #[cfg(feature = "native-bytecode-contract-tests")]
@@ -277,7 +284,10 @@ fn build_model_plan_inner(
         // The CFG constructor supplies these entries and their read sets.
         // Lowering discarded postfix entries would both duplicate compilation
         // and impose their derivative-order limits on the CFG backend.
-        if !matches!(policy, AssignmentRootPolicy::CfgPreludeSlots) {
+        if !matches!(
+            policy,
+            AssignmentRootPolicy::CfgPreludeSlots | AssignmentRootPolicy::CfgSourceEvaluation
+        ) {
             let value_limits = base_limits
                 .with_available_current_pairs(&available_current_pairs)
                 .with_prior_current_probes(&prior_current_probes);
@@ -561,7 +571,7 @@ fn build_model_plan_inner(
         current_dependencies,
         assignment_coverage: match policy {
             AssignmentRootPolicy::PostfixEntries => NativeAssignmentCoverage::ObservableVariables,
-            AssignmentRootPolicy::CfgPreludeSlots if requires_eager_event_observations(model) => {
+            AssignmentRootPolicy::CfgSourceEvaluation => {
                 NativeAssignmentCoverage::ObservableVariables
             }
             AssignmentRootPolicy::CfgPreludeSlots => NativeAssignmentCoverage::CfgPlanReads,
@@ -571,7 +581,10 @@ fn build_model_plan_inner(
     };
     // The CFG caller installs every deferred entry before validating the
     // completed plan. Empty entry vectors cannot be executed as a valid plan.
-    if !matches!(policy, AssignmentRootPolicy::CfgPreludeSlots) {
+    if !matches!(
+        policy,
+        AssignmentRootPolicy::CfgPreludeSlots | AssignmentRootPolicy::CfgSourceEvaluation
+    ) {
         plan.validate_shape(model)?;
     }
     Ok(plan)
@@ -2986,7 +2999,7 @@ fn live_assignment_slots(model: &CompiledModel) -> Vec<bool> {
     live
 }
 
-fn requires_eager_event_observations(model: &CompiledModel) -> bool {
+pub(crate) fn requires_eager_event_observations(model: &CompiledModel) -> bool {
     // Branch kinds are accepted discontinuity state, but their writes are
     // ordinary source evaluation. They cannot replay a procedural event when
     // named values are observed. The canonical prelude publishes their candidates.
@@ -3006,7 +3019,11 @@ pub(crate) fn live_canonical_assignment_slots(
     policy: AssignmentRootPolicy,
 ) -> JitResult<Vec<bool>> {
     let mut live = vec![false; model.num_variables];
-    for name in &mir.digital_observations {
+    for name in mir
+        .digital_observations
+        .iter()
+        .filter(|_| policy != AssignmentRootPolicy::CfgSourceEvaluation)
+    {
         let slot = model
             .variable_names
             .iter()
@@ -3025,17 +3042,15 @@ pub(crate) fn live_canonical_assignment_slots(
         *retained = true;
     }
     match policy {
+        AssignmentRootPolicy::CfgSourceEvaluation => {
+            mark_static_condition_variable_roots(model, mir, limits, &mut live)?;
+        }
         AssignmentRootPolicy::PostfixEntries => {
             mark_observable_variable_roots(model, &mut live);
             mark_canonical_entry_variable_roots(model, mir, limits, true, &mut live)?;
         }
         AssignmentRootPolicy::CfgPreludeSlots => {
             mark_cfg_plan_variable_roots(model, mir, limits, &mut live)?;
-            // Replaying a stateful body after acceptance is a new event, not an
-            // observation. Retain its named values during the actual evaluation.
-            if requires_eager_event_observations(model) {
-                mark_observable_variable_roots(model, &mut live);
-            }
         }
         // The observable set, and nothing beyond it: this pass exists to
         // publish those names and runs no entry that could read anything else.
@@ -4435,22 +4450,7 @@ fn mark_cfg_plan_variable_roots(
     limits: NativeLoweringLimits<'_>,
     live: &mut [bool],
 ) -> JitResult<()> {
-    for (stamp_index, stamp) in model.stamp_programs.iter().enumerate() {
-        let Some(condition) = &stamp.static_condition else {
-            continue;
-        };
-        // The same snapshot-aware limits the entry lowering uses, for the same
-        // reason: a condition redirected to a snapshot keeps that snapshot's
-        // slot alive.
-        let snapshot_identifiers = equation_snapshot_identifiers(model, limits, stamp_index);
-        let limits = match &snapshot_identifiers {
-            Some(identifiers) => limits.with_identifier_index(identifiers),
-            None => limits,
-        };
-        let program =
-            lower_static_condition_program(model, Some(mir), stamp_index, condition, limits)?;
-        mark_native_program_variable_reads(&program, live);
-    }
+    mark_static_condition_variable_roots(model, mir, limits, live)?;
     for &slot in &model.event_state_variables {
         if model
             .evaluation_input_variables
@@ -4468,6 +4468,31 @@ fn mark_cfg_plan_variable_roots(
         if crate::analog_tasks::SIMULATOR_CONTROL_TASK_VARIABLES.contains(&name.as_str()) {
             live[slot] = true;
         }
+    }
+    Ok(())
+}
+
+fn mark_static_condition_variable_roots(
+    model: &CompiledModel,
+    mir: &MirModel,
+    limits: NativeLoweringLimits<'_>,
+    live: &mut [bool],
+) -> JitResult<()> {
+    for (stamp_index, stamp) in model.stamp_programs.iter().enumerate() {
+        let Some(condition) = &stamp.static_condition else {
+            continue;
+        };
+        // The same snapshot-aware limits the entry lowering uses, for the same
+        // reason: a condition redirected to a snapshot keeps that snapshot's
+        // slot alive.
+        let snapshot_identifiers = equation_snapshot_identifiers(model, limits, stamp_index);
+        let limits = match &snapshot_identifiers {
+            Some(identifiers) => limits.with_identifier_index(identifiers),
+            None => limits,
+        };
+        let program =
+            lower_static_condition_program(model, Some(mir), stamp_index, condition, limits)?;
+        mark_native_program_variable_reads(&program, live);
     }
     Ok(())
 }

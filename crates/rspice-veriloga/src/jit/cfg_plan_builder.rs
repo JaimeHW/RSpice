@@ -47,14 +47,13 @@
 //!
 //! # What stays postfix, and why that is not a half measure
 //!
-//! `parameter_defaults`, `static_conditions` and both assignment passes keep
-//! their MIR lowering. A parameter default is evaluated once, before any body
-//! runs, from a MIR expression the CFG does not carry; the assignment passes
-//! write the runtime variable slots the *postfix* value entries read, and the
-//! CFG route recomputes those values inline instead. Leaving them alone is
-//! therefore what makes the two plans comparable at all: both fill `variables`
-//! by the same code, and the value entries then have to agree about what that
-//! operating point evaluates to.
+//! Parameter defaults and static topology setup retain their MIR lowering.
+//! Models with procedural event state publish their named variables from the
+//! source-ordered canonical body, seeded from immutable evaluation inputs.
+//! They require eager readback because replaying an event after acceptance
+//! would produce a different value. Other models retain only assignments the
+//! plan actually reads and compute ordinary readbacks on demand. A refused
+//! canonical body rebuilds the complete postfix plan, including its tasks.
 //!
 //! # Noise takes the CFG route too, and here is what it took
 //!
@@ -988,16 +987,20 @@ pub(crate) fn build_model_plan_from_canonical_cfg(
     // The executable lowering, not the generated one: this plan is executed by
     // `VerilogADevice`, which builds instances from whatever terminal list the
     // netlist supplied.
-    let mut cfg = CfgModel::from_hir_for_executable_backend(&artifact.hir, &artifact.mir).map_err(
-        |diagnostics| {
-            refuse(
-                CfgPlanRefusal::CfgLowering,
-                diagnostics
-                    .first()
-                    .map_or_else(|| "unknown".to_string(), |first| first.message.to_string()),
-            )
-        },
-    )?;
+    let source_evaluation = super::plan_builder::requires_eager_event_observations(model);
+    let lower_body = if source_evaluation {
+        CfgModel::from_hir_for_executable_evaluation
+    } else {
+        CfgModel::from_hir_for_executable_backend
+    };
+    let mut cfg = lower_body(&artifact.hir, &artifact.mir).map_err(|diagnostics| {
+        refuse(
+            CfgPlanRefusal::CfgLowering,
+            diagnostics
+                .first()
+                .map_or_else(|| "unknown".to_string(), |first| first.message.to_string()),
+        )
+    })?;
     if model.stamp_programs.len() != cfg.residuals.len() {
         return Err(refuse(
             CfgPlanRefusal::EquationsUnpaired,
@@ -1062,11 +1065,12 @@ pub(crate) fn build_model_plan_from_canonical_cfg(
         .collect();
     // EvaluationInput reads and candidate publications address the compact
     // state layout directly. Require declaration order to match the runtime.
-    if (artifact
-        .hir
-        .variables
-        .iter()
-        .any(|variable| variable.retains_input)
+    if (source_evaluation
+        || artifact
+            .hir
+            .variables
+            .iter()
+            .any(|variable| variable.retains_input)
         || !model.switch_branch_variables.is_empty())
         && (event_state_variables.len() != model.event_state_variables.len()
             || event_state_variables
@@ -1221,43 +1225,75 @@ pub(crate) fn build_model_plan_from_canonical_cfg(
         .chain(noise_published.iter().copied())
         .collect();
 
-    // The CFG owns ordinary retained writes and source-ordered branch kinds.
-    // Publish their final candidates from this body; procedural event writes
-    // still belong to assignment replay. Required candidates cannot fall back
-    // to uninitialized storage if the prelude cannot publish them.
+    // Event-bearing bodies publish every named value in the numerical pass;
+    // other bodies publish ordinary retained writes and branch kinds here.
+    // Required candidates cannot fall back to uninitialized storage.
     let mut candidate_publications = Vec::new();
-    for &variable in model
-        .evaluation_input_variables
-        .iter()
-        .chain(&model.switch_branch_variables)
-    {
-        let state_slot = model
-            .event_state_variables
-            .binary_search(&variable)
-            .map_err(|_| {
-                refuse(
-                    CfgPlanRefusal::ShippedPlan,
-                    "canonical candidate has no state slot".into(),
-                )
-            })?;
-        let value = cfg
-            .event_state_candidates
-            .get(state_slot)
-            .and_then(|value| scalarized.scalar(*value))
-            .ok_or_else(|| {
+    if source_evaluation {
+        for (variable, output) in artifact.hir.variables.iter().zip(&cfg.observation_roots) {
+            if !variable.is_state
+                && (variable.name.contains('@') || variable.name.starts_with("__guard"))
+            {
+                continue;
+            }
+            let slot = model
+                .variable_names
+                .iter()
+                .position(|name| *name == variable.name)
+                .ok_or_else(|| {
+                    refuse(
+                        CfgPlanRefusal::ShippedPlan,
+                        "source publication has no runtime variable".into(),
+                    )
+                })?;
+            let value = scalarized.scalar(*output).ok_or_else(|| {
                 refuse(
                     CfgPlanRefusal::NoScalar,
-                    "canonical candidate has no scalar output".into(),
+                    "source publication has no scalar output".into(),
                 )
             })?;
-        if !taint.publishable(value) {
-            return Err(refuse(
+            if !taint.publishable(value) {
+                return Err(refuse(
+                    CfgPlanRefusal::PreludeLiveCurrent,
+                    "source publication requires a later contribution current".into(),
+                ));
+            }
+            candidate_publications.push((value, slot));
+        }
+    } else {
+        for &variable in model
+            .evaluation_input_variables
+            .iter()
+            .chain(&model.switch_branch_variables)
+        {
+            let state_slot = model
+                .event_state_variables
+                .binary_search(&variable)
+                .map_err(|_| {
+                    refuse(
+                        CfgPlanRefusal::ShippedPlan,
+                        "canonical candidate has no state slot".into(),
+                    )
+                })?;
+            let value = cfg
+                .event_state_candidates
+                .get(state_slot)
+                .and_then(|value| scalarized.scalar(*value))
+                .ok_or_else(|| {
+                    refuse(
+                        CfgPlanRefusal::NoScalar,
+                        "canonical candidate has no scalar output".into(),
+                    )
+                })?;
+            if !taint.publishable(value) {
+                return Err(refuse(
                 CfgPlanRefusal::PreludeLiveCurrent,
                 "canonical candidate depends on a contribution current published after the prelude"
                     .into(),
             ));
+            }
+            candidate_publications.push((value, variable));
         }
-        candidate_publications.push((value, variable));
     }
 
     let prelude = if prelude_entries.is_empty() && candidate_publications.is_empty() {

@@ -339,8 +339,9 @@ pub struct VarDef {
     pub name: SmolStr,
     pub is_state: bool,
     /// Source variable whose immutable evaluation input owns this value's
-    /// derivative lineage. The source owns itself; its AD descendants must
-    /// start every numerical evaluation at zero.
+    /// derivative lineage. An ordinary retained source owns itself. Event
+    /// sources are identified by `event_state_variables`; their descendants
+    /// also name the source here and start each numerical evaluation at zero.
     pub evaluation_input: Option<usize>,
 }
 
@@ -3032,6 +3033,7 @@ pub mod autodiff {
             assignments,
             variables,
             arrays,
+            event_state_variables,
             ..
         } = ir;
         let span = crate::metrics::FineSpan::new("ir.shadow_axis_fixpoint");
@@ -3093,9 +3095,16 @@ pub mod autodiff {
         let span = crate::metrics::FineSpan::new("ir.shadow_layout");
         let mut input_owners: HashMap<_, _> = variables
             .iter()
-            .filter_map(|variable| {
+            .enumerate()
+            .filter_map(|(slot, variable)| {
                 variable
                     .evaluation_input
+                    .or_else(|| {
+                        event_state_variables
+                            .binary_search(&slot)
+                            .ok()
+                            .map(|_| slot)
+                    })
                     .map(|owner| (variable.name.clone(), owner))
             })
             .collect();
@@ -3844,15 +3853,23 @@ pub mod autodiff {
             assignments,
             variables,
             arrays,
+            event_state_variables,
             ..
         } = ir;
 
         let span = crate::metrics::FineSpan::new("ir.auxiliary_shadow_layout");
         let input_owners: HashMap<_, _> = variables
             .iter()
-            .filter_map(|variable| {
+            .enumerate()
+            .filter_map(|(slot, variable)| {
                 variable
                     .evaluation_input
+                    .or_else(|| {
+                        event_state_variables
+                            .binary_search(&slot)
+                            .ok()
+                            .map(|_| slot)
+                    })
                     .map(|owner| (variable.name.clone(), owner))
             })
             .collect();

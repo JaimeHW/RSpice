@@ -6119,6 +6119,7 @@ endmodule
             .configure_evaluation_inputs(
                 &model.evaluation_input_variables,
                 &model.evaluation_input_derivatives,
+                &model.event_state_derivatives,
             )
             .expect("native fixture evaluation-input layout configures");
         context.currents = vec![0.0; model.stamp_programs.len()];
@@ -7054,6 +7055,7 @@ endmodule
             event_state_variables: Vec::new(),
             evaluation_input_variables: Vec::new(),
             evaluation_input_derivatives: Vec::new(),
+            event_state_derivatives: Vec::new(),
             switch_branch_variables: Vec::new(),
             initialization_prologue_variables: Vec::new(),
             assignment_steps: Vec::new(),

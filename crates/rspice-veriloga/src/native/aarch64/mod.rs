@@ -287,6 +287,7 @@ mod tests {
             event_state_variables: Vec::new(),
             evaluation_input_variables: Vec::new(),
             evaluation_input_derivatives: Vec::new(),
+            event_state_derivatives: Vec::new(),
             switch_branch_variables: Vec::new(),
             assignment_steps: Vec::new(),
             initialization_prologue_variables: Vec::new(),

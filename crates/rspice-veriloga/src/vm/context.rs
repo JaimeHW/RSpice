@@ -336,6 +336,8 @@ pub struct VmContext {
     evaluation_input_slots: Vec<usize>,
     /// Compiler-owned AD descendants of immutable procedural entry inputs.
     evaluation_input_derivatives: Vec<usize>,
+    /// Event-owned AD descendants reset only when a new numerical pass begins.
+    event_state_derivatives: Vec<usize>,
     /// Accepted values corresponding one-for-one with
     /// [`Self::event_state_indices`]. Runtime-only: checkpoints retain the
     /// canonical full variable vector after overlaying this committed lane.
@@ -482,6 +484,7 @@ impl Default for VmContext {
             event_state_indices: Vec::new(),
             evaluation_input_slots: Vec::new(),
             evaluation_input_derivatives: Vec::new(),
+            event_state_derivatives: Vec::new(),
             accepted_event_variables: Vec::new(),
             evaluation_state_inputs: Vec::new(),
             analog_effects: None,
@@ -680,6 +683,7 @@ impl VmContext {
             event_state_indices: Vec::new(),
             evaluation_input_slots: Vec::new(),
             evaluation_input_derivatives: Vec::new(),
+            event_state_derivatives: Vec::new(),
             accepted_event_variables: Vec::new(),
             evaluation_state_inputs: Vec::new(),
             analog_effects: None,
@@ -738,6 +742,7 @@ impl VmContext {
             event_state_indices: Vec::new(),
             evaluation_input_slots: Vec::new(),
             evaluation_input_derivatives: Vec::new(),
+            event_state_derivatives: Vec::new(),
             accepted_event_variables: Vec::new(),
             evaluation_state_inputs: Vec::new(),
             analog_effects: None,
@@ -796,6 +801,7 @@ impl VmContext {
             event_state_indices: Vec::new(),
             evaluation_input_slots: Vec::new(),
             evaluation_input_derivatives: Vec::new(),
+            event_state_derivatives: Vec::new(),
             accepted_event_variables: Vec::new(),
             evaluation_state_inputs: Vec::new(),
             analog_effects: None,
@@ -860,6 +866,7 @@ impl VmContext {
         self.event_state_indices.extend_from_slice(indices);
         self.evaluation_input_slots.clear();
         self.evaluation_input_derivatives.clear();
+        self.event_state_derivatives.clear();
         self.accepted_event_variables.clear();
         self.accepted_event_variables
             .extend(indices.iter().map(|&index| self.variables[index]));
@@ -872,6 +879,7 @@ impl VmContext {
         &mut self,
         variables: &[usize],
         indices: &[usize],
+        event_derivatives: &[usize],
     ) -> Result<(), VmError> {
         if variables.windows(2).any(|pair| pair[0] >= pair[1]) {
             return Err(VmError::InvalidRuntimeConfiguration(
@@ -889,7 +897,11 @@ impl VmContext {
             })
             .collect::<Result<Vec<_>, _>>()?;
         if indices.windows(2).any(|pair| pair[0] >= pair[1])
-            || indices.iter().any(|&index| {
+            || event_derivatives.windows(2).any(|pair| pair[0] >= pair[1])
+            || event_derivatives
+                .iter()
+                .any(|index| indices.binary_search(index).is_ok())
+            || indices.iter().chain(event_derivatives).any(|&index| {
                 index >= self.variables.len()
                     || self.event_state_indices.binary_search(&index).is_ok()
             })
@@ -901,6 +913,9 @@ impl VmContext {
         self.evaluation_input_slots = slots;
         self.evaluation_input_derivatives.clear();
         self.evaluation_input_derivatives.extend_from_slice(indices);
+        self.event_state_derivatives.clear();
+        self.event_state_derivatives
+            .extend_from_slice(event_derivatives);
         Ok(())
     }
 
@@ -960,9 +975,15 @@ impl VmContext {
                 "evaluation-input source storage is inconsistent".into(),
             ));
         }
-        if self.evaluation_input_derivatives.iter().any(|&index| {
-            index >= self.variables.len() || self.event_state_indices.binary_search(&index).is_ok()
-        }) {
+        if self
+            .evaluation_input_derivatives
+            .iter()
+            .chain(&self.event_state_derivatives)
+            .any(|&index| {
+                index >= self.variables.len()
+                    || self.event_state_indices.binary_search(&index).is_ok()
+            })
+        {
             return Err(invalid(
                 "evaluation-input derivative storage is inconsistent".into(),
             ));
@@ -1732,6 +1753,11 @@ impl VmContext {
         self.evaluation_state_inputs
             .clone_from(&self.accepted_event_variables);
         self.prepare_procedural_replay();
+        for &index in &self.event_state_derivatives {
+            if let Some(value) = self.variables.get_mut(index) {
+                *value = 0.0;
+            }
+        }
         for origin in self.idtmod_origins.values_mut() {
             origin.candidate = None;
         }
@@ -2400,13 +2426,49 @@ mod tests {
     }
 
     #[test]
+    fn event_derivatives_reset_at_numerical_entry_and_survive_observation() {
+        let mut context = VmContext::new(1);
+        context.variables = vec![3.0, 7.0, 11.0];
+        context.configure_event_state_variables(&[0]).unwrap();
+        context.configure_evaluation_inputs(&[], &[], &[1]).unwrap();
+        for invalid in [&[0][..], &[3], &[1, 1], &[2, 1]] {
+            assert!(
+                context
+                    .configure_evaluation_inputs(&[], &[], invalid)
+                    .is_err()
+            );
+        }
+        assert!(
+            context
+                .configure_evaluation_inputs(&[], &[1], &[1])
+                .is_err()
+        );
+        context.begin_stateful_evaluation();
+        assert_eq!(context.variables, [3.0, 0.0, 11.0]);
+        context.variables[0] = 5.0;
+        context.variables[1] = 2.0;
+        context.begin_stateful_observation();
+        context.prepare_procedural_replay();
+        assert_eq!(context.variables, [5.0, 2.0, 11.0]);
+        context.advance_state().unwrap();
+        context.begin_stateful_evaluation();
+        assert_eq!(context.variables, [5.0, 0.0, 11.0]);
+    }
+
+    #[test]
     fn evaluation_input_derivatives_reset_only_at_numerical_entry() {
         let mut context = VmContext::new(1);
         context.variables = vec![3.0, 7.0, 11.0];
         context.configure_event_state_variables(&[0]).unwrap();
-        context.configure_evaluation_inputs(&[0], &[1]).unwrap();
+        context
+            .configure_evaluation_inputs(&[0], &[1], &[])
+            .unwrap();
         for invalid in [&[0][..], &[3], &[1, 1], &[2, 1]] {
-            assert!(context.configure_evaluation_inputs(&[0], invalid).is_err());
+            assert!(
+                context
+                    .configure_evaluation_inputs(&[0], invalid, &[])
+                    .is_err()
+            );
         }
         context.begin_stateful_evaluation_with_tasks(false);
         assert_eq!(context.variables, [3.0, 0.0, 11.0]);

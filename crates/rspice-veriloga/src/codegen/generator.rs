@@ -510,7 +510,22 @@ impl CodeGenerator {
                 .filter_map(|(slot, variable)| {
                     variable
                         .evaluation_input
-                        .filter(|&owner| owner != slot)
+                        .filter(|&owner| {
+                            owner != slot && ir.variables[owner].evaluation_input == Some(owner)
+                        })
+                        .map(|_| slot)
+                })
+                .collect(),
+            event_state_derivatives: ir
+                .variables
+                .iter()
+                .enumerate()
+                .filter_map(|(slot, variable)| {
+                    variable
+                        .evaluation_input
+                        .filter(|&owner| {
+                            owner != slot && ir.variables[owner].evaluation_input != Some(owner)
+                        })
                         .map(|_| slot)
                 })
                 .collect(),

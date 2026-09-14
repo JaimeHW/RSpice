@@ -4457,6 +4457,46 @@ assert_eq!(active_again[1], -3.0, "reactive cache restores after re-enable: {act
 }
 
 #[test]
+fn generated_event_derivatives_preserve_source_order_and_rollback() {
+    let (state, stamp, noise) = generated_parts(
+        include_str!("fixtures/event_derivative_readback.va"),
+        "event derivative readback",
+    );
+    run_generated_main(
+        "event derivative readback",
+        &state,
+        &stamp,
+        &noise,
+        r#"
+let mut instance=device::state::Instance::new(&[0,1]);
+instance.finalize_parameters().unwrap();
+for initial in [true,false] {
+    runtime::set_analysis_steps(initial,false);
+    let accepted=instance.capture_rollback_state();
+    for voltage in [-0.5_f64,0.0,0.75] {
+        instance.restore_rollback_state(&accepted);
+        instance.begin_stateful_evaluation();
+        let voltages=[voltage,0.0];
+        let ctx=runtime::GeneratedEvalContext {voltages:&voltages,temperature:300.15};
+        let mut sink=[0.0;12];
+        instance.stamp(&ctx,&mut runtime::GeneratedStamper {sink:Some(&mut sink)});
+        let gain=if initial {5.0} else {6.0};
+        let held=if initial {voltage.exp()} else {0.75_f64.exp()};
+        let expected_jacobian=gain+if initial {voltage.exp()} else {0.0};
+        assert!((sink[9]-gain*voltage-held).abs()<1e-12,"current: {sink:?}");
+        assert!((sink[10]-expected_jacobian).abs()<1e-12,"Jacobian: {sink:?}");
+        assert!((sink[11]+expected_jacobian).abs()<1e-12,"opposite terminal: {sink:?}");
+        assert!(!ctx.evaluation_failed());
+    }
+    instance.validate_advance_state().unwrap();
+    instance.apply_validated_advance_state();
+}
+"#,
+    )
+    .unwrap_or_else(|report| panic!("{report}"));
+}
+
+#[test]
 fn generated_static_dae_event_bodies_retain_the_settled_candidate() {
     let (state, stamp, noise) = generated_parts(
         include_str!("fixtures/static_dae_events.va"),

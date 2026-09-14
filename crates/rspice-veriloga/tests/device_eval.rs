@@ -18,6 +18,260 @@ fn compile(source: &str) -> DeviceFixture {
 }
 
 #[test]
+fn event_readback_preserves_higher_derivatives_without_replaying_the_event() {
+    let fixture = compile(
+        "module event_readback(p,n); inout p,n; electrical p,n;
+         real count=0,reported;
+         analog begin @(initial_step) count=count+1;
+         reported=ddx(ddx(ddx(exp(V(p,n)),V(p,n)),V(p,n)),V(p,n));
+         I(p,n)<+count*V(p,n); end endmodule",
+    );
+    let mut device = fixture.device("EVENT", &[1, 0]);
+    #[cfg(feature = "native")]
+    assert!(device.is_using_native());
+    device.try_set_analysis_step(true, false).unwrap();
+    for voltage in [-0.75_f64, 0.0, 1.25] {
+        device.update_voltages(&[voltage]);
+        assert_eq!(device.try_evaluate().unwrap(), vec![voltage]);
+        let (matrix, _) = collect_stamps(&mut device, &[voltage]);
+        assert_eq!(matrix[&(0, 0)], 1.0);
+        let before = device.checkpoint_state().unwrap();
+        for _ in 0..2 {
+            fixture.observe(&mut device);
+            assert!((device.variable("reported").unwrap() - voltage.exp()).abs() < 1e-12);
+            assert_eq!(device.variable("count"), Some(1.0));
+            assert_eq!(device.checkpoint_state().unwrap(), before);
+        }
+    }
+    device.try_advance_state().unwrap();
+    device.try_set_analysis_step(false, false).unwrap();
+    let accepted = device.checkpoint_state().unwrap();
+    device.update_voltages(&[-0.25]);
+    assert_eq!(device.try_evaluate().unwrap(), vec![-0.25]);
+    fixture.observe(&mut device);
+    assert_eq!(device.variable("count"), Some(1.0));
+    device.validate_checkpoint_state(&accepted).unwrap();
+    device.apply_validated_checkpoint_state(&accepted);
+    device.update_voltages(&[1.25]);
+    assert_eq!(device.try_evaluate().unwrap(), vec![1.25]);
+    fixture.observe(&mut device);
+    assert!((device.variable("reported").unwrap() - 1.25_f64.exp()).abs() < 1e-12);
+    assert_eq!(device.variable("count"), Some(1.0));
+}
+
+#[test]
+fn event_readback_preserves_source_order_and_the_sampled_derivative() {
+    let fixture = compile(include_str!("fixtures/event_derivative_readback.va"));
+    let mut device = fixture.device("ORDERED", &[1, 0]);
+    device.try_set_analysis_step(true, false).unwrap();
+    for voltage in [-0.5_f64, 0.0, 0.75] {
+        device.update_voltages(&[voltage]);
+        assert_eq!(
+            device.try_evaluate().unwrap(),
+            vec![5.0 * voltage + voltage.exp()]
+        );
+        let (matrix, _) = collect_stamps(&mut device, &[voltage]);
+        assert!((matrix[&(0, 0)] - 5.0 - voltage.exp()).abs() < 1e-12);
+        let checkpoint = device.checkpoint_state().unwrap();
+        fixture.observe(&mut device);
+        assert_eq!(device.variable("before"), Some(2.0));
+        assert_eq!(device.variable("after"), Some(3.0));
+        assert!((device.variable("held").unwrap() - voltage.exp()).abs() < 1e-12);
+        assert!((device.variable("reported").unwrap() - voltage.exp()).abs() < 1e-12);
+        assert_eq!(device.checkpoint_state().unwrap(), checkpoint);
+    }
+    device.try_advance_state().unwrap();
+    device.try_set_analysis_step(false, false).unwrap();
+    for voltage in [-1.0, 0.25, 1.5] {
+        device.update_voltages(&[voltage]);
+        assert_eq!(
+            device.try_evaluate().unwrap(),
+            vec![6.0 * voltage + 0.75_f64.exp()]
+        );
+        let (matrix, _) = collect_stamps(&mut device, &[voltage]);
+        assert_eq!(matrix[&(0, 0)], 6.0);
+        fixture.observe(&mut device);
+        assert_eq!(device.variable("before"), Some(3.0));
+        assert_eq!(device.variable("after"), Some(3.0));
+        assert!((device.variable("held").unwrap() - 0.75_f64.exp()).abs() < 1e-12);
+    }
+}
+
+#[test]
+fn event_array_derivative_orders_expire_when_the_sample_is_accepted() {
+    let fixture = compile(
+        "module sampled_array(p,n); inout p,n; electrical p,n;
+         parameter integer slot=1; real held[0:1],slope,curvature;
+         analog begin @(initial_step) held[slot]=exp(V(p,n));
+         slope=ddx(held[slot],V(p,n)); curvature=ddx(slope,V(p,n));
+         I(p,n)<+held[slot]+slope+curvature; end endmodule",
+    );
+    let mut device = fixture.device("SAMPLED_ARRAY", &[1, 0]);
+    for initial in [true, false] {
+        device.try_set_analysis_step(initial, false).unwrap();
+        for voltage in [-0.5_f64, 0.0, 0.75] {
+            device.update_voltages(&[voltage]);
+            let expected = if initial {
+                3.0 * voltage.exp()
+            } else {
+                0.75_f64.exp()
+            };
+            let value = device.try_evaluate().unwrap()[0];
+            assert!((value - expected).abs() < 1e-12);
+            let (matrix, _) = collect_stamps(&mut device, &[voltage]);
+            let slope = matrix.get(&(0, 0)).copied().unwrap_or(0.0);
+            assert!((slope - if initial { expected } else { 0.0 }).abs() < 1e-12);
+            fixture.observe(&mut device);
+            let derivative = if initial { voltage.exp() } else { 0.0 };
+            assert!((device.variable("slope").unwrap() - derivative).abs() < 1e-12);
+            assert!((device.variable("curvature").unwrap() - derivative).abs() < 1e-12);
+        }
+        device.try_advance_state().unwrap();
+    }
+}
+
+#[test]
+fn event_readback_preserves_loop_carried_mixed_axis_derivatives() {
+    let fixture = compile(
+        "module event_array(p,q); inout p,q; electrical p,q;
+         parameter integer slot=1; integer k;
+         real count=0,a[0:1],reported;
+         analog begin @(initial_step) count=count+1;
+         a[slot]=exp(V(p)*V(q));
+         for(k=0;k<4;k=k+1) a[slot]=ddx(a[slot],V(p));
+         reported=a[slot]; I(p)<+count*V(p); end endmodule",
+    );
+    let mut device = fixture.device("ARRAY", &[1, 2]);
+    device.try_set_analysis_step(true, false).unwrap();
+    for (p, q) in [(0.25_f64, 0.5_f64), (-0.75, 1.25), (1.25, -0.5)] {
+        device.update_voltages(&[p, q]);
+        assert_eq!(device.try_evaluate().unwrap(), vec![p]);
+        fixture.observe(&mut device);
+        let expected = q.powi(4) * (p * q).exp();
+        assert!((device.variable("reported").unwrap() - expected).abs() < 1e-11);
+        assert!((device.variable("a[1]").unwrap() - expected).abs() < 1e-11);
+        assert_eq!(device.variable("a[0]"), Some(0.0));
+        assert_eq!(device.variable("count"), Some(1.0));
+    }
+}
+
+#[test]
+fn event_readback_publishes_simulator_control_values() {
+    let fixture = compile(
+        "module event_control(p); inout p; electrical p;
+         real count=0,reported;
+         analog begin @(initial_step) count=count+1;
+         reported=ddx(ddx(ddx(exp(V(p)),V(p)),V(p)),V(p));
+         $bound_step(1e-6/(1+reported*reported));
+         I(p)<+count*V(p); end endmodule",
+    );
+    let mut device = fixture.device("CONTROL", &[1]);
+    device.try_set_analysis_step(true, false).unwrap();
+    for voltage in [-0.5_f64, 0.25, 0.75] {
+        device.update_voltages(&[voltage]);
+        assert_eq!(device.try_evaluate().unwrap(), vec![voltage]);
+        let expected = 1e-6 / (1.0 + voltage.exp().powi(2));
+        let bound = device.try_transient_bound_step().unwrap().unwrap();
+        assert!((bound - expected).abs() < 1e-18, "{bound} != {expected}");
+        fixture.observe(&mut device);
+        assert_eq!(device.try_transient_bound_step().unwrap(), Some(bound));
+        assert_eq!(device.variable("count"), Some(1.0));
+    }
+}
+
+#[test]
+fn current_dependent_retained_candidates_follow_source_order_and_rollback() {
+    let fixture = compile(
+        "module current_retained(p,q,n); inout p,q,n; electrical p,q,n;
+         real held=0,seen;
+         analog begin seen=held; I(p,n)<+exp(V(p,n));
+         held=I(p,n); I(q,n)<+held+seen; end endmodule",
+    );
+    let mut device = fixture.device("CURRENT", &[1, 2, 0]);
+    assert_eq!(fixture.internal_state_nodes.len(), 1);
+    device.set_internal_node_indices(&[3]);
+    device.try_initialize_analysis().unwrap();
+    let mut held = 0.0;
+    for voltage in [0.25_f64, -0.5, 0.75] {
+        let checkpoint = device.checkpoint_state().unwrap();
+        for trial in [-0.75_f64, voltage] {
+            let current = 0.7 + 0.2 * trial;
+            // The inserted zero-voltage sensor's current is opposite I(p,n).
+            device.update_all_voltages(&[trial, 0.0, -current]);
+            let values = device.try_evaluate().unwrap();
+            let expected = trial.exp();
+            assert!((values[0] - expected).abs() < 1e-12);
+            assert!((values[1] - current - held).abs() < 1e-12, "{values:?}");
+            fixture.observe(&mut device);
+            assert!((device.variable("held").unwrap() - current).abs() < 1e-12);
+            assert_eq!(device.variable("seen"), Some(held));
+            device.validate_checkpoint_state(&checkpoint).unwrap();
+            device.apply_validated_checkpoint_state(&checkpoint);
+        }
+        let current = 0.7 + 0.2 * voltage;
+        let solution = [voltage, 0.0, -current];
+        let (matrix, _) = collect_stamps(&mut device, &solution);
+        // The explicit current law occupies the sensor equation. Both port
+        // KCL rows read its current unknown with the opposite orientation.
+        assert!((matrix[&(2, 0)] - voltage.exp()).abs() < 1e-12);
+        assert_eq!(matrix[&(2, 2)], 1.0);
+        assert_eq!(matrix[&(0, 2)], -1.0);
+        assert_eq!(matrix[&(1, 2)], -1.0);
+        device.try_advance_state().unwrap();
+        held = current;
+    }
+}
+
+#[test]
+fn event_readback_preserves_current_sensor_candidates_and_rollback() {
+    let fixture = compile(
+        "module event_current(p,q,n); inout p,q,n; electrical p,q,n;
+         real count=0,held=0,seen;
+         analog begin seen=held; @(initial_step) count=count+1;
+         I(p,n)<+exp(V(p,n)); held=I(p,n);
+         I(q,n)<+held+seen+count*V(p,n); end endmodule",
+    );
+    assert_eq!(fixture.internal_state_nodes.len(), 1);
+    let mut device = fixture.device("EVENT_CURRENT", &[1, 2, 0]);
+    device.set_internal_node_indices(&[3]);
+    device.try_set_analysis_step(true, false).unwrap();
+    device.try_initialize_analysis().unwrap();
+    let mut held = 0.0;
+    for (step, current) in [0.25_f64, -0.5, 0.75].into_iter().enumerate() {
+        let checkpoint = device.checkpoint_state().unwrap();
+        for trial in [-0.75, current] {
+            // The solver supplies phase flags again after checkpoint restore.
+            device.try_set_analysis_step(step == 0, false).unwrap();
+            let solution = [0.5, 0.0, -trial];
+            device.update_all_voltages(&solution);
+            let values = device.try_evaluate().unwrap();
+            assert!((values[0] - 0.5_f64.exp()).abs() < 1e-12);
+            assert!(
+                (values[1] - trial - held - 0.5).abs() < 1e-12,
+                "trial={trial}, accepted held={held}, values={values:?}, count={:?}, seen={:?}",
+                device.variable("count"),
+                device.variable("seen")
+            );
+            let (matrix, _) = collect_stamps(&mut device, &solution);
+            assert_eq!(matrix[&(1, 0)], 1.0);
+            assert_eq!(matrix[&(1, 2)], -1.0);
+            fixture.observe(&mut device);
+            assert_eq!(device.variable("count"), Some(1.0));
+            assert_eq!(device.variable("held"), Some(trial));
+            assert_eq!(device.variable("seen"), Some(held));
+            device.validate_checkpoint_state(&checkpoint).unwrap();
+            device.apply_validated_checkpoint_state(&checkpoint);
+        }
+        device.try_set_analysis_step(step == 0, false).unwrap();
+        device.update_all_voltages(&[0.5, 0.0, -current]);
+        device.try_evaluate().unwrap();
+        device.try_advance_state().unwrap();
+        device.try_set_analysis_step(false, false).unwrap();
+        held = current;
+    }
+}
+
+#[test]
 fn switch_branch_observation_preserves_stamps_and_accepted_state() {
     let fixture = compile(
         "module switch_observation(p); inout p; electrical p; real seen;

@@ -29,6 +29,36 @@ fn levels(calls: &[AnalogTaskInvocation]) -> Vec<i64> {
 }
 
 #[test]
+fn event_readback_and_tasks_publish_one_accepted_source_ordered_effect() {
+    let fixture = DeviceFixture::compile(
+        "module event_tasks(p,n); inout p,n; electrical p,n; real count=0;
+         analog begin @(initial_step) begin count=count+1; $finish(count); end
+         I(p,n)<+count*V(p,n); end endmodule",
+    );
+    let mut device = fixture.device("EVENT_TASK", &[1, 0]);
+    device.try_set_analysis_step(true, false).unwrap();
+    for voltage in [-0.5, 0.75] {
+        device.update_voltages(&[voltage]);
+        assert_eq!(device.try_evaluate().unwrap(), vec![voltage]);
+        fixture.observe(&mut device);
+        device.try_compute_jacobian().unwrap();
+        fixture.observe(&mut device);
+        assert_eq!(device.variable("count"), Some(1.0));
+        assert_eq!(device.drain_accepted_analog_tasks().count(), 0);
+    }
+    device.try_advance_state().unwrap();
+    assert_eq!(
+        levels(&device.drain_accepted_analog_tasks().collect::<Vec<_>>()),
+        vec![1]
+    );
+    device.try_set_analysis_step(false, false).unwrap();
+    device.try_evaluate().unwrap();
+    fixture.observe(&mut device);
+    device.try_advance_state().unwrap();
+    assert_eq!(device.drain_accepted_analog_tasks().count(), 0);
+}
+
+#[test]
 fn finish_publishes_only_the_last_candidate_and_captures_each_argument() {
     let fixture = fixture("i=0; while(i < 3) begin $finish(i); i=i+1; end");
     let mut device = fixture.device("X", &[1, 0]);

@@ -315,7 +315,9 @@ use super::*;
 // Version 94 uses canonical checked array selections and canonical readback (HIR 60).
 // Version 95 recompiles digital parameters with exact widths, signedness and
 // inferred real/integral values, including localparams (HIR 61).
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 95;
+// Version 96 records event-owned derivative slots, which start each numerical
+// evaluation at zero while observations retain the current candidate's slope.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 96;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]

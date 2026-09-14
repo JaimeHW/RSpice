@@ -89,6 +89,9 @@ pub struct CompiledModel {
     /// zero at numerical entry, before assignments publish current derivatives.
     /// Required so old serialized artifacts cannot omit the lifetime contract.
     pub evaluation_input_derivatives: Vec<usize>,
+    /// Sorted AD descendants of event-owned values. Reset at numerical entry,
+    /// but retain the current candidate's derivatives during observation.
+    pub event_state_derivatives: Vec<usize>,
     /// Sorted event-state slots holding the retained kind of each switch branch.
     /// A change from the accepted kind implies an order-zero discontinuity.
     pub switch_branch_variables: Vec<usize>,

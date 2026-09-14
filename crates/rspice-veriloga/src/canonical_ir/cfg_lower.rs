@@ -200,6 +200,31 @@ impl CfgModel {
         Self::from_hir_with_mode(hir, mir, CfgLowerMode::EXECUTABLE)
     }
 
+    /// Execute the complete procedural body from immutable accepted inputs.
+    #[cfg(any(feature = "native", feature = "wasm-jit"))]
+    pub(crate) fn from_hir_for_executable_evaluation(
+        hir: &HirModel,
+        mir: &MirModel,
+    ) -> Result<Self, Vec<IrDiagnostic>> {
+        let mut cfg = Self::from_hir_with_mode(
+            hir,
+            mir,
+            CfgLowerMode {
+                record_tasks: true,
+                record_observations: true,
+                frozen_event_state: false,
+                frozen_contribution_current: false,
+                ..CfgLowerMode::EXECUTABLE
+            },
+        )?;
+        for value in &mut cfg.function.values {
+            if let CfgValueKind::EventState(slot) = value.kind {
+                value.kind = CfgValueKind::EvaluationInput(slot);
+            }
+        }
+        Ok(cfg)
+    }
+
     /// Reuse the executable equation semantics while keeping final readbacks.
     #[cfg(feature = "native")]
     pub(crate) fn from_hir_for_executable_observation(

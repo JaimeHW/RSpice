@@ -1084,6 +1084,7 @@ fn for_each_program_mut(model: &mut CompiledModel, visit: &mut impl FnMut(&mut B
         event_state_variables: _,
         evaluation_input_variables: _,
         evaluation_input_derivatives: _,
+        event_state_derivatives: _,
         switch_branch_variables: _,
         initialization_prologue_variables: _,
         assignment_steps,

@@ -141,7 +141,8 @@ pub const WASM_JIT_ABI_VERSION: u32 = 17;
 /// Version 48 publishes canonical source candidates and checks SSA array indices.
 /// Version 49 separates branch-kind state from eager event observation roots.
 /// Version 50 publishes switch-branch candidates from the canonical prelude.
-pub const WASM_JIT_EMITTER_VERSION: u32 = 50;
+/// Version 51 evaluates event-owned readbacks in the canonical source body.
+pub const WASM_JIT_EMITTER_VERSION: u32 = 51;
 
 /// Hard ceiling for one qualified shipped model's generated module.
 pub const SHIPPED_MODEL_WASM_CODE_SIZE_BUDGET_BYTES: usize = 32 * 1024 * 1024;
@@ -1813,6 +1814,7 @@ endmodule
                 .configure_evaluation_inputs(
                     &report.model.evaluation_input_variables,
                     &report.model.evaluation_input_derivatives,
+                    &report.model.event_state_derivatives,
                 )
                 .unwrap();
             let mut store =
@@ -2849,6 +2851,90 @@ endmodule
                     .advance_state()
                     .unwrap();
             }
+        }
+    }
+
+    #[test]
+    fn wasm_event_readback_preserves_source_order_derivatives_and_accepted_inputs() {
+        use super::abi::{FRAME_ANALYSIS_MASK_OFFSET, FRAME_RESULT_OFFSET};
+        let source = include_str!("../../tests/fixtures/event_derivative_readback.va");
+        let report = VerilogACompiler::new(CompilerOptions::default())
+            .compile_runtime(source, Some("event_derivative_readback"))
+            .unwrap();
+        let slot = |name: &str| {
+            report
+                .model
+                .variable_names
+                .iter()
+                .position(|v| v == name)
+                .unwrap()
+        };
+        let mut harness = FusedKernelHarness::for_source(source, "event_derivative_readback");
+        harness.reset();
+        let context = harness.store.data_mut().context_mut();
+        context.variables[slot("count")] = 2.0;
+        context.commit_initialization().unwrap();
+        let value = harness.stamp_value_export(0);
+        let jacobian = harness.jacobian_export(0, 0);
+        for initial in [true, false] {
+            let accepted = harness
+                .store
+                .data()
+                .context()
+                .accepted_event_variables()
+                .to_vec();
+            for voltage in [-0.5_f64, 0.0, 0.75] {
+                let context = harness.store.data_mut().context_mut();
+                context.analysis_initial_step = initial;
+                context.begin_stateful_evaluation();
+                let mask = context.analysis_query_mask();
+                harness.poke_frame_u32(FRAME_ANALYSIS_MASK_OFFSET, mask);
+                harness.write_f64(FusedKernelHarness::VOLTAGES as usize, voltage);
+                harness.write_f64(FusedKernelHarness::VOLTAGES as usize + 8, 0.0);
+                harness.call_assignments();
+                harness.call_prelude();
+                let held = if initial {
+                    voltage.exp()
+                } else {
+                    0.75_f64.exp()
+                };
+                let gain = if initial { 5.0 } else { 6.0 };
+                assert_eq!(harness.call(&value), 0);
+                assert!(
+                    (harness.read_f64(FRAME_RESULT_OFFSET as usize) - gain * voltage - held).abs()
+                        < 1e-12
+                );
+                assert_eq!(harness.call(&jacobian), 0);
+                let expected_jacobian = gain + if initial { voltage.exp() } else { 0.0 };
+                assert!(
+                    (harness.read_f64(FRAME_RESULT_OFFSET as usize) - expected_jacobian).abs()
+                        < 1e-12
+                );
+                for (name, expected) in [
+                    ("count", 3.0),
+                    ("before", if initial { 2.0 } else { 3.0 }),
+                    ("after", 3.0),
+                    ("held", held),
+                    ("reported", voltage.exp()),
+                ] {
+                    let observed =
+                        harness.read_f64(FusedKernelHarness::VARIABLES as usize + slot(name) * 8);
+                    assert!(
+                        (observed - expected).abs() < 1e-12,
+                        "{name}: {observed} != {expected}"
+                    );
+                }
+                assert_eq!(
+                    harness.store.data().context().accepted_event_variables(),
+                    accepted
+                );
+            }
+            let variables = (0..report.model.num_variables)
+                .map(|index| harness.read_f64(FusedKernelHarness::VARIABLES as usize + index * 8))
+                .collect();
+            let context = harness.store.data_mut().context_mut();
+            context.variables = variables;
+            context.advance_state().unwrap();
         }
     }
 
@@ -4868,11 +4954,9 @@ endmodule
 
     /// The wasm half of
     /// `native::x64::tests::assignment_pass_power_rule_base_term_is_finite_at_a_zero_base`:
-    /// the assignment pass is lowered once by `native::expr` and emitted for
-    /// both machines, so its power rule's base term is read back here off the
-    /// variable array. `seen` is event state, which roots the pass on `c` and
-    /// through it on `q`'s shadow along `V(t)` — without a root the pass would
-    /// not compute `c` at all and the read would be a slot nobody wrote.
+    /// the canonical evaluation publishes its power rule's base term through
+    /// the variable array. `seen` is event state, so this exercises publication
+    /// by the complete source body rather than a later observation pass.
     #[test]
     fn the_wasm_assignment_pass_power_rule_base_term_is_finite_at_a_zero_base() {
         use std::mem::size_of;
@@ -4933,12 +5017,14 @@ endmodule
             );
         }
         harness.call_assignments();
+        harness.call_prelude();
         assert_eq!(harness.read_f64(variable(a)), 0.09, "the pass publishes a");
         assert_eq!(harness.read_f64(variable(c)), 0.0, "dq/dV(t) at a = 0.09");
 
         // At the zero base the same term is `0.5 · 0^-0.5 · 0`.
         harness.write_f64(FusedKernelHarness::VOLTAGES as usize, 0.0);
         harness.call_assignments();
+        harness.call_prelude();
         let value = harness.read_f64(variable(c));
         assert!(
             value.is_finite(),
