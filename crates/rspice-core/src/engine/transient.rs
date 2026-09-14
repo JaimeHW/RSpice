@@ -741,6 +741,10 @@ mod checkpoint;
 mod companion_stamps;
 use companion_stamps::{CompactTwoTerminalStampSlots, TwoTerminalStampSlots};
 mod charge_stamper;
+// The physical event operator is qualified independently before the main
+// acceptance owner routes incoming/outgoing solves through it.
+#[cfg_attr(not(test), allow(dead_code))]
+mod charge_event;
 use charge_stamper::StaticMatrixChargeStamper;
 mod damped_status;
 mod globalization;
