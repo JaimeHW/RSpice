@@ -1316,6 +1316,9 @@ impl Engine {
 }
 
 #[cfg(test)]
+mod source_side_tests;
+
+#[cfg(test)]
 mod tests {
     #[test]
     fn model_interval_preserves_both_bounds_and_a_representable_event_gap() {
