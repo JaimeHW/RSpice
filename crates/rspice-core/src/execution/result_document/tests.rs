@@ -101,6 +101,7 @@ fn ac_points() -> Vec<AcResult> {
 
 fn transient_result() -> TransientResult {
     TransientResult {
+        current_impulses: None,
         time: vec![0.0, 1.0e-6, 2.0e-6],
         step_sizes: vec![0.0, 1.0e-6, 1.0e-6],
         // The second node is deliberately unretained so the document has to
@@ -124,6 +125,70 @@ fn transient_result() -> TransientResult {
         }],
         fft_results: Vec::new(),
     }
+}
+
+#[test]
+fn current_impulse_document_preserves_charge_availability_and_versions() {
+    let mut result = transient_result();
+    let document = |result: &TransientResult| {
+        AnalysisResultDocument::from_transient(
+            instance(AnalysisKind::Tran),
+            result,
+            None,
+            Vec::new(),
+        )
+        .unwrap()
+        .build()
+        .unwrap()
+    };
+    let unavailable = document(&result);
+    let base_count = unavailable.total_value_count();
+    result.current_impulses = Some(vec![crate::CurrentImpulseTrace {
+        branch_name: "v1".into(),
+        points: vec![
+            crate::CurrentImpulsePoint {
+                time: 0.0,
+                charge_coulombs: -1.25e-12,
+            },
+            crate::CurrentImpulsePoint {
+                time: 1.23456789e-6,
+                charge_coulombs: f64::from_bits(1),
+            },
+        ],
+    }]);
+    let recorded = document(&result);
+    assert_eq!(recorded.total_value_count(), base_count + 5);
+    let json = recorded.to_json().unwrap();
+    assert_eq!(AnalysisResultDocument::from_json(&json).unwrap(), recorded);
+    assert!(json.contains("chargeCoulombs"));
+    assert!(!json.contains("Infinity"));
+    for version in 1..6 {
+        let mut old: serde_json::Value = serde_json::from_str(&json).unwrap();
+        old["schemaVersion"] = version.into();
+        assert!(AnalysisResultDocument::from_json(&old.to_string()).is_err());
+        old["payload"]
+            .as_object_mut()
+            .unwrap()
+            .remove("currentImpulses");
+        let decoded = AnalysisResultDocument::from_json(&old.to_string()).unwrap();
+        let ResultPayload::Tran(payload) = decoded.payload() else {
+            panic!("transient")
+        };
+        assert!(payload.current_impulses.is_none());
+    }
+    result.current_impulses = Some(Vec::new());
+    let empty = document(&result);
+    assert_ne!(empty, unavailable);
+    assert_eq!(
+        AnalysisResultDocument::from_json(&empty.to_json().unwrap()).unwrap(),
+        empty
+    );
+    let mut malformed = recorded.clone();
+    let ResultPayload::Tran(payload) = &mut malformed.payload else {
+        panic!("transient")
+    };
+    payload.current_impulses.as_mut().unwrap()[0].points[1].time = 3.0e-6;
+    assert!(malformed.to_json().is_err());
 }
 
 fn noise_points() -> Vec<NoiseResult> {
@@ -1961,6 +2026,7 @@ fn a_series_whose_length_disagrees_with_the_point_count_is_rejected() {
     let error = AnalysisResultDocument::builder(
         instance(AnalysisKind::Tran),
         ResultPayload::Tran(TransientPayload {
+            current_impulses: None,
             step_sizes: vec![0.0, 1.0],
             store_traces: Vec::new(),
             digital_traces: Vec::new(),

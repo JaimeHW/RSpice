@@ -427,6 +427,7 @@ fn assert_event_state_bitwise_eq(
 
 fn valid_transient_result() -> TransientResult {
     TransientResult {
+        current_impulses: None,
         time: vec![0.0, 1.0e-9, 2.0e-9],
         step_sizes: vec![0.0, 1.0e-9, 1.0e-9],
         voltages: vec![vec![0.0, 0.5, 1.0], vec![0.0, 0.25, 0.5]],

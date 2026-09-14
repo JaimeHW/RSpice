@@ -2167,6 +2167,13 @@ impl Engine {
     }
 
     fn transient_result_value_count(result: &TransientResult) -> usize {
+        crate::transient_observation::current_impulse_value_count(
+            result.current_impulses.as_deref(),
+        )
+        .saturating_add(Self::transient_waveform_value_count(result))
+    }
+
+    fn transient_waveform_value_count(result: &TransientResult) -> usize {
         result
             .time
             .len()
@@ -4116,6 +4123,7 @@ impl Engine {
             && !circuit.has_any_veriloga_devices()
         {
             let mut result = TransientResult {
+                current_impulses: None,
                 time: vec![0.0],
                 step_sizes: vec![0.0],
                 voltages: Vec::new(),
@@ -5180,6 +5188,7 @@ impl Engine {
             }
         }
         let mut result = TransientResult {
+            current_impulses: None,
             time,
             step_sizes,
             voltages: (0..num_nodes)
@@ -11741,6 +11750,7 @@ fn compress_transient_result(
      -> TransientResultCompressed {
         let stored_points = indices.len();
         TransientResultCompressed {
+            current_impulses: result.current_impulses.clone(),
             time: indices.iter().map(|&index| result.time[index]).collect(),
             step_sizes: indices
                 .iter()
@@ -14659,6 +14669,19 @@ D1 D 0 DMOD
             })
             .collect::<Vec<_>>();
         let result = TransientResult {
+            current_impulses: Some(vec![crate::CurrentImpulseTrace {
+                branch_name: "VINPUT".into(),
+                points: vec![
+                    crate::CurrentImpulsePoint {
+                        time: time[1],
+                        charge_coulombs: -1.25e-12,
+                    },
+                    crate::CurrentImpulsePoint {
+                        time: time[2],
+                        charge_coulombs: Value::from_bits(1),
+                    },
+                ],
+            }]),
             time: time.clone(),
             step_sizes: step_sizes.clone(),
             voltages: vec![voltage.clone()],
@@ -14689,6 +14712,21 @@ D1 D 0 DMOD
         let compressed = compress_for_test(&result, &config, &[], &NoAbort)
             .expect("well-formed waveform compresses");
         assert!(compressed.time.len() < time.len() / 4);
+        assert_eq!(compressed.current_impulses, result.current_impulses);
+        let expanded = compressed.clone().try_into_transient().unwrap();
+        assert_eq!(expanded.current_impulses, result.current_impulses);
+        let live = result.observable_sample(&[], &[], &[]);
+        assert_eq!(live.current_impulses, result.current_impulses.as_deref());
+        let mut malformed = compressed.clone();
+        malformed.current_impulses.as_mut().unwrap()[0].branch_name = "missing".into();
+        assert!(malformed.validate().is_err());
+        assert!(malformed.try_into_transient().is_err());
+        let mut no_impulses = result.clone();
+        no_impulses.current_impulses = None;
+        assert_eq!(
+            Engine::transient_result_value_count(&result),
+            Engine::transient_result_value_count(&no_impulses) + 5
+        );
         compressed.validate().expect("compressed inventory aligns");
         assert_eq!(compressed.node_names(), result.node_names);
         assert_eq!(compressed.branch_names(), result.branch_names);
@@ -14802,6 +14840,7 @@ D1 D 0 DMOD
             .map(|&time| 100.0 + 20.0 * time * time)
             .collect::<Vec<_>>();
         let result = TransientResult {
+            current_impulses: None,
             step_sizes: std::iter::once(0.0)
                 .chain(time.windows(2).map(|window| window[1] - window[0]))
                 .collect(),
@@ -14943,6 +14982,7 @@ D1 D 0 DMOD
     fn compressed_report_marks_disabled_storage_as_exact() {
         let time = vec![0.0, 0.1, 0.4, 1.0];
         let result = TransientResult {
+            current_impulses: None,
             time: time.clone(),
             step_sizes: vec![0.0, 0.1, 0.3, 0.6],
             voltages: vec![vec![0.0, 1.0, -1.0, 0.0]],
@@ -14974,6 +15014,7 @@ D1 D 0 DMOD
     #[test]
     fn compression_report_verification_observes_abort() {
         let result = TransientResult {
+            current_impulses: None,
             time: vec![0.0, 0.5, 1.0],
             step_sizes: vec![0.0, 0.5, 0.5],
             voltages: vec![vec![0.0, 0.25, 1.0]],
@@ -15005,6 +15046,7 @@ D1 D 0 DMOD
     fn compressed_transient_retains_mandatory_output_points_exactly() {
         let time = vec![0.0, 0.5, 1.0, 1.5, 2.0];
         let result = TransientResult {
+            current_impulses: None,
             time: time.clone(),
             step_sizes: vec![0.0, 0.5, 0.5, 0.5, 0.5],
             voltages: vec![time.iter().map(|time| 2.0 * time).collect()],
@@ -15052,6 +15094,7 @@ D1 D 0 DMOD
     fn transient_compression_polls_abort_during_large_waveform_scans() {
         let time = (0..10_000).map(|index| index as Value).collect::<Vec<_>>();
         let result = TransientResult {
+            current_impulses: None,
             step_sizes: std::iter::once(0.0)
                 .chain(std::iter::repeat_n(1.0, time.len() - 1))
                 .collect(),
@@ -15191,6 +15234,7 @@ D1 D 0 DMOD
     fn compressed_maximum_interval_splits_at_or_before_boundary() {
         let time = vec![0.0, 0.6, 1.01, 1.6];
         let result = TransientResult {
+            current_impulses: None,
             time: time.clone(),
             step_sizes: vec![0.0, 0.6, 0.41, 0.59],
             voltages: vec![time.iter().map(|time| 2.0 * time).collect()],
@@ -15239,6 +15283,7 @@ D1 D 0 DMOD
     #[test]
     fn compression_rejects_an_unattainable_maximum_interval() {
         let result = TransientResult {
+            current_impulses: None,
             time: vec![0.0, 1.5, 3.0],
             step_sizes: vec![0.0, 1.5, 1.5],
             voltages: vec![vec![0.0, 1.5, 3.0]],

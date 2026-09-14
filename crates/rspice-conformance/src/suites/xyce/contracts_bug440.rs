@@ -1440,6 +1440,7 @@ mod tests {
             }
         };
         TransientResult {
+            current_impulses: None,
             time,
             step_sizes,
             num_nodes: node_names.len(),

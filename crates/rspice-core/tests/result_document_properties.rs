@@ -315,6 +315,7 @@ fn transient_payload(shape: &Shape) -> TransientPayload {
     let mut step_sizes = vec![0.0];
     step_sizes.extend((1..shape.point_count).map(|index| index as f64 * 1e-9 + 1e-9));
     TransientPayload {
+        current_impulses: None,
         step_sizes,
         store_traces: vec![NamedObservableSeries {
             name: "r1:r".to_owned(),

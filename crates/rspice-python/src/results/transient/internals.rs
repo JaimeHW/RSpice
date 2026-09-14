@@ -186,6 +186,7 @@ mod tests {
     /// column the run left empty, and one branch the deck did not save.
     fn mixed_result() -> PyTransientResult {
         PyTransientResult::new(TransientResult {
+            current_impulses: None,
             time: vec![0.0, 1.0e-9],
             step_sizes: vec![0.0, 1.0e-9],
             voltages: vec![vec![0.0, 1.0], Vec::new()],

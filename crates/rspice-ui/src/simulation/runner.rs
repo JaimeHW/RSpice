@@ -1475,6 +1475,7 @@ mod tests {
             published_events: Mutex::default(),
         };
         let result = rspice_core::engine::TransientResult {
+            current_impulses: None,
             time: vec![0.0, 2.5e-9],
             step_sizes: vec![0.0, 2.5e-9],
             voltages: vec![vec![0.0, 1.25], Vec::new()],
@@ -1498,6 +1499,7 @@ mod tests {
                 node_voltages: &result.voltages,
                 branch_names: &result.branch_names,
                 branch_currents: &result.branch_currents,
+                current_impulses: result.current_impulses.as_deref(),
                 digital_values: &[],
                 digital_buses: &[],
                 real_values: &[],
@@ -1543,6 +1545,7 @@ mod tests {
                 node_voltages: &voltages,
                 branch_names: &[],
                 branch_currents: &[],
+                current_impulses: None,
                 digital_values: digital,
                 digital_buses: &[],
                 real_values: real,

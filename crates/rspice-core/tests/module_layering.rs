@@ -100,6 +100,8 @@ const LAYERS: &[(&str, u32)] = &[
     // both carry the kind, and neither should reach up into `analysis` for
     // two field-less enums. `analysis::transient` re-exports all three.
     ("event_net", 0),
+    // Sparse charge observations are data shared by results and live hooks.
+    ("transient_observation", 0),
     // SPICE engineering-suffix semantics. Both expression parsers and the
     // deck lexer consume this leaf so numeric text has one semantic owner.
     ("spice_number", 0),

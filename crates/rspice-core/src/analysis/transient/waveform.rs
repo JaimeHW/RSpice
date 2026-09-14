@@ -812,6 +812,9 @@ impl TransientResultIdentity {
 /// Compressed transient result: a complete, self-describing result container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TransientResultCompressed {
+    /// Sparse current impulses carried exactly, without resampling or
+    /// decimation. `None` means their history was unavailable or unrecorded.
+    pub current_impulses: Option<Vec<crate::CurrentImpulseTrace>>,
     /// Retained time points, a subset of the accepted solver grid with their
     /// exact IEEE-754 values.
     pub time: Vec<Value>,
@@ -993,6 +996,17 @@ impl TransientResultCompressed {
         self.validate_report_policy(point_count)?;
         self.validate_grid()?;
         self.validate_channels(point_count)?;
+        crate::transient_observation::validate_current_impulse_traces(
+            self.current_impulses.as_deref(),
+            self.time.first().copied(),
+            self.time.last().copied(),
+            self.channels
+                .iter()
+                .filter_map(|channel| match channel.descriptor.role() {
+                    TransientChannelRole::BranchCurrent { branch } => Some(branch.as_str()),
+                    _ => None,
+                }),
+        )?;
         self.validate_event_traces()?;
         self.validate_worst_observation()
     }
@@ -1532,6 +1546,7 @@ mod tests {
     ) -> TransientResultCompressed {
         let config = CompressionConfig::none();
         TransientResultCompressed {
+            current_impulses: None,
             time: vec![0.0, 1.0, 2.0],
             step_sizes: vec![0.0, 1.0, 1.0],
             channels,

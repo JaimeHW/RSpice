@@ -1336,6 +1336,7 @@ mod tests {
             "counterfactual must prove the historical relation alone admits identical wrong tables"
         );
         let shared_wrong_result = TransientResult {
+            current_impulses: None,
             time: vec![0.0, 1.0e-9],
             step_sizes: vec![0.0, 1.0e-9],
             voltages: vec![

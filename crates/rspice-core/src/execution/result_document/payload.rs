@@ -328,6 +328,12 @@ pub struct AcPayload {}
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TransientPayload {
+    /// Sparse branch current impulses in coulombs, independent of finite
+    /// current samples. Absent/None means unavailable; an empty array means
+    /// recorded with no impulses. Available only from document version 6.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current_impulses: Option<Vec<crate::CurrentImpulseTrace>>,
+
     /// Accepted integration interval for each time point. The first entry is
     /// zero; every later entry is the exact timestep that produced its sample.
     pub step_sizes: Vec<f64>,
@@ -399,6 +405,9 @@ impl TransientPayload {
             .saturating_add(digital)
             .saturating_add(real)
             .saturating_add(buses)
+            .saturating_add(crate::transient_observation::current_impulse_value_count(
+                self.current_impulses.as_deref(),
+            ))
     }
 
     fn validate(&self) -> Result<(), ResultDocumentError> {

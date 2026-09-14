@@ -25,6 +25,7 @@ pub(super) type TransientPersistenceState = (
     Vec<(String, Vec<f64>)>,
     TransientFftPersistenceState,
     TransientEventPersistenceState,
+    ImpulsePersistenceState,
 );
 
 /// Rebuild a transient result from the state `_unpickle` was handed.
@@ -44,11 +45,13 @@ pub(super) fn restore_transient_result(
     store_traces: Vec<(String, Vec<f64>)>,
     fft_state: Option<TransientFftPersistenceState>,
     event_state: Option<VersionedTransientEventState>,
+    impulse_state: Option<ImpulsePersistenceState>,
 ) -> PyResult<TransientResult> {
     let (digital_traces, digital_buses, real_traces) =
         rebuild_transient_event_traces(event_state).map_err(crate::errors::value_error)?;
     let (node_names, branch_names) = names;
     let restored = TransientResult {
+        current_impulses: restore_impulses(impulse_state).map_err(crate::errors::value_error)?,
         time,
         step_sizes,
         voltages,
@@ -116,6 +119,7 @@ pub(super) fn transient_persistence_state(
             &result.real_traces,
             &result.digital_buses,
         ),
+        impulse_persistence_state(result.current_impulses.as_deref()),
     ))
 }
 
@@ -126,6 +130,7 @@ pub(super) fn transient_persistence_state(
 /// that was persisted: a caller reading `voltage_waveform("out")` must get the
 /// samples the solver produced or an error, never a truncated array.
 pub(crate) fn validate_transient_state(result: &TransientResult) -> Result<(), String> {
+    result.validate_current_impulses()?;
     let points = result.time.len();
     if result.step_sizes.len() != points {
         return Err(format!(
@@ -261,11 +266,11 @@ pub(crate) fn clip_transient_to_start(
 
     let original_len = result.time.len();
     let start_index = result.time.partition_point(|time| *time < start_time);
-    if start_index >= original_len {
+    let Some(&retained_start) = result.time.get(start_index) else {
         return Err(format!(
             "transient result contains no sample at or after requested start_time {start_time}"
         ));
-    }
+    };
 
     for (kind, series) in result
         .voltages
@@ -293,6 +298,14 @@ pub(crate) fn clip_transient_to_start(
         }
     }
 
+    result.validate_current_impulses()?;
+    if let Some(traces) = &mut result.current_impulses {
+        for trace in traces.iter_mut() {
+            // Impulses are newly accepted actions, never held state at TSTART.
+            trace.points.retain(|point| point.time >= retained_start);
+        }
+        traces.retain(|trace| !trace.points.is_empty());
+    }
     result.time.drain(..start_index);
     for series in &mut result.voltages {
         series.drain(..start_index);
@@ -351,6 +364,7 @@ mod structural_tests {
 
     fn two_point_result() -> TransientResult {
         TransientResult {
+            current_impulses: None,
             time: vec![0.0, 1.0e-9],
             step_sizes: vec![0.0, 1.0e-9],
             voltages: vec![vec![0.0, 1.0]],
@@ -370,6 +384,42 @@ mod structural_tests {
     #[test]
     fn a_complete_aligned_result_validates() {
         assert_eq!(validate_transient_state(&two_point_result()), Ok(()));
+    }
+
+    #[test]
+    fn impulse_clipping_discards_past_actions_without_replaying_them() {
+        use rspice_core::{CurrentImpulsePoint, CurrentImpulseTrace};
+        let mut result = two_point_result();
+        result.current_impulses = Some(vec![CurrentImpulseTrace {
+            branch_name: "V1".into(),
+            points: vec![
+                CurrentImpulsePoint {
+                    time: 0.0,
+                    charge_coulombs: -1e-12,
+                },
+                CurrentImpulsePoint {
+                    time: 0.5e-9,
+                    charge_coulombs: 2e-12,
+                },
+                CurrentImpulsePoint {
+                    time: 1e-9,
+                    charge_coulombs: 3e-12,
+                },
+            ],
+        }]);
+        let mut past_only = result.clone();
+        past_only.current_impulses.as_mut().unwrap()[0].points.pop();
+        clip_transient_to_start(&mut result, 1e-9).unwrap();
+        assert_eq!(
+            result.current_impulses.as_ref().unwrap()[0].points,
+            vec![CurrentImpulsePoint {
+                time: 1e-9,
+                charge_coulombs: 3e-12
+            },]
+        );
+        result.validate_current_impulses().unwrap();
+        clip_transient_to_start(&mut past_only, 1e-9).unwrap();
+        assert_eq!(past_only.current_impulses, Some(Vec::new()));
     }
 
     #[test]

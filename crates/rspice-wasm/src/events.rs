@@ -732,6 +732,7 @@ C1 out 0 1p
         buses: Vec<DigitalBusDeclaration>,
     ) -> AnalysisResultDocument {
         let result = TransientResult {
+            current_impulses: None,
             time: vec![0.0, 5.0e-9, 1.0e-8, 1.5e-8],
             step_sizes: vec![0.0, 5.0e-9, 5.0e-9, 5.0e-9],
             voltages: vec![vec![0.0, 0.5, 1.0, 1.5]],

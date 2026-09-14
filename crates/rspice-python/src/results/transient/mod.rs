@@ -114,6 +114,14 @@ impl PyTransientResult {
 
 #[pymethods]
 impl PyTransientResult {
+    /// Sparse branch current impulses as (branch, [(seconds, coulombs)]).
+    /// None means unavailable; an empty list means recorded with no impulses.
+    /// These charges are separate from finite current waveform samples.
+    #[getter]
+    fn current_impulses(&self) -> ImpulseRows {
+        impulse_rows(self.inner.current_impulses.as_deref())
+    }
+
     /// Get the time points array
     ///
     /// Returns:
@@ -729,16 +737,17 @@ impl PyTransientResult {
     ///
     /// `event_state` carries the pickle's version tag, the XSPICE digital and
     /// real event histories, and — from version 2 — the bus table declared
-    /// over them. It is the last parameter and defaults to `None` so a state
+    /// over them. It defaults to `None` so a state
     /// written before it existed still reaches this method and is refused with
     /// a message that says what to do, instead of failing as an arity
     /// mismatch. A version-1 state is read, with no bus table, because nothing
     /// that wrote one could declare a bus. Nothing this method builds is
     /// zero-filled: a state that does not describe a complete, aligned result
-    /// is rejected.
+    /// is rejected. The optional versioned `impulse_state` preserves sparse
+    /// charge observations; older states restore unavailable impulse history.
     #[staticmethod]
     #[allow(clippy::too_many_arguments)]
-    #[pyo3(signature = (time, step_sizes, voltages, branch_currents, num_nodes, names, device_op_traces, store_traces, fft_state=None, event_state=None))]
+    #[pyo3(signature = (time, step_sizes, voltages, branch_currents, num_nodes, names, device_op_traces, store_traces, fft_state=None, event_state=None, impulse_state=None))]
     fn _unpickle(
         time: Vec<f64>,
         step_sizes: Vec<f64>,
@@ -750,6 +759,7 @@ impl PyTransientResult {
         store_traces: Vec<(String, Vec<f64>)>,
         fft_state: Option<TransientFftPersistenceState>,
         event_state: Option<VersionedTransientEventState>,
+        impulse_state: Option<ImpulsePersistenceState>,
     ) -> PyResult<Self> {
         Ok(Self::restored(restore_transient_result(
             time,
@@ -762,6 +772,7 @@ impl PyTransientResult {
             store_traces,
             fft_state,
             event_state,
+            impulse_state,
         )?))
     }
 

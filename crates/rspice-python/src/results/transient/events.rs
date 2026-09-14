@@ -474,6 +474,7 @@ mod tests {
             .expect("the published type stub is beside the crate manifest");
         let (digital_traces, real_traces) = traces();
         let result = TransientResult {
+            current_impulses: None,
             time: vec![0.0, 3.0e-8],
             step_sizes: vec![0.0, 3.0e-8],
             voltages: vec![Vec::new(), Vec::new()],

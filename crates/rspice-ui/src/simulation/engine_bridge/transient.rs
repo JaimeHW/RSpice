@@ -471,6 +471,24 @@ fn evaluate_transient_measurements(
         .chain(filtered_time.windows(2).map(|pair| pair[1] - pair[0]))
         .collect();
     let visible_result = rspice_core::engine::TransientResult {
+        current_impulses: result.current_impulses.as_ref().map(|traces| {
+            let start = filtered_time.first().copied().unwrap_or(start_time);
+            traces
+                .iter()
+                .map(|trace| rspice_core::CurrentImpulseTrace {
+                    branch_name: trace.branch_name.clone(),
+                    // An impulse is an action at its original time, not held
+                    // current state to be copied to the output boundary.
+                    points: trace
+                        .points
+                        .iter()
+                        .copied()
+                        .filter(|point| point.time >= start)
+                        .collect(),
+                })
+                .filter(|trace| !trace.points.is_empty())
+                .collect()
+        }),
         time: filtered_time.to_vec(),
         step_sizes,
         voltages,
@@ -866,6 +884,7 @@ mod tests {
     fn transient_conversion_preserves_branch_current_waveforms() {
         let netlist = parse_netlist("branch current\nV1 out 0 1\nR1 out 0 1k\n.tran 1n 2n\n.end\n");
         let result = rspice_core::engine::TransientResult {
+            current_impulses: None,
             time: vec![0.0, 1.0e-9, 2.0e-9],
             step_sizes: vec![0.0, 1.0e-9, 1.0e-9],
             voltages: vec![vec![0.0, 1.0, 1.0]],
@@ -904,6 +923,7 @@ mod tests {
              .end\n",
         );
         let result = rspice_core::engine::TransientResult {
+            current_impulses: None,
             time: vec![0.0, 1.0e-9, 2.0e-9],
             step_sizes: vec![0.0, 1.0e-9, 1.0e-9],
             // `in` and I(V1) retain their index slots but are deliberately
@@ -937,6 +957,7 @@ mod tests {
     #[test]
     fn transient_shape_mismatch_is_a_terminal_error() {
         let result = rspice_core::engine::TransientResult {
+            current_impulses: None,
             time: vec![0.0, 1.0e-9],
             step_sizes: vec![0.0, 1.0e-9],
             voltages: vec![vec![0.0]],
@@ -978,6 +999,7 @@ mod tests {
             .chain(time.windows(2).map(|pair| pair[1] - pair[0]))
             .collect::<Vec<_>>();
         let result = rspice_core::engine::TransientResult {
+            current_impulses: None,
             time: time.clone(),
             step_sizes,
             voltages: vec![values],
@@ -1057,6 +1079,7 @@ mod tests {
             .chain(std::iter::repeat_n(1.0e-9, time.len() - 1))
             .collect();
         let tran_result = rspice_core::engine::TransientResult {
+            current_impulses: None,
             time: time.clone(),
             step_sizes,
             // `out` is retained; `d` is an event-only net, whose column the

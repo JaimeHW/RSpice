@@ -168,7 +168,7 @@ def test_resumed_fft_without_earlier_history_preserves_waveform_and_status(engin
     assert_fft_equal(round_trip(fft), fft)
     assert_fft_equal(round_trip(resumed).fft(0), fft)
     document = fft.document()
-    assert document["schemaVersion"] == 5
+    assert document["schemaVersion"] == 6
     assert document["pointCount"] == 0
     assert document["axes"] == document["signals"] == []
     assert document["payload"]["status"] == {
@@ -229,8 +229,9 @@ def test_transient_pickle_rejects_legacy_and_future_fft_state(
     unpickler, state = original.__reduce__()
     # Compressed state appends the FFT contract before the analog-inventory
     # and compression-certificate contracts. Full transient state appends the
-    # event-history contract after it.
-    fft_index = -3 if compressed else -2
+    # event-history contract after it. Both now end with the impulse contract.
+    # Address the stable FFT position rather than counting back from the tail.
+    fft_index = 3 if compressed else 8
 
     legacy_state = list(state)
     legacy_state[fft_index] = None

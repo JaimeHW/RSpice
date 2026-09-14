@@ -34,6 +34,13 @@ impl CarriesDocumentEvidence for PyCompressedTransientResult {
 
 #[pymethods]
 impl PyCompressedTransientResult {
+    /// Sparse (branch, [(seconds, coulombs)]) impulses, preserved without
+    /// analog compression. None means unavailable, an empty list means none occurred.
+    #[getter]
+    fn current_impulses(&self) -> ImpulseRows {
+        impulse_rows(self.inner.current_impulses.as_deref())
+    }
+
     /// Typed inventory of every signal in this result's shared document.
     ///
     /// The descriptors are the ones the CLI, the WASM build and the engine
@@ -704,7 +711,7 @@ impl PyCompressedTransientResult {
     /// Rebuild from pickled state. Not part of the public API.
     ///
     #[staticmethod]
-    #[pyo3(signature = (time, compression_ratio, input_points, fft_state=None, analog_state=None, compression_state=None))]
+    #[pyo3(signature = (time, compression_ratio, input_points, fft_state=None, analog_state=None, compression_state=None, impulse_state=None))]
     fn _unpickle(
         time: Vec<f64>,
         compression_ratio: f64,
@@ -712,6 +719,7 @@ impl PyCompressedTransientResult {
         fft_state: Option<TransientFftPersistenceState>,
         analog_state: Option<VersionedCompressedTransientAnalogState>,
         compression_state: Option<CompressionReportPersistenceState>,
+        impulse_state: Option<ImpulsePersistenceState>,
     ) -> PyResult<Self> {
         rebuild_compressed_transient(
             time,
@@ -720,6 +728,7 @@ impl PyCompressedTransientResult {
             fft_state,
             analog_state,
             compression_state,
+            impulse_state,
         )
         .map(Self::restored)
     }
@@ -737,8 +746,10 @@ impl PyCompressedTransientResult {
             TransientFftPersistenceState,
             CompressedTransientAnalogState,
             CompressionReportPersistenceState,
+            ImpulsePersistenceState,
         ),
     )> {
+        self.inner.validate().map_err(crate::errors::value_error)?;
         Ok((
             unpickler::<Self>(py)?,
             (
@@ -748,6 +759,7 @@ impl PyCompressedTransientResult {
                 transient_fft_persistence_state(&self.inner.post_results.fft)?,
                 compressed_transient_analog_state(&self.inner),
                 compression_report_persistence_state(&self.inner.compression_report),
+                impulse_persistence_state(self.inner.current_impulses.as_deref()),
             ),
         ))
     }

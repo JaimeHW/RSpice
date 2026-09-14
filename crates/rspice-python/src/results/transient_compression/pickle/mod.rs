@@ -134,6 +134,7 @@ pub(crate) fn rebuild_compressed_transient(
     fft_state: Option<TransientFftPersistenceState>,
     analog_state: Option<VersionedCompressedTransientAnalogState>,
     compression_state: Option<CompressionReportPersistenceState>,
+    impulse_state: Option<ImpulsePersistenceState>,
 ) -> PyResult<rspice_core::engine::TransientResultCompressed> {
     let Some(analog_state) = analog_state else {
         return Err(crate::errors::value_error(
@@ -234,6 +235,7 @@ pub(crate) fn rebuild_compressed_transient(
         ))
     })?;
     let inner = rspice_core::engine::TransientResultCompressed {
+        current_impulses: restore_impulses(impulse_state).map_err(crate::errors::value_error)?,
         time,
         step_sizes,
         channels: channels

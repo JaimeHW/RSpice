@@ -888,6 +888,9 @@ impl AnalysisResultDocument {
         fft_children: Vec<super::payload::FftChildReference>,
     ) -> Result<AnalysisResultDocumentBuilder, ResultDocumentError> {
         const LOCATION: &str = "transient result";
+        result
+            .validate_current_impulses()
+            .map_err(|detail| source_error(LOCATION, detail))?;
         let point_count = result.time.len();
         if point_count == 0 {
             return Err(source_error(
@@ -1060,6 +1063,7 @@ impl AnalysisResultDocument {
         }
 
         let payload = TransientPayload {
+            current_impulses: result.current_impulses.clone(),
             step_sizes: finite_axis(LOCATION, "step size", &result.step_sizes)?,
             store_traces,
             digital_traces,
@@ -1253,6 +1257,7 @@ impl AnalysisResultDocument {
         }
 
         let payload = TransientPayload {
+            current_impulses: compressed.current_impulses.clone(),
             step_sizes: finite_axis(LOCATION, "step size", &compressed.step_sizes)?,
             store_traces,
             digital_traces,
@@ -4381,6 +4386,7 @@ mod compressed_transient_tests {
     fn container() -> TransientResultCompressed {
         let config = CompressionConfig::none();
         TransientResultCompressed {
+            current_impulses: None,
             time: vec![0.0, 1.0, 2.0],
             step_sizes: vec![0.0, 1.0, 1.0],
             channels: vec![

@@ -206,7 +206,7 @@ use crate::execution::topology::TopologyFingerprint;
 pub const ANALYSIS_RESULT_DOCUMENT_SCHEMA: &str = "rspice-analysis-result";
 
 /// Schema version this build produces.
-pub const ANALYSIS_RESULT_DOCUMENT_VERSION: u32 = 5;
+pub const ANALYSIS_RESULT_DOCUMENT_VERSION: u32 = 6;
 
 /// Every schema version this build decodes, oldest first.
 ///
@@ -226,7 +226,9 @@ pub const ANALYSIS_RESULT_DOCUMENT_VERSION: u32 = 5;
 /// Versions 1–3 omit `status` and retain their completed spectral data unchanged.
 /// Version 5 adds sensitivity availability. Earlier sensitivity documents
 /// require a rerun because their zeros do not distinguish undefined values.
-const DECODABLE_ANALYSIS_RESULT_DOCUMENT_VERSIONS: [u32; 5] = [1, 2, 3, 4, 5];
+/// Version 6 adds sparse current impulses. Older transient documents decode
+/// with unavailable impulse history, without asserting that no impulse occurred.
+const DECODABLE_ANALYSIS_RESULT_DOCUMENT_VERSIONS: [u32; 6] = [1, 2, 3, 4, 5, 6];
 
 /// First version whose transient payload may declare a digital bus.
 const FIRST_DIGITAL_BUS_DOCUMENT_VERSION: u32 = 2;
@@ -268,6 +270,43 @@ pub struct AnalysisResultDocument {
 }
 
 impl AnalysisResultDocument {
+    fn validate_current_impulses(&self) -> Result<(), ResultDocumentError> {
+        let payload = match &self.payload {
+            ResultPayload::Tran(payload) => payload,
+            ResultPayload::Envelope(payload) => &payload.transient,
+            _ => return Ok(()),
+        };
+        let Some(traces) = &payload.current_impulses else {
+            return Ok(());
+        };
+        let malformed = |detail| ResultDocumentError::Malformed {
+            location: "transient current impulses",
+            detail,
+        };
+        if self.schema_version < 6 {
+            return Err(malformed(
+                "current impulse observations require document version 6".into(),
+            ));
+        }
+        let times = self
+            .axes
+            .iter()
+            .find_map(|axis| match (&axis.kind, &axis.values) {
+                (ResultAxisKind::Time, AxisValues::Real { values }) => Some(values.as_slice()),
+                _ => None,
+            })
+            .ok_or_else(|| malformed("current impulses require a real time axis".into()))?;
+        // Impulse owners are self-describing branch names; the analog output
+        // selection may omit their finite current series entirely.
+        crate::transient_observation::validate_current_impulse_traces(
+            Some(traces),
+            times.first().copied(),
+            times.last().copied(),
+            traces.iter().map(|trace| trace.branch_name.as_str()),
+        )
+        .map_err(malformed)
+    }
+
     /// Start a document for one analysis instance and result family.
     pub fn builder(
         analysis: AnalysisInstanceId,
@@ -540,6 +579,7 @@ impl AnalysisResultDocument {
         }
         check_abort(abort)?;
         self.payload.validate()?;
+        self.validate_current_impulses()?;
         if let ResultPayload::Sensitivity(payload) = &self.payload {
             self.validate_sensitivity_availability(payload, abort)?;
         }

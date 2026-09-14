@@ -138,6 +138,10 @@ pub struct TransientSample<'a> {
     pub branch_names: &'a [String],
     /// Retained branch-current columns, indexed `[branch][sample]`.
     pub branch_currents: &'a [Vec<crate::Value>],
+    /// Newly accepted current impulses for this run segment. Charge values
+    /// are in coulombs and never form part of `branch_currents`. `None` means
+    /// unavailable/unrecorded history; a resume does not replay past events.
+    pub current_impulses: Option<&'a [crate::CurrentImpulseTrace]>,
     /// Committed digital event state at this accepted time, as
     /// [`DigitalEventCode`]s sorted by node id.
     ///

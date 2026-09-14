@@ -306,6 +306,7 @@ impl XyceTestRunner {
             )
         };
         Ok(TransientResult {
+            current_impulses: None,
             time,
             step_sizes: vec![0.0; result.time.len()],
             voltages: serialize_waveforms("voltage", &source_voltages, source_time.len())?,
@@ -4480,6 +4481,7 @@ impl XyceTestRunner {
             })
             .collect::<Vec<_>>();
         TransientResult {
+            current_impulses: None,
             time,
             step_sizes: vec![0.0; voltages.first().map_or(0, Vec::len)],
             voltages,

@@ -63,6 +63,10 @@ mod export_bridge;
 mod fft;
 mod fourier;
 mod hb;
+mod impulse_state;
+use impulse_state::{
+    ImpulsePersistenceState, ImpulseRows, impulse_persistence_state, impulse_rows, restore_impulses,
+};
 mod monte_carlo;
 mod noise;
 mod pac;

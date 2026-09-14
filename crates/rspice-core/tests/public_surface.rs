@@ -859,7 +859,12 @@ use rspice_core::analysis::harmonic_balance::{
 // for it. The three declarations moved with the code, `event_net` itself is a
 // private module, and the one grouped `pub use` that keeps every frontend's
 // `analysis::transient::` spelling working is the whole of this +1.
-const MAX_PUBLIC_ITEMS: usize = 5007;
+/// +4 deliberate frontend statements expose sparse impulse observations:
+/// CurrentImpulsePoint, CurrentImpulseTrace, their grouped root re-export,
+/// and TransientResult::validate_current_impulses. Python persists and
+/// validates them; the GUI carries their named charges through output windows.
+/// Per-trace validation and resource helpers remain crate-private.
+const MAX_PUBLIC_ITEMS: usize = 5011;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

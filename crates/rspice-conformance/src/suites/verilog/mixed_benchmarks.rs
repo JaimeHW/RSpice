@@ -1215,6 +1215,7 @@ mod tests {
 
     fn waveform(time: &[f64], voltage: &[f64]) -> TransientResult {
         TransientResult {
+            current_impulses: None,
             time: time.to_vec(),
             step_sizes: std::iter::once(0.0)
                 .chain(time.windows(2).map(|pair| pair[1] - pair[0]))

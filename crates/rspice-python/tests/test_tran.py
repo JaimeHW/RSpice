@@ -759,12 +759,12 @@ BUS_DECLARATION = (BUS_NAME, 1, 0, BUS_MEMBERS, "engine")
 def _with_event_state(result, event_state):
     """Rebuild `result` with a different event state, through `_unpickle`."""
     unpickler, state = result.__reduce__()
-    return unpickler(*state[:-1], event_state)
+    return unpickler(*state[:-2], event_state, state[-1])
 
 
 @pytest.fixture(scope="module")
 def bus_transient(event_transient):
-    version = event_transient.__reduce__()[1][-1][0]
+    version = event_transient.__reduce__()[1][-2][0]
     # No real event node, so this result's dump is exactly the browser
     # binding's for the same declaration - which is what the two surfaces are
     # compared on.
@@ -841,7 +841,7 @@ class TestDigitalBuses:
         It is read rather than refused: nothing that could write one could
         declare a bus, so an empty table is what it says.
         """
-        _, digital, real, _ = event_transient.__reduce__()[1][-1]
+        _, digital, real, _ = event_transient.__reduce__()[1][-2]
         restored = _with_event_state(event_transient, (1, digital, real))
         assert restored.digital_buses() == []
         assert restored.digital_nodes() == event_transient.digital_nodes()
@@ -849,14 +849,14 @@ class TestDigitalBuses:
     def test_a_version_that_contradicts_the_state_shape_is_refused(
         self, event_transient
     ):
-        version, digital, real, buses = event_transient.__reduce__()[1][-1]
+        version, digital, real, buses = event_transient.__reduce__()[1][-2]
         with pytest.raises(ValueError, match="4-field state"):
             _with_event_state(event_transient, (1, digital, real, buses))
         with pytest.raises(ValueError, match="3-field state"):
             _with_event_state(event_transient, (version, digital, real))
 
     def test_a_pickled_bus_whose_member_has_no_trace_is_refused(self, event_transient):
-        version, _, real, _ = event_transient.__reduce__()[1][-1]
+        version, _, real, _ = event_transient.__reduce__()[1][-2]
         with pytest.raises(ValueError, match="cannot carry"):
             _with_event_state(
                 event_transient,
@@ -869,7 +869,7 @@ class TestDigitalBuses:
             )
 
     def test_a_pickled_bus_with_an_unknown_declarer_is_refused(self, event_transient):
-        version, _, real, _ = event_transient.__reduce__()[1][-1]
+        version, _, real, _ = event_transient.__reduce__()[1][-2]
         with pytest.raises(ValueError, match="guessed"):
             _with_event_state(
                 event_transient,
