@@ -179,10 +179,18 @@ pub(in crate::engine::transient) struct PhysicalStartupReport {
     pub impulses: Vec<(usize, Value)>,
 }
 
+/// Exclusive model and history targets promoted together at startup.
+pub(in crate::engine::transient) struct PhysicalStartupTargets<'a> {
+    pub circuit: &'a mut crate::CircuitData,
+    pub solution: &'a mut Vec<Value>,
+    pub history: &'a mut BjtTransientHistory,
+}
+
 impl Engine {
     /// Consume the already selected DC/IC histories and publish one physical
     /// outgoing point. Exclusive targets cannot change between preparation
     /// and commit; cancellation or any failure leaves all targets untouched.
+    #[cfg(test)]
     pub(in crate::engine::transient) fn transition_physical_startup(
         &self,
         circuit: &mut crate::CircuitData,
@@ -192,6 +200,35 @@ impl Engine {
         flux_tolerance: Value,
         abort: &dyn AbortSignal,
     ) -> Result<PhysicalStartupReport, SimulationError> {
+        self.transition_physical_startup_with_observation(
+            PhysicalStartupTargets {
+                circuit,
+                solution,
+                history,
+            },
+            options,
+            flux_tolerance,
+            abort,
+            |_| Ok(()),
+        )
+        .map(|(report, ())| report)
+    }
+
+    /// Prepare observations while state is private, then cross the physical
+    /// commit barrier. A refused observation leaves every model target intact.
+    pub(in crate::engine::transient) fn transition_physical_startup_with_observation<T>(
+        &self,
+        targets: PhysicalStartupTargets<'_>,
+        options: &charge_event::EventOptions,
+        flux_tolerance: Value,
+        abort: &dyn AbortSignal,
+        prepare_observation: impl FnOnce(&[(usize, Value)]) -> Result<T, SimulationError>,
+    ) -> Result<(PhysicalStartupReport, T), SimulationError> {
+        let PhysicalStartupTargets {
+            circuit,
+            solution,
+            history,
+        } = targets;
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }
@@ -232,7 +269,8 @@ impl Engine {
                 voltage,
             ));
         }
-        let impulses = point.impulses().collect();
+        let impulses: Vec<_> = point.impulses().collect();
+        let observation = prepare_observation(&impulses)?;
         let mut outgoing = history.clone();
         // The incoming anchor was a private prehistory seed. Build the first
         // accepted sided knot in fresh buffers; appending another t=0 sample
@@ -278,9 +316,12 @@ impl Engine {
         circuit.update_coupled_inductor_pair_state(&point.state.solution);
         *history = outgoing;
         *solution = point.state.solution;
-        Ok(PhysicalStartupReport {
-            coordinate_rates: point.state.coordinate_rates,
-            impulses,
-        })
+        Ok((
+            PhysicalStartupReport {
+                coordinate_rates: point.state.coordinate_rates,
+                impulses,
+            },
+            observation,
+        ))
     }
 }

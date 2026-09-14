@@ -1,6 +1,66 @@
 use super::*;
 
 #[test]
+fn physical_startup_observation_preflight_refusal_preserves_all_model_targets() {
+    let (engine, mut circuit, _, mut solution, mut history) = fixture(
+        "startup observation refusal\nVc c 0 DC 0 PWL(0 1 1 1)\nC1 c 0 1p\nR1 c 0 1k\nVb b 0 .6\nQ1 0 b 0 qm\n.model qm NPN(IS=1e-16 TF=1n PTF=30)\n.end\n",
+    );
+    let before_solution = solution.clone();
+    let before_history = history.clone();
+    let before_caps = (
+        circuit.capacitors.v_prev.clone(),
+        circuit.capacitors.i_prev.clone(),
+    );
+    let before_models = circuit
+        .bjts
+        .devices
+        .iter()
+        .map(|bjt| bjt.accepted_nonlinear_checkpoint().unwrap())
+        .collect::<Vec<_>>();
+    let mut observed = false;
+    let result = engine.transition_physical_startup_with_observation(
+        PhysicalStartupTargets {
+            circuit: &mut circuit,
+            solution: &mut solution,
+            history: &mut history,
+        },
+        &options(),
+        1e-20,
+        &NoAbort,
+        |charges| {
+            observed = true;
+            assert!(charges.iter().any(|(_, charge)| *charge != 0.0));
+            crate::resource::ResourceLimitError::ensure(
+                crate::resource::ResourceKind::ResultValues,
+                11,
+                10,
+            )
+            .map_err(SimulationError::from)
+        },
+    );
+    assert!(observed);
+    assert!(matches!(result, Err(SimulationError::ResourceLimit(_))));
+    assert_eq!(solution, before_solution);
+    assert_eq!(history, before_history);
+    assert_eq!(
+        (
+            circuit.capacitors.v_prev.clone(),
+            circuit.capacitors.i_prev.clone()
+        ),
+        before_caps
+    );
+    assert_eq!(
+        circuit
+            .bjts
+            .devices
+            .iter()
+            .map(|bjt| bjt.accepted_nonlinear_checkpoint().unwrap())
+            .collect::<Vec<_>>(),
+        before_models
+    );
+}
+
+#[test]
 fn physical_startup_solves_coupled_rates_in_the_selected_gp_charge_chart() {
     for (kind, p) in [("NPN", 1.0), ("PNP", -1.0)] {
         for direction in [-1.0, 1.0] {

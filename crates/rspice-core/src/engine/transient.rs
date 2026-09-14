@@ -737,6 +737,7 @@ use step_control::{SourceActivityDeltas, StepBiasFloors};
 
 mod acceptance;
 mod breakpoints;
+mod impulses;
 // Exact source-root ownership is prepared separately from the ordinary
 // controller; main physical-event dispatch is integrated after propagation.
 mod checkpoint;
@@ -5710,15 +5711,33 @@ impl Engine {
         };
         // Absolute linkage tolerance in webers, independent of charge/current units.
         let physical_flux_tolerance = 1e-24;
+        // A resume observes newly accepted actions only, not the past impulse
+        // at its already accepted checkpoint seam.
+        let physical_impulse_branches = circuit.num_branches();
+        result.current_impulses = physical_sources.as_ref().map(|_| Vec::new());
         if resume.is_none() && physical_sources.is_some() {
-            let startup = self.transition_physical_startup(
-                &mut circuit,
-                &mut solution,
-                &mut bjt_history,
+            let (startup, observation) = self.transition_physical_startup_with_observation(
+                state_commit::physical_event::PhysicalStartupTargets {
+                    circuit: &mut circuit,
+                    solution: &mut solution,
+                    history: &mut bjt_history,
+                },
                 &physical_options,
                 physical_flux_tolerance,
                 abort,
+                |charges| {
+                    impulses::prepare(
+                        &mut result,
+                        0.0,
+                        physical_impulse_branches,
+                        charges.iter().copied(),
+                        retained_result_values.saturating_add(retained_scheduled_checkpoint_values),
+                        &self.config.resource_limits,
+                        abort,
+                    )
+                },
             )?;
+            retained_result_values = retained_result_values.saturating_add(observation.commit());
             log::debug!(
                 "Physical startup source impulses (MNA coordinate, C): {:?}",
                 startup.impulses
@@ -10061,6 +10080,27 @@ impl Engine {
                     if let Some(event) = &outgoing_event {
                         new_solution.clone_from(&event.state().solution);
                     }
+                    let impulse_observation = outgoing_event
+                        .as_ref()
+                        .map(|event| {
+                            let pending_sample_values = capture_plan
+                                .analog_values_per_sample()
+                                .saturating_add(result.store_traces.len())
+                                .saturating_add(result.device_op_traces.len())
+                                .saturating_add(1);
+                            impulses::prepare(
+                                &mut result,
+                                t,
+                                physical_impulse_branches,
+                                event.impulses(),
+                                retained_result_values
+                                    .saturating_add(retained_scheduled_checkpoint_values)
+                                    .saturating_add(pending_sample_values),
+                                &self.config.resource_limits,
+                                abort,
+                            )
+                        })
+                        .transpose()?;
                     let accepted_phase_context = outgoing_event
                         .as_ref()
                         .map_or(trial_phase_context, |event| event.phase_context());
@@ -10116,6 +10156,10 @@ impl Engine {
                             },
                         }),
                     )?;
+                    if let Some(observation) = impulse_observation {
+                        retained_result_values =
+                            retained_result_values.saturating_add(observation.commit());
+                    }
                     total_acceptance_nanos += acceptance_phase_start.elapsed().as_nanos();
                     if let Some(history) = static_history {
                         xyce_static_history_candidate = Some(history);
@@ -10600,6 +10644,27 @@ impl Engine {
             if let Some(event) = &outgoing_event {
                 new_solution.clone_from(&event.state().solution);
             }
+            let impulse_observation = outgoing_event
+                .as_ref()
+                .map(|event| {
+                    let pending_sample_values = capture_plan
+                        .analog_values_per_sample()
+                        .saturating_add(result.store_traces.len())
+                        .saturating_add(result.device_op_traces.len())
+                        .saturating_add(1);
+                    impulses::prepare(
+                        &mut result,
+                        t,
+                        physical_impulse_branches,
+                        event.impulses(),
+                        retained_result_values
+                            .saturating_add(retained_scheduled_checkpoint_values)
+                            .saturating_add(pending_sample_values),
+                        &self.config.resource_limits,
+                        abort,
+                    )
+                })
+                .transpose()?;
             let accepted_phase_context = outgoing_event
                 .as_ref()
                 .map_or(trial_phase_context, |event| event.phase_context());
@@ -10655,6 +10720,10 @@ impl Engine {
                     },
                 }),
             )?;
+            if let Some(observation) = impulse_observation {
+                retained_result_values =
+                    retained_result_values.saturating_add(observation.commit());
+            }
             total_acceptance_nanos += acceptance_phase_start.elapsed().as_nanos();
             let tail_phase_start = DiagnosticTimer::start(diagnostic_timing_enabled);
             if let Some(history) = static_history {

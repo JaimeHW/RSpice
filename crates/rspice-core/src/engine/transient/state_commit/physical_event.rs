@@ -8,6 +8,7 @@ use charge_event::circuit::{EventPhase, PreparedEventCircuit};
 mod orders;
 mod startup;
 pub(in crate::engine::transient) use orders::PhysicalEventOrders;
+pub(in crate::engine::transient) use startup::PhysicalStartupTargets;
 
 pub(in crate::engine::transient) struct PhysicalEventStep<'a> {
     pub incoming: &'a [Value],
