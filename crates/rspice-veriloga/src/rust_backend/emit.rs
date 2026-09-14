@@ -1798,6 +1798,12 @@ impl Emitter<'_> {
     fn expression(&self, value: ValueId) -> Result<String, EmitError> {
         let bindings = self.bindings;
         Ok(match &self.function.value(value).kind {
+            CfgValueKind::AnalogTasksEnabled | CfgValueKind::AnalogTaskGuard(_) => {
+                return Err(EmitError::UnsupportedStatefulOperator {
+                    value,
+                    operator: "executable-only analog task dispatch",
+                });
+            }
             CfgValueKind::AnalogTask(task) => {
                 let operand =
                     task.finish_operand()

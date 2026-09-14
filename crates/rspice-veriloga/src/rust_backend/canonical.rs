@@ -395,6 +395,8 @@ fn kernel_region_metrics(
             shape_signature(value_id)
         );
         match &value.kind {
+            CfgValueKind::AnalogTasksEnabled => write!(out, "analog-tasks-enabled"),
+            CfgValueKind::AnalogTaskGuard(_) => write!(out, "analog-task-guard"),
             CfgValueKind::AnalogTask(task) => write!(
                 out,
                 "analog-task:{}",

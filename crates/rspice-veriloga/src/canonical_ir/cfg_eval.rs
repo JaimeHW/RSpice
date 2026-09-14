@@ -947,6 +947,9 @@ impl<S: CfgScalar> Evaluator<'_, S> {
             CfgValueKind::ThermalVoltage => self.inputs.thermal_voltage,
             CfgValueKind::Multiplicity => self.inputs.multiplicity,
             CfgValueKind::Time => self.inputs.time,
+            CfgValueKind::AnalogTasksEnabled | CfgValueKind::AnalogTaskGuard(_) => {
+                return Err(CfgEvalError::AnalogEffectInNumericalEvaluation(id));
+            }
             CfgValueKind::Analysis(name) => {
                 S::from_f64(f64::from(u8::from(self.inputs.analyses.contains(&name))))
             }

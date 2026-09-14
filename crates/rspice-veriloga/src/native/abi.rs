@@ -50,6 +50,37 @@ pub(crate) fn operand_array_call(
             helper: rspice_evaluation_state_native,
         }));
     }
+    if matches!(
+        op,
+        NativeOp::AnalogTasksEnabled | NativeOp::AnalogTaskGuard | NativeOp::AnalogFinish(_)
+    ) {
+        let (count, descriptor, helper) = match op {
+            NativeOp::AnalogTasksEnabled => (
+                0,
+                0,
+                rspice_tasks_enabled_operands_native
+                    as unsafe extern "C" fn(*const f64, *const EvalContext, usize) -> f64,
+            ),
+            NativeOp::AnalogTaskGuard => (
+                1,
+                0,
+                rspice_task_guard_operands_native
+                    as unsafe extern "C" fn(*const f64, *const EvalContext, usize) -> f64,
+            ),
+            NativeOp::AnalogFinish(site) => (
+                1,
+                site as usize,
+                rspice_finish_operands_native
+                    as unsafe extern "C" fn(*const f64, *const EvalContext, usize) -> f64,
+            ),
+            _ => unreachable!("matched analog task operation"),
+        };
+        return Ok(Some(OperandArrayCall {
+            count,
+            descriptor,
+            helper,
+        }));
+    }
     if let NativeOp::LoadSimParamValue(parameter) | NativeOp::LoadSimParamPresent(parameter) = op {
         return Ok(Some(OperandArrayCall {
             count: 0,
@@ -93,6 +124,36 @@ pub(crate) fn operand_array_call(
         descriptor,
         helper,
     }))
+}
+
+// The operand-array ABI is shared by allocated and segmented machine code.
+// A task-enabled query reads only the active dispatch; the other two operations
+// receive their validated single operand and reuse the existing journal helpers.
+unsafe extern "C" fn rspice_tasks_enabled_operands_native(
+    _operands: *const f64,
+    ctx: *const EvalContext,
+    _site: usize,
+) -> f64 {
+    // SAFETY: the dispatch owns this frame throughout the call.
+    f64::from(unsafe { ctx.as_ref() }.is_some_and(|ctx| !ctx.analog_effects.is_null()))
+}
+
+unsafe extern "C" fn rspice_task_guard_operands_native(
+    operands: *const f64,
+    ctx: *const EvalContext,
+    site: usize,
+) -> f64 {
+    // SAFETY: the validated instruction marshals one operand and a live frame.
+    unsafe { rspice_task_guard_native(*operands, ctx, site) }
+}
+
+unsafe extern "C" fn rspice_finish_operands_native(
+    operands: *const f64,
+    ctx: *const EvalContext,
+    site: usize,
+) -> f64 {
+    // SAFETY: the validated instruction marshals one operand and a live frame.
+    unsafe { rspice_finish_native(*operands, ctx, site) }
 }
 
 /// Query the simulator environment without evaluating a model fallback.

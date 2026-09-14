@@ -61,7 +61,7 @@ pub(crate) enum AssignmentRootPolicy {
     /// What still reads a variable under this plan is named by
     /// [`mark_cfg_plan_variable_roots`].
     CfgPreludeSlots,
-    /// The canonical body owns source-ordered assignments and publications.
+    /// The canonical body owns source-ordered assignments, task calls and publications.
     CfgSourceEvaluation,
     /// Nothing in this plan reads a variable: the plan *is* the variables.
     ///
@@ -108,7 +108,7 @@ pub(crate) fn build_model_plan_with_canonical_ir_for_cfg(
     artifact: &CanonicalIrArtifact,
 ) -> JitResult<NativeModelPlan> {
     validate_canonical_artifact_for_model(model, artifact)?;
-    let policy = if requires_eager_event_observations(model) {
+    let policy = if requires_source_evaluation(model) {
         AssignmentRootPolicy::CfgSourceEvaluation
     } else {
         AssignmentRootPolicy::CfgPreludeSlots
@@ -2999,17 +2999,26 @@ fn live_assignment_slots(model: &CompiledModel) -> Vec<bool> {
     live
 }
 
-pub(crate) fn requires_eager_event_observations(model: &CompiledModel) -> bool {
+pub(crate) fn requires_source_evaluation(model: &CompiledModel) -> bool {
+    fn has_tasks(steps: &[AssignmentStep]) -> bool {
+        steps.iter().any(|step| match step {
+            AssignmentStep::Task(_) => true,
+            AssignmentStep::Loop { body, .. } => has_tasks(body),
+            _ => false,
+        })
+    }
+    // Task arguments must use the reaching source values and canonical AD.
     // Branch kinds are accepted discontinuity state, but their writes are
     // ordinary source evaluation. They cannot replay a procedural event when
     // named values are observed. The canonical prelude publishes their candidates.
-    model.event_state_variables.iter().any(|slot| {
-        model
-            .evaluation_input_variables
-            .binary_search(slot)
-            .is_err()
-            && model.switch_branch_variables.binary_search(slot).is_err()
-    })
+    has_tasks(&model.assignment_steps)
+        || model.event_state_variables.iter().any(|slot| {
+            model
+                .evaluation_input_variables
+                .binary_search(slot)
+                .is_err()
+                && model.switch_branch_variables.binary_search(slot).is_err()
+        })
 }
 
 pub(crate) fn live_canonical_assignment_slots(
@@ -3060,7 +3069,11 @@ pub(crate) fn live_canonical_assignment_slots(
     propagate_live_assignment_slots(
         &model.assignment_steps,
         &mut live,
-        AssignmentEffects::IncludeTasks,
+        if policy == AssignmentRootPolicy::CfgSourceEvaluation {
+            AssignmentEffects::SkipTasks
+        } else {
+            AssignmentEffects::IncludeTasks
+        },
     );
     Ok(live)
 }
@@ -3073,6 +3086,7 @@ struct AssignmentShadowIndex {
 
 #[derive(Default)]
 struct AssignmentProgramCursor<'a> {
+    tasks_in_cfg: bool,
     tasks: HashMap<
         u32,
         &'a crate::analog_tasks::AnalogTaskCall<
@@ -3442,6 +3456,7 @@ fn lower_live_canonical_assignment_statements(
     let live = live_canonical_assignment_slots(model, mir, limits, policy)?;
     let shadow_index = AssignmentShadowIndex::for_model(model)?;
     let mut program_cursor = AssignmentProgramCursor::for_model(model, hir)?;
+    program_cursor.tasks_in_cfg = policy == AssignmentRootPolicy::CfgSourceEvaluation;
     let snapshots = ReachingSnapshotCopies::for_model(model)?;
     let mut assignments = snapshots.lower_after(model, None, &live, &mut program_cursor, limits)?;
     for (index, statement) in hir.statements.iter().enumerate() {
@@ -3605,6 +3620,9 @@ fn lower_canonical_assignment_statement(
     match statement {
         HirStatement::Initialization { .. } => Ok(Vec::new()),
         HirStatement::Task(task) => {
+            if program_cursor.tasks_in_cfg {
+                return Ok(Vec::new());
+            }
             let bytecode = program_cursor.tasks.get(&task.site).ok_or_else(|| {
                 JitError::InvalidCanonicalIr {
                     model: model.name.clone(),

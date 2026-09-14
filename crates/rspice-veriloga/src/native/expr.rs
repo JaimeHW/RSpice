@@ -115,6 +115,12 @@ pub(crate) enum VoltageNode {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum NativeOp {
+    /// Whether this dispatch may evaluate and capture analog task arguments.
+    AnalogTasksEnabled,
+    /// Preserve the task guard's finite-value contract before its arguments.
+    AnalogTaskGuard,
+    /// Append one source-ordered call to the current candidate journal.
+    AnalogFinish(u32),
     Const(f64),
     LoadParam(usize),
     LoadParamGiven(usize),
@@ -8640,6 +8646,9 @@ fn is_static_condition_op(op: &NativeOp) -> bool {
 
 pub(crate) fn native_op_name(op: &NativeOp) -> &'static str {
     match op {
+        NativeOp::AnalogTasksEnabled => "AnalogTasksEnabled",
+        NativeOp::AnalogTaskGuard => "AnalogTaskGuard",
+        NativeOp::AnalogFinish(_) => "AnalogFinish",
         NativeOp::Const(_) => "Const",
         NativeOp::LoadParam(_) => "LoadParam",
         NativeOp::LoadParamGiven(_) => "LoadParamGiven",
@@ -9616,6 +9625,8 @@ fn compute_native_max_stack_depth(
 
 pub(crate) fn native_op_stack_effect(op: &NativeOp) -> (usize, usize) {
     match op {
+        NativeOp::AnalogTasksEnabled => (0, 1),
+        NativeOp::AnalogTaskGuard | NativeOp::AnalogFinish(_) => (1, 1),
         NativeOp::Const(_)
         | NativeOp::LoadParam(_)
         | NativeOp::LoadParamGiven(_)

@@ -1185,6 +1185,10 @@ pub enum CfgValueKind {
     /// Ordered analog system-task invocation. It has no numerical result and
     /// is never a common subexpression, derivative, or reusable cached value.
     AnalogTask(crate::analog_tasks::AnalogTaskCall<ValueId, super::SourceSpanRef>),
+    /// Runtime dispatch permission; false during numerical observation.
+    AnalogTasksEnabled,
+    /// Validate the original task guard before evaluating its arguments.
+    AnalogTaskGuard(ValueId),
 }
 
 impl CfgValueKind {
@@ -1200,7 +1204,7 @@ impl CfgValueKind {
     /// all keyed on.
     pub fn is_digital(&self) -> bool {
         match self {
-            Self::AnalogTask(_) => false,
+            Self::AnalogTask(_) | Self::AnalogTasksEnabled | Self::AnalogTaskGuard(_) => false,
             Self::RealConstant(_)
             | Self::BooleanConstant(_)
             | Self::BlockParameter
@@ -1365,6 +1369,7 @@ impl CfgValueKind {
     pub fn operands(&self) -> Vec<ValueId> {
         match self {
             Self::AnalogTask(task) => task.expressions().copied().collect(),
+            Self::AnalogTaskGuard(value) => vec![*value],
             Self::DigitalRepeatCount { input, .. }
             | Self::DigitalDelayTicks { input, .. }
             | Self::Unary { input, .. }
@@ -1601,6 +1606,7 @@ impl CfgValueKind {
 
     pub(crate) fn map_operands(&mut self, mut map: impl FnMut(ValueId) -> ValueId) {
         match self {
+            Self::AnalogTaskGuard(value) => *value = map(*value),
             Self::AnalogTask(task) => {
                 for value in task.expressions_mut() {
                     *value = map(*value);
@@ -2583,6 +2589,7 @@ fn is_leaf(kind: &CfgValueKind) -> bool {
             | CfgValueKind::Multiplicity
             | CfgValueKind::Time
             | CfgValueKind::Analysis(_)
+            | CfgValueKind::AnalogTasksEnabled
             | CfgValueKind::IdtScale
             | CfgValueKind::NodePotential(_)
             | CfgValueKind::BranchFlow(_)

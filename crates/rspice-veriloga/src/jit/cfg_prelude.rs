@@ -210,6 +210,8 @@ pub(crate) struct CfgPrelude {
 pub(crate) struct VariablePublications<'a> {
     pub(crate) values: &'a [(ValueId, usize)],
     pub(crate) count: usize,
+    /// Ordered calls retained in this one prelude, never in per-entry cones.
+    pub(crate) effects: &'a [ValueId],
 }
 
 impl CfgPrelude {
@@ -255,7 +257,7 @@ impl CfgPrelude {
             class,
             detail,
         };
-        if entries.is_empty() && variables.values.is_empty() {
+        if entries.is_empty() && variables.values.is_empty() && variables.effects.is_empty() {
             return Err(refuse(
                 CfgPlanRefusal::Lowering,
                 "a prelude with no entry outputs would compute nothing".to_string(),
@@ -282,6 +284,7 @@ impl CfgPrelude {
         }
         let slot_count = outputs.len();
         outputs.extend(variables.values.iter().map(|(value, _)| *value));
+        outputs.extend_from_slice(variables.effects);
 
         // Prune to every output at once. This is the union the census names as
         // the numerator of the fix, and taking it here is what makes the whole
@@ -295,7 +298,8 @@ impl CfgPrelude {
             .map(|(slot, value)| (value, slot))
             .collect();
 
-        let variable_publications: Vec<_> = pruned_outputs[slot_count..]
+        let variable_publications: Vec<_> = pruned_outputs
+            [slot_count..slot_count + variables.values.len()]
             .iter()
             .copied()
             .zip(variables.values.iter().map(|(_, slot)| *slot))

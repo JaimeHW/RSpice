@@ -212,6 +212,9 @@ impl Effects {
     const CLOBBER_CONTEXT_CACHE: u16 = 1 << 6;
     const INTERNAL_CALL_CONTINUATION: u16 = 1 << 7;
     const PURE_MATH_CALL: u16 = 1 << 8;
+    /// Ordered candidate delivery may occur conditionally and once per loop trip.
+    /// It is distinct from analog history that must advance once per evaluation.
+    const WRITE_JOURNAL: u16 = 1 << 9;
 
     pub(crate) fn for_op(op: NativeOp) -> Self {
         let mut bits = 0;
@@ -223,6 +226,9 @@ impl Effects {
         }
         if op_writes_state(op) {
             bits |= Self::WRITE_STATE;
+        }
+        if matches!(op, NativeOp::AnalogFinish(_)) {
+            bits |= Self::WRITE_JOURNAL;
         }
         if op_may_call(op) {
             bits |= Self::MAY_CALL;
@@ -257,6 +263,10 @@ impl Effects {
         self.contains(Self::WRITE_STATE)
     }
 
+    fn writes_journal(self) -> bool {
+        self.contains(Self::WRITE_JOURNAL)
+    }
+
     pub(crate) fn reads_entry_args(self) -> bool {
         self.contains(Self::READ_ENTRY_ARGS)
     }
@@ -286,13 +296,19 @@ impl Effects {
     /// call, failure, and state write is a sharing barrier; this never reassociates
     /// arithmetic or removes a runtime finite-value check.
     fn permits_result_sharing(self) -> bool {
-        self.0 & (Self::WRITE_STATE | Self::MAY_FAIL) == 0
+        self.0 & (Self::WRITE_STATE | Self::WRITE_JOURNAL | Self::MAY_FAIL) == 0
             && (!self.may_call() || self.contains(Self::PURE_MATH_CALL))
     }
 
     #[cfg(test)]
     fn is_semantically_pure(self) -> bool {
-        self.0 & (Self::READ_CONTEXT | Self::READ_STATE | Self::WRITE_STATE | Self::MAY_FAIL) == 0
+        self.0
+            & (Self::READ_CONTEXT
+                | Self::READ_STATE
+                | Self::WRITE_STATE
+                | Self::WRITE_JOURNAL
+                | Self::MAY_FAIL)
+            == 0
     }
 
     fn contains(self, flag: u16) -> bool {
@@ -1910,7 +1926,9 @@ impl Program {
 
         let mut owners: Vec<Option<ArmOwner>> = vec![None; self.instructions.len()];
         for index in (0..self.instructions.len()).rev() {
-            if self.instructions[index].effects.writes_state() {
+            if self.instructions[index].effects.writes_state()
+                || self.instructions[index].effects.writes_journal()
+            {
                 continue;
             }
             let mut owner: Option<ArmOwner> = None;
@@ -3696,7 +3714,10 @@ fn op_is_pure_math_call(op: NativeOp) -> bool {
 fn op_may_call(op: NativeOp) -> bool {
     matches!(
         op,
-        NativeOp::BinaryMath(_)
+        NativeOp::AnalogTasksEnabled
+            | NativeOp::AnalogTaskGuard
+            | NativeOp::AnalogFinish(_)
+            | NativeOp::BinaryMath(_)
             | NativeOp::LoadSimParamValue(_)
             | NativeOp::LoadSimParamPresent(_)
             | NativeOp::LoadEvaluationState(_)
@@ -3895,7 +3916,9 @@ fn op_writes_state(op: NativeOp) -> bool {
 fn op_may_fail(op: NativeOp) -> bool {
     matches!(
         op,
-        NativeOp::LoadParamGiven(_)
+        NativeOp::AnalogTaskGuard
+            | NativeOp::AnalogFinish(_)
+            | NativeOp::LoadParamGiven(_)
             | NativeOp::LoadSimParamValue(_)
             | NativeOp::LoadSimParamPresent(_)
             | NativeOp::LoadEvaluationState(_)
@@ -4031,6 +4054,35 @@ mod tests {
     }
 
     #[test]
+    fn ordered_calls_are_never_shared_or_treated_as_analog_history() {
+        let effect = Effects::for_op(NativeOp::AnalogFinish(7));
+        assert!(effect.writes_journal());
+        assert!(!effect.writes_state());
+        assert!(!effect.is_semantically_pure());
+        assert!(!effect.permits_result_sharing());
+        let lowered = Program::lower(&program(
+            vec![
+                NativeOp::Const(1.0),
+                NativeOp::AnalogFinish(7),
+                NativeOp::Const(1.0),
+                NativeOp::AnalogFinish(7),
+                NativeOp::Add,
+            ],
+            2,
+        ))
+        .expect("two ordered invocations at the same source site");
+        assert_eq!(
+            lowered
+                .instructions()
+                .iter()
+                .filter(|i| i.op() == NativeOp::AnalogFinish(7))
+                .count(),
+            2
+        );
+        assert_eq!(plan_shared_outputs(&[lowered.clone(), lowered]).len(), 2);
+    }
+
+    #[test]
     fn rejects_stack_metadata_that_disagrees_with_explicit_ssa() {
         let invalid = program(vec![NativeOp::Const(1.0)], 2);
         let error = Program::lower(&invalid).expect_err("stale depth metadata must fail");
@@ -4113,6 +4165,9 @@ mod tests {
             NativeOp::TableLookup(0),
             NativeOp::LimiterStore(0),
             NativeOp::DdtState(0),
+            NativeOp::AnalogTasksEnabled,
+            NativeOp::AnalogTaskGuard,
+            NativeOp::AnalogFinish(0),
         ] {
             let exp = NativeOp::UnaryMath(UnaryMathOp::Exp);
             let prefix = [NativeOp::LoadVariable(0), exp];

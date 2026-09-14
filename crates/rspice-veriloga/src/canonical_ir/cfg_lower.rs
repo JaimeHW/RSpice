@@ -211,6 +211,7 @@ impl CfgModel {
             mir,
             CfgLowerMode {
                 record_tasks: true,
+                runtime_task_gate: true,
                 record_observations: true,
                 frozen_event_state: false,
                 frozen_contribution_current: false,
@@ -533,6 +534,8 @@ struct CfgLowerer<'a> {
     /// ordered assignment pass; numerical and noise slices must not replay it.
     phase: rspice_veriloga_runtime::AnalogEvaluationPhase,
     record_tasks: bool,
+    /// Gate task-only work by the executable dispatch journal permission.
+    runtime_task_gate: bool,
     record_observations: bool,
     /// Whether each noise process publishes its site magnitudes as well as its
     /// exit-merged ones. See [`CfgNoiseProcess::site`].
@@ -980,6 +983,8 @@ fn compute_instance_static_guard_conditions(hir: &HirModel) -> HashSet<ExprId> {
 struct CfgLowerMode {
     phase: rspice_veriloga_runtime::AnalogEvaluationPhase,
     record_tasks: bool,
+    /// Gate task-only work by the executable dispatch journal permission.
+    runtime_task_gate: bool,
     record_observations: bool,
     /// Lower only what raw grouped-noise metadata needs.
     noise_metadata_only: bool,
@@ -1058,6 +1063,7 @@ impl CfgLowerMode {
     const GENERATED: Self = Self {
         phase: rspice_veriloga_runtime::AnalogEvaluationPhase::Evaluation,
         record_tasks: true,
+        runtime_task_gate: false,
         record_observations: false,
         noise_metadata_only: false,
         noise_site_values: false,
@@ -1070,6 +1076,7 @@ impl CfgLowerMode {
     const EXECUTABLE: Self = Self {
         phase: rspice_veriloga_runtime::AnalogEvaluationPhase::Evaluation,
         record_tasks: false,
+        runtime_task_gate: false,
         record_observations: false,
         noise_metadata_only: false,
         noise_site_values: true,
@@ -1082,6 +1089,7 @@ impl CfgLowerMode {
     const NOISE_METADATA: Self = Self {
         phase: rspice_veriloga_runtime::AnalogEvaluationPhase::Evaluation,
         record_tasks: false,
+        runtime_task_gate: false,
         record_observations: false,
         noise_metadata_only: true,
         noise_site_values: false,
@@ -1131,6 +1139,7 @@ impl<'a> CfgLowerer<'a> {
                 .then(|| NoiseMetadataLiveness::for_model(hir)),
             phase: mode.phase,
             record_tasks: mode.record_tasks,
+            runtime_task_gate: mode.runtime_task_gate,
             record_observations: mode.record_observations,
             noise_site_values: mode.noise_site_values,
             per_instance_ports: mode.per_instance_ports,
@@ -1429,12 +1438,48 @@ impl<'a> CfgLowerer<'a> {
             HirRegion::Initialization { .. } => {}
             HirRegion::Task(task) => {
                 if self.record_tasks {
-                    let task = task.map(task.span, |expression| self.expr(expression.id));
+                    let exit = if self.runtime_task_gate {
+                        let enabled = self
+                            .builder
+                            .push_leaf(CfgValueType::Boolean, CfgValueKind::AnalogTasksEnabled);
+                        Some(self.enter_task_guard(enabled))
+                    } else {
+                        None
+                    };
+                    let guard_exit = if self.runtime_task_gate {
+                        task.guard.as_ref().map(|guard| {
+                            let value = self.expr(guard.id);
+                            let checked = self.builder.push(
+                                self.block,
+                                CfgValueType::Real,
+                                CfgValueKind::AnalogTaskGuard(value),
+                            );
+                            self.enter_task_guard(checked)
+                        })
+                    } else {
+                        None
+                    };
+                    let mut call = task.clone();
+                    if self.runtime_task_gate {
+                        call.guard = None;
+                    }
+                    let call = call.map(call.span, |expression| self.expr(expression.id));
                     self.builder.push(
                         self.block,
                         CfgValueType::AnalogEffect,
-                        CfgValueKind::AnalogTask(task),
+                        CfgValueKind::AnalogTask(call),
                     );
+                    for exit in guard_exit.into_iter().chain(exit) {
+                        self.builder.set_terminator(
+                            self.block,
+                            CfgTerminator::Jump {
+                                target: exit,
+                                args: Vec::new(),
+                            },
+                        );
+                        self.builder.seal_block(exit);
+                        self.block = exit;
+                    }
                 }
             }
             HirRegion::Assignment(assignment) => self.assignment(assignment),
@@ -1491,6 +1536,25 @@ impl<'a> CfgLowerer<'a> {
                 );
             }
         }
+    }
+
+    /// Enter task-only work without evaluating its operands on the inactive edge.
+    fn enter_task_guard(&mut self, condition: ValueId) -> BlockId {
+        let body = self.builder.create_block();
+        let exit = self.builder.create_block();
+        self.builder.set_terminator(
+            self.block,
+            CfgTerminator::Branch {
+                condition,
+                then_target: body,
+                then_args: Vec::new(),
+                else_target: exit,
+                else_args: Vec::new(),
+            },
+        );
+        self.builder.seal_block(body);
+        self.block = body;
+        exit
     }
 
     /// Evaluate one assignment into its variable's reaching definition.

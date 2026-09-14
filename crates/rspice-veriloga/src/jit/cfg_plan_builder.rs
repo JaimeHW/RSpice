@@ -987,7 +987,7 @@ pub(crate) fn build_model_plan_from_canonical_cfg(
     // The executable lowering, not the generated one: this plan is executed by
     // `VerilogADevice`, which builds instances from whatever terminal list the
     // netlist supplied.
-    let source_evaluation = super::plan_builder::requires_eager_event_observations(model);
+    let source_evaluation = super::plan_builder::requires_source_evaluation(model);
     let lower_body = if source_evaluation {
         CfgModel::from_hir_for_executable_evaluation
     } else {
@@ -1296,10 +1296,24 @@ pub(crate) fn build_model_plan_from_canonical_cfg(
         }
     }
 
-    let prelude = if prelude_entries.is_empty() && candidate_publications.is_empty() {
+    let task_effects: Vec<_> = if source_evaluation {
+        scalarized
+            .function
+            .values
+            .iter()
+            .filter(|value| matches!(value.kind, CfgValueKind::AnalogTask(_)))
+            .map(|value| value.id)
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let prelude = if prelude_entries.is_empty()
+        && candidate_publications.is_empty()
+        && task_effects.is_empty()
+    {
         None
     } else {
-        let built = if candidate_publications.is_empty() {
+        let built = if candidate_publications.is_empty() && task_effects.is_empty() {
             CfgPrelude::build(
                 module.as_str(),
                 &scalarized.function,
@@ -1319,6 +1333,7 @@ pub(crate) fn build_model_plan_from_canonical_cfg(
                 VariablePublications {
                     values: &candidate_publications,
                     count: model.num_variables,
+                    effects: &task_effects,
                 },
             )
         };
@@ -1333,9 +1348,9 @@ pub(crate) fn build_model_plan_from_canonical_cfg(
             // reaches is in the union's (mvsg_cmc, measured). The class is
             // recorded rather than swallowed; the size census prints it.
             Err(refused) => {
-                if !candidate_publications.is_empty() {
-                    // These are required candidate writes, not optional scratch
-                    // sharing. A plan that lost them must never execute.
+                if !candidate_publications.is_empty() || !task_effects.is_empty() {
+                    // Candidate publications and ordered calls are required.
+                    // A plan that lost them must never execute.
                     return Err(refused);
                 }
                 report.prelude_refused = Some(refused.class);

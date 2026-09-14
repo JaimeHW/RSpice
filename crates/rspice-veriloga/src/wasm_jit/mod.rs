@@ -142,7 +142,8 @@ pub const WASM_JIT_ABI_VERSION: u32 = 17;
 /// Version 49 separates branch-kind state from eager event observation roots.
 /// Version 50 publishes switch-branch candidates from the canonical prelude.
 /// Version 51 evaluates event-owned readbacks in the canonical source body.
-pub const WASM_JIT_EMITTER_VERSION: u32 = 51;
+/// Version 52 captures task arguments and ordered calls in the canonical prelude.
+pub const WASM_JIT_EMITTER_VERSION: u32 = 52;
 
 /// Hard ceiling for one qualified shipped model's generated module.
 pub const SHIPPED_MODEL_WASM_CODE_SIZE_BUDGET_BYTES: usize = 32 * 1024 * 1024;
@@ -2852,6 +2853,186 @@ endmodule
                     .unwrap();
             }
         }
+    }
+
+    #[test]
+    fn wasm_canonical_task_arguments_preserve_order_and_accepted_inputs() {
+        use super::abi::{FRAME_ANALYSIS_MASK_OFFSET, FRAME_RESULT_OFFSET};
+        use rspice_veriloga_runtime::AnalogTaskArgument;
+        let source = include_str!("../../tests/fixtures/canonical_task_arguments.va");
+        let mut harness = FusedKernelHarness::for_source(source, "canonical_task_arguments");
+        harness.reset();
+        let variable_count = harness.store.data().context().variables.len();
+        let value = harness.stamp_value_export(0);
+        let jacobian = harness.jacobian_export(0, 0);
+        for initial in [true, false] {
+            let accepted = harness
+                .store
+                .data()
+                .context()
+                .accepted_event_variables()
+                .to_vec();
+            for voltage in [-0.5_f64, 0.75] {
+                let context = harness.store.data_mut().context_mut();
+                context.analysis_initial_step = initial;
+                context.begin_stateful_evaluation();
+                let mask = context.analysis_query_mask();
+                harness.poke_frame_u32(FRAME_ANALYSIS_MASK_OFFSET, mask);
+                harness.write_f64(FusedKernelHarness::VOLTAGES as usize, voltage);
+                harness.write_f64(FusedKernelHarness::VOLTAGES as usize + 8, 0.0);
+                harness.call_assignments();
+                harness.call_prelude();
+                for _ in 0..2 {
+                    assert_eq!(harness.call(&value), 0);
+                    assert_eq!(
+                        harness.read_f64(FRAME_RESULT_OFFSET as usize),
+                        voltage * if initial { 1.0 } else { 2.0 }
+                    );
+                    assert_eq!(harness.call(&jacobian), 0);
+                    assert_eq!(
+                        harness.read_f64(FRAME_RESULT_OFFSET as usize),
+                        if initial { 1.0 } else { 2.0 }
+                    );
+                }
+                assert_eq!(
+                    harness.store.data().context().accepted_event_variables(),
+                    accepted
+                );
+            }
+            let pending = harness
+                .store
+                .data()
+                .context()
+                .candidate_analog_tasks()
+                .unwrap()
+                .to_vec();
+            assert_eq!(pending.len(), if initial { 4 } else { 0 });
+            harness
+                .store
+                .data_mut()
+                .context_mut()
+                .begin_stateful_observation();
+            harness.call_assignments();
+            harness.call_prelude();
+            assert_eq!(
+                harness
+                    .store
+                    .data()
+                    .context()
+                    .candidate_analog_tasks()
+                    .unwrap(),
+                pending
+            );
+            let variables = (0..variable_count)
+                .map(|index| harness.read_f64(FusedKernelHarness::VARIABLES as usize + index * 8))
+                .collect();
+            let context = harness.store.data_mut().context_mut();
+            context.variables = variables;
+            context.advance_state().unwrap();
+            let levels: Vec<_> = context
+                .drain_accepted_analog_tasks()
+                .map(|call| {
+                    let [AnalogTaskArgument::Integer(level)] = &*call.arguments else {
+                        panic!("integer argument")
+                    };
+                    *level
+                })
+                .collect();
+            assert_eq!(levels, if initial { vec![2, 0, 1, 2] } else { vec![] });
+        }
+    }
+
+    #[test]
+    fn wasm_canonical_task_only_prelude_keeps_identical_loop_calls() {
+        let mut harness = FusedKernelHarness::for_source(
+            "module task_only(p,n); inout p,n; electrical p,n; integer i;
+             parameter integer repetitions=3;
+             analog for(i=0;i<repetitions;i=i+1) begin $finish(1); $finish(1); end endmodule",
+            "task_only",
+        );
+        assert_eq!(harness.stamp_count(), 0);
+        assert!(harness.artifact.prelude_export().is_some());
+        harness.reset();
+        harness
+            .store
+            .data_mut()
+            .context_mut()
+            .begin_stateful_evaluation();
+        harness.call_assignments();
+        harness.call_prelude();
+        let pending = harness
+            .store
+            .data()
+            .context()
+            .candidate_analog_tasks()
+            .unwrap()
+            .to_vec();
+        assert_eq!(pending.len(), 6);
+        assert_ne!(pending[0].site, pending[1].site);
+        assert!(
+            pending
+                .chunks_exact(2)
+                .all(|pair| { pair[0].site == pending[0].site && pair[1].site == pending[1].site })
+        );
+        harness
+            .store
+            .data_mut()
+            .context_mut()
+            .begin_stateful_observation();
+        harness.call_assignments();
+        harness.call_prelude();
+        assert_eq!(
+            harness
+                .store
+                .data()
+                .context()
+                .candidate_analog_tasks()
+                .unwrap(),
+            pending
+        );
+    }
+
+    #[test]
+    fn wasm_canonical_task_observation_skips_invalid_argument_evaluation() {
+        let mut harness = FusedKernelHarness::for_source(
+            "module task_probe(p,n); inout p,n; electrical p,n;
+             analog begin $finish(1/V(p,n)); I(p,n)<+V(p,n); end endmodule",
+            "task_probe",
+        );
+        harness.reset();
+        harness
+            .store
+            .data_mut()
+            .context_mut()
+            .begin_stateful_evaluation();
+        harness.write_f64(FusedKernelHarness::VOLTAGES as usize, 1.0);
+        harness.call_assignments();
+        harness.call_prelude();
+        let pending = harness
+            .store
+            .data()
+            .context()
+            .candidate_analog_tasks()
+            .unwrap()
+            .to_vec();
+        assert_eq!(pending.len(), 1);
+        harness
+            .store
+            .data_mut()
+            .context_mut()
+            .begin_stateful_observation();
+        harness.write_f64(FusedKernelHarness::VOLTAGES as usize, 0.0);
+        harness.call_assignments();
+        harness.call_prelude();
+        assert_eq!(
+            harness
+                .store
+                .data()
+                .context()
+                .candidate_analog_tasks()
+                .unwrap(),
+            pending
+        );
     }
 
     #[test]

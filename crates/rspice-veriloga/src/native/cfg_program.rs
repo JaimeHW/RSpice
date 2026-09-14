@@ -857,7 +857,7 @@ impl Lowerer<'_> {
 
     fn value_type(&self, value: CfgValueId) -> JitResult<ValueType> {
         match self.function.value(value).value_type {
-            CfgValueType::Real | CfgValueType::Boolean => Ok(ValueType::F64),
+            CfgValueType::Real | CfgValueType::Boolean | CfgValueType::AnalogEffect => Ok(ValueType::F64),
             other => Err(self.refuse(format!(
                 "CFG value {} carries type {other:?}, which the native block model has no register class for",
                 usize::from(value)
@@ -878,6 +878,21 @@ impl Lowerer<'_> {
         };
         let operand = |value: CfgValueId| self.read(lowered, value);
         match &entry.kind {
+            CfgValueKind::AnalogTasksEnabled => push(NativeOp::AnalogTasksEnabled, &[]),
+            CfgValueKind::AnalogTaskGuard(value) => {
+                push(NativeOp::AnalogTaskGuard, &[operand(*value)?])
+            }
+            CfgValueKind::AnalogTask(task) => {
+                if task.guard.is_some() {
+                    return Err(
+                        self.refuse("task guard was not lowered before its arguments".into())
+                    );
+                }
+                let value = task.finish_operand().ok_or_else(|| {
+                    self.refuse("unsupported canonical analog task or argument type".into())
+                })?;
+                push(NativeOp::AnalogFinish(task.site), &[operand(*value)?])
+            }
             CfgValueKind::RealConstant(constant) => push(NativeOp::Const(*constant), &[]),
             CfgValueKind::BooleanConstant(constant) => {
                 push(NativeOp::Const(f64::from(u8::from(*constant))), &[])

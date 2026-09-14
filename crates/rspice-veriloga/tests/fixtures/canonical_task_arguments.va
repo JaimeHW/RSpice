@@ -1,0 +1,18 @@
+module canonical_task_arguments(p,n);
+inout p,n; electrical p,n;
+parameter integer repetitions=3;
+real count=0,before,after,reported;
+integer i;
+analog begin
+    before=count;
+    reported=ddx(ddx(ddx(ddx(exp(V(p,n)),V(p,n)),V(p,n)),V(p,n)),V(p,n));
+    @(initial_step) begin
+        count=count+1;
+        $finish(reported);
+        for(i=0;i<repetitions;i=i+1)
+            $finish(i+ddx(ddx(ddx(exp(V(p,n)),V(p,n)),V(p,n)),V(p,n))/8);
+    end
+    after=count;
+    I(p,n)<+(before+after)*V(p,n);
+end
+endmodule
