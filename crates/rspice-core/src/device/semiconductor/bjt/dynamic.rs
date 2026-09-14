@@ -1248,6 +1248,41 @@ impl Bjt {
         }
     }
 
+    /// Evaluate an initial/physical charge state at the supplied terminal
+    /// coordinates. Newton caches may contain a limited internal iterate,
+    /// including tiny displacements between nodes joined by ideal wires;
+    /// approximate cache-key agreement cannot certify an accepted history.
+    /// The private solve imposes exact alias constraints and uses any cached
+    /// state only as a starting guess for actual internal unknowns.
+    pub(crate) fn physical_charge_snapshot(
+        &self,
+        vc: Value,
+        vb: Value,
+        ve: Value,
+        vs: Value,
+    ) -> BjtChargeSnapshot {
+        let state = self.solve_intrinsic_terminal_state(vc, vb, ve, vs);
+        let eval = self.evaluate_state(
+            BjtNodeVoltages {
+                vc,
+                vb,
+                ve,
+                vs,
+                vcx: state.vcx,
+                vci: state.vci,
+                vbx: state.vbx,
+                vbi: state.vbi,
+                vei: state.vei,
+                vbp: state.vbp,
+                vsi: state.vsi,
+            },
+            state.vrth,
+        );
+        self.charge_snapshot_from_base(
+            self.reduced_linearization_from_state_and_eval(state, eval, vc, vb, ve, vs),
+        )
+    }
+
     pub(crate) fn charge_snapshot(
         &self,
         vc: Value,

@@ -444,3 +444,147 @@ fn causal_event_orders_do_not_reuse_waveform_continuity_for_the_dc_startup_trans
         "{error}"
     );
 }
+
+#[test]
+fn gp_startup_phase_seed_matches_the_physical_solution() {
+    for (kind, p) in [("NPN", 1.0), ("PNP", -1.0)] {
+        for rb in ["", "RC=2 RE=1 RB=100 RBM=100", "RB=100 RBM=20 IRB=1e-5"] {
+            let (_, mut circuit, _, incoming, history) = fixture(&format!(
+                "GP startup input ownership\nVc c 0 {}\nVo bias 0 {}\nVb b bias PWL(0 0 1 {})\nQ1 c b 0 qm\n.model qm {kind}(IS=1e-16 TF=1n PTF=30 CJE=1p CJC=.2p {rb})\n.end\n",
+                p * 2.0,
+                p * 0.6,
+                p * 0.04
+            ));
+            let _sources = roots(&mut circuit, 2.0);
+            let mut sampler =
+                PreparedEventCircuit::new(&circuit, 1e-20, &options(), &NoAbort).unwrap();
+            let actual = sampler.forward_inputs(&incoming, &NoAbort).unwrap()[0].unwrap();
+            let phase = history.phase[0].as_ref().unwrap();
+            let seeded = phase.accepted_samples().next_back().unwrap().1;
+            assert_eq!(
+                seeded,
+                actual,
+                "{kind} {rb}: seed internal {:?}, physical internal {:?}",
+                history.dynamic_internal_prev[0].map(Value::to_bits),
+                sampler.models()[0]
+                    .mna_internal_state_at_solution(&incoming)
+                    .map(Value::to_bits)
+            );
+            for side in [SourceTimeSide::LeftLimit, SourceTimeSide::RightLimit] {
+                sampler
+                    .sample(
+                        0.0,
+                        side,
+                        &incoming,
+                        &[Some(EventPhase {
+                            history: phase,
+                            endpoint: actual,
+                        })],
+                        &options(),
+                        &NoAbort,
+                    )
+                    .unwrap();
+            }
+        }
+    }
+}
+
+#[test]
+fn gp_startup_phase_seed_respects_adjacent_biases_without_changing_newton_cache() {
+    for (kind, p) in [("NPN", 1.0), ("PNP", -1.0)] {
+        for common in [0.0, 1024.0] {
+            let (_, circuit, _, incoming, _) = fixture(&format!(
+                "GP exact startup bias\nVe e 0 {common}\nVc c e {}\nVb b e {}\nQ1 c b e qm\n.model qm {kind}(IS=1e-16 TF=1n PTF=30 CJE=1p CJC=.2p)\n.end\n",
+                p * 2.0,
+                p * 0.6
+            ));
+            let cache = circuit.bjts.devices[0]
+                .accepted_nonlinear_checkpoint()
+                .unwrap();
+            let sampler = PreparedEventCircuit::new(&circuit, 1e-20, &options(), &NoAbort).unwrap();
+            let base = circuit.get_node_by_name("b").unwrap() - 1;
+            let mut currents = Vec::new();
+            for voltage in [
+                incoming[base].next_down(),
+                incoming[base],
+                incoming[base].next_up(),
+            ] {
+                let mut point = incoming.clone();
+                point[base] = voltage;
+                let mut history = Engine::initialize_bjt_history(
+                    &circuit,
+                    &point,
+                    ReactiveHistorySeed::SolvedBias,
+                );
+                Engine::initialize_bjt_phase_history(&circuit, &mut history).unwrap();
+                let (charges, internal, _) =
+                    sampler.models()[0].mna_charge_state_at_solution(&point);
+                assert_eq!(
+                    history.dynamic_internal_prev[0], internal,
+                    "{kind} at {common}"
+                );
+                assert_eq!(history.charge_q_prev[0], charges.map(|q| q.charge));
+                let expected = sampler.forward_inputs(&point, &NoAbort).unwrap()[0].unwrap();
+                assert_eq!(
+                    history.phase[0]
+                        .as_ref()
+                        .unwrap()
+                        .accepted_samples()
+                        .next_back()
+                        .unwrap()
+                        .1,
+                    expected
+                );
+                currents.push(expected);
+                assert_eq!(
+                    circuit.bjts.devices[0]
+                        .accepted_nonlinear_checkpoint()
+                        .unwrap(),
+                    cache
+                );
+            }
+            assert!(currents.windows(2).all(|pair| pair[0] != pair[1]));
+        }
+    }
+}
+
+#[test]
+fn gp_startup_phase_seed_keeps_authored_uic_separate_from_solved_bias() {
+    for (kind, p) in [("NPN", 1.0), ("PNP", -1.0)] {
+        let (_, circuit, _, incoming, _) = fixture(&format!(
+            "GP startup IC ownership\nVc c 0 {}\nVb b 0 {}\nQ1 c b 0 qm IC={},{}\n.model qm {kind}(IS=1e-16 TF=1n PTF=30 CJE=1p CJC=.2p)\n.end\n",
+            p * 2.0,
+            p * 0.6,
+            p * 0.4,
+            p * 1.1
+        ));
+        let sampler = PreparedEventCircuit::new(&circuit, 1e-20, &options(), &NoAbort).unwrap();
+        for seed in [
+            ReactiveHistorySeed::SolvedBias,
+            ReactiveHistorySeed::UicStartup,
+        ] {
+            let mut expected_point = incoming.clone();
+            if seed == ReactiveHistorySeed::UicStartup {
+                expected_point[circuit.get_node_by_name("b").unwrap() - 1] = p * 0.4;
+                expected_point[circuit.get_node_by_name("c").unwrap() - 1] = p * 1.1;
+            }
+            let mut history = Engine::initialize_bjt_history(&circuit, &incoming, seed);
+            Engine::initialize_bjt_phase_history(&circuit, &mut history).unwrap();
+            let expected = sampler.forward_inputs(&expected_point, &NoAbort).unwrap()[0].unwrap();
+            assert_eq!(
+                history.phase[0]
+                    .as_ref()
+                    .unwrap()
+                    .accepted_samples()
+                    .next_back()
+                    .unwrap()
+                    .1,
+                expected
+            );
+            let (charges, internal, _) =
+                sampler.models()[0].mna_charge_state_at_solution(&expected_point);
+            assert_eq!(history.dynamic_internal_prev[0], internal);
+            assert_eq!(history.charge_q_prev[0], charges.map(|q| q.charge));
+        }
+    }
+}

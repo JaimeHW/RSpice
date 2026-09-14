@@ -438,7 +438,7 @@ impl Engine {
                 continue;
             }
 
-            let charge_snapshot = bjt.charge_snapshot(vc, vb, ve, vs);
+            let charge_snapshot = bjt.physical_charge_snapshot(vc, vb, ve, vs);
             let (history_vbe, history_vbc, history_vcs) =
                 Self::legacy_bjt_charge_branch_voltages(&charge_snapshot);
             history.vbe_prev.push(history_vbe);
