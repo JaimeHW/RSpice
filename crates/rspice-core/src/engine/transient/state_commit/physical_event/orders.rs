@@ -1,6 +1,7 @@
-//! Solver-owned value-continuity certificates from physical event causes.
+//! Solver-owned value and first-derivative continuity from physical causes.
 //! No interpolation knot, approximate clock match or equal sampled slope
-//! creates a certificate. Higher derivative propagation remains unqualified.
+//! creates a certificate. The admitted C1 charts bound the certificate at
+//! order two; no tracking cutoff follows from this local classification.
 
 use super::*;
 use crate::engine::transient::source_events::{PhysicalSourceEvents, PhysicalSourceOwner};
@@ -28,6 +29,28 @@ pub(super) struct ClassifiedOrders {
 
 fn continuous(order: DelayEventOrder) -> bool {
     matches!(order, DelayEventOrder::AtLeast(n) if n > 0)
+}
+
+fn current_order(
+    order: DelayEventOrder,
+    coupling: charge_event::CurrentJumpCoupling,
+) -> DelayEventOrder {
+    if coupling == charge_event::CurrentJumpCoupling::Cancels {
+        // This current is absent from the algebraic jump constraints. Its
+        // value, rather than its derivative, enters the coordinate-rate
+        // equations. The regular constrained system therefore gains one
+        // continuity order. Unknown provenance certifies only finite values.
+        match order {
+            DelayEventOrder::AtLeast(n) => DelayEventOrder::AtLeast(n.saturating_add(1)),
+            DelayEventOrder::Unknown => DelayEventOrder::AtLeast(1),
+        }
+    } else {
+        order
+    }
+}
+
+fn matching_slopes(left: Option<Value>, right: Option<Value>) -> bool {
+    matches!((left, right), (Some(left), Some(right)) if left.is_finite() && left == right)
 }
 
 pub(super) fn classify(
@@ -90,6 +113,11 @@ pub(super) fn classify(
     let mut has_cause = false;
     let mut has_unknown = false;
     let mut invariant = true;
+    // A C1 constitutive chart has continuous rate-system coefficients at
+    // fixed coordinates. With continuous forcing in that regular system,
+    // its coordinate rates and the GP input's first derivative are continuous.
+    // Higher certificates require stronger constitutive smoothness evidence.
+    let mut propagated = DelayEventOrder::AtLeast(2);
     for event in sources.at(step.time)? {
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
@@ -102,16 +130,18 @@ pub(super) fn classify(
                     return Err(failure("physical voltage source owner is absent"));
                 }
                 invariant &= continuous(event.order);
+                propagated = propagated.merge(event.order);
             }
             PhysicalSourceOwner::Current(index) => {
                 let table = &circuit.current_sources;
                 if index >= table.len() {
                     return Err(failure("physical current source owner is absent"));
                 }
+                let coupling =
+                    topology.current_jump_coupling(table.node_pos[index], table.node_neg[index])?;
                 invariant &= continuous(event.order)
-                    || topology
-                        .current_jump_coupling(table.node_pos[index], table.node_neg[index])?
-                        == charge_event::CurrentJumpCoupling::Cancels;
+                    || coupling == charge_event::CurrentJumpCoupling::Cancels;
+                propagated = propagated.merge(current_order(event.order, coupling));
             }
         }
     }
@@ -132,9 +162,10 @@ pub(super) fn classify(
             let (p, n) = sampler.models()[event.device_index]
                 .legacy_forward_transport_nodes()
                 .ok_or_else(|| failure("physical GP arrival has no current port"))?;
-            invariant &= continuous(event.order)
-                || topology.current_jump_coupling(p, n)?
-                    == charge_event::CurrentJumpCoupling::Cancels;
+            let coupling = topology.current_jump_coupling(p, n)?;
+            invariant &=
+                continuous(event.order) || coupling == charge_event::CurrentJumpCoupling::Cancels;
+            propagated = propagated.merge(current_order(event.order, coupling));
             Ok(())
         },
     )?;
@@ -153,16 +184,35 @@ pub(super) fn classify(
         let table = &circuit.voltage_sources;
         invariant &= table.transient_value_at_on_side(index, step.time, SourceTimeSide::LeftLimit)
             == table.transient_value_at_on_side(index, step.time, SourceTimeSide::RightLimit);
+        // Represented derivatives can downgrade a cause's certificate, but
+        // equal derivatives alone never raise its declared continuity order.
+        if !matching_slopes(
+            table.time_derivative_at_on_side(index, step.time, 1, SourceTimeSide::LeftLimit),
+            table.time_derivative_at_on_side(index, step.time, 1, SourceTimeSide::RightLimit),
+        ) {
+            propagated = propagated.merge(DelayEventOrder::AtLeast(1));
+        }
     }
     for index in 0..circuit.current_sources.len() {
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }
         let table = &circuit.current_sources;
-        invariant &= table.value_at_time_on_side(index, step.time, SourceTimeSide::LeftLimit)
-            == table.value_at_time_on_side(index, step.time, SourceTimeSide::RightLimit)
-            || topology.current_jump_coupling(table.node_pos[index], table.node_neg[index])?
-                == charge_event::CurrentJumpCoupling::Cancels;
+        let coupling =
+            topology.current_jump_coupling(table.node_pos[index], table.node_neg[index])?;
+        if table.value_at_time_on_side(index, step.time, SourceTimeSide::LeftLimit)
+            != table.value_at_time_on_side(index, step.time, SourceTimeSide::RightLimit)
+        {
+            invariant &= coupling == charge_event::CurrentJumpCoupling::Cancels;
+            propagated = propagated.merge(current_order(DelayEventOrder::AtLeast(0), coupling));
+        } else if coupling == charge_event::CurrentJumpCoupling::Present
+            && !matching_slopes(
+                table.time_derivative_at_on_side(index, step.time, 1, SourceTimeSide::LeftLimit),
+                table.time_derivative_at_on_side(index, step.time, 1, SourceTimeSide::RightLimit),
+            )
+        {
+            propagated = propagated.merge(DelayEventOrder::AtLeast(1));
+        }
     }
     // Every admitted nonlinear F/Q law must be C1 in a neighborhood of
     // the fixed coordinates. The two physical solves then establish local
@@ -174,7 +224,10 @@ pub(super) fn classify(
         invariant &= model.legacy_event_locally_c1(step.incoming);
     }
     let order = if invariant {
-        DelayEventOrder::AtLeast(1)
+        match propagated {
+            DelayEventOrder::AtLeast(n) => DelayEventOrder::AtLeast(n.clamp(1, 2)),
+            DelayEventOrder::Unknown => DelayEventOrder::AtLeast(1),
+        }
     } else if has_unknown {
         DelayEventOrder::Unknown
     } else {

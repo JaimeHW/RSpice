@@ -3,7 +3,7 @@ use crate::circuit::SourceTimeBasis;
 use crate::engine::transient::source_events::PhysicalSourceEvents;
 use rspice_veriloga_runtime::transport_delay::DelayEvent;
 
-fn roots(circuit: &mut crate::CircuitData, stop: Value) -> PhysicalSourceEvents {
+pub(super) fn roots(circuit: &mut crate::CircuitData, stop: Value) -> PhysicalSourceEvents {
     circuit.set_independent_source_context(
         SourceTimeBasis {
             tstep: stop / 10.0,
