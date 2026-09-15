@@ -1,5 +1,56 @@
 use super::*;
 
+#[test]
+fn causal_event_orders_affine_source_curvature_does_not_erase_value_or_slope_jumps() {
+    for dialect in [SpiceDialect::Ngspice, SpiceDialect::Xyce] {
+        for waveform in [
+            SourceSpec::Dc(2.0),
+            pulse([1.0, 0.25, 0.25, 1.0, 4.0], 0.0),
+            SourceSpec::DcTransient {
+                dc_value: 17.0,
+                transient: Box::new(SourceSpec::Pwl {
+                    points: vec![(0.0, 0.0), (1.0, 1.0), (1.0, 2.0), (2.0, 0.0)],
+                    delay: 0.0,
+                    repeat_from: None,
+                }),
+            },
+        ] {
+            let pair = sources(waveform, dialect);
+            for time in [0.0, 1.0, 1.125, 1.25, 2.0] {
+                for side in [SourceTimeSide::LeftLimit, SourceTimeSide::RightLimit] {
+                    assert_eq!(
+                        pair.0.time_derivative_at_on_side(0, time, 2, side),
+                        Some(0.0)
+                    );
+                    assert_eq!(
+                        pair.1.time_derivative_at_on_side(0, time, 2, side),
+                        Some(0.0)
+                    );
+                }
+            }
+            if matches!(pair.0.source_specs[0], Some(SourceSpec::DcTransient { .. })) {
+                check(&pair, 1.0, [1.0, 2.0]);
+                check_slopes(&pair, 1.0, [1.0, -2.0]);
+            }
+        }
+        let tone = sources(
+            SourceSpec::Sin {
+                offset: 0.0,
+                amplitude: 1.0,
+                frequency: 1.0,
+                delay: 1.0,
+                damping: 0.0,
+                phase: 0.0,
+            },
+            dialect,
+        );
+        for side in [SourceTimeSide::LeftLimit, SourceTimeSide::RightLimit] {
+            assert_eq!(tone.0.time_derivative_at_on_side(0, 1.0, 2, side), None);
+            assert_eq!(tone.1.time_derivative_at_on_side(0, 1.0, 2, side), None);
+        }
+    }
+}
+
 fn check_slopes(pair: &(VoltageSources, CurrentSources), time: Value, expected: [Value; 2]) {
     for (side, expected) in [SourceTimeSide::LeftLimit, SourceTimeSide::RightLimit]
         .into_iter()
@@ -234,9 +285,20 @@ fn physical_source_slopes_do_not_invent_higher_distributional_derivatives() {
         SpiceDialect::Ngspice,
     );
     for side in [SourceTimeSide::LeftLimit, SourceTimeSide::RightLimit] {
-        assert_eq!(pair.0.time_derivative_at_on_side(0, 1.0, 2, side), None);
-        assert_eq!(pair.1.time_derivative_at_on_side(0, 1.0, 2, side), None);
+        assert_eq!(
+            pair.0.time_derivative_at_on_side(0, 1.0, 2, side),
+            Some(0.0)
+        );
+        assert_eq!(
+            pair.1.time_derivative_at_on_side(0, 1.0, 2, side),
+            Some(0.0)
+        );
     }
+    // Finite curvature on the open sides does not erase the slope jump or
+    // make the published second derivative an ordinary finite value.
+    check_slopes(&pair, 1.0, [1.0, 0.0]);
+    assert_eq!(pair.0.time_derivative_at(0, 1.0, 2), None);
+    assert_eq!(pair.1.time_derivative_at(0, 1.0, 2), None);
 }
 
 #[test]
@@ -269,6 +331,8 @@ fn physical_source_slopes_refuse_missing_files_invalid_patterns_and_invalid_time
         for side in [SourceTimeSide::LeftLimit, SourceTimeSide::RightLimit] {
             assert_eq!(pair.0.time_derivative_at_on_side(0, 1.0, 1, side), None);
             assert_eq!(pair.1.time_derivative_at_on_side(0, 1.0, 1, side), None);
+            assert_eq!(pair.0.time_derivative_at_on_side(0, 1.0, 2, side), None);
+            assert_eq!(pair.1.time_derivative_at_on_side(0, 1.0, 2, side), None);
         }
     }
     let pair = sources(SourceSpec::Dc(1.0), SpiceDialect::Xyce);

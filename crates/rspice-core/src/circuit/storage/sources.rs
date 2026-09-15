@@ -1120,7 +1120,9 @@ impl VoltageSources {
                     );
                     value.is_finite().then_some(value)
                 }),
-                _ => None,
+                _ => self.source_specs[index].as_ref().map_or(Some(0.0), |spec| {
+                    Self::affine_side_higher_derivative(spec, self.pwl_waveforms[index].as_deref())
+                }),
             };
         }
         match order {
@@ -2142,7 +2144,12 @@ impl CurrentSources {
                     );
                     value.is_finite().then_some(value)
                 }),
-                _ => None,
+                _ => self.source_specs[index].as_ref().map_or(Some(0.0), |spec| {
+                    VoltageSources::affine_side_higher_derivative(
+                        spec,
+                        self.pwl_waveforms[index].as_deref(),
+                    )
+                }),
             };
         }
         match order {

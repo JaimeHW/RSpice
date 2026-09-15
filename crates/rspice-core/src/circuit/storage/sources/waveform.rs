@@ -3,6 +3,32 @@
 use super::*;
 
 impl VoltageSources {
+    /// Regular derivatives of order >= 2 vanish on either open side of a
+    /// piecewise affine source. Value/slope jumps and their distributional
+    /// derivatives remain separate; this does not certify continuity.
+    pub(super) fn affine_side_higher_derivative(
+        spec: &crate::netlist::SourceSpec,
+        pwl: Option<&crate::device::pwl_file::PwlWaveform>,
+    ) -> Option<Value> {
+        use crate::netlist::SourceSpec;
+        match spec {
+            SourceSpec::Dc(_)
+            | SourceSpec::Ac { .. }
+            | SourceSpec::DcAc { .. }
+            | SourceSpec::Pulse { .. }
+            | SourceSpec::Pwl { .. } => Some(0.0),
+            SourceSpec::PwlFile { .. } => pwl.map(|_| 0.0),
+            SourceSpec::Distortion { inner, .. } => Self::affine_side_higher_derivative(inner, pwl),
+            SourceSpec::DcTransient { transient, .. }
+            | SourceSpec::AcTransient { transient, .. }
+            | SourceSpec::DcAcTransient { transient, .. } => {
+                Self::affine_side_higher_derivative(transient, pwl)
+            }
+            // An RF port can add a tone even when its inner source is affine.
+            _ => None,
+        }
+    }
+
     pub(super) fn regular_periodic_derivative(
         spec: &crate::netlist::SourceSpec,
         period: Value,
