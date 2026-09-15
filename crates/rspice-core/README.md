@@ -865,8 +865,8 @@ option is `.options eventfluxtol=1e-24`; ordered `option` commands also accept
 it. Explicit configuration overrides take precedence over authored options.
 This setting controls event conservation independently of charge tolerance
 and ordinary inductor timestep truncation. Existing device admission limits
-still apply. Checkpoint configuration identity version 92 binds this setting
-and the GP transport-event tracking policy;
+still apply. Checkpoint configuration identity version 93 binds this setting,
+the GP transport-event tracking policy and physical-event integration restart;
 checkpoints with an earlier configuration identity require a fresh run.
 
 The internal GP transient qualification path tracks all unknown events and
@@ -875,3 +875,8 @@ inputs retain their delay-history knots and interpolation error control but
 do not force another arrival onto the integration grid. This policy covers
 the currently implemented BE, trapezoidal, Gear2 and hybrid methods. Public
 nonzero transient PTF admission remains guarded pending full qualification.
+
+Native GP physical events retain outgoing charge/flux rates and delay memory,
+then start a new integration epoch. Gear2 uses one BE interval before returning
+to second order. Capacitor/inductor error control and checkpoint restoration
+share the same accepted interval lengths at that boundary.

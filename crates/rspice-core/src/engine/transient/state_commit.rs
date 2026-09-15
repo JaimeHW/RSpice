@@ -1664,6 +1664,18 @@ impl Engine {
         }
         mosfet_history.accepted_dt_prev_prev = mosfet_history.accepted_dt_prev;
         mosfet_history.accepted_dt_prev = dt;
+        if physical_event.is_some() && self.config.spice_dialect != SpiceDialect::Xyce {
+            // Native BDF2 must not differentiate through incoming charge or
+            // flux states after an event. Retain outgoing rates and transport
+            // memory, and restart from flat outgoing integration history.
+            Self::restart_physical_event_history(circuit, bjt_history);
+            // Keep the last interval width for first-order charge/flux
+            // truncation on that flat seed. The absent second width identifies
+            // the one-interval BE restart. Passive truncation shares the MOS
+            // clock, which exact resume reconstructs from this BJT clock.
+            bjt_history.accepted_dt_prev = dt;
+            mosfet_history.accepted_dt_prev_prev = 0.0;
+        }
 
         for (idx, vdmos) in circuit.vdmoses.devices.iter().enumerate() {
             let (vgs, vgd, vgb, vds) = vdmos.transient_charge_branch_voltages_at(accepted_solution);

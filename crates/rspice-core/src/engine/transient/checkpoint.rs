@@ -1245,7 +1245,8 @@ pub(crate) fn simulation_checkpoint_identity(config: &SimulationConfig) -> Strin
     // v90 preserves raw subexpressions during behavioral time specialization.
     // v91 binds the configurable physical-event flux conservation tolerance.
     // v92 binds the C2 GP transport-event tracking cutoff.
-    hasher.update(b"rspice-transient-resolved-config-v92\0");
+    // v93 binds native GP physical-event integration epochs and passive clocks.
+    hasher.update(b"rspice-transient-resolved-config-v93\0");
     hash_field(&mut hasher, "temperature", config.temperature.to_bits());
     hash_field(&mut hasher, "ramptime", config.ramptime.to_bits());
     hash_field(&mut hasher, "digital_delay_type", config.digital_delay_type);

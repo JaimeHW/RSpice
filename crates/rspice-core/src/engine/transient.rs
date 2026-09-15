@@ -5913,7 +5913,7 @@ impl Engine {
         // `FORCE_ACCEPT_COOLDOWN_RETRIES`.
         let mut force_accept_cooldown = 0_usize;
         let mut trap_order = native_order_after_restart(current_integration_method(&trapgear));
-        // Xyce OneStep/Gear12 start at order 1; every native Gear2 path remains order 2.
+        // Xyce starts at order 1; native Gear2 returns to order 2 after restart.
         const MAX_RETRIES: usize = 200; // Maximum recovery retries per timepoint
         const MAX_VERILOGA_EVENT_REFINEMENTS: usize = 64;
         const LINEARIZED_STARTUP_RECOVERY_POINTS: usize = 96;
@@ -7096,7 +7096,16 @@ impl Engine {
             // happens only after the landing point is accepted, so the first
             // interval *leaving* the breakpoint is the order-one step.
             let is_first_resumed_interval = resume_is_restart_normalized && result.time.len() == 1;
-            let step_trap_order = if is_first_resumed_interval {
+            let step_trap_order = if physical_sources.is_some()
+                && native_predictor_local
+                && current_method == IntegrationMethod::Gear2
+                && bjt_history.accepted_dt_prev_prev == 0.0
+            {
+                // The outgoing epoch has no older charge/flux state. Use one
+                // BE interval, including all of its rejected retries, before
+                // Gear2 can use two outgoing accepted states again.
+                1
+            } else if is_first_resumed_interval {
                 native_order_after_restart(current_method)
             } else {
                 Self::step_trapezoidal_order(
@@ -9802,7 +9811,11 @@ impl Engine {
                     let method_after_step = current_integration_method(&trapgear);
                     let accepted_step_trap_order =
                         if native_predictor_local && current_method == IntegrationMethod::Gear2 {
-                            2
+                            if physical_sources.is_some() {
+                                step_trap_order
+                            } else {
+                                2
+                            }
                         } else {
                             1
                         };
@@ -10395,6 +10408,11 @@ impl Engine {
                         IntegrationMethod::Trapezoidal | IntegrationMethod::TrapGear
                     ) {
                         trap_order = 1;
+                    } else if physical_sources.is_some()
+                        && native_predictor_local
+                        && current_method == IntegrationMethod::Gear2
+                    {
+                        trap_order = 2;
                     }
                     analysis_first_step_pending = false;
                     if xyce_lte_restart_first_step && !hit_breakpoint {
@@ -11098,6 +11116,11 @@ impl Engine {
                 if hit_breakpoint {
                     trap_order = xyce_startup_or_restart_order(xyce_min_order);
                 }
+            } else if physical_sources.is_some() && current_method == IntegrationMethod::Gear2 {
+                // A retry of the first BE interval may have stored order one.
+                // Native fixed Gear2 resumes order two after that interval;
+                // a new physical event is identified by its reset history.
+                trap_order = 2;
             }
 
             lte_estimator.set_method_order(effective_method_order(current_method, trap_order));

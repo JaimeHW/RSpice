@@ -3,6 +3,8 @@ use super::*;
 use crate::SimulationConfig;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
+mod cutoff;
+
 struct Progress {
     began: std::time::Instant,
     next_report: AtomicU64,
