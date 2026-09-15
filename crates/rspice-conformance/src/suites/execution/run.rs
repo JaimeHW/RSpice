@@ -79,6 +79,21 @@ impl ExecutionRunner {
             }
         };
 
+        let has_control_contract = path.with_extension("control.json").is_file();
+        let has_control_oracle = path.with_extension("control.oracle.json").is_file();
+        if self.is_control(key) || has_control_contract || has_control_oracle {
+            if !self.is_control(key) || !has_control_contract || !has_control_oracle {
+                return (
+                    ExecutionOutcome::ReferenceMismatch {
+                        diagnostic: "ordered control execution requires !control and both control contract/oracle sidecars".into(),
+                    },
+                    Vec::new(),
+                    false,
+                );
+            }
+            return self.execute_control(key, &path, &expanded, start);
+        }
+
         // Parsed with `.control` blocks intact, deliberately. The parser
         // promotes the analysis and output commands out of the script, and
         // these corpora need that: ISCAS85's annotated decks carry no bare

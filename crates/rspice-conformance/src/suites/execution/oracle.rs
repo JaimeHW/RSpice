@@ -19,6 +19,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 mod capture;
+mod control_capture;
 const MAX_REFERENCE_ROWS: usize = 1_001;
 const MAX_IMPLICIT_VARIABLES: usize = 64;
 const NGSPICE_CAPTURE_THREADS: usize = 8;
@@ -108,7 +109,18 @@ pub fn capture_ngspice_oracles(
         }
         stats.eligible += 1;
         let deck_path = runner.deck_path(&key);
-        let reference_path = deck_path.with_extension("oracle.out");
+        let control = runner.is_control(&key);
+        let reference_path = deck_path.with_extension(if control {
+            "control.oracle.json"
+        } else {
+            "oracle.out"
+        });
+        if control != deck_path.with_extension("control.json").is_file() {
+            stats.failures.push(format!(
+                "{key}: !control and its control contract sidecar must agree"
+            ));
+            continue;
+        }
         if let Some(reason) = oracle_capture_exclusion(corpus, &key) {
             if update && let Err(err) = remove_oracle_if_present(&reference_path) {
                 stats.failures.push(format!(
@@ -259,6 +271,16 @@ fn capture_one(
         fs::read_to_string(deck_path).map_err(|err| format!("failed to read deck: {err}"))?;
     let expanded = Netlist::preprocess_includes(&source, deck_path)
         .map_err(|err| format!("failed to expand includes: {err}"))?;
+    if deck_path.with_extension("control.json").is_file() {
+        return control_capture::capture_control(
+            ngspice_exe,
+            version,
+            deck_path,
+            &expanded,
+            timeout_ms,
+        )
+        .map(Some);
+    }
     let mut requests = output_requests(&expanded);
     if requests.is_empty() {
         requests = implicit_output_requests(&expanded);
@@ -296,6 +318,16 @@ fn run_ngspice_raw(
     reference_source: &str,
     timeout_ms: u128,
 ) -> Result<Vec<RawReferencePlot>, String> {
+    run_ngspice_raw_with_log(ngspice_exe, deck_path, reference_source, timeout_ms)
+        .map(|(plots, _)| plots)
+}
+
+fn run_ngspice_raw_with_log(
+    ngspice_exe: &Path,
+    deck_path: &Path,
+    reference_source: &str,
+    timeout_ms: u128,
+) -> Result<(Vec<RawReferencePlot>, String), String> {
     let temp = tempfile::Builder::new()
         .prefix("rspice-ngspice-oracle-")
         .tempdir()
@@ -363,7 +395,7 @@ fn run_ngspice_raw(
         )
     })?;
     match parse_ngspice_raw_plots(&raw) {
-        Ok(plots) => Ok(plots),
+        Ok(plots) => Ok((plots, stdout)),
         Err(err) if std::env::var_os("RSPICE_KEEP_FAILED_ORACLE_RAW").is_some() => {
             let kept = temp.keep();
             Err(format!(

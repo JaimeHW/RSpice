@@ -29,7 +29,7 @@ harness consumes the hand-written Verilog-A suite.
 | `suites::gf180mcu` | per-case ngspice references over a released foundry PDK | external conformance on real process models |
 | `suites::veriloga` | RSpice's own captured stamps plus a finite-difference oracle sharing no code with the chain rule under test | snapshot plus independent mathematics |
 | `suites::verilog` | Icarus Verilog and Verilator, run live | two independent implementations diffed against each other *before* RSpice is involved |
-| `suites::execution` | none; ISCAS85 and the ngspice examples ship no reference data | that a deck loaded, built, and either ran or refused cleanly |
+| `suites::execution` | checked-in ngspice captures where available; explicit execution contracts otherwise | numerical comparison of declared outputs, or completion/refusal coverage |
 
 The Verilog-A suite uses snapshots and an independent oracle rather than
 external conformance because the thing under test is a code generator, and
@@ -39,12 +39,38 @@ there is no second simulator computing the same Jacobian to ask.
 oracle binary installed (the current state everywhere, CI included), it can
 only check itself, and it says so loudly rather than passing quietly.
 
-`suites::execution` is the weakest instrument here and says so. It earns its
-place because its decks are unlike the others: a reference suite's decks are, by
+`suites::execution` distinguishes numerical comparisons from execution-only
+coverage. Its decks differ from the other suites: reference decks are, by
 construction, ones their authors could already simulate, while these are real
 circuits reaching for whatever dialect corner they happened to need. Every
 failure there is a named gap in ingestion, device coverage, or solver
 robustness.
+
+### Ordered control scripts
+
+An execution-manifest `!control` marker requires `<deck>.control.json` and
+`<deck>.control.oracle.json`. The contract declares each expected source line,
+dataset name, and numerical probe. The oracle binds the expanded source and
+contract, retains every captured coordinate and probe value, and records the
+ngspice version and executable identity. Missing, reordered, additional, or
+incomplete run coverage fails. Ordinary tests read these artifacts; they never
+invoke ngspice.
+
+The runner drives the shared control interpreter through assignments, loops,
+source changes, analyses, and presentation-vector resolution. Plot rendering
+is outside this headless contract. Decks without `!control` retain their
+existing promoted-analysis coverage; those results do not qualify their full
+scripts. The original BJT foreach and memristor examples use ordered execution.
+
+The existing `rspice-ngspice-oracle-capture --update` command recognizes the
+marker and captures each occurrence through ngspice's own control interpreter.
+It inserts raw writes and occurrence markers after the original analysis
+commands. The version-1 contract explicitly selects `CSNUMPREC=17`: ngspice's
+default six-digit `$&variable` substitution otherwise rounds analysis arguments
+before execution. This preserves binary64 scalar precision without changing
+the authored expressions, circuit, model, convergence tolerances, or comparison
+budgets. Binary raw output avoids text rounding. Old promoted `.oracle.out`
+artifacts remain separate from the ordered-run references.
 
 ## Corpora
 

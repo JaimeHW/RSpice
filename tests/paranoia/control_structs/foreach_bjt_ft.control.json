@@ -1,0 +1,54 @@
+{
+  "version": 1,
+  "ngspice_csnumprec": 17,
+  "runs": [
+    {
+      "line": 15,
+      "dataset": "ac1",
+      "probes": [
+        "ir(vgain)",
+        "ii(vgain)"
+      ]
+    },
+    {
+      "line": 15,
+      "dataset": "ac2",
+      "probes": [
+        "ir(vgain)",
+        "ii(vgain)"
+      ]
+    },
+    {
+      "line": 15,
+      "dataset": "ac3",
+      "probes": [
+        "ir(vgain)",
+        "ii(vgain)"
+      ]
+    },
+    {
+      "line": 15,
+      "dataset": "ac4",
+      "probes": [
+        "ir(vgain)",
+        "ii(vgain)"
+      ]
+    },
+    {
+      "line": 15,
+      "dataset": "ac5",
+      "probes": [
+        "ir(vgain)",
+        "ii(vgain)"
+      ]
+    },
+    {
+      "line": 15,
+      "dataset": "ac6",
+      "probes": [
+        "ir(vgain)",
+        "ii(vgain)"
+      ]
+    }
+  ]
+}

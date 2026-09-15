@@ -65,7 +65,7 @@ various/i(xxx)_tests.cir	expected_refusal	B-source references branch current of 
 various/probe-i-dev.cir	expected_refusal	.probe device-current form
 measure/inv-meas-tran-auto.sp	expected_refusal	model `PCH` not defined by the deck
 measure/inv-meas-tran-control.sp	expected_refusal	model `PCH` geometry is not covered by the supplied bins
-memristor/memristor.sp	expected_refusal	behavioural memristor transient reaches the minimum timestep
+memristor/memristor.sp	executes	three original ordered frequency/UIC runs and resolved plot vectors !control
 measure/mos-meas-dc.sp	expected_refusal	.print references numeric node `1` not in the deck
 transient-noise/noi-ring51-demo.cir	expected_refusal	.save references node `t1` not in the deck
 transient-noise/noi-ring51-demo_s.cir	expected_refusal	.save references node `t1` not in the deck
@@ -86,7 +86,7 @@ xspice/original-examples/bad_io_type.deck	expected_refusal	upstream negative tes
 xspice/original-examples/bad_name.deck	expected_refusal	upstream negative test: unknown code model
 #
 # ── Convergence ──────────────────────────────────────────────────────────────
-control_structs/foreach_bjt_ft.sp	expected_refusal	AC operating point does not converge
+control_structs/foreach_bjt_ft.sp	executes	six original ordered bias runs, complex current references and resolved plot vectors !control
 #
 # ── Measure gates ────────────────────────────────────────────────────────────
 # Transient decks judged on the engineering quantities in <deck>.gates.tsv —

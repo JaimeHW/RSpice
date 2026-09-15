@@ -14,6 +14,10 @@
 //! choices. Decks absent from the manifest are required to execute, so the
 //! file records only exceptions and stays readable as a list of known gaps
 //! rather than an inventory of everything vendored.
+//!
+//! `!control` requires ordered execution and matching `.control.json` and
+//! `.control.oracle.json` sidecars. It qualifies every declared run occurrence
+//! and presentation-vector resolution, without asserting plot rendering.
 
 use super::*;
 
@@ -23,6 +27,8 @@ pub(super) const FILE_NAME: &str = "execution-manifest.tsv";
 const EXTENDED_MARKER: &str = "!extended";
 /// Marks a deck whose transient is gated on `<deck>.gates.tsv` measures.
 const MEASURES_MARKER: &str = "!measures";
+/// Execute the ordered script and compare every declared run occurrence.
+const CONTROL_MARKER: &str = "!control";
 
 pub(super) fn load(root: &Path) -> HashMap<String, ManifestEntry> {
     let Ok(content) = std::fs::read_to_string(root.join(FILE_NAME)) else {
@@ -62,6 +68,7 @@ fn parse(content: &str, root: &Path) -> HashMap<String, ManifestEntry> {
                 contract,
                 extended: note.contains(EXTENDED_MARKER),
                 measures: note.contains(MEASURES_MARKER),
+                control: note.contains(CONTROL_MARKER),
             },
         );
     }
@@ -92,6 +99,13 @@ impl ExecutionRunner {
         self.manifest
             .get(&normalize_key(key))
             .is_some_and(|entry| entry.measures)
+    }
+
+    /// Whether this deck requires ordered, per-occurrence control conformance.
+    pub fn is_control(&self, key: &str) -> bool {
+        self.manifest
+            .get(&normalize_key(key))
+            .is_some_and(|entry| entry.control)
     }
 }
 

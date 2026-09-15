@@ -46,6 +46,7 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 mod contract;
+mod control;
 mod corpus;
 mod discovery;
 mod manifest;
@@ -255,6 +256,7 @@ struct ManifestEntry {
     contract: ExecutionContract,
     extended: bool,
     measures: bool,
+    control: bool,
 }
 
 impl ExecutionRunner {

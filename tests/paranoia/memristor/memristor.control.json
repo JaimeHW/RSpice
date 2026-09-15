@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "ngspice_csnumprec": 17,
+  "runs": [
+    {
+      "line": 39,
+      "dataset": "tran1",
+      "probes": [
+        "v(1)",
+        "v(xmem.x1)",
+        "i(v1)"
+      ]
+    },
+    {
+      "line": 47,
+      "dataset": "tran2",
+      "probes": [
+        "v(1)",
+        "v(xmem.x1)",
+        "i(v1)"
+      ]
+    },
+    {
+      "line": 53,
+      "dataset": "tran3",
+      "probes": [
+        "v(1)",
+        "v(xmem.x1)",
+        "i(v1)"
+      ]
+    }
+  ]
+}
