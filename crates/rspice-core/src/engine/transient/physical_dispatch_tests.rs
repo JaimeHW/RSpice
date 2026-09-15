@@ -4,6 +4,7 @@ use crate::SimulationConfig;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
 mod cutoff;
+mod nonlinear;
 
 struct Progress {
     began: std::time::Instant,

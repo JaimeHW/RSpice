@@ -880,3 +880,11 @@ Native GP physical events retain outgoing charge/flux rates and delay memory,
 then start a new integration epoch. Gear2 uses one BE interval before returning
 to second order. Capacitor/inductor error control and checkpoint restoration
 share the same accepted interval lengths at that boundary.
+
+Internal transient qualification includes a manufactured nonlinear GP orbit
+with finite base/collector impedances, exponential current, Early feedback and
+TF diffusion charge. Independent harmonic current forcing produces prescribed
+base and collector voltages over three periods with a 1 us transport delay.
+Ngspice-mode trapezoidal and Xyce-mode TrapGear meet 2 uV base / 20 uV collector
+bounds on the complete trajectory. This case does not qualify other GP model
+options, legacy Weil phase compatibility or broader platform admission.
