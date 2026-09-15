@@ -47,6 +47,8 @@ pub enum ControlAnalysisResult {
 #[derive(Debug)]
 pub struct ControlNamedDataset {
     pub name: String,
+    pub analysis_id: crate::identity::AnalysisInstanceId,
+    pub device_op_report: Option<Box<crate::circuit::DeviceOpReport>>,
     pub command: AnalysisCommand,
     pub result: ControlAnalysisResult,
 }
@@ -201,12 +203,17 @@ impl ControlCircuit {
             .map_err(|source| ControlExecutionError::Configuration { line, source })?;
         let mut netlist = self.netlist.clone();
         netlist.analyses = vec![analysis.clone()];
+        let mut device_op_report = None;
         let (kind, result, count) = match &analysis {
             AnalysisCommand::Op => {
-                let result = bounded
-                    .run_dc_op_with_abort(&netlist, abort)
+                let (result, report) = bounded
+                    .run_dc_op_with_report_and_abort(&netlist, abort)
                     .map_err(|error| simulation_error(line, error))?;
-                let count = Engine::simulation_result_value_count(&result);
+                let count = report.entries.iter().fold(
+                    Engine::simulation_result_value_count(&result),
+                    |count, entry| count.saturating_add(entry.params.len()),
+                );
+                device_op_report = Some(Box::new(report));
                 (
                     "op",
                     ControlAnalysisResult::OperatingPoint(Box::new(result)),
@@ -294,8 +301,17 @@ impl ControlCircuit {
             .checked_add(1)
             .ok_or_else(|| command_error(line, "dataset ordinal overflow"))?;
         let name = format!("{kind}{ordinal}");
+        let identity_kind = match &result {
+            ControlAnalysisResult::OperatingPoint(_) => crate::identity::AnalysisKind::Op,
+            ControlAnalysisResult::Ac(_) => crate::identity::AnalysisKind::Ac,
+            ControlAnalysisResult::Transient(_) => crate::identity::AnalysisKind::Tran,
+        };
+        let identity_ordinal = u32::try_from(ordinal - 1)
+            .map_err(|_| command_error(line, "analysis identity ordinal overflow"))?;
         self.datasets.push(ControlNamedDataset {
             name: name.clone(),
+            analysis_id: crate::identity::AnalysisInstanceId::new(identity_kind, identity_ordinal),
+            device_op_report,
             command: analysis,
             result,
         });

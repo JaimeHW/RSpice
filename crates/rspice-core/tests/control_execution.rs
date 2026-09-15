@@ -394,3 +394,57 @@ fn control_vectors_preserve_probe_spelling_and_refuse_misaligned_or_unavailable_
     );
     assert_eq!(circuit.datasets().len(), 2);
 }
+
+#[test]
+fn sealed_source_control_retention_preserves_commands_and_author_locations() {
+    use rspice_core::netlist::{NetlistParseOptions, SealedSourceBundle, SealedSourceEdge};
+    let root = std::path::PathBuf::from("C:/sealed-control/root.sp");
+    let child = std::path::PathBuf::from("C:/sealed-control/commands.inc");
+    let source = "sealed control\nV1 out 0 0\nR1 out 0 1k\n.include commands.inc\n.end\n";
+    let commands =
+        ".control\nforeach bias 1 2\nalter v1 $bias\nop\nend\nprint op1.v(out) op2.v(out)\n.endc\n";
+    let bundle = SealedSourceBundle::try_new_with_edges(
+        [
+            (root.clone(), source.into()),
+            (child.clone(), commands.into()),
+        ],
+        [SealedSourceEdge {
+            owner: root.clone(),
+            requested_path: "commands.inc".into(),
+            target: child.clone(),
+        }],
+    )
+    .unwrap();
+    let netlist = Netlist::parse_with_path_and_sealed_sources_and_options_and_abort(
+        source,
+        &root,
+        bundle,
+        NetlistParseOptions {
+            retain_control_script: true,
+            ..NetlistParseOptions::default()
+        },
+        &NoAbort,
+    )
+    .unwrap();
+    assert!(netlist.analyses.is_empty());
+    assert!(netlist.control_dispositions.is_empty());
+    let script = netlist.control_script.clone().unwrap();
+    let program =
+        ControlProgram::parse_deck_with_abort(script.text(), ControlLimits::default(), &NoAbort)
+            .unwrap();
+    let mut session = program.start(netlist.params.clone());
+    let mut circuit = ControlCircuit::new(netlist).unwrap();
+    let engine = Engine::new(SimulationConfig::default());
+    while let Some(command) = session.next_command(&mut circuit, &NoAbort).unwrap() {
+        let origin = script.origin(command.line).unwrap();
+        assert_eq!(origin.path.as_ref(), Some(&child));
+        if command.name == "op" {
+            assert_eq!(origin.line, 4);
+        }
+        circuit
+            .execute(&engine, &command, session.variables(), &NoAbort)
+            .unwrap();
+    }
+    assert_eq!(circuit.datasets().len(), 2);
+    assert_eq!(circuit.datasets()[1].analysis_id.tag(), "op-002");
+}

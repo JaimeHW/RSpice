@@ -528,6 +528,7 @@ impl Engine {
             return Ok((perturbed, defined_parameters + applied_device_overrides));
         };
         let parse_options = crate::netlist::NetlistParseOptions {
+            retain_control_script: netlist.control_script.is_some(),
             statistical_mode: netlist.params.statistical_mode(),
             statistical_seed: Some(netlist.params.random().seed()),
             expression_dialect: netlist.params.expression_dialect(),

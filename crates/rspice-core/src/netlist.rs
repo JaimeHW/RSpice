@@ -15,6 +15,8 @@ use crate::config::ExpressionDialect;
 
 mod add_resistors;
 mod ast;
+mod control_source;
+pub use control_source::ControlScriptSource;
 mod data_table;
 pub mod expr;
 mod flattener;
@@ -1054,6 +1056,9 @@ pub struct Netlist {
     /// state the disposition on the line that authored it instead of leaving
     /// an imported ngspice block to disappear behind a single blanket warning.
     pub control_dispositions: Vec<ControlCommandRecord>,
+    /// Source-provider-resolved control regions for an ordered execution host.
+    /// Present only when parsing explicitly requests script retention.
+    pub control_script: Option<std::sync::Arc<ControlScriptSource>>,
     /// Authored PSpice E/G CHEBYSHEV card count retained independently from
     /// the variable-size synthesized element realization.
     pub(crate) pspice_chebyshev_source_count: usize,
@@ -1413,14 +1418,17 @@ impl Netlist {
         abort: &dyn AbortSignal,
     ) -> Result<Self, ParseWithAbortError> {
         Self::enforce_root_source_limits_with_abort(input, options.resource_limits, abort)?;
+        let (declarative, control_script) =
+            control_source::prepare_text(input, options.retain_control_script, abort)?;
         let (sanitized, mut diagnostics, dispositions) =
-            Self::sanitize_control_regions_with_abort(input, abort)?;
+            Self::sanitize_control_regions_with_abort(&declarative, abort)?;
         let mut netlist = parser::parse_netlist_with_parameter_overrides_and_abort(
             &sanitized, options, overrides, abort,
         )?;
         diagnostics.extend(netlist.diagnostics);
         netlist.diagnostics = diagnostics;
         netlist.control_dispositions = dispositions;
+        netlist.control_script = control_script;
         if !netlist.spef_includes.is_empty() {
             return Err(ParseError::Syntax {
                 line: 0,
@@ -1688,6 +1696,8 @@ impl Netlist {
         Self::enforce_root_source_limits_with_abort(input, options.resource_limits, abort)?;
         let expanded =
             include_processor.expand_content_mapped_with_abort(input, file_path, abort)?;
+        let (expanded, control_script) =
+            control_source::prepare_expanded(expanded, options.retain_control_script, abort)?;
         let (sanitized, mut diagnostics, dispositions) =
             Self::sanitize_expanded_source_with_abort(expanded, abort)?;
         let mut netlist = parser::parse_expanded_netlist_with_parameter_overrides_and_abort(
@@ -1696,6 +1706,7 @@ impl Netlist {
         diagnostics.extend(netlist.diagnostics);
         netlist.diagnostics = diagnostics;
         netlist.control_dispositions = dispositions;
+        netlist.control_script = control_script;
         Self::normalize_model_string_paths_with_abort(&mut netlist, file_path, abort)?;
         Self::normalize_source_file_paths_with_abort(&mut netlist, file_path, abort)?;
         Self::normalize_measure_file_paths_with_abort(&mut netlist, file_path, abort)?;
@@ -1733,10 +1744,11 @@ impl Netlist {
     pub(crate) fn replay_root_source_with_parameter_overrides_and_abort(
         &self,
         input: &str,
-        options: NetlistParseOptions,
+        mut options: NetlistParseOptions,
         overrides: &[parser::ParameterOverride],
         abort: &dyn AbortSignal,
     ) -> Result<Self, ParseWithAbortError> {
+        options.retain_control_script |= self.control_script.is_some();
         match (&self.replay_context, self.source_path.as_deref()) {
             (Some(NetlistReplayContext::InMemory), _) | (None, None) => {
                 Self::parse_with_parameter_overrides_and_abort(input, options, overrides, abort)
@@ -2050,6 +2062,8 @@ impl Netlist {
             processor.add_lib_path(dir.clone());
         }
         let expanded = processor.expand_content_mapped_with_abort(input, path, abort)?;
+        let (expanded, control_script) =
+            control_source::prepare_expanded(expanded, options.retain_control_script, abort)?;
         let (sanitized, mut diagnostics, dispositions) =
             Self::sanitize_expanded_source_with_abort(expanded, abort)?;
         let mut netlist = parser::parse_expanded_netlist_with_parameter_overrides_and_abort(
@@ -2058,6 +2072,7 @@ impl Netlist {
         diagnostics.extend(netlist.diagnostics);
         netlist.diagnostics = diagnostics;
         netlist.control_dispositions = dispositions;
+        netlist.control_script = control_script;
         Self::normalize_model_string_paths_with_abort(&mut netlist, path, abort)?;
         Self::normalize_source_file_paths_with_abort(&mut netlist, path, abort)?;
         Self::normalize_measure_file_paths_with_abort(&mut netlist, path, abort)?;
@@ -3483,6 +3498,7 @@ impl Default for Netlist {
             spef_includes: Vec::new(),
             diagnostics: Vec::new(),
             control_dispositions: Vec::new(),
+            control_script: None,
             pspice_chebyshev_source_count: 0,
             source_text: None,
             source_path: None,

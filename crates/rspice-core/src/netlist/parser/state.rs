@@ -236,6 +236,7 @@ impl ParseState {
             // its record to the finished netlist; the parser only ever sees
             // the sanitized deck.
             control_dispositions: Vec::new(),
+            control_script: None,
             pspice_chebyshev_source_count: self.pspice_chebyshev_source_count,
             source_text: Some(input.to_string()),
             source_path: None,

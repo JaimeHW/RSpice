@@ -824,6 +824,7 @@ fn clone_netlist_with_abort(
         spef_includes,
         diagnostics,
         control_dispositions,
+        control_script: source.control_script.clone(),
         pspice_chebyshev_source_count,
         source_text: None,
         source_path,

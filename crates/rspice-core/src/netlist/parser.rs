@@ -172,6 +172,9 @@ type MeasureStatement = crate::netlist::measure::MeasureStatement;
 /// Options that affect netlist parsing and immediate parameter evaluation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct NetlistParseOptions {
+    /// Retain ordered control scripts for an execution host instead of
+    /// promoting selected commands into declarative analysis cards.
+    pub retain_control_script: bool,
     pub statistical_mode: StatisticalParamMode,
     /// Runtime seed override, applied before parameter evaluation and retained
     /// in the effective netlist options without rewriting authored source.
@@ -186,6 +189,7 @@ pub struct NetlistParseOptions {
 impl Default for NetlistParseOptions {
     fn default() -> Self {
         Self {
+            retain_control_script: false,
             statistical_mode: StatisticalParamMode::Sample,
             statistical_seed: None,
             expression_dialect: ExpressionDialect::Ngspice,
