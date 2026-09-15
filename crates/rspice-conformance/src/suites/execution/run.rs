@@ -7,7 +7,7 @@ use rspice_core::SimulationError;
 use rspice_core::analysis::FrequencyGridError;
 use rspice_core::analysis::ac::try_ac_sweep_frequencies_with_abort;
 use rspice_core::analysis::s_param;
-use rspice_core::engine::DcSweepRange;
+use rspice_core::netlist::DcSweepSpec;
 
 impl ExecutionRunner {
     /// Run every discovered deck, honouring the extended-cost gate.
@@ -258,31 +258,8 @@ impl ExecutionRunner {
                 ),
                 Err(error) => (classify(Err(error)), false),
             },
-            AnalysisCommand::Dc {
-                source,
-                start,
-                stop,
-                step,
-                sweep2,
-                ..
-            } => {
-                let swept = match sweep2 {
-                    None => {
-                        engine.run_dc_sweep_with_abort(netlist, source, *start, *stop, *step, abort)
-                    }
-                    Some(outer) => engine.run_dc_sweep2_with_abort(
-                        netlist,
-                        source,
-                        DcSweepRange {
-                            start: *start,
-                            stop: *stop,
-                            step: *step,
-                        },
-                        Some(outer),
-                        abort,
-                    ),
-                };
-                match swept {
+            AnalysisCommand::Dc { .. } => {
+                match execute_dc_sweep(engine, netlist, analysis, abort) {
                     Ok(points)
                         if points.iter().all(|(sweep, result)| {
                             sweep.is_finite()
@@ -581,6 +558,43 @@ fn finite<'a>(mut values: impl Iterator<Item = &'a f64>) -> bool {
     values.all(|value| value.is_finite())
 }
 
+/// Preserve both authored sweep specifications, including LIST ordering and
+/// logarithmic spacing, before projecting the public results for comparison.
+fn execute_dc_sweep(
+    engine: &Engine,
+    netlist: &Netlist,
+    analysis: &AnalysisCommand,
+    abort: &DeadlineAbort,
+) -> Result<Vec<(f64, rspice_core::SimulationResult)>, SimulationError> {
+    let AnalysisCommand::Dc {
+        source,
+        start,
+        stop,
+        step,
+        mode,
+        sweep2,
+    } = analysis
+    else {
+        return Err(SimulationError::Circuit(
+            "DC execution requires a DC analysis command".to_string(),
+        ));
+    };
+    let primary = DcSweepSpec {
+        start: *start,
+        stop: *stop,
+        step: *step,
+        mode: mode.clone(),
+    };
+    engine
+        .run_dc_sweep2_spec_with_report_and_abort(netlist, source, &primary, sweep2.as_ref(), abort)
+        .map(|points| {
+            points
+                .into_iter()
+                .map(|point| (point.sweep_value, point.result))
+                .collect()
+        })
+}
+
 /// ngspice's default ceiling when a deck gives no `tmax`.
 fn default_max_step(step: f64, stop: f64) -> f64 {
     let candidate = if step > 0.0 { step } else { stop / 50.0 };
@@ -653,6 +667,67 @@ fn describe(analysis: &AnalysisCommand) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dc_execution_preserves_list_logarithmic_and_nested_grids() {
+        let temporary = tempfile::tempdir().unwrap();
+        let runner = ExecutionRunner::new(
+            ExecutionCorpus::Paranoia,
+            temporary.path(),
+            ExecutionConfig::default(),
+        );
+        let engine = runner.engine(None);
+        for (primary, inner_values) in [
+            ("V1 LIST 2 -1 2 .5", vec![2.0, -1.0, 2.0, 0.5]),
+            ("DEC V1 1 100 1", vec![1.0, 10.0, 100.0]),
+            ("V1 OCT 1 8 1", vec![1.0, 2.0, 4.0, 8.0]),
+        ] {
+            for (outer, outer_values) in
+                [("", vec![3.0]), (" V2 LIST 3 -2 3", vec![3.0, -2.0, 3.0])]
+            {
+                let directive = format!(".dc {primary}{outer}");
+                let source = format!(
+                    "authored DC grids\nV1 in 0 0\nV2 out 0 3\n\
+                     R1 in mid 1k\nR2 mid out 1k\n{directive}\n.end\n"
+                );
+                let netlist = Netlist::parse(&source).unwrap();
+                let abort = DeadlineAbort::new(Instant::now(), 10_000);
+                let points = execute_dc_sweep(&engine, &netlist, &netlist.analyses[0], &abort)
+                    .unwrap_or_else(|error| panic!("{directive}: {error}"));
+                // Expected coordinates are independent of the engine's sweep
+                // generator. Repeated and descending list values must survive.
+                let expected: Vec<_> = outer_values
+                    .iter()
+                    .flat_map(|&outer| inner_values.iter().map(move |&inner| (inner, outer)))
+                    .collect();
+                assert_eq!(points.len(), expected.len(), "{directive}");
+                for ((sweep, result), (inner, outer)) in points.iter().zip(expected) {
+                    assert!(
+                        (sweep - inner).abs() < 1e-10,
+                        "{directive}: {sweep} != {inner}"
+                    );
+                    // Equal resistors give the arithmetic mean at every bias,
+                    // independently checking the nested outer-source order.
+                    for (name, expected_voltage) in [
+                        ("in", inner),
+                        ("out", outer),
+                        ("mid", (inner + outer) / 2.0),
+                    ] {
+                        let index = result
+                            .node_names
+                            .iter()
+                            .position(|node| node.eq_ignore_ascii_case(name))
+                            .unwrap();
+                        let actual = result.node_voltages[index];
+                        assert!(
+                            (actual - expected_voltage).abs() < 1e-9,
+                            "{directive} at ({inner}, {outer}): {name}={actual}, expected {expected_voltage}"
+                        );
+                    }
+                }
+            }
+        }
+    }
 
     #[test]
     fn multiple_dc_analyses_compare_their_own_references_in_any_file_order() {
