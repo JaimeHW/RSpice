@@ -72,6 +72,7 @@ struct Resolver<'a, 'b> {
     // None denotes an ambiguous alias, independent of insertion order.
     aliases: HashMap<String, Option<usize>>,
     retained_currents: HashSet<String>,
+    retained_voltages: HashSet<String>,
     params: &'b crate::netlist::ParamContext,
     abort: &'b dyn AbortSignal,
     extent: (Value, Value),
@@ -82,6 +83,13 @@ struct Resolver<'a, 'b> {
 impl<'a> Resolver<'a, '_> {
     fn probe(&self, authored: &str) -> Result<Form<'a>, CurrentObservationError> {
         let canonical = canonical_measure_signal_name(authored);
+        if n_probe_voltage_name(&canonical)
+            .is_some_and(|voltage| self.retained_voltages.contains(&voltage))
+        {
+            // N(...) names the node before consulting an identically named
+            // device parameter. A voltage has no current impulse history.
+            return Ok(Form::default());
+        }
         let (lookup, projection) = match split_equation_output_operator(&canonical) {
             Some((prefix, args))
                 if !self.aliases.contains_key(&canonical)
@@ -431,10 +439,23 @@ pub(crate) fn resolve_with_coverage<'a>(
         }
     }
     let params = netlist.map_or(&empty_params, |netlist| &netlist.params);
+    let mut retained_voltages = HashSet::new();
+    retained_voltages
+        .try_reserve(result.node_names.len())
+        .map_err(|_| failure("cannot allocate retained voltage names"))?;
+    for node in &result.node_names {
+        if abort.is_aborted() {
+            return Err(CurrentObservationError::Aborted);
+        }
+        if !node.is_empty() {
+            retained_voltages.insert(canonical_measure_signal_name(&format!("V({node})")));
+        }
+    }
     let resolver = Resolver {
         traces,
         aliases,
         retained_currents,
+        retained_voltages,
         params,
         abort,
         extent: (
@@ -748,6 +769,57 @@ mod tests {
                 .to_string()
                 .contains("no complete impulse history")
         );
+    }
+
+    #[test]
+    fn fourier_current_impulse_n_probe_preserves_node_precedence() {
+        let mut result = fixture();
+        result.node_names[0] = "x1:q1:ic".into();
+        let netlist = Netlist::parse("node precedence\nV1 out 0 3\n.end\n").unwrap();
+        let voltage = spectrum(&result, "V(x1:q1:ic)", Some(&netlist)).unwrap();
+        for spec in ["N(x1:q1:ic)", "{N(X1.Q1:IC)}", "V(x1:q1:ic)"] {
+            let output = spectrum(&result, spec, Some(&netlist)).unwrap();
+            close(output.dc_component, 3.0);
+            for (harmonic, reference) in output.harmonics.iter().zip(&voltage.harmonics) {
+                assert_eq!(harmonic.magnitude, reference.magnitude);
+            }
+        }
+        for spec in ["@X1:Q1[ic]", "IC(X1:Q1)"] {
+            close(spectrum(&result, spec, None).unwrap().dc_component, -0.002);
+        }
+    }
+
+    #[test]
+    fn fourier_current_impulse_n_node_needs_no_current_coverage() {
+        let mut result = fixture();
+        result.node_names[0] = "marker:IC".into();
+        result.current_impulses = Some(vec![]);
+        close(
+            spectrum(&result, "N(marker:IC)", None)
+                .unwrap()
+                .dc_component,
+            3.0,
+        );
+        assert!(spectrum(&result, "@X1:Q1[ic]", None).is_err());
+    }
+
+    #[test]
+    fn current_impulse_n_measurements_keep_the_node_value() {
+        let mut result = fixture();
+        result.node_names[0] = "x1:q1:ic".into();
+        let netlist = Netlist::parse(
+            "node measures\nV1 out 0 3\n\
+             .meas tran area INTEG N(x1:q1:ic) FROM=1 TO=2\n\
+             .meas tran expr INTEG {N(x1:q1:ic)} FROM=1 TO=2\n\
+             .meas tran peak MAX N(x1:q1:ic) FROM=1 TO=2\n.end\n",
+        )
+        .unwrap();
+        let measurements = evaluate_tran_measurements(&netlist, &result);
+        assert_eq!(measurements.len(), 3);
+        for measurement in measurements {
+            assert!(measurement.passed, "{measurement:?}");
+            close(measurement.value.unwrap(), 3.0);
+        }
     }
 
     #[test]

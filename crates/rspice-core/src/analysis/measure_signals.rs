@@ -957,6 +957,11 @@ impl LiveMeasureOperand {
         {
             return Ok(value);
         }
+        if let Some(operator) = &self.raw_operator
+            && !operator.internal_candidates.is_empty()
+        {
+            return operator.value(row, signals);
+        }
         if let Some(alias) = &self.alternate_signal
             && let Some(value) =
                 lookup_equation_signal_canonical_optional(signals, &self.authored, alias, row)?
@@ -1173,6 +1178,14 @@ impl LiveRawOutputOperator {
         row: usize,
         signals: &CanonicalMeasureSignalIndex<'_>,
     ) -> Result<Value, String> {
+        // N(...) must consult the node before a preformatted alias that may
+        // also have been populated from an identically named device output.
+        if let Some(voltage) = self.internal_candidates.first()
+            && let Some(value) =
+                lookup_equation_signal_canonical_optional(signals, &self.authored, voltage, row)?
+        {
+            return Ok(value);
+        }
         if let Some(value) = lookup_equation_signal_canonical_optional(
             signals,
             &self.authored,
@@ -2160,6 +2173,17 @@ fn output_column_kind(signal: &SaveSignal) -> OutputColumnKind {
     }
 }
 
+fn n_probe_voltage_name(authored: &str) -> Option<String> {
+    let (operator, arguments) = split_equation_output_operator(authored)?;
+    if !operator.eq_ignore_ascii_case("N") {
+        return None;
+    }
+    let [node] = arguments.as_slice() else {
+        return None;
+    };
+    Some(canonical_measure_signal_name(&format!("V({node})")))
+}
+
 fn resolved_output_column_kind(
     authored: &str,
     signal: &SaveSignal,
@@ -2167,12 +2191,8 @@ fn resolved_output_column_kind(
 ) -> OutputColumnKind {
     // N(...) is node-first: a literal node such as marker:IC must not
     // acquire amperes from the suffix of its name.
-    if let Some((operator, arguments)) = split_equation_output_operator(authored)
-        && operator.eq_ignore_ascii_case("N")
-        && let [node] = arguments.as_slice()
-        && signals
-            .get(&format!("V({node})"))
-            .is_ok_and(|value| value.is_some())
+    if let Some(voltage) = n_probe_voltage_name(authored)
+        && signals.get(&voltage).is_ok_and(|value| value.is_some())
     {
         return OutputColumnKind::Voltage;
     }
@@ -2439,6 +2459,11 @@ fn direct_output_values<'a>(
                     .transpose()
             })
     };
+    if let Some(voltage) = n_probe_voltage_name(authored)
+        && let Some(values) = lookup(&voltage)?
+    {
+        return Ok(values);
+    }
     if let Some(values) = lookup(authored)? {
         return Ok(values);
     }
@@ -4643,7 +4668,12 @@ fn bind_equation_expression(
                 })
                 .collect::<Result<Vec<_>, _>>()?;
             let probe = format!("{prefix}({})", arguments.join(","));
-            NetExpr::Number(lookup_equation_signal(signals, &probe, row)?)
+            let value = if prefix == "N" {
+                LiveRawOutputOperator::compile(&probe)?.value(row, signals)?
+            } else {
+                lookup_equation_signal(signals, &probe, row)?
+            };
+            NetExpr::Number(value)
         }
         NetExpr::FnCall { name, args } => NetExpr::FnCall {
             name: name.clone(),
