@@ -6581,11 +6581,18 @@ impl Engine {
                     )?);
                 }
             }
-            // Transport arrivals are mandatory physical clocks. Source
+            // Rough or unknown transport arrivals are mandatory clocks. Source
             // breakpoint tolerances and the Verilog-A floor grid do not own
             // them; unsupported subminimum gaps must refuse explicitly.
             let phase_arrival = if has_bjt_phase_history {
-                bjt::arrival::next(&circuit, &bjt_history, t, tstop, abort)?
+                bjt::arrival::next(
+                    &circuit,
+                    &bjt_history,
+                    t,
+                    tstop,
+                    self.config.integration_method,
+                    abort,
+                )?
             } else {
                 None
             };

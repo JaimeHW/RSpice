@@ -2,6 +2,23 @@ use super::*;
 use crate::abort_signal::CountingAbort;
 use rspice_veriloga_runtime::transport_delay::{DelayBuffer, DelayConfiguration};
 
+fn next(
+    circuit: &crate::CircuitData,
+    history: &BjtTransientHistory,
+    time: Value,
+    stop: Value,
+    abort: &dyn AbortSignal,
+) -> Result<Option<PhaseArrival>, SimulationError> {
+    super::next(
+        circuit,
+        history,
+        time,
+        stop,
+        IntegrationMethod::TrapGear,
+        abort,
+    )
+}
+
 fn fixture() -> (crate::CircuitData, BjtTransientHistory) {
     let deck = Netlist::parse(
         "phase arrival ownership\n\
@@ -42,6 +59,88 @@ fn advance(circuit: &crate::CircuitData, history: &mut BjtTransientHistory, time
 }
 
 #[test]
+fn gp_phase_arrival_cutoff_preserves_later_rough_causes_and_read_only_history() {
+    use rspice_veriloga_runtime::transport_delay::DelayEvent;
+    let (circuit, mut history) = fixture();
+    for (model, slot) in circuit.bjts.devices.iter().zip(&mut history.phase) {
+        let Some(phase) = slot else { continue };
+        let delay = model.legacy_excess_phase_delay();
+        *phase = DelayBuffer::new(0);
+        for (time, order) in [
+            (0.0, DelayEventOrder::AtLeast(3)),
+            (0.125, DelayEventOrder::AtLeast(8)),
+            (0.25, DelayEventOrder::AtLeast(2)),
+            (0.375, DelayEventOrder::Unknown),
+        ] {
+            phase
+                .accept_event(
+                    time,
+                    DelayEvent {
+                        left: 2.0,
+                        right: 2.0,
+                        order,
+                    },
+                    delay,
+                    None,
+                )
+                .unwrap();
+        }
+        phase.accept_sample(0.5, 2.0, delay, None).unwrap();
+    }
+    let before = history.clone();
+    let phase = history.phase[1].as_ref().unwrap();
+    let smooth = phase.next_event_after(0.5).unwrap().unwrap();
+    let rough = phase
+        .next_event_after(smooth.time + 0.125)
+        .unwrap()
+        .unwrap();
+    assert_eq!(smooth.order, DelayEventOrder::AtLeast(3));
+    assert_eq!(rough.order, DelayEventOrder::AtLeast(2));
+    for method in [
+        IntegrationMethod::BackwardEuler,
+        IntegrationMethod::Trapezoidal,
+        IntegrationMethod::Gear2,
+        IntegrationMethod::TrapGear,
+    ] {
+        assert_eq!(
+            super::next(&circuit, &history, 0.5, smooth.time, method, &NoAbort).unwrap(),
+            None
+        );
+        let next = super::next(&circuit, &history, 0.5, rough.time, method, &NoAbort)
+            .unwrap()
+            .unwrap();
+        assert_eq!(next.time, rough.time);
+        assert_eq!(next.order, DelayEventOrder::AtLeast(2));
+    }
+    let mut causes = Vec::new();
+    visit_next(&circuit, &history, 0.5, rough.time, &NoAbort, |arrival| {
+        causes.push(arrival);
+        Ok(())
+    })
+    .unwrap();
+    assert_eq!(causes.len(), 2);
+    assert!(causes.iter().all(|cause| cause.time == rough.time));
+    let abort = CountingAbort::new(1);
+    assert!(matches!(
+        next(&circuit, &history, 0.5, 20.0, &abort),
+        Err(SimulationError::Aborted)
+    ));
+    assert_eq!(history, before);
+    for phase in history.phase.iter_mut().flatten() {
+        *phase = DelayBuffer::from_checkpoint(phase.checkpoint()).unwrap();
+    }
+    assert_eq!(history, before);
+    advance(&circuit, &mut history, rough.time);
+    assert_eq!(
+        next(&circuit, &history, rough.time, 20.0, &NoAbort)
+            .unwrap()
+            .unwrap()
+            .order,
+        DelayEventOrder::Unknown
+    );
+}
+
+#[test]
 fn gp_phase_arrival_merges_event_orders_across_devices_and_checkpoint_restore() {
     use rspice_veriloga_runtime::transport_delay::DelayEvent;
     let (circuit, mut history) = fixture();
@@ -71,7 +170,7 @@ fn gp_phase_arrival_merges_event_orders_across_devices_and_checkpoint_restore() 
         event.time,
         circuit.bjts.devices[1].legacy_excess_phase_delay()
     );
-    assert_eq!(event.device_index, 1);
+    assert_eq!(event.device_index, 2);
     assert_eq!(event.order, DelayEventOrder::AtLeast(1));
     assert_eq!(history, before);
     for phase in history.phase.iter_mut().flatten() {
@@ -413,11 +512,23 @@ fn gp_phase_arrival_groups_only_one_representable_clock_interval() {
     );
     Engine::initialize_bjt_phase_history(&circuit, &mut history).unwrap();
     let delay = circuit.bjts.devices[0].legacy_excess_phase_delay();
-    for time in [1.0_f64.next_up(), 1.0_f64.next_up().next_up()] {
+    for (time, order) in [
+        (1.0_f64.next_up(), DelayEventOrder::AtLeast(3)),
+        (1.0_f64.next_up().next_up(), DelayEventOrder::Unknown),
+    ] {
         history.phase[0]
             .as_mut()
             .unwrap()
-            .accept_discontinuity(time, 1.0, 2.0, delay, None)
+            .accept_event(
+                time,
+                rspice_veriloga_runtime::transport_delay::DelayEvent {
+                    left: 2.0,
+                    right: 2.0,
+                    order,
+                },
+                delay,
+                None,
+            )
             .unwrap();
     }
     advance(&circuit, &mut history, 2.0);
@@ -425,6 +536,7 @@ fn gp_phase_arrival_groups_only_one_representable_clock_interval() {
         .unwrap()
         .unwrap();
     assert_eq!(arrival.time, (delay + 1.0).next_up());
+    assert_eq!(arrival.order, DelayEventOrder::Unknown);
     advance(&circuit, &mut history, arrival.time);
     assert_eq!(
         history.phase[0]

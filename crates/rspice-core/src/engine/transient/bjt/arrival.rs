@@ -4,6 +4,15 @@
 use super::*;
 use rspice_veriloga_runtime::transport_delay::DelayEventOrder;
 
+/// Linear delay interpolation needs bounded curvature. BE, trapezoidal and
+/// BDF2 integration require no derivative continuity above order two. A C2
+/// physical input can therefore cross the ordinary adaptive grid; its stored
+/// knot and interpolation-error control remain intact. Unknown provenance
+/// never qualifies. Keep order-two events even during first-order restarts.
+fn requires_tracking(order: DelayEventOrder) -> bool {
+    !matches!(order, DelayEventOrder::AtLeast(n) if n >= 3)
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(in crate::engine::transient) struct PhaseArrival {
     pub time: Value,
@@ -70,32 +79,70 @@ pub(in crate::engine::transient) fn next(
     history: &BjtTransientHistory,
     time: Value,
     stop: Value,
+    method: IntegrationMethod,
     abort: &dyn AbortSignal,
 ) -> Result<Option<PhaseArrival>, SimulationError> {
+    // Exhaustive on purpose: a higher-order integrator must qualify its own
+    // tracking cutoff before it can use this dispatcher.
+    match method {
+        IntegrationMethod::BackwardEuler
+        | IntegrationMethod::Trapezoidal
+        | IntegrationMethod::Gear2
+        | IntegrationMethod::TrapGear => {}
+    }
     let mut earliest: Option<PhaseArrival> = None;
-    visit_next(circuit, history, time, stop, abort, |arrival| {
-        match &mut earliest {
-            Some(previous) if previous.time == arrival.time => {
-                previous.order = previous.order.merge(arrival.order);
+    visit_next_matching(
+        circuit,
+        history,
+        time,
+        stop,
+        abort,
+        |arrival| requires_tracking(arrival.order),
+        |arrival| {
+            match &mut earliest {
+                Some(previous) if previous.time == arrival.time => {
+                    previous.order = previous.order.merge(arrival.order);
+                }
+                previous if previous.is_none_or(|previous| arrival.time < previous.time) => {
+                    *previous = Some(arrival);
+                }
+                _ => {}
             }
-            previous if previous.is_none_or(|previous| arrival.time < previous.time) => {
-                *previous = Some(arrival);
-            }
-            _ => {}
-        }
-        Ok(())
-    })?;
+            Ok(())
+        },
+    )?;
     Ok(earliest)
 }
 
-/// Retain each device's cause before a simultaneous arrival is reduced to a
-/// global deadline. Propagation depends on that device's physical incidence.
+/// Retain each device's cause at a selected physical endpoint, including a
+/// smooth cause coincident with another event. Earlier C2 arrivals impose no
+/// deadline; earlier rough/unknown causes still expose a skipped clock.
 pub(in crate::engine::transient) fn visit_next(
     circuit: &crate::CircuitData,
     history: &BjtTransientHistory,
     time: Value,
     stop: Value,
     abort: &dyn AbortSignal,
+    visit: impl FnMut(PhaseArrival) -> Result<(), SimulationError>,
+) -> Result<(), SimulationError> {
+    visit_next_matching(
+        circuit,
+        history,
+        time,
+        stop,
+        abort,
+        |arrival| arrival.time == stop || requires_tracking(arrival.order),
+        visit,
+    )
+}
+
+fn visit_next_matching(
+    circuit: &crate::CircuitData,
+    history: &BjtTransientHistory,
+    time: Value,
+    stop: Value,
+    abort: &dyn AbortSignal,
+    retain: impl Fn(PhaseArrival) -> bool,
     mut visit: impl FnMut(PhaseArrival) -> Result<(), SimulationError>,
 ) -> Result<(), SimulationError> {
     if abort.is_aborted() {
@@ -143,18 +190,31 @@ pub(in crate::engine::transient) fn visit_next(
                 "history belongs to a different nominal phase delay".to_owned(),
             ));
         }
-        if let Some(arrival) = phase.next_event_after(time).map_err(refuse)? {
-            if arrival.time <= time {
+        let mut cursor = time;
+        while let Some(arrival) = phase.next_event_after(cursor).map_err(refuse)? {
+            if arrival.time <= cursor {
                 return Err(refuse(
                     "arrival does not advance the accepted clock".to_owned(),
                 ));
             }
-            if arrival.time <= stop {
-                visit(PhaseArrival {
-                    time: arrival.time,
-                    device_index: index,
-                    order: arrival.order,
-                })?;
+            if arrival.time > stop {
+                break;
+            }
+            let arrival = PhaseArrival {
+                time: arrival.time,
+                device_index: index,
+                order: arrival.order,
+            };
+            // The buffer merges every contributor to this represented clock
+            // before filtering. A known smooth event cannot hide an unknown
+            // or rough event in the same group or a later group.
+            if retain(arrival) {
+                visit(arrival)?;
+                break;
+            }
+            cursor = arrival.time;
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
             }
         }
     }

@@ -171,9 +171,16 @@ fn causal_event_orders_use_each_tied_delay_owner_before_merging() {
             *phase = Some(replacement);
         }
         let before = history.clone();
-        let next = bjt::arrival::next(&circuit, &history, accepted_time, delay, &NoAbort)
-            .unwrap()
-            .unwrap();
+        let next = bjt::arrival::next(
+            &circuit,
+            &history,
+            accepted_time,
+            delay,
+            IntegrationMethod::TrapGear,
+            &NoAbort,
+        )
+        .unwrap()
+        .unwrap();
         assert_eq!(next.order, DelayEventOrder::Unknown);
         let missed_time = delay.next_up();
         let missed = engine
