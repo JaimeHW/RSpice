@@ -1,4 +1,4 @@
-//! Admission contract while native GP transient excess-phase history is absent.
+//! Admission contract while native GP transient excess phase is being qualified.
 //! These refusals are temporary capability boundaries, not phase qualification.
 
 use rspice_core::engine::{
@@ -27,7 +27,7 @@ fn assert_phase_refusal(error: SimulationError, instance: &str) {
         "{message}"
     );
     assert!(
-        message.contains("not implemented") && message.contains("history"),
+        message.contains("not yet supported") && message.contains("history"),
         "{message}"
     );
 }
@@ -41,20 +41,27 @@ fn gp_transient_must_not_silently_ignore_nonzero_ptf() {
         SpiceDialect::Xyce,
         SpiceDialect::BestAvailable,
     ] {
-        let engine = Engine::new(SimulationConfig::default().with_spice_dialect(dialect));
-        for private in ["", "RB=100 RBM=20 IRB=1e-5 RE=1 RC=2"] {
-            for phase in ["90", "21", "-21", "1e-200"] {
-                let source = deck(&format!("TF=1n PTF={phase} {private}"));
-                for startup in [
-                    TransientStartupMode::OperatingPoint,
-                    TransientStartupMode::Uic,
-                ] {
-                    assert_phase_refusal(
-                        engine
-                            .run_tran_with_startup_mode(&source, 2e-9, 4e-12, startup)
-                            .unwrap_err(),
-                        "Q1",
-                    );
+        for model in [
+            rspice_core::GpTransientPhaseModel::ExactDelay,
+            rspice_core::GpTransientPhaseModel::NgspiceWeil,
+        ] {
+            let mut config = SimulationConfig::default().with_spice_dialect(dialect);
+            config.gp_transient_phase_model = model;
+            let engine = Engine::new(config);
+            for private in ["", "RB=100 RBM=20 IRB=1e-5 RE=1 RC=2"] {
+                for phase in ["90", "21", "-21", "1e-200"] {
+                    let source = deck(&format!("TF=1n PTF={phase} {private}"));
+                    for startup in [
+                        TransientStartupMode::OperatingPoint,
+                        TransientStartupMode::Uic,
+                    ] {
+                        assert_phase_refusal(
+                            engine
+                                .run_tran_with_startup_mode(&source, 2e-9, 4e-12, startup)
+                                .unwrap_err(),
+                            "Q1",
+                        );
+                    }
                 }
             }
         }

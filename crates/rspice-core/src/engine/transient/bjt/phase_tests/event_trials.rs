@@ -19,7 +19,7 @@ fn gp_right_trial_holds_incoming_transport_through_nonlinear_bias_probes() {
                 for (factor, weight) in [(0.5, 0.0), (2.5, 0.6), (16.0, 0.9375)] {
                     let delayed = (1.0 - weight) * anchor + weight * left;
                     let trial = BjtPhaseTrial {
-                        history: &history,
+                        history: (&history).into(),
                         time: factor * delay,
                         left_limit: Some(left),
                         incoming_arrival: false,
@@ -74,7 +74,7 @@ fn gp_right_trial_refuses_invalid_left_state_without_changing_history() {
     let before = history.clone();
     for left in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
         let trial = BjtPhaseTrial {
-            history: &history,
+            history: (&history).into(),
             time: 3.0 * delay,
             left_limit: Some(left),
             incoming_arrival: false,
@@ -87,7 +87,7 @@ fn gp_right_trial_refuses_invalid_left_state_without_changing_history() {
         );
     }
     let trial = BjtPhaseTrial {
-        history: &history,
+        history: (&history).into(),
         time: 2.0 * delay,
         left_limit: Some(2e-5),
         incoming_arrival: false,
@@ -119,7 +119,7 @@ fn gp_incoming_trial_uses_the_arriving_left_value_and_physical_gradient() {
                 .unwrap();
             let accepted = history.clone();
             let phase = BjtPhaseTrial {
-                history: &history,
+                history: (&history).into(),
                 time,
                 left_limit: None,
                 incoming_arrival: true,

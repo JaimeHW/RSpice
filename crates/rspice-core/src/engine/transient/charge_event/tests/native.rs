@@ -64,8 +64,10 @@ fn physical_sample(
             bjt.node_emitter,
             bjt.node_substrate,
         ];
-        let rate = phase
-            .history
+        let super::super::super::bjt::BjtPhaseHistoryRef::Delay(history) = phase.history else {
+            panic!("physical event fixture requires exact-delay history");
+        };
+        let rate = history
             .fixed_trajectory_slope(
                 phase.time,
                 phase.left_limit.unwrap(),
@@ -181,7 +183,7 @@ fn charge_event_solves_native_coupled_bjt_charge_and_held_transport_history() {
             .unwrap();
         let checkpoint = history.checkpoint();
         let phase = BjtPhaseTrial {
-            history: &history,
+            history: (&history).into(),
             time: delay,
             left_limit: Some(forward),
             incoming_arrival: false,
@@ -269,7 +271,7 @@ fn flux_event_retains_active_gp_transport_memory_in_finite_terminal_currents() {
             .unwrap();
         let checkpoint = history.checkpoint();
         let phase = BjtPhaseTrial {
-            history: &history,
+            history: (&history).into(),
             time,
             left_limit: Some(incoming_forward),
             incoming_arrival: false,

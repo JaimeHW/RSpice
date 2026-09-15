@@ -57,6 +57,7 @@ pub(super) struct ReactiveBreakpointScheduling<'a> {
 #[derive(Clone)]
 struct AcceptedBjtValues {
     phase_sample: Option<AcceptedBjtPhaseSample>,
+    weil_phase: Option<bjt::weil::WeilHistory>,
     charges: [Value; BJT_DYNAMIC_CHARGE_COUNT],
     currents: [Value; BJT_DYNAMIC_CHARGE_COUNT],
     internal: [Value; BJT_INTERNAL_STATE_DIM],
@@ -555,6 +556,27 @@ impl Engine {
                 })?;
             values.push(AcceptedBjtValues {
                 phase_sample,
+                weil_phase: history.weil_phase[idx]
+                    .as_ref()
+                    .map(|phase| {
+                        let forward =
+                            bjt.legacy_forward_transport_branch(&internal)
+                                .ok_or_else(|| {
+                                    format!("BJT '{}' has no GP forward transport", bjt.name)
+                                })?;
+                        phase.prepare(
+                            accepted_time,
+                            forward.current,
+                            bjt.legacy_excess_phase_delay(),
+                        )
+                    })
+                    .transpose()
+                    .map_err(|error| {
+                        SimulationError::Circuit(format!(
+                            "BJT '{}' accepted Weil history: {error}",
+                            bjt.name
+                        ))
+                    })?,
                 charges,
                 currents,
                 internal,
@@ -572,6 +594,7 @@ impl Engine {
 
     fn commit_bjt_history(history: &mut BjtTransientHistory, prepared: PreparedBjtHistory) {
         for (idx, value) in prepared.values.into_iter().enumerate() {
+            history.weil_phase[idx] = value.weil_phase;
             history.phase_outgoing_slopes[idx] =
                 value.phase_sample.and_then(|sample| sample.outgoing_slope);
             if let Some(sample) = value.phase_sample {

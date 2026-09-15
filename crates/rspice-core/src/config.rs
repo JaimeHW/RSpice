@@ -158,6 +158,17 @@ pub enum SpiceDialect {
     Xyce,
 }
 
+/// Transient phase operator for native Gummel–Poon TF/PTF models.
+/// Public nonzero-PTF execution remains guarded pending full qualification.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum GpTransientPhaseModel {
+    /// Transport the complete nonlinear forward current by TF*PTF*pi/180.
+    #[default]
+    ExactDelay,
+    /// Reproduce ngspice's two-history Weil update on the accepted time grid.
+    NgspiceWeil,
+}
+
 /// Interpolation policy for lossless Xyce `TRA` delay history.
 ///
 /// Modern Xyce detects derivative corners and replaces the three-point
@@ -249,6 +260,8 @@ pub struct SimulationConfig {
     pub integration_method: crate::numerics::integration::IntegrationMethod,
     /// Broad SPICE compatibility policy used by config resolution.
     pub spice_dialect: SpiceDialect,
+    /// Explicit GP transient phase law; independent of evaluator dialect.
+    pub gp_transient_phase_model: GpTransientPhaseModel,
     /// Lossless transmission-line delay interpolation used in Xyce mode.
     /// Other dialects retain their native interpolation policy.
     pub xyce_tra_interpolation: XyceTraInterpolation,
@@ -857,6 +870,7 @@ impl Default for SimulationConfig {
             digital_delay_type: None,
             integration_method: crate::numerics::integration::IntegrationMethod::TrapGear,
             spice_dialect: SpiceDialect::BestAvailable,
+            gp_transient_phase_model: GpTransientPhaseModel::ExactDelay,
             xyce_tra_interpolation: XyceTraInterpolation::default(),
             jfet_level2_model: JfetLevel2Model::DialectDefault,
             matrix_solver: None,

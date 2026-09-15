@@ -120,7 +120,7 @@ fn gp_phase_rejects_history_from_another_nominal_delay() {
         .unwrap();
     let checkpoint = history.checkpoint();
     let trial = BjtPhaseTrial {
-        history: &history,
+        history: (&history).into(),
         time: delay,
         left_limit: None,
         incoming_arrival: false,
@@ -256,7 +256,7 @@ fn gp_phase_companion_has_conservative_current_and_matrix_incidence() {
             let base =
                 Engine::assemble_legacy_bjt_transient_linearization(&bjt, &snapshot, step).unwrap();
             let phase = BjtPhaseTrial {
-                history: &history,
+                history: (&history).into(),
                 time,
                 left_limit: None,
                 incoming_arrival: false,
@@ -340,7 +340,7 @@ fn gp_phase_reduced_jacobian_matches_resolved_terminal_currents() {
                 q_prev_prev: &q,
                 cq_prev: &zero,
                 phase: Some(BjtPhaseTrial {
-                    history: &history,
+                    history: (&history).into(),
                     time,
                     left_limit,
                     incoming_arrival: false,

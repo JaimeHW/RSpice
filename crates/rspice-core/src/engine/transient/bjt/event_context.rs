@@ -17,7 +17,13 @@ impl<'a> BjtPhaseContext<'a> {
         self,
         history: &'h BjtTransientHistory,
     ) -> Result<BjtPhaseHistoryView<'h, 'a>, SimulationError> {
-        if history.phase_outgoing_slopes.len() != history.phase.len()
+        if history.weil_phase.len() != history.phase.len()
+            || history
+                .phase
+                .iter()
+                .zip(&history.weil_phase)
+                .any(|(delay, weil)| delay.is_some() && weil.is_some())
+            || history.phase_outgoing_slopes.len() != history.phase.len()
             || history
                 .phase_outgoing_slopes
                 .iter()

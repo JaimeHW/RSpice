@@ -443,7 +443,7 @@ impl Engine {
             let mut terminal = model.mna_terminal_currents_at_solution(solution);
             if let Some(phase) = phases[index] {
                 let correction = bjt::BjtPhaseTrial {
-                    history: phase.history,
+                    history: (phase.history).into(),
                     time: step.time,
                     left_limit: Some(phase.endpoint),
                     incoming_arrival: false,
@@ -535,6 +535,7 @@ impl Engine {
                 )));
             }
             values.push(AcceptedBjtValues {
+                weil_phase: None,
                 phase_sample,
                 charges,
                 currents,

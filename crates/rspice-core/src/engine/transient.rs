@@ -5514,6 +5514,22 @@ impl Engine {
             .map(|checkpoint| checkpoint.restore_accepted_junction_transient_history(&circuit))
             .transpose()
             .map_err(SimulationError::Circuit)?;
+        if let Some(restored) = &restored_accepted_junction_history {
+            let wrong_phase_model = match self.config.gp_transient_phase_model {
+                crate::config::GpTransientPhaseModel::ExactDelay => {
+                    restored.bjt.weil_phase.iter().any(Option::is_some)
+                }
+                crate::config::GpTransientPhaseModel::NgspiceWeil => {
+                    restored.bjt.phase.iter().any(Option::is_some)
+                }
+            };
+            if wrong_phase_model {
+                return Err(SimulationError::Circuit(
+                    "checkpoint GP phase history does not match the selected transient phase model"
+                        .into(),
+                ));
+            }
+        }
         let exact_runtime_resume_blockers = resume
             .filter(|checkpoint| {
                 matches!(
@@ -5677,7 +5693,11 @@ impl Engine {
             ReactiveHistorySeed::SolvedBias
         };
         let mut bjt_history = Self::initialize_bjt_history(&circuit, &solution, reactive_seed);
-        Self::initialize_bjt_phase_history(&circuit, &mut bjt_history)?;
+        Self::initialize_bjt_phase_history_for_model(
+            &circuit,
+            &mut bjt_history,
+            self.config.gp_transient_phase_model,
+        )?;
         let mut vbic_snapshot_cache = vec![None; circuit.bjts.devices.len()];
         // On a fresh run, ngspice seeds CKTdeltaOld[] with maxstep before the
         // first transient point. Mirror that only at startup so early
@@ -6526,7 +6546,9 @@ impl Engine {
         let mut last_stamped_rollback: Option<TransientMeritRollback> = None;
         // Model membership is fixed, including after checkpoint restoration.
         // Ordinary zero-PTF circuits need no per-attempt phase-history scan.
-        let has_bjt_phase_history = bjt_history.phase.iter().any(Option::is_some);
+        let has_bjt_delay_history = bjt_history.phase.iter().any(Option::is_some);
+        let has_bjt_phase_history =
+            has_bjt_delay_history || bjt_history.weil_phase.iter().any(Option::is_some);
 
         // Adaptive integration may legitimately take far more attempts than
         // `TSTOP / DELMAX`: rejected local trials and accepted steps below the
@@ -6584,7 +6606,7 @@ impl Engine {
             // Rough or unknown transport arrivals are mandatory clocks. Source
             // breakpoint tolerances and the Verilog-A floor grid do not own
             // them; unsupported subminimum gaps must refuse explicitly.
-            let phase_arrival = if has_bjt_phase_history {
+            let phase_arrival = if has_bjt_delay_history {
                 bjt::arrival::next(
                     &circuit,
                     &bjt_history,

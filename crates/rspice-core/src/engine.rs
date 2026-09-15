@@ -100,8 +100,8 @@ pub use crate::analysis::transient::waveform;
 mod xspice_settle_ratchet;
 
 pub use crate::config::{
-    BypassConfig, ConvergenceConfig, DampingStrategy, JfetLevel2Model, SimulationConfig,
-    SimulationConfigError, SpiceDialect, XyceTraInterpolation,
+    BypassConfig, ConvergenceConfig, DampingStrategy, GpTransientPhaseModel, JfetLevel2Model,
+    SimulationConfig, SimulationConfigError, SpiceDialect, XyceTraInterpolation,
 };
 pub use crate::resource::{ResourceKind, ResourceLimitError, ResourceLimits};
 #[cfg(feature = "veriloga")]

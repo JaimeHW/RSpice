@@ -188,7 +188,9 @@ fn checkpoint_operation_result<T>(
 /// Version 46 retains separate left limits at native and runtime transport jumps.
 /// Version 47 retains known transport event orders; earlier sided events stay unknown.
 /// Version 48 retains analytic outgoing GP anchor slopes for phase error control.
-const FORMAT_VERSION: u32 = 48;
+/// Version 49 retains the separately selected GP Weil filter's accepted memory.
+const FORMAT_VERSION: u32 = 49;
+const BJT_WEIL_HISTORY_FORMAT_VERSION: u32 = 49;
 const BJT_PHASE_SLOPE_FORMAT_VERSION: u32 = 48;
 const TRANSPORT_EVENT_ORDER_FORMAT_VERSION: u32 = 47;
 const SIDED_TRANSPORT_FORMAT_VERSION: u32 = 46;
@@ -1247,7 +1249,13 @@ pub(crate) fn simulation_checkpoint_identity(config: &SimulationConfig) -> Strin
     // v92 binds the C2 GP transport-event tracking cutoff.
     // v93 binds native GP physical-event integration epochs and passive clocks.
     // v94 binds ngspice's native GP thermal constants.
-    hasher.update(b"rspice-transient-resolved-config-v94\0");
+    // v95 binds the selected GP transient phase law and legacy filter memory.
+    hasher.update(b"rspice-transient-resolved-config-v95\0");
+    hash_field(
+        &mut hasher,
+        "gp_transient_phase_model",
+        config.gp_transient_phase_model as u64,
+    );
     hash_field(&mut hasher, "temperature", config.temperature.to_bits());
     hash_field(&mut hasher, "ramptime", config.ramptime.to_bits());
     hash_field(&mut hasher, "digital_delay_type", config.digital_delay_type);
@@ -2621,6 +2629,7 @@ fn allocate_bjt_transient_history(
     }
     Ok(BjtTransientHistory {
         phase: values!("accepted BJT phase"),
+        weil_phase: values!("accepted BJT Weil phase"),
         phase_outgoing_slopes: values!("accepted BJT outgoing phase slopes"),
         vbe_prev: values!("accepted BJT vbe_prev"),
         vbe_prev_prev: values!("accepted BJT vbe_prev_prev"),
@@ -3174,6 +3183,36 @@ fn read_accepted_junction_transient_history(
             None
         };
         bjt_history.phase_outgoing_slopes.push(slope);
+        let weil = if version >= BJT_WEIL_HISTORY_FORMAT_VERSION {
+            let line = lines.next().ok_or("missing accepted GP Weil history")?;
+            let mut fields = line.split_whitespace();
+            if fields.next() != Some("accepted_bjt_weil") {
+                return Err("malformed accepted GP Weil history".into());
+            }
+            let present = read_history_bool(&mut fields, "BJT", row, "Weil history")?;
+            let history = if present {
+                let mut value = |name| read_finite_value_field(&mut fields, "BJT Weil", name);
+                let history = super::bjt::weil::WeilHistory {
+                    time: value("time")?,
+                    previous_dt: value("previous_dt")?,
+                    delay: value("delay")?,
+                    input: value("input")?,
+                    output: value("output")?,
+                    previous_output: value("previous_output")?,
+                };
+                history.validate()?;
+                Some(history)
+            } else {
+                None
+            };
+            if fields.next().is_some() {
+                return Err("extra GP Weil history field".into());
+            }
+            history
+        } else {
+            None
+        };
+        bjt_history.weil_phase.push(weil);
     }
 
     let bjt_dt_line = lines
@@ -3401,6 +3440,7 @@ fn accepted_junction_history_payload_is_empty(
         && checkpoint.bjt_runtime_tags.is_empty()
         && checkpoint.vbic_snapshot_cache.is_empty()
         && bjt.phase.is_empty()
+        && bjt.weil_phase.is_empty()
         && bjt.phase_outgoing_slopes.is_empty()
         && bjt.vbe_prev.is_empty()
         && bjt.vbe_prev_prev.is_empty()
@@ -3473,6 +3513,8 @@ fn validate_accepted_junction_transient_history_numeric_state(
             super::GP_MNA_TRANSIENT_HISTORY_RUNTIME_TAG,
             super::GP_PHASE_TRANSIENT_HISTORY_RUNTIME_TAG,
             super::GP_MNA_PHASE_TRANSIENT_HISTORY_RUNTIME_TAG,
+            super::GP_WEIL_TRANSIENT_HISTORY_RUNTIME_TAG,
+            super::GP_MNA_WEIL_TRANSIENT_HISTORY_RUNTIME_TAG,
             super::VBIC_TRANSIENT_HISTORY_RUNTIME_TAG,
         ],
         budget,
@@ -3481,6 +3523,7 @@ fn validate_accepted_junction_transient_history_numeric_state(
     let bjt = &checkpoint.bjt_history;
     for (field, actual) in [
         ("phase", bjt.phase.len()),
+        ("weil_phase", bjt.weil_phase.len()),
         ("phase_outgoing_slopes", bjt.phase_outgoing_slopes.len()),
         ("vbe_prev", bjt.vbe_prev.len()),
         ("vbe_prev_prev", bjt.vbe_prev_prev.len()),
@@ -3529,6 +3572,14 @@ fn validate_accepted_junction_transient_history_numeric_state(
             return Err(
                 "outgoing GP phase slope requires a finite value and accepted history".into(),
             );
+        }
+    }
+    for (phase, weil) in bjt.phase.iter().zip(&bjt.weil_phase) {
+        if let Some(weil) = weil {
+            if phase.is_some() {
+                return Err("GP history cannot contain both phase laws".into());
+            }
+            weil.validate()?;
         }
     }
     if bjt
@@ -6132,10 +6183,23 @@ impl TransientCheckpoint {
                 super::GP_PHASE_TRANSIENT_HISTORY_RUNTIME_TAG
                     | super::GP_MNA_PHASE_TRANSIENT_HISTORY_RUNTIME_TAG
             );
-            if phase.is_some() != phase_tag {
+            let weil = self.accepted_junction_history.bjt_history.weil_phase[index].as_ref();
+            let weil_tag = matches!(
+                tag,
+                super::GP_WEIL_TRANSIENT_HISTORY_RUNTIME_TAG
+                    | super::GP_MNA_WEIL_TRANSIENT_HISTORY_RUNTIME_TAG
+            );
+            if phase.is_some() != phase_tag || weil.is_some() != weil_tag {
                 return Err(format!(
                     "BJT phase history {index} presence does not match its runtime tag"
                 ));
+            }
+            if let Some(weil) = weil {
+                if weil.time != self.time {
+                    return Err(format!(
+                        "BJT Weil history {index} does not match the accepted clock"
+                    ));
+                }
             }
             if let Some(phase) = phase {
                 if !matches!(
@@ -7584,6 +7648,12 @@ impl TransientCheckpoint {
         }
         count = count
             .saturating_add(bjt.phase_outgoing_slopes.len().saturating_mul(2))
+            .saturating_add(
+                bjt.weil_phase
+                    .iter()
+                    .map(|phase| if phase.is_some() { 7usize } else { 1 })
+                    .fold(0usize, usize::saturating_add),
+            )
             .saturating_add(bjt.vbe_prev.len())
             .saturating_add(bjt.vbe_prev_prev.len())
             .saturating_add(bjt.ibe_prev.len())
@@ -8146,6 +8216,24 @@ impl TransientCheckpoint {
             match history.phase_outgoing_slopes[index] {
                 Some(slope) => out.push_str(&format!("accepted_bjt_transport_slope 1 {slope}\n")),
                 None => out.push_str("accepted_bjt_transport_slope 0\n"),
+            }
+            match &history.weil_phase[index] {
+                Some(phase) => {
+                    out.push_str("accepted_bjt_weil 1");
+                    push_values(
+                        &mut out,
+                        &[
+                            phase.time,
+                            phase.previous_dt,
+                            phase.delay,
+                            phase.input,
+                            phase.output,
+                            phase.previous_output,
+                        ],
+                    );
+                    out.push('\n');
+                }
+                None => out.push_str("accepted_bjt_weil 0\n"),
             }
         }
         out.push_str(&format!(
@@ -10189,6 +10277,74 @@ mod tests {
     }
 
     #[test]
+    fn gp_weil_checkpoint_round_trip_wire_validation_and_v48_absence() {
+        use super::super::bjt::weil::WeilHistory;
+        let mut original = sample();
+        original.accepted_junction_history = sample_junction_history();
+        let old = TransientCheckpoint::from_text(&legacy_text(&original, 48)).unwrap();
+        assert!(old.accepted_junction_history.bjt_history.weil_phase[0].is_none());
+        let time = original.time;
+        original.accepted_junction_history.bjt_runtime_tags[0] =
+            super::super::GP_WEIL_TRANSIENT_HISTORY_RUNTIME_TAG.into();
+        original.accepted_junction_history.bjt_history.weil_phase[0] = Some(WeilHistory {
+            time,
+            previous_dt: time / 4.0,
+            delay: time * 0.75,
+            input: 1e-4,
+            output: -3e-5,
+            previous_output: -0.0,
+        });
+        for encoding in [
+            TransientCheckpointEncoding::Unpacked,
+            TransientCheckpointEncoding::Packed,
+        ] {
+            let restored =
+                TransientCheckpoint::from_bytes(&original.to_bytes(encoding).unwrap()).unwrap();
+            assert_eq!(
+                restored.accepted_junction_history,
+                original.accepted_junction_history
+            );
+            assert_eq!(
+                restored.accepted_junction_history.bjt_history.weil_phase[0]
+                    .as_ref()
+                    .unwrap()
+                    .previous_output
+                    .to_bits(),
+                (-0.0_f64).to_bits()
+            );
+        }
+        let text = original.to_text();
+        let row = text
+            .lines()
+            .find(|line| line.starts_with("accepted_bjt_weil "))
+            .unwrap();
+        let mut corrupt = vec![
+            "accepted_bjt_weil 0".to_owned(),
+            "accepted_bjt_weil 0 extra".into(),
+            "accepted_bjt_weil 2".into(),
+            "accepted_bjt_weil 1".into(),
+            format!("{row} extra"),
+            format!("accepted_bjt_weil 1 {} {} 1 1 1 1", time / 2.0, time / 4.0),
+            format!("accepted_bjt_weil 1 {time} 0 1 1 1 1"),
+            format!("accepted_bjt_weil 1 {time} {} 1 1 1 1", time * 2.0),
+            format!("accepted_bjt_weil 1 {time} {time} 0 1 1 1"),
+        ];
+        for index in 2..8 {
+            let mut fields: Vec<_> = row.split_whitespace().collect();
+            fields[index] = "NaN";
+            corrupt.push(fields.join(" "));
+        }
+        for replacement in corrupt {
+            assert!(
+                TransientCheckpoint::from_text(&text.replacen(row, &replacement, 1)).is_err(),
+                "accepted malformed Weil row: {replacement}"
+            );
+        }
+        // An old image cannot advertise a filter law whose memory it lacks.
+        assert!(TransientCheckpoint::from_text(&legacy_text(&original, 48)).is_err());
+    }
+
+    #[test]
     fn gp_phase_checkpoint_round_trip_and_wire_validation() {
         use rspice_veriloga_runtime::transport_delay::{
             DelayBuffer, DelayCheckpoint, DelayConfiguration,
@@ -10653,6 +10809,7 @@ mod tests {
             bjt_runtime_tags: vec![super::super::BJT_TRANSIENT_HISTORY_RUNTIME_TAG.to_string()],
             bjt_history: BjtTransientHistory {
                 phase: vec![None],
+                weil_phase: vec![None],
                 phase_outgoing_slopes: vec![None],
                 vbe_prev: vec![0.61],
                 vbe_prev_prev: vec![0.60],
@@ -11136,6 +11293,9 @@ mod tests {
             if version < BJT_PHASE_SLOPE_FORMAT_VERSION
                 && line.starts_with("accepted_bjt_transport_slope ")
             {
+                continue;
+            }
+            if version < BJT_WEIL_HISTORY_FORMAT_VERSION && line.starts_with("accepted_bjt_weil ") {
                 continue;
             }
             if version < BJT_PHASE_HISTORY_FORMAT_VERSION
@@ -12678,6 +12838,7 @@ mod tests {
             ..AcceptedJunctionTransientHistoryCheckpoint::default()
         };
         let mandatory_bjt_values = 10
+            + 1 // optional legacy Weil phase presence
             + 2 // optional outgoing phase slope, including its presence state
             + 4 * BJT_DYNAMIC_CHARGE_COUNT
             + 2 * BJT_INTERNAL_STATE_DIM
@@ -13520,7 +13681,7 @@ mod tests {
     /// asserting current-format behaviour after two renumberings moved it into
     /// the legacy ladder.
     #[cfg(feature = "veriloga")]
-    const RUNTIME_VERILOGA_FORMAT_STATE_CONTRACTS: [(u32, u32); 32] = [
+    const RUNTIME_VERILOGA_FORMAT_STATE_CONTRACTS: [(u32, u32); 33] = [
         (17, 1),
         (18, 1),
         (19, 1),
@@ -13553,6 +13714,7 @@ mod tests {
         (46, 12),
         (47, 13),
         (48, 13),
+        (49, 13),
     ];
 
     #[cfg(feature = "veriloga")]

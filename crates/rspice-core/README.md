@@ -865,12 +865,20 @@ option is `.options eventfluxtol=1e-24`; ordered `option` commands also accept
 it. Explicit configuration overrides take precedence over authored options.
 This setting controls event conservation independently of charge tolerance
 and ordinary inductor timestep truncation. Existing device admission limits
-still apply. Checkpoint configuration identity version 94 binds this setting,
+still apply. Checkpoint configuration identity version 95 binds this setting,
 the GP transport-event tracking policy and physical-event integration restart;
 checkpoints with an earlier configuration identity require a fresh run.
 Native GP models in ngspice mode now use ngspice 46's thermal constants
 (`k=1.38064852e-23`, `q=1.6021766208e-19`) for their temperature-scaled
 equations. BestAvailable, Xyce and VBIC retain their respective constants.
+
+`SimulationConfig::gp_transient_phase_model` selects `ExactDelay` (default)
+or `NgspiceWeil` independently of the evaluator dialect. The latter uses
+ngspice's discrete two-sample forward-current filter, with immutable trial
+evaluation and accepted state preserved across charge-integration restarts.
+Checkpoint format 49 stores its accepted input, two outputs, delay and step
+size; changing the selected phase law rejects the old checkpoint. This Rust
+setting does not lift the public nonzero-PTF admission guard below.
 
 The internal GP transient qualification path tracks all unknown events and
 known discontinuities through derivative order two. Solver-certified C2

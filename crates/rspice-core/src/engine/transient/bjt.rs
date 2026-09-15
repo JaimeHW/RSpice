@@ -4,15 +4,30 @@ use super::*;
 use crate::device::BjtType;
 
 impl Engine {
+    #[cfg(test)]
     pub(in crate::engine) fn initialize_bjt_phase_history(
         circuit: &crate::circuit::CircuitData,
         history: &mut BjtTransientHistory,
     ) -> Result<(), SimulationError> {
+        Self::initialize_bjt_phase_history_for_model(
+            circuit,
+            history,
+            crate::config::GpTransientPhaseModel::ExactDelay,
+        )
+    }
+
+    pub(in crate::engine::transient) fn initialize_bjt_phase_history_for_model(
+        circuit: &crate::circuit::CircuitData,
+        history: &mut BjtTransientHistory,
+        model: crate::config::GpTransientPhaseModel,
+    ) -> Result<(), SimulationError> {
         let mut phase = Vec::with_capacity(circuit.bjts.devices.len());
+        let mut weil_phase = Vec::with_capacity(circuit.bjts.devices.len());
         for (index, bjt) in circuit.bjts.devices.iter().enumerate() {
             let delay = bjt.legacy_excess_phase_delay();
             if delay == 0.0 {
                 phase.push(None);
+                weil_phase.push(None);
                 continue;
             }
             let forward = bjt
@@ -23,6 +38,19 @@ impl Engine {
                         bjt.name
                     ))
                 })?;
+            if model == crate::config::GpTransientPhaseModel::NgspiceWeil {
+                weil_phase.push(Some(
+                    weil::WeilHistory::new(delay, forward.current).map_err(|error| {
+                        SimulationError::Circuit(format!(
+                            "BJT '{}' phase initialization: {error}",
+                            bjt.name
+                        ))
+                    })?,
+                ));
+                phase.push(None);
+                continue;
+            }
+            weil_phase.push(None);
             let mut buffer = rspice_veriloga_runtime::transport_delay::DelayBuffer::new(4);
             buffer
                 .accept_sample(0.0, forward.current, delay, None)
@@ -36,13 +64,14 @@ impl Engine {
         }
         history.phase_outgoing_slopes = vec![None; phase.len()];
         history.phase = phase;
+        history.weil_phase = weil_phase;
         Ok(())
     }
 
-    /// GP PTF currently has an AC/noise operator but no transient history.
+    /// GP PTF transient operators remain under internal qualification.
     /// Refuse before startup effects, integration, or checkpoint publication.
     /// Remove this admission boundary only with delay residuals, accepted
-    /// history, error control, and restoration implemented together.
+    /// history, error control, and restoration qualified together.
     pub(in crate::engine) fn ensure_bjt_transient_phase_support(
         circuit: &crate::circuit::CircuitData,
         abort: &dyn AbortSignal,
@@ -56,7 +85,7 @@ impl Engine {
                 return Err(SimulationError::unsupported_capability(
                     "analysis.tran.bjt_excess_phase",
                     format!(
-                        "BJT '{}': transient GP PTF excess phase (nominal delay {delay:.17e} s) is not implemented; forward-transport delay history, timestep error control, and restart state are unavailable",
+                        "BJT '{}': transient GP PTF excess phase (nominal delay {delay:.17e} s) is not yet supported by the public simulation API; phase history, numerical accuracy, and restart qualification are incomplete",
                         bjt.name
                     ),
                 ));
@@ -72,7 +101,15 @@ impl BjtTransientHistory {
         index: usize,
         time: Value,
     ) -> Option<BjtPhaseTrial<'_>> {
-        self.phase[index].as_ref().map(|history| BjtPhaseTrial {
+        let history = self.phase[index]
+            .as_ref()
+            .map(BjtPhaseHistoryRef::Delay)
+            .or_else(|| {
+                self.weil_phase[index]
+                    .as_ref()
+                    .map(BjtPhaseHistoryRef::Weil)
+            });
+        history.map(|history| BjtPhaseTrial {
             history,
             time,
             left_limit: None,
@@ -100,7 +137,7 @@ pub(in crate::engine::transient) struct BjtChargeStep<'a> {
 /// The nonlinear solve cannot append, replace, or prune that memory.
 #[derive(Clone, Copy)]
 pub(in crate::engine::transient) struct BjtPhaseTrial<'a> {
-    pub history: &'a rspice_veriloga_runtime::transport_delay::DelayBuffer,
+    pub history: BjtPhaseHistoryRef<'a>,
     pub time: Value,
     /// Forward transport from a separately solved incoming electrical state.
     /// Right-side Newton probes hold this value fixed through every private
@@ -112,18 +149,38 @@ pub(in crate::engine::transient) struct BjtPhaseTrial<'a> {
     pub incoming_arrival: bool,
 }
 
+#[derive(Clone, Copy)]
+pub(in crate::engine::transient) enum BjtPhaseHistoryRef<'a> {
+    Delay(&'a rspice_veriloga_runtime::transport_delay::DelayBuffer),
+    Weil(&'a weil::WeilHistory),
+}
+
+impl<'a> From<&'a rspice_veriloga_runtime::transport_delay::DelayBuffer>
+    for BjtPhaseHistoryRef<'a>
+{
+    fn from(history: &'a rspice_veriloga_runtime::transport_delay::DelayBuffer) -> Self {
+        Self::Delay(history)
+    }
+}
+
 impl BjtPhaseTrial<'_> {
     /// The previous accepted phase current is a physical static DAE term.
     /// OneStep's half-current history must include it even though the generic
     /// static device sampler has no access to the engine's transport memory.
     fn accepted_correction_current(self, bjt: &crate::device::Bjt) -> Result<Value, String> {
-        let (time, forward) = self
-            .history
+        let history = match self.history {
+            BjtPhaseHistoryRef::Delay(history) => history,
+            BjtPhaseHistoryRef::Weil(history) => {
+                return Ok(history
+                    .evaluate(history.time, history.input, bjt.legacy_excess_phase_delay())?
+                    .correction);
+            }
+        };
+        let (time, forward) = history
             .accepted_samples()
             .next_back()
             .ok_or("GP phase has no accepted forward-current sample")?;
-        Ok(self
-            .history
+        Ok(history
             .difference_with_coefficients(time, forward, bjt.legacy_excess_phase_delay(), None)?
             .output)
     }
@@ -170,26 +227,30 @@ impl BjtPhaseTrial<'_> {
         if !delay.is_finite() || delay <= 0.0 {
             return Err("GP transport requires a finite positive nominal phase delay".into());
         }
-        let retained_delay =
-            self.history
-                .small_signal_delay(self.time, branch.current, delay, None)?;
+        let history = match self.history {
+            BjtPhaseHistoryRef::Delay(history) => history,
+            BjtPhaseHistoryRef::Weil(history) => {
+                if self.incoming_arrival || self.left_limit.is_some() {
+                    return Err("Weil filter cannot use an exact-delay event context".into());
+                }
+                let evaluation = history.evaluate(self.time, branch.current, delay)?;
+                branch.current = evaluation.correction;
+                for derivative in branch.d_internal.iter_mut().chain(&mut branch.d_external) {
+                    *derivative = evaluation.apply_correction_derivative(*derivative)?;
+                }
+                return Ok(branch);
+            }
+        };
+        let retained_delay = history.small_signal_delay(self.time, branch.current, delay, None)?;
         if retained_delay.to_bits() != delay.to_bits() {
             return Err("GP transport history belongs to a different nominal phase delay".into());
         }
         let evaluation = if self.incoming_arrival {
-            self.history
-                .difference_before_arrival(self.time, branch.current, delay, None)?
+            history.difference_before_arrival(self.time, branch.current, delay, None)?
         } else if let Some(left) = self.left_limit {
-            self.history.difference_at_discontinuity(
-                self.time,
-                left,
-                branch.current,
-                delay,
-                None,
-            )?
+            history.difference_at_discontinuity(self.time, left, branch.current, delay, None)?
         } else {
-            self.history
-                .difference_with_coefficients(self.time, branch.current, delay, None)?
+            history.difference_with_coefficients(self.time, branch.current, delay, None)?
         };
         branch.current = evaluation.output;
         for derivative in branch.d_internal.iter_mut().chain(&mut branch.d_external) {
@@ -229,6 +290,7 @@ pub(in crate::engine::transient) mod interpolation;
 pub(in crate::engine) use event_context::BjtPhaseContext;
 mod linearization;
 mod snapshot;
+pub(in crate::engine::transient) mod weil;
 
 #[cfg(test)]
 mod phase_tests;

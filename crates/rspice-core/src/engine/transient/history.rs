@@ -223,6 +223,8 @@ impl JfetTransientHistory {
 pub(in crate::engine) struct BjtTransientHistory {
     /// Physical transport memory is independent of Q/CQ integration epochs.
     pub(super) phase: Vec<Option<rspice_veriloga_runtime::transport_delay::DelayBuffer>>,
+    /// Legacy filter memory is independent of integration-order restarts.
+    pub(super) weil_phase: Vec<Option<bjt::weil::WeilHistory>>,
     /// Analytic outgoing input slope at the latest physical event anchor.
     pub(super) phase_outgoing_slopes: Vec<Option<Value>>,
     pub(super) vbe_prev: Vec<Value>,
@@ -261,10 +263,21 @@ pub(super) const GP_PHASE_TRANSIENT_HISTORY_RUNTIME_TAG: &str =
     "legacy-gummel-poon-exact-phase-history-v1";
 pub(super) const GP_MNA_PHASE_TRANSIENT_HISTORY_RUNTIME_TAG: &str =
     "promoted-gummel-poon-exact-phase-history-v1";
+pub(super) const GP_WEIL_TRANSIENT_HISTORY_RUNTIME_TAG: &str =
+    "legacy-gummel-poon-weil-phase-history-v1";
+pub(super) const GP_MNA_WEIL_TRANSIENT_HISTORY_RUNTIME_TAG: &str =
+    "promoted-gummel-poon-weil-phase-history-v1";
 pub(super) const VBIC_TRANSIENT_HISTORY_RUNTIME_TAG: &str = "promoted-vbic-transient-history-v1";
 
-fn bjt_history_runtime_tag(bjt: &crate::device::Bjt) -> &'static str {
+fn bjt_history_runtime_tag(bjt: &crate::device::Bjt, weil: bool) -> &'static str {
     if bjt.legacy_excess_phase_delay() != 0.0 {
+        if weil {
+            return if bjt.mna_promoted() {
+                GP_MNA_WEIL_TRANSIENT_HISTORY_RUNTIME_TAG
+            } else {
+                GP_WEIL_TRANSIENT_HISTORY_RUNTIME_TAG
+            };
+        }
         return if bjt.mna_promoted() {
             GP_MNA_PHASE_TRANSIENT_HISTORY_RUNTIME_TAG
         } else {
@@ -447,7 +460,17 @@ impl Engine {
                 .bjts
                 .devices
                 .iter()
-                .map(|bjt| bjt_history_runtime_tag(bjt).to_string())
+                .enumerate()
+                .map(|(index, bjt)| {
+                    bjt_history_runtime_tag(
+                        bjt,
+                        bjt_history
+                            .weil_phase
+                            .get(index)
+                            .is_some_and(Option::is_some),
+                    )
+                    .to_string()
+                })
                 .collect(),
             bjt_history: bjt_history.clone(),
             diode_names: circuit
@@ -537,7 +560,14 @@ impl Engine {
                 ));
             }
             let captured_tag = &checkpoint.bjt_runtime_tags[index];
-            let expected_tag = bjt_history_runtime_tag(bjt);
+            let expected_tag = bjt_history_runtime_tag(
+                bjt,
+                checkpoint
+                    .bjt_history
+                    .weil_phase
+                    .get(index)
+                    .is_some_and(Option::is_some),
+            );
             if captured_tag != expected_tag {
                 return Err(format!(
                     "BJT '{}' transient history runtime mismatch: captured '{captured_tag}', runtime requires '{expected_tag}'",
@@ -560,6 +590,7 @@ impl Engine {
             bjt_count,
             &[
                 ("phase", bjt.phase.len()),
+                ("weil_phase", bjt.weil_phase.len()),
                 ("phase_outgoing_slopes", bjt.phase_outgoing_slopes.len()),
                 ("vbe_prev", bjt.vbe_prev.len()),
                 ("vbe_prev_prev", bjt.vbe_prev_prev.len()),
@@ -604,9 +635,18 @@ impl Engine {
                     device.name
                 ));
             }
-            match (&bjt.phase[index], delay == 0.0) {
-                (None, true) => {}
-                (Some(phase), false) => {
+            match (&bjt.phase[index], &bjt.weil_phase[index], delay == 0.0) {
+                (None, None, true) => {}
+                (None, Some(weil), false) => {
+                    weil.validate()?;
+                    if weil.delay.to_bits() != delay.to_bits() {
+                        return Err(format!(
+                            "BJT '{}' Weil history has a different nominal delay",
+                            device.name
+                        ));
+                    }
+                }
+                (Some(phase), None, false) => {
                     phase.validate_checkpoint_ready()?;
                     if !matches!(phase.accepted_configuration(),
                         Some(rspice_veriloga_runtime::transport_delay::DelayConfiguration::Fixed { delay: retained })
@@ -1100,6 +1140,7 @@ D1 b 0 DM
         let circuit = engine.build_circuit(&netlist).expect("fixture builds");
         let bjt_history = BjtTransientHistory {
             phase: vec![None],
+            weil_phase: vec![None],
             phase_outgoing_slopes: vec![None],
             vbe_prev: vec![1.0],
             vbe_prev_prev: vec![2.0],

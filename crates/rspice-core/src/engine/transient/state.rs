@@ -232,8 +232,10 @@ impl Engine {
             }
             AcceptedJunctionHistoryRestart::Reinitialize => {
                 let phase = std::mem::take(&mut bjt_history.phase);
+                let weil_phase = std::mem::take(&mut bjt_history.weil_phase);
                 *bjt_history = Self::initialize_bjt_history(circuit, solution, seed);
                 bjt_history.phase = phase;
+                bjt_history.weil_phase = weil_phase;
                 bjt_history.accepted_dt_prev = hinted_max_step;
                 bjt_history.accepted_dt_prev_prev = hinted_max_step;
                 *diode_history = Self::initialize_diode_history(circuit, solution, seed);
@@ -313,6 +315,7 @@ impl Engine {
         let n = circuit.bjts.devices.len();
         let mut history = BjtTransientHistory {
             phase: vec![None; n],
+            weil_phase: vec![None; n],
             phase_outgoing_slopes: vec![None; n],
             vbe_prev: Vec::with_capacity(n),
             vbe_prev_prev: Vec::with_capacity(n),
@@ -1054,6 +1057,7 @@ impl Engine {
             };
 
             if history.phase[idx].is_none()
+                && history.weil_phase[idx].is_none()
                 && !snapshot.branches.iter().any(BjtChargeBranch::is_active)
             {
                 vbic_snapshot_cache[idx] = None;
@@ -2197,6 +2201,7 @@ mod tests {
         };
         let mut bjt_history = BjtTransientHistory {
             phase: vec![None],
+            weil_phase: vec![None],
             phase_outgoing_slopes: vec![None],
             vbe_prev: vec![1.0],
             vbe_prev_prev: vec![-1.0],

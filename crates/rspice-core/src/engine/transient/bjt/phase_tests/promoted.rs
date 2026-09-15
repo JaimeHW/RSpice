@@ -469,7 +469,7 @@ fn gp_right_trial_promoted_stamp_matches_physical_current_and_tangent() {
                 .unwrap();
             let accepted = history.clone();
             let phase = BjtPhaseTrial {
-                history: &history,
+                history: (&history).into(),
                 time: 2.5 * delay,
                 left_limit: Some(left),
                 incoming_arrival: false,
