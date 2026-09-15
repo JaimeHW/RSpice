@@ -888,6 +888,13 @@ pub(super) fn run_deck(
     let canonical_plan =
         DeckPlan::from_netlist_with_abort(netlist, &resource_limits, &crate::abort::ProcessAbort)
             .map_err(|error| map_deck_plan_error(error, args))?;
+    if netlist.control_script.is_some() && !canonical_plan.axes().is_empty() {
+        return Err(CliError::InvalidArgument {
+            message: "control scripts combined with declarative run axes are not yet executable"
+                .into(),
+            suggestion: None,
+        });
+    }
     if canonical_plan.axes().is_empty() {
         // An axis-free deck still takes its artifact namespaces from the
         // canonical plan. Reading the authored identities straight off the

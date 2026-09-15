@@ -18,6 +18,7 @@ pub(super) fn parse_options_for_run(
     resource_limits: rspice_core::ResourceLimits,
 ) -> rspice_core::netlist::NetlistParseOptions {
     let mut options = rspice_core::netlist::NetlistParseOptions {
+        retain_control_script: requested_mode_name(args).is_none(),
         resource_limits,
         ..rspice_core::netlist::NetlistParseOptions::default()
     };

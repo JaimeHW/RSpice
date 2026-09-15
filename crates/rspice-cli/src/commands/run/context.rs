@@ -194,6 +194,15 @@ impl ArtifactCoordinate {
 }
 
 impl<'a> RunContext<'a> {
+    pub(super) fn qualify_control_outputs(&mut self) {
+        // The next command may launch another analysis; every script result
+        // therefore receives its stable identity even before that is known.
+        self.multi_analysis = true;
+        if !self.planned_transient_ids.is_empty() {
+            self.next_transient_ordinal.set(1);
+        }
+    }
+
     pub(super) fn new(
         engine: &'a Engine,
         netlist: &'a Netlist,
@@ -1068,7 +1077,7 @@ pub(super) struct PlannedAnalysisIdentities {
 }
 
 impl PlannedAnalysisIdentities {
-    fn from_pairs<'a>(
+    pub(super) fn from_pairs<'a>(
         pairs: impl IntoIterator<
             Item = (
                 &'a AnalysisCommand,

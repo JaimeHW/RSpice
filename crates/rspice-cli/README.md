@@ -32,7 +32,7 @@ show.
 
 ## How analyses are selected
 
-`rspice run` executes every analysis card found in the netlist, in order:
+Without a control script, `rspice run` executes every analysis card found in the netlist, in order:
 
 `.OP`, `.DC`, `.TRAN`, `.AC`, `.HB`, `.SP`, `.STB`, `.DISTO`, `.NOISE`, `.TF`,
 `.SENS`, `.PZ`, `.PSS`, `.PAC`, `.PXF`, `.PNOISE`, `.ENVELOPE`, `.STEP`,
@@ -40,6 +40,31 @@ show.
 the `DATA=<table>` form, sweeping the frequencies listed in a `.DATA` table
 instead of a generated sweep. If the netlist contains no analysis cards, a DC
 operating point is run by default.
+
+With `.control` regions, `run` executes their commands in order, including
+regions loaded through `.include` and `-I` search paths. The current control
+host supports scalar assignments and nested loops/conditionals, `alter`,
+`op`, `ac`, `tran`, `run`, `print`, `plot`, and `settype`. A control `run`
+executes the deck's declarative analyses; the host currently handles OP, AC,
+and transient analyses. Unsupported commands fail with their source location.
+An explicit command-line analysis mode continues to supersede authored cards.
+
+Each completed script dataset gets its own output identity, for example
+`results.ac-001.csv` and `results.ac-002.csv`. Qualified expressions such as
+`abs(ac1.v(out))` select the named run. Separate plot traces keep their own
+time/frequency grids; arithmetic or `vs` pairing across different grids is
+rejected. `print` writes full complex sample pairs to stdout, including under
+`--quiet`. `plot` writes an SVG and a companion `*.control-NNN.json` file
+containing exact complex samples, units, axes, and current impulse observations
+and coverage. The JSON is written beside `-o`, or beside the input deck when
+no output path was selected. SVG plots require real expressions; use `real`
+or `abs` for complex data. Nonpositive samples remain in JSON and are omitted
+from logarithmic drawings. A failed script publishes none of its staged files.
+
+Control scripts combined with declarative run axes, Fourier/FFT processing,
+checkpoint/resume, segmented restart, or waveform compression are currently
+refused. Other vector functions and general ngspice command compatibility are
+still under development.
 
 Periodic large-signal notes (the card grammar is in the
 [core README](../rspice-core/README.md)):

@@ -288,6 +288,13 @@ pub enum CliError {
         suggestion: Option<String>,
     },
 
+    #[error("Control script failed at {origin}: {source}")]
+    ControlScriptError {
+        #[source]
+        source: rspice_core::execution::control::ControlError,
+        origin: rspice_core::netlist::NetlistSourceLocation,
+    },
+
     #[error("Simulation failed: {message}")]
     SimulationError {
         message: String,
@@ -403,6 +410,14 @@ impl CliError {
             CliError::CoreSimulationError { source, .. } => {
                 Category::Engine(source.descriptor().category)
             }
+            CliError::ControlScriptError { source, .. } => {
+                use rspice_core::execution::control::ControlErrorKind;
+                Category::Engine(match source.kind {
+                    ControlErrorKind::ResourceLimit => SimulationErrorCategory::ResourceLimit,
+                    ControlErrorKind::Aborted => SimulationErrorCategory::Cancellation,
+                    _ => SimulationErrorCategory::Netlist,
+                })
+            }
             CliError::CoreConfigError { source } => Category::Engine(match source {
                 rspice_core::SimulationConfigError::ResourceLimit(_) => {
                     SimulationErrorCategory::ResourceLimit
@@ -464,6 +479,25 @@ impl CliError {
     pub fn details(&self) -> ErrorDetails {
         let category = self.category().as_str();
         match self {
+            Self::ControlScriptError { source, origin } => {
+                use rspice_core::execution::control::ControlErrorKind;
+                let code = match source.kind {
+                    ControlErrorKind::Syntax => "control.syntax",
+                    ControlErrorKind::Expression => "control.expression",
+                    ControlErrorKind::ResourceLimit => "control.resource_limit",
+                    ControlErrorKind::Aborted => "control.aborted",
+                    ControlErrorKind::Host => "control.command",
+                };
+                let mut details = ErrorDetails::new(
+                    code,
+                    category,
+                    source.kind == ControlErrorKind::ResourceLimit,
+                );
+                details.line = Some(origin.line);
+                details.path = origin.path.as_ref().map(|path| path.display().to_string());
+                details.analysis = Some("control script".into());
+                details
+            }
             Self::CoreSimulationError { source, analysis } => {
                 let descriptor = source.descriptor();
                 let mut details =

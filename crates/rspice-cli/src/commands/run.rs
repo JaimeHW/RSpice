@@ -22,6 +22,7 @@ mod advanced;
 mod axis;
 mod basic;
 mod context;
+mod control;
 mod deck;
 mod document;
 mod fft_document;
@@ -650,6 +651,9 @@ fn run_concrete_deck(
     run_label: Option<&str>,
     identity: RunIdentity<'_>,
 ) -> Result<ConcreteDeckOutcome, CliError> {
+    if netlist.control_script.is_some() {
+        return control::run(netlist, args, config, verbose, quiet, run_label, identity);
+    }
     if verbose {
         println!("Title: {}", netlist.title);
         println!("Elements: {}", netlist.elements.len());

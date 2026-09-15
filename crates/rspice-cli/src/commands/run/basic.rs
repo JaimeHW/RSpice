@@ -48,106 +48,7 @@ pub(super) fn run_dc_op(ctx: &RunContext<'_>) -> Result<(), CliError> {
         .engine
         .run_dc_op_with_report_and_abort(ctx.netlist, &crate::abort::ProcessAbort)
     {
-        Ok((result, op_report)) => {
-            let operating_point_signals = checked_dc_operating_point_signals(&result)
-                .map_err(|error| map_output_projection_error(ctx, error, "DC OP"))?;
-            let exported_operating_point_signals = dc_operating_point_export_signals(
-                ctx.netlist,
-                &result,
-                &crate::abort::ProcessAbort,
-            )
-            .map_err(|error| map_output_projection_error(ctx, error, "DC OP"))?;
-            super::shared::ensure_finite_series(
-                ctx.args.allow_nonfinite,
-                "DC OP",
-                (1..result.node_voltages.len())
-                    .map(|node| {
-                        let name = result
-                            .node_names
-                            .get(node)
-                            .map(|n| n.as_str())
-                            .unwrap_or("node");
-                        (name, std::slice::from_ref(&result.node_voltages[node]))
-                    })
-                    .chain(
-                        result
-                            .branch_currents
-                            .iter()
-                            .enumerate()
-                            .map(|(index, current)| {
-                                let name = result
-                                    .branch_names
-                                    .get(index)
-                                    .map(|n| n.as_str())
-                                    .unwrap_or("branch");
-                                (name, std::slice::from_ref(current))
-                            }),
-                    ),
-            )?;
-            super::shared::ensure_finite_series(
-                ctx.args.allow_nonfinite,
-                "DC OP output projection",
-                exported_operating_point_signals
-                    .iter()
-                    .map(|signal| (signal.display_name.as_str(), signal.values.as_slice())),
-            )?;
-
-            if !ctx.quiet {
-                let voltage_signals = operating_point_signals
-                    .iter()
-                    .filter(|signal| signal.kind == SignalKind::Voltage)
-                    .collect::<Vec<_>>();
-                let current_signals = operating_point_signals
-                    .iter()
-                    .filter(|signal| signal.kind == SignalKind::Current)
-                    .collect::<Vec<_>>();
-                println!("DC Operating Point:");
-                for signal in voltage_signals.iter().take(10) {
-                    println!("  {} = {:.6} V", signal.display_name, signal.values[0]);
-                }
-                if voltage_signals.len() > 10 {
-                    println!("  ... ({} more node voltages)", voltage_signals.len() - 10);
-                }
-                for signal in current_signals.iter().take(5) {
-                    println!("  {} = {:.6} A", signal.display_name, signal.values[0]);
-                }
-                if current_signals.len() > 5 {
-                    println!("  ... ({} more branch currents)", current_signals.len() - 5);
-                }
-
-                print_device_op_report(&op_report, ctx.verbose);
-            }
-
-            if let Some(output) = ctx.resolve_output("op") {
-                let analysis_id = output.analysis("op")?;
-                super::document::publish_analysis_result(
-                    ctx,
-                    &output.path,
-                    analysis_id,
-                    super::document::scalar_schema(&exported_operating_point_signals)?,
-                    || {
-                        rspice_core::execution::AnalysisResultDocument::from_operating_point(
-                            analysis_id,
-                            &result,
-                            Some(&op_report),
-                        )
-                    },
-                    |path, format| {
-                        write_dc_op_output(
-                            path,
-                            &exported_operating_point_signals,
-                            format,
-                            Some(&super::document::hdf5_identity(ctx, analysis_id)?),
-                        )
-                    },
-                )?;
-                if !ctx.quiet {
-                    println!("Results exported to: {}", output.path.display());
-                }
-            }
-
-            Ok(())
-        }
+        Ok((result, op_report)) => finish_dc_op_result(ctx, &result, &op_report),
         Err(error) => {
             if matches!(error, rspice_core::SimulationError::Aborted) {
                 Err(super::cancellation_cli_error(ctx.args.timeout))
@@ -159,6 +60,108 @@ pub(super) fn run_dc_op(ctx: &RunContext<'_>) -> Result<(), CliError> {
             }
         }
     }
+}
+
+pub(super) fn finish_dc_op_result(
+    ctx: &RunContext<'_>,
+    result: &rspice_core::solver::SimulationResult,
+    op_report: &rspice_core::circuit::DeviceOpReport,
+) -> Result<(), CliError> {
+    let operating_point_signals = checked_dc_operating_point_signals(result)
+        .map_err(|error| map_output_projection_error(ctx, error, "DC OP"))?;
+    let exported_operating_point_signals =
+        dc_operating_point_export_signals(ctx.netlist, result, &crate::abort::ProcessAbort)
+            .map_err(|error| map_output_projection_error(ctx, error, "DC OP"))?;
+    super::shared::ensure_finite_series(
+        ctx.args.allow_nonfinite,
+        "DC OP",
+        (1..result.node_voltages.len())
+            .map(|node| {
+                let name = result
+                    .node_names
+                    .get(node)
+                    .map(|n| n.as_str())
+                    .unwrap_or("node");
+                (name, std::slice::from_ref(&result.node_voltages[node]))
+            })
+            .chain(
+                result
+                    .branch_currents
+                    .iter()
+                    .enumerate()
+                    .map(|(index, current)| {
+                        let name = result
+                            .branch_names
+                            .get(index)
+                            .map(|n| n.as_str())
+                            .unwrap_or("branch");
+                        (name, std::slice::from_ref(current))
+                    }),
+            ),
+    )?;
+    super::shared::ensure_finite_series(
+        ctx.args.allow_nonfinite,
+        "DC OP output projection",
+        exported_operating_point_signals
+            .iter()
+            .map(|signal| (signal.display_name.as_str(), signal.values.as_slice())),
+    )?;
+
+    if !ctx.quiet {
+        let voltage_signals = operating_point_signals
+            .iter()
+            .filter(|signal| signal.kind == SignalKind::Voltage)
+            .collect::<Vec<_>>();
+        let current_signals = operating_point_signals
+            .iter()
+            .filter(|signal| signal.kind == SignalKind::Current)
+            .collect::<Vec<_>>();
+        println!("DC Operating Point:");
+        for signal in voltage_signals.iter().take(10) {
+            println!("  {} = {:.6} V", signal.display_name, signal.values[0]);
+        }
+        if voltage_signals.len() > 10 {
+            println!("  ... ({} more node voltages)", voltage_signals.len() - 10);
+        }
+        for signal in current_signals.iter().take(5) {
+            println!("  {} = {:.6} A", signal.display_name, signal.values[0]);
+        }
+        if current_signals.len() > 5 {
+            println!("  ... ({} more branch currents)", current_signals.len() - 5);
+        }
+
+        print_device_op_report(op_report, ctx.verbose);
+    }
+
+    if let Some(output) = ctx.resolve_output("op") {
+        let analysis_id = output.analysis("op")?;
+        super::document::publish_analysis_result(
+            ctx,
+            &output.path,
+            analysis_id,
+            super::document::scalar_schema(&exported_operating_point_signals)?,
+            || {
+                rspice_core::execution::AnalysisResultDocument::from_operating_point(
+                    analysis_id,
+                    result,
+                    Some(op_report),
+                )
+            },
+            |path, format| {
+                write_dc_op_output(
+                    path,
+                    &exported_operating_point_signals,
+                    format,
+                    Some(&super::document::hdf5_identity(ctx, analysis_id)?),
+                )
+            },
+        )?;
+        if !ctx.quiet {
+            println!("Results exported to: {}", output.path.display());
+        }
+    }
+
+    Ok(())
 }
 
 /// Engineering-notation formatter for operating-point quantities.
@@ -887,256 +890,14 @@ pub(super) fn run_transient(
 
     match result {
         Ok(result) => {
-            super::shared::ensure_finite_series(
-                ctx.args.allow_nonfinite,
-                "Transient",
-                result
-                    .voltages
-                    .iter()
-                    .enumerate()
-                    .map(|(index, waveform)| {
-                        let name = result
-                            .node_names
-                            .get(index)
-                            .map(|n| n.as_str())
-                            .unwrap_or("node");
-                        (name, waveform.as_slice())
-                    })
-                    .chain(
-                        result
-                            .branch_currents
-                            .iter()
-                            .enumerate()
-                            .map(|(index, waveform)| {
-                                let name = result
-                                    .branch_names
-                                    .get(index)
-                                    .map(|n| n.as_str())
-                                    .unwrap_or("branch");
-                                (name, waveform.as_slice())
-                            }),
-                    ),
-            )?;
-
-            if !ctx.quiet && !ctx.compress {
-                println!(
-                    "✓ Transient complete: {} time points computed",
-                    result.time.len()
-                );
-            }
-
-            // A compressed run already carries the `.MEASURE` results the core
-            // evaluated on the exact accepted trajectory. Re-evaluating them
-            // here would measure the decimated expansion and report different
-            // numbers than the same deck run without `--compress`.
-            let measurements = match post_results.as_ref() {
-                Some(post) => post.measurements.clone(),
-                None => rspice_core::analysis::evaluate_tran_measurements_with_abort(
-                    ctx.netlist,
-                    &result,
-                    &crate::abort::ProcessAbort,
-                )
-                .map_err(|source| CliError::CoreSimulationError {
-                    source,
-                    analysis: Some("Transient measurement projection".to_string()),
-                })?,
-            };
-            ctx.record_measurements("TRAN", measurements);
-            let continuous_measurements =
-                rspice_core::analysis::evaluate_tran_continuous_measurements(ctx.netlist, &result);
-            super::shared::record_continuous_measurements(
+            finish_transient_result(
                 ctx,
-                "TRAN_CONT",
-                continuous_measurements,
-            );
-
-            // Perform checked SAVE/PRINT materialization independently of
-            // file publication, matching OP and DC behavior.
-            let mut signals = transient_export_signals(
-                ctx.netlist,
                 &result,
-                ctx.engine.config().resource_limits,
-                &crate::abort::ProcessAbort,
-            )
-            .map_err(|error| map_output_projection_error(ctx, error, "Transient"))?;
-
-            validate_fft_result_count(&result.fft_results, &ctx.netlist.fft_analyses)?;
-
-            if let Some(resolved) = ctx.resolve_output("tran") {
-                let analysis_id = resolved.analysis("tran")?;
-                let output_path = resolved.path;
-                let output_start = result
-                    .time
-                    .first()
-                    .copied()
-                    .map_or(tstart, |first| tstart.max(first));
-                let projection = result
-                    .output_projection(
-                        &ctx.netlist.options.output_time_points,
-                        ctx.netlist.options.output_interval_schedule.as_ref(),
-                        output_start,
-                        tstop,
-                        ctx.engine.config().resource_limits.max_analysis_points,
-                    )
-                    .map_err(|message| CliError::simulation_error_in(message, "Transient"))?;
-                let output_time = projection.times().to_vec();
-                for signal in &mut signals {
-                    signal.values = projection
-                        .project(&signal.values)
-                        .map_err(|message| CliError::simulation_error_in(message, "Transient"))?;
-                }
-                super::shared::ensure_finite_series(
-                    ctx.args.allow_nonfinite,
-                    "Transient output projection",
-                    signals
-                        .iter()
-                        .map(|signal| (signal.display_name.as_str(), signal.values.as_slice())),
-                )?;
-                let document = match ctx.format {
-                    OutputFormat::Hdf5 => {
-                        let mut data = Hdf5SimulationData::new();
-                        data.title = "Transient Analysis".to_string();
-                        data.identity = Some(super::document::hdf5_identity(ctx, analysis_id)?);
-
-                        let mut transient = Hdf5WaveformSection::new("time", output_time.clone());
-                        for signal in &signals {
-                            transient.add_typed_signal(
-                                signal.display_name.clone(),
-                                signal.raw_variable_type(),
-                                signal.unit_symbol(),
-                                signal.values.clone(),
-                            );
-                        }
-                        data.transient = Some(transient);
-                        TransientOutputDocument::Hdf5(Box::new(data))
-                    }
-                    OutputFormat::Json => {
-                        // `.FFT` spectra attached to this transient are named
-                        // as children of it, so a reader of the typed document
-                        // can find the sibling artifact that carries them.
-                        let children = ctx
-                            .fft_analysis_instances()
-                            .into_iter()
-                            .zip(&result.fft_results)
-                            .map(|(analysis, spectrum)| {
-                                rspice_core::execution::result_document::FftChildReference {
-                                    analysis,
-                                    output_name: spectrum.output_name.clone(),
-                                }
-                            })
-                            .collect();
-                        let builder =
-                            rspice_core::execution::AnalysisResultDocument::from_transient(
-                                analysis_id,
-                                &result,
-                                compression_report.as_ref(),
-                                children,
-                            )
-                            .map_err(|error| {
-                                super::document::document_error(ctx, analysis_id, error)
-                            })?;
-                        TransientOutputDocument::Typed(Box::new(super::document::finish(
-                            ctx,
-                            analysis_id,
-                            builder,
-                        )?))
-                    }
-                    OutputFormat::Vcd => {
-                        if result.digital_traces.is_empty() && result.real_traces.is_empty() {
-                            eprintln!(
-                                "Warning: this transient captured no digital or real event node; \
-                                 {} declares no signal and records no change",
-                                output_path.display()
-                            );
-                        }
-                        TransientOutputDocument::Vcd(Box::new(
-                            crate::commands::vcd_io::event_document(
-                                &output_path,
-                                &result.digital_traces,
-                                &result.real_traces,
-                                // `--expand-buses` asks for the members as
-                                // scalars and no vector, which is what an
-                                // empty table means to the projection.
-                                if ctx.args.expand_buses {
-                                    &[]
-                                } else {
-                                    &result.digital_buses
-                                },
-                            )?,
-                        ))
-                    }
-                    OutputFormat::Raw
-                    | OutputFormat::RawAscii
-                    | OutputFormat::Csv
-                    | OutputFormat::Tsv => TransientOutputDocument::Table {
-                        table: super::export::scalar_table(
-                            "transient",
-                            "Transient Analysis",
-                            "time",
-                            "time",
-                            output_time,
-                            &signals,
-                        ),
-                        events: rspice_core::execution::transient_event_plots(
-                            &result.digital_traces,
-                            &result.real_traces,
-                        ),
-                        buses: rspice_core::execution::transient_bus_plots(
-                            &result.digital_traces,
-                            &result.digital_buses,
-                        )
-                        .map_err(|error| {
-                            crate::commands::waveform_io::conversion_error(&output_path, error)
-                        })?,
-                    },
-                };
-                ctx.record_published(super::PublishedResult {
-                    analysis_id: analysis_id.tag(),
-                    schema: super::document::scalar_schema(&signals)?,
-                    artifact: output_path.clone(),
-                });
-
-                if result.fft_results.is_empty() {
-                    publish::artifact(&output_path, |writer| {
-                        document.write_to(
-                            writer,
-                            &output_path,
-                            ctx.format,
-                            super::document::json_byte_limit(ctx),
-                        )
-                    })
-                    .map_err(|error| map_atomic_output_error(&output_path, error))?;
-                } else {
-                    let parent_analysis_id = ctx.current_transient_analysis_id()?;
-                    let fft_output_path =
-                        ctx.fft_output_path_for(&parent_analysis_id)
-                            .ok_or_else(|| CliError::InternalError {
-                                message:
-                                    "FFT publication was requested without a resolved output path"
-                                        .to_string(),
-                            })?;
-                    write_transient_fft_output_pair(
-                        &output_path,
-                        &document,
-                        &fft_output_path,
-                        ctx.format,
-                        &parent_analysis_id,
-                        ctx.fft_analysis_ids(),
-                        ctx.coordinate.as_ref(),
-                        &result.fft_results,
-                        ctx.netlist,
-                        ctx.args.timeout,
-                        super::document::json_byte_limit(ctx),
-                    )?;
-                    if !ctx.quiet {
-                        println!("  FFT results exported to: {}", fft_output_path.display());
-                    }
-                }
-
-                if !ctx.quiet {
-                    println!("  Results exported to: {}", output_path.display());
-                }
-            }
+                tstart,
+                tstop,
+                post_results.as_ref(),
+                compression_report.as_ref(),
+            )?;
             Ok(TransientOutcome {
                 result,
                 post_results,
@@ -1151,6 +912,256 @@ pub(super) fn run_transient(
             analysis: Some("Transient".to_string()),
         }),
     }
+}
+
+pub(super) fn finish_transient_result(
+    ctx: &RunContext<'_>,
+    result: &rspice_core::analysis::transient::TransientResult,
+    tstart: f64,
+    tstop: f64,
+    post_results: Option<&rspice_core::engine::TransientPostResults>,
+    compression_report: Option<&rspice_core::engine::TransientCompressionReport>,
+) -> Result<(), CliError> {
+    super::shared::ensure_finite_series(
+        ctx.args.allow_nonfinite,
+        "Transient",
+        result
+            .voltages
+            .iter()
+            .enumerate()
+            .map(|(index, waveform)| {
+                let name = result
+                    .node_names
+                    .get(index)
+                    .map(|n| n.as_str())
+                    .unwrap_or("node");
+                (name, waveform.as_slice())
+            })
+            .chain(
+                result
+                    .branch_currents
+                    .iter()
+                    .enumerate()
+                    .map(|(index, waveform)| {
+                        let name = result
+                            .branch_names
+                            .get(index)
+                            .map(|n| n.as_str())
+                            .unwrap_or("branch");
+                        (name, waveform.as_slice())
+                    }),
+            ),
+    )?;
+
+    if !ctx.quiet && !ctx.compress {
+        println!(
+            "✓ Transient complete: {} time points computed",
+            result.time.len()
+        );
+    }
+
+    // A compressed run already carries the `.MEASURE` results the core
+    // evaluated on the exact accepted trajectory. Re-evaluating them
+    // here would measure the decimated expansion and report different
+    // numbers than the same deck run without `--compress`.
+    let measurements = match post_results {
+        Some(post) => post.measurements.clone(),
+        None => rspice_core::analysis::evaluate_tran_measurements_with_abort(
+            ctx.netlist,
+            result,
+            &crate::abort::ProcessAbort,
+        )
+        .map_err(|source| CliError::CoreSimulationError {
+            source,
+            analysis: Some("Transient measurement projection".to_string()),
+        })?,
+    };
+    ctx.record_measurements("TRAN", measurements);
+    let continuous_measurements =
+        rspice_core::analysis::evaluate_tran_continuous_measurements(ctx.netlist, result);
+    super::shared::record_continuous_measurements(ctx, "TRAN_CONT", continuous_measurements);
+
+    // Perform checked SAVE/PRINT materialization independently of
+    // file publication, matching OP and DC behavior.
+    let mut signals = transient_export_signals(
+        ctx.netlist,
+        result,
+        ctx.engine.config().resource_limits,
+        &crate::abort::ProcessAbort,
+    )
+    .map_err(|error| map_output_projection_error(ctx, error, "Transient"))?;
+
+    validate_fft_result_count(&result.fft_results, &ctx.netlist.fft_analyses)?;
+
+    if let Some(resolved) = ctx.resolve_output("tran") {
+        let analysis_id = resolved.analysis("tran")?;
+        let output_path = resolved.path;
+        let output_start = result
+            .time
+            .first()
+            .copied()
+            .map_or(tstart, |first| tstart.max(first));
+        let projection = result
+            .output_projection(
+                &ctx.netlist.options.output_time_points,
+                ctx.netlist.options.output_interval_schedule.as_ref(),
+                output_start,
+                tstop,
+                ctx.engine.config().resource_limits.max_analysis_points,
+            )
+            .map_err(|message| CliError::simulation_error_in(message, "Transient"))?;
+        let output_time = projection.times().to_vec();
+        for signal in &mut signals {
+            signal.values = projection
+                .project(&signal.values)
+                .map_err(|message| CliError::simulation_error_in(message, "Transient"))?;
+        }
+        super::shared::ensure_finite_series(
+            ctx.args.allow_nonfinite,
+            "Transient output projection",
+            signals
+                .iter()
+                .map(|signal| (signal.display_name.as_str(), signal.values.as_slice())),
+        )?;
+        let document = match ctx.format {
+            OutputFormat::Hdf5 => {
+                let mut data = Hdf5SimulationData::new();
+                data.title = "Transient Analysis".to_string();
+                data.identity = Some(super::document::hdf5_identity(ctx, analysis_id)?);
+
+                let mut transient = Hdf5WaveformSection::new("time", output_time.clone());
+                for signal in &signals {
+                    transient.add_typed_signal(
+                        signal.display_name.clone(),
+                        signal.raw_variable_type(),
+                        signal.unit_symbol(),
+                        signal.values.clone(),
+                    );
+                }
+                data.transient = Some(transient);
+                TransientOutputDocument::Hdf5(Box::new(data))
+            }
+            OutputFormat::Json => {
+                // `.FFT` spectra attached to this transient are named
+                // as children of it, so a reader of the typed document
+                // can find the sibling artifact that carries them.
+                let children = ctx
+                    .fft_analysis_instances()
+                    .into_iter()
+                    .zip(&result.fft_results)
+                    .map(|(analysis, spectrum)| {
+                        rspice_core::execution::result_document::FftChildReference {
+                            analysis,
+                            output_name: spectrum.output_name.clone(),
+                        }
+                    })
+                    .collect();
+                let builder = rspice_core::execution::AnalysisResultDocument::from_transient(
+                    analysis_id,
+                    result,
+                    compression_report,
+                    children,
+                )
+                .map_err(|error| super::document::document_error(ctx, analysis_id, error))?;
+                TransientOutputDocument::Typed(Box::new(super::document::finish(
+                    ctx,
+                    analysis_id,
+                    builder,
+                )?))
+            }
+            OutputFormat::Vcd => {
+                if result.digital_traces.is_empty() && result.real_traces.is_empty() {
+                    eprintln!(
+                        "Warning: this transient captured no digital or real event node; \
+                         {} declares no signal and records no change",
+                        output_path.display()
+                    );
+                }
+                TransientOutputDocument::Vcd(Box::new(crate::commands::vcd_io::event_document(
+                    &output_path,
+                    &result.digital_traces,
+                    &result.real_traces,
+                    // `--expand-buses` asks for the members as
+                    // scalars and no vector, which is what an
+                    // empty table means to the projection.
+                    if ctx.args.expand_buses {
+                        &[]
+                    } else {
+                        &result.digital_buses
+                    },
+                )?))
+            }
+            OutputFormat::Raw | OutputFormat::RawAscii | OutputFormat::Csv | OutputFormat::Tsv => {
+                TransientOutputDocument::Table {
+                    table: super::export::scalar_table(
+                        "transient",
+                        "Transient Analysis",
+                        "time",
+                        "time",
+                        output_time,
+                        &signals,
+                    ),
+                    events: rspice_core::execution::transient_event_plots(
+                        &result.digital_traces,
+                        &result.real_traces,
+                    ),
+                    buses: rspice_core::execution::transient_bus_plots(
+                        &result.digital_traces,
+                        &result.digital_buses,
+                    )
+                    .map_err(|error| {
+                        crate::commands::waveform_io::conversion_error(&output_path, error)
+                    })?,
+                }
+            }
+        };
+        ctx.record_published(super::PublishedResult {
+            analysis_id: analysis_id.tag(),
+            schema: super::document::scalar_schema(&signals)?,
+            artifact: output_path.clone(),
+        });
+
+        if result.fft_results.is_empty() {
+            publish::artifact(&output_path, |writer| {
+                document.write_to(
+                    writer,
+                    &output_path,
+                    ctx.format,
+                    super::document::json_byte_limit(ctx),
+                )
+            })
+            .map_err(|error| map_atomic_output_error(&output_path, error))?;
+        } else {
+            let parent_analysis_id = ctx.current_transient_analysis_id()?;
+            let fft_output_path =
+                ctx.fft_output_path_for(&parent_analysis_id)
+                    .ok_or_else(|| CliError::InternalError {
+                        message: "FFT publication was requested without a resolved output path"
+                            .to_string(),
+                    })?;
+            write_transient_fft_output_pair(
+                &output_path,
+                &document,
+                &fft_output_path,
+                ctx.format,
+                &parent_analysis_id,
+                ctx.fft_analysis_ids(),
+                ctx.coordinate.as_ref(),
+                &result.fft_results,
+                ctx.netlist,
+                ctx.args.timeout,
+                super::document::json_byte_limit(ctx),
+            )?;
+            if !ctx.quiet {
+                println!("  FFT results exported to: {}", fft_output_path.display());
+            }
+        }
+
+        if !ctx.quiet {
+            println!("  Results exported to: {}", output_path.display());
+        }
+    }
+    Ok(())
 }
 
 pub(super) enum TransientOutputDocument {

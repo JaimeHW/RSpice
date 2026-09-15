@@ -658,7 +658,7 @@ pub(super) fn run_ac_data(ctx: &RunContext<'_>, table_name: &str) -> Result<(), 
         .engine
         .run_ac_data_with_abort(ctx.netlist, table_name, &crate::abort::ProcessAbort)
         .map_err(|source| map_frequency_error(ctx, "AC DATA", source))?;
-    finish_ac_results(ctx, results)
+    finish_ac_results(ctx, &results)
 }
 
 fn invalid_ac_data(message: String) -> CliError {
@@ -691,15 +691,15 @@ fn run_ac_frequencies(ctx: &RunContext<'_>, frequencies: Vec<f64>) -> Result<(),
         .engine
         .run_ac_with_abort(ctx.netlist, &frequencies, &crate::abort::ProcessAbort)
         .map_err(|source| map_frequency_error(ctx, "AC", source))?;
-    finish_ac_results(ctx, results)
+    finish_ac_results(ctx, &results)
 }
 
-fn finish_ac_results(
+pub(super) fn finish_ac_results(
     ctx: &RunContext<'_>,
-    results: Vec<rspice_core::analysis::AcResult>,
+    results: &[rspice_core::analysis::AcResult],
 ) -> Result<(), CliError> {
     if !ctx.args.allow_nonfinite {
-        for result in &results {
+        for result in results {
             for (node, voltage) in result.voltages.iter().enumerate() {
                 if !voltage.re.is_finite() || !voltage.im.is_finite() {
                     let name = result
@@ -722,7 +722,7 @@ fn finish_ac_results(
 
     let measurements = rspice_core::analysis::evaluate_ac_measurements_with_abort(
         ctx.netlist,
-        &results,
+        results,
         &crate::abort::ProcessAbort,
     )
     .map_err(|source| CliError::CoreSimulationError {
@@ -731,7 +731,7 @@ fn finish_ac_results(
     })?;
     ctx.record_measurements("AC", measurements);
     let continuous_measurements =
-        rspice_core::analysis::evaluate_ac_continuous_measurements(ctx.netlist, &results);
+        rspice_core::analysis::evaluate_ac_continuous_measurements(ctx.netlist, results);
     super::shared::record_continuous_measurements(ctx, "AC_CONT", continuous_measurements);
 
     if !ctx.quiet {
@@ -766,7 +766,7 @@ fn finish_ac_results(
         source,
         analysis: Some("AC output projection".to_string()),
     };
-    let inventory = ac_signals(&results).map_err(ac_projection_error)?;
+    let inventory = ac_signals(results).map_err(ac_projection_error)?;
     let signals = crate::commands::run_signals::complex_export_signals(
         ctx.netlist,
         rspice_core::execution::AnalysisResultKind::Ac,
@@ -784,7 +784,7 @@ fn finish_ac_results(
             &output.path,
             analysis_id,
             super::document::complex_schema(&signals)?,
-            || rspice_core::execution::AnalysisResultDocument::from_ac(analysis_id, &results),
+            || rspice_core::execution::AnalysisResultDocument::from_ac(analysis_id, results),
             |path, format| {
                 if matches!(format, OutputFormat::Hdf5) {
                     let mut data = Hdf5SimulationData::new();
