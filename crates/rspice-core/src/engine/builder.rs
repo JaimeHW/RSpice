@@ -6670,6 +6670,9 @@ impl Engine {
                     )?;
                     bjt = bjt.with_instance_params(instance_params);
                     bjt.set_xyce_compatibility(self.config.spice_dialect == SpiceDialect::Xyce);
+                    bjt.set_ngspice_compatibility(
+                        self.config.spice_dialect == SpiceDialect::Ngspice,
+                    );
                     bjt.set_voltage_limiting_enabled(self.config.device_voltage_limiting);
                     bjt.set_vbic_pnjmaxi(netlist.options.device_pnjmaxi.unwrap_or(1.0));
                     bjt.set_temperature(self.config.temperature);

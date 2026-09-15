@@ -1246,7 +1246,8 @@ pub(crate) fn simulation_checkpoint_identity(config: &SimulationConfig) -> Strin
     // v91 binds the configurable physical-event flux conservation tolerance.
     // v92 binds the C2 GP transport-event tracking cutoff.
     // v93 binds native GP physical-event integration epochs and passive clocks.
-    hasher.update(b"rspice-transient-resolved-config-v93\0");
+    // v94 binds ngspice's native GP thermal constants.
+    hasher.update(b"rspice-transient-resolved-config-v94\0");
     hash_field(&mut hasher, "temperature", config.temperature.to_bits());
     hash_field(&mut hasher, "ramptime", config.ramptime.to_bits());
     hash_field(&mut hasher, "digital_delay_type", config.digital_delay_type);

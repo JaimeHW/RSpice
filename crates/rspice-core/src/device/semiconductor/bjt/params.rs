@@ -1587,6 +1587,12 @@ impl Bjt {
         self.xyce_compatibility = enabled;
     }
 
+    /// A subsequent temperature refresh applies ngspice's const.h thermal
+    /// constants to every GP temperature-scaled quantity. VBIC owns its pair.
+    pub(crate) fn set_ngspice_compatibility(&mut self, enabled: bool) {
+        self.ngspice_compatibility = enabled;
+    }
+
     /// Apply Xyce's global nonlinear-device voltage-limiting policy to this
     /// native BJT. Changing the policy invalidates every bias-dependent cache
     /// because the next load may evaluate at a different junction state.

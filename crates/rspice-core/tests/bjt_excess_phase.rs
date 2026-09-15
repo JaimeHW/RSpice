@@ -7,6 +7,11 @@ use rspice_core::engine::{Engine, SimulationConfig, SpiceDialect};
 use rspice_core::netlist::Netlist;
 use std::f64::consts::PI;
 
+// ngspice 46 const.h; the native GP model retains these thermal constants.
+fn ngspice_thermal_voltage(temperature: f64) -> f64 {
+    1.38064852e-23 * temperature / 1.6021766208e-19
+}
+
 #[test]
 fn gp_bfs17_excess_phase_matches_independent_six_bias_complex_currents() {
     let original = include_str!("../../../tests/paranoia/control_structs/foreach_bjt_ft.sp");
@@ -68,7 +73,7 @@ fn gp_bfs17_excess_phase_matches_independent_six_bias_complex_currents() {
 #[test]
 fn gp_excess_phase_noise_matches_independent_complex_port_covariance() {
     let temperature = 300.15;
-    let vt = K_BOLTZMANN * temperature / Q_ELECTRON;
+    let vt = ngspice_thermal_voltage(temperature);
     let current = 1e-16 * (0.7 / vt).exp_m1();
     let gm = (current + 1e-16) / vt;
     let rb = 100.0;
@@ -217,7 +222,7 @@ fn gp_excess_phase_rotates_forward_transconductance_with_conservative_ports() {
         ("PNP", -1.0, 330.15, 0.2, 3.0),
     ] {
         let engine = engine(temperature);
-        let vt = K_BOLTZMANN * temperature / Q_ELECTRON;
+        let vt = ngspice_thermal_voltage(temperature);
         let gm = area * multiplier * 1e-16 * (0.7 / vt).exp() / vt;
         for phase in [0.0_f64, 21.0, 90.0, -30.0] {
             let source = clamped(
@@ -268,7 +273,7 @@ fn gp_excess_phase_uses_nominal_transit_time_after_temperature_scaling() {
 #[test]
 fn gp_tiny_excess_phase_and_frequency_order_preserve_the_response() {
     let temperature = 300.15;
-    let vt = K_BOLTZMANN * temperature / Q_ELECTRON;
+    let vt = ngspice_thermal_voltage(temperature);
     let gm = 1e-16 * (0.7 / vt).exp() / vt;
     let phase = 1e-20_f64;
     let source = clamped(

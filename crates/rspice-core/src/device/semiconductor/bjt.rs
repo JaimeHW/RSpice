@@ -778,6 +778,8 @@ pub struct Bjt {
     pub temperature: Value,
     /// Select Xyce's historical SPICE device constants for `kT/q`.
     xyce_compatibility: bool,
+    /// Use the thermal constants embedded in ngspice's native GP model.
+    ngspice_compatibility: bool,
     /// Whether the legacy Gummel-Poon load owns Newton junction limiting.
     /// Xyce's global `DEVICE VOLTLIM` defaults this on and may disable both
     /// the initial tVcrit replacement and per-iteration pnjlim path.
@@ -1910,6 +1912,7 @@ impl Bjt {
             ambient_temperature: crate::constants::TEMP_REFERENCE,
             temperature: crate::constants::TEMP_REFERENCE,
             xyce_compatibility: false,
+            ngspice_compatibility: false,
             voltage_limiting_enabled: true,
             xti: 3.0,
             eg: 1.11,
@@ -2201,8 +2204,8 @@ impl Bjt {
         // The VBIC reference equations define their own k/q pair, shared by
         // ngspice vbicload.c/vbictemp.c and Xyce's generated VBIC13 vtv expression.
         // Xyce 7.10's legacy native device package retains the SPICE
-        // constants from N_DEV_Const.h. Best-available and ngspice modes use
-        // current SI/CODATA constants; this small distinction is observable
+        // constants from N_DEV_Const.h; ngspice retains the pair in const.h.
+        // Best-available mode uses current SI constants. The distinction is observable
         // in exponential junction models and is therefore part of dialect
         // compatibility rather than a unit-conversion approximation.
         let (k_boltzmann, q_electron) = if self.charge_model == BjtChargeModel::Vbic {
@@ -2212,6 +2215,8 @@ impl Bjt {
                 crate::constants::XYCE_K_BOLTZMANN,
                 crate::constants::XYCE_Q_ELECTRON,
             )
+        } else if self.ngspice_compatibility {
+            (1.38064852e-23, 1.6021766208e-19)
         } else {
             (crate::constants::K_BOLTZMANN, crate::constants::Q_ELECTRON)
         };

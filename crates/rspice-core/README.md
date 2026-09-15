@@ -865,9 +865,12 @@ option is `.options eventfluxtol=1e-24`; ordered `option` commands also accept
 it. Explicit configuration overrides take precedence over authored options.
 This setting controls event conservation independently of charge tolerance
 and ordinary inductor timestep truncation. Existing device admission limits
-still apply. Checkpoint configuration identity version 93 binds this setting,
+still apply. Checkpoint configuration identity version 94 binds this setting,
 the GP transport-event tracking policy and physical-event integration restart;
 checkpoints with an earlier configuration identity require a fresh run.
+Native GP models in ngspice mode now use ngspice 46's thermal constants
+(`k=1.38064852e-23`, `q=1.6021766208e-19`) for their temperature-scaled
+equations. BestAvailable, Xyce and VBIC retain their respective constants.
 
 The internal GP transient qualification path tracks all unknown events and
 known discontinuities through derivative order two. Solver-certified C2

@@ -53,6 +53,7 @@ fn check_delayed_feedback(dialect: SpiceDialect, method: IntegrationMethod) {
         run_with_configuration(text, 8e-6, max_step, None, scheduled, config.clone());
     let vt: Value = match dialect {
         SpiceDialect::Xyce => 1.380_622_6e-23 * 300.15 / 1.602_191_8e-19,
+        SpiceDialect::Ngspice => 1.380_648_52e-23 * 300.15 / 1.602_176_620_8e-19,
         _ => 1.380_649e-23 * 300.15 / 1.602_176_634e-19,
     };
     let forward = 1e-14 * (0.6 / vt).exp_m1();
