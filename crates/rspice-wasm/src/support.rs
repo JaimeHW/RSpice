@@ -10,10 +10,20 @@ pub(crate) fn parse_netlist_detailed(
     resource_limits: ResourceLimits,
     abort: &dyn AbortSignal,
 ) -> DetailedWasmResult<Netlist> {
+    parse_netlist_with_control_detailed(source, resource_limits, false, abort)
+}
+
+pub(crate) fn parse_netlist_with_control_detailed(
+    source: &str,
+    resource_limits: ResourceLimits,
+    retain_control_script: bool,
+    abort: &dyn AbortSignal,
+) -> DetailedWasmResult<Netlist> {
     Netlist::parse_validated_with_options_and_abort(
         source,
         rspice_core::netlist::NetlistParseOptions {
             resource_limits,
+            retain_control_script,
             ..rspice_core::netlist::NetlistParseOptions::default()
         },
         abort,

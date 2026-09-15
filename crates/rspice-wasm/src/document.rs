@@ -71,7 +71,7 @@ pub enum SignalUnitView {
 }
 
 impl SignalUnitView {
-    fn project(unit: &SignalUnit) -> DetailedWasmResult<Self> {
+    pub(crate) fn project(unit: &SignalUnit) -> DetailedWasmResult<Self> {
         Ok(match unit {
             SignalUnit::Volt => Self::Volt,
             SignalUnit::Ampere => Self::Ampere,

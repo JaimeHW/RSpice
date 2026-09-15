@@ -41,12 +41,13 @@ fn thrown<T>(outcome: DetailedWasmResult<T>) -> Result<T, JsValue> {
 
 /// Retain one execution's results behind the shared bounded handle.
 fn retain(scope: &ExecutionScope, execution: DeckExecution) -> Result<WasmResultHandle, JsValue> {
-    thrown(WasmResultHandle::new(
+    let handle = thrown(WasmResultHandle::new(
         &execution.plan,
         execution.coordinates,
         execution.results,
         scope.resource_limits(),
-    ))
+    ))?;
+    thrown(handle.with_control(execution.control_datasets, execution.control_presentations))
 }
 
 #[wasm_bindgen(js_name = defaultResourceLimits)]

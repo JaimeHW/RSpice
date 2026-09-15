@@ -24,11 +24,17 @@ use crate::events::{BusEventRow, DigitalBusDescriptor, DigitalEventRow, DigitalN
 use crate::js_interop::{serialize_result_window_to_js, serialize_to_js};
 use crate::options::{DEFAULT_MAX_RESULT_JSON_BYTES, DEFAULT_MAX_TRANSFER_VALUES};
 
+mod control;
+pub use control::{
+    ControlChangedVector, ControlCurrentDescriptor, ControlPresentationDescriptor,
+    ControlTraceDescriptor, ControlVectorDescriptor,
+};
+
 /// Schema identifier of the handle's own metadata envelope. The results it
 /// carries keep the core document's schema and version.
 pub const BROWSER_RESULT_SCHEMA: &str = "rspice-browser-result";
 /// Version of the handle metadata envelope.
-pub const BROWSER_RESULT_VERSION: u32 = 2;
+pub const BROWSER_RESULT_VERSION: u32 = 3;
 
 /// One planned run axis, without its values.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -92,6 +98,9 @@ pub struct HandleMetadata<'a> {
     pub result_count: usize,
     pub maximum_window_values: usize,
     pub maximum_result_json_bytes: f64,
+    /// Named control datasets map to `results` by index; empty for direct calls.
+    pub control_datasets: &'a [String],
+    pub control_presentations: Vec<ControlPresentationDescriptor<'a>>,
 }
 
 /// Every result of one browser call, retained in WebAssembly memory.
@@ -104,6 +113,8 @@ pub struct WasmResultHandle {
     results: Vec<AnalysisResultDocument>,
     maximum_window_values: usize,
     maximum_result_json_bytes: u64,
+    control_datasets: Vec<String>,
+    control_presentations: Vec<rspice_core::engine::ControlPresentation>,
 }
 
 impl WasmResultHandle {
@@ -146,6 +157,8 @@ impl WasmResultHandle {
             maximum_window_values: DEFAULT_MAX_TRANSFER_VALUES
                 .min(resource_limits.max_result_values),
             maximum_result_json_bytes: DEFAULT_MAX_RESULT_JSON_BYTES,
+            control_datasets: Vec::new(),
+            control_presentations: Vec::new(),
         })
     }
 
@@ -213,6 +226,8 @@ impl WasmResultHandle {
             #[allow(clippy::cast_precision_loss)]
             // JavaScript numbers are f64; the byte ceiling is far below 2^53.
             maximum_result_json_bytes: self.maximum_result_json_bytes as f64,
+            control_datasets: &self.control_datasets,
+            control_presentations: self.control_metadata()?,
         })
     }
 

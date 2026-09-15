@@ -57,8 +57,9 @@ pub use dto::{
 pub use errors::{WasmError, WasmUnresolvedOutputSymbol};
 pub use events::{BusMembership, DigitalEventRow, DigitalNodeDescriptor};
 pub use handles::{
-    BROWSER_RESULT_SCHEMA, BROWSER_RESULT_VERSION, HandleMetadata, ResultSummary,
-    RunAxisDescriptor, StepTargetDescriptor, WasmResultHandle,
+    BROWSER_RESULT_SCHEMA, BROWSER_RESULT_VERSION, ControlChangedVector, ControlCurrentDescriptor,
+    ControlPresentationDescriptor, ControlTraceDescriptor, ControlVectorDescriptor, HandleMetadata,
+    ResultSummary, RunAxisDescriptor, StepTargetDescriptor, WasmResultHandle,
 };
 pub use options::{WasmCompressionOptions, WasmExecutionOptions, WasmResourceLimits};
 pub use runners::deck::{

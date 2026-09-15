@@ -140,6 +140,8 @@ fn direct_execution(
         plan,
         coordinates,
         results,
+        control_presentations: Vec::new(),
+        control_datasets: Vec::new(),
     })
 }
 

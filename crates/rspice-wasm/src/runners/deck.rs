@@ -46,7 +46,9 @@ use crate::abort::{aborted_error, ensure_not_aborted};
 use crate::errors::{WasmError, resource_limit_error};
 use crate::hb_config::hb_config_for_tones;
 use crate::options::WasmExecutionOptions;
-use crate::support::{engine_with_resource_limits, parse_netlist_detailed};
+use crate::support::{engine_with_resource_limits, parse_netlist_with_control_detailed};
+
+mod control;
 
 /// Everything one authored-deck run produced: the plan it executed, the
 /// coordinates it materialized, and one core document per result.
@@ -55,6 +57,10 @@ pub struct DeckExecution {
     pub plan: DeckPlan,
     pub coordinates: Vec<RunCoordinate>,
     pub results: Vec<AnalysisResultDocument>,
+    /// Ordered, resolved plot/print/unit requests from a control script.
+    pub control_presentations: Vec<rspice_core::engine::ControlPresentation>,
+    /// Script dataset names in the same order as `results`.
+    pub control_datasets: Vec<String>,
 }
 
 /// Execute every planned analysis in an authored analog deck over its
@@ -67,7 +73,11 @@ pub fn run_authored_deck_document_with_options_and_abort_detailed(
     ensure_not_aborted(external_abort)?;
     let resource_limits = options.resource_limits.to_core();
     let compression = options.compression_config()?;
-    let netlist = parse_netlist_detailed(source, resource_limits, external_abort)?;
+    let netlist =
+        parse_netlist_with_control_detailed(source, resource_limits, true, external_abort)?;
+    if netlist.control_script.is_some() {
+        return control::run(netlist, options, external_abort);
+    }
     let plan = DeckPlan::from_netlist_with_abort(&netlist, &resource_limits, external_abort)
         .map_err(deck_plan_wasm_error)?;
 
@@ -197,6 +207,8 @@ pub fn run_authored_deck_document_with_options_and_abort_detailed(
         plan,
         coordinates,
         results,
+        control_presentations: Vec::new(),
+        control_datasets: Vec::new(),
     })
 }
 

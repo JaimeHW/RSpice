@@ -54,6 +54,10 @@ and caller-bounded numeric windows cross into JavaScript.
   interpreted.** Empty, out-of-range, and over-budget windows fail with
   `code: "invalid_result_window"`; an unknown result index fails with
   `code: "invalid_result_index"`.
+- `controlWindow(presentationIndex, traceIndex, start, count)`: a bounded
+  plot/print trace window as four `Float64Array` columns: `xReal`,
+  `xImaginary`, `yReal`, `yImaginary`. It charges four values per point and
+  uses the same transfer ceiling and window errors as `readWindow`.
 - `resultJson(resultIndex)`: the complete core document as JSON. This is the
   lossless export path: it is bounded by an explicit byte budget and fails
   closed rather than truncating.
@@ -107,6 +111,28 @@ the same canonical `AnalysisInstanceId` and the same single run coordinate an
 authored deck would give it. Nothing here mints an identity of its own.
 
 ### Analysis coverage
+
+`runAuthoredDeckDocument` also executes retained `.control` scripts in source
+order through the shared core interpreter. It supports scalar assignments,
+loops, conditionals, source alterations, `op`, `ac`, `tran`, `run`, and
+resolved `plot`, `print`, and `settype` requests. Each completed analysis
+keeps its own core document and canonical identity. A late script error
+returns no handle and includes the authored command's source line.
+
+Handle metadata version 3 adds `controlDatasets` (names such as `ac1`, in
+result order) and `controlPresentations` (ordered descriptors, with no sample
+arrays). A descriptor identifies each trace's result index, expression,
+unit, sample count, axes, title and limits. `settype` descriptors preserve
+the exact ordered unit changes. Each vector's `currentSources` identifies
+the result and typed owner of its separate charge events and coverage in
+`resultJson`; sampled currents never substitute for these events. Plot/print
+data are available through `controlWindow`; the client renders or displays
+them. Direct-analysis exports continue to run their explicitly requested
+analysis.
+
+Control scripts combined with declarative run axes, Fourier/FFT, restart or
+compression are currently refused explicitly. Other control commands and
+analysis families without a shared control-host handler also report an error.
 
 `runAuthoredDeckDocument` executes every planned analysis in a deck over its
 canonical DATA/`.STEP`/`.TEMP` coordinate product:
