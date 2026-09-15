@@ -630,7 +630,8 @@ impl NativeCplRuntime {
                     let (er, ei) = exp_complex(tms.tm[1].x, tms.tm[2].x, h_seconds);
                     self.h1e[row][col] = [e, er, ei];
 
-                    let ff1 = tms.tm[0].c * e * h1_seconds;
+                    let (previous_weight, _) = real_pole_ramp_weights(tms.tm[0].x, h_seconds);
+                    let ff1 = tms.tm[0].c * previous_weight;
                     ff[row] -= tms.tm[0].cnv_i * e;
                     gg[row] -= tms.tm[0].cnv_o * e;
                     ff[row] -= ff1 * input_voltage[col];
@@ -642,16 +643,18 @@ impl NativeCplRuntime {
                     let (a, _) = mult_complex(tms.tm[1].cnv_o, tms.tm[2].cnv_o, er, ei);
                     gg[row] -= 2.0 * (a1 * h1_seconds * output_voltage[col] + a);
                 } else {
-                    let mut ff1 = 0.0;
+                    let mut previous_gain = 0.0;
                     for pole in 0..3 {
                         let e = (tms.tm[pole].x * h_seconds).exp();
                         self.h1e[row][col][pole] = e;
-                        ff1 -= tms.tm[pole].c * e;
+                        let (previous_weight, _) =
+                            real_pole_ramp_weights(tms.tm[pole].x, h_seconds);
+                        previous_gain += tms.tm[pole].c * previous_weight;
                         ff[row] -= tms.tm[pole].cnv_i * e;
                         gg[row] -= tms.tm[pole].cnv_o * e;
                     }
-                    ff[row] += ff1 * h1_seconds * input_voltage[col];
-                    gg[row] += ff1 * h1_seconds * output_voltage[col];
+                    ff[row] -= previous_gain * input_voltage[col];
+                    gg[row] -= previous_gain * output_voltage[col];
                 }
             }
         }
@@ -737,7 +740,23 @@ impl NativeCplRuntime {
         for m in 0..n {
             for p in 0..n {
                 if let Some(tms) = self.h1t[m][p].as_ref() {
-                    aten_h1[m][p] = tms.aten + h1 * self.h1c[m][p];
+                    // Match the accepted linear-ramp convolution. The older
+                    // trapezoidal stamp solved a different branch equation
+                    // from the real-pole state committed after convergence.
+                    let real_terms = if tms.if_img {
+                        &tms.tm[..1]
+                    } else {
+                        &tms.tm[..]
+                    };
+                    let current_gain: f64 = real_terms
+                        .iter()
+                        .map(|term| {
+                            let (_, current_weight) = real_pole_ramp_weights(term.x, h);
+                            term.c * current_weight
+                        })
+                        .sum();
+                    let pair_gain = if tms.if_img { h * tms.tm[1].c } else { 0.0 };
+                    aten_h1[m][p] = tms.aten + current_gain + pair_gain;
                 }
                 if rc.ext {
                     for q in 0..n {
@@ -2198,13 +2217,17 @@ fn update_accepted_real_term(
     current_output: f64,
     e: f64,
 ) {
-    let (phi1, phi2) = exponential_ramp_moments(term.x * h_exp_seconds);
-    let current_weight = h_exp_seconds * phi2;
-    let previous_weight = h_exp_seconds * phi1 - current_weight;
+    let (previous_weight, current_weight) = real_pole_ramp_weights(term.x, h_exp_seconds);
     term.cnv_i = term.cnv_i * e
         + term.c * (previous_input * previous_weight + current_input * current_weight);
     term.cnv_o = term.cnv_o * e
         + term.c * (previous_output * previous_weight + current_output * current_weight);
+}
+
+fn real_pole_ramp_weights(pole: f64, step: f64) -> (f64, f64) {
+    let (phi1, phi2) = exponential_ramp_moments(pole * step);
+    let current = step * phi2;
+    (step * phi1 - current, current)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -3009,8 +3032,10 @@ mod tests {
 
         assert!(rhs.ext);
         assert_slice_close(&rhs.ratio, &[0.25, 0.0]);
-        assert_slice_close(&rhs.ff, &[228.0, 0.0]);
-        assert_slice_close(&rhs.gg, &[69.2, 0.0]);
+        // The zero-pole h1 previous-voltage weight is h/2 = 0.125.
+        // The independently supplied 0.5 weight still belongs to h2/h3.
+        assert_slice_close(&rhs.ff, &[238.6875, 0.0]);
+        assert_slice_close(&rhs.gg, &[82.1375, 0.0]);
         assert_eq!(runtime.h1e[0][0], [1.0, 1.0, 1.0]);
 
         let h3 = runtime.h3t[0][0][0].as_ref().expect("h3");
@@ -3067,8 +3092,10 @@ mod tests {
             .expect("right constants");
 
         assert!(!rhs.ext);
-        assert_slice_close(&rhs.ff, &[-122.5, 0.0]);
-        assert_slice_close(&rhs.gg, &[-182.5, 0.0]);
+        // The real h1 pole receives no charge over the zero-length interval;
+        // the complex-pair test still supplies its separate half-step weight.
+        assert_slice_close(&rhs.ff, &[-103.5, 0.0]);
+        assert_slice_close(&rhs.gg, &[-159.5, 0.0]);
         assert_eq!(runtime.h1e[0][0], [1.0, 1.0, 0.0]);
 
         let h3 = runtime.h3t[0][0][0].as_ref().expect("h3");
@@ -3080,6 +3107,70 @@ mod tests {
             &[h3.tm[0].cnv_o, h3.tm[1].cnv_o, h3.tm[2].cnv_o],
             &[11.0, 20.5, 66.5],
         );
+    }
+
+    #[test]
+    fn cpl_real_pole_stamp_and_accepted_history_obey_the_same_constant_drive_integral() {
+        let mut runtime = empty_runtime(2);
+        runtime.taul_ps = vec![2e12; 2];
+        runtime.h1t[0][0] = Some(tms(
+            false,
+            0.0,
+            [
+                term(3.0, -2.0, 0.0, 0.0),
+                term(0.0, 0.0, 0.0, 0.0),
+                term(0.0, 0.0, 0.0, 0.0),
+            ],
+        ));
+        runtime.h1c[0][0] = 3.0;
+        let near = vec![1.0, 0.0];
+        let far = vec![-2.0, 0.0];
+        let zero = vec![0.0; 2];
+        let mut history = NativeCplViHistory::new(2, near.clone(), far.clone()).unwrap();
+        history
+            .push_sample(NativeCplViSample::new(
+                0.0,
+                near.clone(),
+                far.clone(),
+                zero.clone(),
+                zero.clone(),
+            ))
+            .unwrap();
+        let before = runtime.clone();
+        let stamp = runtime
+            .step_stamp_plan(0.0, 1e12, 1.0, &near, &far, &mut history)
+            .unwrap();
+        assert_eq!(
+            runtime, before,
+            "a trial must not mutate accepted convolution state"
+        );
+        // y' = -2y + 3V, y(0)=0 and constant V: y(1)=3V(1-exp(-2))/2.
+        let expected = -1.5 * (-2.0_f64).exp_m1();
+        let trial_near = stamp.aten_h1[0][0] * near[0] - stamp.ff[0];
+        let trial_far = stamp.aten_h1[0][0] * far[0] - stamp.gg[0];
+        assert!(
+            (trial_near - expected).abs() < 2e-14,
+            "trial {trial_near}, analytic {expected}"
+        );
+        assert!((trial_far + 2.0 * expected).abs() < 4e-14);
+        runtime
+            .commit_step(
+                0.0,
+                1e12,
+                1.0,
+                1.0,
+                &near,
+                &far,
+                &near,
+                &far,
+                &zero,
+                &zero,
+                &mut history,
+            )
+            .unwrap();
+        let accepted = runtime.h1t[0][0].as_ref().unwrap();
+        assert!((accepted.cnv_i_sum() - expected).abs() < 2e-14);
+        assert!((accepted.cnv_o_sum() + 2.0 * expected).abs() < 4e-14);
     }
 
     #[test]
