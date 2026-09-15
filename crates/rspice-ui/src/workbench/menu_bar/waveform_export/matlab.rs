@@ -821,6 +821,7 @@ mod tests {
     fn an_event_only_transient_is_refused_by_what_a_mat_file_carries() {
         let mut events = analysis(AnalysisType::Transient);
         events.result_payload = Some(AnalysisResultPayload::TransientEvents {
+            current_impulses: None,
             digital_traces: Vec::new(),
             real_traces: Vec::new(),
             digital_buses: Vec::new(),

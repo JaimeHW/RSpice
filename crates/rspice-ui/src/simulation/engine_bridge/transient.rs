@@ -639,6 +639,49 @@ fn collect_event_history(
         .collect();
 
     Ok(TransientEventHistory {
+        current_impulses: tran_result
+            .current_impulses
+            .as_ref()
+            .map(|source| {
+                let full_start = tran_result.time.first().copied().ok_or_else(|| {
+                    SimulationError::SolverError("current impulses require a time extent".into())
+                })?;
+                let stop = tran_result.time.last().copied().unwrap_or(full_start);
+                let mut traces = Vec::with_capacity(source.len());
+                for trace in source {
+                    ensure_not_aborted(abort)?;
+                    trace
+                        .validate(full_start, stop)
+                        .map_err(SimulationError::SolverError)?;
+                    let mut points = Vec::new();
+                    for (index, point) in trace.points.iter().enumerate() {
+                        if index.is_multiple_of(64) {
+                            ensure_not_aborted(abort)?;
+                        }
+                        if retained(point.time) {
+                            points.push(*point);
+                        }
+                    }
+                    traces.push(rspice_core::CurrentImpulseTrace {
+                        owner: trace.owner.clone(),
+                        complete: trace.complete,
+                        points,
+                    });
+                }
+                // An incomplete trace with no retained points supplies neither
+                // observations nor a coverage claim for this window.
+                traces.retain(|trace| trace.complete || !trace.points.is_empty());
+                traces.sort_by(|left, right| left.owner.cmp(&right.owner));
+                let history = crate::state::CurrentImpulseHistoryEvidence {
+                    start_time_s: window_start.max(full_start),
+                    stop_time_s: stop,
+                    delivery_complete: true,
+                    traces,
+                };
+                history.validate().map_err(SimulationError::SolverError)?;
+                Ok::<_, SimulationError>(history)
+            })
+            .transpose()?,
         digital,
         real,
         digital_buses,
@@ -652,6 +695,66 @@ mod tests {
 
     fn parse_netlist(source: &str) -> rspice_core::Netlist {
         rspice_core::Netlist::parse(source).expect("test netlist parses")
+    }
+
+    #[test]
+    fn current_impulse_history_conversion_preserves_exact_charge_and_window_coverage() {
+        use rspice_core::{CurrentImpulseOwner, CurrentImpulsePoint};
+        let history = crate::state::CurrentImpulseHistoryEvidence::fixture();
+        let mut result = rspice_core::engine::TransientResult {
+            time: vec![0.0, 0.5, 1.0],
+            step_sizes: vec![0.0, 0.5, 0.5],
+            voltages: vec![],
+            branch_currents: vec![],
+            num_nodes: 0,
+            node_names: vec![],
+            branch_names: vec![],
+            digital_traces: vec![],
+            digital_buses: vec![],
+            real_traces: vec![],
+            device_op_traces: vec![],
+            store_traces: vec![],
+            fft_results: vec![],
+            current_impulses: Some(history.traces),
+        };
+        let source = result.current_impulses.as_mut().unwrap();
+        source[0].points.push(CurrentImpulsePoint {
+            time: 0.7,
+            charge_coulombs: 0.004,
+        });
+        let mut zero = source[0].clone();
+        zero.owner = CurrentImpulseOwner::Branch {
+            branch_name: "V2".into(),
+        };
+        zero.points.clear();
+        source.push(zero);
+        let cropped =
+            collect_event_history(&result, 0.5, &rspice_core::abort_signal::NoAbort).unwrap();
+        assert!(!cropped.is_empty());
+        let retained = cropped.current_impulses.unwrap();
+        assert_eq!((retained.start_time_s, retained.stop_time_s), (0.5, 1.0));
+        assert_eq!(
+            retained.traces[0].points,
+            [CurrentImpulsePoint {
+                time: 0.7,
+                charge_coulombs: 0.004
+            }]
+        );
+        assert!(retained.traces[1].complete && retained.traces[1].points.is_empty());
+        let full =
+            collect_event_history(&result, 0.0, &rspice_core::abort_signal::NoAbort).unwrap();
+        assert_eq!(
+            full.current_impulses.unwrap().traces[0].points[0].charge_coulombs,
+            -0.002
+        );
+        result.current_impulses.as_mut().unwrap()[0].points[0].charge_coulombs = f64::NAN;
+        assert!(collect_event_history(&result, 0.5, &rspice_core::abort_signal::NoAbort).is_err());
+        result.current_impulses = None;
+        assert!(
+            collect_event_history(&result, 0.0, &rspice_core::abort_signal::NoAbort)
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]

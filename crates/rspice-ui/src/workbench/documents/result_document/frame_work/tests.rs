@@ -119,6 +119,7 @@ fn transient_analysis() -> AnalysisResult {
     AnalysisResult::new(1, AnalysisType::Transient, "TRAN")
         .with_waveforms(waveforms)
         .with_result_payload(AnalysisResultPayload::TransientEvents {
+            current_impulses: None,
             digital_traces,
             real_traces: Vec::new(),
             digital_buses: Vec::new(),

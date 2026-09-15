@@ -161,6 +161,35 @@ impl ProjectSimulationResultsData {
 
     fn migrate_to_current_in_place(&mut self, project_id: ProjectId) -> Result<(), String> {
         let source_schema = self.schema_version;
+        if source_schema < CURRENT_IMPULSE_RESULTS_SCHEMA_VERSION
+            && self
+                .runs
+                .iter()
+                .flat_map(|run| &run.analyses)
+                .any(|analysis| {
+                    matches!(
+                        analysis.result_payload.as_ref(),
+                        Some(AnalysisResultPayload::TransientEvents {
+                            current_impulses: Some(_),
+                            ..
+                        })
+                    )
+                })
+        {
+            return Err(
+                "result schemas before v27 cannot contain current impulse histories".into(),
+            );
+        }
+        if source_schema == SENSITIVITY_AVAILABILITY_RESULTS_SCHEMA_VERSION {
+            for run in &self.runs {
+                legacy_digests::validate_v26_result_digests(run)?;
+            }
+            for run in &mut self.runs {
+                seal_project_result_digests(run)?;
+            }
+            self.schema_version = PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION;
+            return self.validate();
+        }
         if source_schema < SENSITIVITY_AVAILABILITY_RESULTS_SCHEMA_VERSION
             && self.runs.iter().flat_map(|run| &run.analyses).any(|analysis| {
                 matches!(analysis.result_payload.as_ref(), Some(AnalysisResultPayload::Sensitivity { rows, .. })

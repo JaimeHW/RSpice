@@ -612,6 +612,44 @@ fn csv_export_marks_unavailable_pole_zero_gain_explicitly() {
 }
 
 #[test]
+fn current_impulse_csv_retains_exact_charge_owner_and_zero_event_coverage() {
+    let mut history = crate::state::CurrentImpulseHistoryEvidence::fixture();
+    let mut zero = history.traces[0].clone();
+    zero.owner = rspice_core::CurrentImpulseOwner::DeviceLead {
+        device_name: "Q1".into(),
+        parameter: "ic".into(),
+    };
+    zero.points.clear();
+    history.traces.push(zero);
+    let analysis =
+        crate::state::AnalysisResult::new(1, crate::state::AnalysisType::Transient, "TRAN")
+            .with_result_payload(crate::state::AnalysisResultPayload::TransientEvents {
+                digital_traces: vec![],
+                real_traces: vec![],
+                digital_buses: vec![],
+                current_impulses: Some(history),
+            });
+    let csv = prepare_typed_result_csv(&analysis).unwrap();
+    let rows: Vec<Vec<_>> = csv
+        .contents
+        .lines()
+        .map(|line| line.split(',').collect())
+        .collect();
+    assert_eq!(rows.len(), 5);
+    assert!(rows.iter().all(|row| row.len() == 13));
+    assert_eq!(rows[0][8], "charge_coulombs");
+    assert_eq!(rows[1][5], "section");
+    assert_eq!(rows[2][5], "coverage");
+    assert_eq!(rows[3][0], "V1");
+    assert_eq!(rows[3][6], "branch");
+    assert_eq!(rows[3][2].parse::<f64>().unwrap(), 0.3);
+    assert_eq!(rows[3][8].parse::<f64>().unwrap(), -0.002);
+    assert_eq!(&rows[4][5..8], ["coverage", "device_lead", "ic"]);
+    assert_eq!(&rows[4][11..13], ["true", "true"]);
+    assert_eq!(rows[4][8], "");
+}
+
+#[test]
 fn csv_export_publishes_canonical_sensitivity_rows_and_basis() {
     let analysis = AnalysisResult::new(1, AnalysisType::Sensitivity, "SENS").with_result_payload(
         AnalysisResultPayload::Sensitivity {
@@ -1813,6 +1851,7 @@ fn engineering_export_preference_dispatches_the_three_new_encoders() {
             vec![0.0, 1.0, 0.0],
         )])
         .with_result_payload(AnalysisResultPayload::TransientEvents {
+            current_impulses: None,
             digital_traces: vec![crate::state::DigitalEventTraceEvidence {
                 node_name: "d".to_owned(),
                 points: vec![

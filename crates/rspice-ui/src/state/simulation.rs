@@ -38,6 +38,9 @@ pub use yield_evidence::YieldEvidence;
 
 pub const MAX_RUN_HISTORY: usize = 20;
 
+mod current_impulses;
+pub use current_impulses::CurrentImpulseHistoryEvidence;
+
 pub use ac_bode::{
     ac_bode_shape_for_analysis, ac_bode_shape_for_selection, ac_bode_summary_for_analysis,
     ac_bode_summary_for_selection,

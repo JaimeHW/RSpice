@@ -403,8 +403,9 @@ fn viewer_can_render(
             Some(AnalysisResultPayload::TransientEvents {
                 ref digital_traces,
                 ref real_traces,
+                ref current_impulses,
                 ..
-            }) if !digital_traces.is_empty() || !real_traces.is_empty()
+            }) if !digital_traces.is_empty() || !real_traces.is_empty() || current_impulses.is_some()
         ),
         ResultViewer::Soa => matches!(
             analysis.result_payload,

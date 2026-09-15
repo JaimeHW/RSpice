@@ -153,6 +153,7 @@ pub(super) fn events_analysis() -> AnalysisResult {
     };
     AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_result_payload(
         AnalysisResultPayload::TransientEvents {
+            current_impulses: None,
             digital_traces: vec![
                 trace("clk", &[(0.0, 0), (5.0e-10, 1), (1.0e-9, 12)]),
                 trace("addr[1]", &[(0.0, 0), (1.0e-9, 1)]),

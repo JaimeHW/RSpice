@@ -1168,6 +1168,7 @@ fn payload_values_label(payload: &AnalysisResultPayload) -> String {
         AnalysisResultPayload::TransientEvents {
             digital_traces,
             real_traces,
+            current_impulses,
             ..
         } => {
             let events: usize = digital_traces
@@ -1175,8 +1176,15 @@ fn payload_values_label(payload: &AnalysisResultPayload) -> String {
                 .map(|trace| trace.points.len())
                 .chain(real_traces.iter().map(|trace| trace.points.len()))
                 .sum();
+            let impulses = current_impulses.as_ref().map_or(0, |history| {
+                history
+                    .traces
+                    .iter()
+                    .map(|trace| trace.points.len())
+                    .sum::<usize>()
+            });
             format!(
-                "{} event nodes / {events} committed events",
+                "{} event nodes / {events} committed events / {impulses} current impulses",
                 digital_traces.len() + real_traces.len()
             )
         }

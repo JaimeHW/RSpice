@@ -247,6 +247,7 @@ fn scalar_state(source: EventSelectionSource) -> (AppState, &'static str) {
         }
         EventSelectionSource::ExactReal => {
             analysis.result_payload = Some(AnalysisResultPayload::TransientEvents {
+                current_impulses: None,
                 digital_traces: vec![],
                 digital_buses: vec![],
                 real_traces: vec![crate::state::RealEventTraceEvidence {

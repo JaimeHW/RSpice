@@ -114,6 +114,7 @@ pub(super) fn prepare_vcd(analysis: &crate::state::AnalysisResult) -> Result<Pre
         digital_traces,
         real_traces,
         digital_buses,
+        ..
     }) = analysis.result_payload.as_ref()
     else {
         return Err(NO_EVENT_EVIDENCE_MESSAGE.to_owned());
@@ -255,6 +256,7 @@ mod tests {
         real_traces: Vec<RealEventTraceEvidence>,
     ) -> AnalysisResultPayload {
         AnalysisResultPayload::TransientEvents {
+            current_impulses: None,
             digital_traces,
             real_traces,
             digital_buses: Vec::new(),
@@ -429,6 +431,7 @@ mod tests {
     /// as the retained evidence a completed run would leave.
     fn bus_declaring_events() -> AnalysisResultPayload {
         AnalysisResultPayload::TransientEvents {
+            current_impulses: None,
             digital_traces: vec![
                 digital("count#1", &[(0.0, 0), (10.0e-9, 1)]),
                 digital(

@@ -137,6 +137,8 @@ struct EventOrder {
     exact: bool,
     rows: Vec<EventOrderEntry>,
     buses: Vec<BusTimeline>,
+    current_names: Vec<String>,
+    current_rows: Vec<(usize, usize)>,
 }
 
 /// Source ownership is checked by both the sheet and the inspector. Holding
@@ -646,8 +648,9 @@ pub(super) fn analysis_is_renderable(analysis: &AnalysisResult) -> bool {
             Some(AnalysisResultPayload::TransientEvents {
                 digital_traces,
                 real_traces,
+                current_impulses,
                 ..
-            }) if !digital_traces.is_empty() || !real_traces.is_empty()
+            }) if !digital_traces.is_empty() || !real_traces.is_empty() || current_impulses.is_some()
         ) || analysis.waveforms.iter().any(waveform_is_event))
 }
 
@@ -741,6 +744,7 @@ fn build_event_order(
         digital_traces,
         real_traces,
         digital_buses,
+        current_impulses,
     }) = analysis.result_payload.as_ref()
     {
         let buses = build_bus_timelines(digital_traces, digital_buses);
@@ -790,10 +794,27 @@ fn build_event_order(
             }
         }
         sort_event_order(analysis, &buses, &mut rows);
+        let mut current_names = Vec::new();
+        let mut current_rows = Vec::new();
+        if let Some(history) = current_impulses {
+            for (trace_index, trace) in history.traces.iter().enumerate() {
+                current_names.push(trace.owner.to_string());
+                current_rows
+                    .extend((0..trace.points.len()).map(|point_index| (trace_index, point_index)));
+            }
+            current_rows.sort_by(|&(left_trace, left_point), &(right_trace, right_point)| {
+                history.traces[left_trace].points[left_point]
+                    .time
+                    .total_cmp(&history.traces[right_trace].points[right_point].time)
+                    .then_with(|| current_names[left_trace].cmp(&current_names[right_trace]))
+            });
+        }
         return EventOrder {
             exact: true,
             rows,
             buses,
+            current_names,
+            current_rows,
         };
     }
 
@@ -840,6 +861,8 @@ fn build_event_order(
         exact: false,
         rows,
         buses: Vec::new(),
+        current_names: Vec::new(),
+        current_rows: Vec::new(),
     }
 }
 
@@ -1129,6 +1152,118 @@ fn event_row_for_selection<'a>(
     selection.matches(&row, buses).then_some(row)
 }
 
+fn show_current_impulses(
+    ui: &mut Ui,
+    history: &crate::state::CurrentImpulseHistoryEvidence,
+    order: &EventOrder,
+) {
+    section_header(ui, "Current impulses", None);
+    panel_note(
+        ui,
+        "Signed charge is reported in coulombs at the exact event time. Finite current waveforms are reported separately in amperes.",
+    );
+    mono(
+        ui,
+        &format!(
+            "Retained interval: {:.17e} to {:.17e} s",
+            history.start_time_s, history.stop_time_s
+        ),
+    );
+    if !history.delivery_complete {
+        panel_note(
+            ui,
+            "This preview did not retain the complete impulse history.",
+        );
+    }
+    let min_width = ui.available_width().max(720.0);
+    egui::ScrollArea::horizontal()
+        .id_salt("rspice.results.current-impulses-horizontal")
+        .auto_shrink([false, true])
+        .show(ui, |ui| {
+            ui.set_min_width(min_width);
+            show_current_impulse_tables(ui, history, order);
+        });
+}
+
+fn show_current_impulse_tables(
+    ui: &mut Ui,
+    history: &crate::state::CurrentImpulseHistoryEvidence,
+    order: &EventOrder,
+) {
+    ui.collapsing("Current coverage", |ui| {
+        TableBuilder::new(ui)
+            .id_salt("rspice.results.current-coverage")
+            .striped(true)
+            .max_scroll_height(180.0)
+            .column(Column::remainder().clip(true))
+            .column(Column::initial(100.0).clip(true))
+            .column(Column::initial(120.0).clip(true))
+            .header(HEADER_HEIGHT, |mut header| {
+                for label in ["CURRENT", "EVENTS", "COVERAGE"] {
+                    header.col(|ui| table_header(ui, label));
+                }
+            })
+            .body(|body| {
+                body.rows(ROW_HEIGHT, history.traces.len(), |mut row| {
+                    let index = row.index();
+                    let trace = &history.traces[index];
+                    row.col(|ui| {
+                        mono(ui, &order.current_names[index]);
+                    });
+                    row.col(|ui| {
+                        mono(ui, &trace.points.len().to_string());
+                    });
+                    row.col(|ui| {
+                        ui.label(if trace.complete && history.delivery_complete {
+                            "Complete"
+                        } else {
+                            "Incomplete"
+                        });
+                    });
+                })
+            });
+    });
+    if order.current_rows.is_empty() {
+        panel_note(
+            ui,
+            if history.traces.is_empty() {
+                "No current coverage was retained. Absence of events does not establish zero impulse charge."
+            } else {
+                "No charge events were retained in this time window. See Current coverage for the currents whose histories are complete."
+            },
+        );
+        return;
+    }
+    let height = (ui.available_height() * 0.45).max(120.0);
+    TableBuilder::new(ui)
+        .id_salt("rspice.results.current-impulses")
+        .striped(true)
+        .max_scroll_height(height)
+        .column(Column::initial(180.0).clip(true))
+        .column(Column::remainder().at_least(100.0).clip(true))
+        .column(Column::initial(210.0).clip(true))
+        .header(HEADER_HEIGHT, |mut header| {
+            for label in ["TIME (s)", "CURRENT", "SIGNED CHARGE (C)"] {
+                header.col(|ui| table_header(ui, label));
+            }
+        })
+        .body(|body| {
+            body.rows(ROW_HEIGHT, order.current_rows.len(), |mut row| {
+                let (trace_index, point_index) = order.current_rows[row.index()];
+                let point = &history.traces[trace_index].points[point_index];
+                row.col(|ui| {
+                    mono(ui, &format!("{:.17e}", point.time));
+                });
+                row.col(|ui| {
+                    mono(ui, &order.current_names[trace_index]);
+                });
+                row.col(|ui| {
+                    mono(ui, &format!("{:.17e}", point.charge_coulombs));
+                });
+            })
+        });
+}
+
 pub fn show(ui: &mut Ui, state: &mut AppState) {
     let Some((analysis_key, structurally_renderable)) =
         state.simulation.active_run().and_then(|run| {
@@ -1171,7 +1306,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         &format!(
             "{} · {} {}{}",
             analysis.label,
-            cache.rows.len(),
+            cache.rows.len() + cache.current_rows.len(),
             if exact {
                 "retained events"
             } else {
@@ -1182,8 +1317,20 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         &[],
     )
     .show(ui);
-    if let Some(note) = EventOrigin::active(state).note() {
+    if !cache.rows.is_empty()
+        && let Some(note) = EventOrigin::active(state).note()
+    {
         panel_note(ui, note);
+    }
+    if let Some(AnalysisResultPayload::TransientEvents {
+        current_impulses: Some(history),
+        ..
+    }) = analysis.result_payload.as_ref()
+    {
+        show_current_impulses(ui, history, &cache);
+        if cache.rows.is_empty() {
+            return;
+        }
     }
     if !exact {
         panel_note(
@@ -1615,8 +1762,35 @@ fn mono(ui: &mut Ui, text: &str) -> egui::Response {
 mod tests {
     use super::*;
 
+    #[test]
+    fn current_impulses_offer_an_exact_event_sheet_without_digital_nodes() {
+        let mut history = crate::state::CurrentImpulseHistoryEvidence::fixture();
+        let mut second = history.traces[0].clone();
+        second.owner = rspice_core::CurrentImpulseOwner::DeviceLead {
+            device_name: "Q1".into(),
+            parameter: "ic".into(),
+        };
+        second.points[0].time = 0.2;
+        history.traces.push(second);
+        let analysis = AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_result_payload(
+            AnalysisResultPayload::TransientEvents {
+                digital_traces: vec![],
+                real_traces: vec![],
+                digital_buses: vec![],
+                current_impulses: Some(history),
+            },
+        );
+        assert!(analysis_is_renderable(&analysis));
+        let order = build_event_order(&analysis, &Default::default());
+        assert!(order.exact);
+        assert_eq!(order.current_names, ["I(V1)", "@Q1[ic]"]);
+        assert_eq!(order.current_rows, [(1, 0), (0, 0)]);
+        assert!(order.rows.is_empty());
+    }
+
     pub(super) fn committed_events(digital: &[(f64, u8)]) -> AnalysisResultPayload {
         AnalysisResultPayload::TransientEvents {
+            current_impulses: None,
             digital_traces: vec![crate::state::DigitalEventTraceEvidence {
                 node_name: "clk".to_owned(),
                 points: digital
@@ -1706,6 +1880,7 @@ mod tests {
     #[test]
     fn exact_event_rows_preserve_between_sample_and_same_time_transitions() {
         let payload = AnalysisResultPayload::TransientEvents {
+            current_impulses: None,
             digital_traces: vec![crate::state::DigitalEventTraceEvidence {
                 node_name: "clk".to_owned(),
                 points: vec![
@@ -1746,6 +1921,7 @@ mod tests {
     #[test]
     fn exact_event_order_is_deterministic_without_claiming_cross_node_delta_order() {
         let payload = AnalysisResultPayload::TransientEvents {
+            current_impulses: None,
             digital_traces: vec![
                 crate::state::DigitalEventTraceEvidence {
                     node_name: "a".to_owned(),
@@ -1907,6 +2083,7 @@ mod availability_tests {
     #[test]
     fn never_validated_evidence_is_not_offered_as_an_events_sheet() {
         let payload = AnalysisResultPayload::TransientEvents {
+            current_impulses: None,
             digital_traces: vec![crate::state::DigitalEventTraceEvidence {
                 node_name: "clk".to_owned(),
                 points: vec![crate::state::DigitalEventPointEvidence {
@@ -1973,6 +2150,7 @@ mod bus_tests {
             AnalysisResultPayload::TransientEvents {
                 digital_traces,
                 real_traces: Vec::new(),
+                current_impulses: None,
                 digital_buses: vec![DigitalBusEvidence {
                     name: "count".to_owned(),
                     msb,
@@ -2112,6 +2290,7 @@ mod bus_tests {
     fn a_result_with_no_declaration_paints_no_bus_row_and_no_bus_subtitle() {
         let analysis = AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_result_payload(
             AnalysisResultPayload::TransientEvents {
+                current_impulses: None,
                 digital_traces: vec![DigitalEventTraceEvidence {
                     node_name: "clk".to_owned(),
                     points: vec![

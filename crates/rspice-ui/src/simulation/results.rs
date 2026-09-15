@@ -106,13 +106,13 @@ pub struct EventNodeHistory<P> {
     pub points: Vec<P>,
 }
 
-/// Every event node a transient run committed.
-///
-/// Empty for the overwhelming majority of decks, which have no event nodes at
-/// all — hence `is_empty`, so callers can skip the whole payload rather than
-/// retain an empty one.
+/// Committed digital and real events, and exact signed current impulses.
+/// Empty current traces can retain an explicit coverage claim even when no
+/// charge events occurred; unavailable legacy histories carry `None`.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct TransientEventHistory {
+    /// Exact charge observations; absent means unknown, not zero charge.
+    pub current_impulses: Option<crate::state::CurrentImpulseHistoryEvidence>,
     pub digital: Vec<EventNodeHistory<DigitalEventPoint>>,
     pub real: Vec<EventNodeHistory<RealEventPoint>>,
     /// Buses the run declared over `digital`, in declaration order.
@@ -131,7 +131,7 @@ impl TransientEventHistory {
     /// if anything ever does.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.digital.is_empty() && self.real.is_empty()
+        self.digital.is_empty() && self.real.is_empty() && self.current_impulses.is_none()
     }
 }
 

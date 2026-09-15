@@ -3416,6 +3416,7 @@ fn retained_result_artifacts(
                 digital_traces,
                 real_traces,
                 digital_buses,
+                current_impulses,
             } => {
                 // One child row per declaration, under the artifact that
                 // carries them: a bus is a node of the browser in its own
@@ -3436,7 +3437,7 @@ fn retained_result_artifacts(
                 }
                 (
                     "payload/transient-events",
-                    "Committed mixed-signal event streams",
+                    "Committed transient events",
                     ResultArtifactKind::EventStream,
                     digital_traces
                         .iter()
@@ -3445,7 +3446,14 @@ fn retained_result_artifacts(
                         + real_traces
                             .iter()
                             .map(|trace| trace.points.len())
-                            .sum::<usize>(),
+                            .sum::<usize>()
+                        + current_impulses.as_ref().map_or(0, |history| {
+                            history
+                                .traces
+                                .iter()
+                                .map(|trace| trace.points.len())
+                                .sum::<usize>()
+                        }),
                     None,
                     ResultViewer::Events,
                 )

@@ -80,7 +80,7 @@ fn sensitivity_v25_migration_authenticates_numeric_evidence_before_resealing() {
     migrated.validate().unwrap();
     assert_eq!(
         migrated.schema_version,
-        SENSITIVITY_AVAILABILITY_RESULTS_SCHEMA_VERSION
+        PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION
     );
     assert_eq!(
         migrated.runs[0].analyses[0].result_payload,
@@ -106,6 +106,81 @@ fn sensitivity_v25_migration_authenticates_numeric_evidence_before_resealing() {
         assert!(tampered.migrate_to_current(ProjectId::new()).is_err());
         assert_eq!(tampered, before, "failed migration must be transactional");
     }
+}
+
+#[test]
+fn current_impulse_project_history_round_trips_and_authenticates_charge() {
+    let mut run = SimulationRun::new(1);
+    run.mark_running().unwrap();
+    run.finish_lifecycle(SimulationRunLifecycle::Completed)
+        .unwrap();
+    run.add_analysis(
+        AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_result_payload(
+            AnalysisResultPayload::TransientEvents {
+                digital_traces: vec![],
+                real_traces: vec![],
+                digital_buses: vec![],
+                current_impulses: Some(crate::state::CurrentImpulseHistoryEvidence::fixture()),
+            },
+        ),
+    );
+    seal_legacy_unattributed(&mut run);
+    let mut simulation = SimulationState::default();
+    simulation.runs = vec![run.clone()].into();
+    simulation.next_run_id = 1;
+    let saved = ProjectSimulationResults::from_state(&simulation);
+    let mut libraries = LibraryManager::with_primitives();
+    let workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
+    let project = ProjectFile::new_with_simulation_results(workspace, libraries, saved.clone());
+    let loaded = load_project_text(&serialize_project_file(&project).unwrap(), None).unwrap();
+    assert!(loaded.simulation_results_warning.is_none());
+    let restored = loaded.simulation_results.into_simulation_state().unwrap();
+    assert_eq!(
+        restored.runs[0].analyses[0].result_payload,
+        run.analyses[0].result_payload
+    );
+    let mut tampered = saved.clone();
+    let PersistedField::Value(AnalysisResultPayload::TransientEvents {
+        current_impulses: Some(history),
+        ..
+    }) = &mut tampered.runs[0].analyses[0].result_payload
+    else {
+        panic!("impulses")
+    };
+    history.traces[0].points[0].charge_coulombs *= -1.0;
+    assert!(tampered.validate().is_err());
+    let mut disguised = saved;
+    disguised.schema_version = SENSITIVITY_AVAILABILITY_RESULTS_SCHEMA_VERSION;
+    assert!(disguised.migrate_to_current(ProjectId::new()).is_err());
+}
+
+#[test]
+fn current_impulse_schema_migration_authenticates_v26_before_resealing() {
+    let (run, mut legacy) = sensitivity_history(0.0.into());
+    legacy.schema_version = SENSITIVITY_AVAILABILITY_RESULTS_SCHEMA_VERSION;
+    legacy.runs[0].analyses[0].result_data_digest =
+        PersistedField::Value(run.analyses[0].legacy_v15_result_data_digest());
+    legacy.runs[0].dataset_content_digest =
+        PersistedField::Value(run.legacy_v15_dataset_content_digest());
+    let mut migrated: ProjectSimulationResults =
+        serde_json::from_str(&serde_json::to_string(&legacy).unwrap()).unwrap();
+    migrated.migrate_to_current(ProjectId::new()).unwrap();
+    migrated.validate().unwrap();
+    assert_eq!(
+        migrated.schema_version,
+        PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION
+    );
+    assert_ne!(
+        migrated.runs[0].dataset_content_digest,
+        legacy.runs[0].dataset_content_digest
+    );
+    let PersistedField::Value(AnalysisResultPayload::Sensitivity { rows, .. }) =
+        &mut legacy.runs[0].analyses[0].result_payload
+    else {
+        panic!("sensitivity")
+    };
+    rows[0].raw = 1.0.into();
+    assert!(legacy.migrate_to_current(ProjectId::new()).is_err());
 }
 
 #[test]

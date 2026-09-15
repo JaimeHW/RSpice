@@ -560,10 +560,12 @@ pub(crate) struct WorkerDigitalBus {
 
 /// Every event node a transient run committed, on the wire.
 ///
-/// All three fields default so a worker built before event transport still
-/// deserializes — it simply reports no events, which is the truth for it.
+/// Missing legacy fields retain unavailable history. The response protocol
+/// version prevents a stale worker from silently omitting new observations.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub(crate) struct WorkerEventHistory {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current_impulses: Option<crate::state::CurrentImpulseHistoryEvidence>,
     #[serde(default)]
     pub digital: Vec<WorkerDigitalEventTrace>,
     #[serde(default)]
@@ -577,6 +579,7 @@ pub(crate) struct WorkerEventHistory {
 impl From<TransientEventHistory> for WorkerEventHistory {
     fn from(value: TransientEventHistory) -> Self {
         Self {
+            current_impulses: value.current_impulses,
             digital: value
                 .digital
                 .into_iter()
@@ -625,6 +628,7 @@ impl From<TransientEventHistory> for WorkerEventHistory {
 impl From<WorkerEventHistory> for TransientEventHistory {
     fn from(value: WorkerEventHistory) -> Self {
         Self {
+            current_impulses: value.current_impulses,
             digital: value
                 .digital
                 .into_iter()
@@ -1458,7 +1462,18 @@ pub(super) fn event_history_payload_bytes(events: &WorkerEventHistory) -> usize 
     // A bus contributes its two declared indices and nothing else: the
     // members are names, which this budget does not count for a trace either,
     // and there is no value in a declaration to count.
+    let impulses = events.current_impulses.as_ref().map_or(0, |history| {
+        history
+            .traces
+            .iter()
+            .fold(2 * size_of::<f64>() + 1, |total, trace| {
+                total
+                    .saturating_add(1)
+                    .saturating_add(f64_payload_bytes(trace.points.len().saturating_mul(2)))
+            })
+    });
     real.saturating_add(events.buses.len().saturating_mul(2 * size_of::<i64>()))
+        .saturating_add(impulses)
 }
 
 #[cfg(test)]

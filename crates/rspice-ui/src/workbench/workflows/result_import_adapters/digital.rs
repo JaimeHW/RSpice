@@ -281,6 +281,7 @@ fn imported_event_payload(
         .map(crate::state::DigitalBusEvidence::from)
         .collect();
     Some(AnalysisResultPayload::TransientEvents {
+        current_impulses: None,
         digital_traces,
         real_traces,
         digital_buses,

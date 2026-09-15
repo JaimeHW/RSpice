@@ -1184,6 +1184,9 @@ pub enum AnalysisResultPayload {
     /// analog timestep grid, so they are retained as their own evidence
     /// rather than resampled into waveforms.
     TransientEvents {
+        /// Sparse current charge events and their independent coverage.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        current_impulses: Option<super::CurrentImpulseHistoryEvidence>,
         digital_traces: Vec<DigitalEventTraceEvidence>,
         real_traces: Vec<RealEventTraceEvidence>,
         /// Buses declared over `digital_traces`, in declaration order.
@@ -1911,14 +1914,19 @@ impl AnalysisResultPayload {
                 digital_traces,
                 real_traces,
                 digital_buses,
+                current_impulses,
             } => {
                 if analysis_type != AnalysisType::Transient {
                     return Err(format!(
                         "event payload does not match analysis type {analysis_type:?}"
                     ));
                 }
-                if digital_traces.is_empty() && real_traces.is_empty() {
+                if digital_traces.is_empty() && real_traces.is_empty() && current_impulses.is_none()
+                {
                     return Err("event payload contains no retained event history".to_owned());
+                }
+                if let Some(history) = current_impulses {
+                    history.validate()?;
                 }
                 let mut seen = std::collections::BTreeSet::new();
                 for trace in digital_traces {
@@ -2001,8 +2009,11 @@ impl AnalysisResultPayload {
             Self::TransientEvents {
                 digital_traces,
                 real_traces,
+                current_impulses,
                 ..
-            } => !digital_traces.is_empty() || !real_traces.is_empty(),
+            } => {
+                !digital_traces.is_empty() || !real_traces.is_empty() || current_impulses.is_some()
+            }
         }
     }
 }

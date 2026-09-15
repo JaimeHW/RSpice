@@ -260,6 +260,7 @@ impl LiveTransientAccumulator {
             .collect::<Vec<_>>();
         digital_buses.sort_by(|left, right| left.name.cmp(&right.name));
         let payload = AnalysisResultPayload::TransientEvents {
+            current_impulses: None,
             digital_traces,
             real_traces,
             digital_buses,

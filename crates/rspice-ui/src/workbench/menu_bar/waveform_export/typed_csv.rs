@@ -609,8 +609,12 @@ pub(super) fn prepare_typed_result_csv(
         AnalysisResultPayload::TransientEvents {
             digital_traces,
             real_traces,
+            current_impulses,
             ..
         } => {
+            if let Some(history) = current_impulses {
+                return Some(current_event_csv(digital_traces, real_traces, history));
+            }
             let mut contents = String::from("node,domain,time_s,value_code,value\n");
             for trace in digital_traces {
                 for point in &trace.points {
@@ -646,6 +650,94 @@ pub(super) fn prepare_typed_result_csv(
                 ),
             })
         }
+    }
+}
+
+fn current_event_csv(
+    digital: &[crate::state::DigitalEventTraceEvidence],
+    real: &[crate::state::RealEventTraceEvidence],
+    history: &crate::state::CurrentImpulseHistoryEvidence,
+) -> PreparedTypedResultCsv {
+    let mut contents = String::from(
+        "node,domain,time_s,value_code,value,record,owner_kind,parameter,charge_coulombs,start_time_s,stop_time_s,coverage_complete,delivery_complete\n",
+    );
+    let mut append = |fields: [String; 13]| {
+        contents.push_str(
+            &fields
+                .iter()
+                .map(|field| csv_text(field))
+                .collect::<Vec<_>>()
+                .join(","),
+        );
+        contents.push('\n');
+    };
+    for trace in digital {
+        for point in &trace.points {
+            let mut row = std::array::from_fn(|_| String::new());
+            row[0] = trace.node_name.clone();
+            row[1] = "digital".into();
+            row[2] = format!("{:.17e}", point.time_s);
+            row[3] = point.value_code.to_string();
+            row[5] = "event".into();
+            append(row);
+        }
+    }
+    for trace in real {
+        for point in &trace.points {
+            let mut row = std::array::from_fn(|_| String::new());
+            row[0] = trace.node_name.clone();
+            row[1] = "real".into();
+            row[2] = format!("{:.17e}", point.time_s);
+            row[4] = format!("{:.17e}", point.value);
+            row[5] = "event".into();
+            append(row);
+        }
+    }
+    // The section row preserves recorded-but-empty histories without claiming
+    // coverage for an omitted current. Coverage rows also survive zero events.
+    let mut section = std::array::from_fn(|_| String::new());
+    section[1] = "current_impulse".into();
+    section[5] = "section".into();
+    section[9] = format!("{:.17e}", history.start_time_s);
+    section[10] = format!("{:.17e}", history.stop_time_s);
+    section[12] = history.delivery_complete.to_string();
+    append(section.clone());
+    let mut impulses = 0usize;
+    for trace in &history.traces {
+        let mut row = section.clone();
+        row[5] = "coverage".into();
+        match &trace.owner {
+            rspice_core::CurrentImpulseOwner::Branch { branch_name } => {
+                row[0] = branch_name.clone();
+                row[6] = "branch".into();
+            }
+            rspice_core::CurrentImpulseOwner::DeviceLead {
+                device_name,
+                parameter,
+            } => {
+                row[0] = device_name.clone();
+                row[6] = "device_lead".into();
+                row[7] = parameter.clone();
+            }
+        }
+        row[11] = trace.complete.to_string();
+        append(row.clone());
+        for point in &trace.points {
+            row[5] = "event".into();
+            row[2] = format!("{:.17e}", point.time);
+            row[8] = format!("{:.17e}", point.charge_coulombs);
+            append(row.clone());
+            impulses += 1;
+        }
+    }
+    PreparedTypedResultCsv {
+        default_name: "event-history.csv",
+        contents,
+        detail: format!(
+            "{} event nodes, {} current histories, {impulses} current impulses",
+            digital.len() + real.len(),
+            history.traces.len()
+        ),
     }
 }
 

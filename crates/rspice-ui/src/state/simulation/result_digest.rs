@@ -43,6 +43,8 @@ const RESULT_DIGEST_ENCODING_VERSION_V13: u16 = 13;
 const RESULT_DIGEST_ENCODING_VERSION_V14: u16 = 14;
 // Explicit availability for sensitivity quantities.
 const RESULT_DIGEST_ENCODING_VERSION_V15: u16 = 15;
+// Exact current charge observations and frontend delivery coverage.
+const RESULT_DIGEST_ENCODING_VERSION_V16: u16 = 16;
 const CANONICAL_NAN_BITS: u64 = 0x7ff8_0000_0000_0000;
 
 struct ResultDigestWriter {
@@ -180,7 +182,7 @@ impl AnalysisResult {
     /// derived display caches are intentionally not part of the identity.
     #[must_use]
     pub fn result_data_digest(&self) -> ContentDigest {
-        self.result_data_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V15)
+        self.result_data_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V16)
     }
 
     /// Logical bytes occupied by all authoritative retained result evidence.
@@ -192,7 +194,7 @@ impl AnalysisResult {
     /// excluded from immutable content identity.
     #[must_use]
     pub fn retained_storage_bytes(&self) -> u64 {
-        let writer = self.result_data_writer_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V15);
+        let writer = self.result_data_writer_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V16);
         let cache_bytes = self.waveforms.iter().fold(0_u64, |total, waveform| {
             let bytes = waveform.display_cache.as_ref().map_or(0_u64, |cache| {
                 u64::try_from(cache.x.len())
@@ -297,6 +299,10 @@ impl AnalysisResult {
         self.result_data_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V14)
     }
 
+    pub(crate) fn legacy_v15_result_data_digest(&self) -> ContentDigest {
+        self.result_data_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V15)
+    }
+
     fn result_data_writer_with_encoding(&self, version: u16) -> ResultDigestWriter {
         let domain = match version {
             RESULT_DIGEST_ENCODING_VERSION_V1 => "rspice.analysis-result-data/v1",
@@ -314,6 +320,7 @@ impl AnalysisResult {
             RESULT_DIGEST_ENCODING_VERSION_V13 => "rspice.analysis-result-data/v13",
             RESULT_DIGEST_ENCODING_VERSION_V14 => "rspice.analysis-result-data/v14",
             RESULT_DIGEST_ENCODING_VERSION_V15 => "rspice.analysis-result-data/v15",
+            RESULT_DIGEST_ENCODING_VERSION_V16 => "rspice.analysis-result-data/v16",
             _ => unreachable!("supported result digest encoding"),
         };
         let mut writer = ResultDigestWriter::new(domain, version);
@@ -454,7 +461,7 @@ impl SimulationRun {
     /// they address the dataset but do not define its sample content.
     #[must_use]
     pub fn dataset_content_digest(&self) -> ContentDigest {
-        self.dataset_content_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V15)
+        self.dataset_content_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V16)
     }
 
     /// Schema-v8 dataset digest retained solely for authenticated migration.
@@ -537,6 +544,10 @@ impl SimulationRun {
         self.dataset_content_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V14)
     }
 
+    pub(crate) fn legacy_v15_dataset_content_digest(&self) -> ContentDigest {
+        self.dataset_content_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V15)
+    }
+
     fn dataset_content_digest_with_encoding(&self, version: u16) -> ContentDigest {
         let domain = match version {
             RESULT_DIGEST_ENCODING_VERSION_V1 => "rspice.simulation-dataset-data/v1",
@@ -554,6 +565,7 @@ impl SimulationRun {
             RESULT_DIGEST_ENCODING_VERSION_V13 => "rspice.simulation-dataset-data/v13",
             RESULT_DIGEST_ENCODING_VERSION_V14 => "rspice.simulation-dataset-data/v14",
             RESULT_DIGEST_ENCODING_VERSION_V15 => "rspice.simulation-dataset-data/v15",
+            RESULT_DIGEST_ENCODING_VERSION_V16 => "rspice.simulation-dataset-data/v16",
             _ => unreachable!("supported dataset digest encoding"),
         };
         let mut writer = ResultDigestWriter::new(domain, version);
@@ -575,7 +587,8 @@ impl SimulationRun {
                 RESULT_DIGEST_ENCODING_VERSION_V12 => analysis.legacy_v12_result_data_digest(),
                 RESULT_DIGEST_ENCODING_VERSION_V13 => analysis.legacy_v13_result_data_digest(),
                 RESULT_DIGEST_ENCODING_VERSION_V14 => analysis.legacy_v14_result_data_digest(),
-                RESULT_DIGEST_ENCODING_VERSION_V15 => analysis.result_data_digest(),
+                RESULT_DIGEST_ENCODING_VERSION_V15 => analysis.legacy_v15_result_data_digest(),
+                RESULT_DIGEST_ENCODING_VERSION_V16 => analysis.result_data_digest(),
                 _ => unreachable!("supported dataset digest encoding"),
             });
         }
@@ -1008,8 +1021,39 @@ fn encode_result_payload(
             digital_traces,
             real_traces,
             digital_buses,
+            current_impulses,
         } => {
             writer.u8(7);
+            if encoding_version >= RESULT_DIGEST_ENCODING_VERSION_V16 {
+                writer.option(current_impulses.as_ref(), |writer, history| {
+                    writer.f64(history.start_time_s);
+                    writer.f64(history.stop_time_s);
+                    writer.bool(history.delivery_complete);
+                    writer.sequence(history.traces.len());
+                    for trace in &history.traces {
+                        match &trace.owner {
+                            rspice_core::CurrentImpulseOwner::Branch { branch_name } => {
+                                writer.u8(0);
+                                writer.string(branch_name);
+                            }
+                            rspice_core::CurrentImpulseOwner::DeviceLead {
+                                device_name,
+                                parameter,
+                            } => {
+                                writer.u8(1);
+                                writer.string(device_name);
+                                writer.string(parameter);
+                            }
+                        }
+                        writer.bool(trace.complete);
+                        writer.sequence(trace.points.len());
+                        for point in &trace.points {
+                            writer.f64(point.time);
+                            writer.f64(point.charge_coulombs);
+                        }
+                    }
+                });
+            }
             writer.sequence(digital_traces.len());
             for trace in digital_traces {
                 writer.string(&trace.node_name);
@@ -2462,6 +2506,7 @@ mod tests {
             ],
         };
         let payload = |digital_buses| AnalysisResultPayload::TransientEvents {
+            current_impulses: None,
             digital_traces: vec![trace("count#1"), trace("count#0")],
             real_traces: Vec::new(),
             digital_buses,

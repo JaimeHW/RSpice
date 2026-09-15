@@ -1629,6 +1629,7 @@ fn persisted_events_at_schema_v18() -> ProjectSimulationResults {
     run.add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_result_payload(
             AnalysisResultPayload::TransientEvents {
+                current_impulses: None,
                 digital_traces: vec![trace("count#1"), trace("count#0")],
                 real_traces: Vec::new(),
                 digital_buses: Vec::new(),

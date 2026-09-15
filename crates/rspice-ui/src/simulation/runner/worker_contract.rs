@@ -563,6 +563,11 @@ impl WorkerResponse {
         match self.outcome {
             WorkerOutcome::Success(result) => {
                 validate_worker_pstb_result(&result).map_err(SimulationError::InvalidConfig)?;
+                if let WorkerSimulationResult::Transient { events, .. } = result.as_ref()
+                    && let Some(history) = &events.current_impulses
+                {
+                    history.validate().map_err(SimulationError::InvalidConfig)?;
+                }
                 Ok(SimulationResult::from(*result))
             }
             WorkerOutcome::Failure(error) => Err(SimulationError::from(error)),
@@ -1679,8 +1684,9 @@ impl WorkerSimulationResult {
 /// 18: transient-source convergence evidence survives result transport.
 /// 19: exact DC curve identities, coordinates and traversal survive transport.
 /// 20: retained PSS orbits carry canonical MNA branch-current samples.
-/// Earlier workers silently omit numerical quality or branch-current state.
-const WORKER_RESPONSE_TRANSPORT_PROTOCOL: u8 = 20;
+/// 21: transient results retain exact current impulse histories and coverage.
+/// Earlier workers silently omit numerical quality or current observations.
+const WORKER_RESPONSE_TRANSPORT_PROTOCOL: u8 = 21;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct WorkerResponseTransport {

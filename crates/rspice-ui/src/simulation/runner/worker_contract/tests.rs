@@ -301,7 +301,7 @@ pub(super) fn nondefault_op_config() -> crate::simulation::dialog::OpConfig {
 
 #[test]
 fn browser_worker_transfer_protocol_matches_rust_transport() {
-    assert_eq!(WORKER_RESPONSE_TRANSPORT_PROTOCOL, 20);
+    assert_eq!(WORKER_RESPONSE_TRANSPORT_PROTOCOL, 21);
     assert_eq!(WORKER_REQUEST_TRANSPORT_PROTOCOL, 10);
     let source = include_str!("../../../../web/simulation-worker.js");
     assert!(source.contains(&format!(
@@ -870,6 +870,7 @@ fn transient_worker_result_round_trips_through_json() {
             event_axis: Some(1e-9),
         }],
         events: WorkerEventHistory {
+            current_impulses: None,
             digital: vec![WorkerDigitalEventTrace {
                 node_name: "clk".to_string(),
                 points: vec![
@@ -927,6 +928,42 @@ fn response_with_measurement(measurement: WorkerMeasurement) -> WorkerResponse {
             events: WorkerEventHistory::default(),
         })),
     }
+}
+
+#[test]
+fn current_impulse_history_survives_worker_transfer_and_rejects_invalid_charge() {
+    let history = crate::state::CurrentImpulseHistoryEvidence::fixture();
+    let mut response = response_with_measurement(projected_worker_measurement());
+    let WorkerOutcome::Success(result) = &mut response.outcome else {
+        unreachable!()
+    };
+    let WorkerSimulationResult::Transient { time, events, .. } = result.as_mut() else {
+        unreachable!()
+    };
+    *time = vec![0.0, 1.0];
+    events.current_impulses = Some(history.clone());
+    let transport = WorkerResponseTransport::from_response(response.clone()).unwrap();
+    let metadata = serde_json::to_string(&transport.response).unwrap();
+    let transported = WorkerResponseTransport {
+        response: serde_json::from_str(&metadata).unwrap(),
+        ..transport
+    }
+    .into_response()
+    .unwrap()
+    .into_result()
+    .unwrap();
+    let SimulationResult::Transient { events, .. } = transported else {
+        panic!("transient")
+    };
+    assert_eq!(events.current_impulses, Some(history));
+    let WorkerOutcome::Success(result) = &mut response.outcome else {
+        unreachable!()
+    };
+    let WorkerSimulationResult::Transient { events, .. } = result.as_mut() else {
+        unreachable!()
+    };
+    events.current_impulses.as_mut().unwrap().traces[0].points[0].charge_coulombs = f64::NAN;
+    assert!(WorkerResponseTransport::from_response(response).is_err());
 }
 
 fn transported_measurement_mut(transport: &mut WorkerResponseTransport) -> &mut WorkerMeasurement {
@@ -1045,6 +1082,7 @@ fn event_histories_survive_the_worker_edge_in_both_directions() {
         periodic_state: None,
         convergence: Default::default(),
         events: crate::simulation::results::TransientEventHistory {
+            current_impulses: None,
             digital: vec![crate::simulation::results::EventNodeHistory {
                 node_name: "clk".to_owned(),
                 points: vec![crate::simulation::results::DigitalEventPoint {

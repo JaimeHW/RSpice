@@ -1777,6 +1777,7 @@ mod tests {
     fn typed_release_target_campaign_viewers_commit_with_embedded_source_evidence() {
         let events = AnalysisResult::new(21, AnalysisType::Transient, "TRAN events")
             .with_result_payload(AnalysisResultPayload::TransientEvents {
+                current_impulses: None,
                 digital_traces: vec![DigitalEventTraceEvidence {
                     node_name: "clk".to_owned(),
                     points: vec![

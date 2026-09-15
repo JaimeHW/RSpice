@@ -81,6 +81,11 @@ pub(super) fn validate_worker_response_before_transport(
     }
     if let WorkerOutcome::Success(result) = &response.outcome {
         validate_transient_source_payload_size(result)?;
+        if let WorkerSimulationResult::Transient { events, .. } = result.as_ref()
+            && let Some(history) = &events.current_impulses
+        {
+            history.validate()?;
+        }
         validate_worker_measurements(result)?;
         if let WorkerSimulationResult::DcSweep {
             evidence,
@@ -1882,6 +1887,14 @@ fn validate_transient_source_payload_size(result: &WorkerSimulationResult) -> Re
         .saturating_add(quality.as_ref().map_or(0, |quality| {
             2 + usize::from(quality.initialization.is_some())
         }));
+    if let WorkerSimulationResult::Transient { events, .. } = result
+        && let Some(history) = &events.current_impulses
+    {
+        values = values.saturating_add(2);
+        for trace in &history.traces {
+            values = values.saturating_add(trace.points.len().saturating_mul(2));
+        }
+    }
     for waveform in waveforms {
         values = values
             .saturating_add(waveform.x_values.len())
