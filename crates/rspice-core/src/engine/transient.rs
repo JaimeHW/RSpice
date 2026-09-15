@@ -9254,6 +9254,19 @@ impl Engine {
             } else {
                 None
             };
+            let cpl_interpolation_limit = circuit
+                .coupled_tlines
+                .iter()
+                .filter_map(|line| {
+                    line.native_interpolation_step_limit(
+                        &new_solution,
+                        step_time,
+                        transient_lte_reltol,
+                        transient_lte_abstol,
+                        self.current_abstol(),
+                    )
+                })
+                .reduce(Value::min);
             let activity_limit = if !first_accepted_transient_step
                 && !lte_estimator.uses_accepted_solution_reference()
             {
@@ -9268,7 +9281,10 @@ impl Engine {
                 None
             };
             let candidate_truncation_limit = Self::min_truncation_limit(
-                Self::min_truncation_limit(device_truncation_limit, ltra_truncation_limit),
+                Self::min_truncation_limit(
+                    Self::min_truncation_limit(device_truncation_limit, ltra_truncation_limit),
+                    cpl_interpolation_limit,
+                ),
                 activity_limit,
             );
             total_trunc_nanos += truncation_phase_start.elapsed().as_nanos();

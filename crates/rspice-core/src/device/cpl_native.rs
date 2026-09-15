@@ -1114,6 +1114,57 @@ impl NativeCplViHistory {
         self.samples.front().map(|sample| sample.time_ps)
     }
 
+    /// Bound the error of the linear VI history before storing a new interval.
+    /// For a quadratic through the last two accepted values and the candidate,
+    /// the maximum difference from the new interval's chord is |v''|*h^2/8.
+    /// Checking only the later delayed query cannot recover lost curvature.
+    pub(crate) fn interpolation_step_limit_ps(
+        &self,
+        candidate_time_ps: f64,
+        candidate_vi: [&[f64]; 4],
+        reltol: f64,
+        voltage_abstol: f64,
+        current_abstol: f64,
+    ) -> Option<f64> {
+        let current = self.samples.back()?;
+        let previous = self.samples.get(self.samples.len().checked_sub(2)?)?;
+        let h = candidate_time_ps - current.time_ps;
+        let previous_h = current.time_ps - previous.time_ps;
+        if !h.is_finite() || h <= 0.0 || !previous_h.is_finite() || previous_h <= 0.0 {
+            return None;
+        }
+        let current_vi = [&current.v_i, &current.v_o, &current.i_i, &current.i_o];
+        let previous_vi = [&previous.v_i, &previous.v_o, &previous.i_i, &previous.i_o];
+        let mut worst_error: f64 = 0.0;
+        for field in 0..4 {
+            let abstol = if field < 2 {
+                voltage_abstol
+            } else {
+                current_abstol
+            };
+            for conductor in 0..self.no_l {
+                let candidate = *candidate_vi[field].get(conductor)?;
+                let current = current_vi[field][conductor];
+                let previous = previous_vi[field][conductor];
+                // Arrange the divided difference as voltage/current increments,
+                // avoiding h^2 and derivatives that can overflow at tiny steps.
+                let chord_error = 0.25
+                    * (h / (h + previous_h))
+                    * ((candidate - current) - (current - previous) * (h / previous_h)).abs();
+                let scale = candidate.abs().max(current.abs()).max(previous.abs());
+                let tolerance = abstol + reltol * scale;
+                if tolerance.is_finite() && tolerance > 0.0 {
+                    worst_error = worst_error.max(chord_error / tolerance);
+                }
+            }
+        }
+        if worst_error > 0.0 {
+            Some(h * (0.9 / worst_error.sqrt()).min(2.0))
+        } else {
+            None
+        }
+    }
+
     pub(crate) fn delayed_vi_samples_ps(
         &mut self,
         previous_time_ps: f64,
@@ -3107,6 +3158,69 @@ mod tests {
             &[h3.tm[0].cnv_o, h3.tm[1].cnv_o, h3.tm[2].cnv_o],
             &[11.0, 20.5, 66.5],
         );
+    }
+
+    #[test]
+    fn cpl_history_interpolation_limit_resolves_quadratic_voltage_and_current() {
+        // v(t)=t^2: over [1, 2.5], its chord is 0.5625 V above the
+        // exact midpoint value. A 0.01 V budget gives h=0.2 before the
+        // controller's 0.9 safety factor, independently of the time unit.
+        for time_scale in [1.0, 1.0 / 1024.0] {
+            for field in 0..4 {
+                let value_scale = if field < 2 { 1.0 } else { 1e-3 };
+                let mut history = NativeCplViHistory::new(2, vec![0.0; 2], vec![0.0; 2]).unwrap();
+                for (time, value) in [(0.0, 0.0), (1.0, 1.0)] {
+                    let mut vi = [vec![0.0; 2], vec![0.0; 2], vec![0.0; 2], vec![0.0; 2]];
+                    vi[field][1] = value * value_scale;
+                    let [v_i, v_o, i_i, i_o] = vi;
+                    history
+                        .push_sample(NativeCplViSample::new(
+                            time * time_scale,
+                            v_i,
+                            v_o,
+                            i_i,
+                            i_o,
+                        ))
+                        .unwrap();
+                }
+                let accepted = history.clone();
+                let mut candidate = [[0.0; 2]; 4];
+                candidate[field][1] = 6.25 * value_scale;
+                let refs = [
+                    &candidate[0][..],
+                    &candidate[1][..],
+                    &candidate[2][..],
+                    &candidate[3][..],
+                ];
+                let limit = history
+                    .interpolation_step_limit_ps(2.5 * time_scale, refs, 0.0, 0.01, 1e-5)
+                    .unwrap();
+                assert!(
+                    (limit / time_scale - 0.18).abs() < 1e-14,
+                    "field {field}: {limit}"
+                );
+                let tighter = history
+                    .interpolation_step_limit_ps(2.5 * time_scale, refs, 0.0, 0.0025, 2.5e-6)
+                    .unwrap();
+                assert!((tighter / limit - 0.5).abs() < 1e-14);
+                candidate[field][1] = 2.5 * value_scale;
+                let refs = [
+                    &candidate[0][..],
+                    &candidate[1][..],
+                    &candidate[2][..],
+                    &candidate[3][..],
+                ];
+                assert_eq!(
+                    history.interpolation_step_limit_ps(2.5 * time_scale, refs, 0.0, 0.01, 1e-5),
+                    None,
+                    "an exactly linear history needs no curvature restriction"
+                );
+                assert_eq!(
+                    history, accepted,
+                    "candidate checks must not change accepted history"
+                );
+            }
+        }
     }
 
     #[test]

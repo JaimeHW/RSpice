@@ -358,8 +358,8 @@ impl CoupledTransmissionLine {
     /// Smallest native mode delay (`taul`) in seconds, or `None` when the native
     /// runtime is unavailable. ngspice clamps the transient max step to
     /// `0.9 * min(taul)` so each mode's propagation is resolved by the
-    /// convolution; mirroring that cap keeps the trapezoidal convolution faithful
-    /// to the reference.
+    /// convolution. This is a causality cap; the accepted-history interpolation
+    /// error provides a separate accuracy limit.
     #[inline]
     pub(crate) fn native_min_taul_seconds(&self) -> Option<Value> {
         let runtime = self.native_runtime_template.as_ref()?;
@@ -489,6 +489,48 @@ impl CoupledTransmissionLine {
                 None
             }
         }
+    }
+
+    /// Limit the candidate interval before its port histories are committed.
+    pub(crate) fn native_interpolation_step_limit(
+        &self,
+        candidate_solution: &[Value],
+        candidate_time: Value,
+        reltol: Value,
+        voltage_abstol: Value,
+        current_abstol: Value,
+    ) -> Option<Value> {
+        let native = self.native.as_ref()?;
+        let branches = self.native_branch_matrix_indices()?;
+        let value = |index: NodeId| {
+            index
+                .checked_sub(1)
+                .and_then(|index| candidate_solution.get(index))
+                .copied()
+                .unwrap_or(0.0)
+        };
+        let near_v: Vec<_> = self
+            .near_nodes
+            .iter()
+            .map(|&node| value(node) - value(self.near_ref))
+            .collect();
+        let far_v: Vec<_> = self
+            .far_nodes
+            .iter()
+            .map(|&node| value(node) - value(self.far_ref))
+            .collect();
+        let near_i: Vec<_> = branches.b1.iter().map(|&branch| value(branch)).collect();
+        let far_i: Vec<_> = branches.b2.iter().map(|&branch| value(branch)).collect();
+        native
+            .history
+            .interpolation_step_limit_ps(
+                candidate_time * 1e12,
+                [&near_v, &far_v, &near_i, &far_i],
+                reltol,
+                voltage_abstol,
+                current_abstol,
+            )
+            .map(|picoseconds| picoseconds * 1e-12)
     }
 
     /// Commit an accepted transient step into the native convolution state,
