@@ -2457,6 +2457,7 @@ impl XyceTestRunner {
             itl4,
             itl6,
             chgtol,
+            eventfluxtol,
             pivtol,
             pivrel,
             temp,
@@ -2553,6 +2554,7 @@ impl XyceTestRunner {
             && itl4.is_none()
             && itl6.is_none()
             && chgtol.is_none()
+            && eventfluxtol.is_none()
             && pivtol.is_none()
             && pivrel.is_none()
             && temp.is_none()
