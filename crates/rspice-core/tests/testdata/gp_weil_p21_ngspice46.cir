@@ -1,0 +1,15 @@
+GP transient phase contract
+VC c 0 2
+VB b 0 DC .7 SIN(.7 1u 1.00000000000000000e+09)
+Q1 c b 0 mm
+.model mm NPN(LEVEL=1 IS=1e-16 BF=100 BR=1 TF=1n PTF=21)
+.options RELTOL=1e-7 ABSTOL=1e-16 VNTOL=1e-10 GMIN=0
+.control
+set numdgt=17
+set wr_vecnames
+set wr_singlescale
+tran 3.99999999999999992e-12 2.00000000000000004e-08 0 3.99999999999999992e-12
+wrdata response.tsv i(VC) v(b)
+quit
+.endc
+.end

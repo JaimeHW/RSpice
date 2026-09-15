@@ -5,8 +5,10 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
 mod cutoff;
 mod nonlinear;
+mod weil;
 
 struct Progress {
+    physical_impulses: bool,
     began: std::time::Instant,
     next_report: AtomicU64,
     accepted_time: AtomicU64,
@@ -30,8 +32,13 @@ impl AbortSignal for Progress {
     }
 
     fn observe_transient_sample(&self, sample: crate::abort_signal::TransientSample<'_>) {
-        if sample.time.len() == 1 {
-            self.initial.lock().unwrap().push((
+        let mut initial = self.initial.lock().unwrap();
+        if sample.time.len() == 1
+            || (!self.physical_impulses && initial.is_empty() && !sample.time.is_empty())
+        {
+            // Ordinary legacy runs first publish a prefix containing startup
+            // and the first interval; physical events publish startup alone.
+            initial.push((
                 sample
                     .node_voltages
                     .iter()
@@ -44,8 +51,11 @@ impl AbortSignal for Progress {
                     .collect(),
             ));
         }
+        drop(initial);
         if let Some(&time) = sample.time.last() {
-            assert!(sample.current_impulses.is_some());
+            if self.physical_impulses {
+                assert!(sample.current_impulses.is_some());
+            }
             for trace in sample.current_impulses.into_iter().flatten() {
                 if let Some(&point) = trace.points.last().filter(|point| point.time == time) {
                     self.impulses
@@ -93,6 +103,8 @@ fn run_with_configuration(
     config: SimulationConfig,
 ) -> (TransientResult, Vec<ScheduledTransientCheckpoint>) {
     let progress = Progress {
+        physical_impulses: config.gp_transient_phase_model
+            == crate::GpTransientPhaseModel::ExactDelay,
         began: std::time::Instant::now(),
         next_report: AtomicU64::new(5000),
         accepted_time: AtomicU64::new(0),
@@ -164,8 +176,8 @@ fn run_with_configuration(
     let mut impulses = result
         .current_impulses
         .as_ref()
-        .unwrap()
-        .iter()
+        .into_iter()
+        .flatten()
         .flat_map(|trace| {
             trace
                 .points

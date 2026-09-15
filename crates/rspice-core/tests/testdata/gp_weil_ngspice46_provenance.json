@@ -1,0 +1,47 @@
+{
+  "reference": "ngspice 46 Windows console, 1 GHz clamped NPN, complete 20-period transient",
+  "binary_sha256": "86c9ea5f645ca919e305639fa7bdb522355364c424d14e197f1ade617feb3453",
+  "format": "Captured numeric tokens unchanged; trailing whitespace removed and LF line endings used.",
+  "runs": [
+    {
+      "phase_degrees": 21,
+      "frequency_hz": 1000000000.0,
+      "steps_per_period": 250,
+      "samples": 5008,
+      "exit_code": 0,
+      "captured_utc": "2026-09-13T20:30:34.204294+00:00",
+      "artifacts": [
+        {
+          "path": "gp_weil_p21_ngspice46.tsv",
+          "sha256": "038cc151691d74874e02bba34027618bfcf573c9545fef8358b282003ab30786",
+          "original_capture_sha256": "b3688b3d7c5ddc5d233f64eebe834747612d11ad8ed43b0fe10f539b58256615"
+        },
+        {
+          "path": "gp_weil_p21_ngspice46.cir",
+          "sha256": "1893cdfd6e5e6f3cfe4bb1b1665169b07e188db921f24d9058f092bb95e5cd8e",
+          "original_capture_sha256": "7b9b06b261b84f06afe5c3006a87a027717b448982ba2fb9861bedbf48343c0c"
+        }
+      ]
+    },
+    {
+      "phase_degrees": 90,
+      "frequency_hz": 1000000000.0,
+      "steps_per_period": 250,
+      "samples": 5008,
+      "exit_code": 0,
+      "captured_utc": "2026-09-13T20:30:34.276919+00:00",
+      "artifacts": [
+        {
+          "path": "gp_weil_p90_ngspice46.tsv",
+          "sha256": "31b45bd9fd67ec4bdaa67d409ac88c6930dedc4f36596767431af41e1289b861",
+          "original_capture_sha256": "b79372d30764b062a4dfb2e1c4435f9715537cf0ae4bbeb45df0b823a7dcf1cc"
+        },
+        {
+          "path": "gp_weil_p90_ngspice46.cir",
+          "sha256": "56068dce72aea1d6d8a4e46d1b0c9996e15ba14571146928ac0e00bfa12731c9",
+          "original_capture_sha256": "6ebdeca073b90faa2e347305f10f597e4684568f966572f9181a57915dd81383"
+        }
+      ]
+    }
+  ]
+}

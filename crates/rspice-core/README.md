@@ -898,4 +898,13 @@ TF diffusion charge. Independent harmonic current forcing produces prescribed
 base and collector voltages over three periods with a 1 us transport delay.
 Ngspice-mode trapezoidal and Xyce-mode TrapGear meet 2 uV base / 20 uV collector
 bounds on the complete trajectory. This case does not qualify other GP model
-options, legacy Weil phase compatibility or broader platform admission.
+options or broader platform admission.
+
+The selected Weil path is separately compared with ngspice 46 for a clamped
+NPN at 1 GHz, TF=1 ns and PTF=21/90 degrees. Both complete 20 ns trajectories
+retain all 5,008 recorded ngspice times, including startup. Maximum current
+errors are below 5.5 fA within the unchanged absolute-plus-signal tolerance;
+packed checkpoint resumes reproduce every remaining voltage and branch-current
+sample exactly. The committed decks, raw numeric samples and hash manifest
+are in `tests/testdata/gp_weil_*`. This establishes those legacy cases, not
+general nonlinear/topology or public transient phase admission.
