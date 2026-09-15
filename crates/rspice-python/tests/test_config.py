@@ -2,6 +2,7 @@
 
 import ast
 import math
+import pickle
 from pathlib import Path
 
 import pytest
@@ -10,6 +11,28 @@ import rspice
 
 
 class TestSimulationConfig:
+    def test_event_flux_tolerance_preserves_state_and_legacy_pickle_defaults(self):
+        default = rspice.SimulationConfig()
+        assert default.transient_event_flux_abstol == 1e-24
+        config = rspice.SimulationConfig(transient_event_flux_abstol=2e-24)
+        assert config != default
+        config.transient_event_flux_abstol = 3e-24
+        for protocol in (4, 5):
+            restored = pickle.loads(pickle.dumps(config, protocol=protocol))
+            assert restored == config
+            assert restored.transient_event_flux_abstol == 3e-24
+
+        # Old pickles supply the original eleven positional values. The new
+        # trailing field must retain its historical solver default when absent.
+        legacy = rspice.SimulationConfig._unpickle(*config.__reduce__()[1][:-1])
+        assert legacy == default
+        for invalid in (0.0, -1.0, math.nan, math.inf):
+            with pytest.raises(ValueError, match="transient_event_flux_abstol"):
+                rspice.SimulationConfig(transient_event_flux_abstol=invalid)
+            with pytest.raises(ValueError, match="transient_event_flux_abstol"):
+                config.transient_event_flux_abstol = invalid
+            assert config.transient_event_flux_abstol == 3e-24
+
     def test_kwargs_constructor(self):
         config = rspice.SimulationConfig(
             tolerance=1e-12,

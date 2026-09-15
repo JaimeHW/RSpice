@@ -31,6 +31,10 @@ impl PartialEq for PySimulationConfig {
             && same_float(left.max_timestep, right.max_timestep)
             && same_float(left.temperature, right.temperature)
             && same_float(left.transient_trtol, right.transient_trtol)
+            && same_float(
+                left.transient_event_flux_abstol,
+                right.transient_event_flux_abstol,
+            )
             && PyConvergenceConfig {
                 inner: left.convergence_config.clone(),
             } == PyConvergenceConfig {
@@ -101,6 +105,8 @@ impl PySimulationConfig {
     ///     temperature: Simulation temperature in Kelvin
     ///     integration_method: Transient integration scheme
     ///     transient_trtol: Truncation-error tolerance factor (TRTOL)
+    ///     transient_event_flux_abstol: Physical-event flux-linkage tolerance
+    ///                                 in weber-turns (finite and positive)
     ///     convergence: DC convergence aid configuration
     ///     bypass: Latent-device bypass configuration
     ///     resource_limits: Parsing, construction, analysis, and cache ceilings
@@ -108,7 +114,8 @@ impl PySimulationConfig {
     #[pyo3(signature = (*, tolerance=None, max_iterations=None, transient_max_iterations=None,
                         min_timestep=None, max_timestep=None, temperature=None,
                         integration_method=None, transient_trtol=None,
-                        convergence=None, bypass=None, resource_limits=None))]
+                        convergence=None, bypass=None, resource_limits=None,
+                        transient_event_flux_abstol=None))]
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         tolerance: Option<f64>,
@@ -122,6 +129,7 @@ impl PySimulationConfig {
         convergence: Option<PyConvergenceConfig>,
         bypass: Option<PyBypassConfig>,
         resource_limits: Option<PyResourceLimits>,
+        transient_event_flux_abstol: Option<f64>,
     ) -> PyResult<Self> {
         let mut inner = SimulationConfig::default();
         if let Some(v) = tolerance {
@@ -148,6 +156,10 @@ impl PySimulationConfig {
         }
         if let Some(v) = transient_trtol {
             inner.transient_trtol = validate_positive("transient_trtol", v)?;
+        }
+        if let Some(v) = transient_event_flux_abstol {
+            inner.transient_event_flux_abstol =
+                validate_positive("transient_event_flux_abstol", v)?;
         }
         if let Some(v) = convergence {
             inner.convergence_config = v.inner;
@@ -262,6 +274,19 @@ impl PySimulationConfig {
         Ok(())
     }
 
+    /// Absolute physical-event flux-linkage tolerance in weber-turns.
+    #[getter]
+    fn get_transient_event_flux_abstol(&self) -> f64 {
+        self.inner.transient_event_flux_abstol
+    }
+
+    #[setter]
+    fn set_transient_event_flux_abstol(&mut self, value: f64) -> PyResult<()> {
+        self.inner.transient_event_flux_abstol =
+            validate_positive("transient_event_flux_abstol", value)?;
+        Ok(())
+    }
+
     /// Convergence configuration (returns a copy; assign back to modify)
     #[getter]
     fn get_convergence(&self) -> PyConvergenceConfig {
@@ -311,6 +336,10 @@ impl PySimulationConfig {
 
     /// Rebuild from pickled state. Not part of the public API.
     #[staticmethod]
+    #[pyo3(signature = (tolerance, max_iterations, transient_max_iterations,
+                        min_timestep, max_timestep, temperature, integration_method,
+                        transient_trtol, convergence, bypass, resource_limits,
+                        transient_event_flux_abstol=None))]
     #[allow(clippy::too_many_arguments)]
     fn _unpickle(
         tolerance: f64,
@@ -324,6 +353,7 @@ impl PySimulationConfig {
         convergence: PyConvergenceConfig,
         bypass: PyBypassConfig,
         resource_limits: PyResourceLimits,
+        transient_event_flux_abstol: Option<f64>,
     ) -> PyResult<Self> {
         Self::new(
             Some(tolerance),
@@ -337,6 +367,7 @@ impl PySimulationConfig {
             Some(convergence),
             Some(bypass),
             Some(resource_limits),
+            transient_event_flux_abstol,
         )
     }
 
@@ -358,6 +389,7 @@ impl PySimulationConfig {
             PyConvergenceConfig,
             PyBypassConfig,
             PyResourceLimits,
+            f64,
         ),
     )> {
         Ok((
@@ -374,6 +406,7 @@ impl PySimulationConfig {
                 self.get_convergence(),
                 self.get_bypass(),
                 self.get_resource_limits(),
+                self.inner.transient_event_flux_abstol,
             ),
         ))
     }

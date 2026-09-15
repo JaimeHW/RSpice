@@ -646,6 +646,7 @@ class SimulationConfig:
         temperature: float | None = None,
         integration_method: IntegrationMethod | None = None,
         transient_trtol: float | None = None,
+        transient_event_flux_abstol: float | None = None,
         convergence: ConvergenceConfig | None = None,
         bypass: BypassConfig | None = None,
         resource_limits: ResourceLimits | None = None,
@@ -658,6 +659,7 @@ class SimulationConfig:
     temperature: float
     integration_method: IntegrationMethod
     transient_trtol: float
+    transient_event_flux_abstol: float
     convergence: ConvergenceConfig
     bypass: BypassConfig
     resource_limits: ResourceLimits
@@ -674,6 +676,7 @@ class SimulationConfig:
         convergence: ConvergenceConfig,
         bypass: BypassConfig,
         resource_limits: ResourceLimits,
+        transient_event_flux_abstol: float | None = None,
     ) -> SimulationConfig: ...
     def __reduce__(self) -> tuple[Any, tuple[Any, ...]]: ...
 
