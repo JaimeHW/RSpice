@@ -20,6 +20,7 @@ pub(in crate::netlist::expr) struct ExprParser<'a> {
     abort: Option<&'a dyn crate::abort_signal::AbortSignal>,
     aborted: bool,
     parse_depth: usize,
+    control_vectors: bool,
 }
 
 impl<'a> ExprParser<'a> {
@@ -30,6 +31,7 @@ impl<'a> ExprParser<'a> {
             abort: None,
             aborted: false,
             parse_depth: 0,
+            control_vectors: false,
         }
     }
 
@@ -43,11 +45,30 @@ impl<'a> ExprParser<'a> {
             abort: Some(abort),
             aborted: false,
             parse_depth: 0,
+            control_vectors: false,
         }
     }
 
     pub(in crate::netlist::expr) fn was_aborted(&self) -> bool {
         self.aborted
+    }
+
+    /// Parse one expression in a control-command list. Only this entry point
+    /// treats qualified probes such as `tran1.v(001)` as raw vector names.
+    pub(in crate::netlist::expr) fn parse_control_prefix(
+        &mut self,
+    ) -> Result<(Expr, usize), ExprError> {
+        self.control_vectors = true;
+        self.skip_ws();
+        let expression = self.parse_ternary()?;
+        self.skip_ws();
+        if self.aborted {
+            return Err(ExprError::UnexpectedChar('\0'));
+        }
+        if self.pos < self.input.len() && !self.input[..self.pos].ends_with(char::is_whitespace) {
+            return Err(ExprError::TrailingInput(self.input[self.pos..].to_string()));
+        }
+        Ok((expression, self.pos))
     }
 
     fn nested(
@@ -720,7 +741,12 @@ impl<'a> ExprParser<'a> {
 
         // Check for function call
         if self.consume('(') {
-            if is_raw_probe_accessor(&name) {
+            if is_raw_probe_accessor(&name)
+                || (self.control_vectors
+                    && name
+                        .rsplit_once('.')
+                        .is_some_and(|(_, probe)| matches!(probe, "V" | "I" | "N")))
+            {
                 let mut args = Vec::new();
                 loop {
                     self.skip_ws();

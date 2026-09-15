@@ -45,7 +45,10 @@ mod tests;
 use parser::ExprParser;
 
 pub use crate::ComplexValue;
-pub(crate) use api::{ParseExpressionWithAbortError, parse_expression_with_abort};
+pub(crate) use api::{
+    ParseExpressionWithAbortError, parse_control_expression_prefix_with_abort,
+    parse_expression_with_abort,
+};
 pub use api::{
     eval_expression, eval_expression_complex, eval_simple, eval_simple_complex, parse_expression,
 };

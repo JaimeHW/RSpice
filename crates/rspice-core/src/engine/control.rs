@@ -13,6 +13,12 @@ use crate::resource::{ResourceKind, ResourceLimitError};
 use crate::{AbortSignal, Value};
 use std::collections::BTreeMap;
 
+mod presentation;
+pub use presentation::{
+    ControlCurrentSource, ControlPlotOptions, ControlPresentation, ControlPresentationKind,
+    ControlTrace, ControlVector, ControlVectorId,
+};
+
 #[derive(Debug, thiserror::Error)]
 pub enum ControlExecutionError {
     #[error(transparent)]
@@ -52,7 +58,7 @@ pub enum ControlCommandEffect {
     Analyses(Vec<String>),
     /// The presentation host must handle this request before advancing the
     /// command session. Returning it is not a claim that rendering occurred.
-    Presentation(ControlCommand),
+    Presentation(ControlPresentation),
 }
 
 /// Mutable circuit state and immutable completed datasets for one script.
@@ -65,6 +71,7 @@ pub struct ControlCircuit {
     datasets: Vec<ControlNamedDataset>,
     ordinals: BTreeMap<&'static str, usize>,
     retained_values: usize,
+    vector_units: BTreeMap<ControlVectorId, crate::execution::SignalUnit>,
 }
 
 impl ControlCircuit {
@@ -77,6 +84,7 @@ impl ControlCircuit {
             datasets: Vec::new(),
             ordinals: BTreeMap::new(),
             retained_values: 0,
+            vector_units: BTreeMap::new(),
         })
     }
 
@@ -159,7 +167,9 @@ impl ControlCircuit {
                 }
                 Ok(ControlCommandEffect::Analyses(names))
             }
-            "plot" | "print" | "settype" => Ok(ControlCommandEffect::Presentation(command.clone())),
+            "plot" | "print" | "settype" => self
+                .present(engine, command, variables, abort)
+                .map(ControlCommandEffect::Presentation),
             _ => Err(command_error(
                 line,
                 format!(

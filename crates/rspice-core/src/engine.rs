@@ -54,8 +54,9 @@ pub use builder::{
 mod config_resolver;
 mod control;
 pub use control::{
-    ControlAnalysisResult, ControlCircuit, ControlCommandEffect, ControlExecutionError,
-    ControlNamedDataset,
+    ControlAnalysisResult, ControlCircuit, ControlCommandEffect, ControlCurrentSource,
+    ControlExecutionError, ControlNamedDataset, ControlPlotOptions, ControlPresentation,
+    ControlPresentationKind, ControlTrace, ControlVector, ControlVectorId,
 };
 mod convergence;
 mod core;

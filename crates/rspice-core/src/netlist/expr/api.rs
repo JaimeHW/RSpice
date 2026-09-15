@@ -36,6 +36,19 @@ pub(crate) fn parse_expression_with_abort(
     }
 }
 
+pub(crate) fn parse_control_expression_prefix_with_abort(
+    input: &str,
+    abort: &dyn crate::abort_signal::AbortSignal,
+) -> Result<(Expr, usize), ParseExpressionWithAbortError> {
+    let mut parser = ExprParser::with_abort(input, abort);
+    let result = parser.parse_control_prefix();
+    if parser.was_aborted() {
+        Err(ParseExpressionWithAbortError::Aborted)
+    } else {
+        result.map_err(ParseExpressionWithAbortError::Parse)
+    }
+}
+
 /// Parse and evaluate a SPICE expression with the given context
 pub fn eval_expression(input: &str, ctx: &ParamContext) -> Result<Value, ExprError> {
     let expr = parse_expression(input)?;
