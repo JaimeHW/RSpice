@@ -20,6 +20,7 @@
 
 pub mod bounded_io;
 mod capability;
+pub mod control;
 mod event_bus;
 mod event_export;
 mod event_projection;
