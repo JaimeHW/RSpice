@@ -2176,7 +2176,7 @@ impl Engine {
         Ok(currents)
     }
 
-    fn transient_result_value_count(result: &TransientResult) -> usize {
+    pub(super) fn transient_result_value_count(result: &TransientResult) -> usize {
         crate::transient_observation::current_impulse_value_count(
             result.current_impulses.as_deref(),
         )

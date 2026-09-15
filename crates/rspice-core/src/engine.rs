@@ -52,6 +52,11 @@ pub use builder::{
 };
 
 mod config_resolver;
+mod control;
+pub use control::{
+    ControlAnalysisResult, ControlCircuit, ControlCommandEffect, ControlExecutionError,
+    ControlNamedDataset,
+};
 mod convergence;
 mod core;
 mod data;
