@@ -408,6 +408,10 @@ pub struct RunArgs {
     #[arg(long, value_name = "TOL", value_parser = spice_value)]
     pub charge_abstol: Option<f64>,
 
+    /// Physical-event flux-linkage absolute tolerance in weber-turns (EVENTFLUXTOL)
+    #[arg(long, value_name = "TOL", value_parser = spice_value)]
+    pub event_flux_abstol: Option<f64>,
+
     /// Limit exported signals (repeatable; overrides the netlist
     /// .SAVE/.PROBE/.PRINT/.PLOT selection), e.g. --save "V(out)" --save "I(v1)"
     #[arg(long = "save", value_name = "SIGNAL")]

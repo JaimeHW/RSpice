@@ -53,6 +53,7 @@ pub struct SimulationConfigOverrides {
     pub max_timestep: Option<Value>,
     pub integration_method: Option<IntegrationMethod>,
     pub transient_trtol: Option<Value>,
+    pub transient_event_flux_abstol: Option<Value>,
     pub transient_lte_reltol: Option<Value>,
     pub transient_lte_abstol: Option<Value>,
     pub transient_timeint_max_timestep: Option<Value>,
@@ -202,6 +203,9 @@ pub fn resolve_simulation_config(
         if let Some(trtol) = opts.trtol {
             transient_trtol = trtol;
         }
+        if let Some(absolute) = opts.eventfluxtol {
+            resolved.transient_event_flux_abstol = absolute;
+        }
         if let Some(reltol) = opts.timeint_reltol {
             transient_lte_reltol = Some(reltol);
         }
@@ -340,6 +344,9 @@ pub fn resolve_simulation_config(
     }
     if let Some(trtol) = overrides.transient_trtol {
         transient_trtol = trtol;
+    }
+    if let Some(absolute) = overrides.transient_event_flux_abstol {
+        resolved.transient_event_flux_abstol = absolute;
     }
     if let Some(reltol) = overrides.transient_lte_reltol {
         transient_lte_reltol = Some(reltol);
@@ -612,6 +619,57 @@ mod tests {
             resolve_simulation_config(&base, Some(&options), &SimulationConfigOverrides::default());
 
         assert_eq!(resolved.transient_trtol, 2.25);
+    }
+
+    #[test]
+    fn event_flux_tolerance_resolves_precedence_and_rejects_invalid_values() {
+        let base = SimulationConfig::default();
+        assert_eq!(base.transient_event_flux_abstol, 1e-24);
+        let deck = crate::Netlist::parse(
+            "event flux options\nR1 1 0 1k\n.options eventfluxtol=2e-24\n.options eventfluxtol=3e-24\n.end\n",
+        )
+        .unwrap();
+        let resolved = resolve_simulation_config(&base, Some(&deck.options), &Default::default());
+        assert_eq!(resolved.transient_event_flux_abstol, 3e-24);
+        let overrides = SimulationConfigOverrides {
+            transient_event_flux_abstol: Some(4e-24),
+            ..Default::default()
+        };
+        let resolved = resolve_simulation_config(&base, Some(&deck.options), &overrides);
+        assert_eq!(resolved.transient_event_flux_abstol, 4e-24);
+        resolved.validate().unwrap();
+        let variables = deck.params.clone();
+        let mut circuit = crate::engine::ControlCircuit::new(deck).unwrap();
+        let engine = crate::Engine::try_new_with_resolved_config(resolved).unwrap();
+        for (arguments, accepted) in [("eventfluxtol=5e-24", true), ("eventfluxtol=0", false)] {
+            let result = circuit.execute(
+                &engine,
+                &crate::execution::control::ControlCommand {
+                    line: 7,
+                    name: "option".into(),
+                    arguments: arguments.into(),
+                },
+                &variables,
+                &crate::abort_signal::NoAbort,
+            );
+            assert_eq!(result.is_ok(), accepted);
+            assert_eq!(circuit.netlist().options.eventfluxtol, Some(5e-24));
+        }
+        for invalid in [0.0, -1.0, Value::NAN, Value::INFINITY] {
+            let config = SimulationConfig {
+                transient_event_flux_abstol: invalid,
+                ..base.clone()
+            };
+            assert!(config.validate().is_err());
+        }
+        for invalid in ["0", "-1", "1e999"] {
+            assert!(
+                crate::Netlist::parse(&format!(
+                    "invalid event flux\nR1 1 0 1k\n.options eventfluxtol={invalid}\n.end\n"
+                ))
+                .is_err()
+            );
+        }
     }
 
     #[test]

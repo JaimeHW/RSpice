@@ -1145,6 +1145,7 @@ impl SimulationOptions {
             max_timestep: Some(self.max_timestep),
             integration_method: Some(self.core_integration_method()),
             transient_trtol: Some(self.trtol),
+            transient_event_flux_abstol: None,
             transient_lte_reltol: self.transient_lte_reltol,
             transient_lte_abstol: self.transient_lte_abstol,
             transient_timeint_max_timestep: None,

@@ -1243,7 +1243,8 @@ pub(crate) fn simulation_checkpoint_identity(config: &SimulationConfig) -> Strin
     // v88 preserves mutual inductance across intermediate product range loss.
     // v89 preserves diode currents at small bias and intermediate quotient range loss.
     // v90 preserves raw subexpressions during behavioral time specialization.
-    hasher.update(b"rspice-transient-resolved-config-v90\0");
+    // v91 binds the configurable physical-event flux conservation tolerance.
+    hasher.update(b"rspice-transient-resolved-config-v91\0");
     hash_field(&mut hasher, "temperature", config.temperature.to_bits());
     hash_field(&mut hasher, "ramptime", config.ramptime.to_bits());
     hash_field(&mut hasher, "digital_delay_type", config.digital_delay_type);
@@ -1270,6 +1271,11 @@ pub(crate) fn simulation_checkpoint_identity(config: &SimulationConfig) -> Strin
         &mut hasher,
         "transient_trtol",
         config.transient_trtol.to_bits(),
+    );
+    hash_field(
+        &mut hasher,
+        "transient_event_flux_abstol",
+        config.transient_event_flux_abstol.to_bits(),
     );
     hash_field(
         &mut hasher,
@@ -15489,6 +15495,27 @@ mod tests {
         checkpoint
             .validate_for_with_config(&netlist, &changed_model)
             .expect_err("resolved model-routing mismatch must reject state");
+    }
+
+    #[test]
+    fn event_flux_tolerance_is_bound_to_checkpoint_resume() {
+        let netlist = Netlist::parse("flux checkpoint\nR1 1 0 1k\n.end\n").unwrap();
+        let base = SimulationConfig::default();
+        let mut checkpoint = sample();
+        checkpoint.netlist_fingerprint = netlist_fingerprint(&netlist);
+        checkpoint.netlist_identity = netlist_checkpoint_identity(&netlist);
+        checkpoint.simulation_identity = Some(simulation_checkpoint_identity(&base));
+        checkpoint
+            .validate_for_with_config(&netlist, &base)
+            .unwrap();
+        let changed = SimulationConfig {
+            transient_event_flux_abstol: 2.0 * base.transient_event_flux_abstol,
+            ..base
+        };
+        let error = checkpoint
+            .validate_for_with_config(&netlist, &changed)
+            .unwrap_err();
+        assert!(error.contains("simulation configuration"));
     }
 
     #[test]

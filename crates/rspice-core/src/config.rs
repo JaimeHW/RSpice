@@ -284,6 +284,10 @@ pub struct SimulationConfig {
     pub cshunt: Option<Value>,
     /// Transient truncation tolerance factor for charge-state timestep control.
     pub transient_trtol: Value,
+    /// Absolute flux-linkage tolerance at physical transient events, in
+    /// weber-turns. Finite and positive; independent of charge tolerance and
+    /// ordinary inductor timestep truncation. Defaults to 1e-24.
+    pub transient_event_flux_abstol: Value,
     /// Explicit transient LTE relative tolerance. `None` uses Xyce's independent
     /// TIMEINT default in Xyce mode and voltage RELTOL in native/ngspice modes.
     pub transient_lte_reltol: Option<Value>,
@@ -463,6 +467,10 @@ impl SimulationConfig {
             return Err(SimulationConfigError::InvalidDigitalDelayType(delay_type));
         }
         validate_positive("transient_trtol", self.transient_trtol)?;
+        validate_positive(
+            "transient_event_flux_abstol",
+            self.transient_event_flux_abstol,
+        )?;
         validate_optional_positive("transient_lte_reltol", self.transient_lte_reltol)?;
         validate_optional_positive("transient_lte_abstol", self.transient_lte_abstol)?;
         validate_optional_positive(
@@ -859,6 +867,7 @@ impl Default for SimulationConfig {
             rshunt: None,
             cshunt: None,
             transient_trtol: crate::constants::TRTOL,
+            transient_event_flux_abstol: crate::constants::EVENT_FLUX_ABSTOL,
             transient_lte_reltol: None,
             transient_lte_abstol: None,
             transient_timeint_max_timestep: None,

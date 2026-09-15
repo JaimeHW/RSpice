@@ -146,6 +146,7 @@ pub(super) fn validate_run_numeric_args(args: &RunArgs) -> Result<(), CliError> 
     require_positive_arg("--voltage-abstol", args.voltage_abstol)?;
     require_positive_arg("--current-abstol", args.current_abstol)?;
     require_positive_arg("--charge-abstol", args.charge_abstol)?;
+    require_positive_arg("--event-flux-abstol", args.event_flux_abstol)?;
     require_non_negative_arg("--mc-spread", args.mc_spread)?;
 
     Ok(())
@@ -661,6 +662,7 @@ pub(super) fn build_sim_config(
         max_timestep: args.max_step,
         integration_method,
         transient_trtol: args.trtol,
+        transient_event_flux_abstol: args.event_flux_abstol,
         transient_lte_reltol: None,
         transient_lte_abstol: None,
         transient_timeint_max_timestep: None,

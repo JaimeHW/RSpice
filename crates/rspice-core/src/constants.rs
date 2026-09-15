@@ -31,6 +31,9 @@ pub const ITOL: Value = 1e-12;
 /// Similar to SPICE CHGTOL parameter.
 pub const CHGTOL: Value = 1e-14;
 
+/// Absolute flux-linkage tolerance for physical event conservation (weber-turns).
+pub const EVENT_FLUX_ABSTOL: Value = 1e-24;
+
 /// Default transient truncation tolerance factor.
 ///
 /// Similar to SPICE TRTOL parameter.

@@ -50,13 +50,22 @@ and transient analyses. Unsupported commands fail with their source location.
 An explicit command-line analysis mode continues to supersede authored cards.
 
 Control `option`/`options` commands change `reltol`, `abstol`, `vntol`,
-`gmin`, `chgtol`, `trtol`, `xmu`, `method`, `itl1`, `itl2`, `itl4`, `temp`
+`gmin`, `chgtol`, `eventfluxtol`, `trtol`, `xmu`, `method`, `itl1`, `itl2`, `itl4`, `temp`
 and `tnom` for subsequent analyses. Each command applies atomically, using
 the ordinary option grammar and validation. Earlier datasets retain their
 original results. `set num_threads=N` caps subsequent parallel work within
 the caller's resource policy. `set noinit` suppresses the initial listing;
 it does not select UIC or skip electrical startup. Other settings currently
 report a source-located error.
+
+RSpice's `EVENTFLUXTOL` sets the absolute flux-linkage conservation tolerance
+at physical transient events, in weber-turns. It must be finite and positive;
+the default is `1e-24`. Set it with `.options eventfluxtol=1e-24` or
+`--event-flux-abstol 1e-24`. The CLI value takes precedence over the deck;
+later control commands apply to subsequent runs. This setting is independent
+of `CHGTOL` and ordinary inductor timestep truncation. It does not enable
+currently guarded device capabilities. Checkpoints bind the resolved setting;
+checkpoints with the preceding configuration identity require a fresh run.
 
 Each completed script dataset gets its own output identity, for example
 `results.ac-001.csv` and `results.ac-002.csv`. Qualified expressions such as

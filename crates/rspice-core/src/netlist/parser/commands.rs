@@ -1631,6 +1631,7 @@ pub(super) fn parse_options_command(
                     | "VNTOL"
                     | "GMIN"
                     | "CHGTOL"
+                    | "EVENTFLUXTOL"
                     | "TRTOL"
                     | "XMU"
                     | "METHOD"
@@ -2459,6 +2460,11 @@ pub(super) fn parse_options_command(
             (_, "CHGTOL") => {
                 let value = expect_value(stream, line_num, params)?;
                 options.chgtol = Some(parse_positive_real_option("CHGTOL", value, line_num)?);
+            }
+            (None, "EVENTFLUXTOL") => {
+                let value = expect_value(stream, line_num, params)?;
+                options.eventfluxtol =
+                    Some(parse_positive_real_option("EVENTFLUXTOL", value, line_num)?);
             }
             (_, "PIVTOL") => {
                 let value = expect_value(stream, line_num, params)?;

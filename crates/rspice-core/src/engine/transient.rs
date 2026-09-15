@@ -5719,7 +5719,7 @@ impl Engine {
             relative_tolerance: self.voltage_reltol(),
         };
         // Absolute linkage tolerance in webers, independent of charge/current units.
-        let physical_flux_tolerance = 1e-24;
+        let physical_flux_tolerance = self.config.transient_event_flux_abstol;
         // A resume observes newly accepted actions only, not the past impulse
         // at its already accepted checkpoint seam.
         let physical_impulse_plan = if physical_sources.is_some() {

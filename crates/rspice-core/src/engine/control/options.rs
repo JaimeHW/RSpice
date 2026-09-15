@@ -63,7 +63,19 @@ impl ControlCircuit {
             )+ };
         }
         apply!(
-            reltol, abstol, vntol, gmin, chgtol, trtol, xmu, itl1, itl2, itl4, temp, tnom
+            reltol,
+            abstol,
+            vntol,
+            gmin,
+            chgtol,
+            eventfluxtol,
+            trtol,
+            xmu,
+            itl1,
+            itl2,
+            itl4,
+            temp,
+            tnom
         );
         if candidate.method.is_some() {
             self.netlist.options.method = candidate.method.clone();

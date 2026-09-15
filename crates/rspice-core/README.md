@@ -855,3 +855,15 @@ For whole-process performance comparison against ngspice, see
 [rspice-bench](../rspice-bench/README.md).
 
 Licensed under the [RSpice Personal Use License](../../LICENSE).
+
+### Physical-event flux tolerance
+
+`SimulationConfig::transient_event_flux_abstol` sets the absolute flux-linkage
+conservation tolerance at physical transient events, in weber-turns. Its
+default is `1e-24`, and values must be finite and positive. The shared netlist
+option is `.options eventfluxtol=1e-24`; ordered `option` commands also accept
+it. Explicit configuration overrides take precedence over authored options.
+This setting controls event conservation independently of charge tolerance
+and ordinary inductor timestep truncation. Existing device admission limits
+still apply. Checkpoint configuration identity version 91 binds this setting;
+checkpoints with an earlier configuration identity require a fresh run.

@@ -31,6 +31,30 @@ fn document(path: &Path) -> serde_json::Value {
 }
 
 #[test]
+fn event_flux_tolerance_cli_and_control_settings_validate_before_publication() {
+    let dir = test_dir("control-event-flux");
+    let deck = dir.join("flux.cir");
+    std::fs::write(
+        &deck,
+        "event flux setting\nV1 n 0 1\nR1 n 0 1k\n.options eventfluxtol=2e-24\n.control\noption eventfluxtol=4e-24\nop\n.endc\n.end\n",
+    ).unwrap();
+    passed(&run(
+        &deck,
+        &dir.join("valid.csv"),
+        &["--event-flux-abstol", "3e-24"],
+    ));
+    assert!(dir.join("valid.op-001.csv").is_file());
+    let invalid = run(
+        &deck,
+        &dir.join("invalid.csv"),
+        &["--event-flux-abstol", "0"],
+    );
+    assert!(!invalid.status.success());
+    assert!(String::from_utf8_lossy(&invalid.stderr).contains("--event-flux-abstol"));
+    assert!(!dir.join("invalid.op-001.csv").exists());
+}
+
+#[test]
 fn original_bjt_control_loop_publishes_six_datasets_and_its_plot() {
     let dir = test_dir("control-bjt");
     let deck = PathBuf::from(env!("CARGO_MANIFEST_DIR"))

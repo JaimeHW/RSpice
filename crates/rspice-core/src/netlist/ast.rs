@@ -4409,6 +4409,9 @@ pub struct SimulationOptions {
     pub itl6: Option<usize>,
     /// Charge tolerance for capacitors (default: 1e-14 C)
     pub chgtol: Option<Value>,
+    /// RSpice EVENTFLUXTOL: physical-event flux-linkage tolerance in
+    /// weber-turns (default: 1e-24), independent of CHGTOL and timestep LTE.
+    pub eventfluxtol: Option<Value>,
     /// Pivot tolerance for matrix operations (default: 1e-13)
     pub pivtol: Option<Value>,
     /// Relative sparse threshold-pivoting tolerance (default: 1e-3).
@@ -4685,6 +4688,9 @@ impl SimulationOptions {
         }
         if other.chgtol.is_some() {
             self.chgtol = other.chgtol;
+        }
+        if other.eventfluxtol.is_some() {
+            self.eventfluxtol = other.eventfluxtol;
         }
         if other.pivtol.is_some() {
             self.pivtol = other.pivtol;

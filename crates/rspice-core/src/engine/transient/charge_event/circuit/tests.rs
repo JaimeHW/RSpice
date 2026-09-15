@@ -30,6 +30,64 @@ fn close(actual: Value, expected: Value, absolute: Value) {
     );
 }
 
+#[test]
+fn event_flux_tolerance_controls_native_linkage_conservation() {
+    let deck = crate::Netlist::parse(
+        "flux conservation scale\nV1 s 0 0\nR1 s n 4\nL1 n 0 .5\n.options eventfluxtol=1e-8\n.end\n",
+    )
+    .unwrap();
+    let engine = crate::Engine::default().resolved_for_netlist(&deck);
+    let circuit = engine.build_circuit(&deck).unwrap();
+    let mut options = options();
+    options.current_tolerance = 1e-8;
+    options.voltage_tolerance = 1e-6;
+    let incoming = vec![0.0; circuit.matrix_size()];
+    let l = circuit.num_nodes() + circuit.inductors.branch_indices[0] - 1;
+    let mut incoming_q = incoming.clone();
+    // An independently prescribed incoming linkage differs from the trial's
+    // zero linkage by 1e-10 Wb-turn. The permitted flux residual must decide
+    // whether a continuous limit can keep that trial unchanged.
+    incoming_q[l] = 1e-10;
+    for (absolute, admitted) in [
+        (engine.config().transient_event_flux_abstol, true),
+        (1e-12, false),
+    ] {
+        let mut sampler =
+            PreparedEventCircuit::new(&circuit, absolute, &options, &NoAbort).unwrap();
+        let topology = sampler
+            .topology(0.0, SourceTimeSide::RightLimit, &options, &NoAbort)
+            .unwrap();
+        let result =
+            topology.solve_continuous(&incoming, &incoming_q, &options, &NoAbort, |state, _| {
+                sampler.sample(
+                    0.0,
+                    SourceTimeSide::RightLimit,
+                    state,
+                    &[],
+                    &options,
+                    &NoAbort,
+                )
+            });
+        assert_eq!(result.is_ok(), admitted);
+        if !admitted {
+            let repaired = topology
+                .solve(&incoming, &incoming_q, &options, &NoAbort, |state, _| {
+                    sampler.sample(
+                        0.0,
+                        SourceTimeSide::RightLimit,
+                        state,
+                        &[],
+                        &options,
+                        &NoAbort,
+                    )
+                })
+                .unwrap();
+            // Q=-L*I and L=0.5 H determine this current independently.
+            close(repaired.solution[l], -2e-10, 1e-20);
+        }
+    }
+}
+
 fn entry(stamp: &EventStamp, row: usize, column: usize) -> Value {
     stamp.rows[row]
         .iter()
