@@ -64,7 +64,10 @@ fn pnoise_physical_constants(
         crate::engine::SpiceDialect::Xyce => {
             crate::analysis::noise::NoisePhysicalConstants::XYCE_7_10
         }
-        crate::engine::SpiceDialect::BestAvailable | crate::engine::SpiceDialect::Ngspice => {
+        crate::engine::SpiceDialect::Ngspice => {
+            crate::analysis::noise::NoisePhysicalConstants::NGSPICE_46
+        }
+        crate::engine::SpiceDialect::BestAvailable => {
             crate::analysis::noise::NoisePhysicalConstants::MODERN
         }
     }
@@ -1233,9 +1236,13 @@ mod publication_tests {
 
     #[test]
     fn driven_pnoise_selects_the_complete_dialect_constant_pair() {
-        let modern = pnoise_physical_constants(crate::engine::SpiceDialect::Ngspice);
+        let modern = pnoise_physical_constants(crate::engine::SpiceDialect::BestAvailable);
         assert_eq!(modern.boltzmann, crate::constants::K_BOLTZMANN);
         assert_eq!(modern.electron_charge, crate::constants::Q_ELECTRON);
+
+        let ngspice = pnoise_physical_constants(crate::engine::SpiceDialect::Ngspice);
+        assert_eq!(ngspice.boltzmann, 1.38064852e-23);
+        assert_eq!(ngspice.electron_charge, 1.6021766208e-19);
 
         let xyce = pnoise_physical_constants(crate::engine::SpiceDialect::Xyce);
         assert_eq!(xyce.boltzmann, crate::constants::XYCE_K_BOLTZMANN);

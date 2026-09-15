@@ -871,6 +871,9 @@ checkpoints with an earlier configuration identity require a fresh run.
 Native GP models in ngspice mode now use ngspice 46's thermal constants
 (`k=1.38064852e-23`, `q=1.6021766208e-19`) for their temperature-scaled
 equations. BestAvailable, Xyce and VBIC retain their respective constants.
+Ordinary and periodic noise also use ngspice's constant pair for generic
+thermal and shot sources in ngspice mode. Model-specific noise constants
+remain owned by their model.
 
 `SimulationConfig::gp_transient_phase_model` selects `ExactDelay` (default)
 or `NgspiceWeil` independently of the evaluator dialect. The latter uses

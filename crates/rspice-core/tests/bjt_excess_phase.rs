@@ -2,7 +2,6 @@
 
 use num_complex::Complex64;
 use rspice_core::analysis::AcResult;
-use rspice_core::constants::{K_BOLTZMANN, Q_ELECTRON};
 use rspice_core::engine::{Engine, SimulationConfig, SpiceDialect};
 use rspice_core::netlist::Netlist;
 use std::f64::consts::PI;
@@ -10,6 +9,45 @@ use std::f64::consts::PI;
 // ngspice 46 const.h; the native GP model retains these thermal constants.
 fn ngspice_thermal_voltage(temperature: f64) -> f64 {
     1.38064852e-23 * temperature / 1.6021766208e-19
+}
+
+#[test]
+fn primitive_noise_absolute_densities_use_each_dialects_constants() {
+    let temperature = 300.15;
+    let source = Netlist::parse(
+        "Absolute thermal and shot noise\nVR r 0 0\nR1 r 0 750\nVC c 0 2\nVB b 0 .7\nQ1 c b 0 mm\n.model mm NPN IS=1e-16 BF=100 BR=1\n.options GMIN=0 RELTOL=1e-10 ABSTOL=1e-18 VNTOL=1e-12\n.end",
+    ).unwrap();
+    // Independent constants: SI, ngspice46 const.h, Xyce7.10 N_DEV_Const.h.
+    for (dialect, k, q) in [
+        (SpiceDialect::BestAvailable, 1.380649e-23, 1.602176634e-19),
+        (SpiceDialect::Ngspice, 1.38064852e-23, 1.6021766208e-19),
+        (SpiceDialect::Xyce, 1.3806226e-23, 1.6021918e-19),
+    ] {
+        let vt: f64 = k * temperature / q;
+        let forward = 1e-16 * (0.7 / vt).exp_m1();
+        let expected = [4.0 * k * temperature / 750.0, 2.0 * q * forward];
+        let results = Engine::new(SimulationConfig::default().with_spice_dialect(dialect))
+            .run_port_noise_correlation(
+                &source,
+                &["VR".into(), "VC".into()],
+                &[1e3, 1e9],
+                temperature,
+            )
+            .unwrap();
+        for result in results {
+            for (index, expected) in expected.into_iter().enumerate() {
+                let actual = result.current_correlation[index][index];
+                // Reverse leakage is <4e-16 A. This bound resolves even the
+                // 8e-9 relative distinction between the two electron charges.
+                assert!(
+                    (actual.re / expected - 1.0).abs() < 1e-10,
+                    "{dialect:?} source {index}: {actual} vs {expected:e}"
+                );
+                assert_eq!(actual.im, 0.0);
+            }
+            assert_eq!(result.current_correlation[0][1], Complex64::default());
+        }
+    }
 }
 
 #[test]
@@ -110,9 +148,9 @@ fn gp_excess_phase_noise_matches_independent_complex_port_covariance() {
                         gm * Complex64::from_polar(1.0, -omega * tf * phase.to_radians()) - ymu;
                     let rb_transfer = [1.0 / (rb * y) - 1.0, -forward / y];
                     let ib_transfer = [-1.0 / (rb * y), forward / y];
-                    let rb_density = 4.0 * K_BOLTZMANN * temperature / rb;
-                    let ib_density = 2.0 * Q_ELECTRON * current / 100.0;
-                    let ic_density = 2.0 * Q_ELECTRON * current;
+                    let rb_density = 4.0 * 1.38064852e-23 * temperature / rb;
+                    let ib_density = 2.0 * 1.6021766208e-19 * current / 100.0;
+                    let ic_density = 2.0 * 1.6021766208e-19 * current;
                     for row in 0..2 {
                         for col in 0..2 {
                             let expected = rb_density * rb_transfer[row] * rb_transfer[col].conj()

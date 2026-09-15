@@ -110,7 +110,8 @@ fn pnoise_rshunt_is_one_physical_source_per_electrical_node_and_uses_dialect_con
     )
     .expect("RSHUNT deck parses");
     for (dialect, boltzmann) in [
-        (SpiceDialect::Ngspice, rspice_core::constants::K_BOLTZMANN),
+        (SpiceDialect::BestAvailable, 1.380649e-23),
+        (SpiceDialect::Ngspice, 1.38064852e-23),
         (SpiceDialect::Xyce, rspice_core::constants::XYCE_K_BOLTZMANN),
     ] {
         let result = Engine::new(SimulationConfig::default().with_spice_dialect(dialect))

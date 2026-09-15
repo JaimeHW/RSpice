@@ -473,7 +473,10 @@ impl Engine {
             crate::engine::SpiceDialect::Xyce => {
                 crate::analysis::noise::NoisePhysicalConstants::XYCE_7_10
             }
-            crate::engine::SpiceDialect::BestAvailable | crate::engine::SpiceDialect::Ngspice => {
+            crate::engine::SpiceDialect::Ngspice => {
+                crate::analysis::noise::NoisePhysicalConstants::NGSPICE_46
+            }
+            crate::engine::SpiceDialect::BestAvailable => {
                 crate::analysis::noise::NoisePhysicalConstants::MODERN
             }
         };

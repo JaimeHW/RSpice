@@ -221,6 +221,12 @@ impl NoisePhysicalConstants {
         electron_charge: Q_ELECTRON,
     };
 
+    /// Constants used by ngspice 46's const.h and nevalsrc.c.
+    pub const NGSPICE_46: Self = Self {
+        boltzmann: 1.38064852e-23,
+        electron_charge: 1.6021766208e-19,
+    };
+
     pub const XYCE_7_10: Self = Self {
         boltzmann: XYCE_K_BOLTZMANN,
         electron_charge: XYCE_Q_ELECTRON,
