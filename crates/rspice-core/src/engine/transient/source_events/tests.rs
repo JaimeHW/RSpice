@@ -25,6 +25,28 @@ fn collect(circuit: &crate::CircuitData, stop: Value) -> PhysicalSourceEvents {
 }
 
 #[test]
+fn physical_source_events_nonzero_pwl_start_does_not_poison_later_corners() {
+    for dialect in [SpiceDialect::Ngspice, SpiceDialect::Xyce] {
+        let circuit = circuit(
+            "PWL initial value\nV1 a 0 DC 2 PWL(0 .6 1 .6 2 .7) TD=.25\nI1 0 n PWL(0 .6 1 .6 2 .7) TD=.25\nR1 n 0 1k\n.end\n",
+            dialect,
+        );
+        let schedule = collect(&circuit, 2.25);
+        for (time, order) in [(0.25, 0), (1.25, 1), (2.25, 1)] {
+            let events = schedule.at(time).unwrap();
+            assert_eq!(events.len(), 2);
+            for event in events {
+                assert_eq!(
+                    event.order,
+                    DelayEventOrder::AtLeast(order),
+                    "{dialect:?}: {event:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn physical_source_events_keep_adjacent_clocks_and_simultaneous_source_owners() {
     let next = 1.0_f64.next_up();
     let mut circuit = circuit(

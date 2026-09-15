@@ -125,8 +125,8 @@ fn activation(spec: &SourceSpec, basis: SourceTimeBasis, dialect: SpiceDialect) 
     }
 }
 
-/// A structural C0 certificate, not a sampled value/slope comparison. A zero
-/// bound is valid for the other finite native waveforms; no higher order or
+/// A structural C0 certificate away from activation, rather than one inferred
+/// from equal samples. A zero bound is valid for other finite native waveforms; no higher order or
 /// absence of an event is inferred. Refine these conservative bounds only
 /// with a corresponding analytic argument, especially for repeat seams.
 fn continuous(
@@ -189,9 +189,7 @@ fn continuous(
         } => {
             if !delay.is_finite()
                 || repeat_from.is_some()
-                || !points
-                    .first()
-                    .is_some_and(|&(time, value)| time >= 0.0 && value == 0.0)
+                || !points.first().is_some_and(|&(time, _)| time >= 0.0)
             {
                 return Ok(false);
             }
@@ -236,6 +234,26 @@ fn continuous(
         | SourceSpec::TrNoise { .. }
         | SourceSpec::TrRandom { .. } => false,
     })
+}
+
+/// A nonzero first PWL value can jump when the waveform activates. That
+/// initial boundary does not reduce the continuity of later, distinct knots.
+fn pwl_starts_nonzero(spec: &SourceSpec) -> bool {
+    match spec {
+        SourceSpec::Distortion { inner, .. }
+        | SourceSpec::RfPort { inner, .. }
+        | SourceSpec::DcTransient {
+            transient: inner, ..
+        }
+        | SourceSpec::AcTransient {
+            transient: inner, ..
+        }
+        | SourceSpec::DcAcTransient {
+            transient: inner, ..
+        } => pwl_starts_nonzero(inner),
+        SourceSpec::Pwl { points, .. } => points.first().is_some_and(|&(_, value)| value != 0.0),
+        _ => false,
+    }
 }
 
 impl Engine {
@@ -317,6 +335,8 @@ impl Engine {
                 remaining,
             )?;
             let base_order = u32::from(continuous(spec, basis, dialect, abort)?);
+            let initial_jump = pwl_starts_nonzero(spec);
+            let activation_time = clocks.minimum;
             for (ordinal, bits) in clocks.times.into_iter().enumerate() {
                 if ordinal.is_multiple_of(64) && abort.is_aborted() {
                     return Err(SimulationError::Aborted);
@@ -340,7 +360,13 @@ impl Engine {
                 // A collapsed represented ramp can have unequal limits even
                 // when its authored curve is continuous. Never publish an
                 // inconsistent positive bound for that represented event.
-                let order = DelayEventOrder::AtLeast(if left == right { base_order } else { 0 });
+                let order = DelayEventOrder::AtLeast(
+                    if left == right && (!initial_jump || time > activation_time) {
+                        base_order
+                    } else {
+                        0
+                    },
+                );
                 events.push(PhysicalSourceEvent { time, owner, order });
             }
         }
