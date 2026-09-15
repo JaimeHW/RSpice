@@ -49,6 +49,15 @@ executes the deck's declarative analyses; the host currently handles OP, AC,
 and transient analyses. Unsupported commands fail with their source location.
 An explicit command-line analysis mode continues to supersede authored cards.
 
+Control `option`/`options` commands change `reltol`, `abstol`, `vntol`,
+`gmin`, `chgtol`, `trtol`, `xmu`, `method`, `itl1`, `itl2`, `itl4`, `temp`
+and `tnom` for subsequent analyses. Each command applies atomically, using
+the ordinary option grammar and validation. Earlier datasets retain their
+original results. `set num_threads=N` caps subsequent parallel work within
+the caller's resource policy. `set noinit` suppresses the initial listing;
+it does not select UIC or skip electrical startup. Other settings currently
+report a source-located error.
+
 Each completed script dataset gets its own output identity, for example
 `results.ac-001.csv` and `results.ac-002.csv`. Qualified expressions such as
 `abs(ac1.v(out))` select the named run. Separate plot traces keep their own

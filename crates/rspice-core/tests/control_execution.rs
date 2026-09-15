@@ -305,6 +305,124 @@ fn failed_control_alteration_and_run_limit_preserve_the_circuit_and_completed_da
 }
 
 #[test]
+fn control_options_drive_the_integrator_and_survive_source_replay_atomically() {
+    let source = "ordered solver options\n.param rval=1k\nV1 in 0 1\nR1 in out {rval}\nC1 out 0 1u ic=0\n.options reltol=1e-3\n.step param rval list 1k 2k\n.end\n";
+    let netlist = Netlist::parse(source).unwrap();
+    let variables = netlist.params.clone();
+    let engine = Engine::new(SimulationConfig::default());
+    let mut circuit = ControlCircuit::new(netlist).unwrap();
+    let command = |name: &str, arguments: &str| ControlCommand {
+        line: 9,
+        name: name.into(),
+        arguments: arguments.into(),
+    };
+    circuit
+        .execute(
+            &engine,
+            &command("option", "method=trap xmu=0 trtol=2"),
+            &variables,
+            &NoAbort,
+        )
+        .unwrap();
+    circuit
+        .execute(
+            &engine,
+            &command("set", "num_threads = 1"),
+            &variables,
+            &NoAbort,
+        )
+        .unwrap();
+    circuit
+        .execute(&engine, &command("set", "noinit"), &variables, &NoAbort)
+        .unwrap();
+    assert!(circuit.settings().suppress_initial_listing);
+    assert_eq!(circuit.settings().maximum_parallel_workers, Some(1));
+    circuit
+        .execute(
+            &engine,
+            &command("tran", ".1m 2m uic"),
+            &variables,
+            &NoAbort,
+        )
+        .unwrap();
+    let ControlAnalysisResult::Transient(result) = &circuit.datasets()[0].result else {
+        panic!("transient");
+    };
+    let column = result
+        .node_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case("out"))
+        .unwrap();
+    let voltage = &result.voltages[column];
+    // XMU=0 is backward Euler even when METHOD=TRAP was selected. Check
+    // every accepted interval against the independent RC recurrence.
+    for index in 1..result.time.len() {
+        let ratio = (result.time[index] - result.time[index - 1]) / 1e-3;
+        let expected = (voltage[index - 1] + ratio) / (1.0 + ratio);
+        assert!((voltage[index] - expected).abs() < 1e-9, "row {index}");
+    }
+    let completed = voltage.clone();
+    circuit
+        .execute(
+            &engine,
+            &command("options", "xmu=.49 reltol=1e-4"),
+            &variables,
+            &NoAbort,
+        )
+        .unwrap();
+    for arguments in [
+        "xmu=.1 reltol=-1",
+        "xmu=.1 misspelled=4",
+        "xmu=.1 restart file=data",
+    ] {
+        assert!(
+            circuit
+                .execute(&engine, &command("option", arguments), &variables, &NoAbort)
+                .is_err()
+        );
+        assert_eq!(circuit.netlist().options.xmu, Some(0.49));
+        assert_eq!(circuit.netlist().options.reltol, Some(1e-4));
+    }
+    assert!(
+        circuit
+            .execute(
+                &engine,
+                &command("set", "num_threads=0"),
+                &variables,
+                &NoAbort
+            )
+            .is_err()
+    );
+    assert_eq!(circuit.settings().maximum_parallel_workers, Some(1));
+    let steps = circuit
+        .netlist()
+        .analyses
+        .iter()
+        .filter_map(|analysis| match analysis {
+            rspice_core::netlist::AnalysisCommand::Step(step) => Some(step.clone()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let plan = engine
+        .plan_step_commands(
+            circuit.netlist(),
+            &steps,
+            rspice_core::engine::StepPlanLimits::from_resource_limits(
+                engine.config().resource_limits,
+            ),
+        )
+        .unwrap();
+    let replayed = engine.materialize_step_run(&plan, 1).unwrap();
+    assert_eq!(replayed.netlist().options.xmu, Some(0.49));
+    assert_eq!(replayed.netlist().options.reltol, Some(1e-4));
+    assert_eq!(replayed.netlist().options.trtol, Some(2.0));
+    let ControlAnalysisResult::Transient(result) = &circuit.datasets()[0].result else {
+        panic!("retained transient");
+    };
+    assert_eq!(result.voltages[column], completed);
+}
+
+#[test]
 fn control_vectors_preserve_probe_spelling_and_refuse_misaligned_or_unavailable_data() {
     let source =
         "control vectors\nV1 001 0 dc 0 ac 2 30\nV2 1 0 dc 0 ac 5\nR1 001 0 1k\nR2 1 0 1k\n.end\n";

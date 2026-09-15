@@ -13,7 +13,9 @@ use crate::resource::{ResourceKind, ResourceLimitError};
 use crate::{AbortSignal, Value};
 use std::collections::BTreeMap;
 
+mod options;
 mod presentation;
+pub use options::ControlSettings;
 pub use presentation::{
     ControlCurrentSource, ControlPlotOptions, ControlPresentation, ControlPresentationKind,
     ControlTrace, ControlVector, ControlVectorId,
@@ -74,6 +76,8 @@ pub struct ControlCircuit {
     ordinals: BTreeMap<&'static str, usize>,
     retained_values: usize,
     vector_units: BTreeMap<ControlVectorId, crate::execution::SignalUnit>,
+    settings: ControlSettings,
+    runtime_options: crate::netlist::SimulationOptions,
 }
 
 impl ControlCircuit {
@@ -87,11 +91,17 @@ impl ControlCircuit {
             ordinals: BTreeMap::new(),
             retained_values: 0,
             vector_units: BTreeMap::new(),
+            settings: ControlSettings::default(),
+            runtime_options: crate::netlist::SimulationOptions::default(),
         })
     }
 
     pub fn netlist(&self) -> &Netlist {
         &self.netlist
+    }
+
+    pub fn settings(&self) -> &ControlSettings {
+        &self.settings
     }
 
     pub fn datasets(&self) -> &[ControlNamedDataset] {
@@ -128,6 +138,14 @@ impl ControlCircuit {
             .into());
         }
         match command.name.as_str() {
+            "option" | "options" => {
+                self.apply_options(engine, command, variables, abort)?;
+                Ok(ControlCommandEffect::CircuitChanged)
+            }
+            "set" => {
+                self.apply_set(command, variables)?;
+                Ok(ControlCommandEffect::CircuitChanged)
+            }
             "alter" => {
                 self.alter(engine, command, variables)?;
                 Ok(ControlCommandEffect::CircuitChanged)
@@ -198,7 +216,19 @@ impl ControlCircuit {
         engine
             .ensure_batch_runs(self.datasets.len().saturating_add(1))
             .map_err(|error| simulation_error(line, error))?;
-        let mut configured = engine.config().clone();
+        // Resolve authored options before marking this bounded engine resolved.
+        // Then apply only settings changed by executed commands: a caller's
+        // resolved policy must not be overwritten by unrelated authored options.
+        let resolved = engine.resolved_for_netlist(&self.netlist);
+        let mut configured = crate::resolve_simulation_config(
+            resolved.config(),
+            Some(&self.runtime_options),
+            &crate::SimulationConfigOverrides::default(),
+        );
+        if let Some(workers) = self.settings.maximum_parallel_workers {
+            configured.resource_limits.max_parallel_workers =
+                configured.resource_limits.max_parallel_workers.min(workers);
+        }
         configured.resource_limits.max_result_values = configured
             .resource_limits
             .max_result_values

@@ -109,6 +109,30 @@ fn original_memristor_control_script_publishes_each_time_grid_and_xy_plot() {
 }
 
 #[test]
+fn original_ring_control_options_execute_the_full_five_nanoseconds() {
+    let dir = test_dir("control-ring-options");
+    let deck =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/paranoia/various/ro_17_4.cir");
+    passed(&run(&deck, &dir.join("ring.csv"), &[]));
+    let plot = document(&dir.join("ring.control-001.json"));
+    let traces = plot["traces"].as_array().unwrap();
+    assert_eq!(traces.len(), 2);
+    let time = traces[0]["x"]["samples"].as_array().unwrap();
+    assert_eq!(time.last().unwrap()[0].as_f64().unwrap(), 5e-9);
+    let voltage = traces[0]["y"]["samples"].as_array().unwrap();
+    let initial = voltage[0][0].as_f64().unwrap();
+    // NOINIT suppresses a listing; it must not turn off the DC startup solve.
+    assert!(initial > 0.9 && initial < 1.1);
+    assert_eq!(plot["y_limits"], serde_json::json!([-1.0, 6.0]));
+    assert_eq!(
+        traces[1]["y"]["current_sources"][0]["owner"]["branchName"],
+        "vdd"
+    );
+    assert!(dir.join("ring.tran-001.csv").is_file());
+    // Startup phase/period accuracy remains a separate, unchanged corpus gate.
+}
+
+#[test]
 fn included_control_commands_keep_source_locations_and_publish_atomically() {
     let dir = test_dir("control-include");
     let search = dir.join("models");

@@ -56,6 +56,49 @@ mod command_parsers;
 mod commands;
 
 pub use commands::parse_save_probe;
+
+/// Apply an ordered control `option` command using the ordinary option grammar.
+/// A private candidate prevents a late invalid assignment from publishing the
+/// earlier assignments on the same command line.
+pub(crate) fn control_options(
+    arguments: &str,
+    line: usize,
+    params: &ParamContext,
+    current: &SimulationOptions,
+    max_analysis_points: usize,
+    abort: &dyn AbortSignal,
+) -> Result<SimulationOptions, ParseWithAbortError> {
+    ensure_parse_not_aborted(abort)?;
+    let mut stream = TokenStream::new(tokenize(arguments).map_err(|error| ParseError::Syntax {
+        line,
+        message: error.to_string(),
+    })?);
+    let mut candidate = current.clone();
+    let mut diagnostics = Vec::new();
+    commands::parse_options_command(
+        &mut stream,
+        line,
+        params,
+        &mut candidate,
+        max_analysis_points,
+        &mut HashSet::new(),
+        &mut diagnostics,
+        None,
+        true,
+    )?;
+    ensure_parse_not_aborted(abort)?;
+    // A control command has no parser-diagnostic publication channel. Refuse
+    // unsupported settings instead of silently discarding their diagnostics.
+    if let Some(diagnostic) = diagnostics.first() {
+        return Err(ParseError::Syntax {
+            line,
+            message: diagnostic.message.clone(),
+        }
+        .into());
+    }
+    Ok(candidate)
+}
+
 mod conditionals;
 mod elements;
 mod laplace_synthesis;

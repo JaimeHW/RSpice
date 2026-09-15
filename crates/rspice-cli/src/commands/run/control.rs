@@ -61,7 +61,7 @@ pub(super) fn run(
         &crate::abort::ProcessAbort,
     )
     .map_err(|error| map_command(error, script, args))?;
-    let engine = Engine::try_new(build_sim_config(args, config, netlist))?;
+    let engine = Engine::try_new_with_resolved_config(build_sim_config(args, config, netlist))?;
     let mut circuit =
         ControlCircuit::new(netlist.clone()).map_err(|error| map_execution(error, script, args))?;
     let mut session = program.start(netlist.params.clone());

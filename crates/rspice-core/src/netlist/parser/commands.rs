@@ -468,6 +468,7 @@ pub(super) fn parse_command(
                 unknown_warned,
                 diagnostics,
                 parameter_direction,
+                false,
             )?;
         }
         ".MEAS" | ".MEASURE" => {
@@ -1592,6 +1593,7 @@ pub(super) fn parse_options_command(
     unknown_warned: &mut std::collections::HashSet<String>,
     diagnostics: &mut Vec<ParseDiagnostic>,
     mut parameter_direction: Option<&mut ParameterDirectionCapture>,
+    control_command: bool,
 ) -> Result<(), ParseError> {
     let mut option_package: Option<String> = None;
 
@@ -1621,6 +1623,29 @@ pub(super) fn parse_options_command(
 
         let (key, key_end) = expect_option_key(stream, line_num)?;
         let key_upper = key.to_uppercase();
+        if control_command
+            && !matches!(
+                key_upper.as_str(),
+                "RELTOL"
+                    | "ABSTOL"
+                    | "VNTOL"
+                    | "GMIN"
+                    | "CHGTOL"
+                    | "TRTOL"
+                    | "XMU"
+                    | "METHOD"
+                    | "ITL1"
+                    | "ITL2"
+                    | "ITL4"
+                    | "TEMP"
+                    | "TNOM"
+            )
+        {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!("control option '{key}' has no runtime handler"),
+            });
+        }
         let has_equals = stream.consume(&TokenKind::Equals);
 
         // A value accepted without `=` must still be separated from its key.

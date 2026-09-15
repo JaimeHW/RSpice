@@ -56,7 +56,7 @@ mod control;
 pub use control::{
     ControlAnalysisResult, ControlCircuit, ControlCommandEffect, ControlCurrentSource,
     ControlExecutionError, ControlNamedDataset, ControlPlotOptions, ControlPresentation,
-    ControlPresentationKind, ControlTrace, ControlVector, ControlVectorId,
+    ControlPresentationKind, ControlSettings, ControlTrace, ControlVector, ControlVectorId,
 };
 mod convergence;
 mod core;

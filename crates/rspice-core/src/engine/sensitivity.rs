@@ -616,6 +616,9 @@ impl Engine {
         overlay: &crate::netlist::NetlistAstOverlay,
         abort: &dyn AbortSignal,
     ) -> Result<(), SimulationError> {
+        if let Some(options) = &overlay.control_options {
+            netlist.options = options.clone();
+        }
         for (index, ((device_name, parameter_name), value)) in
             overlay.device_parameters.iter().enumerate()
         {

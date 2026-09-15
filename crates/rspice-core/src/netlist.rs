@@ -800,6 +800,9 @@ pub(crate) struct NetlistAstOverlay {
     /// Root parameter values retained across nested studies and source replay.
     pub parameters: BTreeMap<String, Value>,
     pub(crate) device_parameters: BTreeMap<(String, String), crate::Value>,
+    /// Options evaluated at the most recent control command, retained across
+    /// later parameter/source replay just like resolved device alterations.
+    pub(crate) control_options: Option<SimulationOptions>,
 }
 
 /// Effective dialect-specific node-zero alias policy after parsing.
