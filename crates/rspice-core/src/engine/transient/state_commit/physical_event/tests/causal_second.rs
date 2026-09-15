@@ -72,16 +72,18 @@ fn causal_event_orders_current_ramp_gains_continuous_rate_only_through_storage()
 }
 
 #[test]
-fn causal_event_orders_delayed_corners_retain_incidence_and_c1_limits() {
-    for storage in [false, true] {
+fn causal_event_orders_delayed_corners_retain_incidence_and_constitutive_limits() {
+    for (storage, c1_only) in [(false, false), (true, false), (true, true)] {
         for declared in [
             DelayEventOrder::Unknown,
             DelayEventOrder::AtLeast(1),
+            DelayEventOrder::AtLeast(2),
             DelayEventOrder::AtLeast(5),
         ] {
             let capacitor = if storage { "C1 c 0 1u" } else { "" };
-            let (engine, mut circuit, _, incoming, mut history) = fixture(&format!(
-                "delayed corner regularity\nVs s 0 2\nRc s c 1k\nVb b 0 .6\n{capacitor}\nQ1 c b 0 qm\n.model qm NPN(IS=1e-16 VAF=20 TF=1n PTF=30 CJE=1p CJC=0)\n.end\n",
+            let join = if c1_only { "VJE=1.2 FC=.5" } else { "" };
+            let (engine, mut circuit, mut matrix, incoming, mut history) = fixture(&format!(
+                "delayed corner regularity\nVs s 0 2\nRc s c 1k\nVb b 0 .6\n{capacitor}\nQ1 c b 0 qm\n.model qm NPN(IS=1e-16 VAF=20 TF=1n PTF=30 CJE=1p CJC=0 {join})\n.end\n",
             ));
             let delay = circuit.bjts.devices[0].legacy_excess_phase_delay();
             let sources = roots(&mut circuit, 2.0 * delay);
@@ -133,7 +135,15 @@ fn causal_event_orders_delayed_corners_retain_incidence_and_c1_limits() {
                 (true, DelayEventOrder::Unknown) | (false, DelayEventOrder::AtLeast(1)) => {
                     DelayEventOrder::AtLeast(1)
                 }
-                _ => DelayEventOrder::AtLeast(2),
+                (true, DelayEventOrder::AtLeast(1)) | (false, DelayEventOrder::AtLeast(2)) => {
+                    DelayEventOrder::AtLeast(2)
+                }
+                _ => DelayEventOrder::AtLeast(3),
+            };
+            let expected = if c1_only {
+                expected.merge(DelayEventOrder::AtLeast(2))
+            } else {
+                expected
             };
             assert_eq!(
                 point.bjt.values[0]
@@ -144,6 +154,24 @@ fn causal_event_orders_delayed_corners_retain_incidence_and_c1_limits() {
                     .order,
                 expected
             );
+            if declared == DelayEventOrder::AtLeast(2) {
+                let mut solution = point.state.solution.clone();
+                accept(
+                    &engine,
+                    &mut circuit,
+                    &mut matrix,
+                    &mut history,
+                    &point,
+                    &mut solution,
+                )
+                .unwrap();
+                let checkpoint = history.phase[0].as_ref().unwrap().checkpoint();
+                let restored = DelayBuffer::from_checkpoint(checkpoint).unwrap();
+                assert_eq!(
+                    restored.next_event_after(delay).unwrap().unwrap().order,
+                    expected
+                );
+            }
         }
     }
 }

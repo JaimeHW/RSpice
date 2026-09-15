@@ -1,7 +1,7 @@
-//! Solver-owned value and first-derivative continuity from physical causes.
+//! Solver-owned continuity through second derivatives from physical causes.
 //! No interpolation knot, approximate clock match or equal sampled slope
-//! creates a certificate. The admitted C1 charts bound the certificate at
-//! order two; no tracking cutoff follows from this local classification.
+//! creates a certificate. C1/C2 constitutive charts bound the certificate at
+//! order two/three; no tracking cutoff follows from this local classification.
 
 use super::*;
 use crate::engine::transient::source_events::{PhysicalSourceEvents, PhysicalSourceOwner};
@@ -116,8 +116,10 @@ pub(super) fn classify(
     // A C1 constitutive chart has continuous rate-system coefficients at
     // fixed coordinates. With continuous forcing in that regular system,
     // its coordinate rates and the GP input's first derivative are continuous.
-    // Higher certificates require stronger constitutive smoothness evidence.
-    let mut propagated = DelayEventOrder::AtLeast(2);
+    // For a C2 chart, differentiating once more has continuous coefficients
+    // and forcing when the inputs have the required derivative continuity.
+    // The model and represented source audits below bound that second step.
+    let mut propagated = DelayEventOrder::AtLeast(3);
     for event in sources.at(step.time)? {
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
@@ -191,6 +193,11 @@ pub(super) fn classify(
             table.time_derivative_at_on_side(index, step.time, 1, SourceTimeSide::RightLimit),
         ) {
             propagated = propagated.merge(DelayEventOrder::AtLeast(1));
+        } else if !matching_slopes(
+            table.time_derivative_at_on_side(index, step.time, 2, SourceTimeSide::LeftLimit),
+            table.time_derivative_at_on_side(index, step.time, 2, SourceTimeSide::RightLimit),
+        ) {
+            propagated = propagated.merge(DelayEventOrder::AtLeast(2));
         }
     }
     for index in 0..circuit.current_sources.len() {
@@ -205,13 +212,18 @@ pub(super) fn classify(
         {
             invariant &= coupling == charge_event::CurrentJumpCoupling::Cancels;
             propagated = propagated.merge(current_order(DelayEventOrder::AtLeast(0), coupling));
+        } else if !matching_slopes(
+            table.time_derivative_at_on_side(index, step.time, 1, SourceTimeSide::LeftLimit),
+            table.time_derivative_at_on_side(index, step.time, 1, SourceTimeSide::RightLimit),
+        ) {
+            propagated = propagated.merge(current_order(DelayEventOrder::AtLeast(1), coupling));
         } else if coupling == charge_event::CurrentJumpCoupling::Present
             && !matching_slopes(
-                table.time_derivative_at_on_side(index, step.time, 1, SourceTimeSide::LeftLimit),
-                table.time_derivative_at_on_side(index, step.time, 1, SourceTimeSide::RightLimit),
+                table.time_derivative_at_on_side(index, step.time, 2, SourceTimeSide::LeftLimit),
+                table.time_derivative_at_on_side(index, step.time, 2, SourceTimeSide::RightLimit),
             )
         {
-            propagated = propagated.merge(DelayEventOrder::AtLeast(1));
+            propagated = propagated.merge(DelayEventOrder::AtLeast(2));
         }
     }
     // Every admitted nonlinear F/Q law must be C1 in a neighborhood of
@@ -222,10 +234,15 @@ pub(super) fn classify(
             return Err(SimulationError::Aborted);
         }
         invariant &= model.legacy_event_locally_c1(step.incoming);
+        if matches!(propagated, DelayEventOrder::AtLeast(n) if n > 2)
+            && !model.legacy_event_locally_c2(step.incoming)
+        {
+            propagated = propagated.merge(DelayEventOrder::AtLeast(2));
+        }
     }
     let order = if invariant {
         match propagated {
-            DelayEventOrder::AtLeast(n) => DelayEventOrder::AtLeast(n.clamp(1, 2)),
+            DelayEventOrder::AtLeast(n) => DelayEventOrder::AtLeast(n.clamp(1, 3)),
             DelayEventOrder::Unknown => DelayEventOrder::AtLeast(1),
         }
     } else if has_unknown {

@@ -125,14 +125,12 @@ impl Bjt {
             .as_ref()?[kind as usize]
     }
 
-    pub(in crate::device::semiconductor::bjt) fn legacy_junction_iv(
+    pub(in crate::device::semiconductor::bjt) fn legacy_junction_emission(
         &self,
         kind: LegacyCurrent,
-        isat: Value,
-        v: Value,
         n: Value,
-    ) -> (Value, Value) {
-        let n = if !self.xyce_compatibility {
+    ) -> Value {
+        if !self.xyce_compatibility {
             self.legacy_junction_params
                 .as_ref()
                 .and_then(|junctions| junctions.temperature_parameters.as_ref())
@@ -146,7 +144,17 @@ impl Bjt {
                 })
         } else {
             n
-        };
+        }
+    }
+
+    pub(in crate::device::semiconductor::bjt) fn legacy_junction_iv(
+        &self,
+        kind: LegacyCurrent,
+        isat: Value,
+        v: Value,
+        n: Value,
+    ) -> (Value, Value) {
+        let n = self.legacy_junction_emission(kind, n);
         let Some(scale) = self.legacy_current_scale(kind) else {
             return self.diode_iv_with_is(isat, v, n);
         };

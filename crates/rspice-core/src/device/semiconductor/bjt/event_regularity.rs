@@ -1,4 +1,4 @@
-//! Sufficient local C1 domain for the physical GP event equations.
+//! Sufficient local C1/C2 domains for the physical GP event equations.
 //!
 //! This is deliberately narrower than model support. A false result keeps
 //! the event uncertified; it does not reject the model or change its laws.
@@ -141,7 +141,9 @@ impl Bjt {
         }
         if self.tf != 0.0 && vbe > 0.0 && self.xtf != 0.0 {
             if self.vtf > 0.0 {
-                let argument = vbc / (self.vtf * 1.44);
+                // Match the charge evaluator's multiplication by its stored
+                // reciprocal: division can round an actual clamp join inward.
+                let argument = vbc * (1.0 / (self.vtf * 1.44));
                 if !(argument > -80.0 && argument < 80.0) {
                     return false;
                 }
@@ -175,13 +177,88 @@ impl Bjt {
                 } else {
                     ((14.59025 + ratio.recip()).sqrt() - root.recip()) / 2.4317
                 };
-                // Exclude the polynomial/trigonometric join. The two stable
-                // formulas at ratio=1 represent the same analytic z law.
-                if !z.is_finite() || z.abs() == 1e-3 || z.abs() >= std::f64::consts::FRAC_PI_2 {
+                // Exclude both the value and derivative approximation joins.
+                // The two formulas at ratio=1 represent the same analytic z law.
+                if !z.is_finite()
+                    || z.abs() == 1e-3
+                    || z.abs() == 0.125
+                    || z.abs() >= std::f64::consts::FRAC_PI_2
+                {
                     return false;
                 }
             }
         }
+        true
+    }
+
+    pub(crate) fn legacy_event_locally_c2(&self, solution: &[Value]) -> bool {
+        if !self.legacy_event_locally_c1(solution) {
+            return false;
+        }
+        let internal = self.mna_internal_state_at_solution(solution);
+        if internal.iter().any(|v| !v.is_finite()) {
+            return false;
+        }
+        let p = self.polarity();
+        let vbe = p * (internal[IDX_VBI] - internal[IDX_VEI]);
+        let vbc = p * (internal[IDX_VBI] - internal[IDX_VCI]);
+        let external = self.external_terminal_voltages(solution);
+        let vbx = p * (external[EXT_B] - internal[IDX_VCI]);
+        let substrate_connection = match self.substrate_topology {
+            BjtSubstrateTopology::Vertical => internal[IDX_VCI],
+            BjtSubstrateTopology::Lateral => internal[IDX_VBI],
+        };
+        let vsub =
+            p * self.substrate_topology.ngspice_sign() * (internal[IDX_VSI] - substrate_connection);
+        let ns = self
+            .legacy_junction_params
+            .as_ref()
+            .and_then(|j| j.substrate_emission)
+            .unwrap_or(1.0);
+        for (kind, voltage, nominal) in [
+            (LegacyCurrent::Forward, vbe, self.nf),
+            (LegacyCurrent::Reverse, vbc, self.nr),
+            (LegacyCurrent::BaseLeakage, vbe, self.nen),
+            (LegacyCurrent::CollectorIdealLeakage, vbc, self.nci),
+            (LegacyCurrent::CollectorLeakage, vbc, self.ncn),
+            (LegacyCurrent::Substrate, vsub, ns),
+        ] {
+            if matches!(kind, LegacyCurrent::Substrate) && self.xyce_compatibility {
+                continue;
+            }
+            let nvt = self.legacy_junction_emission(kind, nominal) * self.vt;
+            // The reverse cubic and exponential meet in value and slope at
+            // -3*n*VT, but their second derivatives differ by a factor 4/3.
+            // Use the evaluator's actual temperature/dialect emission mapping.
+            // Checking inactive junctions too is a conservative restriction.
+            if !voltage.is_finite() || !nvt.is_normal() || nvt <= 0.0 || voltage == -3.0 * nvt {
+                return false;
+            }
+        }
+        // Away from these joins each depletion branch is analytic. Exclude
+        // the joins conservatively, including external BC and lateral substrate
+        // charge, rather than assuming every continuation has matching curvature.
+        let fc = self.fc.clamp(0.0, 0.999_999);
+        for (cap, voltage, join) in [
+            (self.cje, vbe, self.vje * fc),
+            (self.cjc * self.xcjc, vbc, self.vjc * fc),
+            (self.cjc * (1.0 - self.xcjc), vbx, self.vjc * fc),
+            (self.cjcp, vsub, 0.0),
+        ] {
+            if cap != 0.0 && (!voltage.is_finite() || !join.is_finite() || voltage == join) {
+                return false;
+            }
+        }
+        if let Some(nodes) = self.legacy_external_bc_charge_nodes() {
+            let voltage = p
+                * (Self::node_voltage(solution, nodes[0]) - Self::node_voltage(solution, nodes[1]));
+            if !voltage.is_finite() || voltage == self.vjc * fc {
+                return false;
+            }
+        }
+        // The C1 domain already excludes diffusion, injection-floor, XTF
+        // clamp and base-resistance joins. Their remaining elementary branches
+        // have continuous second derivatives with fixed model parameters.
         true
     }
 }
@@ -190,6 +267,95 @@ impl Bjt {
 mod tests {
     use super::*;
     use std::collections::HashMap;
+
+    #[test]
+    fn causal_event_orders_c2_excludes_actual_temperature_mapped_junction_joins() {
+        for p in [1.0, -1.0] {
+            for xyce in [false, true] {
+                let mut model = if p > 0.0 {
+                    Bjt::new_npn("q".into(), 1, 2, 0)
+                } else {
+                    Bjt::new_pnp("q".into(), 1, 2, 0)
+                }
+                .with_params(&HashMap::from([
+                    ("IS".into(), 1e-16),
+                    ("NF".into(), 1.2),
+                    ("NR".into(), 1.4),
+                    ("NE".into(), 1.6),
+                    ("NC".into(), 1.8),
+                    ("NS".into(), 2.0),
+                    ("ISS".into(), 1e-16),
+                    ("TNF1".into(), 0.001),
+                    ("TNR1".into(), 0.002),
+                    ("TNE1".into(), 0.003),
+                    ("TNC1".into(), 0.004),
+                    ("TNS1".into(), 0.005),
+                ]));
+                model.set_substrate_node(3);
+                model.set_xyce_compatibility(xyce);
+                model.set_temperature(340.15);
+                model.assign_mna_internal_nodes(|_| panic!("terminal aliases only"));
+                assert!(model.legacy_event_locally_c2(&[p * 2.0, p * 0.6, 0.0]));
+                for (kind, nominal, terminal) in [
+                    (LegacyCurrent::Forward, model.nf, 0),
+                    (LegacyCurrent::Reverse, model.nr, 1),
+                    (LegacyCurrent::BaseLeakage, model.nen, 0),
+                    (LegacyCurrent::CollectorIdealLeakage, model.nci, 1),
+                    (LegacyCurrent::CollectorLeakage, model.ncn, 1),
+                    (LegacyCurrent::Substrate, 2.0, 2),
+                ] {
+                    if xyce && terminal == 2 {
+                        continue;
+                    }
+                    let nvt = model.legacy_junction_emission(kind, nominal) * model.vt;
+                    let join = -3.0 * nvt;
+                    let state = |v: Value| match terminal {
+                        0 => [0.0, p * v, 0.0],
+                        1 => [-p * v, 0.0, 0.0],
+                        _ => [0.0, 0.0, p * model.substrate_topology.ngspice_sign() * v],
+                    };
+                    assert!(model.legacy_event_locally_c1(&state(join)), "{kind:?}");
+                    assert!(!model.legacy_event_locally_c2(&state(join)), "{kind:?}");
+                    for offset in [-1e-6, 1e-6] {
+                        assert!(
+                            model.legacy_event_locally_c2(&state(join + offset)),
+                            "{kind:?}"
+                        );
+                    }
+                    // Independently differentiate the two current laws at
+                    // the join: their conductance derivatives do not match.
+                    let (_, center) = model.legacy_junction_iv(kind, 1e-16, join, nominal);
+                    let h = nvt * 1e-5;
+                    let (_, left) = model.legacy_junction_iv(kind, 1e-16, join - h, nominal);
+                    let (_, right) = model.legacy_junction_iv(kind, 1e-16, join + h, nominal);
+                    if center != 0.0 {
+                        let ratio = (center - left) / (right - center);
+                        assert!((ratio - 4.0 / 3.0).abs() < 3e-5, "{kind:?}: {ratio}");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn causal_event_orders_c2_keeps_depletion_joins_at_the_c1_bound() {
+        let mut model = Bjt::new_npn("q".into(), 1, 2, 0).with_params(&HashMap::from([
+            ("IS".into(), 1e-16),
+            ("CJE".into(), 1e-12),
+            ("CJC".into(), 1e-12),
+            ("CJS".into(), 1e-12),
+        ]));
+        model.set_substrate_node(3);
+        model.assign_mna_internal_nodes(|_| panic!("terminal aliases only"));
+        for state in [
+            [0.0, model.vje * model.fc, -1.0],
+            [-model.vjc * model.fc, 0.0, -1.0],
+            [0.0, -0.5, 0.0],
+        ] {
+            assert!(model.legacy_event_locally_c1(&state));
+            assert!(!model.legacy_event_locally_c2(&state));
+        }
+    }
 
     #[test]
     fn causal_event_orders_require_a_gp_constitutive_chart() {
@@ -223,5 +389,17 @@ mod tests {
         assert_eq!(-2880.0 / (model.vtf * 1.44), -80.0);
         assert!(!model.legacy_event_locally_c1(&[2880.5, 0.5]));
         assert!(model.legacy_event_locally_c1(&[2844.5, 0.5]));
+        let mut rounded = Bjt::new_npn("rounded".into(), 1, 2, 3).with_params(&HashMap::from([
+            ("TF".into(), 1e-9),
+            ("XTF".into(), 1.0),
+            ("VTF".into(), 0.29),
+        ]));
+        rounded.assign_mna_internal_nodes(|_| panic!("terminal aliases only"));
+        let vbc = -33.407_999_999_999_994;
+        assert_eq!(vbc * (1.0 / (rounded.vtf * 1.44)), -80.0);
+        assert!(vbc / (rounded.vtf * 1.44) > -80.0);
+        assert!(!rounded.legacy_event_locally_c1(&[-vbc, 0.0, -0.5]));
+        assert!(!rounded.legacy_event_locally_c2(&[-vbc, 0.0, -0.5]));
+        assert!(rounded.legacy_event_locally_c2(&[-vbc - 1e-6, 0.0, -0.5]));
     }
 }
