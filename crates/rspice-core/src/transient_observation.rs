@@ -145,7 +145,7 @@ impl<'de> Deserialize<'de> for CurrentImpulseTrace {
 
 impl CurrentImpulseTrace {
     /// Validate the trace against its result's time extent.
-    pub(crate) fn validate(&self, start: Value, stop: Value) -> Result<(), String> {
+    pub fn validate(&self, start: Value, stop: Value) -> Result<(), String> {
         self.owner.validate()?;
         if self.points.is_empty() && !self.complete {
             return Err(

@@ -868,7 +868,9 @@ use rspice_core::analysis::harmonic_balance::{
 /// without parsing display strings. Coverage is carried by each trace.
 /// +1: FourierAnalysis::analyze_transient_output_with_abort shares physical
 /// current Fourier interpretation across retained, CLI and Python results.
-const MAX_PUBLIC_ITEMS: usize = 5013;
+/// +1: CurrentImpulseTrace::validate shares exact charge/time validation with
+/// frontend result retention and worker transport.
+const MAX_PUBLIC_ITEMS: usize = 5014;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently
