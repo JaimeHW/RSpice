@@ -6,7 +6,6 @@
 //! - Abort capability
 //! - Result caching
 
-use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::{
     Arc, Mutex, MutexGuard,
@@ -30,6 +29,10 @@ use super::status::{SimulationProgress, SimulationStatus};
 /// oldest undisplayed point is replaced by newer evidence; terminal retention
 /// remains lossless and atomically replaces the live document.
 const MAX_PENDING_LIVE_TRANSIENT_SAMPLES: usize = 8_192;
+
+mod live_impulses;
+pub(in crate::simulation) use live_impulses::{CurrentImpulseBuffer, CurrentImpulseDelta};
+use live_impulses::{LiveTransientQueue, PublishedCurrentImpulses};
 
 #[cfg(test)]
 mod device_e2e_tests;
@@ -101,6 +104,9 @@ pub(crate) struct TransientSampleDelta {
     /// name per member per step to say what the first message already said.
     #[serde(default)]
     pub buses: Vec<TransientDigitalBusSample>,
+    /// Newly accepted charge observations, independently timed and sequenced.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current_impulses: Option<CurrentImpulseDelta>,
 }
 
 /// One digital bus a run declared, as it crosses to the live viewer.
@@ -178,7 +184,7 @@ pub struct SimulationRunner {
     /// Accepted transient points waiting for the UI controller. This is
     /// deliberately separate from progress: progress may be coalesced, while
     /// waveform samples must remain lossless and ordered.
-    transient_samples: Arc<Mutex<VecDeque<TransientSampleDelta>>>,
+    transient_samples: Arc<Mutex<LiveTransientQueue>>,
 
     /// Current simulation thread handle
     thread_handle: Option<JoinHandle<Result<SimulationResult, SimulationError>>>,
@@ -203,7 +209,7 @@ impl SimulationRunner {
         Self {
             progress: Arc::new(Mutex::new(SimulationProgress::default())),
             abort_flag: Arc::new(AtomicBool::new(false)),
-            transient_samples: Arc::new(Mutex::new(VecDeque::new())),
+            transient_samples: Arc::new(Mutex::new(LiveTransientQueue::default())),
             thread_handle: None,
             pending_result: None,
             #[cfg(target_arch = "wasm32")]
@@ -284,7 +290,7 @@ impl SimulationRunner {
                 poisoned.into_inner()
             }
         };
-        samples.drain(..).collect()
+        samples.drain()
     }
 
     /// Abort and discard all runner-local completion/progress state.
@@ -298,7 +304,7 @@ impl SimulationRunner {
         self.pending_result = None;
         self.abort_flag = Arc::new(AtomicBool::new(false));
         self.progress = Arc::new(Mutex::new(SimulationProgress::default()));
-        self.transient_samples = Arc::new(Mutex::new(VecDeque::new()));
+        self.transient_samples = Arc::new(Mutex::new(LiveTransientQueue::default()));
 
         #[cfg(target_arch = "wasm32")]
         {
@@ -539,7 +545,7 @@ struct RunnerSignal {
     abort_flag: Arc<AtomicBool>,
     progress: Arc<Mutex<SimulationProgress>>,
     progress_observer: Option<ProgressObserver>,
-    transient_samples: Option<Arc<Mutex<VecDeque<TransientSampleDelta>>>>,
+    transient_samples: Option<Arc<Mutex<LiveTransientQueue>>>,
     transient_sample_observer: Option<TransientSampleObserver>,
     published_events: Mutex<PublishedEventValues>,
 }
@@ -555,6 +561,7 @@ struct RunnerSignal {
 /// solver thread reports samples.
 #[derive(Debug, Default)]
 struct PublishedEventValues {
+    currents: PublishedCurrentImpulses,
     digital: std::collections::HashMap<rspice_core::NodeId, u8>,
     real: std::collections::HashMap<rspice_core::NodeId, u64>,
     /// Whether this run has already published its bus declarations.
@@ -572,17 +579,14 @@ fn event_node_name(node_names: &[String], node: rspice_core::NodeId) -> Option<&
 }
 
 fn push_live_transient_sample(
-    samples: &Arc<Mutex<VecDeque<TransientSampleDelta>>>,
+    samples: &Arc<Mutex<LiveTransientQueue>>,
     delta: TransientSampleDelta,
 ) {
     let mut samples = match samples.lock() {
         Ok(samples) => samples,
         Err(poisoned) => poisoned.into_inner(),
     };
-    if samples.len() >= MAX_PENDING_LIVE_TRANSIENT_SAMPLES {
-        samples.pop_front();
-    }
-    samples.push_back(delta);
+    samples.push(delta);
 }
 
 impl RunnerSignal {
@@ -693,6 +697,9 @@ impl rspice_core::abort_signal::AbortSignal for RunnerSignal {
     }
 
     fn observe_transient_sample(&self, sample: rspice_core::abort_signal::TransientSample<'_>) {
+        if self.transient_samples.is_none() && self.transient_sample_observer.is_none() {
+            return;
+        }
         let Some(&time) = sample.time.last() else {
             return;
         };
@@ -742,12 +749,17 @@ impl rspice_core::abort_signal::AbortSignal for RunnerSignal {
         }
         let (events, real_events) = self.changed_event_values(&sample);
         let buses = self.declared_buses(&sample);
+        let current_impulses = match self.published_events.lock() {
+            Ok(mut published) => published.currents.publish(&sample),
+            Err(poisoned) => poisoned.into_inner().currents.publish(&sample),
+        };
         let delta = TransientSampleDelta {
             time,
             waveforms,
             events,
             real_events,
             buses,
+            current_impulses,
         };
         if let Some(samples) = &self.transient_samples {
             push_live_transient_sample(samples, delta.clone());
@@ -995,7 +1007,7 @@ fn run_simulation_thread(
     input: NetlistInput,
     progress: Arc<Mutex<SimulationProgress>>,
     abort_flag: Arc<AtomicBool>,
-    transient_samples: Option<Arc<Mutex<VecDeque<TransientSampleDelta>>>>,
+    transient_samples: Option<Arc<Mutex<LiveTransientQueue>>>,
 ) -> Result<SimulationResult, SimulationError> {
     run_simulation_thread_with_progress_observer(
         request,
@@ -1014,7 +1026,7 @@ pub(in crate::simulation::runner) fn run_simulation_thread_with_progress_observe
     progress: Arc<Mutex<SimulationProgress>>,
     abort_flag: Arc<AtomicBool>,
     progress_observer: Option<ProgressObserver>,
-    transient_samples: Option<Arc<Mutex<VecDeque<TransientSampleDelta>>>>,
+    transient_samples: Option<Arc<Mutex<LiveTransientQueue>>>,
     transient_sample_observer: Option<TransientSampleObserver>,
 ) -> Result<SimulationResult, SimulationError> {
     use super::engine_bridge::EngineBridge;
@@ -1464,8 +1476,73 @@ mod tests {
     }
 
     #[test]
+    fn runner_signal_streams_live_current_impulses_as_sparse_accepted_suffixes() {
+        use rspice_core::{CurrentImpulseOwner, CurrentImpulsePoint, CurrentImpulseTrace};
+        let samples = Arc::new(Mutex::new(LiveTransientQueue::default()));
+        let signal = RunnerSignal {
+            abort_flag: Arc::new(AtomicBool::new(false)),
+            progress: Arc::new(Mutex::new(SimulationProgress::default())),
+            progress_observer: None,
+            transient_samples: Some(Arc::clone(&samples)),
+            transient_sample_observer: None,
+            published_events: Mutex::default(),
+        };
+        let mut traces = vec![CurrentImpulseTrace {
+            owner: CurrentImpulseOwner::DeviceLead {
+                device_name: "Q1".into(),
+                parameter: "ic".into(),
+            },
+            complete: true,
+            points: vec![],
+        }];
+        let mut received = CurrentImpulseBuffer::default();
+        for index in 0..4 {
+            if index == 1 || index == 3 {
+                traces[0].points.push(CurrentImpulsePoint {
+                    time: index as f64 - 0.2,
+                    charge_coulombs: if index == 1 { -0.002 } else { 0.004 },
+                });
+            }
+            rspice_core::abort_signal::AbortSignal::observe_transient_sample(
+                &signal,
+                rspice_core::abort_signal::TransientSample {
+                    time: &[0.0, index as f64],
+                    node_names: &[],
+                    node_voltages: &[],
+                    branch_names: &[],
+                    branch_currents: &[],
+                    current_impulses: Some(&traces),
+                    digital_values: &[],
+                    digital_buses: &[],
+                    real_values: &[],
+                },
+            );
+            let mut drained = samples.lock().unwrap().drain();
+            let delta = drained.pop().unwrap().current_impulses.unwrap();
+            if index == 2 {
+                assert!(
+                    delta.traces.is_empty(),
+                    "unchanged cumulative history is not retransmitted"
+                );
+            }
+            if index == 3 {
+                assert_eq!(
+                    delta.traces[0].points.len(),
+                    1,
+                    "only the new suffix crosses the boundary"
+                );
+            }
+            received.ingest(delta);
+        }
+        let history = received.history().unwrap();
+        history.validate().unwrap();
+        assert!(history.delivery_complete);
+        assert_eq!(history.traces, traces);
+    }
+
+    #[test]
     fn runner_signal_publishes_only_the_latest_committed_transient_point() {
-        let samples = Arc::new(Mutex::new(VecDeque::new()));
+        let samples = Arc::new(Mutex::new(LiveTransientQueue::default()));
         let signal = RunnerSignal {
             abort_flag: Arc::new(AtomicBool::new(false)),
             progress: Arc::new(Mutex::new(SimulationProgress::default())),
@@ -1506,7 +1583,7 @@ mod tests {
             },
         );
 
-        let sample = samples.lock().unwrap().pop_front().expect("sample queued");
+        let sample = samples.lock().unwrap().drain().remove(0);
         assert_eq!(sample.time, 2.5e-9);
         assert_eq!(sample.waveforms.len(), 2);
         assert_eq!(sample.waveforms[0].name, "out");
@@ -1523,7 +1600,7 @@ mod tests {
     fn runner_signal_publishes_event_nodes_only_when_their_value_changes() {
         use rspice_core::abort_signal::{AbortSignal as _, DigitalEventCode, TransientSample};
 
-        let samples = Arc::new(Mutex::new(VecDeque::new()));
+        let samples = Arc::new(Mutex::new(LiveTransientQueue::default()));
         let signal = RunnerSignal {
             abort_flag: Arc::new(AtomicBool::new(false)),
             progress: Arc::new(Mutex::new(SimulationProgress::default())),
@@ -1568,7 +1645,7 @@ mod tests {
             &[(3, 1.5), (4, 9.0)],
         );
 
-        let queued = samples.lock().expect("live queue").clone();
+        let queued = samples.lock().expect("live queue").drain();
         assert_eq!(queued.len(), 3);
 
         assert_eq!(
@@ -1612,11 +1689,12 @@ mod tests {
 
     #[test]
     fn live_transient_queue_is_bounded_for_suspended_ui_consumers() {
-        let samples = Arc::new(Mutex::new(VecDeque::new()));
+        let samples = Arc::new(Mutex::new(LiveTransientQueue::default()));
         for index in 0..MAX_PENDING_LIVE_TRANSIENT_SAMPLES + 17 {
             push_live_transient_sample(
                 &samples,
                 TransientSampleDelta {
+                    current_impulses: None,
                     time: index as f64,
                     waveforms: Vec::new(),
                     events: Vec::new(),
@@ -1627,10 +1705,10 @@ mod tests {
         }
 
         let samples = samples.lock().expect("live queue");
-        assert_eq!(samples.len(), MAX_PENDING_LIVE_TRANSIENT_SAMPLES);
-        assert_eq!(samples.front().expect("oldest retained").time, 17.0);
+        assert_eq!(samples.samples.len(), MAX_PENDING_LIVE_TRANSIENT_SAMPLES);
+        assert_eq!(samples.samples.front().expect("oldest retained").time, 17.0);
         assert_eq!(
-            samples.back().expect("latest retained").time,
+            samples.samples.back().expect("latest retained").time,
             (MAX_PENDING_LIVE_TRANSIENT_SAMPLES + 16) as f64
         );
     }

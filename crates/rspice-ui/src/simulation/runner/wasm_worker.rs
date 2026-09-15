@@ -37,7 +37,6 @@ fn stale_worker_epoch(current: Option<u64>, incoming: u64) -> bool {
 #[cfg(target_arch = "wasm32")]
 mod browser {
     use std::cell::RefCell;
-    use std::collections::VecDeque;
     use std::rc::Rc;
     use std::sync::{
         Arc, Mutex,
@@ -57,7 +56,7 @@ mod browser {
         worker_response_from_value,
     };
     use crate::simulation::runner::{
-        NetlistInput, SimulationError, SimulationRequest, TransientSampleDelta,
+        LiveTransientQueue, NetlistInput, SimulationError, SimulationRequest, TransientSampleDelta,
         push_live_transient_sample,
     };
     use crate::simulation::status::{EngineAvailability, SimulationProgress, SimulationStatus};
@@ -69,7 +68,7 @@ mod browser {
         wakeup: Option<Arc<dyn Fn() + Send + Sync>>,
         active_request_id: Option<u64>,
         active_progress: Option<Arc<Mutex<SimulationProgress>>>,
-        active_transient_samples: Option<Arc<Mutex<VecDeque<TransientSampleDelta>>>>,
+        active_transient_samples: Option<Arc<Mutex<LiveTransientQueue>>>,
         pending_result: Option<Result<SimulationResult, SimulationError>>,
     }
 
@@ -296,7 +295,7 @@ mod browser {
         input: NetlistInput,
         progress: Arc<Mutex<SimulationProgress>>,
         abort_flag: Arc<AtomicBool>,
-        transient_samples: Option<Arc<Mutex<VecDeque<TransientSampleDelta>>>>,
+        transient_samples: Option<Arc<Mutex<LiveTransientQueue>>>,
     ) -> Result<(), SimulationError> {
         if handle.is_running() || handle.has_unpolled_result() {
             return Err(SimulationError::AlreadyRunning);

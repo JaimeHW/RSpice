@@ -1685,8 +1685,9 @@ impl WorkerSimulationResult {
 /// 19: exact DC curve identities, coordinates and traversal survive transport.
 /// 20: retained PSS orbits carry canonical MNA branch-current samples.
 /// 21: transient results retain exact current impulse histories and coverage.
+/// 22: live samples carry sequenced current-impulse suffixes and loss accounting.
 /// Earlier workers silently omit numerical quality or current observations.
-const WORKER_RESPONSE_TRANSPORT_PROTOCOL: u8 = 21;
+const WORKER_RESPONSE_TRANSPORT_PROTOCOL: u8 = 22;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct WorkerResponseTransport {

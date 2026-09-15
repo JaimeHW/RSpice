@@ -1021,8 +1021,49 @@ fn disappeared_batch_target_does_not_reselect_the_active_historical_analysis() {
 }
 
 #[test]
+fn live_current_impulses_reach_a_charge_only_preview_and_survive_bad_analog_columns() {
+    let wire = serde_json::json!({
+        "time": 1.0, "waveforms": [], "events": [], "real_events": [], "buses": [],
+        "current_impulses": {
+            "start_time_s": 0.0, "stop_time_s": 1.0,
+            "first_sequence": 0, "last_sequence": 2, "delivery_complete": true,
+            "traces": [{ "owner": {"branchName": "V1"}, "complete": true,
+                "points": [{"time": 0.3, "chargeCoulombs": -0.002}] }]
+        }
+    });
+    let mut delta: TransientSampleDelta = serde_json::from_value(wire).unwrap();
+    delta
+        .waveforms
+        .push(crate::simulation::runner::TransientWaveformSample {
+            name: "out".into(),
+            value: f64::NAN,
+            y_unit: "V".into(),
+        });
+    let mut accumulator = LiveTransientAccumulator::default();
+    accumulator.ingest(vec![delta]);
+    assert!(!accumulator.is_empty());
+    assert!(accumulator.waveforms.is_empty());
+    let analysis = accumulator.source_analysis(AnalysisType::Transient, "TRAN");
+    assert!(analysis.is_live_partial());
+    let Some(AnalysisResultPayload::TransientEvents {
+        current_impulses: Some(history),
+        ..
+    }) = analysis.result_payload
+    else {
+        panic!("retained current history")
+    };
+    assert_eq!(
+        history,
+        crate::state::CurrentImpulseHistoryEvidence::fixture()
+    );
+    accumulator.clear();
+    assert!(accumulator.is_empty());
+}
+
+#[test]
 fn live_transient_accumulator_rejects_partial_or_schema_changing_points() {
     let sample = |time, waveforms: &[(&str, f64)]| TransientSampleDelta {
+        current_impulses: None,
         time,
         waveforms: waveforms
             .iter()
@@ -1060,6 +1101,7 @@ fn live_transient_accumulator_keeps_a_change_compressed_event_history() {
 
     let delta =
         |time: f64, events: &[(&str, u8)], real_events: &[(&str, f64)]| TransientSampleDelta {
+            current_impulses: None,
             time,
             waveforms: vec![crate::simulation::runner::TransientWaveformSample {
                 name: "out".to_owned(),
@@ -1158,6 +1200,7 @@ fn live_transient_accumulator_bounds_the_provisional_event_history() {
 
     let deltas = (0..LiveTransientAccumulator::MAX_LIVE_EVENT_POINTS + 64)
         .map(|index| TransientSampleDelta {
+            current_impulses: None,
             time: index as f64,
             waveforms: Vec::new(),
             events: vec![TransientDigitalEventSample {
@@ -1198,6 +1241,7 @@ fn live_transient_accumulator_compacts_aligned_source_traces() {
     let mut accumulator = LiveTransientAccumulator::default();
     let deltas = (0..LiveTransientAccumulator::MAX_SOURCE_SAMPLES + 1)
         .map(|index| TransientSampleDelta {
+            current_impulses: None,
             time: index as f64,
             waveforms: vec![
                 crate::simulation::runner::TransientWaveformSample {

@@ -4,6 +4,7 @@ use super::*;
 
 #[derive(Debug, Default)]
 pub(super) struct LiveTransientAccumulator {
+    current_impulses: crate::simulation::runner::CurrentImpulseBuffer,
     pub(super) waveforms: Vec<LiveTransientWaveform>,
     digital_events: Vec<DigitalEventTraceEvidence>,
     real_events: Vec<RealEventTraceEvidence>,
@@ -33,6 +34,7 @@ impl LiveTransientAccumulator {
     pub(super) const MAX_LIVE_EVENT_POINTS: usize = 8_192;
 
     pub(super) fn clear(&mut self) {
+        self.current_impulses.clear();
         self.waveforms.clear();
         self.digital_events.clear();
         self.real_events.clear();
@@ -45,13 +47,25 @@ impl LiveTransientAccumulator {
     }
 
     fn has_events(&self) -> bool {
-        !self.digital_events.is_empty() || !self.real_events.is_empty()
+        !self.digital_events.is_empty()
+            || !self.real_events.is_empty()
+            || !self.current_impulses.is_empty()
     }
 
     pub(super) fn ingest(&mut self, deltas: Vec<TransientSampleDelta>) {
         for delta in deltas {
             if !delta.time.is_finite() {
+                self.current_impulses.mark_lost();
                 continue;
+            }
+            // Charge has its own exact time axis; malformed or compacted
+            // analog columns cannot erase a valid current observation.
+            if let Some(impulses) = delta.current_impulses {
+                if impulses.stop_time_s == delta.time {
+                    self.current_impulses.ingest(impulses);
+                } else {
+                    self.current_impulses.mark_lost();
+                }
             }
             let mut samples = HashMap::with_capacity(delta.waveforms.len());
             let mut malformed = false;
@@ -260,7 +274,7 @@ impl LiveTransientAccumulator {
             .collect::<Vec<_>>();
         digital_buses.sort_by(|left, right| left.name.cmp(&right.name));
         let payload = AnalysisResultPayload::TransientEvents {
-            current_impulses: None,
+            current_impulses: self.current_impulses.history(),
             digital_traces,
             real_traces,
             digital_buses,
