@@ -231,15 +231,18 @@ fn every_surface_prices_the_same_queue_in_the_same_currency() {
     let forecast = validation.forecast;
 
     // The forecast tile's "Cost" row and the preview receipt both read
-    // `forecast.cost_ms`; the point table's status line and the preflight
-    // Execution cell both call `modelled_duration`; the task-rate card sums
-    // its rows. All three have to be one sentence about one queue.
+    // `forecast.cost_ms`; the point table's status line calls
+    // `modelled_duration`; the task-rate card sums its rows. All three have to
+    // be one sentence about one queue.
     let tile = run_set::format_duration_ms(forecast.cost_ms);
-    let strip = modelled_duration(&app.state, forecast.task_count);
+    let priced = modelled_duration(&app.state, forecast.task_count);
     let card = workload.total_duration().expect("the fixture prices");
 
     assert_eq!(forecast.task_count, tasks, "one queue");
-    assert_eq!(tile, strip, "the forecast tile and the strips agree");
+    assert_eq!(
+        tile, priced,
+        "the forecast tile and the point table's status line agree"
+    );
     assert_eq!(tile, card, "the forecast tile and the task-rate card agree");
 
     // And the rows themselves add up in milliseconds, not just in tasks — a

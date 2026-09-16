@@ -298,14 +298,14 @@ fn registry(
             if outputs.is_empty() {
                 // What an empty registry means is the selection mode's answer,
                 // not this row's. It read "the run stores nothing", which under
-                // `Automatic` is exactly what the run does not do — it
-                // synthesizes a bounded set — and the preflight cell two
-                // surfaces away had been saying so all along.
+                // `Automatic` is exactly what the run does not do: it
+                // synthesizes a bounded set, so the page an engineer opens to
+                // check what a run captures was the page stating the opposite.
                 empty_registry_row(
                     ui,
                     &empty_registry_text(
                         app.state.sim_setup.save_policy.output_selection_mode,
-                        super::readiness::enabled_schematic_probe_outputs(app),
+                        enabled_schematic_probe_outputs(app),
                     ),
                     Tone::Warn,
                 );
@@ -612,19 +612,72 @@ fn output_registry_summary<'a>(
 
 /// What an empty registry means, which is the selection mode's answer.
 ///
-/// Read from [`super::readiness::empty_registry_outcome`], the same owner the
-/// preflight Outputs cell reads. This row stated "the run stores nothing"
-/// unconditionally, and under `Automatic` the run stores a bounded synthesized
-/// set — so two surfaces contradicted each other about one plan, and the one an
-/// engineer checks before dispatching was the wrong one.
+/// Read from [`empty_registry_outcome`]. This row stated "the run stores
+/// nothing" unconditionally, and under `Automatic` the run stores a bounded
+/// synthesized set — so the registry contradicted the plan it reports on, and
+/// the surface an engineer checks before dispatching was the wrong one.
 pub(super) fn empty_registry_text(
     mode: crate::state::OutputSelectionMode,
     schematic_probes: usize,
 ) -> String {
     format!(
         "No saved outputs \u{b7} {}",
-        super::readiness::empty_registry_outcome(mode, schematic_probes)
+        empty_registry_outcome(mode, schematic_probes)
     )
+}
+
+/// What a run stores when this plan's output registry holds nothing.
+///
+/// Separate from the row that prints it because the answer is a property of the
+/// plan rather than of the sentence: `Automatic` synthesizes a bounded top-level
+/// voltage set (`prepared_run::occurrence_outputs::effective_plan_saved_outputs`),
+/// those become saved-output contracts (`prepared_run::attach_saved_output_contracts`)
+/// and the contracts prune the retained waveforms
+/// (`simulation::output_contract`) — so "full dataset retained" is the one thing
+/// that run does not do. Only `Explicit only`, which returns an empty set rather
+/// than falling back, and `Save all` leave the dataset whole, because
+/// `attach_saved_output_contracts` returns the queue untouched when the set is
+/// empty.
+///
+/// `schematic_probes` is how many outputs the sheet's enabled probes alone would
+/// mint — see
+/// [`crate::simulation::controller::prepared_run::occurrence_outputs::enabled_probe_output_count`].
+/// It is not decoration. Once the probes mint an output the effective set is
+/// non-empty, and a non-empty set is what the preparation returns in *every*
+/// selection mode: a plan with no authored output and one enabled probe saves
+/// that probe, which is neither the bounded automatic set nor the whole dataset
+/// — and those two were the only things this row could say.
+pub(super) fn empty_registry_outcome(
+    mode: crate::state::OutputSelectionMode,
+    schematic_probes: usize,
+) -> String {
+    if schematic_probes > 0 {
+        return format!(
+            "{schematic_probes} schematic probe{} saved",
+            if schematic_probes == 1 { "" } else { "s" }
+        );
+    }
+    match mode {
+        crate::state::OutputSelectionMode::Automatic => "bounded automatic set".to_owned(),
+        crate::state::OutputSelectionMode::ExplicitOnly
+        | crate::state::OutputSelectionMode::SaveAll => "full dataset retained".to_owned(),
+    }
+}
+
+/// The outputs the simulation root's enabled probes would have a run save.
+///
+/// The root the run would execute, not the sheet on screen: the two are the
+/// same sheet most of the time, and where they are not it is the run this
+/// registry is about.
+fn enabled_schematic_probe_outputs(app: &RSpiceApp) -> usize {
+    app.state
+        .workspace
+        .simulation_root_schematic(&app.state.workspace.active_view, &app.state.schematic)
+        .map_or(0, |schematic| {
+            crate::simulation::controller::prepared_run::occurrence_outputs::enabled_probe_output_count(
+                &schematic.probes,
+            )
+        })
 }
 
 /// One statement across the width of the registry, in place of its rows.
@@ -1598,5 +1651,50 @@ mod tests {
             output_registry_summary(std::iter::empty(), 0),
             ("0 saved · nothing configured".to_owned(), Tone::Neutral),
         );
+    }
+
+    /// The empty row states what the mode will actually save, in every mode.
+    ///
+    /// It hard-coded "the run stores nothing", which under `Automatic` is
+    /// precisely what the run does not do — so an engineer checking what would
+    /// be captured was told the opposite of what the plan resolves to. And an
+    /// enabled probe outranks the mode entirely: once the probes mint an output
+    /// the effective set is non-empty, and a non-empty set is returned in every
+    /// selection mode.
+    #[test]
+    fn an_empty_registry_states_what_its_selection_mode_will_save() {
+        use crate::state::OutputSelectionMode;
+
+        assert_eq!(
+            super::empty_registry_outcome(OutputSelectionMode::Automatic, 0),
+            "bounded automatic set",
+            "the automatic mode saves a set, so no surface may say the run stores nothing"
+        );
+        assert_eq!(
+            super::empty_registry_outcome(OutputSelectionMode::ExplicitOnly, 0),
+            "full dataset retained"
+        );
+        assert_eq!(
+            super::empty_registry_outcome(OutputSelectionMode::SaveAll, 0),
+            "full dataset retained"
+        );
+        for mode in OutputSelectionMode::ALL {
+            assert_eq!(
+                super::empty_registry_outcome(mode, 1),
+                "1 schematic probe saved",
+                "{mode:?}"
+            );
+            assert_eq!(
+                super::empty_registry_outcome(mode, 3),
+                "3 schematic probes saved",
+                "{mode:?}"
+            );
+            let row = super::empty_registry_text(mode, 2);
+            assert!(
+                row.starts_with("No saved outputs")
+                    && row.ends_with(&super::empty_registry_outcome(mode, 2)),
+                "the row states the outcome rather than a second account of it: {row}"
+            );
+        }
     }
 }

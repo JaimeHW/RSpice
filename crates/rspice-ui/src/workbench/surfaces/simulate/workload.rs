@@ -464,9 +464,9 @@ fn task_rate(
 /// The duration a surface promising `task_count` tasks must state.
 ///
 /// Takes the state rather than the application so a surface holding only the
-/// state — the preflight strip does — can state the same duration as one that
-/// holds the frame. Every caller passes a task count it already displayed, so
-/// the duration is never an independent claim about the same queue.
+/// state can state the same duration as one that holds the frame. Every caller
+/// passes a task count it already displayed, so the duration is never an
+/// independent claim about the same queue.
 pub(super) fn modelled_duration(app: &AppState, task_count: usize) -> String {
     run_set::format_duration_ms(run_set::modelled_cost_ms(
         task_count,

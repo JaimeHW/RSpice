@@ -116,41 +116,6 @@ fn attributed(analysis: AnalysisResult) -> AnalysisResult {
 }
 
 #[test]
-fn lifecycle_receipt_height_is_stable_across_short_and_verbose_receipts() {
-    let render_height = |detail: &str, width: f32| {
-        let ctx = egui::Context::default();
-        crate::ui::Theme::default().apply(&ctx);
-        let mut app = RSpiceApp::test_instance();
-        app.state
-            .workbench
-            .analysis_lifecycle_status
-            .record_receipt(detail);
-        let mut height = 0.0;
-        let _ = ctx.run_ui(
-            egui::RawInput {
-                screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(width, 240.0))),
-                ..egui::RawInput::default()
-            },
-            |ctx| {
-                egui::CentralPanel::default()
-                    .frame(egui::Frame::NONE)
-                    .show(ctx, |ui| {
-                        height = lifecycle_receipt_strip(ui, &app).rect.height();
-                    });
-            },
-        );
-        height
-    };
-    let short = "Edit committed.";
-    let verbose = "Receipt #42 committed for an immutable analysis instance. Dependency bindings were refreshed from enabled earlier instances. Prior datasets remain immutable and the complete diagnostic remains available for audit.";
-
-    assert_eq!(render_height(short, 960.0), 40.0);
-    assert_eq!(render_height(verbose, 960.0), 40.0);
-    assert_eq!(render_height(short, 560.0), 64.0);
-    assert_eq!(render_height(verbose, 560.0), 64.0);
-}
-
-#[test]
 fn envelope_source_catalog_rejects_unknown_and_dc_only_selections() {
     let catalog = EnvelopeSourceCatalog {
         source_digest: ContentDigest::from_bytes([0x33; 32]),
@@ -256,7 +221,6 @@ fn responsive_surface_geometry_matches_mockup_contract() {
     assert_eq!(ANALYSIS_STACK_TABLET_MIN_WIDTH, 175.0);
     assert_eq!(ANALYSIS_STACK_DESKTOP_MIN_WIDTH, 190.0);
     assert!(ANALYSIS_STACK_TABLET_MIN_WIDTH >= analysis_row_content_min_width());
-    assert_eq!(PREFLIGHT_CELL_HEIGHT, 42.0);
     assert_eq!(STACKED_WORKSPACE_GAP, 9.0);
     assert_eq!(analysis_column_min_height(720.0, 148.0), 572.0);
     assert_eq!(analysis_column_min_height(100.0, 120.0), 1.0);
@@ -2037,10 +2001,15 @@ fn a_receipt_advances_the_guard_without_reporting_anything() {
 }
 
 /// The field is `#[serde(skip)]`, so serde fills it from `Default` and never
-/// from the struct literal. A `Default` that was empty would leave the strip
-/// blank after every session restore.
+/// from the struct literal.
+///
+/// Two things follow and both are pinned. A restore must not carry a receipt
+/// from the session that wrote it — a lifecycle outcome is an event, and a
+/// restored one would announce a change nobody just made — and the toasted
+/// sequence has to come back at zero beside it, or the first frame after a
+/// restore would compare a fresh outcome against a guard from the old session.
 #[test]
-fn a_restored_session_shows_a_lifecycle_line_rather_than_a_blank_strip() {
+fn a_restored_session_starts_from_the_default_lifecycle_outcome() {
     use crate::workbench::state::{AnalysisLifecycleOutcome, WorkbenchState};
 
     assert!(!AnalysisLifecycleOutcome::default().message().is_empty());
@@ -2053,81 +2022,12 @@ fn a_restored_session_shows_a_lifecycle_line_rather_than_a_blank_strip() {
     let saved = serde_json::to_value(&app.state.workbench).expect("the workbench serializes");
     let restored: WorkbenchState = serde_json::from_value(saved).expect("the workbench restores");
 
-    assert!(
-        !restored.analysis_lifecycle_status.message().is_empty(),
-        "a restored session must not open on an empty lifecycle strip"
-    );
     assert_eq!(
         restored.analysis_lifecycle_status,
         AnalysisLifecycleOutcome::default(),
         "the outcome is runtime-only, so a restore starts from the default line"
     );
     assert_eq!(restored.analysis_lifecycle_toasted_sequence, 0);
-}
-
-/// Identical wording, opposite severity: the strip has to paint these
-/// differently, which it can only do by reading the severity.
-#[test]
-fn the_lifecycle_strip_separates_a_refusal_from_a_receipt_by_severity() {
-    fn collect(shape: &egui::epaint::Shape, found: &mut Vec<egui::Color32>) {
-        match shape {
-            egui::epaint::Shape::Text(text) if text.galley.job.text.starts_with("Instance 4") => {
-                found.extend(text.galley.job.sections.iter().map(|s| s.format.color));
-            }
-            egui::epaint::Shape::Vec(shapes) => {
-                for shape in shapes {
-                    collect(shape, found);
-                }
-            }
-            _ => {}
-        }
-    }
-
-    let detail_colors = |refusal: bool| {
-        let ctx = egui::Context::default();
-        crate::ui::Theme::default().apply(&ctx);
-        let mut app = RSpiceApp::test_instance();
-        let wording = "Instance 4 · dependency binding · revision 7 to 8.";
-        if refusal {
-            app.state
-                .workbench
-                .analysis_lifecycle_status
-                .record_refusal(wording);
-        } else {
-            app.state
-                .workbench
-                .analysis_lifecycle_status
-                .record_receipt(wording);
-        }
-        let output = ctx.run_ui(
-            egui::RawInput {
-                screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(960.0, 240.0))),
-                ..egui::RawInput::default()
-            },
-            |ctx| {
-                egui::CentralPanel::default()
-                    .frame(egui::Frame::NONE)
-                    .show(ctx, |ui| {
-                        let _ = lifecycle_receipt_strip(ui, &app);
-                    });
-            },
-        );
-        let mut found = Vec::new();
-        for clipped in &output.shapes {
-            collect(&clipped.shape, &mut found);
-        }
-        assert!(!found.is_empty(), "the strip paints its detail line");
-        (found, Tokens::get(&ctx).color)
-    };
-
-    let (receipt, palette) = detail_colors(false);
-    let (refusal, _) = detail_colors(true);
-    assert_ne!(
-        receipt, refusal,
-        "the same wording must not paint the same way for a receipt and a refusal"
-    );
-    assert!(refusal.iter().all(|color| *color == palette.err));
-    assert!(receipt.iter().all(|color| *color == palette.text_dim));
 }
 
 /// Three announcing sites sit on the render path rather than in a click
