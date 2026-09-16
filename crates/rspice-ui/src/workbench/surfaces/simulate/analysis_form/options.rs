@@ -20,29 +20,36 @@
 
 use egui::Ui;
 
-use crate::simulation::plan::{AnalysisDraft, AnalysisNumericOverride, OverrideValueKind};
+use crate::product::AnalysisInstanceId;
+use crate::simulation::plan::{AnalysisDraft, OverrideValueKind};
 use crate::ui::tokens::Tokens;
 use crate::ui::widgets::{mono_input, select};
+use crate::workbench::RSpiceApp;
 
 use super::super::advanced_options::{self, AdvancedOptionRow, OptionEdit};
 
-/// What the plan resolves the options this form does not own to.
-///
-/// Borrowed rather than cloned: the form runs once per frame and this is read
-/// once per option.
-pub(in crate::workbench::surfaces::simulate) struct OptionContext<'a> {
-    pub(in crate::workbench::surfaces::simulate) record: Option<&'a AnalysisNumericOverride>,
-    pub(in crate::workbench::surfaces::simulate) options:
-        &'a crate::simulation::dialog::SimulationOptions,
-}
-
 /// Draw every advanced option this analysis owns, and report what was edited.
+///
+/// The record is the committed one and the options are the plan's committed
+/// block, not the drafts either is edited through: an option field reports what
+/// a run would resolve to, and an uncommitted edit is not part of any run yet.
+/// The draft is still what carries the instance's tier and homotopy, which is
+/// what decides whether an option reaches the solve at all.
 pub(in crate::workbench::surfaces::simulate) fn fields(
     ui: &mut Ui,
+    app: &RSpiceApp,
     draft: &AnalysisDraft,
-    context: OptionContext<'_>,
+    instance: AnalysisInstanceId,
 ) -> Vec<OptionEdit> {
-    let rows = advanced_options::form_rows(draft.kind(), draft, context.record, context.options);
+    let record = app
+        .state
+        .sim_setup
+        .stable_analysis_plan()
+        .ok()
+        .and_then(|plan| plan.instance(instance))
+        .and_then(|target| target.numeric_override());
+    let rows =
+        advanced_options::form_rows(draft.kind(), draft, record, &app.state.sim_setup.options);
     let mut edits = Vec::new();
     for (heading, rows) in grouped(&rows) {
         super::sub_header(ui, heading);
@@ -137,7 +144,12 @@ fn field(ui: &mut Ui, row: &AdvancedOptionRow) -> Option<OptionEdit> {
         _ => {
             let mut text = well_text(ui, row);
             let response = option_field(ui, label, origin, |ui| {
+                // The hint slot states the origin, so the shape a value has to
+                // take is the hover. The form's own wells say "engineering
+                // notation" in that slot and need no hover; an option's slot is
+                // spent on the one fact a field cannot otherwise carry.
                 mono_input(ui, label, &mut text, ui.available_width())
+                    .on_hover_text(row.option.value_hint())
             });
             retain_well_text(ui, row, &text, &response);
             // Committed when the well is let go of, not per keystroke: one

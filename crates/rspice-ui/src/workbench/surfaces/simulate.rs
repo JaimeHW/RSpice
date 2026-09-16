@@ -2316,24 +2316,8 @@ fn analysis_form_body(
             );
             // Under the analysis's own parameters, because that is what they
             // are: a bound this analysis states, in the same grid and with the
-            // same label over the same well. The record is the committed one,
-            // not the draft above it — an option field reports what a run would
-            // resolve to, and an uncommitted parameter edit is not part of any
-            // run yet.
-            *option_edits = analysis_form::options::fields(
-                ui,
-                draft,
-                analysis_form::options::OptionContext {
-                    record: app
-                        .state
-                        .sim_setup
-                        .stable_analysis_plan()
-                        .ok()
-                        .and_then(|plan| plan.instance(selected))
-                        .and_then(|target| target.numeric_override()),
-                    options: &app.state.sim_setup.options,
-                },
-            );
+            // same label over the same well.
+            *option_edits = analysis_form::options::fields(ui, app, draft, selected);
             // The form's own account of what this configuration will do. Some
             // of these sentences are the only place a setting's consequence is
             // stated — the DC retrace note names the two traces the run will

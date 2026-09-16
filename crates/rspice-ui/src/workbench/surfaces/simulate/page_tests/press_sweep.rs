@@ -477,14 +477,14 @@ fn announced(node: &Node) -> String {
 /// contributed, and the Outputs registry's own actions are all disabled over
 /// an empty registry, so its enabled controls are the toolbar's.
 const PRESSED_PER_SURFACE: &[(&str, usize)] = &[
-    ("Analyses/Transient", 31),
+    ("Analyses/Transient", 37),
     ("Analyses/Ac", 3),
-    ("Analyses/DcSweep", 2),
+    ("Analyses/DcSweep", 5),
     ("Analyses/Noise", 9),
     ("Analyses/Stb", 3),
-    ("Analyses/Pss", 3),
-    ("Analyses/Temperature", 2),
-    ("Analyses/Corner", 2),
+    ("Analyses/Pss", 5),
+    ("Analyses/Temperature", 3),
+    ("Analyses/Corner", 8),
     ("Excitations", 1),
     ("Variables", 2),
     ("Outputs", 0),
@@ -503,7 +503,7 @@ const PRESSED_PER_SURFACE: &[(&str, usize)] = &[
     ("analysis catalogue · Solver", 0),
     ("analysis catalogue · Save", 0),
     ("analysis catalogue · Results workspace", 0),
-    ("analysis options · Operating point", 26),
+    ("analysis options · Operating point", 12),
     ("plan manager", 12),
     ("rename analysis", 4),
     ("run points", 12),
@@ -523,7 +523,7 @@ const PRESSED_PER_SURFACE: &[(&str, usize)] = &[
 /// "advanced options" surface became `analysis options · Operating point` — the
 /// one form the routes do not open, carrying the authored override that is the
 /// only way a global option's legacy field appears at all.
-const PRESSED_FLOOR: usize = 262;
+const PRESSED_FLOOR: usize = 266;
 
 /// Controls that are wired to nothing.
 ///
@@ -549,12 +549,17 @@ const DEAD_CONTROLS: &[&str] = &[];
 
 /// How many presses the segmented-selection arm excuses.
 ///
-/// Three: the analysis stack's selected instance, the plan manager's active
-/// plan, and the solver's Balanced preset. The first two announce a fresh
-/// identity per fixture. The solver entry is also asserted by name below.
-/// Consistent temperature buffers make reselecting Balanced a true no-op;
-/// previously it needlessly rewrote the reference-temperature spelling.
-const HELD_SELECTION_CEILING: usize = 3;
+/// Four: the analysis stack's selected instance on each of the two Analyses
+/// fixtures that select one the other does not, the plan manager's active plan,
+/// and the solver's Balanced preset. A stack row announces a fresh identity per
+/// fixture, so the operating point's own selected row is a second control of the
+/// same shape rather than the same control seen twice — it arrived with the
+/// analysis-options surface, which moved from the Solver route, where no stack
+/// rail is drawn, to the Analyses route, where one is. The solver entry is also
+/// asserted by name below. Consistent temperature buffers make reselecting
+/// Balanced a true no-op; previously it needlessly rewrote the
+/// reference-temperature spelling.
+const HELD_SELECTION_CEILING: usize = 4;
 
 /// Presses whose whole product leaves this process.
 ///
@@ -593,6 +598,7 @@ const SEGMENTS_AND_MODALS_PER_SURFACE: &[(&str, usize, usize)] = &[
     ("Solver", 1, 0),
     ("Variables", 0, 1),
     ("Save", 0, 1),
+    ("analysis options · Operating point", 1, 0),
     ("plan manager", 1, 0),
 ];
 
@@ -1379,4 +1385,26 @@ impl Sweep {
             self.app.state.sim_setup, self.app.state.workspace
         )
     }
+}
+
+/// The per-surface tallies as the sweep measures them now, in the shape
+/// [`PRESSED_PER_SURFACE`] is written in.
+///
+/// [`the_press_sweep_covers_every_control_it_covered_before`] reports a tally
+/// that *fell* and says nothing about one that rose, which is the honest shape
+/// for a floor and a useless one for re-freezing the table after a deliberate
+/// change. That left the numbers to be reconstructed by hand from a red gate,
+/// which is how a frozen tally rots into a number nobody believes. This prints
+/// them, and it is the counterpart of `print_studio_visual_fingerprints_for_review`
+/// next door: both are review tools, both are `#[ignore]`d, and both exist so
+/// re-approving a measurement is reading output rather than guessing.
+#[test]
+#[ignore = "prints source-ready press tallies after explicit review"]
+fn print_press_sweep_surface_tallies_for_review() {
+    let mut total = 0usize;
+    for surface in studio_enumeration() {
+        total += surface.targets.len();
+        eprintln!("    (\"{}\", {}),", surface.surface, surface.targets.len());
+    }
+    eprintln!("PRESSED_FLOOR = {total}");
 }
