@@ -128,7 +128,12 @@ pub struct ApplicationWindowState {
     pub title: String,
     pub workspace: Workspace,
     pub route: SurfaceRoute,
+    // Both read through `retired_documents`, so a window restored from a
+    // session that named a document this build no longer has opens on the
+    // documents it still does.
+    #[serde(deserialize_with = "crate::workbench::state::retired_documents::deserialize_option")]
     pub active_document: Option<WorkspaceDocumentId>,
+    #[serde(deserialize_with = "crate::workbench::state::retired_documents::deserialize_list")]
     pub documents: Vec<WorkspaceDocumentId>,
     pub layout: WorkspaceLayoutState,
     pub bounds: ApplicationWindowBounds,

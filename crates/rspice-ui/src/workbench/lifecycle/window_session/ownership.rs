@@ -1,6 +1,7 @@
 //! JSON-safe document ownership, retaining compatibility with old RON maps.
 
 use super::{ApplicationWindowId, HashMap, WorkspaceDocumentId, document_sort_key};
+use crate::workbench::state::retired_documents::RetirableDocumentId;
 use serde::{Serialize, de};
 
 type Ownership = HashMap<WorkspaceDocumentId, ApplicationWindowId>;
@@ -28,16 +29,27 @@ pub(super) fn deserialize<'de, D: serde::Deserializer<'de>>(
 
         fn visit_seq<A: de::SeqAccess<'de>>(self, mut entries: A) -> Result<Ownership, A::Error> {
             let mut ownership = Ownership::new();
-            while let Some((document, window)) = entries.next_element()? {
-                insert(&mut ownership, document, window)?;
+            while let Some((document, window)) =
+                entries.next_element::<(RetirableDocumentId, ApplicationWindowId)>()?
+            {
+                // A window that owned only a retired document is left empty
+                // here and dropped by `normalize_after_restore`, which is the
+                // same path an ownerless window already takes.
+                if let Some(document) = document.0 {
+                    insert(&mut ownership, document, window)?;
+                }
             }
             Ok(ownership)
         }
 
         fn visit_map<A: de::MapAccess<'de>>(self, mut entries: A) -> Result<Ownership, A::Error> {
             let mut ownership = Ownership::new();
-            while let Some((document, window)) = entries.next_entry()? {
-                insert(&mut ownership, document, window)?;
+            while let Some((document, window)) =
+                entries.next_entry::<RetirableDocumentId, ApplicationWindowId>()?
+            {
+                if let Some(document) = document.0 {
+                    insert(&mut ownership, document, window)?;
+                }
             }
             Ok(ownership)
         }

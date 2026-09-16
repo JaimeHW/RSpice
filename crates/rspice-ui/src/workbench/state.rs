@@ -6,6 +6,7 @@
 
 mod navigator_tree;
 pub(crate) mod plan_provenance;
+pub(crate) mod retired_documents;
 mod session_views;
 mod workflow_drafts;
 
@@ -178,7 +179,6 @@ pub enum WorkspaceDocumentId {
     Project,
     CellView(crate::state::CellViewRef),
     SimulationPlan,
-    AnalysisSetup(crate::product::AnalysisInstanceId),
     ResultDataset(crate::product::DatasetId),
     VisualizationDocument(crate::product::ResultDocumentId),
     Verification,
@@ -204,7 +204,7 @@ impl WorkspaceDocumentId {
         match self {
             Self::Project => Workspace::Project,
             Self::CellView(_) => Workspace::Design,
-            Self::SimulationPlan | Self::AnalysisSetup(_) => Workspace::Simulate,
+            Self::SimulationPlan => Workspace::Simulate,
             Self::ResultDataset(_) | Self::VisualizationDocument(_) => Workspace::Results,
             Self::Verification => Workspace::Verify,
             Self::Models => Workspace::Models,
@@ -320,9 +320,15 @@ impl Default for ResultImportDialogState {
 /// presentation state for each workspace.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct WorkspaceDocumentRegistry {
-    #[serde(default)]
+    // Read through `retired_documents`: this registry is where a retired
+    // document identity is most likely to be sitting, because activating one
+    // wrote it here.
+    #[serde(
+        default,
+        deserialize_with = "retired_documents::deserialize_active_map"
+    )]
     active: HashMap<Workspace, WorkspaceDocumentId>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "retired_documents::deserialize_set")]
     closed: HashSet<WorkspaceDocumentId>,
 }
 

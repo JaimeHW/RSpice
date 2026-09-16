@@ -271,40 +271,19 @@ fn available_documents_for_workspace(
                 dirty: document.dirty,
             })
             .collect(),
-        Workspace::Simulate => {
-            let mut documents = vec![WorkspaceDocument {
-                id: WorkspaceDocumentId::SimulationPlan,
-                label: "Simulation plan".to_owned(),
-                icon: WorkbenchIcon::Simulate,
-                dirty: false,
-            }];
-            if let Ok(plan) = state.sim_setup.stable_analysis_plan() {
-                // Named by the plan, not by the kind. A tab headed with the
-                // kind's code said the same thing about every instance of that
-                // kind, so a plan holding two unnamed transients opened two
-                // tabs both reading "TRAN · setup" and neither said which
-                // analysis it edited. `instance_list_label` is the plan's own
-                // answer to what an instance is called beside its siblings —
-                // the author's name where there is one, and a position prefix
-                // for exactly the case the naming rules leave ambiguous.
-                documents.extend(
-                    plan.instances()
-                        .iter()
-                        .enumerate()
-                        .map(|(index, instance)| WorkspaceDocument {
-                            id: WorkspaceDocumentId::AnalysisSetup(instance.id()),
-                            label: format!(
-                                "{} \u{b7} setup",
-                                plan.instance_list_label(index)
-                                    .unwrap_or_else(|| instance.display_name().to_owned())
-                            ),
-                            icon: WorkbenchIcon::Sliders,
-                            dirty: false,
-                        }),
-                );
-            }
-            documents
-        }
+        // One plan, one document. The Studio used to open a "<name> · setup"
+        // tab per analysis instance too, and activating one only selected that
+        // instance on the Analyses page — which the plan's own analysis list
+        // does, permanently, on the left. A plan with seven analyses therefore
+        // paid a strip of eight tabs for nothing the list did not already say,
+        // so the strip is gone: `document_strip_visible` hides a lone
+        // non-Design document.
+        Workspace::Simulate => vec![WorkspaceDocument {
+            id: WorkspaceDocumentId::SimulationPlan,
+            label: "Simulation plan".to_owned(),
+            icon: WorkbenchIcon::Simulate,
+            dirty: false,
+        }],
         // The library is one project-owned record, and the shell has no
         // document identity for it yet — the instrument that edits a
         // definition is what will open one. Naming a tab here before that
@@ -735,23 +714,6 @@ fn activate_document(state: &mut AppState, document: &WorkspaceDocumentId) -> bo
                 state,
                 *document_id,
             )
-        }
-        WorkspaceDocumentId::AnalysisSetup(id) => {
-            let Some(position) = state
-                .sim_setup
-                .stable_analysis_plan()
-                .ok()
-                .and_then(|plan| {
-                    plan.instances()
-                        .iter()
-                        .position(|instance| instance.id() == *id)
-                })
-            else {
-                return false;
-            };
-            state.workbench.active_analysis_instance = Some(*id);
-            state.workbench.active_analysis = position;
-            true
         }
         // Re-activating the dataset that is already active must not re-select
         // its run. `select_run` resynchronizes the displayed waveforms, which
@@ -1375,15 +1337,14 @@ mod tests {
     #[test]
     fn registry_scopes_active_documents_by_workspace() {
         let mut registry = super::super::super::state::WorkspaceDocumentRegistry::default();
-        let analysis = crate::product::AnalysisInstanceId::new();
         let dataset = crate::product::DatasetId::new();
 
-        registry.activate(WorkspaceDocumentId::AnalysisSetup(analysis));
+        registry.activate(WorkspaceDocumentId::SimulationPlan);
         registry.activate(WorkspaceDocumentId::ResultDataset(dataset));
 
         assert_eq!(
             registry.active(Workspace::Simulate),
-            Some(&WorkspaceDocumentId::AnalysisSetup(analysis))
+            Some(&WorkspaceDocumentId::SimulationPlan)
         );
         assert_eq!(
             registry.active(Workspace::Results),
@@ -1576,67 +1537,87 @@ mod tests {
         assert_ne!(fitted, "precision_sensor_front_end · schematic");
     }
 
-    /// Two analysis setup tabs never carry the same title.
+    /// The Simulation Studio is one document, whatever the plan holds.
     ///
-    /// The tab was headed with the analysis kind's code, which says the same
-    /// thing about every instance of that kind: a plan holding two unnamed
-    /// transients opened two tabs both reading "TRAN · setup", and neither
-    /// said which analysis it edited. The plan already answers what an
-    /// instance is called beside its siblings, and both tabs ask it now.
+    /// It used to open a "<name> \u{b7} setup" tab per analysis instance, and
+    /// activating one only selected that instance on the Analyses page --
+    /// which the plan's analysis list on the left does anyway. So a plan with
+    /// three analyses showed four tabs that said nothing the list did not, and
+    /// the strip is gone: one document, and `document_strip_visible` hides a
+    /// lone non-Design document.
     #[test]
-    fn two_analysis_setup_tabs_never_carry_the_same_title() {
+    fn the_simulate_workspace_is_one_document_whatever_the_plan_holds() {
         use crate::simulation::plan::AnalysisKind;
 
         let mut state = AppState::default();
+        state.workbench.workspace = Workspace::Simulate;
         let plan = state
             .sim_setup
             .analysis_plan
             .as_mut()
             .expect("a default state owns a stable analysis plan");
-        let (second, _) = plan
-            .insert(AnalysisKind::Transient)
+        plan.insert(AnalysisKind::Transient)
             .expect("a plan takes a second transient");
+        plan.insert(AnalysisKind::Ac)
+            .expect("a plan takes a small-signal sweep");
         assert_eq!(
-            plan.instances()
+            plan.instances().len(),
+            3,
+            "the fixture holds the instances the strip used to tab"
+        );
+
+        let documents = available_documents_for_workspace(&state, Workspace::Simulate);
+        assert_eq!(
+            documents
                 .iter()
-                .filter(|instance| instance.kind() == AnalysisKind::Transient)
-                .count(),
-            2,
-            "the fixture holds the pair the tabs have to tell apart"
+                .map(|document| document.label.as_str())
+                .collect::<Vec<_>>(),
+            ["Simulation plan"]
+        );
+        assert_eq!(documents[0].id, WorkspaceDocumentId::SimulationPlan);
+        assert!(
+            !document_strip_visible(Workspace::Simulate, documents.len()),
+            "one document paints no strip"
+        );
+    }
+
+    /// A session whose Studio tab was a retired setup document opens on the
+    /// plan.
+    ///
+    /// The registry is where an activated document identity was written, so a
+    /// reader upgrading across the deletion has one in their session file.
+    /// `ron` refuses an unknown enum variant outright and
+    /// `restore_eframe_session` discards the whole AppState on any error, so
+    /// the retired identity is read and dropped rather than refused, and the
+    /// active document falls back to the one document the Studio now has.
+    #[test]
+    fn a_session_naming_the_retired_setup_document_opens_on_the_plan() {
+        const SESSION: &str = r#"(
+            active: {
+                Simulate: AnalysisSetup("9f1b6f6c-0f1a-4f2e-9c6d-2a1b3c4d5e6f"),
+                Models: Models,
+            },
+            closed: [AnalysisSetup("9f1b6f6c-0f1a-4f2e-9c6d-2a1b3c4d5e6f")],
+        )"#;
+
+        let registry: super::super::super::state::WorkspaceDocumentRegistry =
+            ron::from_str(SESSION).expect("a retired identity costs the reader nothing");
+        assert!(
+            registry.active(Workspace::Simulate).is_none(),
+            "the retired identity is dropped, not restored"
+        );
+        assert_eq!(
+            registry.active(Workspace::Models),
+            Some(&WorkspaceDocumentId::Models),
+            "its neighbours in the same session survive it"
         );
 
-        let titles: Vec<String> = available_documents_for_workspace(&state, Workspace::Simulate)
-            .into_iter()
-            .filter(|document| matches!(document.id, WorkspaceDocumentId::AnalysisSetup(_)))
-            .map(|document| document.label)
-            .collect();
-        assert_eq!(titles.len(), 2, "one tab per analysis: {titles:?}");
-        assert_ne!(titles[0], titles[1], "the two tabs are told apart");
-        for title in &titles {
-            assert!(title.ends_with(" \u{b7} setup"), "{title:?}");
-        }
-
-        // A name the author chose replaces the position prefix, and the other
-        // tab loses it too because nothing is ambiguous any more.
-        state
-            .sim_setup
-            .analysis_plan
-            .as_mut()
-            .expect("stable plan")
-            .set_instance_name(second, "Startup")
-            .expect("a plan takes a name no sibling answers to");
-        let named: Vec<String> = available_documents_for_workspace(&state, Workspace::Simulate)
-            .into_iter()
-            .filter(|document| matches!(document.id, WorkspaceDocumentId::AnalysisSetup(_)))
-            .map(|document| document.label)
-            .collect();
-        assert!(
-            named.contains(&"Startup \u{b7} setup".to_owned()),
-            "the tab is headed with the name its author chose: {named:?}"
-        );
-        assert!(
-            named.iter().all(|title| !title.contains('#')),
-            "nothing is ambiguous, so no tab carries a position: {named:?}"
+        let mut state = AppState::default();
+        state.workbench.workspace = Workspace::Simulate;
+        state.workbench.documents = registry;
+        assert_eq!(
+            active_document_id(&state),
+            Some(WorkspaceDocumentId::SimulationPlan)
         );
     }
 }
