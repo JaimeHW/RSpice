@@ -434,6 +434,7 @@ fn the_manager_fits_the_real_viewport_at_every_supported_width() {
             "Declared run set",
             "Modelled cost",
             "Model closure",
+            "Retired analyses",
             "Regression baseline",
             "Source lineage",
             "Switching is atomic",
@@ -456,7 +457,7 @@ fn the_manager_fits_the_real_viewport_at_every_supported_width() {
         // Vertical fit is asserted at the dialog level, where clipping is
         // real: every label this surface owes the reader has to be on
         // screen, not merely emitted. The five per-plan operations are the
-        // point of selecting a row, and the eight detail rows are the
+        // point of selecting a row, and the nine detail rows are the
         // plan's facts.
         //
         // And fitting the fixture is not enough. The records table is the
@@ -1114,7 +1115,7 @@ fn rendered_aside(app: &RSpiceApp, plan_id: SimulationPlanId) -> RenderedAside {
         |root| {
             egui::CentralPanel::default()
                 .frame(egui::Frame::NONE)
-                // One column, so the eight rows land in one reading order
+                // One column, so the nine rows land in one reading order
                 // for the assertions below to be about.
                 .show(root, |ui| selected_plan_properties(ui, selected, 1));
         },
@@ -1211,6 +1212,7 @@ fn the_browse_aside_states_every_fact_the_catalog_owns_about_the_selected_plan()
             "Declared run set",
             "Modelled cost",
             "Model closure",
+            "Retired analyses",
             "Regression baseline",
             "Source lineage",
         ]
@@ -1267,6 +1269,11 @@ fn the_browse_aside_states_every_fact_the_catalog_owns_about_the_selected_plan()
     assert_eq!(
         aside_value(&rows, "Model closure"),
         format!("{bindings} binding{}", plural_suffix(bindings))
+    );
+    assert_eq!(
+        aside_value(&rows, "Retired analyses"),
+        "none",
+        "the fixture plan has retired nothing, and a zero states that in words"
     );
     assert_eq!(
         aside_value(&rows, "Source lineage"),

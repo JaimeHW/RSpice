@@ -493,11 +493,19 @@ pub(super) fn section_head(ui: &mut Ui, label: &str, status: Option<HeadStatus<'
 /// takes the design system's control height — which a dialog raises to the
 /// 44-point touch target on every viewport 820 points wide or narrower. That is
 /// the right rule for a control and the wrong one for a statement: these rows
-/// are read, never operated, and at the touch height eight of them cost 352
+/// are read, never operated, and at the touch height nine of them cost 396
 /// points of an aside that has 418 to hold its whole contents. So the detail
 /// list keeps the compact row at every width, and the actions below it — which
 /// *are* controls — keep the touch height they need.
-const DETAIL_ROW_HEIGHT: f32 = 22.0;
+///
+/// Twenty points rather than the twenty-two it was. The ninth fact the list
+/// states — the analyses a plan has retired — put the aside's closing status
+/// 11 points past the dialog body's clip rect at the 820-point gate, where the
+/// aside's narrow track wraps that status onto a third line. A row holds one
+/// 14-point line, so this leaves three points above and below it: the list is
+/// the densest thing in this dialog by intention, and the height it gives up
+/// is the height the ninth fact costs.
+const DETAIL_ROW_HEIGHT: f32 = 20.0;
 /// Horizontal inset inside a detail row, matching `property_row`'s.
 const DETAIL_ROW_PAD: f32 = 10.0;
 /// Gap between a detail row's label and value columns, matching

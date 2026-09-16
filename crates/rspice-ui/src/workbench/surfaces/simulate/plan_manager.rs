@@ -799,7 +799,8 @@ struct PlanDetailRow {
 /// per-plan design and testbench binding, and a named execution profile — have
 /// no owner anywhere in RSpice. So the list states the strongest facts the
 /// catalog does own in their place: the reference corner, the run set's own
-/// forecast, the cost that forecast models, and the model closure.
+/// forecast, the cost that forecast models, the model closure, and the
+/// analyses the plan has retired.
 ///
 /// It repeats nothing the table already paints. The stable identity is the
 /// second line of every identity cell and the result count is a column, and the
@@ -857,6 +858,18 @@ fn plan_detail_rows(selected: &PlanCatalogRecord) -> Vec<PlanDetailRow> {
             ),
         ),
         stated(
+            "Retired analyses",
+            if selected.tombstones == 0 {
+                "none".to_owned()
+            } else {
+                format!(
+                    "{} tombstone{} · prior results retained",
+                    selected.tombstones,
+                    plural_suffix(selected.tombstones)
+                )
+            },
+        ),
+        stated(
             "Regression baseline",
             selected
                 .regression_baseline
@@ -876,8 +889,8 @@ fn plan_detail_rows(selected: &PlanCatalogRecord) -> Vec<PlanDetailRow> {
 ///
 /// `columns` is how the list spends a width it did not ask for. Beside the table
 /// the aside is one narrow track and the list is flat, as the authored one is.
-/// Stacked, the aside has the whole dialog width and eight rows in a single
-/// track would cost 232 points of a budget the records column has already spent
+/// Stacked, the aside has the whole dialog width and nine rows in a single
+/// track would cost 180 points of a budget the records column has already spent
 /// most of — so there it pays the height of half the rows instead of all of
 /// them. One row list feeds both arrangements, so the two cannot come to state
 /// different things.

@@ -53,10 +53,11 @@ pub(super) struct PlanEntry {
 /// Every field has a reader. The manager's table shows the lifecycle and the
 /// declared scale of each plan, its selected-plan aside states the rest —
 /// the reference corner, the run set's own forecast, the model closure, the
-/// plan-owned record counts, the pinned regression baseline, and the source
-/// plan a clone or import came from — and the comparison route diffs the four
-/// rosters. A field with no reader was a fact the projection collected and no
-/// one could see, so it is not a shape this record is allowed to hold.
+/// analyses it has retired, the plan-owned record counts, the pinned
+/// regression baseline, and the source plan a clone or import came from — and
+/// the comparison route diffs the four rosters. A field with no reader was a
+/// fact the projection collected and no one could see, so it is not a shape
+/// this record is allowed to hold.
 #[derive(Debug, Clone)]
 pub(super) struct PlanCatalogRecord {
     pub(super) id: SimulationPlanId,
@@ -70,6 +71,11 @@ pub(super) struct PlanCatalogRecord {
     /// One entry per analysis instance, in declaration order, named by
     /// [`analysis_roster`]'s rule. Its length is [`Self::analyses`].
     pub(super) analysis_roster: Vec<PlanEntry>,
+    /// Retired instances the plan keeps as tombstones, so a result produced
+    /// before the removal stays attributable to the analysis that produced
+    /// it. Never part of [`Self::analyses`]: a tombstone is an identity the
+    /// plan refuses to reuse, not an analysis it will run.
+    pub(super) tombstones: usize,
     /// The run set's own forecast, or `None` when the declaration does not
     /// validate. Nothing here recomputes a quantity the forecast carries.
     pub(super) forecast: Option<RunSetForecast>,
@@ -193,6 +199,7 @@ pub(super) fn plan_catalog_records(app: &RSpiceApp) -> Vec<PlanCatalogRecord> {
             analyses: plan.instances().len(),
             enabled,
             analysis_roster: analysis_roster(plan),
+            tombstones: plan.tombstones().len(),
             forecast: forecast_for(
                 plan,
                 &app.state.sim_setup.run_set,
@@ -224,6 +231,7 @@ pub(super) fn plan_catalog_records(app: &RSpiceApp) -> Vec<PlanCatalogRecord> {
             analyses: stored.analysis_plan().instances().len(),
             enabled,
             analysis_roster: analysis_roster(stored.analysis_plan()),
+            tombstones: stored.analysis_plan().tombstones().len(),
             forecast: forecast_for(
                 stored.analysis_plan(),
                 stored.run_set(),
@@ -824,6 +832,81 @@ mod tests {
         assert_eq!(
             record.estimated_storage(),
             Some(format_bytes(forecast.storage_bytes))
+        );
+    }
+
+    /// A tombstone is the plan's own record of a removal, and each kind of
+    /// catalog entry reads it from the plan it projects.
+    ///
+    /// Retiring the plan into the catalog must carry the count with it: a
+    /// stored record that read the live plan would report the active plan's
+    /// removals against every entry in the table.
+    #[test]
+    fn a_retired_instance_is_counted_on_the_active_and_on_the_stored_record() {
+        let mut app = RSpiceApp::test_instance();
+        let retired_from = {
+            let plan = app
+                .state
+                .sim_setup
+                .stable_analysis_plan_mut()
+                .expect("the fixture has a stable plan");
+            let (disposable, _) = plan
+                .insert(crate::simulation::plan::AnalysisKind::DcSweep)
+                .expect("a disposable instance inserts");
+            plan.remove(disposable, Vec::new())
+                .expect("an instance nothing depends on retires");
+            plan.id()
+        };
+
+        let records = plan_catalog_records(&app);
+        let active = records.first().expect("the active plan is projected");
+        assert_eq!(active.id, retired_from);
+        assert_eq!(
+            active.tombstones, 1,
+            "the active record reads the plan's own tombstones"
+        );
+        assert_eq!(
+            active.analyses,
+            app.state
+                .sim_setup
+                .stable_analysis_plan()
+                .expect("stable plan")
+                .instances()
+                .len(),
+            "and a tombstone is not counted as an analysis"
+        );
+
+        let mut setup = app.state.sim_setup.clone();
+        setup
+            .create_plan("Second characterization")
+            .expect("a fresh root plan is created");
+        app.state.sim_setup = setup;
+
+        let records = plan_catalog_records(&app);
+        let stored = app
+            .state
+            .sim_setup
+            .inactive_plans()
+            .iter()
+            .find(|plan| plan.id() == retired_from)
+            .expect("the retired plan is in the catalog");
+        let stored_record = records
+            .iter()
+            .find(|record| record.id == retired_from)
+            .expect("the retired plan is projected");
+        assert_eq!(
+            stored_record.tombstones,
+            stored.analysis_plan().tombstones().len()
+        );
+        assert_eq!(stored_record.tombstones, 1);
+
+        let fresh = records
+            .iter()
+            .find(|record| record.active)
+            .expect("the created plan is active");
+        assert_eq!(
+            fresh.tombstones, 0,
+            "a plan that has retired nothing reports nothing"
         );
     }
 
