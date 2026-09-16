@@ -548,3 +548,52 @@ fn a_long_path_keeps_its_root_and_the_folder_it_names() {
     }
     assert!(shortened[1].len() > shortened[2].len());
 }
+
+/// A header too narrow for its title and metadata side by side sets the
+/// metadata under the title, from the same left edge, inside its band.
+#[test]
+fn a_wrapped_section_header_sets_its_metadata_under_the_title() {
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    let meta = "inherited \u{b7} project default";
+    let mut header = Rect::NOTHING;
+    let mut shapes = Vec::new();
+    for _ in 0..2 {
+        let output = ctx.run_ui(Default::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                ui.allocate_ui(Vec2::new(200.0, 80.0), |ui| {
+                    // The band ends where the cursor stops, with no spacing.
+                    ui.spacing_mut().item_spacing.y = 0.0;
+                    let top = ui.cursor().top();
+                    schematic_section_header(ui, "Drawing sheet", Some(meta));
+                    header = Rect::from_min_max(
+                        Pos2::new(ui.min_rect().left(), top),
+                        Pos2::new(ui.min_rect().right(), ui.cursor().top()),
+                    );
+                });
+            });
+        });
+        shapes = output.shapes;
+    }
+    let find = |wanted: &str| {
+        shapes
+            .iter()
+            .find_map(|shape| painted_text_rect(&shape.shape, wanted))
+            .unwrap_or_else(|| panic!("{wanted:?} was not painted"))
+    };
+    let title = find("DRAWING SHEET");
+    let metadata = find(meta);
+
+    assert!(
+        (metadata.left() - title.left()).abs() < 0.5,
+        "{title:?} {metadata:?}"
+    );
+    assert!(metadata.top() >= title.bottom(), "{title:?} {metadata:?}");
+    assert!(title.top() >= header.top() && metadata.bottom() <= header.bottom());
+    let above = title.top() - header.top();
+    let below = header.bottom() - metadata.bottom();
+    assert!(
+        (above - below).abs() <= 2.0,
+        "unbalanced: {above} above, {below} below"
+    );
+}

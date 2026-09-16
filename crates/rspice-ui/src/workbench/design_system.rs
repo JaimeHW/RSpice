@@ -938,31 +938,34 @@ fn section_header_with_typography(
             );
             return;
         }
-        let title_rect = Rect::from_min_max(
-            Pos2::new(content_left, rect.top()),
-            Pos2::new(content_right, rect.top() + PANEL_SECTION_H),
-        );
-        let title = elide_text(ui, &title, &title_font, title_rect.width());
+        // Title over its metadata, both from the left edge and centred as one
+        // block in the band. Right-aligned on a line of its own, the metadata
+        // hung under nothing and read as a layout fault.
+        let title = elide_text(ui, &title, &title_font, content_width);
         let title_galley = tracked_galley(ui, title, title_font, t.color.text_dim, title_tracking);
-        ui.painter().with_clip_rect(title_rect).galley(
-            Pos2::new(
-                title_rect.left(),
-                title_rect.center().y - title_galley.size().y * 0.5,
-            ),
+        let meta = meta.map(|meta| {
+            let meta = elide_text(ui, meta, &meta_font, content_width);
+            ui.painter()
+                .layout_no_wrap(meta, meta_font.clone(), t.color.text_faint)
+        });
+        let line_gap = 2.0;
+        let block_height =
+            title_galley.size().y + meta.as_ref().map_or(0.0, |meta| line_gap + meta.size().y);
+        let top = rect.center().y - block_height * 0.5;
+        let clip = Rect::from_min_max(
+            Pos2::new(content_left, rect.top()),
+            Pos2::new(content_right, rect.bottom()),
+        );
+        let meta_top = top + title_galley.size().y + line_gap;
+        ui.painter().with_clip_rect(clip).galley(
+            Pos2::new(content_left, top),
             title_galley,
             t.color.text_dim,
         );
         if let Some(meta) = meta {
-            let meta_rect = Rect::from_min_max(
-                Pos2::new(content_left, rect.top() + PANEL_SECTION_H - 1.0),
-                Pos2::new(content_right, rect.bottom()),
-            );
-            let meta = elide_text(ui, meta, &meta_font, meta_rect.width());
-            ui.painter().with_clip_rect(meta_rect).text(
-                meta_rect.right_center(),
-                Align2::RIGHT_CENTER,
+            ui.painter().with_clip_rect(clip).galley(
+                Pos2::new(content_left, meta_top),
                 meta,
-                meta_font,
                 t.color.text_faint,
             );
         }
