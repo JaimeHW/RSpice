@@ -731,18 +731,23 @@ fn section_heading(
             pos2(rect.right() - button_width, rect.top()),
             vec2(button_width, rect.height()),
         );
-        let clicked = ui
-            .scope_builder(
-                egui::UiBuilder::new()
-                    .max_rect(slot)
-                    .layout(egui::Layout::left_to_right(egui::Align::Center)),
-                |ui| button.show(ui).clicked(),
-            )
-            .inner;
-        if clicked {
+        if button_in(ui, slot, button) {
             *requested = Some(action.clone());
         }
     }
+}
+
+/// Show `button` centred in `slot`, a part of a row the caller has already
+/// allocated. A child, not a scope: a scope moves the column's cursor to the
+/// bottom of the button, and when that is above the bottom of the row the
+/// next row starts inside this one.
+fn button_in(ui: &mut Ui, slot: Rect, button: Button<'_>) -> bool {
+    let mut slot_ui = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(slot)
+            .layout(egui::Layout::left_to_right(egui::Align::Center)),
+    );
+    button.show(&mut slot_ui).clicked()
 }
 
 fn identity_section(ui: &mut Ui, identity: &IdentityModel, requested: &mut Option<AccountAction>) {
@@ -1189,15 +1194,7 @@ fn list_row(ui: &mut Ui, width: f32, row: ListRow<'_>) -> bool {
         egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), &announced)
     });
     match (row.trailing, button) {
-        (_, Some(button)) => {
-            ui.scope_builder(
-                egui::UiBuilder::new()
-                    .max_rect(trailing_rect)
-                    .layout(egui::Layout::left_to_right(egui::Align::Center)),
-                |ui| button.show(ui).clicked(),
-            )
-            .inner
-        }
+        (_, Some(button)) => button_in(ui, trailing_rect, button),
         (Trailing::Text(text, color), None) => {
             ui.painter().text(
                 trailing_rect.left_center(),
@@ -1636,10 +1633,15 @@ mod tests {
 
     #[cfg(not(target_arch = "wasm32"))]
     fn signed_in_app() -> RSpiceApp {
+        signed_in_app_with(active_cloud_snapshot())
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn signed_in_app_with(snapshot: CloudSessionSnapshot) -> RSpiceApp {
         let mut app = RSpiceApp::test_instance();
         app.cloud_account = crate::services::cloud_account::CloudAccountService::with_snapshot(
             CloudAccountAvailability::Native,
-            active_cloud_snapshot(),
+            snapshot,
         );
         app.state.license = Some(sample_license());
         app.state
@@ -1715,6 +1717,65 @@ mod tests {
                 assert!(
                     !text.contains(retired),
                     "{retired:?} is still painted at {}x{}:\n{text}",
+                    size.x,
+                    size.y
+                );
+            }
+        }
+    }
+
+    /// Device rows follow one another without overlapping, including on a
+    /// phone, where Revoke sits under the device name. That button was laid
+    /// out in a scope, which pulled the list's cursor back up to its bottom
+    /// edge, eight points above the bottom of the row, so the row after a
+    /// revocable device started inside it.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn device_rows_follow_one_another_without_overlapping() {
+        let mut snapshot = active_cloud_snapshot();
+        snapshot.device_leases.push(LeaseSummary {
+            id: "lease-c".to_owned(),
+            plan: "professional".to_owned(),
+            issued_at: "2026-07-28T00:00:00Z".to_owned(),
+            expires_at: "2026-08-04T00:00:00Z".to_owned(),
+            revoked_at: None,
+            this_device: false,
+        });
+        for size in [egui::vec2(1_440.0, 1_400.0), egui::vec2(390.0, 2_400.0)] {
+            let mut app = signed_in_app_with(snapshot.clone());
+            let ctx = egui::Context::default();
+            crate::ui::Theme::default().apply(&ctx);
+            ctx.enable_accesskit();
+            let mut rows = Vec::new();
+            for _ in 0..4 {
+                let output = ctx.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+                        ..Default::default()
+                    },
+                    |ctx| show(ctx, &mut app),
+                );
+                rows = output
+                    .platform_output
+                    .accesskit_update
+                    .iter()
+                    .flat_map(|update| update.nodes.iter())
+                    .filter(|(_, node)| {
+                        [node.label(), node.value()]
+                            .into_iter()
+                            .flatten()
+                            .any(|text| text.contains(" plan \u{b7} issued "))
+                    })
+                    .filter_map(|(_, node)| node.bounds())
+                    .map(|bounds| (bounds.y0, bounds.y1))
+                    .collect::<Vec<_>>();
+            }
+            rows.sort_by(|a, b| a.0.total_cmp(&b.0));
+            assert_eq!(rows.len(), 3, "{rows:?} at {}x{}", size.x, size.y);
+            for pair in rows.windows(2) {
+                assert!(
+                    (pair[1].0 - pair[0].1).abs() < 0.5,
+                    "rows {pair:?} overlap or part at {}x{}",
                     size.x,
                     size.y
                 );

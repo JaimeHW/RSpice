@@ -1275,6 +1275,69 @@ mod tests {
         }
     }
 
+    /// Each checkpoint row starts where the one above it ends. Its buttons
+    /// were laid out in a scope, which pulled the list's cursor back up to the
+    /// buttons' bottom edge, so every row began 12 points inside the one
+    /// above: its highlight and rule landed on the next row's text.
+    #[test]
+    fn checkpoint_rows_follow_one_another_without_overlapping() {
+        for size in [
+            egui::vec2(1440.0, 900.0),
+            egui::vec2(820.0, 1180.0),
+            egui::vec2(390.0, 844.0),
+        ] {
+            let mut app = recovery_project_app(3, false, false);
+            let ctx = egui::Context::default();
+            crate::ui::Theme::default().apply(&ctx);
+            ctx.enable_accesskit();
+            let mut rows = Vec::new();
+            for _ in 0..3 {
+                let output = ctx.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+                        ..Default::default()
+                    },
+                    |ctx| {
+                        egui::CentralPanel::default().show(ctx, |ui| show(ui, &mut app));
+                    },
+                );
+                rows = output
+                    .platform_output
+                    .accesskit_update
+                    .iter()
+                    .flat_map(|update| update.nodes.iter())
+                    .filter(|(_, node)| {
+                        [node.label(), node.value()]
+                            .into_iter()
+                            .flatten()
+                            .any(|text| text.contains(" \u{b7} revision "))
+                    })
+                    .filter_map(|(_, node)| node.bounds())
+                    .map(|bounds| (bounds.y0, bounds.y1))
+                    .collect::<Vec<_>>();
+            }
+            rows.sort_by(|a, b| a.0.total_cmp(&b.0));
+            assert_eq!(rows.len(), 3, "{rows:?} at {}x{}", size.x, size.y);
+            for pair in rows.windows(2) {
+                assert!(
+                    (pair[1].0 - pair[0].1).abs() < 0.5,
+                    "rows {pair:?} overlap or part at {}x{}",
+                    size.x,
+                    size.y
+                );
+            }
+            for (top, bottom) in &rows {
+                assert!(
+                    bottom - top >= f64::from(recovery::CHECKPOINT_ROW_HEIGHT) - 0.5,
+                    "a row is {} tall at {}x{}",
+                    bottom - top,
+                    size.x,
+                    size.y
+                );
+            }
+        }
+    }
+
     /// An empty catalog says so once, a damaged artifact gets its own card,
     /// and an unreadable directory offers a retry instead of an empty list.
     #[test]

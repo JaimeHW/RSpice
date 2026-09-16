@@ -18,7 +18,7 @@ use crate::workbench::lifecycle::project_checkpoint::{
 /// promise restoring one keeps.
 const RECOVERY_NOTE: &str = "A checkpoint is a complete, verified copy of the project. \
      Restoring one saves it as a new project file; your current work is never changed.";
-const CHECKPOINT_ROW_HEIGHT: f32 = 52.0;
+pub(super) const CHECKPOINT_ROW_HEIGHT: f32 = 52.0;
 /// Below this card width a row's actions move under its text.
 const CHECKPOINT_ROW_STACK_WIDTH: f32 = 460.0;
 const ROW_INSET: f32 = 12.0;
@@ -466,36 +466,37 @@ fn checkpoint_row(
     );
 
     let mut intent = None;
-    ui.scope_builder(
+    // A child, not a scope: a scope moves the list's cursor to the bottom of
+    // the buttons, which sit above the bottom of the row, so the next row
+    // would start inside this one.
+    let mut actions_ui = ui.new_child(
         egui::UiBuilder::new()
             .max_rect(actions)
             .layout(Layout::left_to_right(Align::Center)),
-        |ui| {
-            ui.spacing_mut().item_spacing.x = 6.0;
-            if compare
-                .accessible_label(&format!(
-                    "Compare {} with the current project",
-                    checkpoint.reason().label()
-                ))
-                .show(ui)
-                .on_hover_text("Check whether the current project still matches this checkpoint")
-                .clicked()
-            {
-                intent = Some(RecoveryIntent::Compare(checkpoint.clone()));
-            }
-            if restore
-                .accessible_label(&format!(
-                    "Restore {} as a new project",
-                    checkpoint.reason().label()
-                ))
-                .show(ui)
-                .on_hover_text("Save this checkpoint as a new project file")
-                .clicked()
-            {
-                intent = Some(RecoveryIntent::Restore(checkpoint.clone()));
-            }
-        },
     );
+    actions_ui.spacing_mut().item_spacing.x = 6.0;
+    if compare
+        .accessible_label(&format!(
+            "Compare {} with the current project",
+            checkpoint.reason().label()
+        ))
+        .show(&mut actions_ui)
+        .on_hover_text("Check whether the current project still matches this checkpoint")
+        .clicked()
+    {
+        intent = Some(RecoveryIntent::Compare(checkpoint.clone()));
+    }
+    if restore
+        .accessible_label(&format!(
+            "Restore {} as a new project",
+            checkpoint.reason().label()
+        ))
+        .show(&mut actions_ui)
+        .on_hover_text("Save this checkpoint as a new project file")
+        .clicked()
+    {
+        intent = Some(RecoveryIntent::Restore(checkpoint.clone()));
+    }
 
     let row_label = format!("{}, {detail}", checkpoint.reason().label());
     response.widget_info(|| {
