@@ -153,15 +153,10 @@ fn a_form_offers_the_options_its_own_kind_owns() {
         .collect();
     assert_eq!(
         offered_on_the_op,
-        vec![
-            O::GminStepping,
-            O::SourceStepping,
-            O::PseudoTransient,
-            O::ArcLength,
-            O::Damping,
-        ],
-        "an operating point owns how its solve recovers; its Newton budget is \
-         its accuracy tier's, so that one earns no field"
+        vec![O::Damping],
+        "the operating point's own form carries the homotopy chooser, so the three ramp \
+         switches would be that chooser said twice; its Newton budget belongs to its \
+         accuracy tier; and arc length continues a sweep, which it is not"
     );
 
     let (app, dc_sweep) = studio(AnalysisKind::DcSweep);
@@ -169,10 +164,18 @@ fn a_form_offers_the_options_its_own_kind_owns() {
         .into_iter()
         .map(|(option, _)| option)
         .collect();
-    assert!(
-        offered_on_the_sweep.contains(&O::Itl1),
-        "a DC sweep carries no tier, so its Newton budget is its own: \
-         {offered_on_the_sweep:?}"
+    assert_eq!(
+        offered_on_the_sweep,
+        vec![
+            O::Itl1,
+            O::GminStepping,
+            O::SourceStepping,
+            O::PseudoTransient,
+            O::ArcLength,
+            O::Damping,
+        ],
+        "a DC sweep carries neither a tier nor a homotopy chooser, so every part of how \
+         its solve recovers is its own"
     );
 
     for kind in [
@@ -215,6 +218,41 @@ fn an_untouched_form_states_the_plan_as_every_origin() {
         };
         assert_eq!(hint, expected, "{}", option.key());
     }
+}
+
+/// A bound the plan does not state opens on an empty well.
+///
+/// Its effective value is a pair of words rather than a number — the engine's
+/// own dialect default stands — and the hint slot is where that belongs. Inside
+/// a numeric well the same words read as a value a reader could edit, which is
+/// exactly what they are not.
+#[test]
+fn a_bound_the_plan_does_not_state_opens_on_an_empty_well() {
+    let (mut app, transient) = studio(AnalysisKind::Transient);
+    let inherited = row_of(&app, transient, O::LteReltol);
+    assert_eq!(origin_hint(&inherited), ENGINE_ORIGIN);
+    assert_eq!(
+        inherited.effective, ENGINE_ORIGIN,
+        "the row states the words"
+    );
+    assert_eq!(well_value(&inherited), "", "the well states nothing");
+    assert_eq!(
+        well_edit(&inherited, ""),
+        None,
+        "and an empty well over an inherited bound asks for nothing"
+    );
+
+    // A number typed into it is an override like any other, and the well then
+    // opens on what the solve will use.
+    commit(
+        &mut app,
+        transient,
+        &[OptionEdit::Set(O::LteReltol, "2e-3".to_owned())],
+    );
+    let authored = row_of(&app, transient, O::LteReltol);
+    assert_eq!(origin_hint(&authored), "override");
+    assert_eq!(well_value(&authored), authored.effective);
+    assert!(!well_value(&authored).is_empty());
 }
 
 /// A well let go of with a new value authors an override; emptied, it clears.

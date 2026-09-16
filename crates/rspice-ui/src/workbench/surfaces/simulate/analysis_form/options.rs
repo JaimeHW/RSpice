@@ -116,7 +116,7 @@ fn field(ui: &mut Ui, row: &AdvancedOptionRow) -> Option<OptionEdit> {
                     },
                 )
                 .inner;
-            changed.then(|| if setting { "on" } else { "off" })
+            changed.then_some(if setting { "on" } else { "off" })
         })
         .and_then(|chosen| advanced_options::setting_edit(row, chosen)),
         OverrideValueKind::Method | OverrideValueKind::Damping | OverrideValueKind::Solver => {
@@ -219,7 +219,7 @@ fn settings_of(option: crate::simulation::plan::NumericOverrideOption) -> Vec<St
 /// drawn from a shared reference and cannot write a keystroke into the plan.
 fn well_text(ui: &Ui, row: &AdvancedOptionRow) -> String {
     ui.data(|data| data.get_temp::<String>(well_id(ui, row)))
-        .unwrap_or_else(|| row.effective.clone())
+        .unwrap_or_else(|| advanced_options::well_value(row).to_owned())
 }
 
 /// Retain what the well holds while it is focused, and drop it once it is not.

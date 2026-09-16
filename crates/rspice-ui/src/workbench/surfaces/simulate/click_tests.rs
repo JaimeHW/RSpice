@@ -790,23 +790,23 @@ fn a_departed_row_on_the_solver_ledger_opens_its_analysis_advanced_options() {
 /// behind it, and a switch bound to nothing would render, announce itself and
 /// pass every other gate this crate has.
 ///
-/// Pressed on an operating point because that is the kind whose form offers the
-/// aids at all, and under the default tier and homotopy — `Robust` and a named
-/// homotopy each own them, and an owned option is given no field.
+/// Pressed on a DC sweep, because that is the kind whose form offers the ramps
+/// as switches: an operating point's form carries the homotopy chooser, and a
+/// switch beside it would be that chooser said twice.
 #[test]
 fn a_click_on_an_option_switch_authors_the_override_it_states() {
     use crate::simulation::plan::{AnalysisKind, NumericOverrideOption};
 
     let mut app = RSpiceApp::test_instance();
-    let operating_point = app
+    let sweep = app
         .state
         .sim_setup
         .stable_analysis_plan_mut()
         .expect("the test instance has a stable plan")
-        .insert(AnalysisKind::OperatingPoint)
+        .insert(AnalysisKind::DcSweep)
         .map(|(id, _)| id)
-        .expect("an operating point inserts");
-    app.state.workbench.active_analysis_instance = Some(operating_point);
+        .expect("a DC sweep inserts");
+    app.state.workbench.active_analysis_instance = Some(sweep);
     let label = NumericOverrideOption::GminStepping.label();
 
     // Tall enough that the option fields, which sit under the analysis's own
@@ -816,7 +816,7 @@ fn a_click_on_an_option_switch_authors_the_override_it_states() {
     let mut studio = Studio::open(app, SimulationPage::Analyses, (1280.0, 4000.0));
     assert!(
         studio.announces(|announced| announced == label),
-        "the operating point's form offers its continuation aids as fields"
+        "the DC sweep offers every ramp its own solve may take as a field"
     );
     studio.click(|announced| announced == label);
 
@@ -826,7 +826,7 @@ fn a_click_on_an_option_switch_authors_the_override_it_states() {
         .sim_setup
         .stable_analysis_plan()
         .expect("the plan survives the press")
-        .instance(operating_point)
+        .instance(sweep)
         .and_then(|target| target.numeric_override())
         .and_then(|record| record.value(NumericOverrideOption::GminStepping));
     assert_eq!(

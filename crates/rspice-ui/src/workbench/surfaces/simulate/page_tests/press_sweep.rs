@@ -503,7 +503,7 @@ const PRESSED_PER_SURFACE: &[(&str, usize)] = &[
     ("analysis catalogue · Solver", 0),
     ("analysis catalogue · Save", 0),
     ("analysis catalogue · Results workspace", 0),
-    ("analysis options · Operating point", 12),
+    ("analysis options · Operating point", 11),
     ("plan manager", 12),
     ("rename analysis", 4),
     ("run points", 12),
@@ -523,7 +523,7 @@ const PRESSED_PER_SURFACE: &[(&str, usize)] = &[
 /// "advanced options" surface became `analysis options · Operating point` — the
 /// one form the routes do not open, carrying the authored override that is the
 /// only way a global option's legacy field appears at all.
-const PRESSED_FLOOR: usize = 266;
+const PRESSED_FLOOR: usize = 265;
 
 /// Controls that are wired to nothing.
 ///
@@ -1401,10 +1401,20 @@ impl Sweep {
 #[test]
 #[ignore = "prints source-ready press tallies after explicit review"]
 fn print_press_sweep_surface_tallies_for_review() {
+    use std::io::Write as _;
+
+    let stderr = std::io::stderr();
+    let mut report = stderr.lock();
     let mut total = 0usize;
     for surface in studio_enumeration() {
         total += surface.targets.len();
-        eprintln!("    (\"{}\", {}),", surface.surface, surface.targets.len());
+        writeln!(
+            report,
+            "    (\"{}\", {}),",
+            surface.surface,
+            surface.targets.len()
+        )
+        .expect("write the press tally");
     }
-    eprintln!("PRESSED_FLOOR = {total}");
+    writeln!(report, "PRESSED_FLOOR = {total}").expect("write the press tally");
 }

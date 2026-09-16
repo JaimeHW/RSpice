@@ -158,6 +158,135 @@ fn the_analysis_header_identity_elides_instead_of_reaching_its_availability_chip
     );
 }
 
+/// The Analyses route with one analysis of `kind` selected, at `width`.
+///
+/// The kind is inserted where the default plan does not hold one. `None` where
+/// the plan refuses the insert, which is a kind that has no form to measure.
+fn analyses_form_lines(kind: AnalysisKind, width: f32) -> Option<Vec<PaintedLine>> {
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    let mut app = RSpiceApp::test_instance();
+    let plan = app.state.sim_setup.stable_analysis_plan_mut().ok()?;
+    let instance = match plan
+        .instances()
+        .iter()
+        .find(|instance| instance.kind() == kind)
+    {
+        Some(instance) => instance.id(),
+        None => plan.insert(kind).ok()?.0,
+    };
+    app.state.workbench.simulation_page = crate::workbench::state::SimulationPage::Analyses;
+    app.state.workbench.active_analysis_instance = Some(instance);
+    let mut run = || {
+        ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(width, 2_600.0))),
+                ..egui::RawInput::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::NONE)
+                    .show(ctx, |ui| super::show(ui, &mut app));
+            },
+        )
+    };
+    // The surface resolves its content width against the scrollbar track it
+    // reserves, which it only knows on a second pass.
+    let _ = run();
+    Some(painted_lines(&run().shapes))
+}
+
+/// Every word a field may state in the helper slot beside its caption.
+///
+/// A closed set, because the field constructors are its only writers: the form
+/// names the notation or says the domain constrains the choice, and an option
+/// field names where its value came from. Asserted to be *found* below, so a
+/// slot renamed out from under this cannot leave the gate matching nothing.
+const FIELD_HELPERS: [&str; 6] = [
+    "engineering notation",
+    "domain constrained",
+    "Celsius",
+    "plan policy",
+    "override",
+    "engine default",
+];
+
+/// No field caption runs under the helper beside it, on any analysis form.
+///
+/// A caption and its helper are both painted into one strip — the caption from
+/// the left, the helper right-aligned — so nothing in the layout stops the two
+/// meeting. Every caption was short until the advanced options arrived carrying
+/// `Truncation absolute bound · TIMEINT ABSTOL` into a 206-point cell. The
+/// caption elides now, and this is the measurement: 460 points is the narrowest
+/// surface that still lays the fields out in two columns, so its cells are the
+/// narrowest any caption is ever given.
+///
+/// Judged on the strips a helper is painted in rather than on every baseline
+/// the route paints. A well legitimately holds a galley wider than itself and
+/// clips it — the noise form's frequency list is one — so "nothing overlaps
+/// anywhere" is not true of the surface, while "nothing overlaps a helper" is
+/// the claim this is about, and it covers the two cells of one grid row too.
+#[test]
+fn no_field_caption_overlaps_the_helper_beside_it() {
+    /// The narrowest surface whose fields are still two columns wide.
+    const NARROWEST_TWO_COLUMN_SURFACE: f32 = 460.0;
+    /// Sub-pixel: text resting exactly against its neighbour is not a collision.
+    const TOLERANCE: f32 = 0.5;
+
+    let mut collisions = Vec::new();
+    let mut helpers = 0usize;
+    let mut forms = 0usize;
+    for kind in AnalysisKind::ALL {
+        let Some(lines) = analyses_form_lines(kind, NARROWEST_TWO_COLUMN_SURFACE) else {
+            continue;
+        };
+        forms += 1;
+        let mut rows: Vec<Vec<PaintedLine>> = Vec::new();
+        let mut sorted = lines;
+        sorted.sort_by(|a, b| a.top.total_cmp(&b.top).then(a.left.total_cmp(&b.left)));
+        for line in sorted {
+            match rows.last_mut() {
+                Some(row) if (row[0].top - line.top).abs() < TOLERANCE => row.push(line),
+                _ => rows.push(vec![line]),
+            }
+        }
+        for row in &rows {
+            for (index, helper) in row.iter().enumerate() {
+                if !FIELD_HELPERS.contains(&helper.text.as_str()) {
+                    continue;
+                }
+                helpers += 1;
+                for (other, line) in row.iter().enumerate() {
+                    if other == index
+                        || line.right <= helper.left + TOLERANCE
+                        || line.left >= helper.right - TOLERANCE
+                    {
+                        continue;
+                    }
+                    collisions.push(format!(
+                        "{kind:?}: {:?} spans {:.1}..{:.1} over the helper {:?} at {:.1}..{:.1}",
+                        line.text, line.left, line.right, helper.text, helper.left, helper.right
+                    ));
+                }
+            }
+        }
+    }
+    collisions.sort();
+    collisions.dedup();
+    assert!(
+        collisions.is_empty(),
+        "text painted over a field's helper:\n{}",
+        collisions.join("\n")
+    );
+    // A sweep that opened no form, or found no helper on the ones it opened,
+    // would pass forever.
+    let kinds = AnalysisKind::ALL.len();
+    assert!(
+        forms >= kinds - 4 && helpers > 2 * forms,
+        "the sweep opened {forms} of {kinds} forms and found {helpers} helpers"
+    );
+}
+
 /// What the analysis catalogue drew, gathered into the rows it drew them in.
 ///
 /// Every analysis code the frame painted, grouped by the top it landed on:

@@ -31,7 +31,7 @@ const STUDIO_BASELINES: [StudioBaseline; 9] = [
     StudioBaseline {
         name: "studio-analyses",
         page: SimulationPage::Analyses,
-        fingerprint: "533ce916595ae4a282e77498b4aa72832e80cd7576d736c8032a76ab7318df34",
+        fingerprint: "8a41dda90cf85fa272b6ae75cd97647e1410e80a59a8661c02fc2e7dc87def89",
     },
     StudioBaseline {
         name: "studio-excitations",
@@ -161,6 +161,57 @@ fn print_studio_visual_fingerprints_for_review() {
             canvas.regression_fingerprint(regression_height(&canvas))
         )
         .expect("write visual fingerprint");
+    }
+}
+
+/// Write one form per analysis kind that owns advanced options, so the fields
+/// they add under the analysis's own parameters can be reviewed.
+///
+/// [`render_every_studio_page`] renders the Analyses route on the default plan,
+/// which is one transient — and the option fields differ per kind, because what
+/// an analysis owns differs per kind. The operating point is the one that
+/// cannot be seen any other way: it is not in the default plan, and its
+/// Convergence field is the one the homotopy chooser above it decides.
+#[test]
+#[ignore = "writes PNGs for a human to look at; run with --ignored"]
+fn render_every_analysis_option_form() {
+    use std::io::Write as _;
+
+    use crate::simulation::plan::AnalysisKind;
+
+    let directory = std::env::var("RSPICE_RASTER_DIR")
+        .map_or_else(|_| std::env::temp_dir(), std::path::PathBuf::from);
+    std::fs::create_dir_all(&directory).expect("raster output directory");
+    let stderr = std::io::stderr();
+    let mut report_output = stderr.lock();
+    for kind in [
+        AnalysisKind::Transient,
+        AnalysisKind::OperatingPoint,
+        AnalysisKind::DcSweep,
+    ] {
+        let canvas = raster(SimulationPage::Analyses, page_width(), |app| {
+            let Ok(plan) = app.state.sim_setup.stable_analysis_plan_mut() else {
+                return;
+            };
+            let instance = plan
+                .instances()
+                .iter()
+                .find(|instance| instance.kind() == kind)
+                .map(|instance| instance.id())
+                .or_else(|| plan.insert(kind).ok().map(|(id, _)| id));
+            app.state.workbench.active_analysis_instance = instance;
+        });
+        let height = regression_height(&canvas);
+        let path = directory.join(format!("options-{kind:?}.png").to_lowercase());
+        std::fs::write(&path, canvas.png(height)).expect("write page render");
+        writeln!(
+            report_output,
+            "{} {}x{}",
+            path.display(),
+            canvas.width(),
+            height
+        )
+        .expect("write raster qualification report");
     }
 }
 

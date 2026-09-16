@@ -350,16 +350,34 @@ fn offered_on_the_form(option: NumericOverrideOption, kind: AnalysisKind, author
         | O::MinTimestep
         | O::Chgtol
         | O::Itl4 => true,
-        O::Itl1
-        | O::GminStepping
-        | O::SourceStepping
-        | O::PseudoTransient
-        | O::ArcLength
-        | O::Damping => {
-            matches!(kind, AnalysisKind::OperatingPoint | AnalysisKind::DcSweep) || authored
+        // Three of the aids are the homotopy chooser's own intent wherever the
+        // form carries one: switching a ramp on here and naming it there are
+        // two editors of one fact on one form, and the chooser is the
+        // analysis's own field, so it wins.
+        O::GminStepping | O::SourceStepping | O::PseudoTransient => {
+            (owns_the_dc_recovery(kind) && !form_owns_the_homotopy(kind)) || authored
         }
+        // Arc length continues a sweep past a fold, which is what a DC sweep
+        // does and an operating point does not.
+        O::ArcLength => matches!(kind, AnalysisKind::DcSweep) || authored,
+        O::Itl1 | O::Damping => owns_the_dc_recovery(kind) || authored,
         _ => authored,
     }
+}
+
+/// Whether this kind owns how its own DC solve recovers.
+const fn owns_the_dc_recovery(kind: AnalysisKind) -> bool {
+    matches!(kind, AnalysisKind::OperatingPoint | AnalysisKind::DcSweep)
+}
+
+/// Whether this kind's own form carries the homotopy chooser.
+///
+/// The operating point's does — `Homotopy strategy`, which names the one ramp
+/// the solve is to try — so the three ramp switches are that chooser said
+/// twice. Asked of the kind rather than read off the draft: what decides this
+/// is which fields the form draws, not which ramp is currently selected.
+const fn form_owns_the_homotopy(kind: AnalysisKind) -> bool {
+    matches!(kind, AnalysisKind::OperatingPoint)
 }
 
 /// The word the field's hint slot states about where its value came from.
@@ -375,6 +393,20 @@ pub(super) fn origin_hint(row: &AdvancedOptionRow) -> &'static str {
         return ENGINE_ORIGIN;
     }
     PLAN_ORIGIN
+}
+
+/// What a well opens on, which is nothing where there is no value to open on.
+///
+/// A bound the plan does not state resolves to the engine's own dialect
+/// default, and the catalogue has no number for it — `plan_preset_value` says
+/// the words instead. The hint slot already states `engine default`, and those
+/// two words inside a numeric well read as a value a reader could edit in
+/// place, which is precisely what they are not.
+pub(super) fn well_value(row: &AdvancedOptionRow) -> &str {
+    if row.authored.is_none() && row.origin == ENGINE_ORIGIN {
+        return "";
+    }
+    &row.effective
 }
 
 /// What a well asks for once the reader has let go of it.

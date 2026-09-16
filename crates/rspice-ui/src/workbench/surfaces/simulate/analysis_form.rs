@@ -207,6 +207,8 @@ const NOISE_SWEEP_CONTROL_COUNT: usize = 2;
 const FIELD_COLUMN_GAP: f32 = 14.0;
 const FIELD_ROW_GAP: f32 = 10.0;
 const FIELD_LABEL_HEIGHT: f32 = 15.0;
+/// Clear space between a field's caption and the helper on its right.
+const FIELD_CAPTION_GAP: f32 = 8.0;
 
 #[derive(Debug, Clone, Copy, Default)]
 pub(super) struct OpContextAvailability {
@@ -287,7 +289,6 @@ fn field_cell<R>(
     helper: Option<&str>,
     add_control: impl FnOnce(&mut Ui) -> R,
 ) -> R {
-    let t = Tokens::get(ui.ctx());
     let rect = next_field_cell(ui);
     let mut cell = ui.new_child(
         UiBuilder::new()
@@ -300,23 +301,48 @@ fn field_cell<R>(
         vec2(cell.available_width(), FIELD_LABEL_HEIGHT),
         egui::Sense::hover(),
     );
-    cell.painter().text(
-        label_rect.left_center(),
-        egui::Align2::LEFT_CENTER,
+    paint_field_caption(&cell, label_rect, label, helper);
+    add_control(&mut cell)
+}
+
+/// A field's caption, and the helper the caption has to leave room for.
+///
+/// The helper never moves and never shortens: it is one or two words naming the
+/// notation, the domain, or where the value came from, and a reader scanning a
+/// column of fields needs them on one right edge. So the caption is what gives,
+/// and it is elided rather than painted straight through — which is what a
+/// painted caption did until an option field arrived carrying
+/// `Truncation absolute bound · TIMEINT ABSTOL` into a 206-point cell and ran
+/// its own text under the word beside it.
+fn paint_field_caption(ui: &Ui, rect: Rect, label: &str, helper: Option<&str>) {
+    let t = Tokens::get(ui.ctx());
+    let mut caption_right = rect.right();
+    if let Some(helper) = helper {
+        let font = theme::mono(tokens::FS_0, FontWeight::Regular);
+        let width = ui
+            .painter()
+            .layout_no_wrap(helper.to_owned(), font.clone(), t.color.text_faint)
+            .size()
+            .x;
+        ui.painter().text(
+            rect.right_center(),
+            egui::Align2::RIGHT_CENTER,
+            helper,
+            font,
+            t.color.text_faint,
+        );
+        caption_right = rect.right() - width - FIELD_CAPTION_GAP;
+    }
+    super::page_kit::paint_text(
+        ui,
+        Rect::from_min_max(
+            rect.min,
+            egui::pos2(caption_right.max(rect.left()), rect.max.y),
+        ),
         label,
         theme::sans(tokens::FS_0, FontWeight::Regular),
         t.color.text_dim,
     );
-    if let Some(helper) = helper {
-        cell.painter().text(
-            label_rect.right_center(),
-            egui::Align2::RIGHT_CENTER,
-            helper,
-            theme::mono(tokens::FS_0, FontWeight::Regular),
-            t.color.text_faint,
-        );
-    }
-    add_control(&mut cell)
 }
 
 fn full_width_field<R>(
@@ -326,7 +352,6 @@ fn full_width_field<R>(
     control_height: f32,
     add_control: impl FnOnce(&mut Ui) -> R,
 ) -> R {
-    let t = Tokens::get(ui.ctx());
     let row_height = FIELD_LABEL_HEIGHT + 5.0 + control_height;
     let (rect, _) =
         ui.allocate_exact_size(vec2(ui.available_width(), row_height), egui::Sense::hover());
@@ -341,22 +366,7 @@ fn full_width_field<R>(
         vec2(cell.available_width(), FIELD_LABEL_HEIGHT),
         egui::Sense::hover(),
     );
-    cell.painter().text(
-        label_rect.left_center(),
-        egui::Align2::LEFT_CENTER,
-        label,
-        theme::sans(tokens::FS_0, FontWeight::Regular),
-        t.color.text_dim,
-    );
-    if let Some(helper) = helper {
-        cell.painter().text(
-            label_rect.right_center(),
-            egui::Align2::RIGHT_CENTER,
-            helper,
-            theme::mono(tokens::FS_0, FontWeight::Regular),
-            t.color.text_faint,
-        );
-    }
+    paint_field_caption(&cell, label_rect, label, helper);
     add_control(&mut cell)
 }
 
