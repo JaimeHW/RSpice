@@ -940,3 +940,144 @@ fn every_studio_workflow_dialog_comes_to_rest_and_stays_there() {
          overlays it claims to check"
     );
 }
+
+/// The plan header's action group ends at the pane's right edge, at every
+/// width.
+///
+/// `plan_heading` reserves `available_width - actions - chip - spacing` for the
+/// heading and lays the five actions out after it, which puts the accent
+/// action's right edge on the pane's right inset -- but only if the heading
+/// block actually occupies the width reserved for it. It did not: an
+/// `allocate_ui_with_layout` advances its parent past the content's `min_rect`,
+/// not past the size requested, so a top-down block of labels collapsed to the
+/// widest label and the whole group started that much early. At an 1100-point
+/// pane the accent action ended 114 points short of the inset, and the group
+/// read as though it had been dropped in the middle of the row. Its three
+/// sibling surfaces -- automation, report authoring and Verilog-A -- each carry
+/// the `set_width` that this one was missing.
+///
+/// Measured at three widths, not one, because a constant offset and a
+/// collapsed block are indistinguishable from a single sample: the shortfall
+/// is the heading's slack, so it grows with the pane and a test that only knew
+/// 1000 would have been satisfied by a group nailed 114 points from the left
+/// of the actions' own reserve.
+#[test]
+fn the_plan_headers_actions_end_at_the_panes_right_edge() {
+    // The surface withholds the scroll track from its content whether or not a
+    // bar is up, so the pane's own right edge is inside it by that much. Read
+    // from the same spacing the surface reads rather than restated here.
+    let gutter = scroll_track_width();
+    // The title row's frame inset, plus the row's own action spacing as slack
+    // for the difference between a measured button and a painted one.
+    let tolerance: f64 = 8.0 + 6.0;
+
+    let mut findings = Vec::new();
+    let mut shortfalls = Vec::new();
+    for width in [1000.0_f32, 1600.0, 2560.0] {
+        let app = studio_route(SimulationPage::Analyses, None);
+        let nodes = studio_route_nodes(app, width);
+        let mut actions: Vec<(String, f64, f64)> = Vec::new();
+        let mut heading_right = f64::NEG_INFINITY;
+        for (_, node) in &nodes {
+            let Some(bounds) = node.bounds() else {
+                continue;
+            };
+            match node.role() {
+                egui::accesskit::Role::Button => {
+                    let label = node.label().unwrap_or_default().to_string();
+                    if PLAN_HEADER_ACTIONS.contains(&label.as_str()) {
+                        actions.push((label, bounds.x0, bounds.x1));
+                    }
+                }
+                // A Label publishes its text as a value, not as a label.
+                egui::accesskit::Role::Label => {
+                    let text = node.value().unwrap_or_default().to_string();
+                    if text.starts_with("SIMULATION PLAN")
+                        || text.starts_with("Lab characterization")
+                        || text.contains("enabled instances")
+                    {
+                        heading_right = heading_right.max(bounds.x1);
+                    }
+                }
+                _ => {}
+            }
+        }
+        assert_eq!(
+            actions.len(),
+            PLAN_HEADER_ACTIONS.len(),
+            "the {width:.0}pt pane published {} of the header's actions, not all of them",
+            actions.len()
+        );
+        assert!(
+            heading_right.is_finite(),
+            "the {width:.0}pt pane published none of the heading's own text"
+        );
+
+        let inset = f64::from(width - gutter);
+        let accent = actions
+            .iter()
+            .find(|(label, _, _)| *label == "Validate plan")
+            .expect("the accent action is one of the five");
+        shortfalls.push((width, inset - accent.2));
+        if (inset - accent.2).abs() > tolerance {
+            findings.push(format!(
+                "{width:.0}pt pane: the accent action ends at {:.1}, {:.1} from the {:.1} inset",
+                accent.2,
+                inset - accent.2,
+                inset
+            ));
+        }
+        let group_left = actions
+            .iter()
+            .map(|(_, x0, _)| *x0)
+            .fold(f64::INFINITY, f64::min);
+        if heading_right > group_left + 0.5 {
+            findings.push(format!(
+                "{width:.0}pt pane: the heading runs to {heading_right:.1}, under a group that \
+                 starts at {group_left:.1}"
+            ));
+        }
+    }
+    assert!(
+        findings.is_empty(),
+        "the plan header's actions are not on the pane's right edge:\n{}",
+        findings.join("\n")
+    );
+    // The same inset at every width, because that is what "on the right edge"
+    // means and a fixed tolerance alone does not say it: the group that this
+    // gate was written for ended at 977.6 on all three panes, which the
+    // tolerance caught at 1600 and 2560 and let through at 1000.
+    let (_, first) = shortfalls[0];
+    let drift = shortfalls
+        .iter()
+        .map(|(_, shortfall)| (shortfall - first).abs())
+        .fold(0.0_f64, f64::max);
+    assert!(
+        drift <= 0.5,
+        "the group's distance from the inset moves with the pane: {shortfalls:?}"
+    );
+}
+
+/// The five actions the plan header offers on a fixture with no prior run.
+const PLAN_HEADER_ACTIONS: [&str; 5] = [
+    "Open prior run",
+    "Split with results",
+    "Plans",
+    "Clone plan",
+    "Validate plan",
+];
+
+/// What the studio surface withholds for its scroll track, read from the live
+/// theme rather than restated as a constant this test could get wrong.
+fn scroll_track_width() -> f32 {
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    let mut width = f32::NAN;
+    let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            width = ui.spacing().scroll.allocated_width();
+        });
+    });
+    assert!(width.is_finite(), "the theme answered no scroll geometry");
+    width
+}

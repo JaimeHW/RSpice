@@ -1243,7 +1243,20 @@ fn plan_heading(ui: &mut Ui, app: &mut RSpiceApp, surface_width: f32) {
             ui.allocate_ui_with_layout(
                 vec2(heading_width, 0.0),
                 Layout::top_down(Align::Min),
-                |ui| heading(ui, &eyebrow, &plan_name, &description),
+                |ui| {
+                    // `allocate_ui_with_layout` advances its parent past the
+                    // content's `min_rect`, not past the size asked for, and a
+                    // top-down block of labels is only as wide as its widest
+                    // label. Without this the block collapsed to the text, the
+                    // action group started that much early, and its right edge
+                    // sat at the same x on a 1000-point pane and a 2560-point
+                    // one — 114 points shy of the inset at 1100, and 1569 shy
+                    // at 2560. It also bounds the galleys: a description longer
+                    // than the reserve wraps inside the heading's own column
+                    // instead of running under the group.
+                    ui.set_width(heading_width);
+                    heading(ui, &eyebrow, &plan_name, &description);
+                },
             );
             if let Some(chip) = &chip {
                 rerun_preflight = chip.show(ui);
