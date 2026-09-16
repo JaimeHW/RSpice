@@ -1,16 +1,16 @@
-//! Account and administration console.
+//! Account and administration.
 //!
-//! The shape is a datasheet, not a dashboard: one surface read top to bottom
-//! — sign-in, license, what it unlocks, device sessions, build, data — with
-//! every band stating only facts the application can prove. Provable sources
-//! are exactly three: the verified local license file, the cloud account
-//! session (server-verified principal, entitlements, and license leases from
-//! `services::cloud_account`), and this build/process. Anything without a
-//! backing authority is reported as an explicit boundary instead of being
-//! rendered as an inert or simulated control, and every exposed action routes
-//! to a real executor.
+//! One narrow column read top to bottom — who is signed in, the license this
+//! installation runs under, what it unlocks, the devices holding a lease,
+//! what leaves this machine, and the build — with every section stating only
+//! facts the application can prove. Provable sources are exactly three: the
+//! verified local license file, the cloud account session (server-verified
+//! principal, entitlements, and license leases from `services::cloud_account`),
+//! and this build/process. Anything without a backing authority is left out
+//! rather than rendered as an inert or simulated control, and every exposed
+//! action routes to a real executor.
 
-use egui::{Align, Color32, Frame, Layout, Margin, RichText, Sense, Stroke, Ui, Vec2, vec2};
+use egui::{Align2, Color32, Rect, Sense, Stroke, Ui, Vec2, pos2, vec2};
 
 use crate::diagnostics::ConsoleMessage;
 use crate::services::cloud_account::{
@@ -24,68 +24,80 @@ use crate::ui::{
 };
 use crate::workbench::{AppState, RSpiceApp};
 
+use super::design_system::elide_text;
 use super::{RouteTransitionSource, SurfaceId, SurfaceRoute};
 
-const ACCOUNT_DESCRIPTION: &str = "The account this installation is signed in with, the license it runs under, the build it runs, and exactly what leaves this machine.";
-// The 920 pt dialog loses a small amount to its vertical scrollbar; retain the
-// mockup's table layout on the full desktop surface and collapse only when
-// the actual content track is materially narrower.
-const ACCOUNT_TABLE_BREAKPOINT: f32 = 860.0;
-const ACCOUNT_PROPERTY_TOP: i8 = 7;
-const ACCOUNT_PROPERTY_BOTTOM: i8 = 10;
-const ACCOUNT_TABLE_CELL_INSET: f32 = 8.0;
-const ACCOUNT_SECTION_HEADER_HEIGHT: f32 = 29.0;
-const ACCOUNT_SCROLL_END_PADDING: f32 = 12.0;
-const ACCOUNT_NARROW_BREAKPOINT: f32 = 820.0;
+const ACCOUNT_TITLE: &str = "Account and administration";
+const ACCOUNT_DESCRIPTION: &str = "The account this installation is signed in with, the license it runs under, what leaves this machine, and the build it runs.";
+/// Side inset of every section.
+const SECTION_INSET: f32 = 20.0;
+const SECTION_TOP: f32 = 16.0;
+const SECTION_BOTTOM: f32 = 16.0;
+const AVATAR_SIZE: f32 = 40.0;
+/// Below this body width a list row's action moves under its name, and the
+/// identity block's state moves under the account name.
+const LIST_STACK_WIDTH: f32 = 420.0;
 
 // ---------------------------------------------------------------------------
 // Model
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum BadgeTone {
+enum Tone {
+    Neutral,
+    Info,
     Ok,
     Warn,
 }
 
+impl Tone {
+    fn color(self, tokens: &Tokens) -> Color32 {
+        match self {
+            Self::Neutral => tokens.color.text_dim,
+            Self::Info => tokens.color.info,
+            Self::Ok => tokens.color.ok,
+            Self::Warn => tokens.color.warn,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct StripModel {
+struct IdentityModel {
     title: String,
     detail: String,
-    meta: String,
-    avatar: String,
-    badge: (String, BadgeTone),
+    note: String,
+    initials: Option<String>,
+    status: (&'static str, Tone),
     error: Option<String>,
     actions: Vec<AccountAction>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct UnlockRow {
-    feature: String,
+struct FeatureRow {
+    name: String,
     detail: String,
-    state: &'static str,
     licensed: bool,
     term: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct DeviceRow {
-    device: String,
-    issued: String,
-    expires: String,
+    name: String,
+    detail: String,
     /// Lease ID to revoke; `None` marks this installation's own row.
     revoke: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct AccountConsoleModel {
-    strip: StripModel,
+    identity: IdentityModel,
     license_rows: Vec<(String, String)>,
-    license_chip: (String, BadgeTone),
-    unlocks: Vec<UnlockRow>,
+    license_status: (String, Tone),
+    license_action: AccountAction,
+    features: Vec<FeatureRow>,
     devices: Vec<DeviceRow>,
-    build_rows: Vec<(String, String)>,
-    data_rows: Vec<(String, String)>,
+    privacy_rows: Vec<(String, String)>,
+    about_rows: Vec<(String, String)>,
     boundary: String,
 }
 
@@ -96,110 +108,112 @@ impl AccountConsoleModel {
         availability: CloudAccountAvailability,
     ) -> Self {
         Self {
-            strip: strip_model(cloud, availability),
+            identity: identity_model(cloud, availability),
             license_rows: license_rows(license, cloud),
-            license_chip: if license.is_some() {
-                ("activated".to_owned(), BadgeTone::Ok)
+            license_status: license_status(license),
+            license_action: if license.is_some() {
+                AccountAction::ManageLicense
             } else {
-                ("no license file".to_owned(), BadgeTone::Warn)
+                AccountAction::ActivateLicense
             },
-            unlocks: unlock_rows(license, cloud),
+            features: feature_rows(license, cloud),
             devices: device_rows(cloud),
-            build_rows: vec![
+            privacy_rows: privacy_rows(availability),
+            about_rows: vec![
                 (
-                    "Application".to_owned(),
+                    "Version".to_owned(),
                     concat!("RSpice ", env!("CARGO_PKG_VERSION")).to_owned(),
                 ),
                 ("Platform".to_owned(), current_platform_label().to_owned()),
             ],
-            data_rows: data_rows(availability),
             boundary: boundary_statement(license, cloud),
         }
     }
 }
 
-fn strip_model(cloud: &CloudSessionSnapshot, availability: CloudAccountAvailability) -> StripModel {
-    let signed_out_title = "Not signed in".to_owned();
+fn identity_model(
+    cloud: &CloudSessionSnapshot,
+    availability: CloudAccountAvailability,
+) -> IdentityModel {
+    let signed_out = |detail: &str, note: &str, error, actions| IdentityModel {
+        title: "Not signed in".to_owned(),
+        detail: detail.to_owned(),
+        note: note.to_owned(),
+        initials: None,
+        status: ("Local only", Tone::Neutral),
+        error,
+        actions,
+    };
     match availability {
-        CloudAccountAvailability::UnconfiguredBuild => StripModel {
-            title: signed_out_title,
-            detail: "This build carries no cloud account endpoints.".to_owned(),
-            meta: "Sign-in, cloud licensing, web publishing, and live collaboration are \
-                   unavailable in this build."
-                .to_owned(),
-            avatar: "—".to_owned(),
-            badge: ("LOCAL / OFFLINE".to_owned(), BadgeTone::Warn),
-            error: None,
-            actions: Vec::new(),
-        },
+        CloudAccountAvailability::UnconfiguredBuild => signed_out(
+            "This build can't connect to RSpice Cloud.",
+            "Cloud licensing, web publishing, and live collaboration are unavailable.",
+            None,
+            Vec::new(),
+        ),
         CloudAccountAvailability::Native | CloudAccountAvailability::Browser => {
             match &cloud.phase {
-                CloudSessionPhase::SignedOut { last_error } => StripModel {
-                    title: signed_out_title,
-                    detail: "Sign in to connect licensing, web publishing, and collaboration."
+                CloudSessionPhase::SignedOut { last_error } => signed_out(
+                    "Sign in to use cloud licensing, web publishing, and live collaboration.",
+                    "Signing in opens your browser; RSpice never sees your password.",
+                    last_error.clone(),
+                    vec![AccountAction::SignIn],
+                ),
+                CloudSessionPhase::WaitingForBrowser => IdentityModel {
+                    title: "Finish signing in".to_owned(),
+                    detail: "Complete sign-in in the browser window RSpice opened.".to_owned(),
+                    note: "Nothing changes here until the browser hands the sign-in back."
                         .to_owned(),
-                    meta: "Signing in opens your browser; RSpice never sees your password."
-                        .to_owned(),
-                    avatar: "—".to_owned(),
-                    badge: ("LOCAL / OFFLINE".to_owned(), BadgeTone::Warn),
-                    error: last_error.clone(),
-                    actions: vec![AccountAction::SignIn],
-                },
-                CloudSessionPhase::WaitingForBrowser => StripModel {
-                    title: "Waiting for the browser…".to_owned(),
-                    detail: "Complete sign-in in the browser window that just opened.".to_owned(),
-                    meta: "Nothing happens in RSpice until the browser hands the sign-in back."
-                        .to_owned(),
-                    avatar: "…".to_owned(),
-                    badge: ("SIGNING IN".to_owned(), BadgeTone::Warn),
+                    initials: None,
+                    status: ("Signing in", Tone::Info),
                     error: None,
                     actions: vec![AccountAction::ReopenSignInPage, AccountAction::CancelSignIn],
                 },
                 CloudSessionPhase::ExchangingTokens | CloudSessionPhase::Bootstrapping => {
-                    StripModel {
-                        title: "Signing in…".to_owned(),
-                        detail: "Establishing the account session.".to_owned(),
-                        meta: String::new(),
-                        avatar: "…".to_owned(),
-                        badge: ("SIGNING IN".to_owned(), BadgeTone::Warn),
+                    IdentityModel {
+                        title: "Signing in\u{2026}".to_owned(),
+                        detail: "Setting up your account session.".to_owned(),
+                        note: String::new(),
+                        initials: None,
+                        status: ("Signing in", Tone::Info),
                         error: None,
                         actions: Vec::new(),
                     }
                 }
                 CloudSessionPhase::Active => {
                     let (title, detail) = identity_lines(cloud);
-                    StripModel {
-                        avatar: initials(&title),
-                        meta: cloud
+                    IdentityModel {
+                        initials: Some(initials(&title)),
+                        note: cloud
                             .verified_at
                             .as_deref()
                             .map(|stamp| format!("Account verified {}", humanize_stamp(stamp)))
                             .unwrap_or_default(),
                         title,
                         detail,
-                        badge: ("SIGNED IN".to_owned(), BadgeTone::Ok),
+                        status: ("Signed in", Tone::Ok),
                         error: None,
                         actions: vec![AccountAction::RefreshSession, AccountAction::SignOut],
                     }
                 }
                 CloudSessionPhase::OfflineLicensed => {
                     let (title, detail) = identity_lines(cloud);
-                    let meta = cloud
+                    let note = cloud
                         .native_license
                         .as_ref()
                         .map(|license| {
                             format!(
-                                "Offline — this device stays licensed through {}",
+                                "Offline \u{2014} this device stays licensed through {}",
                                 unix_date(license.expires_at_unix_seconds)
                             )
                         })
                         .unwrap_or_default();
-                    StripModel {
-                        avatar: initials(&title),
+                    IdentityModel {
+                        initials: Some(initials(&title)),
                         title,
                         detail,
-                        meta,
-                        badge: ("OFFLINE · LICENSED".to_owned(), BadgeTone::Warn),
+                        note,
+                        status: ("Offline", Tone::Warn),
                         error: None,
                         actions: vec![AccountAction::RefreshSession, AccountAction::SignOut],
                     }
@@ -221,79 +235,81 @@ fn identity_lines(cloud: &CloudSessionSnapshot) -> (String, String) {
     }
 }
 
+fn license_status(license: Option<&LicenseInfo>) -> (String, Tone) {
+    match license {
+        Some(info) if info.updates_expired => {
+            ("Active \u{b7} updates ended".to_owned(), Tone::Warn)
+        }
+        Some(_) => ("Active".to_owned(), Tone::Ok),
+        None => ("Not activated".to_owned(), Tone::Neutral),
+    }
+}
+
 fn license_rows(
     license: Option<&LicenseInfo>,
     cloud: &CloudSessionSnapshot,
 ) -> Vec<(String, String)> {
-    let storage = license_storage_description();
     let mut rows = match license {
         Some(info) => vec![
             (
-                "State".to_owned(),
+                "Status".to_owned(),
                 if info.updates_expired {
-                    "Verified · perpetual use retained · updates window ended".to_owned()
+                    "Verified \u{b7} perpetual use kept \u{b7} updates window ended".to_owned()
                 } else {
-                    "Verified locally · active for this build".to_owned()
+                    "Verified on this device".to_owned()
                 },
             ),
             ("Licensed to".to_owned(), info.licensed_to.clone()),
-            ("Tier".to_owned(), info.tier.clone()),
+            ("Edition".to_owned(), info.tier.clone()),
             ("Updates until".to_owned(), info.updates_until.clone()),
             ("License ID".to_owned(), info.license_id.clone()),
-            ("Storage".to_owned(), storage),
         ],
-        None => vec![
-            (
-                "State".to_owned(),
-                "No activated local license file".to_owned(),
-            ),
-            ("Storage".to_owned(), storage),
-        ],
+        None => vec![("Status".to_owned(), "No license on this device".to_owned())],
     };
     if let Some(native) = &cloud.native_license {
         rows.push((
-            "Cloud license".to_owned(),
-            format!("{} · {} plan", native.product, native.plan),
+            "Cloud plan".to_owned(),
+            format!("{} \u{b7} {}", native.product, native.plan),
         ));
         rows.push((
-            "Offline lease renews by".to_owned(),
+            "Offline until".to_owned(),
             unix_date(native.expires_at_unix_seconds),
         ));
     }
+    rows.push(("License file".to_owned(), license_storage_description()));
     rows
 }
 
 /// Cloud entitlement feature keys mapped to the product language, so the
-/// Unlocks table names shipped capabilities rather than wire identifiers.
+/// feature list names shipped capabilities rather than wire identifiers.
 fn cloud_feature_display(key: &str) -> (String, String) {
     match key {
         "cloud_publishing" => (
             "Web publishing".to_owned(),
-            "published circuit pages on RSpice Cloud".to_owned(),
+            "Published circuit pages on RSpice Cloud".to_owned(),
         ),
         "live_collaboration" => (
             "Live collaboration".to_owned(),
-            "live sessions on RSpice Cloud".to_owned(),
+            "Live sessions on RSpice Cloud".to_owned(),
         ),
         "cloud_simulation" => (
             "Cloud simulation".to_owned(),
-            "runs queued to RSpice Cloud workers".to_owned(),
+            "Runs queued to RSpice Cloud workers".to_owned(),
         ),
         "native_license" => (
             "Offline desktop license".to_owned(),
-            "a verified lease keeps this device licensed offline".to_owned(),
+            "A verified lease keeps this device licensed offline".to_owned(),
         ),
-        other => (other.to_owned(), "account entitlement".to_owned()),
+        other => (other.to_owned(), "Account entitlement".to_owned()),
     }
 }
 
-fn unlock_rows(license: Option<&LicenseInfo>, cloud: &CloudSessionSnapshot) -> Vec<UnlockRow> {
-    let mut rows = vec![UnlockRow {
-        feature: "Schematic capture & simulation".to_owned(),
-        detail: "DC · AC · transient · noise · S-parameter".to_owned(),
-        state: "included",
+fn feature_rows(license: Option<&LicenseInfo>, cloud: &CloudSessionSnapshot) -> Vec<FeatureRow> {
+    let mut rows = vec![FeatureRow {
+        name: "Schematic capture & simulation".to_owned(),
+        detail: "DC \u{b7} AC \u{b7} transient \u{b7} noise \u{b7} S-parameter".to_owned(),
         licensed: true,
-        term: "perpetual".to_owned(),
+        term: "Included".to_owned(),
     }];
 
     // The local license's feature catalog: every label the signer can grant,
@@ -303,16 +319,11 @@ fn unlock_rows(license: Option<&LicenseInfo>, cloud: &CloudSessionSnapshot) -> V
         .map(|(_, label)| *label)
     {
         let granted = license.is_some_and(|info| info.features.iter().any(|f| f == label));
-        rows.push(UnlockRow {
-            feature: label.to_owned(),
-            detail: "local license grant".to_owned(),
-            state: if granted { "licensed" } else { "not licensed" },
+        rows.push(FeatureRow {
+            name: label.to_owned(),
+            detail: String::new(),
             licensed: granted,
-            term: if granted {
-                "perpetual".to_owned()
-            } else {
-                "—".to_owned()
-            },
+            term: if granted { "Perpetual" } else { "Not licensed" }.to_owned(),
         });
     }
 
@@ -338,15 +349,14 @@ fn unlock_rows(license: Option<&LicenseInfo>, cloud: &CloudSessionSnapshot) -> V
         }
         granted.sort_by(|a, b| a.0.cmp(&b.0));
         for (key, valid_until) in granted {
-            let (feature, detail) = cloud_feature_display(&key);
-            rows.push(UnlockRow {
-                feature,
+            let (name, detail) = cloud_feature_display(&key);
+            rows.push(FeatureRow {
+                name,
                 detail,
-                state: "licensed",
                 licensed: true,
                 term: match valid_until {
-                    Some(stamp) => format!("through {}", humanize_stamp(&stamp)),
-                    None => "while the subscription is active".to_owned(),
+                    Some(stamp) => format!("Through {}", humanize_stamp(&stamp)),
+                    None => "With subscription".to_owned(),
                 },
             });
         }
@@ -360,17 +370,17 @@ fn device_rows(cloud: &CloudSessionSnapshot) -> Vec<DeviceRow> {
         .iter()
         .filter(|lease| lease.revoked_at.is_none())
         .map(|lease| DeviceRow {
-            device: if lease.this_device {
-                format!("This installation · {} plan", lease.plan)
+            name: if lease.this_device {
+                "This device".to_owned()
             } else {
-                format!(
-                    "Signed-in device · lease {} · {} plan",
-                    short_id(&lease.id),
-                    lease.plan
-                )
+                format!("Device {}", short_id(&lease.id))
             },
-            issued: humanize_stamp(&lease.issued_at),
-            expires: humanize_stamp(&lease.expires_at),
+            detail: format!(
+                "{} plan \u{b7} issued {} \u{b7} renews by {}",
+                capitalized(&lease.plan),
+                humanize_stamp(&lease.issued_at),
+                humanize_stamp(&lease.expires_at)
+            ),
             revoke: if lease.this_device {
                 None
             } else {
@@ -380,49 +390,50 @@ fn device_rows(cloud: &CloudSessionSnapshot) -> Vec<DeviceRow> {
         .collect()
 }
 
-fn data_rows(availability: CloudAccountAvailability) -> Vec<(String, String)> {
+fn privacy_rows(availability: CloudAccountAvailability) -> Vec<(String, String)> {
     let network = match availability {
-        CloudAccountAvailability::Native => {
-            "sign-in, licensing, and RSpice Cloud services only".to_owned()
-        }
-        CloudAccountAvailability::Browser => {
-            "sign-in and RSpice Cloud live collaboration only".to_owned()
-        }
-        CloudAccountAvailability::UnconfiguredBuild => {
-            "none — this build reaches no account service".to_owned()
-        }
+        CloudAccountAvailability::Native => "Sign-in, licensing, and RSpice Cloud only",
+        CloudAccountAvailability::Browser => "Sign-in and live collaboration only",
+        CloudAccountAvailability::UnconfiguredBuild => "None",
     };
     vec![
-        ("Telemetry".to_owned(), "none — nothing is sent".to_owned()),
-        ("Network access".to_owned(), network),
         (
-            "Engineering data".to_owned(),
-            "files on this device".to_owned(),
+            "Usage data".to_owned(),
+            "None \u{2014} nothing is sent".to_owned(),
         ),
+        ("Network access".to_owned(), network.to_owned()),
+        ("Project files".to_owned(), "Stay on this device".to_owned()),
     ]
 }
 
 fn boundary_statement(license: Option<&LicenseInfo>, cloud: &CloudSessionSnapshot) -> String {
     if let Some(native) = &cloud.native_license {
         return format!(
-            "Without a reachable licensing service this device stays licensed through {}, \
-             and projects, results, and reports on this machine stay readable forever — a \
-             license gates new work, never your existing files.",
+            "Without the licensing service this device stays licensed through {}. Projects, \
+             results, and reports stay readable after that; a license gates new work, never \
+             your existing files.",
             unix_date(native.expires_at_unix_seconds)
         );
     }
     if license.is_some() {
-        return "License verification is local and signed; nothing about your projects \
-                leaves this machine."
+        return "The license is verified on this device; nothing about your projects is sent \
+                to check it."
             .to_owned();
     }
-    "Projects, results, and reports on this machine stay readable without any license or \
-     account."
+    "Projects, results, and reports on this device stay readable without a license or account."
         .to_owned()
 }
 
 fn short_id(id: &str) -> String {
     id.chars().take(8).collect()
+}
+
+fn capitalized(text: &str) -> String {
+    let mut characters = text.chars();
+    match characters.next() {
+        Some(first) => first.to_uppercase().chain(characters).collect(),
+        None => String::new(),
+    }
 }
 
 /// `2026-08-06T13:41:00Z` → `2026-08-06`; anything unparsable passes through.
@@ -457,7 +468,8 @@ fn unix_date(unix_seconds: i64) -> String {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum AccountAction {
     PersonalPreferences,
-    LicenseManager,
+    ActivateLicense,
+    ManageLicense,
     SignIn,
     ReopenSignInPage,
     CancelSignIn,
@@ -472,18 +484,24 @@ enum AccountAction {
 impl AccountAction {
     fn label(&self) -> &'static str {
         match self {
-            Self::PersonalPreferences => "Personal preferences…",
-            Self::LicenseManager => "License & activation…",
-            Self::SignIn => "Sign in…",
-            Self::ReopenSignInPage => "Open the sign-in page again",
-            Self::CancelSignIn => "Cancel sign-in",
+            Self::PersonalPreferences => "Preferences\u{2026}",
+            Self::ActivateLicense => "Activate license\u{2026}",
+            Self::ManageLicense => "Manage license\u{2026}",
+            Self::SignIn => "Sign in\u{2026}",
+            Self::ReopenSignInPage => "Open sign-in page again",
+            Self::CancelSignIn => "Cancel",
             Self::SignOut => "Sign out",
             Self::RefreshSession => "Refresh",
             Self::RevokeLease(_) => "Revoke",
-            Self::LegalPrivacy => "Legal and privacy…",
-            Self::SupportBundle => "Create support bundle…",
-            Self::HelpCenter => "Help center…",
+            Self::LegalPrivacy => "Legal and privacy\u{2026}",
+            Self::SupportBundle => "Create support bundle\u{2026}",
+            Self::HelpCenter => "Help center\u{2026}",
         }
+    }
+
+    /// The one action a section leads with.
+    const fn is_primary(&self) -> bool {
+        matches!(self, Self::SignIn | Self::ActivateLicense)
     }
 }
 
@@ -512,7 +530,9 @@ fn execute_action(app: &mut RSpiceApp, action: AccountAction) {
                     .push_user_message(ConsoleMessage::warning(error.to_string()));
             }
         }
-        AccountAction::LicenseManager => app.open_license_dialog(),
+        AccountAction::ActivateLicense | AccountAction::ManageLicense => {
+            app.open_license_dialog();
+        }
         AccountAction::SignIn => app.cloud_account.sign_in(),
         AccountAction::ReopenSignInPage => app.cloud_account.reopen_sign_in_page(),
         AccountAction::CancelSignIn => app.cloud_account.cancel_sign_in(),
@@ -558,32 +578,35 @@ pub(crate) fn show(ctx: &egui::Context, app: &mut RSpiceApp) {
         app.cloud_account.availability(),
     );
     let mut requested_action = None;
-    let choice = Dialog::new(
-        "Account · license · data",
-        "Account and administration",
-        "Close",
-    )
-    .description(ACCOUNT_DESCRIPTION)
-    .size(DialogSize::AccountManager)
-    .flush_body()
-    .show(ctx, |ui| {
-        render_strip(ui, &model.strip, &mut requested_action);
-        render_owner_actions(ui, &mut requested_action);
-        render_license_band(ui, &model, &mut requested_action);
-        render_unlocks_band(ui, &model);
-        render_devices_band(ui, &model, &mut requested_action);
-        render_build_band(ui, &model);
-        render_data_band(ui, &model, &mut requested_action);
-        render_support_band(ui, &mut requested_action);
-        render_boundary(ui, &model.boundary);
-    });
+    let choice = Dialog::prompt(ACCOUNT_TITLE, "Close")
+        .description(ACCOUNT_DESCRIPTION)
+        .size(DialogSize::AccountManager)
+        .secondary(AccountAction::PersonalPreferences.label())
+        .secondary_leading()
+        .flush_body()
+        .show(ctx, |ui| {
+            identity_section(ui, &model.identity, &mut requested_action);
+            section_rule(ui);
+            license_section(ui, &model, &mut requested_action);
+            section_rule(ui);
+            features_section(ui, &model.features);
+            if !model.devices.is_empty() {
+                section_rule(ui);
+                devices_section(ui, &model.devices, &mut requested_action);
+            }
+            section_rule(ui);
+            privacy_section(ui, &model.privacy_rows, &mut requested_action);
+            section_rule(ui);
+            about_section(ui, &model.about_rows, &mut requested_action);
+        });
 
-    if matches!(
-        choice,
-        DialogChoice::Primary | DialogChoice::Cancelled | DialogChoice::Ghost
-    ) {
-        close_to_source(&mut app.state);
-        return;
+    match choice {
+        DialogChoice::Primary | DialogChoice::Cancelled | DialogChoice::Ghost => {
+            close_to_source(&mut app.state);
+            return;
+        }
+        DialogChoice::Secondary => requested_action = Some(AccountAction::PersonalPreferences),
+        _ => {}
     }
     if let Some(action) = requested_action {
         execute_action(app, action);
@@ -613,460 +636,636 @@ fn close_to_source(state: &mut AppState) {
 // Rendering
 // ---------------------------------------------------------------------------
 
-fn render_strip(ui: &mut Ui, strip: &StripModel, action: &mut Option<AccountAction>) {
-    let t = Tokens::get(ui.ctx());
-    Frame::NONE
-        .fill(t.color.bg_panel)
-        .inner_margin(Margin::symmetric(12, 10))
-        .show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            let narrow = ui.available_width() <= ACCOUNT_NARROW_BREAKPOINT;
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 10.0;
-                avatar(ui, &strip.avatar);
-                ui.vertical(|ui| {
-                    render_strip_text(ui, strip);
-                    if narrow {
-                        ui.add_space(3.0);
-                        render_badge(ui, strip);
-                    }
-                });
-                if !narrow {
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        render_badge(ui, strip);
-                    });
-                }
-            });
-            if !strip.actions.is_empty() || strip.error.is_some() {
-                ui.add_space(6.0);
-                if let Some(error) = &strip.error {
-                    let label = ui.add(
-                        egui::Label::new(
-                            RichText::new(error)
-                                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                                .color(t.color.err),
-                        )
-                        .wrap(),
-                    );
-                    accessible_text(ui, &label, error);
-                }
-                ui.horizontal_wrapped(|ui| {
-                    ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
-                    for strip_action in &strip.actions {
-                        if Button::new(strip_action.label()).show(ui).clicked() {
-                            *action = Some(strip_action.clone());
-                        }
-                    }
-                });
-            }
-        });
-    horizontal_rule(ui, t.color.border_strong);
-}
-
-fn render_badge(ui: &mut Ui, strip: &StripModel) {
-    let t = Tokens::get(ui.ctx());
-    let color = match strip.badge.1 {
-        BadgeTone::Ok => t.color.ok,
-        BadgeTone::Warn => t.color.warn,
-    };
-    status_badge(ui, &strip.badge.0, color);
-}
-
-fn render_strip_text(ui: &mut Ui, strip: &StripModel) {
-    let t = Tokens::get(ui.ctx());
-    ui.spacing_mut().item_spacing.y = 2.0;
-    let title = ui.label(
-        RichText::new(&strip.title)
-            .font(theme::sans(tokens::FS_2, FontWeight::SemiBold))
-            .color(t.color.text),
+/// The hairline between two sections.
+fn section_rule(ui: &mut Ui) {
+    let tokens = Tokens::get(ui.ctx());
+    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 1.0), Sense::hover());
+    ui.painter().hline(
+        (rect.left() + SECTION_INSET)..=(rect.right() - SECTION_INSET),
+        rect.center().y,
+        Stroke::new(1.0, tokens.color.border),
     );
-    accessible_text(ui, &title, &strip.title);
-    if !strip.detail.is_empty() {
-        let detail = ui.label(
-            RichText::new(&strip.detail)
-                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                .color(t.color.text_dim),
-        );
-        accessible_text(ui, &detail, &strip.detail);
-    }
-    if !strip.meta.is_empty() {
-        let meta = ui.add(
-            egui::Label::new(
-                RichText::new(&strip.meta)
-                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                    .color(t.color.text_faint),
+}
+
+/// Run `body` inside one section's inset, with its vertical breathing room.
+fn section<R>(ui: &mut Ui, body: impl FnOnce(&mut Ui, f32) -> R) -> R {
+    ui.add_space(SECTION_TOP);
+    let width = (ui.available_width() - 2.0 * SECTION_INSET).max(1.0);
+    let output = ui
+        .horizontal_top(|ui| {
+            ui.spacing_mut().item_spacing.x = 0.0;
+            ui.add_space(SECTION_INSET);
+            ui.allocate_ui_with_layout(
+                vec2(width, 1.0),
+                egui::Layout::top_down(egui::Align::Min),
+                |ui| {
+                    ui.set_width(width);
+                    ui.spacing_mut().item_spacing.y = 0.0;
+                    body(ui, width)
+                },
             )
-            .wrap(),
+            .inner
+        })
+        .inner;
+    ui.add_space(SECTION_BOTTOM);
+    output
+}
+
+/// A section's heading: its name, and on the right either a short state or
+/// the one action the section offers.
+fn section_heading(
+    ui: &mut Ui,
+    title: &str,
+    trailing: Option<(&str, Color32)>,
+    action: Option<&AccountAction>,
+    requested: &mut Option<AccountAction>,
+) {
+    let tokens = Tokens::get(ui.ctx());
+    let width = ui.available_width();
+    let button = action.map(|action| {
+        let button = Button::new(action.label());
+        if action.is_primary() {
+            button.accent()
+        } else {
+            button
+        }
+    });
+    let button_width = button
+        .as_ref()
+        .map_or(0.0, |button| button.measured_width(ui));
+    let height = if button.is_some() && tokens.metrics.is_touch() {
+        tokens.metrics.ctl_h.max(tokens::TOUCH_TARGET)
+    } else {
+        tokens.metrics.ctl_h
+    };
+    let (rect, response) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
+    let title_font = theme::sans(tokens::FS_2, FontWeight::SemiBold);
+    let title_rect = ui.painter().text(
+        rect.left_center(),
+        Align2::LEFT_CENTER,
+        title,
+        title_font,
+        tokens.color.text,
+    );
+    if let Some((text, color)) = trailing {
+        let font = theme::sans(tokens::FS_1, FontWeight::Regular);
+        let right = rect.right() - button_width - if button.is_some() { 12.0 } else { 0.0 };
+        let text = elide_text(
+            ui,
+            text,
+            &font,
+            (right - title_rect.right() - 16.0).max(1.0),
         );
-        accessible_text(ui, &meta, &strip.meta);
+        ui.painter().text(
+            pos2(right, rect.center().y),
+            Align2::RIGHT_CENTER,
+            text,
+            font,
+            color,
+        );
+    }
+    response
+        .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), title));
+    if let (Some(button), Some(action)) = (button, action) {
+        let slot = Rect::from_min_size(
+            pos2(rect.right() - button_width, rect.top()),
+            vec2(button_width, rect.height()),
+        );
+        let clicked = ui
+            .scope_builder(
+                egui::UiBuilder::new()
+                    .max_rect(slot)
+                    .layout(egui::Layout::left_to_right(egui::Align::Center)),
+                |ui| button.show(ui).clicked(),
+            )
+            .inner;
+        if clicked {
+            *requested = Some(action.clone());
+        }
     }
 }
 
-fn render_owner_actions(ui: &mut Ui, action: &mut Option<AccountAction>) {
-    let t = Tokens::get(ui.ctx());
-    Frame::NONE
-        .fill(t.color.bg_inset)
-        .inner_margin(Margin::symmetric(10, 7))
-        .show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
-            let narrow = ui.available_width() <= ACCOUNT_NARROW_BREAKPOINT;
-            let render_buttons = |ui: &mut Ui, action: &mut Option<AccountAction>| {
-                for owner_action in [
-                    AccountAction::PersonalPreferences,
-                    AccountAction::LicenseManager,
-                ] {
-                    if Button::new(owner_action.label())
-                        .min_width(if narrow { ui.available_width() } else { 0.0 })
-                        .show(ui)
-                        .clicked()
-                    {
-                        *action = Some(owner_action.clone());
-                    }
-                }
-            };
-            if narrow {
-                ui.vertical(|ui| render_buttons(ui, action));
+fn identity_section(ui: &mut Ui, identity: &IdentityModel, requested: &mut Option<AccountAction>) {
+    let tokens = Tokens::get(ui.ctx());
+    section(ui, |ui, width| {
+        let status_font = theme::sans(tokens::FS_1, FontWeight::Medium);
+        let status_color = identity.status.1.color(&tokens);
+        let status_width = ui
+            .painter()
+            .layout_no_wrap(
+                identity.status.0.to_owned(),
+                status_font.clone(),
+                status_color,
+            )
+            .size()
+            .x
+            + 14.0;
+        let text_left = AVATAR_SIZE + 14.0;
+        // Narrow, the state takes its own line under the name rather than
+        // squeezing the name and its sentences into a column beside it.
+        let narrow = width < LIST_STACK_WIDTH;
+        let text_width = if narrow {
+            width - text_left
+        } else {
+            width - text_left - status_width - 12.0
+        }
+        .max(1.0);
+        let status_line = if narrow { 20.0 } else { 0.0 };
+
+        let title_font = theme::sans(tokens::FS_4, FontWeight::SemiBold);
+        let detail_font = theme::sans(tokens::FS_1, FontWeight::Regular);
+        let detail = ui.painter().layout(
+            identity.detail.clone(),
+            detail_font.clone(),
+            tokens.color.text_dim,
+            text_width,
+        );
+        let note = (!identity.note.is_empty()).then(|| {
+            ui.painter().layout(
+                identity.note.clone(),
+                detail_font,
+                tokens.color.text_faint,
+                text_width,
+            )
+        });
+        let text_height = 22.0
+            + status_line
+            + if identity.detail.is_empty() {
+                0.0
             } else {
-                ui.horizontal(|ui| render_buttons(ui, action));
+                detail.size().y + 2.0
             }
-        });
-    horizontal_rule(ui, t.color.border_strong);
-}
-
-fn render_license_band(
-    ui: &mut Ui,
-    model: &AccountConsoleModel,
-    action: &mut Option<AccountAction>,
-) {
-    let t = Tokens::get(ui.ctx());
-    section_title(ui, "License");
-    property_list(ui, |ui| {
-        for (label, value) in &model.license_rows {
-            property_row(ui, label, value);
+            + note.as_ref().map_or(0.0, |note| note.size().y + 2.0);
+        let (rect, response) =
+            ui.allocate_exact_size(vec2(width, text_height.max(AVATAR_SIZE)), Sense::hover());
+        avatar(
+            ui,
+            Rect::from_min_size(rect.left_top(), Vec2::splat(AVATAR_SIZE)),
+            identity.initials.as_deref(),
+        );
+        let text_x = rect.left() + text_left;
+        let title = elide_text(ui, &identity.title, &title_font, text_width);
+        ui.painter().text(
+            pos2(text_x, rect.top() + 1.0),
+            Align2::LEFT_TOP,
+            title,
+            title_font,
+            tokens.color.text,
+        );
+        let mut y = rect.top() + 24.0 + status_line;
+        if !identity.detail.is_empty() {
+            let height = detail.size().y;
+            ui.painter()
+                .galley(pos2(text_x, y), detail, tokens.color.text_dim);
+            y += height + 2.0;
         }
-    });
-    band_actions(ui, &[AccountAction::LicenseManager], action);
-    horizontal_rule(ui, t.color.border_strong);
-}
-
-fn render_unlocks_band(ui: &mut Ui, model: &AccountConsoleModel) {
-    let t = Tokens::get(ui.ctx());
-    let licensed = model.unlocks.iter().filter(|row| row.licensed).count();
-    section_title(
-        ui,
-        &format!(
-            "Unlocks · {licensed} of {} feature sets",
-            model.unlocks.len()
-        ),
-    );
-    if ui.available_width() < ACCOUNT_TABLE_BREAKPOINT {
-        property_list(ui, |ui| {
-            for row in &model.unlocks {
-                property_row(ui, &row.feature, &format!("{} · {}", row.state, row.term));
-            }
+        if let Some(note) = note {
+            ui.painter()
+                .galley(pos2(text_x, y), note, tokens.color.text_faint);
+        }
+        // The session state, as a dot and a word: top-right, or under the
+        // name when narrow.
+        let (dot, label_anchor, align) = if narrow {
+            let center_y = rect.top() + 24.0 + 8.0;
+            (
+                pos2(text_x + 3.5, center_y),
+                pos2(text_x + 12.0, center_y),
+                Align2::LEFT_CENTER,
+            )
+        } else {
+            let center_y = rect.top() + 11.0;
+            (
+                pos2(rect.right() - status_width + 3.5, center_y),
+                pos2(rect.right(), center_y),
+                Align2::RIGHT_CENTER,
+            )
+        };
+        ui.painter().text(
+            label_anchor,
+            align,
+            identity.status.0,
+            status_font,
+            status_color,
+        );
+        ui.painter().circle_filled(dot, 3.5, status_color);
+        let announced = [
+            identity.title.as_str(),
+            identity.detail.as_str(),
+            identity.note.as_str(),
+            identity.status.0,
+        ]
+        .into_iter()
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join(", ");
+        response.widget_info(|| {
+            egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), &announced)
         });
-    } else {
-        let widths = [0.46_f32, 0.18, 0.36];
-        let total = ui.available_width();
-        egui::Grid::new("account-organization.unlocks")
-            .num_columns(3)
-            .striped(false)
-            .min_col_width(0.0)
-            .spacing(Vec2::ZERO)
-            .show(ui, |ui| {
-                for (heading, width) in ["FEATURE", "STATE", "TERM"].iter().zip(widths) {
-                    table_header_cell(ui, heading, total * width);
-                }
-                ui.end_row();
-                for row in &model.unlocks {
-                    let feature = if row.detail.is_empty() {
-                        row.feature.clone()
-                    } else {
-                        format!("{} — {}", row.feature, row.detail)
-                    };
-                    table_cell(ui, &feature, total * widths[0]);
-                    table_cell(ui, row.state, total * widths[1]);
-                    table_cell(ui, &row.term, total * widths[2]);
-                    ui.end_row();
-                }
-            });
-    }
-    horizontal_rule(ui, t.color.border_strong);
-}
 
-fn render_devices_band(
-    ui: &mut Ui,
-    model: &AccountConsoleModel,
-    action: &mut Option<AccountAction>,
-) {
-    let t = Tokens::get(ui.ctx());
-    if model.devices.is_empty() {
-        section_title(ui, "Device sessions");
-        property_list(ui, |ui| {
-            property_row(
-                ui,
-                "Current session",
-                &format!(
-                    "RSpice · this application\n{} · current process\nLocation not collected · local trust boundary",
-                    current_platform_label()
-                ),
-            );
-        });
-        horizontal_rule(ui, t.color.border_strong);
-        return;
-    }
-
-    section_title(
-        ui,
-        &format!("Device sessions · {} signed in", model.devices.len()),
-    );
-    if ui.available_width() < ACCOUNT_TABLE_BREAKPOINT {
-        property_list(ui, |ui| {
-            for row in &model.devices {
-                property_row(
+        if let Some(error) = &identity.error {
+            ui.add_space(8.0);
+            ui.horizontal_top(|ui| {
+                ui.add_space(text_left);
+                wrapped_text(
                     ui,
-                    &row.device,
-                    &format!("issued {} · renews by {}", row.issued, row.expires),
+                    error,
+                    theme::sans(tokens::FS_1, FontWeight::Regular),
+                    tokens.color.err,
                 );
-            }
-        });
-    } else {
-        let widths = [0.4_f32, 0.2, 0.2, 0.2];
-        let total = ui.available_width();
-        egui::Grid::new("account-organization.devices")
-            .num_columns(4)
-            .striped(false)
-            .min_col_width(0.0)
-            .spacing(Vec2::ZERO)
-            .show(ui, |ui| {
-                for (heading, width) in ["DEVICE", "ISSUED", "RENEWS BY", "ACTION"]
-                    .iter()
-                    .zip(widths)
-                {
-                    table_header_cell(ui, heading, total * width);
-                }
-                ui.end_row();
-                for row in &model.devices {
-                    table_cell(ui, &row.device, total * widths[0]);
-                    table_cell(ui, &row.issued, total * widths[1]);
-                    table_cell(ui, &row.expires, total * widths[2]);
-                    match &row.revoke {
-                        Some(lease_id) => {
-                            if Button::new("Revoke").show(ui).clicked() {
-                                *action = Some(AccountAction::RevokeLease(lease_id.clone()));
-                            }
-                        }
-                        None => table_cell(ui, "this device", total * widths[3]),
-                    }
-                    ui.end_row();
-                }
             });
-    }
-    horizontal_rule(ui, t.color.border_strong);
-}
-
-fn render_build_band(ui: &mut Ui, model: &AccountConsoleModel) {
-    let t = Tokens::get(ui.ctx());
-    section_title(ui, "Build");
-    property_list(ui, |ui| {
-        for (label, value) in &model.build_rows {
-            property_row(ui, label, value);
         }
-    });
-    horizontal_rule(ui, t.color.border_strong);
-}
-
-fn render_data_band(ui: &mut Ui, model: &AccountConsoleModel, action: &mut Option<AccountAction>) {
-    let t = Tokens::get(ui.ctx());
-    section_title(ui, "Data");
-    property_list(ui, |ui| {
-        for (label, value) in &model.data_rows {
-            property_row(ui, label, value);
-        }
-    });
-    band_actions(ui, &[AccountAction::LegalPrivacy], action);
-    horizontal_rule(ui, t.color.border_strong);
-}
-
-fn render_support_band(ui: &mut Ui, action: &mut Option<AccountAction>) {
-    let t = Tokens::get(ui.ctx());
-    section_title(ui, "Support");
-    band_actions(
-        ui,
-        &[AccountAction::SupportBundle, AccountAction::HelpCenter],
-        action,
-    );
-    horizontal_rule(ui, t.color.border_strong);
-}
-
-fn render_boundary(ui: &mut Ui, boundary: &str) {
-    let t = Tokens::get(ui.ctx());
-    Frame::NONE
-        .inner_margin(Margin::symmetric(10, 8))
-        .show(ui, |ui| {
-            let label = ui.add(
-                egui::Label::new(
-                    RichText::new(boundary)
-                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                        .color(t.color.text_dim),
-                )
-                .wrap(),
-            );
-            accessible_text(ui, &label, boundary);
-        });
-    ui.add_space(ACCOUNT_SCROLL_END_PADDING);
-}
-
-fn band_actions(ui: &mut Ui, actions: &[AccountAction], requested: &mut Option<AccountAction>) {
-    Frame::NONE
-        .inner_margin(Margin::symmetric(10, 4))
-        .show(ui, |ui| {
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                ui.spacing_mut().item_spacing.x = 6.0;
-                for action in actions.iter().rev() {
-                    if Button::new(action.label()).show(ui).clicked() {
+        if !identity.actions.is_empty() {
+            ui.add_space(12.0);
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
+                ui.add_space(text_left);
+                for action in &identity.actions {
+                    let button = Button::new(action.label());
+                    let button = if action.is_primary() {
+                        button.accent()
+                    } else {
+                        button
+                    };
+                    if button.show(ui).clicked() {
                         *requested = Some(action.clone());
                     }
                 }
             });
-        });
-}
-
-fn property_list(ui: &mut Ui, body: impl FnOnce(&mut Ui)) {
-    Frame::NONE
-        .inner_margin(Margin {
-            left: 0,
-            right: 0,
-            top: ACCOUNT_PROPERTY_TOP,
-            bottom: ACCOUNT_PROPERTY_BOTTOM,
-        })
-        .show(ui, body);
-}
-
-fn accessible_text(ui: &Ui, response: &egui::Response, text: &str) {
-    ui.ctx().accesskit_node_builder(response.id, |node| {
-        node.set_role(egui::accesskit::Role::Label);
-        node.set_label(text);
+        }
     });
 }
 
-fn avatar(ui: &mut Ui, text: &str) {
-    let t = Tokens::get(ui.ctx());
-    let (rect, _) = ui.allocate_exact_size(Vec2::splat(38.0), Sense::hover());
-    ui.painter()
-        .circle_filled(rect.center(), 19.0, t.color.bg_elevated);
-    ui.painter()
-        .circle_stroke(rect.center(), 19.0, Stroke::new(1.0, t.color.border_strong));
-    ui.painter().text(
-        rect.center(),
-        egui::Align2::CENTER_CENTER,
-        text,
-        theme::mono(tokens::FS_0, FontWeight::SemiBold),
-        t.color.text,
-    );
+fn license_section(
+    ui: &mut Ui,
+    model: &AccountConsoleModel,
+    requested: &mut Option<AccountAction>,
+) {
+    let tokens = Tokens::get(ui.ctx());
+    section(ui, |ui, _| {
+        section_heading(
+            ui,
+            "License",
+            Some((
+                model.license_status.0.as_str(),
+                model.license_status.1.color(&tokens),
+            )),
+            Some(&model.license_action),
+            requested,
+        );
+        ui.add_space(6.0);
+        for (label, value) in &model.license_rows {
+            fact_row(ui, label, value);
+        }
+        ui.add_space(8.0);
+        wrapped_text(
+            ui,
+            &model.boundary,
+            theme::sans(tokens::FS_1, FontWeight::Regular),
+            tokens.color.text_faint,
+        );
+    });
 }
 
-fn status_badge(ui: &mut Ui, label: &str, color: Color32) {
-    Frame::NONE
-        .fill(color.gamma_multiply(0.10))
-        .stroke(Stroke::new(1.0, color.gamma_multiply(0.65)))
-        .inner_margin(Margin::symmetric(7, 4))
-        .show(ui, |ui| {
-            ui.label(
-                RichText::new(label)
-                    .font(theme::mono(tokens::FS_0, FontWeight::Medium))
-                    .color(color),
+fn features_section(ui: &mut Ui, features: &[FeatureRow]) {
+    let tokens = Tokens::get(ui.ctx());
+    let licensed = features.iter().filter(|row| row.licensed).count();
+    section(ui, |ui, width| {
+        section_heading(
+            ui,
+            "Features",
+            Some((
+                &format!("{licensed} of {} licensed", features.len()),
+                tokens.color.text_faint,
+            )),
+            None,
+            &mut None,
+        );
+        ui.add_space(4.0);
+        for feature in features {
+            let (term_color, mark_color) = if feature.licensed {
+                (tokens.color.text_dim, tokens.color.ok)
+            } else {
+                (tokens.color.text_faint, tokens.color.text_faint)
+            };
+            list_row(
+                ui,
+                width,
+                ListRow {
+                    mark: Some((mark_color, feature.licensed)),
+                    name: &feature.name,
+                    name_color: if feature.licensed {
+                        tokens.color.text
+                    } else {
+                        tokens.color.text_dim
+                    },
+                    detail: &feature.detail,
+                    trailing: Trailing::Text(&feature.term, term_color),
+                },
             );
-        });
-}
-
-fn section_title(ui: &mut Ui, title: &str) {
-    let t = Tokens::get(ui.ctx());
-    let (rect, _) = ui.allocate_exact_size(
-        vec2(ui.available_width(), ACCOUNT_SECTION_HEADER_HEIGHT),
-        Sense::hover(),
-    );
-    ui.painter().rect_filled(
-        rect,
-        0.0,
-        Color32::from_rgba_unmultiplied(
-            t.color.bg_panel_2.r(),
-            t.color.bg_panel_2.g(),
-            t.color.bg_panel_2.b(),
-            204,
-        ),
-    );
-    let title_font = theme::sans(tokens::FS_0, FontWeight::SemiBold);
-    let mut job = egui::text::LayoutJob::default();
-    job.append(
-        &title.to_uppercase(),
-        0.0,
-        egui::TextFormat {
-            font_id: title_font,
-            color: t.color.text_dim,
-            extra_letter_spacing: 0.055 * tokens::FS_0,
-            ..Default::default()
-        },
-    );
-    let galley = ui.fonts_mut(|fonts| fonts.layout_job(job));
-    let text_rect = rect.shrink2(vec2(10.0, 0.0));
-    ui.painter().with_clip_rect(text_rect).galley(
-        text_rect.left_center() - vec2(0.0, galley.size().y * 0.5),
-        galley,
-        t.color.text_dim,
-    );
-}
-
-fn property_row(ui: &mut Ui, label: &str, value: &str) {
-    let accessible_label = format!("{label}: {value}");
-    let response = super::design_system::property_row(ui, label, value);
-    response.widget_info(|| {
-        egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), &accessible_label)
+        }
     });
-    accessible_text(ui, &response, &accessible_label);
 }
 
-fn table_header_cell(ui: &mut Ui, value: &str, width: f32) {
-    let t = Tokens::get(ui.ctx());
-    let font = theme::sans(tokens::FS_0, FontWeight::SemiBold);
-    let (rect, response) = ui.allocate_exact_size(vec2(width, 27.0), Sense::hover());
-    let text_rect = rect.shrink2(vec2(ACCOUNT_TABLE_CELL_INSET, 0.0));
-    let text = super::design_system::elide_text(ui, value, &font, text_rect.width());
-    ui.painter().text(
-        text_rect.left_center(),
-        egui::Align2::LEFT_CENTER,
-        text,
-        font,
-        t.color.text_dim,
-    );
-    response
-        .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), value));
+fn devices_section(ui: &mut Ui, devices: &[DeviceRow], requested: &mut Option<AccountAction>) {
+    let tokens = Tokens::get(ui.ctx());
+    section(ui, |ui, width| {
+        section_heading(
+            ui,
+            "Devices",
+            Some((
+                &format!("{} signed in", devices.len()),
+                tokens.color.text_faint,
+            )),
+            None,
+            &mut None,
+        );
+        ui.add_space(4.0);
+        for device in devices {
+            let trailing = match &device.revoke {
+                Some(_) => Trailing::Action("Revoke"),
+                None => Trailing::Text("This device", tokens.color.text_faint),
+            };
+            let clicked = list_row(
+                ui,
+                width,
+                ListRow {
+                    mark: None,
+                    name: &device.name,
+                    name_color: tokens.color.text,
+                    detail: &device.detail,
+                    trailing,
+                },
+            );
+            if clicked && let Some(lease_id) = &device.revoke {
+                *requested = Some(AccountAction::RevokeLease(lease_id.clone()));
+            }
+        }
+    });
 }
 
-fn table_cell(ui: &mut Ui, value: &str, width: f32) {
-    let t = Tokens::get(ui.ctx());
-    let font = theme::mono(tokens::FS_0, FontWeight::Regular);
-    let (rect, response) = ui.allocate_exact_size(vec2(width, t.metrics.row_h), Sense::hover());
-    let text_rect = rect.shrink2(vec2(ACCOUNT_TABLE_CELL_INSET, 0.0));
-    let text = super::design_system::elide_text(ui, value, &font, text_rect.width());
-    ui.painter().text(
-        text_rect.left_center(),
-        egui::Align2::LEFT_CENTER,
-        text,
-        font,
-        t.color.text,
-    );
-    response
-        .on_hover_text(value)
-        .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, value));
+fn privacy_section(ui: &mut Ui, rows: &[(String, String)], requested: &mut Option<AccountAction>) {
+    section(ui, |ui, _| {
+        section_heading(
+            ui,
+            "Privacy",
+            None,
+            Some(&AccountAction::LegalPrivacy),
+            requested,
+        );
+        ui.add_space(6.0);
+        for (label, value) in rows {
+            fact_row(ui, label, value);
+        }
+    });
 }
 
-fn horizontal_rule(ui: &mut Ui, color: Color32) {
+fn about_section(ui: &mut Ui, rows: &[(String, String)], requested: &mut Option<AccountAction>) {
+    section(ui, |ui, _| {
+        section_heading(ui, "About", None, None, &mut None);
+        ui.add_space(6.0);
+        for (label, value) in rows {
+            fact_row(ui, label, value);
+        }
+        ui.add_space(12.0);
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
+            for action in [AccountAction::HelpCenter, AccountAction::SupportBundle] {
+                if Button::new(action.label()).show(ui).clicked() {
+                    *requested = Some(action);
+                }
+            }
+        });
+    });
+}
+
+/// A label and its value on one line, in the section's own two columns.
+fn fact_row(ui: &mut Ui, label: &str, value: &str) {
+    let tokens = Tokens::get(ui.ctx());
     let width = ui.available_width();
-    let (rect, _) = ui.allocate_exact_size(vec2(width, 1.0), Sense::hover());
-    ui.painter()
-        .hline(rect.x_range(), rect.center().y, Stroke::new(1.0, color));
+    let height = 24.0;
+    let label_width = (width * 0.34).clamp(96.0, 132.0);
+    let (rect, response) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
+    let label_font = theme::sans(tokens::FS_1, FontWeight::Regular);
+    let value_font = theme::sans(tokens::FS_1, FontWeight::Regular);
+    ui.painter().text(
+        rect.left_center(),
+        Align2::LEFT_CENTER,
+        elide_text(ui, label, &label_font, label_width - 12.0),
+        label_font,
+        tokens.color.text_faint,
+    );
+    let value_width = (width - label_width).max(1.0);
+    let shown = elide_text(ui, value, &value_font, value_width);
+    let elided = shown != value;
+    ui.painter().text(
+        pos2(rect.left() + label_width, rect.center().y),
+        Align2::LEFT_CENTER,
+        shown,
+        value_font,
+        tokens.color.text,
+    );
+    let announced = format!("{label}: {value}");
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), &announced)
+    });
+    if elided {
+        response.on_hover_text(value);
+    }
+}
+
+enum Trailing<'a> {
+    Text(&'a str, Color32),
+    Action(&'a str),
+}
+
+struct ListRow<'a> {
+    /// A dot before the name: its colour, and whether it is filled.
+    mark: Option<(Color32, bool)>,
+    name: &'a str,
+    name_color: Color32,
+    detail: &'a str,
+    trailing: Trailing<'a>,
+}
+
+/// One entry of a section's list: a name with an optional detail under it,
+/// and a state or an action on the right. Returns whether the action was
+/// clicked.
+fn list_row(ui: &mut Ui, width: f32, row: ListRow<'_>) -> bool {
+    let tokens = Tokens::get(ui.ctx());
+    let name_font = theme::sans(tokens::FS_1, FontWeight::Regular);
+    let detail_font = theme::sans(tokens::FS_0, FontWeight::Regular);
+    let trailing_font = theme::sans(tokens::FS_1, FontWeight::Regular);
+    let button = match row.trailing {
+        Trailing::Action(label) => Some(Button::new(label).destructive(true)),
+        Trailing::Text(..) => None,
+    };
+    let trailing_width = match (&row.trailing, &button) {
+        (_, Some(button)) => button.measured_width(ui),
+        (Trailing::Text(text, color), None) => {
+            ui.painter()
+                .layout_no_wrap((*text).to_owned(), trailing_font.clone(), *color)
+                .size()
+                .x
+        }
+        (Trailing::Action(_), None) => 0.0,
+    };
+    // A short state keeps its place on the right at any width; a button
+    // drops under the name once the two no longer fit side by side.
+    let stacked = button.is_some() && width < LIST_STACK_WIDTH;
+    let control_height = if button.is_some() {
+        tokens.metrics.ctl_h.max(if tokens.metrics.is_touch() {
+            tokens::TOUCH_TARGET
+        } else {
+            0.0
+        })
+    } else {
+        0.0
+    };
+    let mark_width = if row.mark.is_some() { 16.0 } else { 0.0 };
+    let text_left = mark_width;
+    let text_right = if stacked {
+        width
+    } else {
+        width - trailing_width - 16.0
+    };
+    let text_width = (text_right - text_left).max(1.0);
+    let has_detail = !row.detail.is_empty();
+    let text_height = if has_detail { 34.0 } else { 18.0 };
+    let height = if stacked {
+        8.0 + text_height + 4.0 + control_height.max(18.0) + 8.0
+    } else {
+        (text_height + 12.0).max(control_height + 8.0)
+    };
+    let (rect, response) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
+    let text_top = if stacked {
+        rect.top() + 8.0
+    } else {
+        rect.center().y - text_height * 0.5
+    };
+    if let Some((color, filled)) = row.mark {
+        let center = pos2(rect.left() + 4.0, text_top + 9.0);
+        if filled {
+            ui.painter().circle_filled(center, 3.5, color);
+        } else {
+            ui.painter()
+                .circle_stroke(center, 3.0, Stroke::new(1.0, color));
+        }
+    }
+    ui.painter().text(
+        pos2(rect.left() + text_left, text_top),
+        Align2::LEFT_TOP,
+        elide_text(ui, row.name, &name_font, text_width),
+        name_font,
+        row.name_color,
+    );
+    if has_detail {
+        ui.painter().text(
+            pos2(rect.left() + text_left, text_top + 18.0),
+            Align2::LEFT_TOP,
+            elide_text(ui, row.detail, &detail_font, text_width),
+            detail_font,
+            tokens.color.text_faint,
+        );
+    }
+    let trailing_rect = if stacked {
+        Rect::from_min_size(
+            pos2(
+                rect.left() + text_left,
+                rect.bottom() - 8.0 - control_height.max(18.0),
+            ),
+            vec2(trailing_width, control_height.max(18.0)),
+        )
+    } else {
+        Rect::from_min_max(
+            pos2(rect.right() - trailing_width, rect.top()),
+            rect.right_bottom(),
+        )
+    };
+    let announced = match &row.trailing {
+        Trailing::Text(text, _) => format!("{}, {}, {text}", row.name, row.detail),
+        Trailing::Action(_) => format!("{}, {}", row.name, row.detail),
+    };
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), &announced)
+    });
+    match (row.trailing, button) {
+        (_, Some(button)) => {
+            ui.scope_builder(
+                egui::UiBuilder::new()
+                    .max_rect(trailing_rect)
+                    .layout(egui::Layout::left_to_right(egui::Align::Center)),
+                |ui| button.show(ui).clicked(),
+            )
+            .inner
+        }
+        (Trailing::Text(text, color), None) => {
+            ui.painter().text(
+                trailing_rect.left_center(),
+                Align2::LEFT_CENTER,
+                text,
+                trailing_font,
+                color,
+            );
+            false
+        }
+        (Trailing::Action(_), None) => false,
+    }
+}
+
+/// Wrapped copy, painted as text rather than laid out as a selectable label.
+fn wrapped_text(ui: &mut Ui, text: &str, font: egui::FontId, color: Color32) {
+    let galley = ui
+        .painter()
+        .layout(text.to_owned(), font, color, ui.available_width().max(1.0));
+    let (rect, response) = ui.allocate_exact_size(galley.size(), Sense::hover());
+    ui.painter().galley(rect.min, galley, color);
+    response
+        .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), text));
+}
+
+/// The account's initials in a circle, or a person mark when no one is
+/// signed in.
+fn avatar(ui: &Ui, rect: Rect, initials: Option<&str>) {
+    let tokens = Tokens::get(ui.ctx());
+    let radius = rect.width() * 0.5;
+    match initials {
+        Some(initials) => {
+            ui.painter().circle_filled(
+                rect.center(),
+                radius,
+                tokens.color.accent.gamma_multiply(0.18),
+            );
+            ui.painter().text(
+                rect.center(),
+                Align2::CENTER_CENTER,
+                initials,
+                theme::sans(tokens::FS_2, FontWeight::SemiBold),
+                tokens.color.accent,
+            );
+        }
+        None => {
+            ui.painter()
+                .circle_filled(rect.center(), radius, tokens.color.bg_elevated);
+            ui.painter().circle_stroke(
+                rect.center(),
+                radius - 0.5,
+                Stroke::new(1.0, tokens.color.border),
+            );
+            // A head over a pair of shoulders, drawn to the circle's scale.
+            let stroke = Stroke::new(1.5, tokens.color.text_faint);
+            let unit = radius / 20.0;
+            let center = rect.center();
+            ui.painter()
+                .circle_stroke(center + vec2(0.0, -4.0 * unit), 4.5 * unit, stroke);
+            let shoulders = (0..=16)
+                .map(|step| {
+                    let angle = std::f32::consts::PI * (1.0 + step as f32 / 16.0);
+                    center + vec2(0.0, 11.0 * unit) + 8.5 * unit * vec2(angle.cos(), angle.sin())
+                })
+                .collect::<Vec<_>>();
+            ui.painter().add(egui::Shape::line(shoulders, stroke));
+        }
+    }
 }
 
 fn initials(value: &str) -> String {
@@ -1077,20 +1276,20 @@ fn initials(value: &str) -> String {
         .collect::<String>()
         .to_uppercase();
     if letters.is_empty() {
-        letters.push('—');
+        letters.push('\u{2014}');
     }
     letters
 }
 
 #[cfg(target_arch = "wasm32")]
 fn license_storage_description() -> String {
-    "Browser application session storage".to_owned()
+    "Browser session storage".to_owned()
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 fn license_storage_description() -> String {
     crate::services::license::license_file_path().map_or_else(
-        || "Configuration directory unavailable".to_owned(),
+        || "Configuration folder unavailable".to_owned(),
         |path| path.display().to_string(),
     )
 }
@@ -1189,6 +1388,11 @@ mod tests {
         }
     }
 
+    fn sample_license() -> LicenseInfo {
+        crate::services::license::parse_and_verify(crate::services::license::SAMPLE_KEY)
+            .expect("signed sample license")
+    }
+
     #[test]
     fn unconfigured_model_never_invents_identity_or_authority() {
         let model = AccountConsoleModel::project(
@@ -1196,15 +1400,20 @@ mod tests {
             &CloudSessionSnapshot::default(),
             CloudAccountAvailability::UnconfiguredBuild,
         );
-        assert_eq!(model.strip.title, "Not signed in");
-        assert!(model.strip.actions.is_empty(), "no endpoints, no sign-in");
+        assert_eq!(model.identity.title, "Not signed in");
+        assert!(
+            model.identity.actions.is_empty(),
+            "no endpoints, no sign-in"
+        );
+        assert!(model.identity.initials.is_none());
         assert!(model.devices.is_empty());
         assert!(
             model
-                .unlocks
+                .features
                 .iter()
-                .all(|row| row.detail != "account entitlement")
+                .all(|row| row.detail != "Account entitlement")
         );
+        assert_eq!(model.license_action, AccountAction::ActivateLicense);
         let disclosed = format!("{model:?}");
         for fixture in ["James Whitfield", "Acme Engineering", "Chicago", "SAML"] {
             assert!(!disclosed.contains(fixture));
@@ -1218,50 +1427,46 @@ mod tests {
             &CloudSessionSnapshot::default(),
             CloudAccountAvailability::Native,
         );
-        assert_eq!(model.strip.actions, vec![AccountAction::SignIn]);
-        assert_eq!(model.strip.badge.0, "LOCAL / OFFLINE");
+        assert_eq!(model.identity.actions, vec![AccountAction::SignIn]);
+        assert_eq!(model.identity.status, ("Local only", Tone::Neutral));
     }
 
     #[test]
     fn active_session_projects_server_facts_only() {
         let cloud = active_cloud_snapshot();
         let model = AccountConsoleModel::project(None, &cloud, CloudAccountAvailability::Native);
-        assert_eq!(model.strip.title, "Example Engineer");
-        assert_eq!(model.strip.detail, "engineer@example.com");
-        assert_eq!(model.strip.badge.0, "SIGNED IN");
-        assert!(
-            model
-                .unlocks
-                .iter()
-                .any(|row| row.feature == "Web publishing"
-                    && row.licensed
-                    && row.term == "through 2027-07-01")
-        );
+        assert_eq!(model.identity.title, "Example Engineer");
+        assert_eq!(model.identity.detail, "engineer@example.com");
+        assert_eq!(model.identity.initials.as_deref(), Some("EE"));
+        assert_eq!(model.identity.status, ("Signed in", Tone::Ok));
+        assert!(model.features.iter().any(|row| row.name == "Web publishing"
+            && row.licensed
+            && row.term == "Through 2027-07-01"));
         // Revoked leases never render; the foreign lease is revocable.
         assert_eq!(model.devices.len(), 2);
+        assert_eq!(model.devices[0].name, "This device");
         assert_eq!(model.devices[0].revoke, None);
         assert_eq!(model.devices[1].revoke, Some("lease-b".to_owned()));
         assert!(model.boundary.contains("stays licensed through"));
     }
 
     #[test]
-    fn expired_entitlements_grant_no_unlock_rows() {
+    fn expired_entitlements_grant_no_feature_rows() {
         let mut cloud = active_cloud_snapshot();
         cloud.entitlements[0].status = "expired".to_owned();
         cloud.native_license = None;
         let model = AccountConsoleModel::project(None, &cloud, CloudAccountAvailability::Native);
         assert!(
             !model
-                .unlocks
+                .features
                 .iter()
-                .any(|row| row.feature == "Web publishing")
+                .any(|row| row.name == "Web publishing")
         );
     }
 
     #[test]
     fn local_license_rows_project_exact_verified_data() {
-        let info = crate::services::license::parse_and_verify(crate::services::license::SAMPLE_KEY)
-            .expect("signed sample license");
+        let info = sample_license();
         let model = AccountConsoleModel::project(
             Some(&info),
             &CloudSessionSnapshot::default(),
@@ -1276,15 +1481,16 @@ mod tests {
                 .expect(label)
         };
         assert_eq!(row("Licensed to"), info.licensed_to);
-        assert_eq!(row("Tier"), info.tier);
+        assert_eq!(row("Edition"), info.tier);
         assert_eq!(row("Updates until"), info.updates_until);
         assert_eq!(row("License ID"), info.license_id);
+        assert_eq!(model.license_action, AccountAction::ManageLicense);
         for feature in &info.features {
             assert!(
                 model
-                    .unlocks
+                    .features
                     .iter()
-                    .any(|unlock| &unlock.feature == feature && unlock.licensed),
+                    .any(|row| &row.name == feature && row.licensed),
                 "granted local feature must appear licensed: {feature}"
             );
         }
@@ -1351,9 +1557,11 @@ mod tests {
             SurfaceId::Preferences
         );
 
-        let mut license_app = RSpiceApp::test_instance();
-        execute_action(&mut license_app, AccountAction::LicenseManager);
-        assert!(license_app.state.dialogs.license_dialog.open);
+        for action in [AccountAction::ActivateLicense, AccountAction::ManageLicense] {
+            let mut license_app = RSpiceApp::test_instance();
+            execute_action(&mut license_app, action);
+            assert!(license_app.state.dialogs.license_dialog.open);
+        }
 
         let mut help_app = RSpiceApp::test_instance();
         execute_action(&mut help_app, AccountAction::SupportBundle);
@@ -1373,6 +1581,145 @@ mod tests {
             execute_action(&mut cloud_app, action);
         }
         assert!(!cloud_app.cloud_account.snapshot().signed_in());
+    }
+
+    /// Draw the console for `app` at `size` and collect every painted string,
+    /// plus every accessible name and value, which also covers the rows the
+    /// body has scrolled out of view.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn painted_console(app: &mut RSpiceApp, size: egui::Vec2) -> String {
+        fn collect(shape: &egui::epaint::Shape, rendered: &mut String) {
+            match shape {
+                egui::epaint::Shape::Text(text) => {
+                    rendered.push_str(&text.galley.job.text);
+                    rendered.push('\n');
+                }
+                egui::epaint::Shape::Vec(shapes) => {
+                    for shape in shapes {
+                        collect(shape, rendered);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        let mut rendered = String::new();
+        // A content-height dialog settles its size over its first passes.
+        for _ in 0..4 {
+            rendered.clear();
+            let output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+                    ..Default::default()
+                },
+                |ctx| show(ctx, app),
+            );
+            for shape in &output.shapes {
+                collect(&shape.shape, &mut rendered);
+            }
+            for (_, node) in output
+                .platform_output
+                .accesskit_update
+                .iter()
+                .flat_map(|update| update.nodes.iter())
+            {
+                for text in [node.label(), node.value()].into_iter().flatten() {
+                    rendered.push_str(text);
+                    rendered.push('\n');
+                }
+            }
+        }
+        rendered
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn signed_in_app() -> RSpiceApp {
+        let mut app = RSpiceApp::test_instance();
+        app.cloud_account = crate::services::cloud_account::CloudAccountService::with_snapshot(
+            CloudAccountAvailability::Native,
+            active_cloud_snapshot(),
+        );
+        app.state.license = Some(sample_license());
+        app.state
+            .workbench
+            .navigate(account_route(), RouteTransitionSource::User)
+            .expect("account manager route is executable");
+        app
+    }
+
+    /// Every section reaches the reader. The right-aligned action row that
+    /// used to follow the license facts took all the height left below it,
+    /// which pushed every later section out of the dialog.
+    ///
+    /// A phone sheet as tall as the whole console shows every control; on the
+    /// desktop the body scrolls, and a button scrolled out of view is not
+    /// drawn, so there only the sections themselves are required.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn every_section_of_a_signed_in_console_is_painted() {
+        const BELOW_THE_DESKTOP_FOLD: [&str; 3] = [
+            "Revoke",
+            "Help center\u{2026}",
+            "Create support bundle\u{2026}",
+        ];
+        for size in [egui::vec2(1_440.0, 1_400.0), egui::vec2(390.0, 2_400.0)] {
+            let mut app = signed_in_app();
+            let text = painted_console(&mut app, size);
+            let scrolls = size.x > 560.0;
+            for expected in [
+                "Account and administration",
+                "Example Engineer",
+                "engineer@example.com",
+                "Signed in",
+                "Refresh",
+                "Sign out",
+                "License",
+                "Manage license\u{2026}",
+                "Licensed to",
+                "Features",
+                "Web publishing",
+                "Through 2027-07-01",
+                "Devices",
+                "This device",
+                "Device lease-b",
+                "Revoke",
+                "Privacy",
+                "Legal and privacy\u{2026}",
+                "About",
+                "Help center\u{2026}",
+                "Create support bundle\u{2026}",
+                "Preferences\u{2026}",
+                "Close",
+            ]
+            .into_iter()
+            .filter(|expected| !(scrolls && BELOW_THE_DESKTOP_FOLD.contains(expected)))
+            {
+                assert!(
+                    text.contains(expected),
+                    "{expected:?} missing at {}x{}:\n{text}",
+                    size.x,
+                    size.y
+                );
+            }
+            for retired in [
+                "ACCOUNT \u{b7} LICENSE \u{b7} DATA",
+                "LOCAL / OFFLINE",
+                "SIGNED IN",
+                "Personal preferences\u{2026}",
+                "License & activation\u{2026}",
+                "Location not collected",
+                "FEATURE",
+            ] {
+                assert!(
+                    !text.contains(retired),
+                    "{retired:?} is still painted at {}x{}:\n{text}",
+                    size.x,
+                    size.y
+                );
+            }
+        }
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -1406,24 +1753,105 @@ mod tests {
             .accesskit_update
             .expect("account manager accessibility tree")
             .nodes;
+        // Controls carry their text as a name; static text carries it as a
+        // value.
         let labels = nodes
             .iter()
-            .filter_map(|(_, node)| node.label())
+            .flat_map(|(_, node)| [node.label(), node.value()])
+            .flatten()
             .collect::<Vec<_>>();
         for expected in [
             "Account and administration",
-            "Not signed in",
-            "This build carries no cloud account endpoints.",
-            "Personal preferences…",
-            "License & activation…",
+            "Preferences\u{2026}",
+            "Activate license\u{2026}",
         ] {
             assert!(
                 labels.contains(&expected),
                 "missing rendered label: {expected}; labels: {labels:?}"
             );
         }
+        assert!(
+            labels.iter().any(|label| label.contains("Not signed in")
+                && label.contains("This build can't connect to RSpice Cloud.")),
+            "the identity block must state the offline boundary; labels: {labels:?}"
+        );
         for fixture in ["James Whitfield", "Acme Engineering", "Chicago", "SAML"] {
-            assert!(!labels.contains(&fixture), "fixture leaked into account UI");
+            assert!(
+                !labels.iter().any(|label| label.contains(fixture)),
+                "fixture leaked into account UI"
+            );
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    #[ignore = "writes PNGs for a human to look at; run with --ignored"]
+    fn render_the_account_console_for_review() {
+        use crate::services::cloud_account::CloudAccountService;
+        use std::io::Write as _;
+
+        let directory = std::env::var("RSPICE_RASTER_DIR")
+            .map_or_else(|_| std::env::temp_dir(), std::path::PathBuf::from);
+        std::fs::create_dir_all(&directory).expect("raster output directory");
+        let states: [(&str, CloudAccountAvailability, CloudSessionSnapshot, bool); 4] = [
+            (
+                "unconfigured",
+                CloudAccountAvailability::UnconfiguredBuild,
+                CloudSessionSnapshot::default(),
+                false,
+            ),
+            (
+                "signed-out",
+                CloudAccountAvailability::Native,
+                CloudSessionSnapshot {
+                    phase: CloudSessionPhase::SignedOut {
+                        last_error: Some(
+                            "The sign-in page did not answer. Check your connection and try again."
+                                .to_owned(),
+                        ),
+                    },
+                    ..CloudSessionSnapshot::default()
+                },
+                false,
+            ),
+            (
+                "signed-in",
+                CloudAccountAvailability::Native,
+                active_cloud_snapshot(),
+                true,
+            ),
+            (
+                "waiting",
+                CloudAccountAvailability::Native,
+                CloudSessionSnapshot {
+                    phase: CloudSessionPhase::WaitingForBrowser,
+                    ..CloudSessionSnapshot::default()
+                },
+                false,
+            ),
+        ];
+        for (name, availability, snapshot, licensed) in states {
+            for size in [
+                egui::vec2(1280.0, 800.0),
+                egui::vec2(820.0, 1180.0),
+                egui::vec2(390.0, 844.0),
+            ] {
+                let mut app = RSpiceApp::test_instance();
+                app.cloud_account =
+                    CloudAccountService::with_snapshot(availability, snapshot.clone());
+                app.state.license = licensed.then(sample_license);
+                app.state
+                    .workbench
+                    .navigate(account_route(), RouteTransitionSource::User)
+                    .expect("account manager route is executable");
+                let canvas = crate::ui::raster::render(size, |ui, _| show(ui.ctx(), &mut app));
+                let path = directory.join(format!(
+                    "account-{name}-{}x{}.png",
+                    size.x as usize, size.y as usize
+                ));
+                std::fs::write(&path, canvas.png(size.y as usize)).expect("write the render");
+                writeln!(std::io::stderr(), "{}", path.display()).ok();
+            }
         }
     }
 
@@ -1431,6 +1859,6 @@ mod tests {
     fn initials_are_derived_without_fixture_fallbacks() {
         assert_eq!(initials("Ada Lovelace"), "AL");
         assert_eq!(initials("RSpice Labs LLC"), "RL");
-        assert_eq!(initials("—"), "—");
+        assert_eq!(initials("\u{2014}"), "\u{2014}");
     }
 }

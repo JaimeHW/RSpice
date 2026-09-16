@@ -66,10 +66,9 @@ pub enum DialogSize {
     /// Drawing-sheet supporting workflows: 1160 pt wide, content-height
     /// capped at 760 pt, and edge-to-edge at the shared 820 pt breakpoint.
     DrawingSheetWorkflow,
-    /// Account, organization, and licensing manager: the mockup's 920 pt
-    /// desktop surface, content-height capped at 820 pt so the final license
-    /// action clears the fixed footer, and edge-to-edge at the shared 820 pt
-    /// manager breakpoint.
+    /// Account, license, and privacy console: one 600 pt reading column,
+    /// content-height capped at 760 pt, and a full-viewport sheet at 560 pt
+    /// and below.
     AccountManager,
     /// Governed capability matrices: 1040 pt wide, content-height capped at
     /// 760 pt, edge-to-edge at the mockup's 820 pt breakpoint.
@@ -219,11 +218,11 @@ impl DialogSize {
                 top_anchored: false,
             },
             Self::AccountManager => DialogSurfaceSpec {
-                width: 920.0,
-                max_height: 820.0,
+                width: 600.0,
+                max_height: 760.0,
                 horizontal_inset: 24.0,
                 vertical_inset: 24.0,
-                narrow_max_width: 820.0,
+                narrow_max_width: 560.0,
                 narrow_inset: 0.0,
                 narrow_vertical_inset: 0.0,
                 cap_narrow_height: false,

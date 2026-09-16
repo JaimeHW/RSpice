@@ -787,6 +787,20 @@ impl CloudAccountService {
         }
     }
 
+    /// An inert service that reports `snapshot`, so a surface can be drawn in
+    /// a session state no test can reach without a server.
+    #[cfg(test)]
+    pub(crate) fn with_snapshot(
+        availability: CloudAccountAvailability,
+        snapshot: CloudSessionSnapshot,
+    ) -> Self {
+        Self {
+            availability,
+            snapshot,
+            ..Self::unconfigured()
+        }
+    }
+
     pub(crate) fn availability(&self) -> CloudAccountAvailability {
         self.availability
     }

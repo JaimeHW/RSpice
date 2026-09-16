@@ -224,19 +224,24 @@ fn drawing_sheet_workflow_uses_the_approved_supporting_surface_width() {
 }
 
 #[test]
-fn account_manager_geometry_matches_its_mockup_width_and_breakpoint() {
+fn account_manager_is_one_reading_column_and_a_sheet_on_phones() {
     let tall_desktop = Rect::from_min_size(egui::Pos2::ZERO, vec2(1_440.0, 1_080.0));
     let tall = DialogLayout::resolve(DialogSize::AccountManager, tall_desktop, None);
-    assert_eq!(tall.surface_rect.size(), vec2(920.0, 820.0));
+    assert_eq!(tall.surface_rect.size(), vec2(600.0, 760.0));
     assert_eq!(tall.surface_rect.center(), tall_desktop.center());
 
     let desktop_screen = Rect::from_min_size(egui::Pos2::ZERO, vec2(1_000.0, 800.0));
     let desktop = DialogLayout::resolve(DialogSize::AccountManager, desktop_screen, Some(640.0));
-    assert_eq!(desktop.surface_rect.size(), vec2(920.0, 640.0));
-    assert_eq!(desktop.surface_rect.left(), 40.0);
+    assert_eq!(desktop.surface_rect.size(), vec2(600.0, 640.0));
+    assert_eq!(desktop.surface_rect.left(), 200.0);
     assert_eq!(desktop.surface_rect.center(), desktop_screen.center());
 
-    let breakpoint = Rect::from_min_size(egui::pos2(5.0, 7.0), vec2(820.0, 900.0));
+    let tablet_screen = Rect::from_min_size(egui::Pos2::ZERO, vec2(820.0, 1_180.0));
+    let tablet = DialogLayout::resolve(DialogSize::AccountManager, tablet_screen, Some(700.0));
+    assert_eq!(tablet.surface_rect.size(), vec2(600.0, 700.0));
+    assert!(!tablet.narrow);
+
+    let breakpoint = Rect::from_min_size(egui::pos2(5.0, 7.0), vec2(560.0, 900.0));
     let narrow = DialogLayout::resolve(DialogSize::AccountManager, breakpoint, Some(500.0));
     assert_eq!(narrow.surface_rect, breakpoint);
     assert_eq!(narrow.radius, 0.0);
