@@ -24,7 +24,8 @@ const CHECKPOINT_DIRECTORY: &str = ".rspice-recovery";
 #[cfg(not(target_arch = "wasm32"))]
 const MANIFEST_SUFFIX: &str = ".checkpoint.json";
 const SNAPSHOT_SUFFIX: &str = ".rspiceproj";
-const MAX_RETAINED_CHECKPOINTS: usize = 8;
+/// How many checkpoints a project keeps; creating one more removes the oldest.
+pub(crate) const MAX_RETAINED_CHECKPOINTS: usize = 8;
 #[cfg(not(target_arch = "wasm32"))]
 const MAX_RETAINED_QUARANTINE_RECORDS: usize = 8;
 #[cfg(target_arch = "wasm32")]
@@ -99,7 +100,12 @@ pub(crate) struct ProjectCheckpointQuarantine {
 }
 
 impl ProjectCheckpointQuarantine {
-    #[cfg(test)]
+    /// The artifact that failed verification: its checkpoint identity when its
+    /// manifest could be read, otherwise the file or key it was found under.
+    pub(crate) fn label(&self) -> &str {
+        &self.label
+    }
+
     pub(crate) fn reason(&self) -> &str {
         &self.reason
     }
@@ -138,6 +144,42 @@ impl ProjectCheckpointSummary {
 
     pub(crate) const fn snapshot_digest(&self) -> ContentDigest {
         self.snapshot_digest
+    }
+}
+
+/// A catalog entry for a checkpoint that exists only in a test, so a surface
+/// can be drawn over a populated catalog without publishing one.
+#[cfg(all(test, not(target_arch = "wasm32")))]
+pub(crate) fn fixture_summary(
+    project_name: &str,
+    project_revision: u64,
+    reason: ProjectCheckpointReason,
+    created_unix_ms: u64,
+    snapshot_byte_len: u64,
+) -> ProjectCheckpointSummary {
+    ProjectCheckpointSummary {
+        checkpoint_id: Uuid::new_v4(),
+        project_id: Uuid::new_v4().to_string(),
+        project_name: project_name.to_owned(),
+        project_revision,
+        reason,
+        created_unix_ms,
+        snapshot_digest: ContentDigest::from_bytes([0x5a; 32]),
+        snapshot_byte_len,
+        locator: ProjectCheckpointLocator::Native {
+            manifest: PathBuf::from("fixture.checkpoint.json"),
+            snapshot: PathBuf::from("fixture.rspiceproj"),
+        },
+    }
+}
+
+/// A set-aside artifact that exists only in a test.
+#[cfg(all(test, not(target_arch = "wasm32")))]
+pub(crate) fn fixture_quarantine(label: &str, reason: &str) -> ProjectCheckpointQuarantine {
+    ProjectCheckpointQuarantine {
+        label: label.to_owned(),
+        reason: reason.to_owned(),
+        artifacts: Vec::new(),
     }
 }
 
@@ -373,6 +415,12 @@ fn sort_newest_first(checkpoints: &mut [ProjectCheckpointSummary]) {
             .cmp(&left.created_unix_ms)
             .then_with(|| right.checkpoint_id.cmp(&left.checkpoint_id))
     });
+}
+
+/// Where this project's checkpoints are kept, as the reader would look for them.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn storage_location(state: &AppState) -> Result<PathBuf, String> {
+    checkpoint_directory(state, &state.workspace.project.id().to_string())
 }
 
 #[cfg(not(target_arch = "wasm32"))]

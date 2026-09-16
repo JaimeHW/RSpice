@@ -10,6 +10,7 @@ mod landing;
 mod library;
 mod library_publication;
 mod overview;
+mod page;
 mod recovery;
 mod technology;
 
@@ -148,6 +149,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
         let panel = ui.scope(|ui| match page {
             ProjectPage::Overview => overview::overview(ui, app),
             ProjectPage::Library => library::library(ui, app),
+            ProjectPage::Recovery => recovery(ui, app),
             page => {
                 ScrollArea::vertical()
                     .id_salt(("workbench.project.surface", page))
@@ -157,8 +159,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
                             configuration::configuration(ui, app);
                         }
                         ProjectPage::Dependencies => dependencies::dependencies(ui, app),
-                        ProjectPage::Recovery => recovery(ui, app),
-                        ProjectPage::Overview | ProjectPage::Library => {
+                        ProjectPage::Overview | ProjectPage::Library | ProjectPage::Recovery => {
                             unreachable!("page owns its scroll contract")
                         }
                     });
@@ -1168,6 +1169,152 @@ mod tests {
         );
     }
 
+    /// The Recovery page over a catalog this test controls, rather than
+    /// whatever the machine's recovery directory happens to hold.
+    fn recovery_project_app(checkpoints: usize, set_aside: bool, error: bool) -> RSpiceApp {
+        use crate::workbench::lifecycle::project_checkpoint::{
+            ProjectCheckpointReason, fixture_quarantine, fixture_summary,
+        };
+
+        let mut app = populated_project_app();
+        app.state.workbench.project_page = ProjectPage::Recovery;
+        let now = crate::time_compat::checked_unix_time_ms().expect("clock");
+        let name = app.state.workspace.project.name().to_owned();
+        let project_id = app.state.workspace.project.id().to_string();
+        let catalog = [
+            (ProjectCheckpointReason::Manual, 3, 6 * 60_000, 48_214),
+            (
+                ProjectCheckpointReason::TechnologyAttachment,
+                2,
+                2 * 3_600_000,
+                47_902,
+            ),
+            (ProjectCheckpointReason::Manual, 1, 3 * 86_400_000, 31_577),
+        ]
+        .into_iter()
+        .take(checkpoints)
+        .map(|(reason, revision, age, bytes)| {
+            fixture_summary(&name, revision, reason, now - age, bytes)
+        })
+        .collect::<Vec<_>>();
+        app.state.workbench.project_checkpoint_selection = catalog
+            .first()
+            .map(|checkpoint| checkpoint.checkpoint_id().to_string());
+        let recovery = &mut app.state.dialogs.project_checkpoint_recovery;
+        recovery.project_id = Some(project_id);
+        recovery.initialized = true;
+        recovery.checkpoints = catalog;
+        if set_aside {
+            recovery.quarantined = vec![fixture_quarantine(
+                "7f0c2a9e-5b41-4d0e-9a55-2c1f6e8b3d10",
+                "project checkpoint bytes do not match their integrity manifest",
+            )];
+        }
+        if error {
+            recovery.error = Some(
+                "project recovery directory 'D:\\designs\\.rspice-recovery' could not be read: \
+                 Access is denied. (os error 5)"
+                    .to_owned(),
+            );
+        }
+        app
+    }
+
+    /// Recovery states its checkpoints, where they are kept, and its two
+    /// actions in plain words at every supported width, and none of the
+    /// retired policy ledger survives.
+    #[test]
+    fn the_recovery_page_lists_checkpoints_and_where_they_are_kept() {
+        for size in [
+            egui::vec2(1440.0, 900.0),
+            egui::vec2(820.0, 1180.0),
+            egui::vec2(390.0, 844.0),
+        ] {
+            let mut app = recovery_project_app(3, false, false);
+            let text = painted_project_page(size, |ui| show(ui, &mut app));
+            for expected in [
+                "Recovery",
+                "3 verified",
+                "Create checkpoint",
+                "Revision history\u{2026}",
+                "CHECKPOINTS",
+                "3 OF 8 KEPT",
+                "Manual checkpoint",
+                "Before technology attachment",
+                "6 min ago \u{b7} revision 3",
+                "Compare",
+                "Restore\u{2026}",
+                "STORAGE",
+                "The newest 8 checkpoints",
+                "All checkpoints verified",
+            ] {
+                assert!(
+                    text.contains(expected),
+                    "{expected:?} missing at {}x{}:\n{text}",
+                    size.x,
+                    size.y
+                );
+            }
+            for retired in [
+                "Policy & storage",
+                "SHOWN",
+                "Checkpoint now",
+                "Quarantined payloads",
+                "governed mutations",
+                "never overwritten",
+                "Working state",
+                "SET ASIDE",
+            ] {
+                assert!(
+                    !text.contains(retired),
+                    "{retired:?} is still painted at {}x{}:\n{text}",
+                    size.x,
+                    size.y
+                );
+            }
+        }
+    }
+
+    /// An empty catalog says so once, a damaged artifact gets its own card,
+    /// and an unreadable directory offers a retry instead of an empty list.
+    #[test]
+    fn the_recovery_page_states_empty_damaged_and_unreadable_catalogs() {
+        let size = egui::vec2(1440.0, 900.0);
+        let mut empty = recovery_project_app(0, false, false);
+        let text = painted_project_page(size, |ui| show(ui, &mut empty));
+        for expected in ["no checkpoints", "No checkpoints yet", "Nothing to check"] {
+            assert!(text.contains(expected), "{expected:?} missing:\n{text}");
+        }
+        assert!(
+            !text.contains("KEPT"),
+            "an empty catalog counts nothing:\n{text}"
+        );
+
+        let mut damaged = recovery_project_app(2, true, false);
+        let text = painted_project_page(size, |ui| show(ui, &mut damaged));
+        for expected in [
+            "1 set aside",
+            "SET ASIDE",
+            "7f0c2a9e-5b41-4d0e-9a55-2c1f6e8b3d10",
+            "Project checkpoint bytes do not match their integrity manifest",
+            "1 damaged, set aside",
+        ] {
+            assert!(text.contains(expected), "{expected:?} missing:\n{text}");
+        }
+
+        let mut unreadable = recovery_project_app(0, false, true);
+        let text = painted_project_page(size, |ui| show(ui, &mut unreadable));
+        for expected in [
+            "unreadable",
+            "Checkpoints could not be read",
+            "Access is denied",
+            "Try again",
+        ] {
+            assert!(text.contains(expected), "{expected:?} missing:\n{text}");
+        }
+        assert!(!text.contains("No checkpoints yet"), "{text}");
+    }
+
     #[test]
     #[ignore = "writes PNGs for a human to look at; run with --ignored"]
     fn render_the_project_workspace_for_review() {
@@ -1206,6 +1353,27 @@ mod tests {
                     page.label().to_lowercase().replace(' ', "-"),
                     size.x as usize,
                     size.y as usize
+                ));
+                std::fs::write(&path, canvas.png(height)).expect("write the render");
+                writeln!(report_output, "{}", path.display()).ok();
+            }
+        }
+        for (name, checkpoints, set_aside, error) in [
+            ("listed", 3, false, false),
+            ("set-aside", 2, true, false),
+            ("unreadable", 0, false, true),
+        ] {
+            for size in [
+                egui::vec2(1440.0, 900.0),
+                egui::vec2(820.0, 1180.0),
+                egui::vec2(390.0, 844.0),
+            ] {
+                let mut app = recovery_project_app(checkpoints, set_aside, error);
+                let canvas = crate::ui::raster::render(size, |ui, _| show(ui, &mut app));
+                let height = canvas.content_height().max(1).max(size.y as usize);
+                let path = directory.join(format!(
+                    "project-recovery-{name}-{}x{}.png",
+                    size.x as usize, size.y as usize
                 ));
                 std::fs::write(&path, canvas.png(height)).expect("write the render");
                 writeln!(report_output, "{}", path.display()).ok();

@@ -1,13 +1,27 @@
-//! The recovery page: checkpoints, their contents, and exporting a copy.
+//! The recovery page: the project's checkpoints and where they are kept.
 //!
-//! A checkpoint row states what it holds and when it was taken, and exporting
-//! a copy never mutates or consumes the checkpoint — recovery is always
-//! additive, so inspecting or exporting one cannot cost you the ability to
-//! recover from it later.
+//! A checkpoint is a complete, integrity-checked copy of the project. Comparing
+//! or restoring one never mutates or consumes it — restoring saves a separate
+//! project file — so inspecting a checkpoint cannot cost the reader the
+//! ability to recover from it later.
 
+use super::page::{self, BODY_TOP, CARD_GAP, HEADER_TOP, STACK_BREAKPOINT, paint_elided};
 use super::*;
 use crate::simulation::run_set::format_bytes;
 use crate::workbench::app_state::AppState;
+use crate::workbench::design_system::{property_row_path, property_row_toned};
+use crate::workbench::lifecycle::project_checkpoint::{
+    MAX_RETAINED_CHECKPOINTS, ProjectCheckpointSummary,
+};
+
+/// The one sentence the page opens with: what a checkpoint is, and the
+/// promise restoring one keeps.
+const RECOVERY_NOTE: &str = "A checkpoint is a complete, verified copy of the project. \
+     Restoring one saves it as a new project file; your current work is never changed.";
+const CHECKPOINT_ROW_HEIGHT: f32 = 52.0;
+/// Below this card width a row's actions move under its text.
+const CHECKPOINT_ROW_STACK_WIDTH: f32 = 460.0;
+const ROW_INSET: f32 = 12.0;
 
 #[cfg(target_arch = "wasm32")]
 struct BrowserManualCheckpointCompletion {
@@ -24,345 +38,592 @@ thread_local! {
         const { std::cell::RefCell::new(std::collections::VecDeque::new()) };
 }
 
+/// Everything the page draws, read before any of it is drawn, so an action
+/// taken on this frame changes the next one rather than half of this one.
+struct RecoverySnapshot {
+    checkpoints: Vec<ProjectCheckpointSummary>,
+    /// Label and reason of each artifact that failed verification.
+    set_aside: Vec<(String, String)>,
+    error: Option<String>,
+    loading: bool,
+    creating: bool,
+    selected: Option<String>,
+    location: String,
+    stored_bytes: u64,
+    now_unix_ms: Option<u64>,
+}
+
+impl RecoverySnapshot {
+    fn capture(state: &AppState) -> Self {
+        let recovery = &state.dialogs.project_checkpoint_recovery;
+        #[cfg(target_arch = "wasm32")]
+        let loading = recovery.loading && !recovery.initialized;
+        #[cfg(not(target_arch = "wasm32"))]
+        let loading = false;
+        Self {
+            checkpoints: recovery.checkpoints.clone(),
+            set_aside: recovery
+                .quarantined
+                .iter()
+                .map(|artifact| (artifact.label().to_owned(), artifact.reason().to_owned()))
+                .collect(),
+            error: recovery.error.clone(),
+            loading,
+            creating: manual_checkpoint_pending(),
+            selected: state.workbench.project_checkpoint_selection.clone(),
+            location: storage_location(state),
+            stored_bytes: recovery
+                .checkpoints
+                .iter()
+                .map(ProjectCheckpointSummary::snapshot_byte_len)
+                .sum(),
+            now_unix_ms: crate::time_compat::checked_unix_time_ms().ok(),
+        }
+    }
+
+    /// The page's one-word state beside its title, and its tone.
+    fn status(&self, tokens: &Tokens) -> (String, Color32) {
+        if self.error.is_some() {
+            ("unreadable".to_owned(), tokens.color.err)
+        } else if self.loading {
+            ("loading".to_owned(), tokens.color.text_faint)
+        } else if !self.set_aside.is_empty() {
+            (
+                format!("{} set aside", self.set_aside.len()),
+                tokens.color.warn,
+            )
+        } else if self.checkpoints.is_empty() {
+            ("no checkpoints".to_owned(), tokens.color.text_faint)
+        } else {
+            (
+                format!("{} verified", self.checkpoints.len()),
+                tokens.color.ok,
+            )
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn storage_location(state: &AppState) -> String {
+    crate::workbench::lifecycle::project_checkpoint::storage_location(state)
+        .map_or_else(|error| error, |path| path.display().to_string())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn storage_location(_state: &AppState) -> String {
+    "This browser's site storage".to_owned()
+}
+
+enum RecoveryIntent {
+    Create,
+    RevisionHistory,
+    Reload,
+    Select(String),
+    Compare(ProjectCheckpointSummary),
+    Restore(ProjectCheckpointSummary),
+}
+
+impl RecoveryIntent {
+    fn execute(self, ctx: &Context, app: &mut RSpiceApp) {
+        match self {
+            Self::Create => create_manual_checkpoint(ctx, &mut app.state),
+            Self::RevisionHistory => Command::RevisionHistory.execute(app),
+            Self::Reload => app.state.dialogs.project_checkpoint_recovery.invalidate(),
+            Self::Select(id) => app.state.workbench.project_checkpoint_selection = Some(id),
+            Self::Compare(checkpoint) => {
+                app.state.workbench.project_checkpoint_selection =
+                    Some(checkpoint.checkpoint_id().to_string());
+                compare_project_checkpoint(ctx, &mut app.state, &checkpoint);
+            }
+            Self::Restore(checkpoint) => {
+                app.state.workbench.project_checkpoint_selection =
+                    Some(checkpoint.checkpoint_id().to_string());
+                export_project_checkpoint_copy(ctx, &mut app.state, checkpoint);
+            }
+        }
+    }
+}
+
+fn keep_first(slot: &mut Option<RecoveryIntent>, candidate: Option<RecoveryIntent>) {
+    if slot.is_none() {
+        *slot = candidate;
+    }
+}
+
 pub(super) fn recovery(ui: &mut Ui, app: &mut RSpiceApp) {
     #[cfg(target_arch = "wasm32")]
     poll_browser_manual_checkpoint(ui.ctx(), &mut app.state);
     ensure_project_recovery_catalog(ui.ctx(), &mut app.state);
-    recovery_context_strip(ui, &mut app.state);
-    let width = visible_workspace_width(ui);
-    if width >= 640.0 {
-        let timeline_width = (width * 0.60).floor().max(360.0);
-        let policy_width = (width - timeline_width - 1.0).max(240.0);
-        let shown = ui.horizontal_top(|ui| {
-            ui.spacing_mut().item_spacing.x = 1.0;
-            ui.allocate_ui_with_layout(
-                vec2(timeline_width, 0.0),
-                Layout::top_down(Align::Min),
-                |ui| {
-                    ui.set_width(timeline_width);
-                    recovery_checkpoint_timeline(ui, &mut app.state);
-                },
-            );
-            ui.allocate_ui_with_layout(
-                vec2(policy_width, 0.0),
-                Layout::top_down(Align::Min),
-                |ui| {
-                    ui.set_width(policy_width);
-                    recovery_policy_panel(ui, app);
-                },
-            );
-        });
-        ui.painter().vline(
-            shown.response.rect.left() + timeline_width + 0.5,
-            shown.response.rect.y_range(),
-            Stroke::new(1.0, Tokens::get(ui.ctx()).color.border_strong),
-        );
-    } else {
-        recovery_checkpoint_timeline(ui, &mut app.state);
-        recovery_policy_panel(ui, app);
-    }
-}
-
-fn recovery_context_strip(ui: &mut Ui, state: &mut AppState) {
-    let t = Tokens::get(ui.ctx());
-    let checkpoints = state.dialogs.project_checkpoint_recovery.checkpoints.len();
-    let verified = state.dialogs.project_checkpoint_recovery.error.is_none()
-        && state
-            .dialogs
-            .project_checkpoint_recovery
-            .quarantined
-            .is_empty();
-    let modified = crate::workbench::lifecycle::project_lifecycle::dirty_document_count(state);
-    // No rule under this strip: the panel header below opens with one of its
-    // own, and two hairlines a pixel apart read as one thick, uneven line.
-    egui::Frame::new()
-        .fill(t.color.bg_inset)
-        .inner_margin(Margin::symmetric(10, 5))
-        .show(ui, |ui| {
-            // A `Frame` shrinks to its content, so a band that is not told
-            // to take the visible width stops partway across the workspace.
-            // Measured from inside the frame, the visible width is already the
-            // band's inner width: subtracting the margins again leaves the fill
-            // 20 px short of the edge.
-            ui.set_width(visible_workspace_width(ui));
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 8.0;
-                let search = ui.add_sized(
-                    [(ui.available_width() * 0.48).clamp(180.0, 430.0), 28.0],
-                    egui::TextEdit::singleline(&mut state.workbench.project_recovery_filter)
-                        .hint_text("Checkpoint, revision, state\u{2026}"),
-                );
-                ui.ctx().accesskit_node_builder(search.id, |node| {
-                    node.set_label("Filter project recovery checkpoints");
-                });
-                ui.separator();
-                recovery_context_fact(
-                    ui,
-                    "Working state",
-                    if modified == 0 {
-                        "current".to_owned()
-                    } else {
-                        format!("{modified} modified")
-                    },
-                    if modified == 0 {
-                        t.color.ok
-                    } else {
-                        t.color.warn
-                    },
-                );
-                ui.separator();
-                recovery_context_fact(
-                    ui,
-                    "Integrity",
-                    format!("{checkpoints} verified"),
-                    if verified { t.color.ok } else { t.color.warn },
-                );
-            });
-        });
-}
-
-fn recovery_context_fact(ui: &mut Ui, label: &str, value: String, color: Color32) {
-    let t = Tokens::get(ui.ctx());
-    ui.label(
-        egui::RichText::new(label)
-            .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
-            .color(t.color.text_faint),
-    );
-    ui.label(
-        egui::RichText::new(value)
-            .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-            .color(color),
-    );
-}
-
-fn recovery_checkpoint_timeline(ui: &mut Ui, state: &mut AppState) {
-    let t = Tokens::get(ui.ctx());
-    let filter = state
-        .workbench
-        .project_recovery_filter
-        .trim()
-        .to_ascii_lowercase();
-    let checkpoints = state
-        .dialogs
-        .project_checkpoint_recovery
-        .checkpoints
-        .clone();
-    let visible = checkpoints
-        .iter()
-        .filter(|checkpoint| {
-            filter.is_empty()
-                || format!(
-                    "{} {} {}",
-                    checkpoint.reason().label(),
-                    checkpoint.project_revision(),
-                    checkpoint.checkpoint_id()
-                )
-                .to_ascii_lowercase()
-                .contains(&filter)
-        })
-        .collect::<Vec<_>>();
-    workspace_table_panel_header(
+    let snapshot = RecoverySnapshot::capture(&app.state);
+    let mut intent = None;
+    page::show(
         ui,
-        "Project checkpoints",
-        &format!("{} SHOWN", visible.len()),
-        if visible.is_empty() {
-            t.color.text_faint
-        } else {
-            t.color.ok
+        "workbench.project.recovery.page",
+        |ui, inset, content_width| {
+            keep_first(
+                &mut intent,
+                recovery_header(ui, &snapshot, inset, content_width),
+            );
+            ui.add_space(BODY_TOP);
+            if content_width >= STACK_BREAKPOINT {
+                let mut left_intent = None;
+                page::columns(
+                    ui,
+                    inset,
+                    content_width,
+                    |left| left_intent = checkpoints_card(left, &snapshot),
+                    |right| {
+                        storage_card(right, &snapshot);
+                        set_aside_card(right, &snapshot);
+                    },
+                );
+                keep_first(&mut intent, left_intent);
+            } else {
+                page::inset_column(ui, inset, content_width, |ui| {
+                    keep_first(&mut intent, checkpoints_card(ui, &snapshot));
+                    ui.add_space(CARD_GAP);
+                    storage_card(ui, &snapshot);
+                    set_aside_card(ui, &snapshot);
+                });
+            }
         },
     );
-    if visible.is_empty() {
-        workspace_empty_table_row(
-            ui,
-            ui.available_width().max(1.0),
-            if checkpoints.is_empty() {
-                "No integrity-verified project checkpoint is available."
-            } else {
-                "No checkpoint matches the current filter."
-            },
-        );
+    if let Some(intent) = intent {
+        intent.execute(&ui.ctx().clone(), app);
     }
-    for checkpoint in visible {
-        let id = checkpoint.checkpoint_id().to_string();
-        let selected = state.workbench.project_checkpoint_selection.as_deref() == Some(id.as_str());
-        let (rect, response) =
-            ui.allocate_exact_size(vec2(ui.available_width().max(1.0), 58.0), Sense::click());
-        if selected || response.hovered() {
-            ui.painter().rect_filled(
-                rect,
-                0.0,
-                if selected {
-                    t.color.bg_active
-                } else {
-                    t.color.bg_hover
-                },
-            );
-        }
-        if selected {
-            ui.painter().rect_filled(
-                Rect::from_min_size(rect.left_top(), vec2(2.0, rect.height())),
-                0.0,
-                t.color.accent,
-            );
-        }
-        ui.painter().hline(
-            rect.x_range(),
-            rect.bottom(),
-            Stroke::new(1.0, t.color.border),
-        );
-        let content = rect.shrink2(vec2(10.0, 5.0));
-        let actions = Rect::from_min_max(
-            pos2((rect.right() - 180.0).max(rect.left()), rect.top() + 12.0),
-            pos2(rect.right() - 8.0, rect.bottom() - 8.0),
-        );
-        let text_painter = ui.painter().with_clip_rect(Rect::from_min_max(
-            content.min,
-            pos2((actions.left() - 8.0).max(content.left()), content.bottom()),
-        ));
-        let age = checkpoint_age(checkpoint.created_unix_ms());
-        let age_rect = text_painter.text(
-            content.left_top(),
-            Align2::LEFT_TOP,
-            &age,
-            theme::mono(tokens::FS_0, FontWeight::Regular),
-            t.color.text_faint,
-        );
-        let details_x = (content.left() + 70.0).max(age_rect.right() + 10.0);
-        text_painter.text(
-            pos2(details_x, content.top()),
-            Align2::LEFT_TOP,
-            checkpoint.reason().label(),
-            theme::sans(tokens::FS_0, FontWeight::SemiBold),
-            t.color.text,
-        );
-        text_painter.text(
-            pos2(content.left(), content.top() + 20.0),
-            Align2::LEFT_TOP,
-            format!(
-                "revision {} \u{00b7} {} \u{00b7} verified",
-                checkpoint.project_revision(),
-                format_bytes(checkpoint.snapshot_byte_len())
-            ),
-            theme::mono(tokens::FS_0, FontWeight::Regular),
-            t.color.ok,
-        );
-        ui.scope_builder(
-            egui::UiBuilder::new()
-                .max_rect(actions)
-                .layout(Layout::right_to_left(Align::Center)),
-            |ui| {
-                if Button::new("Restore\u{2026}").show(ui).clicked() {
-                    export_project_checkpoint_copy(ui.ctx(), state, checkpoint.clone());
-                }
-                if Button::new("Compare\u{2026}").show(ui).clicked() {
-                    compare_project_checkpoint(ui.ctx(), state, checkpoint);
-                }
-            },
-        );
-        let row_label = format!(
-            "{}, {age}, revision {}, {}, verified",
-            checkpoint.reason().label(),
-            checkpoint.project_revision(),
-            format_bytes(checkpoint.snapshot_byte_len())
-        );
-        response.widget_info(|| {
-            egui::WidgetInfo::selected(
-                egui::WidgetType::SelectableLabel,
-                ui.is_enabled(),
-                selected,
-                row_label.clone(),
-            )
-        });
-        theme::paint_focus_ring(ui, &response, rect);
-        if response.clicked() {
-            state.workbench.project_checkpoint_selection = Some(id);
-        }
-    }
-    egui::Frame::new()
-        .fill(t.color.bg_panel)
-        .inner_margin(Margin::symmetric(10, 7))
-        .show(ui, |ui| {
-            ui.set_min_width(ui.available_width());
-            ui.add(
-                egui::Label::new(
-                    egui::RichText::new(
-                        "Compare and restore operate on immutable checkpoints. Restore publishes an independent project copy and never overwrites current work.",
-                    )
-                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                    .color(t.color.text_dim),
-                )
-                .wrap(),
-            );
-        });
 }
 
-fn recovery_policy_panel(ui: &mut Ui, app: &mut RSpiceApp) {
-    let t = Tokens::get(ui.ctx());
-    let recovery = &app.state.dialogs.project_checkpoint_recovery;
-    let checkpoint_bytes = recovery
-        .checkpoints
-        .iter()
-        .map(|checkpoint| checkpoint.snapshot_byte_len())
-        .sum::<u64>();
-    let verified = recovery.error.is_none() && recovery.quarantined.is_empty();
-    workspace_table_panel_header(
+/// Title, state, the page's one note, and its two actions, above the rule
+/// every carded project page opens with.
+fn recovery_header(
+    ui: &mut Ui,
+    snapshot: &RecoverySnapshot,
+    inset: f32,
+    content_width: f32,
+) -> Option<RecoveryIntent> {
+    let tokens = Tokens::get(ui.ctx());
+    ui.add_space(HEADER_TOP);
+    let intent = page::inset_column(ui, inset, content_width, |ui| {
+        let (status, status_color) = snapshot.status(&tokens);
+        let (title_rect, title_response) =
+            ui.allocate_exact_size(vec2(content_width, 27.0), Sense::hover());
+        let title = ui.painter().text(
+            title_rect.left_center(),
+            Align2::LEFT_CENTER,
+            "Recovery",
+            theme::sans(20.0, FontWeight::SemiBold),
+            tokens.color.text,
+        );
+        ui.painter().text(
+            pos2(title.right() + 12.0, title_rect.center().y + 2.0),
+            Align2::LEFT_CENTER,
+            &status,
+            theme::mono(tokens::FS_0, FontWeight::Medium),
+            status_color,
+        );
+        title_response.widget_info(|| {
+            WidgetInfo::labeled(
+                WidgetType::Label,
+                ui.is_enabled(),
+                format!("Recovery · {status}"),
+            )
+        });
+
+        ui.add_space(3.0);
+        text_block(ui, RECOVERY_NOTE, body_font(), tokens.color.text_dim);
+        ui.add_space(12.0);
+        let mut intent = None;
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
+            let create = Button::new(if snapshot.creating {
+                "Creating checkpoint\u{2026}"
+            } else {
+                "Create checkpoint"
+            })
+            .icon(crate::ui::icons::Icon::Add)
+            .accent()
+            .enabled(!snapshot.creating)
+            .show(ui);
+            if create.clicked() {
+                intent = Some(RecoveryIntent::Create);
+            }
+            if Button::new("Revision history\u{2026}").show(ui).clicked() {
+                intent = Some(RecoveryIntent::RevisionHistory);
+            }
+        });
+        intent
+    });
+    page::header_rule(ui);
+    intent
+}
+
+fn checkpoints_card(ui: &mut Ui, snapshot: &RecoverySnapshot) -> Option<RecoveryIntent> {
+    let tokens = Tokens::get(ui.ctx());
+    let meta = if snapshot.checkpoints.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "{} of {MAX_RETAINED_CHECKPOINTS} kept",
+            snapshot.checkpoints.len()
+        )
+    };
+    page::card(ui, "Checkpoints", &meta, tokens.color.text_faint, |ui| {
+        if let Some(error) = &snapshot.error {
+            return catalog_error(ui, error);
+        }
+        if snapshot.loading {
+            card_message(ui, "Loading checkpoints\u{2026}", None);
+            return None;
+        }
+        if snapshot.checkpoints.is_empty() {
+            card_message(
+                ui,
+                "No checkpoints yet",
+                Some(
+                    "RSpice creates one before every technology change. Create one yourself \
+                     before an edit you may want to undo.",
+                ),
+            );
+            return None;
+        }
+        let mut intent = None;
+        let count = snapshot.checkpoints.len();
+        for (index, checkpoint) in snapshot.checkpoints.iter().enumerate() {
+            let selected = snapshot.selected.as_deref()
+                == Some(checkpoint.checkpoint_id().to_string().as_str());
+            keep_first(
+                &mut intent,
+                checkpoint_row(
+                    ui,
+                    checkpoint,
+                    selected,
+                    snapshot.now_unix_ms,
+                    index + 1 < count,
+                ),
+            );
+        }
+        intent
+    })
+}
+
+/// A card's whole body when it has no rows: a title and, optionally, a
+/// sentence under it.
+fn card_message(ui: &mut Ui, title: &str, detail: Option<&str>) {
+    let tokens = Tokens::get(ui.ctx());
+    ui.add_space(14.0);
+    let width = ui.available_width() - 2.0 * (ROW_INSET + 2.0);
+    page::inset_column(ui, ROW_INSET + 2.0, width, |ui| {
+        text_block(ui, title, title_font(), tokens.color.text);
+        if let Some(detail) = detail {
+            ui.add_space(4.0);
+            text_block(ui, detail, body_font(), tokens.color.text_dim);
+        }
+    });
+    ui.add_space(5.0);
+}
+
+fn title_font() -> egui::FontId {
+    theme::sans(tokens::FS_2, FontWeight::Medium)
+}
+
+fn body_font() -> egui::FontId {
+    theme::sans(tokens::FS_1, FontWeight::Regular)
+}
+
+/// Wrapped copy, painted as text rather than laid out as a selectable label.
+fn text_block(ui: &mut Ui, text: &str, font: egui::FontId, color: Color32) {
+    let galley = ui
+        .painter()
+        .layout(text.to_owned(), font, color, ui.available_width().max(1.0));
+    let (rect, response) = ui.allocate_exact_size(galley.size(), Sense::hover());
+    ui.painter().galley(rect.min, galley, color);
+    response.widget_info(|| WidgetInfo::labeled(WidgetType::Label, ui.is_enabled(), text));
+}
+
+fn catalog_error(ui: &mut Ui, error: &str) -> Option<RecoveryIntent> {
+    let tokens = Tokens::get(ui.ctx());
+    ui.add_space(14.0);
+    let width = ui.available_width() - 2.0 * (ROW_INSET + 2.0);
+    let reload = page::inset_column(ui, ROW_INSET + 2.0, width, |ui| {
+        text_block(
+            ui,
+            "Checkpoints could not be read",
+            title_font(),
+            tokens.color.err,
+        );
+        ui.add_space(4.0);
+        text_block(
+            ui,
+            &sentence_case(error),
+            body_font(),
+            tokens.color.text_dim,
+        );
+        ui.add_space(10.0);
+        Button::new("Try again")
+            .icon(crate::ui::icons::Icon::Refresh)
+            .show(ui)
+            .clicked()
+    });
+    ui.add_space(5.0);
+    reload.then_some(RecoveryIntent::Reload)
+}
+
+fn checkpoint_row(
+    ui: &mut Ui,
+    checkpoint: &ProjectCheckpointSummary,
+    selected: bool,
+    now_unix_ms: Option<u64>,
+    separated: bool,
+) -> Option<RecoveryIntent> {
+    let tokens = Tokens::get(ui.ctx());
+    let width = ui.available_width().max(1.0);
+    let stacked = width < CHECKPOINT_ROW_STACK_WIDTH;
+    let control_height = tokens.metrics.ctl_h.max(if tokens.metrics.is_touch() {
+        tokens::TOUCH_TARGET
+    } else {
+        0.0
+    });
+    let text_height = 34.0;
+    let height = if stacked {
+        12.0 + text_height + 6.0 + control_height + 12.0
+    } else {
+        CHECKPOINT_ROW_HEIGHT.max(control_height + 16.0)
+    };
+    let (rect, response) = ui.allocate_exact_size(vec2(width, height), Sense::click());
+    if selected {
+        ui.painter().rect_filled(rect, 0.0, tokens.color.bg_active);
+        ui.painter().rect_filled(
+            Rect::from_min_size(rect.left_top(), vec2(2.0, rect.height())),
+            0.0,
+            tokens.color.accent,
+        );
+    } else if response.hovered() {
+        ui.painter().rect_filled(rect, 0.0, tokens.color.bg_hover);
+    }
+    if separated {
+        ui.painter().hline(
+            (rect.left() + ROW_INSET)..=(rect.right() - ROW_INSET),
+            rect.bottom() - 0.5,
+            Stroke::new(1.0, tokens.color.border),
+        );
+    }
+
+    let compare = Button::new("Compare");
+    let restore = Button::new("Restore\u{2026}");
+    let actions_width = compare.measured_width(ui) + 6.0 + restore.measured_width(ui);
+    let actions = if stacked {
+        Rect::from_min_size(
+            pos2(
+                rect.left() + ROW_INSET,
+                rect.bottom() - 12.0 - control_height,
+            ),
+            vec2(actions_width, control_height),
+        )
+    } else {
+        Rect::from_min_max(
+            pos2(
+                rect.right() - ROW_INSET - actions_width,
+                rect.center().y - control_height * 0.5,
+            ),
+            pos2(
+                rect.right() - ROW_INSET,
+                rect.center().y + control_height * 0.5,
+            ),
+        )
+    };
+    let text_right = if stacked {
+        rect.right() - ROW_INSET
+    } else {
+        actions.left() - 12.0
+    };
+    let text_top = if stacked {
+        rect.top() + 12.0
+    } else {
+        rect.center().y - text_height * 0.5
+    };
+    let text_width = (text_right - rect.left() - ROW_INSET).max(1.0);
+    let age = checkpoint_age(checkpoint.created_unix_ms(), now_unix_ms);
+    paint_elided(
         ui,
-        "Policy & storage",
-        if verified { "VERIFIED" } else { "REVIEW" },
-        if verified { t.color.ok } else { t.color.warn },
+        pos2(rect.left() + ROW_INSET, text_top),
+        checkpoint.reason().label(),
+        theme::sans(tokens::FS_1, FontWeight::Medium),
+        tokens.color.text,
+        text_width,
     );
-    property_row(ui, "Checkpoint mode", "manual and governed mutations");
-    property_row(
+    let detail = format!(
+        "{age} \u{b7} revision {} \u{b7} {}",
+        checkpoint.project_revision(),
+        format_bytes(checkpoint.snapshot_byte_len())
+    );
+    paint_elided(
         ui,
-        "Retained checkpoints",
-        &recovery.checkpoints.len().to_string(),
+        pos2(rect.left() + ROW_INSET, text_top + 19.0),
+        &detail,
+        theme::mono(tokens::FS_0, FontWeight::Regular),
+        tokens.color.text_faint,
+        text_width,
     );
-    property_row(ui, "Restore destination", "independent project copy");
-    property_row(ui, "Current work", "never overwritten");
-    property_row(ui, "Storage", &format_bytes(checkpoint_bytes));
-    property_row(
+
+    let mut intent = None;
+    ui.scope_builder(
+        egui::UiBuilder::new()
+            .max_rect(actions)
+            .layout(Layout::left_to_right(Align::Center)),
+        |ui| {
+            ui.spacing_mut().item_spacing.x = 6.0;
+            if compare
+                .accessible_label(&format!(
+                    "Compare {} with the current project",
+                    checkpoint.reason().label()
+                ))
+                .show(ui)
+                .on_hover_text("Check whether the current project still matches this checkpoint")
+                .clicked()
+            {
+                intent = Some(RecoveryIntent::Compare(checkpoint.clone()));
+            }
+            if restore
+                .accessible_label(&format!(
+                    "Restore {} as a new project",
+                    checkpoint.reason().label()
+                ))
+                .show(ui)
+                .on_hover_text("Save this checkpoint as a new project file")
+                .clicked()
+            {
+                intent = Some(RecoveryIntent::Restore(checkpoint.clone()));
+            }
+        },
+    );
+
+    let row_label = format!("{}, {detail}", checkpoint.reason().label());
+    response.widget_info(|| {
+        WidgetInfo::selected(
+            WidgetType::SelectableLabel,
+            ui.is_enabled(),
+            selected,
+            row_label.clone(),
+        )
+    });
+    theme::paint_focus_ring(ui, &response, rect);
+    let response = response.on_hover_text(format!(
+        "{}\nCreated {}\nCheckpoint {}",
+        checkpoint.reason().label(),
+        utc_stamp(checkpoint.created_unix_ms()),
+        checkpoint.checkpoint_id()
+    ));
+    if response.clicked() && intent.is_none() {
+        intent = Some(RecoveryIntent::Select(
+            checkpoint.checkpoint_id().to_string(),
+        ));
+    }
+    intent
+}
+
+/// Where checkpoints live and the rules they are kept under.
+fn storage_card(ui: &mut Ui, snapshot: &RecoverySnapshot) {
+    let tokens = Tokens::get(ui.ctx());
+    page::card(ui, "Storage", "", tokens.color.text_faint, |ui| {
+        ui.add_space(3.0);
+        property_row_path(ui, "Location", &snapshot.location);
+        property_row(
+            ui,
+            "Keeps",
+            &format!("The newest {MAX_RETAINED_CHECKPOINTS} checkpoints"),
+        );
+        property_row(ui, "Space used", &format_bytes(snapshot.stored_bytes));
+        // `ProjectCheckpointReason::TechnologyAttachment` is the one
+        // checkpoint RSpice takes on its own.
+        property_row(ui, "Taken automatically", "Before technology changes");
+        let (integrity, tone) = if snapshot.error.is_some() {
+            ("Not checked".to_owned(), tokens.color.err)
+        } else if !snapshot.set_aside.is_empty() {
+            (
+                format!("{} damaged, set aside", snapshot.set_aside.len()),
+                tokens.color.warn,
+            )
+        } else if snapshot.checkpoints.is_empty() {
+            ("Nothing to check".to_owned(), tokens.color.text_dim)
+        } else {
+            ("All checkpoints verified".to_owned(), tokens.color.ok)
+        };
+        property_row_toned(ui, "Integrity", &integrity, tone);
+    });
+}
+
+/// Artifacts that failed verification. They are never offered for restore,
+/// and the card is drawn only when there is something in it.
+fn set_aside_card(ui: &mut Ui, snapshot: &RecoverySnapshot) {
+    if snapshot.set_aside.is_empty() {
+        return;
+    }
+    let tokens = Tokens::get(ui.ctx());
+    ui.add_space(CARD_GAP);
+    page::card(
         ui,
-        "Quarantined payloads",
-        &recovery.quarantined.len().to_string(),
-    );
-    property_row(
-        ui,
-        "Project path",
-        &app.state
-            .workspace
-            .project
-            .path
-            .as_ref()
-            .map_or_else(|| "not saved".to_owned(), |path| path.display().to_string()),
-    );
-    egui::Frame::new()
-        .fill(t.color.bg_panel)
-        .inner_margin(Margin::symmetric(10, 5))
-        .show(ui, |ui| {
-            // An action bar that stops short of the pane edge reads as a
-            // floating box of buttons rather than the panel's own footer.
-            ui.set_min_width(ui.available_width());
-            ui.horizontal_wrapped(|ui| {
-                let pending = manual_checkpoint_pending();
-                let create = Button::new(if pending {
-                    "Creating checkpoint\u{2026}"
-                } else {
-                    "Checkpoint now\u{2026}"
-                })
-                .accent()
-                .enabled(!pending)
-                .show(ui);
-                if create.clicked() {
-                    create_manual_checkpoint(ui.ctx(), &mut app.state);
-                }
-                if Button::new("Save project").show(ui).clicked() {
-                    Command::Save.execute(app);
-                }
-                if Button::new("Revision history\u{2026}").show(ui).clicked() {
-                    Command::RevisionHistory.execute(app);
+        "Set aside",
+        &snapshot.set_aside.len().to_string(),
+        tokens.color.warn,
+        |ui| {
+            ui.add_space(10.0);
+            let width = ui.available_width() - 2.0 * ROW_INSET;
+            page::inset_column(ui, ROW_INSET, width, |ui| {
+                text_block(
+                    ui,
+                    "These files failed verification, so they are never offered for restore.",
+                    body_font(),
+                    tokens.color.text_dim,
+                );
+                for (label, reason) in &snapshot.set_aside {
+                    ui.add_space(10.0);
+                    let (rect, response) =
+                        ui.allocate_exact_size(vec2(width, 16.0), Sense::hover());
+                    paint_elided(
+                        ui,
+                        rect.left_top(),
+                        label,
+                        theme::mono(tokens::FS_0, FontWeight::Medium),
+                        tokens.color.text,
+                        width,
+                    );
+                    response.on_hover_text(label.as_str());
+                    text_block(
+                        ui,
+                        &sentence_case(reason),
+                        body_font(),
+                        tokens.color.text_dim,
+                    );
                 }
             });
-        });
+        },
+    );
+}
+
+fn sentence_case(text: &str) -> String {
+    let mut characters = text.chars();
+    match characters.next() {
+        Some(first) => first.to_uppercase().chain(characters).collect(),
+        None => String::new(),
+    }
+}
+
+/// A checkpoint's creation time in UTC, for the row's tooltip.
+fn utc_stamp(created_unix_ms: u64) -> String {
+    let Ok(seconds) = i64::try_from(created_unix_ms / 1_000) else {
+        return "at an unknown time".to_owned();
+    };
+    let Ok(stamp) = time::OffsetDateTime::from_unix_timestamp(seconds) else {
+        return "at an unknown time".to_owned();
+    };
+    format!(
+        "{:04}-{:02}-{:02} {:02}:{:02} UTC",
+        stamp.year(),
+        u8::from(stamp.month()),
+        stamp.day(),
+        stamp.hour(),
+        stamp.minute()
+    )
 }
 
 pub(super) fn ensure_project_recovery_catalog(ctx: &Context, state: &mut AppState) {
@@ -420,21 +681,21 @@ pub(super) fn ensure_project_recovery_catalog(ctx: &Context, state: &mut AppStat
     }
 }
 
-fn checkpoint_age(created_unix_ms: u64) -> String {
-    if created_unix_ms == 0 {
+fn checkpoint_age(created_unix_ms: u64, now_unix_ms: Option<u64>) -> String {
+    // A checkpoint stamped after the clock's present says the clock moved,
+    // not how old the checkpoint is.
+    let Some(elapsed) = now_unix_ms
+        .filter(|_| created_unix_ms != 0)
+        .and_then(|now| now.checked_sub(created_unix_ms))
+    else {
         return "time unavailable".to_owned();
-    }
-    let Ok(now) = crate::time_compat::checked_unix_time_ms() else {
-        return "time unavailable".to_owned();
-    };
-    let Some(elapsed) = now.checked_sub(created_unix_ms) else {
-        return "clock skew".to_owned();
     };
     let seconds = elapsed / 1_000;
     match seconds {
-        0..=59 => format!("{seconds} s ago"),
+        0..=59 => "just now".to_owned(),
         60..=3_599 => format!("{} min ago", seconds / 60),
         3_600..=86_399 => format!("{} h ago", seconds / 3_600),
+        86_400..=172_799 => "yesterday".to_owned(),
         _ => format!("{} d ago", seconds / 86_400),
     }
 }
@@ -448,12 +709,12 @@ fn compare_project_checkpoint(
     {
         Ok(true) => state.ui.toasts.success(
             ctx,
-            "Checkpoint matches",
-            "The current project is byte-for-byte equivalent to this validated checkpoint.",
+            "No changes since this checkpoint",
+            "The current project is identical to this checkpoint.",
         ),
         Ok(false) => state.ui.toasts.info_with_title(
             ctx,
-            "Checkpoint differs",
+            "Changed since this checkpoint",
             format!(
                 "The current project differs from checkpoint {} (revision {}).",
                 short_identity(&checkpoint.checkpoint_id().to_string()),
@@ -463,7 +724,7 @@ fn compare_project_checkpoint(
         Err(error) => state
             .ui
             .toasts
-            .error_with_title(ctx, "Checkpoint comparison failed", error),
+            .error_with_title(ctx, "Could not compare", error),
     }
 }
 

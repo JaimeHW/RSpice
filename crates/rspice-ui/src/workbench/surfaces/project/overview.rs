@@ -7,9 +7,7 @@
 
 use std::collections::BTreeSet;
 
-use egui::{
-    Align, Align2, Color32, CornerRadius, Layout, Rect, Sense, Stroke, Ui, UiBuilder, pos2, vec2,
-};
+use egui::{Align, Align2, Color32, Layout, Rect, Sense, Stroke, Ui, pos2, vec2};
 
 use crate::services::drc::DrcSeverity;
 use crate::state::netlist_document::{DiagnosticSeverity, DocumentOwnership};
@@ -22,24 +20,14 @@ use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::DesignCheckStatus;
 use crate::workbench::commands::CommandAvailability;
 use crate::workbench::commands::vocabulary::Command;
-use crate::workbench::design_system::{centered_content_rect, property_row, property_row_toned};
+use crate::workbench::design_system::{property_row, property_row_toned};
 use crate::workbench::lifecycle::project_lifecycle::dirty_document_count;
 use crate::workbench::state::{ModelsCatalogScope, ModelsPage, ProjectPage, Workspace};
 
-use super::visible_workspace_width;
+use super::page::{
+    self, BODY_TOP, CARD_GAP, HEADER_TOP, STACK_BREAKPOINT, elide_text, paint_elided,
+};
 
-/// Shared page measure of the workbench landing surfaces, so the overview,
-/// the no-project landing, and the netlist-first landing read as one product.
-const CONTENT_MAX_WIDTH: f32 = 1240.0;
-const DESKTOP_GUTTER: f32 = 30.0;
-const HEADER_TOP: f32 = 15.0;
-const HEADER_BOTTOM: f32 = 14.0;
-const BODY_TOP: f32 = 14.0;
-const BODY_BOTTOM: f32 = 26.0;
-const STACK_BREAKPOINT: f32 = 900.0;
-const COLUMN_GAP: f32 = 14.0;
-const CARD_GAP: f32 = 10.0;
-const CARD_HEADER_HEIGHT: f32 = 26.0;
 const STATUS_ROW_HEIGHT: f32 = 27.0;
 const REGISTER_ROW_HEIGHT: f32 = 17.0;
 const ACTIVITY_ROW_HEIGHT: f32 = 30.0;
@@ -760,49 +748,20 @@ struct DrcCounts {
 pub(super) fn overview(ui: &mut Ui, app: &mut RSpiceApp) {
     let snapshot = OverviewSnapshot::capture(app);
     let mut intent = None;
-    let tokens = Tokens::get(ui.ctx());
-    let workspace_width = visible_workspace_width(ui);
-    let viewport_height = ui.available_height().max(1.0);
-    egui::Frame::new().fill(tokens.color.bg_app).show(ui, |ui| {
-        ui.set_min_height(viewport_height);
-        ui.set_width(workspace_width);
-        egui::ScrollArea::vertical()
-            .id_salt("workbench.project.overview.page")
-            .auto_shrink([false, false])
-            .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded)
-            .show(ui, |ui| {
-                ui.spacing_mut().item_spacing.y = 0.0;
-                ui.set_min_width(workspace_width);
-                let content = centered_content_rect(
-                    Rect::from_min_size(pos2(0.0, 0.0), vec2(workspace_width, 1.0)),
-                    DESKTOP_GUTTER,
-                    CONTENT_MAX_WIDTH,
-                );
-                retain_first_intent(
-                    &mut intent,
-                    overview_header(ui, app, &snapshot, content.left(), content.width()),
-                );
-                overview_body(
-                    ui,
-                    app,
-                    &snapshot,
-                    &mut intent,
-                    content.left(),
-                    content.width(),
-                );
-                ui.add_space(BODY_BOTTOM);
-            });
-    });
+    page::show(
+        ui,
+        "workbench.project.overview.page",
+        |ui, inset, content_width| {
+            retain_first_intent(
+                &mut intent,
+                overview_header(ui, app, &snapshot, inset, content_width),
+            );
+            overview_body(ui, app, &snapshot, &mut intent, inset, content_width);
+        },
+    );
     if let Some(intent) = intent {
         intent.execute(app);
     }
-}
-
-/// The reference dashboard columns: `minmax(300px, 1.3fr) minmax(260px, 1fr)`.
-fn overview_column_widths(content_width: f32) -> (f32, f32) {
-    let usable = (content_width - COLUMN_GAP).max(2.0);
-    let right = (usable * 0.435).clamp(260.0_f32.min(usable * 0.5), 500.0);
-    ((usable - right).max(1.0), right)
 }
 
 fn retain_first_intent(slot: &mut Option<OverviewIntent>, candidate: Option<OverviewIntent>) {
@@ -821,62 +780,39 @@ fn overview_body(
 ) {
     ui.add_space(BODY_TOP);
     if content_width >= STACK_BREAKPOINT {
-        let (left_width, right_width) = overview_column_widths(content_width);
-        let origin = ui.cursor().min;
-        // Both columns lay out at their natural content height; the page —
-        // not the cards — owns the leftover vertical space.
-        let unbounded = 40_000.0;
-        let mut left = ui.new_child(
-            UiBuilder::new()
-                .max_rect(Rect::from_min_size(
-                    pos2(origin.x + inset, origin.y),
-                    vec2(left_width, unbounded),
-                ))
-                .layout(Layout::top_down(Align::Min)),
+        let (mut left_intent, mut right_intent) = (None, None);
+        page::columns(
+            ui,
+            inset,
+            content_width,
+            |left| {
+                retain_first_intent(
+                    &mut left_intent,
+                    status_card(left, &snapshot.statuses, &snapshot.problem),
+                );
+                left.add_space(CARD_GAP);
+                retain_first_intent(&mut left_intent, design_card(left, app, snapshot));
+            },
+            |right| {
+                retain_first_intent(&mut right_intent, context_card(right, snapshot));
+                right.add_space(CARD_GAP);
+                retain_first_intent(&mut right_intent, operations_card(right, snapshot));
+            },
         );
-        retain_first_intent(
-            intent,
-            status_card(&mut left, &snapshot.statuses, &snapshot.problem),
-        );
-        left.add_space(CARD_GAP);
-        retain_first_intent(intent, design_card(&mut left, app, snapshot));
-        let mut right = ui.new_child(
-            UiBuilder::new()
-                .max_rect(Rect::from_min_size(
-                    pos2(origin.x + inset + left_width + COLUMN_GAP, origin.y),
-                    vec2(right_width, unbounded),
-                ))
-                .layout(Layout::top_down(Align::Min)),
-        );
-        retain_first_intent(intent, context_card(&mut right, snapshot));
-        right.add_space(CARD_GAP);
-        retain_first_intent(intent, operations_card(&mut right, snapshot));
-        let used = left.min_rect().height().max(right.min_rect().height());
-        ui.allocate_rect(
-            Rect::from_min_size(origin, vec2(ui.available_width().max(1.0), used)),
-            Sense::hover(),
-        );
+        retain_first_intent(intent, left_intent);
+        retain_first_intent(intent, right_intent);
     } else {
-        ui.horizontal_top(|ui| {
-            ui.spacing_mut().item_spacing.x = 0.0;
-            ui.add_space(inset);
-            ui.allocate_ui_with_layout(
-                vec2(content_width, 1.0),
-                Layout::top_down(Align::Min),
-                |ui| {
-                    ui.set_width(content_width);
-                    retain_first_intent(
-                        intent,
-                        status_card(ui, &snapshot.statuses, &snapshot.problem),
-                    );
-                    ui.add_space(CARD_GAP);
-                    retain_first_intent(intent, context_card(ui, snapshot));
-                    ui.add_space(CARD_GAP);
-                    retain_first_intent(intent, design_card(ui, app, snapshot));
-                    ui.add_space(CARD_GAP);
-                    retain_first_intent(intent, operations_card(ui, snapshot));
-                },
+        page::inset_column(ui, inset, content_width, |ui| {
+            retain_first_intent(
+                intent,
+                status_card(ui, &snapshot.statuses, &snapshot.problem),
             );
+            ui.add_space(CARD_GAP);
+            retain_first_intent(intent, context_card(ui, snapshot));
+            ui.add_space(CARD_GAP);
+            retain_first_intent(intent, design_card(ui, app, snapshot));
+            ui.add_space(CARD_GAP);
+            retain_first_intent(intent, operations_card(ui, snapshot));
         });
     }
 }
@@ -889,76 +825,7 @@ fn overview_card(
     meta_color: Color32,
     body: impl FnOnce(&mut Ui) -> Option<OverviewIntent>,
 ) -> Option<OverviewIntent> {
-    let tokens = Tokens::get(ui.ctx());
-    let width = ui.available_width().max(1.0);
-    let mut intent = None;
-    let shown = egui::Frame::new()
-        .fill(tokens.color.bg_panel)
-        .stroke(Stroke::new(1.0, tokens.color.border))
-        .corner_radius(tokens.radius)
-        .show(ui, |ui| {
-            ui.spacing_mut().item_spacing.y = 0.0;
-            ui.set_width(width);
-            card_title_row(ui, title, meta, meta_color);
-            intent = body(ui);
-            ui.add_space(9.0);
-        });
-    ui.ctx().accesskit_node_builder(shown.response.id, |node| {
-        node.set_role(egui::accesskit::Role::Group);
-        node.set_label(title);
-    });
-    intent
-}
-
-fn card_title_row(ui: &mut Ui, title: &str, meta: &str, meta_color: Color32) {
-    let tokens = Tokens::get(ui.ctx());
-    let width = ui.available_width().max(1.0);
-    let (rect, response) = ui.allocate_exact_size(vec2(width, CARD_HEADER_HEIGHT), Sense::hover());
-    let radius = tokens.radius as u8;
-    ui.painter().rect_filled(
-        rect,
-        CornerRadius {
-            nw: radius,
-            ne: radius,
-            sw: 0,
-            se: 0,
-        },
-        tokens.color.bg_panel_2,
-    );
-    ui.painter().hline(
-        rect.x_range(),
-        rect.bottom(),
-        Stroke::new(1.0, tokens.color.border),
-    );
-    let meta_font = theme::mono(tokens::FS_0, FontWeight::Medium);
-    let meta = elide_text(ui, &meta.to_uppercase(), &meta_font, (width * 0.5).max(1.0));
-    let meta_width = ui
-        .painter()
-        .layout_no_wrap(meta.clone(), meta_font.clone(), Color32::WHITE)
-        .size()
-        .x;
-    ui.painter().text(
-        pos2(rect.right() - 10.0, rect.center().y),
-        Align2::RIGHT_CENTER,
-        &meta,
-        meta_font,
-        meta_color,
-    );
-    paint_elided(
-        ui,
-        pos2(rect.left() + 10.0, rect.center().y - tokens::FS_0 * 0.5),
-        &title.to_uppercase(),
-        theme::sans(tokens::FS_0, FontWeight::SemiBold),
-        tokens.color.text_dim,
-        (width - meta_width - 28.0).max(1.0),
-    );
-    response.widget_info(|| {
-        egui::WidgetInfo::labeled(
-            egui::WidgetType::Label,
-            ui.is_enabled(),
-            format!("{title}: {meta}"),
-        )
-    });
+    page::card(ui, title, meta, meta_color, body)
 }
 
 /// Summarise the status register beside the project name.
@@ -1182,14 +1049,7 @@ fn overview_header(
             },
         );
     });
-    ui.add_space(HEADER_BOTTOM);
-    let rule_width = ui.available_width().max(1.0);
-    let (rule_rect, _) = ui.allocate_exact_size(vec2(rule_width, 1.0), Sense::hover());
-    ui.painter().hline(
-        rule_rect.x_range(),
-        rule_rect.top(),
-        Stroke::new(1.0, tokens.color.border),
-    );
+    page::header_rule(ui);
     intent
 }
 
@@ -2406,60 +2266,6 @@ fn relative_time(timestamp_ms: u64, now_ms: u64) -> String {
 
 const fn singular_or_plural<'a>(count: usize, singular: &'a str, plural: &'a str) -> &'a str {
     if count == 1 { singular } else { plural }
-}
-
-fn paint_elided(
-    ui: &Ui,
-    position: egui::Pos2,
-    text: &str,
-    font: egui::FontId,
-    color: Color32,
-    max_width: f32,
-) {
-    let text = elide_text(ui, text, &font, max_width);
-    ui.painter()
-        .text(position, Align2::LEFT_TOP, text, font, color);
-}
-
-fn elide_text(ui: &Ui, text: &str, font: &egui::FontId, max_width: f32) -> String {
-    if max_width <= 0.0 {
-        return String::new();
-    }
-    if ui
-        .painter()
-        .layout_no_wrap(text.to_owned(), font.clone(), Color32::WHITE)
-        .size()
-        .x
-        <= max_width
-    {
-        return text.to_owned();
-    }
-    let characters = text.chars().collect::<Vec<_>>();
-    let mut low = 0;
-    let mut high = characters.len();
-    while low < high {
-        let midpoint = (low + high).div_ceil(2);
-        let candidate = characters[..midpoint]
-            .iter()
-            .copied()
-            .chain(std::iter::once('…'))
-            .collect::<String>();
-        let width = ui
-            .painter()
-            .layout_no_wrap(candidate, font.clone(), Color32::WHITE)
-            .size()
-            .x;
-        if width <= max_width {
-            low = midpoint;
-        } else {
-            high = midpoint - 1;
-        }
-    }
-    characters[..low]
-        .iter()
-        .copied()
-        .chain(std::iter::once('…'))
-        .collect()
 }
 
 #[cfg(test)]

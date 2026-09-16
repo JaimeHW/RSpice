@@ -1211,8 +1211,6 @@ pub struct WorkbenchState {
     #[serde(default)]
     pub project_dependency_selection: Option<String>,
     #[serde(default)]
-    pub project_recovery_filter: String,
-    #[serde(default)]
     pub project_checkpoint_selection: Option<String>,
     /// Device-local projection retained by the Library/Cellview specialist
     /// route. Authoritative library, cellview, symbol, and form records remain
@@ -1520,7 +1518,6 @@ impl Default for WorkbenchState {
             project_library_filter: String::new(),
             project_dependency_filter: String::new(),
             project_dependency_selection: None,
-            project_recovery_filter: String::new(),
             project_checkpoint_selection: None,
             library_cellview_page: LibraryCellviewPage::Libraries,
             verification_page: VerificationPage::Yield,
