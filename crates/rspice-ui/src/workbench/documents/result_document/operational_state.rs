@@ -890,6 +890,13 @@ pub(super) fn show_result_operational_status(
     if status.state == ResultOperationalState::Complete {
         return false;
     }
+    // An empty well is not an alarm. It reads the way an empty schematic
+    // sheet does: guidance set on the canvas, with no card behind it.
+    if status.blocks_visuals && status.state.category() == ResultOperationalCategory::Empty {
+        let response = show_empty_hint(ui, status);
+        announce_status(ui, &response, status);
+        return true;
+    }
     let t = Tokens::get(ui.ctx());
     let accent = match status.state.category() {
         ResultOperationalCategory::Normal | ResultOperationalCategory::Recovery => t.color.ok,
@@ -916,6 +923,23 @@ pub(super) fn show_result_operational_status(
         card.show(ui, &mut actions)
     };
     let OperationalCardActions { dismiss, highlight } = actions;
+    announce_status(ui, &response, status);
+    if dismiss {
+        state.ui.results.dismiss_runtime_condition();
+    }
+    if highlight {
+        if marked {
+            state.clear_failure_site_marking();
+            state.ui.results.marked_failure_run = None;
+        } else if state.highlight_active_failure_sites() {
+            state.ui.results.marked_failure_run = offer.as_ref().map(|offer| offer.run_sequence);
+        }
+    }
+    status.blocks_visuals
+}
+
+/// Name the state to assistive technology on whatever response shows it.
+fn announce_status(ui: &Ui, response: &egui::Response, status: &ResultOperationalStatus) {
     let accessible = format!(
         "{} status, {}: {} {}",
         status.state.id(),
@@ -934,18 +958,6 @@ pub(super) fn show_result_operational_status(
         );
         node.set_label(accessible);
     });
-    if dismiss {
-        state.ui.results.dismiss_runtime_condition();
-    }
-    if highlight {
-        if marked {
-            state.clear_failure_site_marking();
-            state.ui.results.marked_failure_run = None;
-        } else if state.highlight_active_failure_sites() {
-            state.ui.results.marked_failure_run = offer.as_ref().map(|offer| offer.run_sequence);
-        }
-    }
-    status.blocks_visuals
 }
 
 /// The card's own geometry, as `.viewer-operational-state` defines it: a
@@ -958,6 +970,83 @@ const OPERATIONAL_CARD_ICON: f32 = 20.0;
 const OPERATIONAL_CARD_ICON_GAP: f32 = 10.0;
 /// What the banner form keeps clear of the bar above and the viewer below.
 const OPERATIONAL_BANNER_INSET: i8 = 8;
+
+/// The empty schematic sheet's hint, as `schematic::view::scene` paints it:
+/// a medium title in dim text over regular lines in faint text.
+const EMPTY_HINT_TITLE_SIZE: f32 = 15.0;
+const EMPTY_HINT_LINE_SIZE: f32 = tokens::FS_1;
+/// Centre-to-centre spacing of that hint's rows: title to first line, then
+/// line to line.
+const EMPTY_HINT_TITLE_PITCH: f32 = 24.0;
+const EMPTY_HINT_LINE_PITCH: f32 = 20.0;
+
+/// Paint an empty state the way the schematic paints an empty sheet: bare
+/// centred text on the canvas, with no card, border, or glyph.
+///
+/// The copy wraps inside the card's bounded column, so a long sentence breaks
+/// into centred lines instead of running under the well's edges. A block
+/// taller than its well starts at the top, like the card.
+fn show_empty_hint(ui: &Ui, status: &ResultOperationalStatus) -> egui::Response {
+    let t = Tokens::get(ui.ctx());
+    let well = ui.available_rect_before_wrap();
+    let wrap =
+        (well.width() - 2.0 * OPERATIONAL_CARD_GUTTER).clamp(1.0, OPERATIONAL_CARD_MAX_WIDTH);
+    let painter = ui.painter();
+    let set = |copy: &str, font: egui::FontId, color: egui::Color32| {
+        let mut job = egui::text::LayoutJob::simple(copy.to_owned(), font, color, wrap);
+        job.halign = egui::Align::Center;
+        painter.layout_job(job)
+    };
+
+    let mut rows = vec![set(
+        status.state.label(),
+        theme::sans(EMPTY_HINT_TITLE_SIZE, FontWeight::Medium),
+        t.color.text_dim,
+    )];
+    let line = theme::sans(EMPTY_HINT_LINE_SIZE, FontWeight::Regular);
+    rows.extend(
+        status
+            .detail
+            .as_deref()
+            .into_iter()
+            .chain([status.state.message(), status.state.recovery()])
+            .map(|copy| set(copy, line.clone(), t.color.text_faint)),
+    );
+
+    // Each galley is set in one font, so its rows share one height. The pitch
+    // is measured between adjacent rows' centres, which keeps unwrapped copy
+    // exactly where the schematic puts its lines.
+    let row_height = |galley: &egui::Galley| galley.size().y / galley.rows.len().max(1) as f32;
+    let mut offsets = Vec::with_capacity(rows.len());
+    let mut height = 0.0;
+    for (index, galley) in rows.iter().enumerate() {
+        if let Some(previous) = index.checked_sub(1).map(|previous| &rows[previous]) {
+            let pitch = if index == 1 {
+                EMPTY_HINT_TITLE_PITCH
+            } else {
+                EMPTY_HINT_LINE_PITCH
+            };
+            height += (pitch - 0.5 * (row_height(previous) + row_height(galley))).max(0.0);
+        }
+        offsets.push(height);
+        height += galley.size().y;
+    }
+
+    let top = (well.center().y - 0.5 * height)
+        .max(well.top() + OPERATIONAL_CARD_GUTTER)
+        .round();
+    let mut painted = egui::Rect::NOTHING;
+    for (galley, offset) in rows.into_iter().zip(offsets) {
+        let origin = egui::pos2(well.center().x, top + offset);
+        painted = painted.union(galley.rect.translate(origin.to_vec2()));
+        painter.galley(origin, galley, t.color.text_faint);
+    }
+    ui.interact(
+        painted,
+        ui.id().with("result-operational-empty-hint"),
+        egui::Sense::hover(),
+    )
+}
 
 /// The glyph that stands for a category before its sentence is read.
 const fn operational_icon(category: ResultOperationalCategory) -> WorkbenchIcon {
@@ -1383,7 +1472,7 @@ mod presentation_tests {
     /// well's left edge, so the card landed neither centred nor predictably.
     #[test]
     fn a_blocking_card_is_centred_in_the_well_it_owns() {
-        let (well, card) = centered_card(ResultOperationalState::NoDataset, WELL);
+        let (well, card) = centered_card(ResultOperationalState::Corrupted, WELL);
 
         assert!(
             (card.center().x - well.center().x).abs() <= 1.0,
@@ -1404,13 +1493,13 @@ mod presentation_tests {
     /// differently sized card.
     #[test]
     fn card_width_is_the_bounded_column_and_not_the_length_of_the_sentence() {
-        let (_, empty) = centered_card(ResultOperationalState::NoDataset, WELL);
+        let (_, corrupted) = centered_card(ResultOperationalState::Corrupted, WELL);
         let (_, partial) = centered_card(ResultOperationalState::Partial, WELL);
         let (_, offline) = centered_card(ResultOperationalState::Offline, WELL);
 
-        assert_eq!(empty.width(), OPERATIONAL_CARD_MAX_WIDTH);
-        assert_eq!(partial.width(), empty.width());
-        assert_eq!(offline.width(), empty.width());
+        assert_eq!(corrupted.width(), OPERATIONAL_CARD_MAX_WIDTH);
+        assert_eq!(partial.width(), corrupted.width());
+        assert_eq!(offline.width(), corrupted.width());
     }
 
     /// Below the bounded column the card keeps its gutter rather than
@@ -1418,7 +1507,7 @@ mod presentation_tests {
     #[test]
     fn a_narrow_well_keeps_the_card_inside_its_gutter() {
         let narrow = egui::vec2(360.0, 540.0);
-        let (well, card) = centered_card(ResultOperationalState::NoDataset, narrow);
+        let (well, card) = centered_card(ResultOperationalState::Corrupted, narrow);
 
         assert_eq!(card.width(), well.width() - 2.0 * OPERATIONAL_CARD_GUTTER);
         assert!(
@@ -1432,9 +1521,94 @@ mod presentation_tests {
     #[test]
     fn a_card_taller_than_its_well_starts_at_the_top() {
         let short = egui::vec2(420.0, 90.0);
-        let (well, card) = centered_card(ResultOperationalState::NoDataset, short);
+        let (well, card) = centered_card(ResultOperationalState::Corrupted, short);
 
         assert!(card.height() > well.height(), "the case under test");
         assert_eq!(card.top(), (well.top() + OPERATIONAL_CARD_GUTTER).round());
+    }
+
+    /// Lay one empty-state hint out headlessly and report the well, the
+    /// rectangle its text took, and every shape the pass painted.
+    fn empty_hint(
+        state: ResultOperationalState,
+        well_size: egui::Vec2,
+    ) -> (Rect, Rect, Vec<egui::epaint::ClippedShape>) {
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let status = ResultOperationalStatus::canonical(state, true);
+        assert_eq!(state.category(), ResultOperationalCategory::Empty);
+        let mut well = Rect::NOTHING;
+        let mut text = Rect::NOTHING;
+        let mut shapes = Vec::new();
+        for _ in 0..3 {
+            let input = egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, well_size)),
+                ..Default::default()
+            };
+            shapes = ctx
+                .run_ui(input, |ui| {
+                    well = ui.available_rect_before_wrap();
+                    text = show_empty_hint(ui, &status).rect;
+                })
+                .shapes;
+        }
+        (well, text, shapes)
+    }
+
+    /// An empty well reads like an empty schematic sheet: centred text with
+    /// nothing painted behind it.
+    #[test]
+    fn an_empty_state_is_centred_text_with_no_card() {
+        for state in [
+            ResultOperationalState::NoDataset,
+            ResultOperationalState::NoProject,
+        ] {
+            let (well, text, shapes) = empty_hint(state, WELL);
+
+            assert_eq!(shapes.len(), 3, "{state:?}: title, message, recovery");
+            assert!(
+                shapes
+                    .iter()
+                    .all(|clipped| matches!(clipped.shape, egui::Shape::Text(_))),
+                "{state:?} painted something other than text: {shapes:?}"
+            );
+            assert!(
+                (text.center().x - well.center().x).abs() <= 1.0,
+                "{state:?}: text centre {:?} is not the well centre {:?}",
+                text.center(),
+                well.center()
+            );
+            assert!(
+                (text.center().y - well.center().y).abs() <= 1.0,
+                "{state:?}: text centre {:?} is not the well centre {:?}",
+                text.center(),
+                well.center()
+            );
+        }
+    }
+
+    /// On a phone-width well the sentences wrap inside the gutter instead of
+    /// running past the canvas edges.
+    #[test]
+    fn a_narrow_well_wraps_the_hint_inside_its_gutter() {
+        let narrow = egui::vec2(360.0, 540.0);
+        let (well, text, _) = empty_hint(ResultOperationalState::NoDataset, narrow);
+
+        assert!(
+            well.shrink(OPERATIONAL_CARD_GUTTER - 0.5)
+                .contains_rect(text),
+            "{text:?} escaped the gutter of {well:?}"
+        );
+    }
+
+    /// A hint taller than its well is pinned to the top, so the title stays
+    /// on screen.
+    #[test]
+    fn a_hint_taller_than_its_well_starts_at_the_top() {
+        let short = egui::vec2(420.0, 60.0);
+        let (well, text, _) = empty_hint(ResultOperationalState::NoDataset, short);
+
+        assert!(text.height() > well.height(), "the case under test");
+        assert_eq!(text.top(), (well.top() + OPERATIONAL_CARD_GUTTER).round());
     }
 }
