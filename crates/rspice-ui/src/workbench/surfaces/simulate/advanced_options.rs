@@ -1,17 +1,17 @@
-//! One analysis's advanced options, by section.
+//! What one analysis's advanced options resolve to, and who decided each.
 //!
-//! The resolution ledger above this panel answers "which analyses depart from
-//! the plan, and where". This one answers the other question: for *this*
-//! analysis, what does every advanced option actually resolve to, and who
-//! decided it.
+//! In Spectre and ADS an analysis's options belong to the analysis, so they are
+//! drawn as fields on the analysis's own form — the same two-column grid that
+//! carries a transient's stop, step and start times, with each field's hint
+//! slot naming where its value came from. This file is the half that decides
+//! *what* those fields say; `analysis_form/options.rs` draws them.
 //!
-//! So every option the catalog knows earns a row, not only the authored ones.
-//! A row an analysis has not touched still states the value its solve will
-//! use and names the plan as the owner; a row its kind cannot carry states the
-//! refusal in place rather than vanishing, because an option that is simply
-//! absent reads as an oversight and sends a reader looking for it elsewhere.
+//! Every option the catalogue knows earns a row here, including the ones no
+//! form offers: the Solver page's resolution ledger reports the plan whole, and
+//! it reads these same rows. [`form_rows`] is what narrows them to the ones one
+//! analysis owns.
 //!
-//! The origin column is the whole point of the panel and has four values:
+//! The origin has four values:
 //!
 //! - **plan policy** — the analysis states nothing, so the plan's own
 //!   `.OPTIONS` block decides.
@@ -21,37 +21,27 @@
 //!   the engine's own dialect default stands.
 //! - a **refusal sentence** — the option cannot be carried, and the sentence
 //!   says who owns it instead. The accuracy tier's ownership of the Newton
-//!   budget is the one a reader meets most often.
+//!   budget is the one a reader meets most often. A refused option is given no
+//!   field: a control that authors a value the solve discards is worse than no
+//!   control, and the ledger has the room to say who owns it.
 //!
 //! A refusal is not always a property of the kind. Five of these options land
 //! on fields the analysis's *own* accuracy tier and homotopy control assign,
 //! and both are applied after the deck's `.OPTIONS` are resolved, so whether
 //! such an option reaches the solve depends on which tier and which homotopy
 //! this instance carries. Those rows are refused per instance, and their
-//! effective cell states the owner's value read back out of the same two
-//! functions the solve applies — never the plan preset, which is precisely
-//! the number the solve is about to discard.
-
-use std::cell::{Cell, RefCell};
-
-use egui::Ui;
+//! effective value is the owner's, read back out of the same two functions the
+//! solve applies — never the plan preset, which is precisely the number the
+//! solve is about to discard.
 
 use crate::product::AnalysisInstanceId;
 use crate::simulation::dialog::SimulationOptions;
 use crate::simulation::plan::{
     AnalysisDraft, AnalysisKind, AnalysisNumericOverride, NumericOverrideOption, OverrideSection,
-    OverrideValueKind, SolverOwnership,
+    SolverOwnership,
 };
-use crate::ui::theme::{self, FontWeight};
-use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{Button, mono_input};
 use crate::workbench::RSpiceApp;
-use crate::workbench::state::AdvancedOptionsEditor;
-
-use super::page_kit::{RowPress, Tone, card_note, card_with_head, ledger_head, ledger_row};
-
-/// Analysis · Option · Effective value · Origin, and the editor's own cell.
-const COLUMNS: [f32; 4] = [0.30, 0.22, 0.30, 0.18];
+use crate::workbench::state::WorkbenchState;
 
 pub(super) const PLAN_ORIGIN: &str = "plan policy";
 pub(super) const OVERRIDE_ORIGIN: &str = "analysis override";
@@ -62,9 +52,14 @@ pub(super) struct AdvancedOptionRow {
     pub(super) option: NumericOverrideOption,
     /// What the solve will use.
     pub(super) effective: String,
+    /// What the plan's own block resolves this option to, which is the policy
+    /// the analysis departs *from*. Carried beside the effective value because
+    /// a two-state control has no empty state to clear through, so choosing the
+    /// plan's own setting is how such a field returns to it.
+    pub(super) preset: String,
     pub(super) origin: &'static str,
     /// The value this analysis states, when it states one. `None` means the
-    /// row is inherited and "Clear" has nothing to do.
+    /// row is inherited and there is nothing to clear.
     pub(super) authored: Option<String>,
     /// Set when the kind cannot carry the option at all.
     pub(super) refused: bool,
@@ -167,6 +162,7 @@ fn row(
         return AdvancedOptionRow {
             option,
             effective: refused_effective(option, draft, ownership, options),
+            preset,
             origin: reason,
             authored: None,
             refused: true,
@@ -184,6 +180,7 @@ fn row(
             AdvancedOptionRow {
                 option,
                 effective,
+                preset,
                 origin,
                 authored: Some(authored),
                 refused: false,
@@ -192,12 +189,13 @@ fn row(
         None => AdvancedOptionRow {
             option,
             // `plan_preset_value` says so itself when the plan states nothing.
-            origin: if preset == "engine default" {
+            origin: if preset == ENGINE_ORIGIN {
                 ENGINE_ORIGIN
             } else {
                 PLAN_ORIGIN
             },
-            effective: preset,
+            effective: preset.clone(),
+            preset,
             authored: None,
             refused: false,
         },
@@ -267,336 +265,202 @@ pub(super) fn refused_effective(
     }
 }
 
-/// The analysis this panel is open on, if any.
-fn open_instance(app: &RSpiceApp) -> Option<AnalysisInstanceId> {
-    let editor = app.state.workbench.advanced_options.as_ref()?;
-    let plan = app.state.sim_setup.stable_analysis_plan().ok()?;
-    // A plan edit elsewhere can retire the instance the panel was opened on.
-    plan.instance(editor.instance).map(|_| editor.instance)
+/// What a press on the section asked the application to do.
+///
+/// Returned rather than performed, because [`section`] reads the application
+/// and never writes it. The split is the same one `participation_action` makes
+/// one level up (`simulate.rs`): a command that moves focus off a form field
+/// must be dispatched before the editor compares its draft, or pressing it
+/// would commit a half-typed field on the way out.
+/// One change an analysis's advanced-option fields asked for.
+///
+/// Returned rather than performed, because the fields are drawn from a shared
+/// reference and never write through it. The split is the one the form already
+/// makes for its own values: an edit is collected while the frame is drawing
+/// and committed after it has closed, so a control that moves focus off a
+/// half-typed field cannot commit that field on the way out.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum OptionEdit {
+    /// Author, or re-author, one option at the value its field now holds.
+    Set(NumericOverrideOption, String),
+    /// Return one option to the plan.
+    Clear(NumericOverrideOption),
 }
 
-pub(super) fn panel(ui: &mut Ui, app: &mut RSpiceApp) {
-    let Some(instance) = open_instance(app) else {
-        return;
-    };
-    let Ok(plan) = app.state.sim_setup.stable_analysis_plan() else {
-        return;
-    };
-    let Some(target) = plan.instance(instance) else {
-        return;
-    };
-    let kind = target.kind();
-    let name = target.display_name().to_owned();
-    // The committed plan options, not the page's draft: this panel reports
-    // what a run would resolve to, and an uncommitted edit above it is not
-    // yet part of any run.
-    let sections = sections(
-        kind,
-        target.draft(),
-        target.numeric_override(),
-        &app.state.sim_setup.options,
-    );
-    let editing = app
-        .state
-        .workbench
-        .advanced_options
-        .as_ref()
-        .and_then(|editor| editor.editing);
-    let error = app
-        .state
-        .workbench
-        .advanced_options
-        .as_ref()
-        .and_then(|editor| editor.error.clone());
-    let departures = sections
-        .iter()
-        .flat_map(|section| &section.rows)
-        .filter(|row| row.authored.is_some())
-        .count();
-    let status = if departures == 0 {
-        format!("{} resolves entirely to the plan policy", kind.label())
-    } else {
-        format!("{departures} of this analysis's options depart from the plan")
-    };
+/// Which advanced options an analysis's own form offers as fields.
+///
+/// Not all of them. A global solver bound — the Newton update bound, the
+/// floors, the pivot thresholds, the matrix backend, device bypass — is the
+/// plan's policy and is owned by the Solver page: the same number resolved
+/// twenty ways per analysis is not a feature, it is twenty ways for one deck to
+/// disagree with itself. What an analysis's form offers is what belongs to that
+/// analysis:
+///
+/// * a kind that advances time owns how time advances — the integration method,
+///   the truncation bounds, the step floor, the charge floor and the per-step
+///   iteration budget;
+/// * the operating point and the DC sweep own how their solve recovers — the
+///   Newton budget and the four continuation aids with the damping strategy.
+///
+/// Two exclusions on top of that. The transient's step ceiling is its own `Max
+/// step` field and is not repeated here. And an option the instance cannot
+/// carry earns no field at all: a control that authors a value the solve
+/// discards is worse than no control, and the Solver page's ledger has the room
+/// to say who owns it instead.
+///
+/// The one exception is legacy data. A project saved before this partition can
+/// hold a per-analysis override of a global option, and dropping it silently
+/// would change what the run resolves to. So a global option earns a field
+/// exactly while the analysis states one — visible, readable, and clearable —
+/// and there is no path that authors a new one.
+pub(super) fn form_rows(
+    kind: AnalysisKind,
+    draft: &AnalysisDraft,
+    record: Option<&AnalysisNumericOverride>,
+    options: &SimulationOptions,
+) -> Vec<AdvancedOptionRow> {
+    sections(kind, draft, record, options)
+        .into_iter()
+        .flat_map(|section| section.rows)
+        .filter(|row| !row.refused && offered_on_the_form(row.option, kind, row.authored.is_some()))
+        .collect()
+}
 
-    let close = Cell::new(false);
-    let reveal = Cell::new(false);
-    let picked = Cell::new(None::<NumericOverrideOption>);
-    let clear = Cell::new(None::<NumericOverrideOption>);
-    let apply = Cell::new(false);
-    let value = RefCell::new(
-        app.state
-            .workbench
-            .advanced_options
-            .as_ref()
-            .map_or_else(String::new, |editor| editor.value.clone()),
-    );
+/// Whether one option belongs on this kind's own form. See [`form_rows`].
+fn offered_on_the_form(option: NumericOverrideOption, kind: AnalysisKind, authored: bool) -> bool {
+    use NumericOverrideOption as O;
 
-    card_with_head(
-        ui,
-        |ui| {
-            super::page_kit::card_head_row(
-                ui,
-                &format!("Advanced options · {name}"),
-                Some((status.as_str(), Tone::Neutral)),
-                |ui| {
-                    // Right to left, so Close stays furthest right and the
-                    // hop back sits beside it.
-                    close.set(Button::new("Close").show(ui).clicked());
-                    reveal.set(Button::new(REVEAL_ACTION).show(ui).clicked());
-                },
-            );
-        },
-        |ui| {
-            for section in &sections {
-                ledger_head(
-                    ui,
-                    &COLUMNS,
-                    &[section.section.title(), "Effective", "Origin", ""],
-                );
-                for row in &section.rows {
-                    let is_editing = editing == Some(row.option);
-                    if is_editing {
-                        editor_row(ui, row, &value, &apply, &clear);
-                        continue;
+    match option {
+        // The transient's own `Max step` field writes this one.
+        O::MaximumTimestep => authored,
+        O::IntegrationMethod
+        | O::Trtol
+        | O::LteReltol
+        | O::LteAbstol
+        | O::MinTimestep
+        | O::Chgtol
+        | O::Itl4 => true,
+        O::Itl1
+        | O::GminStepping
+        | O::SourceStepping
+        | O::PseudoTransient
+        | O::ArcLength
+        | O::Damping => {
+            matches!(kind, AnalysisKind::OperatingPoint | AnalysisKind::DcSweep) || authored
+        }
+        _ => authored,
+    }
+}
+
+/// The word the field's hint slot states about where its value came from.
+///
+/// Three words, because three is how many origins an option can have once the
+/// refused rows are gone: the plan's own block, this analysis's record, or the
+/// engine's dialect default where the plan states nothing at all.
+pub(super) fn origin_hint(row: &AdvancedOptionRow) -> &'static str {
+    if row.authored.is_some() {
+        return "override";
+    }
+    if row.origin == ENGINE_ORIGIN {
+        return ENGINE_ORIGIN;
+    }
+    PLAN_ORIGIN
+}
+
+/// What a well asks for once the reader has let go of it.
+///
+/// Emptying a well is how a bound returns to the plan, so an empty one clears
+/// rather than refusing. A well let go of unchanged asks for nothing: tabbing
+/// through a form must not author twenty overrides equal to the policy they
+/// came from.
+pub(super) fn well_edit(row: &AdvancedOptionRow, text: &str) -> Option<OptionEdit> {
+    let text = text.trim();
+    if text.is_empty() {
+        return row
+            .authored
+            .is_some()
+            .then_some(OptionEdit::Clear(row.option));
+    }
+    (text != row.effective).then(|| OptionEdit::Set(row.option, text.to_owned()))
+}
+
+/// What a switch or a chooser asks for when its setting moves.
+///
+/// A two-state control has no empty state to clear through, so the plan's own
+/// value is the clear: choosing what the plan already resolves to returns the
+/// option to the plan rather than authoring an override that departs from
+/// nothing. That is what keeps the hint slot honest — a field reading `override`
+/// is a field whose value actually differs — and what keeps a reader who
+/// flipped a switch from being unable to put it back.
+pub(super) fn setting_edit(row: &AdvancedOptionRow, chosen: &str) -> Option<OptionEdit> {
+    if chosen.eq_ignore_ascii_case(&row.preset) {
+        return row
+            .authored
+            .is_some()
+            .then_some(OptionEdit::Clear(row.option));
+    }
+    (Some(chosen) != row.authored.as_deref())
+        .then(|| OptionEdit::Set(row.option, chosen.to_owned()))
+}
+
+/// Commit what the option fields collected, after the form frame has closed.
+///
+/// Both arms go through the plan-configuration transaction the Solver page
+/// owns rather than a second writer here. One writer per fact is what stops the
+/// two surfaces that report an override from disagreeing about what one is, and
+/// it is where a refusal is announced: `write_numeric_record` states a value the
+/// record refuses through the same funnel every refused plan command uses, and
+/// `commit_numeric_override` states one the plan refuses.
+pub(super) fn commit(app: &mut RSpiceApp, instance: AnalysisInstanceId, edits: &[OptionEdit]) {
+    for edit in edits {
+        // The outcome is announced by the writer, not here: a second report of
+        // one refusal is a second toast for one press.
+        let _ = match edit {
+            OptionEdit::Set(option, authored) => {
+                super::page_solver::write_numeric_record(app, instance, *option, authored.trim())
+            }
+            OptionEdit::Clear(option) => {
+                let cleared = app
+                    .state
+                    .sim_setup
+                    .stable_analysis_plan()
+                    .ok()
+                    .and_then(|plan| plan.instance(instance))
+                    .and_then(|target| target.numeric_override().cloned())
+                    .map(|mut record| {
+                        record.clear(*option);
+                        record
+                    });
+                match cleared {
+                    Some(record) => {
+                        super::lifecycle::commit_numeric_override(app, instance, Some(record))
                     }
-                    let response = ledger_row(
-                        ui,
-                        &COLUMNS,
-                        &[
-                            (row.option.label(), Tone::Neutral),
-                            (
-                                row.effective.as_str(),
-                                match () {
-                                    () if row.refused => Tone::Neutral,
-                                    () if row.authored.is_some() => Tone::Warn,
-                                    () => Tone::Accent,
-                                },
-                            ),
-                            (row.origin, Tone::Neutral),
-                            (if row.refused { "—" } else { "Edit" }, Tone::Neutral),
-                        ],
-                        false,
-                        // A refused option has no editor to open, so its row
-                        // states the owner's value and answers no press.
-                        if row.refused {
-                            RowPress::Ignored
-                        } else {
-                            RowPress::Taken
-                        },
-                    );
-                    // The origin cell carries a whole sentence for a refused
-                    // row and is the first to elide, so the hover restates it
-                    // together with the engine site that reads the option.
-                    let response = response.on_hover_text(format!(
-                        "{}\n\n{} resolves onto {}, read at {}.",
-                        row.origin,
-                        row.option.key(),
-                        row.option.config_field(),
-                        row.option.consumer()
-                    ));
-                    if response.clicked() {
-                        picked.set(Some(row.option));
-                    }
+                    None => Ok(()),
                 }
             }
-            if let Some(error) = error.as_ref() {
-                card_note(ui, error);
-            }
-            card_note(
-                ui,
-                "Every row states what this analysis's solve will use. An inherited row follows \
-                 the plan; an authored one reaches the engine as a second options block in this \
-                 task's own deck, so it wins for exactly the key it names — except the step \
-                 ceiling, which the transient clamps against the plan's, so the tighter of the \
-                 two is what runs. A refused row states its owner's value, or an em dash where \
-                 the option never reaches the solve at all. Clearing an override is how the \
-                 analysis returns to the plan.",
-            );
-        },
-    );
-
-    if reveal.get() {
-        reveal_in_analyses(&mut app.state.workbench, instance);
-        return;
-    }
-    if close.get() {
-        app.state.workbench.advanced_options = None;
-        return;
-    }
-    if let Some(editor) = app.state.workbench.advanced_options.as_mut() {
-        editor.value = value.into_inner();
-    }
-    if let Some(option) = picked.get() {
-        let seeded = sections
-            .iter()
-            .flat_map(|section| &section.rows)
-            .find(|row| row.option == option)
-            .map(|row| row.effective.clone())
-            .unwrap_or_default();
-        if let Some(editor) = app.state.workbench.advanced_options.as_mut() {
-            editor.editing = Some(option);
-            editor.value = seeded;
-            editor.error = None;
-        }
-        return;
-    }
-    // Both commands go through the plan transaction the Solver page already
-    // owns, rather than a second writer here. One writer per fact is what
-    // stops the two surfaces disagreeing about what an override is.
-    if let Some(option) = clear.get() {
-        let cleared = app
-            .state
-            .sim_setup
-            .stable_analysis_plan()
-            .ok()
-            .and_then(|plan| plan.instance(instance))
-            .and_then(|target| target.numeric_override().cloned())
-            .map(|mut record| {
-                record.clear(option);
-                record
-            });
-        let outcome = match cleared {
-            Some(record) => super::lifecycle::commit_numeric_override(app, instance, Some(record)),
-            None => Ok(()),
         };
-        if let Some(editor) = app.state.workbench.advanced_options.as_mut() {
-            editor.editing = None;
-            editor.error = outcome.err();
-        }
-        return;
-    }
-    if apply.get()
-        && let Some(option) = editing
-    {
-        let authored = app
-            .state
-            .workbench
-            .advanced_options
-            .as_ref()
-            .map(|editor| editor.value.trim().to_owned())
-            .unwrap_or_default();
-        let outcome = super::page_solver::write_numeric_record(app, instance, option, &authored);
-        if let Some(editor) = app.state.workbench.advanced_options.as_mut() {
-            editor.error = outcome.as_ref().err().cloned();
-            if outcome.is_ok() {
-                editor.editing = None;
-            }
-        }
     }
 }
 
-/// The row under edit: the option's name, an input, and the two commands.
-fn editor_row(
-    ui: &mut Ui,
-    row: &AdvancedOptionRow,
-    value: &RefCell<String>,
-    apply: &Cell<bool>,
-    clear: &Cell<Option<NumericOverrideOption>>,
-) {
-    let color = Tokens::get(ui.ctx()).color;
-    // The two text cells of an editing row sit in the same columns a read-only
-    // row paints, so they take that row's type: `ledger_row` writes every cell
-    // in mono at the token base size, and a bare `label` here painted egui's
-    // 13 px default beside its own mono neighbours.
-    let (_, cells) = super::page_kit::ledger_row_cells(ui, &COLUMNS);
-    let mut name = super::page_kit::cell_ui(ui, cells[0]);
-    name.label(
-        egui::RichText::new(row.option.label())
-            .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-            .color(color.text_dim),
-    );
-
-    let mut input = super::page_kit::cell_ui(ui, cells[1]);
-    // A boolean is not free text. Typing `on` into a well that also accepts
-    // `3.25e-7` invites a spelling the record then refuses, so the two
-    // settings a flag has are the control.
-    if row.option.value_kind() == OverrideValueKind::Flag {
-        let mut text = value.borrow_mut();
-        for setting in ["on", "off"] {
-            let button = Button::new(setting);
-            // The accent is the current setting, so the pair reads as a state
-            // rather than as two commands.
-            let button = if text.trim().eq_ignore_ascii_case(setting) {
-                button.accent()
-            } else {
-                button
-            };
-            if button.show(&mut input).clicked() {
-                *text = setting.to_owned();
-            }
-        }
-    } else {
-        let width = input.available_width();
-        let mut text = value.borrow_mut();
-        mono_input(&mut input, row.option.label(), &mut text, width)
-            .on_hover_text(row.option.value_hint());
-    }
-
-    // The hint sits where the origin does on a read-only row: an editing row
-    // has no origin yet, and the shape a value must take is what a reader
-    // needs in that instant instead. Faint rather than dim, because the origin
-    // it stands in for is a fact about the row and this is guidance about the
-    // well beside it.
-    let mut hint = super::page_kit::cell_ui(ui, cells[2]);
-    hint.label(
-        egui::RichText::new(row.option.value_hint())
-            .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-            .color(color.text_faint),
-    );
-
-    let mut actions = super::page_kit::cell_ui(ui, cells[3]);
-    if Button::new("Apply").show(&mut actions).clicked() {
-        apply.set(true);
-    }
-    if Button::new("Clear")
-        .enabled(row.authored.is_some())
-        .show(&mut actions)
-        .clicked()
-    {
-        clear.set(Some(row.option));
-    }
-}
-
-/// What the head's hop back to the analysis is called.
+///
+/// Two surfaces send a reader here — the Solver page's resolution ledger and a
+/// refused plan removal — and `page_tests/plan_removal.rs` pins this equal to
+/// `workbench::app::REVEAL_BLOCKER` so the two cannot word one hop two ways.
 pub(super) const REVEAL_ACTION: &str = "Open in Analyses";
 
-/// Show the analysis this panel is open on, on the page that edits it.
+/// Show one analysis on the page that edits it.
 ///
-/// The route in is one-way otherwise. `Options…` on the analysis header sends
-/// the reader to the Solver page and opens this panel there, and the only
-/// control the panel carried was `Close` — which leaves them on Solver, three
-/// routes away from the form they came from, with nothing on screen naming the
-/// way back. The two facts the Analyses page needs are the page and the
-/// instance, and both are already in hand here.
-///
-/// The panel is deliberately left open. This is a hop, not a dismissal: the
-/// reader who returns to Solver finds the same analysis's options where they
-/// left them, and `Close` remains the way to say they are done with it.
-pub(super) fn reveal_in_analyses(
-    workbench: &mut crate::workbench::state::WorkbenchState,
-    instance: AnalysisInstanceId,
-) {
+/// The two facts a hop needs are the route and the instance, and a caller
+/// holding either of the surfaces that hop has both. Takes the workbench rather
+/// than the application: moving what is on screen touches nothing else, and a
+/// handler that asked for the whole application could mutate every subsystem to
+/// do it.
+pub(super) fn reveal_in_analyses(workbench: &mut WorkbenchState, instance: AnalysisInstanceId) {
     workbench.simulation_page = crate::workbench::state::SimulationPage::Analyses;
     workbench.active_analysis_instance = Some(instance);
 }
 
-/// Open the panel on one analysis.
-///
-/// Takes the workbench rather than the application: opening a panel is a
-/// change to what is on screen and touches nothing else, and a handler that
-/// asked for the whole application could mutate every subsystem to do it.
-pub(super) fn open_for_analysis(
-    workbench: &mut crate::workbench::state::WorkbenchState,
-    instance: AnalysisInstanceId,
-) {
-    workbench.advanced_options = Some(AdvancedOptionsEditor {
-        instance,
-        editing: None,
-        value: String::new(),
-        error: None,
-    });
-}
-
+#[cfg(test)]
+mod field_tests;
 #[cfg(test)]
 mod tests;

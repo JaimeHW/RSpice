@@ -5,6 +5,12 @@
 //! does; validation is rendered by the caller.
 
 mod dc_sweep;
+/// Kept a module of its own rather than a branch of [`form`]: an analysis's
+/// advanced options are the same fields in the same grid, but which ones an
+/// analysis owns is a question about the option catalogue, not about the kind's
+/// own parameters. It is `pub(super)` so the route can draw them after the
+/// form's own fields; the primitives it draws with stay private here.
+pub(super) mod options;
 mod pss;
 mod run_space;
 mod stb_probe;

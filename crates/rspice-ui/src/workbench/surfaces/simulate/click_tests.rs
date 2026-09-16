@@ -691,63 +691,147 @@ fn adding_an_analysis_from_another_route_opens_the_catalogue_and_lands_on_the_ne
     );
 }
 
-// ------------------------------------------------ advanced options hand-back
+// --------------------------------------------- the Solver ledger's own hop
 
-/// The advanced-options panel hands the reader back to its analysis.
+/// A departed row on the Solver ledger opens the analysis that authored it.
 ///
-/// `Options…` on the analysis header is a hop: it selects the Solver route and
-/// opens the sectioned panel there, on the instance it was pressed for. Until
-/// this control the only way out was `Close`, which leaves the reader on
-/// Solver with the analysis they asked about three routes away and nothing on
-/// screen naming it.
+/// The ledger is a reader: it reports every option each enabled analysis
+/// resolves to across the whole plan, and the authoring is a field on that
+/// analysis's own form. So the press is the whole of the route between them,
+/// and both facts it has to carry are asserted — the page and the analysis.
 ///
-/// The selection starts on a *different* instance, so the assertion is that
-/// the hop carried the panel's own subject rather than that it left whatever
-/// was already selected in place.
+/// The selection starts on a *different* instance, so this shows the press
+/// carried the pressed row's subject rather than leaving whatever was already
+/// selected in place.
+///
+/// The row is found by the analysis it names, which is what `ledger_row`
+/// publishes for a row whose click is read. The rows that state the plan's own
+/// policy take no press and announce themselves as labels, so they are not
+/// candidates here and the match stays unambiguous.
 #[test]
-fn open_in_analyses_returns_the_advanced_options_panel_to_its_analysis() {
-    use crate::simulation::plan::AnalysisKind;
+fn a_departed_row_on_the_solver_ledger_opens_its_analysis_advanced_options() {
+    use crate::simulation::plan::{
+        AnalysisDraft, AnalysisKind, AnalysisNumericOverride, NumericOverrideOption,
+        SolverOwnership,
+    };
 
     let mut app = RSpiceApp::test_instance();
-    let (first, reported) = {
+    let (other, reported) = {
         let plan = app
             .state
             .sim_setup
             .stable_analysis_plan_mut()
             .expect("the test instance has a stable plan");
-        while plan.instances().len() < 2 {
-            plan.insert(AnalysisKind::Transient)
-                .expect("a transient inserts");
-        }
-        let ids = plan
+        let transient = plan
             .instances()
             .iter()
+            .find(|instance| matches!(instance.draft(), AnalysisDraft::Transient(_)))
             .map(|instance| instance.id())
-            .collect::<Vec<_>>();
-        (ids[0], ids[ids.len() - 1])
+            .expect("the default plan runs a transient");
+        let (other, _) = plan
+            .insert(AnalysisKind::OperatingPoint)
+            .expect("an operating point inserts");
+        let mut record = AnalysisNumericOverride::default();
+        record
+            .set_for_instance(
+                AnalysisKind::Transient,
+                SolverOwnership::NONE,
+                NumericOverrideOption::Reltol,
+                "2e-4",
+            )
+            .expect("a transient carries its own update bound");
+        plan.set_numeric_override(transient, Some(record))
+            .expect("the plan accepts a bound the transient can use");
+        (other, transient)
     };
-    assert_ne!(first, reported, "the fixture needs two distinct analyses");
-    // The same entry point the analysis header's Options… uses, so what this
-    // presses is the panel the product opens rather than one arranged here.
-    super::page_solver::open_for_analysis(&mut app, reported)
-        .expect("a transient carries authorable options");
-    app.state.workbench.active_analysis_instance = Some(first);
+    app.state.workbench.active_analysis_instance = Some(other);
+    let name = app
+        .state
+        .sim_setup
+        .stable_analysis_plan()
+        .expect("the plan survives the override")
+        .instances()
+        .iter()
+        .position(|instance| instance.id() == reported)
+        .and_then(|index| {
+            app.state
+                .sim_setup
+                .stable_analysis_plan()
+                .ok()
+                .and_then(|plan| plan.instance_list_label(index))
+        })
+        .expect("the plan names the analysis its ledger row reports");
 
-    // Tall enough that the panel, which is the last card on a long Solver
+    // Tall enough that the ledger, which is the last card on a long Solver
     // page, is inside the surface's own scroll viewport: a control below the
     // fold still publishes its rectangle, and a press aimed at that rectangle
     // lands outside the clip and reaches nothing.
     let mut studio = Studio::open(app, SimulationPage::Solver, (1280.0, 4000.0));
-    studio.click(|label| label == super::advanced_options::REVEAL_ACTION);
+    studio.click(|label| label == name);
 
+    let workbench = &studio.app.state.workbench;
     assert_eq!(
-        studio.app.state.workbench.simulation_page,
+        workbench.simulation_page,
         SimulationPage::Analyses,
         "the hop lands on the one route that edits an analysis"
     );
     assert_eq!(
-        studio.app.state.workbench.active_analysis_instance,
+        workbench.active_analysis_instance,
         Some(reported),
-        "and it opens on the analysis the panel was reporting"
+        "and on the analysis the pressed row reported"
+    );
+}
+
+/// The switch an operating point's continuation aid is drawn as commits.
+///
+/// A flag is the one option field whose control carries no text, so nothing
+/// about its value is readable from the plan until the press has gone through:
+/// the switch has to reach `write_numeric_record` and the plan transaction
+/// behind it, and a switch bound to nothing would render, announce itself and
+/// pass every other gate this crate has.
+///
+/// Pressed on an operating point because that is the kind whose form offers the
+/// aids at all, and under the default tier and homotopy — `Robust` and a named
+/// homotopy each own them, and an owned option is given no field.
+#[test]
+fn a_click_on_an_option_switch_authors_the_override_it_states() {
+    use crate::simulation::plan::{AnalysisKind, NumericOverrideOption};
+
+    let mut app = RSpiceApp::test_instance();
+    let operating_point = app
+        .state
+        .sim_setup
+        .stable_analysis_plan_mut()
+        .expect("the test instance has a stable plan")
+        .insert(AnalysisKind::OperatingPoint)
+        .map(|(id, _)| id)
+        .expect("an operating point inserts");
+    app.state.workbench.active_analysis_instance = Some(operating_point);
+    let label = NumericOverrideOption::GminStepping.label();
+
+    // Tall enough that the option fields, which sit under the analysis's own
+    // parameters at the bottom of a long form, are inside the surface's own
+    // scroll viewport: a control below the fold still publishes its rectangle,
+    // and a press aimed at that rectangle lands outside the clip.
+    let mut studio = Studio::open(app, SimulationPage::Analyses, (1280.0, 4000.0));
+    assert!(
+        studio.announces(|announced| announced == label),
+        "the operating point's form offers its continuation aids as fields"
+    );
+    studio.click(|announced| announced == label);
+
+    let authored = studio
+        .app
+        .state
+        .sim_setup
+        .stable_analysis_plan()
+        .expect("the plan survives the press")
+        .instance(operating_point)
+        .and_then(|target| target.numeric_override())
+        .and_then(|record| record.value(NumericOverrideOption::GminStepping));
+    assert_eq!(
+        authored.as_deref(),
+        Some("off"),
+        "the switch authored the setting it now shows; the plan's own is on"
     );
 }

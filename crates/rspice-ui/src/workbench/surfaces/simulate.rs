@@ -16,15 +16,15 @@ mod page_specs;
 mod page_variables;
 mod pages;
 mod participation;
+mod plan_issue_wording;
 mod plan_manager;
-mod readiness;
 mod variable_import;
 mod workflows;
 mod workload;
 
 use catalog::*;
 use lifecycle::*;
-use readiness::*;
+use plan_issue_wording::*;
 use workflows::*;
 
 use std::collections::HashSet;
@@ -57,9 +57,9 @@ use crate::workbench::{AppState, RSpiceApp};
 
 use super::super::commands::vocabulary::Command;
 use super::super::design_system::{
-    PROPERTY_ROW_TRAILING_PAD, StatusMark, WorkbenchIcon, elide_text, heading, paint_status_mark,
-    property_row, property_row_control_columns, property_row_toned, property_row_wrapped,
-    status_dot, workspace_title_row,
+    PROPERTY_ROW_TRAILING_PAD, StatusMark, WorkbenchIcon, elide_text, heading, property_row,
+    property_row_control_columns, property_row_toned, property_row_wrapped, status_dot,
+    workspace_title_row,
 };
 
 const SIMULATION_STACK_BREAKPOINT: f32 = 820.0;
@@ -83,13 +83,12 @@ const ANALYSIS_STACK_TABLET_MIN_WIDTH: f32 = 175.0;
 const ANALYSIS_STACK_DESKTOP_MIN_WIDTH: f32 = 190.0;
 const ANALYSIS_EDITOR_TABLET_MIN_WIDTH: f32 = 330.0;
 const ANALYSIS_EDITOR_DESKTOP_MIN_WIDTH: f32 = 360.0;
-const PREFLIGHT_CELL_HEIGHT: f32 = 42.0;
 /// Gap between the instance contract's two columns.
 const CONTRACT_COLUMN_GAP: f32 = 10.0;
 /// The narrowest instance contract that can carry its two columns side by side.
 ///
-/// The mockup collapses this block, the analysis form's grid and the preflight
-/// strip together at `@container (width <= 560px)`
+/// The mockup collapses this block and the analysis form's grid together at
+/// `@container (width <= 560px)`
 /// (`styles/30-simulation/090-simulation-cockpit.css`). A CSS grid child
 /// shrinks to whatever its track gives it and stays readable doing it; the
 /// participation row — a select, a point picker and a stat laid out beside a
@@ -1589,8 +1588,6 @@ fn analysis_editor(
                     page_kit::Tone::Dim,
                 );
             });
-            lifecycle_receipt_strip(ui, app);
-            preflight_strip(ui, app);
             return;
         }
         Err(error) => {
@@ -1600,8 +1597,6 @@ fn analysis_editor(
                 status_dot(ui, Tokens::get(ui.ctx()).color.err, "Plan unavailable");
                 page_kit::note_line(ui, &error, page_kit::Tone::Error);
             });
-            lifecycle_receipt_strip(ui, app);
-            preflight_strip(ui, app);
             return;
         }
     };
@@ -1630,11 +1625,12 @@ fn analysis_editor(
     // than editing it in place. Collected here and applied below, for the same
     // reason the participation action is: the frame is already borrowing `app`.
     let mut run_space_route = None;
+    let mut option_edits = Vec::new();
 
     let t = Tokens::get(ui.ctx());
     let editor_response = egui::Frame::new().fill(t.color.bg_app).show(ui, |ui| {
         ui.spacing_mut().item_spacing.y = 0.0;
-        let header_command = analysis_form_header(ui, &selected, validation_error.as_deref());
+        let rename_requested = analysis_form_header(ui, &selected, validation_error.as_deref());
         if availability_label(selected.kind) != "Production" {
             capability_banner(ui, selected.kind);
         }
@@ -1653,15 +1649,21 @@ fn analysis_editor(
             viewport_width <= 760.0,
             &mut action,
         );
-        (
-            analysis_form_body(ui, app, &mut draft, envelope_sources, &mut run_space_route),
-            header_command,
-        )
+        let form_anchor_y = analysis_form_body(
+            ui,
+            app,
+            &mut draft,
+            envelope_sources,
+            &mut run_space_route,
+            selected.id,
+            &mut option_edits,
+        );
+        (form_anchor_y, rename_requested)
     });
     if let Some(page) = run_space_route {
         app.state.workbench.simulation_page = page;
     }
-    let (form_anchor_y, header_command) = editor_response.inner;
+    let (form_anchor_y, rename_requested) = editor_response.inner;
     let form_anchor_content_y = content_space_anchor(form_anchor_y, scroll_content_origin_y);
     let editor_response = editor_response.response;
     ui.painter().hline(
@@ -1691,7 +1693,6 @@ fn analysis_editor(
                 &format!("the draft could not be serialized exactly: {error}"),
             );
             app.state.workbench.simulation_surface_editor_anchor_y = Some(form_anchor_content_y);
-            lifecycle_receipt_strip(ui, app);
             return;
         }
     };
@@ -1701,6 +1702,15 @@ fn analysis_editor(
     // content above it is then compensated on the next frame without maintaining
     // a fragile action whitelist.
     app.state.workbench.simulation_surface_editor_anchor_y = Some(form_anchor_content_y);
+    // Ahead of every commit below, for the reason the participation action is:
+    // an option field commits when it is let go of, which is the same instant
+    // focus lands somewhere else, and that must not also commit an edit to the
+    // analysis's own parameters.
+    if !option_edits.is_empty() {
+        advanced_options::commit(app, selected.id, &option_edits);
+        ui.ctx().request_repaint();
+        return;
+    }
     // Dispatched before the draft comparison so that clicking the hop, which
     // takes focus off whatever field was being typed into, does not also
     // commit an unintended edit on the way out of the page.
@@ -1711,28 +1721,18 @@ fn analysis_editor(
         Command::OpenRunInResults.execute(app);
         return;
     }
-    match header_command {
-        Some(HeaderCommand::OpenOptions) => {
-            if let Err(error) = page_solver::open_for_analysis(app, selected.id) {
-                record_failure(&mut app.state, "Analysis options", &error);
-            }
-            ui.ctx().request_repaint();
-            return;
-        }
-        Some(HeaderCommand::Rename) => {
-            // Opened on what the header showed, and told which analysis it is
-            // by the two facts the header's own second line states.
-            app.state.workbench.simulation_workflow = Some(
-                SimulationWorkflowDialog::RenameAnalysis(RenameAnalysisDraft::for_instance(
-                    selected.id,
-                    format!("{} · {}", selected.kind.label(), selected.id),
-                    &selected.name,
-                )),
-            );
-            ui.ctx().request_repaint();
-            return;
-        }
-        None => {}
+    if rename_requested {
+        // Opened on what the header showed, and told which analysis it is by
+        // the two facts the header's own second line states.
+        app.state.workbench.simulation_workflow = Some(SimulationWorkflowDialog::RenameAnalysis(
+            RenameAnalysisDraft::for_instance(
+                selected.id,
+                format!("{} · {}", selected.kind.label(), selected.id),
+                &selected.name,
+            ),
+        ));
+        ui.ctx().request_repaint();
+        return;
     }
     // Ahead of the draft comparison for the same reason the hop is: changing
     // participation moves focus off whatever field was being typed into, and
@@ -1757,8 +1757,6 @@ fn analysis_editor(
         apply_analysis_action(app, selected.id, action);
         ui.ctx().request_repaint();
     }
-    lifecycle_receipt_strip(ui, app);
-    preflight_strip(ui, app);
 }
 
 fn editor_anchor_scroll_delta(anchor_y: f32, current_y: f32) -> f32 {
@@ -1773,18 +1771,12 @@ fn adjusted_scroll_for_stack_delta(scroll_y: f32, before: f32, after: f32) -> f3
     (scroll_y + after - before).max(0.0)
 }
 
-/// What the analysis editor's header was asked to do this frame.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum HeaderCommand {
-    OpenOptions,
-    Rename,
-}
-
+/// Draw the analysis editor's header; `true` when its one control was pressed.
 fn analysis_form_header(
     ui: &mut Ui,
     selected: &SelectedAnalysis,
     validation_error: Option<&str>,
-) -> Option<HeaderCommand> {
+) -> bool {
     let t = Tokens::get(ui.ctx());
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 42.0), Sense::hover());
     ui.painter().hline(
@@ -1799,11 +1791,11 @@ fn analysis_form_header(
     ui.painter().rect_filled(icon_rect, 3.0, t.color.accent_dim);
     analysis_icon(selected.kind).paint(ui.painter(), icon_rect.shrink(4.0), t.color.accent);
     let text_left = icon_rect.right() + 9.0;
-    // The workbench's own buttons rather than egui's, laid out right-to-left
-    // from the header's trailing inset. The rects this replaces were authored
-    // beside the row at 26 points, but the egui buttons put into them drew at
-    // their own 30, so the header's two controls stood taller than the
-    // lifecycle row directly beneath them.
+    // The workbench's own button rather than egui's, laid out right-to-left
+    // from the header's trailing inset. The rect this replaces was authored
+    // beside the row at 26 points, but the egui button put into it drew at its
+    // own 30, so the header's control stood taller than the lifecycle row
+    // directly beneath it.
     let mut trailing = ui.new_child(
         egui::UiBuilder::new()
             .max_rect(Rect::from_min_max(
@@ -1813,10 +1805,6 @@ fn analysis_form_header(
             .layout(Layout::right_to_left(Align::Center)),
     );
     trailing.spacing_mut().item_spacing.x = 6.0;
-    let options = Button::new("Options\u{2026}")
-        .show(&mut trailing)
-        .on_hover_text("Open typed numerical options for this exact analysis instance")
-        .clicked();
     let rename = Button::new("Name\u{2026}")
         .show(&mut trailing)
         .on_hover_text("Name this analysis instance so every surface reports it by that name")
@@ -1882,11 +1870,7 @@ fn analysis_form_header(
     if let Some(error) = validation_error {
         response.on_hover_text(error);
     }
-    match (rename, options) {
-        (true, _) => Some(HeaderCommand::Rename),
-        (false, true) => Some(HeaderCommand::OpenOptions),
-        (false, false) => None,
-    }
+    rename
 }
 
 fn analysis_icon(kind: AnalysisKind) -> WorkbenchIcon {
@@ -2232,6 +2216,11 @@ fn analysis_form_body(
     draft: &mut AnalysisDraft,
     envelope_sources: Option<&EnvelopeSourceCatalog>,
     route: &mut Option<crate::workbench::state::SimulationPage>,
+    // The analysis's advanced options are fields of this form, and an edit to
+    // one is not part of the draft: it lands on the instance's own override
+    // record, through the plan transaction, after this frame has closed.
+    selected: AnalysisInstanceId,
+    option_edits: &mut Vec<advanced_options::OptionEdit>,
 ) -> f32 {
     let project_revision = app.state.workspace.project.revision();
     let previous_state = app
@@ -2324,6 +2313,26 @@ fn analysis_form_body(
                 op_context,
                 &run_space,
                 route,
+            );
+            // Under the analysis's own parameters, because that is what they
+            // are: a bound this analysis states, in the same grid and with the
+            // same label over the same well. The record is the committed one,
+            // not the draft above it — an option field reports what a run would
+            // resolve to, and an uncommitted parameter edit is not part of any
+            // run yet.
+            *option_edits = analysis_form::options::fields(
+                ui,
+                draft,
+                analysis_form::options::OptionContext {
+                    record: app
+                        .state
+                        .sim_setup
+                        .stable_analysis_plan()
+                        .ok()
+                        .and_then(|plan| plan.instance(selected))
+                        .and_then(|target| target.numeric_override()),
+                    options: &app.state.sim_setup.options,
+                },
             );
             // The form's own account of what this configuration will do. Some
             // of these sentences are the only place a setting's consequence is

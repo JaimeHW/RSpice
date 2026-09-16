@@ -192,7 +192,7 @@ fn studio_analysis_kinds() -> Vec<crate::simulation::plan::AnalysisKind> {
 /// Takes the fixture by value: a helper that borrowed the whole application
 /// mutably would be one more of exactly the parameter the layering ratchet
 /// counts, and nothing here needs the application afterwards.
-fn studio_route_nodes(
+pub(super) fn studio_route_nodes(
     mut app: RSpiceApp,
     width: f32,
 ) -> Vec<(egui::accesskit::NodeId, egui::accesskit::Node)> {
@@ -320,6 +320,19 @@ fn workflow_host_nodes(
     }
     nodes
 }
+
+/// The widths the overflow sweeps measure every route at.
+///
+/// The 1000-point gate and the widths either side of it, then a walk out to the
+/// widest window this is drawn in, stepping 120. Coarse, because every width
+/// costs a fixture and two render passes for each of the thirty-odd analysis
+/// forms; 120 rather than coarser, because that is comfortably inside the
+/// 160-point band [`no_analyses_page_control_is_cut_off_at_any_gate`] describes,
+/// and a step wider than the band is a sweep that can walk straight over one.
+const GATE_WIDTHS: [f32; 14] = [
+    620.0, 700.0, 820.0, 960.0, 1000.0, 1024.0, 1140.0, 1260.0, 1380.0, 1500.0, 1620.0, 1740.0,
+    1860.0, 1920.0,
+];
 
 /// The fixture on one route, with the instance of one kind selected.
 pub(super) fn studio_route(
@@ -455,10 +468,10 @@ fn the_analysis_catalogue_is_hosted_by_the_frame_on_every_route() {
 /// it opens from.
 ///
 /// The name sweep ran the surface and nothing else, so the catalogue the
-/// palette opens, the advanced-options panel and every workflow dialog were
-/// outside it — and two of the nameless text fields it exists to catch were
-/// living in exactly those two places. A gate that cannot reach a surface is
-/// not a gate over it.
+/// palette opens, the advanced options and every workflow dialog were outside
+/// it — and two of the nameless text fields it exists to catch were living in
+/// exactly those two places. A gate that cannot reach a surface is not a gate
+/// over it.
 ///
 /// "Every workflow dialog" was five of the eight. The clone, the capture group
 /// and the guided variable import were never listed here, so every sweep that
@@ -467,6 +480,9 @@ fn the_analysis_catalogue_is_hosted_by_the_frame_on_every_route() {
 /// [`every_studio_workflow_draft_has_an_overlay_fixture`] counts the list
 /// against the enum rather than trusting the sentence.
 pub(super) fn studio_overlays() -> Vec<(String, RSpiceApp)> {
+    use crate::simulation::plan::{
+        AnalysisKind, AnalysisNumericOverride, NumericOverrideOption, SolverOwnership,
+    };
     use crate::workbench::state::{
         CaptureGroupDraft, ClonePlanDraft, DesignVariableDraft, RenameAnalysisDraft,
         SavedOutputDraft, SimulationPlanManagerDraft, SimulationWorkflowDialog,
@@ -474,11 +490,33 @@ pub(super) fn studio_overlays() -> Vec<(String, RSpiceApp)> {
 
     let mut overlays: Vec<(String, RSpiceApp)> = analysis_catalogue_fixtures();
 
-    // The advanced-options panel, opened on one analysis from the Solver page.
-    let mut app = studio_route(SimulationPage::Solver, None);
-    let instance = first_enabled_instance(&app);
-    super::super::advanced_options::open_for_analysis(&mut app.state.workbench, instance);
-    overlays.push(("advanced options".to_owned(), app));
+    // An analysis whose form the routes above do not open, carrying an authored
+    // override. Not an overlay — an analysis's advanced options are fields of
+    // its own form now — but it is the same thing every sweep reading this list
+    // wants from it: a surface the routes do not reach on their own. The
+    // operating point is the one that matters, because its continuation aids are
+    // the only switch fields the option catalogue offers, and a legacy override
+    // of a global option is the only way one of those fields appears at all.
+    if let Some(mut app) = studio_form(AnalysisKind::OperatingPoint) {
+        let instance = app
+            .state
+            .workbench
+            .active_analysis_instance
+            .expect("the fixture selects the analysis it opened the form on");
+        let mut record = AnalysisNumericOverride::default();
+        record
+            .set_for_instance(
+                AnalysisKind::OperatingPoint,
+                SolverOwnership::NONE,
+                NumericOverrideOption::Gmin,
+                "1e-13",
+            )
+            .expect("an inheriting operating point carries its own conductance floor");
+        if let Ok(plan) = app.state.sim_setup.stable_analysis_plan_mut() {
+            let _ = plan.set_numeric_override(instance, Some(record));
+        }
+        overlays.push(("analysis options · Operating point".to_owned(), app));
+    }
 
     // The plan manager.
     let mut app = studio_route(SimulationPage::Analyses, None);
@@ -724,16 +762,6 @@ fn every_studio_text_field_and_switch_announces_a_name() {
 /// checked 1400 and 1920 and called the range covered.
 #[test]
 fn no_analyses_page_control_is_cut_off_at_any_gate() {
-    // The 1000-point gate and the widths either side of it, then a walk out to
-    // the widest window this is drawn in, stepping 120. Coarse, because every
-    // width costs a fixture and two render passes for each of the thirty-odd
-    // analysis forms; 120 rather than coarser, because that is comfortably
-    // inside the 160-point band described above, and a step wider than the band
-    // is a sweep that can walk straight over one.
-    const GATE_WIDTHS: [f32; 14] = [
-        620.0, 700.0, 820.0, 960.0, 1000.0, 1024.0, 1140.0, 1260.0, 1380.0, 1500.0, 1620.0, 1740.0,
-        1860.0, 1920.0,
-    ];
     // Sub-pixel: a control resting exactly on the edge is inside it, and
     // rounding in the layout must not read as a defect.
     const TOLERANCE: f64 = 0.5;
@@ -841,8 +869,8 @@ fn every_studio_workflow_dialog_comes_to_rest_and_stays_there() {
     // catalogue's result list now reads its row track through
     // `analysis_catalog_row_space` with the gutter withheld whether or not a
     // bar is showing, and the studio surface reserves the same gutter for the
-    // routes drawn into it (which is what brought the advanced-options panel
-    // to rest), so the sweep covers everything.
+    // routes drawn into it (which is what brought the advanced options to
+    // rest), so the sweep covers everything.
     for (surface, app) in studio_overlays() {
         swept += 1;
         let passes = studio_route_passes(app, 1280.0, PASSES);
