@@ -57,6 +57,7 @@ fn offered(app: &RSpiceApp, instance: AnalysisInstanceId) -> Vec<(O, &'static st
         &app.state.sim_setup.options,
     )
     .into_iter()
+    .flat_map(|section| section.rows)
     .map(|row| (row.option, origin_hint(&row)))
     .collect()
 }

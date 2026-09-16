@@ -1185,16 +1185,6 @@ impl PreflightRemediation {
             corner,
         }
     }
-
-    /// Whether this finding stands between the design and an executable
-    /// netlist.
-    ///
-    /// The preflight strip's Netlist cell asks this question, and asking it
-    /// here is what keeps a new destination for a netlist-stage failure from
-    /// silently turning that cell green.
-    pub const fn blocks_executable_netlist(&self) -> bool {
-        matches!(self, Self::DesignChecks | Self::NetlistSource { .. })
-    }
 }
 
 /// One non-blocking finding in a simulation-preflight report.

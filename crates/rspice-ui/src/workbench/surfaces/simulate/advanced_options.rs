@@ -57,12 +57,14 @@ pub(super) struct AdvancedOptionRow {
     /// a two-state control has no empty state to clear through, so choosing the
     /// plan's own setting is how such a field returns to it.
     pub(super) preset: String,
+    /// Who decided the effective value: one of the three origin constants
+    /// above, or the sentence naming the owner of an option this instance
+    /// cannot carry. [`form_rows`] gives such a row no field, so a form only
+    /// ever meets the first three.
     pub(super) origin: &'static str,
     /// The value this analysis states, when it states one. `None` means the
     /// row is inherited and there is nothing to clear.
     pub(super) authored: Option<String>,
-    /// Set when the kind cannot carry the option at all.
-    pub(super) refused: bool,
 }
 
 /// One section's rows, in catalog order.
@@ -165,7 +167,6 @@ fn row(
             preset,
             origin: reason,
             authored: None,
-            refused: true,
         };
     }
     match record.and_then(|record| record.value(option)) {
@@ -183,7 +184,6 @@ fn row(
                 preset,
                 origin,
                 authored: Some(authored),
-                refused: false,
             }
         }
         None => AdvancedOptionRow {
@@ -197,7 +197,6 @@ fn row(
             effective: preset.clone(),
             preset,
             authored: None,
-            refused: false,
         },
     }
 }
@@ -318,11 +317,22 @@ pub(super) fn form_rows(
     draft: &AnalysisDraft,
     record: Option<&AnalysisNumericOverride>,
     options: &SimulationOptions,
-) -> Vec<AdvancedOptionRow> {
+) -> Vec<AdvancedOptionSection> {
+    // The catalogue's own answer to what this instance may carry, rather than a
+    // second reading of the refusals behind it: the gate that decides whether a
+    // value survives to the solve is the gate that decides whether it earns a
+    // control.
+    let authorable = NumericOverrideOption::applicable_to_instance(kind, draft.solver_ownership());
     sections(kind, draft, record, options)
         .into_iter()
-        .flat_map(|section| section.rows)
-        .filter(|row| !row.refused && offered_on_the_form(row.option, kind, row.authored.is_some()))
+        .map(|mut section| {
+            section.rows.retain(|row| {
+                authorable.contains(&row.option)
+                    && offered_on_the_form(row.option, kind, row.authored.is_some())
+            });
+            section
+        })
+        .filter(|section| !section.rows.is_empty())
         .collect()
 }
 

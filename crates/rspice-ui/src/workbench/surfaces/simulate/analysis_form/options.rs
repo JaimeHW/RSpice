@@ -26,7 +26,7 @@ use crate::ui::tokens::Tokens;
 use crate::ui::widgets::{mono_input, select};
 use crate::workbench::RSpiceApp;
 
-use super::super::advanced_options::{self, AdvancedOptionRow, OptionEdit};
+use super::super::advanced_options::{self, AdvancedOptionRow, AdvancedOptionSection, OptionEdit};
 
 /// Draw every advanced option this analysis owns, and report what was edited.
 ///
@@ -48,10 +48,10 @@ pub(in crate::workbench::surfaces::simulate) fn fields(
         .ok()
         .and_then(|plan| plan.instance(instance))
         .and_then(|target| target.numeric_override());
-    let rows =
+    let offered =
         advanced_options::form_rows(draft.kind(), draft, record, &app.state.sim_setup.options);
     let mut edits = Vec::new();
-    for (heading, rows) in grouped(&rows) {
+    for (heading, rows) in grouped(&offered) {
         super::sub_header(ui, heading);
         for row in rows {
             if let Some(edit) = field(ui, row) {
@@ -71,32 +71,24 @@ pub(in crate::workbench::surfaces::simulate) fn fields(
 /// label does, so a lone section joins the next one that has more than one, and
 /// the merged group takes that section's name. A kind with one group gets one
 /// heading; a kind with none gets nothing at all.
-fn grouped(rows: &[AdvancedOptionRow]) -> Vec<(&'static str, Vec<&AdvancedOptionRow>)> {
+fn grouped(sections: &[AdvancedOptionSection]) -> Vec<(&'static str, Vec<&AdvancedOptionRow>)> {
     let mut groups: Vec<(&'static str, Vec<&AdvancedOptionRow>)> = Vec::new();
     let mut pending: Vec<&AdvancedOptionRow> = Vec::new();
-    for section in crate::simulation::plan::OverrideSection::ALL {
-        let mut held: Vec<&AdvancedOptionRow> = rows
-            .iter()
-            .filter(|row| row.option.section() == section)
-            .collect();
-        if held.is_empty() {
-            continue;
-        }
+    for section in sections {
+        let mut held: Vec<&AdvancedOptionRow> = section.rows.iter().collect();
         if held.len() < 2 {
             pending.append(&mut held);
             continue;
         }
         let mut merged = std::mem::take(&mut pending);
         merged.append(&mut held);
-        groups.push((section.title(), merged));
+        groups.push((section.section.title(), merged));
     }
-    if !pending.is_empty() {
+    if let Some(first) = pending.first() {
+        let title = first.option.section().title();
         match groups.last_mut() {
             Some((_, last)) => last.append(&mut pending),
-            None => {
-                let section = pending[0].option.section();
-                groups.push((section.title(), pending));
-            }
+            None => groups.push((title, pending)),
         }
     }
     groups
@@ -145,11 +137,16 @@ fn field(ui: &mut Ui, row: &AdvancedOptionRow) -> Option<OptionEdit> {
             let mut text = well_text(ui, row);
             let response = option_field(ui, label, origin, |ui| {
                 // The hint slot states the origin, so the shape a value has to
-                // take is the hover. The form's own wells say "engineering
-                // notation" in that slot and need no hover; an option's slot is
-                // spent on the one fact a field cannot otherwise carry.
-                mono_input(ui, label, &mut text, ui.available_width())
-                    .on_hover_text(row.option.value_hint())
+                // take is the hover — and with it the engine field the option
+                // lands on and the site that reads it, which is what tells a
+                // reader the bound they are typing reaches a solve at all.
+                mono_input(ui, label, &mut text, ui.available_width()).on_hover_text(format!(
+                    "{}\n\n{} resolves onto {}, read at {}.",
+                    row.option.value_hint(),
+                    row.option.key(),
+                    row.option.config_field(),
+                    row.option.consumer()
+                ))
             });
             retain_well_text(ui, row, &text, &response);
             // Committed when the well is let go of, not per keystroke: one

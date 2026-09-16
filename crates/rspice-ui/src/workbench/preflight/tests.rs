@@ -1195,10 +1195,6 @@ fn a_netlist_stage_failure_opens_the_deck_rather_than_re_running_design_checks()
         PreflightRemediation::NetlistSource { line: Some(42) }
     );
     assert_eq!(remediation_label(&remediation), "Open netlist source");
-    assert!(
-        remediation.blocks_executable_netlist(),
-        "the preflight strip's Netlist cell still has to see it"
-    );
 
     let mut app = RSpiceApp::test_instance();
     app.state.project_lifecycle.project_open = true;
