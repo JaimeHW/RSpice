@@ -1277,54 +1277,6 @@ fn the_ledger_reports_the_effective_value_of_an_authored_override() {
     );
 }
 
-#[test]
-fn selected_analysis_options_open_the_exact_instance_in_the_typed_solver_editor() {
-    use crate::simulation::plan::{
-        AnalysisDraft, AnalysisKind, AnalysisNumericOverride, NumericOverrideOption,
-    };
-
-    let mut app = RSpiceApp::test_instance();
-    let transient = app
-        .state
-        .sim_setup
-        .stable_analysis_plan()
-        .unwrap()
-        .instances()
-        .iter()
-        .find(|instance| matches!(instance.draft(), AnalysisDraft::Transient(_)))
-        .map(|instance| instance.id())
-        .expect("default transient instance");
-    let mut override_record = AnalysisNumericOverride::default();
-    override_record
-        .set_for_instance(
-            AnalysisKind::Transient,
-            crate::simulation::plan::SolverOwnership::NONE,
-            NumericOverrideOption::Reltol,
-            "2e-4",
-        )
-        .unwrap();
-    app.state
-        .sim_setup
-        .stable_analysis_plan_mut()
-        .unwrap()
-        .set_numeric_override(transient, Some(override_record))
-        .unwrap();
-
-    super::page_solver::open_for_analysis(&mut app, transient)
-        .expect("selected analysis opens its supported options");
-
-    assert_eq!(app.state.workbench.simulation_page, SimulationPage::Solver);
-    let draft = app
-        .state
-        .workbench
-        .analysis_override_draft
-        .as_ref()
-        .expect("typed override editor is open");
-    assert_eq!(draft.instance, transient);
-    assert_eq!(draft.option, NumericOverrideOption::Reltol);
-    assert_eq!(draft.value, "200u");
-}
-
 /// An override the analysis's solve would never read must be refused, not
 /// stored. A stored-and-ignored bound is indistinguishable from one that works,
 /// and the ledger would then report a policy no run resolves to.
@@ -1991,7 +1943,7 @@ fn an_output_filter_matching_nothing_is_distinguishable_from_an_empty_registry()
     // default mode saves a bounded synthesized set rather than nothing.
     assert!(
         empty.contains("No saved outputs")
-            && empty.contains(&super::readiness::empty_registry_outcome(
+            && empty.contains(&super::page_outputs::empty_registry_outcome(
                 crate::state::OutputSelectionMode::default(),
                 0
             )),

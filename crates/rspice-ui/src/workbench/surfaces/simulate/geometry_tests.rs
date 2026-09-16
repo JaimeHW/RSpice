@@ -83,7 +83,7 @@ fn analyses_route_painted_lines(width: f32) -> Vec<PaintedLine> {
 ///
 /// So the line is elided, and both halves of that are pinned at the width the
 /// gate measures. At 1016 the full line fits and stops short of the chip; at
-/// 950 it does not fit, ends in the ellipsis, and still stops short. The
+/// 860 it does not fit, ends in the ellipsis, and still stops short. The
 /// mockup's own rule for this row is `overflow:hidden; text-overflow:ellipsis`.
 ///
 /// These are viewport widths, and the studio surface no longer gets all of one:
@@ -91,8 +91,14 @@ fn analyses_route_painted_lines(width: f32) -> Vec<PaintedLine> {
 /// showing, so a route is laid out in thirteen points less than the window. The
 /// wide probe was 1000 and measured a surface of exactly that; it names 1016
 /// now for the same reason, and for the same surface with a little room to
-/// spare. The narrow probe is unmoved: it was well past the line already, and
-/// taking width away only takes it further past.
+/// spare.
+///
+/// The narrow probe was 950 and is 860, because the header's trailing group
+/// stopped holding two buttons: `Options…` went with the per-analysis options
+/// themselves, which are a section under the form now, and the room it gave
+/// back moved the elision threshold down past 890. 860 is inside the band that
+/// elides and clear of the narrow widths at which the availability chip itself
+/// stops being painted, which is what a probe of this row needs on both sides.
 #[test]
 fn the_analysis_header_identity_elides_instead_of_reaching_its_availability_chip() {
     /// The header band: the chip and the identity line are the only two things
@@ -138,7 +144,7 @@ fn the_analysis_header_identity_elides_instead_of_reaching_its_availability_chip
         chip.left
     );
 
-    let (identity, chip) = header_geometry(950.0);
+    let (identity, chip) = header_geometry(860.0);
     assert!(
         identity.text.ends_with('\u{2026}'),
         "a line that no longer fits has to say it was shortened: {:?}",

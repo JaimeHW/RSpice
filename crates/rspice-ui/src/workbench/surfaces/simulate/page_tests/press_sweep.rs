@@ -491,7 +491,7 @@ const PRESSED_PER_SURFACE: &[(&str, usize)] = &[
     ("Specifications", 4),
     ("RunSet", 31),
     ("Models", 1),
-    ("Solver", 33),
+    ("Solver", 32),
     ("Save", 6),
     ("analysis catalogue · Analyses", 29),
     ("analysis catalogue · Excitations", 0),
@@ -503,7 +503,7 @@ const PRESSED_PER_SURFACE: &[(&str, usize)] = &[
     ("analysis catalogue · Solver", 0),
     ("analysis catalogue · Save", 0),
     ("analysis catalogue · Results workspace", 0),
-    ("advanced options", 26),
+    ("analysis options · Operating point", 26),
     ("plan manager", 12),
     ("rename analysis", 4),
     ("run points", 12),
@@ -515,7 +515,15 @@ const PRESSED_PER_SURFACE: &[(&str, usize)] = &[
 ];
 
 /// Distinct controls the sweep presses in total.
-const PRESSED_FLOOR: usize = 263;
+///
+/// Re-measured when the per-analysis advanced options stopped being a panel on
+/// the Solver page and became fields of the analysis's own form. Three things
+/// moved: the Solver page lost `Add override…` and its single-row editor, every
+/// analysis form gained the option fields its kind owns, and the sweep's
+/// "advanced options" surface became `analysis options · Operating point` — the
+/// one form the routes do not open, carrying the authored override that is the
+/// only way a global option's legacy field appears at all.
+const PRESSED_FLOOR: usize = 262;
 
 /// Controls that are wired to nothing.
 ///
@@ -911,7 +919,8 @@ surface_press_cases! {
         every_control_on_the_catalogue_over_save_answers_its_press),
     (25, "analysis catalogue · Results workspace",
         every_control_on_the_catalogue_over_the_results_workspace_answers_its_press),
-    (26, "advanced options", every_control_on_the_advanced_options_panel_answers_its_press),
+    (26, "analysis options · Operating point",
+        every_control_on_the_operating_point_options_answers_its_press),
     (27, "plan manager", every_control_on_the_plan_manager_answers_its_press),
     (28, "rename analysis", every_control_on_the_rename_analysis_dialog_answers_its_press),
     (29, "run points", every_control_on_the_run_points_picker_answers_its_press),
