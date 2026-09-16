@@ -520,3 +520,31 @@ fn card_content_remains_vertical_inside_a_horizontal_parent() {
 
     assert!(second.top() >= first.bottom());
 }
+
+#[test]
+fn a_long_path_keeps_its_root_and_the_folder_it_names() {
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    let path = r"C:\Users\Example\AppData\Local\RSpice\.rspice-recovery";
+    let font = crate::ui::theme::mono(tokens::FS_0, FontWeight::Regular);
+    let mut shortened = Vec::new();
+    let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            let full = ui
+                .painter()
+                .layout_no_wrap(path.to_owned(), font.clone(), Color32::WHITE)
+                .size()
+                .x;
+            for width in [full + 1.0, full * 0.7, full * 0.45] {
+                shortened.push(elide_path(ui, path, &font, width));
+            }
+        });
+    });
+
+    assert_eq!(shortened[0], path, "a path that fits is left alone");
+    for elided in &shortened[1..] {
+        assert!(elided.starts_with("C:\\\u{2026}\\"), "{elided}");
+        assert!(elided.ends_with(r"\.rspice-recovery"), "{elided}");
+    }
+    assert!(shortened[1].len() > shortened[2].len());
+}

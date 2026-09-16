@@ -1050,19 +1050,50 @@ fn section_header_column_widths(
 
 pub fn property_row(ui: &mut Ui, label: &str, value: &str) -> Response {
     let t = Tokens::get(ui.ctx());
-    property_row_with_tone(ui, label, value, t.color.text, None, tokens::FS_0)
+    property_row_with_tone(
+        ui,
+        label,
+        value,
+        t.color.text,
+        None,
+        tokens::FS_0,
+        elide_text,
+    )
 }
 
 /// Read-only schematic property row. The upgraded inspector uses body-sized
 /// mono values while retaining caption-sized labels.
 pub fn schematic_property_row(ui: &mut Ui, label: &str, value: &str) -> Response {
     let t = Tokens::get(ui.ctx());
-    property_row_with_tone(ui, label, value, t.color.text, None, tokens::FS_1)
+    property_row_with_tone(
+        ui,
+        label,
+        value,
+        t.color.text,
+        None,
+        tokens::FS_1,
+        elide_text,
+    )
+}
+
+/// Property row whose value is a file-system path. A long path is shortened
+/// from the middle, so the folder it names stays in view.
+pub fn property_row_path(ui: &mut Ui, label: &str, path: &str) -> Response {
+    let t = Tokens::get(ui.ctx());
+    property_row_with_tone(
+        ui,
+        label,
+        path,
+        t.color.text,
+        None,
+        tokens::FS_0,
+        elide_path,
+    )
 }
 
 /// Property row whose value communicates an explicit semantic tone.
 pub fn property_row_toned(ui: &mut Ui, label: &str, value: &str, value_tone: Color32) -> Response {
-    property_row_with_tone(ui, label, value, value_tone, None, tokens::FS_0)
+    property_row_with_tone(ui, label, value, value_tone, None, tokens::FS_0, elide_text)
 }
 
 /// Property row with a font-independent semantic mark before its value.
@@ -1073,7 +1104,15 @@ pub fn property_row_status(
     value_tone: Color32,
     mark: StatusMark,
 ) -> Response {
-    property_row_with_tone(ui, label, value, value_tone, Some(mark), tokens::FS_0)
+    property_row_with_tone(
+        ui,
+        label,
+        value,
+        value_tone,
+        Some(mark),
+        tokens::FS_0,
+        elide_text,
+    )
 }
 
 /// Status-bearing counterpart to [`schematic_property_row`].
@@ -1084,7 +1123,15 @@ pub fn schematic_property_row_status(
     value_tone: Color32,
     mark: StatusMark,
 ) -> Response {
-    property_row_with_tone(ui, label, value, value_tone, Some(mark), tokens::FS_1)
+    property_row_with_tone(
+        ui,
+        label,
+        value,
+        value_tone,
+        Some(mark),
+        tokens::FS_1,
+        elide_text,
+    )
 }
 
 /// Horizontal padding inside a property row.
@@ -1495,6 +1542,7 @@ fn property_row_with_tone(
     value_tone: Color32,
     mark: Option<StatusMark>,
     value_size: f32,
+    elide_value: fn(&Ui, &str, &egui::FontId, f32) -> String,
 ) -> Response {
     let t = Tokens::get(ui.ctx());
     let full_label = label;
@@ -1509,7 +1557,7 @@ fn property_row_with_tone(
         .layout_no_wrap(display_label, label_font, t.color.text_dim);
     let status_prefix = if mark.is_some() { 17.0 } else { 0.0 };
     let value_width = (value_column - status_prefix).max(1.0);
-    let display_value = elide_text(ui, value, &value_font, value_width);
+    let display_value = elide_value(ui, value, &value_font, value_width);
     let value_galley = ui
         .painter()
         .layout_no_wrap(display_value, value_font, value_tone);
@@ -1591,6 +1639,63 @@ pub(crate) fn elide_text(ui: &Ui, text: &str, font: &egui::FontId, max_width: f3
         }
     }
     format!("{}{}", graphemes[..low].concat(), ellipsis)
+}
+
+/// Shorten a path from the middle: its root stays, and as many of its
+/// trailing components as fit, starting on a separator.
+///
+/// The end of a path is the part that names what it points at, so the
+/// end-truncation [`elide_text`] applies to a label would cut exactly that.
+pub(crate) fn elide_path(ui: &Ui, text: &str, font: &egui::FontId, max_width: f32) -> String {
+    let fits = |candidate: &str| {
+        ui.painter()
+            .layout_no_wrap(candidate.to_owned(), font.clone(), Color32::WHITE)
+            .size()
+            .x
+            <= max_width
+    };
+    if max_width <= 0.0 {
+        return String::new();
+    }
+    if fits(text) {
+        return text.to_owned();
+    }
+    let is_separator = |grapheme: &str| grapheme == "/" || grapheme == "\\";
+    let graphemes = UnicodeSegmentation::graphemes(text, true).collect::<Vec<_>>();
+    // The root: everything up to and including the first separator.
+    let root_len = graphemes
+        .iter()
+        .position(|grapheme| is_separator(grapheme))
+        .map_or(0, |index| index + 1)
+        .min(graphemes.len() / 2);
+    let root = graphemes[..root_len].concat();
+    let candidate = |tail: usize| {
+        format!(
+            "{root}\u{2026}{}",
+            graphemes[graphemes.len() - tail..].concat()
+        )
+    };
+    let mut low = 0;
+    let mut high = graphemes.len() - root_len;
+    while low < high {
+        let middle = (low + high).div_ceil(2);
+        if fits(&candidate(middle)) {
+            low = middle;
+        } else {
+            high = middle - 1;
+        }
+    }
+    if low == 0 {
+        return elide_text(ui, text, font, max_width);
+    }
+    // Start the kept tail on a component boundary when one is in it.
+    let tail = &graphemes[graphemes.len() - low..];
+    let tail = tail
+        .iter()
+        .position(|grapheme| is_separator(grapheme))
+        .filter(|&start| start + 1 < tail.len())
+        .map_or(tail, |start| &tail[start..]);
+    format!("{root}\u{2026}{}", tail.concat())
 }
 
 pub fn card(ui: &mut Ui, title: &str, body: impl FnOnce(&mut Ui)) {
