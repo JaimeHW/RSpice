@@ -404,12 +404,13 @@ fn analysis_catalog(ctx: &egui::Context, app: &mut RSpiceApp) {
     app.state.workbench.activate(Workspace::Simulate);
 }
 
-/// Carry a refused plan command to a reader who is not on the Analyses page.
+/// Carry a refused plan command to the reader wherever they are.
 ///
-/// Only that one route draws the lifecycle strip, so this is the whole of the
-/// error surface for the other seven. It sits here because this is the single
-/// entry point every route passes through, which is what keeps the drain out of
-/// the twenty-odd places that announce an outcome.
+/// A plan command can be refused from any route and any workspace, so it is
+/// reported where the reader is, from the single entry point every route
+/// passes through — which keeps the drain out of the twenty-odd places that
+/// announce an outcome. This is the notice; the Console record of the same
+/// refusal is `AppState::record_plan_refusal`'s.
 ///
 /// The guard is the outcome's sequence, not its text: three of the announcing
 /// sites are on the render path rather than in a click handler, and a text
@@ -2486,6 +2487,8 @@ mod page_raster;
 mod page_runset_parity_tests;
 #[cfg(test)]
 mod page_tests;
+#[cfg(test)]
+mod receipt_log_tests;
 #[cfg(test)]
 mod statement_tests;
 #[cfg(test)]

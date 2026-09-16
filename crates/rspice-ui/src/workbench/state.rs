@@ -984,24 +984,34 @@ impl AnalysisLifecycleOutcome {
         matches!(self.severity, AnalysisLifecycleSeverity::Refusal)
     }
 
-    /// Announce a committed change.
-    pub fn record_receipt(&mut self, message: impl Into<String>) {
-        self.record(AnalysisLifecycleSeverity::Receipt, message);
+    /// Announce a committed change. Returns whether this is a new outcome, so
+    /// that a reporter which also records it elsewhere records it once per
+    /// event.
+    pub fn record_receipt(&mut self, message: impl Into<String>) -> bool {
+        self.record(AnalysisLifecycleSeverity::Receipt, message)
     }
 
-    /// Announce a command that changed nothing, and why.
-    pub fn record_refusal(&mut self, message: impl Into<String>) {
-        self.record(AnalysisLifecycleSeverity::Refusal, message);
+    /// Announce a command that changed nothing, and why. Returns whether this
+    /// is a new outcome, as [`Self::record_receipt`] does.
+    pub fn record_refusal(&mut self, message: impl Into<String>) -> bool {
+        self.record(AnalysisLifecycleSeverity::Refusal, message)
     }
 
-    fn record(&mut self, severity: AnalysisLifecycleSeverity, message: impl Into<String>) {
+    /// Whether the announced outcome differs from the one already held.
+    ///
+    /// Three announcing sites sit on the render path rather than in a click
+    /// handler, so a standing refusal is restated every frame. Restating it is
+    /// not an event: the sequence does not advance, and a reporter reading the
+    /// answer does not report it again.
+    fn record(&mut self, severity: AnalysisLifecycleSeverity, message: impl Into<String>) -> bool {
         let message = message.into();
         if self.severity == severity && self.message == message {
-            return;
+            return false;
         }
         self.severity = severity;
         self.message = message;
         self.sequence += 1;
+        true
     }
 }
 

@@ -656,10 +656,7 @@ fn commit_save_policy(
         return false;
     }
     if let Err(error) = policy.validate() {
-        state
-            .workbench
-            .analysis_lifecycle_status
-            .record_refusal(error);
+        state.record_plan_refusal(error);
         return false;
     }
     let previous = state.sim_setup.save_policy;
@@ -669,19 +666,13 @@ fn commit_save_policy(
         .commit_active_plan_configuration_change(detail)
     {
         Ok(receipt) => {
-            state
-                .workbench
-                .analysis_lifecycle_status
-                .record_receipt(receipt.status_line());
+            state.record_plan_receipt(receipt.status_line());
             state.workbench.preflight.invalidate();
             true
         }
         Err(error) => {
             state.sim_setup.save_policy = previous;
-            state
-                .workbench
-                .analysis_lifecycle_status
-                .record_refusal(error.to_string());
+            state.record_plan_refusal(error.to_string());
             false
         }
     }

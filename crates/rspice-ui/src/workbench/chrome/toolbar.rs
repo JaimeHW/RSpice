@@ -1878,10 +1878,7 @@ pub(in crate::workbench) fn commit_reference_pvt(
         .map_err(|error| error.to_string())?;
     app.state.sim_setup = setup;
     app.invalidate_simulation_preflight();
-    app.state
-        .workbench
-        .analysis_lifecycle_status
-        .record_receipt(receipt.status_line());
+    app.state.record_plan_receipt(receipt.status_line());
     Ok(true)
 }
 

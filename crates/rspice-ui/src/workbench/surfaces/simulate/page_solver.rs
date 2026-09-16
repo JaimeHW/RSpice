@@ -285,9 +285,7 @@ fn apply_options(app: &mut RSpiceApp, options: &SimulationOptions) {
         }
         Err(error) => {
             app.state
-                .workbench
-                .analysis_lifecycle_status
-                .record_refusal(format!("Solver options were not committed: {error}"));
+                .record_plan_refusal(format!("Solver options were not committed: {error}"));
         }
     }
 }
@@ -325,10 +323,7 @@ pub(super) fn commit_options_transaction(
         .map_err(|error| error.to_string())?;
     app.state.sim_setup = candidate;
     app.invalidate_simulation_preflight();
-    app.state
-        .workbench
-        .analysis_lifecycle_status
-        .record_receipt(receipt.status_line());
+    app.state.record_plan_receipt(receipt.status_line());
     Ok(true)
 }
 
@@ -2008,13 +2003,10 @@ pub(super) fn commit_draft(app: &mut RSpiceApp) {
             // has to travel with it: the policy strip states the same thing,
             // but it sits at the top of a page whose fields scroll well past
             // it.
-            app.state
-                .workbench
-                .analysis_lifecycle_status
-                .record_refusal(format!(
-                    "Solver options were not applied · {}",
-                    errors.join(" · ")
-                ));
+            app.state.record_plan_refusal(format!(
+                "Solver options were not applied · {}",
+                errors.join(" · ")
+            ));
         }
         PendingChange::Ready(options) => apply_options(app, &options),
     }

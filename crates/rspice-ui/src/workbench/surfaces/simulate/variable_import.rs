@@ -173,17 +173,14 @@ pub(super) fn poll_pending_import(
 /// lifecycle status, which is the channel `commit_plan_change` itself writes on
 /// failure.
 ///
-/// This writes one field, so it takes that field's owner rather than the whole
-/// application — the same reason `lifecycle::record_failure` does. Announcing an
-/// outcome is not a licence to mutate every subsystem.
+/// This only announces an outcome, so it takes the session aggregate rather
+/// than the whole application — the same reason `lifecycle::record_failure`
+/// does. Announcing an outcome is not a licence to mutate every subsystem.
 fn refuse(state: &mut AppState, refusal: &VariableImportRefusal) {
-    state
-        .workbench
-        .analysis_lifecycle_status
-        .record_refusal(format!(
-            "Design-variable import refused \u{00b7} {}",
-            refusal.message()
-        ));
+    state.record_plan_refusal(format!(
+        "Design-variable import refused \u{00b7} {}",
+        refusal.message()
+    ));
 }
 
 /// Which import refusal a rejected row amounts to.

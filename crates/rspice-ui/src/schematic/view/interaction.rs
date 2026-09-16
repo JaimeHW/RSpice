@@ -1726,10 +1726,7 @@ fn ensure_plan_probe_output(
     state.sim_setup = setup;
     state.workspace = workspace;
     state.workbench.preflight.invalidate();
-    state
-        .workbench
-        .analysis_lifecycle_status
-        .record_receipt(receipt.status_line());
+    state.record_plan_receipt(receipt.status_line());
     Ok(ProbeOutputBinding {
         plan_name,
         created: true,

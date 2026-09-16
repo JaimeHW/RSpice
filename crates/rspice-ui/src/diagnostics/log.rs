@@ -77,6 +77,15 @@ pub enum LogSource {
     Drc,
     /// User-initiated actions
     User,
+    /// Simulation-plan lifecycle outcomes: the receipt a committed plan
+    /// command left, or the refusal that kept one from committing.
+    ///
+    /// Its own source because the Console is this product's session log of
+    /// plan commands, the way a Spectre log records every command with its
+    /// outcome, and because the activity mirror has to be able to leave these
+    /// where they are. A receipt is a record of what was committed, not a
+    /// notice to chase the reader with.
+    Plan,
     /// System/infrastructure messages
     #[default]
     System,
@@ -91,6 +100,7 @@ impl LogSource {
             Self::Netlist => "NET",
             Self::Drc => "DRC",
             Self::User => "USR",
+            Self::Plan => "PLAN",
             Self::System => "SYS",
         }
     }

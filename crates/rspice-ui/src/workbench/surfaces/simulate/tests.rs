@@ -2153,6 +2153,15 @@ fn a_render_path_refusal_restated_every_frame_does_not_spin_the_sequence() {
         "four frames of the same standing refusal are one event"
     );
     assert_eq!(app.state.ui.toasts.activity().len(), 1);
+    assert_eq!(
+        app.state
+            .log_buffer
+            .entries()
+            .filter(|entry| entry.source == crate::diagnostics::LogSource::Plan)
+            .count(),
+        1,
+        "and one Console record, not one per frame"
+    );
 }
 
 /// A supply-and-process corner declaration whose transient base analysis

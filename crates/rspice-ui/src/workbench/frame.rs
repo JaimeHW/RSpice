@@ -488,6 +488,13 @@ fn synchronize_activity_stream(ctx: &Context, app: &mut RSpiceApp) {
                     NotificationCategory::Job
                 }
                 LogSource::User | LogSource::System => NotificationCategory::System,
+                // A plan receipt is a record of what was committed, not a
+                // notice, so the Console keeps it and this lifts nothing at
+                // any severity. A refusal is left here for the opposite
+                // reason: it already reaches the notice centre as the plan
+                // drain's titled toast, and mirroring it would count one
+                // refusal twice.
+                LogSource::Plan => return None,
             };
             let kind = match entry.severity {
                 LogSeverity::Error => ToastKind::Error,
@@ -1034,5 +1041,56 @@ mod tests {
         );
         synchronize_activity_stream(&ctx, &mut app);
         assert_eq!(app.state.ui.toasts.activity().len(), 1);
+    }
+
+    /// A plan entry is a record, and the notice centre never lifts one.
+    ///
+    /// Plan receipts and refusals are written to the Console so the session
+    /// holds a log of what was commanded. A refusal already reaches the notice
+    /// centre as the plan drain's titled toast, so mirroring the record would
+    /// count one refusal twice, and mirroring a receipt would make every
+    /// routine registry edit a notification. The rule is the source, not the
+    /// severity, which is why both are asserted here.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn a_plan_entry_is_recorded_without_becoming_a_notice() {
+        let ctx = Context::default();
+        let mut app = RSpiceApp::test_instance();
+        app.state.log_buffer.log(
+            LogSeverity::Info,
+            LogSource::Plan,
+            "Receipt #7 \u{00b7} Reorder committed for instance 3.",
+            None,
+        );
+        app.state.log_buffer.log(
+            LogSeverity::Warning,
+            LogSource::Plan,
+            "Remove rejected fail-closed: another analysis is bound to it.",
+            None,
+        );
+
+        synchronize_activity_stream(&ctx, &mut app);
+        assert!(
+            app.state.ui.toasts.activity().is_empty(),
+            "a plan record is not a notice: {:?}",
+            app.state
+                .ui
+                .toasts
+                .activity()
+                .iter()
+                .map(|record| record.message().to_owned())
+                .collect::<Vec<_>>()
+        );
+
+        // And the filter is the plan source alone. A user action at the same
+        // severity still reaches the stream, which is the behaviour this must
+        // not have changed.
+        app.state
+            .log_buffer
+            .log(LogSeverity::Info, LogSource::User, "opened", None);
+        synchronize_activity_stream(&ctx, &mut app);
+        let activity = app.state.ui.toasts.activity();
+        assert_eq!(activity.len(), 1);
+        assert_eq!(activity[0].message(), "opened");
     }
 }

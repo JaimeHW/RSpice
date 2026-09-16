@@ -320,7 +320,7 @@ pub(super) fn insert_analysis_instance(
                         || "Dependencies are explicitly bound.".to_owned(),
                         |issue| format!("Preflight remains blocked: {issue}"),
                     );
-                    app.state.workbench.analysis_lifecycle_status.record_receipt(format!(
+                    app.state.record_plan_receipt(format!(
                         "Receipts #{} and #{} committed for instance {id}. {} {} {readiness} Prior datasets remain immutable.",
                         insert_receipt.sequence(),
                         bind_receipt.sequence(),
@@ -329,7 +329,7 @@ pub(super) fn insert_analysis_instance(
                     ));
                 }
                 Some(Err(error)) => {
-                    app.state.workbench.analysis_lifecycle_status.record_refusal(format!(
+                    app.state.record_plan_refusal(format!(
                         "Receipt #{} committed for instance {id}. {} Automatic dependency binding was rejected fail-closed: {error}. The inserted instance remains selected and preflight blocked; prior datasets remain immutable.",
                         insert_receipt.sequence(),
                         insert_receipt.detail(),
@@ -427,7 +427,7 @@ pub(super) fn apply_analysis_action(
             match result {
                 Ok((repair, receipt)) => {
                     refresh_analysis_projections(app);
-                    app.state.workbench.analysis_lifecycle_status.record_receipt(format!(
+                    app.state.record_plan_receipt(format!(
                         "Receipt #{} committed for instance {id}. Prerequisite repair completed atomically: {} added, {} enabled, {} moved earlier, {} exact bindings updated, and {} invalid bindings removed. Prior datasets remain immutable.",
                         receipt.sequence(),
                         repair.inserted().len(),
@@ -449,7 +449,7 @@ pub(super) fn apply_analysis_action(
                 .and_then(|plan| prepared_autonomous_pss_id(plan, id));
             if let Some(pss_id) = existing {
                 app.state.workbench.active_analysis_instance = Some(pss_id);
-                app.state.workbench.analysis_lifecycle_status.record_receipt(format!(
+                app.state.record_plan_receipt(format!(
                     "Existing autonomous PSS prerequisite {pss_id} was selected for phase-noise analysis {id}. Complete its oscillator node and remaining controls, enable it, then run dependency repair to bind the exact prerequisite without creating a duplicate instance."
                 ));
                 return;
@@ -477,7 +477,7 @@ pub(super) fn apply_analysis_action(
                 Ok((pss_id, receipt)) => {
                     refresh_analysis_projections(app);
                     app.state.workbench.active_analysis_instance = Some(pss_id);
-                    app.state.workbench.analysis_lifecycle_status.record_receipt(format!(
+                    app.state.record_plan_receipt(format!(
                         "Receipt #{} committed. Autonomous PSS prerequisite {pss_id} and its inferable dependency chain are prepared before phase-noise analysis {id}. Enter the exact oscillator node, review the remaining PSS controls, then enable it; dependency repair will reuse and bind it while preflight remains fail-closed until configuration is complete.",
                         receipt.sequence(),
                     ));
@@ -540,7 +540,7 @@ pub(super) fn validate_analysis_instance(app: &mut AppState, id: AnalysisInstanc
 
     match result {
         Ok(name) => {
-            app.workbench.analysis_lifecycle_status.record_receipt(format!(
+            app.record_plan_receipt(format!(
                 "Validation passed for {name} ({id}). Dependency identity, order, and enabled state are valid for this instance."
             ));
         }
@@ -787,14 +787,15 @@ pub(super) fn refresh_analysis_projections(app: &mut RSpiceApp) {
     app.invalidate_simulation_preflight();
 }
 
-/// Both of these write one field — the lifecycle status strip — so they take
-/// it rather than the application. A handler that took the whole app could
-/// mutate every subsystem to announce an outcome.
+/// Both of these only announce an outcome — the lifecycle status line and the
+/// Console record of it, through the funnel that writes the pair — so they
+/// take the session aggregate rather than the application. A handler that took
+/// the whole app could mutate every subsystem to announce an outcome.
 pub(super) fn record_receipt(state: &mut AppState, receipt: &AnalysisLifecycleReceipt) {
     let related = receipt
         .related_instance_id()
         .map_or_else(String::new, |id| format!(" · related instance {id}"));
-    state.workbench.analysis_lifecycle_status.record_receipt(format!(
+    state.record_plan_receipt(format!(
         "Receipt #{} · {} committed for instance {}{related} · revision {} to {} · outcome {}. {} Prior datasets remain immutable.",
         receipt.sequence(),
         lifecycle_command_label(receipt.command()),
@@ -807,7 +808,7 @@ pub(super) fn record_receipt(state: &mut AppState, receipt: &AnalysisLifecycleRe
 }
 
 pub(super) fn record_failure(state: &mut AppState, action: &str, error: &str) {
-    state.workbench.analysis_lifecycle_status.record_refusal(format!(
+    state.record_plan_refusal(format!(
         "{action} rejected fail-closed: {error}. The stable plan is unchanged and prior datasets remain immutable."
     ));
 }

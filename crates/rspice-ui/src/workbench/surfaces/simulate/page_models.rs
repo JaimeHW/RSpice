@@ -510,20 +510,14 @@ fn apply_model_binding_action(app: &mut RSpiceApp, action: ModelBindingAction) {
         Ok(receipt) => {
             app.state.sim_setup = candidate;
             app.invalidate_simulation_preflight();
-            app.state
-                .workbench
-                .analysis_lifecycle_status
-                .record_receipt(receipt.status_line());
+            app.state.record_plan_receipt(receipt.status_line());
         }
         Err(error) => record_binding_refusal(app, &error.to_string()),
     }
 }
 
 fn record_binding_refusal(app: &mut RSpiceApp, error: &str) {
-    app.state
-        .workbench
-        .analysis_lifecycle_status
-        .record_refusal(error.to_owned());
+    app.state.record_plan_refusal(error);
 }
 
 /// One model's contribution to the release gate.

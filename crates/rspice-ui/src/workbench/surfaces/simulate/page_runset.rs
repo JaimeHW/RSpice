@@ -1443,10 +1443,7 @@ fn budgets(ui: &mut Ui, app: &mut RSpiceApp, frame: &RunSetFrame) {
                         }
                         Ok(_) => {}
                         Err(error) => {
-                            app.state
-                                .workbench
-                                .analysis_lifecycle_status
-                                .record_refusal(error);
+                            app.state.record_plan_refusal(error);
                             app.state.workbench.run_set_budget_drafts = Some(drafts_from(&current));
                         }
                     }
@@ -2150,9 +2147,7 @@ fn commit(app: &mut RSpiceApp, action: RunSetAction) {
         // `was_adopted` is exactly `status == Completed`, so a transaction that
         // reaches here was blocked and its receipt states the reason.
         app.state
-            .workbench
-            .analysis_lifecycle_status
-            .record_refusal(transaction.receipt.status_line());
+            .record_plan_refusal(transaction.receipt.status_line());
         return;
     }
     if previewing {
@@ -2176,10 +2171,7 @@ fn commit(app: &mut RSpiceApp, action: RunSetAction) {
             ),
             None => transaction.receipt.status_line(),
         };
-        app.state
-            .workbench
-            .analysis_lifecycle_status
-            .record_receipt(line);
+        app.state.record_plan_receipt(line);
         return;
     }
 
@@ -2190,12 +2182,9 @@ fn commit(app: &mut RSpiceApp, action: RunSetAction) {
         Ok(prunes) => prunes,
         Err(reason) => {
             app.state.sim_setup.run_set = before;
-            app.state
-                .workbench
-                .analysis_lifecycle_status
-                .record_refusal(format!(
-                    "{reason} The run set is unchanged and prior datasets remain immutable."
-                ));
+            app.state.record_plan_refusal(format!(
+                "{reason} The run set is unchanged and prior datasets remain immutable."
+            ));
             return;
         }
     };
@@ -2222,16 +2211,10 @@ fn commit(app: &mut RSpiceApp, action: RunSetAction) {
                     pruned.join("; ")
                 ));
             }
-            app.state
-                .workbench
-                .analysis_lifecycle_status
-                .record_receipt(line);
+            app.state.record_plan_receipt(line);
         }
         Err(error) => {
-            app.state
-                .workbench
-                .analysis_lifecycle_status
-                .record_refusal(error.to_string());
+            app.state.record_plan_refusal(error.to_string());
         }
     }
 }

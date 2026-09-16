@@ -1195,6 +1195,61 @@ impl AppState {
         self.push_console_message_with_source(crate::diagnostics::LogSource::User, message);
     }
 
+    /// Announce a committed plan command on the lifecycle status line and
+    /// record it in the Console.
+    ///
+    /// One funnel for every announcing site, because a plan command's outcome
+    /// has two readers with different jobs: the status line states the latest
+    /// outcome, and the Console is the session's log of what was commanded,
+    /// which is where an operator reconstructs an hour of plan edits
+    /// afterwards. A receipt used to reach only the first of those, so a
+    /// committed plan edit left no durable record anywhere.
+    ///
+    /// [`crate::diagnostics::LogSource::Plan`] is what keeps the second reader
+    /// from becoming noise: the activity mirror never lifts a `Plan` entry, so
+    /// recording a receipt cannot turn a routine registry edit into a
+    /// notification.
+    ///
+    /// Recorded only when the outcome changes. Three announcing sites sit on
+    /// the render path and restate a standing refusal every frame, and the
+    /// price of not writing that refusal sixty times a second is that two
+    /// consecutive identical receipts leave one record.
+    pub(crate) fn record_plan_receipt(&mut self, message: impl Into<String>) {
+        let message = message.into();
+        if self
+            .workbench
+            .analysis_lifecycle_status
+            .record_receipt(message.as_str())
+        {
+            self.log_buffer.log(
+                crate::diagnostics::LogSeverity::Info,
+                crate::diagnostics::LogSource::Plan,
+                message,
+                None,
+            );
+        }
+    }
+
+    /// Announce a refused plan command, as [`Self::record_plan_receipt`] does,
+    /// at warning severity so the Problems page lists it. The notice a refusal
+    /// also raises is the plan drain's titled toast, which is a separate
+    /// reporter: this is the record, and that is the notice.
+    pub(crate) fn record_plan_refusal(&mut self, message: impl Into<String>) {
+        let message = message.into();
+        if self
+            .workbench
+            .analysis_lifecycle_status
+            .record_refusal(message.as_str())
+        {
+            self.log_buffer.log(
+                crate::diagnostics::LogSeverity::Warning,
+                crate::diagnostics::LogSource::Plan,
+                message,
+                None,
+            );
+        }
+    }
+
     /// Select a model library, reporting a name the project no longer holds.
     ///
     /// One reporter for a refusal every caller would otherwise have to spell
