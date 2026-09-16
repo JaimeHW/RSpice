@@ -1,8 +1,11 @@
 //! Per-analysis configuration forms for the Simulate right panel.
 //!
 //! Each form edits one typed [`AnalysisDraft`] owned by a stable analysis
-//! instance. The form returns a one-line note describing what the analysis
-//! does; validation is rendered by the caller.
+//! instance. A form says nothing about what its kind *is* — the reader picked
+//! the kind — so the only prose here belongs to a field: a constraint that
+//! would refuse the run, or a consequence of the current configuration that
+//! the controls do not state. Both are painted beside the control they are
+//! about. Validation is rendered by the caller.
 
 mod dc_sweep;
 /// Kept a module of its own rather than a branch of [`form`]: an analysis's
@@ -1028,13 +1031,15 @@ fn envelope_modulation_control_widths(available_width: f32) -> (f32, f32) {
     (selector_width, content_width - selector_width)
 }
 
+/// Returns the selector's own response, so a caller with a constraint to state
+/// about this field can hang it on the control rather than under the form.
 fn named_periodic_source_row(
     ui: &mut Ui,
     label: &str,
     id_namespace: &str,
     value: &mut String,
     circuit_sources: &[String],
-) {
+) -> Response {
     let catalog_selection = circuit_sources
         .iter()
         .position(|source| source.eq_ignore_ascii_case(value.trim()));
@@ -1054,10 +1059,9 @@ fn named_periodic_source_row(
             |ui| {
                 ui.spacing_mut().item_spacing.x = ENVELOPE_INLINE_CONTROL_GAP;
                 let salt = format!("analysis-{id_namespace}-source-{}", ui.id().value());
-                if let Some(index) =
-                    select_mono_with_response(ui, &salt, label, current, &options, selector_width)
-                        .picked
-                {
+                let picker =
+                    select_mono_with_response(ui, &salt, label, current, &options, selector_width);
+                if let Some(index) = picker.picked {
                     selected = index;
                     if let Some(source) = circuit_sources.get(index) {
                         *value = source.clone();
@@ -1070,13 +1074,14 @@ fn named_periodic_source_row(
                 } else {
                     ui.allocate_exact_size(vec2(editor_width, 1.0), egui::Sense::hover());
                 }
+                picker.response
             },
-        );
+        )
+        .inner
     };
 
     if uses_two_column_fields(ui) {
-        field_cell(ui, label, Some("domain constrained"), add_control);
-        return;
+        return field_cell(ui, label, Some("domain constrained"), add_control);
     }
 
     let t = Tokens::get(ui.ctx());
@@ -1095,9 +1100,10 @@ fn named_periodic_source_row(
                 theme::sans(tokens::FS_1, FontWeight::Regular),
                 color,
             );
-            add_control(ui);
+            add_control(ui)
         },
-    );
+    )
+    .inner
 }
 
 fn envelope_modulation_source_row(ui: &mut Ui, value: &mut String, circuit_sources: &[String]) {
@@ -1283,7 +1289,7 @@ fn periodic_network_fields(
 }
 
 /// The S-parameter run's ports, from whichever of the two declarations owns
-/// them. Returns the form's note.
+/// them.
 ///
 /// A port is a Z0 plane the run drives and measures, and a design can declare
 /// one in two places: `RF Port` components on the sheet, which the netlist
@@ -1296,7 +1302,7 @@ fn sp_port_fields(
     ui: &mut Ui,
     setup: &mut crate::simulation::dialog::SpDialogState,
     placed: &[crate::simulation::placed_sources::PlacedRfPort],
-) -> &'static str {
+) {
     use crate::simulation::dialog::SpPortSource;
 
     let labels: Vec<&str> = SpPortSource::ALL
@@ -1354,18 +1360,6 @@ fn sp_port_fields(
     // will be refused is visible beside the ports it is about.
     if let Some(reason) = setup.port_roster_error(placed) {
         field_advisory(ui, &reason);
-    }
-
-    match source {
-        SpPortSource::Placed => {
-            "Scattering parameters between the RF ports the design places. Their P cards are \
-             the ports the run drives and measures; nothing is added to the netlist for it."
-        }
-        SpPortSource::AdHoc => {
-            "Scattering parameters between the node pairs named here. Each becomes a generator \
-             behind its reference impedance, which only a deck that declares no ports of its \
-             own accepts."
-        }
     }
 }
 
@@ -1446,7 +1440,7 @@ fn network_port_fields(ui: &mut Ui, index: usize, port: &mut NetworkPortDraft) {
     input_row(ui, "Reference Z0", &mut port.z0);
 }
 
-/// Render the form for `draft`; returns the explanatory note.
+/// Render the form for `draft`.
 pub(super) fn form(
     ui: &mut Ui,
     draft: &mut AnalysisDraft,
@@ -1466,10 +1460,10 @@ pub(super) fn form(
     op_context: OpContextAvailability,
     run_space: &run_space::RunSpaceContext<'_>,
     route: &mut Option<crate::workbench::state::SimulationPage>,
-) -> &'static str {
+) {
     clear_pending_cell(ui);
     ui.spacing_mut().item_spacing.y = FIELD_ROW_GAP;
-    let note = match draft {
+    match draft {
         AnalysisDraft::OperatingPoint(setup) => {
             setup.ensure_initialized();
             op_temperature_row(ui, setup);
@@ -1529,7 +1523,6 @@ pub(super) fn form(
                 &OP_ACCURACY_CHOICES,
                 &mut setup.accuracy_idx,
             );
-            "Solves the DC operating point; device bias lands in the OP inspector."
         }
         AnalysisDraft::Transient(setup) => {
             quantity_input_row(
@@ -1569,7 +1562,6 @@ pub(super) fn form(
                 input_row(ui, "Max step", &mut setup.max_step);
             }
             switch_row(ui, "Use initial conditions", &mut setup.uic);
-            "Local truncation error controls step size between limits."
         }
         AnalysisDraft::Ac(setup) => {
             quantity_input_row(
@@ -1590,7 +1582,6 @@ pub(super) fn form(
             );
             input_row(ui, sweep_point_field_label(setup.sweep), &mut setup.points);
             choice_row(ui, "Sweep", SWEEP_KINDS, &mut setup.sweep);
-            "Small-signal sweep around the operating point."
         }
         AnalysisDraft::DcSweep(setup) => dc_sweep::fields(ui, setup),
         AnalysisDraft::Noise(setup) => {
@@ -1683,7 +1674,6 @@ pub(super) fn form(
             {
                 setup.integration_mode = mode;
             }
-            "Integrated and spot noise over its independent small-signal sweep."
         }
         AnalysisDraft::PoleZero(setup) => {
             input_row(ui, "Input +", &mut setup.input_pos);
@@ -1697,7 +1687,6 @@ pub(super) fn form(
                 &["both", "poles", "zeros"],
                 &mut setup.analysis_idx,
             );
-            "Extracts poles and zeros of the small-signal transfer."
         }
         AnalysisDraft::Sensitivity(setup) => {
             input_row(ui, "Output", &mut setup.output_expr);
@@ -1711,7 +1700,6 @@ pub(super) fn form(
                 locale,
                 setup.sens_type_idx == 1,
             );
-            "Sensitivity of the output to every parameter the circuit exposes."
         }
         AnalysisDraft::MonteCarlo(setup) => {
             use crate::simulation::dialog::McVariationSource;
@@ -1747,12 +1735,16 @@ pub(super) fn form(
                         .collect::<Vec<_>>()
                 },
             );
-            if states_spread {
-                "Each trial perturbs the eligible parameters and solves an operating \
-                 point; the result is the distribution of the node voltages."
-            } else {
-                "Each trial redraws the deck's own agauss/gauss/unif expressions, model \
-                 cards included, and solves an operating point."
+            // Which spread is drawn from is the `From` choice's own answer, and
+            // the two rows above say so by going quiet. What they cannot say is
+            // how far the deck's statistics reach, and a reader who expects
+            // only `.param` tolerances to move is owed the model cards.
+            if !states_spread {
+                field_note(
+                    ui,
+                    "Each trial redraws the deck's own agauss/gauss/unif expressions, model \
+                     cards included.",
+                );
             }
         }
         AnalysisDraft::Pss(setup) => {
@@ -1788,8 +1780,6 @@ pub(super) fn form(
             );
             choice_row(ui, "Sweep", SWEEP_KINDS, &mut setup.sweep_type_idx);
             switch_row(ui, "Nyquist contour", &mut setup.compute_nyquist);
-            "Loop gain via the probe source. Gain margin, phase margin and \
-             crossover are always extracted and reported as measurements."
         }
         AnalysisDraft::Temperature(setup) => {
             // The plan may already declare a temperature axis. This instance
@@ -1837,7 +1827,6 @@ pub(super) fn form(
             if action_line(ui, "+ Add tone") {
                 setup.additional_tones.push(Default::default());
             }
-            "Multi-tone steady state in the frequency domain."
         }
         AnalysisDraft::SParameter(setup) => {
             quantity_input_row(
@@ -1896,7 +1885,6 @@ pub(super) fn form(
             input_row(ui, "Magnitude", &mut setup.pac_magnitude);
             input_row(ui, "Max sideband", &mut setup.max_sideband);
             switch_row(ui, "Include DC", &mut setup.include_dc);
-            "Small-signal AC around the periodic steady state (needs PSS)."
         }
         AnalysisDraft::Pnoise(setup) => {
             quantity_input_row(
@@ -1933,7 +1921,6 @@ pub(super) fn form(
             );
             switch_row(ui, "Integrated noise", &mut setup.integrated_noise);
             switch_row(ui, "Noise summary", &mut setup.noise_summary);
-            "Cyclostationary noise around the periodic steady state (needs PSS)."
         }
         AnalysisDraft::Pxf(setup) => {
             quantity_input_row(
@@ -1968,7 +1955,6 @@ pub(super) fn form(
             // here while its up-conversion path was.
             input_row(ui, "In sideband", &mut setup.input_sideband);
             input_row(ui, "Max sideband", &mut setup.max_sideband);
-            "Transfer functions onto a periodic steady state (needs PSS)."
         }
         AnalysisDraft::Pstb(setup) => {
             // The same element STB designates, chosen the same way. It was
@@ -1986,8 +1972,6 @@ pub(super) fn form(
             engineering_input_row(ui, "Unstable above", &mut setup.stability_threshold);
             engineering_input_row(ui, "Eigen tol", &mut setup.eigenvalue_tolerance);
             switch_row(ui, "Detect subharmonics", &mut setup.detect_subharmonics);
-            "Loop stability around the periodic steady state (needs PSS). \
-             Margins are always extracted from the Floquet multipliers."
         }
         AnalysisDraft::TransferFunction(setup) => {
             // The two ports are the same two quantities the noise form asks
@@ -2049,7 +2033,6 @@ pub(super) fn form(
                 XF_ACCURACY_CHOICES,
                 &mut setup.accuracy_idx,
             );
-            "DC-linearized transfer gain plus input and output resistance."
         }
         AnalysisDraft::Corner(setup) => {
             // The run space has one editor — PVT, sweeps & variation — and one
@@ -2095,7 +2078,6 @@ pub(super) fn form(
             );
             setup.extraction_path_idx = 0;
             property_row(ui, ENVELOPE_FIELD_LABELS[7], ENVELOPE_EXTRACTION_PATH);
-            "Envelope-following transient for modulated carriers."
         }
         AnalysisDraft::Fourier(setup) => {
             quantity_input_row(
@@ -2126,7 +2108,6 @@ pub(super) fn form(
             );
             switch_row(ui, "Compute THD", &mut setup.compute_thd);
             switch_row(ui, "Normalize", &mut setup.normalize);
-            "Fourier components of a transient waveform window."
         }
         AnalysisDraft::Reliability(setup) => {
             input_row(ui, "Years", &mut setup.years_csv);
@@ -2134,10 +2115,10 @@ pub(super) fn form(
             switch_row(ui, "Hot carrier (HCI)", &mut setup.enable_hci);
             switch_row(ui, "Bias instability (NBTI)", &mut setup.enable_nbti);
             switch_row(ui, "Electromigration", &mut setup.enable_em);
-            "Projects device aging across the lifetime points."
         }
         AnalysisDraft::Optimization(setup) => {
-            input_row(ui, "Variables", &mut setup.variables_text);
+            input_row(ui, "Variables", &mut setup.variables_text)
+                .on_hover_text("One per line or comma, spelled name:min:max[:initial].");
             input_row(ui, "Objective", &mut setup.objective_node);
             input_row(ui, "Obj ref", &mut setup.objective_ref);
             choice_row(ui, "Goal", &["min", "max", "target"], &mut setup.goal_mode);
@@ -2150,7 +2131,6 @@ pub(super) fn form(
             );
             input_row(ui, "Max iters", &mut setup.max_iterations);
             input_row(ui, "Tolerance", &mut setup.cost_tolerance);
-            "Tunes the variables (name:min:max[:initial]) toward the goal."
         }
         AnalysisDraft::Soa(setup) => {
             quantity_input_row(
@@ -2177,7 +2157,6 @@ pub(super) fn form(
             input_row_enabled(ui, "Max Vbe", &mut setup.max_vbe, setup.check_vbe_max);
             switch_row(ui, "Check Vce", &mut setup.check_vce_max);
             input_row_enabled(ui, "Max Vce", &mut setup.max_vce, setup.check_vce_max);
-            "Flags excursions outside the safe operating area during transient."
         }
         AnalysisDraft::Disto(setup) => {
             quantity_input_row(
@@ -2203,7 +2182,13 @@ pub(super) fn form(
             );
             choice_row(ui, "Sweep", SWEEP_KINDS, &mut setup.sweep.sweep);
             input_row(ui, "f2/f1", &mut setup.f2_over_f1);
-            "Volterra harmonic and intermodulation distortion from source DISTOF1/DISTOF2 excitations; f2/f1 must be between 0 and 1, or empty for single-tone."
+            // The one bound the Volterra run refuses on, said where it is
+            // typed: the ratio has no meaning at or above the first tone, and
+            // an empty field is the single-tone run rather than a mistake.
+            field_note(
+                ui,
+                "Between 0 and 1, exclusive, or empty for a single-tone run.",
+            );
         }
         AnalysisDraft::Qpss(setup) => {
             input_row(ui, "Tone frequencies", &mut setup.tones);
@@ -2217,11 +2202,9 @@ pub(super) fn form(
                 &mut setup.oscillator_node,
                 setup.autonomous,
             );
-            "Multi-tone spectral-lattice operating state (needs OP)."
         }
         AnalysisDraft::Hbsp(setup) => {
             periodic_network_fields(ui, setup, policy, locale);
-            "Large-signal network response linearized around harmonic balance (needs HB)."
         }
         AnalysisDraft::Hbnoise(setup) => {
             frequency_sweep_fields(ui, &mut setup.sweep, policy, locale);
@@ -2232,11 +2215,9 @@ pub(super) fn form(
             switch_row(ui, "Integrated noise", &mut setup.integrated_noise);
             switch_row(ui, "Noise figure", &mut setup.noise_figure);
             switch_row(ui, "Contributor ranking", &mut setup.contributor_ranking);
-            "Noise folding and correlation around harmonic balance (needs HB)."
         }
         AnalysisDraft::Psp(setup) => {
             periodic_network_fields(ui, setup, policy, locale);
-            "Frequency-translated network response around PSS (needs PSS)."
         }
         AnalysisDraft::Qpac(setup) => {
             frequency_sweep_fields(ui, &mut setup.sweep, policy, locale);
@@ -2245,7 +2226,6 @@ pub(super) fn form(
             input_row(ui, "Output ref", &mut setup.output_ref);
             input_row(ui, "Input lattice", &mut setup.input_lattice);
             input_row(ui, "Output lattice", &mut setup.output_lattice);
-            "Small-signal conversion matrix around QPSS (needs QPSS)."
         }
         AnalysisDraft::Qpnoise(setup) => {
             frequency_sweep_fields(ui, &mut setup.sweep, policy, locale);
@@ -2255,7 +2235,6 @@ pub(super) fn form(
             input_row(ui, "Lattice ranges", &mut setup.lattice_products);
             switch_row(ui, "Integrated noise", &mut setup.integrated_noise);
             switch_row(ui, "Contributor ranking", &mut setup.contributor_ranking);
-            "Noise folding across a multi-tone spectral lattice (needs QPSS)."
         }
         AnalysisDraft::Qpxf(setup) => {
             frequency_sweep_fields(ui, &mut setup.sweep, policy, locale);
@@ -2265,7 +2244,6 @@ pub(super) fn form(
             input_row(ui, "Input lattice", &mut setup.input_lattice);
             input_row(ui, "Output lattice", &mut setup.output_lattice);
             switch_row(ui, "Group delay", &mut setup.group_delay);
-            "Translated transfer paths indexed by lattice products (needs QPSS)."
         }
         AnalysisDraft::TransientNoise(setup) => {
             quantity_input_row(
@@ -2315,7 +2293,6 @@ pub(super) fn form(
                 "Use initial conditions",
                 &mut setup.use_initial_conditions,
             );
-            "Reproducible stochastic device noise in the time domain (needs TRAN)."
         }
         AnalysisDraft::DcMismatch(setup) => {
             input_row(ui, "Output expression", &mut setup.output_expression);
@@ -2328,11 +2305,9 @@ pub(super) fn form(
                 "Normalize contributions",
                 &mut setup.normalized_contributions,
             );
-            "Local mismatch variance and ranked contributions around OP (needs OP)."
         }
-    };
+    }
     clear_pending_cell(ui);
-    note
 }
 
 #[cfg(test)]

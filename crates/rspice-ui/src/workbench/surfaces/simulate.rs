@@ -2297,7 +2297,7 @@ fn analysis_form_body(
         .show(ui, |ui| {
             ui.set_width(content_width);
             ui.spacing_mut().item_spacing.y = 0.0;
-            let note = analysis_form::form(
+            analysis_form::form(
                 ui,
                 draft,
                 app.state.ui.preferences.quantity_presentation_policy(),
@@ -2318,12 +2318,6 @@ fn analysis_form_body(
             // are: a bound this analysis states, in the same grid and with the
             // same label over the same well.
             *option_edits = analysis_form::options::fields(ui, app, draft, selected);
-            // The form's own account of what this configuration will do. Some
-            // of these sentences are the only place a setting's consequence is
-            // stated — the DC retrace note names the two traces the run will
-            // report — so discarding it left the field grid speaking for
-            // itself and the reader to guess.
-            page_kit::card_note(ui, note);
         })
         .response
         .rect

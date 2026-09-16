@@ -31,7 +31,7 @@ const STUDIO_BASELINES: [StudioBaseline; 9] = [
     StudioBaseline {
         name: "studio-analyses",
         page: SimulationPage::Analyses,
-        fingerprint: "8a41dda90cf85fa272b6ae75cd97647e1410e80a59a8661c02fc2e7dc87def89",
+        fingerprint: "4c8116583e530cac31243e5121275901c461af1f34636b0f74c5ded161a74f90",
     },
     StudioBaseline {
         name: "studio-excitations",

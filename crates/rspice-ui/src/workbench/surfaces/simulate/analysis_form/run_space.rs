@@ -19,7 +19,7 @@ use crate::simulation::run_set::{
 use crate::state::NominalFailurePolicy;
 use crate::workbench::state::SimulationPage;
 
-use super::{action_line, choice_row, property_row, sub_header};
+use super::{action_line, choice_row, field_note, property_row, sub_header};
 
 /// The plan facts the run-space forms read, resolved once by the caller.
 ///
@@ -110,7 +110,7 @@ impl RunSpaceContext<'_> {
 }
 
 /// Draw the temperature sweep as a reader of the plan's axis, with the switch
-/// that lets this instance own its temperatures instead. Returns the note.
+/// that lets this instance own its temperatures instead.
 pub(super) fn temperature_form(
     ui: &mut Ui,
     setup: &mut crate::simulation::dialog::temp::TempDialogState,
@@ -118,7 +118,7 @@ pub(super) fn temperature_form(
     route: &mut Option<SimulationPage>,
     policy: crate::quantity::QuantityPresentationPolicy,
     locale: crate::quantity::UiNumberLocale,
-) -> &'static str {
+) {
     use crate::simulation::dialog::temp::TempAxisMode;
 
     let labels: Vec<&str> = TempAxisMode::ALL
@@ -133,6 +133,10 @@ pub(super) fn temperature_form(
         .run_set
         .declared_temperatures_celsius(context.reference);
     property_row(ui, "Run-set axis", &axis_state(context, setup, &declared));
+    // Under the axis row, because it is that row's cost and it is the same in
+    // both modes: inheriting authors the temperatures once, it does not move
+    // who walks them, so this instance owns a point expansion either way.
+    field_note(ui, POINT_EXPANSION_NOTE);
 
     match setup.axis_mode() {
         TempAxisMode::InheritRunSetAxis => {
@@ -141,17 +145,7 @@ pub(super) fn temperature_form(
             }
             super::choice_row(ui, "Base", &["op", "tran", "ac", "dc"], &mut setup.base_idx);
             if setup.base_idx == 3 {
-                "Repeats the base analysis across the temperatures the plan declares, travelling \
-                 the DC range once at each: a Bidirectional retrace belongs to that analysis \
-                 instance and the point family does not carry it. Inheriting authors those \
-                 temperatures once; it does not move who walks them, so this instance still owns \
-                 a point expansion and the plan is refused while any global run-set axis is \
-                 enabled."
-            } else {
-                "Repeats the base analysis across the temperatures the plan declares. Inheriting \
-                 authors those temperatures once; it does not move who walks them, so this \
-                 instance still owns a point expansion and the plan is refused while any global \
-                 run-set axis is enabled. Edit the temperatures in PVT, sweeps & variation."
+                field_note(ui, DC_BASE_TRAVELS_ONCE_NOTE);
             }
         }
         TempAxisMode::Explicit => {
@@ -180,22 +174,29 @@ pub(super) fn temperature_form(
                 locale,
             );
             super::choice_row(ui, "Base", &["op", "tran", "ac", "dc"], &mut setup.base_idx);
-            super::input_row(ui, "Explicit list", &mut setup.specific_temps);
+            super::input_row(ui, "Explicit list", &mut setup.specific_temps)
+                .on_hover_text("Replaces the range above; leave it empty to sweep the range.");
             if setup.base_idx == 3 {
-                "Repeats the base analysis across temperature, travelling the DC range once at \
-                 each: a Bidirectional retrace belongs to that analysis instance and the point \
-                 family does not carry it. An explicit list replaces the range above; leave it \
-                 empty to sweep the range. This instance owns a point expansion either way, so \
-                 the plan is refused while any global run-set axis is enabled."
-            } else {
-                "Repeats the base analysis across temperature. An explicit list replaces the \
-                 range above; leave it empty to sweep the range. This instance owns a point \
-                 expansion either way, so the plan is refused while any global run-set axis is \
-                 enabled."
+                field_note(ui, DC_BASE_TRAVELS_ONCE_NOTE);
             }
         }
     }
 }
+
+/// The one cost of declaring a temperature axis on an analysis instance, which
+/// neither the mode choice nor the axis row can state: whichever mode is in
+/// force, this instance walks the points, and the plan refuses to hold a second
+/// walker.
+const POINT_EXPANSION_NOTE: &str = "This instance owns a point expansion, so the plan is refused \
+                                    while any global run-set axis is enabled.";
+
+/// The base analysis's configuration travels to every point; its Bidirectional
+/// flag does not. `CornerBaseMode::DcSweep` has no field for one, so a
+/// retracing DC sweep runs one-way at every point. Said where the base is
+/// chosen, because "repeats the base analysis" otherwise implies it.
+const DC_BASE_TRAVELS_ONCE_NOTE: &str = "The DC base travels its range once at each \
+                                         point: a Bidirectional retrace belongs to that analysis \
+                                         instance and the point family does not carry it.";
 
 /// The one line that says which axis is in force, and what it costs to differ.
 ///
@@ -245,13 +246,13 @@ fn axis_state(
 }
 
 /// Draw the declared space, the conditions it runs under, and the route to its
-/// editor. Returns the form's note.
+/// editor.
 pub(super) fn corner_form(
     ui: &mut Ui,
     base_analysis_idx: &mut usize,
     context: &RunSpaceContext<'_>,
     route: &mut Option<SimulationPage>,
-) -> &'static str {
+) {
     sub_header(ui, "Run space");
     for dimension in context.run_set.dimensions.iter() {
         let values = if dimension.values.is_empty() {
@@ -302,15 +303,7 @@ pub(super) fn corner_form(
 
     sub_header(ui, "At every point");
     choice_row(ui, "Base", &["tran", "ac", "dc", "op"], base_analysis_idx);
-    // The point family carries the base analysis's configuration, not its
-    // Bidirectional flag: `CornerBaseMode::DcSweep` has no field for one, so a
-    // retracing DC sweep runs one-way at every point. Said where the base is
-    // chosen, because "repeats the base analysis" otherwise implies it.
     if *base_analysis_idx == 2 {
-        "Repeats the base analysis at every point of the plan's declared run space. The DC base \
-         travels its range once at each point: a Bidirectional retrace belongs to that analysis \
-         instance and the point family does not carry it."
-    } else {
-        "Repeats the base analysis at every point of the plan's declared run space."
+        field_note(ui, DC_BASE_TRAVELS_ONCE_NOTE);
     }
 }

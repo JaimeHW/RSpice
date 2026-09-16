@@ -1,7 +1,7 @@
-//! The DC sweep form: its fields, and the sentence describing what it will do.
+//! The DC sweep form: its fields, and what a retrace does to them.
 //!
 //! Split out because this one analysis carries two settings that exclude each
-//! other and a note that changes with them. The exclusion is the reason: a
+//! other and a note that one of them turns on. The exclusion is the reason: a
 //! nested sweep is a family of curves over two sources, a retrace is one source
 //! travelled twice, and "retrace a nested sweep" does not name an analysis —
 //! there is no answer to which axis rewinds, or whether the outer source
@@ -12,10 +12,10 @@ use egui::Ui;
 
 use crate::workbench::app_state::DcSetup;
 
-use super::{clear_pending_cell, input_row, input_row_enabled, switch_row};
+use super::{clear_pending_cell, field_note, input_row, input_row_enabled, switch_row};
 
-/// Render the DC sweep fields; returns the note describing the configured run.
-pub(super) fn fields(ui: &mut Ui, setup: &mut DcSetup) -> &'static str {
+/// Render the DC sweep fields.
+pub(super) fn fields(ui: &mut Ui, setup: &mut DcSetup) {
     input_row(ui, "Source", &mut setup.source);
     input_row(ui, "Start", &mut setup.start);
     input_row(ui, "Stop", &mut setup.stop);
@@ -25,6 +25,11 @@ pub(super) fn fields(ui: &mut Ui, setup: &mut DcSetup) -> &'static str {
     ui.add_enabled_ui(!setup.nested, |ui| {
         switch_row(ui, "Bidirectional", &mut setup.hysteresis);
     });
+    // Beside the switch that turns it on, because it is that switch's
+    // consequence and nothing else on the form carries it.
+    if let Some(note) = retrace_note(setup) {
+        field_note(ui, note);
+    }
     ui.add_enabled_ui(!setup.hysteresis, |ui| {
         switch_row(ui, "Nested sweep", &mut setup.nested);
     });
@@ -36,10 +41,12 @@ pub(super) fn fields(ui: &mut Ui, setup: &mut DcSetup) -> &'static str {
     input_row_enabled(ui, "Start 2", &mut setup.start2, setup.nested);
     input_row_enabled(ui, "Stop 2", &mut setup.stop2, setup.nested);
     input_row_enabled(ui, "Step 2", &mut setup.step2, setup.nested);
-    note(setup)
 }
 
-/// What this configuration will actually do, stated rather than implied.
+/// What a retrace will actually do, stated rather than implied. `None` while
+/// the switch is off: a one-way sweep is what the four fields above already
+/// say, and repeating them under the form is the kind's description, not this
+/// configuration's consequence.
 ///
 /// The retracing sentence is specific on purpose. A reverse branch is not a
 /// second run: it continues from the state the forward branch ended in, which
@@ -56,15 +63,18 @@ pub(super) fn fields(ui: &mut Ui, setup: &mut DcSetup) -> &'static str {
 /// a second run of the same numbers under two trace names. A note that
 /// promised a continued solve regardless of source promised something the
 /// configuration would then refuse.
-pub(super) const fn note(setup: &DcSetup) -> &'static str {
+const fn retrace_note(setup: &DcSetup) -> Option<&'static str> {
     if setup.hysteresis {
-        "Sweeps the source up and then back down in one continued solve, carrying the forward \
-         branch's final state into the reverse branch. Each signal is reported as two traces, \
-         [forward] and [reverse], over the same source values. Only an independent V or I \
-         source carries state that way, so a retrace over a temperature, a parameter or a \
-         device parameter is refused rather than run as two identical branches."
+        Some(
+            "Sweeps the source up and then back down in one continued solve, carrying the \
+             forward branch's final state into the reverse branch. Each signal is reported as \
+             two traces, [forward] and [reverse], over the same source values. Only an \
+             independent V or I source carries state that way, so a retrace over a temperature, \
+             a parameter or a device parameter is refused rather than run as two identical \
+             branches.",
+        )
     } else {
-        "Sweeps a source over the operating range."
+        None
     }
 }
 
@@ -75,13 +85,14 @@ mod tests {
     /// The note is the only place the form says what a retrace does, so it has
     /// to name the two things a reader cannot see anywhere else: that the
     /// branches are one continued solve, and that they arrive as two traces.
+    /// A one-way sweep gets no note at all — the fields are the whole story.
     #[test]
     fn the_note_states_what_a_retracing_sweep_actually_does() {
         let mut setup = DcSetup::default();
-        assert_eq!(note(&setup), "Sweeps a source over the operating range.");
+        assert_eq!(retrace_note(&setup), None);
 
         setup.hysteresis = true;
-        let note = note(&setup);
+        let note = retrace_note(&setup).expect("a retrace has a consequence to state");
         assert!(note.contains("one continued solve"), "{note}");
         assert!(
             note.contains("final state into the reverse branch"),
@@ -105,7 +116,7 @@ mod tests {
             hysteresis: true,
             ..DcSetup::default()
         };
-        let note = note(&setup);
+        let note = retrace_note(&setup).expect("a retrace has a consequence to state");
         assert!(note.contains("independent V or I source"), "{note}");
         assert!(note.contains("refused"), "{note}");
     }
