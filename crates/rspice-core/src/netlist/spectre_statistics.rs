@@ -73,6 +73,52 @@ pub struct SpectreVariation {
     pub percent: bool,
 }
 
+/// One statistical variable's nominal value and standard deviation,
+/// evaluated in the sampler's own parameter context.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct SpectreVariationSigma {
+    /// Canonical (upper-case) parameter name.
+    pub parameter: String,
+    /// The value the deterministic run uses.
+    pub nominal: Value,
+    /// Standard deviation of the parameter itself, not of a latent draw.
+    pub standard_deviation: Value,
+}
+
+/// Deterministic replacement for what the mismatch sampler would draw.
+///
+/// A linearized mismatch analysis needs one named instance's one named
+/// variable displaced by exactly its standard deviation while every other
+/// instance stays at nominal. No statistical coordinate produces that
+/// combination — a coordinate draws every instance at once — so the
+/// displacement is carried beside the plan and consumed by the same
+/// elaborator hook the sampled draw feeds. There is one mismatch materializer,
+/// and this is how a caller addresses it.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub(crate) struct SpectreMismatchOverride {
+    /// Canonical instance identity to canonical parameter name to the
+    /// absolute value that instance reads. An identity absent from this map
+    /// keeps every statistical variable at its nominal.
+    values: BTreeMap<String, BTreeMap<String, Value>>,
+}
+
+impl SpectreMismatchOverride {
+    /// Displace exactly one instance's one variable.
+    pub(crate) fn single(instance: &str, parameter: &str, value: Value) -> Self {
+        Self {
+            values: BTreeMap::from([(
+                instance.to_ascii_uppercase(),
+                BTreeMap::from([(parameter.to_ascii_uppercase(), value)]),
+            )]),
+        }
+    }
+
+    /// What one instance reads, or `None` when it is at nominal.
+    pub(crate) fn for_instance(&self, instance: &str) -> Option<&BTreeMap<String, Value>> {
+        self.values.get(instance)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SpectreCorrelation {
     pub line: usize,
@@ -326,14 +372,19 @@ impl SpectreStatisticsPlan {
         )
     }
 
-    fn sample_scope(
-        &self,
+    /// Resolve every variation of one scope against the same parameter
+    /// context the sampler draws in, sorted by canonical parameter name.
+    ///
+    /// This is the one place a variation's nominal value and its authored
+    /// spread are evaluated. Both the sampler and `.DCMATCH`'s linearization
+    /// read it, so a spread expression cannot mean one thing to a Monte Carlo
+    /// trial and another to a mismatch variance.
+    fn resolve_scope<'plan>(
+        &'plan self,
         scope: SpectreVariationScope,
         params: &ParamContext,
         process: &BTreeMap<String, Value>,
-        instance: Option<&str>,
-        coordinate: &SpectreStatisticalCoordinate,
-    ) -> Result<BTreeMap<String, Value>, SpectreStatisticsError> {
+    ) -> Result<Vec<ResolvedVariation<'plan>>, SpectreStatisticsError> {
         self.validate_structure()?;
         let mut variations = self
             .variations
@@ -400,6 +451,63 @@ impl SpectreStatisticsPlan {
                 .to_ascii_uppercase()
                 .cmp(&right.source.parameter.to_ascii_uppercase())
         });
+        Ok(variations)
+    }
+
+    /// Standard deviation of every variation of one scope.
+    ///
+    /// `.DCMATCH` linearizes rather than sampling, so it needs the second
+    /// moment the sampler's draw would have had. Each distribution's spread
+    /// is converted once, here, beside the draw it belongs to:
+    ///
+    /// * Gaussian — the authored `std` *is* the standard deviation.
+    /// * Uniform — the authored `N` is a half range, so the standard
+    ///   deviation of the uniform draw on `nominal ± N` is `N / sqrt(3)`.
+    /// * Lognormal — `std` is the standard deviation of `log(x)`, and the
+    ///   parameter's own spread is only defined by a linearization at the
+    ///   nominal: `sigma_p ~= nominal * std`. That approximation is exact to
+    ///   first order and is the same order as the sensitivity it multiplies.
+    pub(crate) fn scope_standard_deviations(
+        &self,
+        scope: SpectreVariationScope,
+        params: &ParamContext,
+        process: &BTreeMap<String, Value>,
+    ) -> Result<Vec<SpectreVariationSigma>, SpectreStatisticsError> {
+        self.resolve_scope(scope, params, process)?
+            .into_iter()
+            .map(|variation| {
+                let standard_deviation = match variation.source.distribution {
+                    SpectreDistribution::Gaussian => variation.spread,
+                    SpectreDistribution::Uniform => variation.spread / libm::sqrt(3.0),
+                    SpectreDistribution::Lognormal => variation.nominal * variation.spread,
+                };
+                if !standard_deviation.is_finite() {
+                    return Err(invalid(
+                        variation.source.line,
+                        format!(
+                            "Spectre variation '{}' has no finite standard deviation",
+                            variation.source.parameter
+                        ),
+                    ));
+                }
+                Ok(SpectreVariationSigma {
+                    parameter: variation.source.parameter.to_ascii_uppercase(),
+                    nominal: variation.nominal,
+                    standard_deviation,
+                })
+            })
+            .collect()
+    }
+
+    fn sample_scope(
+        &self,
+        scope: SpectreVariationScope,
+        params: &ParamContext,
+        process: &BTreeMap<String, Value>,
+        instance: Option<&str>,
+        coordinate: &SpectreStatisticalCoordinate,
+    ) -> Result<BTreeMap<String, Value>, SpectreStatisticsError> {
+        let variations = self.resolve_scope(scope, params, process)?;
         if variations.is_empty() {
             return Ok(BTreeMap::new());
         }

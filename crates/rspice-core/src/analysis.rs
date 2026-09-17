@@ -25,6 +25,7 @@
 pub mod ac;
 pub mod corner;
 pub mod dc;
+pub mod dcmatch;
 pub mod distortion;
 pub mod error;
 pub mod floquet;
@@ -52,6 +53,7 @@ pub mod temperature;
 pub mod transfer;
 pub mod transient;
 
+pub use dcmatch::{DcMatchContributor, DcMatchResult, DcMatchScope};
 pub use floquet::{
     FLOQUET_UNIT_CIRCLE_BAND, FloquetOrbitKind, FloquetSpectrumCertificate,
     FloquetSpectrumEvidence, FloquetStabilityVerdict, classify_floquet_stability,

@@ -62,6 +62,7 @@ mod convergence;
 mod core;
 mod data;
 mod dc;
+mod dcmatch;
 mod distortion;
 use crate::analysis::error;
 mod hb;

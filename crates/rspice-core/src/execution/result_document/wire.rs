@@ -11,6 +11,7 @@ use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::Value;
+use crate::analysis::dcmatch::DcMatchScope;
 use crate::execution::capability::AnalysisResultKind;
 use crate::execution::plan::{
     AnalysisInstanceId, AnalysisKind, AxisKind, DataBinding, RunAxisValue, RunCoordinateId,
@@ -123,6 +124,7 @@ tagged_enum_adapter!(
         Pstb => "pstb",
         HarmonicBalance => "hb",
         Envelope => "envelope",
+        DcMatch => "dcmatch",
     }
 );
 
@@ -155,6 +157,11 @@ tagged_enum_adapter!(signal_shape, SignalShape, {
     Scalar => "scalar",
     Vector => "vector",
     Matrix => "matrix",
+});
+
+tagged_enum_adapter!(dc_match_scope, DcMatchScope, {
+    Process => "process",
+    Mismatch => "mismatch",
 });
 
 //=============================================================================

@@ -896,6 +896,18 @@ fn materialize_statistical_model(
     Ok(materialized)
 }
 
+/// The mismatch scope one flattened element belongs to.
+///
+/// Spectre mismatch variables belong to the concrete subcircuit instance, so
+/// all primitive elements inside that instance share one draw. A top-level
+/// primitive is its own instance scope. `.DCMATCH` enumerates contributors by
+/// the same rule, which is why it lives here rather than inline.
+pub(crate) fn spectre_mismatch_identity(element_name: &str) -> &str {
+    element_name
+        .rsplit_once('.')
+        .map_or(element_name, |(parent, _)| parent)
+}
+
 fn materialize_spectre_statistics_after_flattening(
     netlist: &mut Netlist,
     elements: &mut [Element],
@@ -906,37 +918,54 @@ fn materialize_spectre_statistics_after_flattening(
 ) -> Result<(), SimulationError> {
     check_build_abort(abort)?;
     let plan = netlist.spectre_statistics.clone();
-    let has_mismatch = coordinate.is_some()
+    let displacement = netlist.spectre_mismatch_override.clone();
+    if displacement.is_some() && coordinate.is_some() {
+        return Err(SimulationError::Circuit(
+            "a Spectre mismatch displacement and a statistical coordinate cannot both be active: \
+             the build would have to both sample and hold the same variable"
+                .to_owned(),
+        ));
+    }
+    let samples_mismatch = coordinate.is_some()
         && plan
             .variations
             .iter()
             .any(|variation| variation.scope == crate::netlist::SpectreVariationScope::Mismatch);
+    let has_mismatch = samples_mismatch || displacement.is_some();
     let mut mismatch_cache = BTreeMap::<String, BTreeMap<String, Value>>::new();
     let mut model_cache = BTreeMap::<(String, String), String>::new();
     for element in elements {
         check_build_abort(abort)?;
-        // Spectre mismatch variables belong to the concrete subcircuit
-        // instance.  All primitive elements inside that instance therefore
-        // share one draw.  A top-level primitive is its own instance scope.
-        let mismatch_identity = element
-            .name
-            .rsplit_once('.')
-            .map_or(element.name.as_str(), |(parent, _)| parent);
+        let mismatch_identity = spectre_mismatch_identity(&element.name);
         let canonical_mismatch_identity = mismatch_identity.to_ascii_uppercase();
         let empty_mismatch = BTreeMap::new();
         let mismatch = if has_mismatch {
             match mismatch_cache.entry(canonical_mismatch_identity.clone()) {
                 std::collections::btree_map::Entry::Occupied(entry) => entry.into_mut(),
                 std::collections::btree_map::Entry::Vacant(entry) => {
-                    let coordinate = coordinate.ok_or_else(|| {
-                        SimulationError::Circuit(
-                            "Spectre mismatch materialization requires an active statistical coordinate"
-                                .to_owned(),
+                    let mismatch = if let Some(displacement) = &displacement {
+                        // An instance the displacement does not name is at
+                        // nominal, which `statistical_expression_context`
+                        // already reads from the design's parameters.
+                        displacement
+                            .for_instance(entry.key())
+                            .cloned()
+                            .unwrap_or_default()
+                    } else {
+                        let coordinate = coordinate.ok_or_else(|| {
+                            SimulationError::Circuit(
+                                "Spectre mismatch materialization requires an active statistical coordinate"
+                                    .to_owned(),
+                            )
+                        })?;
+                        plan.sample_mismatch(
+                            &netlist.params,
+                            process,
+                            mismatch_identity,
+                            coordinate,
                         )
-                    })?;
-                    let mismatch = plan
-                        .sample_mismatch(&netlist.params, process, mismatch_identity, coordinate)
-                        .map_err(|error| SimulationError::Circuit(error.to_string()))?;
+                        .map_err(|error| SimulationError::Circuit(error.to_string()))?
+                    };
                     entry.insert(mismatch)
                 }
             }

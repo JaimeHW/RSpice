@@ -39,10 +39,11 @@ pub enum AnalysisResultKind {
     Pstb,
     HarmonicBalance,
     Envelope,
+    DcMatch,
 }
 
 impl AnalysisResultKind {
-    pub const ALL: [Self; 22] = [
+    pub const ALL: [Self; 23] = [
         Self::OperatingPoint,
         Self::DcSweep,
         Self::Ac,
@@ -65,6 +66,7 @@ impl AnalysisResultKind {
         Self::Pstb,
         Self::HarmonicBalance,
         Self::Envelope,
+        Self::DcMatch,
     ];
 
     pub const fn tag(self) -> &'static str {
@@ -91,6 +93,7 @@ impl AnalysisResultKind {
             Self::Pstb => "pstb",
             Self::HarmonicBalance => "hb",
             Self::Envelope => "envelope",
+            Self::DcMatch => "dcmatch",
         }
     }
 }
@@ -127,6 +130,7 @@ pub const fn analysis_result_kind(kind: AnalysisKind) -> Option<AnalysisResultKi
         AnalysisKind::MonteCarlo => AnalysisResultKind::MonteCarlo,
         AnalysisKind::Fourier => AnalysisResultKind::Fourier,
         AnalysisKind::Fft => AnalysisResultKind::Fft,
+        AnalysisKind::DcMatch => AnalysisResultKind::DcMatch,
         // Named for the surfaces above, not yet runnable here.
         AnalysisKind::Soa
         | AnalysisKind::Optimize
@@ -136,8 +140,7 @@ pub const fn analysis_result_kind(kind: AnalysisKind) -> Option<AnalysisResultKi
         | AnalysisKind::Qpss
         | AnalysisKind::Qpac
         | AnalysisKind::Qpnoise
-        | AnalysisKind::Qpxf
-        | AnalysisKind::DcMatch => return None,
+        | AnalysisKind::Qpxf => return None,
     })
 }
 
@@ -271,7 +274,7 @@ const fn adapter_typed_axes() -> SurfaceCapability {
 ///
 /// Every constructor is deliberately visible in source: unsupported cells are
 /// declarations, never a wildcard/default inferred by the renderer.
-pub const ANALYSIS_CAPABILITY_MATRIX: [AnalysisResultCapability; 22] = [
+pub const ANALYSIS_CAPABILITY_MATRIX: [AnalysisResultCapability; 23] = [
     AnalysisResultCapability {
         result: AnalysisResultKind::OperatingPoint,
         cli: cli_mapped_axes(),
@@ -426,6 +429,13 @@ pub const ANALYSIS_CAPABILITY_MATRIX: [AnalysisResultCapability; 22] = [
         wasm: wasm_mapped_axes(),
         engine_adapter: adapter_typed_axes(),
     },
+    AnalysisResultCapability {
+        result: AnalysisResultKind::DcMatch,
+        cli: cli_mapped_axes(),
+        python: python_mapped_axes(),
+        wasm: wasm_mapped_axes(),
+        engine_adapter: adapter_typed_axes(),
+    },
 ];
 
 /// Exhaustive result-to-row lookup. A new `AnalysisResultKind` variant makes
@@ -456,6 +466,7 @@ pub const fn analysis_result_capability(
         AnalysisResultKind::Pstb => &ANALYSIS_CAPABILITY_MATRIX[19],
         AnalysisResultKind::HarmonicBalance => &ANALYSIS_CAPABILITY_MATRIX[20],
         AnalysisResultKind::Envelope => &ANALYSIS_CAPABILITY_MATRIX[21],
+        AnalysisResultKind::DcMatch => &ANALYSIS_CAPABILITY_MATRIX[22],
     }
 }
 
@@ -630,6 +641,7 @@ mod tests {
             AnalysisKind::MonteCarlo,
             AnalysisKind::Fourier,
             AnalysisKind::Fft,
+            AnalysisKind::DcMatch,
         ];
         for kind in kinds {
             let result = analysis_result_kind(kind)

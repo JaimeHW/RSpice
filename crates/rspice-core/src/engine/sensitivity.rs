@@ -2406,7 +2406,7 @@ impl Engine {
         })
     }
 
-    fn dc_sensitivity_output_value(
+    pub(in crate::engine) fn dc_sensitivity_output_value(
         result: &SimulationResult,
         output: &AcSensitivityOutput,
     ) -> Result<Value, SimulationError> {

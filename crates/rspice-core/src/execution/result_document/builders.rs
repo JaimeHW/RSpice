@@ -17,16 +17,16 @@ use std::collections::BTreeMap;
 use num_complex::Complex64;
 
 use super::payload::{
-    AcPayload, AcSensitivityEntry, CompressionReportDocument, DcSweepAxisDocument, DcSweepPayload,
-    DigitalEventBus, DigitalEventPoint, DigitalEventTrace, DistortionPayload,
-    DistortionProductSeries, DistortionProductTag, DistortionTone, EnvelopeCarrierDocument,
-    EnvelopeContinuationDocument, EnvelopeNodeSpectrum, EnvelopePayload, FftMetricsDocument,
-    FftPayload, FftSourceDocument, FloquetEvidenceDocument, FloquetOrbitTag, FourierPayload,
-    HarmonicBalancePayload, HbReactiveSpectrumDocument, MonteCarloPayload,
-    MonteCarloVariableStatistics, NamedObservable, NamedObservableSeries, NoiseContributionSeries,
-    NoisePayload, NoiseSourceIdentityDocument, NyquistSample, OperatingPointPayload,
-    OscillatorPhaseNoiseDocument, PNoiseBandwidth, PNoiseContribution, PNoiseContributor,
-    PNoisePayload, PacConversionEntry, PacConversionMatrixDocument, PacPayload,
+    AcPayload, AcSensitivityEntry, CompressionReportDocument, DcMatchContributorDocument,
+    DcMatchPayload, DcSweepAxisDocument, DcSweepPayload, DigitalEventBus, DigitalEventPoint,
+    DigitalEventTrace, DistortionPayload, DistortionProductSeries, DistortionProductTag,
+    DistortionTone, EnvelopeCarrierDocument, EnvelopeContinuationDocument, EnvelopeNodeSpectrum,
+    EnvelopePayload, FftMetricsDocument, FftPayload, FftSourceDocument, FloquetEvidenceDocument,
+    FloquetOrbitTag, FourierPayload, HarmonicBalancePayload, HbReactiveSpectrumDocument,
+    MonteCarloPayload, MonteCarloVariableStatistics, NamedObservable, NamedObservableSeries,
+    NoiseContributionSeries, NoisePayload, NoiseSourceIdentityDocument, NyquistSample,
+    OperatingPointPayload, OscillatorPhaseNoiseDocument, PNoiseBandwidth, PNoiseContribution,
+    PNoiseContributor, PNoisePayload, PacConversionEntry, PacConversionMatrixDocument, PacPayload,
     PacSidebandDescriptor, PoleZeroPayload, PortDocument, PortNoiseCovarianceNormalization,
     PortNoisePayload, PstbModeDocument, PstbPayload, PstbStabilityTag, PxfGroupDelaySample,
     PxfPayload, RealEventPoint, RealEventTrace, ResultPayload, RootSetEvidenceDocument,
@@ -41,6 +41,7 @@ use super::{
 };
 use crate::Value;
 use crate::analysis::ac::AcResult;
+use crate::analysis::dcmatch::DcMatchResult;
 use crate::analysis::distortion::{DistortionAnalysisResult, DistortionPointResult};
 use crate::analysis::fourier::FourierResult;
 use crate::analysis::harmonic_balance::HbResult;
@@ -1793,6 +1794,87 @@ impl AnalysisResultDocument {
             input: result.input.clone(),
         };
         Ok(Self::builder(analysis, ResultPayload::Tf(payload), 0).scalars(scalars))
+    }
+
+    /// Project one `.DCMATCH` mismatch-variance result.
+    ///
+    /// The three sigmas are published as scalars because they are what a
+    /// reader asks for first, and the contributor table stays in the payload
+    /// because it is a ranked table rather than a signal on an axis.
+    pub fn from_dc_match(
+        analysis: AnalysisInstanceId,
+        result: &DcMatchResult,
+    ) -> Result<AnalysisResultDocumentBuilder, ResultDocumentError> {
+        const LOCATION: &str = "DC mismatch result";
+        let unit = if result.output.starts_with('I') {
+            SignalUnit::Ampere
+        } else {
+            SignalUnit::Volt
+        };
+        let scalars = vec![
+            real_scalar(
+                LOCATION,
+                "nominal_value",
+                "Nominal value",
+                unit.clone(),
+                result.nominal_value,
+            )?,
+            real_scalar(
+                LOCATION,
+                "sigma_total",
+                "Total sigma",
+                unit.clone(),
+                result.sigma_total,
+            )?,
+            real_scalar(
+                LOCATION,
+                "sigma_mismatch",
+                "Mismatch sigma",
+                unit.clone(),
+                result.sigma_mismatch,
+            )?,
+            real_scalar(
+                LOCATION,
+                "sigma_process",
+                "Process sigma",
+                unit.clone(),
+                result.sigma_process,
+            )?,
+            // What the card asked to be quoted, so a reader does not have to
+            // recover the multiplier from the deck to interpret the row.
+            real_scalar(
+                LOCATION,
+                "quoted_sigma",
+                "Quoted sigma",
+                unit,
+                result.quoted_sigma(),
+            )?,
+        ];
+        // Every number below is checked by `DcMatchPayload::validate`, which
+        // the builder runs before the document is handed back.
+        let payload = DcMatchPayload {
+            output: result.output.clone(),
+            nominal_value: result.nominal_value,
+            sigma_multiplier: result.sigma_multiplier,
+            sigma_total: result.sigma_total,
+            sigma_mismatch: result.sigma_mismatch,
+            sigma_process: result.sigma_process,
+            contributors: result
+                .contributors
+                .iter()
+                .map(|contributor| DcMatchContributorDocument {
+                    instance: contributor.instance.clone(),
+                    parameter: contributor.parameter.clone(),
+                    scope: contributor.scope,
+                    sigma_parameter: contributor.sigma_parameter,
+                    sensitivity: contributor.sensitivity,
+                    contribution: contributor.contribution,
+                    share: contributor.share,
+                })
+                .collect(),
+            evaluated_contributors: result.evaluated_contributors,
+        };
+        Ok(Self::builder(analysis, ResultPayload::DcMatch(payload), 0).scalars(scalars))
     }
 
     /// Project one `.STB` loop-gain result.

@@ -13,6 +13,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::{ComplexSample, ResultDocumentError, finite, finite_optional, finite_slice};
+use crate::analysis::dcmatch::DcMatchScope;
 use crate::analysis::distortion::DistortionProduct;
 use crate::analysis::floquet::{FloquetOrbitKind, FloquetSpectrumEvidence};
 use crate::analysis::harmonic_balance::{HbContinuationLimitation, HbReactiveKind};
@@ -69,6 +70,10 @@ pub enum ResultPayload {
     /// variant several times the size of every other and made every document
     /// of every family pay for it.
     Envelope(Box<EnvelopePayload>),
+    /// Renamed because the family tag is documented to be the result kind's
+    /// own tag, and `.DCMATCH` spells it as one word.
+    #[serde(rename = "dcmatch")]
+    DcMatch(DcMatchPayload),
 }
 
 impl ResultPayload {
@@ -97,6 +102,7 @@ impl ResultPayload {
             Self::Pstb(_) => AnalysisResultKind::Pstb,
             Self::Hb(_) => AnalysisResultKind::HarmonicBalance,
             Self::Envelope(_) => AnalysisResultKind::Envelope,
+            Self::DcMatch(_) => AnalysisResultKind::DcMatch,
         }
     }
 
@@ -176,6 +182,13 @@ impl ResultPayload {
                 .carrier
                 .value_count()
                 .saturating_add(payload.transient.value_count()),
+            // Four numbers per contributor plus the four scalars the payload
+            // carries beside the table.
+            Self::DcMatch(payload) => payload
+                .contributors
+                .len()
+                .saturating_mul(4)
+                .saturating_add(4),
         }
     }
 
@@ -203,6 +216,7 @@ impl ResultPayload {
             Self::PNoise(payload) => payload.validate(),
             Self::Hb(payload) => payload.validate(),
             Self::Envelope(payload) => payload.validate(),
+            Self::DcMatch(payload) => payload.validate(),
         }
     }
 }
@@ -1422,6 +1436,91 @@ impl TransferFunctionPayload {
     fn validate(&self) -> Result<(), ResultDocumentError> {
         super::require_name("transfer-function output", &self.output)?;
         super::require_name("transfer-function input", &self.input)
+    }
+}
+
+//=============================================================================
+// DC mismatch
+//=============================================================================
+
+/// One statistical variable's contribution to a `.DCMATCH` output variance.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DcMatchContributorDocument {
+    /// Instance that owns the variable, or the design for a process variable.
+    pub instance: String,
+    /// Canonical statistical parameter name.
+    pub parameter: String,
+    /// `process` or `mismatch`.
+    #[serde(with = "super::wire::dc_match_scope")]
+    pub scope: DcMatchScope,
+    /// Standard deviation of the parameter itself.
+    pub sigma_parameter: f64,
+    /// `d(output)/d(parameter)` at the nominal operating point.
+    pub sensitivity: f64,
+    /// Signed output displacement one standard deviation produces.
+    pub contribution: f64,
+    /// This contributor's fraction of the total output variance.
+    pub share: f64,
+}
+
+/// A `.DCMATCH` result: the output's DC spread and who owns it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DcMatchPayload {
+    /// Authored output probe, for example `V(out,in)`.
+    pub output: String,
+    /// The output with every statistical variable at its nominal value.
+    pub nominal_value: f64,
+    /// The multiple of sigma the card asked to be quoted.
+    pub sigma_multiplier: f64,
+    /// Total output standard deviation, before the multiplier.
+    pub sigma_total: f64,
+    /// The mismatch scope's part of `sigma_total`.
+    pub sigma_mismatch: f64,
+    /// The process scope's part of `sigma_total`.
+    pub sigma_process: f64,
+    /// Contributors the card retained, largest share first.
+    pub contributors: Vec<DcMatchContributorDocument>,
+    /// How many contributors were evaluated, including any the card's
+    /// `CONTRIBUTORS` and `THRESHOLD` limits dropped. A reader can tell a
+    /// short list that is the whole truth from one that was trimmed.
+    pub evaluated_contributors: usize,
+}
+
+impl DcMatchPayload {
+    fn validate(&self) -> Result<(), ResultDocumentError> {
+        super::require_name("DC mismatch output", &self.output)?;
+        finite("DC mismatch nominal value", self.nominal_value)?;
+        finite("DC mismatch sigma multiplier", self.sigma_multiplier)?;
+        finite("DC mismatch total sigma", self.sigma_total)?;
+        finite("DC mismatch scope sigma", self.sigma_mismatch)?;
+        finite("DC mismatch scope sigma", self.sigma_process)?;
+        if self.contributors.len() > self.evaluated_contributors {
+            return Err(ResultDocumentError::Malformed {
+                location: "DC mismatch payload",
+                detail: format!(
+                    "{} retained contributor(s) cannot exceed the {} evaluated",
+                    self.contributors.len(),
+                    self.evaluated_contributors
+                ),
+            });
+        }
+        for contributor in &self.contributors {
+            super::require_name("DC mismatch contributor instance", &contributor.instance)?;
+            super::require_name("DC mismatch contributor parameter", &contributor.parameter)?;
+            finite("DC mismatch contributor sigma", contributor.sigma_parameter)?;
+            finite(
+                "DC mismatch contributor sensitivity",
+                contributor.sensitivity,
+            )?;
+            finite(
+                "DC mismatch contributor contribution",
+                contributor.contribution,
+            )?;
+            finite("DC mismatch contributor share", contributor.share)?;
+        }
+        Ok(())
     }
 }
 

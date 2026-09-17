@@ -15,6 +15,17 @@ use crate::{CircuitData, Netlist, Value};
 const DC_SWEEP_CONTINUATION_MAX_SUBDIVISIONS: usize = 128;
 const DC_SWEEP_RESULT_PREALLOC_LIMIT: usize = 4096;
 
+/// One converged operating point together with the solver state that produced
+/// it.
+pub(in crate::engine) struct DcOperatingPointState {
+    pub result: SimulationResult,
+    pub report: crate::circuit::DeviceOpReport,
+    /// The complete MNA solution, including the device-internal unknowns past
+    /// the public branch range, in the exact layout
+    /// [`DcOpStartup::PreviousSolution`] accepts.
+    pub solution: Vec<Value>,
+}
+
 /// Enumerate the sweep points a `.DC` spec expands to.
 ///
 /// Bounded by the engine's analysis-point resource limit, so an unbounded
@@ -948,7 +959,26 @@ impl Engine {
         self.solved_dc_op_with_startup_and_lifecycle_report_and_abort(
             netlist, startup, lifecycle, abort,
         )
+        .map(|state| (state.result, state.report))
         .map_err(SimulationError::into_exhausted_circuit_error)
+    }
+
+    /// An operating point that retains the solver state it converged to.
+    ///
+    /// The public entries above publish node voltages and public branch
+    /// currents, which is less than the solve knows: a device owning an
+    /// internal unknown keeps it past the public branch range. A caller that
+    /// re-solves a slightly perturbed deck needs the complete vector, or its
+    /// warm start seeds the internal unknowns with zero and asks the Newton
+    /// iteration to rediscover them.
+    pub(in crate::engine) fn run_dc_op_state_with_startup_and_abort(
+        &self,
+        netlist: &Netlist,
+        startup: DcOpStartup<'_>,
+        abort: &dyn AbortSignal,
+    ) -> Result<DcOperatingPointState, SimulationError> {
+        self.solved_dc_op_with_startup_and_lifecycle_report_and_abort(netlist, startup, None, abort)
+            .map_err(SimulationError::into_exhausted_circuit_error)
     }
 
     fn solved_dc_op_with_startup_and_lifecycle_report_and_abort(
@@ -957,7 +987,7 @@ impl Engine {
         startup: DcOpStartup<'_>,
         mut lifecycle: Option<&mut DcSweepLifecycle>,
         abort: &dyn AbortSignal,
-    ) -> Result<(SimulationResult, crate::circuit::DeviceOpReport), SimulationError> {
+    ) -> Result<DcOperatingPointState, SimulationError> {
         let force_initial_conditions = matches!(startup, DcOpStartup::ForceInitialConditions);
         let run_scope = crate::abort_signal::ModelRunSignal::if_needed(abort);
         let abort: &dyn AbortSignal = run_scope.as_ref().map_or(abort, |scope| scope);
@@ -1067,7 +1097,14 @@ impl Engine {
                     crate::ModelFinishPoint::OperatingPoint,
                 )?;
             }
-            return Ok((result, report));
+            return Ok(DcOperatingPointState {
+                result,
+                report,
+                // A circuit with no unknowns has no solution vector, which is
+                // the exact seed `DcOpStartup::PreviousSolution` accepts for
+                // one.
+                solution: Vec::new(),
+            });
         }
 
         // Build matrix structure (done once)
@@ -1155,7 +1192,11 @@ impl Engine {
             )?;
         }
 
-        Ok((result, device_op_report))
+        Ok(DcOperatingPointState {
+            result,
+            report: device_op_report,
+            solution,
+        })
     }
 
     /// Run DC sweep analysis

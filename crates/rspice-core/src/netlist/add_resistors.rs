@@ -791,6 +791,7 @@ fn clone_netlist_with_abort(
     let output_requests = clone_slice(&source.output_requests, abort)?;
     let spectre_statistics = source.spectre_statistics.clone();
     let spectre_statistical_coordinate = source.spectre_statistical_coordinate.clone();
+    let spectre_mismatch_override = source.spectre_mismatch_override.clone();
     let options = source.options.clone();
     let veriloga_includes = clone_slice(&source.veriloga_includes, abort)?;
     let spef_includes = clone_slice(&source.spef_includes, abort)?;
@@ -811,6 +812,7 @@ fn clone_netlist_with_abort(
         params,
         spectre_statistics,
         spectre_statistical_coordinate,
+        spectre_mismatch_override,
         initial_conditions,
         device_initial_conditions,
         node_sets,

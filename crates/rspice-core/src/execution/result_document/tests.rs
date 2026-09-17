@@ -6,6 +6,7 @@ use super::payload::{DigitalBusSourceTag, DigitalEventBus};
 use super::*;
 use crate::abort_signal::{CountingAbort, ImmediateAbort, NoAbort};
 use crate::analysis::ac::AcResult;
+use crate::analysis::dcmatch::{DcMatchContributor, DcMatchResult, DcMatchScope};
 use crate::analysis::distortion::{
     DistortionAnalysisResult, DistortionPointResult, DistortionProduct, DistortionProductResult,
 };
@@ -692,6 +693,10 @@ fn document_for(kind: AnalysisResultKind) -> AnalysisResultDocument {
             instance(AnalysisKind::Envelope),
             &envelope_result(),
         ),
+        AnalysisResultKind::DcMatch => AnalysisResultDocument::from_dc_match(
+            instance(AnalysisKind::DcMatch),
+            &dc_match_result(),
+        ),
     };
     builder
         .unwrap_or_else(|error| panic!("{} projection failed: {error}", kind.tag()))
@@ -878,6 +883,30 @@ fn pstb_measurement() -> (
             result,
         },
     )
+}
+
+/// A two-contributor mismatch result whose shares sum to one, so the
+/// document's own validation sees a well-formed ranked table.
+fn dc_match_result() -> DcMatchResult {
+    let contributor = |instance: &str, sensitivity: f64, share: f64| DcMatchContributor {
+        instance: instance.to_owned(),
+        parameter: "DVTH".to_owned(),
+        scope: DcMatchScope::Mismatch,
+        sigma_parameter: 5.0e-3,
+        sensitivity,
+        contribution: sensitivity * 5.0e-3,
+        share,
+    };
+    DcMatchResult {
+        output: "V(out)".to_owned(),
+        nominal_value: 0.0,
+        sigma_multiplier: 3.0,
+        sigma_total: libm::sqrt(2.0) * 0.05,
+        sigma_mismatch: libm::sqrt(2.0) * 0.05,
+        sigma_process: 0.0,
+        contributors: vec![contributor("M1", 10.0, 0.5), contributor("M2", -10.0, 0.5)],
+        evaluated_contributors: 2,
+    }
 }
 
 fn envelope_result() -> crate::engine::EnvelopeResult {

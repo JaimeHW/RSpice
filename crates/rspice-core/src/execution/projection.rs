@@ -71,7 +71,8 @@ pub const fn projection_analysis_kind(kind: AnalysisResultKind) -> Option<Output
         | AnalysisResultKind::Pxf
         | AnalysisResultKind::PNoise
         | AnalysisResultKind::Pstb
-        | AnalysisResultKind::Envelope => None,
+        | AnalysisResultKind::Envelope
+        | AnalysisResultKind::DcMatch => None,
     }
 }
 

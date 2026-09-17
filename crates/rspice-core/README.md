@@ -400,6 +400,7 @@ Advanced analyses, all flat under `analysis/`:
 | Pole-zero | `pole_zero.rs`, `pole_zero/` |
 | Sensitivity (DC and AC) | `sensitivity.rs` |
 | Transfer function (`.TF`) | `transfer.rs`, `transfer/` |
+| DC mismatch variance (`.DCMATCH`) | `dcmatch.rs`, `engine/dcmatch.rs` |
 | Parametric sweep (`.STEP`) | `netlist/ast.rs`, `engine/step.rs` |
 | Monte Carlo | `monte_carlo.rs` |
 | Process corners | `corner.rs` |

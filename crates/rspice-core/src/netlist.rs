@@ -1024,6 +1024,14 @@ pub struct Netlist {
     /// sampling at all, so a deck with variations must never reach the
     /// builder without one.
     pub spectre_statistical_coordinate: Option<SpectreStatisticalCoordinate>,
+    /// Deterministic mismatch displacement replacing the sampler's draw.
+    ///
+    /// `.DCMATCH` sets it to linearize one instance's one variable; nothing
+    /// else does, and it is mutually exclusive with a statistical coordinate
+    /// because a deck cannot both sample and be displaced by hand. Kept
+    /// crate-private: it is an analysis-internal build input, not something a
+    /// frontend authors.
+    pub(crate) spectre_mismatch_override: Option<SpectreMismatchOverride>,
     /// Initial conditions from .IC statements
     pub initial_conditions: Vec<InitialCondition>,
     /// Netlist-wide device `IC=` overrides from Xyce's `.INITCOND` directive.
@@ -3488,6 +3496,7 @@ impl Default for Netlist {
             params: ParamContext::new(),
             spectre_statistics: SpectreStatisticsPlan::default(),
             spectre_statistical_coordinate: None,
+            spectre_mismatch_override: None,
             initial_conditions: Vec::new(),
             device_initial_conditions: None,
             node_sets: Vec::new(),

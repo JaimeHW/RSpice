@@ -19,8 +19,8 @@
 //!   "resultKind":    "op" | "dc" | "ac" | "tran" | "noise" | "sp" |
 //!                    "port-noise" | "distortion" | "tf" | "stb" |
 //!                    "sensitivity" | "pole-zero" | "fourier" | "fft" |
-//!                    "monte-carlo" | "pss" | "pac" | "pnoise" | "hb" |
-//!                    "pstb" | "envelope"
+//!                    "monte-carlo" | "pss" | "pac" | "pxf" | "pnoise" |
+//!                    "hb" | "pstb" | "envelope" | "dcmatch"
 //!   "analysis":      { "kind": <analysis tag>, "ordinal": <u32, 0-based>,
 //!                      "tag": "<kind>-<ordinal+1, 3 digits>" }
 //!   "parentAnalysis": same shape or null. Required for "fft" and "fourier",
@@ -171,19 +171,19 @@ use serde::{Deserialize, Serialize};
 pub use payload::{
     AcPayload, AcSensitivityEntry, CompressionAlgorithmTag, CompressionObservationDocument,
     CompressionPolicyDocument, CompressionReportDocument, CompressionSampleDomainTag,
-    CompressionSignalKindTag, DcSweepAxisDocument, DcSweepPayload, DigitalBusSourceTag,
-    DigitalEventBus, DigitalEventPoint, DigitalEventTrace, DigitalStateTag, DigitalStrengthTag,
-    DistortionPayload, DistortionProductSeries, DistortionProductTag, DistortionTone,
-    EnvelopeCarrierDocument, EnvelopeContinuationDocument, EnvelopeGuaranteeTag,
-    EnvelopeNodeSpectrum, EnvelopePayload, FftChildReference, FftCoefficientFormatTag,
-    FftCompatibilityModeTag, FftHarmonicDocument, FftMetricsDocument, FftPayload,
-    FftSourceDocument, FftWindowTag, FloquetCertificateDocument, FloquetEvidenceDocument,
-    FloquetOrbitTag, FourierPayload, HarmonicBalancePayload, HbContinuationLimitationTag,
-    HbReactiveKindTag, HbReactiveSpectrumDocument, MonteCarloPayload, MonteCarloVariableStatistics,
-    NamedObservable, NamedObservableSeries, NoiseContributionSeries, NoiseMechanismTag,
-    NoisePayload, NoiseSourceIdentityDocument, NyquistSample, OperatingPointPayload,
-    OscillatorPhaseNoiseDocument, PNoiseBandwidth, PNoiseContribution, PNoiseContributor,
-    PNoisePayload, PacConversionEntry, PacConversionMatrixDocument, PacPayload,
+    CompressionSignalKindTag, DcMatchContributorDocument, DcMatchPayload, DcSweepAxisDocument,
+    DcSweepPayload, DigitalBusSourceTag, DigitalEventBus, DigitalEventPoint, DigitalEventTrace,
+    DigitalStateTag, DigitalStrengthTag, DistortionPayload, DistortionProductSeries,
+    DistortionProductTag, DistortionTone, EnvelopeCarrierDocument, EnvelopeContinuationDocument,
+    EnvelopeGuaranteeTag, EnvelopeNodeSpectrum, EnvelopePayload, FftChildReference,
+    FftCoefficientFormatTag, FftCompatibilityModeTag, FftHarmonicDocument, FftMetricsDocument,
+    FftPayload, FftSourceDocument, FftWindowTag, FloquetCertificateDocument,
+    FloquetEvidenceDocument, FloquetOrbitTag, FourierPayload, HarmonicBalancePayload,
+    HbContinuationLimitationTag, HbReactiveKindTag, HbReactiveSpectrumDocument, MonteCarloPayload,
+    MonteCarloVariableStatistics, NamedObservable, NamedObservableSeries, NoiseContributionSeries,
+    NoiseMechanismTag, NoisePayload, NoiseSourceIdentityDocument, NyquistSample,
+    OperatingPointPayload, OscillatorPhaseNoiseDocument, PNoiseBandwidth, PNoiseContribution,
+    PNoiseContributor, PNoisePayload, PacConversionEntry, PacConversionMatrixDocument, PacPayload,
     PacSidebandDescriptor, PoleZeroPayload, PortDocument, PortNoiseCovarianceNormalization,
     PortNoisePayload, PssPayload, PstbModeDocument, PstbPayload, PstbStabilityTag,
     PxfGroupDelaySample, PxfPayload, RealEventPoint, RealEventTrace, ResultPayload,
@@ -230,6 +230,13 @@ pub const ANALYSIS_RESULT_DOCUMENT_VERSION: u32 = 7;
 /// with unavailable impulse history, without asserting that no impulse occurred.
 /// Version 7 names device-lead impulse owners and explicit per-current coverage.
 /// Version-6 rows retain their data with unqualified completeness.
+///
+/// A new result *family* costs no version. No document of an existing family
+/// changes shape, and no reader of an earlier version has a document of the
+/// new family to misread: it refuses the unknown `resultKind` tag outright.
+/// Bumping for one would instead make every family's freshly produced
+/// document undecodable by every current reader, which is the compatibility
+/// break this constant exists to avoid.
 const DECODABLE_ANALYSIS_RESULT_DOCUMENT_VERSIONS: [u32; 7] = [1, 2, 3, 4, 5, 6, 7];
 
 /// First version whose transient payload may declare a digital bus.

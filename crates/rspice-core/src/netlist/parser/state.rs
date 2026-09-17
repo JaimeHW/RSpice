@@ -220,6 +220,7 @@ impl ParseState {
             params,
             spectre_statistics: self.spectre_statistics,
             spectre_statistical_coordinate: None,
+            spectre_mismatch_override: None,
             initial_conditions: self.initial_conditions,
             device_initial_conditions: self.device_initial_conditions,
             node_sets: self.node_sets,

@@ -1569,6 +1569,7 @@ pub(super) fn analysis_kind(command: &crate::netlist::AnalysisCommand) -> Analys
         AnalysisCommand::Pnoise(_) => AnalysisKind::PNoise,
         AnalysisCommand::Pstb(_) => AnalysisKind::Pstb,
         AnalysisCommand::Envelope(_) => AnalysisKind::Envelope,
+        AnalysisCommand::DcMatch(_) => AnalysisKind::DcMatch,
         AnalysisCommand::Step(_) | AnalysisCommand::Temp { .. } => AnalysisKind::ImplicitOp,
     }
 }
