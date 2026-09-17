@@ -20,18 +20,13 @@ use crate::product::{
 use crate::services::drc::{DrcLocation, DrcResult, DrcSeverity, DrcViolation, DrcViolationType};
 use crate::services::simulation_runner::{CornerBaseMode, CornerFrequencySweep, PnoiseReference};
 use crate::simulation::AnalysisConfig;
-use crate::simulation::config::{
-    AcSweepType, NoiseContributionDetail, NoiseIntegrationMode, NoiseSweepType, PzAnalysisType,
-};
+use crate::simulation::config::{AcSweepType, PzAnalysisType};
 use crate::simulation::dialog::{
     IntegrationMethod, OpAccuracy, OpAnnotation, OpConfig, OpDeviceDetail, OpHomotopy,
     OpInitialGuess, OpNodeInitialization, OpPreviousState, OpRunPointContext, OpSaveDevice,
     OpTemperatureMode,
 };
-use crate::simulation::multi_run::{
-    AnalysisSpec, EnvelopeAdaptiveMode, EnvelopeExtractionPath, EnvelopeInitialPeriodicSolve,
-    FrequencySweep,
-};
+use crate::simulation::multi_run::AnalysisSpec;
 use crate::simulation::plan::{AnalysisNumericOverride, NumericOverrideOption, OverrideValue};
 use crate::simulation::runner::SpecExecutionOptions;
 use crate::state::CanonicalAnalysisKind;
@@ -1015,7 +1010,13 @@ fn drc_violation_type_tag(violation_type: DrcViolationType) -> u8 {
 mod tests {
     use super::*;
     use crate::services::drc::{DrcLocation, DrcViolation};
-    use crate::simulation::multi_run::{TfAccuracy, TfNormalization};
+    use crate::simulation::config::{
+        NoiseContributionDetail, NoiseIntegrationMode, NoiseSweepType,
+    };
+    use crate::simulation::multi_run::{
+        EnvelopeAdaptiveMode, EnvelopeExtractionPath, EnvelopeInitialPeriodicSolve, FrequencySweep,
+        TfAccuracy, TfNormalization,
+    };
 
     #[test]
     fn analysis_kind_tags_are_append_only() {

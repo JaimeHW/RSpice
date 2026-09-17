@@ -18,7 +18,7 @@ use crate::simulation::multi_run::{
     TfAccuracy, TfNormalization,
 };
 
-use super::{WorkerSweepType, worker_default_noise_temperature};
+use super::WorkerSweepType;
 
 const fn worker_default_pss_stabilization_cycles() -> usize {
     20
