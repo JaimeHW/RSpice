@@ -67,14 +67,12 @@ impl Extractor {
             }
             self.opened = Some(origin.clone());
             self.found = true;
-        } else if head.eq_ignore_ascii_case(".endc") {
-            if self.opened.take().is_none() {
-                return Err(ParseError::Syntax {
-                    line: origin.line,
-                    message: ".ENDC without .CONTROL".into(),
-                }
-                .into());
+        } else if head.eq_ignore_ascii_case(".endc") && self.opened.take().is_none() {
+            return Err(ParseError::Syntax {
+                line: origin.line,
+                message: ".ENDC without .CONTROL".into(),
             }
+            .into());
         }
         if boundary || self.opened.is_some() {
             self.script.text.push_str(text);

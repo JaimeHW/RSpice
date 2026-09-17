@@ -6194,12 +6194,12 @@ impl TransientCheckpoint {
                     "BJT phase history {index} presence does not match its runtime tag"
                 ));
             }
-            if let Some(weil) = weil {
-                if weil.time != self.time {
-                    return Err(format!(
-                        "BJT Weil history {index} does not match the accepted clock"
-                    ));
-                }
+            if let Some(weil) = weil
+                && weil.time != self.time
+            {
+                return Err(format!(
+                    "BJT Weil history {index} does not match the accepted clock"
+                ));
             }
             if let Some(phase) = phase {
                 if !matches!(

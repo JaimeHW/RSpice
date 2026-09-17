@@ -488,10 +488,10 @@ impl ControlSession<'_> {
                                 self.pc = end + 1;
                                 continue;
                             }
-                            if !self
+                            if self
                                 .loops
                                 .last()
-                                .is_some_and(|frame| frame.opening == self.pc)
+                                .is_none_or(|frame| frame.opening != self.pc)
                             {
                                 self.loops.push(LoopFrame {
                                     opening: self.pc,
