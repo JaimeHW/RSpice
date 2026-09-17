@@ -244,7 +244,18 @@ const ALLOWED_VIOLATIONS: &[(&str, &str, usize)] = &[
 /// says so where it re-tightened the others. So the two signatures are gone,
 /// not banked — the next whole-app parameter is still the one that turns this
 /// red, and the room for it comes from the same place these two did.
-const MAX_WHOLE_APP_MUTABLE_PARAMS: usize = 871;
+///
+/// 871 -> 866 on 2026-09-16. Four of those five slots were never occupied:
+/// the account console arrived with four whole-app signatures while the
+/// ceiling stood at 871 against a measurement of 867, so the gate had four
+/// slots of slack and spent them silently. The fifth is a real narrowing —
+/// `account_organization::open` routes, and routing is `AppState`'s, so it
+/// takes the state its two statements touch and its caller passes
+/// `&mut app.state` the way the sibling command arms already do. The other
+/// three genuinely need the application: `show` and `execute_action` reach
+/// the cloud session, the license dialog and the command vocabulary, and the
+/// test helper draws through `show`.
+const MAX_WHOLE_APP_MUTABLE_PARAMS: usize = 866;
 
 fn src_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("src")

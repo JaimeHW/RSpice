@@ -2094,7 +2094,9 @@ impl Command {
             }
             Self::CommandPalette => open_command_palette(&mut app.state),
             Self::KeyboardShortcuts => app.state.dialogs.shortcuts_help = true,
-            Self::AccountOrganization => super::account_organization::open(app),
+            Self::AccountOrganization => {
+                super::account_organization::open(&mut app.state);
+            }
             Self::License => app.open_license_dialog(),
             Self::DesignSpecialistWorkspaces | Self::SpecialistToolBrowser => {
                 crate::workbench::tools::specialist_tool_browser::open(app);

@@ -550,15 +550,18 @@ fn execute_action(app: &mut RSpiceApp, action: AccountAction) {
 // ---------------------------------------------------------------------------
 
 /// Open the canonical manager route from title chrome or another manager.
-pub(crate) fn open(app: &mut RSpiceApp) {
+///
+/// Routing is a state transition, so this takes the state rather than the
+/// application: the navigation and the message it may push are both
+/// [`AppState`]'s, and nothing here needs the cloud session or the dialogs
+/// the whole application would also hand over.
+pub(crate) fn open(state: &mut AppState) {
     let route = SurfaceRoute::surface(SurfaceId::AccountOrganization);
-    if let Err(error) = app
-        .state
+    if let Err(error) = state
         .workbench
         .navigate(route, RouteTransitionSource::User)
     {
-        app.state
-            .push_user_message(ConsoleMessage::warning(error.to_string()));
+        state.push_user_message(ConsoleMessage::warning(error.to_string()));
     }
 }
 
