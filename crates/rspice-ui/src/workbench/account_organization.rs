@@ -557,10 +557,7 @@ fn execute_action(app: &mut RSpiceApp, action: AccountAction) {
 /// the whole application would also hand over.
 pub(crate) fn open(state: &mut AppState) {
     let route = SurfaceRoute::surface(SurfaceId::AccountOrganization);
-    if let Err(error) = state
-        .workbench
-        .navigate(route, RouteTransitionSource::User)
-    {
+    if let Err(error) = state.workbench.navigate(route, RouteTransitionSource::User) {
         state.push_user_message(ConsoleMessage::warning(error.to_string()));
     }
 }

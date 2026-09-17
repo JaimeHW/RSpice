@@ -56,9 +56,8 @@ fn stable_pstb_result() -> AnalysisResult {
 
 #[test]
 fn periodic_payload_fields_are_v8_identity_while_v7_stays_legacy() {
-    let pss =
-        AnalysisResult::new(1, AnalysisType::Pss, "PSS")
-            .with_result_payload(AnalysisResultPayload::PssFloquet {
+    let pss = AnalysisResult::new(1, AnalysisType::Pss, "PSS").with_result_payload(
+        AnalysisResultPayload::PssFloquet {
             period_s: Some(1.0),
             fundamental_frequency_hz: Some(1.0),
             iterations: Some(2),
@@ -81,7 +80,8 @@ fn periodic_payload_fields_are_v8_identity_while_v7_stays_legacy() {
             orbit_kind: FloquetOrbitKindEvidence::Driven,
             trivial_multiplier_index: None,
             stability_verdict: FloquetStabilityVerdictEvidence::Stable,
-        });
+        },
+    );
     let mut changed_pss = pss.clone();
     let Some(AnalysisResultPayload::PssFloquet { multipliers, .. }) =
         changed_pss.result_payload.as_mut()
@@ -311,11 +311,7 @@ fn analysis(kind: AnalysisType) -> AnalysisResult {
             vec![0.25, 0.5, 0.75],
             "#00aaff",
         )
-        .with_complex_components(
-            "V(out)",
-            vec![0.25, 0.5, 0.75],
-            vec![-0.5, 0.0, 0.5],
-        ),
+        .with_complex_components("V(out)", vec![0.25, 0.5, 0.75], vec![-0.5, 0.0, 0.5]),
     ])
 }
 
@@ -539,8 +535,7 @@ fn typed_payload_is_current_content_identity_without_rewriting_v1_history() {
                     infinite_count: 0,
                     max_backward_error: 1.0e-14,
                     qualification_tolerance:
-                        PoleZeroSpectrumCertificate::canonical_qualification_tolerance(1)
-                            .unwrap(),
+                        PoleZeroSpectrumCertificate::canonical_qualification_tolerance(1).unwrap(),
                 },
             },
             zero_evidence: PoleZeroRootSetEvidence::Qualified {
@@ -549,16 +544,14 @@ fn typed_payload_is_current_content_identity_without_rewriting_v1_history() {
                     infinite_count: 0,
                     max_backward_error: 2.0e-14,
                     qualification_tolerance:
-                        PoleZeroSpectrumCertificate::canonical_qualification_tolerance(1)
-                            .unwrap(),
+                        PoleZeroSpectrumCertificate::canonical_qualification_tolerance(1).unwrap(),
                 },
             },
             gain: Some(4.0),
         },
     );
     let mut changed_root = pole_zero.clone();
-    let Some(AnalysisResultPayload::PoleZero { poles, .. }) =
-        changed_root.result_payload.as_mut()
+    let Some(AnalysisResultPayload::PoleZero { poles, .. }) = changed_root.result_payload.as_mut()
     else {
         panic!("pole-zero payload")
     };
@@ -649,10 +642,7 @@ fn sensitivity_and_scalar_payload_digests_are_deterministic_and_field_sensitive(
 
     let scalar = AnalysisResult::new(1, AnalysisType::Disto, "DISTO").with_result_payload(
         AnalysisResultPayload::ScalarMeasurements {
-            values: BTreeMap::from([
-                ("gain".to_owned(), 10.0),
-                ("resistance".to_owned(), 50.0),
-            ]),
+            values: BTreeMap::from([("gain".to_owned(), 10.0), ("resistance".to_owned(), 50.0)]),
         },
     );
     assert_eq!(
@@ -660,8 +650,8 @@ fn sensitivity_and_scalar_payload_digests_are_deterministic_and_field_sensitive(
         scalar.clone().result_data_digest()
     );
 
-    let positive_zero = AnalysisResult::new(1, AnalysisType::PoleZero, "PZ")
-        .with_result_payload(AnalysisResultPayload::PoleZero {
+    let positive_zero = AnalysisResult::new(1, AnalysisType::PoleZero, "PZ").with_result_payload(
+        AnalysisResultPayload::PoleZero {
             poles: vec![ComplexResultValue {
                 real: 0.0,
                 imaginary: 0.0,
@@ -670,9 +660,10 @@ fn sensitivity_and_scalar_payload_digests_are_deterministic_and_field_sensitive(
             pole_evidence: PoleZeroRootSetEvidence::LegacyUnknown,
             zero_evidence: PoleZeroRootSetEvidence::LegacyUnknown,
             gain: Some(1.0),
-        });
-    let negative_zero = AnalysisResult::new(1, AnalysisType::PoleZero, "PZ")
-        .with_result_payload(AnalysisResultPayload::PoleZero {
+        },
+    );
+    let negative_zero = AnalysisResult::new(1, AnalysisType::PoleZero, "PZ").with_result_payload(
+        AnalysisResultPayload::PoleZero {
             poles: vec![ComplexResultValue {
                 real: -0.0,
                 imaginary: -0.0,
@@ -681,7 +672,8 @@ fn sensitivity_and_scalar_payload_digests_are_deterministic_and_field_sensitive(
             pole_evidence: PoleZeroRootSetEvidence::LegacyUnknown,
             zero_evidence: PoleZeroRootSetEvidence::LegacyUnknown,
             gain: Some(1.0),
-        });
+        },
+    );
     assert_eq!(
         positive_zero.result_data_digest(),
         negative_zero.result_data_digest()
@@ -875,8 +867,7 @@ fn reliability_and_soa_evidence_are_field_sensitive_v4_content_identity() {
         },
     );
     let mut changed_soa = soa.clone();
-    let Some(AnalysisResultPayload::Soa { evaluations, .. }) =
-        changed_soa.result_payload.as_mut()
+    let Some(AnalysisResultPayload::Soa { evaluations, .. }) = changed_soa.result_payload.as_mut()
     else {
         panic!("SOA payload")
     };
