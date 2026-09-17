@@ -533,6 +533,7 @@ impl Engine {
         circuit
             .current_sources
             .stamp_transient_rhs_on_side(rhs, time, source_time_side);
+        circuit.stamp_transient_device_noise(rhs, time);
         let companion_coeff = if xyce_one_step {
             CompanionCoefficients::backward_euler()
         } else {
@@ -717,6 +718,7 @@ impl Engine {
         circuit
             .current_sources
             .stamp_transient_rhs_on_side(rhs, time, source_time_side);
+        circuit.stamp_transient_device_noise(rhs, time);
         let companion_coeff = if xyce_one_step {
             CompanionCoefficients::backward_euler()
         } else {
@@ -1514,6 +1516,7 @@ impl Engine {
             circuit
                 .current_sources
                 .stamp_transient_rhs_on_side(rhs, time, ctx.source_time_side);
+            circuit.stamp_transient_device_noise(rhs, time);
 
             // Xyce's OneStep order-2 residual scales the complete static DAE
             // contribution by one half.  The reactive Q contribution is stamped
@@ -2460,6 +2463,7 @@ impl Engine {
             circuit
                 .current_sources
                 .stamp_transient_rhs_on_side(probe_rhs, time, side);
+            circuit.stamp_transient_device_noise(probe_rhs, time);
             circuit.stamp_generic_switches_with_solution(probe, probe_rhs, solution, time);
             circuit.stamp_xyce_core_static_residual(probe, solution);
             if circuit.has_nonlinear_devices() {

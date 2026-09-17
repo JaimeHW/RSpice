@@ -96,6 +96,7 @@ impl CircuitData {
             xspice_evaluation_error: None,
             xspice_evaluation_warning: None,
             xspice_resource_failure: None,
+            transient_device_noise: None,
             // Verilog-A devices
             #[cfg(feature = "veriloga")]
             veriloga_devices: crate::device::veriloga::VerilogADevices::new(),

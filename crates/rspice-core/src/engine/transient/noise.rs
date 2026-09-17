@@ -20,17 +20,24 @@ use crate::Value;
 use crate::abort_signal::AbortSignal;
 use crate::engine::SimulationError;
 use crate::netlist::{Element, ElementKind, SourceSpec};
+use crate::numerics::{SPLIT_MIX_GAMMA, fnv1a, split_mix64_output};
 
 /// Hard cap on generated samples per source. 4M samples is ~64 MB of PWL
 /// points — beyond that the deck should raise NT rather than the simulator
 /// silently degrading the spectrum.
-const MAX_NOISE_SAMPLES: usize = 1 << 22;
+pub(super) const MAX_NOISE_SAMPLES: usize = 1 << 22;
+
+/// The run seed a deck that names none draws every noise stream from.
+///
+/// Shared with transient device noise so that a deck mixing an authored
+/// `TRNOISE` card with `.TRAN … NOISEFMAX=` draws both from one run seed.
+pub(super) const DEFAULT_NOISE_SEED: u64 = 0x5EED_0001;
 
 /// Convert a floating sample-grid quotient only after proving that the final
 /// count, including the generator's required tail points, fits the hard cap.
 /// Rust's float-to-integer cast saturates, and adding the tail afterward can
 /// then overflow or wrap; neither behavior is an acceptable resource check.
-fn checked_noise_sample_count(
+pub(super) fn checked_noise_sample_count(
     source_kind: &str,
     name: &str,
     quotient: Value,
@@ -69,7 +76,7 @@ pub(in crate::engine) fn expand_transient_noise(
     tstop: Value,
     abort: &dyn AbortSignal,
 ) -> Result<(), SimulationError> {
-    let base_seed = seed.unwrap_or(0x5EED_0001);
+    let base_seed = seed.unwrap_or(DEFAULT_NOISE_SEED);
     for (index, element) in elements.iter_mut().enumerate() {
         if index.is_multiple_of(64) && abort.is_aborted() {
             return Err(SimulationError::Aborted);
@@ -270,7 +277,7 @@ fn generate_noise_points(
     }
     if flicker_enabled {
         let mut flicker_rng = SplitMix64::new(seed ^ 0x464C_4943_4B45_5221);
-        let flicker = kasdin_one_over_f(n, nalpha, namp, &mut flicker_rng, abort)?;
+        let flicker = kasdin_one_over_f(n, nalpha, namp, usize::MAX, &mut flicker_rng, abort)?;
         let origin = flicker[0];
         for (index, (sample, value)) in samples.iter_mut().zip(flicker).enumerate().skip(1) {
             if index.is_multiple_of(512) {
@@ -495,7 +502,7 @@ fn add_random_offset(sample: (Value, Value), offset: (Value, Value)) -> Value {
     value + ((sample_error + offset.1) + error)
 }
 
-fn check_noise_abort(abort: &dyn AbortSignal) -> Result<(), SimulationError> {
+pub(super) fn check_noise_abort(abort: &dyn AbortSignal) -> Result<(), SimulationError> {
     if abort.is_aborted() {
         Err(SimulationError::Aborted)
     } else {
@@ -509,10 +516,19 @@ fn check_noise_abort(abort: &dyn AbortSignal) -> Result<(), SimulationError> {
 /// left inputs are complete, so their contributions can be added once. Block
 /// sizes depend only on the midpoint, never on the requested output length.
 /// This costs O(n log^2 n), retains O(n) storage and preserves exact prefixes.
-fn kasdin_one_over_f(
+///
+/// `kernel_limit` truncates the impulse response after that many taps, which
+/// is how a lowest represented frequency is imposed: the untruncated
+/// fractional integrator has unbounded power as `f -> 0` for `alpha >= 1`, so
+/// a run that declares a lowest flicker frequency `fmin` keeps
+/// `1/(fmin*NT)` taps and leaves the decades below it out rather than letting
+/// the sequence wander. `usize::MAX` is the untruncated filter, which is what
+/// a `TRNOISE` card asks for.
+pub(super) fn kasdin_one_over_f(
     n: usize,
     alpha: Value,
     amplitude: Value,
+    kernel_limit: usize,
     rng: &mut SplitMix64,
     abort: &dyn AbortSignal,
 ) -> Result<Vec<Value>, SimulationError> {
@@ -527,7 +543,11 @@ fn kasdin_one_over_f(
         if k.is_multiple_of(512) {
             check_noise_abort(abort)?;
         }
-        h[k] = h[k - 1] * (k as Value - 1.0 + alpha / 2.0) / k as Value;
+        h[k] = if k <= kernel_limit {
+            h[k - 1] * (k as Value - 1.0 + alpha / 2.0) / k as Value
+        } else {
+            0.0
+        };
     }
     let mut white = Vec::with_capacity(n);
     for index in 0..n {
@@ -637,13 +657,13 @@ struct TrRandomSpec {
     parameter2: Value,
 }
 
-struct SplitMix64 {
+pub(super) struct SplitMix64 {
     state: u64,
     spare: Option<f64>,
 }
 
 impl SplitMix64 {
-    fn new(seed: u64) -> Self {
+    pub(super) fn new(seed: u64) -> Self {
         Self {
             state: seed,
             spare: None,
@@ -651,11 +671,8 @@ impl SplitMix64 {
     }
 
     fn next_u64(&mut self) -> u64 {
-        self.state = self.state.wrapping_add(0x9E37_79B9_7F4A_7C15);
-        let mut z = self.state;
-        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-        z ^ (z >> 31)
+        self.state = self.state.wrapping_add(SPLIT_MIX_GAMMA);
+        split_mix64_output(self.state)
     }
 
     fn uniform(&mut self) -> f64 {
@@ -787,16 +804,6 @@ fn poisson_log_mass(k: Value, lambda: Value, delta: Value) -> Value {
                 * (-1.0 / 360.0
                     + square * (1.0 / 1260.0 + square * (-1.0 / 1680.0 + square / 1188.0))));
     -deviance - stirling_error - 0.5 * k.ln() - 0.918_938_533_204_672_7
-}
-
-/// FNV-1a — stable, dependency-free name hash for per-source seeding.
-fn fnv1a(input: &str) -> u64 {
-    let mut hash: u64 = 0xCBF2_9CE4_8422_2325;
-    for byte in input.as_bytes() {
-        hash ^= u64::from(*byte);
-        hash = hash.wrapping_mul(0x0000_0100_0000_01B3);
-    }
-    hash
 }
 
 #[cfg(test)]
@@ -1012,7 +1019,7 @@ mod tests {
         for alpha in [0.25, 1.0, 1.8] {
             let n = 513;
             let mut rng = SplitMix64::new(42);
-            let full = kasdin_one_over_f(n, alpha, 1.0, &mut rng, &NoAbort).unwrap();
+            let full = kasdin_one_over_f(n, alpha, 1.0, usize::MAX, &mut rng, &NoAbort).unwrap();
             let mut reference_rng = SplitMix64::new(42);
             let white: Vec<_> = (0..n).map(|_| reference_rng.gaussian()).collect();
             let mut h = vec![1.0; n];
@@ -1031,7 +1038,8 @@ mod tests {
             }
             for length in [1, 2, 3, 31, 32, 33, 63, 64, 65, 127, 128, 129, 257, 512] {
                 let mut rng = SplitMix64::new(42);
-                let prefix = kasdin_one_over_f(length, alpha, 1.0, &mut rng, &NoAbort).unwrap();
+                let prefix =
+                    kasdin_one_over_f(length, alpha, 1.0, usize::MAX, &mut rng, &NoAbort).unwrap();
                 for (actual, expected) in prefix.iter().zip(&full) {
                     assert_eq!(
                         actual.to_bits(),
@@ -1173,6 +1181,7 @@ mod tests {
             1 << 20,
             1.0,
             1.0,
+            usize::MAX,
             &mut rng,
             &PollBudget(AtomicUsize::new(0)),
         )
@@ -1265,7 +1274,7 @@ mod tests {
         let n = 32_768;
         let alpha = 1.0;
         let mut rng = SplitMix64::new(7);
-        let series = kasdin_one_over_f(n, alpha, 1.0, &mut rng, &NoAbort).unwrap();
+        let series = kasdin_one_over_f(n, alpha, 1.0, usize::MAX, &mut rng, &NoAbort).unwrap();
 
         let mut buf: Vec<Complex<f64>> = series.iter().map(|v| Complex::new(*v, 0.0)).collect();
         FftPlanner::new().plan_fft_forward(n).process(&mut buf);

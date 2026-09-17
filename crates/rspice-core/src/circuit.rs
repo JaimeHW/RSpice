@@ -35,6 +35,7 @@ pub(crate) use storage::{
 mod analog_tasks;
 mod construction;
 pub(crate) mod dae;
+pub(crate) mod device_noise;
 mod external_models;
 pub(crate) use external_models::{
     VerilogADcAcceptedStateCarrier, XspiceCompanionPolicy, XspiceOutputIterates,
@@ -673,6 +674,14 @@ pub struct CircuitData {
     /// in-memory clones. Unlike an evaluation error, this failure is not cleared
     /// by observation or candidate restoration. Allocated only for XSPICE circuits.
     pub(crate) xspice_resource_failure: Option<Arc<std::sync::OnceLock<String>>>,
+    /// Time-domain device-noise injection for a `.TRAN … NOISEFMAX=` run.
+    ///
+    /// Present only while such a transient is running: the engine installs it
+    /// after the run's initial operating point — which is therefore the
+    /// deterministic one — and refreshes the amplitudes from the solution at
+    /// every accepted step. Every other analysis leaves it absent and so
+    /// stamps nothing.
+    pub(crate) transient_device_noise: Option<Box<device_noise::TransientDeviceNoise>>,
 
     // Verilog-A devices (feature-gated)
     #[cfg(feature = "veriloga")]

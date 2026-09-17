@@ -11,7 +11,9 @@
 
 pub(crate) mod eigenspectrum;
 mod power_law;
+mod split_mix;
 pub(crate) use power_law::{power_product_binary_normalization, scaled_power_law};
+pub(crate) use split_mix::{SPLIT_MIX_GAMMA, fnv1a, split_mix64_at, split_mix64_output};
 pub mod integration;
 pub mod rustfft_qualification;
 

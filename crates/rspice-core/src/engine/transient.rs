@@ -752,6 +752,7 @@ mod charge_stamper;
 mod charge_event;
 use charge_stamper::StaticMatrixChargeStamper;
 mod damped_status;
+mod device_noise;
 mod globalization;
 pub(in crate::engine) mod noise;
 mod nox_status;
@@ -3985,6 +3986,23 @@ impl Engine {
         // one elaboration and one per collector.
         let _startup_directives = self.startup_directive_scope(netlist);
         fft::preflight(self, netlist, window.tstop, abort)?;
+        // A checkpoint does not carry the noise streams' position, and the
+        // default lowest flicker frequency is derived from this run's stop
+        // time, so a resumed segment would silently replay a different
+        // realization than the one it continues. Refuse before any solver
+        // work, the way every other checkpoint blocker does.
+        if netlist.options.transient_noise.is_some()
+            && (plan.resume.is_some()
+                || plan.final_checkpoint_retention.is_retained()
+                || !plan.scheduled_checkpoint_times.is_empty())
+        {
+            return Err(SimulationError::Circuit(
+                "a transient with NOISEFMAX= cannot be checkpointed or resumed: a checkpoint \
+                 does not carry the noise streams' position, so a resumed segment would replay \
+                 a different realization. Run the window as one transient."
+                    .to_string(),
+            ));
+        }
         let trapezoidal_xmu = if self.config.spice_dialect == SpiceDialect::Xyce {
             0.5
         } else {
@@ -4661,6 +4679,32 @@ impl Engine {
             AnalysisCommand::Tran { step, .. } if step.is_finite() && *step > 0.0 => Some(*step),
             _ => None,
         });
+        // Transient device noise is installed after the run's initial
+        // operating point, so that point is the deterministic one and every
+        // injected density is evaluated from a converged bias.
+        let transient_noise = match netlist.options.transient_noise {
+            None => None,
+            Some(config) => {
+                let runtime = self.install_transient_device_noise(
+                    &mut circuit,
+                    &solution,
+                    config,
+                    tstop,
+                    netlist.options.seed,
+                    abort,
+                )?;
+                log::info!(
+                    "Transient noise: {} device noise source(s) injected from seed {} \
+                     at NOISEFMAX={:e} Hz (NT={:e} s), NOISESCALE={}",
+                    runtime.source_count(),
+                    runtime.seed(),
+                    config.fmax,
+                    1.0 / (2.0 * config.fmax),
+                    config.scale,
+                );
+                Some(runtime)
+            }
+        };
         let mut breakpoints = if self.config.spice_dialect == SpiceDialect::Xyce {
             BreakpointManager::new_with_tolerance_and_policy(
                 crate::numerics::integration::XYCE_BREAKPOINT_TOLERANCE,
@@ -4707,6 +4751,12 @@ impl Engine {
             netlist,
             tstop,
             abort,
+            self.config.resource_limits.max_analysis_points,
+        )?;
+        Self::add_transient_noise_breakpoints(
+            &mut breakpoints,
+            &circuit,
+            tstop,
             self.config.resource_limits.max_analysis_points,
         )?;
         Self::add_breakpoint_if_in_range(&mut breakpoints, tstop, tstop);
@@ -10890,6 +10940,13 @@ impl Engine {
             xyce_step_failure_count = 0;
 
             solution.clone_from(&new_solution);
+            // Spectre practice: the injected noise densities follow the
+            // instantaneous bias. Re-derive them from the point just accepted
+            // so the next step's stamp carries this bias, and never from a
+            // candidate the solver may still reject.
+            if let Some(runtime) = &transient_noise {
+                runtime.refresh(&mut circuit, &solution)?;
+            }
             if let Some(history) = xyce_static_history_candidate {
                 xyce_static_history = Some(history);
             }
