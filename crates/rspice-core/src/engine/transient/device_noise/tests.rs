@@ -136,7 +136,12 @@ fn a_resistor_at_300k_produces_4ktr_noise_power_in_band() {
     let expected = 4.0 * boltzmann() * T * RESISTANCE * FMAX;
     // The estimator's relative standard error is sqrt(2/N) = 0.45% at
     // 100000 independent held samples, so 3% is 6.7 standard errors.
-    against_oracle("4kTRf mean-square node voltage (V^2)", measured, expected, 0.03);
+    against_oracle(
+        "4kTRf mean-square node voltage (V^2)",
+        measured,
+        expected,
+        0.03,
+    );
 }
 
 /// Equipartition: whatever the resistance and whatever the noise
@@ -182,7 +187,12 @@ fn a_resistor_capacitor_pair_settles_to_kt_over_c() {
         total += time_averaged_square(&result, waveform);
     }
     let measured = total / SECTIONS as Value;
-    against_oracle("kT/C capacitor voltage variance (V^2)", measured, expected, 0.03);
+    against_oracle(
+        "kT/C capacitor voltage variance (V^2)",
+        measured,
+        expected,
+        0.03,
+    );
 }
 
 /// Determinism: the same seed replays the same realization exactly, a
@@ -395,7 +405,10 @@ fn flicker_noise_follows_the_devices_af_ef_law_in_time() {
         expected,
         0.10,
     );
-    println!("  1/f exponent: fitted {slope:+.4} against the model's {:+.4}", -ef);
+    println!(
+        "  1/f exponent: fitted {slope:+.4} against the model's {:+.4}",
+        -ef
+    );
 }
 
 /// Spectre practice: the injected density follows the instantaneous bias.
@@ -453,9 +466,7 @@ fn transient_noise_tracks_the_instantaneous_bias() {
         late_current / early_current > 100.0,
         "the two bias points must be far apart: {early_current:e} A then {late_current:e} A"
     );
-    println!(
-        "  diode bias: {early_current:e} A then {late_current:e} A",
-    );
+    println!("  diode bias: {early_current:e} A then {late_current:e} A",);
     against_oracle(
         "shot-noise amplitude ratio against sqrt(I_late/I_early)",
         late_amplitude / early_amplitude,

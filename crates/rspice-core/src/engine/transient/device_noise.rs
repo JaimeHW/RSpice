@@ -587,7 +587,10 @@ impl Engine {
         tstop: Value,
         max_points: usize,
     ) -> Result<(), SimulationError> {
-        let Some(plan) = circuit.transient_device_noise().filter(|plan| !plan.is_empty()) else {
+        let Some(plan) = circuit
+            .transient_device_noise()
+            .filter(|plan| !plan.is_empty())
+        else {
             return Ok(());
         };
         let nt = plan.sample_interval();
