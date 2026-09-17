@@ -79,82 +79,10 @@ impl SimulationController {
             AnalysisSpec::Pnoise => self.build_pnoise_command(state),
             AnalysisSpec::Pxf => self.build_pxf_command(state),
             AnalysisSpec::Pstb => self.build_pstb_command(state),
-            AnalysisSpec::Psp {
-                start_freq,
-                stop_freq,
-                points_per_unit,
-                sweep,
-                max_sideband,
-                ..
-            } => Ok(format!(
-                "* RSPICE PSP {} {} {:.16e} {:.16e} MAXSIDEBAND={}",
-                match sweep {
-                    FrequencySweep::Decade => "DEC",
-                    FrequencySweep::Octave => "OCT",
-                    FrequencySweep::Linear => "LIN",
-                },
-                points_per_unit,
-                start_freq,
-                stop_freq,
-                max_sideband
-            )),
-            AnalysisSpec::Hbsp {
-                start_freq,
-                stop_freq,
-                points_per_unit,
-                sweep,
-                max_sideband,
-                ..
-            } => Ok(format!(
-                "* RSPICE HBSP {} {} {:.16e} {:.16e} MAXSIDEBAND={}",
-                match sweep {
-                    FrequencySweep::Decade => "DEC",
-                    FrequencySweep::Octave => "OCT",
-                    FrequencySweep::Linear => "LIN",
-                },
-                points_per_unit,
-                start_freq,
-                stop_freq,
-                max_sideband
-            )),
-            AnalysisSpec::Hbnoise {
-                start_freq,
-                stop_freq,
-                points_per_unit,
-                sweep,
-                output_node,
-                output_ref,
-                input_source,
-                max_sideband,
-                integrated_noise,
-                contributor_ranking,
-                ..
-            } => Ok(format!(
-                "* RSPICE HBNOISE {} {} {:.16e} {:.16e} OUT={} REF={} IN={} MAXSIDEBAND={} INTEGRATED={} CONTRIBUTORS={}",
-                match sweep {
-                    FrequencySweep::Decade => "DEC",
-                    FrequencySweep::Octave => "OCT",
-                    FrequencySweep::Linear => "LIN",
-                },
-                points_per_unit,
-                start_freq,
-                stop_freq,
-                output_node.trim(),
-                output_ref.trim(),
-                input_source.trim(),
-                max_sideband,
-                integrated_noise,
-                contributor_ranking
-            )),
-            AnalysisSpec::Tf {
-                input_source,
-                output_expression,
-                ..
-            } => Ok(format!(
-                ".tf {} {}",
-                output_expression.trim(),
-                input_source.trim()
-            )),
+            AnalysisSpec::Psp { .. } => Self::build_psp_command(spec),
+            AnalysisSpec::Hbsp { .. } => Self::build_hbsp_command(spec),
+            AnalysisSpec::Hbnoise { .. } => Self::build_hbnoise_command(spec),
+            AnalysisSpec::Tf { .. } => Self::build_tf_command(spec),
             AnalysisSpec::Qpss { .. }
             | AnalysisSpec::Qpac { .. }
             | AnalysisSpec::Qpnoise { .. }
@@ -409,6 +337,124 @@ impl SimulationController {
         } else {
             Err("failed to build DISTO command".to_string())
         }
+    }
+
+    /// The PSP directive: a periodic scattering sweep, in the marker form the
+    /// runner reads.
+    ///
+    /// Takes the specification rather than the session, as the three builders
+    /// below it do. These four kinds have no `sim_setup` slot to read — the
+    /// draft is projected into a specification and the specification is the
+    /// whole input — which is also why the destructure carries an `else` the
+    /// way `build_disto_command` does.
+    pub(super) fn build_psp_command(spec: &AnalysisSpec) -> Result<String, String> {
+        let AnalysisSpec::Psp {
+            start_freq,
+            stop_freq,
+            points_per_unit,
+            sweep,
+            max_sideband,
+            ..
+        } = spec
+        else {
+            return Err("failed to build PSP command".to_string());
+        };
+        Ok(format!(
+            "* RSPICE PSP {} {} {:.16e} {:.16e} MAXSIDEBAND={}",
+            match sweep {
+                FrequencySweep::Decade => "DEC",
+                FrequencySweep::Octave => "OCT",
+                FrequencySweep::Linear => "LIN",
+            },
+            points_per_unit,
+            start_freq,
+            stop_freq,
+            max_sideband
+        ))
+    }
+
+    /// The HBSP directive: the same scattering sweep, about a harmonic-balance
+    /// point rather than a shooting one.
+    pub(super) fn build_hbsp_command(spec: &AnalysisSpec) -> Result<String, String> {
+        let AnalysisSpec::Hbsp {
+            start_freq,
+            stop_freq,
+            points_per_unit,
+            sweep,
+            max_sideband,
+            ..
+        } = spec
+        else {
+            return Err("failed to build HBSP command".to_string());
+        };
+        Ok(format!(
+            "* RSPICE HBSP {} {} {:.16e} {:.16e} MAXSIDEBAND={}",
+            match sweep {
+                FrequencySweep::Decade => "DEC",
+                FrequencySweep::Octave => "OCT",
+                FrequencySweep::Linear => "LIN",
+            },
+            points_per_unit,
+            start_freq,
+            stop_freq,
+            max_sideband
+        ))
+    }
+
+    /// The HBNOISE directive: the noise measured about a harmonic-balance
+    /// point, with both ends of the measurement and what is reported of it.
+    pub(super) fn build_hbnoise_command(spec: &AnalysisSpec) -> Result<String, String> {
+        let AnalysisSpec::Hbnoise {
+            start_freq,
+            stop_freq,
+            points_per_unit,
+            sweep,
+            output_node,
+            output_ref,
+            input_source,
+            max_sideband,
+            integrated_noise,
+            contributor_ranking,
+            ..
+        } = spec
+        else {
+            return Err("failed to build HBNOISE command".to_string());
+        };
+        Ok(format!(
+            "* RSPICE HBNOISE {} {} {:.16e} {:.16e} OUT={} REF={} IN={} MAXSIDEBAND={} INTEGRATED={} CONTRIBUTORS={}",
+            match sweep {
+                FrequencySweep::Decade => "DEC",
+                FrequencySweep::Octave => "OCT",
+                FrequencySweep::Linear => "LIN",
+            },
+            points_per_unit,
+            start_freq,
+            stop_freq,
+            output_node.trim(),
+            output_ref.trim(),
+            input_source.trim(),
+            max_sideband,
+            integrated_noise,
+            contributor_ranking
+        ))
+    }
+
+    /// The `.tf` directive: the output expression, then the source it is
+    /// measured against, which is the order the card is read in.
+    pub(super) fn build_tf_command(spec: &AnalysisSpec) -> Result<String, String> {
+        let AnalysisSpec::Tf {
+            input_source,
+            output_expression,
+            ..
+        } = spec
+        else {
+            return Err("failed to build TF command".to_string());
+        };
+        Ok(format!(
+            ".tf {} {}",
+            output_expression.trim(),
+            input_source.trim()
+        ))
     }
 
     /// Inject non-default UI simulation options before `.end`.
@@ -771,5 +817,122 @@ mod tests {
             let end = with_models.find(terminal).expect("terminal retained");
             assert!(model < end, "{with_models}");
         }
+    }
+    fn psp_spec() -> AnalysisSpec {
+        AnalysisSpec::Psp {
+            start_freq: 1.0e6,
+            stop_freq: 1.0e9,
+            points_per_unit: 11,
+            sweep: FrequencySweep::Decade,
+            ports: Vec::new(),
+            max_sideband: 3,
+            mixed_mode: false,
+            noise_parameters: false,
+        }
+    }
+
+    fn hbsp_spec() -> AnalysisSpec {
+        AnalysisSpec::Hbsp {
+            start_freq: 1.0e3,
+            stop_freq: 1.0e5,
+            points_per_unit: 7,
+            sweep: FrequencySweep::Octave,
+            ports: Vec::new(),
+            max_sideband: 2,
+            mixed_mode: true,
+            noise_parameters: true,
+        }
+    }
+
+    /// Every string field arrives with surrounding space, because the card
+    /// trims each one and a fixture that came in clean would not say so.
+    fn hbnoise_spec() -> AnalysisSpec {
+        AnalysisSpec::Hbnoise {
+            start_freq: 1.0e1,
+            stop_freq: 1.0e4,
+            points_per_unit: 21,
+            sweep: FrequencySweep::Linear,
+            output_node: " out ".to_owned(),
+            output_ref: " 0 ".to_owned(),
+            input_source: " vin ".to_owned(),
+            max_sideband: 4,
+            integrated_noise: true,
+            noise_figure: false,
+            contributor_ranking: true,
+        }
+    }
+
+    fn tf_spec() -> AnalysisSpec {
+        AnalysisSpec::Tf {
+            input_source: " vin ".to_owned(),
+            output_expression: " V(out) ".to_owned(),
+            transfer_gain: true,
+            input_resistance: false,
+            output_resistance: false,
+            normalization: crate::simulation::multi_run::TfNormalization::default(),
+            accuracy: crate::simulation::multi_run::TfAccuracy::default(),
+        }
+    }
+
+    /// The four directives the dispatch match used to format inline.
+    ///
+    /// Pinned rather than derived: these cards have no reader in this crate,
+    /// so a builder that changed its sweep keyword, its exponent width or its
+    /// trimming would emit a deck the runner reads differently and nothing
+    /// else here would notice.
+    #[test]
+    fn every_statement_builder_emits_what_the_inline_arm_did() {
+        assert_eq!(
+            SimulationController::build_psp_command(&psp_spec()),
+            Ok(
+                "* RSPICE PSP DEC 11 1.0000000000000000e6 1.0000000000000000e9 MAXSIDEBAND=3"
+                    .to_owned()
+            )
+        );
+        assert_eq!(
+            SimulationController::build_hbsp_command(&hbsp_spec()),
+            Ok(
+                "* RSPICE HBSP OCT 7 1.0000000000000000e3 1.0000000000000000e5 MAXSIDEBAND=2"
+                    .to_owned()
+            )
+        );
+        assert_eq!(
+            SimulationController::build_hbnoise_command(&hbnoise_spec()),
+            Ok(
+                "* RSPICE HBNOISE LIN 21 1.0000000000000000e1 1.0000000000000000e4 OUT=out REF=0 \
+                IN=vin MAXSIDEBAND=4 INTEGRATED=true CONTRIBUTORS=true"
+                    .to_owned()
+            )
+        );
+        assert_eq!(
+            SimulationController::build_tf_command(&tf_spec()),
+            Ok(".tf V(out) vin".to_owned())
+        );
+    }
+
+    /// A builder handed another kind's specification refuses by name.
+    ///
+    /// The destructure's `else` is not decoration: these four are routed by a
+    /// `..` pattern, so a variant added beside them could reach the wrong
+    /// builder, and the answer has to be a refusal naming the builder rather
+    /// than a panic in a running studio.
+    #[test]
+    fn a_statement_builder_handed_another_kind_refuses_by_name() {
+        assert_eq!(
+            SimulationController::build_psp_command(&hbsp_spec()),
+            Err("failed to build PSP command".to_owned())
+        );
+        assert_eq!(
+            SimulationController::build_hbsp_command(&psp_spec()),
+            Err("failed to build HBSP command".to_owned())
+        );
+        assert_eq!(
+            SimulationController::build_hbnoise_command(&tf_spec()),
+            Err("failed to build HBNOISE command".to_owned())
+        );
+        assert_eq!(
+            SimulationController::build_tf_command(&hbnoise_spec()),
+            Err("failed to build TF command".to_owned())
+        );
     }
 }
