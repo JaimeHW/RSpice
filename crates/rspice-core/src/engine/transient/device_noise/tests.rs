@@ -75,6 +75,27 @@ fn installed(
     (circuit, runtime, solution)
 }
 
+/// Compare one measured quantity against its analytic oracle, reporting both.
+///
+/// A stochastic oracle is worth only its margin, so the measured value, the
+/// analytic one and the realized error are printed — visible under
+/// `--nocapture` — rather than discarded on the way to a boolean.
+fn against_oracle(label: &str, measured: Value, analytic: Value, tolerance: Value) {
+    let error = measured / analytic - 1.0;
+    println!(
+        "{label}: measured {measured:e}, analytic {analytic:e}, {:+.3}% off, tolerance {:.1}%",
+        error * 100.0,
+        tolerance * 100.0
+    );
+    assert!(
+        error.abs() < tolerance,
+        "{label}: measured {measured:e} against analytic {analytic:e} is {:+.3}% off, past the \
+         {:.1}% tolerance",
+        error * 100.0,
+        tolerance * 100.0
+    );
+}
+
 /// One injected source's complete sample train, read from the plan.
 fn injected_train(circuit: &CircuitData, source: usize) -> Vec<Value> {
     let plan = circuit
@@ -115,12 +136,7 @@ fn a_resistor_at_300k_produces_4ktr_noise_power_in_band() {
     let expected = 4.0 * boltzmann() * T * RESISTANCE * FMAX;
     // The estimator's relative standard error is sqrt(2/N) = 0.45% at
     // 100000 independent held samples, so 3% is 6.7 standard errors.
-    let error = (measured / expected - 1.0).abs();
-    assert!(
-        error < 0.03,
-        "measured {measured:e} V^2 against 4kTRf = {expected:e} V^2 ({:.2}% off)",
-        error * 100.0
-    );
+    against_oracle("4kTRf mean-square node voltage (V^2)", measured, expected, 0.03);
 }
 
 /// Equipartition: whatever the resistance and whatever the noise
@@ -166,12 +182,7 @@ fn a_resistor_capacitor_pair_settles_to_kt_over_c() {
         total += time_averaged_square(&result, waveform);
     }
     let measured = total / SECTIONS as Value;
-    let error = (measured / expected - 1.0).abs();
-    assert!(
-        error < 0.03,
-        "measured {measured:e} V^2 against kT/C = {expected:e} V^2 ({:.2}% off)",
-        error * 100.0
-    );
+    against_oracle("kT/C capacitor voltage variance (V^2)", measured, expected, 0.03);
 }
 
 /// Determinism: the same seed replays the same realization exactly, a
@@ -263,10 +274,11 @@ fn noisescale_scales_the_injected_rms_linearly() {
         .map(|value| (value - 0.5) * (value - 0.5))
         .sum::<Value>();
     assert!(unity_power > 0.0, "the unity-scale run must inject noise");
-    let ratio = (doubled_power / unity_power).sqrt();
-    assert!(
-        (ratio - 2.0).abs() < 1.0e-9,
-        "NOISESCALE=2 must double the injected RMS, found {ratio}"
+    against_oracle(
+        "NOISESCALE=2 injected RMS ratio",
+        (doubled_power / unity_power).sqrt(),
+        2.0,
+        1.0e-9,
     );
 
     // NOISESCALE=0 leaves the assembly with no injected current at all,
@@ -377,13 +389,13 @@ fn flicker_noise_follows_the_devices_af_ef_law_in_time() {
         (source.spectral_density(1.0e3, T) / expected - 1.0).abs() < 0.2,
         "the band must sit on the 1 kHz decade"
     );
-    let error = (measured / expected - 1.0).abs();
-    assert!(
-        error < 0.10,
-        "the injected density over {BAND_LOW}-{BAND_HIGH} Hz is {measured:e} A^2/Hz against \
-         the model's {expected:e} A^2/Hz ({:.1}% off)",
-        error * 100.0
+    against_oracle(
+        &format!("injected flicker density over {BAND_LOW}-{BAND_HIGH} Hz (A^2/Hz)"),
+        measured,
+        expected,
+        0.10,
     );
+    println!("  1/f exponent: fitted {slope:+.4} against the model's {:+.4}", -ef);
 }
 
 /// Spectre practice: the injected density follows the instantaneous bias.
@@ -441,14 +453,14 @@ fn transient_noise_tracks_the_instantaneous_bias() {
         late_current / early_current > 100.0,
         "the two bias points must be far apart: {early_current:e} A then {late_current:e} A"
     );
-    let measured = late_amplitude / early_amplitude;
-    let expected = (late_current / early_current).sqrt();
-    let error = (measured / expected - 1.0).abs();
-    assert!(
-        error < 0.10,
-        "the shot-noise amplitude scaled by {measured} where sqrt(I_late/I_early) is \
-         {expected} ({:.2}% off)",
-        error * 100.0
+    println!(
+        "  diode bias: {early_current:e} A then {late_current:e} A",
+    );
+    against_oracle(
+        "shot-noise amplitude ratio against sqrt(I_late/I_early)",
+        late_amplitude / early_amplitude,
+        (late_current / early_current).sqrt(),
+        0.10,
     );
 }
 
