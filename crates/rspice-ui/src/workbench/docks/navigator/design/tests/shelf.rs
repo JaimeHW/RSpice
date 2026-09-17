@@ -1630,3 +1630,77 @@ fn the_pin_menu_opens_from_the_keyboard_on_the_focused_row() {
         "and the menu acts on the row the keyboard was on"
     );
 }
+
+/// A project's stimulus definitions are placeable parts, so the shelf lists
+/// them and a click arms the cursor with the saved revision.
+///
+/// Driven through the search field rather than by opening the band: the
+/// section folds shut on a fresh profile like every other catalog, and a query
+/// is how a reader reaches a definition without first learning where it lives.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_stimulus_definition_is_listed_as_a_part_and_arms_the_cursor() {
+    let mut shelf = ShelfHarness::opened();
+    let mut definition = crate::state::stimulus_library::definition::StimulusDefinition::new(
+        "sensor_drive",
+        ComponentType::VoltageSourceSin,
+    )
+    .expect("definition");
+    definition.value = "0".to_owned();
+    definition.params = "va=3m freq=1k".to_owned();
+    shelf
+        .app
+        .state
+        .workspace
+        .stimulus_library
+        .insert(definition)
+        .expect("insert");
+    shelf.app.state.workbench.placement_query = "sensor_drive".to_owned();
+
+    let mut shelf = shelf.settled();
+    let (text, runs) = shelf.frame(Vec::new());
+    assert!(
+        paints_line(&text, "STIMULUS LIBRARY"),
+        "the section states itself, in the uppercase every shelf header uses: {text}"
+    );
+    assert!(
+        paints_line(&text, "V \u{00b7} SIN \u{00b7} 1kHz"),
+        "the meta column reads the instance the definition would place: {text}"
+    );
+
+    // Aimed at the meta cell rather than the name: the query that reveals the
+    // section is the definition's own name, so the search field paints that
+    // string first and a press aimed at it lands in the text box.
+    let row = run_rect(&runs, "V \u{00b7} SIN \u{00b7} 1kHz")
+        .expect("the definition is rendered as a row");
+    let _ = shelf.frame(click_events(row.center()));
+    assert_eq!(
+        shelf.app.state.schematic.tool,
+        Tool::Place(ComponentType::VoltageSourceSin),
+        "the row's click must reach the arming action"
+    );
+    let armed = shelf
+        .app
+        .state
+        .schematic
+        .pending_stimulus
+        .as_ref()
+        .expect("the click armed the definition");
+    assert_eq!(armed.definition(), "sensor_drive");
+    assert_eq!(armed.revision(), 1);
+}
+
+/// A project that has authored no stimulus paints no section at all. An empty
+/// header is a door that leads nowhere, and the shelf's other catalogs already
+/// hold that line.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn an_empty_stimulus_library_paints_no_section() {
+    let mut shelf = ShelfHarness::opened().settled();
+    assert!(shelf.app.state.workspace.stimulus_library.is_empty());
+    let (text, _) = shelf.frame(Vec::new());
+    assert!(
+        !paints_line(&text, "Stimulus library"),
+        "an unauthored library must leave the shelf as it was: {text}"
+    );
+}

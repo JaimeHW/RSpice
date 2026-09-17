@@ -67,6 +67,10 @@ fn command_catalog_matches_the_mockup_exactly() {
                 Some(Command::CreateHierarchy),
             ),
             ("Create symbol from schematic ports…", None),
+            ("Adopt stimulus definition…", None),
+            ("Save as stimulus definition…", None),
+            ("Open in Stimulus Library", None),
+            ("Re-adopt stimulus definition", None),
             ("Page setup…", Some(Command::PageSetup)),
             ("Fit schematic content", Some(Command::FitSchematicContent),),
             ("Show in netlist", Some(Command::ShowInNetlist)),
@@ -82,7 +86,7 @@ fn command_catalog_matches_the_mockup_exactly() {
             .iter()
             .filter(|entry| matches!(entry, ContextEntry::Separator))
             .count(),
-        4
+        5
     );
 }
 
@@ -812,4 +816,144 @@ fn operating_point_hop_selects_the_operating_point_analysis() {
         "the hop must select the result its viewer can render"
     );
     assert_eq!(state.ui.results.op_filter, "M1");
+}
+
+/// The stimulus rows are offered exactly where their transactions can run, and
+/// each one states why when it cannot.
+///
+/// Availability is the link transaction's own target check and the model's own
+/// lifecycle word: a menu that answered either question itself would offer a
+/// row the dialog refuses, or withhold one it would have accepted.
+#[test]
+fn the_stimulus_rows_follow_the_library_and_the_instance_provenance() {
+    use crate::state::stimulus_library::definition::StimulusDefinition;
+
+    let mut state = AppState::default();
+    assert_eq!(
+        action_availability(ContextAction::AdoptStimulus, &state),
+        (false, "Select one independent source")
+    );
+
+    let resistor = state
+        .schematic
+        .add_component(ComponentType::Resistor, Point::new(0, 0));
+    state.schematic.selection.select_only_component(resistor);
+    assert!(
+        !action_availability(ContextAction::SaveStimulus, &state).0,
+        "a resistor has no waveform to save"
+    );
+
+    let source = state
+        .schematic
+        .add_component(ComponentType::VoltageSourceSin, Point::new(80, 0));
+    state.schematic.selection.select_only_component(source);
+    assert!(action_availability(ContextAction::SaveStimulus, &state).0);
+    assert_eq!(
+        action_availability(ContextAction::AdoptStimulus, &state),
+        (false, "The library holds no definitions"),
+        "there is nothing to adopt until the project authors one"
+    );
+
+    let mut definition =
+        StimulusDefinition::new("sensor_drive", ComponentType::VoltageSourceSin).expect("ok");
+    definition.value = "0".to_owned();
+    definition.params = "va=3m freq=1k".to_owned();
+    state
+        .workspace
+        .stimulus_library
+        .insert(definition.clone())
+        .expect("insert");
+    assert!(action_availability(ContextAction::AdoptStimulus, &state).0);
+    assert_eq!(
+        action_availability(ContextAction::OpenStimulusDefinition, &state),
+        (false, "This source adopted no definition")
+    );
+    assert!(!action_availability(ContextAction::ReadoptStimulus, &state).0);
+
+    let component = state
+        .schematic
+        .components
+        .iter_mut()
+        .find(|component| component.id == source)
+        .expect("held");
+    definition.adopt_onto(component).expect("adopted");
+    assert!(action_availability(ContextAction::OpenStimulusDefinition, &state).0);
+    assert_eq!(
+        action_availability(ContextAction::ReadoptStimulus, &state),
+        (false, "This source already carries the library's revision")
+    );
+
+    // A local edit is what makes re-adoption change something.
+    state
+        .schematic
+        .components
+        .iter_mut()
+        .find(|component| component.id == source)
+        .expect("held")
+        .params = "va=9m freq=1k".to_owned();
+    assert!(action_availability(ContextAction::ReadoptStimulus, &state).0);
+}
+
+/// The adopt row opens the link transaction rather than editing anything
+/// itself, and the re-adopt row runs the one the model owns.
+#[test]
+fn the_stimulus_rows_route_to_the_transactions_that_own_them() {
+    use crate::state::stimulus_library::definition::StimulusDefinition;
+    use crate::state::stimulus_library::provenance::ProvenanceState;
+
+    let mut state = AppState::default();
+    let source = state
+        .schematic
+        .add_component(ComponentType::VoltageSourceSin, Point::new(80, 0));
+    state.schematic.selection.select_only_component(source);
+    let mut definition =
+        StimulusDefinition::new("sensor_drive", ComponentType::VoltageSourceSin).expect("ok");
+    definition.value = "0".to_owned();
+    definition.params = "va=3m freq=1k".to_owned();
+    state
+        .workspace
+        .stimulus_library
+        .insert(definition.clone())
+        .expect("insert");
+
+    let ctx = Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    let symbol_context = SchematicSymbolContext::from_state(&state);
+    let run = |action, state: &mut AppState| {
+        let _ = ctx.run_ui(Default::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                execute_context_action(action, ui, state, Point::origin(), &symbol_context);
+            });
+        });
+    };
+
+    run(ContextAction::AdoptStimulus, &mut state);
+    assert!(
+        state.dialogs.stimulus_link.open,
+        "the row raises the transaction instead of adopting in the menu"
+    );
+    state.dialogs.stimulus_link.close();
+
+    // Adopt it, then edit the card, so re-adoption has something to undo.
+    let component = state
+        .schematic
+        .components
+        .iter_mut()
+        .find(|component| component.id == source)
+        .expect("held");
+    definition.adopt_onto(component).expect("adopted");
+    component.params = "va=9m freq=1k".to_owned();
+
+    run(ContextAction::ReadoptStimulus, &mut state);
+    let component = state
+        .schematic
+        .components
+        .iter()
+        .find(|component| component.id == source)
+        .expect("held");
+    assert_eq!(component.params, "va=3m freq=1k");
+    assert_eq!(
+        state.workspace.stimulus_library.provenance_state(component),
+        ProvenanceState::Adopted { revision: 1 }
+    );
 }

@@ -27,18 +27,54 @@ use crate::simulation::placed_sources::{
     PlacedRfPort, PlacedSource, SourceConsumer, duplicate_port_numbers,
 };
 use crate::state::InstancePath;
+use crate::state::stimulus_library::provenance::ProvenanceState;
 use crate::workbench::app_state::AppState;
 use crate::workbench::state::Workspace;
 
+use super::page_kit;
 use super::page_kit::{RowPress, Tone, card, card_note, ledger_head, ledger_row};
 
 /// Reference, quantity, the occurrence it is reached through, waveform,
-/// terminals, and what reads it.
+/// terminals, what reads it, which stimulus definition it copied, and the
+/// row's own verbs.
 ///
 /// The occurrence sits beside the reference because it qualifies it: `V1` is
 /// not a name in a hierarchical design until the path in front of it is read,
 /// and two rows can carry one reference.
-const EXCITATION_COLUMNS: [f32; 6] = [0.13, 0.05, 0.14, 0.22, 0.20, 0.26];
+///
+/// The Definition column is last before the verbs because it is the one cell a
+/// reader acts on: what it says and what the button beside it offers are the
+/// same subject, and splitting them across the table would put the verb a
+/// column away from the fact that justifies it.
+const EXCITATION_COLUMNS: [f32; 8] = [0.11, 0.04, 0.11, 0.16, 0.14, 0.18, 0.18, 0.08];
+
+/// The head labels of a source block. The quantity and the verb columns are
+/// unlabelled: one carries a single letter the row itself explains, and the
+/// other carries a control that names itself.
+const EXCITATION_HEAD: [&str; 8] = [
+    "Reference",
+    "",
+    "Occurrence",
+    "Waveform",
+    "Terminals",
+    "Read by",
+    "Definition",
+    "",
+];
+
+/// The head labels of the RF-port block. A port's third cell states what the
+/// port is and the impedance it presents, which is not a waveform, and a port
+/// adopts no stimulus definition.
+const PORT_HEAD: [&str; 8] = [
+    "Reference",
+    "",
+    "Occurrence",
+    "Port",
+    "Terminals",
+    "Read by",
+    "",
+    "",
+];
 
 /// The page renders the lists its own heading counted.
 ///
@@ -56,11 +92,12 @@ pub(super) fn show(
     // would dispatch, so a source only it names is one the run drives without
     // reading.
     let unread = sources.iter().filter(|source| !source.is_read()).count();
+    let (verdict, verdict_tone) = verdict(sources, ports);
 
     card(
         ui,
         "Placed excitations",
-        Some(verdict(sources, ports)),
+        Some((verdict.as_str(), verdict_tone)),
         |ui| {
             if sources.is_empty() && ports.is_empty() {
                 card_note(
@@ -71,23 +108,18 @@ pub(super) fn show(
                 return;
             }
             if !sources.is_empty() {
-                ledger_head(
-                    ui,
-                    &EXCITATION_COLUMNS,
-                    &[
-                        "Reference",
-                        "",
-                        "Occurrence",
-                        "Waveform",
-                        "Terminals",
-                        "Read by",
-                    ],
-                );
+                ledger_head(ui, &EXCITATION_COLUMNS, &EXCITATION_HEAD);
+                let mut taken = None;
                 for source in sources {
                     let row = excitation_row(ui, state, source);
-                    if row.clicked() {
+                    if let Some(verb) = source_row_verbs(ui, state, source, row.rect) {
+                        taken = Some((source.component_id, source.occurrence.clone(), verb));
+                    } else if row.clicked() {
                         reveal(state, source.occurrence.as_ref(), source.component_id);
                     }
+                }
+                if let Some((component_id, occurrence, verb)) = taken {
+                    take_source_verb(state, component_id, occurrence.as_ref(), &verb);
                 }
             }
             // A second head rather than a group caption: a port's third cell
@@ -95,18 +127,7 @@ pub(super) fn show(
             // not a waveform, and a column label that covered both would name
             // neither.
             if !ports.is_empty() {
-                ledger_head(
-                    ui,
-                    &EXCITATION_COLUMNS,
-                    &[
-                        "Reference",
-                        "",
-                        "Occurrence",
-                        "Port",
-                        "Terminals",
-                        "Read by",
-                    ],
-                );
+                ledger_head(ui, &EXCITATION_COLUMNS, &PORT_HEAD);
                 for port in ports {
                     let row = port_row(ui, state, port);
                     if row.clicked() {
@@ -140,24 +161,48 @@ pub(super) fn show(
 /// ordinary state of an RF testbench swept in the time domain rather than a
 /// finding. The one design where nothing reading the ports is the finding is
 /// the one with nothing else to read.
-fn verdict(sources: &[PlacedSource], ports: &[PlacedRfPort]) -> (&'static str, Tone) {
+fn verdict(sources: &[PlacedSource], ports: &[PlacedRfPort]) -> (String, Tone) {
     let unread = sources.iter().filter(|source| !source.is_read()).count();
+    let adopted = sources
+        .iter()
+        .filter(|source| source.provenance != ProvenanceState::FromSchematic)
+        .count();
+    let behind = sources
+        .iter()
+        .filter(|source| {
+            matches!(
+                source.provenance,
+                ProvenanceState::Behind { .. } | ProvenanceState::ModifiedBehind { .. }
+            )
+        })
+        .count();
+    let stated = |text: &str, tone| (text.to_owned(), tone);
     if sources.is_empty() && ports.is_empty() {
-        ("no sources placed", Tone::Warn)
+        stated("no sources placed", Tone::Warn)
     } else if ports.iter().any(PlacedRfPort::is_read) && !duplicate_port_numbers(ports).is_empty() {
         // Only once something indexes them. Two ports sharing a number is a
         // defect the moment a run addresses one by number, and until then it is
         // a bench still being drawn — flagging it before there is an `.sp` to
         // confuse would fire on every second port the moment it is placed.
-        ("ports share a number", Tone::Warn)
+        stated("ports share a number", Tone::Warn)
+    } else if behind > 0 {
+        // The library has published past what these instances copied, and the
+        // row that says so also carries the verb that fixes it. It outranks
+        // the unread finding because an unread source still drives the
+        // circuit, while a source behind its definition drives it with a card
+        // the project no longer describes.
+        (
+            format!("{adopted} adopted \u{00b7} {behind} behind"),
+            Tone::Warn,
+        )
     } else if unread > 0 {
-        ("sources with no reader", Tone::Warn)
+        stated("sources with no reader", Tone::Warn)
     } else if !sources.is_empty() {
-        ("every source is read", Tone::Ok)
+        stated("every source is read", Tone::Ok)
     } else if ports.iter().any(PlacedRfPort::is_read) {
-        ("S-parameter ports drive this design", Tone::Ok)
+        stated("S-parameter ports drive this design", Tone::Ok)
     } else {
-        ("ports with no S-parameter run", Tone::Warn)
+        stated("ports with no S-parameter run", Tone::Warn)
     }
 }
 
@@ -241,19 +286,165 @@ fn excitation_row(ui: &mut Ui, state: &AppState, source: &PlacedSource) -> egui:
             (summary.as_str(), Tone::Neutral),
             (terminals.as_str(), Tone::Neutral),
             (readers.as_str(), tone),
+            (
+                source.definition_cell.as_str(),
+                definition_tone(source.provenance),
+            ),
+            ("", Tone::Neutral),
         ],
         selected,
         RowPress::Taken,
     )
     .on_hover_text(row_tooltip(
         &format!(
-            "{occurrence} \u{00b7} {} \u{00b7} {summary}",
-            source.reference
+            "{occurrence} \u{00b7} {} \u{00b7} {summary} \u{00b7} {}",
+            source.reference, source.definition_cell
         ),
         &source.consumers,
         "No analysis in this plan names this source, and none reads every source",
         elsewhere(state, source.occurrence.as_ref()),
     ))
+}
+
+/// What the Definition cell's colour says.
+///
+/// Only a state a reader has to act on takes a colour. `behind` and
+/// `definition removed` are the library having moved out from under the
+/// instance, which is a finding; `modified` is a deliberate local edit, which
+/// is worth marking but is not a defect; everything else is the ordinary state
+/// and stays in the metadata register with the cells beside it.
+fn definition_tone(provenance: ProvenanceState) -> Tone {
+    match provenance {
+        ProvenanceState::Behind { .. }
+        | ProvenanceState::ModifiedBehind { .. }
+        | ProvenanceState::Removed { .. } => Tone::Warn,
+        ProvenanceState::Modified { .. } => Tone::Accent,
+        ProvenanceState::FromSchematic | ProvenanceState::Adopted { .. } => Tone::Neutral,
+    }
+}
+
+/// One verb a source row offers.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum SourceVerb {
+    /// Select the instance and open Component Properties on it.
+    Properties,
+    /// Show the named definition in the Stimulus Library workspace.
+    OpenDefinition(String),
+    /// Copy the library's current revision of the adopted definition back onto
+    /// this instance, in one undo group.
+    Readopt(String),
+}
+
+impl SourceVerb {
+    /// The row a reader picks, in the words the menu shows.
+    fn label(&self, provenance: ProvenanceState) -> String {
+        match self {
+            Self::Properties => "Properties".to_owned(),
+            Self::OpenDefinition(_) => "Open in Stimulus Library".to_owned(),
+            Self::Readopt(_) => match provenance {
+                ProvenanceState::Behind { library, .. }
+                | ProvenanceState::ModifiedBehind { library, .. } => {
+                    format!("Re-adopt r{library}")
+                }
+                ProvenanceState::Modified { from } => format!("Re-adopt r{from}"),
+                _ => "Re-adopt".to_owned(),
+            },
+        }
+    }
+}
+
+/// The verbs this row offers, in the order they are listed.
+///
+/// Every source row offers Properties, because every source has an editor. The
+/// other two are the provenance's own answers — a definition the library still
+/// holds can be opened, and an instance that has drifted can be re-adopted —
+/// so nothing here re-derives a lifecycle word.
+fn source_verbs(source: &PlacedSource) -> Vec<SourceVerb> {
+    let mut verbs = vec![SourceVerb::Properties];
+    let held = source.definition.as_ref().filter(|_| {
+        !matches!(source.provenance, ProvenanceState::Removed { .. })
+            && source.provenance != ProvenanceState::FromSchematic
+    });
+    if let Some(definition) = held {
+        verbs.push(SourceVerb::OpenDefinition(definition.clone()));
+        if source.provenance.offers_readoption() {
+            verbs.push(SourceVerb::Readopt(definition.clone()));
+        }
+    }
+    verbs
+}
+
+/// Paint the row's trailing verb control and report the verb taken.
+///
+/// The control is placed over the row's own last column rather than in a
+/// column of its own layout: the row owns its height and its selection, and a
+/// second allocation would put the menu on a line of its own. Within a layer
+/// the later widget wins the pointer, so the button takes the press and the
+/// row keeps every other part of itself — the same order the run-set table's
+/// per-row controls keep.
+fn source_row_verbs(
+    ui: &mut Ui,
+    state: &AppState,
+    source: &PlacedSource,
+    row: egui::Rect,
+) -> Option<SourceVerb> {
+    let verbs = source_verbs(source);
+    let cells = page_kit::column_rects(row, &EXCITATION_COLUMNS);
+    let cell = *cells.last()?;
+    let unreachable = elsewhere(state, source.occurrence.as_ref())
+        .is_some()
+        .then_some(
+            "This instance is drawn inside another occurrence; descend to it from the design \
+         navigator's Excitations rail first",
+        );
+    let choices: Vec<page_kit::PopupChoice> = verbs
+        .iter()
+        .map(|verb| page_kit::PopupChoice {
+            label: verb.label(source.provenance),
+            unavailable: match verb {
+                SourceVerb::Properties | SourceVerb::Readopt(_) => unreachable,
+                SourceVerb::OpenDefinition(_) => None,
+            },
+        })
+        .collect();
+    let salt = format!("excitation-verbs-{}", source.component_id);
+    let mut child = page_kit::cell_ui(ui, cell);
+    let taken = page_kit::command_popup(
+        &mut child,
+        &salt,
+        crate::ui::widgets::Button::new("Actions")
+            .ghost()
+            .accessible_label(&source.reference),
+        "This source offers no action here",
+        &choices,
+    )?;
+    verbs.get(taken).cloned()
+}
+
+/// Run one row verb against the design.
+fn take_source_verb(
+    state: &mut AppState,
+    component_id: u64,
+    occurrence: Option<&InstancePath>,
+    verb: &SourceVerb,
+) {
+    match verb {
+        SourceVerb::Properties => {
+            reveal(state, occurrence, component_id);
+            crate::workbench::app::open_property_editor(state, component_id);
+        }
+        SourceVerb::OpenDefinition(definition) => {
+            crate::workbench::app::open_stimulus_definition(state, definition);
+        }
+        SourceVerb::Readopt(definition) => {
+            reveal(state, occurrence, component_id);
+            let outcome = crate::workbench::app::commit_readoption(state, component_id, definition);
+            state.push_user_message(match outcome {
+                Ok(line) => crate::diagnostics::ConsoleMessage::info(line),
+                Err(refusal) => crate::diagnostics::ConsoleMessage::warning(refusal),
+            });
+        }
+    }
 }
 
 /// One RF port's row, in the columns the source rows above it use.
@@ -278,6 +469,8 @@ fn port_row(ui: &mut Ui, state: &AppState, port: &PlacedRfPort) -> egui::Respons
             (summary.as_str(), Tone::Neutral),
             (terminals.as_str(), Tone::Neutral),
             (readers.as_str(), tone),
+            ("", Tone::Neutral),
+            ("", Tone::Neutral),
         ],
         selected,
         RowPress::Taken,
@@ -438,10 +631,15 @@ fn reveal(state: &mut AppState, occurrence: Option<&InstancePath>, component_id:
 
 #[cfg(test)]
 mod tests {
-    use super::{Tone, duplicate_port_note, unread_port_note, unread_source_note, verdict};
+    use super::{
+        ProvenanceState, SourceVerb, Tone, definition_tone, duplicate_port_note, source_verbs,
+        unread_port_note, unread_source_note, verdict,
+    };
     use crate::simulation::placed_sources::{placed_rf_ports, placed_sources};
     use crate::simulation::plan::{AnalysisKind, SimulationPlan};
-    use crate::state::{Component, ComponentType, Point, SchematicState};
+    use crate::state::stimulus_library::definition::StimulusDefinition;
+    use crate::state::stimulus_library::draft::DefinitionDraft;
+    use crate::state::{Component, ComponentType, Point, SchematicState, StimulusLibrary};
 
     fn schematic_with(components: Vec<Component>) -> SchematicState {
         let mut schematic = SchematicState::default();
@@ -505,7 +703,7 @@ mod tests {
         let ports = placed_rf_ports(&schematic, Some(&plan_with(AnalysisKind::SParameter, true)));
         assert_eq!(
             verdict(&[], &ports),
-            ("S-parameter ports drive this design", Tone::Ok)
+            ("S-parameter ports drive this design".to_owned(), Tone::Ok)
         );
     }
 
@@ -527,12 +725,15 @@ mod tests {
             schematic_with(vec![rf_port(1, "P1", "port=1"), rf_port(2, "P2", "port=1")]);
 
         let read = placed_rf_ports(&schematic, Some(&plan_with(AnalysisKind::SParameter, true)));
-        assert_eq!(verdict(&[], &read), ("ports share a number", Tone::Warn));
+        assert_eq!(
+            verdict(&[], &read),
+            ("ports share a number".to_owned(), Tone::Warn)
+        );
 
         let unread = placed_rf_ports(&schematic, None);
         assert_eq!(
             verdict(&[], &unread),
-            ("ports with no S-parameter run", Tone::Warn),
+            ("ports with no S-parameter run".to_owned(), Tone::Warn),
             "with nothing indexing them the bench is unfinished, not miswired"
         );
     }
@@ -540,7 +741,10 @@ mod tests {
     /// A design with nothing on it still says so, in the words it always used.
     #[test]
     fn a_design_that_places_nothing_still_states_that_it_places_nothing() {
-        assert_eq!(verdict(&[], &[]), ("no sources placed", Tone::Warn));
+        assert_eq!(
+            verdict(&[], &[]),
+            ("no sources placed".to_owned(), Tone::Warn)
+        );
     }
 
     /// Ports and no run that reads them is the one finding a ports-only bench
@@ -557,7 +761,7 @@ mod tests {
             let ports = placed_rf_ports(&schematic, plan.as_ref());
             assert_eq!(
                 verdict(&[], &ports),
-                ("ports with no S-parameter run", Tone::Warn),
+                ("ports with no S-parameter run".to_owned(), Tone::Warn),
                 "{plan:?}"
             );
         }
@@ -574,20 +778,141 @@ mod tests {
             rf_port(2, "P1", "port=1"),
         ]);
         let transient = plan_with(AnalysisKind::Transient, true);
-        let sources = placed_sources(&schematic, Some(&transient));
+        let sources = placed_sources(&schematic, &StimulusLibrary::default(), Some(&transient));
         let ports = placed_rf_ports(&schematic, Some(&transient));
         assert_eq!(
             verdict(&sources, &ports),
-            ("every source is read", Tone::Ok)
+            ("every source is read".to_owned(), Tone::Ok)
         );
 
         let ac_only = plan_with(AnalysisKind::Ac, true);
-        let sources = placed_sources(&schematic, Some(&ac_only));
+        let sources = placed_sources(&schematic, &StimulusLibrary::default(), Some(&ac_only));
         let ports = placed_rf_ports(&schematic, Some(&ac_only));
         assert_eq!(
             verdict(&sources, &ports),
-            ("sources with no reader", Tone::Warn),
+            ("sources with no reader".to_owned(), Tone::Warn),
             "a PULSE carries no AC magnitude, so an AC-only plan reads it not at all"
+        );
+    }
+
+    /// A design fixture whose one source has adopted `definition`, with the
+    /// library holding `library_revision` of it.
+    fn adopted_design(library_revision: u32) -> (SchematicState, StimulusLibrary) {
+        let mut definition =
+            StimulusDefinition::new("sensor_drive", ComponentType::VoltageSourceSin)
+                .expect("definition");
+        definition.value = "0".to_owned();
+        definition.params = "va=3m freq=1k".to_owned();
+        let mut component = Component::new(1, ComponentType::VoltageSourceSin, Point::origin())
+            .with_name_value("V1", "0");
+        definition
+            .adopt_onto(&mut component)
+            .expect("the fixture instance is of the definition's own type");
+        let mut library = StimulusLibrary::default();
+        library.insert(definition.clone()).expect("insert");
+        // Published through the library itself: `apply` is the one verb that
+        // advances a revision, so a fixture that moved the number some other
+        // way would be testing a state the product cannot reach.
+        let mut draft = DefinitionDraft::new(definition);
+        for revision in 1..library_revision {
+            draft.edit(|working| working.params = format!("va={revision}m freq=1k"));
+            library.apply(&mut draft);
+        }
+        (schematic_with(vec![component]), library)
+    }
+
+    /// The Definition column states which definition an instance copied and
+    /// where it stands, in the library's own words rather than the page's.
+    #[test]
+    fn the_definition_cell_is_the_provenance_state_the_library_reports() {
+        let (schematic, library) = adopted_design(1);
+        let sources = placed_sources(&schematic, &library, None);
+        let source = sources.first().expect("the fixture places one source");
+        assert_eq!(source.definition.as_deref(), Some("sensor_drive"));
+        assert_eq!(source.provenance, ProvenanceState::Adopted { revision: 1 });
+        assert_eq!(source.definition_cell, "sensor_drive · r1");
+        assert_eq!(definition_tone(source.provenance), Tone::Neutral);
+
+        let (schematic, library) = adopted_design(3);
+        let sources = placed_sources(&schematic, &library, None);
+        let source = sources.first().expect("the fixture places one source");
+        assert_eq!(
+            source.provenance,
+            ProvenanceState::Behind {
+                adopted: 1,
+                library: 3
+            }
+        );
+        assert_eq!(source.definition_cell, "sensor_drive · r1 · library r3");
+        assert_eq!(definition_tone(source.provenance), Tone::Warn);
+    }
+
+    /// An instance drawn on the sheet adopted nothing, so its cell says so and
+    /// its only verb is the editor every source has.
+    #[test]
+    fn a_source_that_adopted_nothing_offers_only_its_editor() {
+        let schematic = schematic_with(vec![
+            Component::new(1, ComponentType::VoltageSourcePulse, Point::origin())
+                .with_name_value("V1", "0"),
+        ]);
+        let sources = placed_sources(&schematic, &StimulusLibrary::default(), None);
+        let source = sources.first().expect("the fixture places one source");
+        assert_eq!(source.provenance, ProvenanceState::FromSchematic);
+        assert_eq!(source.definition_cell, "— · from schematic");
+        assert_eq!(source_verbs(source), vec![SourceVerb::Properties]);
+    }
+
+    /// Re-adoption is offered exactly when the model says it would change
+    /// something, and the verb names the revision it would copy.
+    #[test]
+    fn the_readopt_verb_appears_only_once_the_library_has_moved_past_the_copy() {
+        let (schematic, library) = adopted_design(1);
+        let current = placed_sources(&schematic, &library, None);
+        let current = current.first().expect("one source");
+        assert_eq!(
+            source_verbs(current),
+            vec![
+                SourceVerb::Properties,
+                SourceVerb::OpenDefinition("sensor_drive".to_owned())
+            ],
+            "an instance holding the library's own revision has nothing to re-adopt"
+        );
+
+        let (schematic, library) = adopted_design(4);
+        let behind = placed_sources(&schematic, &library, None);
+        let behind = behind.first().expect("one source");
+        assert_eq!(
+            source_verbs(behind),
+            vec![
+                SourceVerb::Properties,
+                SourceVerb::OpenDefinition("sensor_drive".to_owned()),
+                SourceVerb::Readopt("sensor_drive".to_owned())
+            ]
+        );
+        assert_eq!(
+            SourceVerb::Readopt("sensor_drive".to_owned()).label(behind.provenance),
+            "Re-adopt r4"
+        );
+    }
+
+    /// The chip counts the drift, because that is the finding a reader can act
+    /// on from this page. An unread source still drives the circuit; a source
+    /// behind its definition drives it with a card the project no longer holds.
+    #[test]
+    fn the_chip_counts_adopters_that_are_behind_their_definition() {
+        let (schematic, library) = adopted_design(2);
+        let sources = placed_sources(&schematic, &library, None);
+        assert_eq!(
+            verdict(&sources, &[]),
+            ("1 adopted · 1 behind".to_owned(), Tone::Warn)
+        );
+
+        let (schematic, library) = adopted_design(1);
+        let sources = placed_sources(&schematic, &library, None);
+        assert_eq!(
+            verdict(&sources, &[]),
+            ("sources with no reader".to_owned(), Tone::Warn),
+            "with nothing behind, the page states the finding it always stated"
         );
     }
 }

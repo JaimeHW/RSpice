@@ -252,6 +252,7 @@ pub(super) fn component_shelf(ui: &mut Ui, app: &mut RSpiceApp) {
     let visible_matches = component_shelf_match_count(&app.state, &query) + library_parts.len();
     let mut band = None;
     let mut primitive = None;
+    let mut stimulus = None;
     let mut builtin = None;
     let mut generated = None;
     let mut cell = None;
@@ -266,6 +267,7 @@ pub(super) fn component_shelf(ui: &mut Ui, app: &mut RSpiceApp) {
             let pinned = pinned_band(ui, state, &library_parts, &cells);
             band = recent_band(ui, state, &library_parts, &cells).or(pinned);
             primitive = primitive_catalog(ui, state);
+            stimulus = stimulus_library_section(ui, state);
             builtin = builtin_xspice_catalog(ui, state);
             generated = generated_veriloga_catalog(ui, state);
             requested_part = library_parts_section(ui, state, &library_parts);
@@ -288,6 +290,8 @@ pub(super) fn component_shelf(ui: &mut Ui, app: &mut RSpiceApp) {
         apply_shelf_arm(app, arm, ui.ctx());
     } else if let Some(kind) = primitive {
         arm_primitive(app, kind, ui.ctx());
+    } else if let Some(name) = stimulus {
+        arm_stimulus_definition(&mut app.state, &name, ui.ctx());
     } else if let Some(binding) = builtin {
         arm_cell(&mut app.state, binding, ui.ctx());
     } else if let Some(binding) = generated {
@@ -652,7 +656,11 @@ pub(super) fn component_shelf_match_count(state: &AppState, query: &str) -> usiz
             )
         })
         .count();
-    primitive_matches + builtin_matches + generated_matches + library_matches
+    primitive_matches
+        + builtin_matches
+        + generated_matches
+        + library_matches
+        + stimulus_library_rows(state, query).len()
 }
 
 fn shelf_search(ui: &mut Ui, state: &mut AppState) -> bool {
@@ -886,16 +894,26 @@ fn armed_shelf_entry(state: &AppState) -> Option<ShelfEntry> {
     {
         return Some(ShelfEntry::LibraryPart(armed.model.clone()));
     }
+    // A stimulus definition is armed on the same tool as its family's
+    // primitive, and it is not one: crediting the primitive would fill the
+    // recent band with a source the reader never picked, and a key of its own
+    // would name a definition that is project state rather than something this
+    // build can offer. The Stimulus library section lists it either way.
+    if state.schematic.pending_stimulus.is_some() {
+        return None;
+    }
     Some(ShelfEntry::Primitive(kind))
 }
 
 /// The identity of a shelf row being dragged over the canvas right now.
 fn dragged_shelf_entry(ctx: &egui::Context) -> Option<ShelfEntry> {
     let payload = egui::DragAndDrop::payload::<SchematicShelfDragPayload>(ctx)?;
-    Some(match payload.as_ref() {
-        SchematicShelfDragPayload::Primitive(kind) => ShelfEntry::Primitive(*kind),
-        SchematicShelfDragPayload::LibraryCell(binding) => ShelfEntry::from_binding(binding),
-    })
+    match payload.as_ref() {
+        SchematicShelfDragPayload::Primitive(kind) => Some(ShelfEntry::Primitive(*kind)),
+        SchematicShelfDragPayload::LibraryCell(binding) => Some(ShelfEntry::from_binding(binding)),
+        // Not a pinnable identity — see [`armed_shelf_entry`].
+        SchematicShelfDragPayload::Stimulus(_) => None,
+    }
 }
 
 /// Credit the shelf identity on offer when the design grows.
@@ -1400,6 +1418,124 @@ fn primitive_rows(
         shelf_pin_context_menu(&response, state, &ShelfEntry::Primitive(entry.kind));
     }
     armed
+}
+
+/// The Stimulus library section: every definition this project authored, as a
+/// placeable part.
+///
+/// It sits directly under Primitives because that is what a definition is — a
+/// source of one of the twelve families above it, with its fields already
+/// filled in — and above the pack and cell catalogs, which publish devices
+/// rather than excitations. A project that has authored none paints nothing at
+/// all rather than an empty header: the shelf's other sections do the same, and
+/// a heading over nothing is a door that leads nowhere.
+///
+/// Returns the definition a click armed.
+fn stimulus_library_section(ui: &mut Ui, state: &mut AppState) -> Option<String> {
+    let query = normalized(&state.workbench.placement_query);
+    let rows = stimulus_library_rows(state, &query);
+    if rows.is_empty() {
+        return None;
+    }
+    let visible = if query.is_empty() {
+        catalog_group_row(
+            ui,
+            "component-shelf-stimulus-library",
+            ShelfGlyph::Source,
+            "Stimulus library",
+            rows.len(),
+            false,
+        )
+    } else {
+        shelf_section_header(ui, "Stimulus library", Some(&rows.len().to_string()));
+        true
+    };
+    if !visible {
+        return None;
+    }
+
+    let mut armed = None;
+    for row in &rows {
+        let response = shelf_part_row(
+            ui,
+            ShelfGlyph::Source,
+            &row.name,
+            state
+                .schematic
+                .pending_stimulus
+                .as_ref()
+                .is_some_and(|held| held.definition().eq_ignore_ascii_case(&row.name)),
+            Some(&row.meta),
+            if query.is_empty() { 2 } else { 0 },
+        )
+        .on_hover_text(&row.hover);
+        response.dnd_set_drag_payload(SchematicShelfDragPayload::stimulus(row.placement.clone()));
+        if response.clicked() {
+            armed = Some(row.name.clone());
+        }
+    }
+    armed
+}
+
+/// One Stimulus library row, resolved through the definition's own realization.
+struct StimulusShelfRow {
+    name: String,
+    /// `V · SIN · 1 kHz`, from the instance this definition would place.
+    meta: String,
+    hover: String,
+    placement: crate::state::PendingStimulusPlacement,
+}
+
+/// Every definition the query keeps, in the library's own list order.
+fn stimulus_library_rows(state: &AppState, query: &str) -> Vec<StimulusShelfRow> {
+    state
+        .workspace
+        .stimulus_library
+        .definitions()
+        .iter()
+        .filter(|definition| {
+            matches_query(
+                query,
+                &[
+                    definition.name(),
+                    definition.family().label(),
+                    &definition.purpose,
+                ],
+            )
+        })
+        .map(|definition| {
+            let instance = definition.transient_component();
+            let meta = crate::simulation::placed_sources::source_identity_line(&instance)
+                .unwrap_or_else(|| definition.family().label().to_owned());
+            let revision = definition.revision();
+            let mut hover = format!("{} \u{00b7} r{revision} \u{00b7} {meta}", definition.name());
+            if !definition.purpose.trim().is_empty() {
+                hover.push('\n');
+                hover.push_str(definition.purpose.trim());
+            }
+            hover.push_str("\nClick to place it, or drag it onto the schematic");
+            StimulusShelfRow {
+                name: definition.name().to_owned(),
+                meta,
+                hover,
+                placement: crate::state::PendingStimulusPlacement::of(definition),
+            }
+        })
+        .collect()
+}
+
+/// Arm one definition from the shelf, and say so where the reader is looking.
+fn arm_stimulus_definition(state: &mut AppState, name: &str, ctx: &egui::Context) {
+    match crate::workbench::app::arm_placement_from_definition(state, name) {
+        Ok(()) => finish_shelf_placement(state, ctx, name),
+        Err(refusal) => {
+            state.push_user_message(crate::diagnostics::ConsoleMessage::warning(refusal.clone()));
+            state
+                .ui
+                .toasts
+                .warn_with_title(ctx, "Stimulus not armed", refusal);
+        }
+    }
 }
 
 fn builtin_xspice_catalog(ui: &mut Ui, state: &mut AppState) -> Option<LibraryCellInstance> {

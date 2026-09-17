@@ -24,7 +24,11 @@ use crate::workbench::design_system::WorkbenchIcon;
 use crate::workbench::state::Workspace;
 use crate::workbench::{
     ResultViewer,
-    app::{open_replace_instance_dialog, replace_instance_available},
+    app::{
+        StimulusLinkMode, commit_readoption, open_replace_instance_dialog,
+        open_stimulus_definition, open_stimulus_link, replace_instance_available,
+        stimulus_link_target,
+    },
 };
 
 use super::SchematicSymbolContext;
@@ -78,6 +82,10 @@ enum ContextAction {
     ReplaceInstance,
     CreateHierarchy,
     CreateSymbolFromPorts,
+    AdoptStimulus,
+    SaveStimulus,
+    OpenStimulusDefinition,
+    ReadoptStimulus,
     PageSetup,
     FitContent,
     ShowInNetlist,
@@ -181,6 +189,38 @@ const CONTEXT_ENTRIES: &[ContextEntry] = &[
         action: ContextAction::CreateSymbolFromPorts,
         icon: ContextIcon::Hierarchy,
         label: "Create symbol from schematic ports…",
+        shortcut_command: None,
+    }),
+    // The stimulus-library group sits after the instance operations because
+    // adopting a definition *is* one: a cross-family adoption re-places the
+    // instance exactly as Replace instance does, and the reader who has just
+    // considered that row is the reader who wants this one.
+    ContextEntry::Separator,
+    ContextEntry::Command(ContextCommand {
+        action: ContextAction::AdoptStimulus,
+        icon: ContextIcon::Waveform,
+        label: "Adopt stimulus definition…",
+        shortcut_command: None,
+    }),
+    ContextEntry::Command(ContextCommand {
+        action: ContextAction::SaveStimulus,
+        icon: ContextIcon::Waveform,
+        label: "Save as stimulus definition…",
+        shortcut_command: None,
+    }),
+    ContextEntry::Command(ContextCommand {
+        action: ContextAction::OpenStimulusDefinition,
+        icon: ContextIcon::Waveform,
+        label: "Open in Stimulus Library",
+        shortcut_command: None,
+    }),
+    // The revision is deliberately not in the label: every row in this table
+    // is a fixed string, and the console line the verb writes names the
+    // revision it copied, which is the record a reader keeps.
+    ContextEntry::Command(ContextCommand {
+        action: ContextAction::ReadoptStimulus,
+        icon: ContextIcon::Waveform,
+        label: "Re-adopt stimulus definition",
         shortcut_command: None,
     }),
     ContextEntry::Separator,
@@ -1147,6 +1187,35 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
                     .any(|library| !library.read_only),
             "Add at least one schematic port and make a writable design library available",
         ),
+        ContextAction::AdoptStimulus => {
+            if selected_stimulus_source(state).is_none() {
+                (false, "Select one independent source")
+            } else if state.workspace.stimulus_library.is_empty() {
+                (false, "The library holds no definitions")
+            } else {
+                (true, "Select one independent source")
+            }
+        }
+        ContextAction::SaveStimulus => (
+            selected_stimulus_source(state).is_some(),
+            "Select one independent source",
+        ),
+        ContextAction::OpenStimulusDefinition => (
+            selected_stimulus_definition(state).is_some(),
+            "This source adopted no definition",
+        ),
+        ContextAction::ReadoptStimulus => (
+            selected_stimulus_definition(state).is_some_and(|_| {
+                selected_stimulus_source(state).is_some_and(|component| {
+                    state
+                        .workspace
+                        .stimulus_library
+                        .provenance_state(component)
+                        .offers_readoption()
+                })
+            }),
+            "This source already carries the library's revision",
+        ),
         ContextAction::PageSetup => (
             writable
                 && matches!(
@@ -1180,6 +1249,29 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
             "Run a DC operating-point analysis with device OP reporting first",
         ),
     }
+}
+
+/// The one selected instance a stimulus verb can act on: exactly one
+/// independent source, on a sheet that takes edits.
+///
+/// The link transaction owns that question — it is the same target check the
+/// dialog performs before it opens — so this menu states availability with the
+/// answer rather than with a second reading of the selection.
+fn selected_stimulus_source(state: &AppState) -> Option<&crate::state::Component> {
+    let id = state.schematic.selection.single_component()?;
+    stimulus_link_target(state, id)
+}
+
+/// The definition the selected source adopted, when the library still holds
+/// it.
+fn selected_stimulus_definition(state: &AppState) -> Option<String> {
+    let component = selected_stimulus_source(state)?;
+    let name = component.stimulus_provenance.as_ref()?.definition.clone();
+    state
+        .workspace
+        .stimulus_library
+        .get(&name)
+        .map(|definition| definition.name().to_owned())
 }
 
 fn execute_context_action(
@@ -1231,6 +1323,34 @@ fn execute_context_action(
         }
         ContextAction::CreateSymbolFromPorts => {
             crate::workbench::app::open_create_model_bound_symbol_dialog(state);
+        }
+        ContextAction::AdoptStimulus | ContextAction::SaveStimulus => {
+            let mode = if action == ContextAction::AdoptStimulus {
+                StimulusLinkMode::Adopt
+            } else {
+                StimulusLinkMode::Extract
+            };
+            if let Some(id) = state.schematic.selection.single_component()
+                && let Err(refusal) = open_stimulus_link(state, id, mode)
+            {
+                state.push_user_message(ConsoleMessage::warning(refusal));
+            }
+        }
+        ContextAction::OpenStimulusDefinition => {
+            if let Some(definition) = selected_stimulus_definition(state) {
+                open_stimulus_definition(state, &definition);
+            }
+        }
+        ContextAction::ReadoptStimulus => {
+            if let Some(definition) = selected_stimulus_definition(state)
+                && let Some(id) = state.schematic.selection.single_component()
+            {
+                let outcome = commit_readoption(state, id, &definition);
+                state.push_user_message(match outcome {
+                    Ok(line) => ConsoleMessage::info(line),
+                    Err(refusal) => ConsoleMessage::warning(refusal),
+                });
+            }
         }
         ContextAction::PageSetup => {
             crate::workbench::app::open_drawing_sheet_setup_for_state(state);
