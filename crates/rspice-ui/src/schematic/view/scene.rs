@@ -4,6 +4,8 @@
 //! selected or highlighted, and the labels that need to be drawn, so the
 //! painter walks a prepared list rather than the whole design.
 
+use std::collections::BTreeMap;
+
 use egui::{Painter, Rect, Stroke};
 
 use crate::simulation::netlist_gen::{bus_notations, projection_nets};
@@ -23,8 +25,8 @@ use super::documentation_shapes::{
     documentation_shape_at, draw_documentation_shape, world_bounds as documentation_shape_bounds,
 };
 use super::drawing::{
-    ProbeVisualStatus, draw_bus, draw_bus_tap, draw_component, draw_junction, draw_probe,
-    draw_wire, paint_conductor, probe_at_screen, probe_world_bounds,
+    ProbeVisualStatus, chain_conductors, draw_bus, draw_bus_tap, draw_component, draw_conductor,
+    draw_junction, draw_probe, paint_conductor, probe_at_screen, probe_world_bounds,
 };
 use super::drawing_sheet::ActiveDrawingSheet;
 use super::net_labels::{draw_net_label, net_label_at, world_bounds as net_label_world_bounds};
@@ -129,6 +131,12 @@ pub(super) fn draw_scene(
         draw_bus(painter, viewport, bus, selected);
     }
 
+    // Wires of one style that meet end to end are painted as one path, so the
+    // corner two wires form is a mitered join. Plain wires go down first,
+    // then highlighted nets, then the selection, so emphasis stays on top.
+    type ConductorStyle = (bool, Option<[u8; 4]>);
+    let mut conductor_groups: BTreeMap<ConductorStyle, (Option<egui::Color32>, Vec<&[Point]>)> =
+        BTreeMap::new();
     for index in visible_wire_indices {
         let Some(wire) = state.schematic.wires.get(index) else {
             continue;
@@ -162,7 +170,16 @@ pub(super) fn draw_scene(
             SchematicNetHighlighting::NetClassColors => net_class_colors.get(&wire.id).copied(),
             SchematicNetHighlighting::Off => None,
         };
-        draw_wire(painter, viewport, wire, is_selected, highlight_color);
+        conductor_groups
+            .entry((is_selected, highlight_color.map(|color| color.to_array())))
+            .or_insert_with(|| (highlight_color, Vec::new()))
+            .1
+            .push(wire.points.as_slice());
+    }
+    for ((is_selected, _), (highlight_color, polylines)) in conductor_groups {
+        for chain in chain_conductors(polylines) {
+            draw_conductor(painter, viewport, &chain, is_selected, highlight_color);
+        }
     }
 
     for tap in &state.schematic.bus_taps {
@@ -536,15 +553,18 @@ fn draw_parent_context(painter: &Painter, viewport: &Viewport, state: &AppState)
     let (wx0, wy0, wx1, wy1) = viewport.visible_world_rect(CULL_MARGIN);
 
     for (key, sheet) in parent_context_sheets(state) {
-        for wire in &sheet.wires {
-            if !object_is_on_sheet(state, &key, wire.id)
-                || !polyline_intersects_view(&wire.points, wx0, wy0, wx1, wy1)
-            {
-                continue;
-            }
+        let wires = sheet
+            .wires
+            .iter()
+            .filter(|wire| {
+                object_is_on_sheet(state, &key, wire.id)
+                    && polyline_intersects_view(&wire.points, wx0, wy0, wx1, wy1)
+            })
+            .map(|wire| wire.points.as_slice());
+        for chain in chain_conductors(wires) {
             paint_conductor(
                 painter,
-                wire.points
+                chain
                     .iter()
                     .map(|point| viewport.schematic_to_screen(*point))
                     .collect(),

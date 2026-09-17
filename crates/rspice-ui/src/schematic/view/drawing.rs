@@ -3,6 +3,9 @@
 //! Draws the schematic itself: the grid, wires, junctions, labels, and
 //! placed instances, in the order that puts selection and highlight on top.
 
+use std::collections::HashMap;
+
+use egui::emath::GuiRounding as _;
 use egui::{Painter, Pos2, Rect, Stroke, Vec2};
 
 use crate::state::{
@@ -41,7 +44,18 @@ pub(super) fn draw_wire(
     selected: bool,
     highlight_color: Option<egui::Color32>,
 ) {
-    // Wire is a polyline - draw all segments
+    draw_conductor(painter, viewport, &wire.points, selected, highlight_color);
+}
+
+/// Draw one conductor polyline: a wire, or several wires chained end to end
+/// by [`chain_conductors`].
+pub(super) fn draw_conductor(
+    painter: &Painter,
+    viewport: &Viewport,
+    points: &[Point],
+    selected: bool,
+    highlight_color: Option<egui::Color32>,
+) {
     // Priority: selected > highlighted > default
     let palette = crate::ui::tokens::active_palette();
     let (color, width) = if selected {
@@ -52,45 +66,199 @@ pub(super) fn draw_wire(
         (palette.wire, DEFAULT_WIRE_STROKE_WIDTH)
     };
 
-    let points = wire
-        .points
+    let points = points
         .iter()
         .map(|point| viewport.schematic_to_screen(*point))
         .collect();
     paint_conductor(painter, points, Stroke::new(width * viewport.zoom, color));
 }
 
-/// One screen-space path for a conductor polyline, or `None` when fewer than
-/// two distinct points remain.
+/// Screen-space paths for a conductor polyline: one mitered path, split
+/// wherever the polyline folds straight back on itself.
 ///
 /// Painting a polyline one segment at a time leaves a notch at every corner:
 /// two butt ends meet at the vertex and the outer square between them is never
-/// painted. One path gives every interior vertex a mitered join, and extending
-/// both ends by half the stroke width (a square cap) closes the corner that two
-/// separate conductors form when they meet end to end. A square cap on a
-/// conductor that ends on another conductor's body, or on a pin lead of the
-/// same weight, lands inside that stroke, so nothing protrudes.
-pub(super) fn conductor_shape(mut points: Vec<Pos2>, stroke: Stroke) -> Option<egui::Shape> {
+/// painted. One path gives every interior vertex a mitered join. Ends stay
+/// butt ends: egui anti-aliases with alpha-blended feather bands, so two
+/// strokes whose edges coincide blend to a lighter hairline, and a cap that
+/// closed a corner or hid inside another conductor would put its end edge on
+/// that conductor's edge. Corners two conductors form are closed by
+/// [`chain_conductors`] instead, and a butt end on another conductor's
+/// centreline sits fully inside its opaque core. A fold-back is split because
+/// the tessellator flares a 180° join to double width.
+///
+/// Axis-aligned segments are snapped to the pixel grid exactly as egui snaps
+/// a `LineSegment`, so a one-pixel wire at 100% zoom stays crisp and lines up
+/// with the pin leads the symbol painter still draws as segments.
+pub(super) fn conductor_shapes(
+    mut points: Vec<Pos2>,
+    stroke: Stroke,
+    pixels_per_point: f32,
+) -> Vec<egui::Shape> {
     points.dedup();
-    if points.len() < 2 {
-        return None;
+    let mut shapes = Vec::new();
+    for mut run in split_at_folds(points) {
+        snap_conductor(&mut run, &stroke, pixels_per_point);
+        run.dedup();
+        if run.len() >= 2 {
+            shapes.push(egui::Shape::line(run, stroke));
+        }
     }
-    let half_width = stroke.width * 0.5;
-    if half_width > 0.0 {
-        let last = points.len() - 1;
-        let start_direction = (points[1] - points[0]).normalized();
-        let end_direction = (points[last] - points[last - 1]).normalized();
-        points[0] -= start_direction * half_width;
-        points[last] += end_direction * half_width;
-    }
-    Some(egui::Shape::line(points, stroke))
+    shapes
 }
 
-/// Paint a conductor polyline as one mitered, square-capped path.
+/// Split a deduplicated polyline into runs that never reverse direction at a
+/// vertex. Each fold vertex ends one run and starts the next.
+fn split_at_folds(points: Vec<Pos2>) -> Vec<Vec<Pos2>> {
+    let mut runs = Vec::new();
+    let mut run: Vec<Pos2> = Vec::with_capacity(points.len());
+    for point in points {
+        if run.len() >= 2 {
+            let (a, b) = (run[run.len() - 2], run[run.len() - 1]);
+            let (u, v) = (b - a, point - b);
+            let folds_back = (u.x * v.y - u.y * v.x).abs() <= f32::EPSILON && u.dot(v) < 0.0;
+            if folds_back {
+                runs.push(std::mem::replace(&mut run, vec![b]));
+            }
+        }
+        run.push(point);
+    }
+    if run.len() >= 2 {
+        runs.push(run);
+    }
+    runs
+}
+
+/// egui's `LineSegment` pixel snapping, applied to a whole polyline: the
+/// across-axis coordinate of every axis-aligned segment goes to a pixel
+/// centre or edge by stroke parity, and each open end is pulled a quarter
+/// pixel inward before rounding so it does not gain a pixel at the fence post.
+fn snap_conductor(points: &mut [Pos2], stroke: &Stroke, pixels_per_point: f32) {
+    if points.len() < 2 {
+        return;
+    }
+    for index in 0..points.len() - 1 {
+        let (a, b) = (points[index], points[index + 1]);
+        if a.x == b.x {
+            let mut x = a.x;
+            stroke.round_center_to_pixel(pixels_per_point, &mut x);
+            points[index].x = x;
+            points[index + 1].x = x;
+        } else if a.y == b.y {
+            let mut y = a.y;
+            stroke.round_center_to_pixel(pixels_per_point, &mut y);
+            points[index].y = y;
+            points[index + 1].y = y;
+        }
+    }
+    let quarter_pixel = 0.25 / pixels_per_point;
+    let last = points.len() - 1;
+    let inward = points[1];
+    snap_open_end(&mut points[0], inward, quarter_pixel, pixels_per_point);
+    let inward = points[last - 1];
+    snap_open_end(&mut points[last], inward, quarter_pixel, pixels_per_point);
+}
+
+fn snap_open_end(end: &mut Pos2, inward: Pos2, quarter_pixel: f32, pixels_per_point: f32) {
+    if end.x == inward.x && end.y != inward.y {
+        let shrunk = end.y + quarter_pixel * (inward.y - end.y).signum();
+        end.y = shrunk.round_to_pixel_center(pixels_per_point);
+    } else if end.y == inward.y && end.x != inward.x {
+        let shrunk = end.x + quarter_pixel * (inward.x - end.x).signum();
+        end.x = shrunk.round_to_pixel_center(pixels_per_point);
+    }
+}
+
+/// Paint a conductor polyline as one mitered path.
 pub(super) fn paint_conductor(painter: &Painter, points: Vec<Pos2>, stroke: Stroke) {
-    if let Some(shape) = conductor_shape(points, stroke) {
+    for shape in conductor_shapes(points, stroke, painter.pixels_per_point()) {
         painter.add(shape);
     }
+}
+
+/// Chain conductors that meet end to end into single polylines, so the corner
+/// two wires form is one mitered join rather than two butt ends with a notch
+/// between them. Ends chain only where exactly two conductor ends meet, in a
+/// corner or a collinear continuation; a T-junction, a pin, a dangling end and
+/// an end on another conductor's interior vertex keep their butt end, which
+/// is either open or hidden inside the through conductor. A continuation that
+/// folds straight back is never chained.
+pub(super) fn chain_conductors<'a>(
+    polylines: impl IntoIterator<Item = &'a [Point]>,
+) -> Vec<Vec<Point>> {
+    let mut chains: Vec<Vec<Point>> = polylines
+        .into_iter()
+        .map(|points| {
+            let mut points = points.to_vec();
+            points.dedup();
+            points
+        })
+        .filter(|points| points.len() >= 2)
+        .collect();
+    let mut ends: HashMap<Point, Vec<(usize, bool)>> = HashMap::new();
+    for (index, chain) in chains.iter().enumerate() {
+        ends.entry(chain[0]).or_default().push((index, false));
+        ends.entry(chain[chain.len() - 1])
+            .or_default()
+            .push((index, true));
+    }
+    let mut consumed = vec![false; chains.len()];
+    let mut output = Vec::with_capacity(chains.len());
+    for start in 0..chains.len() {
+        if consumed[start] {
+            continue;
+        }
+        consumed[start] = true;
+        let mut chain = std::mem::take(&mut chains[start]);
+        // Grow from the tail, then turn the chain around and grow again, so
+        // both ends are extended with one piece of bookkeeping.
+        for _ in 0..2 {
+            loop {
+                let tail = chain[chain.len() - 1];
+                let Some(incident) = ends.get(&tail) else {
+                    break;
+                };
+                if incident.len() != 2 {
+                    break;
+                }
+                let Some(&(other, at_end)) = incident.iter().find(|(index, _)| !consumed[*index])
+                else {
+                    break;
+                };
+                let candidate = &chains[other];
+                let second = if at_end {
+                    candidate[candidate.len() - 2]
+                } else {
+                    candidate[1]
+                };
+                if folds_back(chain[chain.len() - 2], tail, second) {
+                    break;
+                }
+                let mut next = std::mem::take(&mut chains[other]);
+                if at_end {
+                    next.reverse();
+                }
+                consumed[other] = true;
+                chain.extend_from_slice(&next[1..]);
+            }
+            chain.reverse();
+        }
+        output.push(chain);
+    }
+    output
+}
+
+/// Whether `b -> c` reverses straight back along `a -> b`.
+fn folds_back(a: Point, b: Point, c: Point) -> bool {
+    let (ux, uy) = (
+        i64::from(b.x) - i64::from(a.x),
+        i64::from(b.y) - i64::from(a.y),
+    );
+    let (vx, vy) = (
+        i64::from(c.x) - i64::from(b.x),
+        i64::from(c.y) - i64::from(b.y),
+    );
+    ux * vy == uy * vx && ux * vx + uy * vy < 0
 }
 
 /// Draw a typed multi-conductor bus. Buses deliberately use the same
@@ -1194,9 +1362,12 @@ mod tests {
     }
 
     #[test]
-    fn a_conductor_is_one_square_capped_path() {
-        let stroke = Stroke::new(2.0, egui::Color32::WHITE);
-        let shape = conductor_shape(
+    fn a_conductor_is_one_path_snapped_like_a_line_segment() {
+        // A one-pixel stroke snaps its centreline to pixel centres, and each
+        // open end is pulled a quarter pixel inward before rounding: exactly
+        // what egui does to a `LineSegment`, so wires and pin leads agree.
+        let stroke = Stroke::new(1.0, egui::Color32::WHITE);
+        let shapes = conductor_shapes(
             vec![
                 Pos2::new(10.0, 10.0),
                 Pos2::new(10.0, 10.0),
@@ -1204,26 +1375,88 @@ mod tests {
                 Pos2::new(50.0, 50.0),
             ],
             stroke,
-        )
-        .expect("two distinct points make a path");
-        let Shape::Path(path) = shape else {
+            1.0,
+        );
+        let [Shape::Path(path)] = shapes.as_slice() else {
             panic!("a conductor is one path, never a segment per vertex pair");
         };
         assert!(!path.closed);
         assert_eq!(
             path.points,
             vec![
-                Pos2::new(10.0, 9.0),
-                Pos2::new(10.0, 50.0),
-                Pos2::new(51.0, 50.0)
-            ],
-            "each end extends by half the stroke width along its own segment"
+                Pos2::new(10.5, 10.5),
+                Pos2::new(10.5, 50.5),
+                Pos2::new(49.5, 50.5)
+            ]
         );
-        assert!((path.stroke.width - 2.0).abs() < f32::EPSILON);
+        assert!((path.stroke.width - 1.0).abs() < f32::EPSILON);
 
         assert!(
-            conductor_shape(vec![Pos2::new(3.0, 3.0), Pos2::new(3.0, 3.0)], stroke).is_none(),
+            conductor_shapes(vec![Pos2::new(3.0, 3.0), Pos2::new(3.0, 3.0)], stroke, 1.0)
+                .is_empty(),
             "a degenerate conductor paints nothing"
+        );
+
+        // A path that folds straight back is two runs, never one flared join.
+        let folded = conductor_shapes(
+            vec![
+                Pos2::new(10.0, 10.0),
+                Pos2::new(10.0, 50.0),
+                Pos2::new(10.0, 30.0),
+            ],
+            stroke,
+            1.0,
+        );
+        assert_eq!(folded.len(), 2);
+    }
+
+    #[test]
+    fn conductors_chain_only_where_exactly_two_ends_meet() {
+        let corner = [Point::new(0, 0), Point::new(0, 10)];
+        let continuation = [Point::new(0, 10), Point::new(10, 10)];
+        let chained = chain_conductors([&corner[..], &continuation[..]]);
+        assert_eq!(
+            chained,
+            vec![vec![
+                Point::new(0, 0),
+                Point::new(0, 10),
+                Point::new(10, 10)
+            ]]
+        );
+
+        // Authoring direction does not matter: a continuation drawn towards
+        // the shared end is turned around.
+        let reversed = [Point::new(10, 10), Point::new(0, 10)];
+        let chained = chain_conductors([&corner[..], &reversed[..]]);
+        assert_eq!(
+            chained,
+            vec![vec![
+                Point::new(0, 0),
+                Point::new(0, 10),
+                Point::new(10, 10)
+            ]]
+        );
+
+        // Three ends at a point are a junction; nothing chains there.
+        let third = [Point::new(0, 10), Point::new(0, 20)];
+        let chained = chain_conductors([&corner[..], &continuation[..], &third[..]]);
+        assert_eq!(chained.len(), 3);
+
+        // An end on another conductor's interior vertex is not a shared end.
+        let bent = [Point::new(0, 0), Point::new(0, 10), Point::new(10, 10)];
+        let onto_vertex = [Point::new(-10, 10), Point::new(0, 10)];
+        assert_eq!(chain_conductors([&bent[..], &onto_vertex[..]]).len(), 2);
+
+        // A continuation that folds straight back keeps both conductors apart.
+        let fold = [Point::new(0, 10), Point::new(0, 5)];
+        assert_eq!(chain_conductors([&corner[..], &fold[..]]).len(), 2);
+
+        // Collinear pieces, a wire split at a former junction, become one run.
+        let left = [Point::new(0, 0), Point::new(10, 0)];
+        let right = [Point::new(10, 0), Point::new(20, 0)];
+        assert_eq!(
+            chain_conductors([&left[..], &right[..]]),
+            vec![vec![Point::new(0, 0), Point::new(10, 0), Point::new(20, 0)]]
         );
     }
 

@@ -765,18 +765,19 @@ fn draw_wire_preview(
         let drawing = &state.schematic.wire_drawing;
         let to_screen = |point: &Point| viewport.schematic_to_screen(*point);
         let committed: Vec<Pos2> = drawing.points.iter().map(to_screen).collect();
-        // The hint is the route a click would commit, corner included.
-        let hint: Vec<Pos2> = drawing.get_preview_path().iter().map(to_screen).collect();
+        // The whole route a click would commit, corner included, goes down
+        // first in the hint tone as one mitered path, and the committed
+        // prefix is painted over it in full tone with a butt end at the last
+        // vertex. No end edge lies on another stroke's edge, which is what
+        // turns egui's alpha-feathered anti-aliasing into a lighter hairline.
+        let route: Vec<Pos2> = drawing.get_full_path().iter().map(to_screen).collect();
 
         if let Some(start) = committed.first().copied() {
             let wire_color = crate::ui::tokens::active_palette().accent;
             let width = WIRE_PREVIEW_STROKE_WIDTH * viewport.zoom;
-            // The hint goes down first. Its square cap begins inside the
-            // committed conductor, and the committed stroke painted over it
-            // is what closes the corner, so the overlap never shows through.
             paint_conductor(
                 painter,
-                hint,
+                route,
                 Stroke::new(width, wire_color.gamma_multiply(0.6)),
             );
             paint_conductor(painter, committed, Stroke::new(width, wire_color));
