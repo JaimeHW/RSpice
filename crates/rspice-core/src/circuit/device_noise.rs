@@ -137,6 +137,15 @@ impl TransientDeviceNoise {
         self.sample_count
     }
 
+    /// Whether this run injects nothing.
+    ///
+    /// A deck that asked for transient noise and turned out to hold no noise
+    /// mechanism runs as an ordinary deterministic transient, which means it
+    /// must not pay for the sample breakpoints either.
+    pub(crate) fn is_empty(&self) -> bool {
+        self.sources.is_empty()
+    }
+
     /// Mutable access to the amplitude slots, for the accepted-step refresh.
     pub(crate) fn sources_mut(&mut self) -> &mut [InjectedNoiseSource] {
         &mut self.sources
@@ -156,7 +165,7 @@ impl TransientDeviceNoise {
     /// `t = 0` carries no noise at all: the run's first point is the
     /// deterministic operating point.
     fn sample_index(&self, time: Value) -> Option<usize> {
-        if self.sample_count == 0 || !(time > 0.0) {
+        if self.sample_count == 0 || !time.is_finite() || time <= 0.0 {
             return None;
         }
         let scaled = time / self.nt;
@@ -183,6 +192,11 @@ impl TransientDeviceNoise {
 
     /// The injected current of one source at `time`, in amperes. Zero outside
     /// the run's noise window.
+    ///
+    /// The run itself never needs one source in isolation — it stamps them all
+    /// together — so this exists for the oracle tests, which read one
+    /// mechanism's train back to estimate its spectrum.
+    #[cfg(test)]
     pub(crate) fn source_current(&self, index: usize, time: Value) -> Value {
         let Some(source) = self.sources.get(index) else {
             return 0.0;

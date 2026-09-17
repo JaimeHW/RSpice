@@ -559,6 +559,13 @@ fn a_deck_without_noise_mechanisms_runs_deterministically() {
     let mut rhs = vec![0.0; circuit.matrix_size()];
     circuit.stamp_transient_device_noise(&mut rhs, tstop / 2.0);
     assert!(rhs.iter().all(|value| *value == 0.0));
+
+    // And it must not pay for the sample breakpoints either: a run with
+    // nothing to inject has no discontinuity for the integrator to land on.
+    let mut breakpoints = crate::numerics::integration::BreakpointManager::new_with_tolerance(nt);
+    Engine::add_transient_noise_breakpoints(&mut breakpoints, &circuit, tstop, 1_000_000)
+        .expect("an empty plan schedules nothing");
+    assert!(breakpoints.times().is_empty());
 }
 
 /// A one-sided Welch periodogram of a sampled sequence, in units of the
