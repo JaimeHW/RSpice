@@ -7,6 +7,7 @@
 //! browser, so this is a serialized contract rather than a shared type.
 
 mod analysis;
+mod analysis_spec;
 mod conversions;
 mod transport;
 
@@ -14,6 +15,7 @@ pub(crate) use conversions::*;
 pub(crate) use transport::*;
 
 pub(crate) use analysis::*;
+pub(crate) use analysis_spec::*;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -32,11 +34,7 @@ use crate::simulation::config::{
     NoiseContributionDetail, NoiseIntegrationMode, NoiseSweepType, PoleZeroConfig, PzAnalysisType,
     SensitivityConfig, TransientAnalysisConfig,
 };
-use crate::simulation::multi_run::{
-    AnalysisSpec, EnvelopeAdaptiveMode, EnvelopeExtractionPath, EnvelopeInitialPeriodicSolve,
-    FrequencySweep, HbToneSpec, OptimizationAlgorithm, OptimizationGoal, OptimizationVariable,
-    PssMethod, SpPort, TfAccuracy, TfNormalization,
-};
+use crate::simulation::multi_run::{AnalysisSpec, FrequencySweep, TfAccuracy, TfNormalization};
 use crate::simulation::reliability_engine::{ParamShift, ReliabilityResult, StressMetrics};
 use crate::simulation::results::{
     DcOpResult, DigitalEventPoint, EventNodeHistory, MonteCarloVariableResult, RealEventPoint,
@@ -304,244 +302,12 @@ pub(crate) enum WorkerSimulationRequest {
     },
 }
 
-const fn worker_default_pss_stabilization_cycles() -> usize {
-    20
-}
-
-const fn worker_default_pss_shooting_points() -> usize {
-    512
-}
-
-const fn worker_default_true() -> bool {
-    true
-}
-
+/// The reference temperature a noise request defaults to.
+///
+/// Named by a `serde(default)` in two modules — the specification enum and
+/// the noise run configuration — so it stays where both can see it.
 const fn worker_default_noise_temperature() -> f64 {
     rspice_core::constants::TEMP_REFERENCE
-}
-
-fn worker_default_noise_reference_node() -> String {
-    "0".to_owned()
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub(crate) enum WorkerAnalysisSpec {
-    #[serde(rename = "DcOp")]
-    LegacyDcOp,
-    #[serde(rename = "DcOpConfigured")]
-    DcOp(crate::simulation::dialog::OpConfig),
-    DcSweep {
-        source_name: String,
-        start: f64,
-        stop: f64,
-        step: f64,
-        source2: Option<String>,
-        start2: Option<f64>,
-        stop2: Option<f64>,
-        step2: Option<f64>,
-        /// Sweep out and back as one continued solve. Defaulted on read so a
-        /// worker message from an older build is understood as the one-way
-        /// sweep it described.
-        #[serde(default)]
-        hysteresis: bool,
-    },
-    Transient {
-        stop_time: f64,
-        step_time: f64,
-        start_time: f64,
-        max_timestep: Option<f64>,
-        uic: bool,
-    },
-    Ac {
-        start_freq: f64,
-        stop_freq: f64,
-        points_per_unit: usize,
-        sweep: WorkerSweepType,
-    },
-    AcData {
-        table_name: String,
-        frequencies: Vec<f64>,
-    },
-    Noise {
-        output_node: String,
-        #[serde(default = "worker_default_noise_reference_node")]
-        reference_node: String,
-        #[serde(default)]
-        input_source: String,
-        start_freq: f64,
-        stop_freq: f64,
-        points_per_decade: usize,
-        #[serde(default)]
-        sweep: NoiseSweepType,
-        #[serde(default)]
-        explicit_frequencies: Option<Vec<f64>>,
-        #[serde(default)]
-        data_table_name: Option<String>,
-        #[serde(default)]
-        contribution_detail: NoiseContributionDetail,
-        #[serde(default)]
-        integration_mode: NoiseIntegrationMode,
-        temperature: f64,
-    },
-    Sensitivity {
-        output_var: String,
-        ac_mode: bool,
-        frequency: Option<f64>,
-    },
-    PoleZero {
-        input_node: String,
-        input_ref: String,
-        output_node: String,
-        output_ref: String,
-        transfer_type: String,
-        analysis_type: String,
-    },
-    Tf {
-        input_source: String,
-        output_expression: String,
-        transfer_gain: bool,
-        input_resistance: bool,
-        output_resistance: bool,
-        normalization: TfNormalization,
-        accuracy: TfAccuracy,
-    },
-    Pac,
-    Pxf,
-    Pnoise,
-    Pstb,
-    Parametric,
-    Corner,
-    MonteCarlo {
-        #[serde(default)]
-        variation_source: crate::simulation::dialog::McVariationSource,
-    },
-    Reliability {
-        target_years: Vec<f64>,
-        enable_hci: bool,
-        enable_nbti: bool,
-        enable_em: bool,
-        min_stress_voltage: f64,
-    },
-    Optimization {
-        variables: Vec<OptimizationVariable>,
-        objective_node: String,
-        objective_ref: String,
-        goal: OptimizationGoal,
-        target: Option<f64>,
-        algorithm: OptimizationAlgorithm,
-        max_iterations: usize,
-        cost_tolerance: f64,
-        fd_step: f64,
-        initial_step: f64,
-        min_step: f64,
-    },
-    Soa {
-        stop_time: f64,
-        step_time: f64,
-        check_vgs_max: bool,
-        max_vgs: f64,
-        check_vds_max: bool,
-        max_vds: f64,
-        check_vbe_max: bool,
-        max_vbe: f64,
-        check_vce_max: bool,
-        max_vce: f64,
-    },
-    Stb {
-        probe_node: String,
-        start_freq: f64,
-        stop_freq: f64,
-        sweep: WorkerSweepType,
-        points_per_decade: usize,
-        #[serde(default = "worker_default_true")]
-        compute_nyquist: bool,
-    },
-    SParameter {
-        start_freq: f64,
-        stop_freq: f64,
-        points_per_unit: usize,
-        sweep: WorkerSweepType,
-        z0: f64,
-        ports: Vec<SpPort>,
-        #[serde(default)]
-        do_noise: bool,
-    },
-    Disto {
-        start_freq: f64,
-        stop_freq: f64,
-        points_per_unit: usize,
-        sweep: WorkerSweepType,
-        f2_over_f1: Option<f64>,
-    },
-    Pss {
-        #[serde(default)]
-        method: PssMethod,
-        fundamental_freq: f64,
-        /// A request that named no tone restores as one that named no tone;
-        /// no reader can supply a source name the design does not carry.
-        #[serde(default)]
-        tone_sources: Vec<String>,
-        #[serde(default = "worker_default_pss_stabilization_cycles")]
-        tstab_periods: usize,
-        #[serde(default = "worker_default_pss_shooting_points")]
-        points_per_period: usize,
-        #[serde(alias = "period_tolerance")]
-        tolerance: f64,
-        #[serde(default)]
-        oscillator_mode: bool,
-        #[serde(default)]
-        oscillator_node: Option<String>,
-        num_harmonics: usize,
-    },
-    HarmonicBalance {
-        tones: Vec<HbToneSpec>,
-        reltol: f64,
-        abstol: f64,
-        max_iterations: usize,
-        damping: f64,
-        oversample: usize,
-        #[serde(default)]
-        collocation_points: Option<usize>,
-        max_mixing_order: usize,
-        use_krylov: bool,
-        gmres_restart: usize,
-        source_stepping: bool,
-        verbose: bool,
-    },
-    Envelope {
-        fundamental_freq: f64,
-        #[serde(default)]
-        additional_carrier_tones: Vec<f64>,
-        stop_time: f64,
-        num_harmonics: usize,
-        #[serde(default, alias = "max_step")]
-        envelope_step: Option<f64>,
-        #[serde(default)]
-        modulation_sources: Vec<String>,
-        #[serde(default)]
-        initial_periodic_solve: EnvelopeInitialPeriodicSolve,
-        #[serde(default)]
-        adaptive_mode: EnvelopeAdaptiveMode,
-        #[serde(default)]
-        extraction_path: EnvelopeExtractionPath,
-    },
-    Fourier {
-        fundamental_freq: f64,
-        num_harmonics: usize,
-        output_node: String,
-        output_ref: String,
-        start_time: f64,
-        stop_time: f64,
-        #[serde(default = "worker_default_true")]
-        compute_thd: bool,
-        #[serde(default)]
-        normalize: bool,
-    },
-    /// Canonical complex analysis carried verbatim when a dedicated wire
-    /// mirror would merely duplicate the domain shape. The dispatcher remains
-    /// responsible for capability validation after lossless reconstruction.
-    #[serde(alias = "ManifestPreview")]
-    CanonicalSpec(AnalysisSpec),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
