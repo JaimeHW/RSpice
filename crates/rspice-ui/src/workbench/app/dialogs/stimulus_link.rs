@@ -99,7 +99,7 @@ impl StimulusLinkDialogState {
 }
 
 /// Whether one instance can be linked at all: an editable independent source.
-pub(crate) fn stimulus_link_target(state: &AppState, component_id: u64) -> Option<&Component> {
+fn stimulus_link_target(state: &AppState, component_id: u64) -> Option<&Component> {
     if state.schematic_edit_read_only() {
         return None;
     }

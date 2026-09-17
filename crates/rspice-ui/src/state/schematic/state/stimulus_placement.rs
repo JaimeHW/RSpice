@@ -70,6 +70,24 @@ impl PendingStimulusPlacement {
 }
 
 impl SchematicState {
+    /// Place one `kind` at `pos` the way the armed tool means it: as an adopter
+    /// of the armed stimulus definition when one is armed for exactly this
+    /// type, and as a default instance otherwise.
+    ///
+    /// The choice lives here rather than at the click that asks for it,
+    /// because the payload is this document's runtime state and the rule for
+    /// when it applies is the same one [`Self::arm_tool`] retires it by.
+    pub fn add_armed_component(&mut self, kind: ComponentType, pos: Point) -> u64 {
+        match self
+            .pending_stimulus
+            .clone()
+            .filter(|armed| armed.component_type == kind)
+        {
+            Some(armed) => self.add_stimulus_component(&armed, pos),
+            None => self.add_component(kind, pos),
+        }
+    }
+
     /// Place one source that has already adopted `placement`.
     ///
     /// The copy and the receipt are written inside the same call that creates
@@ -133,20 +151,43 @@ mod tests {
     }
 
     /// One undo removes the instance, because the copy and the receipt are
-    /// written inside the same operation that created it.
+    /// written inside the same operation that created it. Driven through
+    /// `add_armed_component`, which is the call the canvas click makes.
     #[test]
     fn one_undo_removes_the_whole_adopted_placement() {
         let (_, definition) = library_with_sin();
-        let placement = PendingStimulusPlacement::of(&definition);
         let mut schematic = SchematicState::default();
         schematic.init_undo_history();
+        schematic.pending_stimulus = Some(PendingStimulusPlacement::of(&definition));
 
-        schematic.with_undo("place sensor_drive", |schematic| {
-            schematic.add_stimulus_component(&placement, Point::new(4, 4));
+        schematic.with_undo("place a sine source", |schematic| {
+            schematic.add_armed_component(ComponentType::VoltageSourceSin, Point::new(4, 4));
         });
         assert_eq!(schematic.components.len(), 1);
+        assert!(
+            schematic.components[0].stimulus_provenance.is_some(),
+            "the armed definition is on the placed instance"
+        );
         assert!(schematic.undo());
         assert!(schematic.components.is_empty());
+    }
+
+    /// A definition armed for one type says nothing about another: the same
+    /// call places a default instance of any other type.
+    #[test]
+    fn an_armed_definition_applies_only_to_its_own_type() {
+        let (_, definition) = library_with_sin();
+        let mut schematic = SchematicState::default();
+        schematic.pending_stimulus = Some(PendingStimulusPlacement::of(&definition));
+
+        let id = schematic.add_armed_component(ComponentType::VoltageSourcePulse, Point::new(4, 4));
+        let placed = schematic
+            .components
+            .iter()
+            .find(|component| component.id == id)
+            .expect("placed");
+        assert_eq!(placed.kind, ComponentType::VoltageSourcePulse);
+        assert!(placed.stimulus_provenance.is_none());
     }
 
     /// Arming anything else retires the armed definition, so a resistor can
