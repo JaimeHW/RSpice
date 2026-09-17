@@ -33,7 +33,8 @@ use super::sheet_visibility::{
     retain_selection_on_active_sheet, select_in_rect_on_active_sheet, with_active_wire_topology,
 };
 use super::snap_resolution::{
-    resolve_grid_pointer, resolve_target_pointer, target_acquisition_radius,
+    conductor_attachment_pitch, resolve_grid_pointer, resolve_target_pointer,
+    target_acquisition_radius,
 };
 use super::stretch_interaction::handle_armed_stretch_selection;
 use super::viewport::Viewport;
@@ -685,7 +686,13 @@ fn nearest_active_wire_screen_hit(
     pointer: egui::Pos2,
 ) -> Option<WireScreenHit> {
     let wires = objects_on_active_sheet(state, &state.schematic.wires, |item| item.id);
-    nearest_wire_screen_hit(viewport, wires.as_ref(), pointer, 6.0)
+    nearest_wire_screen_hit(
+        viewport,
+        wires.as_ref(),
+        pointer,
+        6.0,
+        conductor_attachment_pitch(state),
+    )
 }
 
 /// A visual conductor acquisition owns the click. If no exact integer

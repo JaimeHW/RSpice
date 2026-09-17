@@ -32,7 +32,9 @@ use super::resolved_symbol_render::{draw_resolved_symbol, resolved_symbol_world_
 use super::sheet_visibility::{
     active_junction_at, object_is_on_active_sheet, objects_on_active_sheet,
 };
-use super::snap_resolution::{resolve_grid_pointer, resolve_target_pointer};
+use super::snap_resolution::{
+    conductor_attachment_pitch, resolve_grid_pointer, resolve_target_pointer,
+};
 use super::viewport::Viewport;
 
 const WIRE_PREVIEW_STROKE_WIDTH: f32 = 1.5;
@@ -806,7 +808,13 @@ fn resolve_wire_preview_snap(
         ));
     }
     let active_wires = objects_on_active_sheet(state, &state.schematic.wires, |wire| wire.id);
-    let Some(hit) = nearest_wire_screen_hit(viewport, active_wires.as_ref(), pointer, 6.0) else {
+    let Some(hit) = nearest_wire_screen_hit(
+        viewport,
+        active_wires.as_ref(),
+        pointer,
+        6.0,
+        conductor_attachment_pitch(state),
+    ) else {
         return Some(resolve_target_pointer(
             state,
             symbol_context,
@@ -1336,7 +1344,7 @@ mod tests {
     }
 
     #[test]
-    fn wire_preview_matches_exact_visual_conductor_attachment() {
+    fn wire_preview_attaches_on_the_grid_along_the_conductor_and_exactly_in_free_mode() {
         let mut state = AppState::default();
         state.schematic.wires.push(crate::state::Wire::segment(
             5,
@@ -1350,10 +1358,15 @@ mod tests {
             bounds: egui::Rect::from_min_size(egui::Pos2::ZERO, egui::Vec2::splat(400.0)),
         };
         let pointer = viewport.schematic_to_screen(Point::new(7, 10)) + egui::vec2(0.0, 2.0);
+
+        assert_eq!(state.schematic.grid_size, 10);
         let result = resolve_wire_preview_snap(&state, &symbol_context, &viewport, pointer)
             .expect("representable conductor acquisition");
-
-        assert_eq!(result.snapped_position, Point::new(7, 10));
+        assert_eq!(
+            result.snapped_position,
+            Point::new(10, 10),
+            "grid mode quantizes the attachment along the conductor"
+        );
         assert_eq!(
             result.target_type(),
             Some(&SnapTargetType::WireSegment {
@@ -1362,6 +1375,15 @@ mod tests {
             })
         );
         assert!(result.show_indicator);
+
+        state.schematic.snap_engine.snap_to_grid = false;
+        let free = resolve_wire_preview_snap(&state, &symbol_context, &viewport, pointer)
+            .expect("representable conductor acquisition");
+        assert_eq!(
+            free.snapped_position,
+            Point::new(7, 10),
+            "Free mode keeps the exact visual attachment"
+        );
     }
 
     #[test]

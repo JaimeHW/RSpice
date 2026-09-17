@@ -27,6 +27,16 @@ pub(super) fn target_acquisition_radius(viewport: &Viewport) -> i32 {
         .max(1.0) as i32
 }
 
+/// The pitch a visual conductor attachment is quantized to along the
+/// conductor, or `None` when the pointer's exact schematic coordinate is the
+/// contract: snapping disabled, or the `Free` grid mode. Only the coordinate
+/// along the conductor is quantized; the conductor's own position fixes the
+/// other one, so the attachment always stays on its body.
+pub(super) fn conductor_attachment_pitch(state: &AppState) -> Option<i32> {
+    let engine = &state.schematic.snap_engine;
+    (engine.enabled && engine.snap_to_grid).then_some(state.schematic.grid_size)
+}
+
 /// Resolve a pointer for grid-governed placement and geometry editing.
 ///
 /// The master snap switch is authoritative: when disabled, the raw integer

@@ -301,21 +301,29 @@ pub(super) fn probe_at_screen(
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) struct WireScreenHit {
     pub(super) wire_id: u64,
-    /// Exact integer schematic attachment when representable. A visual hit on
-    /// a malformed/non-integral conductor deliberately has no attachment.
+    /// Integer schematic attachment on the conductor when representable,
+    /// quantized along the conductor to the grid pitch when one is given. A
+    /// visual hit on a malformed/non-integral conductor deliberately has no
+    /// attachment.
     pub(super) attachment: Option<Point>,
     distance_sq: f32,
     authored_index: usize,
 }
 
-/// Nearest conductor under a screen-space pointer, with an exact authored
-/// attachment point only when that point is representable in integer
-/// schematic coordinates.
+/// Nearest conductor under a screen-space pointer, with an attachment point
+/// only when one is representable in integer schematic coordinates.
+///
+/// With a `grid_pitch`, the coordinate along an axis-aligned conductor is
+/// quantized to that pitch (the conductor's own position fixes the other
+/// coordinate, so the attachment stays on its body), and the nearer of that
+/// grid point and the segment's endpoints wins. Without one the exact pointer
+/// projection is the attachment, which is the `Free` grid contract.
 pub(super) fn nearest_wire_screen_hit(
     viewport: &Viewport,
     wires: &[Wire],
     pointer: Pos2,
     radius: f32,
+    grid_pitch: Option<i32>,
 ) -> Option<WireScreenHit> {
     let radius_sq = radius.max(0.0).powi(2);
     wires
@@ -339,27 +347,47 @@ pub(super) fn nearest_wire_screen_hit(
 
                 let a = segment[0];
                 let b = segment[1];
-                let attachment = if a.y == b.y {
-                    let x = ((closest.x - viewport.bounds.min.x - viewport.offset.x)
-                        / viewport.zoom)
-                        .round()
-                        .clamp(a.x.min(b.x) as f32, a.x.max(b.x) as f32);
-                    Some(Point::new(x as i32, a.y))
-                } else if a.x == b.x {
-                    let y = ((closest.y - viewport.bounds.min.y - viewport.offset.y)
-                        / viewport.zoom)
-                        .round()
-                        .clamp(a.y.min(b.y) as f32, a.y.max(b.y) as f32);
-                    Some(Point::new(a.x, y as i32))
+                let world_x =
+                    (closest.x - viewport.bounds.min.x - viewport.offset.x) / viewport.zoom;
+                let world_y =
+                    (closest.y - viewport.bounds.min.y - viewport.offset.y) / viewport.zoom;
+                let quantize = |value: f32| match grid_pitch {
+                    Some(pitch) if pitch > 0 => (value / pitch as f32).round() * pitch as f32,
+                    _ => value.round(),
+                };
+                let distance_to = |point: Point| {
+                    (point.x as f32 - world_x).powi(2) + (point.y as f32 - world_y).powi(2)
+                };
+                let attachment = if a.y == b.y || a.x == b.x {
+                    let horizontal = a.y == b.y;
+                    let (low, high) = if horizontal {
+                        (a.x.min(b.x), a.x.max(b.x))
+                    } else {
+                        (a.y.min(b.y), a.y.max(b.y))
+                    };
+                    let along = quantize(if horizontal { world_x } else { world_y });
+                    let on_segment = (along >= low as f32 && along <= high as f32).then(|| {
+                        if horizontal {
+                            Point::new(along as i32, a.y)
+                        } else {
+                            Point::new(a.x, along as i32)
+                        }
+                    });
+                    // The grid point leads so it wins a tie against an endpoint
+                    // it coincides with; an endpoint wins only when the pointer
+                    // is genuinely nearer to it.
+                    on_segment
+                        .into_iter()
+                        .chain([a, b])
+                        .min_by(|left, right| distance_to(*left).total_cmp(&distance_to(*right)))
                 } else {
-                    let world_x = ((closest.x - viewport.bounds.min.x - viewport.offset.x)
-                        / viewport.zoom)
-                        .round() as i32;
-                    let world_y = ((closest.y - viewport.bounds.min.y - viewport.offset.y)
-                        / viewport.zoom)
-                        .round() as i32;
-                    let candidate = Point::new(world_x, world_y);
-                    wire.contains_point(candidate).then_some(candidate)
+                    let on_grid = grid_pitch
+                        .map(|_| Point::new(quantize(world_x) as i32, quantize(world_y) as i32));
+                    let exact = Point::new(world_x.round() as i32, world_y.round() as i32);
+                    on_grid
+                        .into_iter()
+                        .chain([exact])
+                        .find(|candidate| wire.contains_point(*candidate))
                 };
                 Some(WireScreenHit {
                     wire_id: wire.id,
@@ -1200,6 +1228,40 @@ mod tests {
     }
 
     #[test]
+    fn wire_screen_hit_quantizes_along_the_conductor_to_the_grid_pitch() {
+        let viewport = Viewport {
+            offset: Pos2::ZERO,
+            zoom: 2.0,
+            bounds: Rect::from_min_size(Pos2::ZERO, Vec2::splat(400.0)),
+        };
+
+        let on_grid = Wire::segment(5, Point::new(0, 10), Point::new(40, 10));
+        let pointer = viewport.schematic_to_screen(Point::new(17, 10)) + Vec2::new(0.0, 2.0);
+        let hit = nearest_wire_screen_hit(&viewport, &[on_grid], pointer, 4.0, Some(10)).unwrap();
+        assert_eq!(hit.attachment, Some(Point::new(20, 10)));
+
+        // Only the coordinate along the conductor is quantized: a conductor
+        // that is itself off the grid keeps the attachment on its body.
+        let off_grid = Wire::segment(6, Point::new(0, 13), Point::new(40, 13));
+        let pointer = viewport.schematic_to_screen(Point::new(17, 13));
+        let hit = nearest_wire_screen_hit(&viewport, &[off_grid], pointer, 4.0, Some(10)).unwrap();
+        assert_eq!(hit.attachment, Some(Point::new(20, 13)));
+
+        // An endpoint the pointer is nearer to beats the grid point.
+        let stub = Wire::segment(7, Point::new(3, 0), Point::new(3, 4));
+        let pointer = viewport.schematic_to_screen(Point::new(3, 4)) + Vec2::new(0.0, 6.0);
+        let hit = nearest_wire_screen_hit(&viewport, &[stub], pointer, 8.0, Some(10)).unwrap();
+        assert_eq!(hit.attachment, Some(Point::new(3, 4)));
+
+        // A diagonal conductor between grid points attaches on a grid point
+        // of its own body.
+        let diagonal = Wire::segment(8, Point::new(0, 0), Point::new(40, 40));
+        let pointer = viewport.schematic_to_screen(Point::new(18, 18));
+        let hit = nearest_wire_screen_hit(&viewport, &[diagonal], pointer, 4.0, Some(10)).unwrap();
+        assert_eq!(hit.attachment, Some(Point::new(20, 20)));
+    }
+
+    #[test]
     fn wire_screen_hit_respects_viewport_origin_and_rejects_fractional_diagonal_attachment() {
         let viewport = Viewport {
             offset: Pos2::new(17.0, 23.0),
@@ -1209,13 +1271,13 @@ mod tests {
         let horizontal = Wire::segment(5, Point::new(0, 10), Point::new(20, 10));
         let pointer = viewport.schematic_to_screen(Point::new(7, 10)) + Vec2::new(0.0, 2.0);
 
-        let hit = nearest_wire_screen_hit(&viewport, &[horizontal], pointer, 4.0).unwrap();
+        let hit = nearest_wire_screen_hit(&viewport, &[horizontal], pointer, 4.0, None).unwrap();
         assert_eq!(hit.wire_id, 5);
         assert_eq!(hit.attachment, Some(Point::new(7, 10)));
 
         let diagonal = Wire::segment(6, Point::new(0, 0), Point::new(2, 1));
         let fractional = viewport.schematic_to_screen(Point::origin()) + Vec2::new(2.0, 1.0);
-        let hit = nearest_wire_screen_hit(&viewport, &[diagonal], fractional, 1.0).unwrap();
+        let hit = nearest_wire_screen_hit(&viewport, &[diagonal], fractional, 1.0, None).unwrap();
         assert_eq!(hit.wire_id, 6);
         assert_eq!(hit.attachment, None);
     }
