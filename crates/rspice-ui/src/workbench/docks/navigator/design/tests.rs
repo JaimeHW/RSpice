@@ -1920,6 +1920,7 @@ fn an_excitation_row_stands_for_the_instance_the_object_menu_acts_on() {
 
     let sources = crate::simulation::placed_sources::placed_sources(
         &app.state.schematic,
+        &app.state.workspace.stimulus_library,
         app.state.sim_setup.analysis_plan.as_ref(),
     );
     let placed = sources

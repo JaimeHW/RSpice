@@ -905,7 +905,12 @@ fn port_section(ui: &mut Ui, app: &mut RSpiceApp) {
 /// other is a row that has to stay.
 fn whole_design_sources(app: &RSpiceApp) -> Vec<crate::simulation::placed_sources::PlacedSource> {
     let plan = app.state.sim_setup.analysis_plan.as_ref();
-    let mut rows = crate::simulation::placed_sources::placed_sources(&app.state.schematic, plan);
+    let stimulus_library = &app.state.workspace.stimulus_library;
+    let mut rows = crate::simulation::placed_sources::placed_sources(
+        &app.state.schematic,
+        stimulus_library,
+        plan,
+    );
     let Some(projection) = design_projection(app) else {
         return rows;
     };
@@ -913,6 +918,7 @@ fn whole_design_sources(app: &RSpiceApp) -> Vec<crate::simulation::placed_source
     rows.extend(
         crate::simulation::placed_sources::design_sources(
             &app.state.library_manager,
+            stimulus_library,
             &projection,
             plan,
         )
@@ -933,6 +939,7 @@ fn whole_design_rf_ports(app: &RSpiceApp) -> Vec<crate::simulation::placed_sourc
     rows.extend(
         crate::simulation::placed_sources::design_rf_ports(
             &app.state.library_manager,
+            &app.state.workspace.stimulus_library,
             &projection,
             plan,
         )

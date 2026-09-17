@@ -10,6 +10,6 @@ pub(crate) use editors::parse_expression_source;
 pub use render::render_tabbed_property_dialog;
 pub use state::{
     ComponentEditorContext, ComponentModelContext, ComponentOperatingPointContext,
-    ComponentPropertySession, ComponentTerminalContext, TabbedDialogResult,
+    ComponentPropertySession, ComponentTerminalContext, StimulusEditorContext, TabbedDialogResult,
     TabbedPropertyDialogState,
 };

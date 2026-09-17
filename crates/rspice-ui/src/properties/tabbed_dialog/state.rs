@@ -174,6 +174,30 @@ pub struct ComponentEditorContext {
     pub model: Option<ComponentModelContext>,
     pub operating_point: Option<ComponentOperatingPointContext>,
     pub terminals: Vec<ComponentTerminalContext>,
+    /// Where this instance stands with the project's stimulus library.
+    /// `None` for anything that is not an independent source, which is every
+    /// component with no waveform to adopt.
+    pub stimulus: Option<StimulusEditorContext>,
+}
+
+/// What the editor shows about one source's link to the stimulus library.
+///
+/// Every field is read from the library and the instance when the frame is
+/// built; nothing here is retained, so the chip in the header, the section in
+/// the evidence pane and the Excitations page cannot describe one instance
+/// differently.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StimulusEditorContext {
+    /// The lifecycle word, from the model that computes it.
+    pub state: crate::state::stimulus_library::provenance::ProvenanceState,
+    /// The definition the receipt names, if it names one.
+    pub definition: Option<String>,
+    /// The revision the library holds of that definition now, if it still
+    /// holds it. `None` is what makes "open it" an offer the editor withholds.
+    pub library_revision: Option<u32>,
+    /// Whether the project has authored any definition at all: with none,
+    /// there is nothing to adopt and the section says so instead.
+    pub library_is_empty: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -218,6 +242,16 @@ pub enum TabbedDialogResult {
     OpenModel,
     /// Open qualification evidence for the selected model.
     OpenQualification,
+    /// Close the editor and open the adopt half of the stimulus link dialog.
+    AdoptStimulus,
+    /// Close the editor and open the save half of the stimulus link dialog.
+    ExtractStimulus,
+    /// Close the editor and show the adopted definition in the Stimulus
+    /// Library workspace.
+    OpenStimulusDefinition,
+    /// Copy the library's current revision onto this instance now, and reload
+    /// the editor from what that leaves behind.
+    ReadoptStimulus,
     /// Close the editor and cross-probe the selected instance in Results.
     CrossProbe,
     /// User clicked Cancel - changes discarded

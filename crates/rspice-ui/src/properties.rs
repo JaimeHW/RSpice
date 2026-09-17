@@ -13,12 +13,13 @@
 pub(crate) mod model_browser;
 pub(crate) mod property_bridge;
 pub(crate) mod pwl_editor;
+pub(crate) mod source_preview;
 pub(crate) mod tabbed_dialog;
 
 // Re-export main types
 
 pub use tabbed_dialog::{
     ComponentEditorContext, ComponentModelContext, ComponentOperatingPointContext,
-    ComponentPropertySession, ComponentTerminalContext, TabbedDialogResult,
+    ComponentPropertySession, ComponentTerminalContext, StimulusEditorContext, TabbedDialogResult,
     TabbedPropertyDialogState, render_tabbed_property_dialog,
 };

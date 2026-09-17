@@ -235,7 +235,14 @@ fn component_identity_header(
                     c.accent,
                 );
 
-                let status_width = (ui.available_width() * 0.28).clamp(110.0, 190.0);
+                // A source carrying a provenance chip needs room for the chip
+                // *and* the family beside it; everything else keeps the track
+                // the family alone has always had.
+                let status_width = if context.stimulus.is_some() {
+                    (ui.available_width() * 0.44).clamp(200.0, 330.0)
+                } else {
+                    (ui.available_width() * 0.28).clamp(110.0, 190.0)
+                };
                 let identity_width =
                     (ui.available_width() - status_width - ui.spacing().item_spacing.x).max(180.0);
                 ui.allocate_ui_with_layout(
@@ -303,6 +310,7 @@ fn component_identity_header(
                     Layout::right_to_left(Align::Center),
                     |ui| {
                         ui.set_min_width(status_width);
+                        ui.spacing_mut().item_spacing.x = 8.0;
                         ui.add(
                             egui::Label::new(
                                 egui::RichText::new(&context.family)
@@ -311,6 +319,16 @@ fn component_identity_header(
                             )
                             .truncate(),
                         );
+                        if let Some(stimulus) = &context.stimulus {
+                            ui.add(
+                                egui::Label::new(
+                                    egui::RichText::new(stimulus.state.label())
+                                        .font(theme::mono(tokens::FS_0, FontWeight::Medium))
+                                        .color(provenance_colour(ui, stimulus.state)),
+                                )
+                                .truncate(),
+                            );
+                        }
                     },
                 );
             });
@@ -714,8 +732,129 @@ fn evidence_contents(
     operating_point_card(ui, context, action);
     if supports_source_preview(component_type) {
         source_preview_card(ui, state, component_type, registry);
+        stimulus_library_card(ui, context, action);
     }
     terminals_card(ui, context);
+}
+
+/// The colour a provenance chip takes.
+///
+/// Only the two states a reader has to act on are coloured: the library having
+/// moved past the copy, or the definition having gone away, is a finding; a
+/// local edit is deliberate and marked rather than flagged. This is the same
+/// rule the Studio's Definition column follows, because it is the same fact.
+fn provenance_colour(
+    ui: &Ui,
+    provenance: crate::state::stimulus_library::provenance::ProvenanceState,
+) -> egui::Color32 {
+    use crate::state::stimulus_library::provenance::ProvenanceState;
+
+    let c = Tokens::get(ui.ctx()).color;
+    match provenance {
+        ProvenanceState::Behind { .. }
+        | ProvenanceState::ModifiedBehind { .. }
+        | ProvenanceState::Removed { .. } => c.warn,
+        ProvenanceState::Modified { .. } => c.accent,
+        ProvenanceState::FromSchematic | ProvenanceState::Adopted { .. } => c.text_faint,
+    }
+}
+
+/// Where this source stands with the project's stimulus library, and the four
+/// verbs that move it.
+///
+/// Only two of the verbs are unconditional. Opening a definition and
+/// re-adopting one are offers about a record the library may not hold and a
+/// revision that may not exist, so they are absent rather than disabled: a
+/// control that is here works, and the status line above already states why
+/// there is nothing to open.
+fn stimulus_library_card(
+    ui: &mut Ui,
+    context: &ComponentEditorContext,
+    action: &mut TabbedDialogResult,
+) {
+    let Some(stimulus) = context.stimulus.as_ref() else {
+        return;
+    };
+    let held = stimulus
+        .definition
+        .as_deref()
+        .zip(stimulus.library_revision);
+    section_block(ui, "Stimulus library", &stimulus.state.label(), |ui| {
+        let t = Tokens::get(ui.ctx());
+        match held {
+            Some((definition, revision)) => {
+                evidence_row(ui, "Definition", definition);
+                evidence_row(ui, "Library holds", &format!("r{revision}"));
+            }
+            None if stimulus.definition.is_some() => {
+                evidence_row(
+                    ui,
+                    "Definition",
+                    stimulus.definition.as_deref().unwrap_or_default(),
+                );
+                ui.label(
+                    egui::RichText::new(
+                        "The library no longer holds it. This instance keeps the card it copied.",
+                    )
+                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                    .color(t.color.warn),
+                );
+            }
+            None => {
+                ui.label(
+                    egui::RichText::new(if stimulus.library_is_empty {
+                        "This project has authored no stimulus definitions yet."
+                    } else {
+                        "This source was drawn on the sheet and adopted no definition."
+                    })
+                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                    .color(t.color.text_dim),
+                );
+            }
+        }
+        ui.add_space(8.0);
+        ui.horizontal_wrapped(|ui| {
+            if !stimulus.library_is_empty
+                && crate::ui::widgets::Button::new("Adopt definition…")
+                    .show(ui)
+                    .on_hover_text(
+                        "Copy a library definition's card onto this instance and record which \
+                         revision it came from",
+                    )
+                    .clicked()
+            {
+                *action = TabbedDialogResult::AdoptStimulus;
+            }
+            if crate::ui::widgets::Button::new("Save as library definition…")
+                .show(ui)
+                .on_hover_text("Publish this instance's card as a project stimulus definition")
+                .clicked()
+            {
+                *action = TabbedDialogResult::ExtractStimulus;
+            }
+            if held.is_some()
+                && crate::ui::widgets::Button::new("Open in Stimulus Library")
+                    .show(ui)
+                    .clicked()
+            {
+                *action = TabbedDialogResult::OpenStimulusDefinition;
+            }
+            let readopt = held
+                .filter(|_| stimulus.state.offers_readoption())
+                .map(|(_, revision)| format!("Re-adopt r{revision}"));
+            if let Some(label) = readopt.as_deref()
+                && crate::ui::widgets::Button::new(label)
+                    .show(ui)
+                    .on_hover_text(
+                        "Copies the library's revision onto this instance now. Unapplied edits in \
+                         this editor are replaced by the copy.",
+                    )
+                    .clicked()
+            {
+                *action = TabbedDialogResult::ReadoptStimulus;
+            }
+        });
+    });
 }
 
 /// Whether this family has a card the engine can be asked about.
@@ -1097,161 +1236,23 @@ fn terminal_table_row(
 /// stop time — so every substitution the engine makes for an omitted field is
 /// visible here exactly as it will be in the run, which is what the dialog's
 /// own sampler could not promise.
+///
+/// The drawing itself belongs to [`crate::properties::source_preview`], which
+/// the stimulus link dialog paints through as well: that dialog shows the card
+/// a definition would leave on this instance, and a second painter is how two
+/// surfaces come to disagree about the same curve.
 fn source_preview_card(
     ui: &mut Ui,
     state: &TabbedPropertyDialogState,
     kind: crate::state::ComponentType,
     registry: &PropertyRegistry,
 ) {
-    use crate::simulation::stimulus_realize;
-
     let timing = state.preview_timing();
     section_band(ui, "Transient stimulus preview", "engine evaluator");
-
-    // The generator's and the parser's refusals already name the component and
-    // the field; a preview that rewrote them would be a second voice saying the
-    // same thing differently.
     let curve = preview_component(state, kind, registry)
         .ok_or_else(|| "This editor has no instance to evaluate.".to_owned())
-        .and_then(|component| stimulus_realize::source_spec(&component))
-        .and_then(|spec| match stimulus_realize::preview_defect(&spec) {
-            Some(defect) => Err(defect),
-            None => Ok(stimulus_realize::evaluate_waveform(
-                &spec,
-                timing.window(PREVIEW_SAMPLES),
-                timing.tstep,
-                timing.tstop,
-                stimulus_realize::PREVIEW_DIALECT,
-            )),
-        });
-
-    let (rect, response) =
-        ui.allocate_exact_size(vec2(ui.available_width(), 132.0), Sense::hover());
-    let caption = timing.caption();
-    let readouts = curve
-        .as_ref()
-        .ok()
-        .and_then(|samples| stimulus_realize::WaveformReadouts::of(samples));
-    let label = match (&curve, readouts) {
-        (Ok(_), Some(_)) => format!("Engine-evaluated waveform of this source over {caption}"),
-        (Ok(_), None) => format!("This source has no curve over {caption}"),
-        (Err(reason), _) => reason.clone(),
-    };
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Image, true, &label));
-
-    let t = Tokens::get(ui.ctx());
-    ui.painter().rect_filled(rect, 0.0, t.color.bg_app);
-    let plot = egui::Rect::from_min_max(rect.min + vec2(46.0, 8.0), rect.max - vec2(12.0, 20.0));
-    ui.painter().text(
-        pos2(plot.right(), rect.top() + 2.0),
-        egui::Align2::RIGHT_TOP,
-        &caption,
-        theme::mono(tokens::FS_0, FontWeight::Regular),
-        t.color.text_faint,
-    );
-    ui.painter().line_segment(
-        [plot.left_bottom(), plot.left_top()],
-        Stroke::new(1.0, t.color.border),
-    );
-    ui.painter().line_segment(
-        [plot.left_bottom(), plot.right_bottom()],
-        Stroke::new(1.0, t.color.border),
-    );
-    for fraction in [0.0_f32, 0.5, 1.0] {
-        let y = egui::lerp(plot.bottom()..=plot.top(), fraction);
-        ui.painter()
-            .hline(plot.x_range(), y, Stroke::new(0.5, t.color.border));
-    }
-
-    let (samples, readouts) = match (curve, readouts) {
-        (Err(reason), _) => {
-            preview_card_statement(ui, plot, &reason, t.color.text_dim);
-            preview_card_rule(ui, rect, t.color.border);
-            return;
-        }
-        (Ok(_), None) => {
-            preview_card_statement(
-                ui,
-                plot,
-                "Preview unavailable until values are valid",
-                t.color.text_dim,
-            );
-            preview_card_rule(ui, rect, t.color.border);
-            return;
-        }
-        (Ok(samples), Some(readouts)) => (samples, readouts),
-    };
-
-    let span = readouts.span().max(1e-12);
-    for (fraction, label) in [
-        (1.0_f32, format!("{:.2e}", readouts.maximum)),
-        (0.5, format!("{:.2e}", readouts.midpoint)),
-        (0.0, format!("{:.2e}", readouts.minimum)),
-    ] {
-        let y = egui::lerp(plot.bottom()..=plot.top(), fraction);
-        ui.painter().text(
-            pos2(plot.left() - 5.0, y),
-            egui::Align2::RIGHT_CENTER,
-            label,
-            theme::mono(tokens::FS_0, FontWeight::Regular),
-            t.color.text_faint,
-        );
-    }
-    for (fraction, label) in [
-        (0.0_f32, "0".to_owned()),
-        (0.5, crate::state::format_engineering(timing.tstop * 0.5)),
-        (1.0, crate::state::format_engineering(timing.tstop)),
-    ] {
-        let x = egui::lerp(plot.left()..=plot.right(), fraction);
-        ui.painter().text(
-            pos2(x, plot.bottom() + 5.0),
-            egui::Align2::CENTER_TOP,
-            format!("{label}s"),
-            theme::mono(tokens::FS_0, FontWeight::Regular),
-            t.color.text_faint,
-        );
-    }
-    let points = samples
-        .iter()
-        .enumerate()
-        .map(|(index, (_, value))| {
-            let x = egui::lerp(
-                plot.left()..=plot.right(),
-                index as f32 / (samples.len() - 1) as f32,
-            );
-            let normalized = if readouts.span() <= 1e-12 {
-                0.5
-            } else {
-                ((value - readouts.minimum) / span) as f32
-            };
-            let y = egui::lerp(plot.bottom()..=plot.top(), normalized);
-            pos2(x, y)
-        })
-        .collect::<Vec<_>>();
-    ui.painter()
-        .add(egui::Shape::line(points, Stroke::new(1.5, t.color.accent)));
-    preview_card_rule(ui, rect, t.color.border);
-}
-
-/// How many points the preview asks the engine for.
-///
-/// Finer than the stroke at the card's widest, and the density the card has
-/// always drawn at.
-const PREVIEW_SAMPLES: usize = 96;
-
-fn preview_card_statement(ui: &Ui, plot: egui::Rect, message: &str, color: egui::Color32) {
-    ui.painter().text(
-        plot.center(),
-        egui::Align2::CENTER_CENTER,
-        message,
-        theme::sans(tokens::FS_0, FontWeight::Regular),
-        color,
-    );
-}
-
-fn preview_card_rule(ui: &Ui, rect: egui::Rect, color: egui::Color32) {
-    ui.painter()
-        .hline(rect.x_range(), rect.bottom(), Stroke::new(1.0, color));
+        .and_then(|component| crate::properties::source_preview::source_curve(&component, timing));
+    crate::properties::source_preview::paint_source_preview(ui, &curve, timing);
 }
 
 /// The instance as the draft currently describes it.
@@ -1724,15 +1725,10 @@ mod tests {
         registry: &PropertyRegistry,
     ) -> Vec<(f64, f64)> {
         let component = preview_component(state, kind, registry).expect("a component");
-        let spec = stimulus_realize::source_spec(&component).expect("spec");
-        let timing = state.preview_timing();
-        stimulus_realize::evaluate_waveform(
-            &spec,
-            timing.window(PREVIEW_SAMPLES),
-            timing.tstep,
-            timing.tstop,
-            stimulus_realize::PREVIEW_DIALECT,
-        )
+        // Through the shared painter's own evaluation, so a test cannot agree
+        // with a sampling the card does not use.
+        crate::properties::source_preview::source_curve(&component, state.preview_timing())
+            .expect("curve")
     }
 
     /// Every independent source has a card, so every independent source gets a

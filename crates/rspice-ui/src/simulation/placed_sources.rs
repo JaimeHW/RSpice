@@ -81,9 +81,11 @@ use std::sync::{Arc, Weak};
 
 use crate::simulation::netlist_gen::{design_nets, projection_nets};
 use crate::simulation::plan::{AnalysisDraft, SimulationPlan};
+use crate::state::stimulus_library::provenance::ProvenanceState;
 use crate::state::workspace::DesignProjection;
 use crate::state::{
     CellViewRef, Component, ComponentType, InstancePath, LibraryManager, SchematicState,
+    StimulusLibrary,
 };
 
 /// Net names keyed by (component id, terminal name), as
@@ -128,6 +130,18 @@ pub struct PlacedSource {
     pub family: &'static str,
     /// The one number that identifies this source at a glance.
     pub key_figure: String,
+    /// The Definition column, as [`StimulusLibrary::studio_definition_cell`]
+    /// writes it: which definition this instance copied, and where it stands.
+    pub definition_cell: String,
+    /// Where it stands, for the cell's tone and for the row's own verbs.
+    ///
+    /// Resolved here rather than on the page because the page has no component
+    /// in hand: the walk does, and a second derivation from a row is exactly
+    /// how a chip and a cell come to disagree.
+    pub provenance: ProvenanceState,
+    /// The definition the receipt names, for the verb that opens it. `None`
+    /// when the instance adopted nothing.
+    pub definition: Option<String>,
     /// Terminal nets in pin order.
     pub nets: Vec<String>,
     pub consumers: Vec<SourceConsumer>,
@@ -318,6 +332,7 @@ pub fn placed_source_count(schematic: &SchematicState) -> usize {
 /// being drawn.
 pub fn placed_sources(
     schematic: &SchematicState,
+    stimulus_library: &StimulusLibrary,
     plan: Option<&SimulationPlan>,
 ) -> Vec<PlacedSource> {
     #[cfg(test)]
@@ -334,7 +349,7 @@ pub fn placed_sources(
         .components
         .iter()
         .filter_map(|component| {
-            let (source, drive) = placed_source(component, &nets)?;
+            let (source, drive) = placed_source(component, &nets, stimulus_library)?;
             Some(with_source_consumers(source, drive, plan))
         })
         .collect();
@@ -356,10 +371,11 @@ pub fn placed_sources(
 /// [`placed_sources`] lists a sheet's.
 pub fn design_sources(
     libraries: &LibraryManager,
+    stimulus_library: &StimulusLibrary,
     projection: &Arc<DesignProjection>,
     plan: Option<&SimulationPlan>,
 ) -> Vec<PlacedSource> {
-    design_excitations(libraries, projection)
+    design_excitations(libraries, stimulus_library, projection)
         .sources
         .iter()
         .map(|(source, drive)| with_source_consumers(source.clone(), *drive, plan))
@@ -376,11 +392,12 @@ pub fn design_sources(
 /// occurrences each carrying `P1` claim one index of one matrix.
 pub fn design_rf_ports(
     libraries: &LibraryManager,
+    stimulus_library: &StimulusLibrary,
     projection: &Arc<DesignProjection>,
     plan: Option<&SimulationPlan>,
 ) -> Vec<PlacedRfPort> {
     let consumers = plan.map(port_consumers_for).unwrap_or_default();
-    design_excitations(libraries, projection)
+    design_excitations(libraries, stimulus_library, projection)
         .ports
         .iter()
         .map(|port| PlacedRfPort {
@@ -410,13 +427,14 @@ pub fn whole_design_excitations(
     active_schematic: &SchematicState,
     plan: Option<&SimulationPlan>,
 ) -> (Vec<PlacedSource>, Vec<PlacedRfPort>) {
+    let stimulus_library = &workspace.stimulus_library;
     match workspace.design_projection(libraries, &workspace.active_view, active_schematic) {
         Ok(projection) => (
-            design_sources(libraries, &projection, plan),
-            design_rf_ports(libraries, &projection, plan),
+            design_sources(libraries, stimulus_library, &projection, plan),
+            design_rf_ports(libraries, stimulus_library, &projection, plan),
         ),
         Err(_) => (
-            placed_sources(active_schematic, plan),
+            placed_sources(active_schematic, stimulus_library, plan),
             placed_rf_ports(active_schematic, plan),
         ),
     }
@@ -444,7 +462,9 @@ pub fn whole_design_source_count(
     active_schematic: &SchematicState,
 ) -> usize {
     match workspace.design_projection(libraries, &workspace.active_view, active_schematic) {
-        Ok(projection) => design_excitations(libraries, &projection).sources.len(),
+        Ok(projection) => design_excitations(libraries, &workspace.stimulus_library, &projection)
+            .sources
+            .len(),
         Err(_) => placed_source_count(active_schematic),
     }
 }
@@ -494,28 +514,42 @@ thread_local! {
     /// Per thread, because that is where a frame is painted and because two
     /// threads deriving against two projections would otherwise evict each
     /// other on every call.
-    static DESIGN_EXCITATIONS: RefCell<Option<(Weak<DesignProjection>, Arc<DesignExcitations>)>> =
-        const { RefCell::new(None) };
+    /// The stimulus library is part of the key for the same reason the
+    /// projection is: a row states where its instance stands with respect to
+    /// the library, so publishing a revision moves an answer this memo holds.
+    /// The library is not part of the projection and has no epoch of its own,
+    /// so it is compared by value — a handful of small records, against a walk
+    /// of the whole design.
+    static DESIGN_EXCITATIONS: RefCell<
+        Option<(Weak<DesignProjection>, StimulusLibrary, Arc<DesignExcitations>)>,
+    > = const { RefCell::new(None) };
 }
 
 /// The retained whole-design half, rebuilt only for a projection this thread
 /// has not already answered about.
 fn design_excitations(
     libraries: &LibraryManager,
+    stimulus_library: &StimulusLibrary,
     projection: &Arc<DesignProjection>,
 ) -> Arc<DesignExcitations> {
     let key: *const DesignProjection = Arc::as_ptr(projection);
     let retained = DESIGN_EXCITATIONS.with_borrow(|slot| {
         slot.as_ref()
-            .filter(|(against, _)| std::ptr::eq(against.as_ptr(), key))
-            .map(|(_, excitations)| Arc::clone(excitations))
+            .filter(|(against, library, _)| {
+                std::ptr::eq(against.as_ptr(), key) && library == stimulus_library
+            })
+            .map(|(_, _, excitations)| Arc::clone(excitations))
     });
     if let Some(excitations) = retained {
         return excitations;
     }
-    let excitations = Arc::new(walk_design(libraries, projection));
+    let excitations = Arc::new(walk_design(libraries, stimulus_library, projection));
     DESIGN_EXCITATIONS.with_borrow_mut(|slot| {
-        *slot = Some((Arc::downgrade(projection), Arc::clone(&excitations)));
+        *slot = Some((
+            Arc::downgrade(projection),
+            stimulus_library.clone(),
+            Arc::clone(&excitations),
+        ));
     });
     excitations
 }
@@ -529,6 +563,7 @@ fn design_excitations(
 /// once, not a hundred times.
 fn walk_design(
     libraries: &LibraryManager,
+    stimulus_library: &StimulusLibrary,
     projection: &Arc<DesignProjection>,
 ) -> DesignExcitations {
     #[cfg(test)]
@@ -560,7 +595,7 @@ fn walk_design(
         );
         let occurrence = binding.instance_path().clone();
         for component in &schematic.components {
-            if let Some((mut source, drive)) = placed_source(component, &nets) {
+            if let Some((mut source, drive)) = placed_source(component, &nets, stimulus_library) {
                 source.occurrence = Some(occurrence.clone());
                 sources.push((source, drive));
             } else if component.kind == ComponentType::RfPort {
@@ -646,6 +681,7 @@ struct SourceDrive {
 fn placed_source(
     component: &Component,
     nets: &HashMap<(u64, String), String>,
+    stimulus_library: &StimulusLibrary,
 ) -> Option<(PlacedSource, SourceDrive)> {
     let family = source_family(component.kind)?;
     let params = crate::state::parse_params_string(&component.params);
@@ -656,6 +692,12 @@ fn placed_source(
             is_voltage: is_voltage_source(component.kind),
             family,
             key_figure: key_figure(component, &params),
+            definition_cell: stimulus_library.studio_definition_cell(component),
+            provenance: stimulus_library.provenance_state(component),
+            definition: component
+                .stimulus_provenance
+                .as_ref()
+                .map(|provenance| provenance.definition.clone()),
             nets: terminal_nets(component, nets),
             consumers: Vec::new(),
             occurrence: None,
@@ -1107,6 +1149,31 @@ const fn is_voltage_source(kind: ComponentType) -> bool {
     )
 }
 
+/// What one source is, in the words a narrow column has room for:
+/// `V · SIN · 1 kHz` — the quantity, the waveform family, and the one number
+/// that tells two sources of that family apart.
+///
+/// Derived from a component rather than from a definition, so the Component
+/// shelf's stimulus rows, which ask it about the instance a definition would
+/// realize to, cannot describe a card differently from the Excitations rows
+/// its adopters get. `None` for anything that is not an independent source.
+#[must_use]
+pub fn source_identity_line(component: &Component) -> Option<String> {
+    let family = source_family(component.kind)?;
+    let quantity = if is_voltage_source(component.kind) {
+        "V"
+    } else {
+        "I"
+    };
+    let params = crate::state::parse_params_string(&component.params);
+    let figure = key_figure(component, &params);
+    Some(if figure.is_empty() {
+        format!("{quantity} \u{00b7} {family}")
+    } else {
+        format!("{quantity} \u{00b7} {family} \u{00b7} {figure}")
+    })
+}
+
 /// The one number that tells two sources of the same family apart.
 ///
 /// Which number that is differs by family: a pulse train is identified by its
@@ -1290,7 +1357,7 @@ mod tests {
             source(4, ComponentType::CurrentSourcePulse, "I1", "per=1m"),
             port(5, "P1", "port=1"),
         ]);
-        let listed = placed_sources(&schematic, None);
+        let listed = placed_sources(&schematic, &StimulusLibrary::default(), None);
         let references: Vec<&str> = listed
             .iter()
             .map(|source| source.reference.as_str())
@@ -1449,7 +1516,7 @@ mod tests {
             "{listed:?}"
         );
         assert!(
-            placed_sources(&schematic, Some(&plan))[0]
+            placed_sources(&schematic, &StimulusLibrary::default(), Some(&plan))[0]
                 .consumers
                 .is_empty(),
             "an S-parameter run reads ports, not independent sources"
@@ -1499,7 +1566,7 @@ mod tests {
             "V1",
             "freq=1000",
         )]);
-        let listed = placed_sources(&schematic, None);
+        let listed = placed_sources(&schematic, &StimulusLibrary::default(), None);
         assert_eq!(listed[0].summary(), "SIN · 1kHz");
         assert_eq!(listed[0].quantity(), "V");
     }
@@ -1513,7 +1580,11 @@ mod tests {
     fn a_dc_row_states_a_value_authored_with_its_unit() {
         let component = Component::new(1, ComponentType::VoltageSource, Point::origin())
             .with_name_value("V1", "5V");
-        let listed = placed_sources(&schematic_with(vec![component]), None);
+        let listed = placed_sources(
+            &schematic_with(vec![component]),
+            &StimulusLibrary::default(),
+            None,
+        );
         assert_eq!(listed[0].summary(), "DC · 5V");
     }
 
@@ -1523,7 +1594,11 @@ mod tests {
     fn a_current_source_authored_in_amperes_reads_as_amperes() {
         let component = Component::new(1, ComponentType::CurrentSource, Point::origin())
             .with_name_value("I1", "1A");
-        let listed = placed_sources(&schematic_with(vec![component]), None);
+        let listed = placed_sources(
+            &schematic_with(vec![component]),
+            &StimulusLibrary::default(),
+            None,
+        );
         assert_eq!(listed[0].summary(), "DC · 1A");
         assert_eq!(listed[0].quantity(), "I");
     }
@@ -1537,7 +1612,7 @@ mod tests {
             source(1, ComponentType::CurrentSourcePulse, "I1", "per=1ms"),
             source(2, ComponentType::VoltageSourceSin, "V1", "freq=10kHz"),
         ]);
-        let listed = placed_sources(&schematic, None);
+        let listed = placed_sources(&schematic, &StimulusLibrary::default(), None);
         let summaries: Vec<String> = listed.iter().map(PlacedSource::summary).collect();
         assert_eq!(summaries, vec!["PULSE · PER 1ms", "SIN · 10kHz"]);
     }
@@ -1550,7 +1625,7 @@ mod tests {
             "I1",
             "per=1m pw=100u",
         )]);
-        let listed = placed_sources(&schematic, None);
+        let listed = placed_sources(&schematic, &StimulusLibrary::default(), None);
         assert_eq!(listed[0].summary(), "PULSE · PER 1ms");
         assert_eq!(listed[0].quantity(), "I");
     }
@@ -1561,7 +1636,11 @@ mod tests {
     fn a_pwl_row_counts_its_points() {
         let component = Component::new(1, ComponentType::VoltageSourcePwl, Point::origin())
             .with_name_value("V1", "0 0 1u 1 2u 0");
-        let listed = placed_sources(&schematic_with(vec![component]), None);
+        let listed = placed_sources(
+            &schematic_with(vec![component]),
+            &StimulusLibrary::default(),
+            None,
+        );
         assert_eq!(listed[0].summary(), "PWL · 3 points");
     }
 
@@ -1575,7 +1654,7 @@ mod tests {
             "V1",
             "freq=1k",
         )]);
-        let listed = placed_sources(&schematic, None);
+        let listed = placed_sources(&schematic, &StimulusLibrary::default(), None);
         let pins = listed[0].nets.len();
         assert_eq!(pins, schematic.components[0].terminal_positions().len());
         assert!(
@@ -1644,7 +1723,7 @@ mod tests {
                 .collect()
         };
 
-        let listed = placed_sources(&schematic, Some(&plan));
+        let listed = placed_sources(&schematic, &StimulusLibrary::default(), Some(&plan));
         assert!(
             listed[0].consumers.is_empty(),
             "an AC magnitude and a zero tone do not drive a distortion run: {listed:?}"
@@ -1662,7 +1741,7 @@ mod tests {
             draft.f2_over_f1 = "0.9".to_owned();
         })
         .expect("Disto draft edits");
-        let listed = placed_sources(&schematic, Some(&plan));
+        let listed = placed_sources(&schematic, &StimulusLibrary::default(), Some(&plan));
         assert_eq!(
             roles(&listed, 2),
             vec!["distortion drive"],
@@ -1697,7 +1776,7 @@ mod tests {
             source(1, ComponentType::VoltageSourceSin, "V1", "freq=1k"),
             source(2, ComponentType::VoltageSourceSin, "V2", "freq=1k"),
         ]);
-        let listed = placed_sources(&schematic, Some(&plan));
+        let listed = placed_sources(&schematic, &StimulusLibrary::default(), Some(&plan));
         assert_eq!(
             listed[0]
                 .consumers
@@ -1731,7 +1810,7 @@ mod tests {
             source(1, ComponentType::VoltageSourceSin, "V1", "freq=1k"),
             source(2, ComponentType::VoltageSourceSin, "V2", "freq=1k"),
         ]);
-        let listed = placed_sources(&schematic, Some(&plan));
+        let listed = placed_sources(&schematic, &StimulusLibrary::default(), Some(&plan));
         assert_eq!(
             listed[0].consumers[0].role, "envelope modulation source",
             "V1 is named in the modulation list"
@@ -1760,7 +1839,7 @@ mod tests {
             "V1",
             "per=1m pw=100u",
         )]);
-        let listed = placed_sources(&schematic, Some(&plan));
+        let listed = placed_sources(&schematic, &StimulusLibrary::default(), Some(&plan));
         assert_eq!(
             listed[0]
                 .consumers
@@ -1783,7 +1862,7 @@ mod tests {
             source(1, ComponentType::VoltageSourcePulse, "V1", "per=1m"),
             source(2, ComponentType::CurrentSourceSin, "I1", "freq=1k"),
         ]);
-        let listed = placed_sources(&schematic, Some(&plan));
+        let listed = placed_sources(&schematic, &StimulusLibrary::default(), Some(&plan));
         assert!(
             listed.iter().all(|source| source
                 .consumers
@@ -1805,7 +1884,7 @@ mod tests {
             "V1",
             "per=1m",
         )]);
-        let listed = placed_sources(&schematic, Some(&plan));
+        let listed = placed_sources(&schematic, &StimulusLibrary::default(), Some(&plan));
         assert!(listed[0].consumers.is_empty(), "{:?}", listed[0].consumers);
     }
 
@@ -1846,7 +1925,7 @@ mod tests {
             "per=1m",
         )]);
 
-        let listed = placed_sources(&schematic, Some(&plan));
+        let listed = placed_sources(&schematic, &StimulusLibrary::default(), Some(&plan));
 
         assert_eq!(
             listed[0]
@@ -1869,7 +1948,7 @@ mod tests {
 
         plan.set_enabled(transient, true)
             .expect("the fixture transient re-enables");
-        let listed = placed_sources(&schematic, Some(&plan));
+        let listed = placed_sources(&schematic, &StimulusLibrary::default(), Some(&plan));
         assert!(
             listed[0].is_read(),
             "re-enabling the instance is what makes the source read"
@@ -1883,7 +1962,7 @@ mod tests {
             source(1, ComponentType::VoltageSourceSin, "V2", "freq=1k"),
             source(2, ComponentType::VoltageSourceSin, "V1", "freq=1k"),
         ]);
-        let listed = placed_sources(&schematic, None);
+        let listed = placed_sources(&schematic, &StimulusLibrary::default(), None);
         assert_eq!(listed[0].reference, "V1");
         assert_eq!(listed[1].reference, "V2");
     }
@@ -1898,11 +1977,17 @@ mod tests {
             source(1, ComponentType::VoltageSourceSin, "V1", "freq=1k"),
             port(2, "P1", "port=1"),
         ]);
-        assert_eq!(placed_sources(&schematic, None)[0].occurrence, None);
+        assert_eq!(
+            placed_sources(&schematic, &StimulusLibrary::default(), None)[0].occurrence,
+            None
+        );
         assert_eq!(placed_rf_ports(&schematic, None)[0].occurrence, None);
         // The column still states something, because a sheet read on its own
         // is being read as its own root.
-        assert_eq!(placed_sources(&schematic, None)[0].occurrence_label(), "/");
+        assert_eq!(
+            placed_sources(&schematic, &StimulusLibrary::default(), None)[0].occurrence_label(),
+            "/"
+        );
         assert_eq!(placed_rf_ports(&schematic, None)[0].occurrence_label(), "/");
     }
 
@@ -1972,11 +2057,21 @@ mod tests {
             }
 
             fn sources(&self, plan: Option<&SimulationPlan>) -> Vec<PlacedSource> {
-                design_sources(&self.libraries, &self.projection(), plan)
+                design_sources(
+                    &self.libraries,
+                    &StimulusLibrary::default(),
+                    &self.projection(),
+                    plan,
+                )
             }
 
             fn ports(&self, plan: Option<&SimulationPlan>) -> Vec<PlacedRfPort> {
-                design_rf_ports(&self.libraries, &self.projection(), plan)
+                design_rf_ports(
+                    &self.libraries,
+                    &StimulusLibrary::default(),
+                    &self.projection(),
+                    plan,
+                )
             }
         }
 
@@ -2120,11 +2215,26 @@ mod tests {
             let projection = design.projection();
 
             reset();
-            let first = design_sources(&design.libraries, &projection, None);
+            let first = design_sources(
+                &design.libraries,
+                &StimulusLibrary::default(),
+                &projection,
+                None,
+            );
             assert_eq!(count(Derivation::PlacedSources), 1, "the first call walks");
 
-            let again = design_sources(&design.libraries, &projection, None);
-            let ports = design_rf_ports(&design.libraries, &projection, None);
+            let again = design_sources(
+                &design.libraries,
+                &StimulusLibrary::default(),
+                &projection,
+                None,
+            );
+            let ports = design_rf_ports(
+                &design.libraries,
+                &StimulusLibrary::default(),
+                &projection,
+                None,
+            );
             assert_eq!(
                 count(Derivation::PlacedSources),
                 1,
@@ -2148,7 +2258,12 @@ mod tests {
                 "an edit mints a new projection"
             );
             assert_eq!(
-                placements(&design_sources(&edited.libraries, &moved, None)),
+                placements(&design_sources(
+                    &edited.libraries,
+                    &StimulusLibrary::default(),
+                    &moved,
+                    None
+                )),
                 vec![
                     ("/".to_owned(), "VDD"),
                     ("/XA".to_owned(), "V1"),
