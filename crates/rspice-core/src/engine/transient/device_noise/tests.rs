@@ -47,6 +47,46 @@ fn time_averaged_square(result: &TransientResult, waveform: &[Value]) -> Value {
     weighted / span
 }
 
+/// Time-weighted RMS deviation of a waveform from its own mean over
+/// `(from, to]`, with the number of held noise samples the window covers.
+///
+/// Weighting by each accepted interval makes this the integral over the
+/// window rather than an average over however the controller distributed its
+/// points; the sample count is what the estimate's precision actually rests
+/// on, because every point inside one held interval carries the same draw.
+fn windowed_rms_deviation(
+    result: &TransientResult,
+    waveform: &[Value],
+    from: Value,
+    to: Value,
+    nt: Value,
+) -> (Value, usize) {
+    let mut weighted = 0.0;
+    let mut span = 0.0;
+    for index in 1..waveform.len() {
+        let time = result.time[index];
+        if time <= from || time > to {
+            continue;
+        }
+        let dt = result.step_sizes[index];
+        weighted += waveform[index] * dt;
+        span += dt;
+    }
+    assert!(span > 0.0, "the window recorded no accepted interval");
+    let mean = weighted / span;
+    let mut squared = 0.0;
+    for index in 1..waveform.len() {
+        let time = result.time[index];
+        if time <= from || time > to {
+            continue;
+        }
+        let dt = result.step_sizes[index];
+        let deviation = waveform[index] - mean;
+        squared += deviation * deviation * dt;
+    }
+    ((squared / span).sqrt(), (span / nt).floor() as usize)
+}
+
 /// Build a circuit, solve its operating point, and install the injection
 /// plan, returning everything the caller needs to inspect one train.
 fn installed(
@@ -412,12 +452,17 @@ fn flicker_noise_follows_the_devices_af_ef_law_in_time() {
 }
 
 /// Spectre practice: the injected density follows the instantaneous bias.
-/// A diode's shot noise is `2qI`, so its injected amplitude must scale as
-/// the square root of the bias current — measured here against the
-/// current the deterministic solution carries, which the noise code has
-/// no part in computing.
+/// A diode's shot noise is `2qI`, so the amplitude installed at an operating
+/// point must scale as the square root of that point's bias current —
+/// measured against the current the deterministic solution carries, which the
+/// noise code has no part in computing.
+///
+/// This checks the installed amplitude and the accepted-step refresh in
+/// isolation. That the injected noise follows the bias *while a transient
+/// runs* is [`transient_noise_tracks_the_instantaneous_bias`], which observes
+/// only node voltages.
 #[test]
-fn transient_noise_tracks_the_instantaneous_bias() {
+fn the_installed_shot_noise_amplitude_follows_the_operating_point() {
     const FMAX: Value = 1.0e9;
     const RESISTANCE: Value = 1.0e3;
     let nt = 1.0 / (2.0 * FMAX);
@@ -471,6 +516,118 @@ fn transient_noise_tracks_the_instantaneous_bias() {
         "shot-noise amplitude ratio against sqrt(I_late/I_early)",
         late_amplitude / early_amplitude,
         (late_current / early_current).sqrt(),
+        0.10,
+    );
+
+    // And the accepted-step refresh itself: move the junction well past the
+    // tolerance that lets the refresh skip, and the amplitude must be
+    // re-derived to the density the model reports at the new junction
+    // voltage. The perturbed vector is not a KCL solution — it does not need
+    // to be, because a collection reads device biases — so the oracle is the
+    // junction law rather than another run.
+    let (mut circuit, mut runtime, solution) = installed(&deck(0.68), config, tstop);
+    let position = runtime
+        .entries
+        .iter()
+        .position(|entry| entry.identity.device.eq_ignore_ascii_case("D1"))
+        .expect("the diode exports a shot-noise mechanism");
+    let node = circuit
+        .get_node_by_name("a")
+        .expect("the diode's anode exists");
+    let installed_amplitude = circuit
+        .transient_device_noise()
+        .expect("installed")
+        .amplitude(position);
+    let thermal_voltage = crate::constants::K_BOLTZMANN * T / crate::constants::Q_ELECTRON;
+    let step = 0.1;
+    let mut moved = solution.clone();
+    moved[node - 1] += step;
+    circuit.update_nonlinear(&moved);
+    runtime
+        .refresh(&mut circuit, &moved)
+        .expect("the refresh re-derives the density");
+    let refreshed_amplitude = circuit
+        .transient_device_noise()
+        .expect("installed")
+        .amplitude(position);
+    assert_ne!(
+        refreshed_amplitude, installed_amplitude,
+        "a junction moved by {step} V must not take the refresh's skip path"
+    );
+    against_oracle(
+        "refreshed shot-noise amplitude ratio against exp(dV/2nVt)",
+        refreshed_amplitude / installed_amplitude,
+        (step / (2.0 * thermal_voltage)).exp(),
+        0.01,
+    );
+}
+
+/// Spectre practice, observed through a run: the injected density follows the
+/// instantaneous bias, not the operating point the run started from.
+///
+/// An ideal current source steps a diode's bias by 100x halfway through the
+/// run. The diode carries no junction capacitance, so its anode is purely
+/// algebraic and the small-signal transfer from the injected current to the
+/// node is exactly `n·Vt/I`: the node's RMS fluctuation is
+/// `sqrt(2qI·fmax)·n·Vt/I`, so the second half's RMS must be `sqrt(I1/I2)`
+/// of the first's. The three hypotheses are ten-fold apart, which is what
+/// makes this an oracle rather than a check: tracking gives `sqrt(I1/I2)`
+/// = 0.1, an amplitude frozen at t=0 gives `I1/I2` = 0.01, and noise that
+/// ignored the bias entirely would give 1.
+#[test]
+fn transient_noise_tracks_the_instantaneous_bias() {
+    const FMAX: Value = 1.0e9;
+    const HALF_SAMPLES: usize = 6144;
+    const EARLY_CURRENT: Value = 1.0e-5;
+    const LATE_CURRENT: Value = 1.0e-3;
+    let nt = 1.0 / (2.0 * FMAX);
+    let half = HALF_SAMPLES as Value * nt;
+    let edge = 10.0 * nt;
+    let tstop = 2.0 * half;
+    // An ideal current source fixes the diode current, so the two bias
+    // currents are the authored ones and no solve is needed to know them.
+    let result = run(
+        &format!(
+            "shot noise follows the bias within a run\n\
+             I1 0 a PWL(0 {EARLY_CURRENT:e} {half:e} {EARLY_CURRENT:e} {:e} {LATE_CURRENT:e} \
+             {tstop:e} {LATE_CURRENT:e})\n\
+             D1 a 0 DM\n\
+             .MODEL DM D IS=1e-14 N=1\n\
+             .TRAN {nt:e} {tstop:e} NOISEFMAX={FMAX:e} NOISESEED=20260917\n\
+             .END\n",
+            half + edge
+        ),
+        tstop,
+        nt,
+    );
+    let waveform = result
+        .try_voltage_waveform_named("a")
+        .expect("the diode's anode is retained");
+
+    // Skip the run's own startup and, after the edge, a settle window of the
+    // same width, so each window sees one steady bias.
+    let settle = 0.25 * half;
+    let (early_rms, early_samples) = windowed_rms_deviation(&result, waveform, settle, half, nt);
+    let (late_rms, late_samples) =
+        windowed_rms_deviation(&result, waveform, half + edge + settle, tstop, nt);
+    println!(
+        "  window RMS: {early_rms:e} V over {early_samples} samples at {EARLY_CURRENT:e} A, \
+         {late_rms:e} V over {late_samples} samples at {LATE_CURRENT:e} A"
+    );
+    assert!(
+        early_samples >= 4096 && late_samples >= 4096,
+        "each window must hold at least 4096 held samples, found {early_samples} and \
+         {late_samples}"
+    );
+
+    // With N held samples per window the RMS estimate's relative standard
+    // error is 1/sqrt(2N), so the ratio's is sqrt(1/(2*N1) + 1/(2*N2)).
+    let sigma = (0.5 / early_samples as Value + 0.5 / late_samples as Value).sqrt();
+    println!("  ratio 1 sigma = {:.3}%, tolerance 10.0%", sigma * 100.0);
+    against_oracle(
+        "late/early node RMS against sqrt(I_early/I_late)",
+        late_rms / early_rms,
+        (EARLY_CURRENT / LATE_CURRENT).sqrt(),
         0.10,
     );
 }
