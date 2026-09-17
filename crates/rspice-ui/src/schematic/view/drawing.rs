@@ -52,11 +52,44 @@ pub(super) fn draw_wire(
         (palette.wire, DEFAULT_WIRE_STROKE_WIDTH)
     };
 
-    // Draw each segment of the wire polyline
-    for segment in wire.points.windows(2) {
-        let start = viewport.schematic_to_screen(segment[0]);
-        let end = viewport.schematic_to_screen(segment[1]);
-        painter.line_segment([start, end], Stroke::new(width * viewport.zoom, color));
+    let points = wire
+        .points
+        .iter()
+        .map(|point| viewport.schematic_to_screen(*point))
+        .collect();
+    paint_conductor(painter, points, Stroke::new(width * viewport.zoom, color));
+}
+
+/// One screen-space path for a conductor polyline, or `None` when fewer than
+/// two distinct points remain.
+///
+/// Painting a polyline one segment at a time leaves a notch at every corner:
+/// two butt ends meet at the vertex and the outer square between them is never
+/// painted. One path gives every interior vertex a mitered join, and extending
+/// both ends by half the stroke width (a square cap) closes the corner that two
+/// separate conductors form when they meet end to end. A square cap on a
+/// conductor that ends on another conductor's body, or on a pin lead of the
+/// same weight, lands inside that stroke, so nothing protrudes.
+pub(super) fn conductor_shape(mut points: Vec<Pos2>, stroke: Stroke) -> Option<egui::Shape> {
+    points.dedup();
+    if points.len() < 2 {
+        return None;
+    }
+    let half_width = stroke.width * 0.5;
+    if half_width > 0.0 {
+        let last = points.len() - 1;
+        let start_direction = (points[1] - points[0]).normalized();
+        let end_direction = (points[last] - points[last - 1]).normalized();
+        points[0] -= start_direction * half_width;
+        points[last] += end_direction * half_width;
+    }
+    Some(egui::Shape::line(points, stroke))
+}
+
+/// Paint a conductor polyline as one mitered, square-capped path.
+pub(super) fn paint_conductor(painter: &Painter, points: Vec<Pos2>, stroke: Stroke) {
+    if let Some(shape) = conductor_shape(points, stroke) {
+        painter.add(shape);
     }
 }
 
@@ -942,8 +975,8 @@ mod tests {
 
         let mut widths = Vec::new();
         painter.for_each_shape(|shape| {
-            if let Shape::LineSegment { stroke, .. } = &shape.shape {
-                widths.push(stroke.width);
+            if let Shape::Path(path) = &shape.shape {
+                widths.push(path.stroke.width);
             }
         });
 
@@ -1130,6 +1163,40 @@ mod tests {
                 Some(8)
             );
         }
+    }
+
+    #[test]
+    fn a_conductor_is_one_square_capped_path() {
+        let stroke = Stroke::new(2.0, egui::Color32::WHITE);
+        let shape = conductor_shape(
+            vec![
+                Pos2::new(10.0, 10.0),
+                Pos2::new(10.0, 10.0),
+                Pos2::new(10.0, 50.0),
+                Pos2::new(50.0, 50.0),
+            ],
+            stroke,
+        )
+        .expect("two distinct points make a path");
+        let Shape::Path(path) = shape else {
+            panic!("a conductor is one path, never a segment per vertex pair");
+        };
+        assert!(!path.closed);
+        assert_eq!(
+            path.points,
+            vec![
+                Pos2::new(10.0, 9.0),
+                Pos2::new(10.0, 50.0),
+                Pos2::new(51.0, 50.0)
+            ],
+            "each end extends by half the stroke width along its own segment"
+        );
+        assert!((path.stroke.width - 2.0).abs() < f32::EPSILON);
+
+        assert!(
+            conductor_shape(vec![Pos2::new(3.0, 3.0), Pos2::new(3.0, 3.0)], stroke).is_none(),
+            "a degenerate conductor paints nothing"
+        );
     }
 
     #[test]

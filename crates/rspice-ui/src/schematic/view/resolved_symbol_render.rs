@@ -94,18 +94,17 @@ fn draw_symbol_body(
     for shape in &symbol.document().body {
         match shape {
             SymbolShape::Polyline { points, closed } => {
-                let screen_points: Vec<Pos2> = points
+                let mut screen_points: Vec<Pos2> = points
                     .iter()
                     .map(|point| to_screen_symbol(origin, scale, component, symbol, *point))
                     .collect();
-                for pair in screen_points.windows(2) {
-                    painter.line_segment([pair[0], pair[1]], stroke);
-                }
-                if *closed
-                    && screen_points.len() > 2
-                    && let (Some(first), Some(last)) = (screen_points.first(), screen_points.last())
-                {
-                    painter.line_segment([*last, *first], stroke);
+                screen_points.dedup();
+                // One path, so every corner of the outline is a mitered join
+                // rather than two butt ends with a notch between them.
+                if *closed && screen_points.len() > 2 {
+                    painter.add(egui::Shape::closed_line(screen_points, stroke));
+                } else if screen_points.len() >= 2 {
+                    painter.add(egui::Shape::line(screen_points, stroke));
                 }
             }
             SymbolShape::Circle { center, radius } => {

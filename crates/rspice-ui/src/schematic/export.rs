@@ -165,8 +165,8 @@ fn export_to_svg_with_resolved_symbol_entries(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
 <svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width}\" height=\"{height}\" viewBox=\"{vx} {vy} {width} {height}\">\n\
 <style>\n\
-  .wire {{ stroke: {wire_color}; stroke-width: {wire_width}; fill: none; stroke-linecap: round; stroke-linejoin: round; }}\n\
-  .bus {{ stroke: {wire_color}; stroke-width: {bus_width}; fill: none; stroke-linecap: round; stroke-linejoin: round; }}\n\
+  .wire {{ stroke: {wire_color}; stroke-width: {wire_width}; fill: none; stroke-linecap: square; stroke-linejoin: miter; }}\n\
+  .bus {{ stroke: {wire_color}; stroke-width: {bus_width}; fill: none; stroke-linecap: square; stroke-linejoin: miter; }}\n\
   .bus-tap {{ stroke: {wire_color}; stroke-width: {tap_width}; fill: none; stroke-linecap: round; }}\n\
   .junction {{ fill: {wire_color}; stroke: none; }}\n\
   .component {{ stroke: {comp_color}; stroke-width: {comp_width}; fill: none; }}\n\

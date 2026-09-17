@@ -3,7 +3,7 @@
 //! Draws the ghost of an object being placed, following the cursor at the
 //! current grid snap and orientation, before the placement is committed.
 
-use egui::{Painter, Rect, Response, Stroke, Vec2};
+use egui::{Painter, Pos2, Rect, Response, Stroke, Vec2};
 
 use crate::state::{
     Bus, BusTap, Component, ComponentType, DesignNote, NetLabel, Point, PortSpec,
@@ -25,7 +25,7 @@ use super::documentation_shapes::{
 use super::drawing::{
     compatible_builtin_xspice_asset, draw_artwork_lead_extensions, draw_bus, draw_bus_tap,
     draw_component, draw_junction, draw_port_direction_overlay, draw_symbol_resolution_error,
-    draw_wire, nearest_wire_screen_hit, port_symbol_stroke,
+    draw_wire, nearest_wire_screen_hit, paint_conductor, port_symbol_stroke,
 };
 use super::net_labels::draw_net_label;
 use super::resolved_symbol_render::{draw_resolved_symbol, resolved_symbol_world_bounds};
@@ -760,37 +760,25 @@ fn draw_wire_preview(
     };
 
     if wire_active {
-        let wire_points: Vec<Point> = state.schematic.wire_drawing.points.clone();
-        let preview_pos_opt = state.schematic.wire_drawing.preview_pos;
+        let drawing = &state.schematic.wire_drawing;
+        let to_screen = |point: &Point| viewport.schematic_to_screen(*point);
+        let committed: Vec<Pos2> = drawing.points.iter().map(to_screen).collect();
+        // The hint is the route a click would commit, corner included.
+        let hint: Vec<Pos2> = drawing.get_preview_path().iter().map(to_screen).collect();
 
-        if !wire_points.is_empty() {
+        if let Some(start) = committed.first().copied() {
             let wire_color = crate::ui::tokens::active_palette().accent;
-            let stroke = Stroke::new(WIRE_PREVIEW_STROKE_WIDTH * viewport.zoom, wire_color);
-
-            for segment in wire_points.windows(2) {
-                let p1 = viewport.schematic_to_screen(segment[0]);
-                let p2 = viewport.schematic_to_screen(segment[1]);
-                painter.line_segment([p1, p2], stroke);
-            }
-
-            if let Some(preview) = preview_pos_opt
-                && let Some(last) = wire_points.last()
-            {
-                let p1 = viewport.schematic_to_screen(*last);
-                let p2 = viewport.schematic_to_screen(preview);
-                painter.line_segment(
-                    [p1, p2],
-                    Stroke::new(
-                        WIRE_PREVIEW_STROKE_WIDTH * viewport.zoom,
-                        wire_color.gamma_multiply(0.6),
-                    ),
-                );
-            }
-
-            if let Some(start) = wire_points.first() {
-                let start_screen = viewport.schematic_to_screen(*start);
-                painter.circle_filled(start_screen, 4.0 * viewport.zoom, wire_color);
-            }
+            let width = WIRE_PREVIEW_STROKE_WIDTH * viewport.zoom;
+            // The hint goes down first. Its square cap begins inside the
+            // committed conductor, and the committed stroke painted over it
+            // is what closes the corner, so the overlap never shows through.
+            paint_conductor(
+                painter,
+                hint,
+                Stroke::new(width, wire_color.gamma_multiply(0.6)),
+            );
+            paint_conductor(painter, committed, Stroke::new(width, wire_color));
+            painter.circle_filled(start, 4.0 * viewport.zoom, wire_color);
         }
     }
 

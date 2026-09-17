@@ -24,7 +24,7 @@ use super::documentation_shapes::{
 };
 use super::drawing::{
     ProbeVisualStatus, draw_bus, draw_bus_tap, draw_component, draw_junction, draw_probe,
-    draw_wire, probe_at_screen, probe_world_bounds,
+    draw_wire, paint_conductor, probe_at_screen, probe_world_bounds,
 };
 use super::drawing_sheet::ActiveDrawingSheet;
 use super::net_labels::{draw_net_label, net_label_at, world_bounds as net_label_world_bounds};
@@ -542,15 +542,14 @@ fn draw_parent_context(painter: &Painter, viewport: &Viewport, state: &AppState)
             {
                 continue;
             }
-            for segment in wire.points.windows(2) {
-                painter.line_segment(
-                    [
-                        viewport.schematic_to_screen(segment[0]),
-                        viewport.schematic_to_screen(segment[1]),
-                    ],
-                    stroke,
-                );
-            }
+            paint_conductor(
+                painter,
+                wire.points
+                    .iter()
+                    .map(|point| viewport.schematic_to_screen(*point))
+                    .collect(),
+                stroke,
+            );
         }
         for bus in &sheet.buses {
             if !object_is_on_sheet(state, &key, bus.id)
@@ -558,15 +557,14 @@ fn draw_parent_context(painter: &Painter, viewport: &Viewport, state: &AppState)
             {
                 continue;
             }
-            for segment in bus.points.windows(2) {
-                painter.line_segment(
-                    [
-                        viewport.schematic_to_screen(segment[0]),
-                        viewport.schematic_to_screen(segment[1]),
-                    ],
-                    stroke,
-                );
-            }
+            paint_conductor(
+                painter,
+                bus.points
+                    .iter()
+                    .map(|point| viewport.schematic_to_screen(*point))
+                    .collect(),
+                stroke,
+            );
         }
         for junction in &sheet.junctions {
             let (jx, jy) = (junction.pos.x as f32, junction.pos.y as f32);
