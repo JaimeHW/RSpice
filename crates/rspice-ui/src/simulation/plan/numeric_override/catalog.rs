@@ -54,6 +54,9 @@
 //!   and capacitors to every node. They change the circuit, not one analysis's
 //!   numerics, and the plan states no policy for them to depart from.
 
+mod global;
+mod timeint;
+
 use crate::simulation::accuracy::AnalysisAccuracy;
 use crate::simulation::dialog::{DampingStrategy, IntegrationMethod, MatrixSolver, OpHomotopy};
 
@@ -185,6 +188,10 @@ pub(super) const HOMOTOPY_OWNS_CONTINUATION: &str = "this operating point's Homo
 
 /// Everything the editor, the emitter, the digest and the ledger need to know
 /// about one option.
+///
+/// `Copy` because the catalog is assembled from the package tables by a
+/// `const fn`, which reads each entry out of its table by index.
+#[derive(Clone, Copy)]
 pub struct OptionSpec {
     pub option: NumericOverrideOption,
     /// The `.OPTIONS` key, exactly as the engine's parser spells it.
@@ -206,324 +213,62 @@ pub struct OptionSpec {
 }
 
 /// The catalog. Order here is the order the ledger and the editor report.
-pub(super) const SPECS: &[OptionSpec] = &[
-    // ---------------------------------------------------------- convergence
-    OptionSpec {
-        option: NumericOverrideOption::Reltol,
-        key: "RELTOL",
-        package: OptionPackage::Global,
-        section: OverrideSection::Convergence,
-        label: "Update bound · RELTOL",
-        value_kind: OverrideValueKind::PositiveReal,
-        value_hint: "positive real",
-        config_field: "convergence_config.voltage_reltol",
-        consumer: "engine/convergence/tolerances.rs:48 · voltage_reltol",
-        time_stepped_only: false,
-    },
-    OptionSpec {
-        option: NumericOverrideOption::Abstol,
-        // `IABSTOL`, not `ABSTOL`, and the difference is load-bearing. The
-        // resolver reads `opts.iabstol.or(opts.abstol)`
-        // (`engine/config_resolver.rs:250`), which is *field* precedence, not
-        // card order: a plan that states `IABSTOL` would win over an analysis
-        // that stated `ABSTOL` however late its card came, and the departure
-        // would be persisted, reported and then ignored. Both keys name the
-        // one current floor, so the record states the one that wins and
-        // last-card-wins does the rest.
-        key: "IABSTOL",
-        package: OptionPackage::Global,
-        section: OverrideSection::Convergence,
-        label: "Current floor · IABSTOL",
-        value_kind: OverrideValueKind::PositiveReal,
-        value_hint: "positive real",
-        config_field: "convergence_config.current_abstol",
-        consumer: "engine/convergence/tolerances.rs:63 · current_abstol",
-        time_stepped_only: false,
-    },
-    OptionSpec {
-        option: NumericOverrideOption::Vntol,
-        key: "VNTOL",
-        package: OptionPackage::Global,
-        section: OverrideSection::Convergence,
-        label: "Voltage floor · VNTOL",
-        value_kind: OverrideValueKind::PositiveReal,
-        value_hint: "positive real",
-        config_field: "convergence_config.voltage_abstol",
-        consumer: "engine/convergence/tolerances.rs:53 · voltage_abstol",
-        time_stepped_only: false,
-    },
-    OptionSpec {
-        option: NumericOverrideOption::ResidualReltol,
-        key: "RESIDUAL_RELTOL",
-        package: OptionPackage::Global,
-        section: OverrideSection::Convergence,
-        label: "Residual bound · RESIDUAL_RELTOL",
-        value_kind: OverrideValueKind::PositiveReal,
-        value_hint: "positive real",
-        config_field: "convergence_config.residual_reltol",
-        consumer: "engine/convergence/tolerances.rs:297 · residual_reltol",
-        time_stepped_only: false,
-    },
-    OptionSpec {
-        option: NumericOverrideOption::Gmin,
-        key: "GMIN",
-        package: OptionPackage::Global,
-        section: OverrideSection::Convergence,
-        label: "Junction conductance floor · GMIN",
-        value_kind: OverrideValueKind::NonNegativeReal,
-        value_hint: "conductance, 0 for none",
-        config_field: "convergence_config.junction_gmin_target",
-        consumer: "engine/convergence/stamping.rs:8 · effective_device_junction_gmin",
-        time_stepped_only: false,
-    },
-    OptionSpec {
-        option: NumericOverrideOption::Itl1,
-        key: "ITL1",
-        package: OptionPackage::Global,
-        section: OverrideSection::Convergence,
-        label: "Newton budget · ITL1",
-        value_kind: OverrideValueKind::IterationCount,
-        value_hint: "iteration count",
-        config_field: "max_iterations",
-        consumer: "engine/convergence/tolerances.rs:20 · nonlinear_iteration_budget",
-        time_stepped_only: false,
-    },
-    OptionSpec {
-        option: NumericOverrideOption::Itl4,
-        key: "ITL4",
-        package: OptionPackage::Global,
-        section: OverrideSection::Convergence,
-        label: "Iterations per step · ITL4",
-        value_kind: OverrideValueKind::IterationCount,
-        value_hint: "iteration count",
-        config_field: "transient_max_iterations",
-        consumer: "engine/transient/step_control.rs:191 · transient_max_iterations",
-        time_stepped_only: true,
-    },
-    OptionSpec {
-        option: NumericOverrideOption::GminStepping,
-        key: "GMINSTEPPING",
-        package: OptionPackage::Global,
-        section: OverrideSection::Convergence,
-        label: "Gmin stepping",
-        value_kind: OverrideValueKind::Flag,
-        value_hint: "on · off",
-        config_field: "convergence_config.gmin_stepping",
-        consumer: "engine/convergence/solve.rs:137 · gmin_stepping fallback",
-        time_stepped_only: false,
-    },
-    OptionSpec {
-        option: NumericOverrideOption::SourceStepping,
-        key: "SOURCESTEPPING",
-        package: OptionPackage::Global,
-        section: OverrideSection::Convergence,
-        label: "Source stepping",
-        value_kind: OverrideValueKind::Flag,
-        value_hint: "on · off",
-        config_field: "convergence_config.source_stepping",
-        consumer: "engine/convergence/solve.rs:154 · source_stepping fallback",
-        time_stepped_only: false,
-    },
-    OptionSpec {
-        option: NumericOverrideOption::PseudoTransient,
-        key: "PSEUDOTRANSIENT",
-        package: OptionPackage::Global,
-        section: OverrideSection::Convergence,
-        label: "Pseudo-transient",
-        value_kind: OverrideValueKind::Flag,
-        value_hint: "on · off",
-        config_field: "convergence_config.pseudo_transient",
-        consumer: "engine/convergence/solve.rs:605 · pseudo_transient fallback",
-        time_stepped_only: false,
-    },
-    OptionSpec {
-        option: NumericOverrideOption::ArcLength,
-        key: "ARCLENGTH",
-        package: OptionPackage::Global,
-        section: OverrideSection::Convergence,
-        label: "Arc-length continuation",
-        value_kind: OverrideValueKind::Flag,
-        value_hint: "on · off",
-        config_field: "convergence_config.arc_length",
-        consumer: "engine/convergence/solve.rs:607 · arc_length fallback",
-        time_stepped_only: false,
-    },
-    OptionSpec {
-        option: NumericOverrideOption::Damping,
-        key: "DAMPING",
-        package: OptionPackage::Global,
-        section: OverrideSection::Convergence,
-        label: "Damping strategy",
-        value_kind: OverrideValueKind::Damping,
-        value_hint: "NONE · LINESEARCH · VOLTAGELIMITING · BANKROSE · COMBINED",
-        config_field: "convergence_config.damping_strategy",
-        consumer: "engine/convergence/damping.rs:272 · damping_strategy",
-        time_stepped_only: false,
-    },
-    // -------------------------------------------------------------- charge
-    OptionSpec {
-        option: NumericOverrideOption::Chgtol,
-        key: "CHGTOL",
-        package: OptionPackage::Global,
-        section: OverrideSection::Charge,
-        label: "Charge floor · CHGTOL",
-        value_kind: OverrideValueKind::PositiveReal,
-        value_hint: "charge, SI suffixes accepted",
-        config_field: "convergence_config.charge_abstol",
-        consumer: "engine/transient/truncation.rs:114 · charge truncation estimate",
-        // Every read of `charge_abstol` outside the resolver is under
-        // `engine/transient`: it floors the charge the truncation estimate
-        // divides by. A DC solve never forms one.
-        time_stepped_only: true,
-    },
-    // --------------------------------------------------------- integration
-    OptionSpec {
-        option: NumericOverrideOption::Trtol,
-        key: "TRTOL",
-        package: OptionPackage::Global,
-        section: OverrideSection::Integration,
-        label: "Truncation bound · TRTOL",
-        value_kind: OverrideValueKind::PositiveReal,
-        value_hint: "positive real",
-        config_field: "transient_trtol",
-        consumer: "engine/convergence/tolerances.rs:85 · transient_trtol",
-        time_stepped_only: true,
-    },
-    OptionSpec {
-        option: NumericOverrideOption::IntegrationMethod,
-        key: "METHOD",
-        package: OptionPackage::Global,
-        section: OverrideSection::Integration,
-        label: "Integration method",
-        value_kind: OverrideValueKind::Method,
-        value_hint: "TRAP · EULER · GEAR2 · TRAPGEAR",
-        config_field: "integration_method",
-        consumer: "engine/transient.rs:2451 · fixed_method",
-        time_stepped_only: true,
-    },
-    OptionSpec {
-        option: NumericOverrideOption::LteReltol,
-        key: "RELTOL",
-        package: OptionPackage::Timeint,
-        section: OverrideSection::Integration,
-        label: "Truncation relative bound · TIMEINT RELTOL",
-        value_kind: OverrideValueKind::PositiveReal,
-        value_hint: "positive real",
-        config_field: "transient_lte_reltol",
-        consumer: "engine/transient.rs:2412 · accepted local truncation error",
-        time_stepped_only: true,
-    },
-    OptionSpec {
-        option: NumericOverrideOption::LteAbstol,
-        key: "ABSTOL",
-        package: OptionPackage::Timeint,
-        section: OverrideSection::Integration,
-        label: "Truncation absolute bound · TIMEINT ABSTOL",
-        value_kind: OverrideValueKind::PositiveReal,
-        value_hint: "positive real",
-        config_field: "transient_lte_abstol",
-        consumer: "engine/transient.rs:2413 · accepted local truncation error",
-        time_stepped_only: true,
-    },
-    OptionSpec {
-        option: NumericOverrideOption::MinTimestep,
-        key: "MINTIMESTEP",
-        package: OptionPackage::Timeint,
-        section: OverrideSection::Integration,
-        label: "Step floor",
-        value_kind: OverrideValueKind::PositiveReal,
-        value_hint: "time, SI suffixes accepted",
-        config_field: "min_timestep",
-        consumer: "engine/transient.rs:2391 · preferred_min_dt",
-        time_stepped_only: true,
-    },
-    OptionSpec {
-        option: NumericOverrideOption::MaximumTimestep,
-        key: "DELMAX",
-        package: OptionPackage::Timeint,
-        section: OverrideSection::Integration,
-        label: "Step ceiling",
-        value_kind: OverrideValueKind::PositiveReal,
-        value_hint: "time, SI suffixes accepted",
-        config_field: "transient_timeint_max_timestep",
-        consumer: "engine/transient.rs:1545 · hinted_max_step clamp",
-        time_stepped_only: true,
-    },
-    // -------------------------------------------------------------- matrix
-    OptionSpec {
-        option: NumericOverrideOption::Pivrel,
-        key: "PIVREL",
-        package: OptionPackage::Global,
-        section: OverrideSection::Matrix,
-        label: "Relative pivot threshold · PIVREL",
-        value_kind: OverrideValueKind::PositiveReal,
-        value_hint: "positive real",
-        config_field: "matrix_pivot_tolerance",
-        consumer: "engine/matrix.rs:1711 · solver_options.pivot_tolerance",
-        time_stepped_only: false,
-    },
-    OptionSpec {
-        option: NumericOverrideOption::Pivtol,
-        key: "PIVTOL",
-        package: OptionPackage::Global,
-        section: OverrideSection::Matrix,
-        label: "Absolute pivot floor · PIVTOL",
-        value_kind: OverrideValueKind::PositiveReal,
-        value_hint: "positive real",
-        config_field: "matrix_absolute_pivot_tolerance",
-        consumer: "engine/matrix.rs:1712 · solver_options.absolute_pivot_tolerance",
-        time_stepped_only: false,
-    },
-    OptionSpec {
-        option: NumericOverrideOption::Solver,
-        key: "SOLVER",
-        package: OptionPackage::Global,
-        section: OverrideSection::Matrix,
-        label: "Matrix backend",
-        value_kind: OverrideValueKind::Solver,
-        value_hint: "KLU · FAER",
-        config_field: "matrix_solver",
-        consumer: "engine/matrix.rs:1708 · solver_options.real_backend",
-        time_stepped_only: false,
-    },
-    // ------------------------------------------------------- device bypass
-    OptionSpec {
-        option: NumericOverrideOption::Bypass,
-        key: "BYPASS",
-        package: OptionPackage::Global,
-        section: OverrideSection::DeviceBypass,
-        label: "Device bypass",
-        value_kind: OverrideValueKind::Flag,
-        value_hint: "on · off",
-        config_field: "bypass_config.enabled",
-        consumer: "engine/builder.rs:8626 · set_b3soi_bypass_tolerances",
-        time_stepped_only: false,
-    },
-    OptionSpec {
-        option: NumericOverrideOption::BypassReltol,
-        key: "BYPASSRELTOL",
-        package: OptionPackage::Global,
-        section: OverrideSection::DeviceBypass,
-        label: "Bypass relative bound · BYPASSRELTOL",
-        value_kind: OverrideValueKind::PositiveReal,
-        value_hint: "positive real",
-        config_field: "bypass_config.reltol",
-        consumer: "engine/builder.rs:8627 · set_b3soi_bypass_tolerances",
-        time_stepped_only: false,
-    },
-    OptionSpec {
-        option: NumericOverrideOption::BypassAbstol,
-        key: "BYPASSABSTOL",
-        package: OptionPackage::Global,
-        section: OverrideSection::DeviceBypass,
-        label: "Bypass voltage floor · BYPASSABSTOL",
-        value_kind: OverrideValueKind::PositiveReal,
-        value_hint: "positive real",
-        config_field: "bypass_config.abstol",
-        consumer: "engine/builder.rs:8629 · set_b3soi_bypass_tolerances",
-        time_stepped_only: false,
-    },
-];
+///
+/// The two package tables are spliced rather than appended, because that
+/// order is by *section*: the four `TIMEINT` keys are the integration
+/// section's own, and they report after the global keys that open that
+/// section and before the matrix section's. The tables carry ownership; this
+/// carries the order.
+pub(super) const SPECS: &[OptionSpec] = &LEDGER_ORDER;
+
+/// How many options the catalog holds, across every package.
+const CATALOG_LEN: usize = global::GLOBAL.len() + timeint::TIMEINT.len();
+
+const LEDGER_ORDER: [OptionSpec; CATALOG_LEN] = ledger_order();
+
+/// Both package tables, in the order the ledger reports them.
+const fn ledger_order() -> [OptionSpec; CATALOG_LEN] {
+    let seam = integration_seam();
+    let mut catalog = [global::GLOBAL[0]; CATALOG_LEN];
+    let mut written = 0;
+    let mut index = 0;
+    while index < seam {
+        catalog[written] = global::GLOBAL[index];
+        written += 1;
+        index += 1;
+    }
+    index = 0;
+    while index < timeint::TIMEINT.len() {
+        catalog[written] = timeint::TIMEINT[index];
+        written += 1;
+        index += 1;
+    }
+    index = seam;
+    while index < global::GLOBAL.len() {
+        catalog[written] = global::GLOBAL[index];
+        written += 1;
+        index += 1;
+    }
+    catalog
+}
+
+/// Where the integration package's table splices into the global one: after
+/// the last global key of the same section.
+///
+/// Derived rather than written down. A global key added to the convergence
+/// section would otherwise push the integration package past the matrix
+/// section with nothing saying so.
+const fn integration_seam() -> usize {
+    let mut seam = 0;
+    let mut index = 0;
+    while index < global::GLOBAL.len() {
+        if matches!(global::GLOBAL[index].section, OverrideSection::Integration) {
+            seam = index + 1;
+        }
+        index += 1;
+    }
+    seam
+}
 
 impl NumericOverrideOption {
     /// Why an analysis carrying an accuracy tier cannot be given ITL1, and

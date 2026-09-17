@@ -853,3 +853,45 @@ fn a_real_override_is_spelled_the_way_the_preset_beside_it_is() {
         );
     }
 }
+
+/// The catalog reports both package tables in the order it always has.
+///
+/// That order is observable: [`NumericOverrideOption::all`] is what the
+/// ledger and the option picker walk. It is also not the order a naive
+/// concatenation of the two package tables would give — the four `TIMEINT`
+/// keys report inside the integration section, not after the device-bypass
+/// one — so a splice that appended instead of inserting would move four rows
+/// with nothing else failing.
+#[test]
+fn the_catalog_order_survives_the_split_into_package_tables() {
+    assert_eq!(
+        NumericOverrideOption::all().collect::<Vec<_>>(),
+        vec![
+            NumericOverrideOption::Reltol,
+            NumericOverrideOption::Abstol,
+            NumericOverrideOption::Vntol,
+            NumericOverrideOption::ResidualReltol,
+            NumericOverrideOption::Gmin,
+            NumericOverrideOption::Itl1,
+            NumericOverrideOption::Itl4,
+            NumericOverrideOption::GminStepping,
+            NumericOverrideOption::SourceStepping,
+            NumericOverrideOption::PseudoTransient,
+            NumericOverrideOption::ArcLength,
+            NumericOverrideOption::Damping,
+            NumericOverrideOption::Chgtol,
+            NumericOverrideOption::Trtol,
+            NumericOverrideOption::IntegrationMethod,
+            NumericOverrideOption::LteReltol,
+            NumericOverrideOption::LteAbstol,
+            NumericOverrideOption::MinTimestep,
+            NumericOverrideOption::MaximumTimestep,
+            NumericOverrideOption::Pivrel,
+            NumericOverrideOption::Pivtol,
+            NumericOverrideOption::Solver,
+            NumericOverrideOption::Bypass,
+            NumericOverrideOption::BypassReltol,
+            NumericOverrideOption::BypassAbstol,
+        ]
+    );
+}
