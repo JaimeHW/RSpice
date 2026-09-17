@@ -24,25 +24,25 @@ use super::remove_unused::{
 use super::xspice_parser;
 use super::{
     AnalysisCard, AnalysisCardError, AnalysisCardIssue, AnalysisCommand, BjtType, DataTable,
-    DeviceInitialConditionDirective, DeviceInitialConditionEntry, DeviceInitialConditionError,
-    DeviceInitialConditionSource, DuplicateModelParameterError, Element, ElementKind, EnvelopeCard,
-    FftAnalysis, FftFormat, FftOutput, FftWindow, FreqVariation, InitialCondition, JfetType,
-    LinAnalysis, MesfetType, MissingSubcircuitEndsBoundary, MissingSubcircuitEndsError, ModelDef,
-    MonteCarloCommand, MonteCarloDistribution, MosType, Netlist, NetlistSourceLocation, NodeSet,
-    OutputAnalysisKind, OutputDirectiveKind, OutputOperand, OutputOperandKind, OutputRequest,
-    PacCard, ParamContext, ParameterDefinitionKind, ParameterRedefinitionDiagnosticPolicy,
-    ParameterRedefinitionError, ParameterRedefinitionPolicy, ParametricValue, ParseDiagnostic,
-    ParseError, ParseWithAbortError, PeriodicSourceSelector, PeriodicSweep, PnoiseCard,
-    PnoiseReference, PoleZeroAnalysisType, PoleZeroTransferType, PrintDelimiter,
-    PspiceChebyshevKind, PspiceUTiming, PspiceUTimingMode, PssCard, PstbCard, PxfCard,
-    RemoveUnusedDeviceType, RemoveUnusedPolicy, SaveSet, SaveSignal, SensitivityAcSweep,
-    SimulationOptions, SourceMultiplicity, SourceRfPort, SourceSpec, SpectreStatisticsPlan,
-    StartupDiagnosticCode, StartupDirectiveDisposition, StartupDirectiveEntry,
-    StartupDirectiveKind, StartupDirectiveRecord, StartupDirectiveScope, StatisticalParamMode,
-    StepCommand, StepSweep, StepTarget, SubcircuitDef, SwitchState, TransientNoiseConfig,
-    VerilogAInclude, XyceAddResistorMode, XyceAddResistorSpec, XyceAddResistorsPolicy,
-    ensure_parse_not_aborted, finish_non_aborting_parse, poll_parse_abort, poll_parse_text,
-    validate_startup_directives_with_abort,
+    DcMatchCard, DeviceInitialConditionDirective, DeviceInitialConditionEntry,
+    DeviceInitialConditionError, DeviceInitialConditionSource, DuplicateModelParameterError,
+    Element, ElementKind, EnvelopeCard, FftAnalysis, FftFormat, FftOutput, FftWindow,
+    FreqVariation, InitialCondition, JfetType, LinAnalysis, MesfetType,
+    MissingSubcircuitEndsBoundary, MissingSubcircuitEndsError, ModelDef, MonteCarloCommand,
+    MonteCarloDistribution, MosType, Netlist, NetlistSourceLocation, NodeSet, OutputAnalysisKind,
+    OutputDirectiveKind, OutputOperand, OutputOperandKind, OutputRequest, PacCard, ParamContext,
+    ParameterDefinitionKind, ParameterRedefinitionDiagnosticPolicy, ParameterRedefinitionError,
+    ParameterRedefinitionPolicy, ParametricValue, ParseDiagnostic, ParseError, ParseWithAbortError,
+    PeriodicSourceSelector, PeriodicSweep, PnoiseCard, PnoiseReference, PoleZeroAnalysisType,
+    PoleZeroTransferType, PrintDelimiter, PspiceChebyshevKind, PspiceUTiming, PspiceUTimingMode,
+    PssCard, PstbCard, PxfCard, RemoveUnusedDeviceType, RemoveUnusedPolicy, SaveSet, SaveSignal,
+    SensitivityAcSweep, SimulationOptions, SourceMultiplicity, SourceRfPort, SourceSpec,
+    SpectreStatisticsPlan, StartupDiagnosticCode, StartupDirectiveDisposition,
+    StartupDirectiveEntry, StartupDirectiveKind, StartupDirectiveRecord, StartupDirectiveScope,
+    StatisticalParamMode, StepCommand, StepSweep, StepTarget, SubcircuitDef, SwitchState,
+    TransientNoiseConfig, VerilogAInclude, XyceAddResistorMode, XyceAddResistorSpec,
+    XyceAddResistorsPolicy, ensure_parse_not_aborted, finish_non_aborting_parse, poll_parse_abort,
+    poll_parse_text, validate_startup_directives_with_abort,
 };
 use super::{ElementParameterDirection, ParameterDirectionCapture};
 use crate::Value;
@@ -51,6 +51,7 @@ use crate::expr::Derivative;
 use crate::numerics::integration::{XYCE_DEFAULT_NLMAX, XYCE_DEFAULT_NLMIN};
 use std::collections::{HashMap, HashSet};
 
+mod analysis_card_scan;
 mod chebyshev_synthesis;
 mod command_parsers;
 mod commands;
@@ -100,6 +101,7 @@ pub(crate) fn control_options(
 }
 
 mod conditionals;
+mod dcmatch_card;
 mod elements;
 mod laplace_synthesis;
 mod line;

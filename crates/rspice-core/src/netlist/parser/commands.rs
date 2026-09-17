@@ -455,6 +455,11 @@ pub(super) fn parse_command(
         ".TF" => {
             analyses.push(parse_tf_command(stream, line_num)?);
         }
+        ".DCMATCH" => {
+            analyses.push(dcmatch_card::parse_dcmatch_command(
+                stream, line_num, params,
+            )?);
+        }
         ".PREPROCESS" => parse_preprocess_command(stream, line_num, diagnostics)?,
         ".OPTIONS" | ".OPTION" | ".OPT" => {
             let parameter_direction = if defer_scoped_values {

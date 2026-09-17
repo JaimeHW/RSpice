@@ -2365,6 +2365,63 @@ pub enum AnalysisCommand {
 
     /// Harmonic-balance envelope continuation: `.ENVELOPE`.
     Envelope(Box<EnvelopeCard>),
+
+    /// DC mismatch variance of one output, with ranked contributors:
+    /// `.DCMATCH`.
+    DcMatch(Box<DcMatchCard>),
+}
+
+//=============================================================================
+// DC mismatch card
+//=============================================================================
+
+/// Authored `.DCMATCH` card.
+///
+/// `.DCMATCH OUT=V(node[,ref])|I(element) [MISMATCH=yes|no] [PROCESS=yes|no]
+/// [CONTRIBUTORS=<n>] [THRESHOLD=<share>] [SIGMA=<k>]`
+///
+/// Every field is validated by the parser, so the analysis layer converts the
+/// card rather than re-deriving what the deck asked for.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DcMatchCard {
+    /// Node for a `V(...)` probe, element name for an `I(...)` probe.
+    pub output_node: String,
+    /// Reference node of a differential `V(out,ref)` probe.
+    pub reference_node: Option<String>,
+    /// True when the probe is a branch current `I(element)`.
+    pub output_is_current: bool,
+    /// Include the per-instance `mismatch` variations of the design's
+    /// `statistics` block.
+    pub mismatch: bool,
+    /// Include the design-wide `process` variations, which every instance
+    /// reads as one perfectly correlated variable.
+    pub process: bool,
+    /// Contributors retained in the report, largest variance share first.
+    /// Zero retains every contributor.
+    pub contributor_limit: usize,
+    /// Smallest variance share a contributor must carry to be listed.
+    pub threshold: Value,
+    /// Multiple of sigma the report quotes.
+    pub sigma_multiplier: Value,
+}
+
+impl DcMatchCard {
+    /// Contributors retained when the card does not say.
+    pub const DEFAULT_CONTRIBUTORS: usize = 10;
+
+    /// A card probing `V(output)` with every other field defaulted.
+    pub fn voltage_probe(output_node: impl Into<String>) -> Self {
+        Self {
+            output_node: output_node.into(),
+            reference_node: None,
+            output_is_current: false,
+            mismatch: true,
+            process: false,
+            contributor_limit: Self::DEFAULT_CONTRIBUTORS,
+            threshold: 0.0,
+            sigma_multiplier: 1.0,
+        }
+    }
 }
 
 //=============================================================================
@@ -2774,6 +2831,7 @@ pub enum AnalysisCard {
     Pnoise,
     Pstb,
     Envelope,
+    DcMatch,
 }
 
 impl AnalysisCard {
@@ -2786,6 +2844,7 @@ impl AnalysisCard {
             Self::Pnoise => ".PNOISE",
             Self::Pstb => ".PSTB",
             Self::Envelope => ".ENVELOPE",
+            Self::DcMatch => ".DCMATCH",
         }
     }
 }
