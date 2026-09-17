@@ -55,6 +55,17 @@ impl SchematicState {
         if Some(tool) != self.pending_part_model.as_ref().map(|armed| armed.tool) {
             self.pending_part_model = None;
         }
+        // A stimulus definition is armed for one exact source type, and the
+        // same rule applies: re-arming anything else retires it, so a resistor
+        // can never be placed carrying a sine card.
+        if Some(tool)
+            != self
+                .pending_stimulus
+                .as_ref()
+                .map(|armed| Tool::Place(armed.component_type))
+        {
+            self.pending_stimulus = None;
+        }
         self.tool = tool;
     }
 
@@ -102,6 +113,7 @@ impl SchematicState {
         self.pending_documentation_shape = None;
         self.documentation_shape_drawing.clear();
         self.pending_part_model = None;
+        self.pending_stimulus = None;
         self.tool = Tool::Select;
     }
 

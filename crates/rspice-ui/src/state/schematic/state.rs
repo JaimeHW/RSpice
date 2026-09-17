@@ -31,8 +31,11 @@ mod editor_ops;
 mod identity;
 mod junction_ops;
 mod selection_ops;
+mod stimulus_placement;
 mod undo;
 mod viewport;
+
+pub use stimulus_placement::PendingStimulusPlacement;
 
 // =============================================================================
 // Constants
@@ -412,6 +415,15 @@ pub struct SchematicState {
     #[serde(skip)]
     pub pending_part_model: Option<PendingPartModel>,
 
+    /// Stimulus definition armed for the next independent-source placement.
+    ///
+    /// Runtime interaction state only. A definition is a placeable part, so
+    /// the instance it becomes is born holding the definition's card and the
+    /// receipt for it; the payload rides beside the armed tool exactly as
+    /// [`PendingPartModel`] does, and for the same reason.
+    #[serde(skip)]
+    pub pending_stimulus: Option<PendingStimulusPlacement>,
+
     /// Validated configuration used while `Tool::BusTap` is armed.
     #[serde(skip)]
     pub pending_bus_tap: Option<PendingBusTap>,
@@ -549,6 +561,7 @@ impl Default for SchematicState {
             preview_mirror_h: false,
             pending_library_cell: None,
             pending_part_model: None,
+            pending_stimulus: None,
             pending_bus_tap: None,
             pending_port: None,
             pending_design_note: None,

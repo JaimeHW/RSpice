@@ -8,7 +8,7 @@
 use egui::{InputState, Key, Modifiers, Popup, Response};
 
 use crate::diagnostics::ConsoleMessage;
-use crate::state::{ComponentType, LibraryCellInstance, Point};
+use crate::state::{ComponentType, LibraryCellInstance, PendingStimulusPlacement, Point};
 use crate::workbench::app_state::AppState;
 
 /// Typed payload shared by component-shelf drag sources and the schematic
@@ -19,6 +19,9 @@ pub(crate) enum SchematicShelfDragPayload {
     /// Boxed: a bound cell instance dwarfs a primitive's component type, and
     /// this payload rides in drag state alongside the primitive case.
     LibraryCell(Box<LibraryCellInstance>),
+    /// A stimulus definition dragged off the Component shelf. Boxed for the
+    /// same reason the cell binding is: it carries the copied card.
+    Stimulus(Box<PendingStimulusPlacement>),
 }
 
 impl SchematicShelfDragPayload {
@@ -36,16 +39,22 @@ impl SchematicShelfDragPayload {
         Self::LibraryCell(Box::new(binding))
     }
 
+    /// Carry one armed stimulus definition to the canvas.
+    pub(crate) fn stimulus(placement: PendingStimulusPlacement) -> Self {
+        Self::Stimulus(Box::new(placement))
+    }
+
     pub(crate) fn component_type(&self) -> ComponentType {
         match self {
             Self::Primitive(kind) => *kind,
             Self::LibraryCell(_) => ComponentType::CellInstance,
+            Self::Stimulus(placement) => placement.component_type,
         }
     }
 
     pub(crate) fn binding(&self) -> Option<&LibraryCellInstance> {
         match self {
-            Self::Primitive(_) => None,
+            Self::Primitive(_) | Self::Stimulus(_) => None,
             Self::LibraryCell(binding) => Some(binding),
         }
     }
@@ -54,6 +63,9 @@ impl SchematicShelfDragPayload {
         match self {
             Self::Primitive(kind) => kind.display_name().to_owned(),
             Self::LibraryCell(binding) => format!("{}/{}", binding.library, binding.cell),
+            Self::Stimulus(placement) => {
+                format!("{} r{}", placement.definition(), placement.revision())
+            }
         }
     }
 }
@@ -108,6 +120,14 @@ pub(super) fn commit_shelf_drop(
             state.schematic.with_undo("drop library cell", |schematic| {
                 schematic.add_library_cell_component(grid_pos, binding);
             })
+        }
+        SchematicShelfDragPayload::Stimulus(placement) => {
+            let placement = (**placement).clone();
+            state
+                .schematic
+                .with_undo(format!("drop {}", placement.definition()), |schematic| {
+                    schematic.add_stimulus_component(&placement, grid_pos);
+                })
         }
     };
     if !changed {

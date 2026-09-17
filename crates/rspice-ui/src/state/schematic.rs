@@ -129,7 +129,10 @@ pub(crate) use replacement::{
 pub use rotation::Rotation;
 pub use selection::{JunctionSelection, SchematicSelectionFilter, Selection};
 pub use snap::{SnapEngine, SnapResult, SnapTarget, SnapTargetType};
-pub use state::{MoveSelectionMode, SchematicState, StretchOrthogonalPolicy, StretchTarget};
+pub use state::{
+    MoveSelectionMode, PendingStimulusPlacement, SchematicState, StretchOrthogonalPolicy,
+    StretchTarget,
+};
 /// Reachable only from the drawing tests; production callers inside the
 /// schematic state reach the constant through its defining module.
 #[cfg(test)]

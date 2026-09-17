@@ -942,17 +942,48 @@ fn place_component(state: &mut AppState, component_type: ComponentType, grid_pos
                 log::info!("Placed library cell instance at {:?}", grid_pos);
             }
         }
-        _ => {
-            let changed = state.schematic.with_undo(
-                format!("place {}", component_type.display_name()),
-                |schematic| {
-                    schematic.add_component(component_type, grid_pos);
-                },
-            );
-            if changed {
-                log::info!("Placed {:?} at {:?}", component_type, grid_pos);
+        // A definition armed on the cursor places an instance that is already
+        // an adopter: the copy and the receipt are written inside the same
+        // undo group as the instance, so one undo removes an adopted source
+        // rather than stepping back through a default one nobody placed.
+        _ => match state
+            .schematic
+            .pending_stimulus
+            .clone()
+            .filter(|armed| armed.component_type == component_type)
+        {
+            Some(armed) => {
+                let changed = state.schematic.with_undo(
+                    format!(
+                        "place {} from {}",
+                        component_type.display_name(),
+                        armed.definition()
+                    ),
+                    |schematic| {
+                        schematic.add_stimulus_component(&armed, grid_pos);
+                    },
+                );
+                if changed {
+                    log::info!(
+                        "Placed {:?} from stimulus definition {} at {:?}",
+                        component_type,
+                        armed.definition(),
+                        grid_pos
+                    );
+                }
             }
-        }
+            None => {
+                let changed = state.schematic.with_undo(
+                    format!("place {}", component_type.display_name()),
+                    |schematic| {
+                        schematic.add_component(component_type, grid_pos);
+                    },
+                );
+                if changed {
+                    log::info!("Placed {:?} at {:?}", component_type, grid_pos);
+                }
+            }
+        },
     }
 }
 
