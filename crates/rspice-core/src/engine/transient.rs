@@ -4682,7 +4682,7 @@ impl Engine {
         // Transient device noise is installed after the run's initial
         // operating point, so that point is the deterministic one and every
         // injected density is evaluated from a converged bias.
-        let transient_noise = match netlist.options.transient_noise {
+        let mut transient_noise = match netlist.options.transient_noise {
             None => None,
             Some(config) => {
                 let runtime = self.install_transient_device_noise(
@@ -10944,7 +10944,7 @@ impl Engine {
             // instantaneous bias. Re-derive them from the point just accepted
             // so the next step's stamp carries this bias, and never from a
             // candidate the solver may still reject.
-            if let Some(runtime) = &transient_noise {
+            if let Some(runtime) = transient_noise.as_mut() {
                 runtime.refresh(&mut circuit, &solution)?;
             }
             if let Some(history) = xyce_static_history_candidate {
@@ -11323,6 +11323,14 @@ impl Engine {
             "Transient complete: {} time points computed",
             result.time.len()
         );
+        if let Some(runtime) = &transient_noise {
+            log::info!(
+                "Transient noise complete: {} source(s) re-derived at {} of {} accepted points",
+                runtime.source_count(),
+                runtime.refresh_count(),
+                result.time.len()
+            );
+        }
         if let Some(message) = circuit.take_xspice_evaluation_error() {
             return Err(SimulationError::Circuit(format!(
                 "XSPICE evaluation failed: {message}"

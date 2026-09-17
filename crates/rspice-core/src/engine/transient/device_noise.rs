@@ -193,6 +193,16 @@ pub(super) struct TransientNoiseRuntime {
     /// The seed the whole run was derived from, for the run log.
     seed: u64,
     entries: Vec<AmplitudeEntry>,
+    /// Newton's own statement of when two solutions are the same bias.
+    reltol: Value,
+    node_abstol: Value,
+    branch_abstol: Value,
+    /// Where the node block ends in the solution vector.
+    num_nodes: usize,
+    /// The accepted solution the installed amplitudes were derived from.
+    reference: Vec<Value>,
+    /// How many accepted points re-derived the densities, for the run log.
+    refreshes: usize,
 }
 
 impl TransientNoiseRuntime {
@@ -206,20 +216,54 @@ impl TransientNoiseRuntime {
         self.seed
     }
 
+    /// How many accepted points re-derived the injected densities.
+    pub(super) fn refresh_count(&self) -> usize {
+        self.refreshes
+    }
+
+    /// Whether the bias has moved since the amplitudes were last derived.
+    ///
+    /// The comparison is Newton's own: the solver declares a solution
+    /// converged when its remaining update is inside
+    /// `reltol·|x| + abstol`, so two accepted solutions that differ by less
+    /// than that are the same bias as far as anything in this run can tell,
+    /// and the densities re-derived from either would differ by less than the
+    /// bias itself is resolved to. Using the deck's authored tolerances rather
+    /// than a threshold of this module's own invention is what keeps that a
+    /// statement about the deck instead of an approximation smuggled in here.
+    fn bias_moved(&self, solution: &[Value]) -> bool {
+        if self.reference.len() != solution.len() {
+            return true;
+        }
+        solution
+            .iter()
+            .zip(&self.reference)
+            .enumerate()
+            .any(|(row, (now, before))| {
+                let floor = if row < self.num_nodes {
+                    self.node_abstol
+                } else {
+                    self.branch_abstol
+                };
+                (now - before).abs() > self.reltol * now.abs().max(before.abs()) + floor
+            })
+    }
+
     /// Re-derive every injected amplitude from an accepted solution.
     ///
     /// Re-collecting the catalog is what makes the density the device model's
     /// own at the present bias rather than a frozen operating-point value.
     /// The catalog's order is a function of the circuit's fixed device arrays,
     /// so the common case matches position for position; the structural check
-    /// below is what proves that rather than assuming it, and a mechanism
-    /// whose bias-dependent guard has flipped falls back to a keyed match.
+    /// in [`Self::apply`] is what proves that rather than assuming it, and a
+    /// mechanism whose bias-dependent guard has flipped falls back to a keyed
+    /// match.
     pub(super) fn refresh(
-        &self,
+        &mut self,
         circuit: &mut CircuitData,
         solution: &[Value],
     ) -> Result<(), SimulationError> {
-        if self.entries.is_empty() {
+        if self.entries.is_empty() || !self.bias_moved(solution) {
             return Ok(());
         }
         let mut collected = Engine::try_collect_noise_sources(circuit, solution, self.dialect)?;
@@ -228,7 +272,11 @@ impl TransientNoiseRuntime {
             &mut collected.correlated,
             self.dialect,
         );
-        self.apply(circuit, &collected.elementary)
+        self.apply(circuit, &collected.elementary)?;
+        self.reference.clear();
+        self.reference.extend_from_slice(solution);
+        self.refreshes = self.refreshes.saturating_add(1);
+        Ok(())
     }
 
     /// Re-derive the amplitudes from a catalog the caller has already
@@ -362,10 +410,10 @@ impl Engine {
     /// Build the injection plan for a transient-noise run and install it on
     /// the circuit.
     ///
-    /// Returns the run-local half, or `None` when the deck did not ask for
-    /// transient noise. A deck that asked for it and has no noise mechanism at
-    /// all runs as an ordinary deterministic transient, and the run log says
-    /// so rather than the request disappearing.
+    /// Returns the run-local half that re-derives the amplitudes. A deck that
+    /// asked for transient noise and has no noise mechanism at all runs as an
+    /// ordinary deterministic transient, and the run log says it injected zero
+    /// sources rather than the request disappearing.
     pub(super) fn install_transient_device_noise(
         &self,
         circuit: &mut CircuitData,
@@ -499,17 +547,30 @@ impl Engine {
             sample_count,
             injected,
         ));
-        let runtime = TransientNoiseRuntime {
+        let convergence = &self.config.convergence_config;
+        let node_abstol = if convergence.voltage_abstol > 0.0 {
+            convergence.voltage_abstol
+        } else {
+            self.config.tolerance
+        };
+        let mut runtime = TransientNoiseRuntime {
             dialect: self.config.spice_dialect,
             ambient_temperature: self.config.temperature,
             scale: config.scale,
             fmax: config.fmax,
             seed: run_seed,
             entries,
+            reltol: convergence.voltage_reltol,
+            node_abstol,
+            branch_abstol: convergence.current_abstol,
+            num_nodes: circuit.num_nodes(),
+            reference: Vec::new(),
+            refreshes: 1,
         };
         // The catalog in hand is the one the operating point produced, so the
         // first amplitudes come from it rather than from a second collection.
         runtime.apply(circuit, &collected.elementary)?;
+        runtime.reference.extend_from_slice(solution);
         Ok(runtime)
     }
 
