@@ -220,6 +220,10 @@ pub(crate) use dialogs::hierarchy::descend::open_descend_hierarchy_dialog;
 pub(crate) use dialogs::replace_instance::{
     open_replace_instance_dialog, replace_instance_available,
 };
+pub(crate) use dialogs::stimulus_link::{
+    StimulusLinkMode, commit_readoption, open_stimulus_definition, open_stimulus_link,
+    stimulus_link_target,
+};
 pub(crate) use dialogs::view_operations::{
     open_full_screen_workflow, open_reset_active_view_workflow,
 };
@@ -229,6 +233,7 @@ pub(crate) use actions::property_edit::{
     authoritative_component_property_sheet, open_property_editor, open_selected_object_properties,
     selected_object_properties_available,
 };
+pub(crate) use actions::stimulus_placement::arm_placement_from_definition;
 
 pub(crate) use dialogs::placement::net_label::open_net_label_placement;
 pub(crate) use dialogs::selection::array::{
@@ -856,6 +861,7 @@ impl RSpiceApp {
         self.render_stretch_selection_dialog(ctx);
         self.render_array_selection_dialog(ctx);
         self.render_replace_instance_dialog(ctx);
+        dialogs::stimulus_link::render_stimulus_link_dialog(ctx, &mut self.state);
         self.render_create_hierarchy_dialog(ctx);
         self.render_check_and_save_dialog(ctx);
         self.render_connectivity_manager_dialog(ctx);

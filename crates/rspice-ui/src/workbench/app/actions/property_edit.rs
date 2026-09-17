@@ -560,7 +560,7 @@ pub(crate) fn open_property_editor(state: &mut AppState, component_id: u64) {
 /// a transient yet gets the setup's own defaults, which is what a run would use
 /// if the user added one and changed nothing, and the card says the numbers came
 /// from there rather than from an analysis.
-fn stimulus_preview_timing(state: &AppState) -> PreviewTiming {
+pub(in crate::workbench) fn stimulus_preview_timing(state: &AppState) -> PreviewTiming {
     let authored = state.sim_setup.analysis_plan.as_ref().and_then(|plan| {
         plan.instances()
             .iter()

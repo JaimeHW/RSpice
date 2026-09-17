@@ -6,12 +6,16 @@
 
 use std::collections::HashMap;
 
+use crate::diagnostics::ConsoleMessage;
 use crate::properties::{
     ComponentEditorContext, ComponentModelContext, ComponentOperatingPointContext,
     ComponentTerminalContext, TabbedDialogResult, render_tabbed_property_dialog,
 };
 use crate::simulation::netlist_gen::{HierarchySource, projection_nets};
 use crate::state::{Component, ComponentType, PropertySheet, PropertyValue};
+use crate::workbench::app::dialogs::stimulus_link::{
+    StimulusLinkMode, commit_readoption, open_stimulus_definition, open_stimulus_link,
+};
 use crate::workbench::app_state::AppState;
 use crate::workbench::state::{ModelsPage, Workspace};
 
@@ -190,6 +194,56 @@ pub fn render_property_dialog(ctx: &egui::Context, state: &mut AppState) -> Tabb
         TabbedDialogResult::CrossProbe => {
             state.tabbed_property_dialog.close();
             state.workbench.activate(Workspace::Results);
+        }
+        TabbedDialogResult::AdoptStimulus | TabbedDialogResult::ExtractStimulus => {
+            // The link transaction is about the instance on the sheet, not
+            // about this editor's draft, so the editor closes first: two modal
+            // surfaces over one component would let a reader apply one edit
+            // through each and see only the second.
+            let mode = if result == TabbedDialogResult::AdoptStimulus {
+                StimulusLinkMode::Adopt
+            } else {
+                StimulusLinkMode::Extract
+            };
+            if let Some(component_id) = state.tabbed_property_dialog.component_id {
+                state.tabbed_property_dialog.close();
+                if let Err(refusal) = open_stimulus_link(state, component_id, mode) {
+                    state.push_user_message(ConsoleMessage::warning(refusal));
+                }
+            }
+        }
+        TabbedDialogResult::OpenStimulusDefinition => {
+            let definition = editor_context
+                .stimulus
+                .as_ref()
+                .and_then(|stimulus| stimulus.definition.clone());
+            state.tabbed_property_dialog.close();
+            if let Some(definition) = definition {
+                open_stimulus_definition(state, &definition);
+            }
+        }
+        TabbedDialogResult::ReadoptStimulus => {
+            let definition = editor_context
+                .stimulus
+                .as_ref()
+                .and_then(|stimulus| stimulus.definition.clone());
+            if let (Some(component_id), Some(definition)) =
+                (state.tabbed_property_dialog.component_id, definition)
+            {
+                match commit_readoption(state, component_id, &definition) {
+                    Ok(line) => {
+                        state.push_user_message(ConsoleMessage::info(line));
+                        // Reopened rather than patched in place: the copy is a
+                        // whole new card, and the draft the reader was typing
+                        // into describes the one it replaced.
+                        state.tabbed_property_dialog.close();
+                        crate::workbench::app::open_property_editor(state, component_id);
+                    }
+                    Err(refusal) => {
+                        state.tabbed_property_dialog.commit_error = Some(refusal);
+                    }
+                }
+            }
         }
         _ => {}
     }
@@ -455,7 +509,37 @@ fn component_editor_context(state: &AppState) -> ComponentEditorContext {
         model: component_model_context(state, component),
         operating_point: component_operating_point_context(state, component),
         terminals: component_terminal_context(state, component),
+        stimulus: component_stimulus_context(state, component),
     }
+}
+
+/// Where this instance stands with the project's stimulus library.
+///
+/// Read from the library on every frame, exactly as the model binding and the
+/// terminals are: the library is project state, and an editor holding its own
+/// copy of a lifecycle word is how a chip comes to disagree with the page that
+/// computed it.
+fn component_stimulus_context(
+    state: &AppState,
+    component: &Component,
+) -> Option<crate::properties::StimulusEditorContext> {
+    if !crate::simulation::stimulus_realize::is_independent_source(component.kind) {
+        return None;
+    }
+    let library = &state.workspace.stimulus_library;
+    let definition = component
+        .stimulus_provenance
+        .as_ref()
+        .map(|provenance| provenance.definition.clone());
+    Some(crate::properties::StimulusEditorContext {
+        state: library.provenance_state(component),
+        library_revision: definition
+            .as_deref()
+            .and_then(|name| library.get(name))
+            .map(crate::state::stimulus_library::definition::StimulusDefinition::revision),
+        definition,
+        library_is_empty: library.is_empty(),
+    })
 }
 
 fn component_editor_glyph(kind: ComponentType) -> &'static str {

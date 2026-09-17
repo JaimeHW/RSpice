@@ -426,6 +426,13 @@ pub struct DialogState {
     /// Pin-, parameter-, model-, and netlist-compatible instance replacement.
     pub(crate) replace_instance: ReplaceInstanceDialogState,
 
+    /// Adopting a stimulus definition onto a placed source, or saving one from
+    /// it. Both directions are one transaction over one instance, so they are
+    /// one session with two modes rather than two dialogs that would each have
+    /// to state the same instance and the same card.
+    pub(crate) stimulus_link:
+        crate::workbench::app::dialogs::stimulus_link::StimulusLinkDialogState,
+
     /// Multi-document selected-instance extraction transaction.
     pub(crate) create_hierarchy: CreateHierarchyDialogState,
 
@@ -546,6 +553,7 @@ impl DialogState {
             || self.stretch_selection.open
             || self.array_selection.open
             || self.replace_instance.open
+            || self.stimulus_link.open
             || self.create_hierarchy.open
             || self.check_and_save.open
             || self.connectivity_manager.open
