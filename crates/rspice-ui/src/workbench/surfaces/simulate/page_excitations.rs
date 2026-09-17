@@ -337,7 +337,12 @@ enum SourceVerb {
 
 impl SourceVerb {
     /// The row a reader picks, in the words the menu shows.
-    fn label(&self, provenance: ProvenanceState) -> String {
+    ///
+    /// Named `row_label` rather than `label` because the studio's font guard
+    /// scans this tree for `.label(` with an argument and flags every hit that
+    /// names no font: a getter that hands back a word is not a call that paints
+    /// one, and the guard is worth more than the shorter name.
+    fn row_label(&self, provenance: ProvenanceState) -> String {
         match self {
             Self::Properties => "Properties".to_owned(),
             Self::OpenDefinition(_) => "Open in Stimulus Library".to_owned(),
@@ -400,7 +405,7 @@ fn source_row_verbs(
     let choices: Vec<page_kit::PopupChoice> = verbs
         .iter()
         .map(|verb| page_kit::PopupChoice {
-            label: verb.label(source.provenance),
+            label: verb.row_label(source.provenance),
             unavailable: match verb {
                 SourceVerb::Properties | SourceVerb::Readopt(_) => unreachable,
                 SourceVerb::OpenDefinition(_) => None,
@@ -890,7 +895,7 @@ mod tests {
             ]
         );
         assert_eq!(
-            SourceVerb::Readopt("sensor_drive".to_owned()).label(behind.provenance),
+            SourceVerb::Readopt("sensor_drive".to_owned()).row_label(behind.provenance),
             "Re-adopt r4"
         );
     }
