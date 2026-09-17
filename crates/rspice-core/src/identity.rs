@@ -39,6 +39,16 @@ pub enum AnalysisKind {
     MonteCarlo,
     Fourier,
     Fft,
+    Soa,
+    Optimize,
+    Psp,
+    Hbsp,
+    HbNoise,
+    Qpss,
+    Qpac,
+    Qpnoise,
+    Qpxf,
+    DcMatch,
 }
 
 impl AnalysisKind {
@@ -66,6 +76,16 @@ impl AnalysisKind {
             Self::MonteCarlo => "mc",
             Self::Fourier => "four",
             Self::Fft => "fft",
+            Self::Soa => "soa",
+            Self::Optimize => "optimize",
+            Self::Psp => "psp",
+            Self::Hbsp => "hbsp",
+            Self::HbNoise => "hbnoise",
+            Self::Qpss => "qpss",
+            Self::Qpac => "qpac",
+            Self::Qpnoise => "qpnoise",
+            Self::Qpxf => "qpxf",
+            Self::DcMatch => "dcmatch",
         }
     }
 }
@@ -153,6 +173,96 @@ mod tests {
         assert_eq!(
             AnalysisInstanceId::new(AnalysisKind::ImplicitOp, 0).to_string(),
             "implicit-op-001"
+        );
+    }
+
+    /// Every kind's tag is a distinct lower-case token.
+    ///
+    /// The tag is the kind's external spelling: it names a result document's
+    /// analysis on the wire and an instance in every output name, so two
+    /// kinds sharing one — or one carrying a capital that a reader would
+    /// type in lower case — is a collision rather than a cosmetic slip.
+    /// There is no parse-from-tag to round-trip through; this is the
+    /// property such a parser would need.
+    #[test]
+    fn every_analysis_kind_tag_is_a_distinct_lower_case_token() {
+        let kinds = [
+            AnalysisKind::ImplicitOp,
+            AnalysisKind::Op,
+            AnalysisKind::Dc,
+            AnalysisKind::Ac,
+            AnalysisKind::Tran,
+            AnalysisKind::Noise,
+            AnalysisKind::Sp,
+            AnalysisKind::Stb,
+            AnalysisKind::Distortion,
+            AnalysisKind::PoleZero,
+            AnalysisKind::Sensitivity,
+            AnalysisKind::TransferFunction,
+            AnalysisKind::Pss,
+            AnalysisKind::Pac,
+            AnalysisKind::Pxf,
+            AnalysisKind::PNoise,
+            AnalysisKind::Pstb,
+            AnalysisKind::HarmonicBalance,
+            AnalysisKind::Envelope,
+            AnalysisKind::MonteCarlo,
+            AnalysisKind::Fourier,
+            AnalysisKind::Fft,
+            AnalysisKind::Soa,
+            AnalysisKind::Optimize,
+            AnalysisKind::Psp,
+            AnalysisKind::Hbsp,
+            AnalysisKind::HbNoise,
+            AnalysisKind::Qpss,
+            AnalysisKind::Qpac,
+            AnalysisKind::Qpnoise,
+            AnalysisKind::Qpxf,
+            AnalysisKind::DcMatch,
+        ];
+
+        let mut tags = kinds.map(AnalysisKind::tag).to_vec();
+        tags.sort_unstable();
+        let distinct = tags.len();
+        tags.dedup();
+        assert_eq!(tags.len(), distinct, "two kinds share a tag: {tags:?}");
+        for tag in &tags {
+            assert!(
+                !tag.is_empty()
+                    && tag
+                        .chars()
+                        .all(|character| character.is_ascii_lowercase() || character == '-'),
+                "{tag} is not a lower-case token"
+            );
+        }
+    }
+
+    /// The ten kinds this release names for the surfaces above it.
+    ///
+    /// They exist so a plan, a project and a result document can carry the
+    /// kind while the engine learns to run it. Pinned by tag because the tag
+    /// is what persists: renaming one would silently orphan every saved
+    /// document that named it.
+    #[test]
+    fn the_newly_named_kinds_keep_the_tags_they_were_declared_with() {
+        assert_eq!(
+            [
+                AnalysisKind::Soa,
+                AnalysisKind::Optimize,
+                AnalysisKind::Psp,
+                AnalysisKind::Hbsp,
+                AnalysisKind::HbNoise,
+                AnalysisKind::Qpss,
+                AnalysisKind::Qpac,
+                AnalysisKind::Qpnoise,
+                AnalysisKind::Qpxf,
+                AnalysisKind::DcMatch,
+            ]
+            .map(AnalysisKind::tag),
+            [
+                "soa", "optimize", "psp", "hbsp", "hbnoise", "qpss", "qpac", "qpnoise", "qpxf",
+                "dcmatch",
+            ]
         );
     }
 

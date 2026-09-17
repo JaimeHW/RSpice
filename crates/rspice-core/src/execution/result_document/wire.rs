@@ -85,6 +85,16 @@ tagged_enum_adapter!(analysis_kind, AnalysisKind, {
     MonteCarlo => "mc",
     Fourier => "four",
     Fft => "fft",
+    Soa => "soa",
+    Optimize => "optimize",
+    Psp => "psp",
+    Hbsp => "hbsp",
+    HbNoise => "hbnoise",
+    Qpss => "qpss",
+    Qpac => "qpac",
+    Qpnoise => "qpnoise",
+    Qpxf => "qpxf",
+    DcMatch => "dcmatch",
 });
 
 tagged_enum_adapter!(

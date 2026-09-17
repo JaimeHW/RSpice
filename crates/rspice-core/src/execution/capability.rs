@@ -95,12 +95,17 @@ impl AnalysisResultKind {
     }
 }
 
-/// Convert every core analysis identity to the result family it produces.
+/// Convert every core analysis identity to the result family it produces, or
+/// `None` where it produces none.
 ///
 /// Port-noise is an optional second result of `SP`, so it has a registry row
 /// but no distinct `AnalysisKind`. Implicit and authored OP share one schema.
-pub const fn analysis_result_kind(kind: AnalysisKind) -> AnalysisResultKind {
-    match kind {
+///
+/// `None` is the answer for a kind that is named and not yet bound to a
+/// directive. Nothing plans one, so nothing produces a result for one, and a
+/// registry row invented for it would claim a schema the engine cannot fill.
+pub const fn analysis_result_kind(kind: AnalysisKind) -> Option<AnalysisResultKind> {
+    Some(match kind {
         AnalysisKind::ImplicitOp | AnalysisKind::Op => AnalysisResultKind::OperatingPoint,
         AnalysisKind::Dc => AnalysisResultKind::DcSweep,
         AnalysisKind::Ac => AnalysisResultKind::Ac,
@@ -122,7 +127,18 @@ pub const fn analysis_result_kind(kind: AnalysisKind) -> AnalysisResultKind {
         AnalysisKind::MonteCarlo => AnalysisResultKind::MonteCarlo,
         AnalysisKind::Fourier => AnalysisResultKind::Fourier,
         AnalysisKind::Fft => AnalysisResultKind::Fft,
-    }
+        // Named for the surfaces above, not yet runnable here.
+        AnalysisKind::Soa
+        | AnalysisKind::Optimize
+        | AnalysisKind::Psp
+        | AnalysisKind::Hbsp
+        | AnalysisKind::HbNoise
+        | AnalysisKind::Qpss
+        | AnalysisKind::Qpac
+        | AnalysisKind::Qpnoise
+        | AnalysisKind::Qpxf
+        | AnalysisKind::DcMatch => return None,
+    })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -616,7 +632,8 @@ mod tests {
             AnalysisKind::Fft,
         ];
         for kind in kinds {
-            let result = analysis_result_kind(kind);
+            let result = analysis_result_kind(kind)
+                .expect("every kind listed here is one a deck can request");
             assert_eq!(analysis_result_capability(result).result, result);
         }
     }

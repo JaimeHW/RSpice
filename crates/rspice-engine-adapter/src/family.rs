@@ -919,9 +919,9 @@ mod tests {
         // The registry is the input: a new core result family must appear in
         // exactly one of the two request tables before this build ships.
         for kind in AnalysisResultKind::ALL {
-            let runnable = REQUEST_KINDS
-                .iter()
-                .any(|(_, planned)| rspice_core::execution::analysis_result_kind(*planned) == kind);
+            let runnable = REQUEST_KINDS.iter().any(|(_, planned)| {
+                rspice_core::execution::analysis_result_kind(*planned) == Some(kind)
+            });
             let refused = match kind {
                 AnalysisResultKind::SParameters => refusal_for_request("s_parameters").is_some(),
                 AnalysisResultKind::PortNoise => refusal_for_request("port_noise").is_some(),

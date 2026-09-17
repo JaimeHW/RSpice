@@ -693,7 +693,7 @@ impl AnalysisResultDocument {
 
     fn validate_identity(&self) -> Result<(), ResultDocumentError> {
         let declared = analysis_result_kind(self.analysis.kind());
-        let compatible = declared == self.result_kind
+        let compatible = declared == Some(self.result_kind)
             || (self.result_kind == AnalysisResultKind::PortNoise
                 && self.analysis.kind() == AnalysisKind::Sp);
         if !compatible {
@@ -2015,7 +2015,9 @@ pub enum ResultDocumentError {
     /// The analysis identity belongs to a different result family.
     AnalysisFamilyMismatch {
         declared: AnalysisResultKind,
-        analysis: AnalysisResultKind,
+        /// The family the document's own analysis kind produces, or `None`
+        /// for a kind that produces none.
+        analysis: Option<AnalysisResultKind>,
     },
     /// A post-process family did not name the analysis it derived from.
     MissingParentAnalysis { result_kind: AnalysisResultKind },
@@ -2094,11 +2096,23 @@ impl fmt::Display for ResultDocumentError {
                 declared.tag(),
                 payload.tag()
             ),
-            Self::AnalysisFamilyMismatch { declared, analysis } => write!(
+            Self::AnalysisFamilyMismatch {
+                declared,
+                analysis: Some(analysis),
+            } => write!(
                 formatter,
                 "document declares result family {} but its analysis produces {}",
                 declared.tag(),
                 analysis.tag()
+            ),
+            Self::AnalysisFamilyMismatch {
+                declared,
+                analysis: None,
+            } => write!(
+                formatter,
+                "document declares result family {} but its analysis produces no \
+                 result family",
+                declared.tag()
             ),
             Self::MissingParentAnalysis { result_kind } => write!(
                 formatter,

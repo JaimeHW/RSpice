@@ -2877,7 +2877,8 @@ mod tests {
             AnalysisKind::PNoise,
             AnalysisKind::Envelope,
         ] {
-            let result = analysis_result_kind(kind);
+            let result = analysis_result_kind(kind)
+                .expect("every periodic kind here is one a deck can request");
             assert_eq!(analysis_result_capability(result).result, result);
         }
     }
