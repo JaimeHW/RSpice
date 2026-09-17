@@ -111,8 +111,12 @@ pub struct EnvelopeDialogState {
     pub initial_periodic_solve_idx: usize,
     #[serde(default = "legacy_adaptive_mode_idx")]
     pub adaptive_mode_idx: usize,
-    #[serde(default)]
-    pub extraction_path_idx: usize,
+    /// Retired: the projection is the only extraction path the runner has,
+    /// so the row that pinned this to its one value was reading a control
+    /// back from itself. Accepted so a project saved while the row existed
+    /// still opens, then dropped.
+    #[serde(default, rename = "extraction_path_idx", skip_serializing)]
+    _extraction_path_idx: Option<serde::de::IgnoredAny>,
     /// Accepted solely to migrate drafts written by the removed AM/FM/PM/IQ
     /// placeholder. It is never serialized or interpreted as a new control.
     #[serde(default, rename = "modulation_idx", skip_serializing)]
@@ -144,7 +148,7 @@ impl EnvelopeDialogState {
                 EnvelopeAdaptiveMode::FixedEnvelopeStep => 1,
                 EnvelopeAdaptiveMode::EventAlignedOnly => 2,
             },
-            extraction_path_idx: 0,
+            _extraction_path_idx: None,
             _legacy_modulation_idx: 0,
             initialized: true,
         }
@@ -174,10 +178,8 @@ impl EnvelopeDialogState {
             2 => EnvelopeAdaptiveMode::EventAlignedOnly,
             _ => return Err("Invalid Envelope output-schedule selection".to_owned()),
         };
-        let extraction_path = match self.extraction_path_idx {
-            0 => EnvelopeExtractionPath::Projection,
-            _ => return Err("Invalid extraction path selection".to_owned()),
-        };
+        // One path, and no control that could ask for another.
+        let extraction_path = EnvelopeExtractionPath::Projection;
         let config = EnvelopeConfig {
             carrier_tones,
             stop_time,
@@ -459,5 +461,30 @@ mod tests {
         let mut state = EnvelopeDialogState::from_config(&EnvelopeConfig::default());
         state.harmonic_order = "1.5".to_owned();
         assert_eq!(state.to_config().unwrap_err(), expected);
+    }
+
+    /// A draft saved while the extraction-path row existed still opens.
+    ///
+    /// The row painted one value and wrote it back, so the key carries no
+    /// choice. It is accepted and dropped, and the projection stays the only
+    /// path `EnvelopeConfig` can name.
+    #[test]
+    fn a_saved_draft_that_carries_an_extraction_path_still_opens() {
+        let mut state: EnvelopeDialogState = serde_json::from_str(
+            r#"{"fundamental":"2.4G","stop_time":"10u","harmonics":"7","extraction_path_idx":0}"#,
+        )
+        .expect("a draft carrying the retired key still opens");
+        state.initialized = true;
+        let config = state.to_config().expect("the restored draft configures");
+        assert_eq!(config.extraction_path, EnvelopeExtractionPath::Projection);
+
+        let written = serde_json::to_value(&state).expect("the draft serializes");
+        assert!(
+            !written
+                .as_object()
+                .expect("the draft is an object")
+                .contains_key("extraction_path_idx"),
+            "the retired key is never written again: {written}"
+        );
     }
 }

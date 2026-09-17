@@ -75,8 +75,6 @@ pub struct HbConfig {
     pub fundamental_freq: f64,
     /// Number of harmonics (DC through Nth)
     pub num_harmonics: u32,
-    /// Optional primary tone name
-    pub fundamental_name: String,
     /// Optional source routing for primary tone
     pub fundamental_source: Option<String>,
     /// Additional tones for multi-tone analysis
@@ -108,7 +106,6 @@ impl Default for HbConfig {
         Self {
             fundamental_freq: 1e9, // 1 GHz RF default
             num_harmonics: 9,      // DC through 9th harmonic
-            fundamental_name: "tone1".to_string(),
             fundamental_source: None,
             additional_tones: Vec::new(),
             oversample: 2,       // 2x oversampling (Spectre default)

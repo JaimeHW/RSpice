@@ -923,7 +923,9 @@ fn validate_choice_indices(plan: &SimSetupState) -> Result<(), String> {
         ("pnoise.sweep_type_idx", plan.pnoise.sweep_type_idx, 2),
         ("pnoise.noise_ref_idx", plan.pnoise.noise_ref_idx, 2),
         ("pxf.sweep_type_idx", plan.pxf.sweep_type_idx, 2),
-        ("xf.sweep_type_idx", plan.xf.sweep_type_idx, 2),
+        // The transfer function's sweep mode and the envelope's extraction
+        // path are retired keys: they are read back from a saved project and
+        // discarded, so there is no selection left for a bound to refuse.
         ("corner.base_analysis_idx", plan.corner.base_analysis_idx, 3),
         (
             "envelope.initial_periodic_solve_idx",
@@ -934,11 +936,6 @@ fn validate_choice_indices(plan: &SimSetupState) -> Result<(), String> {
             "envelope.adaptive_mode_idx",
             plan.envelope.adaptive_mode_idx,
             2,
-        ),
-        (
-            "envelope.extraction_path_idx",
-            plan.envelope.extraction_path_idx,
-            0,
         ),
         ("optimization.goal_mode", plan.optimization.goal_mode, 2),
         ("optimization.algorithm", plan.optimization.algorithm, 2),

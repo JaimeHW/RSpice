@@ -108,27 +108,35 @@ pub struct XfDialogState {
     #[serde(default = "default_accuracy_idx")]
     pub accuracy_idx: usize,
 
+    // The retired AC-shaped editor's nine keys. Private, because no control
+    // reaches one and nothing outside this module may read one: what they
+    // are for is [`Self::prepare_after_restore`], which reads their
+    // presence to recognize a pre-correction project and their values to
+    // build the expression that replaced them.
+    //
+    // `Option` rather than a bare value so absent and empty stay distinct.
+    // A key nothing reads at all is `IgnoredAny`, which cannot be mistaken
+    // for state.
     #[serde(default, skip_serializing)]
-    pub start_freq: String,
+    start_freq: Option<String>,
     #[serde(default, skip_serializing)]
-    pub stop_freq: String,
+    stop_freq: Option<String>,
     #[serde(default, skip_serializing)]
-    pub num_points: String,
+    num_points: Option<String>,
+    #[serde(default, skip_serializing, rename = "sweep_type_idx")]
+    _sweep_type_idx: Option<serde::de::IgnoredAny>,
     #[serde(default, skip_serializing)]
-    pub sweep_type_idx: usize,
+    output_node: Option<String>,
     #[serde(default, skip_serializing)]
-    pub output_node: String,
-    #[serde(default, skip_serializing)]
-    pub output_ref: String,
-    /// Accepted so `deny_unknown_fields` does not reject a pre-correction
-    /// project, then dropped: group delay is a frequency-domain quantity and
-    /// the DC `.TF` model it was saved beside no longer computes one.
+    output_ref: Option<String>,
+    /// Group delay is a frequency-domain quantity and the DC `.TF` model
+    /// this was saved beside no longer computes one.
     #[serde(default, skip_serializing, rename = "group_delay")]
-    pub _group_delay: bool,
+    _group_delay: Option<serde::de::IgnoredAny>,
     #[serde(default, skip_serializing)]
-    pub input_impedance: Option<bool>,
+    input_impedance: Option<bool>,
     #[serde(default, skip_serializing)]
-    pub output_impedance: Option<bool>,
+    output_impedance: Option<bool>,
 
     #[serde(skip)]
     pub initialized: bool,
@@ -185,21 +193,24 @@ impl XfDialogState {
 
     /// Restore runtime state and migrate the retired AC-shaped `.XF` editor.
     pub fn prepare_after_restore(&mut self) {
-        let legacy = !self.start_freq.is_empty()
-            || !self.stop_freq.is_empty()
-            || !self.num_points.is_empty()
-            || !self.output_node.is_empty()
-            || !self.output_ref.is_empty()
+        let stated =
+            |field: &Option<String>| field.as_deref().is_some_and(|value| !value.is_empty());
+        let legacy = stated(&self.start_freq)
+            || stated(&self.stop_freq)
+            || stated(&self.num_points)
+            || stated(&self.output_node)
+            || stated(&self.output_ref)
             || self.input_impedance.is_some()
             || self.output_impedance.is_some();
         if legacy && self.output_expression.trim().is_empty() {
-            let node = self.output_node.trim();
+            let node = self.output_node.as_deref().unwrap_or_default().trim();
+            let reference = self.output_ref.as_deref().unwrap_or_default().trim();
             self.output_expression = if node.is_empty() {
                 XfConfig::default().output_expression
-            } else if self.output_ref.trim().is_empty() {
+            } else if reference.is_empty() {
                 format!("V({node})")
             } else {
-                format!("V({node},{})", self.output_ref.trim())
+                format!("V({node},{reference})")
             };
             self.input_resistance = self.input_impedance.unwrap_or(true);
             self.output_resistance = self.output_impedance.unwrap_or(true);
@@ -383,6 +394,29 @@ mod tests {
                 "output_resistance",
                 "transfer_gain",
             ])
+        );
+    }
+
+    /// A project written since the correction is not migrated as a legacy one.
+    ///
+    /// The retired keys are read for their *presence*, so absent and present
+    /// have to stay distinguishable from empty: a state that carried
+    /// `"start_freq": ""` was never a frequency-domain editor's, and treating
+    /// it as one would overwrite the two resistance flags it did author with
+    /// the migration's defaults.
+    #[test]
+    fn a_state_without_the_retired_keys_keeps_the_flags_it_authored() {
+        let json = r#"{
+            "input_source":"VIN","output_expression":"V(OUT)",
+            "input_resistance":false,"output_resistance":false
+        }"#;
+        let mut restored: XfDialogState = serde_json::from_str(json).expect("current XF state");
+        restored.prepare_after_restore();
+        let config = restored.to_config().expect("XF config");
+        assert_eq!(config.output_expression, "V(OUT)");
+        assert!(
+            !config.input_resistance && !config.output_resistance,
+            "a state with no retired key is not migrated"
         );
     }
 }

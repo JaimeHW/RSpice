@@ -37,8 +37,11 @@ pub struct HbDialogState {
     pub fundamental: String,
     /// Number of harmonics buffer
     pub harmonics: String,
-    /// Primary tone name buffer
-    pub fundamental_name: String,
+    /// Retired: no control ever wrote this, and the primary tone's label is
+    /// the one the specification builder gives it. Accepted so a project
+    /// saved while the field existed still opens, then dropped.
+    #[serde(default, rename = "fundamental_name", skip_serializing)]
+    _fundamental_name: Option<serde::de::IgnoredAny>,
     /// Primary tone source buffer
     pub fundamental_source: String,
     /// Oversample factor buffer
@@ -68,7 +71,7 @@ impl HbDialogState {
         Self {
             fundamental: format_freq(config.fundamental_freq),
             harmonics: config.num_harmonics.to_string(),
-            fundamental_name: config.fundamental_name.clone(),
+            _fundamental_name: None,
             fundamental_source: config.fundamental_source.clone().unwrap_or_default(),
             oversample: config.oversample.to_string(),
             reltol: format!("{:.0e}", config.reltol),
@@ -124,11 +127,6 @@ impl HbDialogState {
         let mut config = HbConfig {
             fundamental_freq: fundamental,
             num_harmonics: harmonics,
-            fundamental_name: if self.fundamental_name.trim().is_empty() {
-                "tone1".to_string()
-            } else {
-                self.fundamental_name.trim().to_string()
-            },
             fundamental_source: if self.fundamental_source.trim().is_empty() {
                 None
             } else {
@@ -184,5 +182,38 @@ impl HbDialogState {
         if !self.initialized {
             *self = Self::from_config(&HbConfig::default());
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A draft saved while the primary tone carried a name still opens.
+    ///
+    /// The key is accepted and dropped: no control ever wrote it, and the
+    /// specification builder labels the primary tone itself, so restoring the
+    /// value would put a name into the digest that nothing can author.
+    #[test]
+    fn a_saved_draft_that_carries_a_fundamental_name_still_opens() {
+        let mut saved = serde_json::to_value(HbDialogState::from_config(&HbConfig::default()))
+            .expect("the draft serializes");
+        saved
+            .as_object_mut()
+            .expect("the draft is an object")
+            .insert("fundamental_name".to_owned(), "mytone".into());
+
+        let restored: HbDialogState =
+            serde_json::from_value(saved).expect("a draft carrying the retired key still opens");
+        restored.to_config().expect("the restored draft configures");
+
+        let written = serde_json::to_value(&restored).expect("the draft serializes");
+        assert!(
+            !written
+                .as_object()
+                .expect("the draft is an object")
+                .contains_key("fundamental_name"),
+            "the retired key is never written again: {written}"
+        );
     }
 }

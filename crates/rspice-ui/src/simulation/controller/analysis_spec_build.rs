@@ -617,14 +617,12 @@ impl SimulationController {
             .to_config()
             .map_err(|e| format!("invalid harmonic balance settings: {}", e))?;
         let mut tones = Vec::with_capacity(1 + hb_cfg.additional_tones.len());
-        let primary_name = if hb_cfg.fundamental_name.trim().is_empty() {
-            "tone1".to_string()
-        } else {
-            hb_cfg.fundamental_name.trim().to_string()
-        };
+        // The primary tone's label. Fixed, because nothing authors one: the
+        // form has no name row and the additional tones number themselves
+        // from this.
         let mut primary_tone =
             HbToneSpec::new(hb_cfg.fundamental_freq, hb_cfg.num_harmonics as usize)
-                .with_name(primary_name);
+                .with_name("tone1".to_string());
         if let Some(source) = hb_cfg
             .fundamental_source
             .as_deref()
@@ -1348,7 +1346,6 @@ mod manifest_tests {
         state.sim_setup.envelope.modulation_sources = "VIN_AM, VCTRL".to_owned();
         state.sim_setup.envelope.initial_periodic_solve_idx = 1;
         state.sim_setup.envelope.adaptive_mode_idx = 2;
-        state.sim_setup.envelope.extraction_path_idx = 0;
 
         let spec = controller
             .build_envelope_spec(&state)

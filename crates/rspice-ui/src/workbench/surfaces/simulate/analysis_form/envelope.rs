@@ -17,11 +17,10 @@ use crate::ui::tokens::{self, Tokens};
 use super::{
     QuantityPresentationPolicy, UiNumberLocale, field_cell, input_row, inspector_input_row,
     mono_input, mono_input_with_suffix, named_periodic_source_row,
-    normalize_quantity_on_focus_loss, property_row, select_mono_with_response,
-    uses_two_column_fields,
+    normalize_quantity_on_focus_loss, select_mono_with_response, uses_two_column_fields,
 };
 
-pub(super) const ENVELOPE_FIELD_LABELS: [&str; 8] = [
+pub(super) const ENVELOPE_FIELD_LABELS: [&str; 7] = [
     "Carrier tones",
     "Envelope stop",
     "Envelope step",
@@ -29,7 +28,6 @@ pub(super) const ENVELOPE_FIELD_LABELS: [&str; 8] = [
     "Modulation sources",
     "Initial periodic solve",
     "Output schedule",
-    "Extraction path",
 ];
 
 pub(super) const ENVELOPE_INITIAL_SOLVE_CHOICES: &[&str] =
@@ -40,8 +38,6 @@ pub(super) const ENVELOPE_ADAPTIVE_CHOICES: &[&str] = &[
     "Fixed envelope step",
     "Event-aligned only",
 ];
-
-pub(super) const ENVELOPE_EXTRACTION_PATH: &str = "Least-squares projection";
 
 pub(super) const ENVELOPE_HARMONIC_ORDER_HELPER: &str = "positive integer";
 
@@ -206,6 +202,4 @@ pub(super) fn fields(
         ENVELOPE_ADAPTIVE_CHOICES,
         &mut setup.adaptive_mode_idx,
     );
-    setup.extraction_path_idx = 0;
-    property_row(ui, ENVELOPE_FIELD_LABELS[7], ENVELOPE_EXTRACTION_PATH);
 }

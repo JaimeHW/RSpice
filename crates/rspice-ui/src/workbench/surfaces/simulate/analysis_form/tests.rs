@@ -6,8 +6,8 @@
 //! is the half that grows every time a form makes a new claim.
 
 use super::envelope::{
-    ENVELOPE_ADAPTIVE_CHOICES, ENVELOPE_EXTRACTION_PATH, ENVELOPE_FIELD_LABELS,
-    ENVELOPE_HARMONIC_ORDER_HELPER, ENVELOPE_INITIAL_SOLVE_CHOICES,
+    ENVELOPE_ADAPTIVE_CHOICES, ENVELOPE_FIELD_LABELS, ENVELOPE_HARMONIC_ORDER_HELPER,
+    ENVELOPE_INITIAL_SOLVE_CHOICES,
 };
 use super::noise::{
     NOISE_CONTRIBUTION_CHOICES, NOISE_FIELD_LABELS, NOISE_INTEGRATION_CHOICES, NOISE_SWEEP_CHOICES,
@@ -544,7 +544,6 @@ fn envelope_form_matches_mockup_owned_contract() {
             "Modulation sources",
             "Initial periodic solve",
             "Output schedule",
-            "Extraction path",
         ]
     );
     assert_eq!(
@@ -561,7 +560,6 @@ fn envelope_form_matches_mockup_owned_contract() {
     );
     assert_eq!(ENVELOPE_DECLARED_SOURCES_CHOICE, "Declared list...");
     assert_eq!(ENVELOPE_HARMONIC_ORDER_HELPER, "positive integer");
-    assert_eq!(ENVELOPE_EXTRACTION_PATH, "Least-squares projection");
 }
 
 #[test]
