@@ -7,17 +7,42 @@
 //! the controls do not state. Both are painted beside the control they are
 //! about. Validation is rendered by the caller.
 
+mod ac;
+mod dc_mismatch;
 mod dc_sweep;
+mod disto;
+mod envelope;
+mod fourier;
+mod harmonic_balance;
+mod monte_carlo;
+mod noise;
+mod operating_point;
+mod optimization;
 /// Kept a module of its own rather than a branch of [`form`]: an analysis's
 /// advanced options are the same fields in the same grid, but which ones an
 /// analysis owns is a question about the option catalogue, not about the kind's
 /// own parameters. It is `pub(super)` so the route can draw them after the
 /// form's own fields; the primitives it draws with stay private here.
 pub(super) mod options;
+mod pac;
+mod periodic_network;
+mod pnoise;
+mod pole_zero;
 mod pss;
+mod pstb;
+mod pxf;
+mod quasi_periodic;
+mod reliability;
 mod run_space;
+mod s_parameter;
+mod sensitivity;
+mod soa;
+mod stb;
 mod stb_probe;
 mod sweep_point_label;
+mod transfer_function;
+mod transient;
+mod transient_noise;
 
 pub(super) use run_space::RunSpaceContext;
 use sweep_point_label::{
@@ -30,11 +55,7 @@ use crate::quantity::{
     QuantityInputKind, QuantityPresentationPolicy, UiNumberLocale, parse_ui_quantity,
 };
 use crate::services::simulation_runner::TfRunConfig;
-use crate::simulation::config::{NoiseContributionDetail, NoiseIntegrationMode, NoiseSweepType};
-
-use crate::simulation::plan::{
-    AnalysisDraft, FrequencySweepDraft, NetworkPortDraft, PeriodicNetworkDraft,
-};
+use crate::simulation::plan::{AnalysisDraft, FrequencySweepDraft};
 use crate::state::format_engineering;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -44,20 +65,6 @@ use crate::ui::widgets::{
 };
 use crate::workbench::design_system::property_row as inspector_property_row;
 
-const NOISE_FIELD_LABELS: [&str; 8] = [
-    "Sweep",
-    // The point field names its own units, so the frozen entry is the ungraded
-    // spelling and the rendered one re-resolves. See
-    // `the_sweep_point_label_names_what_a_point_is_in_each_mode`.
-    SWEEP_POINT_NEUTRAL_LABEL,
-    "Start frequency",
-    "Stop frequency",
-    "Output node",
-    "Input source",
-    "Contribution detail",
-    "Integrated noise",
-];
-const NOISE_SWEEP_CHOICES: [&str; 4] = NoiseSweepType::OPTIONS;
 const NOISE_OUTPUT_CUSTOM_CHOICE: &str = "Exact expression\u{2026}";
 const NOISE_INPUT_CUSTOM_CHOICE: &str = "Exact source name\u{2026}";
 /// How many elaborated names one noise row offers as presets.
@@ -68,143 +75,9 @@ const NOISE_INPUT_CUSTOM_CHOICE: &str = "Exact source name\u{2026}";
 /// anything the design contains, and the row states how much of the design it
 /// is showing whenever it shows less than all of it.
 const NOISE_DOMAIN_PRESET_LIMIT: usize = 64;
-const NOISE_CONTRIBUTION_CHOICES: [&str; 4] = NoiseContributionDetail::OPTIONS;
-const NOISE_INTEGRATION_CHOICES: [&str; 3] = NoiseIntegrationMode::OPTIONS;
-const OP_FIELD_LABELS: [&str; 8] = [
-    "Temperature",
-    "Initial guess",
-    "Node initialization",
-    "Homotopy strategy",
-    "Annotate schematic",
-    "Device detail",
-    "Save device OP",
-    "Accuracy preset",
-];
-const OP_TEMPERATURE_CHOICES: [&str; 4] = [
-    "PVT run set",
-    "Nominal temperature \u{00b7} 27 \u{00b0}C",
-    "Explicit temperature\u{2026}",
-    "Inherit active run-set axis",
-];
-const OP_INITIAL_GUESS_CHOICES: [&str; 4] = [
-    "Automatic",
-    "Previous converged solution",
-    "User node voltages",
-    "Zero state",
-];
-const OP_NODE_INITIALIZATION_CHOICES: [&str; 4] = [
-    "Use IC / nodeset",
-    "Ignore IC and nodeset",
-    "Force .ic values",
-    "Validate initialization only",
-];
-const OP_HOMOTOPY_CHOICES: [&str; 5] = [
-    "Adaptive",
-    "Source stepping",
-    "Gmin stepping",
-    "Pseudo-transient",
-    "None",
-];
-const OP_ANNOTATION_CHOICES: [&str; 4] = [
-    "Voltages + currents",
-    "Voltages only",
-    "Voltages + device OP",
-    "None",
-];
-const OP_DEVICE_DETAIL_CHOICES: [&str; 4] = [
-    "Selected + violations",
-    "All devices",
-    "Violations only",
-    "None",
-];
-const OP_SAVE_DEVICE_CHOICES: [&str; 3] = ["Enabled", "Disabled", "Final point only"];
-const OP_ACCURACY_CHOICES: [&str; 4] = ["Fast", "Balanced", "Accurate", "Robust"];
-const PSS_FIELD_LABELS: [&str; 9] = [
-    "Mode",
-    "Fundamental",
-    "Tones",
-    "Stabilization cycles",
-    "Shooting points",
-    "Period tolerance",
-    "Autonomous oscillator",
-    "Oscillator node",
-    "Save harmonics",
-];
-const PSS_MODE_CHOICES: [&str; 1] = ["Driven shooting"];
-const OP_STARTUP_CONFLICT: &str =
-    "This initial-guess and node-initialization combination is not executable";
 
-fn op_initial_guess_disabled(
-    node_initialization_idx: usize,
-    previous_state_available: bool,
-) -> Vec<(usize, &'static str)> {
-    let mut disabled = Vec::new();
-    for initial_guess_idx in 0..OP_INITIAL_GUESS_CHOICES.len() {
-        if !op_startup_indices_compatible(initial_guess_idx, node_initialization_idx) {
-            disabled.push((initial_guess_idx, OP_STARTUP_CONFLICT));
-        } else if initial_guess_idx == 1 && !previous_state_available {
-            disabled.push((
-                initial_guess_idx,
-                "Run and retain a source-compatible OP state before selecting this policy",
-            ));
-        }
-    }
-    disabled
-}
-
-fn op_node_initialization_disabled(initial_guess_idx: usize) -> Vec<(usize, &'static str)> {
-    (0..OP_NODE_INITIALIZATION_CHOICES.len())
-        .filter(|node_idx| !op_startup_indices_compatible(initial_guess_idx, *node_idx))
-        .map(|node_idx| (node_idx, OP_STARTUP_CONFLICT))
-        .collect()
-}
-
-const fn op_startup_indices_compatible(
-    initial_guess_idx: usize,
-    node_initialization_idx: usize,
-) -> bool {
-    match initial_guess_idx {
-        0 => true,
-        1 | 3 => matches!(node_initialization_idx, 1 | 3),
-        2 => matches!(node_initialization_idx, 0 | 2),
-        _ => false,
-    }
-}
-const XF_FIELD_LABELS: [&str; 8] = [
-    "Input source",
-    "Output expression",
-    "Solve point",
-    "Transfer gain",
-    "Input resistance",
-    "Output resistance",
-    "Normalize",
-    "Accuracy",
-];
-const XF_SOLVE_POINT: &str = "DC operating point";
-/// The action that fills the two fields above it from the design's own deck.
-const XF_INFER_LABEL: &str = "Infer from deck";
 const XF_ENABLED_CHOICES: &[&str] = &["Enabled", "Disabled"];
-const XF_NORMALIZATION_CHOICES: &[&str] = &["Disabled", "Relative to nominal", "Per source unit"];
-const XF_ACCURACY_CHOICES: &[&str] = &["Fast", "Balanced", "Accurate", "Robust"];
-const ENVELOPE_FIELD_LABELS: [&str; 8] = [
-    "Carrier tones",
-    "Envelope stop",
-    "Envelope step",
-    "Harmonic order",
-    "Modulation sources",
-    "Initial periodic solve",
-    "Output schedule",
-    "Extraction path",
-];
-const ENVELOPE_INITIAL_SOLVE_CHOICES: &[&str] = &["HB", "PSS", "Transient spectral estimate"];
-const ENVELOPE_ADAPTIVE_CHOICES: &[&str] = &[
-    "Adaptive solver samples",
-    "Fixed envelope step",
-    "Event-aligned only",
-];
 const ENVELOPE_DECLARED_SOURCES_CHOICE: &str = "Declared list...";
-const ENVELOPE_EXTRACTION_PATH: &str = "Least-squares projection";
-const ENVELOPE_HARMONIC_ORDER_HELPER: &str = "positive integer";
 const ENVELOPE_INLINE_CONTROL_GAP: f32 = 6.0;
 const NOISE_SWEEP_CONTROL_COUNT: usize = 2;
 const FIELD_COLUMN_GAP: f32 = 14.0;
@@ -484,16 +357,6 @@ fn enabled_choice_row(ui: &mut Ui, label: &str, enabled: &mut bool) -> bool {
     changed
 }
 
-fn noise_enum_choice_row(
-    ui: &mut Ui,
-    label: &str,
-    options: &[&str],
-    selected: usize,
-) -> Option<usize> {
-    let mut next = selected;
-    choice_row(ui, label, options, &mut next).then_some(next)
-}
-
 /// What a noise domain row is offering, stated in the row itself.
 ///
 /// `offered` is what the select paints, `total` what the elaborated design
@@ -601,71 +464,11 @@ fn noise_domain_row(
     }
 }
 
-fn noise_sweep_control(ui: &mut Ui, sweep: &mut NoiseSweepType, explicit_frequencies: &mut String) {
-    ui.spacing_mut().item_spacing.x = ENVELOPE_INLINE_CONTROL_GAP;
-    let selected = sweep.selection_index();
-    let current = selected
-        .and_then(|index| NOISE_SWEEP_CHOICES.get(index))
-        .copied()
-        .unwrap_or("Schema unavailable");
-    let options = NOISE_SWEEP_CHOICES.map(str::to_owned);
-    let width = ui.available_width();
-    let explicit = matches!(sweep, NoiseSweepType::ExplicitFrequencyList);
-    let (selector_width, editor_width) = noise_sweep_control_widths(width);
-    let salt = format!("analysis-noise-sweep-{}", ui.id().value());
-    if let Some(index) = select_mono_with_response(
-        ui,
-        &salt,
-        NOISE_FIELD_LABELS[0],
-        current,
-        &options,
-        selector_width,
-    )
-    .picked
-    {
-        *sweep = NoiseSweepType::from_selection_index(index);
-    }
-    ui.add_enabled_ui(explicit, |ui| {
-        mono_input(
-            ui,
-            NOISE_FIELD_LABELS[0],
-            explicit_frequencies,
-            editor_width,
-        )
-        .on_hover_text(if explicit {
-            "Comma- or space-separated frequencies in Hz"
-        } else {
-            "Select Explicit frequency list to edit this retained axis"
-        });
-    });
-}
-
 fn noise_sweep_control_widths(available_width: f32) -> (f32, f32) {
     let content_width =
         (available_width - ENVELOPE_INLINE_CONTROL_GAP).max(NOISE_SWEEP_CONTROL_COUNT as f32);
     let selector_width = content_width * 0.44;
     (selector_width, content_width - selector_width)
-}
-
-fn noise_sweep_row(ui: &mut Ui, sweep: &mut NoiseSweepType, explicit_frequencies: &mut String) {
-    if uses_two_column_fields(ui) {
-        field_cell(
-            ui,
-            NOISE_FIELD_LABELS[0],
-            Some("domain constrained"),
-            |ui| {
-                ui.horizontal(|ui| noise_sweep_control(ui, sweep, explicit_frequencies));
-            },
-        );
-    } else {
-        full_width_field(
-            ui,
-            NOISE_FIELD_LABELS[0],
-            Some("domain constrained"),
-            Tokens::get(ui.ctx()).metrics.ctl_h,
-            |ui| ui.horizontal(|ui| noise_sweep_control(ui, sweep, explicit_frequencies)),
-        );
-    }
 }
 
 fn choice_row_with_disabled(
@@ -734,73 +537,6 @@ fn choice_row_with_disabled(
             false
         }
     })
-}
-
-fn op_temperature_row(ui: &mut Ui, setup: &mut crate::simulation::dialog::OpDialogState) {
-    if !uses_two_column_fields(ui) {
-        let control_height = Tokens::get(ui.ctx()).metrics.ctl_h * 2.0 + 6.0;
-        full_width_field(
-            ui,
-            OP_FIELD_LABELS[0],
-            Some("Celsius"),
-            control_height,
-            |ui| {
-                let current = OP_TEMPERATURE_CHOICES
-                    .get(setup.temperature_mode_idx)
-                    .copied()
-                    .unwrap_or("Schema unavailable");
-                if let Some(index) = select(
-                    ui,
-                    "op-temperature-mode-stacked",
-                    OP_FIELD_LABELS[0],
-                    current,
-                    &OP_TEMPERATURE_CHOICES.map(|value| value.to_owned()),
-                    ui.available_width(),
-                ) {
-                    setup.temperature_mode_idx = index;
-                    if index == 1 {
-                        setup.temperature = "27".to_owned();
-                    }
-                }
-                ui.add_enabled_ui(setup.temperature_mode_idx == 2, |ui| {
-                    mono_input(
-                        ui,
-                        OP_FIELD_LABELS[0],
-                        &mut setup.temperature,
-                        ui.available_width(),
-                    )
-                });
-            },
-        );
-        return;
-    }
-    field_cell(ui, OP_FIELD_LABELS[0], Some("Celsius"), |ui| {
-        let input_width = 92.0;
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 6.0;
-            let select_width = (ui.available_width() - input_width - 6.0).max(1.0);
-            let current = OP_TEMPERATURE_CHOICES
-                .get(setup.temperature_mode_idx)
-                .copied()
-                .unwrap_or("Schema unavailable");
-            if let Some(index) = select(
-                ui,
-                "op-temperature-mode",
-                OP_FIELD_LABELS[0],
-                current,
-                &OP_TEMPERATURE_CHOICES.map(|value| value.to_owned()),
-                select_width,
-            ) {
-                setup.temperature_mode_idx = index;
-                if index == 1 {
-                    setup.temperature = "27".to_owned();
-                }
-            }
-            ui.add_enabled_ui(setup.temperature_mode_idx == 2, |ui| {
-                mono_input(ui, OP_FIELD_LABELS[0], &mut setup.temperature, input_width)
-            });
-        });
-    });
 }
 
 fn mono_input_with_suffix(
@@ -928,103 +664,6 @@ fn schema_reads(text: &str, schema_value: f64) -> bool {
         && crate::simulation::dialog::parse_si_value(text).is_ok_and(agrees)
 }
 
-fn envelope_time_input_row(
-    ui: &mut Ui,
-    label: &str,
-    value: &mut String,
-    policy: QuantityPresentationPolicy,
-    locale: UiNumberLocale,
-) -> Response {
-    let response = if uses_two_column_fields(ui) {
-        field_cell(ui, label, Some("engineering notation"), |ui| {
-            mono_input_with_suffix(ui, label, value, "s")
-        })
-    } else {
-        let t = Tokens::get(ui.ctx());
-        let row_h = t.metrics.row_h;
-        let color = t.color.text_dim;
-        ui.allocate_ui_with_layout(
-            vec2(ui.available_width(), row_h),
-            Layout::left_to_right(Align::Center),
-            |ui| {
-                ui.spacing_mut().item_spacing.x = 8.0;
-                let (label_rect, _) =
-                    ui.allocate_exact_size(vec2(96.0, row_h), egui::Sense::hover());
-                ui.painter().text(
-                    label_rect.left_center(),
-                    egui::Align2::LEFT_CENTER,
-                    label,
-                    theme::sans(tokens::FS_1, FontWeight::Regular),
-                    color,
-                );
-                mono_input_with_suffix(ui, label, value, "s")
-            },
-        )
-        .inner
-    };
-    normalize_quantity_on_focus_loss(&response, value, QuantityInputKind::Time, policy, locale);
-    response
-}
-
-fn envelope_harmonic_order_row(ui: &mut Ui, value: &mut String) -> Response {
-    if !uses_two_column_fields(ui) {
-        return inspector_input_row(ui, ENVELOPE_FIELD_LABELS[3], value);
-    }
-    field_cell(
-        ui,
-        ENVELOPE_FIELD_LABELS[3],
-        Some(ENVELOPE_HARMONIC_ORDER_HELPER),
-        |ui| mono_input(ui, ENVELOPE_FIELD_LABELS[3], value, ui.available_width()),
-    )
-}
-
-fn envelope_choice_row(ui: &mut Ui, label: &str, options: &[&str], value: &mut usize) -> bool {
-    let mut add_control = |ui: &mut Ui| {
-        let options = options
-            .iter()
-            .map(|option| (*option).to_owned())
-            .collect::<Vec<_>>();
-        let current = options
-            .get(*value)
-            .map_or("Schema unavailable", String::as_str);
-        let salt = format!("analysis-envelope-field-{}-{label}", ui.id().value());
-        if let Some(index) =
-            select_mono_with_response(ui, &salt, label, current, &options, ui.available_width())
-                .picked
-        {
-            *value = index;
-            true
-        } else {
-            false
-        }
-    };
-
-    if uses_two_column_fields(ui) {
-        return field_cell(ui, label, Some("domain constrained"), add_control);
-    }
-
-    let t = Tokens::get(ui.ctx());
-    let row_h = t.metrics.row_h;
-    let color = t.color.text_dim;
-    ui.allocate_ui_with_layout(
-        vec2(ui.available_width(), row_h),
-        Layout::left_to_right(Align::Center),
-        |ui| {
-            ui.spacing_mut().item_spacing.x = 8.0;
-            let (label_rect, _) = ui.allocate_exact_size(vec2(96.0, row_h), egui::Sense::hover());
-            ui.painter().text(
-                label_rect.left_center(),
-                egui::Align2::LEFT_CENTER,
-                label,
-                theme::sans(tokens::FS_1, FontWeight::Regular),
-                color,
-            );
-            add_control(ui)
-        },
-    )
-    .inner
-}
-
 fn envelope_modulation_control_widths(available_width: f32) -> (f32, f32) {
     let content_width = (available_width - ENVELOPE_INLINE_CONTROL_GAP).max(2.0);
     let selector_width = content_width * 0.58;
@@ -1104,16 +743,6 @@ fn named_periodic_source_row(
         },
     )
     .inner
-}
-
-fn envelope_modulation_source_row(ui: &mut Ui, value: &mut String, circuit_sources: &[String]) {
-    named_periodic_source_row(
-        ui,
-        ENVELOPE_FIELD_LABELS[4],
-        "envelope-modulation",
-        value,
-        circuit_sources,
-    );
 }
 
 fn switch_row(ui: &mut Ui, label: &str, value: &mut bool) -> bool {
@@ -1262,184 +891,6 @@ fn frequency_sweep_fields(
     choice_row(ui, "Sweep", SWEEP_KINDS, &mut sweep.sweep);
 }
 
-fn periodic_network_fields(
-    ui: &mut Ui,
-    setup: &mut PeriodicNetworkDraft,
-    policy: QuantityPresentationPolicy,
-    locale: UiNumberLocale,
-) {
-    frequency_sweep_fields(ui, &mut setup.sweep, policy, locale);
-    input_row(ui, "Max sideband", &mut setup.max_sideband);
-    switch_row(ui, "Mixed-mode matrix", &mut setup.mixed_mode);
-    switch_row(ui, "Noise parameters", &mut setup.noise_parameters);
-    let port_count = setup.ports.len();
-    let mut remove = None;
-    for (index, port) in setup.ports.iter_mut().enumerate() {
-        network_port_fields(ui, index, port);
-        if port_count > 1 && action_line(ui, "Remove port") {
-            remove = Some(index);
-        }
-    }
-    if let Some(index) = remove {
-        setup.ports.remove(index);
-    }
-    if action_line(ui, "+ Add port") {
-        setup.ports.push(NetworkPortDraft::default());
-    }
-}
-
-/// The S-parameter run's ports, from whichever of the two declarations owns
-/// them.
-///
-/// A port is a Z0 plane the run drives and measures, and a design can declare
-/// one in two places: `RF Port` components on the sheet, which the netlist
-/// carries as `P` cards, or node pairs typed here, which the runner
-/// materializes only for a deck that declares none of its own
-/// (`services::simulation_runner::sparameter::resolve_ports`). Both at once is
-/// not a richer setup, it is two answers to one question — so this row picks
-/// the owner, and the other declaration goes quiet rather than half-applying.
-fn sp_port_fields(
-    ui: &mut Ui,
-    setup: &mut crate::simulation::dialog::SpDialogState,
-    placed: &[crate::simulation::placed_sources::PlacedRfPort],
-) {
-    use crate::simulation::dialog::SpPortSource;
-
-    let labels: Vec<&str> = SpPortSource::ALL
-        .iter()
-        .map(|source| source.display_name())
-        .collect();
-    let resolved = setup.port_source(placed.len());
-    let mut selected = resolved.index();
-    choice_row(ui, "Ports", &labels, &mut selected);
-    // Written back only when the reader actually moves it. Stamping the
-    // resolved value every frame would record a choice on a project that never
-    // made one, and pin it to whatever the sheet happened to hold the first
-    // time this form was drawn.
-    if selected != resolved.index() {
-        setup.port_source_idx = Some(selected);
-    }
-
-    let source = setup.port_source(placed.len());
-    if source == SpPortSource::Placed {
-        // Read-only: these are the design's, and an editable copy of them here
-        // is the second declaration this switch exists to remove.
-        for port in placed {
-            sub_header(ui, &format!("Port {}", port.port_number));
-            property_row(ui, "Instance", &port.reference);
-            property_row(ui, "Role", &port.summary());
-        }
-    } else {
-        let mut remove: Option<usize> = None;
-        let port_count = setup.ports.len();
-        for (idx, port) in setup.ports.iter_mut().enumerate() {
-            sub_header(ui, &format!("Port {}", idx + 1));
-            input_row(ui, "Node +", &mut port.node_pos);
-            switch_row(ui, "Differential", &mut port.differential);
-            if port.differential {
-                input_row(ui, "Node −", &mut port.node_neg);
-            }
-            switch_row(ui, "Z0 override", &mut port.z0_override);
-            if port.z0_override {
-                input_row(ui, "Port Z0", &mut port.z0);
-            }
-            if port_count > 1 && action_line(ui, "Remove port") {
-                remove = Some(idx);
-            }
-        }
-        if let Some(idx) = remove {
-            setup.ports.remove(idx);
-        }
-        ui.add_space(4.0);
-        if action_line(ui, "+ Add port") {
-            setup.ports.push(Default::default());
-        }
-    }
-
-    // The same resolution dispatch performs, stated here so the reason a run
-    // will be refused is visible beside the ports it is about.
-    if let Some(reason) = setup.port_roster_error(placed) {
-        field_advisory(ui, &reason);
-    }
-}
-
-/// The output presets the transfer-function form offers: every elaborated
-/// node, spelled as the voltage measured there.
-///
-/// The field takes an expression, not a node — `validate_output_expression`
-/// admits `V(node)`, `V(node,ref)` and `I(element)` and nothing else — so a
-/// picker that offered bare node names would be one whose every choice fails
-/// validation. A differential pair or a branch current is typed through the
-/// exact-expression escape beside the selector.
-fn xf_output_presets(nodes: &[String]) -> Vec<String> {
-    nodes
-        .iter()
-        .take(NOISE_DOMAIN_PRESET_LIMIT)
-        .map(|node| format!("V({node})"))
-        .collect()
-}
-
-/// The design's own answer to the transfer-function form's two ports.
-///
-/// A pre-fill, not a run. Pressing this writes the deck's only independent
-/// source and the node that source does not connect to into the two fields
-/// above, where both stay editable and the reader still presses Run — which is
-/// the whole reason a positional guess at the output is acceptable here and was
-/// not acceptable in the PAC, PXF and PNOISE runners that ran on one.
-///
-/// When the deck names no single obvious pair the action is offered and
-/// refused, with the reason in its place: a button whose only answer is a
-/// refusal teaches nothing, and a button that has silently vanished teaches
-/// less.
-///
-/// The note retires itself. It says what the deck offers only while the form
-/// does not already say it, so a reader who has pressed the action — or typed
-/// the same two names — is not told a third time.
-fn xf_inference_action(
-    ui: &mut Ui,
-    setup: &mut crate::simulation::dialog::XfDialogState,
-    inference: Option<&Result<TfRunConfig, String>>,
-) {
-    // `None` is "not measured", which only a caller that painted this form
-    // without resolving a design can produce. There is nothing honest to say
-    // about a deck nobody read.
-    let Some(inference) = inference else {
-        return;
-    };
-    match inference {
-        Ok(config) => {
-            if action_line(ui, XF_INFER_LABEL) {
-                setup.input_source.clone_from(&config.input_source);
-                setup
-                    .output_expression
-                    .clone_from(&config.output_expression);
-            }
-            if setup.input_source != config.input_source
-                || setup.output_expression != config.output_expression
-            {
-                field_note(
-                    ui,
-                    &format!(
-                        "This design offers input {} and output {}.",
-                        config.input_source, config.output_expression
-                    ),
-                );
-            }
-        }
-        Err(reason) => {
-            action_line_enabled(ui, XF_INFER_LABEL, false);
-            field_advisory(ui, reason);
-        }
-    }
-}
-
-fn network_port_fields(ui: &mut Ui, index: usize, port: &mut NetworkPortDraft) {
-    sub_header(ui, &format!("Port {}", index + 1));
-    input_row(ui, "Node +", &mut port.node_pos);
-    input_row(ui, "Node −", &mut port.node_neg);
-    input_row(ui, "Reference Z0", &mut port.z0);
-}
-
 /// Render the form for `draft`.
 pub(super) fn form(
     ui: &mut Ui,
@@ -1464,848 +915,63 @@ pub(super) fn form(
     clear_pending_cell(ui);
     ui.spacing_mut().item_spacing.y = FIELD_ROW_GAP;
     match draft {
-        AnalysisDraft::OperatingPoint(setup) => {
-            setup.ensure_initialized();
-            op_temperature_row(ui, setup);
-            let initial_guess_disabled =
-                op_initial_guess_disabled(setup.node_initialization_idx, op_context.previous_state);
-            choice_row_with_disabled(
-                ui,
-                OP_FIELD_LABELS[1],
-                &OP_INITIAL_GUESS_CHOICES,
-                &mut setup.initial_guess_idx,
-                &initial_guess_disabled,
-            );
-            let node_initialization_disabled =
-                op_node_initialization_disabled(setup.initial_guess_idx);
-            choice_row_with_disabled(
-                ui,
-                OP_FIELD_LABELS[2],
-                &OP_NODE_INITIALIZATION_CHOICES,
-                &mut setup.node_initialization_idx,
-                &node_initialization_disabled,
-            );
-            choice_row(
-                ui,
-                OP_FIELD_LABELS[3],
-                &OP_HOMOTOPY_CHOICES,
-                &mut setup.homotopy_idx,
-            );
-            choice_row(
-                ui,
-                OP_FIELD_LABELS[4],
-                &OP_ANNOTATION_CHOICES,
-                &mut setup.annotation_idx,
-            );
-            choice_row_with_disabled(
-                ui,
-                OP_FIELD_LABELS[5],
-                &OP_DEVICE_DETAIL_CHOICES,
-                &mut setup.device_detail_idx,
-                if op_context.soa_violations {
-                    &[]
-                } else {
-                    &[(
-                        2,
-                        "Run SOA checks with warning or violation evidence before selecting this policy",
-                    )]
-                },
-            );
-            choice_row(
-                ui,
-                OP_FIELD_LABELS[6],
-                &OP_SAVE_DEVICE_CHOICES,
-                &mut setup.save_device_op_idx,
-            );
-            choice_row(
-                ui,
-                OP_FIELD_LABELS[7],
-                &OP_ACCURACY_CHOICES,
-                &mut setup.accuracy_idx,
-            );
-        }
-        AnalysisDraft::Transient(setup) => {
-            quantity_input_row(
-                ui,
-                "Stop time",
-                &mut setup.stop,
-                QuantityInputKind::Time,
-                policy,
-                locale,
-            );
-            quantity_input_row(
-                ui,
-                "Step time",
-                &mut setup.step,
-                QuantityInputKind::Time,
-                policy,
-                locale,
-            );
-            quantity_input_row(
-                ui,
-                "Start time",
-                &mut setup.start,
-                QuantityInputKind::Time,
-                policy,
-                locale,
-            );
-            if !setup.max_step.eq_ignore_ascii_case("auto") {
-                quantity_input_row(
-                    ui,
-                    "Max step",
-                    &mut setup.max_step,
-                    QuantityInputKind::Time,
-                    policy,
-                    locale,
-                );
-            } else {
-                input_row(ui, "Max step", &mut setup.max_step);
-            }
-            switch_row(ui, "Use initial conditions", &mut setup.uic);
-        }
-        AnalysisDraft::Ac(setup) => {
-            quantity_input_row(
-                ui,
-                "Start",
-                &mut setup.fstart,
-                QuantityInputKind::Frequency,
-                policy,
-                locale,
-            );
-            quantity_input_row(
-                ui,
-                "Stop",
-                &mut setup.fstop,
-                QuantityInputKind::Frequency,
-                policy,
-                locale,
-            );
-            input_row(ui, sweep_point_field_label(setup.sweep), &mut setup.points);
-            choice_row(ui, "Sweep", SWEEP_KINDS, &mut setup.sweep);
-        }
+        AnalysisDraft::OperatingPoint(setup) => operating_point::fields(ui, setup, op_context),
+        AnalysisDraft::Transient(setup) => transient::fields(ui, setup, policy, locale),
+        AnalysisDraft::Ac(setup) => ac::fields(ui, setup, policy, locale),
         AnalysisDraft::DcSweep(setup) => dc_sweep::fields(ui, setup),
-        AnalysisDraft::Noise(setup) => {
-            noise_sweep_row(ui, &mut setup.sweep, &mut setup.explicit_frequencies);
-            let fixed_grid = !matches!(setup.sweep, NoiseSweepType::ExplicitFrequencyList);
-            input_row_enabled(
-                ui,
-                noise_point_field_label(setup.sweep),
-                &mut setup.points,
-                fixed_grid,
-            );
-            quantity_input_row_enabled(
-                ui,
-                NOISE_FIELD_LABELS[2],
-                &mut setup.fstart,
-                QuantityInputKind::Frequency,
-                policy,
-                locale,
-                fixed_grid,
-            );
-            quantity_input_row_enabled(
-                ui,
-                NOISE_FIELD_LABELS[3],
-                &mut setup.fstop,
-                QuantityInputKind::Frequency,
-                policy,
-                locale,
-                fixed_grid,
-            );
-            let offered_nodes = noise_domain
-                .nodes
-                .get(..NOISE_DOMAIN_PRESET_LIMIT)
-                .unwrap_or(noise_domain.nodes);
-            let offered_sources = noise_domain
-                .sources
-                .get(..NOISE_DOMAIN_PRESET_LIMIT)
-                .unwrap_or(noise_domain.sources);
-            let previous_output = setup.output.clone();
-            noise_domain_row(
-                ui,
-                NOISE_FIELD_LABELS[4],
-                "output",
-                &noise_domain_hint(
-                    "nodes",
-                    offered_nodes.len(),
-                    noise_domain.nodes.len(),
-                    noise_domain.unavailable.is_some(),
-                ),
-                offered_nodes,
-                NOISE_OUTPUT_CUSTOM_CHOICE,
-                &mut setup.output,
-            );
-            if setup.output != previous_output {
-                // Once the exact output-expression field is edited it owns
-                // both nodes; a hidden legacy reference must not leak into it.
-                setup.reference = "0".to_owned();
-            }
-            noise_domain_row(
-                ui,
-                NOISE_FIELD_LABELS[5],
-                "input",
-                &noise_domain_hint(
-                    "sources",
-                    offered_sources.len(),
-                    noise_domain.sources.len(),
-                    noise_domain.unavailable.is_some(),
-                ),
-                offered_sources,
-                NOISE_INPUT_CUSTOM_CHOICE,
-                &mut setup.input,
-            );
-            if let Some(reason) = noise_domain.unavailable {
-                noise_domain_advisory(ui, reason);
-            }
-            if let Some(selection) = noise_enum_choice_row(
-                ui,
-                NOISE_FIELD_LABELS[6],
-                &NOISE_CONTRIBUTION_CHOICES,
-                setup.contribution_detail.selection_index(),
-            ) && let Some(detail) = NoiseContributionDetail::from_selection_index(selection)
-            {
-                setup.contribution_detail = detail;
-            }
-            if let Some(selection) = noise_enum_choice_row(
-                ui,
-                NOISE_FIELD_LABELS[7],
-                &NOISE_INTEGRATION_CHOICES,
-                setup.integration_mode.selection_index(),
-            ) && let Some(mode) = NoiseIntegrationMode::from_selection_index(selection)
-            {
-                setup.integration_mode = mode;
-            }
-        }
-        AnalysisDraft::PoleZero(setup) => {
-            input_row(ui, "Input +", &mut setup.input_pos);
-            input_row(ui, "Input −", &mut setup.input_neg);
-            input_row(ui, "Output +", &mut setup.output_pos);
-            input_row(ui, "Output −", &mut setup.output_neg);
-            choice_row(ui, "Transfer", &["V", "I"], &mut setup.transfer_idx);
-            choice_row(
-                ui,
-                "Roots",
-                &["both", "poles", "zeros"],
-                &mut setup.analysis_idx,
-            );
-        }
-        AnalysisDraft::Sensitivity(setup) => {
-            input_row(ui, "Output", &mut setup.output_expr);
-            choice_row(ui, "Mode", &["DC", "AC"], &mut setup.sens_type_idx);
-            quantity_input_row_enabled(
-                ui,
-                "Frequency",
-                &mut setup.ac_freq,
-                QuantityInputKind::Frequency,
-                policy,
-                locale,
-                setup.sens_type_idx == 1,
-            );
-        }
-        AnalysisDraft::MonteCarlo(setup) => {
-            use crate::simulation::dialog::McVariationSource;
-
-            input_row(ui, "Samples", &mut setup.num_runs);
-            input_row(ui, "Seed", &mut setup.seed)
-                .on_hover_text("An integer from 0 to 18446744073709551615. Leave blank to use the repeatable default seed.");
-            choice_row(
-                ui,
-                "From",
-                &["parameters", "deck"],
-                &mut setup.variation_source_idx,
-            );
-            // The spread and its shape belong to the parameter-tolerance
-            // source. Under deck statistics the deck states its own spread, so
-            // these two rows would be read by nothing.
-            let states_spread = McVariationSource::ALL
-                .get(setup.variation_source_idx)
-                .copied()
-                .unwrap_or_default()
-                .uses_stated_spread();
-            input_row_enabled(ui, "Spread %", &mut setup.variation_pct, states_spread);
-            choice_row_with_disabled(
-                ui,
-                "Vary",
-                &["gauss", "uniform", "worst"],
-                &mut setup.distribution_idx,
-                &if states_spread {
-                    Vec::new()
-                } else {
-                    (0..3)
-                        .map(|index| (index, "the deck states its own distribution"))
-                        .collect::<Vec<_>>()
-                },
-            );
-            // Which spread is drawn from is the `From` choice's own answer, and
-            // the two rows above say so by going quiet. What they cannot say is
-            // how far the deck's statistics reach, and a reader who expects
-            // only `.param` tolerances to move is owed the model cards.
-            if !states_spread {
-                field_note(
-                    ui,
-                    "Each trial redraws the deck's own agauss/gauss/unif expressions, model \
-                     cards included.",
-                );
-            }
-        }
+        AnalysisDraft::Noise(setup) => noise::fields(ui, setup, noise_domain, policy, locale),
+        AnalysisDraft::PoleZero(setup) => pole_zero::fields(ui, setup),
+        AnalysisDraft::Sensitivity(setup) => sensitivity::fields(ui, setup, policy, locale),
+        AnalysisDraft::MonteCarlo(setup) => monte_carlo::fields(ui, setup),
         AnalysisDraft::Pss(setup) => {
             pss::fields(ui, setup, envelope_modulation_sources, policy, locale)
         }
-        AnalysisDraft::Stb(setup) => {
-            stb_probe::row(
-                ui,
-                placed_loop_probes,
-                &mut setup.probe_source,
-                &mut setup.probe_reference,
-            );
-            quantity_input_row(
-                ui,
-                "Start",
-                &mut setup.start_freq,
-                QuantityInputKind::Frequency,
-                policy,
-                locale,
-            );
-            quantity_input_row(
-                ui,
-                "Stop",
-                &mut setup.stop_freq,
-                QuantityInputKind::Frequency,
-                policy,
-                locale,
-            );
-            input_row(
-                ui,
-                sweep_point_field_label(setup.sweep_type_idx),
-                &mut setup.num_points,
-            );
-            choice_row(ui, "Sweep", SWEEP_KINDS, &mut setup.sweep_type_idx);
-            switch_row(ui, "Nyquist contour", &mut setup.compute_nyquist);
-        }
+        AnalysisDraft::Stb(setup) => stb::fields(ui, setup, placed_loop_probes, policy, locale),
+        // The plan may already declare a temperature axis. This instance
+        // either reads it or states its own, and says which in place —
+        // because two temperature declarations that silently disagree is
+        // the same defect the corner form above was built to stop.
         AnalysisDraft::Temperature(setup) => {
-            // The plan may already declare a temperature axis. This instance
-            // either reads it or states its own, and says which in place —
-            // because two temperature declarations that silently disagree is
-            // the same defect the corner form above was built to stop.
             run_space::temperature_form(ui, setup, run_space, route, policy, locale)
         }
         AnalysisDraft::HarmonicBalance(setup) => {
-            quantity_input_row(
-                ui,
-                "Fundamental",
-                &mut setup.fundamental,
-                QuantityInputKind::Frequency,
-                policy,
-                locale,
-            );
-            input_row(ui, "Harmonics", &mut setup.harmonics);
-            input_row(ui, "Source", &mut setup.fundamental_source);
-            input_row(ui, "Oversample", &mut setup.oversample);
-            input_row(ui, "Max iters", &mut setup.maxiter);
-            choice_row(ui, "Solver", &["newton", "krylov"], &mut setup.solver_idx);
-            switch_row(ui, "Source stepping", &mut setup.source_stepping);
-            let mut remove: Option<usize> = None;
-            for (idx, tone) in setup.additional_tones.iter_mut().enumerate() {
-                sub_header(ui, &format!("Tone {}", idx + 2));
-                quantity_input_row(
-                    ui,
-                    "Frequency",
-                    &mut tone.frequency,
-                    QuantityInputKind::Frequency,
-                    policy,
-                    locale,
-                );
-                input_row(ui, "Harmonics", &mut tone.harmonics);
-                input_row(ui, "Source", &mut tone.source);
-                if action_line(ui, "Remove tone") {
-                    remove = Some(idx);
-                }
-            }
-            if let Some(idx) = remove {
-                setup.additional_tones.remove(idx);
-            }
-            ui.add_space(4.0);
-            if action_line(ui, "+ Add tone") {
-                setup.additional_tones.push(Default::default());
-            }
+            harmonic_balance::fields(ui, setup, policy, locale)
         }
         AnalysisDraft::SParameter(setup) => {
-            quantity_input_row(
-                ui,
-                "Start",
-                &mut setup.start_freq,
-                QuantityInputKind::Frequency,
-                policy,
-                locale,
-            );
-            quantity_input_row(
-                ui,
-                "Stop",
-                &mut setup.stop_freq,
-                QuantityInputKind::Frequency,
-                policy,
-                locale,
-            );
-            input_row(
-                ui,
-                sweep_point_field_label(setup.sweep_type_idx),
-                &mut setup.num_points,
-            );
-            choice_row(ui, "Sweep", SWEEP_KINDS, &mut setup.sweep_type_idx);
-            input_row(ui, "Z0", &mut setup.z0);
-            switch_row(ui, "Noise parameters", &mut setup.do_noise);
-            switch_row(ui, "Touchstone export", &mut setup.touchstone_export);
-            sp_port_fields(ui, setup, placed_rf_ports)
+            s_parameter::fields(ui, setup, placed_rf_ports, policy, locale)
         }
-        AnalysisDraft::Pac(setup) => {
-            quantity_input_row(
-                ui,
-                "Start",
-                &mut setup.start_freq,
-                QuantityInputKind::Frequency,
-                policy,
-                locale,
-            );
-            quantity_input_row(
-                ui,
-                "Stop",
-                &mut setup.stop_freq,
-                QuantityInputKind::Frequency,
-                policy,
-                locale,
-            );
-            input_row(
-                ui,
-                sweep_point_field_label(setup.sweep_type_idx),
-                &mut setup.num_points,
-            );
-            choice_row(ui, "Sweep", SWEEP_KINDS, &mut setup.sweep_type_idx);
-            input_row(ui, "Input src", &mut setup.input_source);
-            input_row(ui, "Output", &mut setup.output_node);
-            input_row(ui, "Output ref", &mut setup.output_ref);
-            input_row(ui, "Magnitude", &mut setup.pac_magnitude);
-            input_row(ui, "Max sideband", &mut setup.max_sideband);
-            switch_row(ui, "Include DC", &mut setup.include_dc);
-        }
-        AnalysisDraft::Pnoise(setup) => {
-            quantity_input_row(
-                ui,
-                "Start",
-                &mut setup.start_freq,
-                QuantityInputKind::Frequency,
-                policy,
-                locale,
-            );
-            quantity_input_row(
-                ui,
-                "Stop",
-                &mut setup.stop_freq,
-                QuantityInputKind::Frequency,
-                policy,
-                locale,
-            );
-            input_row(
-                ui,
-                sweep_point_field_label(setup.sweep_type_idx),
-                &mut setup.num_points,
-            );
-            choice_row(ui, "Sweep", SWEEP_KINDS, &mut setup.sweep_type_idx);
-            input_row(ui, "Output", &mut setup.output_node);
-            input_row(ui, "Output ref", &mut setup.output_ref);
-            input_row(ui, "Input src", &mut setup.input_source);
-            input_row(ui, "Max sideband", &mut setup.max_sideband);
-            choice_row(
-                ui,
-                "Refer to",
-                &["output", "input", "phase"],
-                &mut setup.noise_ref_idx,
-            );
-            switch_row(ui, "Integrated noise", &mut setup.integrated_noise);
-            switch_row(ui, "Noise summary", &mut setup.noise_summary);
-        }
-        AnalysisDraft::Pxf(setup) => {
-            quantity_input_row(
-                ui,
-                "Start",
-                &mut setup.start_freq,
-                QuantityInputKind::Frequency,
-                policy,
-                locale,
-            );
-            quantity_input_row(
-                ui,
-                "Stop",
-                &mut setup.stop_freq,
-                QuantityInputKind::Frequency,
-                policy,
-                locale,
-            );
-            input_row(
-                ui,
-                sweep_point_field_label(setup.sweep_type_idx),
-                &mut setup.num_points,
-            );
-            choice_row(ui, "Sweep", SWEEP_KINDS, &mut setup.sweep_type_idx);
-            input_row(ui, "Output", &mut setup.output_node);
-            input_row(ui, "Output ref", &mut setup.output_ref);
-            input_row(ui, "Out sideband", &mut setup.output_sideband);
-            input_row(ui, "Input src", &mut setup.input_source);
-            // Both ends of the transfer, each next to the probe it belongs to.
-            // The input sideband was pinned to 1 in the run-configuration
-            // builder, so a mixer's down-conversion path was not authorable
-            // here while its up-conversion path was.
-            input_row(ui, "In sideband", &mut setup.input_sideband);
-            input_row(ui, "Max sideband", &mut setup.max_sideband);
-        }
-        AnalysisDraft::Pstb(setup) => {
-            // The same element STB designates, chosen the same way. It was
-            // free text here long after the stability form's stopped being
-            // one, so a probe name that matched nothing on the drawing failed
-            // in the solver instead of being refused by name.
-            stb_probe::row(
-                ui,
-                placed_loop_probes,
-                &mut setup.probe,
-                &mut setup.probe_reference,
-            );
-            input_row(ui, "Harmonics", &mut setup.max_harmonics);
-            input_row(ui, "Multipliers", &mut setup.num_multipliers);
-            engineering_input_row(ui, "Unstable above", &mut setup.stability_threshold);
-            engineering_input_row(ui, "Eigen tol", &mut setup.eigenvalue_tolerance);
-            switch_row(ui, "Detect subharmonics", &mut setup.detect_subharmonics);
-        }
+        AnalysisDraft::Pac(setup) => pac::fields(ui, setup, policy, locale),
+        AnalysisDraft::Pnoise(setup) => pnoise::fields(ui, setup, policy, locale),
+        AnalysisDraft::Pxf(setup) => pxf::fields(ui, setup, policy, locale),
+        AnalysisDraft::Pstb(setup) => pstb::fields(ui, setup, placed_loop_probes),
         AnalysisDraft::TransferFunction(setup) => {
-            // The two ports are the same two quantities the noise form asks
-            // for — one independent source in, one measured expression out —
-            // so they are offered from the same elaborated vocabulary the
-            // noise rows read rather than typed blind against a design the
-            // form already knows. A name this design does not carry is not a
-            // suggestion; it is a run that fails at validation.
-            let offered_sources = noise_domain
-                .sources
-                .get(..NOISE_DOMAIN_PRESET_LIMIT)
-                .unwrap_or(noise_domain.sources);
-            noise_domain_row(
-                ui,
-                XF_FIELD_LABELS[0],
-                "xf-input",
-                &noise_domain_hint(
-                    "sources",
-                    offered_sources.len(),
-                    noise_domain.sources.len(),
-                    noise_domain.unavailable.is_some(),
-                ),
-                offered_sources,
-                NOISE_INPUT_CUSTOM_CHOICE,
-                &mut setup.input_source,
-            );
-            let offered_outputs = xf_output_presets(noise_domain.nodes);
-            noise_domain_row(
-                ui,
-                XF_FIELD_LABELS[1],
-                "xf-output",
-                &noise_domain_hint(
-                    "nodes",
-                    offered_outputs.len(),
-                    noise_domain.nodes.len(),
-                    noise_domain.unavailable.is_some(),
-                ),
-                &offered_outputs,
-                NOISE_OUTPUT_CUSTOM_CHOICE,
-                &mut setup.output_expression,
-            );
-            if let Some(reason) = noise_domain.unavailable {
-                noise_domain_advisory(ui, reason);
-            }
-            xf_inference_action(ui, setup, tf_inference);
-            property_row(ui, XF_FIELD_LABELS[2], XF_SOLVE_POINT);
-            enabled_choice_row(ui, XF_FIELD_LABELS[3], &mut setup.transfer_gain);
-            enabled_choice_row(ui, XF_FIELD_LABELS[4], &mut setup.input_resistance);
-            enabled_choice_row(ui, XF_FIELD_LABELS[5], &mut setup.output_resistance);
-            choice_row(
-                ui,
-                XF_FIELD_LABELS[6],
-                XF_NORMALIZATION_CHOICES,
-                &mut setup.normalization_idx,
-            );
-            choice_row(
-                ui,
-                XF_FIELD_LABELS[7],
-                XF_ACCURACY_CHOICES,
-                &mut setup.accuracy_idx,
-            );
+            transfer_function::fields(ui, setup, noise_domain, tf_inference)
         }
+        // The run space has one editor — PVT, sweeps & variation — and one
+        // owner, the plan. This form reads that declaration; it does not
+        // keep one. A second set of axis controls here, or a second copy
+        // behind them, would be a second owner of the same fact, and the
+        // two would eventually disagree about how many points run.
         AnalysisDraft::Corner(setup) => {
-            // The run space has one editor — PVT, sweeps & variation — and one
-            // owner, the plan. This form reads that declaration; it does not
-            // keep one. A second set of axis controls here, or a second copy
-            // behind them, would be a second owner of the same fact, and the
-            // two would eventually disagree about how many points run.
             run_space::corner_form(ui, &mut setup.base_analysis_idx, run_space, route)
         }
         AnalysisDraft::Envelope(setup) => {
-            input_row(ui, ENVELOPE_FIELD_LABELS[0], &mut setup.carrier_tones);
-            envelope_time_input_row(
-                ui,
-                ENVELOPE_FIELD_LABELS[1],
-                &mut setup.stop_time,
-                policy,
-                locale,
-            );
-            envelope_time_input_row(
-                ui,
-                ENVELOPE_FIELD_LABELS[2],
-                &mut setup.envelope_step,
-                policy,
-                locale,
-            );
-            envelope_harmonic_order_row(ui, &mut setup.harmonic_order);
-            envelope_modulation_source_row(
-                ui,
-                &mut setup.modulation_sources,
-                envelope_modulation_sources,
-            );
-            envelope_choice_row(
-                ui,
-                ENVELOPE_FIELD_LABELS[5],
-                ENVELOPE_INITIAL_SOLVE_CHOICES,
-                &mut setup.initial_periodic_solve_idx,
-            );
-            envelope_choice_row(
-                ui,
-                ENVELOPE_FIELD_LABELS[6],
-                ENVELOPE_ADAPTIVE_CHOICES,
-                &mut setup.adaptive_mode_idx,
-            );
-            setup.extraction_path_idx = 0;
-            property_row(ui, ENVELOPE_FIELD_LABELS[7], ENVELOPE_EXTRACTION_PATH);
+            envelope::fields(ui, setup, envelope_modulation_sources, policy, locale)
         }
-        AnalysisDraft::Fourier(setup) => {
-            quantity_input_row(
-                ui,
-                "Fundamental",
-                &mut setup.fundamental,
-                QuantityInputKind::Frequency,
-                policy,
-                locale,
-            );
-            input_row(ui, "Harmonics", &mut setup.harmonics);
-            input_row(ui, "Output", &mut setup.output_node);
-            quantity_input_row(
-                ui,
-                "From",
-                &mut setup.start_time,
-                QuantityInputKind::Time,
-                policy,
-                locale,
-            );
-            quantity_input_row(
-                ui,
-                "To",
-                &mut setup.stop_time,
-                QuantityInputKind::Time,
-                policy,
-                locale,
-            );
-            switch_row(ui, "Compute THD", &mut setup.compute_thd);
-            switch_row(ui, "Normalize", &mut setup.normalize);
-        }
-        AnalysisDraft::Reliability(setup) => {
-            input_row(ui, "Years", &mut setup.years_csv);
-            input_row(ui, "Min stress V", &mut setup.min_stress_voltage);
-            switch_row(ui, "Hot carrier (HCI)", &mut setup.enable_hci);
-            switch_row(ui, "Bias instability (NBTI)", &mut setup.enable_nbti);
-            switch_row(ui, "Electromigration", &mut setup.enable_em);
-        }
-        AnalysisDraft::Optimization(setup) => {
-            input_row(ui, "Variables", &mut setup.variables_text)
-                .on_hover_text("One per line or comma, spelled name:min:max[:initial].");
-            input_row(ui, "Objective", &mut setup.objective_node);
-            input_row(ui, "Obj ref", &mut setup.objective_ref);
-            choice_row(ui, "Goal", &["min", "max", "target"], &mut setup.goal_mode);
-            input_row_enabled(ui, "Target", &mut setup.target_value, setup.goal_mode == 2);
-            choice_row(
-                ui,
-                "Method",
-                &["gradient", "pattern", "anneal"],
-                &mut setup.algorithm,
-            );
-            input_row(ui, "Max iters", &mut setup.max_iterations);
-            input_row(ui, "Tolerance", &mut setup.cost_tolerance);
-        }
-        AnalysisDraft::Soa(setup) => {
-            quantity_input_row(
-                ui,
-                "Stop time",
-                &mut setup.stop_time,
-                QuantityInputKind::Time,
-                policy,
-                locale,
-            );
-            quantity_input_row(
-                ui,
-                "Step time",
-                &mut setup.step_time,
-                QuantityInputKind::Time,
-                policy,
-                locale,
-            );
-            switch_row(ui, "Check Vgs", &mut setup.check_vgs_max);
-            input_row_enabled(ui, "Max Vgs", &mut setup.max_vgs, setup.check_vgs_max);
-            switch_row(ui, "Check Vds", &mut setup.check_vds_max);
-            input_row_enabled(ui, "Max Vds", &mut setup.max_vds, setup.check_vds_max);
-            switch_row(ui, "Check Vbe", &mut setup.check_vbe_max);
-            input_row_enabled(ui, "Max Vbe", &mut setup.max_vbe, setup.check_vbe_max);
-            switch_row(ui, "Check Vce", &mut setup.check_vce_max);
-            input_row_enabled(ui, "Max Vce", &mut setup.max_vce, setup.check_vce_max);
-        }
-        AnalysisDraft::Disto(setup) => {
-            quantity_input_row(
-                ui,
-                "Start",
-                &mut setup.sweep.fstart,
-                QuantityInputKind::Frequency,
-                policy,
-                locale,
-            );
-            quantity_input_row(
-                ui,
-                "Stop",
-                &mut setup.sweep.fstop,
-                QuantityInputKind::Frequency,
-                policy,
-                locale,
-            );
-            input_row(
-                ui,
-                sweep_point_field_label(setup.sweep.sweep),
-                &mut setup.sweep.points,
-            );
-            choice_row(ui, "Sweep", SWEEP_KINDS, &mut setup.sweep.sweep);
-            input_row(ui, "f2/f1", &mut setup.f2_over_f1);
-            // The one bound the Volterra run refuses on, said where it is
-            // typed: the ratio has no meaning at or above the first tone, and
-            // an empty field is the single-tone run rather than a mistake.
-            field_note(
-                ui,
-                "Between 0 and 1, exclusive, or empty for a single-tone run.",
-            );
-        }
-        AnalysisDraft::Qpss(setup) => {
-            input_row(ui, "Tone frequencies", &mut setup.tones);
-            input_row(ui, "Harmonic orders", &mut setup.harmonics);
-            input_row(ui, "Max iterations", &mut setup.max_iterations);
-            input_row(ui, "Relative tolerance", &mut setup.relative_tolerance);
-            switch_row(ui, "Autonomous oscillator", &mut setup.autonomous);
-            input_row_enabled(
-                ui,
-                "Oscillator node",
-                &mut setup.oscillator_node,
-                setup.autonomous,
-            );
-        }
-        AnalysisDraft::Hbsp(setup) => {
-            periodic_network_fields(ui, setup, policy, locale);
-        }
-        AnalysisDraft::Hbnoise(setup) => {
-            frequency_sweep_fields(ui, &mut setup.sweep, policy, locale);
-            input_row(ui, "Output", &mut setup.output_node);
-            input_row(ui, "Output ref", &mut setup.output_ref);
-            input_row(ui, "Input source", &mut setup.input_source);
-            input_row(ui, "Max sideband", &mut setup.max_sideband);
-            switch_row(ui, "Integrated noise", &mut setup.integrated_noise);
-            switch_row(ui, "Noise figure", &mut setup.noise_figure);
-            switch_row(ui, "Contributor ranking", &mut setup.contributor_ranking);
-        }
-        AnalysisDraft::Psp(setup) => {
-            periodic_network_fields(ui, setup, policy, locale);
-        }
-        AnalysisDraft::Qpac(setup) => {
-            frequency_sweep_fields(ui, &mut setup.sweep, policy, locale);
-            input_row(ui, "Input source", &mut setup.input_source);
-            input_row(ui, "Output", &mut setup.output_node);
-            input_row(ui, "Output ref", &mut setup.output_ref);
-            input_row(ui, "Input lattice", &mut setup.input_lattice);
-            input_row(ui, "Output lattice", &mut setup.output_lattice);
-        }
-        AnalysisDraft::Qpnoise(setup) => {
-            frequency_sweep_fields(ui, &mut setup.sweep, policy, locale);
-            input_row(ui, "Output", &mut setup.output_node);
-            input_row(ui, "Output ref", &mut setup.output_ref);
-            input_row(ui, "Input source", &mut setup.input_source);
-            input_row(ui, "Lattice ranges", &mut setup.lattice_products);
-            switch_row(ui, "Integrated noise", &mut setup.integrated_noise);
-            switch_row(ui, "Contributor ranking", &mut setup.contributor_ranking);
-        }
-        AnalysisDraft::Qpxf(setup) => {
-            frequency_sweep_fields(ui, &mut setup.sweep, policy, locale);
-            input_row(ui, "Input source", &mut setup.input_source);
-            input_row(ui, "Output", &mut setup.output_node);
-            input_row(ui, "Output ref", &mut setup.output_ref);
-            input_row(ui, "Input lattice", &mut setup.input_lattice);
-            input_row(ui, "Output lattice", &mut setup.output_lattice);
-            switch_row(ui, "Group delay", &mut setup.group_delay);
-        }
-        AnalysisDraft::TransientNoise(setup) => {
-            quantity_input_row(
-                ui,
-                "Stop time",
-                &mut setup.stop_time,
-                QuantityInputKind::Time,
-                policy,
-                locale,
-            );
-            quantity_input_row(
-                ui,
-                "Step time",
-                &mut setup.step_time,
-                QuantityInputKind::Time,
-                policy,
-                locale,
-            );
-            quantity_input_row(
-                ui,
-                "Start time",
-                &mut setup.start_time,
-                QuantityInputKind::Time,
-                policy,
-                locale,
-            );
-            quantity_input_row(
-                ui,
-                "Max step",
-                &mut setup.max_step,
-                QuantityInputKind::Time,
-                policy,
-                locale,
-            );
-            input_row(ui, "Seed", &mut setup.seed);
-            quantity_input_row(
-                ui,
-                "Noise fmax",
-                &mut setup.noise_fmax,
-                QuantityInputKind::Frequency,
-                policy,
-                locale,
-            );
-            input_row(ui, "Noise scale", &mut setup.scale);
-            switch_row(
-                ui,
-                "Use initial conditions",
-                &mut setup.use_initial_conditions,
-            );
-        }
-        AnalysisDraft::DcMismatch(setup) => {
-            input_row(ui, "Output expression", &mut setup.output_expression);
-            input_row(ui, "Sigma multiplier", &mut setup.sigma_multiplier);
-            input_row(ui, "Contributor limit", &mut setup.contributor_limit);
-            switch_row(ui, "Process variation", &mut setup.include_process);
-            switch_row(ui, "Local mismatch", &mut setup.include_mismatch);
-            switch_row(
-                ui,
-                "Normalize contributions",
-                &mut setup.normalized_contributions,
-            );
-        }
+        AnalysisDraft::Fourier(setup) => fourier::fields(ui, setup, policy, locale),
+        AnalysisDraft::Reliability(setup) => reliability::fields(ui, setup),
+        AnalysisDraft::Optimization(setup) => optimization::fields(ui, setup),
+        AnalysisDraft::Soa(setup) => soa::fields(ui, setup, policy, locale),
+        AnalysisDraft::Disto(setup) => disto::fields(ui, setup, policy, locale),
+        AnalysisDraft::Qpss(setup) => quasi_periodic::shooting_fields(ui, setup),
+        AnalysisDraft::Hbsp(setup) => periodic_network::fields(ui, setup, policy, locale),
+        AnalysisDraft::Hbnoise(setup) => periodic_network::noise_fields(ui, setup, policy, locale),
+        AnalysisDraft::Psp(setup) => periodic_network::fields(ui, setup, policy, locale),
+        AnalysisDraft::Qpac(setup) => quasi_periodic::ac_fields(ui, setup, policy, locale),
+        AnalysisDraft::Qpnoise(setup) => quasi_periodic::noise_fields(ui, setup, policy, locale),
+        AnalysisDraft::Qpxf(setup) => quasi_periodic::transfer_fields(ui, setup, policy, locale),
+        AnalysisDraft::TransientNoise(setup) => transient_noise::fields(ui, setup, policy, locale),
+        AnalysisDraft::DcMismatch(setup) => dc_mismatch::fields(ui, setup),
     }
     clear_pending_cell(ui);
 }

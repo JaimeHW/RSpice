@@ -11,8 +11,10 @@ mod model;
 mod numeric_override;
 
 pub use config::{
-    AnalysisDependencyRepairContext, AnalysisDraft, DistoDraft, FrequencySweepDraft,
-    NetworkPortDraft, NoiseDraft, PeriodicNetworkDraft,
+    AnalysisDependencyRepairContext, AnalysisDraft, DcMismatchDraft, DistoDraft,
+    FrequencySweepDraft, HbNoiseDraft, NetworkPortDraft, NoiseDraft, PeriodicNetworkDraft,
+    QpssDraft, QuasiPeriodicAcDraft, QuasiPeriodicNoiseDraft, QuasiPeriodicTransferDraft,
+    TransientNoiseDraft,
 };
 pub use kind::{AnalysisAvailability, AnalysisKind};
 pub use model::{

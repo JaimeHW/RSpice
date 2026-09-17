@@ -31,10 +31,24 @@ use crate::quantity::QuantityInputKind;
 use crate::simulation::dialog::PssDialogState;
 
 use super::{
-    PSS_FIELD_LABELS, PSS_MODE_CHOICES, QuantityPresentationPolicy, UiNumberLocale, choice_row,
-    enabled_choice_row, engineering_input_row, input_row, input_row_enabled,
-    named_periodic_source_row, quantity_input_row,
+    QuantityPresentationPolicy, UiNumberLocale, choice_row, enabled_choice_row,
+    engineering_input_row, input_row, input_row_enabled, named_periodic_source_row,
+    quantity_input_row,
 };
+
+pub(super) const PSS_FIELD_LABELS: [&str; 9] = [
+    "Mode",
+    "Fundamental",
+    "Tones",
+    "Stabilization cycles",
+    "Shooting points",
+    "Period tolerance",
+    "Autonomous oscillator",
+    "Oscillator node",
+    "Save harmonics",
+];
+
+pub(super) const PSS_MODE_CHOICES: [&str; 1] = ["Driven shooting"];
 
 /// Render the PSS fields.
 pub(super) fn fields(

@@ -5,7 +5,24 @@
 //! read the text it painted, which is a different concern from painting it and
 //! is the half that grows every time a form makes a new claim.
 
+use super::envelope::{
+    ENVELOPE_ADAPTIVE_CHOICES, ENVELOPE_EXTRACTION_PATH, ENVELOPE_FIELD_LABELS,
+    ENVELOPE_HARMONIC_ORDER_HELPER, ENVELOPE_INITIAL_SOLVE_CHOICES,
+};
+use super::noise::{
+    NOISE_CONTRIBUTION_CHOICES, NOISE_FIELD_LABELS, NOISE_INTEGRATION_CHOICES, NOISE_SWEEP_CHOICES,
+};
+use super::operating_point::{
+    OP_INITIAL_GUESS_CHOICES, OP_NODE_INITIALIZATION_CHOICES, op_initial_guess_disabled,
+    op_node_initialization_disabled, op_startup_indices_compatible,
+};
+use super::pss::{PSS_FIELD_LABELS, PSS_MODE_CHOICES};
+use super::transfer_function::{
+    XF_ACCURACY_CHOICES, XF_FIELD_LABELS, XF_INFER_LABEL, XF_NORMALIZATION_CHOICES, XF_SOLVE_POINT,
+    xf_output_presets,
+};
 use super::*;
+use crate::simulation::config::{NoiseContributionDetail, NoiseIntegrationMode, NoiseSweepType};
 use crate::simulation::dialog::{PssConfig, PssDialogState};
 use crate::simulation::plan::{AnalysisKind, NoiseDraft};
 
@@ -1224,5 +1241,88 @@ fn the_transfer_function_form_refuses_a_deck_that_names_no_single_input() {
         xf_ports(&draft),
         (String::new(), String::new()),
         "a refused inference writes nothing"
+    );
+}
+
+/// Every analysis form is a module, and [`form`] is only the router.
+///
+/// Seven lanes add fields to seven different analyses at once. If an arm's
+/// fields live in the arm, each of them edits the same file and every pair
+/// conflicts, so the router's job is to name a module and nothing else: one
+/// arm, one call, no body of its own.
+///
+/// The arm count is checked against the draft enum rather than pinned to a
+/// number, so a kind added to `AnalysisDraft` without a module of its own
+/// fails here instead of quietly going unscanned.
+#[test]
+fn every_analysis_form_arm_lives_in_its_own_module() {
+    let shipped = crate::source_guard::production_source(include_str!("../analysis_form.rs"));
+    let router = shipped
+        .split_once("pub(super) fn form(")
+        .expect("the router is still called `form`")
+        .1;
+
+    let mut arms = Vec::new();
+    let mut lines = router.lines().peekable();
+    while let Some(line) = lines.next() {
+        let Some(rest) = line.strip_prefix("        AnalysisDraft::") else {
+            continue;
+        };
+        let (variant, body) = rest
+            .split_once("(setup) => ")
+            .expect("every arm binds its draft as `setup`");
+        arms.push(variant.to_owned());
+        // `rustfmt` wraps a delegation wider than the line budget into a
+        // block, so the block is read through rather than refused.
+        let call = if body.trim() == "{" {
+            let inner = lines
+                .next()
+                .expect("a wrapped arm has a call in it")
+                .trim()
+                .to_owned();
+            assert_eq!(
+                lines.next().map(str::trim),
+                Some("}"),
+                "{variant} has more than a call in its block"
+            );
+            inner
+        } else {
+            body.trim().trim_end_matches(',').to_owned()
+        };
+        assert!(
+            !call.contains(';'),
+            "{variant} runs statements in the router; move them into its module"
+        );
+        let (path, _) = call
+            .split_once('(')
+            .unwrap_or_else(|| panic!("{variant} does not delegate to a module: {call}"));
+        assert!(
+            path.contains("::") && !path.contains(' '),
+            "{variant} does not delegate to a module: {call}"
+        );
+    }
+
+    // Counted by line rather than split on a newline literal: `.gitattributes`
+    // leaves this tree CRLF on Windows and LF on CI, and a scan that matched
+    // one of the two would find nothing on the other and pass empty.
+    let drafts = include_str!("../../../../simulation/plan/config.rs")
+        .split_once("pub enum AnalysisDraft {")
+        .expect("the draft enum is still called `AnalysisDraft`")
+        .1
+        .lines()
+        .map(str::trim_end)
+        .take_while(|line| *line != "}")
+        .filter(|line| {
+            let variant = line.trim_start();
+            line.starts_with("    ")
+                && variant.ends_with(',')
+                && variant.starts_with(|first: char| first.is_ascii_uppercase())
+        })
+        .count();
+    assert_eq!(
+        arms.len(),
+        drafts,
+        "{} arms for {drafts} drafts: {arms:?}",
+        arms.len()
     );
 }
