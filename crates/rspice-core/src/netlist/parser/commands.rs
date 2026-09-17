@@ -232,9 +232,16 @@ pub(super) fn parse_command(
                 });
             }
             let stop = expect_value(stream, line_num, params)?;
-            let start = try_value(stream, params);
-            let max_step = try_value(stream, params);
-            let uic = consume_uic_keyword(stream);
+            // A `KEY=VALUE` tail is never a positional field, so the optional
+            // positionals stop at the first keyword pair rather than letting
+            // a keyword whose name also parses as a value be eaten as tstart.
+            let start = try_positional_transient_value(stream, params);
+            let max_step = try_positional_transient_value(stream, params);
+            let mut uic = consume_uic_keyword(stream);
+            if let Some(noise) = parse_transient_noise_keywords(stream, line_num, params, &mut uic)?
+            {
+                bind_transient_noise_options(options, noise, line_num)?;
+            }
 
             analyses.push(AnalysisCommand::Tran {
                 step,
@@ -6704,13 +6711,349 @@ pub(super) fn consume_uic_keyword(stream: &mut TokenStream) -> bool {
     false
 }
 
+/// Read one optional positional `.TRAN` field, stopping before a `KEY=VALUE`
+/// pair.
+///
+/// `tstart` and `tmaxstep` are plain values, so a keyword is never one of
+/// them. Without this guard a deck that also defines a parameter named after
+/// a keyword would have the keyword's name consumed as a positional field.
+fn try_positional_transient_value(
+    stream: &mut TokenStream,
+    params: &ParamContext,
+) -> Option<Value> {
+    skip_commas(stream);
+    if matches!(stream.peek().kind, TokenKind::Ident(_))
+        && matches!(stream.peek_n(1).kind, TokenKind::Equals)
+    {
+        return None;
+    }
+    try_value(stream, params)
+}
+
+/// Consume a `NOISE… =` pair and return the upper-cased keyword.
+///
+/// Any other token is left untouched: the `.TRAN` card defines no other
+/// keyword, so a non-`NOISE` pair is reported by the line-consumed check that
+/// already covers every unrecognized trailing field.
+fn take_transient_noise_keyword(stream: &mut TokenStream) -> Option<String> {
+    skip_commas(stream);
+    let TokenKind::Ident(name) = &stream.peek().kind else {
+        return None;
+    };
+    if !matches!(stream.peek_n(1).kind, TokenKind::Equals) {
+        return None;
+    }
+    let keyword = name.to_ascii_uppercase();
+    if !keyword.starts_with("NOISE") {
+        return None;
+    }
+    stream.advance();
+    stream.advance();
+    Some(keyword)
+}
+
+/// Reject a `.TRAN` noise keyword the card already bound.
+fn bind_transient_noise_keyword<T>(
+    slot: &mut Option<T>,
+    value: T,
+    line_num: usize,
+    keyword: &str,
+) -> Result<(), ParseError> {
+    if slot.is_some() {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(".TRAN carries {keyword} more than once"),
+        });
+    }
+    *slot = Some(value);
+    Ok(())
+}
+
+/// Parse the `.TRAN` card's transient-noise keyword family, in any order and
+/// interleaved with `UIC`/`NOOP`.
+///
+/// `NOISEFMAX=` is what turns transient device noise on; the other three
+/// modify a run that has it and are refused on their own, because a deck that
+/// authored only `NOISESEED=` asked for something this card cannot mean.
+fn parse_transient_noise_keywords(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+    uic: &mut bool,
+) -> Result<Option<TransientNoiseConfig>, ParseError> {
+    let mut fmax = None;
+    let mut fmin = None;
+    let mut seed = None;
+    let mut scale = None;
+    loop {
+        if consume_uic_keyword(stream) {
+            *uic = true;
+            continue;
+        }
+        let Some(keyword) = take_transient_noise_keyword(stream) else {
+            break;
+        };
+        match keyword.as_str() {
+            "NOISEFMAX" => bind_transient_noise_keyword(
+                &mut fmax,
+                expect_value(stream, line_num, params)?,
+                line_num,
+                "NOISEFMAX",
+            )?,
+            "NOISEFMIN" => bind_transient_noise_keyword(
+                &mut fmin,
+                expect_value(stream, line_num, params)?,
+                line_num,
+                "NOISEFMIN",
+            )?,
+            "NOISESEED" => bind_transient_noise_keyword(
+                &mut seed,
+                expect_u64_literal(stream, line_num, "NOISESEED")?,
+                line_num,
+                "NOISESEED",
+            )?,
+            "NOISESCALE" => bind_transient_noise_keyword(
+                &mut scale,
+                expect_value(stream, line_num, params)?,
+                line_num,
+                "NOISESCALE",
+            )?,
+            unknown => {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: format!(
+                        ".TRAN does not define the keyword {unknown}; the transient-noise \
+                         keywords are NOISEFMAX, NOISEFMIN, NOISESEED and NOISESCALE"
+                    ),
+                });
+            }
+        }
+    }
+    let Some(fmax) = fmax else {
+        if fmin.is_some() || seed.is_some() || scale.is_some() {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!(
+                    ".TRAN transient-noise keywords require {}= to select the noise bandwidth",
+                    TransientNoiseConfig::FMAX_KEYWORD
+                ),
+            });
+        }
+        return Ok(None);
+    };
+    let config = TransientNoiseConfig {
+        fmax,
+        fmin,
+        seed,
+        scale: scale.unwrap_or(1.0),
+    };
+    config.validate().map_err(|message| ParseError::Syntax {
+        line: line_num,
+        message,
+    })?;
+    Ok(Some(config))
+}
+
+/// Store one card's transient-noise selection, refusing a second `.TRAN` card
+/// that asks for a different realization.
+fn bind_transient_noise_options(
+    options: &mut SimulationOptions,
+    config: TransientNoiseConfig,
+    line_num: usize,
+) -> Result<(), ParseError> {
+    match options.transient_noise {
+        Some(existing) if existing != config => Err(ParseError::Syntax {
+            line: line_num,
+            message: "this deck's .TRAN cards request different transient-noise settings; \
+                      one deck plays one noise realization"
+                .to_string(),
+        }),
+        _ => {
+            options.transient_noise = Some(config);
+            Ok(())
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::{
         Netlist,
-        netlist::{AnalysisCommand, DcSweepMode, ParseError, PrintDelimiter, SaveSignal},
+        netlist::{
+            AnalysisCommand, DcSweepMode, ParseError, PrintDelimiter, SaveSignal,
+            TransientNoiseConfig,
+        },
         numerics::integration::TransientErrorControl,
     };
+
+    /// Parse one `.TRAN` card in a minimal deck and return the deck.
+    fn transient_deck(card: &str) -> Result<Netlist, ParseError> {
+        Netlist::parse(&format!(
+            "transient noise card\nV1 in 0 1\nR1 in 0 1k\n{card}\n.END\n"
+        ))
+    }
+
+    #[test]
+    fn a_tran_card_carries_every_noise_keyword() {
+        let netlist = transient_deck(
+            ".TRAN 1n 1u 0 2n UIC NOISEFMAX=5e8 NOISEFMIN=1k NOISESEED=97 NOISESCALE=0.5",
+        )
+        .expect("every transient-noise keyword parses");
+        assert!(matches!(
+            netlist.analyses.as_slice(),
+            [AnalysisCommand::Tran {
+                step,
+                stop,
+                start: Some(start),
+                max_step: Some(max_step),
+                uic: true,
+            }] if step.to_bits() == 1.0e-9f64.to_bits()
+                && stop.to_bits() == 1.0e-6f64.to_bits()
+                && start.to_bits() == 0.0f64.to_bits()
+                && max_step.to_bits() == 2.0e-9f64.to_bits()
+        ));
+        assert_eq!(
+            netlist.options.transient_noise,
+            Some(TransientNoiseConfig {
+                fmax: 5.0e8,
+                fmin: Some(1.0e3),
+                seed: Some(97),
+                scale: 0.5,
+            })
+        );
+
+        // The keywords are order-free and may surround `UIC`, and the
+        // positional fields remain optional in front of them.
+        let reordered = transient_deck(
+            ".TRAN 1n 1u NOISESCALE=0.5 NOISESEED=97 UIC NOISEFMIN=1k NOISEFMAX=5e8",
+        )
+        .expect("the keyword tail is order-free");
+        assert_eq!(
+            reordered.options.transient_noise,
+            netlist.options.transient_noise
+        );
+        assert!(matches!(
+            reordered.analyses.as_slice(),
+            [AnalysisCommand::Tran {
+                start: None,
+                max_step: None,
+                uic: true,
+                ..
+            }]
+        ));
+
+        // NOISEFMAX alone is the whole request; the rest take their defaults.
+        let minimal = transient_deck(".TRAN 1n 1u NOISEFMAX=1e9").expect("NOISEFMAX alone parses");
+        assert_eq!(
+            minimal.options.transient_noise,
+            Some(TransientNoiseConfig {
+                fmax: 1.0e9,
+                fmin: None,
+                seed: None,
+                scale: 1.0,
+            })
+        );
+
+        // A deck that never names the family asks for a deterministic run.
+        let deterministic = transient_deck(".TRAN 1n 1u").expect("a plain .TRAN parses");
+        assert_eq!(deterministic.options.transient_noise, None);
+    }
+
+    #[test]
+    fn an_unknown_noise_keyword_on_a_tran_card_is_refused_by_name() {
+        let error = transient_deck(".TRAN 1n 1u NOISEX=1e9")
+            .expect_err("an unknown NOISE keyword is an error, not a warning");
+        let ParseError::Syntax { message, .. } = &error else {
+            panic!("expected a syntax error, got {error:?}");
+        };
+        assert!(
+            message.contains("NOISEX") && message.contains("NOISEFMAX"),
+            "the refusal must name the keyword and the family: {message}"
+        );
+    }
+
+    #[test]
+    fn transient_noise_keywords_require_the_noise_bandwidth() {
+        for card in [
+            ".TRAN 1n 1u NOISEFMIN=1k",
+            ".TRAN 1n 1u NOISESEED=7",
+            ".TRAN 1n 1u NOISESCALE=2",
+        ] {
+            let error = transient_deck(card).expect_err("NOISEFMAX is what turns noise on");
+            let ParseError::Syntax { message, .. } = &error else {
+                panic!("expected a syntax error for {card}, got {error:?}");
+            };
+            assert!(
+                message.contains("NOISEFMAX"),
+                "{card} must be refused by naming NOISEFMAX: {message}"
+            );
+        }
+    }
+
+    #[test]
+    fn transient_noise_keyword_values_are_validated_on_the_card() {
+        for (card, expected) in [
+            (".TRAN 1n 1u NOISEFMAX=0", "NOISEFMAX"),
+            (".TRAN 1n 1u NOISEFMAX=-1e9", "NOISEFMAX"),
+            (".TRAN 1n 1u NOISEFMAX=1e9 NOISEFMIN=1e9", "NOISEFMIN"),
+            (".TRAN 1n 1u NOISEFMAX=1e9 NOISEFMIN=2e9", "NOISEFMIN"),
+            (".TRAN 1n 1u NOISEFMAX=1e9 NOISEFMIN=0", "NOISEFMIN"),
+            (".TRAN 1n 1u NOISEFMAX=1e9 NOISESCALE=-1", "NOISESCALE"),
+            (".TRAN 1n 1u NOISEFMAX=1e9 NOISEFMAX=2e9", "NOISEFMAX"),
+        ] {
+            let error = transient_deck(card).expect_err("an inadmissible value is refused");
+            let ParseError::Syntax { message, .. } = &error else {
+                panic!("expected a syntax error for {card}, got {error:?}");
+            };
+            assert!(
+                message.contains(expected),
+                "{card} must be refused by naming {expected}: {message}"
+            );
+        }
+        // A seed is an integer literal, not a real.
+        let error = transient_deck(".TRAN 1n 1u NOISEFMAX=1e9 NOISESEED=1.5")
+            .expect_err("a fractional seed is refused");
+        let ParseError::Syntax { message, .. } = &error else {
+            panic!("expected a syntax error, got {error:?}");
+        };
+        assert!(message.contains("NOISESEED"), "{message}");
+    }
+
+    #[test]
+    fn two_tran_cards_may_not_request_different_noise_realizations() {
+        let shared = Netlist::parse(
+            "two matching transient noise cards\n\
+             V1 in 0 1\n\
+             R1 in 0 1k\n\
+             .TRAN 1n 1u NOISEFMAX=1e9 NOISESEED=4\n\
+             .TRAN 1n 2u NOISEFMAX=1e9 NOISESEED=4\n\
+             .END\n",
+        )
+        .expect("two cards that agree parse");
+        assert_eq!(
+            shared.options.transient_noise,
+            Some(TransientNoiseConfig {
+                fmax: 1.0e9,
+                fmin: None,
+                seed: Some(4),
+                scale: 1.0,
+            })
+        );
+
+        let error = Netlist::parse(
+            "two conflicting transient noise cards\n\
+             V1 in 0 1\n\
+             R1 in 0 1k\n\
+             .TRAN 1n 1u NOISEFMAX=1e9\n\
+             .TRAN 1n 1u NOISEFMAX=2e9\n\
+             .END\n",
+        )
+        .expect_err("two cards that disagree are refused");
+        let ParseError::Syntax { message, .. } = &error else {
+            panic!("expected a syntax error, got {error:?}");
+        };
+        assert!(message.contains("one noise realization"), "{message}");
+    }
 
     #[test]
     fn print_delimiters_are_typed_without_polluting_saved_signals() {

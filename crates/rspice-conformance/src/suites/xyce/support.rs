@@ -2500,6 +2500,7 @@ impl XyceTestRunner {
             bypass_reltol,
             bypass_abstol,
             restart,
+            transient_noise,
             scale: _,
         } = options;
         spice_dialect.is_none()
@@ -2537,6 +2538,7 @@ impl XyceTestRunner {
             && nonlin_transient_nox.is_none()
             && *transient_lte_reference == lte_reference
             && transient_new_bp_stepping.is_none()
+            && transient_noise.is_none()
             && vntol.is_none()
             && iabstol.is_none()
             && residual_reltol.is_none()

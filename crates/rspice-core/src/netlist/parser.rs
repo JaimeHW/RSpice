@@ -39,9 +39,9 @@ use super::{
     SimulationOptions, SourceMultiplicity, SourceRfPort, SourceSpec, SpectreStatisticsPlan,
     StartupDiagnosticCode, StartupDirectiveDisposition, StartupDirectiveEntry,
     StartupDirectiveKind, StartupDirectiveRecord, StartupDirectiveScope, StatisticalParamMode,
-    StepCommand, StepSweep, StepTarget, SubcircuitDef, SwitchState, VerilogAInclude,
-    XyceAddResistorMode, XyceAddResistorSpec, XyceAddResistorsPolicy, ensure_parse_not_aborted,
-    finish_non_aborting_parse, poll_parse_abort, poll_parse_text,
+    StepCommand, StepSweep, StepTarget, SubcircuitDef, SwitchState, TransientNoiseConfig,
+    VerilogAInclude, XyceAddResistorMode, XyceAddResistorSpec, XyceAddResistorsPolicy,
+    ensure_parse_not_aborted, finish_non_aborting_parse, poll_parse_abort, poll_parse_text,
     validate_startup_directives_with_abort,
 };
 use super::{ElementParameterDirection, ParameterDirectionCapture};

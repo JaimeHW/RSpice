@@ -2256,7 +2256,11 @@ pub enum AnalysisCommand {
         f2_over_f1: Option<Value>,
     },
 
-    /// Transient analysis: `.TRAN tstep tstop [tstart [tmaxstep]] [UIC]`
+    /// Transient analysis:
+    /// `.TRAN tstep tstop [tstart [tmaxstep]] [UIC] [NOISEFMAX=… …]`
+    ///
+    /// The `NOISE*` keyword family is authored here and stored in
+    /// [`SimulationOptions::transient_noise`]; see that field for why.
     Tran {
         step: Value,
         stop: Value,
@@ -4147,6 +4151,62 @@ impl XyceFftMode {
     }
 }
 
+/// Time-domain device-noise settings authored on a `.TRAN` card.
+///
+/// This is Spectre's `tran noisefmax=… noisefmin=… noiseseed=…
+/// noisescale=…` family, spelled as SPICE keywords on the transient card:
+/// `NOISEFMAX=` turns the run's device-noise injection on and fixes both the
+/// sample interval `NT = 1/(2·fmax)` and the injected noise bandwidth.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TransientNoiseConfig {
+    /// Highest represented noise frequency in hertz. Finite and positive.
+    pub fmax: Value,
+    /// Lowest flicker frequency represented, in hertz. `None` means the run
+    /// derives it as `1/tstop`, the longest period the run can resolve.
+    pub fmin: Option<Value>,
+    /// Seed for this analysis only, overriding `.OPTIONS SEED`.
+    pub seed: Option<u64>,
+    /// Multiplies every injected noise amplitude. One leaves the device
+    /// models' own densities untouched; zero reproduces the deterministic
+    /// run exactly.
+    pub scale: Value,
+}
+
+impl TransientNoiseConfig {
+    /// The keyword this card spells `fmax` with, for diagnostics.
+    pub(crate) const FMAX_KEYWORD: &'static str = "NOISEFMAX";
+
+    /// Validate the authored combination, naming the field that is wrong.
+    pub(crate) fn validate(&self) -> Result<(), String> {
+        if !self.fmax.is_finite() || self.fmax <= 0.0 {
+            return Err(format!(
+                "NOISEFMAX must be a positive finite frequency, found {}",
+                self.fmax
+            ));
+        }
+        if let Some(fmin) = self.fmin {
+            if !fmin.is_finite() || fmin <= 0.0 {
+                return Err(format!(
+                    "NOISEFMIN must be a positive finite frequency, found {fmin}"
+                ));
+            }
+            if fmin >= self.fmax {
+                return Err(format!(
+                    "NOISEFMIN ({fmin}) must be below NOISEFMAX ({})",
+                    self.fmax
+                ));
+            }
+        }
+        if !self.scale.is_finite() || self.scale < 0.0 {
+            return Err(format!(
+                "NOISESCALE must be a finite nonnegative number, found {}",
+                self.scale
+            ));
+        }
+        Ok(())
+    }
+}
+
 /// Simulation options from .OPTIONS command
 ///
 /// Controls numerical parameters for simulation accuracy and convergence.
@@ -4507,6 +4567,17 @@ pub struct SimulationOptions {
     /// accepted-history points. Xyce also forces linear LTRA interpolation
     /// while this option is enabled.
     pub device_try_to_compact: Option<bool>,
+    /// Time-domain device noise requested by a `.TRAN` card's `NOISEFMAX=`
+    /// keyword family.
+    ///
+    /// Authored on the transient card and stored here because what it selects
+    /// is one noise realization for the deck: the stream a device's injected
+    /// current is drawn from is seeded from `NOISESEED` or, absent that, from
+    /// this same options block's `SEED`, and every transient in the deck plays
+    /// that one realization. Two `.TRAN` cards that author the family
+    /// differently are refused while parsing, so storing it once cannot lose a
+    /// distinction the deck drew.
+    pub transient_noise: Option<TransientNoiseConfig>,
 }
 
 impl SimulationOptions {
