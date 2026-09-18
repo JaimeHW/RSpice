@@ -26,7 +26,7 @@ pub struct ControlError {
 }
 
 impl ControlError {
-    pub fn new(line: usize, kind: ControlErrorKind, message: impl Into<String>) -> Self {
+    pub(crate) fn new(line: usize, kind: ControlErrorKind, message: impl Into<String>) -> Self {
         Self {
             line,
             kind,
@@ -85,7 +85,7 @@ pub trait ControlScalarEvaluator {
 }
 
 #[derive(Default)]
-pub struct ParameterScalarEvaluator;
+pub(crate) struct ParameterScalarEvaluator;
 
 impl ControlScalarEvaluator for ParameterScalarEvaluator {
     fn evaluate_scalar(
