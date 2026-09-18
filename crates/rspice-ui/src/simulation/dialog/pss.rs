@@ -366,6 +366,16 @@ impl<'de> Deserialize<'de> for PssDialogState {
 }
 
 impl PssDialogState {
+    /// The last chooser position `integration_method_idx` may hold: the
+    /// engine's default at zero, then every offered method.
+    ///
+    /// Asked of the draft rather than spelled where a project is read, so that
+    /// bound cannot fall behind the method list, and the reader names no more
+    /// of this module than the draft it already holds.
+    pub(crate) fn last_integration_method_position(&self) -> usize {
+        IntegrationMethod::all().len()
+    }
+
     pub fn from_config(config: &PssConfig) -> Self {
         Self {
             integration_method_idx: integration_method_index(config.integration_method),
