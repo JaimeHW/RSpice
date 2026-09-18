@@ -1036,6 +1036,7 @@ impl<'a> RunContext<'a> {
             AnalysisCommand::Pstb(card) => periodic::run_pstb_card(self, card)?,
             AnalysisCommand::Pnoise(card) => periodic::run_pnoise_card(self, card)?,
             AnalysisCommand::Envelope(card) => periodic::run_envelope_card(self, card)?,
+            AnalysisCommand::DcMatch(card) => advanced::run_dc_match_from_command(self, card)?,
         }
 
         Ok(())

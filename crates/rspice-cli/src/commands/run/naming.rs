@@ -32,6 +32,7 @@ pub(super) fn analysis_output_tag(analysis: &AnalysisCommand) -> Option<&'static
         AnalysisCommand::Pstb(_) => Some("pstb"),
         AnalysisCommand::Pnoise(_) => Some("pnoise"),
         AnalysisCommand::Envelope(_) => Some("env"),
+        AnalysisCommand::DcMatch(_) => Some("dcmatch"),
         // `.STEP` and `.TEMP` are run axes whose coordinates own the artifact
         // namespace, and `.FOUR` publishes under its own post-process instance
         // identity, so neither owns a physical output namespace.
@@ -80,6 +81,7 @@ pub(super) fn output_tag_analysis_kind(tag: &str) -> Option<rspice_core::executi
         "pstb" => Some(AnalysisKind::Pstb),
         "pnoise" => Some(AnalysisKind::PNoise),
         "env" => Some(AnalysisKind::Envelope),
+        "dcmatch" => Some(AnalysisKind::DcMatch),
         // The aggregated axis sweep table spans coordinates, so it is not one
         // analysis instance and publishes no typed document of its own.
         _ => None,

@@ -31,6 +31,12 @@ struct FamilyRun {
     /// Circuit this family is driven against; the shared one unless the
     /// family needs a different excitation.
     circuit: Option<&'static str>,
+    /// Spectre `.scs` library written beside the deck as `statistics.scs`,
+    /// for a family whose deck `.include`s one. A statistical card reads the
+    /// design's own `statistics` block, and the include expander is what
+    /// lowers that block into the executable plan, so the family is driven
+    /// through the same two files a user's deck is.
+    library: Option<&'static str>,
     /// Analysis cards appended to the circuit.
     cards: &'static str,
     /// Extra command-line flags.
@@ -63,6 +69,7 @@ fn coverage(kind: AnalysisResultKind) -> FamilyCoverage {
     match kind {
         AnalysisResultKind::OperatingPoint => FamilyCoverage::Document(FamilyRun {
             circuit: None,
+            library: None,
             cards: ".OP\n",
             flags: &[],
             artifact: "",
@@ -72,6 +79,7 @@ fn coverage(kind: AnalysisResultKind) -> FamilyCoverage {
         }),
         AnalysisResultKind::DcSweep => FamilyCoverage::Document(FamilyRun {
             circuit: None,
+            library: None,
             cards: ".DC V1 0.4 0.6 0.1\n",
             flags: &[],
             artifact: "",
@@ -81,6 +89,7 @@ fn coverage(kind: AnalysisResultKind) -> FamilyCoverage {
         }),
         AnalysisResultKind::Ac => FamilyCoverage::Document(FamilyRun {
             circuit: None,
+            library: None,
             cards: ".AC DEC 2 1k 10k\n",
             flags: &[],
             artifact: "",
@@ -90,6 +99,7 @@ fn coverage(kind: AnalysisResultKind) -> FamilyCoverage {
         }),
         AnalysisResultKind::Transient => FamilyCoverage::Document(FamilyRun {
             circuit: None,
+            library: None,
             cards: ".TRAN 100u 500u\n",
             flags: &[],
             artifact: "",
@@ -99,6 +109,7 @@ fn coverage(kind: AnalysisResultKind) -> FamilyCoverage {
         }),
         AnalysisResultKind::Noise => FamilyCoverage::Document(FamilyRun {
             circuit: None,
+            library: None,
             cards: ".NOISE V(out) V1 DEC 2 1k 10k\n",
             flags: &[],
             artifact: "",
@@ -108,6 +119,7 @@ fn coverage(kind: AnalysisResultKind) -> FamilyCoverage {
         }),
         AnalysisResultKind::SParameters => FamilyCoverage::Document(FamilyRun {
             circuit: None,
+            library: None,
             cards: ".SP DEC 2 1k 10k\n",
             flags: &[],
             artifact: "",
@@ -121,6 +133,7 @@ fn coverage(kind: AnalysisResultKind) -> FamilyCoverage {
         // the 4kT normalization and the two-port figures.
         AnalysisResultKind::PortNoise => FamilyCoverage::Document(FamilyRun {
             circuit: None,
+            library: None,
             cards: ".SP DEC 2 1k 10k DONOISE\n",
             flags: &[],
             artifact: "port-noise",
@@ -139,6 +152,7 @@ fn coverage(kind: AnalysisResultKind) -> FamilyCoverage {
                  D1 out 0 DMOD\n\
                  .model DMOD D(IS=1e-12 N=1 CJO=0 TT=0)\n",
             ),
+            library: None,
             cards: ".DISTO DEC 2 1k 10k\n",
             flags: &[],
             artifact: "",
@@ -148,6 +162,7 @@ fn coverage(kind: AnalysisResultKind) -> FamilyCoverage {
         }),
         AnalysisResultKind::TransferFunction => FamilyCoverage::Document(FamilyRun {
             circuit: None,
+            library: None,
             cards: ".TF V(out) V1\n",
             flags: &[],
             artifact: "",
@@ -171,6 +186,7 @@ fn coverage(kind: AnalysisResultKind) -> FamilyCoverage {
                  R3 n2 ctrl 1k\n\
                  C3 ctrl 0 159.154943091895n\n",
             ),
+            library: None,
             cards: ".STB DEC 20 10 10meg probe=VPROBE\n",
             flags: &[],
             artifact: "",
@@ -180,6 +196,7 @@ fn coverage(kind: AnalysisResultKind) -> FamilyCoverage {
         }),
         AnalysisResultKind::Sensitivity => FamilyCoverage::Document(FamilyRun {
             circuit: None,
+            library: None,
             cards: ".SENS V(out) DC\n",
             flags: &[],
             artifact: "",
@@ -189,6 +206,7 @@ fn coverage(kind: AnalysisResultKind) -> FamilyCoverage {
         }),
         AnalysisResultKind::PoleZero => FamilyCoverage::Document(FamilyRun {
             circuit: None,
+            library: None,
             cards: ".PZ in 0 out 0 vol pz\n",
             flags: &[],
             artifact: "",
@@ -198,6 +216,7 @@ fn coverage(kind: AnalysisResultKind) -> FamilyCoverage {
         }),
         AnalysisResultKind::Fourier => FamilyCoverage::Document(FamilyRun {
             circuit: None,
+            library: None,
             cards: ".TRAN 10u 3m\n.FOUR 1k V(out)\n",
             flags: &[],
             artifact: "four-001",
@@ -216,6 +235,7 @@ fn coverage(kind: AnalysisResultKind) -> FamilyCoverage {
         },
         AnalysisResultKind::MonteCarlo => FamilyCoverage::Document(FamilyRun {
             circuit: None,
+            library: None,
             cards: ".OP\n",
             flags: &["--monte-carlo", "4", "--seed", "7", "--mc-spread", "0.02"],
             artifact: "",
@@ -225,6 +245,7 @@ fn coverage(kind: AnalysisResultKind) -> FamilyCoverage {
         }),
         AnalysisResultKind::Pss => FamilyCoverage::Document(FamilyRun {
             circuit: None,
+            library: None,
             cards: ".PSS FUND=1k\n",
             flags: &[],
             artifact: "",
@@ -234,6 +255,7 @@ fn coverage(kind: AnalysisResultKind) -> FamilyCoverage {
         }),
         AnalysisResultKind::HarmonicBalance => FamilyCoverage::Document(FamilyRun {
             circuit: None,
+            library: None,
             cards: ".HB 1k\n",
             flags: &[],
             artifact: "",
@@ -247,6 +269,7 @@ fn coverage(kind: AnalysisResultKind) -> FamilyCoverage {
         // the core refuses to exceed rather than truncate.
         AnalysisResultKind::Pac => FamilyCoverage::Document(FamilyRun {
             circuit: None,
+            library: None,
             cards: ".HB 1k\n.PAC DEC 2 1k 10k INPUT=V1 OUT=V(out) MAXSIDEBAND=1\n",
             flags: &[],
             artifact: "pac-001",
@@ -261,6 +284,7 @@ fn coverage(kind: AnalysisResultKind) -> FamilyCoverage {
         // output frequency, whose unit is not in doubt.
         AnalysisResultKind::Pxf => FamilyCoverage::Document(FamilyRun {
             circuit: None,
+            library: None,
             cards: ".HB 1k\n.PXF DEC 2 1k 10k INPUT=V1 OUT=V(out) MAXSIDEBAND=1\n",
             flags: &[],
             artifact: "pxf-001",
@@ -280,6 +304,7 @@ fn coverage(kind: AnalysisResultKind) -> FamilyCoverage {
                  L1 a out 10u\n\
                  C1 out 0 1n\n",
             ),
+            library: None,
             cards: ".PSS FUND=1meg HARMS=8 POINTS=64 TSTABPERIODS=2\n\
                     .PSTB PROBE=L1 MAXHARM=4\n",
             flags: &[],
@@ -290,6 +315,7 @@ fn coverage(kind: AnalysisResultKind) -> FamilyCoverage {
         }),
         AnalysisResultKind::PNoise => FamilyCoverage::Document(FamilyRun {
             circuit: None,
+            library: None,
             cards: ".HB 1k\n.PNOISE DEC 2 1k 10k OUT=V(out) INPUT=V1 MAXSIDEBAND=1\n",
             flags: &[],
             artifact: "pnoise-001",
@@ -312,12 +338,43 @@ fn coverage(kind: AnalysisResultKind) -> FamilyCoverage {
                  R1 in out 1k\n\
                  C1 out 0 159.154943091895n\n",
             ),
+            library: None,
             cards: ".HB 1k\n.ENVELOPE TSTOP=1m MAXSTEP=0.1m\n",
             flags: &[],
             artifact: "env-001",
             analysis_tag: "env-001",
             series: Some(("v(out)", "volt")),
             scalar: None,
+        }),
+        // DC mismatch has no default spread to fall back on: every sigma comes
+        // from the design's own `statistics` block, so this family is driven
+        // against a resistor divider whose two resistances are varied by a
+        // Spectre library the deck includes. The result is five named scalars
+        // and a ranked contributor table, so there is no series to check.
+        AnalysisResultKind::DcMatch => FamilyCoverage::Document(FamilyRun {
+            circuit: Some(
+                "* DC mismatch coverage\n\
+                 .include \"statistics.scs\"\n\
+                 V1 in 0 1\n\
+                 R1 in out {r1v}\n\
+                 R2 out 0 {r2v}\n",
+            ),
+            library: Some(
+                "// Resistor divider mismatch, declared the way a PDK does.\n\
+                 parameters r1v=1000 r2v=2000\n\
+                 statistics {\n\
+                  mismatch {\n\
+                   vary r1v dist=gauss std=10\n\
+                   vary r2v dist=gauss std=10\n\
+                  }\n\
+                 }\n",
+            ),
+            cards: ".DCMATCH OUT=V(out) CONTRIBUTORS=0 SIGMA=3\n",
+            flags: &[],
+            artifact: "",
+            analysis_tag: "dcmatch-001",
+            series: None,
+            scalar: Some("sigma_total"),
         }),
     }
 }
@@ -441,6 +498,10 @@ fn assert_document(kind: AnalysisResultKind, run: &FamilyRun) {
 }
 
 fn run_family(dir: &Path, run: &FamilyRun) -> (std::process::Output, PathBuf) {
+    if let Some(library) = run.library {
+        std::fs::write(dir.join("statistics.scs"), library)
+            .expect("write the deck's Spectre statistics library");
+    }
     crate::run(dir, run.circuit, run.cards, run.flags, "json")
 }
 

@@ -1764,6 +1764,156 @@ pub(super) fn run_sparam(ctx: &RunContext<'_>, ports_spec: &str, z0: f64) -> Res
     publish_sparam_run(ctx, &run, "sparam")
 }
 
+/// Run one authored `.DCMATCH` card.
+///
+/// Like `.TF`, this is a single-point analysis: one nominal operating point,
+/// one variance sum, no sweep and no axis of its own. The summary quotes the
+/// three sigmas at the multiple the card asked for and then the ranked
+/// contributors, because which instance owns the spread is the question the
+/// card was authored to ask.
+pub(super) fn run_dc_match_from_command(
+    ctx: &RunContext<'_>,
+    card: &rspice_core::netlist::DcMatchCard,
+) -> Result<(), CliError> {
+    if !ctx.quiet {
+        println!("Running DC mismatch analysis...");
+    }
+    let result = ctx
+        .engine
+        .run_dc_match_with_abort(ctx.netlist, card, &crate::abort::ProcessAbort)
+        .map_err(|error| map_advanced_simulation_error(ctx, "DC Mismatch", error))?;
+    ensure_not_cancelled(ctx)?;
+    report_dc_match(ctx, &result);
+    export_dc_match(ctx, &result)
+}
+
+/// Unit symbol of a `.DCMATCH` probe, read off the probe the result names.
+///
+/// The shared document decides the same way, so the printed unit and the
+/// document's declared unit cannot disagree.
+fn dc_match_unit(result: &rspice_core::analysis::dcmatch::DcMatchResult) -> &'static str {
+    if result.output.starts_with('I') { "A" } else { "V" }
+}
+
+/// Print one mismatch result.
+///
+/// Every quoted key is a scalar the typed document publishes under the same
+/// name, so a reader who moves from the terminal to the artifact does not
+/// have to translate.
+fn report_dc_match(ctx: &RunContext<'_>, result: &rspice_core::analysis::dcmatch::DcMatchResult) {
+    if ctx.quiet {
+        return;
+    }
+    let unit = dc_match_unit(result);
+    println!("DC mismatch information:");
+    println!("output = {}", result.output);
+    println!("nominal_value = {:.6e} {unit}", result.nominal_value);
+    println!("sigma_total = {:.6e} {unit}", result.sigma_total);
+    println!("sigma_mismatch = {:.6e} {unit}", result.sigma_mismatch);
+    println!("sigma_process = {:.6e} {unit}", result.sigma_process);
+    println!(
+        "quoted_sigma = {:.6e} {unit} ({:.6e} sigma)",
+        result.quoted_sigma(),
+        result.sigma_multiplier
+    );
+    if result.contributors.is_empty() {
+        println!(
+            "contributors: none of the {} evaluated pass the card's limits",
+            result.evaluated_contributors
+        );
+        return;
+    }
+    println!(
+        "contributors ({} listed of {} evaluated, largest variance share first):",
+        result.contributors.len(),
+        result.evaluated_contributors
+    );
+    println!(
+        "  {:<24} {:<10} {:<10} {:>13} {:>13} {:>13}",
+        "INSTANCE", "PARAMETER", "SCOPE", "SHARE", "SENSITIVITY", "CONTRIBUTION"
+    );
+    for contributor in &result.contributors {
+        println!(
+            "  {:<24} {:<10} {:<10} {:>13.6e} {:>13.6e} {:>13.6e}",
+            truncate(&contributor.instance, 24),
+            truncate(&contributor.parameter, 10),
+            contributor.scope.tag(),
+            contributor.share,
+            contributor.sensitivity,
+            contributor.contribution
+        );
+    }
+}
+
+/// Write one mismatch result.
+///
+/// The flat table is a single row of named scalars, the way `.TF`'s is: the
+/// three sigmas and the nominal value, then each retained contributor's
+/// displacement and variance share. The ranked table with each contributor's
+/// own sigma and derivative stays in the typed document, which is the only
+/// representation that can carry a table of rows.
+fn export_dc_match(
+    ctx: &RunContext<'_>,
+    result: &rspice_core::analysis::dcmatch::DcMatchResult,
+) -> Result<(), CliError> {
+    let Some(resolved) = ctx.resolve_output("dcmatch") else {
+        return Ok(());
+    };
+    super::frequency::reject_hdf5(ctx.format, "DC mismatch")?;
+    let analysis_id = resolved.analysis("dcmatch")?;
+    use super::export::{ColumnData, ExportColumn, ExportTable};
+
+    let unit = dc_match_unit(result);
+    let scalar = |name: String, var_type: &str, value: f64| ExportColumn {
+        name,
+        var_type: var_type.to_string(),
+        data: ColumnData::Real(vec![value]),
+    };
+    let quantity = if unit == "A" { "current" } else { "voltage" };
+    let mut columns = vec![
+        scalar("nominal_value".to_owned(), quantity, result.nominal_value),
+        scalar("sigma_total".to_owned(), quantity, result.sigma_total),
+        scalar("sigma_mismatch".to_owned(), quantity, result.sigma_mismatch),
+        scalar("sigma_process".to_owned(), quantity, result.sigma_process),
+        scalar("quoted_sigma".to_owned(), quantity, result.quoted_sigma()),
+    ];
+    for contributor in &result.contributors {
+        let owner = format!("{}/{}", contributor.instance, contributor.parameter);
+        columns.push(scalar(
+            format!("contribution({owner})"),
+            quantity,
+            contributor.contribution,
+        ));
+        columns.push(scalar(format!("share({owner})"), "share", contributor.share));
+    }
+    let table = ExportTable {
+        analysis: "dcmatch".to_string(),
+        plot_name: "DC Mismatch".to_string(),
+        scale_name: "point".to_string(),
+        scale_type: "index".to_string(),
+        scale: vec![0.0],
+        columns,
+    };
+    super::document::publish_table_result(
+        ctx,
+        &resolved.path,
+        analysis_id,
+        // The mismatch result publishes named scalars and a ranked
+        // contributor table rather than a series, so its typed values live in
+        // the document's payload.
+        super::document::empty_schema(),
+        &table,
+        || {
+            rspice_core::execution::AnalysisResultDocument::from_dc_match(analysis_id, result)
+        },
+    )?;
+
+    if !ctx.quiet {
+        println!("  DC mismatch exported to: {}", resolved.path.display());
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

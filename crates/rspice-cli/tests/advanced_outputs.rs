@@ -583,3 +583,136 @@ fn netlist_dc_sensitivity_rejects_discrete_parameter_filter() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// The Spectre statistics library the mismatch decks below include, declared
+/// the way a PDK declares one: two independent per-instance spreads on the
+/// divider's two resistances.
+const DIVIDER_STATISTICS: &str = "\
+// Resistor divider mismatch.
+parameters r1v=1000 r2v=2000
+statistics {
+ mismatch {
+  vary r1v dist=gauss std=10
+  vary r2v dist=gauss std=10
+ }
+}
+";
+
+const DIVIDER_MISMATCH_DECK: &str = "* resistor divider DC mismatch\n\
+     .include \"statistics.scs\"\n\
+     V1 in 0 1\n\
+     R1 in out {r1v}\n\
+     R2 out 0 {r2v}\n\
+     .DCMATCH OUT=V(out) CONTRIBUTORS=0 SIGMA=3\n\
+     .end\n";
+
+#[test]
+fn a_dcmatch_card_runs_and_publishes_its_typed_document() {
+    let dir = test_dir("dcmatch");
+    std::fs::write(dir.join("statistics.scs"), DIVIDER_STATISTICS)
+        .expect("write the Spectre statistics library");
+    let deck = write_deck(&dir, "dcmatch.sp", DIVIDER_MISMATCH_DECK);
+    let out = dir.join("dcmatch.json");
+
+    let output = run_rspice(&[
+        "run",
+        deck.to_str().unwrap(),
+        "-o",
+        out.to_str().unwrap(),
+        "-f",
+        "json",
+    ]);
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    // V(out) = Vs*R2/(R1+R2), so d/dR1 = -Vs*R2/(R1+R2)^2 and
+    // d/dR2 = Vs*R1/(R1+R2)^2. Algebra computed here from the deck's own
+    // declared values, not a recorded number.
+    let (source, r1, r2, sigma) = (1.0_f64, 1.0e3_f64, 2.0e3_f64, 10.0_f64);
+    let sum = r1 + r2;
+    let from_r1 = source * r2 / (sum * sum) * sigma;
+    let from_r2 = source * r1 / (sum * sum) * sigma;
+    let expected = (from_r1 * from_r1 + from_r2 * from_r2).sqrt();
+
+    let document: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&out).expect("mismatch document"))
+            .expect("the published artifact is JSON");
+    assert_eq!(document["resultKind"], "dcmatch");
+    assert_eq!(document["analysis"]["tag"], "dcmatch-001");
+    let sigma_total = scalar_value(&document, "sigma_total");
+    let error = (sigma_total - expected).abs() / expected;
+    assert!(
+        error < 1.0e-3,
+        "sigma_total {sigma_total} against the analytic {expected} (relative error {error})"
+    );
+    assert!(
+        (scalar_value(&document, "nominal_value") - source * r2 / sum).abs() < 1.0e-9,
+        "nominal V(out) is {}",
+        scalar_value(&document, "nominal_value")
+    );
+    assert!(
+        (scalar_value(&document, "sigma_mismatch") - sigma_total).abs() < 1.0e-12,
+        "the deck declares only mismatch spread"
+    );
+    assert_eq!(scalar_value(&document, "sigma_process"), 0.0);
+    assert!(
+        (scalar_value(&document, "quoted_sigma") - 3.0 * sigma_total).abs() < 1.0e-12,
+        "the card asked for 3 sigma"
+    );
+
+    // The ranked contributor table is the payload's own, and the shares of
+    // the six evaluated (instance, variable) pairs account for all of the
+    // variance.
+    let contributors = document["payload"]["contributors"]
+        .as_array()
+        .unwrap_or_else(|| panic!("the mismatch payload carries no contributors: {document:#}"));
+    assert_eq!(contributors.len(), 6, "{document:#}");
+    let shares: f64 = contributors
+        .iter()
+        .map(|entry| entry["share"].as_f64().expect("numeric share"))
+        .sum();
+    assert!((shares - 1.0).abs() < 1.0e-9, "shares sum to {shares}");
+
+    // The terminal summary quotes what the document publishes, under the
+    // same names.
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("DC mismatch information:") && stdout.contains("sigma_total ="),
+        "unexpected summary: {stdout}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_dcmatch_card_without_statistics_reports_the_engines_remedy() {
+    let dir = test_dir("dcmatch-no-statistics");
+    let deck = write_deck(
+        &dir,
+        "no-statistics.sp",
+        "* the same divider with no statistics block bound to it\n\
+         V1 in 0 1\n\
+         R1 in out 1k\n\
+         R2 out 0 2k\n\
+         .DCMATCH OUT=V(out)\n\
+         .end\n",
+    );
+
+    let output = run_rspice(&["--quiet", "run", deck.to_str().unwrap()]);
+    assert!(
+        !output.status.success(),
+        "a mismatch card with no declared spread must fail closed"
+    );
+    // The engine's own refusal text, unchanged: there is no default spread,
+    // and the remedy names the block the deck has to declare.
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("statistics { mismatch { vary ... } }"),
+        "unexpected error: {stderr}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
