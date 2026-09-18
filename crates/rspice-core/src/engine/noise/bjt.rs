@@ -415,7 +415,14 @@ mod tests {
 
     #[test]
     fn gp_private_noise_adjoint_retains_excess_phase() {
-        let vt = crate::constants::K_BOLTZMANN * 300.15 / crate::constants::Q_ELECTRON;
+        // The native GP model reads ngspice's const.h pair in the Ngspice
+        // dialect, so the oracle must state the junction bias with the same
+        // thermal voltage the device uses: the exponential turns the
+        // seventh-digit difference from the SI pair into one part in 1e5 of
+        // gm, five times this test's tolerance. The device's own value is
+        // asserted below rather than assumed.
+        let vt =
+            crate::constants::NGSPICE_K_BOLTZMANN * 300.15 / crate::constants::NGSPICE_Q_ELECTRON;
         let current = 1e-16 * (0.7 / vt).exp_m1();
         let gm = (current + 1e-16) / vt;
         for phase in [0.0_f64, 21.0, 90.0] {
@@ -436,6 +443,12 @@ mod tests {
             circuit.set_semiconductor_junction_gmin(0.0);
             // Programmatic hidden-node path; authored variable RB uses MNA.
             let bjt = &mut circuit.bjts.devices[0];
+            assert!(
+                (bjt.vt - vt).abs() <= vt * 1e-15,
+                "the oracle's thermal voltage {vt:e} is not the one the device \
+                 evaluates its junctions with ({:e})",
+                bjt.vt,
+            );
             bjt.rbi = 100.0;
             assert!(!bjt.mna_promoted());
             let private_base = bjt.legacy_noise_terminals()[1].0.unwrap();

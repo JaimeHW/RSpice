@@ -2216,7 +2216,10 @@ impl Bjt {
                 crate::constants::XYCE_Q_ELECTRON,
             )
         } else if self.ngspice_compatibility {
-            (1.38064852e-23, 1.6021766208e-19)
+            (
+                crate::constants::NGSPICE_K_BOLTZMANN,
+                crate::constants::NGSPICE_Q_ELECTRON,
+            )
         } else {
             (crate::constants::K_BOLTZMANN, crate::constants::Q_ELECTRON)
         };

@@ -203,6 +203,20 @@ pub const XYCE_K_BOLTZMANN: Value = 1.3806226e-23;
 /// Elementary charge as Xyce 7.10 rounds it (C). See [`XYCE_K_BOLTZMANN`].
 pub const XYCE_Q_ELECTRON: Value = 1.6021918e-19;
 
+/// Boltzmann constant as ngspice 46's `const.h` carries it (J/K).
+///
+/// ngspice froze the CODATA 2014 pair, which its native Gummel-Poon
+/// temperature equations and `nevalsrc.c` both read. The difference from the
+/// exact SI pair above is seventh-digit in `kT/q`, and every junction
+/// exponentiates it: at 0.7 V it moves a transconductance by one part in
+/// 1e5. Which pair applies is a dialect decision, so it is named once here
+/// and read by every equation that must reproduce ngspice's numbers.
+pub(crate) const NGSPICE_K_BOLTZMANN: Value = 1.38064852e-23;
+
+/// Elementary charge as ngspice 46's `const.h` carries it (C). See
+/// [`NGSPICE_K_BOLTZMANN`].
+pub(crate) const NGSPICE_Q_ELECTRON: Value = 1.6021766208e-19;
+
 /// Physical constants used while evaluating primitive noise sources.
 ///
 /// Compatibility simulators historically embedded rounded constants in their
@@ -223,8 +237,8 @@ impl NoisePhysicalConstants {
 
     /// Constants used by ngspice 46's const.h and nevalsrc.c.
     pub(crate) const NGSPICE_46: Self = Self {
-        boltzmann: 1.38064852e-23,
-        electron_charge: 1.6021766208e-19,
+        boltzmann: NGSPICE_K_BOLTZMANN,
+        electron_charge: NGSPICE_Q_ELECTRON,
     };
 
     pub const XYCE_7_10: Self = Self {
