@@ -22,7 +22,12 @@ use crate::workbench::{AppState, MessageId};
 use super::super::super::design_system::{WorkbenchIcon, icon_button, labeled_icon_button_sized};
 use super::{Stage, StageAction};
 
-const ROW_HEIGHT: f32 = 22.0;
+const ROW_HEIGHT: f32 = 24.0;
+/// How many adopters the band shows before its list scrolls. Three is what a
+/// definition in ordinary use has; the inspector lists every one.
+const VISIBLE_ADOPTERS: usize = 3;
+const BAND_FOOT: f32 = 4.0;
+const INSET: f32 = 10.0;
 const BUTTON: egui::Vec2 = egui::Vec2::new(24.0, 20.0);
 const READOPT_WIDTH: f32 = 104.0;
 /// Room each row keeps at its right edge, sized to the verbs and note it
@@ -35,22 +40,33 @@ const ADOPTER_TRAIL_WIDTH: f32 = 280.0;
 const TRAIL_GAP: f32 = 6.0;
 const TRAIL_INSET: f32 = 8.0;
 
+/// How tall the band is: its head, the definition's card, and the adopters it
+/// shows without scrolling.
+pub(super) fn content_height(stage: &Stage) -> f32 {
+    ROW_HEIGHT * (2 + stage.adopters.len().min(VISIBLE_ADOPTERS)) as f32 + BAND_FOOT
+}
+
 pub(super) fn show(ui: &mut Ui, state: &AppState, stage: &Stage, actions: &mut Vec<StageAction>) {
     let messages = state.ui.messages();
     let palette = Tokens::get(ui.ctx()).color;
+    ui.spacing_mut().item_spacing.y = 0.0;
     super::split_row(
         ui,
         ROW_HEIGHT,
         HEADER_NOTE_WIDTH,
         |ui| {
-            ui.add_space(8.0);
+            ui.add_space(INSET);
             ui.add(
                 egui::Label::new(
                     egui::RichText::new(if stage.adopters.is_empty() {
                         messages.text(MessageId::StimulusRealizationNoAdopters)
                     } else {
                         messages.format(
-                            MessageId::StimulusRealization,
+                            if stage.adopters.len() == 1 {
+                                MessageId::StimulusRealizationSingular
+                            } else {
+                                MessageId::StimulusRealization
+                            },
                             &[("count", &stage.adopters.len().to_string())],
                         )
                     })
@@ -75,6 +91,7 @@ pub(super) fn show(ui: &mut Ui, state: &AppState, stage: &Stage, actions: &mut V
         .id_salt("workbench.stimulus.realization")
         .auto_shrink([false, false])
         .show(ui, |ui| {
+            ui.spacing_mut().item_spacing.y = 0.0;
             definition_line(ui, state, stage, actions);
             for adopter in &stage.adopters {
                 adopter_line(ui, state, stage, adopter, actions);
@@ -96,15 +113,8 @@ fn definition_line(ui: &mut Ui, state: &AppState, stage: &Stage, actions: &mut V
         ROW_HEIGHT,
         DEFINITION_TRAIL_WIDTH,
         |ui| {
-            ui.add_space(8.0);
-            ui.add(
-                egui::Label::new(
-                    egui::RichText::new(&text)
-                        .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                        .color(color),
-                )
-                .truncate(),
-            );
+            ui.add_space(INSET);
+            card_well(ui, &text, color);
         },
         |ui| {
             ui.add_space(8.0);
@@ -160,15 +170,8 @@ fn adopter_line(
         ROW_HEIGHT,
         ADOPTER_TRAIL_WIDTH,
         |ui| {
-            ui.add_space(8.0);
-            ui.add(
-                egui::Label::new(
-                    egui::RichText::new(text)
-                        .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                        .color(color),
-                )
-                .truncate(),
-            );
+            ui.add_space(INSET);
+            card_well(ui, &text, color);
         },
         |ui| {
             ui.add_space(8.0);
@@ -218,4 +221,35 @@ fn adopter_line(
         },
     );
     actions.append(&mut trailing);
+}
+
+/// One card, in the inset well every card on this band sits in.
+///
+/// The well is what says "this is text the netlister wrote" rather than a
+/// sentence about it, and it is sized to the card so a short one does not
+/// leave a slab of inset beside it. A card longer than its room is elided and
+/// keeps its whole text under the pointer.
+fn card_well(ui: &mut Ui, text: &str, color: egui::Color32) {
+    const PAD: f32 = 6.0;
+    let palette = Tokens::get(ui.ctx()).color;
+    let font = theme::mono(tokens::FS_0, FontWeight::Regular);
+    let room = (ui.available_width() - 2.0 * PAD - INSET).max(0.0);
+    let shown = crate::workbench::design_system::elide_text(ui, text, &font, room);
+    let elided = shown != text;
+    let galley = ui.painter().layout_no_wrap(shown, font, color);
+    let (rect, response) = ui.allocate_exact_size(
+        egui::Vec2::new(galley.size().x + 2.0 * PAD, 18.0),
+        egui::Sense::hover(),
+    );
+    ui.painter().rect_filled(rect, 2.0, palette.bg_inset);
+    ui.painter().galley(
+        egui::pos2(rect.left() + PAD, rect.center().y - galley.size().y * 0.5),
+        galley,
+        color,
+    );
+    response
+        .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), text));
+    if elided {
+        response.on_hover_text(text);
+    }
 }

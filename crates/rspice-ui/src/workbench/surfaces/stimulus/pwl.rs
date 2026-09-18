@@ -14,26 +14,39 @@
 //! validator — the slope column and the row count are read through it, and its
 //! refusals are what the audit strip states.
 
-use egui::Ui;
+use egui::{Rect, Ui};
 
 use crate::properties::pwl_editor::PwlData;
 use crate::state::stimulus_library::definition::StimulusKind;
-use crate::state::{PropertySheet, format_engineering};
+use crate::state::{PropertySheet, format_engineering_display};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::workbench::state::read_field;
 use crate::workbench::{AppState, MessageId};
 
 use super::super::super::design_system::{
-    WorkbenchIcon, labeled_icon_button_sized, property_row_input_with_hint,
+    WorkbenchIcon, labeled_icon_button_sized, property_row_height, property_row_input_with_hint,
 };
-use super::program::{field_row, note, quantity_unit, shape_fields};
+use super::program::{field_grid, grid_height, note, note_height, quantity_unit, shape_fields};
 use super::{Stage, StageAction};
 
 /// The field an authored PWL table is stored in.
 const POINTS_FIELD: &str = "pwl_data";
-/// Height of one editable table row.
-const ROW_HEIGHT: f32 = 22.0;
+/// Height of one editable table row, and of the toolbar above the table.
+const ROW_HEIGHT: f32 = 24.0;
+/// Height of the column heads.
+const HEADER_HEIGHT: f32 = 20.0;
+/// How many points the table shows before it scrolls. The plot above marks the
+/// selected one, so the table is for editing a neighbourhood, not for reading
+/// a hundred rows at once.
+const VISIBLE_ROWS: usize = 6;
+/// Air between the table and the scalar fields under it.
+const TABLE_FOOT: f32 = 4.0;
+/// Inset of the table from its column, matching a property row's label.
+const INSET: f32 = 10.0;
+const INDEX_WIDTH: f32 = 26.0;
+const SLOPE_WIDTH: f32 = 96.0;
+const CELL_GAP: f32 = 6.0;
 
 /// The authored point table.
 pub(super) fn points_editor(
@@ -54,8 +67,9 @@ pub(super) fn points_editor(
     super::split_row(
         ui,
         ROW_HEIGHT,
-        176.0,
+        186.0,
         |ui| {
+            ui.add_space(INSET);
             ui.add(
                 egui::Label::new(
                     egui::RichText::new(messages.format(
@@ -69,6 +83,7 @@ pub(super) fn points_editor(
             );
         },
         |ui| {
+            ui.add_space(INSET);
             let deletable = rows > 1;
             let delete = ui
                 .add_enabled_ui(deletable, |ui| {
@@ -116,22 +131,51 @@ pub(super) fn points_editor(
     );
     actions.append(&mut trailing);
 
-    if rows == 0 || !cells.len().is_multiple_of(2) {
-        raw_table(ui, state, stage, &text, actions);
-    } else {
+    if is_table(&cells) {
+        table_header(ui, state, stage);
         egui::ScrollArea::vertical()
             .id_salt("workbench.stimulus.pwl.points")
             .auto_shrink([false, false])
-            .max_height((ui.available_height() - 30.0).max(30.0))
+            .max_height(visible_rows(rows) as f32 * ROW_HEIGHT)
             .show(ui, |ui| {
+                ui.spacing_mut().item_spacing.y = 0.0;
                 point_rows(ui, state, stage, &cells, actions);
             });
+    } else {
+        raw_table(ui, state, stage, &text, actions);
     }
-    for name in ["td", "repeat", "r"] {
-        if let Some(definition) = sheet.get(name) {
-            field_row(ui, state, stage, definition, actions);
-        }
-    }
+    ui.add_space(TABLE_FOOT);
+    field_grid(ui, state, stage, &scalar_fields(sheet), actions);
+}
+
+/// What [`points_editor`] will take in a column `width` wide.
+pub(super) fn points_height(ui: &Ui, stage: &Stage, sheet: &PropertySheet, width: f32) -> f32 {
+    let text = read_field(&stage.working, POINTS_FIELD);
+    let cells = text.split_whitespace().collect::<Vec<_>>();
+    let table = if cells.is_empty() || !cells.len().is_multiple_of(2) {
+        property_row_height(ui)
+    } else {
+        HEADER_HEIGHT + visible_rows(cells.len() / 2) as f32 * ROW_HEIGHT
+    };
+    ROW_HEIGHT + table + TABLE_FOOT + grid_height(ui, &scalar_fields(sheet), width)
+}
+
+/// Whether the authored text reads as whole `(time, level)` pairs.
+fn is_table(cells: &[String]) -> bool {
+    !cells.is_empty() && cells.len().is_multiple_of(2)
+}
+
+/// How many rows the table shows before it scrolls.
+fn visible_rows(rows: usize) -> usize {
+    rows.min(VISIBLE_ROWS)
+}
+
+/// The fields a PWL card carries beside its table, in the sheet's order.
+fn scalar_fields(sheet: &PropertySheet) -> Vec<&crate::state::PropertyDefinition> {
+    ["td", "repeat", "r"]
+        .iter()
+        .filter_map(|name| sheet.get(name))
+        .collect()
 }
 
 /// The table as text, for a list the parser cannot read.
@@ -183,82 +227,157 @@ fn point_rows(
     ui: &mut Ui,
     state: &AppState,
     stage: &Stage,
-    tokens: &[String],
+    cells: &[String],
     actions: &mut Vec<StageAction>,
 ) {
-    let messages = state.ui.messages();
     let palette = Tokens::get(ui.ctx()).color;
     let unit = quantity_unit(stage.working.kind());
-    let parsed = PwlData::parse(&tokens.join(" ")).ok();
-    let level_label = match stage.working.kind() {
-        StimulusKind::Voltage => messages.text(MessageId::StimulusPwlLevel),
-        StimulusKind::Current => messages.text(MessageId::StimulusPwlCurrent),
-    };
-    let width = ui.available_width();
-    let index_width = 28.0;
-    let slope_width = 84.0;
-    let cell = ((width - index_width - slope_width - 24.0) * 0.5).max(48.0);
+    let parsed = PwlData::parse(&cells.join(" ")).ok();
+    let font = theme::mono(tokens::FS_0, FontWeight::Regular);
 
-    ui.horizontal(|ui| {
-        header(ui, "#", index_width, palette.text_faint);
-        header(
-            ui,
-            &messages.text(MessageId::StimulusPwlTime),
-            cell,
-            palette.text_faint,
-        );
-        header(ui, &level_label, cell, palette.text_faint);
-        header(
-            ui,
-            &messages.text(MessageId::StimulusPwlSlope),
-            slope_width,
-            palette.text_faint,
-        );
-    });
-
-    for index in 0..tokens.len() / 2 {
+    for index in 0..cells.len() / 2 {
         let selected = stage.selected_point == Some(index);
-        let row = ui.horizontal(|ui| {
-            ui.set_min_height(ROW_HEIGHT);
-            header(
-                ui,
-                &(index + 1).to_string(),
-                index_width,
-                palette.text_faint,
-            );
-            cell_edit(ui, state, stage, tokens, index * 2, cell, actions);
-            cell_edit(ui, state, stage, tokens, index * 2 + 1, cell, actions);
-            header(
-                ui,
-                &slope(parsed.as_ref(), index, unit),
-                slope_width,
-                palette.text_dim,
-            );
-        });
+        // The row is allocated first and the cells are put on top of it, so a
+        // press on a cell edits the cell and a press anywhere else on the row
+        // selects it; the other order gives the row every press.
+        let (row, response) = ui.allocate_exact_size(
+            egui::Vec2::new(ui.available_width(), ROW_HEIGHT),
+            egui::Sense::click(),
+        );
+        let columns = TableColumns::of(row);
         if selected {
-            ui.painter().rect_stroke(
-                row.response.rect,
-                2.0,
-                egui::Stroke::new(1.0, palette.accent),
-                egui::StrokeKind::Inside,
+            // The product's list selection: the active fill, and the accent
+            // bar at the row's leading edge.
+            ui.painter().rect_filled(row, 0.0, palette.bg_active);
+            ui.painter().rect_filled(
+                Rect::from_min_max(row.min, egui::pos2(row.left() + 2.0, row.bottom())),
+                0.0,
+                palette.accent,
             );
+        } else if response.hovered() {
+            ui.painter().rect_filled(row, 0.0, palette.bg_hover);
         }
-        if row.response.interact(egui::Sense::click()).clicked() {
+        ui.painter().text(
+            egui::pos2(columns.index.right(), row.center().y),
+            egui::Align2::RIGHT_CENTER,
+            (index + 1).to_string(),
+            font.clone(),
+            palette.text_faint,
+        );
+        let mut focused = false;
+        for (slot, cell) in [(index * 2, columns.time), (index * 2 + 1, columns.level)] {
+            focused |= cell_edit(ui, state, stage, cells, slot, cell, actions);
+        }
+        ui.painter().text(
+            egui::pos2(columns.slope.right(), row.center().y),
+            egui::Align2::RIGHT_CENTER,
+            slope(parsed.as_ref(), index, unit),
+            font.clone(),
+            palette.text_dim,
+        );
+        if (response.clicked() || focused) && !selected {
             actions.push(StageAction::SelectPoint(Some(index)));
         }
     }
 }
 
-/// One cell of the table, editing the token at `slot`.
+/// Where the four columns of the point table sit inside one row.
+///
+/// One owner for the head and every row under it, so a column head is over
+/// its column by construction rather than by two sums agreeing.
+struct TableColumns {
+    index: Rect,
+    time: Rect,
+    level: Rect,
+    slope: Rect,
+}
+
+impl TableColumns {
+    fn of(row: Rect) -> Self {
+        let left = row.left() + INSET;
+        let right = row.right() - INSET;
+        let cell = ((right - left - INDEX_WIDTH - SLOPE_WIDTH - 3.0 * CELL_GAP) * 0.5).max(48.0);
+        let span = |from: f32, width: f32| {
+            Rect::from_min_max(
+                egui::pos2(from, row.top() + 1.0),
+                egui::pos2(from + width, row.bottom() - 1.0),
+            )
+        };
+        let index = span(left, INDEX_WIDTH);
+        let time = span(index.right() + CELL_GAP, cell);
+        let level = span(time.right() + CELL_GAP, cell);
+        let slope = span(level.right() + CELL_GAP, SLOPE_WIDTH);
+        Self {
+            index,
+            time,
+            level,
+            slope,
+        }
+    }
+}
+
+/// The column heads, over the columns [`TableColumns`] gives every row.
+fn table_header(ui: &mut Ui, state: &AppState, stage: &Stage) {
+    let messages = state.ui.messages();
+    let palette = Tokens::get(ui.ctx()).color;
+    let font = theme::sans(tokens::FS_MICRO, FontWeight::Medium);
+    let (row, _) = ui.allocate_exact_size(
+        egui::Vec2::new(ui.available_width(), HEADER_HEIGHT),
+        egui::Sense::hover(),
+    );
+    let columns = TableColumns::of(row);
+    let level = match stage.working.kind() {
+        StimulusKind::Voltage => messages.text(MessageId::StimulusPwlLevel),
+        StimulusKind::Current => messages.text(MessageId::StimulusPwlCurrent),
+    };
+    for (rect, align, text) in [
+        (columns.index, egui::Align2::RIGHT_CENTER, "#".to_owned()),
+        (
+            columns.time,
+            egui::Align2::LEFT_CENTER,
+            messages.text(MessageId::StimulusPwlTime),
+        ),
+        (columns.level, egui::Align2::LEFT_CENTER, level),
+        (
+            columns.slope,
+            egui::Align2::RIGHT_CENTER,
+            messages.text(MessageId::StimulusPwlSlope),
+        ),
+    ] {
+        let x = if align == egui::Align2::RIGHT_CENTER {
+            rect.right()
+        } else {
+            // Over the text inside the cell, not over the cell's frame.
+            rect.left() + 6.0
+        };
+        ui.painter().text(
+            egui::pos2(x, row.center().y),
+            align,
+            text,
+            font.clone(),
+            palette.text_faint,
+        );
+    }
+    ui.painter().hline(
+        (row.left() + INSET)..=(row.right() - INSET),
+        row.bottom() - 0.5,
+        egui::Stroke::new(1.0, palette.border),
+    );
+}
+
+/// One cell of the table, editing the token at `slot` inside `cell`.
+///
+/// Reports whether the caret has just arrived, which selects the row: a reader
+/// who tabs into a point is on that point, and the marker above should say so.
 fn cell_edit(
     ui: &mut Ui,
     state: &AppState,
     stage: &Stage,
     tokens: &[String],
     slot: usize,
-    width: f32,
+    cell: Rect,
     actions: &mut Vec<StageAction>,
-) {
+) -> bool {
     let field = format!("{POINTS_FIELD}.{slot}");
     let editing = stage.editing_field.as_deref() == Some(field.as_str());
     let mut text = if editing {
@@ -280,13 +399,15 @@ fn cell_edit(
         },
         &[("index", &(slot / 2 + 1).to_string())],
     );
-    let response = ui.add(
+    let response = ui.put(
+        cell,
         egui::TextEdit::singleline(&mut text)
             .font(egui::TextStyle::Monospace)
-            .desired_width(width)
-            .margin(egui::Margin::symmetric(5, 2))
+            .desired_width(cell.width())
+            .margin(egui::Margin::symmetric(6, 3))
             .id_salt(("workbench.stimulus.pwl.cell", slot)),
     );
+    let arrived = response.gained_focus();
     ui.ctx().accesskit_node_builder(response.id, |node| {
         node.set_label(label.as_str());
     });
@@ -303,6 +424,7 @@ fn cell_edit(
     } else if response.changed() || response.gained_focus() {
         actions.push(StageAction::TypeField { field, value: text });
     }
+    arrived
 }
 
 /// The slope into one point, as the engine's own ramp between two samples.
@@ -322,7 +444,7 @@ fn slope(parsed: Option<&PwlData>, index: usize, unit: &str) -> String {
     }
     format!(
         "{}{unit}/s",
-        format_engineering((point.value - previous.value) / step)
+        format_engineering_display((point.value - previous.value) / step)
     )
 }
 
@@ -360,19 +482,6 @@ fn inserted_point(tokens: &[String], after: usize) -> Vec<String> {
     vec![format!("{inserted}"), level]
 }
 
-/// One fixed-width, non-interactive cell.
-fn header(ui: &mut Ui, text: &str, width: f32, color: egui::Color32) {
-    ui.add_sized(
-        [width, ROW_HEIGHT],
-        egui::Label::new(
-            egui::RichText::new(text)
-                .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                .color(color),
-        )
-        .truncate(),
-    );
-}
-
 /// The measured-file shape.
 pub(super) fn file_editor(
     ui: &mut Ui,
@@ -401,8 +510,9 @@ pub(super) fn file_editor(
     super::split_row(
         ui,
         ROW_HEIGHT,
-        124.0,
+        134.0,
         |ui| {
+            ui.add_space(INSET);
             ui.add(
                 egui::Label::new(
                     egui::RichText::new(retained)
@@ -413,6 +523,7 @@ pub(super) fn file_editor(
             );
         },
         |ui| {
+            ui.add_space(INSET);
             if labeled_icon_button_sized(
                 ui,
                 WorkbenchIcon::Folder,
@@ -428,8 +539,23 @@ pub(super) fn file_editor(
         },
     );
     actions.append(&mut trailing);
-    for definition in shape_fields(sheet, stage) {
-        field_row(ui, state, stage, definition, actions);
-    }
+    field_grid(ui, state, stage, &shape_fields(sheet, stage), actions);
     note(ui, &messages.text(MessageId::StimulusRetainedNote));
+}
+
+/// What [`file_editor`] will take in a column `width` wide.
+pub(super) fn file_height(
+    ui: &Ui,
+    state: &AppState,
+    stage: &Stage,
+    sheet: &PropertySheet,
+    width: f32,
+) -> f32 {
+    ROW_HEIGHT
+        + grid_height(ui, &shape_fields(sheet, stage), width)
+        + note_height(
+            ui,
+            &state.ui.messages().text(MessageId::StimulusRetainedNote),
+            width,
+        )
 }

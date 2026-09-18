@@ -27,7 +27,7 @@ use super::{
     DETACHED_NETS, PREVIEW_DIALECT, PreviewTiming, PreviewWindow, WaveformReadouts,
     evaluate_waveform, preview_defect, source_spec, transient_part,
 };
-use crate::state::format_engineering;
+use crate::state::format_engineering_display;
 use crate::state::stimulus_library::definition::{
     StimulusDefinition, StimulusFamily, StimulusKind,
 };
@@ -791,7 +791,7 @@ fn seconds_free(value: f64, unit: &str) -> String {
     if !value.is_finite() {
         return "—".to_owned();
     }
-    format!("{}{unit}", format_engineering(value))
+    format!("{}{unit}", format_engineering_display(value))
 }
 
 #[cfg(test)]
@@ -909,8 +909,8 @@ mod tests {
         let record = definition(ComponentType::VoltageSourceExp, "0", "v2=1 tau1=0 tau2=0");
         let realization = StimulusRealization::of(&record, SpanChoice::Fit, timing(1e-3));
 
-        assert_eq!(readout(&realization, "τ rise"), "1us");
-        assert_eq!(readout(&realization, "τ fall"), "1us");
+        assert_eq!(readout(&realization, "τ rise"), "1µs");
+        assert_eq!(readout(&realization, "τ fall"), "1µs");
     }
 
     #[test]
@@ -953,8 +953,8 @@ mod tests {
                 .is_some_and(|defect| defect.contains("TRNOISE"))
         );
         assert!(realization.samples.is_empty());
-        assert_eq!(readout(&realization, "RMS"), "20uV");
-        assert_eq!(readout(&realization, "NT"), "1us");
+        assert_eq!(readout(&realization, "RMS"), "20µV");
+        assert_eq!(readout(&realization, "NT"), "1µs");
     }
 
     #[test]
@@ -967,7 +967,7 @@ mod tests {
         let realization = StimulusRealization::of(&record, SpanChoice::Fit, timing(1e-3));
 
         assert_eq!(readout(&realization, "TYPE"), "Gaussian");
-        assert_eq!(readout(&realization, "TS"), "500us");
+        assert_eq!(readout(&realization, "TS"), "500µs");
         assert_eq!(readout(&realization, "σ"), "2mV");
     }
 

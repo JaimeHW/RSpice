@@ -216,7 +216,11 @@ fn lifecycle_chip(ui: &mut Ui, state: &AppState, stage: &Stage) {
     } else if errors > 0 {
         (
             messages.format(
-                MessageId::StimulusDraftErrors,
+                if errors == 1 {
+                    MessageId::StimulusDraftErrorSingular
+                } else {
+                    MessageId::StimulusDraftErrors
+                },
                 &[("count", &errors.to_string())],
             ),
             tokens.color.err,
@@ -236,10 +240,17 @@ fn lifecycle_chip(ui: &mut Ui, state: &AppState, stage: &Stage) {
 }
 
 /// Who is carrying a copy of this definition, and how far each has drifted.
+///
+/// Three spellings, longest first, and the first that fits whole is the one
+/// painted: every instance by name, then how many there are, then nothing. A
+/// fact cut off mid-word (`no ad…`) is worse than the fact missing, and it is
+/// never missing from the instrument — the realization band heads its list
+/// with the same count.
 fn adopter_summary(ui: &mut Ui, state: &AppState, stage: &Stage) {
     let messages = state.ui.messages();
     let tokens = Tokens::get(ui.ctx());
-    let text = if stage.adopters.is_empty() {
+    let font = theme::mono(tokens::FS_0, FontWeight::Regular);
+    let named = if stage.adopters.is_empty() {
         messages.text(MessageId::StimulusNoAdopters)
     } else {
         stage
@@ -256,14 +267,33 @@ fn adopter_summary(ui: &mut Ui, state: &AppState, stage: &Stage) {
             .collect::<Vec<_>>()
             .join(" \u{b7} ")
     };
-    let response = ui.add(
-        egui::Label::new(
-            egui::RichText::new(&text)
-                .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                .color(tokens.color.text_dim),
-        )
-        .truncate(),
-    );
+    let mut spellings = vec![named];
+    if !stage.adopters.is_empty() {
+        spellings.push(messages.format(
+            if stage.adopters.len() == 1 {
+                MessageId::StimulusAdopterCountSingular
+            } else {
+                MessageId::StimulusAdopterCount
+            },
+            &[("count", &stage.adopters.len().to_string())],
+        ));
+    }
+    let room = ui.available_width() - 8.0;
+    let Some(galley) = spellings
+        .into_iter()
+        .map(|text| {
+            ui.painter()
+                .layout_no_wrap(text, font.clone(), tokens.color.text_dim)
+        })
+        .find(|galley| galley.size().x <= room)
+    else {
+        return;
+    };
+    let text = galley.job.text.clone();
+    let (rect, response) = ui.allocate_exact_size(galley.size(), Sense::hover());
+    ui.painter().galley(rect.min, galley, tokens.color.text_dim);
+    response
+        .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), &text));
     if !stage.adopters.is_empty() {
         response.on_hover_text(
             stage
@@ -304,7 +334,11 @@ fn delete_label(messages: &crate::workbench::MessageCatalog, stage: &Stage) -> S
         messages.text(MessageId::StimulusDelete)
     } else {
         messages.format(
-            MessageId::StimulusDeleteWithAdopters,
+            if stage.adopters.len() == 1 {
+                MessageId::StimulusDeleteWithAdopterSingular
+            } else {
+                MessageId::StimulusDeleteWithAdopters
+            },
             &[("count", &stage.adopters.len().to_string())],
         )
     }

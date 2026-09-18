@@ -217,7 +217,7 @@ fn a_noise_definition_states_why_it_has_no_curve() {
             .any(|text| text.contains("TRNOISE") && text.contains("no waveform")),
         "{published:?}"
     );
-    assert!(published.iter().any(|text| text == "RMS"));
+    assert!(published.iter().any(|text| text.starts_with("RMS ")));
 }
 
 /// A waveform centred on zero states zero, not the rounding two float steps
@@ -512,4 +512,194 @@ fn review_states() -> Vec<ReviewState> {
             app
         }),
     ]
+}
+
+/// The number a tick label states, read back the way a reader would.
+fn tick_value(text: &str) -> Option<f64> {
+    let digits = text.strip_suffix('V').unwrap_or(text);
+    crate::quantity::parse_engineering_value(&digits.replace('\u{b5}', "u")).ok()
+}
+
+/// The value axis of one painted frame: `(value, y)` for every label in the
+/// right-aligned column left of the plot.
+fn value_axis(painted: &[(String, Rect, Rect)]) -> Vec<(f64, f32)> {
+    let mut columns = std::collections::BTreeMap::<i32, Vec<(f64, f32)>>::new();
+    for (text, rect, _) in painted {
+        let Some(value) = tick_value(text) else {
+            continue;
+        };
+        // Labels that end at the same x are one right-aligned column.
+        columns
+            .entry((rect.right() * 2.0).round() as i32)
+            .or_default()
+            .push((value, rect.center().y));
+    }
+    columns
+        .into_values()
+        .filter(|ticks| ticks.iter().any(|(_, y)| (y - ticks[0].1).abs() > 1.0))
+        .max_by_key(Vec::len)
+        .unwrap_or_default()
+}
+
+/// A value label is drawn at the value it states.
+///
+/// The first version of the axis labelled the padded ends of the range and let
+/// the formatter round them, so a 2 mV sine read `2m` at a line 2.48 mV up and
+/// a ramp to 5 V read `-1`, `2`, `6`. Every label is held here to be a number
+/// on one straight scale with every other: equal steps in value are equal
+/// steps on the screen, which a rounded label at an unrounded position breaks.
+#[test]
+fn every_value_tick_is_drawn_at_the_value_it_states() {
+    for name in [
+        "sensor_diff_1k",
+        "vdd_ramp_1ms",
+        "bridge_cal_step",
+        "emi_am_150k",
+    ] {
+        let mut app = seeded(name);
+        let painted = painted(&mut app.state, stage_size(1440.0, 900.0));
+        let mut axis = value_axis(&painted);
+        axis.sort_by(|left, right| left.0.total_cmp(&right.0));
+        assert!(axis.len() >= 3, "{name}: the axis states {axis:?}");
+        let (first, last) = (axis[0], axis[axis.len() - 1]);
+        let scale = (last.1 - first.1) / (last.0 - first.0) as f32;
+        for (value, y) in &axis {
+            let expected = first.1 + (*value - first.0) as f32 * scale;
+            assert!(
+                (y - expected).abs() <= 0.75,
+                "{name}: the label for {value} is at y={y}, and a straight scale puts it at \
+                 {expected}: {axis:?}"
+            );
+        }
+    }
+}
+
+/// On a laptop the program shows every field it has: nothing is left to a
+/// scroll bar while the plot above it holds four hundred points of height.
+#[test]
+fn a_laptop_stage_shows_every_field_without_scrolling() {
+    for name in ["sensor_diff_1k", "bridge_cal_step", "supply_trnoise"] {
+        let mut app = seeded(name);
+        let size = stage_size(1440.0, 900.0);
+        let painted = painted(&mut app.state, size);
+        let stage = resolve(&mut app.state).expect("stage");
+        let sheet = app
+            .state
+            .property_registry
+            .get(stage.working.component_type())
+            .expect("sheet");
+        for definition in program::shape_fields(sheet, &stage) {
+            let shown = painted.iter().find(|(text, _, clip)| {
+                clip.is_positive()
+                    && (text.starts_with(definition.display_name.as_str())
+                        || definition
+                            .display_name
+                            .strip_suffix(')')
+                            .and_then(|inner| inner.rsplit('(').next())
+                            .is_some_and(|word| {
+                                text == word || text.strip_suffix(" *") == Some(word)
+                            }))
+            });
+            let (text, rect, clip) = shown.unwrap_or_else(|| {
+                panic!(
+                    "{name}: no row was painted for {:?}",
+                    definition.display_name
+                )
+            });
+            assert!(
+                clip.contains_rect(*rect),
+                "{name}: {text:?} at {rect:?} is cut by {clip:?}"
+            );
+        }
+    }
+}
+
+/// The point table and the scalar fields under it are two blocks, one above
+/// the other, at either size.
+#[test]
+fn a_point_table_never_runs_under_the_fields_below_it() {
+    for (viewport, width, height) in VIEWPORTS {
+        let mut app = seeded("vdd_ramp_1ms");
+        let painted = painted(&mut app.state, stage_size(width, height));
+        let visible = |wanted: &dyn Fn(&str) -> bool| {
+            painted
+                .iter()
+                .filter(|(text, _, clip)| clip.is_positive() && wanted(text))
+                .map(|(_, rect, _)| *rect)
+                .collect::<Vec<_>>()
+        };
+        let rows = visible(&|text| text == "1" || text == "2" || text == "3");
+        let fields = visible(&|text| text.starts_with("Delay") || text == "TD");
+        let last_row = rows
+            .iter()
+            .map(Rect::bottom)
+            .fold(f32::NEG_INFINITY, f32::max);
+        for field in &fields {
+            assert!(
+                field.top() >= last_row - 0.5,
+                "{viewport}: a field at {field:?} starts above the table's last row at {last_row}"
+            );
+        }
+        assert!(!rows.is_empty(), "{viewport}: no point row was painted");
+    }
+}
+
+/// The identity band says a fact whole or not at all.
+#[test]
+fn the_identity_band_never_cuts_a_fact_short() {
+    for name in fixtures::names() {
+        let mut app = seeded(name);
+        for (text, rect, _) in painted(&mut app.state, stage_size(1024.0, 640.0)) {
+            assert!(
+                !(rect.top() < IDENTITY_HEIGHT && text.contains('\u{2026}')),
+                "{name}: the identity band elided {text:?}"
+            );
+        }
+    }
+}
+
+/// Breakpoint labels a pixel apart are one label, not two painted over each
+/// other.
+#[test]
+fn guide_labels_that_would_touch_are_merged() {
+    let mut app = seeded("bridge_cal_step");
+    let painted = painted(&mut app.state, stage_size(1024.0, 640.0));
+    let labels = painted
+        .iter()
+        .filter(|(text, ..)| {
+            text.split('\u{b7}')
+                .all(|part| matches!(part, "TD" | "TR" | "PW" | "TF" | "PER"))
+        })
+        .collect::<Vec<_>>();
+    assert!(!labels.is_empty(), "the pulse painted no breakpoint label");
+    for (index, (text, rect, _)) in labels.iter().enumerate() {
+        for (other, other_rect, _) in &labels[index + 1..] {
+            assert!(
+                !rect.intersects(*other_rect),
+                "{text:?} at {rect:?} is painted over {other:?} at {other_rect:?}"
+            );
+        }
+    }
+}
+
+/// One error is `1 error`.
+#[test]
+fn a_count_of_one_is_singular() {
+    let mut app = seeded("bridge_cal_step");
+    crate::workbench::app::actions::stimulus::edit_name(&mut app.state, "sensor_diff_1k");
+    let published = published(&mut app.state, vec2(1000.0, 470.0));
+    assert!(
+        published.iter().any(|text| text == "1 error"),
+        "{published:?}"
+    );
+    assert!(
+        published.iter().any(|text| text == "draft \u{b7} 1 error"),
+        "{published:?}"
+    );
+    for text in &published {
+        assert!(
+            !text.contains("(s)") && !text.contains("(ies)"),
+            "{text:?} hedges its own count"
+        );
+    }
 }

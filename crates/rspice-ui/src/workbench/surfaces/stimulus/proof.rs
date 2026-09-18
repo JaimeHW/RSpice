@@ -15,9 +15,10 @@
 use egui::{Align2, Color32, Pos2, Rect, Sense, Stroke, Ui, Vec2};
 
 use crate::simulation::stimulus_realize::Guide;
-use crate::state::format_engineering;
+use crate::state::format_engineering_display;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
+use crate::ui::widgets::{ViewOption, view_switch};
 use crate::workbench::state::PreviewSpan;
 use crate::workbench::{AppState, MessageId};
 
@@ -38,6 +39,8 @@ const TICK_LABEL_INSET: f32 = TICK_LABEL_GAP + 6.0;
 const TIME_GUTTER: f32 = 16.0;
 /// How close a pointer has to be to a PWL marker to select it.
 const MARKER_GRAB: f32 = 7.0;
+/// Air between a readout's label and its value.
+const READOUT_GAP: f32 = 4.0;
 
 pub(super) fn show(ui: &mut Ui, state: &AppState, stage: &Stage, actions: &mut Vec<StageAction>) {
     let band = ui.available_rect_before_wrap();
@@ -81,51 +84,76 @@ fn strip_row(
     strip.set_clip_rect(ui.clip_rect().intersect(leading));
     strip.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
         ui.add_space(8.0);
-        for span in PreviewSpan::ALL {
-            let available = span != PreviewSpan::Period || stage.realization.fundamental.is_some();
-            let response = ui
-                .add_enabled_ui(available, |ui| {
-                    ui.selectable_label(stage.span == span, span.label())
-                })
-                .inner;
-            if response.clicked() && stage.span != span {
-                actions.push(StageAction::SetSpan(span));
-            }
-            if !available {
-                response.on_disabled_hover_text(messages.text(MessageId::StimulusNoFundamental));
-            }
+        // Period stays in the switch for a family with no fundamental, faint,
+        // saying why: the other two do not move when the family changes.
+        let no_fundamental = messages.text(MessageId::StimulusNoFundamental);
+        let options = PreviewSpan::ALL.map(|span| ViewOption {
+            label: span.label(),
+            unavailable: (span == PreviewSpan::Period && stage.realization.fundamental.is_none())
+                .then_some(no_fundamental.as_str()),
+        });
+        let selected = PreviewSpan::ALL
+            .iter()
+            .position(|span| *span == stage.span)
+            .unwrap_or(0);
+        if let Some(index) = view_switch(ui, "workbench.stimulus.proof.span", &options, selected) {
+            actions.push(StageAction::SetSpan(PreviewSpan::ALL[index]));
         }
-        ui.add_space(10.0);
+        ui.add_space(12.0);
         for (label, value) in &stage.realization.derived {
-            // A readout that would not fit is dropped rather than clipped:
-            // half a number beside a full one reads as a different number.
-            if ui.next_widget_position().x > leading.right() - 56.0 {
+            // A readout is a label and its value, and it is painted whole or
+            // not at all: half a number beside a full one reads as a different
+            // number, and a label with nothing beside it reads as a fault.
+            let label_galley = ui.painter().layout_no_wrap(
+                label.clone(),
+                theme::sans(tokens::FS_MICRO, FontWeight::Regular),
+                tokens.color.text_faint,
+            );
+            let value_galley = ui.painter().layout_no_wrap(
+                value.clone(),
+                theme::mono(tokens::FS_0, FontWeight::Medium),
+                tokens.color.text,
+            );
+            let size = Vec2::new(
+                label_galley.size().x + READOUT_GAP + value_galley.size().x,
+                label_galley.size().y.max(value_galley.size().y),
+            );
+            if ui.next_widget_position().x + size.x > leading.right() - 4.0 {
                 break;
             }
-            ui.add(egui::Label::new(
-                egui::RichText::new(label)
-                    .font(theme::sans(tokens::FS_MICRO, FontWeight::Regular))
-                    .color(tokens.color.text_faint),
-            ));
-            ui.add_space(3.0);
-            ui.add(
-                egui::Label::new(
-                    egui::RichText::new(value)
-                        .font(theme::mono(tokens::FS_0, FontWeight::Medium))
-                        .color(tokens.color.text),
-                )
-                .truncate(),
+            let (rect, response) = ui.allocate_exact_size(size, Sense::hover());
+            // Both runs sit on one baseline, which a small label beside a
+            // larger value does not do when each is centred on its own height.
+            ui.painter().galley(
+                Pos2::new(rect.left(), rect.bottom() - label_galley.size().y - 0.5),
+                label_galley,
+                tokens.color.text_faint,
             );
-            ui.add_space(8.0);
+            ui.painter().galley(
+                Pos2::new(
+                    rect.right() - value_galley.size().x,
+                    rect.bottom() - value_galley.size().y,
+                ),
+                value_galley,
+                tokens.color.text,
+            );
+            response.widget_info(|| {
+                egui::WidgetInfo::labeled(
+                    egui::WidgetType::Label,
+                    ui.is_enabled(),
+                    format!("{label} {value}"),
+                )
+            });
+            ui.add_space(10.0);
         }
     });
 
     let readout = match hover {
         Some((time, value)) => format!(
             "t = {}s \u{b7} {} = {}{}",
-            format_engineering(time),
+            format_engineering_display(time),
             stage.working.kind().letter().to_lowercase(),
-            format_engineering(value),
+            format_engineering_display(value),
             unit(stage)
         ),
         None => messages.text(MessageId::StimulusHoverUnset),
@@ -239,11 +267,20 @@ fn plot_body(
     };
 
     let (minimum, maximum) = padded_range(readouts.minimum, readouts.maximum);
-    let value_ticks = value_ticks(ui, minimum, maximum);
+    // The plot's height does not depend on its gutter, so the ladder can be
+    // chosen before the rectangle it is drawn in.
+    let axis = value_ticks(
+        ui,
+        minimum,
+        maximum,
+        plot_rect(rect, MINIMUM_VALUE_GUTTER).height(),
+        unit(stage),
+    );
     // The gutter is measured from the labels it has to hold. A fixed one is a
     // guess, and the frame that disproves the guess paints a tick label at a
     // negative x — outside the band, outside the stage, and unreadable.
-    let gutter = value_ticks
+    let gutter = axis
+        .ticks
         .iter()
         .map(|(_, _, width)| *width)
         .fold(0.0_f32, f32::max)
@@ -265,7 +302,7 @@ fn plot_body(
         maximum,
     };
 
-    paint_grid(ui, &projector, colors.border, &value_ticks);
+    paint_grid(ui, &projector, colors.border, &axis);
     if minimum < 0.0 && maximum > 0.0 {
         ui.painter().hline(
             plot.x_range(),
@@ -332,7 +369,7 @@ fn accessible_label(state: &AppState, stage: &Stage) -> String {
                 ("name", stage.working.name()),
                 (
                     "span",
-                    &format!("{}s", format_engineering(stage.realization.span)),
+                    &format!("{}s", format_engineering_display(stage.realization.span)),
                 ),
             ],
         ),
@@ -364,44 +401,58 @@ fn statement(ui: &mut Ui, plot: Rect, state: &AppState, stage: &Stage) {
     );
 }
 
-/// The three value ticks an axis states, with the width each label needs.
+/// The value ticks an axis states, with the width each label needs.
 ///
-/// The labels come from the plot's own tick formatter — the one the Results
-/// axes read through — so a value reads the same on this band as it does on
-/// the waveform viewer that will show the run. Its zero is exact, which is why
-/// the tick values are snapped first: the midpoint of a symmetric range is
-/// zero only up to the rounding of two float steps, and `-6.9e-16` is not a
-/// number anyone can read off an axis.
-fn value_ticks(ui: &Ui, minimum: f64, maximum: f64) -> [(f64, String, f32); 3] {
+/// The plot kit's own ladder — the one the Results axes are drawn from — over
+/// the padded range, so every label is a round number and its grid line is
+/// drawn at exactly that number. The first version of this band labelled the
+/// padded minimum, midpoint and maximum and let the formatter round them: a
+/// sine of 2 mV read `2m` at a line 2.48 mV up, above its own crest, and a
+/// ramp to 5 V read `-1`, `2`, `6` for -0.6, 2.5 and 5.6. A proof surface may
+/// be coarse; it may not state a number that is not where it says it is.
+///
+/// Zero is on the ladder whenever it is in range, and the ladder's zero is
+/// exact, so a waveform centred on it states `0` rather than the `-6.9e-16`
+/// two float steps leave behind.
+fn value_ticks(ui: &Ui, minimum: f64, maximum: f64, height: f32, unit: &str) -> ValueAxis {
     let font = theme::mono(tokens::FS_MICRO, FontWeight::Regular);
-    let range = maximum - minimum;
-    let step = range / 2.0;
-    [0.0_f64, 0.5, 1.0].map(|fraction| {
-        let value = snapped_to_zero(minimum + range * fraction, step);
-        let text = crate::ui::plot::tick_label_with_step(value, step);
-        let width = ui
-            .painter()
-            .layout_no_wrap(text.clone(), font.clone(), Color32::PLACEHOLDER)
-            .size()
-            .x;
-        (value, text, width)
-    })
+    let target = ((height / VALUE_TICK_PITCH).floor() as usize).clamp(2, 6);
+    let series = crate::ui::plot::linear_ticks(minimum, maximum, target);
+    let anchor = crate::ui::plot::anchor_label(&series, unit);
+    let ticks = series
+        .ticks
+        .into_iter()
+        .map(|(value, label)| {
+            // An offset axis states its unit once, on the anchor; an absolute
+            // one states it on every tick but zero, which has none.
+            let text = if anchor.is_some() || value == 0.0 {
+                label
+            } else {
+                format!("{label}{unit}")
+            };
+            let width = ui
+                .painter()
+                .layout_no_wrap(text.clone(), font.clone(), Color32::PLACEHOLDER)
+                .size()
+                .x;
+            (value, text, width)
+        })
+        .collect();
+    ValueAxis { ticks, anchor }
 }
 
-/// A tick value that is zero to within the axis's own resolution, as exactly
-/// zero.
-fn snapped_to_zero(value: f64, step: f64) -> f64 {
-    if value.abs() <= step.abs() * ZERO_TICK_TOLERANCE {
-        0.0
-    } else {
-        value
-    }
+/// One value axis: its ticks, and the anchor its labels are offsets from when
+/// the range is too narrow against its own level to label absolutely.
+struct ValueAxis {
+    ticks: Vec<(f64, String, f32)>,
+    anchor: Option<String>,
 }
 
-/// How close to zero a tick has to be before it is one. A billionth of the
-/// tick spacing is far below anything an axis could resolve and far above the
-/// rounding two float steps accumulate.
-const ZERO_TICK_TOLERANCE: f64 = 1e-9;
+/// Roughly how far apart two value ticks are drawn.
+const VALUE_TICK_PITCH: f32 = 44.0;
+/// Roughly how far apart two time ticks are drawn: a label is about sixty
+/// points wide and wants air either side.
+const TIME_TICK_PITCH: f32 = 110.0;
 
 /// The plotting area inside the band, given the gutter its value labels need.
 fn plot_rect(band: Rect, value_gutter: f32) -> Rect {
@@ -422,36 +473,45 @@ fn padded_range(minimum: f64, maximum: f64) -> (f64, f64) {
     (minimum - pad, maximum + pad)
 }
 
-fn paint_grid(ui: &Ui, projector: &Projector, color: Color32, value_ticks: &[(f64, String, f32)]) {
+/// The grid and both axes' labels: one line per tick, at the tick.
+///
+/// The time axis comes off the same ladder as the value axis, so a grid line
+/// and the label under it are the same number. Labels are laid left to right
+/// and one that would run into the label before it, or off the plot, is not
+/// painted; its grid line still is.
+fn paint_grid(ui: &Ui, projector: &Projector, color: Color32, axis: &ValueAxis) {
     let plot = projector.plot;
     let tokens = Tokens::get(ui.ctx());
     let font = theme::mono(tokens::FS_MICRO, FontWeight::Regular);
     let stroke = Stroke::new(0.5, color);
-    let time_step = projector.span / 4.0;
-    for fraction in [0.0_f64, 0.25, 0.5, 0.75, 1.0] {
-        let time = snapped_to_zero(projector.span * fraction, time_step);
+    let target = ((plot.width() / TIME_TICK_PITCH).floor() as usize).clamp(2, 8);
+    let mut painted_to = f32::NEG_INFINITY;
+    for (time, label) in crate::ui::plot::linear_ticks(0.0, projector.span, target).ticks {
         let x = projector.x(time);
         ui.painter().vline(x, plot.y_range(), stroke);
-        if fraction == 0.0 || fraction == 0.5 || fraction == 1.0 {
-            ui.painter().text(
-                Pos2::new(x, plot.bottom() + 2.0),
-                if fraction == 1.0 {
-                    Align2::RIGHT_TOP
-                } else if fraction == 0.0 {
-                    Align2::LEFT_TOP
-                } else {
-                    Align2::CENTER_TOP
-                },
-                format!(
-                    "{}s",
-                    crate::ui::plot::tick_label_with_step(time, time_step)
-                ),
-                font.clone(),
-                tokens.color.text_faint,
-            );
+        let text = if time == 0.0 {
+            label
+        } else {
+            format!("{label}s")
+        };
+        let galley = ui
+            .painter()
+            .layout_no_wrap(text, font.clone(), tokens.color.text_faint);
+        let left = (x - galley.size().x * 0.5).clamp(
+            plot.left(),
+            (plot.right() - galley.size().x).max(plot.left()),
+        );
+        if left < painted_to + 8.0 {
+            continue;
         }
+        painted_to = left + galley.size().x;
+        ui.painter().galley(
+            Pos2::new(left, plot.bottom() + 2.0),
+            galley,
+            tokens.color.text_faint,
+        );
     }
-    for (value, text, _) in value_ticks {
+    for (value, text, _) in &axis.ticks {
         let y = projector.y(*value);
         ui.painter().hline(plot.x_range(), y, stroke);
         ui.painter().text(
@@ -462,13 +522,34 @@ fn paint_grid(ui: &Ui, projector: &Projector, color: Color32, value_ticks: &[(f6
             tokens.color.text_faint,
         );
     }
+    if let Some(anchor) = &axis.anchor {
+        ui.painter().text(
+            Pos2::new(plot.left() + 4.0, plot.top() + 2.0),
+            Align2::LEFT_TOP,
+            anchor,
+            font,
+            tokens.color.text_faint,
+        );
+    }
 }
 
 /// The breakpoint rules and their labels.
+///
+/// Every rule is drawn where it is. Labels are another matter: a pulse with
+/// microsecond edges in a millisecond window puts `TD` and `TR` a pixel apart,
+/// and two labels a pixel apart are one smear. Rules whose labels would touch
+/// share one label, in time order (`TD·TR`), hung on the first of them.
 fn paint_guides(ui: &Ui, projector: &Projector, guides: &[Guide], color: Color32) {
     let plot = projector.plot;
     let tokens = Tokens::get(ui.ctx());
     let font = theme::mono(tokens::FS_MICRO, FontWeight::Regular);
+    let width = |text: &str| {
+        ui.painter()
+            .layout_no_wrap(text.to_owned(), font.clone(), tokens.color.text_faint)
+            .size()
+            .x
+    };
+    let mut groups: Vec<(f32, String)> = Vec::new();
     for guide in guides {
         let x = projector.x(guide.time);
         ui.painter().vline(
@@ -476,13 +557,23 @@ fn paint_guides(ui: &Ui, projector: &Projector, guides: &[Guide], color: Color32
             plot.y_range(),
             Stroke::new(1.0, color.gamma_multiply(0.45)),
         );
+        let touches = groups
+            .last()
+            .is_some_and(|(start, label)| x < start + 2.0 + width(label) + GUIDE_LABEL_GAP);
+        match groups.last_mut().filter(|_| touches) {
+            Some((_, label)) => {
+                label.push('\u{b7}');
+                label.push_str(guide.label);
+            }
+            None => groups.push((x, guide.label.to_owned())),
+        }
+    }
+    for (x, label) in groups {
+        let galley = ui
+            .painter()
+            .layout_no_wrap(label, font.clone(), tokens.color.text_faint);
         // A rule near the right edge carries its tag on its left, so the tag
         // stays on the plot it names rather than running into the gutter.
-        let galley = ui.painter().layout_no_wrap(
-            guide.label.to_owned(),
-            font.clone(),
-            tokens.color.text_faint,
-        );
         let left = if x + 2.0 + galley.size().x <= plot.right() {
             x + 2.0
         } else {
@@ -492,6 +583,9 @@ fn paint_guides(ui: &Ui, projector: &Projector, guides: &[Guide], color: Color32
             .galley(Pos2::new(left, plot.top()), galley, tokens.color.text_faint);
     }
 }
+
+/// Air two guide labels keep between them before they are read as one.
+const GUIDE_LABEL_GAP: f32 = 6.0;
 
 /// The authored PWL points, and the click that selects one.
 ///

@@ -181,17 +181,18 @@ impl Stage {
 
 /// Band heights, in the order the instrument stacks them.
 ///
-/// Every band but the proof surface is sized by its content: an identity row,
-/// a two-column program, a card list and a verdict strip do not become more
-/// legible with more room. The plot does, so it takes what is left — which is
-/// also what makes the instrument fit rather than scroll.
+/// Every band but the proof surface is as tall as what it holds, and says so
+/// before it is painted (`program::content_height` and its two siblings): an
+/// identity row, a grid of fields, a card list and a verdict strip do not
+/// become more legible with more room, and they become unusable with less — a
+/// fixed slot for the program showed three and a half of a pulse's seven
+/// fields and one of a PWL's points whatever the screen. The plot does gain
+/// from room, so it takes what is left, which is also what makes the
+/// instrument fit rather than scroll.
 const IDENTITY_HEIGHT: f32 = 36.0;
-const PROGRAM_HEIGHT: f32 = 150.0;
-const REALIZATION_HEIGHT: f32 = 66.0;
-const AUDIT_HEIGHT: f32 = 52.0;
 /// Below this the plot is a line rather than a waveform, so the program band
-/// yields instead: a squashed curve proves nothing.
-const PROOF_MINIMUM_HEIGHT: f32 = 96.0;
+/// yields — and scrolls — instead: a squashed curve proves nothing.
+const PROOF_MINIMUM_HEIGHT: f32 = 120.0;
 const SEAM: f32 = 1.0;
 
 pub(super) fn show(ui: &mut Ui, state: &mut AppState) {
@@ -473,9 +474,12 @@ fn paint(ui: &mut Ui, state: &AppState, stage: &Stage, actions: &mut Vec<StageAc
     let frame = ui.available_rect_before_wrap();
     let (rect, _) = ui.allocate_exact_size(frame.size(), Sense::hover());
     let seam_color = Tokens::get(ui.ctx()).color.border_strong;
-    let fixed = IDENTITY_HEIGHT + REALIZATION_HEIGHT + AUDIT_HEIGHT + 4.0 * SEAM;
+    let realization = realization::content_height(stage);
+    let audit = audit::content_height(stage);
+    let fixed = IDENTITY_HEIGHT + realization + audit + 4.0 * SEAM;
     let proof_and_program = (rect.height() - fixed).max(PROOF_MINIMUM_HEIGHT);
-    let program = PROGRAM_HEIGHT.min((proof_and_program - PROOF_MINIMUM_HEIGHT).max(0.0));
+    let program = program::content_height(ui, state, stage, rect.width())
+        .min((proof_and_program - PROOF_MINIMUM_HEIGHT).max(0.0));
     let proof = proof_and_program - program;
 
     let mut top = rect.top();
@@ -490,8 +494,8 @@ fn paint(ui: &mut Ui, state: &AppState, stage: &Stage, actions: &mut Vec<StageAc
     let identity_rect = band(IDENTITY_HEIGHT);
     let proof_rect = band(proof);
     let program_rect = band(program);
-    let realization_rect = band(REALIZATION_HEIGHT);
-    let audit_rect = band(AUDIT_HEIGHT);
+    let realization_rect = band(realization);
+    let audit_rect = band(audit);
 
     for seam in [identity_rect, proof_rect, program_rect, realization_rect] {
         ui.painter().hline(
