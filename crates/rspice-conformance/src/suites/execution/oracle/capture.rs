@@ -125,7 +125,10 @@ fn isolated_analysis_source(normalized: &str, key: &str) -> Result<String, Strin
     Ok(output)
 }
 
-pub(super) fn validate_plot(plot: &RawReferencePlot, requests: &[OutputRequest]) -> Result<(), String> {
+pub(super) fn validate_plot(
+    plot: &RawReferencePlot,
+    requests: &[OutputRequest],
+) -> Result<(), String> {
     let count = plot.data.first().map_or(0, Vec::len);
     if count == 0
         || plot.data.len() != plot.variables.len()
