@@ -41,7 +41,7 @@ pub use decimate::{
     DEFAULT_DISPLAY_CACHE_MIB, DecimationCache, DisplayDecimation, SampleInterpolation, sample_at,
     sample_at_with,
 };
-pub use format::{fmt_si, fmt_si_significant, fmt_significant};
+pub use format::{fmt_si, fmt_si_significant, fmt_significant, tick_label_with_step};
 pub use render::{
     InteractionMode, PlotResponse, ViewChange, plot_rect, set_interaction_mode, show,
     square_outer_rect,

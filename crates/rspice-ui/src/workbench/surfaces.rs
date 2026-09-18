@@ -70,7 +70,7 @@ fn show_primary(ui: &mut Ui, app: &mut RSpiceApp) {
         Workspace::Project => project::show(ui, app),
         Workspace::Design => design::show(ui, app),
         Workspace::Simulate => simulate::show(ui, app),
-        Workspace::Stimulus => stimulus::show(ui, &app.state),
+        Workspace::Stimulus => stimulus::show(ui, &mut app.state),
         Workspace::Results => results::show(ui, app),
         Workspace::Verify => verify::show(ui, app),
         Workspace::Models => models::show(ui, app),
