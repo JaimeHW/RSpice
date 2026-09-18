@@ -42,6 +42,7 @@ pub use decimate::{
     sample_at_with,
 };
 pub use format::{fmt_si, fmt_si_significant, fmt_significant};
+pub(crate) use render::paint_min_max_band;
 pub use render::{
     InteractionMode, PlotResponse, ViewChange, plot_rect, set_interaction_mode, show,
     square_outer_rect,

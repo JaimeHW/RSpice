@@ -256,6 +256,43 @@ fn a_waveform_centred_on_zero_states_zero_on_its_axis() {
     }
 }
 
+/// A window holding five hundred cycles says so where the reader is looking,
+/// and the plot announces itself as a band rather than as a waveform. A window
+/// that carries its shape says nothing, because there is nothing to warn about.
+#[test]
+fn a_many_cycle_window_announces_its_band_and_a_curve_does_not() {
+    let mut app = many_cycle_train();
+    let band = published(&mut app.state, stage_size(1024.0, 640.0));
+    assert!(
+        band.iter().any(|text| text == "500 cycles \u{b7} envelope"),
+        "the strip never stated what it is drawing: {band:?}"
+    );
+    assert!(
+        band.iter()
+            .any(|text| text.contains("Engine-evaluated waveform of")
+                && text.contains("500 cycles \u{b7} envelope")),
+        "the plot announced itself as a waveform: {band:?}"
+    );
+
+    let mut app = seeded("sensor_diff_1k");
+    let curve = published(&mut app.state, stage_size(1024.0, 640.0));
+    assert!(
+        !curve.iter().any(|text| text.contains("envelope")),
+        "a curve called itself a band: {curve:?}"
+    );
+}
+
+/// A pulse train with five hundred cycles in the plan's transient window, which
+/// is the shape a uniform grid cannot draw.
+fn many_cycle_train() -> RSpiceApp {
+    let mut app = seeded("bridge_cal_step");
+    for (field, value) in [("tr", "1n"), ("tf", "1n"), ("pw", "1u"), ("per", "2u")] {
+        crate::workbench::app::actions::stimulus::edit_field(&mut app.state, field, value);
+    }
+    app.state.workbench.stimulus_editor.span = crate::workbench::state::PreviewSpan::Transient;
+    app
+}
+
 #[test]
 fn a_family_switch_resets_the_shape_parameters_and_undo_restores_them() {
     let mut app = seeded("bridge_cal_step");
@@ -504,6 +541,7 @@ fn review_states() -> Vec<ReviewState> {
                 .select_point("vdd_ramp_1ms", Some(1));
             app
         }),
+        ("pulse-many-cycles", many_cycle_train as fn() -> RSpiceApp),
         ("pwl-file", || seeded("bridge_meas_step")),
         ("trnoise", || seeded("supply_trnoise")),
         ("draft-with-error", || {

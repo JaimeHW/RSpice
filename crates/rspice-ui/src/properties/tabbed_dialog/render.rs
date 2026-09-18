@@ -1768,11 +1768,11 @@ mod tests {
         (state, registry)
     }
 
-    fn curve(
+    fn trace_of(
         state: &TabbedPropertyDialogState,
         kind: ComponentType,
         registry: &PropertyRegistry,
-    ) -> Vec<(f64, f64)> {
+    ) -> stimulus_realize::WaveformTrace {
         let component = preview_component(state, kind, registry).expect("a component");
         // Through the shared painter's own evaluation, so a test cannot agree
         // with a sampling the card does not use.
@@ -1801,15 +1801,12 @@ mod tests {
     #[test]
     fn the_preview_follows_the_draft_rather_than_the_baseline() {
         let (mut state, registry) = editor(ComponentType::VoltageSourceSin);
-        let before = curve(&state, ComponentType::VoltageSourceSin, &registry);
+        let before = trace_of(&state, ComponentType::VoltageSourceSin, &registry);
         state.set_value("va", PropertyValue::number(9.0));
-        let after = curve(&state, ComponentType::VoltageSourceSin, &registry);
+        let after = trace_of(&state, ComponentType::VoltageSourceSin, &registry);
 
-        let peak = |samples: &[(f64, f64)]| {
-            stimulus_realize::WaveformReadouts::of(samples)
-                .expect("readouts")
-                .maximum
-        };
+        let peak =
+            |trace: &stimulus_realize::WaveformTrace| trace.readouts().expect("readouts").maximum;
         // The sampling grid need not land exactly on a crest, so the amplitude
         // is read to within one sample of the sine's own curvature.
         assert!(peak(&after) > peak(&before) * 2.0, "{before:?} {after:?}");
@@ -1827,8 +1824,8 @@ mod tests {
         numeric.set_value("per", PropertyValue::number(1e-3));
 
         assert_eq!(
-            curve(&typed, ComponentType::VoltageSourcePulse, &registry),
-            curve(&numeric, ComponentType::VoltageSourcePulse, &registry)
+            trace_of(&typed, ComponentType::VoltageSourcePulse, &registry),
+            trace_of(&numeric, ComponentType::VoltageSourcePulse, &registry)
         );
     }
 

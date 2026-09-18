@@ -16,9 +16,10 @@
 //! - the samples come from `VoltageSources::evaluate_source_spec_at_time_with_dialect`,
 //!   the evaluator a transient steps with.
 //!
-//! Everything here is plumbing between those three. The one judgement it does
-//! make is where to *look* — the window and the sample count — and that is a
-//! choice of x-range, never of value.
+//! Everything here is plumbing between those three. The judgements it does make
+//! are where to *look* — the window, the sample count, and whether that many
+//! samples can carry the shape at all ([`trace`]) — and those are choices of
+//! x-range and of how the range is measured, never of value.
 
 use rspice_core::circuit::VoltageSources;
 use rspice_core::config::SpiceDialect;
@@ -202,35 +203,25 @@ impl PreviewTiming {
 /// use would be offering a choice the project cannot make.
 pub(crate) const PREVIEW_DIALECT: SpiceDialect = SpiceDialect::BestAvailable;
 
-/// This spec's waveform, as the engine steps it.
+/// This spec's value at one instant, as the engine steps it.
 ///
-/// One point per sample, `(time, value)`, evaluated by the transient's own
-/// evaluator — including every substitution it makes for an omitted field, so
-/// an edges-only `PULSE(0 5 0 1n 1n)` shows the single zero-width pulse the
-/// ngspice-46/47 rule produces rather than the square wave its labels suggest,
-/// and an `SFFM` authored with `FC=0` shows the engine's `5 / TSTOP` carrier.
-pub(crate) fn evaluate_waveform(
-    spec: &SourceSpec,
-    window: PreviewWindow,
-    tstep: f64,
-    tstop: f64,
-    dialect: SpiceDialect,
-) -> Vec<(f64, f64)> {
-    if window.samples < 2 || !window.start.is_finite() || !window.stop.is_finite() {
-        return Vec::new();
-    }
-    let span = window.stop - window.start;
-    (0..window.samples)
-        .map(|index| {
-            let time = window.start + span * index as f64 / (window.samples - 1) as f64;
-            (
-                time,
-                VoltageSources::evaluate_source_spec_at_time_with_dialect(
-                    spec, time, tstep, tstop, dialect,
-                ),
-            )
-        })
-        .collect()
+/// Evaluated by the transient's own evaluator — including every substitution it
+/// makes for an omitted field, so an edges-only `PULSE(0 5 0 1n 1n)` shows the
+/// single zero-width pulse the ngspice-46/47 rule produces rather than the
+/// square wave its labels suggest, and an `SFFM` authored with `FC=0` shows the
+/// engine's `5 / TSTOP` carrier.
+///
+/// The transient the substitutions resolve against is the plan's, never the
+/// window's: a preview looking at one period of a pulse train is still looking
+/// at the train a run would produce over its whole stop time.
+fn evaluate_at(spec: &SourceSpec, time: f64, timing: PreviewTiming) -> f64 {
+    VoltageSources::evaluate_source_spec_at_time_with_dialect(
+        spec,
+        time,
+        timing.tstep,
+        timing.tstop,
+        PREVIEW_DIALECT,
+    )
 }
 
 /// The numbers the preview card reads off its own curve.
@@ -259,6 +250,18 @@ impl WaveformReadouts {
             (f64::INFINITY, f64::NEG_INFINITY),
             |(minimum, maximum), (_, value)| (minimum.min(*value), maximum.max(*value)),
         );
+        Self::spanning(minimum, maximum)
+    }
+
+    /// The readouts of a range someone else measured.
+    ///
+    /// An envelope's extremes are measured over each column's own interval
+    /// rather than read off a grid, and they reach the axis through here so
+    /// that the middle gridline is halfway between the two numbers beside it
+    /// in both modes, rather than halfway in one and something else in the
+    /// other.
+    #[must_use]
+    pub fn spanning(minimum: f64, maximum: f64) -> Option<Self> {
         if !minimum.is_finite() || !maximum.is_finite() {
             return None;
         }
@@ -343,8 +346,10 @@ pub(crate) fn is_independent_source(kind: ComponentType) -> bool {
 }
 
 mod derived;
+mod trace;
 
 pub(crate) use derived::{Guide, SpanChoice, StimulusRealization};
+pub(crate) use trace::{EnvelopeColumn, TraceReading, WaveformTrace, sample_trace};
 
 #[cfg(test)]
 mod tests;

@@ -16,12 +16,14 @@
 //! therefore clear it outright.
 //!
 //! The preview cache lives here for the same reason the drafts do: the proof
-//! surface is the engine's own evaluator, and asking it for four hundred
-//! samples of a modulated carrier on every frame is real work. It is keyed on
-//! the three things that can change what the engine would answer — the working
-//! record, the span the surface is looking through, and the transient the plan
-//! resolves omitted fields against — so a frame that changed none of them
-//! repaints the samples it already had.
+//! surface is the engine's own evaluator, and asking it for a window's worth of
+//! a modulated carrier on every frame is real work — a window drawn as measured
+//! extremes sweeps each of its columns, so it is tens of thousands of
+//! evaluations rather than hundreds. It is keyed on the three things that can
+//! change what the engine would answer — the working record, the span the
+//! surface is looking through, and the transient the plan resolves omitted
+//! fields against — so a frame that changed none of them repaints the trace it
+//! already had.
 
 use std::collections::HashMap;
 
