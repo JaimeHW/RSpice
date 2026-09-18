@@ -50,14 +50,31 @@ impl StimulusLibrary {
     /// Names are compared case-insensitively, because SPICE reads instance and
     /// source names that way and a library that let `VDD` and `vdd` coexist
     /// would produce two definitions that place the same card.
+    ///
+    /// A name a definition used to answer to resolves to it as well, and that
+    /// is what makes renaming safe: a placed source keeps the name it copied
+    /// until someone re-adopts, so a library that only knew current names
+    /// would tell every adopter its definition had been removed the moment a
+    /// spelling was corrected. Current names are searched first, so a name in
+    /// use is never shadowed by another record's history.
     #[must_use]
     pub fn get(&self, name: &str) -> Option<&StimulusDefinition> {
         self.definitions
             .iter()
             .find(|definition| definition.name().eq_ignore_ascii_case(name))
+            .or_else(|| {
+                self.definitions
+                    .iter()
+                    .find(|definition| definition.answers_to(name))
+            })
     }
 
-    /// Add a definition, refusing a name the library already holds.
+    /// Add a definition, refusing a name the library already answers to.
+    ///
+    /// A name another record used to carry is refused as firmly as one in use:
+    /// an instance that adopted under the old name would otherwise resolve to
+    /// whichever record the search reached first, and the card it is holding
+    /// came from neither.
     pub fn insert(
         &mut self,
         definition: StimulusDefinition,
@@ -99,7 +116,11 @@ impl StimulusLibrary {
     /// The instances that adopted it are the caller's to repoint — they carry
     /// their own copy of the name and the library has never seen them.
     pub fn rename(&mut self, old: &str, new: &str) -> Result<(), StimulusDefinitionError> {
-        if !old.eq_ignore_ascii_case(new) && self.get(new).is_some() {
+        // A record may take back a name it used to answer to, and only that
+        // record may: `get` resolves former names, so the refusal asks whether
+        // the name resolves to somebody else.
+        let taken = self.get(new).is_some_and(|holder| !holder.answers_to(old));
+        if taken {
             return Err(StimulusDefinitionError::DuplicateName(new.to_owned()));
         }
         self.definitions
@@ -320,6 +341,87 @@ mod tests {
         draft.edit(|working| working.value = "1.8".to_owned());
         assert_eq!(library.apply(&mut draft), 2);
         assert_eq!(library.len(), 2);
+    }
+
+    /// A name a definition used to carry still finds it, and no other
+    /// definition may take that name: an instance that adopted under it would
+    /// otherwise resolve to a record whose card it never copied.
+    #[test]
+    fn a_former_name_resolves_to_its_definition_and_cannot_be_taken() {
+        let mut library = StimulusLibrary::default();
+        library
+            .insert(
+                StimulusDefinition::new("vdd_oprate", ComponentType::VoltageSource).expect("ok"),
+            )
+            .expect("insert");
+        library.rename("vdd_oprate", "vdd_operate").expect("rename");
+
+        assert_eq!(
+            library.get("vdd_oprate").map(StimulusDefinition::name),
+            Some("vdd_operate")
+        );
+        assert_eq!(
+            library.get("VDD_OPRATE").map(StimulusDefinition::name),
+            Some("vdd_operate")
+        );
+        assert!(
+            library
+                .insert(
+                    StimulusDefinition::new("vdd_oprate", ComponentType::VoltageSource)
+                        .expect("ok")
+                )
+                .is_err()
+        );
+        // Taking a name back leaves the record answering to the one it just
+        // left, and to that one only once: anything that adopted under
+        // `vdd_operate` in between still has to resolve.
+        assert!(library.rename("vdd_operate", "vdd_oprate").is_ok());
+        let record = library.get("vdd_oprate").expect("held");
+        assert_eq!(record.name(), "vdd_oprate");
+        assert_eq!(record.former_names(), ["vdd_operate"]);
+    }
+
+    /// A duplicate and a generated name both go through the same uniqueness
+    /// test, so neither can land on a name another record still answers to.
+    #[test]
+    fn a_generated_name_never_lands_on_a_former_name() {
+        let mut library = StimulusLibrary::default();
+        library
+            .insert(
+                StimulusDefinition::new("pulse", ComponentType::VoltageSourcePulse).expect("ok"),
+            )
+            .expect("insert");
+        library.rename("pulse", "clock_edge").expect("rename");
+
+        assert_eq!(
+            library
+                .new_definition(ComponentType::VoltageSourcePulse)
+                .expect("new")
+                .name(),
+            "pulse_2"
+        );
+    }
+
+    /// Every project written before definitions kept their former names loads,
+    /// and a record that has never been renamed writes nothing extra.
+    #[test]
+    fn a_record_with_no_former_names_round_trips_through_the_document() {
+        let definition =
+            StimulusDefinition::new("sensor_diff_1k", ComponentType::VoltageSourceSin).expect("ok");
+        let encoded = ron::ser::to_string(&definition).expect("serialize");
+        assert!(
+            !encoded.contains("former_names"),
+            "an unrenamed definition must not write the list: {encoded}"
+        );
+        let decoded: StimulusDefinition = ron::from_str(&encoded).expect("deserialize");
+        assert_eq!(decoded, definition);
+        assert!(decoded.former_names().is_empty());
+
+        let mut renamed = definition;
+        renamed.rename("sensor_diff_2k").expect("rename");
+        let encoded = ron::ser::to_string(&renamed).expect("serialize");
+        let decoded: StimulusDefinition = ron::from_str(&encoded).expect("deserialize");
+        assert_eq!(decoded.former_names(), ["sensor_diff_1k"]);
     }
 
     #[test]

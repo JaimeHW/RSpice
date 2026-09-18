@@ -127,10 +127,10 @@ pub(crate) fn delete_needs_confirmation(state: &AppState) -> Option<String> {
 
 /// Publish the draft as the next revision.
 ///
-/// A rename is published here too: every placed source whose provenance names
-/// the old definition is rewritten to the new name, because a rename is not a
-/// deletion and an adopter that suddenly read "definition removed" because
-/// someone corrected a spelling would be a lie about what it adopted.
+/// A rename is published here too, as a rename of the library's own record.
+/// Nothing reaches into the design to repoint adopters: an instance that
+/// adopted before the rename is on whatever sheet it is on, and the definition
+/// keeps answering to the name that instance copied.
 pub(crate) fn apply_draft(state: &mut AppState) {
     let Some(name) = selected(state) else {
         return;
@@ -152,7 +152,6 @@ pub(crate) fn apply_draft(state: &mut AppState) {
     }
     let revision = state.workspace.stimulus_library.apply(&mut published);
     if !renamed.eq_ignore_ascii_case(&name) {
-        rewrite_adopters(state, &name, &renamed);
         state.workbench.stimulus_editor.rename_key(&name, &renamed);
     }
     // The draft the editor holds is the one this publish came from, so it is
@@ -177,18 +176,6 @@ pub(crate) fn apply_draft(state: &mut AppState) {
              now read behind until re-adopted"
         )
     }));
-}
-
-/// Point every adopter of `old` at `new`.
-pub(crate) fn rewrite_adopters(state: &mut AppState, old: &str, new: &str) {
-    for component in &mut state.schematic.components {
-        if let Some(provenance) = component.stimulus_provenance.as_mut()
-            && provenance.definition.eq_ignore_ascii_case(old)
-        {
-            provenance.definition = new.to_owned();
-        }
-    }
-    state.sync_active_schematic_to_workspace();
 }
 
 /// Throw the draft away, as one undoable step.
@@ -263,8 +250,8 @@ pub(crate) fn import_data_file(state: &mut AppState) {
         Some(root) if !std::path::Path::new(&reference).is_absolute() => root.join(&reference),
         _ => std::path::PathBuf::from(&reference),
     };
-    let contents = match std::fs::read_to_string(&absolute) {
-        Ok(contents) => contents,
+    let bytes = match std::fs::read(&absolute) {
+        Ok(bytes) => bytes,
         Err(error) => {
             state.push_user_message(ConsoleMessage::warning(format!(
                 "Cannot read '{}': {error}",
@@ -277,12 +264,18 @@ pub(crate) fn import_data_file(state: &mut AppState) {
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_else(|| reference.clone());
-    let bytes = contents.len();
-    let retained = RetainedPwlFile::new(
-        name.clone(),
-        contents,
+    let retained = match retained_table(
+        &name,
+        bytes,
         u64::try_from(crate::time_compat::unix_epoch().as_millis()).unwrap_or(u64::MAX),
-    );
+    ) {
+        Ok(retained) => retained,
+        Err(refusal) => {
+            state.push_user_message(ConsoleMessage::warning(refusal));
+            return;
+        }
+    };
+    let retained_bytes = retained.contents.len();
     with_draft(state, |draft| {
         draft.edit(|working| {
             write_field(working, "file", &reference);
@@ -290,8 +283,33 @@ pub(crate) fn import_data_file(state: &mut AppState) {
         });
     });
     state.push_user_message(ConsoleMessage::info(format!(
-        "Retained '{name}' ({bytes} B) in the stimulus definition"
+        "Retained '{name}' ({retained_bytes} B) in the stimulus definition"
     )));
+}
+
+/// One picked file as a definition's retained table, or why it is not one.
+///
+/// The picker offers CSV and WAV, because the engine's `PWL FILE` loader reads
+/// both — but a definition retains the *text* of a table, and a WAV is samples
+/// in a binary container. Reading one as text surfaces as an operating-system
+/// decoding error naming a byte offset, which tells the reader nothing about
+/// what they picked, so the refusal is stated here in the product's own terms
+/// and the draft is left exactly as it was.
+pub(crate) fn retained_table(
+    file_name: &str,
+    bytes: Vec<u8>,
+    imported_at_unix_ms: u64,
+) -> Result<RetainedPwlFile, String> {
+    let contents = String::from_utf8(bytes).map_err(|_| {
+        format!(
+            "'{file_name}' is not a text PWL table; a PWL FILE definition retains time/value text"
+        )
+    })?;
+    Ok(RetainedPwlFile::new(
+        file_name,
+        contents,
+        imported_at_unix_ms,
+    ))
 }
 
 /// Copy the definition's current revision onto one placed adopter.
@@ -444,4 +462,31 @@ fn selected(state: &AppState) -> Option<String> {
         .stimulus_library
         .get(name)
         .map(|definition| definition.name().to_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The shared picker offers WAV as well as CSV, so a binary pick is a
+    /// thing a reader can do. It is refused by what it is rather than by the
+    /// byte offset a decoder happened to stop at.
+    #[test]
+    fn a_binary_pick_is_refused_as_not_a_text_table() {
+        let refusal = retained_table("bridge_capture.wav", vec![0x52, 0x49, 0xff, 0xfe, 0x00], 7)
+            .expect_err("a WAV is not a PWL table");
+        assert_eq!(
+            refusal,
+            "'bridge_capture.wav' is not a text PWL table; a PWL FILE definition retains \
+             time/value text"
+        );
+    }
+
+    #[test]
+    fn a_text_table_is_retained_with_its_own_bytes() {
+        let retained = retained_table("step.csv", b"0 0\n1e-9 1\n".to_vec(), 7).expect("retained");
+        assert_eq!(retained.file_name, "step.csv");
+        assert_eq!(retained.contents, "0 0\n1e-9 1\n");
+        assert_eq!(retained.imported_at_unix_ms, 7);
+    }
 }

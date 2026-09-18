@@ -310,8 +310,11 @@ fn apply_is_blocked_by_an_error_and_available_after_the_fix() {
     assert!(stage.apply_block().is_none());
 }
 
-/// A rename is published, not dropped: every adopter's provenance follows it,
-/// so nothing reads "definition removed" because of a corrected spelling.
+/// A rename is published as a rename of the library's record, and every
+/// adopter keeps the receipt it took. Nothing reads "definition removed"
+/// because of a corrected spelling, and nothing reaches into the design to
+/// make that true — which is what keeps an adopter on an unloaded sheet as
+/// safe as the one on this one.
 #[test]
 fn applying_a_rename_repoints_every_adopter() {
     let mut app = seeded("bridge_cal_step");
@@ -319,12 +322,25 @@ fn applying_a_rename_repoints_every_adopter() {
     crate::workbench::app::actions::stimulus::edit_name(&mut app.state, "bridge_cal_pulse");
     crate::workbench::app::actions::stimulus::apply_draft(&mut app.state);
 
-    assert!(
+    assert_eq!(
+        app.state
+            .workspace
+            .stimulus_library
+            .definitions()
+            .iter()
+            .filter(|definition| definition.name().starts_with("bridge_cal"))
+            .count(),
+        1,
+        "a rename moves one record rather than leaving two"
+    );
+    assert_eq!(
         app.state
             .workspace
             .stimulus_library
             .get("bridge_cal_step")
-            .is_none()
+            .map(|definition| definition.name()),
+        Some("bridge_cal_pulse"),
+        "the name an adopter copied still resolves to the record"
     );
     let definition = app
         .state
@@ -345,7 +361,8 @@ fn applying_a_rename_repoints_every_adopter() {
             .stimulus_provenance
             .as_ref()
             .map(|provenance| provenance.definition.as_str()),
-        Some("bridge_cal_pulse")
+        Some("bridge_cal_step"),
+        "the receipt keeps the name it copied; the library resolves it"
     );
     assert_eq!(
         app.state

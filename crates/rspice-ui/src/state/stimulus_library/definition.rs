@@ -321,6 +321,20 @@ pub struct StimulusDefinition {
     /// The retained table a `PWL FILE=` definition reads.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pwl_file: Option<RetainedPwlFile>,
+    /// Every name this definition has answered to, oldest first.
+    ///
+    /// A placed source records the name it copied, and it keeps that receipt
+    /// until someone re-adopts. Correcting a spelling in the library would
+    /// therefore orphan every instance that had already adopted — they would
+    /// read "definition removed" because of a typo fix — and chasing them is
+    /// not possible from here: an adopter may be on another sheet, in another
+    /// cell view, or in a cell this session has not loaded.
+    ///
+    /// So the definition answers to its old names instead. Nothing else has to
+    /// change: the receipt still names what it copied, the library still finds
+    /// the record, and the next adoption stamps the current name.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    former_names: Vec<String>,
 }
 
 impl StimulusDefinition {
@@ -349,6 +363,7 @@ impl StimulusDefinition {
             revision: 1,
             modified_unix_ms: super::now_unix_ms(),
             pwl_file: None,
+            former_names: Vec::new(),
         })
     }
 
@@ -417,6 +432,7 @@ impl StimulusDefinition {
                 StimulusFamily::PwlFile => self.pwl_file.clone(),
                 _ => None,
             },
+            former_names: self.former_names.clone(),
         }
     }
 
@@ -437,12 +453,31 @@ impl StimulusDefinition {
     }
 
     /// Rename the definition, refusing anything that is not an identifier.
+    ///
+    /// The name it had is kept, so every placed source that already copied
+    /// this definition still resolves to it. A name it answered to before is
+    /// not recorded twice, and a rename back to an earlier name drops that
+    /// name from the list rather than leaving the record answering to its own
+    /// current name from two directions.
     pub fn rename(&mut self, name: impl Into<String>) -> Result<(), StimulusDefinitionError> {
         let name = name.into();
         if !is_spice_identifier(&name) {
             return Err(StimulusDefinitionError::Name(name));
         }
-        self.name = name;
+        if self.name.eq_ignore_ascii_case(&name) {
+            self.name = name;
+            return Ok(());
+        }
+        let previous = std::mem::replace(&mut self.name, name);
+        if !self
+            .former_names
+            .iter()
+            .any(|former| former.eq_ignore_ascii_case(&previous))
+        {
+            self.former_names.push(previous);
+        }
+        self.former_names
+            .retain(|former| !former.eq_ignore_ascii_case(&self.name));
         Ok(())
     }
 
@@ -473,7 +508,30 @@ impl StimulusDefinition {
             revision: 0,
             modified_unix_ms: 0,
             pwl_file: self.pwl_file.clone(),
+            // What a record used to be called is not what it says. Comparing
+            // it would make a name typed away and typed back read as an edit,
+            // because the round trip leaves a former name behind.
+            former_names: Vec::new(),
         }
+    }
+
+    /// Every name this definition has answered to, oldest first.
+    #[must_use]
+    pub fn former_names(&self) -> &[String] {
+        &self.former_names
+    }
+
+    /// Whether this definition answers to a name, current or former.
+    ///
+    /// Case-insensitively, the way SPICE reads an instance name and the way
+    /// the library compares the definitions it holds.
+    #[must_use]
+    pub fn answers_to(&self, name: &str) -> bool {
+        self.name.eq_ignore_ascii_case(name)
+            || self
+                .former_names
+                .iter()
+                .any(|former| former.eq_ignore_ascii_case(name))
     }
 }
 

@@ -334,22 +334,35 @@ impl StimulusLibrary {
     }
 
     /// The Studio Excitations "Definition" cell for one placed source.
+    ///
+    /// The definition is named as the library names it now. An instance that
+    /// adopted before a rename holds the old name in its receipt, and printing
+    /// that would put a name in the column that the library browser beside it
+    /// does not list.
     #[must_use]
     pub fn studio_definition_cell(&self, component: &Component) -> String {
-        self.provenance_state(component).studio_cell(
-            component
-                .stimulus_provenance
-                .as_ref()
-                .map(|provenance| provenance.definition.as_str()),
-        )
+        let adopted = component
+            .stimulus_provenance
+            .as_ref()
+            .map(|provenance| provenance.definition.as_str());
+        let current = adopted
+            .and_then(|name| self.get(name))
+            .map(StimulusDefinition::name);
+        self.provenance_state(component)
+            .studio_cell(current.or(adopted))
     }
 
     /// Which placed sources adopted each definition this library holds.
     ///
-    /// Keyed by definition name and ordered by it, so two surfaces listing the
-    /// same library list it the same way. An instance naming a definition the
-    /// library no longer holds is deliberately absent: it has no definition to
-    /// be an adopter of, and [`Self::provenance_state`] is where it says so.
+    /// Keyed by the definition's *current* name and ordered by it, so two
+    /// surfaces listing the same library list it the same way. An instance
+    /// that adopted before a rename carries the old name in its receipt and
+    /// still lands under the record it adopted, because the library resolves
+    /// the name it copied.
+    ///
+    /// An instance naming a definition the library no longer holds is
+    /// deliberately absent: it has no definition to be an adopter of, and
+    /// [`Self::provenance_state`] is where it says so.
     #[must_use]
     pub fn adopters<'a>(
         &self,
@@ -364,7 +377,10 @@ impl StimulusLibrary {
             let Some(provenance) = component.stimulus_provenance.as_ref() else {
                 continue;
             };
-            if let Some(entry) = adopters.get_mut(&provenance.definition) {
+            let Some(definition) = self.get(&provenance.definition) else {
+                continue;
+            };
+            if let Some(entry) = adopters.get_mut(definition.name()) {
                 entry.push(component);
             }
         }
@@ -576,6 +592,58 @@ mod tests {
         component.params = "va=3m freq=1k".to_owned();
         assert_eq!(
             library(vec![definition]).provenance_state(&component),
+            ProvenanceState::Behind {
+                adopted: 1,
+                library: 2
+            }
+        );
+    }
+
+    /// Correcting a spelling in the library must not orphan what has already
+    /// adopted. The instance keeps the receipt it took — the library is what
+    /// resolves it — so it reads `adopted` before the publish and `behind`
+    /// after, and never `definition removed`.
+    #[test]
+    fn a_rename_never_makes_an_adopter_read_removed() {
+        let mut component = source(ComponentType::VoltageSourceSin, "0", "");
+        let definition = definition(
+            "sensor_dif_1k",
+            ComponentType::VoltageSourceSin,
+            "0",
+            "va=1",
+        );
+        definition.adopt_onto(&mut component).expect("adopt");
+
+        let mut library = library(vec![definition]);
+        library
+            .rename("sensor_dif_1k", "sensor_diff_1k")
+            .expect("rename");
+        assert_eq!(
+            library.provenance_state(&component),
+            ProvenanceState::Adopted { revision: 1 }
+        );
+        assert_eq!(
+            library.studio_definition_cell(&component),
+            "sensor_diff_1k · r1",
+            "the cell names the definition as the library names it now"
+        );
+
+        let components = vec![component.clone()];
+        let adopters = library.adopters(&components);
+        assert_eq!(
+            adopters["sensor_diff_1k"].len(),
+            1,
+            "an adopter is grouped under the definition's current name"
+        );
+        assert!(!adopters.contains_key("sensor_dif_1k"));
+
+        let mut draft = super::super::draft::DefinitionDraft::new(
+            library.get("sensor_diff_1k").expect("held").clone(),
+        );
+        draft.edit(|working| working.params = "va=2".to_owned());
+        library.apply(&mut draft);
+        assert_eq!(
+            library.provenance_state(&component),
             ProvenanceState::Behind {
                 adopted: 1,
                 library: 2
