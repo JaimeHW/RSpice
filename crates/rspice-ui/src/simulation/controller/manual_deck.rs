@@ -717,6 +717,38 @@ fn ac_data_table_frequencies(netlist: &Netlist, table_name: &str) -> Result<Vec<
     Ok(frequencies)
 }
 
+/// The engine's own default transient-noise seed.
+///
+/// Duplicated from `rspice-core`'s `DEFAULT_NOISE_SEED` rather than exported
+/// from it, because exporting a constant would widen that crate's public
+/// surface to carry a number this crate can hold and prove instead. The proof
+/// is `a_deck_without_a_noise_seed_carries_the_engine_resolved_default`, which
+/// runs two decks — one silent about the seed, one stating this value — and
+/// requires the realizations to be bit-identical. A drift in either crate
+/// fails that test rather than silently re-pointing this card at a different
+/// realization.
+const ENGINE_DEFAULT_NOISE_SEED: u64 = 0x5EED_0001;
+
+/// The seed the engine will actually play, resolved the way the engine
+/// resolves it.
+///
+/// A hand-written deck is free to say nothing about the seed, and the run is
+/// still reproducible — the engine falls back to `.OPTIONS SEED` and then to
+/// its own constant. The resolved value is carried into the specification so
+/// that the card the Studio would write for this analysis re-runs the same
+/// realization the deck just ran. Leaving it unresolved would produce a plan
+/// whose seed field disagreed with the run it came from.
+const fn resolved_transient_noise_seed(
+    noise: &rspice_core::netlist::TransientNoiseConfig,
+    options_seed: Option<u64>,
+) -> u64 {
+    match (noise.seed, options_seed) {
+        (Some(seed), _) => seed,
+        (None, Some(seed)) => seed,
+        (None, None) => ENGINE_DEFAULT_NOISE_SEED,
+    }
+}
+
 fn command_to_queue_item(
     state: &AppState,
     netlist: &Netlist,
@@ -954,12 +986,33 @@ fn command_to_queue_item(
             uic,
         } => {
             let start_time = start.unwrap_or(0.0);
-            let spec = AnalysisSpec::Transient {
-                stop_time: *stop,
-                step_time: *step,
-                start_time,
-                max_timestep: *max_step,
-                uic: *uic,
+            // The noise keywords a `.TRAN` card carries are parsed into the
+            // deck's options rather than onto the command, so a reader that
+            // only looked at the command would plan an ordinary transient and
+            // drop the whole noise request without a word. The deck asked for
+            // a different analysis, and this is where it is recognized as one.
+            let spec = match netlist.options.transient_noise {
+                Some(noise) => AnalysisSpec::TransientNoise {
+                    stop_time: *stop,
+                    step_time: *step,
+                    start_time,
+                    // The engine derives its own bound when the card states
+                    // none; the Studio's own drafts always state one, so the
+                    // resolved bound is carried here rather than invented.
+                    max_timestep: max_step.unwrap_or(*step),
+                    seed: resolved_transient_noise_seed(&noise, netlist.options.seed),
+                    noise_fmax: noise.fmax,
+                    noise_fmin: noise.fmin,
+                    scale: noise.scale,
+                    uic: *uic,
+                },
+                None => AnalysisSpec::Transient {
+                    stop_time: *stop,
+                    step_time: *step,
+                    start_time,
+                    max_timestep: *max_step,
+                    uic: *uic,
+                },
             };
             Ok(QueuedAnalysis {
                 numeric_override: None,
@@ -1402,6 +1455,161 @@ mod tests {
             .into_iter()
             .map(|q| q.spec)
             .collect()
+    }
+
+    /// A hand-written `.TRAN` card with noise keywords is a transient-noise
+    /// analysis, not an ordinary transient with a request quietly discarded.
+    ///
+    /// The keywords land in the deck's options rather than on the command, so
+    /// nothing in the command this reader matches on says the run is noisy.
+    /// Before this arm existed the deck planned a plain transient, ran without
+    /// noise, and reported no difference — the run the author asked for was
+    /// simply not the run that happened.
+    #[test]
+    fn a_manual_deck_with_noisefmax_is_read_as_transient_noise() {
+        let specs = specs_for(
+            "noisy deck\n\
+             V1 in 0 DC 1\n\
+             R1 in out 10k\n\
+             R2 out 0 10k\n\
+             .tran 1n 1u 0 2n NOISEFMAX=5e8 NOISEFMIN=1k NOISESEED=97 NOISESCALE=0.5\n\
+             .end\n",
+        );
+        let [
+            AnalysisSpec::TransientNoise {
+                stop_time,
+                step_time,
+                start_time,
+                max_timestep,
+                seed,
+                noise_fmax,
+                noise_fmin,
+                scale,
+                uic,
+            },
+        ] = specs.as_slice()
+        else {
+            panic!("a noisy .tran card plans one transient-noise analysis: {specs:?}");
+        };
+        assert_eq!(*stop_time, 1.0e-6);
+        assert_eq!(*step_time, 1.0e-9);
+        assert_eq!(*start_time, 0.0);
+        assert_eq!(*max_timestep, 2.0e-9);
+        assert_eq!(*seed, 97);
+        assert_eq!(*noise_fmax, 5.0e8);
+        assert_eq!(*noise_fmin, Some(1.0e3));
+        assert_eq!(*scale, 0.5);
+        assert!(!*uic);
+
+        // The same deck without the keywords is still the ordinary transient
+        // it always was, so this arm reads a request rather than reclassifying
+        // every `.tran` card in the corpus.
+        let plain = specs_for(
+            "plain deck\n\
+             V1 in 0 DC 1\n\
+             R1 in out 10k\n\
+             R2 out 0 10k\n\
+             .tran 1n 1u\n\
+             .end\n",
+        );
+        assert!(
+            matches!(plain.as_slice(), [AnalysisSpec::Transient { .. }]),
+            "{plain:?}"
+        );
+    }
+
+    /// The card the Studio writes, read back by the reader a hand-written deck
+    /// goes through, is the specification it was written from.
+    ///
+    /// Two routes reach one run: the typed plan, and a deck someone was handed.
+    /// They have to agree, or a deck exported from the Studio and re-opened is
+    /// a different analysis from the one that produced it — with the same name
+    /// on it. Every field is compared, because the fields that would go missing
+    /// silently are exactly the ones the card spells as optional keywords.
+    #[test]
+    fn the_studio_card_round_trips_through_the_manual_deck_reader() {
+        use crate::simulation::controller::SimulationController;
+
+        for noise_fmin in [None, Some(1.0e3)] {
+            for scale in [1.0, 0.5] {
+                let authored = AnalysisSpec::TransientNoise {
+                    stop_time: 1.0e-6,
+                    step_time: 1.0e-9,
+                    start_time: 2.0e-7,
+                    max_timestep: 2.5e-10,
+                    seed: 97,
+                    noise_fmax: 5.0e8,
+                    noise_fmin,
+                    scale,
+                    uic: false,
+                };
+                let card = SimulationController::build_transient_noise_command(&authored)
+                    .expect("the plan writes its card");
+                let specs = specs_for(&format!(
+                    "round trip\n\
+                     V1 in 0 DC 1\n\
+                     R1 in out 10k\n\
+                     R2 out 0 10k\n\
+                     {card}\n\
+                     .end\n"
+                ));
+                assert_eq!(
+                    specs.as_slice(),
+                    &[authored],
+                    "the card `{card}` read back as something else"
+                );
+            }
+        }
+    }
+
+    /// A deck that says nothing about the seed carries the seed the engine
+    /// will actually play.
+    ///
+    /// The reader cannot leave it unresolved: the specification's seed is what
+    /// the form shows and what the Studio's own card would write, so a plan
+    /// read from a silent deck has to name the realization that deck ran. The
+    /// value is proved rather than asserted — two runs, one silent about the
+    /// seed and one stating the resolved constant, must produce bit-identical
+    /// waveforms. That is what ties this crate's constant to the engine's
+    /// without exporting it.
+    #[test]
+    fn a_deck_without_a_noise_seed_carries_the_engine_resolved_default() {
+        const SILENT: &str = "silent seed\n\
+                              V1 in 0 DC 1\n\
+                              R1 in out 10k\n\
+                              R2 out 0 10k\n\
+                              .tran 1n 1u NOISEFMAX=1e9\n\
+                              .end\n";
+
+        let specs = specs_for(SILENT);
+        let [AnalysisSpec::TransientNoise { seed, .. }] = specs.as_slice() else {
+            panic!("a silent-seed noisy card still plans transient noise: {specs:?}");
+        };
+        assert_eq!(*seed, ENGINE_DEFAULT_NOISE_SEED);
+
+        // The engine's own answer, measured: the same deck with this seed
+        // stated must play the realization the silent deck played.
+        let run = |deck: &str| -> Vec<u64> {
+            let netlist = rspice_core::Netlist::parse(deck).expect("the deck parses");
+            let result = rspice_core::Engine::new(rspice_core::SimulationConfig::default())
+                .run_tran(&netlist, 1.0e-6, 1.0e-9)
+                .expect("the noisy transient converges");
+            let node = result
+                .node_names
+                .iter()
+                .position(|name| name.eq_ignore_ascii_case("out"))
+                .expect("the divider's output node is solved");
+            result.voltages[node].iter().map(|v| v.to_bits()).collect()
+        };
+        let stated = SILENT.replace(
+            "NOISEFMAX=1e9",
+            &format!("NOISEFMAX=1e9 NOISESEED={ENGINE_DEFAULT_NOISE_SEED}"),
+        );
+        assert_eq!(
+            run(SILENT),
+            run(&stated),
+            "this crate's default seed is not the one the engine resolves"
+        );
     }
 
     #[test]
