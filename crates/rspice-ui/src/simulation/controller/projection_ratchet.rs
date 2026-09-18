@@ -663,6 +663,8 @@ fn every_authored_advanced_option_moves_the_prepared_task_identity() {
             K::Method => "GEAR2",
             K::Damping => "BANKROSE",
             K::Solver => "KLU",
+            K::TimeDomainMode => "Transient-assisted",
+            K::TimeList => "137u 651u",
         };
         let mut record = crate::simulation::plan::AnalysisNumericOverride::default();
         record

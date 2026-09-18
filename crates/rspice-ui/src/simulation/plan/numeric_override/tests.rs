@@ -8,20 +8,41 @@
 
 use super::*;
 
+use crate::simulation::dialog::{HbTimeDomainMode, format_si_value};
 use rspice_core::engine::SimulationConfig;
 
 /// The resolved engine configuration one record produces, through the exact
 /// path a prepared run takes: emit, splice, parse, resolve.
 fn resolve(record: &AnalysisNumericOverride) -> SimulationConfig {
+    resolve_and_parse(record).0
+}
+
+/// Both halves of what an emitted record reaches: the resolved configuration
+/// and the parsed option record the engine also reads directly.
+///
+/// The catalog admits an option on either route — the resolver maps it onto a
+/// `SimulationConfig` field, *or* the engine reads the parsed package record
+/// off `netlist.options` — so the ratchet has to be able to look at both. A
+/// key that moves neither is inert whichever route it claimed.
+fn resolve_and_parse(
+    record: &AnalysisNumericOverride,
+) -> (SimulationConfig, rspice_core::netlist::SimulationOptions) {
     let emitted = record.to_spice_options();
     let deck = format!("ratchet\nV1 1 0 1\nR1 1 0 1k\n{emitted}\n.op\n.end\n");
     let netlist = rspice_core::netlist::parse_netlist(&deck)
         .unwrap_or_else(|error| panic!("the emitted cards must parse: {error}\n{deck}"));
-    rspice_core::resolve_simulation_config(
+    let resolved = rspice_core::resolve_simulation_config(
         &SimulationConfig::default(),
         Some(&netlist.options),
         &rspice_core::SimulationConfigOverrides::default(),
-    )
+    );
+    (resolved, netlist.options)
+}
+
+/// What one record reaches, as one comparable string.
+fn reach_of(record: &AnalysisNumericOverride) -> String {
+    let (resolved, options) = resolve_and_parse(record);
+    format!("{resolved:?}\n{options:?}")
 }
 
 /// Authored strings to try for one option.
@@ -63,6 +84,14 @@ fn candidates(option: NumericOverrideOption) -> Vec<String> {
             .filter_map(|solver| solver.spice_name())
             .map(str::to_owned)
             .collect(),
+        OverrideValueKind::TimeDomainMode => HbTimeDomainMode::all()
+            .iter()
+            .map(|mode| mode.display_name().to_owned())
+            .collect(),
+        // Three increasing stops, well inside any transient's window. The
+        // pool holds one candidate because a schedule is a schedule: there is
+        // no engine default for it to fail to differ from.
+        OverrideValueKind::TimeList => vec!["1u 2u 3u".to_owned()],
     }
 }
 
@@ -109,8 +138,25 @@ fn the_catalog_states_one_entry_and_one_consumer_per_option() {
             "{} must name the SimulationConfig field it resolves onto",
             option.key()
         );
+        // A packaged key reports qualified. Two options spell the same bare
+        // key under different packages — three spell `RELTOL` — so an entry
+        // that forgot its `packaged_name` arm would report a name the ledger
+        // shows twice and a refusal cannot tell apart.
+        if option.package() != OptionPackage::Global {
+            assert_eq!(
+                option.key(),
+                format!("{} {}", option.package().name(), spec.key),
+                "a packaged option reports its package and its key"
+            );
+        } else {
+            assert_eq!(
+                option.key(),
+                spec.key,
+                "a global option reports its bare key"
+            );
+        }
     }
-    assert_eq!(seen.len(), 25, "the catalog size changed; update the count");
+    assert_eq!(seen.len(), 36, "the catalog size changed; update the count");
 }
 
 /// The admission rule, mechanically.
@@ -121,7 +167,7 @@ fn the_catalog_states_one_entry_and_one_consumer_per_option() {
 /// to a byte-identical configuration and fails here.
 #[test]
 fn every_option_moves_the_resolved_engine_configuration() {
-    let baseline = format!("{:?}", resolve(&AnalysisNumericOverride::default()));
+    let baseline = reach_of(&AnalysisNumericOverride::default());
     let mut inert = Vec::new();
 
     for option in NumericOverrideOption::all() {
@@ -135,7 +181,7 @@ fn every_option_moves_the_resolved_engine_configuration() {
             {
                 continue;
             }
-            if format!("{:?}", resolve(&record)) != baseline {
+            if reach_of(&record) != baseline {
                 moved = true;
                 break;
             }
@@ -339,6 +385,18 @@ fn every_stated_option_round_trips_through_the_deck_at_full_precision() {
                     .is_ok()
             })
             .unwrap_or_else(|| panic!("{} has an authorable candidate", option.key()));
+        // One pair of options is mutually exclusive by design, so "every
+        // option at once" cannot include both. Whichever comes first in the
+        // catalog is stated and the other is skipped here; both are proven
+        // separately by
+        // `an_output_schedule_is_a_strobe_or_a_stop_list_and_not_both`.
+        if option == NumericOverrideOption::OutputTimePoints
+            && record
+                .value(NumericOverrideOption::StrobeInterval)
+                .is_some()
+        {
+            continue;
+        }
         record
             .set_for_instance(kind, SolverOwnership::NONE, option, &authored)
             .unwrap_or_else(|error| panic!("{} is authorable: {error}", option.key()));
@@ -370,6 +428,32 @@ fn every_stated_option_round_trips_through_the_deck_at_full_precision() {
     assert_eq!(options.timeint_delmax, Some(3.25e-7));
     assert_eq!(options.bypass_reltol, Some(3.25e-7));
     assert_eq!(options.bypass_abstol, Some(3.25e-7));
+
+    // The three packages admitted under the fourth route, read off the parsed
+    // record rather than the resolved configuration — which is the whole point
+    // of that route, and the reason this assertion block exists twice.
+    assert_eq!(options.nonlin_transient_reltol, Some(3.25e-7));
+    assert_eq!(options.nonlin_transient_abstol, Some(3.25e-7));
+    assert_eq!(options.nonlin_transient_deltaxtol, Some(3.25e-7));
+    assert_eq!(options.nonlin_transient_rhstol, Some(3.25e-7));
+    assert_eq!(options.nonlin_transient_maxstep, Some(37));
+    assert_eq!(
+        options.nonlin_transient_enforce_device_convergence,
+        Some(true)
+    );
+    assert_eq!(options.nonlin_transient_nox, Some(true));
+    assert_eq!(
+        options
+            .output_interval_schedule
+            .as_ref()
+            .map(|schedule| schedule.initial_interval),
+        Some(3.25e-7)
+    );
+    assert_eq!(options.output_snapshots, Some(true));
+    assert_eq!(
+        options.hb_time_domain_mode,
+        Some(rspice_core::netlist::XyceHbTimeDomainMode::Direct)
+    );
 
     // And the fields those keys resolve onto, which is what the engine reads.
     assert_eq!(resolved.convergence_config.voltage_reltol, 3.25e-7);
@@ -626,12 +710,44 @@ fn the_time_stepped_options_are_refused_by_a_kind_that_never_steps() {
         NumericOverrideOption::LteAbstol,
         NumericOverrideOption::MinTimestep,
         NumericOverrideOption::MaximumTimestep,
+        NumericOverrideOption::TransientNewtonReltol,
+        NumericOverrideOption::TransientNewtonAbstol,
+        NumericOverrideOption::TransientNewtonUpdateBound,
+        NumericOverrideOption::TransientNewtonResidualBound,
+        NumericOverrideOption::TransientNewtonBudget,
+        NumericOverrideOption::TransientDeviceConvergence,
+        NumericOverrideOption::TransientNoxSolver,
+        NumericOverrideOption::StrobeInterval,
+        NumericOverrideOption::OutputTimePoints,
+        NumericOverrideOption::RetainEverySignal,
     ] {
         assert_eq!(
             option.refusal_for(AnalysisKind::Ac),
             Some(catalog::NOT_TIME_STEPPED),
             "{} is only read on a time-stepped path",
             option.key()
+        );
+    }
+    // The harmonic-balance package is read on no other family's solve, and the
+    // refusal says which family reads it rather than "not applicable".
+    for kind in [AnalysisKind::Ac, AnalysisKind::Transient] {
+        assert_eq!(
+            NumericOverrideOption::HbInitialState.refusal_for(kind),
+            Some(catalog::NOT_HARMONIC_BALANCE),
+            "{} does not run a harmonic-balance solve",
+            kind.label()
+        );
+    }
+    for kind in [
+        AnalysisKind::HarmonicBalance,
+        AnalysisKind::Hbsp,
+        AnalysisKind::Hbnoise,
+    ] {
+        assert_eq!(
+            NumericOverrideOption::HbInitialState.refusal_for(kind),
+            None,
+            "{} solves a harmonic-balance fixed point first",
+            kind.label()
         );
     }
     // And a kind that does step carries all of them but the one the transient
@@ -854,14 +970,15 @@ fn a_real_override_is_spelled_the_way_the_preset_beside_it_is() {
     }
 }
 
-/// The catalog reports both package tables in the order it always has.
+/// The catalog reports every package table in the order it always has.
 ///
 /// That order is observable: [`NumericOverrideOption::all`] is what the
 /// ledger and the option picker walk. It is also not the order a naive
-/// concatenation of the two package tables would give — the four `TIMEINT`
-/// keys report inside the integration section, not after the device-bypass
-/// one — so a splice that appended instead of inserting would move four rows
-/// with nothing else failing.
+/// concatenation of the package tables would give — the four `TIMEINT` keys
+/// report inside the integration section, not after the device-bypass one, and
+/// the three packages added after them report inside their own sections rather
+/// than at the end — so an assembly that appended instead of interleaving
+/// would move a dozen rows with nothing else failing.
 #[test]
 fn the_catalog_order_survives_the_split_into_package_tables() {
     assert_eq!(
@@ -886,6 +1003,17 @@ fn the_catalog_order_survives_the_split_into_package_tables() {
             NumericOverrideOption::LteAbstol,
             NumericOverrideOption::MinTimestep,
             NumericOverrideOption::MaximumTimestep,
+            NumericOverrideOption::TransientNewtonReltol,
+            NumericOverrideOption::TransientNewtonAbstol,
+            NumericOverrideOption::TransientNewtonUpdateBound,
+            NumericOverrideOption::TransientNewtonResidualBound,
+            NumericOverrideOption::TransientNewtonBudget,
+            NumericOverrideOption::TransientDeviceConvergence,
+            NumericOverrideOption::TransientNoxSolver,
+            NumericOverrideOption::StrobeInterval,
+            NumericOverrideOption::OutputTimePoints,
+            NumericOverrideOption::RetainEverySignal,
+            NumericOverrideOption::HbInitialState,
             NumericOverrideOption::Pivrel,
             NumericOverrideOption::Pivtol,
             NumericOverrideOption::Solver,
@@ -894,4 +1022,319 @@ fn the_catalog_order_survives_the_split_into_package_tables() {
             NumericOverrideOption::BypassAbstol,
         ]
     );
+}
+
+/// Every package header the Studio writes is one the parser scopes.
+///
+/// The writer and the reader keep two lists of package names, and a header the
+/// reader does not know is not an error — it is read as an ordinary global
+/// key, so every key after it on that card lands in the global set. A typo of
+/// `NONLIN-TRANS` would therefore resolve a transient Newton bound onto the
+/// operating point's, silently. `option_package_key_is_known` is public for
+/// exactly this check.
+#[test]
+fn every_engine_option_package_the_studio_writes_is_one_the_parser_scopes() {
+    for package in OptionPackage::ALL {
+        if package == OptionPackage::Global {
+            assert_eq!(
+                package.header(),
+                ".OPTIONS",
+                "the global set has no selector to name"
+            );
+            continue;
+        }
+        assert!(
+            rspice_core::netlist::option_package_key_is_known(package.name()),
+            "the parser does not scope `{}`, so every key on that card would be read as a global \
+             one",
+            package.name()
+        );
+        assert_eq!(
+            package.header(),
+            format!(".OPTIONS {}", package.name()),
+            "a package's card header is its name"
+        );
+    }
+}
+
+/// One card per package, and a scoped card never re-scopes what follows it.
+///
+/// The parser's package selector stays in force for the rest of the command it
+/// appears on. That is the trap the per-package cards exist to avoid, and it
+/// is invisible in the emitted text: a record that put `TAHB` on the global
+/// card would emit something that parses, and the global keys after it would
+/// land in `HBINT` and be dropped.
+#[test]
+fn an_option_card_per_package_keeps_the_parsers_scope_from_leaking() {
+    let mut record = AnalysisNumericOverride::default();
+    // One key in each package, on a kind that carries all of them — and a
+    // global key authored *last*, so an emitter that kept declaration order
+    // instead of package order would put it after a scoped header.
+    for (kind, option, authored) in [
+        (
+            AnalysisKind::Fourier,
+            NumericOverrideOption::LteReltol,
+            "4e-9",
+        ),
+        (
+            AnalysisKind::Fourier,
+            NumericOverrideOption::TransientNewtonUpdateBound,
+            "0.125",
+        ),
+        (
+            AnalysisKind::Fourier,
+            NumericOverrideOption::RetainEverySignal,
+            "on",
+        ),
+        (
+            AnalysisKind::HarmonicBalance,
+            NumericOverrideOption::HbInitialState,
+            "DC operating point",
+        ),
+        (AnalysisKind::Fourier, NumericOverrideOption::Reltol, "1e-5"),
+    ] {
+        record
+            .set_for_instance(kind, SolverOwnership::NONE, option, authored)
+            .unwrap_or_else(|error| panic!("{} is authorable: {error}", option.key()));
+    }
+
+    let emitted = record.to_spice_options();
+    assert_eq!(
+        emitted,
+        ".OPTIONS\n+ RELTOL=1e-5\n.OPTIONS TIMEINT\n+ RELTOL=4e-9\n.OPTIONS NONLIN-TRAN\n+ \
+         DELTAXTOL=1.25e-1\n.OPTIONS OUTPUT\n+ SNAPSHOTS=1\n.OPTIONS HBINT\n+ TAHB=2"
+    );
+    // One card per package that has a stated key, and not one more.
+    assert_eq!(
+        emitted.matches(".OPTIONS").count(),
+        5,
+        "a package with a stated key gets exactly one card"
+    );
+
+    // And each key landed in its own package rather than in the one before it.
+    let deck = format!("scope\nV1 1 0 1\nR1 1 0 1k\n{emitted}\n.op\n.end\n");
+    let netlist = rspice_core::netlist::parse_netlist(&deck)
+        .unwrap_or_else(|error| panic!("the per-package cards must parse: {error}\n{deck}"));
+    let options = &netlist.options;
+    assert_eq!(
+        options.reltol,
+        Some(1e-5),
+        "the global RELTOL stayed global"
+    );
+    assert_eq!(
+        options.timeint_reltol,
+        Some(4e-9),
+        "the TIMEINT RELTOL is a different bound and kept its own field"
+    );
+    assert_eq!(options.nonlin_transient_deltaxtol, Some(0.125));
+    assert_eq!(options.output_snapshots, Some(true));
+    assert_eq!(
+        options.hb_time_domain_mode,
+        Some(rspice_core::netlist::XyceHbTimeDomainMode::DcOperatingPoint)
+    );
+}
+
+/// An authored strobe schedule changes which times a core run reports.
+///
+/// `OUTPUTTIMEPOINTS` stops are exact accepted solver points, so the proof is
+/// the run's own time grid: every authored stop is a sample, and none of them
+/// is merely near one. A tiny RC deck, run through the same engine entry point
+/// the Studio's transient service calls.
+#[test]
+fn a_transient_strobe_interval_reaches_the_engine() {
+    use rspice_core::engine::Engine;
+
+    let mut record = AnalysisNumericOverride::default();
+    record
+        .set_for_instance(
+            AnalysisKind::Transient,
+            SolverOwnership::NONE,
+            NumericOverrideOption::OutputTimePoints,
+            "137u 651u 1.339m",
+        )
+        .expect("a transient owns its output schedule");
+
+    let emitted = record.to_spice_options();
+    assert_eq!(
+        emitted,
+        ".OPTIONS OUTPUT\n+ OUTPUTTIMEPOINTS=1.37e-4,6.51e-4,1.339e-3"
+    );
+    const CIRCUIT: &str = "strobe\nV1 1 0 1\nR1 1 2 1k\nC1 2 0 1u\n";
+    let netlist =
+        rspice_core::netlist::parse_netlist(&format!("{CIRCUIT}{emitted}\n.tran 100u 2m\n.end\n"))
+            .unwrap_or_else(|error| panic!("the strobe deck must parse: {error}"));
+    let unscheduled =
+        rspice_core::netlist::parse_netlist(&format!("{CIRCUIT}.tran 100u 2m\n.end\n"))
+            .expect("the unscheduled deck parses");
+
+    let engine = Engine::new(SimulationConfig::default());
+    let baseline = engine
+        .run_tran(&unscheduled, 2.0e-3, 100.0e-6)
+        .expect("the unscheduled transient runs");
+    let scheduled = engine
+        .run_tran(&netlist, 2.0e-3, 100.0e-6)
+        .expect("the scheduled transient runs");
+
+    // Exact accepted solver points, not interpolations: the engine adds each
+    // authored stop to the breakpoint schedule, which is the whole reason this
+    // key is a control rather than a post-processing preference.
+    for stop in [1.37e-4, 6.51e-4, 1.339e-3] {
+        assert!(
+            scheduled
+                .time
+                .binary_search_by(|time| time.total_cmp(&stop))
+                .is_ok(),
+            "the authored stop {stop} is not an accepted sample: {:?}",
+            scheduled.time
+        );
+    }
+    assert_ne!(
+        baseline.time, scheduled.time,
+        "an authored schedule that left the sample times alone would not be a schedule"
+    );
+}
+
+/// An authored HB initial state changes the record the HB engine reads.
+///
+/// Admitted under the fourth route, so the proof is the parsed package record
+/// rather than a resolved configuration field: `resolve_simulation_config` has
+/// no arm for `TAHB`, and `Engine::hb_config_for_netlist` reads
+/// `netlist.options.hb_time_domain_mode` on the way into every HB solve.
+#[test]
+fn an_hb_integration_option_reaches_the_engine() {
+    let baseline = resolve_and_parse(&AnalysisNumericOverride::default());
+    assert_eq!(
+        baseline.1.hb_time_domain_mode, None,
+        "an empty record leaves the engine on its own DC seed"
+    );
+
+    for (authored, expected) in [
+        ("0", rspice_core::netlist::XyceHbTimeDomainMode::Direct),
+        (
+            "Transient-assisted",
+            rspice_core::netlist::XyceHbTimeDomainMode::TransientAssisted,
+        ),
+        (
+            "DC operating point",
+            rspice_core::netlist::XyceHbTimeDomainMode::DcOperatingPoint,
+        ),
+    ] {
+        let mut record = AnalysisNumericOverride::default();
+        record
+            .set_for_instance(
+                AnalysisKind::HarmonicBalance,
+                SolverOwnership::NONE,
+                NumericOverrideOption::HbInitialState,
+                authored,
+            )
+            .unwrap_or_else(|error| panic!("{authored:?} is an authorable initial state: {error}"));
+        let (resolved, options) = resolve_and_parse(&record);
+        assert_eq!(
+            options.hb_time_domain_mode,
+            Some(expected),
+            "{authored:?} must reach the record the HB engine reads"
+        );
+        assert_eq!(
+            format!("{resolved:?}"),
+            format!("{:?}", baseline.0),
+            "TAHB reaches the engine without passing through SimulationConfig, which is the \
+             fourth admission route and the reason this option needs it"
+        );
+    }
+}
+
+/// An output schedule is a strobe interval or a list of stops, never both.
+///
+/// The engine's own parser refuses a card carrying both keys, so a record that
+/// accepted the pair would emit a deck that cannot be read — and the analysis
+/// would be reported as a broken netlist rather than as an over-specified
+/// schedule. Refused where the second value is authored, with the key to clear
+/// named.
+#[test]
+fn an_output_schedule_is_a_strobe_or_a_stop_list_and_not_both() {
+    let mut record = AnalysisNumericOverride::default();
+    record
+        .set_for_instance(
+            AnalysisKind::Transient,
+            SolverOwnership::NONE,
+            NumericOverrideOption::StrobeInterval,
+            "10u",
+        )
+        .expect("a transient owns its strobe interval");
+    let error = record
+        .set_for_instance(
+            AnalysisKind::Transient,
+            SolverOwnership::NONE,
+            NumericOverrideOption::OutputTimePoints,
+            "1u 2u",
+        )
+        .expect_err("two output schedules cannot both be stated");
+    assert!(
+        error.contains("OUTPUT INITIAL_INTERVAL") && error.contains("Clear"),
+        "the refusal must name the key to clear: {error}"
+    );
+    assert_eq!(
+        record.value(NumericOverrideOption::OutputTimePoints),
+        None,
+        "a refused value is not stored"
+    );
+
+    // Clearing the first one frees the other, and the record emits one key.
+    record.clear(NumericOverrideOption::StrobeInterval);
+    record
+        .set_for_instance(
+            AnalysisKind::Transient,
+            SolverOwnership::NONE,
+            NumericOverrideOption::OutputTimePoints,
+            "1u 2u",
+        )
+        .expect("the schedule is free once the strobe interval is cleared");
+    assert_eq!(
+        record.to_spice_options(),
+        ".OPTIONS OUTPUT\n+ OUTPUTTIMEPOINTS=1e-6,2e-6"
+    );
+}
+
+/// A stop list is validated against the schedule the engine will build.
+///
+/// Each rule here is one the engine's breakpoint schedule enforces, so a list
+/// this accepts is a list that run can use. Refusing them at authoring time is
+/// the difference between a field that says what is wrong and a run that fails
+/// with a netlist error three surfaces away.
+#[test]
+fn an_output_stop_list_refuses_what_the_engine_schedule_would() {
+    let mut record = AnalysisNumericOverride::default();
+    for authored in ["", "  ", "1u 1u", "2u 1u", "-1u", "1u soon"] {
+        assert!(
+            record
+                .set_for_instance(
+                    AnalysisKind::Transient,
+                    SolverOwnership::NONE,
+                    NumericOverrideOption::OutputTimePoints,
+                    authored,
+                )
+                .is_err(),
+            "{authored:?} is not a schedule the engine could run"
+        );
+    }
+    assert!(record.is_empty());
+
+    // Both separators, because the deck writes commas and the well reports
+    // spaces, and a value has to survive the round trip through either.
+    for authored in ["1u,2u,3u", "1u 2u 3u", " 1u, 2u 3u "] {
+        record
+            .set_for_instance(
+                AnalysisKind::Transient,
+                SolverOwnership::NONE,
+                NumericOverrideOption::OutputTimePoints,
+                authored,
+            )
+            .unwrap_or_else(|error| panic!("{authored:?} is a schedule: {error}"));
+        assert_eq!(
+            record
+                .value(NumericOverrideOption::OutputTimePoints)
+                .unwrap(),
+            "1u 2u 3u"
+        );
+    }
 }

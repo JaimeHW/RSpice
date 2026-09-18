@@ -1899,21 +1899,27 @@ fn every_authored_option_reaches_its_task_deck_and_changes_its_identity() {
             K::Method => vec!["GEAR2", "EULER"],
             K::Damping => vec!["BANKROSE", "COMBINED"],
             K::Solver => vec!["KLU", "FAER"],
+            K::TimeDomainMode => vec!["Transient-assisted", "DC operating point"],
+            K::TimeList => vec!["137u 651u", "1u 2u 3u"],
         }
     };
 
-    let inherited = format!(
-        "{:?}",
-        rspice_core::resolve_simulation_config(
+    // What a deck reaches, both ways the catalog admits an option: onto a
+    // resolved `SimulationConfig` field, or onto the parsed option record the
+    // engine reads directly. The output schedule takes the second route and no
+    // resolver arm exists for it, so comparing the resolved configuration
+    // alone would report a live control as dead.
+    let reach_of = |deck: &str| -> String {
+        let parsed = rspice_core::netlist::parse_netlist(deck)
+            .unwrap_or_else(|error| panic!("the deck must parse: {error}\n{deck}"));
+        let resolved = rspice_core::resolve_simulation_config(
             &rspice_core::engine::SimulationConfig::default(),
-            Some(
-                &rspice_core::netlist::parse_netlist(DECK)
-                    .expect("the bare deck parses")
-                    .options,
-            ),
+            Some(&parsed.options),
             &rspice_core::SimulationConfigOverrides::default(),
-        )
-    );
+        );
+        format!("{resolved:?}\n{:?}", parsed.options)
+    };
+    let inherited = reach_of(DECK);
 
     for option in NumericOverrideOption::applicable_to_instance(
         AnalysisKind::Transient,
@@ -1957,18 +1963,7 @@ fn every_authored_option_reaches_its_task_deck_and_changes_its_identity() {
                 option.key()
             );
 
-            let parsed = rspice_core::netlist::parse_netlist(deck).unwrap_or_else(|error| {
-                panic!(
-                    "the deck spliced for {} must parse: {error}\n{deck}",
-                    option.key()
-                )
-            });
-            let resolved = rspice_core::resolve_simulation_config(
-                &rspice_core::engine::SimulationConfig::default(),
-                Some(&parsed.options),
-                &rspice_core::SimulationConfigOverrides::default(),
-            );
-            if format!("{resolved:?}") != inherited {
+            if reach_of(deck) != inherited {
                 moved = true;
                 break;
             }

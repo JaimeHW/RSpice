@@ -345,6 +345,17 @@ fn encode_numeric_override(
                 OverrideValue::Solver(solver) => {
                     writer.string(solver.spice_name().unwrap_or("AUTO"));
                 }
+                // The deck spelling, which is the digit the engine reads. A
+                // separate tag table would be a second identity for one fact.
+                OverrideValue::TimeDomainMode(mode) => writer.string(mode.spice_name()),
+                // Length first, so that two schedules cannot encode alike by
+                // one of them ending where the other's next stop begins.
+                OverrideValue::TimeList(times) => {
+                    writer.usize(times.len());
+                    for time in times {
+                        writer.f64(time);
+                    }
+                }
             }
         }
     });

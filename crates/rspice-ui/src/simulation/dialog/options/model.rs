@@ -573,7 +573,15 @@ mod tests {
         for option in NumericOverrideOption::applicable_to_instance(
             kind,
             crate::simulation::plan::SolverOwnership::NONE,
-        ) {
+        )
+        .into_iter()
+        // The two output-schedule keys are mutually exclusive in the engine's
+        // own parser, so no record can state both and this one states the
+        // list. That is the record's rule and not a gap in it —
+        // `an_output_schedule_is_a_strobe_or_a_stop_list_and_not_both` is
+        // where it is proven.
+        .filter(|option| *option != NumericOverrideOption::StrobeInterval)
+        {
             let authored = match option.value_kind() {
                 OverrideValueKind::PositiveReal | OverrideValueKind::NonNegativeReal => "1.25e-8",
                 OverrideValueKind::IterationCount => "77",
@@ -581,6 +589,8 @@ mod tests {
                 OverrideValueKind::Method => "EULER",
                 OverrideValueKind::Damping => "BANKROSE",
                 OverrideValueKind::Solver => "KLU",
+                OverrideValueKind::TimeDomainMode => "Transient-assisted",
+                OverrideValueKind::TimeList => "1u 2u 3u",
             };
             record
                 .set_for_instance(
