@@ -353,13 +353,7 @@ pub(crate) fn open_instance_properties(state: &mut AppState, component_id: u64) 
 
 /// Audit every definition in the library and report the totals.
 pub(crate) fn validate_library(state: &mut AppState) {
-    let definitions = state
-        .workspace
-        .stimulus_library
-        .definitions()
-        .iter()
-        .cloned()
-        .collect::<Vec<_>>();
+    let definitions = state.workspace.stimulus_library.definitions().to_vec();
     let mut errors = 0_usize;
     let mut advisories = 0_usize;
     for definition in &definitions {

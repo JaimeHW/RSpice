@@ -93,6 +93,9 @@ struct FieldEdit {
     text: String,
 }
 
+/// The net each placed terminal sits on, keyed by component id and pin name.
+type TerminalNets = HashMap<(u64, String), String>;
+
 /// Every definition the instrument has open, and the preview it last drew.
 #[derive(Debug, Clone, Default)]
 pub struct StimulusEditorState {
@@ -103,7 +106,7 @@ pub struct StimulusEditorState {
     pub span: PreviewSpan,
     cache: Option<PreviewCache>,
     field: Option<FieldEdit>,
-    nets: Option<(u64, HashMap<(u64, String), String>)>,
+    nets: Option<(u64, TerminalNets)>,
     focus_name: bool,
     pending_delete: Option<String>,
     /// How many times the engine has been asked to evaluate a waveform for
@@ -335,7 +338,7 @@ impl StimulusEditorState {
         &mut self,
         epoch: u64,
         schematic: &crate::state::SchematicState,
-    ) -> &HashMap<(u64, String), String> {
+    ) -> &TerminalNets {
         if self
             .nets
             .as_ref()
