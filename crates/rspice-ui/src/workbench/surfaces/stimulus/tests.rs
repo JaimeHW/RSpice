@@ -478,9 +478,12 @@ fn print_stimulus_renders_for_review() {
     }
 }
 
+/// One reviewed state: the name its render is filed under, and how to build it.
+type ReviewState = (&'static str, fn() -> RSpiceApp);
+
 /// The states a review covers: one per layout the stage has a distinct shape
 /// for, plus the two that cannot be reached by picking a definition.
-fn review_states() -> Vec<(&'static str, fn() -> RSpiceApp)> {
+fn review_states() -> Vec<ReviewState> {
     vec![
         ("empty", RSpiceApp::test_instance as fn() -> RSpiceApp),
         ("sin", || seeded("sensor_diff_1k")),
