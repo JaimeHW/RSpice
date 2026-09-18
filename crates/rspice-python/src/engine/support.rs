@@ -408,7 +408,9 @@ statistics {
         // the probe: every other key is at its documented default.
         assert_eq!(describe(".DCMATCH OUT=V(out)"), ".dcmatch out=v(OUT)");
         assert_eq!(
-            describe(".DCMATCH OUT=V(out,in) MISMATCH=no PROCESS=yes CONTRIBUTORS=3 THRESHOLD=0.01 SIGMA=3"),
+            describe(
+                ".DCMATCH OUT=V(out,in) MISMATCH=no PROCESS=yes CONTRIBUTORS=3 THRESHOLD=0.01 SIGMA=3"
+            ),
             ".dcmatch out=v(OUT,IN) mismatch=no process=yes contributors=3 threshold=0.01 sigma=3"
         );
         assert_eq!(describe(".DCMATCH OUT=I(V1)"), ".dcmatch out=i(V1)");

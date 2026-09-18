@@ -204,7 +204,9 @@ impl PyDcMatchResult {
             .cloned()
             .ok_or_else(|| {
                 let suffix = parameter.map_or(String::new(), |name| format!("/{name}"));
-                crate::errors::key_error(format!("unknown mismatch contributor '{instance}{suffix}'"))
+                crate::errors::key_error(format!(
+                    "unknown mismatch contributor '{instance}{suffix}'"
+                ))
             })
     }
 

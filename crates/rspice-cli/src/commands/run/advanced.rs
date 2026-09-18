@@ -1792,7 +1792,11 @@ pub(super) fn run_dc_match_from_command(
 /// The shared document decides the same way, so the printed unit and the
 /// document's declared unit cannot disagree.
 fn dc_match_unit(result: &rspice_core::analysis::dcmatch::DcMatchResult) -> &'static str {
-    if result.output.starts_with('I') { "A" } else { "V" }
+    if result.output.starts_with('I') {
+        "A"
+    } else {
+        "V"
+    }
 }
 
 /// A standard deviation of exactly zero, printed as zero.
@@ -1903,7 +1907,11 @@ fn export_dc_match(
             quantity,
             contributor.contribution,
         ));
-        columns.push(scalar(format!("share({owner})"), "share", contributor.share));
+        columns.push(scalar(
+            format!("share({owner})"),
+            "share",
+            contributor.share,
+        ));
     }
     let table = ExportTable {
         analysis: "dcmatch".to_string(),
@@ -1922,9 +1930,7 @@ fn export_dc_match(
         // the document's payload.
         super::document::empty_schema(),
         &table,
-        || {
-            rspice_core::execution::AnalysisResultDocument::from_dc_match(analysis_id, result)
-        },
+        || rspice_core::execution::AnalysisResultDocument::from_dc_match(analysis_id, result),
     )?;
 
     if !ctx.quiet {

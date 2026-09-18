@@ -39,10 +39,9 @@ use crate::netlist::{PyNetlist, describe_analysis};
 use crate::results::{
     NodeIdentifier, PyAcResult, PyAcSensitivityResult, PyAnalysisRecord,
     PyCompressedTransientResult, PyDcMatchResult, PyDcSweepResult, PyDistortionResult,
-    PyEnvelopeResult,
-    PyFourierResult, PyHbResult, PyMeasurement, PyMonteCarloResult, PyNoiseResult,
-    PyOscillatorNoiseResult, PyPacResult, PyPeriodicNoiseResult, PyPoleZeroResult, PyPssResult,
-    PyPstbResult, PyPxfResult, PyRunCoordinate, PyRunReport, PySParameterResult,
+    PyEnvelopeResult, PyFourierResult, PyHbResult, PyMeasurement, PyMonteCarloResult,
+    PyNoiseResult, PyOscillatorNoiseResult, PyPacResult, PyPeriodicNoiseResult, PyPoleZeroResult,
+    PyPssResult, PyPstbResult, PyPxfResult, PyRunCoordinate, PyRunReport, PySParameterResult,
     PySensitivityResult, PySimulationResult, PyStbResult, PyTransferFunctionResult,
     PyTransientCheckpoint, PyTransientResult, is_ground_name, periodic_noise_probe,
 };
