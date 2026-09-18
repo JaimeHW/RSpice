@@ -16,6 +16,7 @@ use crate::state::stimulus_library::definition::{
     RetainedPwlFile, StimulusDefinition, StimulusFamily, StimulusKind,
 };
 use crate::state::stimulus_library::draft::DefinitionDraft;
+use crate::ui::accessibility::counted;
 use crate::workbench::app_state::AppState;
 use crate::workbench::state::write_field;
 
@@ -88,8 +89,13 @@ pub(crate) fn delete_definition(state: &mut AppState) {
         format!("Stimulus definition '{name}' deleted")
     } else {
         format!(
-            "Stimulus definition '{name}' deleted; {adopters} placed source(s) keep their cards \
-             and now read 'definition removed'"
+            "Stimulus definition '{name}' deleted; {} and now {} 'definition removed'",
+            counted(
+                adopters,
+                "placed source keeps its card",
+                "placed sources keep their cards"
+            ),
+            if adopters == 1 { "reads" } else { "read" }
         )
     }));
 }
@@ -114,13 +120,23 @@ pub(crate) fn delete_needs_confirmation(state: &AppState) -> Option<String> {
             "'{name}' has a draft that has not been applied. Deleting the definition discards it."
         )),
         (count, false) => Some(format!(
-            "{count} placed source(s) adopted '{name}'. They keep their cards and will read \
-             'definition removed'."
+            "{} adopted '{name}'. {} and will read 'definition removed'.",
+            counted(count, "placed source", "placed sources"),
+            if count == 1 {
+                "It keeps its card"
+            } else {
+                "They keep their cards"
+            }
         )),
         (count, true) => Some(format!(
-            "'{name}' has a draft that has not been applied, and {count} placed source(s) adopted \
-             it. The draft is discarded; the instances keep their cards and will read 'definition \
-             removed'."
+            "'{name}' has a draft that has not been applied, and {} adopted it. The draft is \
+             discarded; {} and will read 'definition removed'.",
+            counted(count, "placed source", "placed sources"),
+            if count == 1 {
+                "the instance keeps its card"
+            } else {
+                "the instances keep their cards"
+            }
         )),
     }
 }
@@ -172,8 +188,8 @@ pub(crate) fn apply_draft(state: &mut AppState) {
         format!("Stimulus definition '{renamed}' published at r{revision}; no adopter")
     } else {
         format!(
-            "Stimulus definition '{renamed}' published at r{revision}; {behind} placed source(s) \
-             now read behind until re-adopted"
+            "Stimulus definition '{renamed}' published at r{revision}; {} behind until re-adopted",
+            counted(behind, "placed source now reads", "placed sources now read")
         )
     }));
 }
@@ -374,8 +390,10 @@ pub(crate) fn validate_library(state: &mut AppState) {
         }
     }
     state.push_user_message(ConsoleMessage::info(format!(
-        "Stimulus library checked: {} definition(s), {errors} error(s), {advisories} advisory(ies)",
-        definitions.len()
+        "Stimulus library checked: {}, {}, {}",
+        counted(definitions.len(), "definition", "definitions"),
+        counted(errors, "error", "errors"),
+        counted(advisories, "advisory", "advisories")
     )));
 }
 
