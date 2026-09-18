@@ -114,6 +114,26 @@ const MODELS_TOOLBAR_COMMANDS: [(Command, WorkbenchIcon, Option<&str>); 4] = [
     (Command::CompileVerilogA, WorkbenchIcon::Netlist, None),
 ];
 
+const STIMULUS_TOOLBAR_COMMANDS: [(Command, WorkbenchIcon, Option<&str>); 5] = [
+    (
+        Command::StimulusNewDefinition,
+        WorkbenchIcon::Add,
+        Some("New definition"),
+    ),
+    (
+        Command::StimulusDuplicateDefinition,
+        WorkbenchIcon::Copy,
+        None,
+    ),
+    (Command::StimulusDeleteDefinition, WorkbenchIcon::Trash, None),
+    (
+        Command::StimulusValidateLibrary,
+        WorkbenchIcon::Check,
+        Some("Validate library"),
+    ),
+    (Command::StimulusShowAdopter, WorkbenchIcon::Target, None),
+];
+
 pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
     let ctx = root.ctx().clone();
     let ctx = &ctx;
@@ -457,10 +477,7 @@ fn workspace_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
         }
         Workspace::Design => design_tools(ui, app, layout),
         Workspace::Simulate => simulation_tools(ui, app, layout),
-        // The library's own verbs — new, duplicate, place, validate — belong
-        // to the instrument that edits a definition, and that is not built.
-        // A toolbar of buttons that refuse would be worse than none.
-        Workspace::Stimulus => {}
+        Workspace::Stimulus => stimulus_tools(ui, app, layout),
         Workspace::Results => results_tools(ui, app, layout),
         Workspace::Verify => verification_tools(ui, app, layout),
         Workspace::Models => models_tools(ui, app, layout),
@@ -1158,6 +1175,24 @@ fn verification_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec
         WorkbenchIcon::Target,
         layout,
     );
+}
+
+/// The Stimulus Library's own verbs.
+///
+/// New leads because an empty library is the state this workspace opens in
+/// most often; the separator divides the verbs that act on one definition from
+/// the two that act on the library and the design around it.
+fn stimulus_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
+    for (index, (command, icon, label)) in STIMULUS_TOOLBAR_COMMANDS.into_iter().enumerate() {
+        if index == 3 {
+            context_separator(ui, layout);
+        }
+        if let Some(label) = label {
+            toolbar_text_command(ui, app, command, icon, label, layout);
+        } else {
+            toolbar_icon_command(ui, app, command, icon, layout);
+        }
+    }
 }
 
 fn models_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {

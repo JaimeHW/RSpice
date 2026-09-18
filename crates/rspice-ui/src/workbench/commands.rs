@@ -846,6 +846,25 @@ impl Command {
                     })
             }
             Self::ModelValidate => state.workbench.model_editor.draft.is_some(),
+            // Every library verb needs the instrument open, because they all
+            // act on the definition it is reading; New and Validate need only
+            // that, because a library with nothing in it is exactly where New
+            // belongs.
+            Self::StimulusNewDefinition | Self::StimulusValidateLibrary => {
+                state.workbench.workspace == Workspace::Stimulus
+            }
+            Self::StimulusDuplicateDefinition | Self::StimulusDeleteDefinition => {
+                state.workbench.workspace == Workspace::Stimulus
+                    && state.workbench.selected_stimulus_definition.is_some()
+            }
+            Self::StimulusApplyDraft | Self::StimulusRevertDraft => {
+                state.workbench.workspace == Workspace::Stimulus
+                    && crate::workbench::app::actions::stimulus::selected_draft_is_dirty(state)
+            }
+            Self::StimulusShowAdopter => {
+                state.workbench.workspace == Workspace::Stimulus
+                    && crate::workbench::app::actions::stimulus::first_adopter(state).is_some()
+            }
             Self::ModelRunQualificationTests => state
                 .workbench
                 .model_editor
@@ -2065,6 +2084,28 @@ impl Command {
                 .state
                 .pdk_settings_dialog
                 .open(app.state.pdk_config.clone()),
+            Self::StimulusNewDefinition => {
+                crate::workbench::app::actions::stimulus::new_definition(&mut app.state);
+            }
+            Self::StimulusDuplicateDefinition => {
+                crate::workbench::app::actions::stimulus::duplicate_definition(&mut app.state);
+            }
+            Self::StimulusDeleteDefinition => {
+                crate::workbench::app::actions::stimulus::delete_definition(&mut app.state);
+            }
+            Self::StimulusApplyDraft => {
+                crate::workbench::app::actions::stimulus::apply_draft(&mut app.state);
+            }
+            Self::StimulusRevertDraft => {
+                crate::workbench::app::actions::stimulus::revert_draft(&mut app.state);
+            }
+            Self::StimulusValidateLibrary => {
+                crate::workbench::app::actions::stimulus::validate_library(&mut app.state);
+            }
+            Self::StimulusShowAdopter => {
+                crate::workbench::app::actions::stimulus::show_adopter_on_schematic(&mut app.state);
+                activate_workspace(app, Workspace::Design);
+            }
             Self::RescanModelLibraries => {
                 app.state.pdk_config.discover_model_files();
                 app.state.model_library_manager.discover_spice_packs();

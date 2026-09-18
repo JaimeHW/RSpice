@@ -10,6 +10,7 @@ pub(in crate::workbench) mod export_image;
 pub(in crate::workbench) mod file;
 pub(in crate::workbench) mod property_edit;
 pub(in crate::workbench) mod sheets;
+pub(in crate::workbench) mod stimulus;
 pub(in crate::workbench) mod stimulus_placement;
 pub(in crate::workbench) mod workspace;
 
@@ -1012,6 +1013,15 @@ impl RSpiceApp {
     }
 
     pub(crate) fn action_edit_undo(&mut self) {
+        // A stimulus draft is the workspace's own edit history, like the
+        // symbol document's. It is stepped first while that workspace is open
+        // so Ctrl+Z means "take back what I just typed" rather than reaching
+        // past the instrument into the design.
+        if self.state.workbench.workspace == crate::workbench::state::Workspace::Stimulus
+            && stimulus::undo_draft(&mut self.state)
+        {
+            return;
+        }
         if self.state.workbench.workspace == crate::workbench::state::Workspace::Netlist
             && self.state.ui.code_workspace.page
                 == crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist
@@ -1045,6 +1055,11 @@ impl RSpiceApp {
     }
 
     pub(crate) fn action_edit_redo(&mut self) {
+        if self.state.workbench.workspace == crate::workbench::state::Workspace::Stimulus
+            && stimulus::redo_draft(&mut self.state)
+        {
+            return;
+        }
         if self.state.workbench.workspace == crate::workbench::state::Workspace::Netlist
             && self.state.ui.code_workspace.page
                 == crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist

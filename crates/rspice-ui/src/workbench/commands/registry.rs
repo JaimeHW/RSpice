@@ -369,6 +369,16 @@ const AUTOMATION_WORKSPACE: &[ShortcutBinding] =
 /// the four chords under it — a shortcut every reader has already learned.
 const STIMULUS_WORKSPACE: &[ShortcutBinding] =
     &[primary(chord(Key::Num8, false, true, false, "Alt+8"), ALL)];
+/// Publishing the draft the library instrument is editing.
+///
+/// Desktop only, because the browser spends `Ctrl+Enter` on Run — it has no
+/// F5 to give that command — and a chord that meant "publish this definition"
+/// on one platform and "start a simulation" on another would be the worst of
+/// both.
+const STIMULUS_APPLY_DRAFT: &[ShortcutBinding] = &[primary(
+    chord(Key::Enter, true, false, false, "Ctrl+Enter"),
+    DESKTOP,
+)];
 const PLACE_INSTANCE: &[ShortcutBinding] =
     &[primary(chord(Key::I, false, false, true, "Shift+I"), ALL)];
 const PLACE_WIRE: &[ShortcutBinding] = &[primary(chord(Key::W, false, false, false, "W"), ALL)];
@@ -533,6 +543,13 @@ impl Command {
                 | Self::ModelCompareRelease
                 | Self::PdkSettings
                 | Self::RescanModelLibraries
+                | Self::StimulusNewDefinition
+                | Self::StimulusDuplicateDefinition
+                | Self::StimulusDeleteDefinition
+                | Self::StimulusApplyDraft
+                | Self::StimulusRevertDraft
+                | Self::StimulusValidateLibrary
+                | Self::StimulusShowAdopter
                 | Self::CompileVerilogA
                 | Self::AutomationConsole
                 | Self::VisualizationStudio
@@ -751,6 +768,7 @@ impl Command {
             Self::OpenWorkspace(Workspace::Verify) => VERIFICATION_WORKSPACE,
             Self::OpenWorkspace(Workspace::Models) => MODELS_WORKSPACE,
             Self::OpenWorkspace(Workspace::Stimulus) => STIMULUS_WORKSPACE,
+            Self::StimulusApplyDraft => STIMULUS_APPLY_DRAFT,
             Self::OpenWorkspace(Workspace::Netlist) => AUTOMATION_WORKSPACE,
             Self::ProjectLauncher => PROJECT_LAUNCHER,
             Self::NewProject => NEW_PROJECT,
@@ -1239,6 +1257,28 @@ impl Command {
                 "validate a clean candidate with at least one qualification suite first"
             }
             Self::ModelCompareRelease => "a clean candidate and an immutable release are required",
+            Self::StimulusNewDefinition | Self::StimulusValidateLibrary => {
+                "open the Stimulus Library"
+            }
+            Self::StimulusDuplicateDefinition
+            | Self::StimulusDeleteDefinition
+            | Self::StimulusShowAdopter
+                if app.state.workbench.workspace != Workspace::Stimulus =>
+            {
+                "open the Stimulus Library"
+            }
+            Self::StimulusShowAdopter => "no placed source has adopted this definition",
+            Self::StimulusDuplicateDefinition | Self::StimulusDeleteDefinition => {
+                "select a stimulus definition"
+            }
+            Self::StimulusApplyDraft | Self::StimulusRevertDraft
+                if app.state.workbench.workspace != Workspace::Stimulus =>
+            {
+                "open the Stimulus Library"
+            }
+            Self::StimulusApplyDraft | Self::StimulusRevertDraft => {
+                "this definition has no draft to apply"
+            }
             _ => "command is unavailable in this context",
         };
         CommandAvailability::Disabled(reason)

@@ -74,7 +74,7 @@ thread_local! {
         const { std::cell::RefCell::new(None) };
 }
 
-mod actions;
+pub(in crate::workbench) mod actions;
 mod command_palette;
 mod dialogs;
 #[cfg(target_arch = "wasm32")]

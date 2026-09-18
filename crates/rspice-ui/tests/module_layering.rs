@@ -255,7 +255,13 @@ const ALLOWED_VIOLATIONS: &[(&str, &str, usize)] = &[
 /// three genuinely need the application: `show` and `execute_action` reach
 /// the cloud session, the license dialog and the command vocabulary, and the
 /// test helper draws through `show`.
-const MAX_WHOLE_APP_MUTABLE_PARAMS: usize = 866;
+/// 866 -> 867 on 2026-09-16, for `chrome::toolbar::stimulus_tools`. Every
+/// sibling workspace toolbar takes the application — `models_tools`,
+/// `design_tools`, `results_tools` and the rest all do, because the toolbar
+/// command helpers they dispatch through resolve availability against the
+/// whole application. A `stimulus_tools` that took less would have to
+/// duplicate that resolution to say why a button is unavailable.
+const MAX_WHOLE_APP_MUTABLE_PARAMS: usize = 867;
 
 fn src_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("src")

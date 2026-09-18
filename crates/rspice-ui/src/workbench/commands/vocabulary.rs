@@ -261,6 +261,13 @@ pub enum Command {
     ModelCompareRelease,
     PdkSettings,
     RescanModelLibraries,
+    StimulusNewDefinition,
+    StimulusDuplicateDefinition,
+    StimulusDeleteDefinition,
+    StimulusApplyDraft,
+    StimulusRevertDraft,
+    StimulusValidateLibrary,
+    StimulusShowAdopter,
     CompileVerilogA,
     AutomationConsole,
     CommandPalette,
@@ -959,6 +966,27 @@ impl Command {
             Self::RescanModelLibraries => {
                 spec("rescan-model-libraries", "Rescan model libraries", "Models")
             }
+            Self::StimulusNewDefinition => {
+                spec("stimulus-new", "New stimulus definition", "Stimulus")
+            }
+            Self::StimulusDuplicateDefinition => {
+                spec("stimulus-duplicate", "Duplicate stimulus definition", "Stimulus")
+            }
+            Self::StimulusDeleteDefinition => {
+                spec("stimulus-delete", "Delete stimulus definition", "Stimulus")
+            }
+            Self::StimulusApplyDraft => {
+                spec("stimulus-apply", "Apply stimulus draft", "Stimulus")
+            }
+            Self::StimulusRevertDraft => {
+                spec("stimulus-revert", "Revert stimulus draft", "Stimulus")
+            }
+            Self::StimulusValidateLibrary => {
+                spec("stimulus-validate", "Validate stimulus library", "Stimulus")
+            }
+            Self::StimulusShowAdopter => {
+                spec("stimulus-show-adopter", "Show adopter on schematic", "Stimulus")
+            }
             Self::CompileVerilogA => spec("veriloga", "Compile Verilog-A", "Models"),
             Self::AutomationConsole => spec("automation", "Automation workspace", "Automation"),
             Self::CommandPalette => spec("command-palette", "Command palette", "Navigate"),
@@ -1307,6 +1335,13 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::ModelBrowser,
     Command::PdkSettings,
     Command::RescanModelLibraries,
+    Command::StimulusNewDefinition,
+    Command::StimulusDuplicateDefinition,
+    Command::StimulusDeleteDefinition,
+    Command::StimulusApplyDraft,
+    Command::StimulusRevertDraft,
+    Command::StimulusValidateLibrary,
+    Command::StimulusShowAdopter,
     Command::CompileVerilogA,
     Command::AutomationConsole,
     Command::CommandPalette,

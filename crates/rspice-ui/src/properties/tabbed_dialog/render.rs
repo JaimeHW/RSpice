@@ -1334,8 +1334,15 @@ const PROJECT_DATA_DIR: &str = "data";
 /// becomes relative the first time the project is saved somewhere.
 ///
 /// `Ok(None)` means the picker was dismissed.
+///
+/// It takes the project's data root rather than an editor, because the
+/// Stimulus Library imports the same kind of file for the same reason and
+/// there must be exactly one route that decides where an attached waveform
+/// lands.
 #[cfg(not(target_arch = "wasm32"))]
-fn attach_data_file(state: &TabbedPropertyDialogState) -> Result<Option<String>, String> {
+pub(crate) fn attach_data_file(
+    data_root: Option<&std::path::Path>,
+) -> Result<Option<String>, String> {
     let Some(source) = rfd::FileDialog::new()
         .add_filter("Waveform data", &["csv", "wav"])
         .add_filter("All files", &["*"])
@@ -1344,7 +1351,7 @@ fn attach_data_file(state: &TabbedPropertyDialogState) -> Result<Option<String>,
         return Ok(None);
     };
 
-    let Some(root) = state.data_root.as_deref() else {
+    let Some(root) = data_root else {
         return Ok(Some(source.to_string_lossy().into_owned()));
     };
     // Already inside the project: reference it where it lies rather than
@@ -1424,7 +1431,9 @@ fn files_have_equal_contents(left: &std::path::Path, right: &std::path::Path) ->
 }
 
 #[cfg(target_arch = "wasm32")]
-fn attach_data_file(_state: &TabbedPropertyDialogState) -> Result<Option<String>, String> {
+pub(crate) fn attach_data_file(
+    _data_root: Option<&std::path::Path>,
+) -> Result<Option<String>, String> {
     Err("Waveform data files are only available in the desktop application".to_owned())
 }
 
@@ -1559,7 +1568,7 @@ fn render_property_field(
         }
     }
     if browse_clicked && picks_data_file {
-        match attach_data_file(state) {
+        match attach_data_file(state.data_root.as_deref()) {
             Ok(Some(reference)) => {
                 state.set_value(&def.name, PropertyValue::String(reference));
                 state.session_error = None;

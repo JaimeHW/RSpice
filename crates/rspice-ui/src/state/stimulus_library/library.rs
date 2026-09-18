@@ -90,6 +90,27 @@ impl StimulusLibrary {
         revision
     }
 
+    /// Rename a definition in place, refusing a name the library already
+    /// holds.
+    ///
+    /// In place, because [`Self::apply`] matches the record it publishes by
+    /// name: a renamed draft applied without this would be appended beside the
+    /// record it came from and the library would hold the definition twice.
+    /// The instances that adopted it are the caller's to repoint — they carry
+    /// their own copy of the name and the library has never seen them.
+    pub fn rename(&mut self, old: &str, new: &str) -> Result<(), StimulusDefinitionError> {
+        if !old.eq_ignore_ascii_case(new)
+            && self.get(new).is_some()
+        {
+            return Err(StimulusDefinitionError::DuplicateName(new.to_owned()));
+        }
+        self.definitions
+            .iter_mut()
+            .find(|definition| definition.name().eq_ignore_ascii_case(old))
+            .ok_or_else(|| StimulusDefinitionError::Unknown(old.to_owned()))?
+            .rename(new)
+    }
+
     /// Remove a definition. Adopters keep their cards and read
     /// `definition removed`.
     pub fn delete(&mut self, name: &str) -> Option<StimulusDefinition> {
@@ -272,6 +293,35 @@ mod tests {
         assert_eq!(library.apply(&mut draft), 2);
         assert_eq!(library.len(), 1);
         assert_eq!(library.get("vdd_operate").expect("held").value, "1.8");
+    }
+
+    /// A rename keeps the record where it was, so publishing the renamed
+    /// draft replaces it rather than appending a second copy.
+    #[test]
+    fn a_rename_moves_the_record_in_place_and_refuses_a_name_in_use() {
+        let mut library = StimulusLibrary::default();
+        for name in ["first", "second"] {
+            library
+                .insert(StimulusDefinition::new(name, ComponentType::VoltageSource).expect("ok"))
+                .expect("insert");
+        }
+
+        assert!(library.rename("first", "SECOND").is_err());
+        assert!(library.rename("missing", "third").is_err());
+        library.rename("first", "renamed").expect("rename");
+        assert_eq!(
+            library
+                .definitions()
+                .iter()
+                .map(StimulusDefinition::name)
+                .collect::<Vec<_>>(),
+            vec!["renamed", "second"]
+        );
+
+        let mut draft = DefinitionDraft::new(library.get("renamed").expect("held").clone());
+        draft.edit(|working| working.value = "1.8".to_owned());
+        assert_eq!(library.apply(&mut draft), 2);
+        assert_eq!(library.len(), 2);
     }
 
     #[test]
