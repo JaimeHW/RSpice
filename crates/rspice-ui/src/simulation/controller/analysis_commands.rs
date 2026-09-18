@@ -460,7 +460,17 @@ impl SimulationController {
     /// it yet. Its absence is itself a value — the engine derives `1/tstop`,
     /// the longest period the run can resolve — so an unauthored floor must
     /// stay unwritten rather than be pinned to a number the form never stated.
-    pub(super) fn build_transient_noise_command(spec: &AnalysisSpec) -> Result<String, String> {
+    ///
+    /// Visible across `simulation` rather than to the controller alone, which
+    /// the rest of this family is. The runner's dispatch test executes the
+    /// card this writes instead of a hand-spelled one, because the seed and
+    /// the bandwidth reach the solver *only* through this line — the transient
+    /// configuration carries the window and nothing else — so a run fixture
+    /// that spelled its own card would prove the engine can be asked for noise
+    /// while proving nothing about whether the Studio asks for it.
+    pub(in crate::simulation) fn build_transient_noise_command(
+        spec: &AnalysisSpec,
+    ) -> Result<String, String> {
         let AnalysisSpec::TransientNoise {
             stop_time,
             step_time,
@@ -578,7 +588,6 @@ const fn manifest_spec_kind(spec: &AnalysisSpec) -> Option<crate::simulation::pl
         AnalysisSpec::Qpac { .. } => AnalysisKind::Qpac,
         AnalysisSpec::Qpnoise { .. } => AnalysisKind::Qpnoise,
         AnalysisSpec::Qpxf { .. } => AnalysisKind::Qpxf,
-        AnalysisSpec::TransientNoise { .. } => AnalysisKind::TransientNoise,
         AnalysisSpec::DcMismatch { .. } => AnalysisKind::DcMismatch,
         AnalysisSpec::Reliability { .. } => AnalysisKind::Reliability,
         _ => return None,

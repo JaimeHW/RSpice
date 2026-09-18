@@ -90,7 +90,7 @@ fn only(state: &mut AppState, kinds: &[AnalysisKind]) -> Vec<AnalysisInstanceId>
 /// The one independent source the fixture design owns.
 const FIXTURE_TONE_SOURCE: &str = "VCC";
 
-/// How many of the 27 kinds with no execution blocker compile a queue from
+/// How many of the 28 kinds with no execution blocker compile a queue from
 /// their default draft on this fixture, measured.
 ///
 /// The other four ask for something no default can invent — an output node, an
@@ -98,7 +98,7 @@ const FIXTURE_TONE_SOURCE: &str = "VCC";
 /// This is a floor on coverage rather than a count of the catalogue: it may
 /// rise freely, and a change that lowers it has narrowed what the ratchet
 /// watches and should say so out loud rather than coast.
-const EXECUTABLE_KINDS_THIS_FIXTURE_COMPILES: usize = 23;
+const EXECUTABLE_KINDS_THIS_FIXTURE_COMPILES: usize = 24;
 
 /// Point a PSS instance at the source the fixture design actually has.
 fn name_the_fixture_tone_source(plan: &mut SimulationPlan, pss: AnalysisInstanceId) {
@@ -342,7 +342,7 @@ fn a_default_pss_plan_prepares_a_receipt_instead_of_being_refused_at_dispatch() 
 #[test]
 fn a_kind_without_a_solver_is_still_refused_by_its_own_blocker() {
     // The receipt layer now accepts every tag the canonical assignment can
-    // emit, including the six whose solver is absent from this build. That is
+    // emit, including those whose solver is absent from this build. That is
     // deliberate: the closed protocol describes what this binary's tag
     // assignment produces, and refusing a kind that has no solver is the
     // execution blocker's job. Losing that would turn a named "not available
@@ -368,7 +368,7 @@ fn a_kind_without_a_solver_is_still_refused_by_its_own_blocker() {
         blocked += 1;
     }
     assert_eq!(
-        blocked, 7,
+        blocked, 6,
         "the engine-blocked catalogue changed; re-read what the blockers now cover"
     );
 }

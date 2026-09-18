@@ -969,7 +969,6 @@ fn analysis_catalog_search_preserves_canonical_group_order() {
         AnalysisKind::Qpac,
         AnalysisKind::Qpnoise,
         AnalysisKind::Qpxf,
-        AnalysisKind::TransientNoise,
         AnalysisKind::DcMismatch,
     ];
     assert_eq!(all.len(), AnalysisKind::ALL.len());

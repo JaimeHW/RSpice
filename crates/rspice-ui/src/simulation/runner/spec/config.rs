@@ -74,6 +74,27 @@ pub(super) fn analysis_config_from_spec(spec: &AnalysisSpec) -> Option<AnalysisC
             max_timestep: *max_timestep,
             uic: *uic,
         })),
+        // A transient-noise run is the same walk through time, with the noise
+        // the deck's `.tran` card turned on. The realization is selected by
+        // `NOISEFMAX=`/`NOISESEED=` on that card and reaches the engine
+        // through the parsed deck's options, not through this configuration —
+        // so the window is all there is to carry here, and carrying it as a
+        // second transient configuration type would be two spellings of one
+        // solve.
+        AnalysisSpec::TransientNoise {
+            stop_time,
+            step_time,
+            start_time,
+            max_timestep,
+            uic,
+            ..
+        } => Some(AnalysisConfig::Transient(TransientAnalysisConfig {
+            stop_time: *stop_time,
+            step_time: *step_time,
+            start_time: *start_time,
+            max_timestep: Some(*max_timestep),
+            uic: *uic,
+        })),
         AnalysisSpec::Ac {
             start_freq,
             stop_freq,

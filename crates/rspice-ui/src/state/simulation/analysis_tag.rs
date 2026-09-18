@@ -268,9 +268,6 @@ impl CanonicalAnalysisKind {
             Self::Qpxf => Some(
                 "quasi-periodic translated-transfer execution is not available in this engine build",
             ),
-            Self::TransientNoise => Some(
-                "stochastic transient device-noise execution is not available in this engine build",
-            ),
             Self::DcMismatch => {
                 Some("DC mismatch contribution extraction is not available in this engine build")
             }

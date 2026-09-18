@@ -124,7 +124,6 @@ pub(super) fn run_spec_request_with_environment(
         | AnalysisSpec::Qpac { .. }
         | AnalysisSpec::Qpnoise { .. }
         | AnalysisSpec::Qpxf { .. }
-        | AnalysisSpec::TransientNoise { .. }
         | AnalysisSpec::DcMismatch { .. }
         | AnalysisSpec::Reliability { .. }) => {
             let kind = crate::simulation::execution::canonical_analysis_kind(&blocked);
@@ -140,6 +139,7 @@ pub(super) fn run_spec_request_with_environment(
         | AnalysisSpec::DcOp { .. }
         | AnalysisSpec::DcSweep { .. }
         | AnalysisSpec::Transient { .. }
+        | AnalysisSpec::TransientNoise { .. }
         | AnalysisSpec::Ac { .. }
         | AnalysisSpec::Noise { .. }
         | AnalysisSpec::PoleZero { .. }
@@ -527,16 +527,6 @@ mod tests {
                 input_lattice: [0, 0],
                 output_lattice: [0, 0],
                 group_delay: true,
-            },
-            AnalysisSpec::TransientNoise {
-                stop_time: 1.0e-6,
-                step_time: 1.0e-9,
-                start_time: 0.0,
-                max_timestep: 1.0e-9,
-                seed: 1,
-                noise_fmax: 1.0e8,
-                scale: 1.0,
-                uic: false,
             },
             AnalysisSpec::DcMismatch {
                 output_expression: "V(out)".to_owned(),
@@ -1057,10 +1047,218 @@ R2 out 0 1k\n\
                 crate::state::CanonicalAnalysisKind::Qpac,
                 crate::state::CanonicalAnalysisKind::Qpnoise,
                 crate::state::CanonicalAnalysisKind::Qpxf,
-                crate::state::CanonicalAnalysisKind::TransientNoise,
                 crate::state::CanonicalAnalysisKind::DcMismatch,
                 crate::state::CanonicalAnalysisKind::Reliability,
             ]
+        );
+    }
+
+    /// A resistor divider run with device noise on, twice from the same seed
+    /// and once from another.
+    ///
+    /// The deck is the smallest circuit with a noise source in it: a resistor
+    /// has thermal noise and nothing else, so what the run injects is the one
+    /// mechanism under test rather than a device model's whole family.
+    fn transient_noise_divider_run(seed: u64) -> Vec<f64> {
+        const DECK: &str = "transient noise divider\n\
+                            V1 in 0 DC 1\n\
+                            R1 in out 10k\n\
+                            R2 out 0 10k\n\
+                            .end\n";
+        let spec = AnalysisSpec::TransientNoise {
+            stop_time: 1.0e-6,
+            step_time: 1.0e-9,
+            start_time: 0.0,
+            max_timestep: 1.0e-9,
+            seed,
+            noise_fmax: 1.0e9,
+            scale: 1.0,
+            uic: false,
+        };
+        // The deck the run executes is the card the Studio writes, spliced in
+        // by the same builder the Analyses page displays. Writing a `.tran`
+        // line here by hand would prove the engine can be asked for noise and
+        // say nothing about whether the Studio asks for it.
+        let card =
+            crate::simulation::controller::SimulationController::build_transient_noise_command(
+                &spec,
+            )
+            .expect("the specification writes its card");
+        let deck = DECK.replace(".end\n", &format!("{card}\n.end\n"));
+
+        let result = run_spec_request(
+            &EngineBridge::new(),
+            spec,
+            SpecExecutionOptions::default(),
+            &deck,
+            None,
+            &ResolvedExecutionDependencies::default(),
+            &rspice_core::abort_signal::NoAbort,
+        )
+        .expect("a transient-noise specification reaches the engine");
+
+        let SimulationResult::Transient {
+            time, waveforms, ..
+        } = result
+        else {
+            panic!("transient noise retains the transient result family");
+        };
+        assert!(!time.is_empty(), "the run produced no time axis");
+        // A retained node voltage is keyed by the node's own name, as the
+        // transient conversion writes it.
+        waveforms
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case("out"))
+            .map(|(_, waveform)| waveform.y_values.clone())
+            .unwrap_or_else(|| {
+                panic!(
+                    "the divider's output node is retained; the run returned {:?}",
+                    waveforms.keys().collect::<Vec<_>>()
+                )
+            })
+    }
+
+    /// The kind that was refused before dispatch now reaches its solver, and
+    /// what comes back is a noisy waveform that the seed reproduces.
+    ///
+    /// Three properties, because any two of them pass for the wrong reason.
+    /// A run that succeeds proves only that the refusal is gone. A waveform
+    /// that differs from the deterministic divider proves noise was injected
+    /// — a divider with no noise sits at exactly half the supply for the whole
+    /// window, so a constant 0.5 V trace is the run silently ignoring the
+    /// card. And the same seed reproducing it bit for bit is what makes the
+    /// result a measurement rather than a sample: without it the Studio would
+    /// be showing a number nobody can get back.
+    #[test]
+    fn a_transient_noise_run_reaches_the_engine_and_returns_waveforms() {
+        let first = transient_noise_divider_run(97);
+        let again = transient_noise_divider_run(97);
+        let other = transient_noise_divider_run(98);
+
+        assert!(
+            first.iter().any(|value| (value - 0.5).abs() > f64::EPSILON),
+            "every sample sat at the deterministic half-supply; no noise was injected"
+        );
+        assert_eq!(
+            first.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
+            again.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
+            "the same seed must reproduce the same realization bit for bit"
+        );
+        assert_ne!(
+            first.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
+            other.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
+            "a different seed must play a different realization"
+        );
+    }
+
+    /// The kind is no longer refused before its solver is asked.
+    ///
+    /// Replaces this kind's entry in the blocked-kinds walk above. Both halves
+    /// are asserted: the blocker is gone from the canonical tag, and the
+    /// runner routes the specification instead of returning the
+    /// `rejected before dispatch` refusal that walk checks for.
+    #[test]
+    fn transient_noise_is_no_longer_refused_before_dispatch() {
+        let spec = AnalysisSpec::TransientNoise {
+            stop_time: 1.0e-6,
+            step_time: 1.0e-9,
+            start_time: 0.0,
+            max_timestep: 1.0e-9,
+            seed: 1,
+            noise_fmax: 1.0e8,
+            scale: 1.0,
+            uic: false,
+        };
+        assert_eq!(
+            crate::simulation::execution::canonical_analysis_kind(&spec).execution_blocker(),
+            None,
+            "the transient-noise solver is in this build"
+        );
+        assert!(
+            config::analysis_config_from_spec(&spec).is_some(),
+            "transient noise routes with the config-backed group"
+        );
+
+        let result = run_spec_request(
+            &EngineBridge::new(),
+            spec,
+            SpecExecutionOptions::default(),
+            "transient noise dispatch\n\
+             V1 in 0 DC 1\n\
+             R1 in out 10k\n\
+             R2 out 0 10k\n\
+             .tran 1n 1u 0 1n NOISEFMAX=100000000 NOISESEED=1\n\
+             .end\n",
+            None,
+            &ResolvedExecutionDependencies::default(),
+            &rspice_core::abort_signal::NoAbort,
+        );
+        match result {
+            Err(SimulationError::InvalidConfig(message))
+                if message.contains("rejected before dispatch") =>
+            {
+                panic!("transient noise is still refused before dispatch: {message}")
+            }
+            Err(other) => panic!("transient noise must reach its solver, got {other:?}"),
+            Ok(_) => {}
+        }
+    }
+
+    /// An engine refusal is the engine's, word for word.
+    ///
+    /// The Studio does not pre-judge which devices can be rendered as noise
+    /// sources: the mechanisms transient noise cannot inject — a tabulated
+    /// density, a correlated BSIM4 channel/gate pair — are refused inside the
+    /// engine, against the elaborated circuit, and the Studio has no second
+    /// opinion to offer. What it must not do is translate the refusal, so this
+    /// checks the engine's own sentence arrives at the run outcome unchanged.
+    #[test]
+    fn an_engine_noise_refusal_reaches_the_run_outcome_unchanged() {
+        // A BSIM4 model card at `tnoiMod=2`: the mechanism is a cross-spectrum
+        // between the channel and gate currents, which no pair of independent
+        // injected currents reproduces. Nothing about the deck is malformed,
+        // and nothing the Studio can see says so — only the elaborated circuit
+        // does, which is exactly why the judgement is the engine's.
+        let deck = "correlated thermal refusal\n\
+                    vdd dd 0 dc 1.0\n\
+                    rl dd d 10k\n\
+                    vin g 0 dc 0.8\n\
+                    m1 d g 0 0 n45 w=1u l=45n\n\
+                    .model n45 nmos level=54 version=4.8 fnoimod=1 tnoimod=2\n\
+                    .tran 1n 1u 0 1n NOISEFMAX=100000000 NOISESEED=1\n\
+                    .end\n";
+        let spec = AnalysisSpec::TransientNoise {
+            stop_time: 1.0e-6,
+            step_time: 1.0e-9,
+            start_time: 0.0,
+            max_timestep: 1.0e-9,
+            seed: 1,
+            noise_fmax: 1.0e8,
+            scale: 1.0,
+            uic: false,
+        };
+        let error = run_spec_request(
+            &EngineBridge::new(),
+            spec,
+            SpecExecutionOptions::default(),
+            deck,
+            None,
+            &ResolvedExecutionDependencies::default(),
+            &rspice_core::abort_signal::NoAbort,
+        )
+        .expect_err("a correlated channel/gate pair has no independent-current rendering");
+        let message = error.to_string();
+        assert!(
+            message.contains("correlated channel/gate thermal noise"),
+            "the engine's own refusal must survive the Studio: {message}"
+        );
+        assert!(
+            message.contains("tnoiMod=0 or 1"),
+            "the engine's own remedy must survive with it: {message}"
+        );
+        assert!(
+            !message.contains("rejected before dispatch"),
+            "the refusal is the engine's, not a Studio pre-judgement: {message}"
         );
     }
 
