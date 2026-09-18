@@ -402,6 +402,7 @@ mod tests {
                 CanonicalAnalysisKind::Hbsp,
                 CanonicalAnalysisKind::Hbnoise,
                 CanonicalAnalysisKind::Psp,
+                CanonicalAnalysisKind::TransientNoise,
             ]
         );
 
@@ -417,7 +418,6 @@ mod tests {
                 CanonicalAnalysisKind::Qpac,
                 CanonicalAnalysisKind::Qpnoise,
                 CanonicalAnalysisKind::Qpxf,
-                CanonicalAnalysisKind::TransientNoise,
                 CanonicalAnalysisKind::DcMismatch,
             ]
         );
