@@ -287,12 +287,19 @@ fn the_sections_are_ordered_and_populated() {
         .iter()
         .map(|section| section.section.title())
         .collect();
+    // Every section, including the one whose options this kind cannot carry:
+    // the panel reports the plan whole and states the refusal in place, which
+    // is why a row is never dropped and a section is never hidden. Which of
+    // them become *fields* is `form_rows`, and `field_tests` pins that.
     assert_eq!(
         titles,
         vec![
             "Convergence",
             "Charge",
             "Integration",
+            "Transient Newton",
+            "Output",
+            "Harmonic balance",
             "Matrix",
             "Device bypass"
         ]
