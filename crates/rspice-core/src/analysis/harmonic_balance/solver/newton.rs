@@ -1021,7 +1021,7 @@ impl HbSolver {
                 },
                 abort,
             ) {
-                Ok(()) => {}
+                Ok(_) => {}
                 Err(error) if error.is_convergence_failure() => return Ok(false),
                 Err(err) => return Err(err),
             }
@@ -1290,13 +1290,24 @@ impl HbSolver {
     /// Advanced implementation following standard methodology:
     /// - Armijo backtracking line search
     /// - PN junction voltage limiting on DC component
+    ///
+    /// The backtracking envelope is the configuration's own: the first trial
+    /// is scaled by [`HbConfig::damping`](crate::analysis::harmonic_balance::HbConfig)
+    /// and the halving stops at `min_damping`. Both used to be literals here —
+    /// `1.0` and `0.01` — while the two configuration fields were hashed into
+    /// every HB identity and read by nothing, so a deck or a form that asked
+    /// for a conservative Newton step got a full one.
+    ///
+    /// Returns the step scale the accepted update was taken at, which is what
+    /// makes that envelope observable: the factor a caller asked for is the
+    /// factor the first trial uses, and the floor is the smallest one tried.
     fn apply_line_search_with_gmin(
         &mut self,
         state: &mut HbSolverState,
         delta: &HbNewtonStep,
         limits: HbLineSearchLimits,
         abort: &dyn AbortSignal,
-    ) -> Result<(), HbError> {
+    ) -> Result<Value, HbError> {
         let HbLineSearchLimits {
             gmin,
             source_scale,
@@ -1306,10 +1317,10 @@ impl HbSolver {
         let initial_merit =
             state.certificate_merit(reltol, current_abstol, self.voltage_abstol, false)?;
         let armijo_c = 1e-4;
-        let min_alpha = 0.01;
+        let min_alpha = self.config.min_damping;
         let vt = 0.02585; // Thermal voltage at 300K
 
-        let mut alpha = 1.0;
+        let mut alpha = self.config.damping;
         let mut best_alpha = alpha;
         let mut best_merit = f64::INFINITY;
 
@@ -1379,7 +1390,7 @@ impl HbSolver {
                 state.certificate_merit(reltol, current_abstol, self.voltage_abstol, false)?;
 
             if merit < initial_merit * (1.0 - armijo_c * alpha) {
-                return Ok(());
+                return Ok(alpha);
             }
 
             if merit < best_merit {
@@ -1424,7 +1435,7 @@ impl HbSolver {
         }
         self.compute_full_residual_with_gmin(state, gmin, source_scale)?;
 
-        Ok(())
+        Ok(best_alpha)
     }
 
     /// Add nonlinear device contributions to residual
@@ -3365,5 +3376,67 @@ mod exact_matrix_free_tests {
             )
             .expect_err("non-real DC evidence must fail closed before line search");
         assert!(error.to_string().contains("imaginary DC"), "{error}");
+    }
+
+    /// The damping factor and its floor are the line search's own envelope.
+    ///
+    /// Both were literals — `1.0` and `0.01` — while `HbConfig::damping` and
+    /// `min_damping` were hashed into every HB identity and read by no solver
+    /// code at all, so a request for a conservative Newton step was answered
+    /// with a full one. The two cases below are the whole contract: the
+    /// accepted step is the factor that was asked for when the first trial
+    /// satisfies Armijo, and when no trial does, the smallest scale the search
+    /// reached is the configured floor.
+    ///
+    /// `reltol = 0` makes the residual certificate a pure `|residual| /
+    /// abstol`, so the merit of a trial is a known monotone function of the
+    /// step and the accepted scale is evidence rather than coincidence.
+    #[test]
+    fn the_hb_line_search_starts_at_the_damping_factor_and_stops_at_its_floor() {
+        fn search(config: HbConfig, direction: Value) -> Value {
+            let mut solver = HbSolver::new(config, 1);
+            solver.add_conductance(0, 0, 1.0);
+            solver.add_dc_source(0, 1.0);
+            let mut state = HbSolverState::new(1, 1);
+            solver
+                .compute_full_residual_with_gmin(&mut state, 0.0, 1.0)
+                .expect("finite linear residual");
+
+            // DC only: the step stays inside the PN limiter's linear band, so
+            // the trial state is exactly `alpha * direction`.
+            let delta = HbNewtonStep {
+                node_voltages: vec![vec![
+                    Complex64::new(direction, 0.0),
+                    Complex64::new(0.0, 0.0),
+                ]],
+                branch_currents: Vec::new(),
+            };
+            solver
+                .apply_line_search_with_gmin(
+                    &mut state,
+                    &delta,
+                    HbLineSearchLimits {
+                        gmin: 0.0,
+                        source_scale: 1.0,
+                        reltol: 0.0,
+                        current_abstol: 1.0,
+                    },
+                    &NoAbort,
+                )
+                .expect("the linear line search completes")
+        }
+
+        let mut config = HbConfig::new(1.0e6).with_harmonics(1).with_damping(0.25);
+        config.min_damping = 0.125;
+
+        // Towards the solution the first trial already decreases the residual
+        // from 1 A to 0.75 A, which clears the Armijo test: the search never
+        // backtracks, so what it took is what was configured.
+        assert_eq!(search(config.clone(), 1.0), 0.25);
+
+        // Away from it every trial raises the residual to `1 + alpha`, so no
+        // scale is ever accepted and the halving walks 0.25, 0.125 and stops:
+        // 0.0625 is below the floor. The best trial seen is the floor itself.
+        assert_eq!(search(config, -1.0), 0.125);
     }
 }

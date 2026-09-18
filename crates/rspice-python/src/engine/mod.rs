@@ -1087,7 +1087,7 @@ impl PyEngine {
     }
 
     /// Run single-tone harmonic-balance analysis.
-    #[pyo3(signature = (netlist, fundamental_frequency, *, harmonics=9, tolerance=1e-6, max_iterations=100, damping=1.0, oversample=2, use_krylov=false, source_stepping=false, abstol=1e-12, min_damping=0.1, collocation_points=None, max_mixing_order=5, gmres_restart=30, use_exact_jacobian=true, source_name=None, verbose=false))]
+    #[pyo3(signature = (netlist, fundamental_frequency, *, harmonics=9, tolerance=1e-6, max_iterations=100, damping=1.0, oversample=2, use_krylov=false, source_stepping=false, abstol=1e-12, min_damping=0.01, collocation_points=None, max_mixing_order=5, gmres_restart=30, use_exact_jacobian=true, source_name=None, verbose=false))]
     #[allow(clippy::too_many_arguments)]
     fn run_hb(
         &self,
@@ -1151,7 +1151,7 @@ impl PyEngine {
     /// `harmonics` may contain one order broadcast to every tone or one order
     /// per frequency. `source_names`, when provided, maps each tone to one
     /// independent source; an empty name broadcasts that tone.
-    #[pyo3(signature = (netlist, frequencies, *, harmonics=None, source_names=None, tolerance=1e-6, abstol=1e-12, max_iterations=100, damping=1.0, min_damping=0.1, oversample=2, collocation_points=None, max_mixing_order=5, use_krylov=false, gmres_restart=30, source_stepping=false, use_exact_jacobian=true, verbose=false))]
+    #[pyo3(signature = (netlist, frequencies, *, harmonics=None, source_names=None, tolerance=1e-6, abstol=1e-12, max_iterations=100, damping=1.0, min_damping=0.01, oversample=2, collocation_points=None, max_mixing_order=5, use_krylov=false, gmres_restart=30, source_stepping=false, use_exact_jacobian=true, verbose=false))]
     #[allow(clippy::too_many_arguments)]
     fn run_hb_multitone(
         &self,
@@ -1224,7 +1224,7 @@ impl PyEngine {
     ///     ...                                    frozen_sources=["VMOD"])
     ///     >>> tran, checkpoint = engine.run_tran_from_hb_envelope(
     ///     ...     netlist, state, duration=1e-6)
-    #[pyo3(signature = (netlist, fundamental_frequency, *, frozen_sources=None, harmonics=9, tolerance=1e-6, max_iterations=100, damping=1.0, oversample=2, use_krylov=false, source_stepping=false, abstol=1e-12, min_damping=0.1, collocation_points=None, max_mixing_order=5, gmres_restart=30, use_exact_jacobian=true, source_name=None, verbose=false))]
+    #[pyo3(signature = (netlist, fundamental_frequency, *, frozen_sources=None, harmonics=9, tolerance=1e-6, max_iterations=100, damping=1.0, oversample=2, use_krylov=false, source_stepping=false, abstol=1e-12, min_damping=0.01, collocation_points=None, max_mixing_order=5, gmres_restart=30, use_exact_jacobian=true, source_name=None, verbose=false))]
     #[allow(clippy::too_many_arguments)]
     fn run_hb_envelope(
         &self,

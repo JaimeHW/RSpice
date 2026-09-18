@@ -158,10 +158,20 @@ pub struct HbConfig {
     pub max_iterations: usize,
 
     /// Newton damping factor (0 < damping <= 1)
-    /// Values < 1 provide more conservative updates
+    ///
+    /// The scale the Armijo line search gives its first trial step, so values
+    /// below one provide more conservative updates. [`Self::with_damping`]
+    /// bounds an authored factor to `[0.1, 1]`, which is the same domain the
+    /// Python entry points enforce.
     pub damping: Value,
 
-    /// Minimum damping factor for adaptive damping
+    /// Smallest step scale the line search will take before it settles for the
+    /// best trial it saw.
+    ///
+    /// The backtracking halves [`Self::damping`] until the Armijo test passes
+    /// or the scale would fall below this floor. The default is the floor the
+    /// search used while it was a literal, so honouring the field left every
+    /// converged HB result unchanged.
     pub min_damping: Value,
 
     /// Oversampling factor for FFT (anti-aliasing)
@@ -226,7 +236,7 @@ impl HbConfig {
             abstol: 1e-12,
             max_iterations: 100,
             damping: 1.0,
-            min_damping: 0.1,
+            min_damping: 0.01,
             oversample_factor: 2,
             collocation_points: None,
             max_mixing_order: 5,
@@ -420,6 +430,12 @@ impl HbConfig {
     }
 
     /// Set Newton damping factor
+    ///
+    /// Bounded to `[0.1, 1]`: a scale above one is not a damped step, and the
+    /// lower bound is the authored domain the Python entry points already
+    /// refuse outside of. A more conservative first trial than `0.1` is asked
+    /// for through [`Self::min_damping`], which the line search honours down
+    /// to whatever positive floor [`Self::validate`] accepts.
     pub fn with_damping(mut self, damping: Value) -> Self {
         self.damping = damping.clamp(0.1, 1.0);
         self
