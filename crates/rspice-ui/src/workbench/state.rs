@@ -8,10 +8,12 @@ mod navigator_tree;
 pub(crate) mod plan_provenance;
 pub(crate) mod retired_documents;
 mod session_views;
+mod stimulus_editor;
 mod workflow_drafts;
 
 pub use navigator_tree::*;
 pub use session_views::*;
+pub use stimulus_editor::*;
 pub use workflow_drafts::*;
 
 use std::collections::{HashMap, HashSet};
@@ -1337,6 +1339,14 @@ pub struct WorkbenchState {
     /// resolves would open the workspace on a definition nobody can see.
     #[serde(skip)]
     pub selected_stimulus_definition: Option<String>,
+    /// What the Stimulus Library instrument is in the middle of editing: one
+    /// unapplied draft per definition, each with its own undo history, and the
+    /// proof surface's cached evaluation. Runtime-only for the same reason the
+    /// selection is, and for one more: a draft is by construction not in the
+    /// project document, so restoring one would offer a revision the library
+    /// never published.
+    #[serde(skip)]
+    pub stimulus_editor: StimulusEditorState,
     /// Where each workspace's navigator tree is unfolded, and what its filter
     /// box narrows the listing to. Runtime-only.
     #[serde(skip)]
@@ -1525,6 +1535,7 @@ impl Default for WorkbenchState {
             specification_evidence_filter: SpecificationEvidenceFilter::default(),
             selected_model: None,
             selected_stimulus_definition: None,
+            stimulus_editor: StimulusEditorState::default(),
             navigator_trees: NavigatorTrees::default(),
             netlist_outline_collapsed: std::collections::BTreeSet::new(),
             command_query: String::new(),

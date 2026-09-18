@@ -725,6 +725,12 @@ pub(crate) fn reset_for_new_project(state: &mut AppState) {
 
 pub(crate) fn mark_project_closed(state: &mut AppState) {
     state.workbench.clear_project_model_editor();
+    // Stimulus drafts belong to the library of the project that is going
+    // away. The close guard has already named every unapplied one, so what is
+    // left here is bookkeeping: carrying them into the next project would
+    // offer to publish a revision of a definition it does not hold.
+    state.workbench.selected_stimulus_definition = None;
+    state.workbench.stimulus_editor.clear();
     state.clear_project_design_history();
     state.dialogs.check_and_save.close();
     state.native_project_binding_receipt = None;
@@ -1826,6 +1832,11 @@ fn revert_document_in_place(
             // browser was reading, and a selection that resolves to nothing
             // leaves the workspace on an empty stage with a name in the dock.
             state.workbench.selected_stimulus_definition = None;
+            // The drafts belonged to the revisions that have just been thrown
+            // away. Keeping one would leave the instrument editing a record
+            // whose saved side no longer exists, and Apply would publish it as
+            // a revision of a definition the revert removed.
+            state.workbench.stimulus_editor.clear();
         }
         ProjectDocumentId::NetlistSource => {
             state.workspace.netlist_source = baseline.workspace.netlist_source;
