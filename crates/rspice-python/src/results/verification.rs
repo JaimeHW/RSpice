@@ -566,6 +566,9 @@ pub struct PyRunReport {
     /// Complete complex AC sensitivity result (last AC .sens)
     #[pyo3(get)]
     pub sensitivity_ac: Option<PyAcSensitivityResult>,
+    /// DC mismatch result (last .dcmatch)
+    #[pyo3(get)]
+    pub dcmatch: Option<PyDcMatchResult>,
     /// Fourier results (one per .four output)
     #[pyo3(get)]
     pub fourier: Vec<PyFourierResult>,
@@ -643,6 +646,10 @@ pub struct PyRunReport {
     /// Every AC sensitivity result, in deck/coordinate order.
     #[pyo3(get)]
     pub all_sensitivity_ac: Vec<PyAcSensitivityResult>,
+    /// Every DC mismatch result, in deck/coordinate order. `dcmatch` is the
+    /// last of these.
+    #[pyo3(get)]
+    pub all_dcmatch: Vec<PyDcMatchResult>,
 }
 
 #[pymethods]

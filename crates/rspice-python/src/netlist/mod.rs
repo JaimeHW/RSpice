@@ -20,7 +20,7 @@
 
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
-use rspice_core::netlist::{AnalysisCommand, DcSecondSweep, DcSweepMode};
+use rspice_core::netlist::{AnalysisCommand, DcMatchCard, DcSecondSweep, DcSweepMode};
 use rspice_core::{Netlist, Value};
 use std::borrow::Cow;
 

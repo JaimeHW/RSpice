@@ -228,6 +228,7 @@ pub(super) struct DirectiveOutcomes {
     temperature: Option<PyDcSweepResult>,
     pub(super) sensitivity: LastAndAll<PySensitivityResult>,
     pub(super) sensitivity_ac: LastAndAll<PyAcSensitivityResult>,
+    pub(super) dcmatch: LastAndAll<PyDcMatchResult>,
     fourier: Vec<PyFourierResult>,
     /// `(fundamental, outputs, harmonics)` per `.four` card, evaluated after
     /// the loop.
@@ -268,6 +269,7 @@ impl DirectiveOutcomes {
         replace_if_some(&mut self.temperature, other.temperature);
         self.sensitivity.append(other.sensitivity);
         self.sensitivity_ac.append(other.sensitivity_ac);
+        self.dcmatch.append(other.dcmatch);
         self.fourier.append(&mut other.fourier);
         self.pending_fourier.append(&mut other.pending_fourier);
     }
@@ -551,6 +553,7 @@ fn into_report(out: DirectiveOutcomes, measurements: Vec<PyMeasurement>) -> PyRu
     let (monte_carlo, all_monte_carlo) = out.monte_carlo.into_parts();
     let (sensitivity, all_sensitivity) = out.sensitivity.into_parts();
     let (sensitivity_ac, all_sensitivity_ac) = out.sensitivity_ac.into_parts();
+    let (dcmatch, all_dcmatch) = out.dcmatch.into_parts();
 
     PyRunReport {
         op,
@@ -576,6 +579,7 @@ fn into_report(out: DirectiveOutcomes, measurements: Vec<PyMeasurement>) -> PyRu
         temperature: out.temperature,
         sensitivity,
         sensitivity_ac,
+        dcmatch,
         fourier: out.fourier,
         records: out.records,
         measurements,
@@ -600,5 +604,6 @@ fn into_report(out: DirectiveOutcomes, measurements: Vec<PyMeasurement>) -> PyRu
         all_monte_carlo,
         all_sensitivity,
         all_sensitivity_ac,
+        all_dcmatch,
     }
 }

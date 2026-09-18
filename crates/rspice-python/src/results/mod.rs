@@ -6,6 +6,7 @@
 //! | Module                  | Types                                                          |
 //! |-------------------------|----------------------------------------------------------------|
 //! | [`dc`]                   | `SimulationResult`, `DcSweepResult`, `DeviceOperatingPoint`     |
+//! | [`dcmatch`]              | `DcMatchResult`, `DcMatchContributor`                           |
 //! | [`transient`]            | `TransientResult`, `DigitalEvent`, `DigitalBus`, `BusEvent`     |
 //! | [`transient_compression`]| `CompressedTransientResult`, `TransientCheckpoint`              |
 //! | [`fft`]                  | `FftResult`, `FftBin`, `FftMetrics`, `FftHarmonic`               |
@@ -55,6 +56,7 @@ use std::path::PathBuf;
 mod ac;
 mod access;
 mod dc;
+mod dcmatch;
 mod distortion;
 mod document;
 mod envelope;
@@ -104,6 +106,7 @@ use state::*;
 pub(crate) use ac::{PyAcResult, PyComplexValue, validated_ac_schema};
 pub(crate) use access::{NodeIdentifier, is_ground_name};
 pub(crate) use dc::{PyDcSweepResult, PyDeviceOperatingPoint, PySimulationResult};
+pub(crate) use dcmatch::{PyDcMatchContributor, PyDcMatchResult};
 pub(crate) use distortion::PyDistortionResult;
 pub(crate) use document::{
     CarriesDocumentEvidence, PyDeviceObservable, PyResultScalar, PySignalDescriptor,

@@ -187,6 +187,8 @@ fn rspice(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<results::PyPxfResult>()?;
     m.add_class::<results::PyPstbResult>()?;
     m.add_class::<results::PyEnvelopeResult>()?;
+    m.add_class::<results::PyDcMatchContributor>()?;
+    m.add_class::<results::PyDcMatchResult>()?;
     m.add_class::<results::PyPeriodicNoiseContribution>()?;
     m.add_class::<results::PyPeriodicNoiseResult>()?;
     m.add_class::<results::PyOscillatorNoiseResult>()?;

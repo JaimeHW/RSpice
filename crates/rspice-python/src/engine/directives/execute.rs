@@ -678,6 +678,23 @@ pub(super) fn execute(
                 ));
             }
         }
+        AnalysisCommand::DcMatch(card) => {
+            // The card carries the probe and both statistical scopes, and
+            // every sigma comes from the design's own `statistics` block, so
+            // core reads the whole study off the deck: there is nothing for
+            // this binding to decide, and a design that declared no
+            // statistics is refused there by name.
+            let engine = py_engine.engine_for_netlist(net);
+            let result = run_interruptible(py, &py_engine.active_runs, |abort| {
+                engine.run_dc_match_with_abort(net, card, abort)
+            })?;
+            out.dcmatch
+                .push(identified(PyDcMatchResult::from_core(&result), context));
+            out.records.push(PyAnalysisRecord::executed(
+                "dcmatch",
+                describe_analysis(analysis),
+            ));
+        }
         AnalysisCommand::Four {
             fundamental,
             outputs,

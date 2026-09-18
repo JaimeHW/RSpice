@@ -245,6 +245,36 @@ pub(crate) fn describe_analysis(analysis: &AnalysisCommand) -> String {
             }
             description
         }
+        AnalysisCommand::DcMatch(card) => {
+            let probe = if card.output_is_current {
+                format!("i({})", card.output_node)
+            } else {
+                match &card.reference_node {
+                    Some(reference) => format!("v({},{reference})", card.output_node),
+                    None => format!("v({})", card.output_node),
+                }
+            };
+            // Only the keys the deck moved off their documented default, so a
+            // record says what the card asked for rather than restating the
+            // whole keyword set on every line.
+            let mut description = format!(".dcmatch out={probe}");
+            if !card.mismatch {
+                description.push_str(" mismatch=no");
+            }
+            if card.process {
+                description.push_str(" process=yes");
+            }
+            if card.contributor_limit != DcMatchCard::DEFAULT_CONTRIBUTORS {
+                description.push_str(&format!(" contributors={}", card.contributor_limit));
+            }
+            if card.threshold != 0.0 {
+                description.push_str(&format!(" threshold={}", card.threshold));
+            }
+            if card.sigma_multiplier != 1.0 {
+                description.push_str(&format!(" sigma={}", card.sigma_multiplier));
+            }
+            description
+        }
         other => format!("{other:?}"),
     }
 }
