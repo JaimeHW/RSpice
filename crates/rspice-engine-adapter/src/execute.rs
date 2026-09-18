@@ -544,6 +544,7 @@ fn axis_analysis_kind(kind: PlannedAnalysisKind) -> Option<AxisAnalysisKind> {
         PlannedAnalysisKind::PNoise => AxisAnalysisKind::PNoise,
         PlannedAnalysisKind::Sp => AxisAnalysisKind::SParameters,
         PlannedAnalysisKind::Envelope => AxisAnalysisKind::Envelope,
+        PlannedAnalysisKind::DcMatch => AxisAnalysisKind::DcMatch,
         _ => return None,
     })
 }

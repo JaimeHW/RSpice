@@ -386,6 +386,7 @@ pub enum AxisAnalysisKind {
     Pstb,
     SParameters,
     Envelope,
+    DcMatch,
 }
 
 impl AxisAnalysisKind {
@@ -412,6 +413,7 @@ impl AxisAnalysisKind {
             Self::Pstb => "pstb",
             Self::SParameters => "sp",
             Self::Envelope => "env",
+            Self::DcMatch => "dcmatch",
         }
     }
 }

@@ -67,6 +67,7 @@ pub const REQUEST_KINDS: &[(&str, PlannedAnalysisKind)] = &[
     ("pnoise", PlannedAnalysisKind::PNoise),
     ("s_parameters", PlannedAnalysisKind::Sp),
     ("envelope", PlannedAnalysisKind::Envelope),
+    ("dc_match", PlannedAnalysisKind::DcMatch),
 ];
 
 /// Wire spellings this build recognizes but deliberately does not run, each
@@ -734,6 +735,13 @@ pub(crate) fn run_directive(
                 .map(|builder| builder.parent_analysis(upstream_id))
                 .map_err(map_result_document_error)
         }
+        AnalysisCommand::DcMatch(card) => {
+            // Every sigma comes from the design's own `statistics` block, so
+            // the whole study is read off the deck and its staged libraries;
+            // a design that declared none is refused in core by name.
+            let result = engine.run_dc_match_with_abort(netlist, card, abort)?;
+            AnalysisResultDocument::from_dc_match(id, &result).map_err(map_result_document_error)
+        }
         // Run axes and post-processing cards occupy no planned analysis slot,
         // and every unmapped card was refused above, so reaching this arm is
         // an executor logic error rather than deck content.
@@ -944,7 +952,8 @@ mod tests {
                 | AnalysisResultKind::Pac
                 | AnalysisResultKind::Pxf
                 | AnalysisResultKind::Pstb
-                | AnalysisResultKind::Envelope => false,
+                | AnalysisResultKind::Envelope
+                | AnalysisResultKind::DcMatch => false,
             };
             assert!(
                 runnable ^ refused,

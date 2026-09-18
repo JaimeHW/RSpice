@@ -135,10 +135,21 @@ impl Job {
 
     /// Run one deck under one analysis kind and return the parsed response.
     fn execute(&self, deck: &str, kind: &str) -> Value {
+        self.execute_with_library(deck, kind, None)
+    }
+
+    /// The same, with a Spectre statistics library staged as the request's
+    /// one manifested artifact so the deck's `.include` of it resolves.
+    fn execute_with_library(&self, deck: &str, kind: &str, library: Option<&str>) -> Value {
+        let artifacts = library
+            .map(|library| {
+                vec![self.stage_artifact(Uuid::from_u128(0x55), "statistics.scs", library)]
+            })
+            .unwrap_or_default();
         let request = build_request(
             json!({"schema": "rspice-circuit-v1", "netlist_utf8": deck}),
             json!({"kind": kind}),
-            Vec::new(),
+            artifacts,
         );
         parse_stdout(&self.run(&request))
     }
@@ -282,6 +293,11 @@ enum FamilyExpectation {
         request_kind: &'static str,
         analysis_tag: &'static str,
         deck: &'static str,
+        /// Spectre `.scs` library staged as the request's one manifested
+        /// artifact, for a family whose deck `.include`s one. A statistical
+        /// card reads the design's own `statistics` block, and a cloud deck
+        /// receives such a library exactly this way.
+        library: Option<&'static str>,
         /// `Partial` when the family runs but a documented subset of results
         /// cannot be published; the registry note says which.
         declared: DeclaredStatus,
@@ -315,6 +331,19 @@ const RF: &str = "periodic fixture\n\
                   V1 in 0 SIN(0 1 1G)\n\
                   R1 in out 1k\n\
                   C1 out 0 1p\n";
+/// Per-instance mismatch on a divider's two resistances, declared the way a
+/// PDK declares it. Staged as a `.scs` library artifact, so the include
+/// expander lowers it exactly as it lowers a PDK's own.
+const DIVIDER_STATISTICS: &str = "\
+// Resistor divider mismatch.
+parameters r1v=1000 r2v=2000
+statistics {
+ mismatch {
+  vary r1v dist=gauss std=10
+  vary r2v dist=gauss std=10
+ }
+}
+";
 
 /// One deck plus refusal per family, matched exhaustively so a new core
 /// result family cannot ship without an adapter decision recorded here.
@@ -324,24 +353,28 @@ fn family_expectation(kind: AnalysisResultKind) -> FamilyExpectation {
             request_kind: "operating_point",
             analysis_tag: "op-001",
             declared: DeclaredStatus::Mapped,
+            library: None,
             deck: "resistive divider\nV1 in 0 DC 10\nR1 in out 1k\nR2 out 0 1k\n.op\n.end\n",
         },
         AnalysisResultKind::DcSweep => FamilyExpectation::Runs {
             request_kind: "dc_sweep",
             analysis_tag: "dc-001",
             declared: DeclaredStatus::Mapped,
+            library: None,
             deck: "divider sweep\nV1 in 0 DC 0\nR1 in out 1k\nR2 out 0 1k\n.dc V1 0 1 0.5\n.end\n",
         },
         AnalysisResultKind::Ac => FamilyExpectation::Runs {
             request_kind: "ac_small_signal",
             analysis_tag: "ac-001",
             declared: DeclaredStatus::Mapped,
+            library: None,
             deck: "rc ac\nV1 in 0 DC 0 AC 1\nR1 in out 1k\nC1 out 0 1u\n.ac LIN 2 1k 2k\n.end\n",
         },
         AnalysisResultKind::Transient => FamilyExpectation::Runs {
             request_kind: "transient",
             analysis_tag: "tran-001",
             declared: DeclaredStatus::Mapped,
+            library: None,
             deck: "rc transient\nV1 in 0 PULSE(0 1 0 1u 1u 1m 2m)\nR1 in out 1k\nC1 out 0 1u\n\
                    .tran 10u 1m\n.end\n",
         },
@@ -349,6 +382,7 @@ fn family_expectation(kind: AnalysisResultKind) -> FamilyExpectation {
             request_kind: "noise",
             analysis_tag: "noise-001",
             declared: DeclaredStatus::Mapped,
+            library: None,
             deck: "divider noise\nV1 in 0 DC 0 AC 1\nR1 in out 1k\nR2 out 0 1k\n\
                    .noise V(out) V1 LIN 2 1k 2k\n.end\n",
         },
@@ -356,6 +390,7 @@ fn family_expectation(kind: AnalysisResultKind) -> FamilyExpectation {
             request_kind: "distortion",
             analysis_tag: "disto-001",
             declared: DeclaredStatus::Mapped,
+            library: None,
             deck: "diode distortion\nV1 out 0 DC 0.5 DISTOF1 1m 0\nD1 out 0 DM\n\
                    .model DM D(IS=1e-12 N=1 CJO=0 TT=0)\n.disto DEC 2 1k 10k\n.end\n",
         },
@@ -363,6 +398,7 @@ fn family_expectation(kind: AnalysisResultKind) -> FamilyExpectation {
             request_kind: "transfer_function",
             analysis_tag: "tf-001",
             declared: DeclaredStatus::Mapped,
+            library: None,
             deck: "divider transfer function\nV1 in 0 DC 10\nR1 in out 1k\nR2 out 0 1k\n\
                    .tf V(out) V1\n.end\n",
         },
@@ -373,6 +409,7 @@ fn family_expectation(kind: AnalysisResultKind) -> FamilyExpectation {
             // ordinary numbers here. A loop with no crossover publishes the
             // typed absence rather than failing.
             declared: DeclaredStatus::Mapped,
+            library: None,
             deck: "three-pole loop\nE1 eo 0 ctrl 0 -1000\nVPROBE eo x 0\n\
                    R1 x n1 1k\nC1 n1 0 159.154943091895n\n\
                    R2 n1 n2 1k\nC2 n2 0 159.154943091895n\n\
@@ -383,6 +420,7 @@ fn family_expectation(kind: AnalysisResultKind) -> FamilyExpectation {
             request_kind: "sensitivity",
             analysis_tag: "sens-001",
             declared: DeclaredStatus::Mapped,
+            library: None,
             deck: "divider sensitivity\nV1 in 0 DC 10\nR1 in out 1k\nR2 out 0 1k\n\
                    .sens V(out)\n.end\n",
         },
@@ -390,6 +428,7 @@ fn family_expectation(kind: AnalysisResultKind) -> FamilyExpectation {
             request_kind: "pole_zero",
             analysis_tag: "pz-001",
             declared: DeclaredStatus::Mapped,
+            library: None,
             deck: "rc pole zero\nV1 in 0 DC 0 AC 1\nR1 in out 1k\nC1 out 0 1u\n\
                    .pz in 0 out 0 vol pz\n.end\n",
         },
@@ -397,6 +436,7 @@ fn family_expectation(kind: AnalysisResultKind) -> FamilyExpectation {
             request_kind: "monte_carlo",
             analysis_tag: "mc-001",
             declared: DeclaredStatus::Mapped,
+            library: None,
             deck: "divider monte carlo\nV1 in 0 DC 10\nR1 in out 1k\nR2 out 0 1k\n\
                    .mc 3 SEED 7 GAUSS 0.01\n.end\n",
         },
@@ -404,6 +444,7 @@ fn family_expectation(kind: AnalysisResultKind) -> FamilyExpectation {
             request_kind: "harmonic_balance",
             analysis_tag: "hb-001",
             declared: DeclaredStatus::Mapped,
+            library: None,
             deck: "rf harmonic balance\nV1 in 0 SIN(0 1 1G)\nR1 in out 1k\nC1 out 0 1p\n\
                    .hb 1g\n.end\n",
         },
@@ -411,6 +452,7 @@ fn family_expectation(kind: AnalysisResultKind) -> FamilyExpectation {
             request_kind: "pss",
             analysis_tag: "pss-001",
             declared: DeclaredStatus::Mapped,
+            library: None,
             deck: "rf periodic steady state\nV1 in 0 SIN(0 1 1G)\nR1 in out 1k\nC1 out 0 1p\n\
                    .pss fund=1g\n.end\n",
         },
@@ -418,6 +460,7 @@ fn family_expectation(kind: AnalysisResultKind) -> FamilyExpectation {
             request_kind: "pac",
             analysis_tag: "pac-001",
             declared: DeclaredStatus::Mapped,
+            library: None,
             deck: "rf periodic ac\nV1 in 0 SIN(0 1 1G)\nR1 in out 1k\nC1 out 0 1p\n\
                    .pss fund=1g\n.pac dec 2 1k 10k input=v1 out=v(out)\n.end\n",
         },
@@ -425,6 +468,7 @@ fn family_expectation(kind: AnalysisResultKind) -> FamilyExpectation {
             request_kind: "pxf",
             analysis_tag: "pxf-001",
             declared: DeclaredStatus::Mapped,
+            library: None,
             deck: "rf periodic transfer function\nV1 in 0 SIN(0 1 1G)\nR1 in out 1k\n\
                    C1 out 0 1p\n\
                    .pss fund=1g\n.pxf dec 2 1k 10k input=v1 out=v(out) maxsideband=1\n.end\n",
@@ -435,6 +479,7 @@ fn family_expectation(kind: AnalysisResultKind) -> FamilyExpectation {
             request_kind: "pstb",
             analysis_tag: "pstb-001",
             declared: DeclaredStatus::Mapped,
+            library: None,
             deck: "rf periodic stability\nVIN in 0 SIN(0 1 1meg)\nR1 in a 50\n\
                    L1 a out 10u\nC1 out 0 1n\n\
                    .pss fund=1meg harms=8 points=64 tstabperiods=2\n\
@@ -444,6 +489,7 @@ fn family_expectation(kind: AnalysisResultKind) -> FamilyExpectation {
             request_kind: "envelope",
             analysis_tag: "env-001",
             declared: DeclaredStatus::Mapped,
+            library: None,
             deck: "rf envelope\nV1 in 0 SIN(0 1 1G)\nR1 in out 1k\nC1 out 0 1p\n\
                    .hb 1g\n.envelope tstop=1n\n.end\n",
         },
@@ -451,6 +497,7 @@ fn family_expectation(kind: AnalysisResultKind) -> FamilyExpectation {
             request_kind: "s_parameters",
             analysis_tag: "sp-001",
             declared: DeclaredStatus::Mapped,
+            library: None,
             deck: "two-port pad\nV1 p1 0 AC 1 portnum=1 z0=50\nV2 p2 0 AC 0 portnum=2 z0=50\n\
                    RA p1 mid 25\nRB mid 0 50\nRC mid p2 25\n.sp lin 2 1meg 2meg\n.end\n",
         },
@@ -458,8 +505,21 @@ fn family_expectation(kind: AnalysisResultKind) -> FamilyExpectation {
             request_kind: "pnoise",
             analysis_tag: "pnoise-001",
             declared: DeclaredStatus::Mapped,
+            library: None,
             deck: "rf periodic noise\nV1 in 0 SIN(0 1 1G)\nR1 in out 1k\nC1 out 0 1p\n\
                    .pss fund=1g\n.pnoise dec 2 1k 10k out=v(out)\n.end\n",
+        },
+        // DC mismatch has no default spread: every sigma comes from the
+        // design's own `statistics` block, which reaches a cloud deck as a
+        // manifested library artifact the deck includes.
+        AnalysisResultKind::DcMatch => FamilyExpectation::Runs {
+            request_kind: "dc_match",
+            analysis_tag: "dcmatch-001",
+            declared: DeclaredStatus::Mapped,
+            library: Some(DIVIDER_STATISTICS),
+            deck: "divider dc mismatch\n.include \"statistics.scs\"\n\
+                   V1 in 0 1\nR1 in out {r1v}\nR2 out 0 {r2v}\n\
+                   .dcmatch out=v(out) contributors=0 sigma=3\n.end\n",
         },
         AnalysisResultKind::PortNoise => FamilyExpectation::Child {
             request_kind: "port_noise",
@@ -504,6 +564,7 @@ fn every_result_family_matches_its_engine_adapter_capability_declaration() {
                 request_kind,
                 analysis_tag,
                 deck,
+                library,
                 declared: expected,
             } => {
                 assert_eq!(
@@ -513,7 +574,7 @@ fn every_result_family_matches_its_engine_adapter_capability_declaration() {
                     declared.scalar
                 );
                 let job = Job::new(&format!("family-{}", kind.tag()));
-                let response = job.execute(deck, request_kind);
+                let response = job.execute_with_library(deck, request_kind, library);
                 assert_eq!(
                     response["status"], "succeeded",
                     "{kind:?} deck failed: {response}"
