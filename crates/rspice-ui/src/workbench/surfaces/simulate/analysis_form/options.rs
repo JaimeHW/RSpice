@@ -119,7 +119,10 @@ fn field(ui: &mut Ui, row: &AdvancedOptionRow) -> Option<OptionEdit> {
             changed.then_some(if setting { "on" } else { "off" })
         })
         .and_then(|chosen| advanced_options::setting_edit(row, chosen)),
-        OverrideValueKind::Method | OverrideValueKind::Damping | OverrideValueKind::Solver => {
+        OverrideValueKind::Method
+        | OverrideValueKind::Damping
+        | OverrideValueKind::Solver
+        | OverrideValueKind::TimeDomainMode => {
             let choices = settings_of(row.option);
             // What the solve will use, shown verbatim. A value the chooser does
             // not offer can only be one the plan resolved and no analysis may
@@ -186,7 +189,9 @@ fn option_field<R>(
 /// offered and what is committed: the record accepts either spelling and
 /// renders the one a reader saw.
 fn settings_of(option: crate::simulation::plan::NumericOverrideOption) -> Vec<String> {
-    use crate::simulation::dialog::{DampingStrategy, IntegrationMethod, MatrixSolver};
+    use crate::simulation::dialog::{
+        DampingStrategy, HbTimeDomainMode, IntegrationMethod, MatrixSolver,
+    };
 
     match option.value_kind() {
         OverrideValueKind::Method => IntegrationMethod::all()
@@ -197,6 +202,20 @@ fn settings_of(option: crate::simulation::plan::NumericOverrideOption) -> Vec<St
             .iter()
             .map(|strategy| strategy.display_name().to_owned())
             .collect(),
+        // The sentence, never the digit the deck carries: `TAHB=1` says
+        // nothing a reader can choose between, and the record accepts either
+        // spelling back. The engine's resting behaviour opens the list because
+        // it is not one of the three modes — a chooser has no empty position,
+        // so inheriting has to be a position.
+        OverrideValueKind::TimeDomainMode => {
+            std::iter::once(advanced_options::HB_DEFAULT_INITIAL_STATE.to_owned())
+                .chain(
+                    HbTimeDomainMode::all()
+                        .iter()
+                        .map(|mode| mode.display_name().to_owned()),
+                )
+                .collect()
+        }
         // The automatic backend emits no key at all, so an analysis cannot
         // state it: removing the override is how one returns to automatic, and
         // a chooser that offered it would offer a departure from nothing.

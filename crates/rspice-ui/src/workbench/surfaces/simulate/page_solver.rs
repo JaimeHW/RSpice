@@ -1329,6 +1329,23 @@ pub(super) fn plan_preset_value(
         O::Bypass => flag_preset(options.bypass_enabled),
         O::BypassReltol => format_value(options.bypass_reltol),
         O::BypassAbstol => format_value(options.bypass_abstol),
+        // The packages the engine reads straight off the deck. The plan states
+        // no policy for any of them — there is no `SimulationOptions` field to
+        // read, because an output schedule and a harmonic-balance initial
+        // state belong to one analysis and not to the whole deck — so the
+        // engine's own default stands until an analysis states otherwise, and
+        // that is what the ledger and the hint slot say.
+        O::TransientNewtonReltol
+        | O::TransientNewtonAbstol
+        | O::TransientNewtonUpdateBound
+        | O::TransientNewtonResidualBound
+        | O::TransientNewtonBudget
+        | O::TransientDeviceConvergence
+        | O::TransientNoxSolver
+        | O::StrobeInterval
+        | O::OutputTimePoints
+        | O::RetainEverySignal
+        | O::HbInitialState => super::advanced_options::ENGINE_ORIGIN.to_owned(),
     }
 }
 

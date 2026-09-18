@@ -45,7 +45,7 @@ use crate::workbench::state::WorkbenchState;
 
 pub(super) const PLAN_ORIGIN: &str = "plan policy";
 pub(super) const OVERRIDE_ORIGIN: &str = "analysis override";
-pub(super) const ENGINE_ORIGIN: &str = "engine default";
+pub(crate) const ENGINE_ORIGIN: &str = "engine default";
 
 /// One option, as this analysis resolves it.
 pub(super) struct AdvancedOptionRow {
@@ -169,6 +169,16 @@ fn row(
             authored: None,
         };
     }
+    // A bound the plan states no policy for rests at the engine's own value,
+    // and for a two-state or chooser control that value has to be stated: a
+    // switch has no empty position to clear through, so the setting it returns
+    // to is the setting it has to be able to show.
+    let plan_states_nothing = preset == ENGINE_ORIGIN;
+    let preset = if plan_states_nothing {
+        engine_rest_value(option).map_or(preset, str::to_owned)
+    } else {
+        preset
+    };
     match record.and_then(|record| record.value(option)) {
         Some(authored) => {
             // A step ceiling composes with the plan's rather than replacing it,
@@ -189,7 +199,7 @@ fn row(
         None => AdvancedOptionRow {
             option,
             // `plan_preset_value` says so itself when the plan states nothing.
-            origin: if preset == ENGINE_ORIGIN {
+            origin: if plan_states_nothing {
                 ENGINE_ORIGIN
             } else {
                 PLAN_ORIGIN
@@ -200,6 +210,47 @@ fn row(
         },
     }
 }
+
+/// What the engine resolves one option to when neither the plan nor the
+/// analysis states it.
+///
+/// Only the two-state and chooser controls need one. A well returns to the
+/// plan by being emptied, so a bound the plan does not state opens empty and
+/// says `engine default` in its hint slot. A switch has no empty position: if
+/// it could not show the setting the run actually uses, it would sit at `off`
+/// over a solve that enforces device convergence, and flipping it to the value
+/// already in force would author an override instead of clearing one.
+///
+/// Each arm is the same `unwrap_or` the engine applies, cited beside it, so a
+/// default changed in the engine and not here is a one-line correction rather
+/// than a hunt.
+fn engine_rest_value(option: NumericOverrideOption) -> Option<&'static str> {
+    use NumericOverrideOption as O;
+
+    Some(match option {
+        // engine/transient.rs:4621 reads `unwrap_or(true)`: Xyce's option
+        // metadata advertises zero, but its runtime default is on.
+        O::TransientDeviceConvergence => "on",
+        // engine/transient.rs:1475 reads `unwrap_or(false)`, which selects the
+        // damped transient solver.
+        O::TransientNoxSolver => "off",
+        // engine/transient.rs:1292 reads `unwrap_or(false)`.
+        O::RetainEverySignal => "off",
+        // engine/hb.rs:1150 leaves `HbInitialStateStrategy::DefaultDcSeed` in
+        // force when no mode is stated, which is not one of the three modes
+        // `TAHB` can name — so the chooser offers it as its own position and
+        // selecting it clears the option.
+        O::HbInitialState => HB_DEFAULT_INITIAL_STATE,
+        _ => return None,
+    })
+}
+
+/// The harmonic-balance initial state an unstated `TAHB` leaves in force.
+///
+/// A chooser position rather than a fourth [`crate::simulation::dialog::HbTimeDomainMode`]
+/// variant: the engine's resting behaviour is the *absence* of the key, and a
+/// variant for it would have to emit something.
+pub(super) const HB_DEFAULT_INITIAL_STATE: &str = "Engine default (DC seed)";
 
 /// A refused option whose owner has no number to show.
 const NO_REFUSED_VALUE: &str = "\u{2014}";
@@ -323,12 +374,28 @@ pub(super) fn form_rows(
     // value survives to the solve is the gate that decides whether it earns a
     // control.
     let authorable = NumericOverrideOption::applicable_to_instance(kind, draft.solver_ownership());
+    // Whether this analysis has already chosen the shape of its output
+    // schedule. Read once, because the two keys that answer it are the two
+    // rows that depend on the answer.
+    let schedule_stated = record.is_some_and(|record| {
+        record
+            .value(NumericOverrideOption::StrobeInterval)
+            .is_some()
+            || record
+                .value(NumericOverrideOption::OutputTimePoints)
+                .is_some()
+    });
     sections(kind, draft, record, options)
         .into_iter()
         .map(|mut section| {
             section.rows.retain(|row| {
                 authorable.contains(&row.option)
-                    && offered_on_the_form(row.option, kind, row.authored.is_some())
+                    && offered_on_the_form(
+                        row.option,
+                        kind,
+                        row.authored.is_some(),
+                        schedule_stated,
+                    )
             });
             section
         })
@@ -337,7 +404,12 @@ pub(super) fn form_rows(
 }
 
 /// Whether one option belongs on this kind's own form. See [`form_rows`].
-fn offered_on_the_form(option: NumericOverrideOption, kind: AnalysisKind, authored: bool) -> bool {
+fn offered_on_the_form(
+    option: NumericOverrideOption,
+    kind: AnalysisKind,
+    authored: bool,
+    schedule_stated: bool,
+) -> bool {
     use NumericOverrideOption as O;
 
     match option {
@@ -350,6 +422,26 @@ fn offered_on_the_form(option: NumericOverrideOption, kind: AnalysisKind, author
         | O::MinTimestep
         | O::Chgtol
         | O::Itl4 => true,
+        // The transient Newton package and the output schedule belong to the
+        // kind that runs the time steps, which is the only kind whose refusal
+        // gate lets them through at all. Offered unconditionally there, for
+        // the same reason the truncation bounds are: the form that owns how
+        // time advances owns how each step's solve is bounded and which of the
+        // solved steps are reported.
+        O::TransientNewtonReltol
+        | O::TransientNewtonAbstol
+        | O::TransientNewtonUpdateBound
+        | O::TransientNewtonResidualBound
+        | O::TransientNewtonBudget
+        | O::TransientDeviceConvergence
+        | O::TransientNoxSolver
+        | O::RetainEverySignal
+        | O::HbInitialState => true,
+        // The two output-schedule keys are one control with two shapes. Both
+        // are offered until one is stated, and then only that one, because the
+        // engine's parser refuses a card carrying both and a field that
+        // authored the second would author a deck that cannot be read.
+        O::StrobeInterval | O::OutputTimePoints => authored || !schedule_stated,
         // Three of the aids are the homotopy chooser's own intent wherever the
         // form carries one: switching a ramp on here and naming it there are
         // two editors of one fact on one form, and the chooser is the

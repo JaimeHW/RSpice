@@ -142,8 +142,47 @@ fn a_form_offers_the_options_its_own_kind_owns() {
             O::LteReltol,
             O::LteAbstol,
             O::MinTimestep,
+            O::TransientNewtonReltol,
+            O::TransientNewtonAbstol,
+            O::TransientNewtonUpdateBound,
+            O::TransientNewtonResidualBound,
+            O::TransientNewtonBudget,
+            O::TransientDeviceConvergence,
+            O::TransientNoxSolver,
+            O::StrobeInterval,
+            O::OutputTimePoints,
+            O::RetainEverySignal,
         ],
-        "a transient owns how time advances and how a step is accepted"
+        "a transient owns how time advances, how each step's solve is accepted, and which of \
+         the accepted steps are reported"
+    );
+
+    // The harmonic-balance family's own package, on the family's own forms and
+    // nowhere else. Its solve is where `TAHB` is read, so it is the only form
+    // that can offer a control for it. Asked of the kind's own draft rather
+    // than of a plan instance, because two of the three carry a prerequisite
+    // and what decides this is the kind, not whether a plan admits one.
+    for kind in [
+        AnalysisKind::HarmonicBalance,
+        AnalysisKind::Hbsp,
+        AnalysisKind::Hbnoise,
+    ] {
+        let draft = AnalysisDraft::for_kind(kind);
+        let offered: Vec<O> = form_rows(kind, &draft, None, &SimulationOptions::default())
+            .into_iter()
+            .flat_map(|section| section.rows)
+            .map(|row| row.option)
+            .collect();
+        assert_eq!(
+            offered,
+            vec![O::HbInitialState],
+            "{} owns how its harmonic-balance solve starts and nothing else",
+            kind.label()
+        );
+    }
+    assert!(
+        !offered_on_the_transient.contains(&O::HbInitialState),
+        "a transient runs no harmonic-balance solve"
     );
 
     let (app, operating_point) = studio(AnalysisKind::OperatingPoint);
@@ -207,11 +246,28 @@ fn a_form_offers_the_options_its_own_kind_owns() {
 #[test]
 fn an_untouched_form_states_the_plan_as_every_origin() {
     let (app, transient) = studio(AnalysisKind::Transient);
+    // The plan states no truncation bound of its own, and it states no policy
+    // at all for the two packages the engine reads straight off the deck: an
+    // output schedule and a transient Newton bound belong to one analysis, not
+    // to the whole deck, so there is no plan field for them to depart from.
+    // Those rows resolve to the engine's own default and the hint says so
+    // rather than naming a policy the plan does not hold.
+    const ENGINE_DEFAULTED: [O; 12] = [
+        O::LteReltol,
+        O::LteAbstol,
+        O::TransientNewtonReltol,
+        O::TransientNewtonAbstol,
+        O::TransientNewtonUpdateBound,
+        O::TransientNewtonResidualBound,
+        O::TransientNewtonBudget,
+        O::TransientDeviceConvergence,
+        O::TransientNoxSolver,
+        O::StrobeInterval,
+        O::OutputTimePoints,
+        O::RetainEverySignal,
+    ];
     for (option, hint) in offered(&app, transient) {
-        // The plan states no truncation bound of its own, so those two resolve
-        // to the engine's dialect default and the hint says so rather than
-        // naming a policy the plan does not hold.
-        let expected = if matches!(option, O::LteReltol | O::LteAbstol) {
+        let expected = if ENGINE_DEFAULTED.contains(&option) {
             ENGINE_ORIGIN
         } else {
             PLAN_ORIGIN
