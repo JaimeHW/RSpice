@@ -656,8 +656,9 @@ impl SimulationController {
             abstol: hb_cfg.abstol,
             max_iterations: hb_cfg.maxiter as usize,
             damping: hb_cfg.damping,
+            min_damping: hb_cfg.min_damping,
             oversample: hb_cfg.oversample as usize,
-            collocation_points: None,
+            collocation_points: hb_cfg.collocation_points.map(|points| points as usize),
             max_mixing_order: hb_cfg.max_mixing_order as usize,
             use_krylov: matches!(
                 hb_cfg.solver,
@@ -665,6 +666,7 @@ impl SimulationController {
             ),
             gmres_restart: hb_cfg.gmres_restart as usize,
             source_stepping: hb_cfg.source_stepping,
+            use_exact_jacobian: hb_cfg.use_exact_jacobian,
             verbose: hb_cfg.verbose,
         })
     }

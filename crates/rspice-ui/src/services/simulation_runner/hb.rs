@@ -56,12 +56,14 @@ pub struct HbRunConfig {
     pub abstol: Value,
     pub max_iterations: usize,
     pub damping: Value,
+    pub min_damping: Value,
     pub oversample: usize,
     pub collocation_points: Option<usize>,
     pub max_mixing_order: usize,
     pub use_krylov: bool,
     pub gmres_restart: usize,
     pub source_stepping: bool,
+    pub use_exact_jacobian: bool,
     pub verbose: bool,
 }
 
@@ -73,12 +75,14 @@ impl Default for HbRunConfig {
             abstol: 1e-12,
             max_iterations: 100,
             damping: 1.0,
+            min_damping: 0.01,
             oversample: 2,
             collocation_points: None,
             max_mixing_order: 5,
             use_krylov: false,
             gmres_restart: 30,
             source_stepping: false,
+            use_exact_jacobian: true,
             verbose: false,
         }
     }
@@ -131,6 +135,14 @@ impl HbRunConfig {
         if !self.damping.is_finite() || self.damping <= 0.0 || self.damping > 1.0 {
             return Err(ServiceRunError::Failure(
                 "HB damping must be in (0, 1]".to_string(),
+            ));
+        }
+        if !self.min_damping.is_finite()
+            || self.min_damping <= 0.0
+            || self.min_damping > self.damping
+        {
+            return Err(ServiceRunError::Failure(
+                "HB min_damping must be in (0, damping]".to_string(),
             ));
         }
         if self.oversample == 0 {
@@ -379,10 +391,12 @@ pub(crate) fn build_core_hb_config(
         hb_config = hb_config.with_collocation_points(points);
     }
     hb_config.abstol = config.abstol;
+    hb_config.min_damping = config.min_damping;
     hb_config.max_mixing_order = config.max_mixing_order;
     hb_config.use_krylov = config.use_krylov;
     hb_config.gmres_restart = config.gmres_restart;
     hb_config.source_stepping = config.source_stepping;
+    hb_config.use_exact_jacobian = config.use_exact_jacobian;
     hb_config.verbose = config.verbose;
 
     ensure_not_aborted(abort)?;
@@ -404,6 +418,64 @@ mod tests {
         fn is_aborted(&self) -> bool {
             self.polls.fetch_add(1, Ordering::Relaxed) + 1 >= self.abort_on
         }
+    }
+
+    /// Every solver control the form authors arrives at the engine's own
+    /// configuration, and arrives at its own field.
+    ///
+    /// Each value is distinct and none is a default, so a control that stopped
+    /// at this crate's run configuration, or landed on the neighbouring field
+    /// of the same type, is visible here. `build_core_hb_config` is the last
+    /// hop: what it returns is what `HbEngine` solves with.
+    #[test]
+    fn every_hb_solver_control_reaches_the_engine_config() {
+        let config = HbRunConfig {
+            tones: vec![HbToneRunConfig::new(2.0e9, 6)],
+            reltol: 1.0e-7,
+            abstol: 1.0e-11,
+            max_iterations: 42,
+            damping: 0.5,
+            min_damping: 0.25,
+            oversample: 8,
+            collocation_points: Some(37),
+            max_mixing_order: 7,
+            use_krylov: true,
+            gmres_restart: 16,
+            source_stepping: true,
+            use_exact_jacobian: false,
+            verbose: true,
+        };
+
+        let core = build_core_hb_config(&config, &NoAbort).expect("the run configuration resolves");
+
+        assert_eq!(core.tolerance, config.reltol);
+        assert_eq!(core.abstol, config.abstol);
+        assert_eq!(core.max_iterations, config.max_iterations);
+        assert_eq!(core.damping, config.damping);
+        assert_eq!(core.min_damping, config.min_damping);
+        assert_eq!(core.oversample_factor, config.oversample);
+        assert_eq!(core.collocation_points, config.collocation_points);
+        assert_eq!(core.max_mixing_order, config.max_mixing_order);
+        assert_eq!(core.use_krylov, config.use_krylov);
+        assert_eq!(core.gmres_restart, config.gmres_restart);
+        assert_eq!(core.source_stepping, config.source_stepping);
+        assert_eq!(core.use_exact_jacobian, config.use_exact_jacobian);
+        assert_eq!(core.verbose, config.verbose);
+    }
+
+    /// A floor above the factor it is a floor for is not a configuration the
+    /// engine would accept, and the run configuration says so before a solve
+    /// is ever prepared.
+    #[test]
+    fn run_config_rejects_a_damping_floor_above_the_damping_factor() {
+        let config = HbRunConfig {
+            damping: 0.2,
+            min_damping: 0.5,
+            ..HbRunConfig::default()
+        };
+
+        let err = config.validate().expect_err("the floor exceeds the factor");
+        assert!(err.contains("min_damping must be in (0, damping]"), "{err}");
     }
 
     #[test]

@@ -89,14 +89,26 @@ pub struct HbConfig {
     pub abstol: f64,
     /// Maximum Newton iterations
     pub maxiter: u32,
-    /// Newton damping factor (0 < damping <= 1)
+    /// Newton damping factor: the scale the line search gives its first trial
+    /// step. `[0.1, 1]`, which is the domain `HbConfig::with_damping` bounds
+    /// an authored factor to in the engine.
     pub damping: f64,
+    /// Smallest step scale the line search takes before it settles for the
+    /// best trial it saw. `(0, damping]`.
+    pub min_damping: f64,
+    /// Exact number of time-domain collocation points, or `None` for the
+    /// solver's own oversampled power-of-two grid.
+    pub collocation_points: Option<u32>,
     /// Solver type
     pub solver: HbSolverType,
     /// GMRES restart parameter (for Krylov)
     pub gmres_restart: u32,
     /// Enable source stepping for difficult convergence
     pub source_stepping: bool,
+    /// Solve Newton steps with the exact real-split Jacobian rather than the
+    /// Toeplitz-only complex one. Both converge to the same spectra; the exact
+    /// path takes fewer iterations to get there.
+    pub use_exact_jacobian: bool,
     /// Verbose logging
     pub verbose: bool,
 }
@@ -108,15 +120,18 @@ impl Default for HbConfig {
             num_harmonics: 9,      // DC through 9th harmonic
             fundamental_source: None,
             additional_tones: Vec::new(),
-            oversample: 2,       // 2x oversampling (Spectre default)
-            max_mixing_order: 5, // Typical for 2-tone IMD
-            reltol: 1e-6,        // Spectre default
-            abstol: 1e-12,       // 1 pA absolute
-            maxiter: 100,        // Spectre default
-            damping: 1.0,        // Full Newton step
+            oversample: 2,            // 2x oversampling (Spectre default)
+            max_mixing_order: 5,      // Typical for 2-tone IMD
+            reltol: 1e-6,             // Spectre default
+            abstol: 1e-12,            // 1 pA absolute
+            maxiter: 100,             // Spectre default
+            damping: 1.0,             // Full Newton step
+            min_damping: 0.01,        // The floor the HB line search backtracks to
+            collocation_points: None, // The solver's own oversampled grid
             solver: HbSolverType::Newton,
             gmres_restart: 30,
             source_stepping: false,
+            use_exact_jacobian: true,
             verbose: false,
         }
     }
@@ -183,8 +198,27 @@ impl HbConfig {
             return Err("Maximum iterations must be at least 1".to_string());
         }
 
-        if self.damping <= 0.0 || self.damping > 1.0 {
-            return Err("Damping factor must be between 0 and 1".to_string());
+        // The engine's own authored domain, not a looser one: the core builder
+        // bounds a factor to [0.1, 1] and the Python entry points refuse
+        // outside it, so a form that accepted 0.05 would show a number no
+        // solve ever takes. A first trial gentler than that is asked for with
+        // the floor below, which the line search honours as authored.
+        if !(0.1..=1.0).contains(&self.damping) {
+            return Err("Damping factor must be between 0.1 and 1".to_string());
+        }
+
+        if self.min_damping <= 0.0 || self.min_damping > self.damping {
+            return Err(format!(
+                "Damping floor must be greater than 0 and no greater than the damping factor ({})",
+                self.damping
+            ));
+        }
+
+        if self
+            .collocation_points
+            .is_some_and(|points| points % 2 == 0)
+        {
+            return Err("Collocation points must be an odd count".to_string());
         }
 
         // Validate additional tones

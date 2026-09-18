@@ -9,6 +9,7 @@ use super::envelope::{
     ENVELOPE_ADAPTIVE_CHOICES, ENVELOPE_FIELD_LABELS, ENVELOPE_HARMONIC_ORDER_HELPER,
     ENVELOPE_INITIAL_SOLVE_CHOICES,
 };
+use super::harmonic_balance::{HB_FIELD_LABELS, HB_SOLVER_CHOICES};
 use super::noise::{
     NOISE_CONTRIBUTION_CHOICES, NOISE_FIELD_LABELS, NOISE_INTEGRATION_CHOICES, NOISE_SWEEP_CHOICES,
 };
@@ -23,7 +24,8 @@ use super::transfer_function::{
 };
 use super::*;
 use crate::simulation::config::{NoiseContributionDetail, NoiseIntegrationMode, NoiseSweepType};
-use crate::simulation::dialog::{PssConfig, PssDialogState};
+use crate::simulation::dialog::hb::HbConfig;
+use crate::simulation::dialog::{HbDialogState, PssConfig, PssDialogState};
 use crate::simulation::plan::{AnalysisKind, NoiseDraft};
 
 #[test]
@@ -263,6 +265,69 @@ fn pss_field_order_and_wording_match_the_canonical_mockup() {
         ]
     );
     assert_eq!(PSS_MODE_CHOICES, ["Driven shooting"]);
+}
+
+#[test]
+fn hb_field_order_and_wording_match_the_canonical_mockup() {
+    assert_eq!(
+        HB_FIELD_LABELS,
+        [
+            "Fundamental",
+            "Harmonics",
+            "Source",
+            "Oversample",
+            "Max iters",
+            "Solver",
+            "Source stepping",
+            "Mixing order",
+            "Relative tolerance",
+            "Absolute tolerance",
+            "Damping",
+            "Damping floor",
+            "GMRES restart",
+            "Collocation points",
+            "Exact Jacobian",
+        ]
+    );
+    assert_eq!(HB_SOLVER_CHOICES, ["newton", "krylov"]);
+}
+
+/// The GMRES restart is the Krylov solver's parameter and is offered only on
+/// that choice, so the chooser must withhold the row rather than remove it.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn hb_solver_choice_preserves_form_geometry() {
+    let heights = HB_SOLVER_CHOICES
+        .iter()
+        .enumerate()
+        .map(|(solver_idx, _)| {
+            let mut setup = HbDialogState::from_config(&HbConfig::default());
+            setup.solver_idx = solver_idx;
+            analysis_form_height(AnalysisDraft::HarmonicBalance(setup))
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(heights[0], heights[1]);
+}
+
+/// Every solver control the form owns is painted, once.
+///
+/// Read off the render rather than off [`HB_FIELD_LABELS`]: a form that
+/// stopped drawing a row would still satisfy an assertion about the constant.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn every_hb_solver_control_is_painted_by_the_form() {
+    let setup = HbDialogState::from_config(&HbConfig::default());
+    let (_, painted) = render_analysis_form(
+        AnalysisDraft::HarmonicBalance(setup),
+        NoiseDomain::default(),
+    );
+    for label in HB_FIELD_LABELS {
+        assert_eq!(
+            painted.iter().filter(|line| *line == label).count(),
+            1,
+            "the HB form paints {label} exactly once: {painted:?}"
+        );
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]

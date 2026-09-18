@@ -228,12 +228,14 @@ pub(super) fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &Analysis
             abstol,
             max_iterations,
             damping,
+            min_damping,
             oversample,
             collocation_points,
             max_mixing_order,
             use_krylov,
             gmres_restart,
             source_stepping,
+            use_exact_jacobian,
             verbose,
         } => {
             writer.sequence(tones.len());
@@ -247,12 +249,14 @@ pub(super) fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &Analysis
             writer.f64(*abstol);
             writer.usize(*max_iterations);
             writer.f64(*damping);
+            writer.f64(*min_damping);
             writer.usize(*oversample);
             writer.option(collocation_points.as_ref(), |w, v| w.usize(*v));
             writer.usize(*max_mixing_order);
             writer.bool(*use_krylov);
             writer.usize(*gmres_restart);
             writer.bool(*source_stepping);
+            writer.bool(*use_exact_jacobian);
             writer.bool(*verbose);
         }
         AnalysisSpec::Sensitivity {

@@ -61,12 +61,14 @@ pub(super) fn run_periodic_spec(
             abstol,
             max_iterations,
             damping,
+            min_damping,
             oversample,
             collocation_points,
             max_mixing_order,
             use_krylov,
             gmres_restart,
             source_stepping,
+            use_exact_jacobian,
             verbose,
         } => {
             let mut hb_tones = Vec::with_capacity(tones.len());
@@ -85,12 +87,14 @@ pub(super) fn run_periodic_spec(
                 abstol,
                 max_iterations,
                 damping,
+                min_damping,
                 oversample,
                 collocation_points,
                 max_mixing_order,
                 use_krylov,
                 gmres_restart,
                 source_stepping,
+                use_exact_jacobian,
                 verbose,
             };
             run_harmonic_balance(netlist, &hb_cfg, true, source_path, abort)

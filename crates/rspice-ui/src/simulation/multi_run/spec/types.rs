@@ -58,6 +58,25 @@ const fn default_pss_shooting_points() -> usize {
     512
 }
 
+/// The line-search step floor a harmonic-balance specification sealed before
+/// the form could author one ran at.
+///
+/// A literal rather than a read of the engine's current default, because the
+/// value has to stay the one that specification's run actually used: this is
+/// the number the HB line search backtracked to while it was hardcoded, and a
+/// default that tracked the engine would silently re-solve a sealed manifest
+/// at whatever floor the engine grew later.
+const fn hb_min_damping_default() -> f64 {
+    0.01
+}
+
+/// Every harmonic-balance run sealed before the form could author this one
+/// solved with the exact real-split Jacobian, which is the engine's own
+/// default. Same argument as above for the literal.
+const fn hb_use_exact_jacobian_default() -> bool {
+    true
+}
+
 const fn default_true() -> bool {
     true
 }
@@ -311,6 +330,8 @@ pub enum AnalysisSpec {
         abstol: f64,
         max_iterations: usize,
         damping: f64,
+        #[serde(default = "hb_min_damping_default")]
+        min_damping: f64,
         oversample: usize,
         #[serde(default)]
         collocation_points: Option<usize>,
@@ -318,6 +339,8 @@ pub enum AnalysisSpec {
         use_krylov: bool,
         gmres_restart: usize,
         source_stepping: bool,
+        #[serde(default = "hb_use_exact_jacobian_default")]
+        use_exact_jacobian: bool,
         verbose: bool,
     },
     /// DC-linearized transfer function.

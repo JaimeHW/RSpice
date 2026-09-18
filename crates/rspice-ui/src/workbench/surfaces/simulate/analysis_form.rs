@@ -269,6 +269,21 @@ fn input_row_enabled(ui: &mut Ui, label: &str, value: &mut String, enabled: bool
     })
 }
 
+/// A well whose hint slot names the rule the value obeys.
+///
+/// The same right-aligned slot [`engineering_input_row`] fills with
+/// "engineering notation": a field whose domain is a counting rule rather than
+/// a number format says the rule there, beside the control it is about, and
+/// the caption elides to make room for it.
+fn hinted_input_row(ui: &mut Ui, label: &str, hint: &str, value: &mut String) -> Response {
+    if !uses_two_column_fields(ui) {
+        return inspector_input_row(ui, label, value);
+    }
+    field_cell(ui, label, Some(hint), |ui| {
+        mono_input(ui, label, value, ui.available_width())
+    })
+}
+
 fn engineering_input_row(ui: &mut Ui, label: &str, value: &mut String) -> Response {
     if !uses_two_column_fields(ui) {
         return inspector_input_row(ui, label, value);

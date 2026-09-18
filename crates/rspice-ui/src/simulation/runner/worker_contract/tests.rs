@@ -804,12 +804,14 @@ fn legacy_hb_specs_default_the_exact_collocation_grid() {
         abstol: 1.0e-12,
         max_iterations: 40,
         damping: 0.7,
+        min_damping: 0.01,
         oversample: 4,
         collocation_points: Some(7),
         max_mixing_order: 3,
         use_krylov: false,
         gmres_restart: 12,
         source_stepping: false,
+        use_exact_jacobian: true,
         verbose: false,
     };
     let mut analysis_json = serde_json::to_value(&analysis).expect("analysis serializes");
@@ -842,6 +844,54 @@ fn legacy_hb_specs_default_the_exact_collocation_grid() {
             ..
         }
     ));
+}
+
+/// A request an older worker encoded restores as the run it described.
+///
+/// The wire format is the protocol: a field added without a `serde(default)`
+/// refuses the request outright, and one added with the wrong default accepts
+/// it and solves something else. Both defaults are the values the engine used
+/// while no layer carried the field — the line search's hardcoded `0.01`
+/// floor, and the exact real-split Jacobian.
+#[test]
+fn an_hb_wire_written_before_the_solver_controls_restores_with_the_engine_defaults() {
+    let analysis = AnalysisSpec::HarmonicBalance {
+        tones: vec![HbToneSpec::new(1.0e6, 3)],
+        reltol: 1.0e-6,
+        abstol: 1.0e-12,
+        max_iterations: 40,
+        damping: 0.7,
+        min_damping: 0.35,
+        oversample: 4,
+        collocation_points: Some(7),
+        max_mixing_order: 3,
+        use_krylov: false,
+        gmres_restart: 12,
+        source_stepping: false,
+        use_exact_jacobian: false,
+        verbose: false,
+    };
+    let worker = WorkerAnalysisSpec::try_from(&analysis).expect("worker spec converts");
+    let mut worker_json = serde_json::to_value(&worker).expect("worker spec serializes");
+    let payload = worker_json["HarmonicBalance"]
+        .as_object_mut()
+        .expect("worker HB payload is an object");
+    for key in ["min_damping", "use_exact_jacobian"] {
+        assert!(payload.remove(key).is_some(), "{key} crosses the wire");
+    }
+
+    let decoded: WorkerAnalysisSpec =
+        serde_json::from_value(worker_json).expect("a wire without the solver controls restores");
+    let WorkerAnalysisSpec::HarmonicBalance {
+        min_damping,
+        use_exact_jacobian,
+        ..
+    } = decoded
+    else {
+        panic!("an HB wire restores as an HB wire");
+    };
+    assert_eq!(min_damping, 0.01);
+    assert!(use_exact_jacobian);
 }
 
 #[test]

@@ -188,6 +188,7 @@ fn render_every_analysis_option_form() {
         AnalysisKind::Transient,
         AnalysisKind::OperatingPoint,
         AnalysisKind::DcSweep,
+        AnalysisKind::HarmonicBalance,
     ] {
         let canvas = raster(SimulationPage::Analyses, page_width(), |app| {
             let Ok(plan) = app.state.sim_setup.stable_analysis_plan_mut() else {

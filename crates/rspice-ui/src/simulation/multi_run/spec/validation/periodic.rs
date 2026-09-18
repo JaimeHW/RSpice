@@ -112,6 +112,7 @@ pub(super) fn validate(spec: &AnalysisSpec) -> Result<(), String> {
             abstol,
             max_iterations,
             damping,
+            min_damping,
             oversample,
             collocation_points,
             max_mixing_order,
@@ -140,6 +141,9 @@ pub(super) fn validate(spec: &AnalysisSpec) -> Result<(), String> {
             }
             if !damping.is_finite() || *damping <= 0.0 || *damping > 1.0 {
                 return Err("HB damping must be in (0, 1]".to_string());
+            }
+            if !min_damping.is_finite() || *min_damping <= 0.0 || *min_damping > *damping {
+                return Err("HB min_damping must be in (0, damping]".to_string());
             }
             if *oversample == 0 {
                 return Err("HB oversample must be > 0".to_string());

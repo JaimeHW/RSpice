@@ -32,6 +32,18 @@ const fn worker_default_true() -> bool {
     true
 }
 
+/// The harmonic-balance line-search floor a request an older worker encoded
+/// ran at: the literal the solver backtracked to before it read the field.
+const fn worker_default_hb_min_damping() -> f64 {
+    0.01
+}
+
+/// Every harmonic-balance request an older worker encoded solved with the
+/// exact real-split Jacobian, which is the engine's own default.
+const fn worker_default_hb_use_exact_jacobian() -> bool {
+    true
+}
+
 fn worker_default_noise_reference_node() -> String {
     "0".to_owned()
 }
@@ -211,6 +223,8 @@ pub(crate) enum WorkerAnalysisSpec {
         abstol: f64,
         max_iterations: usize,
         damping: f64,
+        #[serde(default = "worker_default_hb_min_damping")]
+        min_damping: f64,
         oversample: usize,
         #[serde(default)]
         collocation_points: Option<usize>,
@@ -218,6 +232,8 @@ pub(crate) enum WorkerAnalysisSpec {
         use_krylov: bool,
         gmres_restart: usize,
         source_stepping: bool,
+        #[serde(default = "worker_default_hb_use_exact_jacobian")]
+        use_exact_jacobian: bool,
         verbose: bool,
     },
     Envelope {

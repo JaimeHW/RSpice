@@ -330,12 +330,14 @@ fn validate_hb_producer_config(
         abstol,
         max_iterations,
         damping,
+        min_damping,
         oversample,
         collocation_points,
         max_mixing_order,
         use_krylov,
         gmres_restart,
         source_stepping,
+        use_exact_jacobian,
         verbose,
     } = producer_spec
     else {
@@ -357,12 +359,14 @@ fn validate_hb_producer_config(
         abstol: *abstol,
         max_iterations: *max_iterations,
         damping: *damping,
+        min_damping: *min_damping,
         oversample: *oversample,
         collocation_points: *collocation_points,
         max_mixing_order: *max_mixing_order,
         use_krylov: *use_krylov,
         gmres_restart: *gmres_restart,
         source_stepping: *source_stepping,
+        use_exact_jacobian: *use_exact_jacobian,
         verbose: *verbose,
     };
     let expected = crate::services::simulation_runner::build_core_hb_config(

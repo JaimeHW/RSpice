@@ -403,12 +403,14 @@ mod tests {
             abstol: 1.0e-12,
             max_iterations: 40,
             damping: 1.0,
+            min_damping: 0.01,
             oversample: 2,
             collocation_points,
             max_mixing_order: 3,
             use_krylov: false,
             gmres_restart: 20,
             source_stepping: false,
+            use_exact_jacobian: true,
             verbose: false,
         }
     }
