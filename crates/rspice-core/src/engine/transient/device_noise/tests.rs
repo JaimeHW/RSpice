@@ -38,9 +38,8 @@ fn run(deck: &str, tstop: Value, max_step: Value) -> TransientResult {
 fn time_averaged_square(result: &TransientResult, waveform: &[Value]) -> Value {
     let mut weighted = 0.0;
     let mut span = 0.0;
-    for index in 1..waveform.len() {
-        let dt = result.step_sizes[index];
-        weighted += waveform[index] * waveform[index] * dt;
+    for (sample, dt) in waveform.iter().zip(&result.step_sizes).skip(1) {
+        weighted += sample * sample * dt;
         span += dt;
     }
     assert!(span > 0.0, "the run recorded no accepted interval");
@@ -63,25 +62,24 @@ fn windowed_rms_deviation(
 ) -> (Value, usize) {
     let mut weighted = 0.0;
     let mut span = 0.0;
-    for index in 1..waveform.len() {
-        let time = result.time[index];
-        if time <= from || time > to {
-            continue;
-        }
-        let dt = result.step_sizes[index];
-        weighted += waveform[index] * dt;
+    let points = || {
+        waveform
+            .iter()
+            .zip(&result.time)
+            .zip(&result.step_sizes)
+            .skip(1)
+            .filter(|((_, time), _)| **time > from && **time <= to)
+            .map(|((sample, _), dt)| (*sample, *dt))
+    };
+    for (sample, dt) in points() {
+        weighted += sample * dt;
         span += dt;
     }
     assert!(span > 0.0, "the window recorded no accepted interval");
     let mean = weighted / span;
     let mut squared = 0.0;
-    for index in 1..waveform.len() {
-        let time = result.time[index];
-        if time <= from || time > to {
-            continue;
-        }
-        let dt = result.step_sizes[index];
-        let deviation = waveform[index] - mean;
+    for (sample, dt) in points() {
+        let deviation = sample - mean;
         squared += deviation * deviation * dt;
     }
     ((squared / span).sqrt(), (span / nt).floor() as usize)
