@@ -1185,6 +1185,42 @@ pub fn property_row_control_columns(width: f32) -> (f32, f32) {
 /// column's.
 pub const PROPERTY_ROW_TRAILING_PAD: f32 = PROPERTY_ROW_PAD;
 
+/// How tall one editable property row is under the active density.
+///
+/// A surface that lays property rows into a grid has to know a row's height
+/// before it paints one, to size the band the grid sits in. Restating the
+/// arithmetic there would hold until the density tokens next moved.
+pub fn property_row_height(ui: &Ui) -> f32 {
+    Tokens::get(ui.ctx()).metrics.ctl_h.max(PROPERTY_ROW_MIN_H)
+}
+
+/// [`property_row_columns`] for a caller that knows how wide its labels are.
+///
+/// The proportional label share suits a list whose rows were never measured.
+/// A grid of short cells is the other case: two fifths of a 260 point cell is
+/// narrower than `Emission Mean Time` while the value beside it has room to
+/// spare, so a grid that has measured its labels states the width they need
+/// and the value takes the rest. The stated width is held to what leaves a
+/// value column worth typing in.
+fn property_row_columns_with(width: f32, label_width: Option<f32>) -> (f32, f32, f32) {
+    let (label_column, gap, value_column) = property_row_columns(width);
+    let Some(stated) = label_width else {
+        return (label_column, gap, value_column);
+    };
+    let columns_width = label_column + value_column;
+    let label_column = stated.clamp(0.0, (columns_width - PROPERTY_VALUE_MIN_W).max(0.0));
+    (label_column, gap, (columns_width - label_column).max(1.0))
+}
+
+/// Narrowest value column a row with a stated label width is left with.
+const PROPERTY_VALUE_MIN_W: f32 = 96.0;
+
+/// How wide a property row has to be to show a label `label_width` wide
+/// beside the narrowest value column.
+pub fn property_row_width_for_label(label_width: f32) -> f32 {
+    2.0 * PROPERTY_ROW_PAD + label_width + PROPERTY_ROW_GAP + PROPERTY_VALUE_MIN_W
+}
+
 /// Vertical inset above and below a wrapped property row's text.
 const PROPERTY_ROW_WRAP_PAD: f32 = 6.0;
 
@@ -1263,6 +1299,24 @@ pub fn property_row_input_with_hint(
     )
 }
 
+/// [`property_row_input_with_hint`] with the label column its caller measured.
+pub fn property_row_input_with_hint_labelled(
+    ui: &mut Ui,
+    label: &str,
+    value: &mut String,
+    hint: &str,
+    invalid: bool,
+    label_width: f32,
+) -> Response {
+    property_row_text_edit_in(
+        ui,
+        label,
+        egui::TextEdit::singleline(value).hint_text(hint),
+        invalid,
+        Some(label_width),
+    )
+}
+
 /// Editable property row with caller-owned identity and single-line editor options.
 pub(crate) fn property_row_text_edit(
     ui: &mut Ui,
@@ -1270,10 +1324,20 @@ pub(crate) fn property_row_text_edit(
     edit: egui::TextEdit<'_>,
     invalid: bool,
 ) -> Response {
+    property_row_text_edit_in(ui, label, edit, invalid, None)
+}
+
+fn property_row_text_edit_in(
+    ui: &mut Ui,
+    label: &str,
+    edit: egui::TextEdit<'_>,
+    invalid: bool,
+    label_width: Option<f32>,
+) -> Response {
     let t = Tokens::get(ui.ctx());
     let width = ui.available_width().max(1.0);
-    let (label_column, gap, value_column) = property_row_columns(width);
-    let height = t.metrics.ctl_h.max(PROPERTY_ROW_MIN_H);
+    let (label_column, gap, value_column) = property_row_columns_with(width, label_width);
+    let height = property_row_height(ui);
     let (rect, _) = ui.allocate_exact_size(Vec2::new(width, height), Sense::hover());
     let label_rect = Rect::from_min_max(
         Pos2::new(rect.left() + PROPERTY_ROW_PAD, rect.top()),
@@ -1345,7 +1409,7 @@ pub fn property_row_input_action(
     let t = Tokens::get(ui.ctx());
     let width = ui.available_width().max(1.0);
     let (label_column, gap, value_column) = property_row_columns(width);
-    let height = t.metrics.ctl_h.max(PROPERTY_ROW_MIN_H);
+    let height = property_row_height(ui);
     let (rect, _) = ui.allocate_exact_size(Vec2::new(width, height), Sense::hover());
     let label_rect = Rect::from_min_max(
         Pos2::new(rect.left() + PROPERTY_ROW_PAD, rect.top()),
@@ -1484,10 +1548,43 @@ pub fn property_row_combo(
     options: &[(String, String)],
     enabled: bool,
 ) -> bool {
+    property_row_combo_in(ui, label, id_source, selected, options, enabled, None)
+}
+
+/// [`property_row_combo`] with the label column its caller measured.
+pub fn property_row_combo_labelled(
+    ui: &mut Ui,
+    label: &str,
+    id_source: impl Hash + std::fmt::Debug,
+    selected: &mut String,
+    options: &[(String, String)],
+    enabled: bool,
+    label_width: f32,
+) -> bool {
+    property_row_combo_in(
+        ui,
+        label,
+        id_source,
+        selected,
+        options,
+        enabled,
+        Some(label_width),
+    )
+}
+
+fn property_row_combo_in(
+    ui: &mut Ui,
+    label: &str,
+    id_source: impl Hash + std::fmt::Debug,
+    selected: &mut String,
+    options: &[(String, String)],
+    enabled: bool,
+    label_width: Option<f32>,
+) -> bool {
     let t = Tokens::get(ui.ctx());
     let width = ui.available_width().max(1.0);
-    let (label_column, gap, value_column) = property_row_columns(width);
-    let height = t.metrics.ctl_h.max(PROPERTY_ROW_MIN_H);
+    let (label_column, gap, value_column) = property_row_columns_with(width, label_width);
+    let height = property_row_height(ui);
     let (rect, _) = ui.allocate_exact_size(Vec2::new(width, height), Sense::hover());
     let label_rect = Rect::from_min_max(
         Pos2::new(rect.left() + PROPERTY_ROW_PAD, rect.top()),
@@ -1567,7 +1664,7 @@ fn property_row_with_tone(
     // Read-only property cells share the editable row's invariant geometry.
     // Both columns are one line and ellipsized so changing the selected object
     // can never move the rows below it.
-    let height = t.metrics.ctl_h.max(PROPERTY_ROW_MIN_H);
+    let height = property_row_height(ui);
     let (rect, response) = ui.allocate_exact_size(Vec2::new(width, height), Sense::hover());
     let label_rect = Rect::from_min_max(
         Pos2::new(rect.left() + PROPERTY_ROW_PAD, rect.top()),
