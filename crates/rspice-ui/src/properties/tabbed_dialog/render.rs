@@ -732,7 +732,7 @@ fn evidence_contents(
     operating_point_card(ui, context, action);
     if supports_source_preview(component_type) {
         source_preview_card(ui, state, component_type, registry);
-        stimulus_library_card(ui, context, action);
+        stimulus_library_card(ui, state, context, action);
     }
     terminals_card(ui, context);
 }
@@ -767,14 +767,32 @@ fn provenance_colour(
 /// revision that may not exist, so they are absent rather than disabled: a
 /// control that is here works, and the status line above already states why
 /// there is nothing to open.
+///
+/// Three of the four act on the card the *instance* carries, not on the draft
+/// in front of the reader, and all three leave this editor. While the draft
+/// holds unapplied edits they are therefore disabled, with the reason on them:
+/// a reader who retuned a frequency and pressed Save would otherwise publish
+/// the card they had just edited away from, and the editor would close over
+/// the edit without a word. This is the rule the model binding already keeps —
+/// `Open model detail…` goes unavailable while the draft names a model the
+/// instance has not been given — applied to the whole card, because adopting
+/// and extracting read the whole card.
+///
+/// Opening the definition is the one verb that reads nothing of the draft: it
+/// shows a library record the draft cannot change, exactly as `Open model
+/// detail…` stays available while the draft's model is the committed one.
 fn stimulus_library_card(
     ui: &mut Ui,
+    state: &TabbedPropertyDialogState,
     context: &ComponentEditorContext,
     action: &mut TabbedDialogResult,
 ) {
     let Some(stimulus) = context.stimulus.as_ref() else {
         return;
     };
+    let unapplied = state
+        .has_modifications()
+        .then_some("Apply or cancel this editor's edits first");
     let held = stimulus
         .definition
         .as_deref()
@@ -815,27 +833,31 @@ fn stimulus_library_card(
         ui.add_space(8.0);
         ui.horizontal_wrapped(|ui| {
             if !stimulus.library_is_empty
-                && crate::ui::widgets::Button::new("Adopt definition…")
-                    .show(ui)
-                    .on_hover_text(
-                        "Copy a library definition's card onto this instance and record which \
-                         revision it came from",
-                    )
-                    .clicked()
+                && stimulus_verb(
+                    ui,
+                    "Adopt definition…",
+                    unapplied,
+                    "Copy a library definition's card onto this instance and record which \
+                     revision it came from",
+                )
             {
                 *action = TabbedDialogResult::AdoptStimulus;
             }
-            if crate::ui::widgets::Button::new("Save as library definition…")
-                .show(ui)
-                .on_hover_text("Publish this instance's card as a project stimulus definition")
-                .clicked()
-            {
+            if stimulus_verb(
+                ui,
+                "Save as library definition…",
+                unapplied,
+                "Publish this instance's card as a project stimulus definition",
+            ) {
                 *action = TabbedDialogResult::ExtractStimulus;
             }
             if held.is_some()
-                && crate::ui::widgets::Button::new("Open in Stimulus Library")
-                    .show(ui)
-                    .clicked()
+                && stimulus_verb(
+                    ui,
+                    "Open in Stimulus Library",
+                    None,
+                    "Show this definition in the Stimulus Library workspace",
+                )
             {
                 *action = TabbedDialogResult::OpenStimulusDefinition;
             }
@@ -843,18 +865,36 @@ fn stimulus_library_card(
                 .filter(|_| stimulus.state.offers_readoption())
                 .map(|(_, revision)| format!("Re-adopt r{revision}"));
             if let Some(label) = readopt.as_deref()
-                && crate::ui::widgets::Button::new(label)
-                    .show(ui)
-                    .on_hover_text(
-                        "Copies the library's revision onto this instance now. Unapplied edits in \
-                         this editor are replaced by the copy.",
-                    )
-                    .clicked()
+                && stimulus_verb(
+                    ui,
+                    label,
+                    unapplied,
+                    "Copy the library's revision onto this instance and reload this editor from \
+                     it",
+                )
             {
                 *action = TabbedDialogResult::ReadoptStimulus;
             }
         });
     });
+}
+
+/// One verb in the Stimulus library block.
+///
+/// A verb that cannot be taken right now is drawn disabled and announces why,
+/// rather than vanishing: the reason is a state the reader clears in one act,
+/// and a control that disappeared would leave them looking for it.
+fn stimulus_verb(ui: &mut Ui, label: &str, unavailable: Option<&str>, hover: &str) -> bool {
+    let response = crate::ui::widgets::Button::new(label)
+        .enabled(unavailable.is_none())
+        .show(ui);
+    match unavailable {
+        Some(reason) => {
+            response.on_disabled_hover_text(reason);
+            false
+        }
+        None => response.on_hover_text(hover).clicked(),
+    }
 }
 
 /// Whether this family has a card the engine can be asked about.
@@ -1794,5 +1834,105 @@ mod tests {
         let spec = stimulus_realize::source_spec(&component).expect("spec");
 
         assert!(stimulus_realize::preview_defect(&spec).is_some());
+    }
+
+    /// The stimulus library block, as a screen reader receives it.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn stimulus_verbs(
+        state: &TabbedPropertyDialogState,
+        context: &ComponentEditorContext,
+    ) -> Vec<(String, bool)> {
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        let mut action = TabbedDialogResult::None;
+        ctx.run_ui(Default::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                stimulus_library_card(ui, state, context, &mut action);
+            });
+        })
+        .platform_output
+        .accesskit_update
+        .expect("AccessKit tree update")
+        .nodes
+        .into_iter()
+        .filter_map(|(_, node)| {
+            node.label()
+                .map(|label| (label.to_owned(), node.is_disabled()))
+        })
+        .collect()
+    }
+
+    /// One source that has adopted `sensor_drive`, with the library one
+    /// revision past it so every verb is offered at once.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn adopted_context() -> ComponentEditorContext {
+        use crate::state::stimulus_library::provenance::ProvenanceState;
+
+        ComponentEditorContext {
+            stimulus: Some(crate::properties::StimulusEditorContext {
+                state: ProvenanceState::Behind {
+                    adopted: 1,
+                    library: 2,
+                },
+                definition: Some("sensor_drive".to_owned()),
+                library_revision: Some(2),
+                library_is_empty: false,
+            }),
+            ..ComponentEditorContext::default()
+        }
+    }
+
+    /// A verb that acts on the instance's card is withheld while the editor
+    /// holds edits that card does not have yet.
+    ///
+    /// Adopting, saving and re-adopting all read or replace the whole card and
+    /// all three leave this editor; a reader who retuned a frequency and
+    /// pressed Save would otherwise publish the card they had just edited away
+    /// from, with the edit discarded and nothing said. Opening the definition
+    /// reads nothing of the draft, so it stays available — which is the rule
+    /// `Open model detail…` already keeps for the model binding.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn the_card_verbs_are_withheld_while_the_editor_holds_unapplied_edits() {
+        let (mut state, _) = editor(ComponentType::VoltageSourceSin);
+        let context = adopted_context();
+
+        let clean = stimulus_verbs(&state, &context);
+        for verb in [
+            "Adopt definition…",
+            "Save as library definition…",
+            "Open in Stimulus Library",
+            "Re-adopt r2",
+        ] {
+            assert!(
+                clean
+                    .iter()
+                    .any(|(label, disabled)| label == verb && !disabled),
+                "{verb} is offered on a clean editor: {clean:?}"
+            );
+        }
+
+        state.set_value("freq", crate::state::PropertyValue::string("2k"));
+        assert!(state.has_modifications());
+        let dirty = stimulus_verbs(&state, &context);
+        for verb in [
+            "Adopt definition…",
+            "Save as library definition…",
+            "Re-adopt r2",
+        ] {
+            assert!(
+                dirty
+                    .iter()
+                    .any(|(label, disabled)| label == verb && *disabled),
+                "{verb} must not act on a card the editor has edited away from: {dirty:?}"
+            );
+        }
+        assert!(
+            dirty
+                .iter()
+                .any(|(label, disabled)| label == "Open in Stimulus Library" && !disabled),
+            "opening the definition reads nothing of the draft: {dirty:?}"
+        );
     }
 }
