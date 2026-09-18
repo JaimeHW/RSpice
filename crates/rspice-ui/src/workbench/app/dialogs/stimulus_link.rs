@@ -945,12 +945,21 @@ fn commit_extraction(state: &mut AppState, component_id: u64) -> Result<String, 
         StimulusDefinition::extract_from(&mut candidate, &session.name, &session.purpose)
             .map_err(|error| error.to_string())?;
     let name = definition.name().to_owned();
-    state.edit_component_transaction(&expected, candidate, "save stimulus definition")?;
+    // The library first, then the instance, and the library back out if the
+    // instance refuses. The other order leaves a receipt naming a definition
+    // the project does not hold — which every surface reads as `definition
+    // removed`, over an extraction the reader was told had failed.
     state
         .workspace
         .stimulus_library
         .insert(definition)
         .map_err(|error| error.to_string())?;
+    if let Err(refusal) =
+        state.edit_component_transaction(&expected, candidate, "save stimulus definition")
+    {
+        let _ = state.workspace.stimulus_library.delete(&name);
+        return Err(refusal);
+    }
     state.workbench.selected_stimulus_definition = Some(name.clone());
     Ok(format!(
         "{} saved {name} as r1 in this project's stimulus library and now reads adopted \u{00b7} \

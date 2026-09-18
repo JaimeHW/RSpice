@@ -255,6 +255,81 @@ fn extraction_publishes_the_instance_card_and_leaves_it_adopted() {
     );
 }
 
+/// Neither half of an extraction lands without the other.
+///
+/// The library goes first and comes back out if the instance refuses, because
+/// the other order leaves a receipt naming a definition the project does not
+/// hold: every surface reads that as `definition removed`, over an extraction
+/// the reader was told had failed.
+#[test]
+fn a_refused_extraction_leaves_both_the_library_and_the_instance_as_they_were() {
+    let (mut app, id) = fixture();
+    open_stimulus_link(&mut app.state, id, StimulusLinkMode::Extract).expect("opens");
+    let held = app.state.workspace.stimulus_library.clone();
+
+    // A name the library already holds is refused before anything moves.
+    app.state.dialogs.stimulus_link.name = "sensor_drive".to_owned();
+    let refusal = commit_extraction(&mut app.state, id).expect_err("the name is taken");
+    assert!(refusal.contains("already defines"), "{refusal}");
+    assert_eq!(app.state.workspace.stimulus_library, held);
+
+    // An instance transaction the schematic refuses takes the definition back
+    // out, so the two halves cannot land apart.
+    app.state.dialogs.stimulus_link.name = "v1_pulse".to_owned();
+    app.state
+        .schematic
+        .begin_operation("a gesture already in flight");
+    let refusal = commit_extraction(&mut app.state, id)
+        .expect_err("a pending gesture refuses a component edit");
+    assert!(
+        app.state
+            .workspace
+            .stimulus_library
+            .get("v1_pulse")
+            .is_none(),
+        "the definition is withdrawn when the instance edit refuses: {refusal}"
+    );
+    assert_eq!(app.state.workspace.stimulus_library, held);
+    let component = app
+        .state
+        .schematic
+        .components
+        .iter()
+        .find(|component| component.id == id)
+        .expect("held");
+    assert!(component.stimulus_provenance.is_none());
+}
+
+/// Saving a definition is a project edit, and the project says so.
+///
+/// The definitions ride the project document rather than a sidecar, so the
+/// lifecycle registry digests the library as its own document; without that an
+/// edited library would move the saved file while every document read clean.
+#[test]
+fn an_extraction_leaves_the_project_with_unsaved_changes() {
+    use crate::workbench::lifecycle::project_lifecycle::{
+        ProjectDocumentId, accept_loaded_project, dirty_documents, has_unsaved_changes, snapshot,
+    };
+
+    let (mut app, id) = fixture();
+    let baseline = snapshot(&app.state).expect("the fixture project snapshots");
+    accept_loaded_project(&mut app.state, baseline, None);
+    assert!(
+        !has_unsaved_changes(&app.state),
+        "the fixture starts from an accepted baseline"
+    );
+
+    open_stimulus_link(&mut app.state, id, StimulusLinkMode::Extract).expect("opens");
+    commit_extraction(&mut app.state, id).expect("the extraction commits");
+
+    assert!(has_unsaved_changes(&app.state));
+    assert!(
+        dirty_documents(&app.state).contains(&ProjectDocumentId::StimulusLibrary),
+        "the library is its own document: {:?}",
+        dirty_documents(&app.state)
+    );
+}
+
 /// A name the netlist reader would not accept, and one the library already
 /// holds, are both refused in the model's own words.
 #[test]
