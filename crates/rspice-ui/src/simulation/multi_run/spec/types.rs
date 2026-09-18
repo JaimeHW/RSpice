@@ -2,8 +2,8 @@
 
 use crate::simulation::config::{NoiseContributionDetail, NoiseIntegrationMode, NoiseSweepType};
 use crate::simulation::dialog::{
-    OpAccuracy, OpAnnotation, OpDeviceDetail, OpHomotopy, OpInitialGuess, OpNodeInitialization,
-    OpPreviousState, OpRunPointContext, OpSaveDevice, OpTemperatureMode,
+    IntegrationMethod, OpAccuracy, OpAnnotation, OpDeviceDetail, OpHomotopy, OpInitialGuess,
+    OpNodeInitialization, OpPreviousState, OpRunPointContext, OpSaveDevice, OpTemperatureMode,
 };
 use crate::simulation::multi_run::FrequencySweep;
 use serde::{Deserialize, Serialize};
@@ -75,6 +75,24 @@ const fn hb_min_damping_default() -> f64 {
 /// default. Same argument as above for the literal.
 const fn hb_use_exact_jacobian_default() -> bool {
     true
+}
+
+// The engine's own `.PSS` card defaults, so a request that never stated one
+// restores as the run the engine gave it.
+const fn default_pss_max_iterations() -> usize {
+    100
+}
+
+const fn default_pss_abstol() -> f64 {
+    1.0e-12
+}
+
+const fn default_pss_damping() -> f64 {
+    1.0
+}
+
+const fn default_pss_max_period_change() -> f64 {
+    0.1
 }
 
 const fn default_true() -> bool {
@@ -309,6 +327,37 @@ pub enum AnalysisSpec {
         oscillator_node: Option<String>,
         /// Numeric harmonic retention count. Zero retains no spectrum.
         num_harmonics: usize,
+        /// Integration method the shooting solve's inner transients run
+        /// under, or `None` for the engine's own default. Defaulted on read:
+        /// every request recorded before the control existed ran under the
+        /// engine's default, which is exactly what `None` means.
+        #[serde(default)]
+        integration_method: Option<IntegrationMethod>,
+        /// Stabilization window in seconds. Zero takes it from
+        /// `tstab_periods` instead, which is the engine's own rule and what
+        /// every request written before this control asked for.
+        #[serde(default)]
+        tstab: f64,
+        /// Shooting-Newton correction limit per integration grid.
+        #[serde(default = "default_pss_max_iterations")]
+        max_iterations: usize,
+        /// Absolute periodicity tolerance, in each coordinate's SI unit.
+        #[serde(default = "default_pss_abstol")]
+        abstol: f64,
+        /// Newton damping factor in `[0.1, 1.0]`.
+        #[serde(default = "default_pss_damping")]
+        damping: f64,
+        /// Largest relative period correction one autonomous iteration takes.
+        #[serde(default = "default_pss_max_period_change")]
+        max_period_change: f64,
+        /// Whether the solver logs its convergence progress.
+        ///
+        /// No form control reaches this: the engine writes the log through
+        /// `log::debug!` and nothing in the product displays that channel, so
+        /// a switch for it would be a control with no visible effect. A manual
+        /// deck may still author `VERBOSE=`, and it reaches the engine.
+        #[serde(default)]
+        verbose: bool,
     },
     /// Harmonic content of a converged periodic steady state.
     ///

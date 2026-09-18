@@ -1,10 +1,11 @@
-//! The PSS form: its nine fields, and what autonomous mode does to two of
-//! them.
+//! The PSS form: every control the engine's `.PSS` card carries, and what
+//! autonomous mode does to three of them.
 //!
 //! Split out for the same reason the DC sweep form is: one control changes what
 //! every other one means. Autonomous mode moves the period from the Fundamental
-//! field to the oscillator node and stops the tone list from being read at all,
-//! so the same nine fields mean two different things.
+//! field to the oscillator node, stops the tone list from being read at all,
+//! and is the only mode in which a bound on the period correction means
+//! anything, so the same fields mean two different things.
 //!
 //! Those two things are said on the two fields they are about, as hints rather
 //! than prose, because the form's height must not move when the switch does
@@ -28,16 +29,16 @@
 use egui::Ui;
 
 use crate::quantity::QuantityInputKind;
-use crate::simulation::dialog::PssDialogState;
+use crate::simulation::dialog::{IntegrationMethod, PssDialogState};
 
 use super::{
     QuantityPresentationPolicy, UiNumberLocale, choice_row, enabled_choice_row,
-    engineering_input_row, input_row, input_row_enabled, named_periodic_source_row,
-    quantity_input_row,
+    engineering_input_row, hinted_input_row, hinted_input_row_enabled, input_row,
+    input_row_enabled, named_periodic_source_row, quantity_input_row,
 };
 
-pub(super) const PSS_FIELD_LABELS: [&str; 9] = [
-    "Mode",
+pub(super) const PSS_FIELD_LABELS: [&str; 14] = [
+    "Integration method",
     "Fundamental",
     "Tones",
     "Stabilization cycles",
@@ -46,9 +47,28 @@ pub(super) const PSS_FIELD_LABELS: [&str; 9] = [
     "Autonomous oscillator",
     "Oscillator node",
     "Save harmonics",
+    "Stabilization time",
+    "Max iterations",
+    "Absolute tolerance",
+    "Damping",
+    "Max period change",
 ];
 
-pub(super) const PSS_MODE_CHOICES: [&str; 1] = ["Driven shooting"];
+/// The integration methods the chooser offers, in the engine's own order.
+///
+/// Assembled from [`IntegrationMethod::all`] rather than written out, so the
+/// form cannot offer a method the deck has no spelling for — which is what a
+/// second list of names beside the enum would eventually do. The first entry
+/// is not a method: the card has no keyword for the engine's own choice, so
+/// "engine default" is the absence of `METHOD=` and belongs in the chooser as
+/// the position that writes nothing.
+pub(super) fn pss_integration_method_choices() -> Vec<&'static str> {
+    std::iter::once(PSS_ENGINE_DEFAULT_METHOD)
+        .chain(IntegrationMethod::all().iter().map(IntegrationMethod::display_name))
+        .collect()
+}
+
+pub(super) const PSS_ENGINE_DEFAULT_METHOD: &str = "Engine default";
 
 /// Render the PSS fields.
 pub(super) fn fields(
@@ -61,8 +81,8 @@ pub(super) fn fields(
     choice_row(
         ui,
         PSS_FIELD_LABELS[0],
-        &PSS_MODE_CHOICES,
-        &mut setup.method_idx,
+        &pss_integration_method_choices(),
+        &mut setup.integration_method_idx,
     );
     quantity_input_row(
         ui,
@@ -89,7 +109,59 @@ pub(super) fn fields(
     input_row_enabled(ui, PSS_FIELD_LABELS[7], &mut setup.osc_node, setup.osc_mode)
         .on_hover_text(OSCILLATOR_NODE_HINT);
     input_row(ui, PSS_FIELD_LABELS[8], &mut setup.num_harmonics);
+    hinted_input_row(
+        ui,
+        PSS_FIELD_LABELS[9],
+        &mut setup.tstab,
+        "overrides the cycles",
+    )
+    .on_hover_text(STABILIZATION_TIME_HINT);
+    input_row(ui, PSS_FIELD_LABELS[10], &mut setup.max_iterations)
+        .on_hover_text(MAX_ITERATIONS_HINT);
+    engineering_input_row(ui, PSS_FIELD_LABELS[11], &mut setup.abstol)
+        .on_hover_text(ABSOLUTE_TOLERANCE_HINT);
+    hinted_input_row(ui, PSS_FIELD_LABELS[12], &mut setup.damping, "0.1 to 1")
+        .on_hover_text(DAMPING_HINT);
+    // Autonomous only, and still a stable member of the grid: the period is a
+    // solver unknown in exactly one mode, and that is the only mode in which a
+    // bound on its correction means anything.
+    hinted_input_row_enabled(
+        ui,
+        PSS_FIELD_LABELS[13],
+        &mut setup.max_period_change,
+        "autonomous only",
+        setup.osc_mode,
+    )
+    .on_hover_text(MAX_PERIOD_CHANGE_HINT);
 }
+
+/// The rule the two stabilization fields share, stated where the overriding
+/// one is.
+///
+/// `PssConfig::effective_tstab` takes `tstab` when it is positive and
+/// `tstab_periods * period` otherwise, so the two are not additive and the
+/// cycle count is not a floor. A blank field is the engine's zero.
+const STABILIZATION_TIME_HINT: &str = "Seconds to settle before the shooting solve. \
+                                       Blank takes the window from the stabilization cycles \
+                                       instead; any positive time replaces them.";
+
+const MAX_ITERATIONS_HINT: &str = "Shooting-Newton corrections allowed on each integration \
+                                   grid. The solve refines the grid until the orbits agree, \
+                                   and every grid must converge within this limit.";
+
+const ABSOLUTE_TOLERANCE_HINT: &str = "A coordinate converges on this or on the period \
+                                       tolerance, whichever it meets first, in its own unit \
+                                       (V, A, or K). It is what lets a node resting at zero \
+                                       converge at all, where a relative error is undefined.";
+
+const DAMPING_HINT: &str = "Fraction of each Newton correction that is taken. Below one it \
+                            converges more slowly and survives stiffer circuits; the engine \
+                            admits 0.1 to 1.";
+
+const MAX_PERIOD_CHANGE_HINT: &str = "Largest relative change one autonomous iteration may \
+                                      make to the detected period, which is what stops the \
+                                      period from oscillating instead of converging. A driven \
+                                      solve has no period to correct.";
 
 /// What the tone list is, on the field that holds it.
 ///

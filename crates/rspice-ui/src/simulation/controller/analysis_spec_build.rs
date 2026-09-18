@@ -570,12 +570,11 @@ impl SimulationController {
             .to_config()
             .map_err(|e| format!("invalid PSS settings: {}", e))?;
         Ok(AnalysisSpec::Pss {
-            method: match pss_cfg.method {
-                crate::simulation::dialog::PssSolverMethod::Shooting => PssMethod::Shooting,
-                crate::simulation::dialog::PssSolverMethod::HarmonicBalance => {
-                    PssMethod::HarmonicBalance
-                }
-            },
+            // The editor builds shooting requests and nothing else. The
+            // legacy harmonic-balance formulation is still a variant so a
+            // sealed manifest that named it opens and refuses by name; no
+            // control reaches it.
+            method: PssMethod::Shooting,
             fundamental_freq: pss_cfg.fund_freq,
             tone_sources: pss_cfg.tone_sources,
             tstab_periods: pss_cfg.tstab_periods,
@@ -584,6 +583,17 @@ impl SimulationController {
             oscillator_mode: pss_cfg.osc_mode,
             oscillator_node: pss_cfg.osc_mode.then(|| pss_cfg.osc_node.trim().to_owned()),
             num_harmonics: pss_cfg.num_harmonics,
+            integration_method: pss_cfg.integration_method,
+            tstab: pss_cfg.tstab,
+            max_iterations: pss_cfg.max_iterations,
+            abstol: pss_cfg.abstol,
+            damping: pss_cfg.damping,
+            max_period_change: pss_cfg.max_period_change,
+            // No form control reaches the solver log: the engine writes it
+            // through `log::debug!` and nothing in the product displays that
+            // channel, so a switch here would be a control with no visible
+            // effect. A manual deck may still author `VERBOSE=`.
+            verbose: false,
         })
     }
 
@@ -1263,7 +1273,7 @@ mod manifest_tests {
         state.sim_setup.pss.points_per_period = "1024".to_owned();
         state.sim_setup.pss.tolerance = "2e-9".to_owned();
         state.sim_setup.pss.num_harmonics = "17".to_owned();
-        state.sim_setup.pss.method_idx = 0;
+        state.sim_setup.pss.integration_method_idx = 0;
         // Driven: this draft names two tones, and an autonomous solve naming a
         // tone is a refused contradiction rather than a projectable draft. The
         // retained oscillator node is deliberately left set to prove the driven
@@ -1284,6 +1294,13 @@ mod manifest_tests {
                 oscillator_mode: false,
                 oscillator_node: None,
                 num_harmonics: 17,
+                integration_method: None,
+                tstab: 0.0,
+                max_iterations: 100,
+                abstol: 1.0e-12,
+                damping: 1.0,
+                max_period_change: 0.1,
+                verbose: false,
             }
         );
     }
@@ -1295,7 +1312,7 @@ mod manifest_tests {
         let controller = SimulationController::new();
         let mut state = AppState::default();
         state.sim_setup.pss.ensure_initialized();
-        state.sim_setup.pss.method_idx = 0;
+        state.sim_setup.pss.integration_method_idx = 0;
         state.sim_setup.pss.tone_sources.clear();
         state.sim_setup.pss.osc_mode = true;
         state.sim_setup.pss.osc_node = "osc_out".to_owned();

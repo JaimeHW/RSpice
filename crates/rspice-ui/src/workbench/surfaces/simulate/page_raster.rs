@@ -172,6 +172,11 @@ fn print_studio_visual_fingerprints_for_review() {
 /// an analysis owns differs per kind. The operating point is the one that
 /// cannot be seen any other way: it is not in the default plan, and its
 /// Convergence field is the one the homotopy chooser above it decides.
+///
+/// PSS is here because it carries the largest authored parameter set in the
+/// catalogue — every control the engine's `.PSS` card holds — and two of its
+/// fields change enablement with the autonomous switch, which is a thing to
+/// look at rather than to assert.
 #[test]
 #[ignore = "writes PNGs for a human to look at; run with --ignored"]
 fn render_every_analysis_option_form() {
@@ -189,6 +194,7 @@ fn render_every_analysis_option_form() {
         AnalysisKind::OperatingPoint,
         AnalysisKind::DcSweep,
         AnalysisKind::HarmonicBalance,
+        AnalysisKind::Pss,
     ] {
         let canvas = raster(SimulationPage::Analyses, page_width(), |app| {
             let Ok(plan) = app.state.sim_setup.stable_analysis_plan_mut() else {

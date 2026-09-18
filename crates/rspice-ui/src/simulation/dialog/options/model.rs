@@ -1121,20 +1121,7 @@ impl SimulationOptions {
     }
 
     fn core_integration_method(&self) -> rspice_core::numerics::integration::IntegrationMethod {
-        match self.method {
-            IntegrationMethod::Trap => {
-                rspice_core::numerics::integration::IntegrationMethod::Trapezoidal
-            }
-            IntegrationMethod::Euler => {
-                rspice_core::numerics::integration::IntegrationMethod::BackwardEuler
-            }
-            IntegrationMethod::Gear2 => {
-                rspice_core::numerics::integration::IntegrationMethod::Gear2
-            }
-            IntegrationMethod::TrapGear => {
-                rspice_core::numerics::integration::IntegrationMethod::TrapGear
-            }
-        }
+        self.method.core()
     }
 
     fn simulation_config_overrides(&self) -> rspice_core::SimulationConfigOverrides {

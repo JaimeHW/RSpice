@@ -121,6 +121,13 @@ fn pss_spec(method: PssMethod) -> AnalysisSpec {
         oscillator_mode: false,
         oscillator_node: None,
         num_harmonics: 8,
+        integration_method: None,
+        tstab: 0.0,
+        max_iterations: 100,
+        abstol: 1.0e-12,
+        damping: 1.0,
+        max_period_change: 0.1,
+        verbose: false,
     }
 }
 

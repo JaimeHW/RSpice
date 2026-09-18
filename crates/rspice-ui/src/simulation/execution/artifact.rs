@@ -284,7 +284,14 @@ fn validate_periodic_producer_config(
         oscillator_node,
         tstab_periods,
         points_per_period,
-        tone_sources: _,
+        integration_method,
+        tstab,
+        max_iterations,
+        abstol,
+        damping,
+        max_period_change,
+        verbose,
+        tone_sources,
     } = producer_spec
     else {
         return Err(ExecutionArtifactError::ContractMismatch(
@@ -297,19 +304,33 @@ fn validate_periodic_producer_config(
         ));
     }
 
-    let mut expected = if *oscillator_mode {
-        rspice_core::analysis::PssConfig::autonomous().with_period_guess(1.0 / *fundamental_freq)
-    } else {
-        rspice_core::analysis::PssConfig::new(*fundamental_freq)
-    }
-    .with_harmonics((*num_harmonics).max(1))
-    .with_tolerance(*tolerance)
-    .with_max_iterations(100)
-    .with_tstab_periods(*tstab_periods)
-    .with_points_per_period(*points_per_period);
-    if let Some(node) = oscillator_node.as_deref() {
-        expected = expected.with_oscillator_node(node);
-    }
+    // Resolved by the runner's own builder, not by a second copy of it here.
+    // This arm used to rebuild the configuration field by field, including its
+    // own literal Newton-iteration limit, so every control the request learned
+    // was a field the two could disagree about — and a disagreement refuses a
+    // converged periodic state as unauthenticated. The HB arm below has always
+    // delegated for the same reason.
+    let expected = crate::services::simulation_runner::build_core_pss_config(
+        &crate::services::simulation_runner::PssRunConfig {
+            fundamental_freq: *fundamental_freq,
+            tone_sources: tone_sources.clone(),
+            tstab_periods: *tstab_periods,
+            points_per_period: *points_per_period,
+            num_harmonics: *num_harmonics,
+            tolerance: *tolerance,
+            oscillator_mode: *oscillator_mode,
+            oscillator_node: oscillator_node.clone(),
+            integration_method: integration_method.map(
+                crate::simulation::dialog::IntegrationMethod::core,
+            ),
+            tstab: *tstab,
+            max_iterations: *max_iterations,
+            abstol: *abstol,
+            damping: *damping,
+            max_period_change: *max_period_change,
+            verbose: *verbose,
+        },
+    );
 
     if actual != &expected {
         return Err(ExecutionArtifactError::ContractMismatch(

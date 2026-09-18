@@ -320,6 +320,7 @@ use crate::simulation::config::{
     AcAnalysisConfig, AcSweepType, AnalysisConfig, DcSweepConfig, NoiseAnalysisConfig,
     PoleZeroConfig, PzAnalysisType, SensitivityConfig, TransientAnalysisConfig,
 };
+use crate::simulation::dialog::IntegrationMethod;
 use crate::simulation::multi_run::{
     AnalysisSpec, EnvelopeAdaptiveMode, EnvelopeExtractionPath, EnvelopeInitialPeriodicSolve,
     FrequencySweep, HbToneSpec, OptimizationAlgorithm, OptimizationGoal, OptimizationVariable,
@@ -760,6 +761,13 @@ fn pss_worker_transport_preserves_every_exact_contract_field() {
         oscillator_mode: false,
         oscillator_node: None,
         num_harmonics: 20,
+        integration_method: None,
+        tstab: 0.0,
+        max_iterations: 100,
+        abstol: 1.0e-12,
+        damping: 1.0,
+        max_period_change: 0.1,
+        verbose: false,
     };
     let encode = |spec: &AnalysisSpec| {
         let worker = WorkerAnalysisSpec::try_from(spec).expect("PSS worker conversion");
@@ -786,6 +794,13 @@ fn pss_worker_transport_preserves_every_exact_contract_field() {
     changed!(oscillator_mode, true);
     changed!(oscillator_node, Some("osc".to_owned()));
     changed!(num_harmonics, 0);
+    changed!(integration_method, Some(IntegrationMethod::Euler));
+    changed!(tstab, 3.0e-9);
+    changed!(max_iterations, 250);
+    changed!(abstol, 1.0e-15);
+    changed!(damping, 0.75);
+    changed!(max_period_change, 0.25);
+    changed!(verbose, true);
 
     for variant in variants {
         let encoded = encode(&variant);
@@ -795,6 +810,65 @@ fn pss_worker_transport_preserves_every_exact_contract_field() {
         assert_eq!(AnalysisSpec::from(worker), variant);
     }
 }
+
+/// A wire written before the solver controls existed restores as the run it
+/// described.
+///
+/// The worker enum is the protocol, and an older worker's request carries none
+/// of these keys. Each one is `serde(default)`-ed to the engine's own setting,
+/// so the request that comes back is the one that was sent — a shooting solve
+/// under the engine's integration method — rather than a decode failure.
+#[test]
+fn a_pss_wire_written_before_the_solver_controls_restores_with_the_engine_defaults() {
+    let current = AnalysisSpec::Pss {
+        method: PssMethod::Shooting,
+        fundamental_freq: 1.0e6,
+        tone_sources: vec!["VCLK".to_owned()],
+        tstab_periods: 20,
+        points_per_period: 512,
+        tolerance: 1.0e-7,
+        oscillator_mode: false,
+        oscillator_node: None,
+        num_harmonics: 20,
+        integration_method: None,
+        tstab: 0.0,
+        max_iterations: 100,
+        abstol: 1.0e-12,
+        damping: 1.0,
+        max_period_change: 0.1,
+        verbose: false,
+    };
+    let worker = WorkerAnalysisSpec::try_from(&current).expect("PSS worker conversion");
+    let mut wire = serde_json::to_value(&worker).expect("PSS worker serializes");
+    let payload = wire["Pss"]
+        .as_object_mut()
+        .expect("the PSS wire payload is an object");
+    for retired in SOLVER_CONTROL_WIRE_KEYS {
+        assert!(
+            payload.remove(*retired).is_some(),
+            "the fixture must carry {retired} for its removal to mean anything"
+        );
+    }
+
+    let restored: WorkerAnalysisSpec =
+        serde_json::from_value(wire).expect("an older worker's PSS request decodes");
+    assert_eq!(
+        AnalysisSpec::from(restored),
+        current,
+        "an absent solver control means the engine's own setting"
+    );
+}
+
+/// The wire keys the solver controls occupy, in the order they were added.
+const SOLVER_CONTROL_WIRE_KEYS: &[&str] = &[
+    "integration_method",
+    "tstab",
+    "max_iterations",
+    "abstol",
+    "damping",
+    "max_period_change",
+    "verbose",
+];
 
 #[test]
 fn legacy_hb_specs_default_the_exact_collocation_grid() {

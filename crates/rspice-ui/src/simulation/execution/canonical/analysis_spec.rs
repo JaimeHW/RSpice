@@ -10,7 +10,7 @@ use crate::services::simulation_runner::{
     CornerProcess, PacFrequencySweep, PnoiseFrequencySweep, PxfFrequencySweep,
 };
 use crate::simulation::config::{NoiseContributionDetail, NoiseIntegrationMode, NoiseSweepType};
-use crate::simulation::dialog::OpConfig;
+use crate::simulation::dialog::{IntegrationMethod, OpConfig};
 use crate::simulation::multi_run::{
     AnalysisSpec, EnvelopeAdaptiveMode, EnvelopeExtractionPath, EnvelopeInitialPeriodicSolve,
     FrequencySweep, OptimizationAlgorithm, OptimizationGoal,
@@ -202,6 +202,13 @@ pub(super) fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &Analysis
             oscillator_mode,
             oscillator_node,
             num_harmonics,
+            integration_method,
+            tstab,
+            max_iterations,
+            abstol,
+            damping,
+            max_period_change,
+            verbose,
         } => {
             writer.u8(match method {
                 crate::simulation::multi_run::PssMethod::Shooting => 0,
@@ -218,6 +225,21 @@ pub(super) fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &Analysis
             writer.bool(*oscillator_mode);
             writer.option(oscillator_node.as_ref(), |w, value| w.string(value));
             writer.usize(*num_harmonics);
+            // Appended, never interleaved: the bytes are the protocol, so a
+            // field added to an arm goes on its end. A request that took the
+            // engine's default integration method therefore writes one more
+            // byte than it used to and earns a new digest — which is correct,
+            // because a digest identifies the encoding as well as the request,
+            // and the same reasoning carried the DC sweep's retrace flag.
+            writer.option(integration_method.as_ref(), |w, method| {
+                w.u8(encode_integration_method(*method));
+            });
+            writer.f64(*tstab);
+            writer.usize(*max_iterations);
+            writer.f64(*abstol);
+            writer.f64(*damping);
+            writer.f64(*max_period_change);
+            writer.bool(*verbose);
         }
         AnalysisSpec::PssSpectrum { num_harmonics } => {
             writer.usize(*num_harmonics);
@@ -681,6 +703,20 @@ pub(super) fn encode_f64_slice(writer: &mut CanonicalWriter, values: &[f64]) {
     writer.sequence(values.len());
     for value in values {
         writer.f64(*value);
+    }
+}
+
+/// One integration method's tag, appended in the enum's own order.
+///
+/// A separate function rather than an inline `match` because the same tag set
+/// will be read by every analysis that learns to name a method; a second copy
+/// is how two arms end up disagreeing about which byte means Gear.
+fn encode_integration_method(method: IntegrationMethod) -> u8 {
+    match method {
+        IntegrationMethod::Trap => 0,
+        IntegrationMethod::Euler => 1,
+        IntegrationMethod::Gear2 => 2,
+        IntegrationMethod::TrapGear => 3,
     }
 }
 

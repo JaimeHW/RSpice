@@ -762,29 +762,23 @@ fn every_declared_prerequisite_kind_repairs_to_an_exact_frozen_closure() {
     }
 }
 
+/// Phase noise binds only to the carrier that has a phase to diffuse.
+///
+/// This also used to assert that a PAC refuses a legacy HB-PSS prerequisite,
+/// through a draft with `method_idx = 1`. There is no such draft any more: the
+/// solver-mode chooser had one executable position and is retired, so the
+/// editor cannot ask for the harmonic-balance formulation at all. The refusal
+/// itself is not gone — `execution::artifact` and `spec::validation` still
+/// refuse a *sealed* specification that names it, and their own tests hold
+/// them to it — it simply has no reachable draft to be provoked from here.
 #[test]
-fn periodic_consumers_reject_legacy_hb_pss_and_phase_noise_requires_autonomous_pss() {
+fn phase_noise_requires_an_autonomous_pss_prerequisite() {
     let mut plan = SimulationPlan::empty();
     let (pss, _) = plan.insert(AnalysisKind::Pss).expect("PSS inserts");
-    let (pac, _) = plan.insert(AnalysisKind::Pac).expect("PAC inserts");
     plan.edit(pss, |draft| {
         let AnalysisDraft::Pss(pss) = draft else {
             panic!("expected PSS draft");
         };
-        pss.method_idx = 1;
-    })
-    .expect("legacy PSS state remains editable");
-    assert!(matches!(
-        plan.bind_dependency(pac, AnalysisKind::Pss, pss),
-        Err(AnalysisPlanError::DependencyConfigurationInvalid { detail, .. })
-            if detail.contains("HB-PSS")
-    ));
-
-    plan.edit(pss, |draft| {
-        let AnalysisDraft::Pss(pss) = draft else {
-            panic!("expected PSS draft");
-        };
-        pss.method_idx = 0;
         pss.osc_mode = false;
         pss.osc_node.clear();
         // A driven solve needs a tone, and only the design can name one.

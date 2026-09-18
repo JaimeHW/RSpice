@@ -84,8 +84,8 @@ pub(super) fn fields(
     hinted_input_row(
         ui,
         HB_FIELD_LABELS[7],
-        "products up to this order",
         &mut setup.max_mixing_order,
+        "products up to this order",
     );
     engineering_input_row(ui, HB_FIELD_LABELS[8], &mut setup.reltol);
     engineering_input_row(ui, HB_FIELD_LABELS[9], &mut setup.abstol);
@@ -104,8 +104,8 @@ pub(super) fn fields(
     hinted_input_row(
         ui,
         HB_FIELD_LABELS[13],
-        "odd, empty is automatic",
         &mut setup.collocation_points,
+        "odd, empty is automatic",
     );
     switch_row(ui, HB_FIELD_LABELS[14], &mut setup.use_exact_jacobian);
     let mut remove: Option<usize> = None;

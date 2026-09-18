@@ -76,6 +76,7 @@ pub use psp::{
     PspRunConfig, PspSweep, run_hbsp_analysis_from_hb_with_source_path_and_abort,
     run_psp_analysis_from_pss_with_source_path_and_abort,
 };
+pub(crate) use pss::build_core_pss_config;
 pub use pss::{
     PssRunConfig, compute_fft_harmonics_with_abort,
     run_pss_analysis_with_dc_seed_and_source_path_and_abort,

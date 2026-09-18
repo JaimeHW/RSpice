@@ -269,18 +269,41 @@ fn input_row_enabled(ui: &mut Ui, label: &str, value: &mut String, enabled: bool
     })
 }
 
-/// A well whose hint slot names the rule the value obeys.
+/// A well whose hint slot states a rule rather than the notation.
 ///
-/// The same right-aligned slot [`engineering_input_row`] fills with
-/// "engineering notation": a field whose domain is a counting rule rather than
-/// a number format says the rule there, beside the control it is about, and
-/// the caption elides to make room for it.
-fn hinted_input_row(ui: &mut Ui, label: &str, hint: &str, value: &mut String) -> Response {
+/// Most numeric fields have nothing to say in that slot but which notation
+/// they take, and [`engineering_input_row`] says exactly that. A few have a
+/// rule the label cannot carry and the value alone does not imply — a window
+/// that overrides the count above it, a factor with a closed range, a control
+/// only one mode reads — and for those the rule is worth more in the slot than
+/// the notation is. Both accept the same spellings either way.
+fn hinted_input_row(ui: &mut Ui, label: &str, value: &mut String, hint: &str) -> Response {
     if !uses_two_column_fields(ui) {
         return inspector_input_row(ui, label, value);
     }
     field_cell(ui, label, Some(hint), |ui| {
         mono_input(ui, label, value, ui.available_width())
+    })
+}
+
+/// The same field, offered or withheld by the mode that reads it.
+fn hinted_input_row_enabled(
+    ui: &mut Ui,
+    label: &str,
+    value: &mut String,
+    hint: &str,
+    enabled: bool,
+) -> Response {
+    if !uses_two_column_fields(ui) {
+        return ui
+            .add_enabled_ui(enabled, |ui| inspector_input_row(ui, label, value))
+            .inner;
+    }
+    field_cell(ui, label, Some(hint), |ui| {
+        ui.add_enabled_ui(enabled, |ui| {
+            mono_input(ui, label, value, ui.available_width())
+        })
+        .inner
     })
 }
 

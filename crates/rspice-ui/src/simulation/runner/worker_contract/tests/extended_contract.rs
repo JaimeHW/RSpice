@@ -346,6 +346,13 @@ fn analysis_spec_round_trips_supported_variants() {
             oscillator_mode: false,
             oscillator_node: None,
             num_harmonics: 5,
+            integration_method: Some(IntegrationMethod::Gear2),
+            tstab: 0.0,
+            max_iterations: 100,
+            abstol: 1.0e-12,
+            damping: 1.0,
+            max_period_change: 0.1,
+            verbose: false,
         },
         AnalysisSpec::HarmonicBalance {
             tones: vec![HbToneSpec::new(1e6, 3).with_source("VIN")],

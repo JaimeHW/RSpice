@@ -76,6 +76,76 @@ impl IntegrationMethod {
             IntegrationMethod::TrapGear,
         ]
     }
+
+    /// The method a deck's `METHOD=` spelling names.
+    ///
+    /// The engine accepts several dialects for each integrator — SPICE's
+    /// `TRAP`/`GEAR`, Xyce's numeric `7`/`8`, the hybrid's `AUTO` — and the
+    /// table lives in `rspice_core::numerics::integration` where the enum
+    /// does. This is the reader's side of it, and it is held to the engine's
+    /// by `a_deck_method_spelling_means_the_same_thing_to_both_readers`: every
+    /// spelling here is put through the engine's own `.PSS` parser and must
+    /// come back as the same integrator, and a spelling the engine refuses
+    /// must be refused here.
+    pub fn from_spice_name(spelling: &str) -> Option<Self> {
+        let matches = |candidates: &[&str]| {
+            candidates
+                .iter()
+                .any(|candidate| spelling.eq_ignore_ascii_case(candidate))
+        };
+        if matches(&["TRAP", "TRAPEZOIDAL", "TRAPEZOID", "ONESTEP", "7"]) {
+            Some(Self::Trap)
+        } else if matches(&["EULER", "BE", "BACKWARDEULER"]) {
+            Some(Self::Euler)
+        } else if matches(&["GEAR", "BDF", "GEAR2", "8"]) {
+            Some(Self::Gear2)
+        } else if matches(&["TRAPGEAR", "AUTO"]) {
+            Some(Self::TrapGear)
+        } else {
+            None
+        }
+    }
+
+    /// Every deck spelling this reader accepts, grouped by the method it
+    /// names.
+    ///
+    /// Exposed so the agreement test can enumerate them; nothing shipped
+    /// reads it.
+    #[cfg(test)]
+    pub fn spice_spellings() -> &'static [&'static str] {
+        &[
+            "TRAP",
+            "TRAPEZOIDAL",
+            "TRAPEZOID",
+            "ONESTEP",
+            "7",
+            "EULER",
+            "BE",
+            "BACKWARDEULER",
+            "GEAR",
+            "BDF",
+            "GEAR2",
+            "8",
+            "TRAPGEAR",
+            "AUTO",
+        ]
+    }
+
+    /// The engine's own integrator this names.
+    ///
+    /// One owner for the mapping. The global options model resolved it into a
+    /// `SimulationConfigOverrides` and PSS resolves it into a `PssConfig`, and
+    /// two copies of a four-arm translation is how one of them ends up sending
+    /// Gear where the other sends trapezoidal.
+    pub fn core(self) -> rspice_core::numerics::integration::IntegrationMethod {
+        use rspice_core::numerics::integration::IntegrationMethod as Core;
+        match self {
+            Self::Trap => Core::Trapezoidal,
+            Self::Euler => Core::BackwardEuler,
+            Self::Gear2 => Core::Gear2,
+            Self::TrapGear => Core::TrapGear,
+        }
+    }
 }
 
 /// Damping strategy for Newton-Raphson convergence.

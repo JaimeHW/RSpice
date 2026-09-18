@@ -72,7 +72,7 @@ pub use op::{
 pub use hb::HbDialogState;
 #[cfg(test)]
 pub use pss::PssConfig;
-pub use pss::{PssDialogState, PssSolverMethod};
+pub use pss::PssDialogState;
 
 // Re-exports - Periodic Small-Signal
 pub use pac::PacDialogState;

@@ -252,6 +252,13 @@ mod tests {
                 oscillator_mode: false,
                 oscillator_node: None,
                 num_harmonics: 9,
+                integration_method: None,
+                tstab: 0.0,
+                max_iterations: 100,
+                abstol: 1.0e-12,
+                damping: 1.0,
+                max_period_change: 0.1,
+                verbose: false,
             }
         );
     }
@@ -268,6 +275,13 @@ mod tests {
             oscillator_mode: true,
             oscillator_node: None,
             num_harmonics: 9,
+            integration_method: None,
+            tstab: 0.0,
+            max_iterations: 100,
+            abstol: 1.0e-12,
+            damping: 1.0,
+            max_period_change: 0.1,
+            verbose: false,
         };
 
         assert!(spec.validate().is_err());
@@ -285,6 +299,13 @@ mod tests {
             oscillator_mode: true,
             oscillator_node: Some("out".to_owned()),
             num_harmonics: 9,
+            integration_method: None,
+            tstab: 0.0,
+            max_iterations: 100,
+            abstol: 1.0e-12,
+            damping: 1.0,
+            max_period_change: 0.1,
+            verbose: false,
         };
 
         let error = spec

@@ -915,7 +915,14 @@ fn validate_choice_indices(plan: &SimSetupState) -> Result<(), String> {
         ("pz.analysis_idx", plan.pz.analysis_idx, 2),
         ("sens.sens_type_idx", plan.sens.sens_type_idx, 1),
         ("mc.distribution_idx", plan.mc.distribution_idx, 2),
-        ("pss.method_idx", plan.pss.method_idx, 1),
+        // The chooser's positions are the engine's methods plus the leading
+        // "engine default", so the bound is read off the method list rather
+        // than written down beside it.
+        (
+            "pss.integration_method_idx",
+            plan.pss.integration_method_idx,
+            crate::simulation::dialog::IntegrationMethod::all().len(),
+        ),
         ("temp.base_idx", plan.temp.base_idx, 3),
         ("hb.solver_idx", plan.hb.solver_idx, 1),
         ("sp.sweep_type_idx", plan.sp.sweep_type_idx, 2),

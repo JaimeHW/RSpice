@@ -12,6 +12,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::simulation::config::{NoiseContributionDetail, NoiseIntegrationMode, NoiseSweepType};
+use crate::simulation::dialog::IntegrationMethod;
 use crate::simulation::multi_run::{
     AnalysisSpec, EnvelopeAdaptiveMode, EnvelopeExtractionPath, EnvelopeInitialPeriodicSolve,
     HbToneSpec, OptimizationAlgorithm, OptimizationGoal, OptimizationVariable, PssMethod, SpPort,
@@ -26,6 +27,24 @@ const fn worker_default_pss_stabilization_cycles() -> usize {
 
 const fn worker_default_pss_shooting_points() -> usize {
     512
+}
+
+// The engine's `.PSS` card defaults, so an older worker's request restores as
+// the run it described rather than failing to decode.
+const fn worker_default_pss_max_iterations() -> usize {
+    100
+}
+
+const fn worker_default_pss_abstol() -> f64 {
+    1.0e-12
+}
+
+const fn worker_default_pss_damping() -> f64 {
+    1.0
+}
+
+const fn worker_default_pss_max_period_change() -> f64 {
+    0.1
 }
 
 const fn worker_default_true() -> bool {
@@ -216,6 +235,24 @@ pub(crate) enum WorkerAnalysisSpec {
         #[serde(default)]
         oscillator_node: Option<String>,
         num_harmonics: usize,
+        /// Integration method for the shooting solve's inner transients, or
+        /// `None` for the engine's default. A wire written before the control
+        /// existed restores as the default it ran under.
+        #[serde(default)]
+        integration_method: Option<IntegrationMethod>,
+        /// Stabilization window in seconds; zero defers to the period count.
+        #[serde(default)]
+        tstab: f64,
+        #[serde(default = "worker_default_pss_max_iterations")]
+        max_iterations: usize,
+        #[serde(default = "worker_default_pss_abstol")]
+        abstol: f64,
+        #[serde(default = "worker_default_pss_damping")]
+        damping: f64,
+        #[serde(default = "worker_default_pss_max_period_change")]
+        max_period_change: f64,
+        #[serde(default)]
+        verbose: bool,
     },
     HarmonicBalance {
         tones: Vec<HbToneSpec>,

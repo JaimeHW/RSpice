@@ -549,6 +549,100 @@ fn the_periodic_transfer_and_stability_controls_reach_the_engines_own_card() {
     assert!((pstb_run.eigenvalue_tolerance - 1.0e-12).abs() <= 1.0e-27);
 }
 
+/// Every shooting control the form holds reaches the engine's own card field.
+///
+/// The card is written from a draft with nothing at its default, parsed by the
+/// *core* netlist parser, and compared field by field against the `PssCard`
+/// the engine builds from it. That is the half a string assertion cannot give:
+/// `.pss … damping=0.75` is a well-formed card whatever the engine does with
+/// the keyword, and the studio hardcoded a Newton limit of 100 for as long as
+/// the form had no field for one.
+#[test]
+fn the_pss_directive_carries_every_shooting_control_it_was_given() {
+    use crate::simulation::dialog::IntegrationMethod;
+    use crate::simulation::plan::AnalysisDraft;
+    use rspice_core::netlist::{AnalysisCommand, Netlist};
+
+    let mut draft = fixture_draft(AnalysisKind::Pss);
+    let AnalysisDraft::Pss(pss) = &mut draft else {
+        panic!("the PSS kind carries a PSS draft");
+    };
+    pss.initialized = true;
+    pss.tone_sources = "VSRC".to_owned();
+    pss.fund_freq = "2.5Meg".to_owned();
+    pss.tstab_periods = "7".to_owned();
+    pss.points_per_period = "1024".to_owned();
+    pss.tolerance = "1e-8".to_owned();
+    pss.num_harmonics = "15".to_owned();
+    pss.tstab = "3n".to_owned();
+    pss.max_iterations = "250".to_owned();
+    pss.abstol = "1e-15".to_owned();
+    pss.damping = "0.75".to_owned();
+    pss.max_period_change = "0.25".to_owned();
+    pss.integration_method_idx = 1 + IntegrationMethod::all()
+        .iter()
+        .position(|method| *method == IntegrationMethod::Gear2)
+        .expect("Gear-2 is an offered method");
+
+    let state = engine_facing_state(&draft);
+    let directive = SimulationController::new()
+        .analysis_draft_directive(&state, &draft)
+        .expect("a fully configured PSS draft emits a card");
+    for keyword in [
+        "fund=",
+        "autonomous=",
+        "tstabperiods=",
+        "tstab=",
+        "points=",
+        "harms=",
+        "tol=",
+        "abstol=",
+        "maxiter=",
+        "damping=",
+        "maxperiodchange=",
+        "method=",
+    ] {
+        assert!(
+            directive.contains(keyword),
+            "the card drops {keyword}: {directive}"
+        );
+    }
+
+    let deck = format!("{FIXTURE_DECK}{directive}\n.end\n");
+    let netlist = Netlist::parse(&deck)
+        .unwrap_or_else(|error| panic!("the engine reads `{directive}`: {error}"));
+    let card = match netlist.analyses.into_iter().next() {
+        Some(AnalysisCommand::Pss(card)) => *card,
+        other => panic!("expected a .PSS card, got {other:?}"),
+    };
+    assert_eq!(card.fundamental_freq, 2.5e6);
+    assert_eq!(card.tstab_periods, 7);
+    assert_eq!(card.points_per_period, 1024);
+    assert_eq!(card.num_harmonics, 15);
+    assert_eq!(card.tolerance, 1.0e-8);
+    assert_eq!(card.tstab, 3.0e-9);
+    assert_eq!(card.max_iterations, 250);
+    assert_eq!(card.abstol, 1.0e-15);
+    assert_eq!(card.damping_factor, 0.75);
+    assert_eq!(card.max_period_change, 0.25);
+    assert_eq!(
+        card.integration_method,
+        Some(rspice_core::numerics::integration::IntegrationMethod::Gear2)
+    );
+    assert!(!card.auto_period, "this draft is driven");
+    // The configuration the card converts to is what the solver takes, so the
+    // assertions end there rather than at the card.
+    let config = rspice_core::analysis::PssConfig::from(&card);
+    // The engine's own resolution of the two stabilization fields: a positive
+    // time is the window, and the cycle count is what a zero defers to.
+    assert_eq!(config.effective_tstab(), 3.0e-9);
+    assert!(
+        config.validate().is_ok(),
+        "the card the studio wrote must configure the solver it reaches: {:?}",
+        config.validate()
+    );
+}
+
 /// An autonomous PSS reaches the deck as autonomous, and reads back that way.
 ///
 /// The second setting the parse walk cannot see. `parse_netlist` accepting a
@@ -609,11 +703,24 @@ fn an_autonomous_pss_round_trips_through_the_deck_reader_as_autonomous() {
         oscillator_mode,
         oscillator_node,
         tone_sources,
+        max_iterations,
+        abstol,
+        damping,
+        max_period_change,
+        tstab,
         ..
     } = read_back(true)
     else {
         unreachable!("filtered to the PSS spec");
     };
+    // The controls the draft left at their defaults come back as those
+    // defaults rather than as the reader's own idea of them, which is the
+    // property that makes the two default tables one table.
+    assert_eq!(max_iterations, 100);
+    assert_eq!(abstol, 1.0e-12);
+    assert_eq!(damping, 1.0);
+    assert_eq!(max_period_change, 0.1);
+    assert_eq!(tstab, 0.0);
     assert!(
         oscillator_mode,
         "an autonomous PSS that reads back as driven would solve the trivial answer"

@@ -41,6 +41,22 @@ pub struct PssRunConfig {
     pub tolerance: Value,
     pub oscillator_mode: bool,
     pub oscillator_node: Option<String>,
+    /// Integration method for each shooting period's inner transient, or
+    /// `None` for the engine's own default.
+    pub integration_method: Option<rspice_core::numerics::integration::IntegrationMethod>,
+    /// Stabilization window in seconds. Zero takes it from `tstab_periods`,
+    /// which is `PssConfig::effective_tstab`'s own rule.
+    pub tstab: Value,
+    /// Shooting-Newton correction limit per integration grid.
+    pub max_iterations: usize,
+    /// Absolute periodicity tolerance, in each coordinate's SI unit.
+    pub abstol: Value,
+    /// Newton damping factor in `[0.1, 1.0]`.
+    pub damping: Value,
+    /// Largest relative period correction one autonomous iteration takes.
+    pub max_period_change: Value,
+    /// Whether the engine logs its shooting convergence.
+    pub verbose: bool,
 }
 
 impl PssRunConfig {
@@ -59,6 +75,16 @@ impl PssRunConfig {
             tolerance,
             oscillator_mode: false,
             oscillator_node: None,
+            integration_method: None,
+            // The engine's own card defaults. This constructor serves the
+            // compatibility entry point, which predates every one of these
+            // controls and therefore asked for exactly these values.
+            tstab: 0.0,
+            max_iterations: 100,
+            abstol: 1.0e-12,
+            damping: 1.0,
+            max_period_change: 0.1,
+            verbose: false,
         }
     }
 }
@@ -218,7 +244,7 @@ fn run_pss_analysis_internal(
     // empty selection nor a complete one can pass. Core imposes no such rule
     // on the tone list of `PssConfig::autonomous()`. Core separately verifies
     // that the free-running orbit has no changing external drive.
-    let pss_config = core_pss_config(config);
+    let pss_config = build_core_pss_config(config);
     if !config.oscillator_mode {
         engine
             .validate_pss_source_contract_with_abort(
@@ -324,7 +350,16 @@ fn apply_seed_environment(
     Ok(temperature_celsius + 273.15)
 }
 
-fn core_pss_config(config: &PssRunConfig) -> PssConfig {
+/// The engine configuration one shooting request resolves to.
+///
+/// `pub(crate)` for the same reason [`super::build_core_hb_config`] is: the
+/// execution-artifact contract has to recompute the configuration a frozen
+/// producer specification asked for, and it must arrive at the *same* one this
+/// runner hands the engine. It used to keep its own copy of this function,
+/// including its own literal `100` Newton iterations, so every control this
+/// request learned was a field the two copies could disagree about — and a
+/// disagreement there refuses a converged periodic state as unauthenticated.
+pub(crate) fn build_core_pss_config(config: &PssRunConfig) -> PssConfig {
     let mut pss_config = if config.oscillator_mode {
         PssConfig::autonomous().with_period_guess(1.0 / config.fundamental_freq)
     } else {
@@ -335,12 +370,23 @@ fn core_pss_config(config: &PssRunConfig) -> PssConfig {
     // service identity and yields an empty public harmonic payload.
     .with_harmonics(config.num_harmonics.max(1))
     .with_tolerance(config.tolerance)
-    .with_max_iterations(100)
+    // The literal `100` that stood here is gone: the request carries the
+    // limit, and the form and the deck can both state it.
+    .with_max_iterations(config.max_iterations)
     .with_tstab_periods(config.tstab_periods)
+    .with_tstab(config.tstab)
+    .with_damping(config.damping)
+    .with_verbose(config.verbose)
     .with_points_per_period(config.points_per_period);
     if let Some(node) = config.oscillator_node.as_deref() {
         pss_config = pss_config.with_oscillator_node(node);
     }
+    // Assigned rather than built: `PssConfig` has no builder for these three.
+    // The method is an `Option` whose `None` is the engine's own choice, which
+    // no `with_` call can express, and the other two simply never grew one.
+    pss_config.integration_method = config.integration_method;
+    pss_config.abstol = config.abstol;
+    pss_config.max_period_change = config.max_period_change;
     pss_config
 }
 
@@ -375,6 +421,24 @@ fn validate_pss_config(config: &PssRunConfig) -> Result<(), String> {
     }
     if !config.tolerance.is_finite() || config.tolerance <= 0.0 {
         return Err("PSS tolerance must be positive".to_string());
+    }
+    // The engine's own bounds, asked before the solve starts rather than
+    // after: `PssConfig::validate` refuses the same values, and
+    // `with_damping` would silently clamp this one.
+    if !config.tstab.is_finite() || config.tstab < 0.0 {
+        return Err("PSS tstab must be non-negative".to_owned());
+    }
+    if config.max_iterations == 0 {
+        return Err("PSS max iterations must be at least 1".to_owned());
+    }
+    if !config.abstol.is_finite() || config.abstol <= 0.0 {
+        return Err("PSS abstol must be positive".to_owned());
+    }
+    if !config.damping.is_finite() || !(0.1..=1.0).contains(&config.damping) {
+        return Err("PSS damping must be in [0.1, 1.0]".to_owned());
+    }
+    if !config.max_period_change.is_finite() || config.max_period_change <= 0.0 {
+        return Err("PSS max period change must be positive".to_owned());
     }
     if config.oscillator_mode
         && config
@@ -557,6 +621,13 @@ mod tests {
             tolerance: 1.0e-2,
             oscillator_mode: false,
             oscillator_node: None,
+            integration_method: None,
+            tstab: 0.0,
+            max_iterations: 100,
+            abstol: 1.0e-12,
+            damping: 1.0,
+            max_period_change: 0.1,
+            verbose: false,
         };
         let result = run_pss_analysis_with_dc_seed_and_source_path_and_abort(
             source,
@@ -603,17 +674,42 @@ mod tests {
             tolerance: 2.0e-5,
             oscillator_mode: true,
             oscillator_node: Some("osc".to_owned()),
+            integration_method: Some(
+                rspice_core::numerics::integration::IntegrationMethod::Gear2,
+            ),
+            tstab: 3.0e-9,
+            max_iterations: 250,
+            abstol: 1.0e-15,
+            damping: 0.75,
+            max_period_change: 0.25,
+            verbose: true,
         };
 
-        let core = core_pss_config(&config);
+        let core = build_core_pss_config(&config);
         assert!(core.auto_period);
         assert_eq!(core.period_guess, 0.5e-6);
         assert_eq!(core.num_harmonics, 13);
         assert_eq!(core.tolerance, 2.0e-5);
-        assert_eq!(core.max_iterations, 100);
         assert_eq!(core.tstab_periods, 37);
         assert_eq!(core.points_per_period, 1024);
         assert_eq!(core.oscillator_node.as_deref(), Some("osc"));
+        // Every control the request carries, in the engine's own field. The
+        // Newton limit was a literal here until this lane; the rest had no
+        // route to the engine at all.
+        assert_eq!(core.max_iterations, 250);
+        assert_eq!(core.tstab, 3.0e-9);
+        assert_eq!(core.abstol, 1.0e-15);
+        assert_eq!(core.damping_factor, 0.75);
+        assert_eq!(core.max_period_change, 0.25);
+        assert!(core.verbose);
+        assert_eq!(
+            core.integration_method,
+            Some(rspice_core::numerics::integration::IntegrationMethod::Gear2)
+        );
+        // A positive window is the window: the engine's own resolution takes
+        // the period count only when the time is zero.
+        assert_eq!(core.effective_tstab(), 3.0e-9);
+        assert!(core.validate().is_ok(), "{:?}", core.validate());
     }
 
     #[test]
@@ -627,10 +723,17 @@ mod tests {
             tolerance: 1.0e-7,
             oscillator_mode: false,
             oscillator_node: None,
+            integration_method: None,
+            tstab: 0.0,
+            max_iterations: 100,
+            abstol: 1.0e-12,
+            damping: 1.0,
+            max_period_change: 0.1,
+            verbose: false,
         };
 
         validate_pss_config(&config).expect("zero retained harmonics is valid");
-        let core = core_pss_config(&config);
+        let core = build_core_pss_config(&config);
         assert_eq!(core.num_harmonics, 1);
         assert_eq!(config.num_harmonics, 0);
         assert!(core.validate().is_ok());
@@ -648,6 +751,13 @@ mod tests {
             tolerance: 1.0e-7,
             oscillator_mode: false,
             oscillator_node: None,
+            integration_method: None,
+            tstab: 0.0,
+            max_iterations: 100,
+            abstol: 1.0e-12,
+            damping: 1.0,
+            max_period_change: 0.1,
+            verbose: false,
         };
 
         let error = run_pss_analysis_with_config_and_source_path_and_abort(
@@ -681,6 +791,13 @@ mod tests {
                 tolerance: 1e-7,
                 oscillator_mode: false,
                 oscillator_node: None,
+                integration_method: None,
+                tstab: 0.0,
+                max_iterations: 100,
+                abstol: 1.0e-12,
+                damping: 1.0,
+                max_period_change: 0.1,
+                verbose: false,
             };
             let result = run_pss_analysis_with_config_and_source_path_and_abort(
                 source, &config, None, &NoAbort,
@@ -710,6 +827,13 @@ mod tests {
             tolerance: 1.0e-6,
             oscillator_mode: true,
             oscillator_node: Some("osc".to_owned()),
+            integration_method: None,
+            tstab: 0.0,
+            max_iterations: 100,
+            abstol: 1.0e-12,
+            damping: 1.0,
+            max_period_change: 0.1,
+            verbose: false,
         };
 
         let data = run_pss_analysis_with_config_and_source_path_and_abort(

@@ -17,7 +17,7 @@ use super::operating_point::{
     OP_INITIAL_GUESS_CHOICES, OP_NODE_INITIALIZATION_CHOICES, op_initial_guess_disabled,
     op_node_initialization_disabled, op_startup_indices_compatible,
 };
-use super::pss::{PSS_FIELD_LABELS, PSS_MODE_CHOICES};
+use super::pss::{PSS_ENGINE_DEFAULT_METHOD, PSS_FIELD_LABELS, pss_integration_method_choices};
 use super::transfer_function::{
     XF_ACCURACY_CHOICES, XF_FIELD_LABELS, XF_INFER_LABEL, XF_NORMALIZATION_CHOICES, XF_SOLVE_POINT,
     xf_output_presets,
@@ -253,7 +253,7 @@ fn pss_field_order_and_wording_match_the_canonical_mockup() {
     assert_eq!(
         PSS_FIELD_LABELS,
         [
-            "Mode",
+            "Integration method",
             "Fundamental",
             "Tones",
             "Stabilization cycles",
@@ -262,9 +262,24 @@ fn pss_field_order_and_wording_match_the_canonical_mockup() {
             "Autonomous oscillator",
             "Oscillator node",
             "Save harmonics",
+            "Stabilization time",
+            "Max iterations",
+            "Absolute tolerance",
+            "Damping",
+            "Max period change",
         ]
     );
-    assert_eq!(PSS_MODE_CHOICES, ["Driven shooting"]);
+    assert_eq!(
+        pss_integration_method_choices(),
+        [
+            PSS_ENGINE_DEFAULT_METHOD,
+            "Trapezoidal",
+            "Backward Euler",
+            "Gear-2 (BDF)",
+            "Trap/Gear (Auto)",
+        ],
+        "the chooser offers the engine's own methods, in the engine's order"
+    );
 }
 
 #[test]

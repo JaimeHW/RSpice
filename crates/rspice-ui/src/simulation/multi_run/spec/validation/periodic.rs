@@ -51,6 +51,18 @@ pub(super) fn validate(spec: &AnalysisSpec) -> Result<(), String> {
             oscillator_mode,
             oscillator_node,
             num_harmonics,
+            // Any method the chooser offers is one the card spells and the
+            // engine integrates under, and `None` is the engine's own
+            // default, so there is no setting here to refuse.
+            integration_method: _,
+            tstab,
+            max_iterations,
+            abstol,
+            damping,
+            max_period_change,
+            // The engine takes either setting; what it writes is a log, not a
+            // result, so there is nothing to bound.
+            verbose: _,
         } => {
             if *method != PssMethod::Shooting {
                 return Err(
@@ -94,6 +106,25 @@ pub(super) fn validate(spec: &AnalysisSpec) -> Result<(), String> {
                     .is_none_or(|node| node.trim().is_empty())
             {
                 return Err("PSS oscillator_node must be set in oscillator mode".to_string());
+            }
+            // The engine's own bounds, in the same words the editor refuses
+            // them in. A specification can reach here from a sealed manifest
+            // or a manual deck as well as from the form, so the bound has to
+            // be stated where every route passes.
+            if !tstab.is_finite() || *tstab < 0.0 {
+                return Err("PSS tstab must be finite and non-negative".to_owned());
+            }
+            if *max_iterations == 0 {
+                return Err("PSS max_iterations must be > 0".to_owned());
+            }
+            if !abstol.is_finite() || *abstol <= 0.0 {
+                return Err("PSS abstol must be finite and > 0".to_owned());
+            }
+            if !damping.is_finite() || !(0.1..=1.0).contains(damping) {
+                return Err("PSS damping must be finite and in [0.1, 1.0]".to_owned());
+            }
+            if !max_period_change.is_finite() || *max_period_change <= 0.0 {
+                return Err("PSS max_period_change must be finite and > 0".to_owned());
             }
             Ok(())
         }

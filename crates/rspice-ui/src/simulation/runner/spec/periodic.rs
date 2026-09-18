@@ -7,6 +7,7 @@ use std::path::Path;
 use rspice_core::abort_signal::AbortSignal;
 
 use crate::services::simulation_runner as svc_runner;
+use crate::simulation::dialog::IntegrationMethod;
 use crate::simulation::execution::{ResolvedExecutionDependencies, TransientTrajectoryArtifact};
 use crate::simulation::multi_run::{AnalysisSpec, FrequencySweep, PssMethod};
 use crate::simulation::results::{SimulationResult, WaveformData};
@@ -31,6 +32,13 @@ pub(super) fn run_periodic_spec(
             oscillator_mode,
             oscillator_node,
             num_harmonics,
+            integration_method,
+            tstab,
+            max_iterations,
+            abstol,
+            damping,
+            max_period_change,
+            verbose,
         } => match method {
             PssMethod::Shooting => run_pss(
                 netlist,
@@ -43,6 +51,15 @@ pub(super) fn run_periodic_spec(
                     tolerance,
                     oscillator_mode,
                     oscillator_node,
+                    // The service layer sits below the editors, so it takes
+                    // the engine's own method rather than the chooser's.
+                    integration_method: integration_method.map(IntegrationMethod::core),
+                    tstab,
+                    max_iterations,
+                    abstol,
+                    damping,
+                    max_period_change,
+                    verbose,
                 },
                 source_path,
                 dependencies,

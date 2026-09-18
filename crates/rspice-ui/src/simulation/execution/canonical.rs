@@ -1054,6 +1054,13 @@ mod tests {
             oscillator_mode: false,
             oscillator_node: None,
             num_harmonics: 20,
+            integration_method: None,
+            tstab: 0.0,
+            max_iterations: 100,
+            abstol: 1.0e-12,
+            damping: 1.0,
+            max_period_change: 0.1,
+            verbose: false,
         }
     }
 
@@ -1200,7 +1207,7 @@ mod tests {
     }
 
     #[test]
-    fn pss_digest_changes_for_every_exact_nine_field_contract_value() {
+    fn pss_digest_changes_for_every_exact_contract_value() {
         let base = AnalysisSpec::Pss {
             method: crate::simulation::multi_run::PssMethod::Shooting,
             fundamental_freq: 1.0e6,
@@ -1211,6 +1218,13 @@ mod tests {
             oscillator_mode: false,
             oscillator_node: None,
             num_harmonics: 20,
+            integration_method: None,
+            tstab: 0.0,
+            max_iterations: 100,
+            abstol: 1.0e-12,
+            damping: 1.0,
+            max_period_change: 0.1,
+            verbose: false,
         };
         let digest = |spec: &AnalysisSpec| {
             analysis_config_digest(".pss", spec, None, &SpecExecutionOptions::default(), None)
@@ -1239,6 +1253,16 @@ mod tests {
         changed!(oscillator_mode, true);
         changed!(oscillator_node, Some("osc".to_owned()));
         changed!(num_harmonics, 21);
+        changed!(
+            integration_method,
+            Some(crate::simulation::dialog::IntegrationMethod::Euler)
+        );
+        changed!(tstab, 3.0e-9);
+        changed!(max_iterations, 250);
+        changed!(abstol, 1.0e-15);
+        changed!(damping, 0.75);
+        changed!(max_period_change, 0.25);
+        changed!(verbose, true);
 
         for variant in variants {
             assert_ne!(baseline, digest(&variant), "variant: {variant:?}");

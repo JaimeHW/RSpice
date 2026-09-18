@@ -15,7 +15,7 @@ use crate::simulation::dependency_contract::{
 use crate::simulation::dialog::{
     CornerDialogState, EnvelopeDialogState, FourierDialogState, HbDialogState, McDialogState,
     NoiseReferenceType, OpDialogState, OptimizationDialogState, PacDialogState, PnoiseDialogState,
-    PssDialogState, PssSolverMethod, PstbDialogState, PxfDialogState, PzDialogState,
+    PssDialogState, PstbDialogState, PxfDialogState, PzDialogState,
     ReliabilityDialogState, SensDialogState, SoaDialogState, SpDialogState, StbDialogState,
     TempDialogState, XfDialogState,
 };
@@ -1049,7 +1049,12 @@ pub(super) fn dependency_configuration_issue(
         return validate_periodic_state_contract(
             consumer,
             PeriodicStateCapability {
-                shooting: pss.method == PssSolverMethod::Shooting,
+                // A PSS this editor built is a shooting solve. The capability
+                // stays a field rather than becoming a constant because a
+                // *sealed* specification may still carry the retired HB-PSS
+                // formulation, and `execution::artifact` judges that one; this
+                // is the live draft, which has no way to ask for it.
+                shooting: true,
                 autonomous: pss.osc_mode,
             },
             require_autonomous,
