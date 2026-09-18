@@ -409,9 +409,7 @@ fn parse_pss(
             Some(
                 crate::simulation::dialog::IntegrationMethod::from_spice_name(&spelling)
                     .ok_or_else(|| {
-                        format!(
-                            ".PSS method={spelling:?} is not TRAP, GEAR, EULER or TRAPGEAR"
-                        )
+                        format!(".PSS method={spelling:?} is not TRAP, GEAR, EULER or TRAPGEAR")
                     })?,
             )
         }
@@ -1227,9 +1225,9 @@ mod tests {
                 let rest = trimmed.strip_prefix('"')?;
                 let (keyword, tail) = rest.split_once('"')?;
                 // An arm, not a field name or a message: `"KEY" =>`.
-                tail.trim_start().starts_with("=>").then(|| {
-                    keyword.to_ascii_lowercase()
-                })
+                tail.trim_start()
+                    .starts_with("=>")
+                    .then(|| keyword.to_ascii_lowercase())
             })
             .collect::<Vec<_>>();
         engine_keys.sort();
@@ -1262,7 +1260,8 @@ mod tests {
     fn pss_solver_controls_round_trip_through_the_deck_reader() {
         use crate::simulation::dialog::{IntegrationMethod, PssConfig};
 
-        const CIRCUIT: &str = "pss solver controls\nV1 in 0 SIN(0 1 1Meg)\nR1 in out 1k\nC1 out 0 1n\n";
+        const CIRCUIT: &str =
+            "pss solver controls\nV1 in 0 SIN(0 1 1Meg)\nR1 in out 1k\nC1 out 0 1n\n";
         let authored = PssConfig {
             integration_method: Some(IntegrationMethod::Gear2),
             fund_freq: 1.0e6,
@@ -1344,7 +1343,8 @@ mod tests {
     /// both.
     #[test]
     fn an_autonomous_period_estimate_is_one_quantity_in_two_spellings() {
-        const CIRCUIT: &str = "pss period guess\nV1 in 0 SIN(0 1 1Meg)\nR1 in out 1k\nC1 out 0 1n\n";
+        const CIRCUIT: &str =
+            "pss period guess\nV1 in 0 SIN(0 1 1Meg)\nR1 in out 1k\nC1 out 0 1n\n";
 
         let deck = format!("{CIRCUIT}.pss autonomous=yes oscnode=out periodguess=1n\n.end\n");
         let netlist = Netlist::parse(&deck).expect("the engine reads periodguess=");

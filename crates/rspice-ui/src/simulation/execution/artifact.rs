@@ -320,9 +320,8 @@ fn validate_periodic_producer_config(
             tolerance: *tolerance,
             oscillator_mode: *oscillator_mode,
             oscillator_node: oscillator_node.clone(),
-            integration_method: integration_method.map(
-                crate::simulation::dialog::IntegrationMethod::core,
-            ),
+            integration_method: integration_method
+                .map(crate::simulation::dialog::IntegrationMethod::core),
             tstab: *tstab,
             max_iterations: *max_iterations,
             abstol: *abstol,

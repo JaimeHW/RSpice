@@ -674,9 +674,7 @@ mod tests {
             tolerance: 2.0e-5,
             oscillator_mode: true,
             oscillator_node: Some("osc".to_owned()),
-            integration_method: Some(
-                rspice_core::numerics::integration::IntegrationMethod::Gear2,
-            ),
+            integration_method: Some(rspice_core::numerics::integration::IntegrationMethod::Gear2),
             tstab: 3.0e-9,
             max_iterations: 250,
             abstol: 1.0e-15,

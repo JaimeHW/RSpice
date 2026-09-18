@@ -15,9 +15,8 @@ use crate::simulation::dependency_contract::{
 use crate::simulation::dialog::{
     CornerDialogState, EnvelopeDialogState, FourierDialogState, HbDialogState, McDialogState,
     NoiseReferenceType, OpDialogState, OptimizationDialogState, PacDialogState, PnoiseDialogState,
-    PssDialogState, PstbDialogState, PxfDialogState, PzDialogState,
-    ReliabilityDialogState, SensDialogState, SoaDialogState, SpDialogState, StbDialogState,
-    TempDialogState, XfDialogState,
+    PssDialogState, PstbDialogState, PxfDialogState, PzDialogState, ReliabilityDialogState,
+    SensDialogState, SoaDialogState, SpDialogState, StbDialogState, TempDialogState, XfDialogState,
 };
 use crate::simulation::spice_value::parse_spice_value_checked;
 use crate::workbench::app_state::{AcSetup, DcSetup, TranSetup};

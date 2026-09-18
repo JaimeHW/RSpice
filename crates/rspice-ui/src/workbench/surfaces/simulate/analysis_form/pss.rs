@@ -64,7 +64,11 @@ pub(super) const PSS_FIELD_LABELS: [&str; 14] = [
 /// the position that writes nothing.
 pub(super) fn pss_integration_method_choices() -> Vec<&'static str> {
     std::iter::once(PSS_ENGINE_DEFAULT_METHOD)
-        .chain(IntegrationMethod::all().iter().map(IntegrationMethod::display_name))
+        .chain(
+            IntegrationMethod::all()
+                .iter()
+                .map(IntegrationMethod::display_name),
+        )
         .collect()
 }
 
