@@ -678,6 +678,17 @@ fn execute_analysis(
             Ok(builders)
         }
 
+        AnalysisCommand::DcMatch(card) => {
+            let result = engine
+                .run_dc_match_with_abort(netlist, card, abort)
+                .map_err(simulation_error)?;
+            ensure_not_aborted(abort)?;
+            Ok(vec![
+                AnalysisResultDocument::from_dc_match(id, &result)
+                    .map_err(document_projection_error)?,
+            ])
+        }
+
         AnalysisCommand::Sensitivity { .. } => {
             let result = engine
                 .run_sensitivity_from_card_with_abort(netlist, command, abort)
@@ -1001,7 +1012,8 @@ fn unroutable_reason(command: &AnalysisCommand) -> Option<&'static str> {
         | AnalysisCommand::Pxf(_)
         | AnalysisCommand::Pstb(_)
         | AnalysisCommand::Pnoise(_)
-        | AnalysisCommand::Envelope(_) => None,
+        | AnalysisCommand::Envelope(_)
+        | AnalysisCommand::DcMatch(_) => None,
     }
 }
 
@@ -1030,6 +1042,7 @@ fn card_spelling(command: &AnalysisCommand) -> &'static str {
         AnalysisCommand::Pstb(_) => ".PSTB",
         AnalysisCommand::Pnoise(_) => ".PNOISE",
         AnalysisCommand::Envelope(_) => ".ENVELOPE",
+        AnalysisCommand::DcMatch(_) => ".DCMATCH",
     }
 }
 
@@ -1264,6 +1277,7 @@ pub(crate) fn materialized_run_wasm_error(error: MaterializedRunError) -> Box<Wa
 
 #[cfg(test)]
 mod tests {
+    use rspice_core::execution::result_document::{ResultPayload, ScalarValue};
     use rspice_core::execution::{
         AnalysisResultKind, MappingStatus, NonUiSurface, analysis_result_capability,
     };
@@ -1328,6 +1342,26 @@ C3 e 0 160p\n\
 R4 e a 1k\n\
 C4 a 0 160p\n";
 
+    /// A resistor divider whose two resistances carry independent per-instance
+    /// mismatch, declared the way a PDK declares it. `.DCMATCH` has no default
+    /// spread: a deck with no `statistics` block is refused by name, so this
+    /// family's deck has to bring one.
+    const DIVIDER_STATISTICS: &str = "\
+// Resistor divider mismatch.
+parameters r1v=1000 r2v=2000
+statistics {
+ mismatch {
+  vary r1v dist=gauss std=10
+  vary r2v dist=gauss std=10
+ }
+}
+";
+
+    const MISMATCH_DIVIDER: &str = "browser DC mismatch deck\n\
+V1 in 0 1\n\
+R1 in out {r1v}\n\
+R2 out 0 {r2v}\n";
+
     /// How the browser surface is expected to answer for one result family.
     ///
     /// Every family this build knows now executes, so `Routed` is the only
@@ -1341,6 +1375,25 @@ C4 a 0 160p\n";
 
     fn deck(circuit: &str, cards: &str) -> String {
         format!("{circuit}{cards}.END\n")
+    }
+
+    /// The same deck, with a Spectre statistics library lowered into it.
+    ///
+    /// The browser has no file system to `.include` a `.scs` library from, so
+    /// the library goes through the same public Spectre adapter the include
+    /// expander runs it through and the lowered plan is spliced in after the
+    /// title line. What the engine reads is byte for byte what a deck that
+    /// included the library would have handed it.
+    fn statistical_deck(circuit: &str, library: &str, cards: &str) -> String {
+        let lowered = rspice_core::library::adapt_spectre_model_library(
+            std::path::Path::new("statistics.scs"),
+            library,
+        )
+        .expect("the statistics library lowers to executable SPICE");
+        let (title, body) = circuit
+            .split_once('\n')
+            .expect("a deck carries a title line and a body");
+        format!("{title}\n{lowered}{body}{cards}.END\n")
     }
 
     /// The browser surface's declared answer for every core result family.
@@ -1436,6 +1489,13 @@ C4 a 0 160p\n";
             },
             AnalysisResultKind::Envelope => Expectation::Routed {
                 deck: deck(LINEAR, ".HB 1G\n.ENVELOPE TSTOP=2n MAXSTEP=0.5n\n"),
+            },
+            AnalysisResultKind::DcMatch => Expectation::Routed {
+                deck: statistical_deck(
+                    MISMATCH_DIVIDER,
+                    DIVIDER_STATISTICS,
+                    ".DCMATCH OUT=V(out) CONTRIBUTORS=0 SIGMA=3\n",
+                ),
             },
         }
     }
@@ -1533,6 +1593,65 @@ C4 a 0 160p\n";
         let decoded = AnalysisResultDocument::from_json(&json)
             .expect("the lossless export decodes as the same core document");
         assert_eq!(decoded, expected, "{kind:?} lossless round trip");
+    }
+
+    /// The browser runs the same mismatch study the command line and the
+    /// Python binding run, and gets the same number.
+    ///
+    /// The expectation is algebra computed here from the deck's own declared
+    /// values, not a recorded document: the divider's output variance is an
+    /// exact function of its two resistances, so a regression in the routing,
+    /// the statistical plan or the projection shows up as disagreement with
+    /// the closed form.
+    #[test]
+    fn a_dcmatch_deck_routes_to_a_typed_document() {
+        let Expectation::Routed { deck } = expectation(AnalysisResultKind::DcMatch);
+        let execution = run_authored_deck_document_detailed(&deck)
+            .unwrap_or_else(|error| panic!(".DCMATCH deck must run: {}", error.message));
+        assert_eq!(execution.results.len(), 1);
+        let document = &execution.results[0];
+        assert_eq!(document.result_kind(), AnalysisResultKind::DcMatch);
+        assert_eq!(document.analysis().tag(), "dcmatch-001");
+
+        let (source, r1, r2, sigma) = (1.0_f64, 1.0e3_f64, 2.0e3_f64, 10.0_f64);
+        let sum = r1 + r2;
+        let from_r1 = source * r2 / (sum * sum) * sigma;
+        let from_r2 = source * r1 / (sum * sum) * sigma;
+        let expected = (from_r1 * from_r1 + from_r2 * from_r2).sqrt();
+
+        let scalar = |name: &str| match document
+            .scalars()
+            .iter()
+            .find(|scalar| scalar.name() == name)
+            .unwrap_or_else(|| panic!("the mismatch document publishes no '{name}' scalar"))
+            .value()
+        {
+            ScalarValue::Real { value } => value.expect("a solved sigma is a finite real"),
+            other => panic!("'{name}' is {other:?} rather than a real scalar"),
+        };
+        let sigma_total = scalar("sigma_total");
+        let error = (sigma_total - expected).abs() / expected;
+        assert!(
+            error < 1.0e-3,
+            "sigma_total {sigma_total} against the analytic {expected} (relative error {error})"
+        );
+        assert!((scalar("nominal_value") - source * r2 / sum).abs() < 1.0e-9);
+        assert_eq!(scalar("sigma_process"), 0.0);
+        assert!((scalar("quoted_sigma") - 3.0 * sigma_total).abs() < 1.0e-12);
+
+        // The ranked table is the payload's, and the six evaluated
+        // (instance, variable) pairs account for all of the variance.
+        let ResultPayload::DcMatch(payload) = document.payload() else {
+            panic!("a .DCMATCH result carries the mismatch payload");
+        };
+        assert_eq!(payload.evaluated_contributors, 6);
+        assert_eq!(payload.contributors.len(), 6);
+        let shares: f64 = payload
+            .contributors
+            .iter()
+            .map(|contributor| contributor.share)
+            .sum();
+        assert!((shares - 1.0).abs() < 1.0e-9, "shares sum to {shares}");
     }
 }
 
