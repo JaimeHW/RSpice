@@ -26,7 +26,10 @@ pub(super) fn show(ui: &mut Ui, state: &AppState, stage: &Stage) {
     let advisories = stage.advisories();
     let (verdict, color) = if errors > 0 {
         (
-            messages.format(MessageId::StimulusAuditErrors, &[("count", &errors.to_string())]),
+            messages.format(
+                MessageId::StimulusAuditErrors,
+                &[("count", &errors.to_string())],
+            ),
             palette.err,
         )
     } else if advisories > 0 {

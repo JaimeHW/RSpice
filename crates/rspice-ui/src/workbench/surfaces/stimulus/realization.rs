@@ -83,12 +83,7 @@ pub(super) fn show(ui: &mut Ui, state: &AppState, stage: &Stage, actions: &mut V
 }
 
 /// The definition's own card: what adoption copies.
-fn definition_line(
-    ui: &mut Ui,
-    state: &AppState,
-    stage: &Stage,
-    actions: &mut Vec<StageAction>,
-) {
+fn definition_line(ui: &mut Ui, state: &AppState, stage: &Stage, actions: &mut Vec<StageAction>) {
     let messages = state.ui.messages();
     let palette = Tokens::get(ui.ctx()).color;
     let (text, color) = match &stage.card {
@@ -218,11 +213,7 @@ fn adopter_line(
                 } else {
                     palette.text_faint
                 },
-                ADOPTER_TRAIL_WIDTH
-                    - TRAIL_INSET
-                    - BUTTON.x
-                    - READOPT_WIDTH
-                    - 3.0 * TRAIL_GAP,
+                ADOPTER_TRAIL_WIDTH - TRAIL_INSET - BUTTON.x - READOPT_WIDTH - 3.0 * TRAIL_GAP,
             );
         },
     );

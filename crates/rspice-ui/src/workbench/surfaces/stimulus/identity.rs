@@ -132,9 +132,10 @@ fn name_field(ui: &mut Ui, state: &AppState, stage: &Stage, actions: &mut Vec<St
     } else {
         stage.working.name().to_owned()
     };
-    let invalid = stage.findings.iter().any(|finding| {
-        finding.blocking && finding.message.contains(stage.working.name())
-    });
+    let invalid = stage
+        .findings
+        .iter()
+        .any(|finding| finding.blocking && finding.message.contains(stage.working.name()));
     let mut edit = egui::TextEdit::singleline(&mut text)
         .font(egui::TextStyle::Monospace)
         .desired_width(NAME_WIDTH)
@@ -214,7 +215,10 @@ fn lifecycle_chip(ui: &mut Ui, state: &AppState, stage: &Stage) {
         )
     } else if errors > 0 {
         (
-            messages.format(MessageId::StimulusDraftErrors, &[("count", &errors.to_string())]),
+            messages.format(
+                MessageId::StimulusDraftErrors,
+                &[("count", &errors.to_string())],
+            ),
             tokens.color.err,
         )
     } else {
@@ -312,10 +316,8 @@ fn chip(ui: &mut Ui, text: &str, color: Color32) -> egui::Response {
     let tokens = Tokens::get(ui.ctx());
     let font = theme::mono(tokens::FS_0, FontWeight::Regular);
     let galley = ui.painter().layout_no_wrap(text.to_owned(), font, color);
-    let (rect, response) = ui.allocate_exact_size(
-        Vec2::new(galley.size().x + 14.0, 19.0),
-        Sense::hover(),
-    );
+    let (rect, response) =
+        ui.allocate_exact_size(Vec2::new(galley.size().x + 14.0, 19.0), Sense::hover());
     ui.painter().rect(
         rect,
         tokens.radius,
@@ -328,9 +330,8 @@ fn chip(ui: &mut Ui, text: &str, color: Color32) -> egui::Response {
         galley,
         color,
     );
-    response.widget_info(|| {
-        egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), text)
-    });
+    response
+        .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), text));
     response
 }
 

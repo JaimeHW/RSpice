@@ -37,10 +37,10 @@ mod tests;
 use egui::{Rect, Sense, Ui, UiBuilder, Vec2};
 
 use crate::simulation::stimulus_realize::{PreviewTiming, StimulusRealization};
+use crate::state::ContractStrength;
 use crate::state::stimulus_library::definition::{
     StimulusDefinition, StimulusFamily, StimulusKind,
 };
-use crate::state::ContractStrength;
 use crate::ui::tokens::Tokens;
 use crate::workbench::state::PreviewSpan;
 use crate::workbench::{AppState, MessageId};
@@ -159,7 +159,10 @@ pub(super) struct Stage {
 impl Stage {
     /// How many findings block Apply.
     pub fn errors(&self) -> usize {
-        self.findings.iter().filter(|finding| finding.blocking).count()
+        self.findings
+            .iter()
+            .filter(|finding| finding.blocking)
+            .count()
     }
 
     /// How many findings state something the card's labels do not.
@@ -217,7 +220,12 @@ pub(super) fn show(ui: &mut Ui, state: &mut AppState) {
 fn ask_before_deleting(ui: &Ui, state: &mut AppState) {
     use crate::ui::widgets::{Dialog, DialogChoice, DialogSize};
 
-    let Some(name) = state.workbench.stimulus_editor.pending_delete().map(str::to_owned) else {
+    let Some(name) = state
+        .workbench
+        .stimulus_editor
+        .pending_delete()
+        .map(str::to_owned)
+    else {
         return;
     };
     let consequence = crate::workbench::app::actions::stimulus::delete_needs_confirmation(state)
@@ -575,9 +583,8 @@ pub(super) fn trailing_text(
     let galley = ui.painter().layout_no_wrap(shown.clone(), font, color);
     let (rect, response) = ui.allocate_exact_size(galley.size(), Sense::hover());
     ui.painter().galley(rect.min, galley, color);
-    response.widget_info(|| {
-        egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), text)
-    });
+    response
+        .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), text));
     if shown != text {
         response.on_hover_text(text)
     } else {

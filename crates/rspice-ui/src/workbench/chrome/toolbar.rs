@@ -125,7 +125,11 @@ const STIMULUS_TOOLBAR_COMMANDS: [(Command, WorkbenchIcon, Option<&str>); 5] = [
         WorkbenchIcon::Copy,
         None,
     ),
-    (Command::StimulusDeleteDefinition, WorkbenchIcon::Trash, None),
+    (
+        Command::StimulusDeleteDefinition,
+        WorkbenchIcon::Trash,
+        None,
+    ),
     (
         Command::StimulusValidateLibrary,
         WorkbenchIcon::Check,

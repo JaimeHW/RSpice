@@ -45,7 +45,10 @@ pub(super) fn points_editor(
 ) {
     let messages = state.ui.messages();
     let text = read_field(&stage.working, POINTS_FIELD);
-    let cells = text.split_whitespace().map(str::to_owned).collect::<Vec<_>>();
+    let cells = text
+        .split_whitespace()
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
     let rows = cells.len() / 2;
     let mut trailing = Vec::new();
     super::split_row(
@@ -217,7 +220,12 @@ fn point_rows(
         let selected = stage.selected_point == Some(index);
         let row = ui.horizontal(|ui| {
             ui.set_min_height(ROW_HEIGHT);
-            header(ui, &(index + 1).to_string(), index_width, palette.text_faint);
+            header(
+                ui,
+                &(index + 1).to_string(),
+                index_width,
+                palette.text_faint,
+            );
             cell_edit(ui, state, stage, tokens, index * 2, cell, actions);
             cell_edit(ui, state, stage, tokens, index * 2 + 1, cell, actions);
             header(

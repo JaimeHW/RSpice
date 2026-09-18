@@ -99,9 +99,7 @@ impl StimulusLibrary {
     /// The instances that adopted it are the caller's to repoint — they carry
     /// their own copy of the name and the library has never seen them.
     pub fn rename(&mut self, old: &str, new: &str) -> Result<(), StimulusDefinitionError> {
-        if !old.eq_ignore_ascii_case(new)
-            && self.get(new).is_some()
-        {
+        if !old.eq_ignore_ascii_case(new) && self.get(new).is_some() {
             return Err(StimulusDefinitionError::DuplicateName(new.to_owned()));
         }
         self.definitions

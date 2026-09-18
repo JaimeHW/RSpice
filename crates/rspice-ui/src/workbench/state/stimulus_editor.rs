@@ -124,13 +124,10 @@ impl StimulusEditorState {
     /// close guard exists to prevent.
     pub fn draft_for(&mut self, saved: &StimulusDefinition) -> &mut DefinitionDraft {
         let key = Self::key(saved.name());
-        let entry = self
-            .entries
-            .entry(key)
-            .or_insert_with(|| EditorEntry {
-                draft: DefinitionDraft::new(saved.clone()),
-                selected_point: None,
-            });
+        let entry = self.entries.entry(key).or_insert_with(|| EditorEntry {
+            draft: DefinitionDraft::new(saved.clone()),
+            selected_point: None,
+        });
         if !entry.draft.is_dirty() && entry.draft.saved().normalized() != saved.normalized() {
             entry.draft = DefinitionDraft::new(saved.clone());
         }
@@ -338,16 +335,18 @@ impl StimulusEditorState {
         epoch: u64,
         schematic: &crate::state::SchematicState,
     ) -> &HashMap<(u64, String), String> {
-        if self.nets.as_ref().is_none_or(|(cached, _)| *cached != epoch) {
+        if self
+            .nets
+            .as_ref()
+            .is_none_or(|(cached, _)| *cached != epoch)
+        {
             let nets = crate::simulation::netlist_gen::design_nets(schematic)
                 .into_iter()
                 .flat_map(|net| {
                     let name = net.name.clone();
                     net.terminals
                         .into_iter()
-                        .map(move |terminal| {
-                            ((terminal.component_id, terminal.pin), name.clone())
-                        })
+                        .map(move |terminal| ((terminal.component_id, terminal.pin), name.clone()))
                 })
                 .collect();
             self.nets = Some((epoch, nets));
@@ -510,7 +509,9 @@ mod tests {
 
         assert!(editor.draft("old_name").is_none());
         assert_eq!(
-            editor.draft("new_name").map(|draft| draft.working().value.as_str()),
+            editor
+                .draft("new_name")
+                .map(|draft| draft.working().value.as_str()),
             Some("9")
         );
     }

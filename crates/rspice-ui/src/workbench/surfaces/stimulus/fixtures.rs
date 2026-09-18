@@ -23,7 +23,12 @@ const ROWS: [Row; 14] = [
         "0",
         "va=2m freq=1k ac=1m acphase=0",
     ),
-    ("vdd_operate", ComponentType::VoltageSource, "{VSUP}", "ac=1"),
+    (
+        "vdd_operate",
+        ComponentType::VoltageSource,
+        "{VSUP}",
+        "ac=1",
+    ),
     ("vref_mid", ComponentType::VoltageSource, "{VCM_REF}", ""),
     (
         "vdd_ramp_1ms",
@@ -122,7 +127,9 @@ pub(super) fn definition(name: &str) -> StimulusDefinition {
 pub(super) fn library() -> StimulusLibrary {
     let mut library = StimulusLibrary::default();
     for (name, ..) in ROWS {
-        library.insert(definition(name)).expect("unique fixture name");
+        library
+            .insert(definition(name))
+            .expect("unique fixture name");
     }
     library
 }

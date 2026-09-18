@@ -304,16 +304,18 @@ pub(crate) fn readopt_instance(state: &mut AppState, component_id: u64) {
     };
     let revision = definition.revision();
     let mut outcome = None;
-    state.schematic.with_undo("Re-adopt stimulus definition", |schematic| {
-        if let Some(component) = schematic
-            .components
-            .iter_mut()
-            .find(|component| component.id == component_id)
-        {
-            let instance = component.name.clone();
-            outcome = Some(definition.readopt_onto(component).map(|()| instance));
-        }
-    });
+    state
+        .schematic
+        .with_undo("Re-adopt stimulus definition", |schematic| {
+            if let Some(component) = schematic
+                .components
+                .iter_mut()
+                .find(|component| component.id == component_id)
+            {
+                let instance = component.name.clone();
+                outcome = Some(definition.readopt_onto(component).map(|()| instance));
+            }
+        });
     state.sync_active_schematic_to_workspace();
     match outcome {
         Some(Ok(instance)) => state.push_user_message(ConsoleMessage::info(format!(

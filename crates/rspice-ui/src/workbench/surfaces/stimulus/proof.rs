@@ -70,7 +70,10 @@ fn strip_row(
     let trailing_width = (rect.width() * 0.42).clamp(0.0, 320.0);
     let leading = Rect::from_min_max(
         rect.min,
-        Pos2::new((rect.right() - trailing_width).max(rect.left()), rect.bottom()),
+        Pos2::new(
+            (rect.right() - trailing_width).max(rect.left()),
+            rect.bottom(),
+        ),
     );
     let trailing = Rect::from_min_max(Pos2::new(leading.right(), rect.top()), rect.max);
 
@@ -151,9 +154,8 @@ fn strip_row(
         ui.id().with("workbench.stimulus.proof.evaluator"),
         Sense::hover(),
     );
-    response.widget_info(|| {
-        egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), &chip)
-    });
+    response
+        .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), &chip));
     response.on_hover_text(stage.timing.caption());
 }
 
@@ -169,7 +171,9 @@ fn paint_from_right(
 ) -> f32 {
     let room = (right - region.left()).max(0.0);
     let text = crate::workbench::design_system::elide_text(ui, text, &font, room);
-    let painter = ui.painter().with_clip_rect(region.intersect(ui.clip_rect()));
+    let painter = ui
+        .painter()
+        .with_clip_rect(region.intersect(ui.clip_rect()));
     let galley = painter.layout_no_wrap(text, font, color);
     let left = right - galley.size().x;
     painter.galley(
@@ -222,7 +226,10 @@ fn plot_body(
         node.set_label(label.as_str());
     });
 
-    let Some(readouts) = stage.realization.readouts.filter(|_| stage.realization.defect.is_none())
+    let Some(readouts) = stage
+        .realization
+        .readouts
+        .filter(|_| stage.realization.defect.is_none())
     else {
         let plot = plot_rect(rect, MINIMUM_VALUE_GUTTER);
         if plot.width() > 1.0 && plot.height() > 1.0 {
@@ -243,7 +250,10 @@ fn plot_body(
         + TICK_LABEL_INSET;
     let plot = plot_rect(
         rect,
-        gutter.clamp(MINIMUM_VALUE_GUTTER, (rect.width() * 0.4).max(MINIMUM_VALUE_GUTTER)),
+        gutter.clamp(
+            MINIMUM_VALUE_GUTTER,
+            (rect.width() * 0.4).max(MINIMUM_VALUE_GUTTER),
+        ),
     );
     if plot.width() <= 1.0 || plot.height() <= 1.0 {
         return None;
@@ -320,7 +330,10 @@ fn accessible_label(state: &AppState, stage: &Stage) -> String {
             MessageId::StimulusWaveformOf,
             &[
                 ("name", stage.working.name()),
-                ("span", &format!("{}s", format_engineering(stage.realization.span))),
+                (
+                    "span",
+                    &format!("{}s", format_engineering(stage.realization.span)),
+                ),
             ],
         ),
     }
@@ -429,7 +442,10 @@ fn paint_grid(ui: &Ui, projector: &Projector, color: Color32, value_ticks: &[(f6
                 } else {
                     Align2::CENTER_TOP
                 },
-                format!("{}s", crate::ui::plot::tick_label_with_step(time, time_step)),
+                format!(
+                    "{}s",
+                    crate::ui::plot::tick_label_with_step(time, time_step)
+                ),
                 font.clone(),
                 tokens.color.text_faint,
             );
@@ -496,11 +512,18 @@ fn paint_markers(
         ui.painter().circle(
             center,
             if selected { 4.5 } else { 3.0 },
-            if selected { colors.accent } else { colors.bg_app },
+            if selected {
+                colors.accent
+            } else {
+                colors.bg_app
+            },
             Stroke::new(1.2, colors.accent),
         );
         let hit = Rect::from_center_size(center, Vec2::splat(MARKER_GRAB * 2.0));
-        if response.hover_pos().is_some_and(|pointer| hit.contains(pointer)) {
+        if response
+            .hover_pos()
+            .is_some_and(|pointer| hit.contains(pointer))
+        {
             over_marker = true;
             if response.clicked() {
                 actions.push(StageAction::SelectPoint(Some(marker.index)));
@@ -518,11 +541,7 @@ fn nearest_sample(samples: &[(f64, f64)], time: f64) -> Option<(f64, f64)> {
     samples
         .iter()
         .copied()
-        .min_by(|left, right| {
-            (left.0 - time)
-                .abs()
-                .total_cmp(&(right.0 - time).abs())
-        })
+        .min_by(|left, right| (left.0 - time).abs().total_cmp(&(right.0 - time).abs()))
 }
 
 /// The unit the hover readout states its value in.

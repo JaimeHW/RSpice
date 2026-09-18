@@ -43,10 +43,7 @@ const STACK_BELOW: f32 = 620.0;
 const MINIMUM_COLUMN: f32 = 200.0;
 
 pub(super) fn show(ui: &mut Ui, state: &AppState, stage: &Stage, actions: &mut Vec<StageAction>) {
-    let Some(sheet) = state
-        .property_registry
-        .get(stage.working.component_type())
-    else {
+    let Some(sheet) = state.property_registry.get(stage.working.component_type()) else {
         return;
     };
     let band = ui.available_rect_before_wrap();
@@ -65,7 +62,8 @@ pub(super) fn show(ui: &mut Ui, state: &AppState, stage: &Stage, actions: &mut V
     // for, and what is left for the column beside it is then nothing at all —
     // which is not a narrow property row, it is a property row of negative
     // width. Splitting the band makes both columns' widths arithmetic.
-    let bias_width = (band.width() * BIAS_FRACTION).clamp(MINIMUM_COLUMN, band.width() - MINIMUM_COLUMN);
+    let bias_width =
+        (band.width() * BIAS_FRACTION).clamp(MINIMUM_COLUMN, band.width() - MINIMUM_COLUMN);
     let bias_rect = Rect::from_min_max(
         band.min,
         egui::pos2(band.left() + bias_width, band.bottom()),
@@ -322,7 +320,11 @@ fn boolean_row(
     };
     let yes = messages.text(MessageId::StimulusSwitchOn);
     let no = messages.text(MessageId::StimulusSwitchOff);
-    let mut selected = if on { "true".to_owned() } else { "false".to_owned() };
+    let mut selected = if on {
+        "true".to_owned()
+    } else {
+        "false".to_owned()
+    };
     let choices = vec![("true".to_owned(), yes), ("false".to_owned(), no)];
     if property_row_combo(
         ui,

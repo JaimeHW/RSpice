@@ -211,7 +211,8 @@ fn fundamental_period(spec: &SourceSpec, timing: PreviewTiming) -> Option<f64> {
             signal_freq,
             ..
         } => {
-            let (_, fm, _) = sffm_parameters(*carrier_freq, *modulation_index, *signal_freq, timing);
+            let (_, fm, _) =
+                sffm_parameters(*carrier_freq, *modulation_index, *signal_freq, timing);
             positive(1.0 / fm)
         }
         SourceSpec::Am {
@@ -256,7 +257,11 @@ fn fit_span(spec: &SourceSpec, timing: PreviewTiming) -> f64 {
             frequency, delay, ..
         } => delay.max(0.0) + 3.0 / sin_frequency(*frequency, timing),
         SourceSpec::Exp {
-            td1, tau1, td2, tau2, ..
+            td1,
+            tau1,
+            td2,
+            tau2,
+            ..
         } => {
             let (td1, tau1, td2, tau2) = VoltageSources::resolve_exp_timing_with_defaults(
                 *td1,
@@ -301,7 +306,8 @@ fn fit_span(spec: &SourceSpec, timing: PreviewTiming) -> f64 {
             delay,
             ..
         } => {
-            let (_, fm, _) = sffm_parameters(*carrier_freq, *modulation_index, *signal_freq, timing);
+            let (_, fm, _) =
+                sffm_parameters(*carrier_freq, *modulation_index, *signal_freq, timing);
             delay.max(0.0) + 2.0 / fm
         }
         SourceSpec::Am {
@@ -365,7 +371,11 @@ fn guides(spec: &SourceSpec, timing: PreviewTiming) -> Vec<Guide> {
             }
         }
         SourceSpec::Exp {
-            td1, tau1, td2, tau2, ..
+            td1,
+            tau1,
+            td2,
+            tau2,
+            ..
         } => {
             let (td1, _, td2, _) = VoltageSources::resolve_exp_timing_with_defaults(
                 *td1,
@@ -410,7 +420,10 @@ fn guides(spec: &SourceSpec, timing: PreviewTiming) -> Vec<Guide> {
             }
         }
         SourceSpec::Pat {
-            delay, sample, data, ..
+            delay,
+            sample,
+            data,
+            ..
         } => {
             guides.push(Guide {
                 time: *delay,
@@ -461,7 +474,10 @@ fn readouts_of(
             let frequency = sin_frequency(*frequency, timing);
             rows.push(row("f", seconds_free(frequency, "Hz")));
             rows.push(row("T", seconds_free(1.0 / frequency, "s")));
-            rows.push(row(&format!("{unit}pp"), seconds_free(2.0 * amplitude, unit)));
+            rows.push(row(
+                &format!("{unit}pp"),
+                seconds_free(2.0 * amplitude, unit),
+            ));
         }
         SourceSpec::Pulse {
             v1,
@@ -537,7 +553,10 @@ fn readouts_of(
             let sample = resolved_sample(*sample, timing);
             rows.push(row("bits", bits.len().to_string()));
             rows.push(row("rate", seconds_free(1.0 / sample, "b/s")));
-            rows.push(row("pattern", seconds_free(bits.len() as f64 * sample, "s")));
+            rows.push(row(
+                "pattern",
+                seconds_free(bits.len() as f64 * sample, "s"),
+            ));
             rows.push(row(
                 "R",
                 if *repeat_count < 0 {

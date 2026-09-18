@@ -276,10 +276,15 @@ fn a_family_switch_resets_the_shape_parameters_and_undo_restores_them() {
         .stimulus_editor
         .draft("bridge_cal_step")
         .expect("draft");
-    assert_eq!(draft.working().component_type(), ComponentType::VoltageSourceSin);
+    assert_eq!(
+        draft.working().component_type(),
+        ComponentType::VoltageSourceSin
+    );
     assert_eq!(draft.working().params, "");
 
-    assert!(crate::workbench::app::actions::stimulus::undo_draft(&mut app.state));
+    assert!(crate::workbench::app::actions::stimulus::undo_draft(
+        &mut app.state
+    ));
     let draft = app
         .state
         .workbench
@@ -314,7 +319,13 @@ fn applying_a_rename_repoints_every_adopter() {
     crate::workbench::app::actions::stimulus::edit_name(&mut app.state, "bridge_cal_pulse");
     crate::workbench::app::actions::stimulus::apply_draft(&mut app.state);
 
-    assert!(app.state.workspace.stimulus_library.get("bridge_cal_step").is_none());
+    assert!(
+        app.state
+            .workspace
+            .stimulus_library
+            .get("bridge_cal_step")
+            .is_none()
+    );
     let definition = app
         .state
         .workspace

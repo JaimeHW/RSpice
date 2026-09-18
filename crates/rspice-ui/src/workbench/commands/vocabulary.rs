@@ -969,24 +969,26 @@ impl Command {
             Self::StimulusNewDefinition => {
                 spec("stimulus-new", "New stimulus definition", "Stimulus")
             }
-            Self::StimulusDuplicateDefinition => {
-                spec("stimulus-duplicate", "Duplicate stimulus definition", "Stimulus")
-            }
+            Self::StimulusDuplicateDefinition => spec(
+                "stimulus-duplicate",
+                "Duplicate stimulus definition",
+                "Stimulus",
+            ),
             Self::StimulusDeleteDefinition => {
                 spec("stimulus-delete", "Delete stimulus definition", "Stimulus")
             }
-            Self::StimulusApplyDraft => {
-                spec("stimulus-apply", "Apply stimulus draft", "Stimulus")
-            }
+            Self::StimulusApplyDraft => spec("stimulus-apply", "Apply stimulus draft", "Stimulus"),
             Self::StimulusRevertDraft => {
                 spec("stimulus-revert", "Revert stimulus draft", "Stimulus")
             }
             Self::StimulusValidateLibrary => {
                 spec("stimulus-validate", "Validate stimulus library", "Stimulus")
             }
-            Self::StimulusShowAdopter => {
-                spec("stimulus-show-adopter", "Show adopter on schematic", "Stimulus")
-            }
+            Self::StimulusShowAdopter => spec(
+                "stimulus-show-adopter",
+                "Show adopter on schematic",
+                "Stimulus",
+            ),
             Self::CompileVerilogA => spec("veriloga", "Compile Verilog-A", "Models"),
             Self::AutomationConsole => spec("automation", "Automation workspace", "Automation"),
             Self::CommandPalette => spec("command-palette", "Command palette", "Navigate"),
