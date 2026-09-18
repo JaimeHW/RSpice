@@ -220,6 +220,36 @@ impl WasmResultHandle {
     }
 }
 
+#[wasm_bindgen]
+impl WasmResultHandle {
+    /// Resolve one plot/print trace window without copying its entire dataset.
+    /// Returns {xReal, xImaginary, yReal, yImaginary}, each a Float64Array.
+    #[wasm_bindgen(js_name = controlWindow)]
+    pub fn control_window_js(
+        &self,
+        presentation_index: usize,
+        trace_index: usize,
+        start: usize,
+        count: usize,
+    ) -> Result<JsValue, JsValue> {
+        let columns = self
+            .control_window(presentation_index, trace_index, start, count)
+            .map_err(|error| wasm_error_to_js(*error))?;
+        let output = js_sys::Object::new();
+        for (name, values) in ["xReal", "xImaginary", "yReal", "yImaginary"]
+            .into_iter()
+            .zip(columns)
+        {
+            js_sys::Reflect::set(
+                &output,
+                &JsValue::from_str(name),
+                &js_sys::Float64Array::from(values.as_slice()),
+            )?;
+        }
+        Ok(output.into())
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::indexing_slicing, clippy::panic)]
 mod tests {
@@ -341,35 +371,5 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(error.category, "resource_limit");
-    }
-}
-
-#[wasm_bindgen]
-impl WasmResultHandle {
-    /// Resolve one plot/print trace window without copying its entire dataset.
-    /// Returns {xReal, xImaginary, yReal, yImaginary}, each a Float64Array.
-    #[wasm_bindgen(js_name = controlWindow)]
-    pub fn control_window_js(
-        &self,
-        presentation_index: usize,
-        trace_index: usize,
-        start: usize,
-        count: usize,
-    ) -> Result<JsValue, JsValue> {
-        let columns = self
-            .control_window(presentation_index, trace_index, start, count)
-            .map_err(|error| wasm_error_to_js(*error))?;
-        let output = js_sys::Object::new();
-        for (name, values) in ["xReal", "xImaginary", "yReal", "yImaginary"]
-            .into_iter()
-            .zip(columns)
-        {
-            js_sys::Reflect::set(
-                &output,
-                &JsValue::from_str(name),
-                &js_sys::Float64Array::from(values.as_slice()),
-            )?;
-        }
-        Ok(output.into())
     }
 }
