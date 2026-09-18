@@ -677,19 +677,20 @@ fn every_runnable_family_executes_at_every_step_and_temperature_coordinate() {
     for kind in AnalysisResultKind::ALL {
         // A second result document rides its parent card's execution, so it is
         // checked under the parent's own request and analysis identity.
-        let (request_kind, analysis_tag, deck) = match family_expectation(kind) {
+        let (request_kind, analysis_tag, deck, library) = match family_expectation(kind) {
             FamilyExpectation::Runs {
                 request_kind,
                 analysis_tag,
                 deck,
+                library,
                 ..
-            } => (request_kind, analysis_tag, deck),
+            } => (request_kind, analysis_tag, deck, library),
             FamilyExpectation::Child {
                 parent_request_kind,
                 parent_analysis_tag,
                 deck,
                 ..
-            } => (parent_request_kind, parent_analysis_tag, deck),
+            } => (parent_request_kind, parent_analysis_tag, deck, None),
         };
         for (label, axis_card, axis_kind) in [
             (
@@ -705,7 +706,7 @@ fn every_runnable_family_executes_at_every_step_and_temperature_coordinate() {
                 "{kind:?} deck has no .end to attach the {label} axis to"
             );
             let job = Job::new(&format!("axis-{label}-{}", kind.tag()));
-            let response = job.execute(&axis_deck, request_kind);
+            let response = job.execute_with_library(&axis_deck, request_kind, library);
             assert_eq!(
                 response["status"], "succeeded",
                 "{kind:?} failed on a {label} axis: {response}"
@@ -1917,24 +1918,35 @@ fn the_solve_budget_is_a_launch_input_with_a_bounded_outcome() {
 #[test]
 fn every_family_reports_the_same_cancellation_label() {
     for kind in AnalysisResultKind::ALL {
-        let (request_kind, deck) = match family_expectation(kind) {
+        let (request_kind, deck, library) = match family_expectation(kind) {
             FamilyExpectation::Runs {
-                request_kind, deck, ..
-            } => (request_kind, deck),
+                request_kind,
+                deck,
+                library,
+                ..
+            } => (request_kind, deck, library),
             FamilyExpectation::Child {
                 parent_request_kind,
                 deck,
                 ..
-            } => (parent_request_kind, deck),
+            } => (parent_request_kind, deck, None),
         };
         let job = Job::new(&format!("cancel-{}", kind.tag()));
+        // A family whose deck includes a statistics library needs it attached
+        // here too: the deadline is asserted against a deck that would
+        // otherwise be refused before any solve started.
+        let artifacts = library
+            .map(|library| {
+                vec![job.stage_artifact(Uuid::from_u128(0x55), "statistics.scs", library)]
+            })
+            .unwrap_or_default();
         // A budget that is already spent at the first abort poll makes the
         // stop deterministic instead of a race against a real solve.
         let output = job.run_with(
             &build_request(
                 json!({"schema": "rspice-circuit-v1", "netlist_utf8": deck}),
                 json!({"kind": request_kind}),
-                Vec::new(),
+                artifacts,
             ),
             &[("RSPICE_ENGINE_SOLVE_BUDGET_SECONDS", "0.000001")],
             &[],

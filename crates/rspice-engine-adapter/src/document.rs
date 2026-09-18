@@ -205,6 +205,22 @@ fn expand_includes(netlist: &str, sources: &IncludeSources) -> Result<String, Ci
                 ),
             ));
         };
+        // A native Spectre attachment is lowered by the same public adapter
+        // the file-system include expander runs it through, so a PDK's
+        // `model`, `parameters` and `statistics` declarations mean here what
+        // they mean on every other surface. A plain SPICE attachment is
+        // returned unchanged, so this costs a dialect test per include.
+        let lowered =
+            rspice_core::library::adapt_spectre_model_library(Path::new(directive), content)
+                .map_err(|error| {
+                    CircuitRejection::new(
+                        "netlist.parse_error",
+                        format!(
+                            "Included Spectre library {directive:?} could not be read: {error}"
+                        ),
+                    )
+                })?;
+        let content: &str = &lowered;
         if content
             .lines()
             .any(|nested| include_directive(nested).is_some())
