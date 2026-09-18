@@ -518,11 +518,66 @@ thread_local! {
     /// projection is: a row states where its instance stands with respect to
     /// the library, so publishing a revision moves an answer this memo holds.
     /// The library is not part of the projection and has no epoch of its own,
-    /// so it is compared by value — a handful of small records, against a walk
-    /// of the whole design.
-    static DESIGN_EXCITATIONS: RefCell<
-        Option<(Weak<DesignProjection>, StimulusLibrary, Arc<DesignExcitations>)>,
-    > = const { RefCell::new(None) };
+    /// so what a row reads from it is stamped instead — see [`LibraryStamp`].
+    static DESIGN_EXCITATIONS: RefCell<Option<RetainedExcitations>> =
+        const { RefCell::new(None) };
+}
+
+/// One thread's retained answer, and the two authorities it was derived from.
+struct RetainedExcitations {
+    projection: Weak<DesignProjection>,
+    library: LibraryStamp,
+    excitations: Arc<DesignExcitations>,
+}
+
+/// Exactly what a placed source's row reads from the stimulus library.
+///
+/// [`StimulusLibrary::provenance_state`] asks one question of each definition
+/// — the revision it holds and the type it places — and
+/// [`StimulusLibrary::studio_definition_cell`] is that state in words, so those
+/// two fields per definition are the whole of the library a row depends on.
+///
+/// Keying the memo on the library *itself* would have been correct and far too
+/// expensive: a definition can retain the bytes of a `PWL FILE=` table, so a
+/// by-value key is megabytes cloned on every change and memcmp'd several times
+/// a frame to answer a question no row asks. This stamp is a name, a number
+/// and a type per definition, compared in place against the live library so the
+/// hit path allocates nothing, and rebuilt only when the walk is rebuilt.
+struct LibraryStamp(Vec<(String, u32, ComponentType)>);
+
+impl LibraryStamp {
+    /// Stamp what the rows will read.
+    fn of(library: &StimulusLibrary) -> Self {
+        Self(
+            library
+                .definitions()
+                .iter()
+                .map(|definition| {
+                    (
+                        definition.name().to_owned(),
+                        definition.revision(),
+                        definition.component_type(),
+                    )
+                })
+                .collect(),
+        )
+    }
+
+    /// Whether this stamp still describes `library`, without allocating.
+    ///
+    /// Names are compared the way the library resolves them, which is
+    /// case-insensitively; a definition that only moved in the list order
+    /// reads as a miss, which costs one extra walk and can never answer
+    /// wrongly.
+    fn still_describes(&self, library: &StimulusLibrary) -> bool {
+        let held = library.definitions();
+        held.len() == self.0.len()
+            && held.iter().zip(&self.0).all(|(definition, stamped)| {
+                definition.revision() == stamped.1
+                    && definition.component_type() == stamped.2
+                    && definition.name().eq_ignore_ascii_case(&stamped.0)
+            })
+    }
 }
 
 /// The retained whole-design half, rebuilt only for a projection this thread
@@ -535,21 +590,22 @@ fn design_excitations(
     let key: *const DesignProjection = Arc::as_ptr(projection);
     let retained = DESIGN_EXCITATIONS.with_borrow(|slot| {
         slot.as_ref()
-            .filter(|(against, library, _)| {
-                std::ptr::eq(against.as_ptr(), key) && library == stimulus_library
+            .filter(|retained| {
+                std::ptr::eq(retained.projection.as_ptr(), key)
+                    && retained.library.still_describes(stimulus_library)
             })
-            .map(|(_, _, excitations)| Arc::clone(excitations))
+            .map(|retained| Arc::clone(&retained.excitations))
     });
     if let Some(excitations) = retained {
         return excitations;
     }
     let excitations = Arc::new(walk_design(libraries, stimulus_library, projection));
     DESIGN_EXCITATIONS.with_borrow_mut(|slot| {
-        *slot = Some((
-            Arc::downgrade(projection),
-            stimulus_library.clone(),
-            Arc::clone(&excitations),
-        ));
+        *slot = Some(RetainedExcitations {
+            projection: Arc::downgrade(projection),
+            library: LibraryStamp::of(stimulus_library),
+            excitations: Arc::clone(&excitations),
+        });
     });
     excitations
 }
@@ -2271,6 +2327,67 @@ mod tests {
                 ]
             );
             assert_eq!(count(Derivation::PlacedSources), 2, "and it is walked once");
+        }
+
+        /// The library half of the key is exactly what a row reads from it.
+        ///
+        /// Publishing a revision moves every adopter's state, so the walk has
+        /// to run again. Everything else a definition holds — its purpose, the
+        /// bytes of a retained `PWL FILE=` table — is invisible to a row, and a
+        /// key that noticed it would re-walk the whole design because someone
+        /// typed in a description field. The retained table is the reason this
+        /// is a stamp rather than the library itself: it is megabytes, and it
+        /// answers no question this list asks.
+        #[test]
+        fn the_walk_follows_the_revisions_a_row_reads_and_nothing_else() {
+            use crate::state::stimulus_library::definition::{RetainedPwlFile, StimulusDefinition};
+            use crate::state::stimulus_library::draft::DefinitionDraft;
+
+            let mut root = SchematicState::default();
+            root.components
+                .push(source(1, ComponentType::VoltageSourceSin, "V1", "freq=1k"));
+            let design = Design::new(root, &[]);
+            let projection = design.projection();
+
+            let mut definition =
+                StimulusDefinition::new("sensor_drive", ComponentType::VoltageSourceSin)
+                    .expect("definition");
+            definition.params = "freq=1k".to_owned();
+            let mut library = StimulusLibrary::default();
+            library.insert(definition.clone()).expect("insert");
+
+            reset();
+            let _ = design_sources(&design.libraries, &library, &projection, None);
+            assert_eq!(count(Derivation::PlacedSources), 1, "the first call walks");
+            let _ = design_sources(&design.libraries, &library, &projection, None);
+            assert_eq!(count(Derivation::PlacedSources), 1, "the second does not");
+
+            // Neither of these is a fact any row states.
+            let held = library.get("sensor_drive").cloned().expect("held");
+            let mut quiet = library.clone();
+            let _ = quiet.delete("sensor_drive");
+            let mut edited = held.clone();
+            edited.purpose = "bench clock".to_owned();
+            edited.pwl_file = Some(RetainedPwlFile::new("step.csv", "0 0\n1e-9 1\n", 17));
+            quiet.insert(edited).expect("insert");
+            let _ = design_sources(&design.libraries, &quiet, &projection, None);
+            assert_eq!(
+                count(Derivation::PlacedSources),
+                1,
+                "a purpose and a retained table are invisible to every row"
+            );
+
+            // Publishing is, because every adopter reads `behind` off it.
+            let mut published = library.clone();
+            let mut draft = DefinitionDraft::new(held);
+            draft.edit(|working| working.params = "freq=2k".to_owned());
+            published.apply(&mut draft);
+            let _ = design_sources(&design.libraries, &published, &projection, None);
+            assert_eq!(
+                count(Derivation::PlacedSources),
+                2,
+                "a published revision moves every adopter's state"
+            );
         }
     }
 }
