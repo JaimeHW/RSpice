@@ -696,11 +696,14 @@ fn every_authored_advanced_option_moves_the_prepared_task_identity() {
     );
 
     // What the sweep above cannot reach, declared rather than discovered. Its
-    // carrier is the plan's transient, and a transient refuses exactly one
-    // option: the step ceiling, because the transient form's own Max step
-    // field owns it. An option that started being refused to a transient would
-    // silently leave this ratchet, so the exempt set is asserted rather than
-    // implied by the loop's own filter.
+    // carrier is the plan's transient, and a transient refuses exactly two
+    // options: the step ceiling, because the transient form's own Max step
+    // field owns it, and the harmonic-balance initial state, because a
+    // transient runs no harmonic-balance solve to start. Each is judged
+    // through a kind that can hold it by one of the two tests below. An option
+    // that started being refused to a transient would silently leave this
+    // ratchet, so the exempt set is asserted rather than implied by the loop's
+    // own filter.
     let unreachable = NumericOverrideOption::all()
         .filter(|option| {
             option
@@ -714,7 +717,7 @@ fn every_authored_advanced_option_moves_the_prepared_task_identity() {
         .collect::<Vec<_>>();
     assert_eq!(
         unreachable,
-        vec!["TIMEINT DELMAX"],
+        vec!["TIMEINT DELMAX", "HBINT TAHB"],
         "the options this ratchet's carrier cannot hold are a declaration, not a leftover: \
          cover the new one through a kind that can hold it, the way \
          `the_step_ceiling_a_transient_cannot_carry_is_judged_through_a_kind_that_can` does"
@@ -816,6 +819,109 @@ fn the_step_ceiling_a_transient_cannot_carry_is_judged_through_a_kind_that_can()
         baseline,
         "an authored step ceiling that the prepared queue cannot see runs at the plan's \
          ceiling instead, and reports a plausible result from a solve nobody asked for"
+    );
+}
+
+/// The other advanced option the ratchet above cannot judge, judged.
+///
+/// `HBINT TAHB` decides how a harmonic-balance solve builds its first iterate,
+/// and only a harmonic-balance solve reads it — so the ratchet's transient
+/// carrier is refused it by name. It still has to be judged, and for the same
+/// reason the step ceiling does: an initial state that never reached the deck
+/// would leave the solve on its own default DC seed, which converges on easy
+/// circuits and reports a plausible answer while the mode a reader chose did
+/// nothing.
+///
+/// Harmonic balance is the carrier, bound to the operating point it declares
+/// as its prerequisite. The projection judged is the prepared task's
+/// configuration digest, exactly as above: `TAHB` reaches the engine off the
+/// parsed option record rather than through `SimulationConfig`, so the digest
+/// is what proves the key left the Studio at all.
+#[test]
+fn the_harmonic_balance_initial_state_a_transient_cannot_carry_is_judged_through_a_kind_that_can() {
+    use crate::simulation::plan::{
+        AnalysisKind, AnalysisNumericOverride, NumericOverrideOption, SolverOwnership,
+    };
+
+    const INITIAL_STATE: NumericOverrideOption = NumericOverrideOption::HbInitialState;
+
+    let mut state = super::prepared_run::tests::runnable_state();
+
+    // The premise, stated before it is worked around.
+    let refusal = INITIAL_STATE
+        .refusal_for_instance(AnalysisKind::Transient, SolverOwnership::NONE)
+        .expect("a transient runs no harmonic-balance solve");
+    assert!(
+        refusal.contains("harmonic-balance"),
+        "the refusal must name the family that reads the package: {refusal}"
+    );
+    assert!(
+        INITIAL_STATE
+            .refusal_for_instance(AnalysisKind::HarmonicBalance, SolverOwnership::NONE)
+            .is_none(),
+        "harmonic balance is the family whose solve reads it"
+    );
+
+    let hb = {
+        let plan = state.sim_setup.analysis_plan.as_mut().expect("stable plan");
+        let op = plan
+            .instances()
+            .iter()
+            .find(|instance| instance.kind() == AnalysisKind::OperatingPoint)
+            .map(|instance| instance.id())
+            .unwrap_or_else(|| {
+                plan.insert(AnalysisKind::OperatingPoint)
+                    .expect("an operating point inserts")
+                    .0
+            });
+        let (hb, _) = plan
+            .insert(AnalysisKind::HarmonicBalance)
+            .expect("harmonic balance inserts");
+        plan.bind_dependency(hb, AnalysisKind::OperatingPoint, op)
+            .expect("harmonic balance binds the operating point it declares");
+        hb
+    };
+
+    let digest_of = |state: &AppState| -> Vec<u8> {
+        let controller = SimulationController::new();
+        let plan = controller
+            .build_analysis_plan(state)
+            .unwrap_or_else(|errors| panic!("the fixture plan compiles: {}", errors.join("; ")));
+        let sealed = state
+            .model_library_manager
+            .seal_execution_sources_for_plan(&state.sim_setup.model_bindings)
+            .expect("the fixture library seals");
+        controller
+            .build_queue_from_plan(state, &plan, &sealed)
+            .unwrap_or_else(|errors| panic!("the fixture queue builds: {}", errors.join("; ")))
+            .iter()
+            .flat_map(|task| task.config_digest().as_bytes().to_vec())
+            .collect()
+    };
+
+    let baseline = digest_of(&state);
+    let mut record = AnalysisNumericOverride::default();
+    record
+        .set_for_instance(
+            AnalysisKind::HarmonicBalance,
+            SolverOwnership::NONE,
+            INITIAL_STATE,
+            "DC operating point",
+        )
+        .expect("harmonic balance may author its own initial state");
+    state
+        .sim_setup
+        .analysis_plan
+        .as_mut()
+        .expect("stable plan")
+        .set_numeric_override(hb, Some(record))
+        .expect("the override commits");
+
+    assert_ne!(
+        digest_of(&state),
+        baseline,
+        "an authored harmonic-balance initial state the prepared queue cannot see leaves the \
+         solve on its own default DC seed"
     );
 }
 
