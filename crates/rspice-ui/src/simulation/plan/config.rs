@@ -1942,10 +1942,11 @@ mod tests {
         assert!(validate_transient_noise(&draft).is_none());
         // And the run that plan resolves to asks for no floor at all, which is
         // the fact the saved bytes were making.
-        assert!(matches!(
-            AnalysisDraft::TransientNoise(draft).manifest_configuration_error(),
-            None
-        ));
+        assert!(
+            AnalysisDraft::TransientNoise(draft)
+                .manifest_configuration_error()
+                .is_none()
+        );
     }
 
     #[test]
