@@ -930,7 +930,19 @@ use rspice_core::analysis::harmonic_balance::{
 /// `prepare` and `WeilEvaluation::apply_correction_derivative` — whose own
 /// types are already `pub(in crate::engine::transient)`, so the `pub` on them
 /// never published anything.
-const MAX_PUBLIC_ITEMS: usize = 5067;
+///
+/// +4 is the omitted-field resolutions the Stimulus
+/// Library's proof surface states beside its curve:
+/// `VoltageSources::resolve_sin_frequency_with_dialect`,
+/// `VoltageSources::resolve_sffm_parameters_with_dialect`,
+/// `VoltageSources::resolve_am_frequencies_with_dialect`, and
+/// `VoltageSources::resolve_exp_timing_with_defaults` (widened from
+/// `pub(crate)`). `resolve_pulse_timing_with_defaults` was already public for
+/// exactly this reason. Every one of them is a substitution the card does not
+/// show — an omitted SIN frequency becomes 1/TSTOP, an SFFM carrier 5/TSTOP,
+/// an EXP time constant TSTEP — and without them the only way for a surface
+/// to name the number the run will use is to reimplement the rule.
+const MAX_PUBLIC_ITEMS: usize = 5071;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

@@ -1364,26 +1364,101 @@ impl VoltageSources {
         tstop: Value,
         dialect: crate::config::SpiceDialect,
     ) -> Value {
-        let step = if tstep.is_finite() && tstep > 0.0 {
-            tstep
-        } else {
-            1e-12
-        };
-        let stop = if tstop.is_finite() && tstop > 0.0 {
-            tstop
-        } else {
-            1e99
-        };
         Self::evaluate_source_at_time_with_context(
             spec,
             time,
-            Some(TransientSourceContext {
-                tstep: step,
-                tstop: stop,
-                dialect,
-                xyce_breakpoint_tolerance: None,
-                resource_limits: crate::resource::ResourceLimits::default(),
-            }),
+            Some(Self::stateless_preview_context(tstep, tstop, dialect)),
+        )
+    }
+
+    /// The transient a caller with no integration controller resolves omitted
+    /// waveform fields against.
+    ///
+    /// Every entry point that evaluates or resolves a spec for a preview goes
+    /// through here, so the fail-safe step and stop a preview falls back to
+    /// are stated once rather than once per entry point.
+    fn stateless_preview_context(
+        tstep: Value,
+        tstop: Value,
+        dialect: crate::config::SpiceDialect,
+    ) -> TransientSourceContext {
+        TransientSourceContext {
+            tstep: if tstep.is_finite() && tstep > 0.0 {
+                tstep
+            } else {
+                1e-12
+            },
+            tstop: if tstop.is_finite() && tstop > 0.0 {
+                tstop
+            } else {
+                1e99
+            },
+            dialect,
+            xyce_breakpoint_tolerance: None,
+            resource_limits: crate::resource::ResourceLimits::default(),
+        }
+    }
+
+    /// The frequency a `SIN` card actually runs at under this transient.
+    ///
+    /// An omitted or zero FREQ resolves to `1 / TSTOP`, so a surface that
+    /// states a sine's frequency beside its curve has to ask the engine what
+    /// the substitution came out as rather than reading the card. Same
+    /// resolution the evaluator uses; only the way the transient is named
+    /// differs, because a preview has no integration state to take it from.
+    pub fn resolve_sin_frequency_with_dialect(
+        frequency: Value,
+        tstep: Value,
+        tstop: Value,
+        dialect: crate::config::SpiceDialect,
+    ) -> Value {
+        Self::resolve_sin_frequency(
+            frequency,
+            Some(Self::stateless_preview_context(tstep, tstop, dialect)),
+        )
+    }
+
+    /// `SFFM`'s carrier, modulating frequency and modulation index as this
+    /// transient resolves them, in that order.
+    ///
+    /// MDI is clamped against the resolved `FC/FM` ratio rather than against
+    /// the authored one, which is why the three come back together: reporting
+    /// a modulation index that was computed from a different pair of
+    /// frequencies than the ones beside it would be arithmetic nobody can
+    /// check.
+    pub fn resolve_sffm_parameters_with_dialect(
+        carrier_freq: Value,
+        modulation_index: Value,
+        signal_freq: Value,
+        tstep: Value,
+        tstop: Value,
+        dialect: crate::config::SpiceDialect,
+    ) -> (Value, Value, Value) {
+        Self::sffm_parameters(
+            carrier_freq,
+            modulation_index,
+            signal_freq,
+            Some(Self::stateless_preview_context(tstep, tstop, dialect)),
+        )
+    }
+
+    /// `AM`'s modulating and carrier frequencies as this transient resolves
+    /// them, in that order.
+    ///
+    /// The order is the card's: `AM(VO VMO VMA FM FC …)` names the modulating
+    /// frequency first, and swapping them here would put the 5/TSTOP default
+    /// where the 500/TSTOP one belongs.
+    pub fn resolve_am_frequencies_with_dialect(
+        modulating_freq: Value,
+        carrier_freq: Value,
+        tstep: Value,
+        tstop: Value,
+        dialect: crate::config::SpiceDialect,
+    ) -> (Value, Value) {
+        Self::am_frequencies(
+            modulating_freq,
+            carrier_freq,
+            Some(Self::stateless_preview_context(tstep, tstop, dialect)),
         )
     }
 
@@ -1603,7 +1678,13 @@ impl VoltageSources {
         )
     }
 
-    pub(crate) fn resolve_exp_timing_with_defaults(
+    /// `EXP` timing with dialect defaults substituted for omitted fields.
+    ///
+    /// Public for the same reason [`Self::resolve_pulse_timing_with_defaults`]
+    /// is: the two time constants an exponential actually runs with are what a
+    /// preview states beside its curve, and every one of the four fields has a
+    /// substitution the card does not show.
+    pub fn resolve_exp_timing_with_defaults(
         td1: Value,
         tau1: Value,
         td2: Value,
