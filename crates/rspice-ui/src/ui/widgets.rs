@@ -34,6 +34,7 @@ mod switch;
 mod table;
 mod toast;
 mod tree;
+mod view_switch;
 
 pub use button::{Button, IconButton};
 pub use chip::chip;
@@ -60,3 +61,4 @@ pub use toast::{
     MirroredEntry, NotificationAction, NotificationCategory, NotificationRecord, ToastKind, Toasts,
 };
 pub use tree::{TreeRow, TreeRowResult};
+pub(crate) use view_switch::{ViewOption, view_switch};
