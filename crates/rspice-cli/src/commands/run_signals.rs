@@ -872,18 +872,28 @@ mod tests {
         .expect("test netlist parses")
     }
 
+    /// A device lead current is a current, whatever spelling asked for it:
+    /// the core projection gives `@D1[Id]` amperes, so the `.raw` header
+    /// states `current` and the HDF5 column states `A`. Only a device
+    /// parameter that is not a current stays dimensionless. This test used to
+    /// require both to be `DeviceObservable`, which published a diode current
+    /// with no unit.
     #[test]
-    fn dc_device_save_materializes_authored_qualified_name() {
+    fn dc_device_saves_distinguish_lead_currents_from_other_device_parameters() {
         let mut result = dc_result(&[("out", 1.0)], &[]);
         result.dc_observables.push(("D1:ID".to_string(), 2.5e-3));
-        let netlist = netlist_with_saves(".SAVE @D1[Id]\n");
+        result.dc_observables.push(("D1:GM".to_string(), 7.5e-3));
+        let netlist = netlist_with_saves(".SAVE @D1[Id] @D1[gm]\n");
 
         let op = dc_operating_point_export_signals(&netlist, &result, &NoAbort)
             .expect("DC observable is available");
-        assert_eq!(op.len(), 1);
+        assert_eq!(op.len(), 2);
         assert_eq!(op[0].display_name, "@D1[Id]");
         assert_eq!(op[0].values, [2.5e-3]);
-        assert_eq!(op[0].kind, SignalKind::DeviceObservable);
+        assert_eq!(op[0].kind, SignalKind::Current);
+        assert_eq!(op[1].display_name, "@D1[gm]");
+        assert_eq!(op[1].values, [7.5e-3]);
+        assert_eq!(op[1].kind, SignalKind::DeviceObservable);
 
         let sweep = dc_export_signals(
             &netlist,
@@ -892,9 +902,11 @@ mod tests {
             &NoAbort,
         )
         .expect("DC sweep observable is available");
-        assert_eq!(sweep.len(), 1);
+        assert_eq!(sweep.len(), 2);
         assert_eq!(sweep[0].display_name, "@D1[Id]");
         assert_eq!(sweep[0].values, [2.5e-3, 2.5e-3]);
+        assert_eq!(sweep[0].kind, SignalKind::Current);
+        assert_eq!(sweep[1].kind, SignalKind::DeviceObservable);
     }
 
     #[test]
