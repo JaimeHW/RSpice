@@ -26,7 +26,9 @@ fn delayed_step(time: Value, delay: Value, alpha: Value, beta: Value, forcing: V
 
 fn check_delayed_feedback(dialect: SpiceDialect, method: IntegrationMethod) {
     let text = "Delayed GP collector feedback\nVs s 0 3\nRc s c 1k\nVb b 0 .6\nC1 c 0 1n\nIstep 0 c PWL(0 0 .37u 0 .37u 100u 8u 100u)\nQ1 c b 0 qm\n.model qm NPN(IS=1e-14 BF=100 BR=1 VAF=1 TF=1u PTF=57.29577951308232 TNOM=27)\n.options gmin=0 temp=27 reltol=1e-6 abstol=1e-13 vntol=1e-9\n.tran .07u 8u\n.end\n";
-    let delay = 1e-6 * (57.295_779_513_082_32 * std::f64::consts::PI / 180.0);
+    // The card sets PTF to 180/pi degrees, which is one radian of excess phase at
+    // 1/(2*pi*TF), so the delay the model realizes is TF itself.
+    let delay = 1e-6;
     let config = SimulationConfig {
         integration_method: method,
         ..SimulationConfig::default().with_spice_dialect(dialect)
