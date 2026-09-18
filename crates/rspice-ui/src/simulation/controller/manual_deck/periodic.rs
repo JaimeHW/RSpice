@@ -15,19 +15,23 @@
 //! point, and turning the cards into the typed run configurations the studio
 //! dispatches.
 //!
-//! So the key sets below are the engine's key sets, not a second dialect. Two
-//! consequences follow, and both are stated rather than absorbed:
+//! So the key sets below are the engine's key sets, not a second dialect: a
+//! key the engine's card accepts is a key this reader accepts, at the same
+//! default. `.PXF` used to refuse `RELTOL=`, `ABSTOL=` and `FROM=` by name
+//! while the engine's parser took all three — and since the deck is parsed by
+//! the engine before it reaches this reader, that refusal fired on a deck the
+//! engine had already read. The two key sets are asserted equal by
+//! `the_reader_and_the_engine_accept_the_same_periodic_key_set` and, for
+//! `.PSS`, against the engine's own keyword arms by
+//! `the_reader_and_the_engine_accept_the_same_pss_key_set`.
 //!
-//! - A key the engine accepts but the studio's typed run configuration has no
-//!   field for is refused by name — [`PSS_KEYS_THE_STUDIO_CANNOT_HONOUR`] —
-//!   rather than parsed and dropped. That is the rule `periodic_cards.rs`
-//!   states for the ngspice fields RSpice cannot honour, applied one layer up.
-//! - A key the engine's card accepts is a key this reader accepts, at the same
-//!   default. `.PXF` used to refuse `RELTOL=`, `ABSTOL=` and `FROM=` by name
-//!   while the engine's parser took all three — and since the deck is parsed
-//!   by the engine before it reaches this reader, that refusal fired on a
-//!   deck the engine had already read. The two key sets are asserted equal by
-//!   `the_reader_and_the_engine_accept_the_same_periodic_key_set`.
+//! `.PSS` carried the last exception and no longer does. Eight of the engine's
+//! keywords were refused here by name, with a reason and a remedy, because the
+//! studio's typed request had no field for them: the integration method, the
+//! stabilization time, the Newton limit, the absolute tolerance, the damping
+//! factor, the period bound, the period guess and the solver log. The request
+//! holds all of them now, so the table and the parameter that carried it are
+//! gone.
 //!
 //! `.PXF` and `.PSTB` were the exception until the engine gained cards for
 //! them: the parser used to record both as unsupported dot-commands, warn that
@@ -302,46 +306,32 @@ fn driven_tone_sources(netlist: &Netlist) -> Result<Vec<String>, String> {
         .map_err(|error| format!("the deck's periodic sources could not be read: {error}"))
 }
 
-/// `.PSS` keywords the engine accepts that the studio's typed request cannot
-/// hold, and what the studio does instead.
+/// Every `.PSS` keyword this reader accepts.
 ///
-/// The engine's card carries the whole shooting configuration; the studio's
-/// `PssRunConfig` carries the seven fields its form owns. Each entry is
-/// refused by name rather than parsed and dropped, so a deck is never accepted
-/// under a configuration the run will not honour.
-const PSS_KEYS_THE_STUDIO_CANNOT_HONOUR: &[(&str, &str)] = &[
-    (
-        "periodguess",
-        "the studio seeds an autonomous period from the fundamental; author fund=",
-    ),
-    (
-        "tstab",
-        "the studio's stabilization window is a period count; author tstabperiods=",
-    ),
-    (
-        "maxiter",
-        "the studio's shooting run is fixed at 100 Newton iterations",
-    ),
-    (
-        "abstol",
-        "the studio's shooting run converges on the relative periodicity norm alone; author tol=",
-    ),
-    (
-        "damping",
-        "the studio's shooting run takes the engine's default Newton damping",
-    ),
-    (
-        "maxperiodchange",
-        "the studio's autonomous run takes the engine's default relative period bound",
-    ),
-    (
-        "method",
-        "the studio's shooting run takes the engine's default integration method",
-    ),
-    (
-        "verbose",
-        "the studio does not route solver logging through the deck",
-    ),
+/// The engine's key set, key for key, asserted equal to it by
+/// [`tests::the_reader_and_the_engine_accept_the_same_pss_key_set`], which
+/// reads the engine's own keyword arms out of `periodic_cards.rs` rather than
+/// trusting this list to have been kept up to date.
+///
+/// It was a shorter list beside a refusal table: eight of the engine's
+/// keywords were rejected by name because the studio's typed request had no
+/// field for them. It has fields for all of them now.
+const PSS_KEYS: &[&str] = &[
+    "fund",
+    "periodguess",
+    "autonomous",
+    "oscnode",
+    "harms",
+    "tstab",
+    "tstabperiods",
+    "maxiter",
+    "tol",
+    "abstol",
+    "damping",
+    "maxperiodchange",
+    "points",
+    "method",
+    "verbose",
 ];
 
 /// Read `.PSS FUND=<hz> [KEY=VALUE ...]`, the engine's keyword form.
@@ -354,6 +344,13 @@ const PSS_KEYS_THE_STUDIO_CANNOT_HONOUR: &[(&str, &str)] = &[
 /// complete answer rather than a guess. It is only asked for on a driven card:
 /// an autonomous solve takes its period from the oscillator node and reads no
 /// tone list at all.
+///
+/// `PERIODGUESS=` is not a field of its own here, for the reason the engine's
+/// own card gives: it refuses `FUND=` and `PERIODGUESS=` on one card, and an
+/// autonomous card's period guess *is* its fundamental — `parse_pss_command`
+/// sets each from the other, and `PssConfig::with_period_guess` does the same.
+/// So the two spellings resolve onto one number here as well, and a deck may
+/// use either.
 fn parse_pss(
     card: &ParsedCard,
     params: &ParamContext,
@@ -362,30 +359,12 @@ fn parse_pss(
     if !card.positional.is_empty() {
         return Err(
             ".PSS in a manual deck is the keyword card `.PSS fund=<frequency> [key=value ...]`; \
-             ngspice's positional oscillator card carries a stabilization time in seconds and a \
-             shooting-iteration limit the studio's periodic pipeline does not hold"
+             ngspice's positional oscillator card names the node its period is detected on, so a \
+             driven solve cannot be written in it at all"
                 .to_owned(),
         );
     }
-    reject_unsupported_keys(
-        card,
-        &[
-            "fund",
-            "autonomous",
-            "oscnode",
-            "harms",
-            "tstabperiods",
-            "points",
-            "tol",
-        ],
-        PSS_KEYS_THE_STUDIO_CANNOT_HONOUR,
-        ".PSS",
-    )?;
-    let fundamental = card
-        .keyed
-        .get("fund")
-        .ok_or_else(|| ".PSS requires fund=<frequency>".to_owned())?;
-    let fundamental_freq = numeric_value(fundamental, ".PSS fund", params)?;
+    reject_unsupported_keys(card, PSS_KEYS, ".PSS")?;
     let oscillator_node = card
         .keyed
         .get("oscnode")
@@ -423,9 +402,23 @@ fn parse_pss(
     if tstab_periods == 0 {
         return Err(".PSS tstabperiods must be at least 1".to_owned());
     }
+    let integration_method = match card.keyed.get("method") {
+        None => None,
+        Some(spelling) => {
+            let spelling = unquote(spelling).trim().to_owned();
+            Some(
+                crate::simulation::dialog::IntegrationMethod::from_spice_name(&spelling)
+                    .ok_or_else(|| {
+                        format!(
+                            ".PSS method={spelling:?} is not TRAP, GEAR, EULER or TRAPGEAR"
+                        )
+                    })?,
+            )
+        }
+    };
     let spec = AnalysisSpec::Pss {
         method: PssMethod::Shooting,
-        fundamental_freq,
+        fundamental_freq: pss_fundamental(card, oscillator_mode, params)?,
         tone_sources,
         tstab_periods,
         points_per_period: optional_usize(card, "points", 256, params)?,
@@ -433,10 +426,65 @@ fn parse_pss(
         oscillator_mode,
         oscillator_node,
         num_harmonics,
+        integration_method,
+        // Every default is the engine's own card default, so a key the deck
+        // omits means the same thing to both readers.
+        tstab: optional_value(card, "tstab", 0.0, params)?,
+        max_iterations: optional_usize(card, "maxiter", 100, params)?,
+        abstol: optional_value(card, "abstol", 1.0e-12, params)?,
+        damping: optional_value(card, "damping", 1.0, params)?,
+        max_period_change: optional_value(card, "maxperiodchange", 0.1, params)?,
+        verbose: optional_bool(card, "verbose", false)?,
     };
     spec.validate()
         .map_err(|error| format!("invalid .PSS: {error}"))?;
     Ok(spec)
+}
+
+/// The fundamental the card states, in whichever of its two spellings.
+///
+/// `FUND=` is a frequency and `PERIODGUESS=` is its reciprocal, and the engine
+/// refuses both on one card because they are one quantity. `PERIODGUESS=`
+/// belongs only to an autonomous card — the driven form has a known period,
+/// not an estimate of one — and `parse_pss_command` refuses it there in the
+/// same words.
+fn pss_fundamental(
+    card: &ParsedCard,
+    oscillator_mode: bool,
+    params: &ParamContext,
+) -> Result<f64, String> {
+    let fundamental = card
+        .keyed
+        .contains_key("fund")
+        .then(|| numeric_value(&card.keyed["fund"], ".PSS fund", params))
+        .transpose()?;
+    let period_guess = card
+        .keyed
+        .contains_key("periodguess")
+        .then(|| numeric_value(&card.keyed["periodguess"], ".PSS periodguess", params))
+        .transpose()?;
+    match (fundamental, period_guess) {
+        (Some(_), Some(_)) => Err(
+            ".PSS states both fund= and periodguess=, which are one period spelled twice"
+                .to_owned(),
+        ),
+        (Some(frequency), None) => Ok(frequency),
+        (None, Some(period)) if !oscillator_mode => {
+            let _ = period;
+            Err(
+                ".PSS periodguess= estimates an oscillator's own period; author autonomous=yes, \
+                 or state the driven period as fund="
+                    .to_owned(),
+            )
+        }
+        (None, Some(period)) => {
+            if !period.is_finite() || period <= 0.0 {
+                return Err(".PSS periodguess must be a positive period in seconds".to_owned());
+            }
+            Ok(1.0 / period)
+        }
+        (None, None) => Err(".PSS requires fund=<frequency>".to_owned()),
+    }
 }
 
 fn parse_pac(
@@ -460,7 +508,6 @@ fn parse_pac(
             "includedc",
             "from",
         ],
-        &[],
         ".PAC",
     )?;
     let (sweep, points_per_unit, start_freq, stop_freq) = frequency_sweep(card, ".PAC", params)?;
@@ -536,7 +583,6 @@ fn parse_pnoise(
             "noisesummary",
             "from",
         ],
-        &[],
         ".PNOISE",
     )?;
     let (sweep, points_per_unit, start_freq, stop_freq) = frequency_sweep(card, ".PNOISE", params)?;
@@ -653,7 +699,6 @@ fn parse_pxf(
             "abstol",
             "from",
         ],
-        &[],
         ".PXF",
     )?;
     let (sweep, points_per_unit, start_freq, stop_freq) = frequency_sweep(card, ".PXF", params)?;
@@ -727,7 +772,6 @@ fn parse_pstb(
             "detectsubharmonics",
             "eigentol",
         ],
-        &[],
         ".PSTB",
     )?;
     if !card.positional.is_empty() {
@@ -851,24 +895,17 @@ fn insert_key(keyed: &mut HashMap<String, String>, key: &str, value: &str) -> Re
 
 /// Refuse every key the card carries that this reader does not honour.
 ///
-/// `unhonourable` names keys the *engine* accepts on the same card but whose
-/// value the studio's typed run configuration has no field for. They are
-/// refused with the reason and the remedy rather than with the generic
-/// "unknown option", because a deck that carries one is well formed — it is
-/// asking for something this pipeline would silently not do.
+/// It took a second list until this lane: keys the *engine* accepted on the
+/// same card but whose value the studio's typed run configuration had no field
+/// for, refused by name with a reason and a remedy. `.PSS` was its only user,
+/// and the studio now holds all eight of those controls, so both the table and
+/// the parameter that carried it are gone. An unknown key is the one refusal
+/// left, which is the one the engine's own parser gives.
 fn reject_unsupported_keys(
     card: &ParsedCard,
     accepted: &[&str],
-    unhonourable: &[(&str, &str)],
     directive: &str,
 ) -> Result<(), String> {
-    for (key, reason) in unhonourable {
-        if card.keyed.contains_key(*key) {
-            return Err(format!(
-                "{directive} {key}= is not honoured by the studio's periodic pipeline: {reason}"
-            ));
-        }
-    }
     let accepted = accepted.iter().copied().collect::<HashSet<_>>();
     if let Some(key) = card
         .keyed
@@ -1149,6 +1186,236 @@ fn matches_ignore_ascii_case(value: &str, candidates: &[&str]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The reader's `.PSS` key set is the engine's, read out of the engine.
+    ///
+    /// The sibling test below proves the family's readers agree by authoring
+    /// each key and watching both accept it, which can only catch a key this
+    /// reader refuses. It cannot catch the other direction — a keyword the
+    /// engine's card grew that nobody taught this reader — because nothing in
+    /// this crate knows what that set is. So this reads it: the keyword arms
+    /// of `parse_pss_command` itself, out of the engine's own source.
+    ///
+    /// That is the same shape as the guards in `source_guard`, and it carries
+    /// the same obligation: a scan that stops matching passes forever, so the
+    /// function's text has to be found or this fails, and the set it yields
+    /// has to be big enough to be the real one.
+    #[test]
+    fn the_reader_and_the_engine_accept_the_same_pss_key_set() {
+        let engine_source = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("this crate sits in the workspace's crates/ directory")
+            .join("rspice-core/src/netlist/parser/periodic_cards.rs");
+        let source = std::fs::read_to_string(&engine_source)
+            .unwrap_or_else(|error| panic!("read {}: {error}", engine_source.display()));
+        let start = source
+            .find("fn parse_pss_command(")
+            .expect("the engine still spells the .PSS parser this way");
+        // The keyword loop ends where the next item starts, and `rustfmt`
+        // writes every top-level item at column zero.
+        let body = &source[start..];
+        let end = body[1..]
+            .find("\nfn ")
+            .map(|offset| offset + 1)
+            .expect("the .PSS parser is followed by another function");
+        let body = &body[..end];
+
+        let mut engine_keys = body
+            .lines()
+            .filter_map(|line| {
+                let trimmed = line.trim_start();
+                let rest = trimmed.strip_prefix('"')?;
+                let (keyword, tail) = rest.split_once('"')?;
+                // An arm, not a field name or a message: `"KEY" =>`.
+                tail.trim_start().starts_with("=>").then(|| {
+                    keyword.to_ascii_lowercase()
+                })
+            })
+            .collect::<Vec<_>>();
+        engine_keys.sort();
+        engine_keys.dedup();
+        assert!(
+            engine_keys.len() >= 15,
+            "the scan found only {} `.PSS` keyword arms; a scan that reaches nothing passes \
+             forever: {engine_keys:?}",
+            engine_keys.len()
+        );
+
+        let mut reader_keys = PSS_KEYS
+            .iter()
+            .map(|key| (*key).to_owned())
+            .collect::<Vec<_>>();
+        reader_keys.sort();
+        assert_eq!(
+            reader_keys, engine_keys,
+            "the deck reader and the engine's `.PSS` card must accept the same keywords"
+        );
+    }
+
+    /// Every solver control the form can author survives the deck.
+    ///
+    /// The card is written by the dialog's own emitter and read back by this
+    /// reader, so what is proved is the round trip a saved project takes: the
+    /// studio writes the deck, a reader hands it back as a typed request, and
+    /// the two requests are the same run.
+    #[test]
+    fn pss_solver_controls_round_trip_through_the_deck_reader() {
+        use crate::simulation::dialog::{IntegrationMethod, PssConfig};
+
+        const CIRCUIT: &str = "pss solver controls\nV1 in 0 SIN(0 1 1Meg)\nR1 in out 1k\nC1 out 0 1n\n";
+        let authored = PssConfig {
+            integration_method: Some(IntegrationMethod::Gear2),
+            fund_freq: 1.0e6,
+            tone_sources: vec!["V1".to_owned()],
+            tstab_periods: 7,
+            tstab: 3.0e-9,
+            max_iterations: 250,
+            abstol: 1.0e-15,
+            damping: 0.75,
+            max_period_change: 0.25,
+            points_per_period: 1024,
+            tolerance: 1.0e-8,
+            osc_mode: false,
+            osc_node: String::new(),
+            num_harmonics: 15,
+        };
+        authored.validate().expect("the authored request is valid");
+        let directive = authored.to_spice();
+        let deck = format!("{CIRCUIT}{directive}\n.end\n");
+
+        // The engine reads the card first, exactly as a run would.
+        let netlist = Netlist::parse(&deck)
+            .unwrap_or_else(|error| panic!("the engine reads `{directive}`: {error}"));
+        let tasks = parse_periodic_tasks(&netlist, &deck)
+            .unwrap_or_else(|errors| panic!("the deck reader refused: {}", errors.join("; ")));
+        let AnalysisSpec::Pss {
+            fundamental_freq,
+            tstab_periods,
+            points_per_period,
+            tolerance,
+            num_harmonics,
+            integration_method,
+            tstab,
+            max_iterations,
+            abstol,
+            damping,
+            max_period_change,
+            verbose,
+            ..
+        } = tasks
+            .iter()
+            .map(|task| &task.spec)
+            .find(|spec| matches!(spec, AnalysisSpec::Pss { .. }))
+            .expect("the deck reader recovers the PSS")
+            .clone()
+        else {
+            unreachable!("filtered to the PSS spec");
+        };
+        assert_eq!(fundamental_freq, 1.0e6);
+        assert_eq!(tstab_periods, 7);
+        assert_eq!(points_per_period, 1024);
+        assert_eq!(tolerance, 1.0e-8);
+        assert_eq!(num_harmonics, 15);
+        assert_eq!(integration_method, Some(IntegrationMethod::Gear2));
+        assert_eq!(tstab, 3.0e-9);
+        assert_eq!(max_iterations, 250);
+        assert_eq!(abstol, 1.0e-15);
+        assert_eq!(damping, 0.75);
+        assert_eq!(max_period_change, 0.25);
+        assert!(!verbose, "the form authors no solver log");
+    }
+
+    /// `VERBOSE=` is the one control only a deck can state, and it reaches the
+    /// engine from one.
+    #[test]
+    fn a_deck_authors_the_solver_log_the_form_does_not_offer() {
+        const CIRCUIT: &str = "pss verbose\nV1 in 0 SIN(0 1 1Meg)\nR1 in out 1k\nC1 out 0 1n\n";
+        let deck = format!("{CIRCUIT}.pss fund=1Meg verbose=yes\n.end\n");
+        let netlist = Netlist::parse(&deck).expect("the engine reads verbose=");
+        let tasks = parse_periodic_tasks(&netlist, &deck)
+            .unwrap_or_else(|errors| panic!("the deck reader refused: {}", errors.join("; ")));
+        assert!(matches!(
+            tasks.first().map(|task| &task.spec),
+            Some(AnalysisSpec::Pss { verbose: true, .. })
+        ));
+    }
+
+    /// A deck may spell the autonomous period estimate either way, and not
+    /// both.
+    #[test]
+    fn an_autonomous_period_estimate_is_one_quantity_in_two_spellings() {
+        const CIRCUIT: &str = "pss period guess\nV1 in 0 SIN(0 1 1Meg)\nR1 in out 1k\nC1 out 0 1n\n";
+
+        let deck = format!("{CIRCUIT}.pss autonomous=yes oscnode=out periodguess=1n\n.end\n");
+        let netlist = Netlist::parse(&deck).expect("the engine reads periodguess=");
+        let tasks = parse_periodic_tasks(&netlist, &deck)
+            .unwrap_or_else(|errors| panic!("the deck reader refused: {}", errors.join("; ")));
+        assert!(matches!(
+            tasks.first().map(|task| &task.spec),
+            Some(AnalysisSpec::Pss {
+                oscillator_mode: true,
+                fundamental_freq,
+                ..
+            }) if (*fundamental_freq - 1.0e9).abs() <= 1.0
+        ));
+
+        // Both spellings on one card is the engine's own refusal, so the
+        // reader must refuse the deck the engine will not read either.
+        let conflicting =
+            format!("{CIRCUIT}.pss autonomous=yes oscnode=out fund=1Meg periodguess=1n\n.end\n");
+        assert!(
+            Netlist::parse(&conflicting).is_err(),
+            "the premise is that the engine refuses one card stating both"
+        );
+        let seeded = Netlist::parse(&format!("{CIRCUIT}.end\n")).expect("the fixture parses");
+        let errors = parse_periodic_tasks(&seeded, &conflicting)
+            .expect_err("one period spelled twice is not one card");
+        assert!(
+            errors.iter().any(|error| error.contains("spelled twice")),
+            "{errors:?}"
+        );
+    }
+
+    /// A deck `METHOD=` spelling means the same integrator to both readers.
+    ///
+    /// [`crate::simulation::dialog::IntegrationMethod::from_spice_name`] is
+    /// this crate's copy of a table that lives in the engine, so it is held to
+    /// the engine's by running every spelling through the engine's own `.PSS`
+    /// parser. A spelling neither accepts is checked too: a table that said
+    /// yes to everything would pass the first half alone.
+    #[test]
+    fn a_deck_method_spelling_means_the_same_thing_to_both_readers() {
+        use crate::simulation::dialog::IntegrationMethod;
+        use rspice_core::netlist::AnalysisCommand;
+
+        const CIRCUIT: &str = "pss method\nV1 in 0 SIN(0 1 1Meg)\nR1 in out 1k\nC1 out 0 1n\n";
+        let engine_method = |spelling: &str| {
+            let deck = format!("{CIRCUIT}.pss fund=1Meg method={spelling}\n.end\n");
+            let netlist = Netlist::parse(&deck).ok()?;
+            match netlist.analyses.into_iter().next() {
+                Some(AnalysisCommand::Pss(card)) => card.integration_method,
+                other => panic!("expected a .PSS card, got {other:?}"),
+            }
+        };
+
+        for spelling in IntegrationMethod::spice_spellings() {
+            let reader = IntegrationMethod::from_spice_name(spelling)
+                .unwrap_or_else(|| panic!("this reader accepts {spelling}"));
+            assert_eq!(
+                engine_method(spelling),
+                Some(reader.core()),
+                "`method={spelling}` names a different integrator to each reader"
+            );
+        }
+        for refused in ["bdf2", "gear3", "spectre", ""] {
+            assert_eq!(
+                IntegrationMethod::from_spice_name(refused),
+                None,
+                "`method={refused}` is not a method the engine integrates under"
+            );
+            assert_eq!(engine_method(refused), None, "{refused}");
+        }
+    }
 
     /// Every card here is written in the engine's grammar, and the engine
     /// parses this exact source first: `Netlist::parse` is not a fixture step,
