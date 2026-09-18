@@ -330,6 +330,18 @@ pub(super) const NOT_HARMONIC_BALANCE: &str =
     "only a harmonic-balance solve reads this package, and this analysis does not run one";
 pub(super) const TRANSIENT_OWNS_STEP_CEILING: &str =
     "the transient's own Max step field owns this, and one bound cannot have two copies";
+/// `.OPTIONS METHOD` on a PSS analysis.
+///
+/// A shooting solve never reads it. `Engine::pss_integration_method`
+/// (`rspice-core/src/engine/pss.rs:662`) selects the formula from the `.PSS`
+/// card's own `METHOD=`, and with that keyword absent it falls to the PSS
+/// default — trapezoidal on a fixed shooting grid, otherwise TrapGear's
+/// adaptive choice. `SimulationConfig::method` is not consulted anywhere in
+/// `engine/pss.rs`. So the option is not merely a second editor of the form's
+/// `Integration method` chooser; it is a control a PSS run would ignore, and
+/// the chooser is the one that reaches the solve.
+pub(super) const PSS_OWNS_ITS_INTEGRATION_FORMULA: &str = "a shooting solve reads the formula off its own .PSS card, never .OPTIONS METHOD; the PSS \
+     form's own Integration method chooser is the control that reaches it";
 /// The continuation aids and the damping strategy under a tier that assigns
 /// them. `Fast` clears every aid and `Robust` sets every one, both after the
 /// deck has been resolved, so an authored value under either is read and then
@@ -606,6 +618,11 @@ impl NumericOverrideOption {
         match self {
             Self::MaximumTimestep if matches!(kind, AnalysisKind::Transient) => {
                 Some(TRANSIENT_OWNS_STEP_CEILING)
+            }
+            // The one kind that advances time and still reads its integration
+            // formula from somewhere other than `.OPTIONS METHOD`.
+            Self::IntegrationMethod if matches!(kind, AnalysisKind::Pss) => {
+                Some(PSS_OWNS_ITS_INTEGRATION_FORMULA)
             }
             // Both kinds that offer an accuracy tier, not just the operating
             // point: the transfer function resolves its tier through the same

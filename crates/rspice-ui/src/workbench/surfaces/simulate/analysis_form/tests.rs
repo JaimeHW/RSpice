@@ -1404,3 +1404,92 @@ fn every_analysis_form_arm_lives_in_its_own_module() {
         arms.len()
     );
 }
+
+/// One quantity, one control: a form never paints a name twice.
+///
+/// An analysis form carries its own fields and, under them, the advanced
+/// options that analysis owns. Both are fields in one grid, so a quantity the
+/// form already owns must not reappear as an option — the PSS form shipped
+/// with two `Integration method` controls, one writing `METHOD=` on the `.PSS`
+/// card and one writing `.OPTIONS METHOD`, and only the first reaches a
+/// shooting solve.
+///
+/// Compared on the quantity rather than the whole label, because an option
+/// label states its key after a middle dot (`Update bound · RELTOL`) and the
+/// part before it is the name a reader is choosing between. A collision there
+/// is a collision on screen whether or not the keys differ.
+///
+/// Asked of every kind whose form declares a label table, which is every kind
+/// that has one to collide with; a kind whose fields are built inline has no
+/// list for this test to read and nothing for the option fields to shadow.
+#[test]
+fn a_form_never_paints_a_quantity_it_already_owns() {
+    use crate::simulation::dialog::SimulationOptions;
+    use crate::simulation::plan::AnalysisDraft;
+    use crate::workbench::surfaces::simulate::advanced_options::form_rows;
+
+    /// The name before the key, which is what a reader reads.
+    fn quantity(label: &str) -> String {
+        label
+            .split_once(" \u{b7} ")
+            .map_or(label, |(name, _)| name)
+            .trim()
+            .to_ascii_lowercase()
+    }
+
+    let tables: [(AnalysisKind, &[&str]); 6] = [
+        (AnalysisKind::Pss, &PSS_FIELD_LABELS),
+        (AnalysisKind::HarmonicBalance, &HB_FIELD_LABELS),
+        (AnalysisKind::Envelope, &ENVELOPE_FIELD_LABELS),
+        (AnalysisKind::Noise, &NOISE_FIELD_LABELS),
+        (
+            AnalysisKind::OperatingPoint,
+            &super::operating_point::OP_FIELD_LABELS,
+        ),
+        (AnalysisKind::TransferFunction, &XF_FIELD_LABELS),
+    ];
+
+    let options = SimulationOptions::default();
+    let mut collisions = Vec::new();
+    for (kind, labels) in tables {
+        let owned: Vec<String> = labels.iter().copied().map(quantity).collect();
+        let draft = AnalysisDraft::for_kind(kind);
+        for section in form_rows(kind, &draft, None, &options) {
+            for row in section.rows {
+                if owned.contains(&quantity(row.option.label())) {
+                    collisions.push(format!(
+                        "  {} paints \"{}\" as its own field and again as {}",
+                        kind.label(),
+                        row.option.label(),
+                        row.option.key()
+                    ));
+                }
+            }
+        }
+    }
+    assert!(
+        collisions.is_empty(),
+        "two controls for one quantity on one form — suppress the option through its refusal, \
+         naming the field that owns it:\n{}",
+        collisions.join("\n")
+    );
+
+    // The one this test was written for, named so a regression reads as the
+    // defect rather than as an anonymous collision. Refused rather than merely
+    // unoffered: a PSS run ignores `.OPTIONS METHOD` entirely, so a stored
+    // value would be a bound nothing reads.
+    let refusal = crate::simulation::plan::NumericOverrideOption::IntegrationMethod
+        .refusal_for(AnalysisKind::Pss)
+        .expect("a shooting solve reads its formula off the .PSS card");
+    assert!(
+        refusal.contains(".PSS card") && refusal.contains("Integration method"),
+        "the refusal must name the card it is read from and the chooser that reaches it: {refusal}"
+    );
+    // And a kind whose transient really does read the key still carries it.
+    assert_eq!(
+        crate::simulation::plan::NumericOverrideOption::IntegrationMethod
+            .refusal_for(AnalysisKind::Fourier),
+        None,
+        "a Fourier measurement runs a transient, which integrates with .OPTIONS METHOD"
+    );
+}

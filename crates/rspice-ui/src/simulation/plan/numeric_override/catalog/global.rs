@@ -120,7 +120,14 @@ pub(super) const GLOBAL: [OptionSpec; 21] = [
         key: "SOURCESTEPPING",
         package: OptionPackage::Global,
         section: OverrideSection::Convergence,
-        label: "Source stepping",
+        // Qualified, unlike its three sibling aids, because the harmonic
+        // balance form owns a field of its own called `Source stepping` — the
+        // HB continuation's source ramp, which is a different quantity from
+        // this DC-recovery homotopy flag. A legacy record stating this one on
+        // an HB analysis would otherwise paint two fields with one name, and
+        // two quantities that read alike is the defect `.OPTIONS` labels
+        // carry their key to prevent.
+        label: "Source stepping · SOURCESTEPPING",
         value_kind: OverrideValueKind::Flag,
         value_hint: "on · off",
         config_field: "convergence_config.source_stepping",
