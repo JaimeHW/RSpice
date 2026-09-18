@@ -432,7 +432,9 @@ fn assemble(
             .iter()
             .filter(|entry| entry.scope == scope)
             .map(|entry| entry.contribution * entry.contribution)
-            .sum()
+            // Folded from +0.0: an empty `f64` sum is -0.0, and its square root is a
+            // standard deviation every artifact would carry as "-0".
+            .fold(0.0, |variance, term| variance + term)
     };
     let mismatch_variance = variance(DcMatchScope::Mismatch);
     let process_variance = variance(DcMatchScope::Process);

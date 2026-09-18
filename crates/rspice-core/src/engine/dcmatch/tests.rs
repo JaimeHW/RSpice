@@ -101,6 +101,13 @@ fn a_dcmatch_sigma_matches_the_analytic_resistor_divider() {
     );
     assert_eq!(result.sigma_mismatch, result.sigma_total);
     assert_eq!(result.sigma_process, 0.0);
+    // An empty scope is a spread of zero, not of negative zero: the two compare
+    // equal, but every published artifact carries these bits and "-0" reads as
+    // a defect.
+    assert!(
+        result.sigma_process.is_sign_positive(),
+        "an empty scope must report +0.0"
+    );
 
     // Each resistance is varied only by its own parameter, so the two
     // cross terms are identically zero rather than small.
