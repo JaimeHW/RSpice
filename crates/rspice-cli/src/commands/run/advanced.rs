@@ -1768,9 +1768,9 @@ pub(super) fn run_sparam(ctx: &RunContext<'_>, ports_spec: &str, z0: f64) -> Res
 ///
 /// Like `.TF`, this is a single-point analysis: one nominal operating point,
 /// one variance sum, no sweep and no axis of its own. The summary quotes the
-/// three sigmas at the multiple the card asked for and then the ranked
-/// contributors, because which instance owns the spread is the question the
-/// card was authored to ask.
+/// probe, its nominal value, the three sigmas, the total at the multiple the
+/// card asked for, and then the ranked contributors — because which instance
+/// owns the spread is the question the card was authored to ask.
 pub(super) fn run_dc_match_from_command(
     ctx: &RunContext<'_>,
     card: &rspice_core::netlist::DcMatchCard,
