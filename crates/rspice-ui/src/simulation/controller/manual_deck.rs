@@ -620,6 +620,7 @@ fn command_name(command: &AnalysisCommand) -> &'static str {
         AnalysisCommand::Pstb(_) => ".pstb",
         AnalysisCommand::Pnoise(_) => ".pnoise",
         AnalysisCommand::Envelope(_) => ".envelope",
+        AnalysisCommand::DcMatch(_) => ".dcmatch",
     }
 }
 
@@ -1223,7 +1224,11 @@ fn command_to_queue_item(
                  the PSS operating point; reaching this route means the deck walk did not skip it",
             command_name(command)
         )),
-        AnalysisCommand::Envelope(_) => Err(format!(
+        // `.DCMATCH` joins `.ENVELOPE` here: the queue carries an
+        // `AnalysisSpec`, and neither the mismatch card's probe nor its
+        // statistical scopes have one yet. Refusing by name is the honest
+        // answer until the Studio's own mismatch route exists.
+        AnalysisCommand::Envelope(_) | AnalysisCommand::DcMatch(_) => Err(format!(
             "{} has no manual-deck queue route in this build",
             command_name(command)
         )),
