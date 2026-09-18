@@ -66,9 +66,8 @@ fn seeded(selection: &str) -> RSpiceApp {
 }
 
 /// One placed source that has adopted a fixture definition.
-fn adopter(app: &mut RSpiceApp, name: &str, instance: &str) -> u64 {
-    let definition = app
-        .state
+fn adopter(state: &mut AppState, name: &str, instance: &str) -> u64 {
+    let definition = state
         .workspace
         .stimulus_library
         .get(name)
@@ -78,12 +77,12 @@ fn adopter(app: &mut RSpiceApp, name: &str, instance: &str) -> u64 {
     let mut component = Component::new(id, definition.component_type(), Point::new(4, 4));
     component.name = instance.to_owned();
     definition.adopt_onto(&mut component).expect("adopt");
-    app.state.schematic.components.push(component);
+    state.schematic.components.push(component);
     id
 }
 
 /// Render the stage at one size and return every string it publishes.
-fn published(app: &mut RSpiceApp, size: egui::Vec2) -> Vec<String> {
+fn published(state: &mut AppState, size: egui::Vec2) -> Vec<String> {
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
@@ -93,7 +92,7 @@ fn published(app: &mut RSpiceApp, size: egui::Vec2) -> Vec<String> {
             ..Default::default()
         },
         |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| show(ui, &mut app.state));
+            egui::CentralPanel::default().show(ctx, |ui| show(ui, state));
         },
     );
     output
@@ -113,7 +112,7 @@ fn published(app: &mut RSpiceApp, size: egui::Vec2) -> Vec<String> {
 }
 
 /// Every text shape the stage painted, with the clip rectangle it landed in.
-fn painted(app: &mut RSpiceApp, size: egui::Vec2) -> Vec<(String, Rect, Rect)> {
+fn painted(state: &mut AppState, size: egui::Vec2) -> Vec<(String, Rect, Rect)> {
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);
     let output = ctx.run_ui(
@@ -124,7 +123,7 @@ fn painted(app: &mut RSpiceApp, size: egui::Vec2) -> Vec<(String, Rect, Rect)> {
         |ctx| {
             egui::CentralPanel::default()
                 .frame(egui::Frame::NONE)
-                .show(ctx, |ui| show(ui, &mut app.state));
+                .show(ctx, |ui| show(ui, state));
         },
     );
     let mut lines = Vec::new();
@@ -153,7 +152,7 @@ fn collect_text(shape: &egui::epaint::Shape, clip: Rect, out: &mut Vec<(String, 
 #[test]
 fn an_empty_library_offers_the_one_verb_that_resolves_it() {
     let mut app = RSpiceApp::test_instance();
-    let published = published(&mut app, vec2(900.0, 470.0));
+    let published = published(&mut app.state, vec2(900.0, 470.0));
     assert!(published.contains(&"No stimulus definitions".to_owned()));
     assert!(published.contains(&"New definition".to_owned()));
 }
@@ -164,7 +163,7 @@ fn an_empty_library_offers_the_one_verb_that_resolves_it() {
 fn a_library_with_no_selection_opens_on_its_first_definition() {
     let mut app = RSpiceApp::test_instance();
     app.state.workspace.stimulus_library = fixtures::library();
-    let published = published(&mut app, vec2(900.0, 470.0));
+    let published = published(&mut app.state, vec2(900.0, 470.0));
     assert_eq!(
         app.state.workbench.selected_stimulus_definition.as_deref(),
         Some("sensor_diff_1k")
@@ -176,7 +175,7 @@ fn a_library_with_no_selection_opens_on_its_first_definition() {
 #[test]
 fn every_band_publishes_its_own_strings() {
     let mut app = seeded("sensor_diff_1k");
-    let published = published(&mut app, vec2(1000.0, 470.0));
+    let published = published(&mut app.state, vec2(1000.0, 470.0));
     for expected in [
         // Identity.
         "Name",
@@ -211,7 +210,7 @@ fn every_band_publishes_its_own_strings() {
 #[test]
 fn a_noise_definition_states_why_it_has_no_curve() {
     let mut app = seeded("supply_trnoise");
-    let published = published(&mut app, vec2(1000.0, 470.0));
+    let published = published(&mut app.state, vec2(1000.0, 470.0));
     assert!(
         published
             .iter()
@@ -236,7 +235,7 @@ fn a_waveform_centred_on_zero_states_zero_on_its_axis() {
     let size = stage_size(1024.0, 640.0);
     // Axis ticks are painted, not announced, so they are read off the frame's
     // own text shapes rather than out of the accessibility tree.
-    let painted = painted(&mut app, size);
+    let painted = painted(&mut app.state, size);
     let texts = painted
         .iter()
         .map(|(text, ..)| text.as_str())
@@ -318,7 +317,7 @@ fn apply_is_blocked_by_an_error_and_available_after_the_fix() {
 #[test]
 fn applying_a_rename_repoints_every_adopter() {
     let mut app = seeded("bridge_cal_step");
-    let id = adopter(&mut app, "bridge_cal_step", "V1");
+    let id = adopter(&mut app.state, "bridge_cal_step", "V1");
     crate::workbench::app::actions::stimulus::edit_name(&mut app.state, "bridge_cal_pulse");
     crate::workbench::app::actions::stimulus::apply_draft(&mut app.state);
 
@@ -392,7 +391,7 @@ fn every_family_fits_the_stage_at_both_supported_viewports() {
         let size = stage_size(width, height);
         for name in fixtures::names() {
             let mut app = seeded(name);
-            for (text, rect, clip) in painted(&mut app, size) {
+            for (text, rect, clip) in painted(&mut app.state, size) {
                 if !clip.is_positive() {
                     continue;
                 }
@@ -427,16 +426,16 @@ fn the_measured_stage_is_the_column_the_shell_leaves() {
 fn a_frame_that_changed_nothing_does_not_re_evaluate_the_waveform() {
     let mut app = seeded("sensor_diff_1k");
     let size = stage_size(1024.0, 640.0);
-    let _ = published(&mut app, size);
+    let _ = published(&mut app.state, size);
     let after_first = app.state.workbench.stimulus_editor.evaluations();
-    let _ = published(&mut app, size);
+    let _ = published(&mut app.state, size);
     assert_eq!(
         app.state.workbench.stimulus_editor.evaluations(),
         after_first
     );
 
     crate::workbench::app::actions::stimulus::edit_field(&mut app.state, "va", "9m");
-    let _ = published(&mut app, size);
+    let _ = published(&mut app.state, size);
     assert_eq!(
         app.state.workbench.stimulus_editor.evaluations(),
         after_first + 1
