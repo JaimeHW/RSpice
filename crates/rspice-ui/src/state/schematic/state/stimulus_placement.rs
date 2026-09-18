@@ -190,14 +190,15 @@ mod tests {
         assert!(placed.stimulus_provenance.is_none());
     }
 
-    /// Arming anything else retires the armed definition, so a resistor can
-    /// never be placed carrying a sine card.
+    /// Arming anything retires the armed definition, so a resistor can never
+    /// be placed carrying a sine card. Arming is the only way to set one, and
+    /// the payload is written after the tool, which is what leaves it armed.
     #[test]
     fn arming_another_tool_retires_the_armed_definition() {
         let (_, definition) = library_with_sin();
         let mut schematic = SchematicState::default();
-        schematic.pending_stimulus = Some(PendingStimulusPlacement::of(&definition));
         schematic.arm_tool(Tool::Place(ComponentType::VoltageSourceSin));
+        schematic.pending_stimulus = Some(PendingStimulusPlacement::of(&definition));
         assert!(schematic.pending_stimulus.is_some());
 
         schematic.arm_tool(Tool::Place(ComponentType::Resistor));
@@ -208,8 +209,8 @@ mod tests {
     fn cancelling_the_tool_clears_the_armed_definition() {
         let (_, definition) = library_with_sin();
         let mut schematic = SchematicState::default();
-        schematic.pending_stimulus = Some(PendingStimulusPlacement::of(&definition));
         schematic.arm_tool(Tool::Place(ComponentType::VoltageSourceSin));
+        schematic.pending_stimulus = Some(PendingStimulusPlacement::of(&definition));
 
         schematic.cancel_tool();
         assert!(schematic.pending_stimulus.is_none());

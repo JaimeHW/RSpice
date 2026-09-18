@@ -49,23 +49,25 @@ impl SchematicState {
             self.pending_documentation_shape = None;
             self.documentation_shape_drawing.clear();
         }
-        // A model card is armed for one exact device kind. Re-arming any
-        // other tool — including a different device — retires it, so a
-        // resistor can never be placed carrying a diode's card.
-        if Some(tool) != self.pending_part_model.as_ref().map(|armed| armed.tool) {
-            self.pending_part_model = None;
-        }
-        // A stimulus definition is armed for one exact source type, and the
-        // same rule applies: re-arming anything else retires it, so a resistor
-        // can never be placed carrying a sine card.
-        if Some(tool)
-            != self
-                .pending_stimulus
-                .as_ref()
-                .map(|armed| Tool::Place(armed.component_type))
-        {
-            self.pending_stimulus = None;
-        }
+        // A model card and a stimulus definition are each armed for one exact
+        // device kind, and arming *anything* retires them — including the
+        // plain part of that same kind.
+        //
+        // This used to keep a payload whose tool matched the one being armed,
+        // which reads as "re-arming the same thing changes nothing" and is the
+        // opposite of what the reader asked for: every door that means the
+        // plain part — the shelf row, the toolbar, the command, the shortcut —
+        // arms `Place(kind)`, so a reader who armed a zener and then clicked
+        // the plain diode placed a zener, and one who armed a definition and
+        // then clicked the plain sine source placed an adopter.
+        //
+        // Repeat placement is unaffected: a canvas click places and re-arms
+        // nothing, so the payload lives until the reader arms something else
+        // or cancels. The two callers that do want a payload — `arm_pack_part`
+        // and the stimulus library's own placement action — set it after this
+        // returns, which is the only way to arm one.
+        self.pending_part_model = None;
+        self.pending_stimulus = None;
         self.tool = tool;
     }
 
@@ -175,5 +177,71 @@ mod tests {
         assert!(schematic.canvas_settings_change_blocked());
         schematic.cancel_operation();
         assert!(!schematic.canvas_settings_change_blocked());
+    }
+
+    /// Arming the plain part of a kind retires a payload armed for that same
+    /// kind.
+    ///
+    /// The reader who picks "Voltage source (SIN)" off the shelf, the toolbar
+    /// or the command palette has asked for a default source; the reader who
+    /// picks a model card or a stimulus definition has asked for that one.
+    /// Both arrive as `Place(kind)`, so a payload that survived a matching
+    /// re-arm silently answered the second question when the first was asked.
+    #[test]
+    fn arming_the_plain_part_of_a_kind_retires_a_payload_armed_for_it() {
+        use crate::state::stimulus_library::definition::StimulusDefinition;
+
+        let mut schematic = SchematicState::default();
+        schematic.pending_part_model = Some(PendingPartModel {
+            tool: Tool::Place(ComponentType::Diode),
+            model: "RSPICE_ZENER".to_owned(),
+            variant: None,
+        });
+        schematic.arm_tool(Tool::Place(ComponentType::Diode));
+        assert!(
+            schematic.pending_part_model.is_none(),
+            "the plain diode is not the zener"
+        );
+
+        let definition =
+            StimulusDefinition::new("sensor_drive", ComponentType::VoltageSourceSin).expect("ok");
+        schematic.pending_stimulus = Some(PendingStimulusPlacement::of(&definition));
+        schematic.arm_tool(Tool::Place(ComponentType::VoltageSourceSin));
+        assert!(
+            schematic.pending_stimulus.is_none(),
+            "the plain sine source is not the definition"
+        );
+        let placed =
+            schematic.add_armed_component(ComponentType::VoltageSourceSin, Point::new(4, 4));
+        assert!(
+            schematic.components[0].stimulus_provenance.is_none(),
+            "so the next placement is a default instance ({placed})"
+        );
+    }
+
+    /// Placing does not re-arm, so an armed payload survives every click until
+    /// the reader arms something else.
+    #[test]
+    fn an_armed_definition_survives_repeated_placement() {
+        use crate::state::stimulus_library::definition::StimulusDefinition;
+
+        let mut definition =
+            StimulusDefinition::new("sensor_drive", ComponentType::VoltageSourceSin).expect("ok");
+        definition.params = "freq=1k".to_owned();
+        let mut schematic = SchematicState::default();
+        schematic.arm_tool(Tool::Place(ComponentType::VoltageSourceSin));
+        schematic.pending_stimulus = Some(PendingStimulusPlacement::of(&definition));
+
+        for at in [Point::new(4, 4), Point::new(40, 4)] {
+            schematic.add_armed_component(ComponentType::VoltageSourceSin, at);
+        }
+        assert_eq!(schematic.components.len(), 2);
+        assert!(
+            schematic
+                .components
+                .iter()
+                .all(|component| component.stimulus_provenance.is_some()),
+            "both clicks placed an adopter"
+        );
     }
 }
