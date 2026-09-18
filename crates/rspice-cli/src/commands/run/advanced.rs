@@ -1795,6 +1795,16 @@ fn dc_match_unit(result: &rspice_core::analysis::dcmatch::DcMatchResult) -> &'st
     if result.output.starts_with('I') { "A" } else { "V" }
 }
 
+/// A standard deviation of exactly zero, printed as zero.
+///
+/// The variance sum of a scope with nothing in it can land on negative zero,
+/// which is the same number and reads as a defect in a quoted spread. Only
+/// the terminal summary is normalized: every published artifact carries the
+/// number core produced, bit for bit.
+fn printable_sigma(value: f64) -> f64 {
+    value + 0.0
+}
+
 /// Print one mismatch result.
 ///
 /// Every quoted key is a scalar the typed document publishes under the same
@@ -1808,12 +1818,21 @@ fn report_dc_match(ctx: &RunContext<'_>, result: &rspice_core::analysis::dcmatch
     println!("DC mismatch information:");
     println!("output = {}", result.output);
     println!("nominal_value = {:.6e} {unit}", result.nominal_value);
-    println!("sigma_total = {:.6e} {unit}", result.sigma_total);
-    println!("sigma_mismatch = {:.6e} {unit}", result.sigma_mismatch);
-    println!("sigma_process = {:.6e} {unit}", result.sigma_process);
+    println!(
+        "sigma_total = {:.6e} {unit}",
+        printable_sigma(result.sigma_total)
+    );
+    println!(
+        "sigma_mismatch = {:.6e} {unit}",
+        printable_sigma(result.sigma_mismatch)
+    );
+    println!(
+        "sigma_process = {:.6e} {unit}",
+        printable_sigma(result.sigma_process)
+    );
     println!(
         "quoted_sigma = {:.6e} {unit} ({:.6e} sigma)",
-        result.quoted_sigma(),
+        printable_sigma(result.quoted_sigma()),
         result.sigma_multiplier
     );
     if result.contributors.is_empty() {
