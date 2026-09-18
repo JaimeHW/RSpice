@@ -24,7 +24,7 @@ fn sum(terms: &[[S; 2]]) -> Result<S, String> {
 }
 
 impl WeilEvaluation {
-    pub fn apply_correction_derivative(&self, derivative: f64) -> Result<f64, String> {
+    pub(super) fn apply_correction_derivative(&self, derivative: f64) -> Result<f64, String> {
         if !derivative.is_finite() {
             return Err("Weil input derivative must be finite".into());
         }
@@ -37,7 +37,7 @@ impl WeilEvaluation {
 }
 
 impl WeilHistory {
-    pub fn new(delay: f64, input: f64) -> Result<Self, String> {
+    pub(in crate::engine::transient) fn new(delay: f64, input: f64) -> Result<Self, String> {
         let history = Self {
             time: 0.0,
             previous_dt: 0.0,
@@ -50,7 +50,7 @@ impl WeilHistory {
         Ok(history)
     }
 
-    pub fn validate(&self) -> Result<(), String> {
+    pub(in crate::engine::transient) fn validate(&self) -> Result<(), String> {
         if ![
             self.time,
             self.previous_dt,
@@ -138,7 +138,12 @@ impl WeilHistory {
 
     /// Preparing never mutates accepted state; commit replaces it only after
     /// the complete device family has validated its accepted candidates.
-    pub fn prepare(&self, time: f64, input: f64, delay: f64) -> Result<Self, String> {
+    pub(in crate::engine::transient) fn prepare(
+        &self,
+        time: f64,
+        input: f64,
+        delay: f64,
+    ) -> Result<Self, String> {
         if time <= self.time {
             return Err("accepted GP Weil time must advance".into());
         }

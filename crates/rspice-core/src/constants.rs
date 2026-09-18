@@ -32,7 +32,7 @@ pub const ITOL: Value = 1e-12;
 pub const CHGTOL: Value = 1e-14;
 
 /// Absolute flux-linkage tolerance for physical event conservation (weber-turns).
-pub const EVENT_FLUX_ABSTOL: Value = 1e-24;
+pub(crate) const EVENT_FLUX_ABSTOL: Value = 1e-24;
 
 /// Default transient truncation tolerance factor.
 ///
@@ -222,7 +222,7 @@ impl NoisePhysicalConstants {
     };
 
     /// Constants used by ngspice 46's const.h and nevalsrc.c.
-    pub const NGSPICE_46: Self = Self {
+    pub(crate) const NGSPICE_46: Self = Self {
         boltzmann: 1.38064852e-23,
         electron_charge: 1.6021766208e-19,
     };

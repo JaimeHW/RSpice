@@ -2410,7 +2410,12 @@ impl DcMatchCard {
     pub const DEFAULT_CONTRIBUTORS: usize = 10;
 
     /// A card probing `V(output)` with every other field defaulted.
-    pub fn voltage_probe(output_node: impl Into<String>) -> Self {
+    ///
+    /// This is how this crate's own tests state one `.DCMATCH` request at a
+    /// time; every frontend reads cards the parser produced instead of
+    /// building them, so it is not API.
+    #[cfg(test)]
+    pub(crate) fn voltage_probe(output_node: impl Into<String>) -> Self {
         Self {
             output_node: output_node.into(),
             reference_node: None,
