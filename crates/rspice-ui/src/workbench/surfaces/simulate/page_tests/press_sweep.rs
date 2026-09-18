@@ -482,9 +482,9 @@ const PRESSED_PER_SURFACE: &[(&str, usize)] = &[
     ("Analyses/DcSweep", 5),
     ("Analyses/Noise", 9),
     ("Analyses/Stb", 3),
-    ("Analyses/Pss", 5),
-    ("Analyses/Temperature", 3),
-    ("Analyses/Corner", 8),
+    ("Analyses/Pss", 10),
+    ("Analyses/Temperature", 5),
+    ("Analyses/Corner", 7),
     ("Excitations", 1),
     ("Variables", 2),
     ("Outputs", 0),
@@ -493,7 +493,7 @@ const PRESSED_PER_SURFACE: &[(&str, usize)] = &[
     ("Models", 1),
     ("Solver", 32),
     ("Save", 6),
-    ("analysis catalogue · Analyses", 29),
+    ("analysis catalogue · Analyses", 30),
     ("analysis catalogue · Excitations", 0),
     ("analysis catalogue · Variables", 0),
     ("analysis catalogue · Outputs", 0),
@@ -503,7 +503,7 @@ const PRESSED_PER_SURFACE: &[(&str, usize)] = &[
     ("analysis catalogue · Solver", 0),
     ("analysis catalogue · Save", 0),
     ("analysis catalogue · Results workspace", 0),
-    ("analysis options · Operating point", 11),
+    ("analysis options · Operating point", 12),
     ("plan manager", 12),
     ("rename analysis", 4),
     ("run points", 12),
@@ -523,7 +523,14 @@ const PRESSED_PER_SURFACE: &[(&str, usize)] = &[
 /// "advanced options" surface became `analysis options · Operating point` — the
 /// one form the routes do not open, carrying the authored override that is the
 /// only way a global option's legacy field appears at all.
-const PRESSED_FLOOR: usize = 265;
+///
+/// Re-measured again when the PSS form gained its five shooting controls and
+/// transient noise became addable from the catalogue. A surface's tally counts
+/// only the controls it is the first to publish, and an option field's identity
+/// is its label and grid cell, so the longer PSS form also moved two identities
+/// to Temperature and one to the operating-point options, and took one from
+/// Corner, whose own form did not change.
+const PRESSED_FLOOR: usize = 273;
 
 /// Controls that are wired to nothing.
 ///
