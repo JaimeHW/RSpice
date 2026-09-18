@@ -174,6 +174,16 @@ impl RSpiceApp {
         if self.state.workbench.model_editor_has_unsaved_changes() {
             unsaved.push((WorkbenchIcon::Models, "Device model draft".to_owned()));
         }
+        // A stimulus draft is runtime-only, so it is not an unsaved document
+        // and saving the project would not publish it. Naming it is the only
+        // honest thing to do: closing discards it, and nothing offered here
+        // can apply a draft the audit strip may be refusing.
+        for definition in self.state.workbench.stimulus_editor.dirty_definitions() {
+            unsaved.push((
+                WorkbenchIcon::Source,
+                format!("Stimulus definition {definition}: draft not applied (discarded on close)"),
+            ));
+        }
         if self.state.simulation.has_active_execution() {
             self.render_close_blocked_by_run(ctx, &unsaved);
         } else if documents.is_empty() && unsaved.is_empty() {
