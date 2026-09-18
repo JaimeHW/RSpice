@@ -173,6 +173,17 @@ impl SimulationController {
                     .parse::<u64>()
                     .map_err(|_| "TNOISE seed must be an unsigned integer".to_owned())?,
                 noise_fmax: parse_si(&draft.noise_fmax, "TNOISE maximum noise frequency")?,
+                // Empty is not a missing value: it is the run asking the
+                // engine for its own `1/tstop` floor, which is the widest
+                // band the window can represent.
+                noise_fmin: if draft.noise_fmin.trim().is_empty() {
+                    None
+                } else {
+                    Some(parse_si(
+                        &draft.noise_fmin,
+                        "TNOISE minimum noise frequency",
+                    )?)
+                },
                 scale: parse_si(&draft.scale, "TNOISE noise scale")?,
                 uic: draft.use_initial_conditions,
             },

@@ -417,6 +417,62 @@ fn legacy_fourier_specs_retain_dimensional_thd_behavior() {
     ));
 }
 
+/// A transient-noise request written before the noise floor existed still
+/// decodes, and decodes as the engine derivation it was running under.
+///
+/// The transient-noise variant crosses the boundary as `CanonicalSpec`, so the
+/// domain enum's own serde attributes are the wire format — there is no second
+/// mirror to keep in step, and a field added without `serde(default)` would
+/// refuse every request an older worker had already sent. `None` rather than a
+/// number is the whole point: the run this request described asked the engine
+/// for `1/tstop`, and decoding it as any particular frequency would change
+/// what it asked for.
+#[test]
+fn a_wire_request_written_before_the_noise_floor_field_restores_without_one() {
+    let fields = serde_json::json!({
+        "stop_time": 1.0e-6,
+        "step_time": 1.0e-9,
+        "start_time": 0.0,
+        "max_timestep": 1.0e-9,
+        "seed": 97,
+        "noise_fmax": 5.0e8,
+        "scale": 1.0,
+        "uic": false
+    });
+    let analysis: AnalysisSpec = serde_json::from_value(serde_json::json!({
+        "TransientNoise": fields.clone()
+    }))
+    .expect("a transient-noise spec written before the floor deserializes");
+    let worker: WorkerAnalysisSpec = serde_json::from_value(serde_json::json!({
+        "CanonicalSpec": { "TransientNoise": fields }
+    }))
+    .expect("the same request deserializes as a worker payload");
+
+    let transient_noise = |noise_fmin| AnalysisSpec::TransientNoise {
+        stop_time: 1.0e-6,
+        step_time: 1.0e-9,
+        start_time: 0.0,
+        max_timestep: 1.0e-9,
+        seed: 97,
+        noise_fmax: 5.0e8,
+        noise_fmin,
+        scale: 1.0,
+        uic: false,
+    };
+    let expected = transient_noise(None);
+    assert_eq!(analysis, expected);
+    assert_eq!(AnalysisSpec::from(worker), expected);
+
+    // And an authored floor survives the same crossing, so the default above
+    // is a default rather than the only value this field can hold.
+    let authored = transient_noise(Some(1.0e3));
+    let carried = WorkerAnalysisSpec::try_from(&authored).expect("the request is transportable");
+    let encoded = serde_json::to_string(&carried).expect("the request serializes");
+    let decoded: WorkerAnalysisSpec =
+        serde_json::from_str(&encoded).expect("the request deserializes");
+    assert_eq!(AnalysisSpec::from(decoded), authored);
+}
+
 #[test]
 fn legacy_envelope_specs_migrate_identically_across_worker_transport() {
     let fields = serde_json::json!({

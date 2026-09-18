@@ -627,6 +627,11 @@ pub enum AnalysisSpec {
         max_timestep: f64,
         seed: u64,
         noise_fmax: f64,
+        /// Lowest flicker frequency the run represents, in hertz. `None` is
+        /// the engine's derivation of `1/tstop`, and is the value a
+        /// specification written before this control existed carries.
+        #[serde(default)]
+        noise_fmin: Option<f64>,
         scale: f64,
         uic: bool,
     },

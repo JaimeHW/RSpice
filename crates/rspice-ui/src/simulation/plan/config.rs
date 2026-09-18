@@ -439,6 +439,15 @@ pub struct TransientNoiseDraft {
     pub max_step: String,
     pub seed: String,
     pub noise_fmax: String,
+    /// Lowest flicker frequency the run represents, in hertz. Empty is the
+    /// engine's own derivation — `1/tstop`, the longest period the window can
+    /// resolve — and is the default, because a run that has not been told
+    /// otherwise should represent every period it can.
+    ///
+    /// Defaulted on read so a plan saved before this field existed opens with
+    /// the derivation it was running under rather than refusing to load.
+    #[serde(default)]
+    pub noise_fmin: String,
     pub scale: String,
     pub use_initial_conditions: bool,
 }
@@ -452,6 +461,7 @@ impl Default for TransientNoiseDraft {
             max_step: "10n".to_owned(),
             seed: "1".to_owned(),
             noise_fmax: "10G".to_owned(),
+            noise_fmin: String::new(),
             scale: "1".to_owned(),
             use_initial_conditions: false,
         }
@@ -1418,7 +1428,18 @@ fn validate_transient_noise(draft: &TransientNoiseDraft) -> Option<String> {
             return Err("time steps must not exceed stop time".to_owned());
         }
         parse_positive_usize(&draft.seed, "random seed")?;
-        parse_positive(&draft.noise_fmax, "maximum noise frequency")?;
+        let fmax = parse_positive(&draft.noise_fmax, "maximum noise frequency")?;
+        // An empty floor is the engine's `1/tstop` derivation, not a missing
+        // value, so it is not an error. An authored one has to sit inside the
+        // band the ceiling opens.
+        if !draft.noise_fmin.trim().is_empty() {
+            let fmin = parse_positive(&draft.noise_fmin, "minimum noise frequency")?;
+            if fmin >= fmax {
+                return Err(
+                    "minimum noise frequency must be below the maximum noise frequency".to_owned(),
+                );
+            }
+        }
         parse_positive(&draft.scale, "noise scale")?;
         Ok(())
     })()
@@ -1886,6 +1907,47 @@ mod tests {
         }
     }
 
+    /// A plan saved before the noise floor field existed still opens, running
+    /// the band it was running.
+    ///
+    /// The draft carries `deny_unknown_fields`, which refuses keys it does not
+    /// know and says nothing about keys that are absent — so the shim is the
+    /// `serde(default)`, and this is the test that it is there. The restored
+    /// value has to be the empty field rather than any frequency: empty is the
+    /// engine's `1/tstop` derivation, which is what that saved plan asked for.
+    #[test]
+    fn a_plan_saved_before_the_noise_floor_field_opens_with_the_engine_default() {
+        let saved = serde_json::json!({
+            "stop_time": "1u",
+            "step_time": "1n",
+            "start_time": "0",
+            "max_step": "10n",
+            "seed": "1",
+            "noise_fmax": "10G",
+            "scale": "1",
+            "use_initial_conditions": false
+        });
+        let draft: TransientNoiseDraft =
+            serde_json::from_value(saved).expect("a plan saved before the floor still opens");
+        assert!(
+            draft.noise_fmin.is_empty(),
+            "a saved plan must reopen on the derivation it ran, not on a frequency: {:?}",
+            draft.noise_fmin
+        );
+        // Every field it did carry is still the field it carried.
+        assert_eq!(draft.stop_time, "1u");
+        assert_eq!(draft.noise_fmax, "10G");
+        assert_eq!(draft.seed, "1");
+        assert_eq!(draft.scale, "1");
+        assert!(validate_transient_noise(&draft).is_none());
+        // And the run that plan resolves to asks for no floor at all, which is
+        // the fact the saved bytes were making.
+        assert!(matches!(
+            AnalysisDraft::TransientNoise(draft).manifest_configuration_error(),
+            None
+        ));
+    }
+
     #[test]
     fn manifest_draft_validation_rejects_incomplete_configuration() {
         let mut qpss = QpssDraft::default();
@@ -1912,6 +1974,16 @@ mod tests {
         let mut tnoise = TransientNoiseDraft::default();
         tnoise.seed = "0".to_owned();
         assert!(validate_transient_noise(&tnoise).is_some());
+
+        // An empty noise floor is the engine's derivation and refuses
+        // nothing; an authored one has to sit under the ceiling.
+        let mut floor = TransientNoiseDraft::default();
+        assert!(floor.noise_fmin.is_empty());
+        assert!(validate_transient_noise(&floor).is_none());
+        floor.noise_fmin = "1k".to_owned();
+        assert!(validate_transient_noise(&floor).is_none());
+        floor.noise_fmin = "100G".to_owned();
+        assert!(validate_transient_noise(&floor).is_some());
 
         let mut mismatch = DcMismatchDraft::default();
         mismatch.include_mismatch = false;

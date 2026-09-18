@@ -1072,6 +1072,7 @@ R2 out 0 1k\n\
             max_timestep: 1.0e-9,
             seed,
             noise_fmax: 1.0e9,
+            noise_fmin: None,
             scale: 1.0,
             uic: false,
         };
@@ -1166,6 +1167,7 @@ R2 out 0 1k\n\
             max_timestep: 1.0e-9,
             seed: 1,
             noise_fmax: 1.0e8,
+            noise_fmin: None,
             scale: 1.0,
             uic: false,
         };
@@ -1234,6 +1236,7 @@ R2 out 0 1k\n\
             max_timestep: 1.0e-9,
             seed: 1,
             noise_fmax: 1.0e8,
+            noise_fmin: None,
             scale: 1.0,
             uic: false,
         };

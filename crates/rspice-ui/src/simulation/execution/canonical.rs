@@ -1031,6 +1031,59 @@ mod tests {
         assert_eq!(analysis_kind_tag(&exact_pss_spec()), 7);
     }
 
+    /// A transient-noise plan with no authored floor digests to exactly the
+    /// bytes it digested to before the field existed.
+    ///
+    /// The identity of every prepared snapshot already on disk depends on it.
+    /// The reference is built from the writer primitives in the order the arm
+    /// used before the floor was added, rather than pinned as a hex literal:
+    /// a literal states what the answer is, and this states *why* it is that —
+    /// the eight fields, nothing appended. A `writer.option` around the new
+    /// field would tag the `None` and fail here, which is the point.
+    #[test]
+    fn an_absent_noise_floor_leaves_the_plan_digest_unchanged() {
+        let transient_noise = |noise_fmin| AnalysisSpec::TransientNoise {
+            stop_time: 1.0e-6,
+            step_time: 1.0e-9,
+            start_time: 2.0e-7,
+            max_timestep: 2.5e-10,
+            seed: 97,
+            noise_fmax: 5.0e8,
+            noise_fmin,
+            scale: 0.5,
+            uic: true,
+        };
+        let spec = transient_noise(None);
+        let mut encoded = CanonicalWriter::new("test");
+        encode_analysis_spec(&mut encoded, &spec);
+
+        let mut before_the_field = CanonicalWriter::new("test");
+        before_the_field.domain("analysis-spec");
+        before_the_field.u8(analysis_kind_tag(&spec));
+        before_the_field.f64(1.0e-6);
+        before_the_field.f64(1.0e-9);
+        before_the_field.f64(2.0e-7);
+        before_the_field.f64(2.5e-10);
+        before_the_field.u64(97);
+        before_the_field.f64(5.0e8);
+        before_the_field.f64(0.5);
+        before_the_field.bool(true);
+
+        assert_eq!(
+            encoded.finish(),
+            before_the_field.finish(),
+            "an unauthored noise floor must not move a saved plan's identity"
+        );
+
+        // And an authored one must move it, or two plans running different
+        // bands would share one identity.
+        let mut authored = CanonicalWriter::new("test");
+        encode_analysis_spec(&mut authored, &transient_noise(Some(1.0e3)));
+        let mut absent = CanonicalWriter::new("test");
+        encode_analysis_spec(&mut absent, &spec);
+        assert_ne!(authored.finish(), absent.finish());
+    }
+
     #[test]
     fn a_pss_spectrum_digest_follows_its_harmonic_count() {
         let twenty = AnalysisSpec::PssSpectrum { num_harmonics: 20 };

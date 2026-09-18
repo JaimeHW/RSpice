@@ -66,6 +66,7 @@ pub(super) fn validate(spec: &AnalysisSpec) -> Result<(), String> {
             max_timestep,
             seed,
             noise_fmax,
+            noise_fmin,
             scale,
             ..
         } => {
@@ -90,6 +91,14 @@ pub(super) fn validate(spec: &AnalysisSpec) -> Result<(), String> {
                 return Err(
                     "TNOISE requires a nonzero seed, positive fmax, and positive scale".to_owned(),
                 );
+            }
+            // An absent floor is the engine's `1/tstop` derivation and refuses
+            // nothing. An authored one has to be a frequency inside the band
+            // the ceiling opens, in the same words the neighbours above use.
+            if let Some(noise_fmin) = noise_fmin
+                && (!noise_fmin.is_finite() || *noise_fmin <= 0.0 || noise_fmin >= noise_fmax)
+            {
+                return Err("TNOISE noise_fmin must be finite, > 0, and < noise_fmax".to_owned());
             }
             Ok(())
         }

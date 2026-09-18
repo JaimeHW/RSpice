@@ -456,10 +456,10 @@ impl SimulationController {
     /// `NOISESCALE=1` is omitted for the same reason the positional start is:
     /// it is the card's own default and says nothing.
     ///
-    /// `NOISEFMIN=` is absent from this card because the Studio cannot author
-    /// it yet. Its absence is itself a value — the engine derives `1/tstop`,
-    /// the longest period the run can resolve — so an unauthored floor must
-    /// stay unwritten rather than be pinned to a number the form never stated.
+    /// `NOISEFMIN=` is written only when the form authored one, because its
+    /// absence is itself a value — the engine derives `1/tstop`, the longest
+    /// period the run can resolve — and a card stating that number would
+    /// freeze a derivation the window is still allowed to move.
     ///
     /// Visible across `simulation` rather than to the controller alone, which
     /// the rest of this family is. The runner's dispatch test executes the
@@ -478,6 +478,7 @@ impl SimulationController {
             max_timestep,
             seed,
             noise_fmax,
+            noise_fmin,
             scale,
             uic,
         } = spec
@@ -493,6 +494,9 @@ impl SimulationController {
         }
         .to_spice();
         command.push_str(&format!(" NOISEFMAX={noise_fmax}"));
+        if let Some(noise_fmin) = noise_fmin {
+            command.push_str(&format!(" NOISEFMIN={noise_fmin}"));
+        }
         command.push_str(&format!(" NOISESEED={seed}"));
         if *scale != 1.0 {
             command.push_str(&format!(" NOISESCALE={scale}"));
@@ -930,6 +934,7 @@ mod tests {
             max_timestep: 2.5e-10,
             seed: 97,
             noise_fmax: 5.0e8,
+            noise_fmin: None,
             scale: 0.5,
             uic: true,
         }
@@ -949,7 +954,11 @@ mod tests {
     fn a_transient_noise_spec_writes_the_card_the_engine_parses() {
         use rspice_core::netlist::AnalysisCommand;
 
-        for (scale, uic) in [(0.5, true), (1.0, false)] {
+        for (scale, uic, noise_fmin) in [
+            (0.5, true, None),
+            (1.0, false, None),
+            (1.0, false, Some(1.0e3)),
+        ] {
             let AnalysisSpec::TransientNoise {
                 stop_time,
                 step_time,
@@ -969,6 +978,7 @@ mod tests {
                 max_timestep,
                 seed,
                 noise_fmax,
+                noise_fmin,
                 scale,
                 uic,
             };
@@ -979,12 +989,16 @@ mod tests {
             // have to run a parser to see it.
             assert_eq!(
                 card,
-                if uic {
-                    ".tran 0.000000001 0.000001 0.0000002 0.00000000025 UIC \
-                     NOISEFMAX=500000000 NOISESEED=97 NOISESCALE=0.5"
-                } else {
-                    ".tran 0.000000001 0.000001 0.0000002 0.00000000025 \
-                     NOISEFMAX=500000000 NOISESEED=97"
+                match (uic, noise_fmin) {
+                    (true, None) =>
+                        ".tran 0.000000001 0.000001 0.0000002 0.00000000025 UIC \
+                         NOISEFMAX=500000000 NOISESEED=97 NOISESCALE=0.5",
+                    (false, None) =>
+                        ".tran 0.000000001 0.000001 0.0000002 0.00000000025 \
+                         NOISEFMAX=500000000 NOISESEED=97",
+                    _ =>
+                        ".tran 0.000000001 0.000001 0.0000002 0.00000000025 \
+                         NOISEFMAX=500000000 NOISEFMIN=1000 NOISESEED=97",
                 }
             );
 
@@ -996,9 +1010,12 @@ mod tests {
                 scale != 1.0,
                 "{card} states NOISESCALE against a scale of {scale}"
             );
-            assert!(
-                !card.contains("NOISEFMIN"),
-                "an unauthored noise floor must stay unwritten: {card}"
+            // And an unauthored floor stays unwritten, because writing the
+            // engine's derivation would freeze it.
+            assert_eq!(
+                card.contains("NOISEFMIN"),
+                noise_fmin.is_some(),
+                "{card} states NOISEFMIN against a floor of {noise_fmin:?}"
             );
 
             let deck = rspice_core::netlist::Netlist::parse(&format!(
@@ -1029,7 +1046,7 @@ mod tests {
                 .transient_noise
                 .unwrap_or_else(|| panic!("the card turns transient noise on: {card}"));
             assert_eq!(noise.fmax, noise_fmax, "{card}");
-            assert_eq!(noise.fmin, None, "{card}");
+            assert_eq!(noise.fmin, noise_fmin, "{card}");
             assert_eq!(noise.seed, Some(seed), "{card}");
             assert_eq!(noise.scale, scale, "{card}");
         }

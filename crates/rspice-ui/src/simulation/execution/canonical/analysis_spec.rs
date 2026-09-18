@@ -550,6 +550,7 @@ pub(super) fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &Analysis
             max_timestep,
             seed,
             noise_fmax,
+            noise_fmin,
             scale,
             uic,
         } => {
@@ -561,6 +562,15 @@ pub(super) fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &Analysis
             writer.f64(*noise_fmax);
             writer.f64(*scale);
             writer.bool(*uic);
+            // Appended, and written only when authored, so an absent floor
+            // digests to exactly the bytes this arm produced before the
+            // control existed. `writer.option` would tag the `None` with two
+            // bytes and change the identity of every plan already saved —
+            // the same reason `hb_operating_point_digest` appends its MNA
+            // branches conditionally instead of wrapping them in an option.
+            if let Some(noise_fmin) = noise_fmin {
+                writer.f64(*noise_fmin);
+            }
         }
         AnalysisSpec::DcMismatch {
             output_expression,

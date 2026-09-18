@@ -348,6 +348,35 @@ fn quantity_input_row(
     response
 }
 
+/// A quantity row whose helper states something the label cannot.
+///
+/// The ordinary row spends its helper slot on `engineering notation`, which is
+/// true of every quantity field on the page and is worth saying once a form
+/// rather than once a row. A field where *leaving it empty* selects a
+/// behaviour has a fact the reader cannot infer from the label, and this is
+/// where that fact goes: the caption row's right edge, beside the name of the
+/// thing it qualifies, rather than as a note under the control where it would
+/// read as advice about the form.
+fn hinted_quantity_input_row(
+    ui: &mut Ui,
+    label: &str,
+    helper: &str,
+    value: &mut String,
+    kind: QuantityInputKind,
+    policy: QuantityPresentationPolicy,
+    locale: UiNumberLocale,
+) -> Response {
+    let response = if uses_two_column_fields(ui) {
+        field_cell(ui, label, Some(helper), |ui| {
+            mono_input(ui, label, value, ui.available_width())
+        })
+    } else {
+        inspector_input_row(ui, label, value)
+    };
+    normalize_quantity_on_focus_loss(&response, value, kind, policy, locale);
+    response
+}
+
 fn quantity_input_row_enabled(
     ui: &mut Ui,
     label: &str,
