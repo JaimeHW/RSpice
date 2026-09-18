@@ -7,7 +7,7 @@
 //! `CANONICAL_VERSION` in the parent.
 
 use crate::services::simulation_runner::{
-    CornerProcess, PacFrequencySweep, PnoiseFrequencySweep, PxfFrequencySweep,
+    CornerProcess, PacFrequencySweep, PeriodicCarrier, PnoiseFrequencySweep, PxfFrequencySweep,
 };
 use crate::simulation::config::{NoiseContributionDetail, NoiseIntegrationMode, NoiseSweepType};
 use crate::simulation::dialog::{IntegrationMethod, OpConfig};
@@ -833,5 +833,25 @@ pub(super) fn pnoise_sweep_tag(sweep: PnoiseFrequencySweep) -> u8 {
         PnoiseFrequencySweep::Decade => 0,
         PnoiseFrequencySweep::Octave => 1,
         PnoiseFrequencySweep::Linear => 2,
+    }
+}
+
+/// The named carrier a periodic small-signal request states, or nothing.
+///
+/// Written as a *conditional tail* on each of the three execution-option arms
+/// rather than as a field in the middle of them: every request recorded before
+/// the carrier was authorable took the card's absent `FROM=`, which is
+/// `Preceding`, so that position must add no bytes at all. A named carrier is
+/// a different run — it binds a different producer — so it earns a tag, and
+/// the tag goes last where it cannot move anything that already exists.
+///
+/// This is the shape `hb_operating_point_digest` uses for its own tail: bytes
+/// appear only for the state that has them. `writer.option` is deliberately
+/// not used, because its `None` tag would be a byte on every saved plan.
+pub(super) fn encode_periodic_carrier_tail(writer: &mut CanonicalWriter, carrier: PeriodicCarrier) {
+    match carrier {
+        PeriodicCarrier::Preceding => {}
+        PeriodicCarrier::Pss => writer.u8(0),
+        PeriodicCarrier::Hb => writer.u8(1),
     }
 }

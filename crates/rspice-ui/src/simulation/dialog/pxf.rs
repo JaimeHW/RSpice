@@ -21,8 +21,8 @@
 //! (`rspice-core/src/netlist/parser/periodic_cards.rs`), and the grammar below
 //! is that card's grammar. Its full key set is
 //! `INPUT= OUT= [INPUTSIDEBAND=1] [OUTSIDEBAND=1] [MAXSIDEBAND=5] [RELTOL=1e-3]
-//! [ABSTOL=1e-12] [FROM=PSS|HB]`; this form writes the first five and
-//! deliberately writes none of the last three:
+//! [ABSTOL=1e-12] [FROM=PSS|HB]`, and this form now writes all of it except
+//! the two tolerances:
 //!
 //! - `RELTOL=`/`ABSTOL=` are the deck's numerical contract, and the Solver
 //!   options channel ([`super::options`]) owns it deck-wide through
@@ -31,13 +31,15 @@
 //!   reader falls back to the deck's own `.options` for both — a sharper
 //!   answer than a per-card constant. Two places to set one tolerance is a
 //!   contradiction waiting to be authored.
-//! - `FROM=` selects the carrier to linearize about. No periodic form offers
-//!   it, because the Studio binds a dependent analysis to the one PSS it runs
-//!   for it; `FROM=HB` names a binding this pipeline does not have, so a
-//!   control for it would write a card the Studio's own reader refuses.
+//! - `FROM=` selects the carrier to linearize about, and the form authors it.
+//!   The engine's three positions are the whole vocabulary — the preceding
+//!   periodic solve of either family, the preceding `.PSS`, the preceding
+//!   `.HB` — because the card names a family and not an instance.
 //!
 //! The output probe is spelled `out=` because the engine spells it that way,
 //! so the whole periodic family reads one way.
+
+use crate::services::simulation_runner::PeriodicCarrier;
 
 use super::options::parse_si_value;
 
@@ -102,6 +104,8 @@ pub struct PxfConfig {
     pub input_sideband: i32,
     /// Maximum sideband index
     pub max_sideband: i32,
+    /// Which periodic solve this transfer is measured around; `FROM=`.
+    pub carrier: PeriodicCarrier,
 }
 
 impl Default for PxfConfig {
@@ -121,6 +125,7 @@ impl Default for PxfConfig {
             // analysis it always ran.
             input_sideband: 1,
             max_sideband: 5,
+            carrier: PeriodicCarrier::Preceding,
         }
     }
 }
@@ -155,6 +160,12 @@ impl PxfConfig {
         cmd.push_str(&format!(" inputsideband={}", self.input_sideband));
 
         cmd.push_str(&format!(" maxsideband={}", self.max_sideband));
+
+        // The absent key is the "preceding periodic solve" position, so an
+        // untouched form writes the card it always wrote.
+        if let Some(carrier) = self.carrier.spice_name() {
+            cmd.push_str(&format!(" from={carrier}"));
+        }
 
         cmd
     }
@@ -197,6 +208,9 @@ impl PxfConfig {
                 ));
             }
         }
+        if let Some(reason) = self.carrier.unroutable_reason(".PXF") {
+            return Err(reason);
+        }
         Ok(())
     }
 }
@@ -224,6 +238,11 @@ pub struct PxfDialogState {
     #[serde(default = "default_input_sideband_text")]
     pub input_sideband: String,
     pub max_sideband: String,
+    /// Carrier chooser position, into [`PeriodicCarrier::ALL`]. Absent means
+    /// position zero, the preceding periodic solve, which is what every
+    /// project saved before the row existed both wrote and ran.
+    #[serde(default)]
+    pub carrier_idx: usize,
     #[serde(skip)]
     pub initialized: bool,
 }
@@ -250,6 +269,7 @@ impl PxfDialogState {
             input_source: config.input_source.clone(),
             input_sideband: config.input_sideband.to_string(),
             max_sideband: config.max_sideband.to_string(),
+            carrier_idx: config.carrier.index(),
             initialized: true,
         }
     }
@@ -291,6 +311,7 @@ impl PxfDialogState {
             input_source: self.input_source.clone(),
             input_sideband: in_sb,
             max_sideband: max_sb,
+            carrier: PeriodicCarrier::at(self.carrier_idx),
         };
 
         config.validate()?;
@@ -324,3 +345,68 @@ fn format_freq(freq: f64) -> String {
 // =============================================================================
 // Tests
 // =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The exact card, in the engine's spelling, with no carrier named.
+    ///
+    /// Pinned as a string as well as through the parse ratchet, because the
+    /// keyword order is what a reader of a generated deck sees and the two
+    /// sideband ends have to stay beside the probe each belongs to.
+    #[test]
+    fn the_card_names_its_carrier_only_when_one_is_named() {
+        assert_eq!(
+            PxfConfig::default().to_spice(),
+            ".pxf dec 10 1k 1G out=VOUT outsideband=1 input=VIN inputsideband=1 maxsideband=5"
+        );
+        assert_eq!(
+            PxfConfig {
+                carrier: PeriodicCarrier::Pss,
+                ..PxfConfig::default()
+            }
+            .to_spice(),
+            ".pxf dec 10 1k 1G out=VOUT outsideband=1 input=VIN inputsideband=1 maxsideband=5 \
+             from=pss"
+        );
+    }
+
+    /// A carrier with no route here is refused by name.
+    #[test]
+    fn a_carrier_without_a_studio_route_is_refused_by_name() {
+        let error = PxfConfig {
+            carrier: PeriodicCarrier::Hb,
+            ..PxfConfig::default()
+        }
+        .validate()
+        .expect_err("a harmonic-balance carrier has no PXF runner in this crate");
+        assert!(
+            error.contains("from=hb") && error.contains("command line"),
+            "the refusal must name the carrier and where it runs: {error}"
+        );
+    }
+
+    /// A draft saved before the carrier row existed opens as the analysis it
+    /// ran.
+    #[test]
+    fn a_draft_saved_before_the_carrier_selector_restores_as_preceding() {
+        let mut document = serde_json::to_value(PxfDialogState::from_config(&PxfConfig::default()))
+            .expect("the draft serializes");
+        document
+            .as_object_mut()
+            .expect("the draft is an object")
+            .remove("carrier_idx")
+            .expect("the key this test removes must exist");
+        let restored: PxfDialogState =
+            serde_json::from_value(document).expect("a draft written before the carrier row loads");
+        assert_eq!(restored.carrier_idx, 0);
+        assert_eq!(
+            restored
+                .to_config()
+                .expect("the restored draft is runnable")
+                .carrier,
+            PeriodicCarrier::Preceding
+        );
+    }
+}

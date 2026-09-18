@@ -537,6 +537,9 @@ fn worker_spec_request_preserves_pac_pxf_execution_options() {
         include_dc: false,
         reltol: 4.0e-5,
         abstol: 9.0e-13,
+        // Away from the default, so the round trip proves the carrier crosses
+        // the wire rather than being re-derived on the far side.
+        carrier: crate::services::simulation_runner::PeriodicCarrier::Pss,
     };
     let pxf = crate::services::simulation_runner::PxfRunConfig {
         pss_fundamental_freq: 1.5e6,
@@ -554,6 +557,7 @@ fn worker_spec_request_preserves_pac_pxf_execution_options() {
         max_sideband: 5,
         reltol: 8.0e-5,
         abstol: 2.0e-13,
+        carrier: crate::services::simulation_runner::PeriodicCarrier::Pss,
     };
 
     let pac_request = SimulationRequest::Spec {
@@ -627,6 +631,7 @@ fn worker_spec_request_preserves_pnoise_pstb_execution_options() {
         noise_summary: false,
         reltol: 3.0e-5,
         abstol: 4.0e-18,
+        carrier: crate::services::simulation_runner::PeriodicCarrier::Pss,
     };
     let pstb = crate::services::simulation_runner::PstbRunConfig {
         pss_fundamental_freq: 4.0e6,

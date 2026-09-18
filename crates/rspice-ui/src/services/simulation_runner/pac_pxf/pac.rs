@@ -11,6 +11,7 @@ use rspice_core::Value;
 use rspice_core::abort_signal::AbortSignal;
 
 use super::super::error::{ensure_not_aborted, poll_periodically};
+use super::super::periodic_carrier::PeriodicCarrier;
 use super::super::{
     ServiceRunError, ServiceRunResult, build_resolved_periodic_engine,
     parse_runner_netlist_with_abort,
@@ -56,6 +57,13 @@ pub struct PacRunConfig {
     pub include_dc: bool,
     pub reltol: Value,
     pub abstol: Value,
+    /// Which periodic solve this run linearizes around.
+    ///
+    /// The card's `FROM=` keyword, in the engine's own vocabulary. It is part
+    /// of the request rather than of the dispatch because the two positions
+    /// the Studio runs bind different producers in the plan, and because the
+    /// third has to be refused with the value in the sentence.
+    pub carrier: PeriodicCarrier,
 }
 
 impl Default for PacRunConfig {
@@ -76,6 +84,7 @@ impl Default for PacRunConfig {
             include_dc: true,
             reltol: 1e-3,
             abstol: 1e-12,
+            carrier: PeriodicCarrier::Preceding,
         }
     }
 }
@@ -120,6 +129,13 @@ impl PacRunConfig {
         }
         if !self.abstol.is_finite() || self.abstol <= 0.0 {
             return Err("PAC absolute tolerance must be positive".to_string());
+        }
+        // Refused here rather than bound to whatever periodic state the plan
+        // happens to hold: a run linearized about a carrier other than the one
+        // the request names is a different measurement reported under this
+        // one's name.
+        if let Some(reason) = self.carrier.unroutable_reason(".PAC") {
+            return Err(reason);
         }
         Ok(())
     }
@@ -652,6 +668,7 @@ mod tests {
             include_dc: true,
             reltol: 1.0e-9,
             abstol: 1.0e-15,
+            carrier: PeriodicCarrier::Preceding,
         }
     }
 

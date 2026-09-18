@@ -18,6 +18,8 @@
 //! + out=VOUT maxsideband=5
 //! ```
 
+use crate::services::simulation_runner::PeriodicCarrier;
+
 use super::options::parse_si_value;
 
 // =============================================================================
@@ -94,6 +96,8 @@ pub struct PnoiseConfig {
     pub integrated_noise: bool,
     /// Noise summary (per-device contributions)
     pub noise_summary: bool,
+    /// Which periodic solve this analysis folds noise around; `FROM=`.
+    pub carrier: PeriodicCarrier,
 }
 
 impl Default for PnoiseConfig {
@@ -110,6 +114,7 @@ impl Default for PnoiseConfig {
             noise_ref: NoiseReferenceType::Output,
             integrated_noise: false,
             noise_summary: true,
+            carrier: PeriodicCarrier::Preceding,
         }
     }
 }
@@ -171,6 +176,12 @@ impl PnoiseConfig {
             cmd.push_str(" noisesummary=no");
         }
 
+        // The absent key is the "preceding periodic solve" position, so an
+        // untouched form writes the card it always wrote.
+        if let Some(carrier) = self.carrier.spice_name() {
+            cmd.push_str(&format!(" from={carrier}"));
+        }
+
         cmd
     }
 
@@ -207,6 +218,9 @@ impl PnoiseConfig {
         if self.noise_ref == NoiseReferenceType::Input && self.input_source.trim().is_empty() {
             return Err("Input source must be specified for input-referred noise".to_string());
         }
+        if let Some(reason) = self.carrier.unroutable_reason(".PNOISE") {
+            return Err(reason);
+        }
 
         Ok(())
     }
@@ -241,6 +255,8 @@ pub struct PnoiseDialogState {
     pub integrated_noise: bool,
     /// Noise summary enabled
     pub noise_summary: bool,
+    /// Carrier chooser position, into [`PeriodicCarrier::ALL`].
+    pub carrier_idx: usize,
     /// Initialized flag
     #[serde(skip)]
     pub initialized: bool,
@@ -272,6 +288,11 @@ struct PersistedPnoiseDialogState {
     integrated_noise: bool,
     #[serde(default)]
     noise_summary: bool,
+    /// Absent means position zero, the preceding periodic solve: the card
+    /// every project written before this row existed wrote, and the binding it
+    /// ran.
+    #[serde(default)]
+    carrier_idx: usize,
     /// Retired. The sweep always produces the per-frequency spectrum, so this
     /// selected nothing. Accepted so earlier projects still open.
     #[serde(default)]
@@ -297,6 +318,7 @@ impl<'de> serde::Deserialize<'de> for PnoiseDialogState {
             noise_ref_idx: persisted.noise_ref_idx,
             integrated_noise: persisted.integrated_noise,
             noise_summary: persisted.noise_summary,
+            carrier_idx: persisted.carrier_idx,
             initialized: false,
         })
     }
@@ -325,6 +347,7 @@ impl PnoiseDialogState {
             },
             integrated_noise: config.integrated_noise,
             noise_summary: config.noise_summary,
+            carrier_idx: config.carrier.index(),
             initialized: true,
         }
     }
@@ -365,6 +388,7 @@ impl PnoiseDialogState {
             noise_ref,
             integrated_noise: self.integrated_noise,
             noise_summary: self.noise_summary,
+            carrier: PeriodicCarrier::at(self.carrier_idx),
         };
 
         config.validate()?;
@@ -459,6 +483,61 @@ mod tests {
             }
             .to_spice(),
             PnoiseConfig::default().to_spice()
+        );
+    }
+
+    /// The carrier appears on the card only when it is named, and in the
+    /// engine's keyword when it is.
+    #[test]
+    fn the_card_names_its_carrier_only_when_one_is_named() {
+        assert!(!PnoiseConfig::default().to_spice().contains("from="));
+        assert_eq!(
+            PnoiseConfig {
+                carrier: PeriodicCarrier::Pss,
+                ..PnoiseConfig::default()
+            }
+            .to_spice(),
+            ".pnoise dec 10 1 1Meg out=VOUT maxsideband=5 from=pss"
+        );
+    }
+
+    /// A carrier with no route here is refused by name, not folded onto a
+    /// carrier that was not asked for.
+    #[test]
+    fn a_carrier_without_a_studio_route_is_refused_by_name() {
+        let error = PnoiseConfig {
+            carrier: PeriodicCarrier::Hb,
+            ..PnoiseConfig::default()
+        }
+        .validate()
+        .expect_err("a harmonic-balance carrier has no PNOISE runner in this crate");
+        assert!(
+            error.contains("from=hb") && error.contains("command line"),
+            "the refusal must name the carrier and where it runs: {error}"
+        );
+    }
+
+    /// A draft saved before the carrier row existed opens as the analysis it
+    /// ran.
+    #[test]
+    fn a_draft_saved_before_the_carrier_selector_restores_as_preceding() {
+        let mut document =
+            serde_json::to_value(PnoiseDialogState::from_config(&PnoiseConfig::default()))
+                .expect("the draft serializes");
+        document
+            .as_object_mut()
+            .expect("the draft is an object")
+            .remove("carrier_idx")
+            .expect("the key this test removes must exist");
+        let restored: PnoiseDialogState =
+            serde_json::from_value(document).expect("a draft written before the carrier row loads");
+        assert_eq!(restored.carrier_idx, 0);
+        assert_eq!(
+            restored
+                .to_config()
+                .expect("the restored draft is runnable")
+                .carrier,
+            PeriodicCarrier::Preceding
         );
     }
 }

@@ -8,7 +8,7 @@ use crate::simulation::dialog::PacDialogState;
 
 use super::{
     QuantityPresentationPolicy, SWEEP_KINDS, UiNumberLocale, choice_row, input_row,
-    quantity_input_row, sweep_point_field_label, switch_row,
+    periodic_carrier_row, quantity_input_row, sweep_point_field_label, switch_row,
 };
 
 /// Render the periodic AC fields.
@@ -46,4 +46,8 @@ pub(super) fn fields(
     input_row(ui, "Magnitude", &mut setup.pac_magnitude);
     input_row(ui, "Max sideband", &mut setup.max_sideband);
     switch_row(ui, "Include DC", &mut setup.include_dc);
+    // Last, because it is the only row that is about something outside this
+    // analysis: every field above describes the small signal, and this one
+    // names the large-signal solve the whole measurement sits on.
+    periodic_carrier_row(ui, &mut setup.carrier_idx);
 }

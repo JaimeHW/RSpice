@@ -282,6 +282,70 @@ fn pss_field_order_and_wording_match_the_canonical_mockup() {
     );
 }
 
+/// The three periodic small-signal forms name their carrier, in the engine's
+/// own vocabulary, and say which position they cannot run.
+///
+/// The words are the enum's, read off it rather than repeated here, because
+/// the chooser list and the card keyword are two halves of one vocabulary: a
+/// label that drifted from the carrier it selects would paint a choice the
+/// deck does not make. The disabled position is asserted present rather than
+/// absent — an operator holding a deck the engine accepts is owed the fact
+/// that the card exists and where it runs.
+#[test]
+fn the_periodic_carrier_row_offers_the_carriers_the_engine_has() {
+    use crate::services::simulation_runner::PeriodicCarrier;
+
+    assert_eq!(
+        PERIODIC_CARRIER_CHOICES.len(),
+        PeriodicCarrier::ALL.len(),
+        "the chooser paints one position per carrier the engine's FROM= has"
+    );
+    for (label, carrier) in PERIODIC_CARRIER_CHOICES
+        .iter()
+        .zip(PeriodicCarrier::ALL.iter())
+    {
+        assert_eq!(*label, carrier.display_name());
+    }
+    assert_eq!(
+        PeriodicCarrier::ALL
+            .iter()
+            .filter(|carrier| carrier.chooser_restriction().is_some())
+            .copied()
+            .collect::<Vec<_>>(),
+        vec![PeriodicCarrier::Hb],
+        "harmonic balance is the one position this crate has no runner for"
+    );
+}
+
+/// Every carrier position leaves the three forms the same size.
+///
+/// The row is one chooser whatever it holds, so a selection that moved the
+/// form would mean a row appearing or disappearing behind the selection —
+/// which is how the option sheet under these forms used to jump.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn every_periodic_carrier_position_preserves_form_geometry() {
+    use crate::services::simulation_runner::PeriodicCarrier;
+
+    for kind in [AnalysisKind::Pac, AnalysisKind::Pxf, AnalysisKind::Pnoise] {
+        let mut heights = Vec::new();
+        for position in 0..PeriodicCarrier::ALL.len() {
+            let mut draft = AnalysisDraft::for_kind(kind);
+            match &mut draft {
+                AnalysisDraft::Pac(setup) => setup.carrier_idx = position,
+                AnalysisDraft::Pxf(setup) => setup.carrier_idx = position,
+                AnalysisDraft::Pnoise(setup) => setup.carrier_idx = position,
+                _ => panic!("{kind:?} carries a periodic small-signal draft"),
+            }
+            heights.push(analysis_form_height(draft));
+        }
+        assert!(
+            heights.windows(2).all(|pair| pair[0] == pair[1]),
+            "{kind:?} changed height with the carrier selection: {heights:?}"
+        );
+    }
+}
+
 #[test]
 fn hb_field_order_and_wording_match_the_canonical_mockup() {
     assert_eq!(

@@ -17,6 +17,7 @@ use rspice_core::Value;
 use rspice_core::abort_signal::AbortSignal;
 
 use super::super::error::{ensure_not_aborted, poll_periodically};
+use super::super::periodic_carrier::PeriodicCarrier;
 use super::super::{
     ServiceRunError, ServiceRunResult, build_resolved_periodic_engine, build_voltage_output_expr,
     is_ground_like, parse_runner_netlist_with_abort,
@@ -62,6 +63,8 @@ pub struct PxfRunConfig {
     pub max_sideband: i32,
     pub reltol: Value,
     pub abstol: Value,
+    /// Which periodic solve this run linearizes around; the card's `FROM=`.
+    pub carrier: PeriodicCarrier,
 }
 
 impl Default for PxfRunConfig {
@@ -82,6 +85,7 @@ impl Default for PxfRunConfig {
             max_sideband: 5,
             reltol: 1e-3,
             abstol: 1e-12,
+            carrier: PeriodicCarrier::Preceding,
         }
     }
 }
@@ -141,6 +145,9 @@ impl PxfRunConfig {
         }
         if !self.abstol.is_finite() || self.abstol <= 0.0 {
             return Err("PXF absolute tolerance must be positive".to_string());
+        }
+        if let Some(reason) = self.carrier.unroutable_reason(".PXF") {
+            return Err(reason);
         }
         Ok(())
     }
@@ -364,6 +371,7 @@ mod tests {
             max_sideband: 1,
             reltol: 1.0e-3,
             abstol: 1.0e-12,
+            carrier: PeriodicCarrier::Preceding,
         }
     }
 

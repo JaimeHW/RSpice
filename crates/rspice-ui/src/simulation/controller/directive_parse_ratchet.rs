@@ -549,6 +549,92 @@ fn the_periodic_transfer_and_stability_controls_reach_the_engines_own_card() {
     assert!((pstb_run.eigenvalue_tolerance - 1.0e-12).abs() <= 1.0e-27);
 }
 
+/// A periodic small-signal card names the carrier it linearizes around, and
+/// the engine reads that name back as the same carrier.
+///
+/// `FROM=` was the last keyword of this family no form could author. The
+/// engine's three cards all carry it, the plan binds a card that states it to
+/// the family it names, and the Studio wrote none of them — so every generated
+/// deck said "whichever periodic solve comes first", whatever the session had
+/// selected, and a deck with both a `.PSS` and an `.HB` in it meant something
+/// the studio had no way to state.
+///
+/// Asserted against the `AnalysisCommand` the engine builds rather than
+/// against the emitted string, because `from=pss` is a well-formed card
+/// whatever the parser does with the keyword, and then through the Studio's own
+/// deck reader, which is the route a hand-written deck takes.
+#[test]
+fn a_periodic_small_signal_card_names_the_carrier_it_linearizes_around() {
+    use crate::simulation::plan::AnalysisDraft;
+    use rspice_core::netlist::{AnalysisCommand, PeriodicSourceSelector};
+
+    // The one position the Studio runs that is not the card's absent key.
+    let pss_carrier = crate::services::simulation_runner::PeriodicCarrier::Pss.index();
+
+    let mut pac_draft = fixture_draft(AnalysisKind::Pac);
+    let AnalysisDraft::Pac(pac) = &mut pac_draft else {
+        panic!("the PAC kind carries a PAC draft");
+    };
+    pac.initialized = true;
+    pac.carrier_idx = pss_carrier;
+
+    let mut pxf_draft = fixture_draft(AnalysisKind::Pxf);
+    let AnalysisDraft::Pxf(pxf) = &mut pxf_draft else {
+        panic!("the PXF kind carries a PXF draft");
+    };
+    pxf.initialized = true;
+    pxf.carrier_idx = pss_carrier;
+
+    let mut pnoise_draft = fixture_draft(AnalysisKind::Pnoise);
+    let AnalysisDraft::Pnoise(pnoise) = &mut pnoise_draft else {
+        panic!("the PNoise kind carries a PNoise draft");
+    };
+    pnoise.initialized = true;
+    pnoise.noise_ref_idx = 0; // Output-referred; the input source stays unnamed.
+    pnoise.carrier_idx = pss_carrier;
+
+    // A dependent card binds to the deck's one `.PSS`, so the seed is written
+    // by the same emitter rather than spelled here.
+    let pss_draft = fixture_draft(AnalysisKind::Pss);
+
+    let controller = SimulationController::new();
+    let pac_state = engine_facing_state(&pac_draft);
+    let mut deck = FIXTURE_DECK.to_owned();
+    for draft in [&pss_draft, &pac_draft, &pxf_draft, &pnoise_draft] {
+        let directive = controller
+            .analysis_draft_directive(&engine_facing_state(draft), draft)
+            .unwrap_or_else(|error| panic!("the draft emits a card: {error}"));
+        deck.push_str(&directive);
+        deck.push('\n');
+    }
+    deck.push_str(".end\n");
+
+    let netlist = rspice_core::netlist::parse_netlist(&deck)
+        .unwrap_or_else(|error| panic!("the engine must read the deck back: {error}\n{deck}"));
+    let mut named = 0usize;
+    for command in &netlist.analyses {
+        let (card, source) = match command {
+            AnalysisCommand::Pac(card) => (".PAC", card.source),
+            AnalysisCommand::Pxf(card) => (".PXF", card.source),
+            AnalysisCommand::Pnoise(card) => (".PNOISE", card.source),
+            _ => continue,
+        };
+        assert_eq!(
+            source,
+            PeriodicSourceSelector::Pss,
+            "{card} named the periodic steady state and the engine read {source:?}"
+        );
+        named += 1;
+    }
+    assert_eq!(named, 3, "the deck carries one card of each of the three");
+
+    // The same deck through the Studio's own reader: a named `.PSS` carrier is
+    // the binding this pipeline already makes, so the deck queues.
+    let queue = super::manual_deck::build_manual_deck_queue(&pac_state, &deck)
+        .unwrap_or_else(|errors| panic!("the deck reader refused: {}", errors.join("; ")));
+    assert!(queue.iter().any(|queued| queued.spec_options.pac.is_some()));
+}
+
 /// Every shooting control the form holds reaches the engine's own card field.
 ///
 /// The card is written from a draft with nothing at its default, parsed by the

@@ -9,7 +9,8 @@ mod analysis_spec;
 pub(in crate::simulation) use analysis_spec::analysis_kind_tag;
 use analysis_spec::{
     corner_process_tag, encode_analysis_spec, encode_f64_slice, encode_noise_contribution_detail,
-    encode_noise_integration_mode, pac_sweep_tag, pnoise_sweep_tag, pxf_sweep_tag,
+    encode_noise_integration_mode, encode_periodic_carrier_tail, pac_sweep_tag, pnoise_sweep_tag,
+    pxf_sweep_tag,
 };
 
 use sha2::{Digest as _, Sha256};
@@ -795,6 +796,7 @@ fn encode_spec_options(writer: &mut CanonicalWriter, options: &SpecExecutionOpti
         writer.bool(config.include_dc);
         writer.f64(config.reltol);
         writer.f64(config.abstol);
+        encode_periodic_carrier_tail(writer, config.carrier);
     });
     writer.option(options.pxf.as_ref(), |writer, config| {
         writer.f64(config.pss_fundamental_freq);
@@ -812,6 +814,7 @@ fn encode_spec_options(writer: &mut CanonicalWriter, options: &SpecExecutionOpti
         writer.i32(config.max_sideband);
         writer.f64(config.reltol);
         writer.f64(config.abstol);
+        encode_periodic_carrier_tail(writer, config.carrier);
     });
     // Preserve the retired TF execution-option slot so unrelated analysis
     // identities remain byte-for-byte stable. TF authority now lives in the
@@ -838,6 +841,7 @@ fn encode_spec_options(writer: &mut CanonicalWriter, options: &SpecExecutionOpti
         writer.bool(config.noise_summary);
         writer.f64(config.reltol);
         writer.f64(config.abstol);
+        encode_periodic_carrier_tail(writer, config.carrier);
     });
     writer.option(options.pstb.as_ref(), |writer, config| {
         writer.f64(config.pss_fundamental_freq);
@@ -1316,6 +1320,94 @@ mod tests {
         // by position, so a reordered list is a different run.
         assert_ne!(digest(&filtered), digest(&reordered));
         assert_eq!(digest(&filtered), digest(&filtered.clone()));
+    }
+
+    /// An unauthored carrier leaves the plan digest exactly as it was.
+    ///
+    /// The digest identifies the encoding as well as the request, so a field
+    /// appended in the middle of one of these arms would give every saved plan
+    /// in the family a new identity and detach it from its own results. The
+    /// carrier is therefore a conditional tail: the card's absent `FROM=` — the
+    /// only thing any request written before this lane could have meant — adds
+    /// no bytes, and a named carrier, which binds a different producer and is a
+    /// different run, adds one.
+    ///
+    /// The reference is built from the same writer primitives in the order
+    /// that stood before the tail existed, so this is a check against the
+    /// encoding rather than against a recorded hash that would be regenerated
+    /// along with the defect.
+    #[test]
+    fn an_unauthored_carrier_leaves_the_plan_digest_unchanged() {
+        use crate::services::simulation_runner::{PacRunConfig, PeriodicCarrier};
+
+        let digest = |carrier: PeriodicCarrier| {
+            analysis_config_digest(
+                ".pac",
+                &AnalysisSpec::Pac,
+                None,
+                &SpecExecutionOptions {
+                    pac: Some(PacRunConfig {
+                        carrier,
+                        ..PacRunConfig::default()
+                    }),
+                    ..SpecExecutionOptions::default()
+                },
+                None,
+            )
+        };
+
+        // The same primitives in the same order `analysis_config_digest` and
+        // `encode_spec_options` used before the tail existed.
+        let config = PacRunConfig::default();
+        let mut writer = CanonicalWriter::new("rspice.analysis-config/v4");
+        writer.domain("analysis-line");
+        writer.string(".pac");
+        encode_analysis_spec(&mut writer, &AnalysisSpec::Pac);
+        encode_analysis_config(&mut writer, None);
+        writer.domain("spec-execution-options");
+        for _ in 0..3 {
+            writer.option(None::<&()>, |_, _: &()| unreachable!());
+        }
+        writer.option(Some(&config), |writer, config| {
+            writer.f64(config.pss_fundamental_freq);
+            writer.usize(config.pss_num_harmonics);
+            writer.f64(config.pss_tolerance);
+            writer.f64(config.start_freq);
+            writer.f64(config.stop_freq);
+            writer.usize(config.points_per_unit);
+            writer.u8(pac_sweep_tag(config.sweep));
+            writer.i32(config.max_sideband);
+            writer.string(&config.input_source);
+            writer.string(&config.output_node);
+            writer.option(config.output_ref.as_ref(), |w, v| w.string(v));
+            writer.f64(config.pac_magnitude);
+            writer.bool(config.include_dc);
+            writer.f64(config.reltol);
+            writer.f64(config.abstol);
+        });
+        // The `.PXF` slot, the retired TF flag, then `.PNOISE` and `.PSTB`.
+        writer.option(None::<&()>, |_, _: &()| unreachable!());
+        writer.bool(false);
+        for _ in 0..2 {
+            writer.option(None::<&()>, |_, _: &()| unreachable!());
+        }
+        encode_numeric_override(&mut writer, None);
+
+        assert_eq!(
+            digest(PeriodicCarrier::Preceding),
+            writer.finish(),
+            "the absent FROM= keyword must add no bytes to the digest"
+        );
+        assert_ne!(
+            digest(PeriodicCarrier::Preceding),
+            digest(PeriodicCarrier::Pss),
+            "a named carrier binds a different producer and is a different run"
+        );
+        assert_ne!(
+            digest(PeriodicCarrier::Pss),
+            digest(PeriodicCarrier::Hb),
+            "the two named carriers are two different runs"
+        );
     }
 
     #[test]

@@ -50,6 +50,7 @@ impl SimulationController {
             include_dc: pac_cfg.include_dc,
             reltol,
             abstol,
+            carrier: pac_cfg.carrier,
         })
     }
 
@@ -113,6 +114,7 @@ impl SimulationController {
             noise_summary: pnoise_cfg.noise_summary,
             reltol,
             abstol,
+            carrier: pnoise_cfg.carrier,
         })
     }
 
@@ -159,6 +161,7 @@ impl SimulationController {
             max_sideband: pxf_cfg.max_sideband,
             reltol,
             abstol,
+            carrier: pxf_cfg.carrier,
         })
     }
 

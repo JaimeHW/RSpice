@@ -77,6 +77,18 @@ const NOISE_INPUT_CUSTOM_CHOICE: &str = "Exact source name\u{2026}";
 const NOISE_DOMAIN_PRESET_LIMIT: usize = 64;
 
 const XF_ENABLED_CHOICES: &[&str] = &["Enabled", "Disabled"];
+/// The carrier positions the engine's `FROM=` keyword has, in its order.
+///
+/// Held here rather than built from [`PeriodicCarrier`] at paint time because
+/// `choice_row_with_disabled` takes `&[&str]`, and one static list is what
+/// keeps the three periodic small-signal forms offering the same words in the
+/// same order. `periodic_carrier_labels_are_the_carriers_the_engine_has` pins
+/// it against the enum.
+const PERIODIC_CARRIER_CHOICES: &[&str] = &[
+    "preceding solve",
+    "periodic steady state",
+    "harmonic balance",
+];
 const ENVELOPE_DECLARED_SOURCES_CHOICE: &str = "Declared list...";
 const ENVELOPE_INLINE_CONTROL_GAP: f32 = 6.0;
 const NOISE_SWEEP_CONTROL_COUNT: usize = 2;
@@ -413,6 +425,29 @@ fn choice_row(ui: &mut Ui, label: &str, options: &[&str], value: &mut usize) -> 
             false
         }
     })
+}
+
+/// The carrier row the three periodic small-signal forms share.
+///
+/// One row, because the question is one question: which large-signal periodic
+/// solve does this small signal sit on. The positions are the engine's own
+/// `FROM=` vocabulary and a position the Studio cannot run is painted rather
+/// than hidden — an operator holding a deck the engine accepts is owed the
+/// fact that the card exists and where it runs, and a silently shorter list
+/// would tell them the opposite.
+fn periodic_carrier_row(ui: &mut Ui, value: &mut usize) -> bool {
+    use crate::services::simulation_runner::PeriodicCarrier;
+
+    let disabled = PeriodicCarrier::ALL
+        .iter()
+        .enumerate()
+        .filter_map(|(index, carrier)| {
+            carrier
+                .chooser_restriction()
+                .map(|restriction| (index, restriction))
+        })
+        .collect::<Vec<_>>();
+    choice_row_with_disabled(ui, "Carrier", PERIODIC_CARRIER_CHOICES, value, &disabled)
 }
 
 fn enabled_choice_row(ui: &mut Ui, label: &str, enabled: &mut bool) -> bool {

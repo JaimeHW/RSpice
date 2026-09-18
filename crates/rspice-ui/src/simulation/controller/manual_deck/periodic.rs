@@ -45,6 +45,12 @@ use rspice_core::netlist::expr::eval_expression;
 use rspice_core::netlist::{Netlist, ParamContext};
 
 use super::*;
+// Aliased: this module's own `PeriodicCarrier` is the *solved basis* a
+// dependent card binds to — four numbers off the deck's one `.PSS` — while the
+// runner's is the `FROM=` selector that says which solve that is. Two
+// different facts about one carrier, and a reader of this file needs to see
+// which one each site means.
+use crate::services::simulation_runner::PeriodicCarrier as CarrierSelector;
 use crate::services::simulation_runner::{
     PacFrequencySweep, PacRunConfig, PnoiseFrequencySweep, PnoiseReference, PnoiseRunConfig,
     PstbRunConfig, PxfFrequencySweep, PxfRunConfig,
@@ -537,6 +543,7 @@ fn parse_pac(
         // the card constant and the one this reader has always given.
         reltol: optional_value(card, "reltol", reltol, params)?,
         abstol: optional_value(card, "abstol", abstol, params)?,
+        carrier: CarrierSelector::Preceding,
     };
     validate_frequency_contract(
         ".PAC",
@@ -658,6 +665,7 @@ fn parse_pnoise(
         noise_summary: optional_bool(card, "noisesummary", true)?,
         reltol,
         abstol,
+        carrier: CarrierSelector::Preceding,
     };
     if config.max_sideband < 1 {
         return Err(".PNOISE maxsideband must be at least 1".to_owned());
@@ -725,6 +733,7 @@ fn parse_pxf(
         // the card's constant.
         reltol: optional_value(card, "reltol", reltol, params)?,
         abstol: optional_value(card, "abstol", abstol, params)?,
+        carrier: CarrierSelector::Preceding,
     };
     validate_frequency_contract(
         ".PXF",

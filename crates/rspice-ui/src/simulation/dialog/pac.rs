@@ -18,6 +18,8 @@
 //! + maxsideband=5 input=VRF out=VOUT
 //! ```
 
+use crate::services::simulation_runner::PeriodicCarrier;
+
 use super::options::parse_si_value;
 
 // =============================================================================
@@ -76,6 +78,12 @@ pub struct PacConfig {
     pub pac_magnitude: f64,
     /// Include DC sideband (band 0)
     pub include_dc: bool,
+    /// Which periodic solve this analysis linearizes around.
+    ///
+    /// The card's `FROM=` keyword, and the engine's own three positions: the
+    /// preceding periodic solve of either family, which is what an absent key
+    /// means, the preceding `.PSS`, or the preceding `.HB`.
+    pub carrier: PeriodicCarrier,
 }
 
 impl Default for PacConfig {
@@ -91,6 +99,7 @@ impl Default for PacConfig {
             output_ref: String::new(),
             pac_magnitude: 1.0, // 1V default
             include_dc: true,
+            carrier: PeriodicCarrier::Preceding,
         }
     }
 }
@@ -144,6 +153,14 @@ impl PacConfig {
             cmd.push_str(" includedc=no");
         }
 
+        // `FROM=` has no spelling for "the preceding periodic solve": the
+        // card's absent key *is* that selection, which is why the carrier is
+        // held as a three-position choice and not as a pair of names. An
+        // untouched form therefore writes exactly the card it always wrote.
+        if let Some(carrier) = self.carrier.spice_name() {
+            cmd.push_str(&format!(" from={carrier}"));
+        }
+
         cmd
     }
 
@@ -181,6 +198,14 @@ impl PacConfig {
             return Err("PAC magnitude must be positive".to_string());
         }
 
+        // The engine accepts all three carriers on this card and the Studio
+        // runs two of them, so the third is refused here with the reason and
+        // the place it does run. The chooser paints it disabled for the same
+        // reason; this is what answers a project or a deck that names it.
+        if let Some(reason) = self.carrier.unroutable_reason(".PAC") {
+            return Err(reason);
+        }
+
         Ok(())
     }
 }
@@ -213,6 +238,13 @@ pub struct PacDialogState {
     pub pac_magnitude: String,
     /// Include DC
     pub include_dc: bool,
+    /// Carrier chooser position, into [`PeriodicCarrier::ALL`].
+    ///
+    /// Absent in every project saved before the carrier was authorable, and
+    /// absent is position zero — the preceding periodic solve, which is the
+    /// card those projects wrote and the binding they ran.
+    #[serde(default)]
+    pub carrier_idx: usize,
     /// Initialized flag
     #[serde(skip)]
     pub initialized: bool,
@@ -236,6 +268,7 @@ impl PacDialogState {
             output_ref: config.output_ref.clone(),
             pac_magnitude: config.pac_magnitude.to_string(),
             include_dc: config.include_dc,
+            carrier_idx: config.carrier.index(),
             initialized: true,
         }
     }
@@ -274,6 +307,7 @@ impl PacDialogState {
             output_ref: self.output_ref.clone(),
             pac_magnitude: mag,
             include_dc: self.include_dc,
+            carrier: PeriodicCarrier::at(self.carrier_idx),
         };
 
         config.validate()?;
@@ -357,5 +391,82 @@ mod tests {
             .to_spice(),
             PacConfig::default().to_spice()
         );
+    }
+
+    /// The carrier the analysis linearizes around appears on the card, in the
+    /// engine's own keyword, and only when it is named.
+    ///
+    /// The absent `FROM=` is not a missing setting: `resolve_periodic_source`
+    /// binds a card without it to the nearest preceding `.PSS` *or* `.HB`,
+    /// which is a third answer rather than a default spelling of either. So an
+    /// untouched form writes the card it has always written, and the two named
+    /// positions write the engine's two spellings.
+    #[test]
+    fn the_card_names_its_carrier_only_when_one_is_named() {
+        assert!(
+            !PacConfig::default().to_spice().contains("from="),
+            "the preceding periodic solve is the absent keyword, not a written one"
+        );
+        assert_eq!(
+            PacConfig {
+                carrier: PeriodicCarrier::Pss,
+                ..PacConfig::default()
+            }
+            .to_spice(),
+            ".pac dec 10 1k 1G maxsideband=5 input=VRF out=VOUT from=pss"
+        );
+        assert_eq!(
+            PacConfig {
+                carrier: PeriodicCarrier::Hb,
+                ..PacConfig::default()
+            }
+            .to_spice(),
+            ".pac dec 10 1k 1G maxsideband=5 input=VRF out=VOUT from=hb"
+        );
+    }
+
+    /// A carrier the Studio cannot run is refused by name, with the place it
+    /// does run, rather than bound to whichever periodic state is at hand.
+    #[test]
+    fn a_carrier_without_a_studio_route_is_refused_by_name() {
+        let error = PacConfig {
+            carrier: PeriodicCarrier::Hb,
+            ..PacConfig::default()
+        }
+        .validate()
+        .expect_err("a harmonic-balance carrier has no PAC runner in this crate");
+        assert!(
+            error.contains("from=hb") && error.contains("command line"),
+            "the refusal must name the carrier and where it runs: {error}"
+        );
+        for carrier in [PeriodicCarrier::Preceding, PeriodicCarrier::Pss] {
+            PacConfig {
+                carrier,
+                ..PacConfig::default()
+            }
+            .validate()
+            .unwrap_or_else(|error| panic!("{carrier:?} is routable here: {error}"));
+        }
+    }
+
+    /// A draft saved before the carrier row existed opens as the analysis it
+    /// ran: the preceding periodic solve, writing no `FROM=` at all.
+    #[test]
+    fn a_draft_saved_before_the_carrier_selector_restores_as_preceding() {
+        let mut document = serde_json::to_value(PacDialogState::from_config(&PacConfig::default()))
+            .expect("the draft serializes");
+        document
+            .as_object_mut()
+            .expect("the draft is an object")
+            .remove("carrier_idx")
+            .expect("the key this test removes must exist");
+        let restored: PacDialogState =
+            serde_json::from_value(document).expect("a draft written before the carrier row loads");
+        assert_eq!(restored.carrier_idx, 0);
+        let config = restored
+            .to_config()
+            .expect("the restored draft is runnable");
+        assert_eq!(config.carrier, PeriodicCarrier::Preceding);
+        assert!(!config.to_spice().contains("from="));
     }
 }

@@ -438,6 +438,10 @@ pub(crate) struct WorkerPacRunConfig {
     pub include_dc: bool,
     pub reltol: f64,
     pub abstol: f64,
+    /// The carrier the run linearizes around. Absent on a request an older
+    /// worker wrote, and absent is the preceding periodic solve.
+    #[serde(default)]
+    pub carrier: WorkerPeriodicCarrier,
 }
 
 impl From<&crate::services::simulation_runner::PacRunConfig> for WorkerPacRunConfig {
@@ -458,6 +462,7 @@ impl From<&crate::services::simulation_runner::PacRunConfig> for WorkerPacRunCon
             include_dc: value.include_dc,
             reltol: value.reltol,
             abstol: value.abstol,
+            carrier: WorkerPeriodicCarrier::from(value.carrier),
         }
     }
 }
@@ -480,6 +485,7 @@ impl From<WorkerPacRunConfig> for crate::services::simulation_runner::PacRunConf
             include_dc: value.include_dc,
             reltol: value.reltol,
             abstol: value.abstol,
+            carrier: crate::services::simulation_runner::PeriodicCarrier::from(value.carrier),
         }
     }
 }
@@ -501,6 +507,8 @@ pub(crate) struct WorkerPxfRunConfig {
     pub max_sideband: i32,
     pub reltol: f64,
     pub abstol: f64,
+    #[serde(default)]
+    pub carrier: WorkerPeriodicCarrier,
 }
 
 impl From<&crate::services::simulation_runner::PxfRunConfig> for WorkerPxfRunConfig {
@@ -521,6 +529,7 @@ impl From<&crate::services::simulation_runner::PxfRunConfig> for WorkerPxfRunCon
             max_sideband: value.max_sideband,
             reltol: value.reltol,
             abstol: value.abstol,
+            carrier: WorkerPeriodicCarrier::from(value.carrier),
         }
     }
 }
@@ -543,6 +552,7 @@ impl From<WorkerPxfRunConfig> for crate::services::simulation_runner::PxfRunConf
             max_sideband: value.max_sideband,
             reltol: value.reltol,
             abstol: value.abstol,
+            carrier: crate::services::simulation_runner::PeriodicCarrier::from(value.carrier),
         }
     }
 }
@@ -565,6 +575,8 @@ pub(crate) struct WorkerPnoiseRunConfig {
     pub noise_summary: bool,
     pub reltol: f64,
     pub abstol: f64,
+    #[serde(default)]
+    pub carrier: WorkerPeriodicCarrier,
 }
 
 impl From<&crate::services::simulation_runner::PnoiseRunConfig> for WorkerPnoiseRunConfig {
@@ -586,6 +598,7 @@ impl From<&crate::services::simulation_runner::PnoiseRunConfig> for WorkerPnoise
             noise_summary: value.noise_summary,
             reltol: value.reltol,
             abstol: value.abstol,
+            carrier: WorkerPeriodicCarrier::from(value.carrier),
         }
     }
 }
@@ -609,6 +622,7 @@ impl From<WorkerPnoiseRunConfig> for crate::services::simulation_runner::PnoiseR
             noise_summary: value.noise_summary,
             reltol: value.reltol,
             abstol: value.abstol,
+            carrier: crate::services::simulation_runner::PeriodicCarrier::from(value.carrier),
         }
     }
 }
@@ -1815,6 +1829,42 @@ impl From<WorkerCornerProcess> for crate::services::simulation_runner::CornerPro
             WorkerCornerProcess::FF => Self::FF,
             WorkerCornerProcess::SF => Self::SF,
             WorkerCornerProcess::FS => Self::FS,
+        }
+    }
+}
+
+/// The carrier a periodic small-signal request names, on the wire.
+///
+/// The engine's `FROM=` vocabulary, spelled for transport. Defaulted on read
+/// because an older worker's request carries no carrier at all, and the card
+/// it was written from had no `FROM=` keyword: that request asked for the
+/// preceding periodic solve, which is exactly what the default is.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) enum WorkerPeriodicCarrier {
+    #[default]
+    Preceding,
+    Pss,
+    Hb,
+}
+
+impl From<crate::services::simulation_runner::PeriodicCarrier> for WorkerPeriodicCarrier {
+    fn from(value: crate::services::simulation_runner::PeriodicCarrier) -> Self {
+        use crate::services::simulation_runner::PeriodicCarrier;
+
+        match value {
+            PeriodicCarrier::Preceding => Self::Preceding,
+            PeriodicCarrier::Pss => Self::Pss,
+            PeriodicCarrier::Hb => Self::Hb,
+        }
+    }
+}
+
+impl From<WorkerPeriodicCarrier> for crate::services::simulation_runner::PeriodicCarrier {
+    fn from(value: WorkerPeriodicCarrier) -> Self {
+        match value {
+            WorkerPeriodicCarrier::Preceding => Self::Preceding,
+            WorkerPeriodicCarrier::Pss => Self::Pss,
+            WorkerPeriodicCarrier::Hb => Self::Hb,
         }
     }
 }

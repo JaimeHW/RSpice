@@ -17,6 +17,7 @@ mod helpers;
 mod monte_carlo;
 mod optimization;
 mod pac_pxf;
+mod periodic_carrier;
 mod pnoise;
 mod psp;
 mod pss;
@@ -67,6 +68,7 @@ pub use pac_pxf::{
     run_pac_analysis_from_pss_with_source_path_and_abort,
     run_pxf_analysis_from_pss_with_source_path_and_abort,
 };
+pub use periodic_carrier::PeriodicCarrier;
 pub use pnoise::{
     PnoiseFrequencySweep, PnoiseReference, PnoiseRunConfig,
     run_pnoise_analysis_from_pss_with_source_path_and_abort,

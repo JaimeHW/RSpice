@@ -5,6 +5,7 @@
 //! figure, where noise at every sideband folds onto the output.
 
 use super::error::{ensure_not_aborted, poll_periodically};
+use super::periodic_carrier::PeriodicCarrier;
 use super::{
     ServiceRunError, ServiceRunResult, build_resolved_periodic_engine,
     generate_freq_points_with_abort, is_ground_like,
@@ -89,6 +90,8 @@ pub struct PnoiseRunConfig {
     pub noise_summary: bool,
     pub reltol: Value,
     pub abstol: Value,
+    /// Which periodic solve this run folds noise around; the card's `FROM=`.
+    pub carrier: PeriodicCarrier,
 }
 
 impl Default for PnoiseRunConfig {
@@ -110,6 +113,7 @@ impl Default for PnoiseRunConfig {
             noise_summary: true,
             reltol: 1e-3,
             abstol: 1e-18,
+            carrier: PeriodicCarrier::Preceding,
         }
     }
 }
@@ -165,6 +169,9 @@ impl PnoiseRunConfig {
             return Err(PnoiseRunError::Validation(
                 "PNOISE absolute tolerance must be non-negative".to_string(),
             ));
+        }
+        if let Some(reason) = self.carrier.unroutable_reason(".PNOISE") {
+            return Err(PnoiseRunError::Validation(reason));
         }
         Ok(())
     }
