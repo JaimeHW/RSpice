@@ -342,5 +342,9 @@ pub(crate) fn is_independent_source(kind: ComponentType) -> bool {
     crate::state::stimulus_library::definition::StimulusFamily::of(kind).is_some()
 }
 
+mod derived;
+
+pub(crate) use derived::{Guide, SpanChoice, StimulusRealization};
+
 #[cfg(test)]
 mod tests;
