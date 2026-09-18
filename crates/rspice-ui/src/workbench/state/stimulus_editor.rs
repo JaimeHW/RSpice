@@ -232,6 +232,7 @@ impl StimulusEditorState {
     }
 
     /// How many times this editor has asked the engine for a waveform.
+    #[cfg(test)]
     #[must_use]
     pub const fn evaluations(&self) -> u64 {
         self.evaluations
