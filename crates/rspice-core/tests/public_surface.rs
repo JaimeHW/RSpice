@@ -870,7 +870,67 @@ use rspice_core::analysis::harmonic_balance::{
 /// current Fourier interpretation across retained, CLI and Python results.
 /// +1: CurrentImpulseTrace::validate shares exact charge/time validation with
 /// frontend result retention and worker transport.
-const MAX_PUBLIC_ITEMS: usize = 5014;
+///
+/// 2026-09-18, +53 arrears (5,014 -> 5,067), measured on `78ccba6e7`. The
+/// ceiling was last true at `f80abc545`; every statement since is accounted
+/// for below, and nine of the sixty-two were narrowed rather than recorded.
+///
+/// +38 is the control-script surface, raised by six commits that shipped
+/// `.control` execution to three frontends and never moved this pin. It is
+/// case 2 — a deliberate API a frontend is meant to call — and the callers
+/// are named: `execution::control` hands out `ControlProgram`,
+/// `parse_deck_with_abort`, `declarative_source`, `start`, `ControlSession`,
+/// `variables`, `next_command`, `ControlCommand`, `ControlLimits`,
+/// `ControlError`, `ControlErrorKind` and the `ControlScalarEvaluator` trait
+/// `next_command` takes; `engine::control` hands out `ControlCircuit` with
+/// `new`, `netlist`, `execute`, `datasets`, `into_datasets` and `settings`,
+/// the `ControlExecutionError`, `ControlAnalysisResult`, `ControlNamedDataset`
+/// and `ControlCommandEffect` vocabulary, the `ControlPresentation`,
+/// `ControlPresentationKind`, `ControlTrace`, `ControlVector`,
+/// `ControlVectorId`, `ControlCurrentSource` and `ControlPlotOptions`
+/// presentation types, `ControlSettings`, and the three grouped re-exports
+/// that publish them; and `netlist` hands out `ControlScriptSource` with
+/// `text` and `origin` plus its re-export. `rspice run` drives the whole loop,
+/// the browser deck runner drives it again for retained datasets, the
+/// conformance execution suite drives it against ngspice, and
+/// `tests/control_execution.rs` — an integration test, so the public face is
+/// its only reach — drives `settings`, `ControlCommand` and `origin`.
+///
+/// +13 is `.DCMATCH`: `Engine::run_dc_match` and `run_dc_match_with_abort`,
+/// `AnalysisResultDocument::from_dc_match`, the `DcMatchResult`,
+/// `DcMatchContributor` and `DcMatchScope` vocabulary with
+/// `DcMatchResult::quoted_sigma` and `DcMatchScope::tag`, their grouped
+/// re-export, the `DcMatchPayload` and `DcMatchContributorDocument` the
+/// published document carries, and `DcMatchCard` with
+/// `DEFAULT_CONTRIBUTORS`. The CLI reports the analysis, the Python binding
+/// projects it, the browser runner publishes it, `rspice-engine-adapter`
+/// dispatches it, and the conformance suite checks it against the analytic
+/// divider. The capability matrix's two widened array constants are not in
+/// this number: they replaced the statements they grew out of.
+///
+/// +1 is `TransientNoiseConfig`, the authored `.TRAN` noise keywords, which
+/// `TranCard::transient_noise` publishes as a field of a public card.
+///
+/// +1 is `GpTransientPhaseModel`, the configured GP transient phase model,
+/// which `SimulationConfig` carries and `tests/bjt_excess_phase_transient.rs`
+/// selects.
+///
+/// -9, established by compiling the CLI, the GUI, the Python and WASM
+/// bindings, the conformance suite and this crate's own test targets against
+/// the narrowed items: `ControlError::new` (every caller is this crate; a
+/// frontend reading the error reads its public fields),
+/// `ParameterScalarEvaluator` (the in-crate default evaluator; frontends pass
+/// their `ControlCircuit`), `DcMatchCard::voltage_probe` (which `-D warnings`
+/// then showed has no shipping caller at all, so it is `#[cfg(test)]`: it is
+/// how this crate states one card at a time, and every dependent reads cards
+/// the parser produced), `constants::EVENT_FLUX_ABSTOL`
+/// and `NoisePhysicalConstants::NGSPICE_46` (defaults this crate applies, on
+/// the precedent of `VBIC_1_3`), and the four ngspice Weil operator methods
+/// in `engine::transient::bjt::weil` — `WeilHistory::new`, `validate` and
+/// `prepare` and `WeilEvaluation::apply_correction_derivative` — whose own
+/// types are already `pub(in crate::engine::transient)`, so the `pub` on them
+/// never published anything.
+const MAX_PUBLIC_ITEMS: usize = 5067;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently
