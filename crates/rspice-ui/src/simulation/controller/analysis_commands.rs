@@ -83,11 +83,11 @@ impl SimulationController {
             AnalysisSpec::Hbsp { .. } => Self::build_hbsp_command(spec),
             AnalysisSpec::Hbnoise { .. } => Self::build_hbnoise_command(spec),
             AnalysisSpec::Tf { .. } => Self::build_tf_command(spec),
+            AnalysisSpec::TransientNoise { .. } => Self::build_transient_noise_command(spec),
             AnalysisSpec::Qpss { .. }
             | AnalysisSpec::Qpac { .. }
             | AnalysisSpec::Qpnoise { .. }
             | AnalysisSpec::Qpxf { .. }
-            | AnalysisSpec::TransientNoise { .. }
             | AnalysisSpec::DcMismatch { .. }
             | AnalysisSpec::Reliability { .. } => Err(format!(
                 "{} is configured but cannot produce an engine directive: {}",
@@ -437,6 +437,57 @@ impl SimulationController {
             integrated_noise,
             contributor_ranking
         ))
+    }
+
+    /// The `.tran` directive a transient-noise run executes: the window the
+    /// ordinary transient card states, then the noise this run injects into
+    /// it.
+    ///
+    /// The window half is written by [`TransientAnalysisConfig::to_spice`]
+    /// rather than formatted again here. Two spellings of the same four
+    /// positional fields is how a studio ends up dispatching a window it did
+    /// not display, and the noise keywords are the only thing this card adds
+    /// to the one the Transient kind already writes.
+    ///
+    /// `NOISESEED=` is always written, even at the draft's default. A run
+    /// dispatched from the Studio has to be reproducible by construction: the
+    /// seed the form shows is the seed that ran, and a card that left the
+    /// engine to resolve one would name a realization the form never stated.
+    /// `NOISESCALE=1` is omitted for the same reason the positional start is:
+    /// it is the card's own default and says nothing.
+    ///
+    /// `NOISEFMIN=` is absent from this card because the Studio cannot author
+    /// it yet. Its absence is itself a value — the engine derives `1/tstop`,
+    /// the longest period the run can resolve — so an unauthored floor must
+    /// stay unwritten rather than be pinned to a number the form never stated.
+    pub(super) fn build_transient_noise_command(spec: &AnalysisSpec) -> Result<String, String> {
+        let AnalysisSpec::TransientNoise {
+            stop_time,
+            step_time,
+            start_time,
+            max_timestep,
+            seed,
+            noise_fmax,
+            scale,
+            uic,
+        } = spec
+        else {
+            return Err("failed to build transient noise command".to_string());
+        };
+        let mut command = TransientAnalysisConfig {
+            stop_time: *stop_time,
+            step_time: *step_time,
+            start_time: *start_time,
+            max_timestep: Some(*max_timestep),
+            uic: *uic,
+        }
+        .to_spice();
+        command.push_str(&format!(" NOISEFMAX={noise_fmax}"));
+        command.push_str(&format!(" NOISESEED={seed}"));
+        if *scale != 1.0 {
+            command.push_str(&format!(" NOISESCALE={scale}"));
+        }
+        Ok(command)
     }
 
     /// The `.tf` directive: the output expression, then the source it is
@@ -862,6 +913,119 @@ mod tests {
         }
     }
 
+    fn transient_noise_spec() -> AnalysisSpec {
+        AnalysisSpec::TransientNoise {
+            stop_time: 1.0e-6,
+            step_time: 1.0e-9,
+            start_time: 2.0e-7,
+            max_timestep: 2.5e-10,
+            seed: 97,
+            noise_fmax: 5.0e8,
+            scale: 0.5,
+            uic: true,
+        }
+    }
+
+    /// The card the Studio writes is the card the engine reads, field for
+    /// field.
+    ///
+    /// Not a string assertion. The engine's own parser is the only reader of
+    /// this line, and a keyword it does not know, a positional field in the
+    /// wrong slot, or an exponent it truncates would all pass an expected-text
+    /// comparison while producing a run configured by something the deck never
+    /// said. So the emitted card is read back through `rspice-core` and every
+    /// value is recovered from the `AnalysisCommand::Tran` window and the
+    /// `TransientNoiseConfig` the deck's options carry.
+    #[test]
+    fn a_transient_noise_spec_writes_the_card_the_engine_parses() {
+        use rspice_core::netlist::AnalysisCommand;
+
+        for (scale, uic) in [(0.5, true), (1.0, false)] {
+            let AnalysisSpec::TransientNoise {
+                stop_time,
+                step_time,
+                start_time,
+                max_timestep,
+                seed,
+                noise_fmax,
+                ..
+            } = transient_noise_spec()
+            else {
+                unreachable!("the fixture is a transient-noise specification");
+            };
+            let spec = AnalysisSpec::TransientNoise {
+                stop_time,
+                step_time,
+                start_time,
+                max_timestep,
+                seed,
+                noise_fmax,
+                scale,
+                uic,
+            };
+            let card = SimulationController::build_transient_noise_command(&spec)
+                .expect("a transient-noise specification writes its own card");
+            // Pinned as well as read back: the spelling is what a colleague
+            // handed this deck reads, and a reader of this test should not
+            // have to run a parser to see it.
+            assert_eq!(
+                card,
+                if uic {
+                    ".tran 0.000000001 0.000001 0.0000002 0.00000000025 UIC \
+                     NOISEFMAX=500000000 NOISESEED=97 NOISESCALE=0.5"
+                } else {
+                    ".tran 0.000000001 0.000001 0.0000002 0.00000000025 \
+                     NOISEFMAX=500000000 NOISESEED=97"
+                }
+            );
+
+            // A scale of exactly one is the card's default and is not written;
+            // anything else has to reach the line or the run is quieter than
+            // the form that configured it.
+            assert_eq!(
+                card.contains("NOISESCALE"),
+                scale != 1.0,
+                "{card} states NOISESCALE against a scale of {scale}"
+            );
+            assert!(
+                !card.contains("NOISEFMIN"),
+                "an unauthored noise floor must stay unwritten: {card}"
+            );
+
+            let deck = rspice_core::netlist::Netlist::parse(&format!(
+                "transient noise card\nV1 in 0 SIN(0 1 1k)\nR1 in 0 1k\n{card}\n.end\n"
+            ))
+            .unwrap_or_else(|error| panic!("the engine must read `{card}` back: {error}"));
+
+            let [
+                AnalysisCommand::Tran {
+                    step,
+                    stop,
+                    start,
+                    max_step,
+                    uic: parsed_uic,
+                },
+            ] = deck.analyses.as_slice()
+            else {
+                panic!("the card is one transient window: {:?}", deck.analyses);
+            };
+            assert_eq!(*step, step_time, "{card}");
+            assert_eq!(*stop, stop_time, "{card}");
+            assert_eq!(start.unwrap_or(0.0), start_time, "{card}");
+            assert_eq!(*max_step, Some(max_timestep), "{card}");
+            assert_eq!(*parsed_uic, uic, "{card}");
+
+            let noise = deck
+                .options
+                .transient_noise
+                .unwrap_or_else(|| panic!("the card turns transient noise on: {card}"));
+            assert_eq!(noise.fmax, noise_fmax, "{card}");
+            assert_eq!(noise.fmin, None, "{card}");
+            assert_eq!(noise.seed, Some(seed), "{card}");
+            assert_eq!(noise.scale, scale, "{card}");
+        }
+    }
+
     fn tf_spec() -> AnalysisSpec {
         AnalysisSpec::Tf {
             input_source: " vin ".to_owned(),
@@ -933,6 +1097,10 @@ mod tests {
         assert_eq!(
             SimulationController::build_tf_command(&hbnoise_spec()),
             Err("failed to build TF command".to_owned())
+        );
+        assert_eq!(
+            SimulationController::build_transient_noise_command(&tf_spec()),
+            Err("failed to build transient noise command".to_owned())
         );
     }
 }
