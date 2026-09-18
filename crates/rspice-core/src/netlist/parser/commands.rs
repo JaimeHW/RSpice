@@ -2719,7 +2719,14 @@ pub(super) fn expect_option_key(
     Ok((key, end))
 }
 
-pub(super) fn option_package_key_is_known(key_upper: &str) -> bool {
+/// Whether an upper-cased identifier names one of the option packages this
+/// parser scopes a `.OPTIONS` command to.
+///
+/// Public because a writer of `.OPTIONS` cards has to be able to check its own
+/// package headers against the reader's list rather than against a second copy
+/// of it: a header this returns `false` for is read as an ordinary global key,
+/// so every key after it on that card lands in the wrong place.
+pub fn option_package_key_is_known(key_upper: &str) -> bool {
     matches!(
         key_upper,
         "TOPOLOGY"

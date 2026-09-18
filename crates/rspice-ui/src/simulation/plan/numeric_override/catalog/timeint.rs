@@ -9,7 +9,10 @@
 //! report in the integration section beside the global keys that choose the
 //! method: the split here is by owner, not by where the reader meets them.
 
-use super::{NumericOverrideOption, OptionPackage, OptionSpec, OverrideSection, OverrideValueKind};
+use super::{
+    NumericOverrideOption, OptionPackage, OptionReach, OptionSpec, OverrideSection,
+    OverrideValueKind,
+};
 
 pub(super) const TIMEINT: [OptionSpec; 4] = [
     OptionSpec {
@@ -22,7 +25,7 @@ pub(super) const TIMEINT: [OptionSpec; 4] = [
         value_hint: "positive real",
         config_field: "transient_lte_reltol",
         consumer: "engine/transient.rs:2412 · accepted local truncation error",
-        time_stepped_only: true,
+        reach: OptionReach::TimeStepped,
     },
     OptionSpec {
         option: NumericOverrideOption::LteAbstol,
@@ -34,7 +37,7 @@ pub(super) const TIMEINT: [OptionSpec; 4] = [
         value_hint: "positive real",
         config_field: "transient_lte_abstol",
         consumer: "engine/transient.rs:2413 · accepted local truncation error",
-        time_stepped_only: true,
+        reach: OptionReach::TimeStepped,
     },
     OptionSpec {
         option: NumericOverrideOption::MinTimestep,
@@ -46,7 +49,7 @@ pub(super) const TIMEINT: [OptionSpec; 4] = [
         value_hint: "time, SI suffixes accepted",
         config_field: "min_timestep",
         consumer: "engine/transient.rs:2391 · preferred_min_dt",
-        time_stepped_only: true,
+        reach: OptionReach::TimeStepped,
     },
     OptionSpec {
         option: NumericOverrideOption::MaximumTimestep,
@@ -58,6 +61,6 @@ pub(super) const TIMEINT: [OptionSpec; 4] = [
         value_hint: "time, SI suffixes accepted",
         config_field: "transient_timeint_max_timestep",
         consumer: "engine/transient.rs:1545 · hinted_max_step clamp",
-        time_stepped_only: true,
+        reach: OptionReach::TimeStepped,
     },
 ];

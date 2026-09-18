@@ -56,7 +56,7 @@ mod chebyshev_synthesis;
 mod command_parsers;
 mod commands;
 
-pub use commands::parse_save_probe;
+pub use commands::{option_package_key_is_known, parse_save_probe};
 
 /// Apply an ordered control `option` command using the ordinary option grammar.
 /// A private candidate prevents a late invalid assignment from publishing the

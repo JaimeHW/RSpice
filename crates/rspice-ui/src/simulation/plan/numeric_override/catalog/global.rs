@@ -4,7 +4,10 @@
 //! force, so these can share a card with each other and with nothing else.
 //! The banners between them are the editor's own stacking order.
 
-use super::{NumericOverrideOption, OptionPackage, OptionSpec, OverrideSection, OverrideValueKind};
+use super::{
+    NumericOverrideOption, OptionPackage, OptionReach, OptionSpec, OverrideSection,
+    OverrideValueKind,
+};
 
 pub(super) const GLOBAL: [OptionSpec; 21] = [
     // ---------------------------------------------------------- convergence
@@ -18,7 +21,7 @@ pub(super) const GLOBAL: [OptionSpec; 21] = [
         value_hint: "positive real",
         config_field: "convergence_config.voltage_reltol",
         consumer: "engine/convergence/tolerances.rs:48 · voltage_reltol",
-        time_stepped_only: false,
+        reach: OptionReach::EverySolve,
     },
     OptionSpec {
         option: NumericOverrideOption::Abstol,
@@ -38,7 +41,7 @@ pub(super) const GLOBAL: [OptionSpec; 21] = [
         value_hint: "positive real",
         config_field: "convergence_config.current_abstol",
         consumer: "engine/convergence/tolerances.rs:63 · current_abstol",
-        time_stepped_only: false,
+        reach: OptionReach::EverySolve,
     },
     OptionSpec {
         option: NumericOverrideOption::Vntol,
@@ -50,7 +53,7 @@ pub(super) const GLOBAL: [OptionSpec; 21] = [
         value_hint: "positive real",
         config_field: "convergence_config.voltage_abstol",
         consumer: "engine/convergence/tolerances.rs:53 · voltage_abstol",
-        time_stepped_only: false,
+        reach: OptionReach::EverySolve,
     },
     OptionSpec {
         option: NumericOverrideOption::ResidualReltol,
@@ -62,7 +65,7 @@ pub(super) const GLOBAL: [OptionSpec; 21] = [
         value_hint: "positive real",
         config_field: "convergence_config.residual_reltol",
         consumer: "engine/convergence/tolerances.rs:297 · residual_reltol",
-        time_stepped_only: false,
+        reach: OptionReach::EverySolve,
     },
     OptionSpec {
         option: NumericOverrideOption::Gmin,
@@ -74,7 +77,7 @@ pub(super) const GLOBAL: [OptionSpec; 21] = [
         value_hint: "conductance, 0 for none",
         config_field: "convergence_config.junction_gmin_target",
         consumer: "engine/convergence/stamping.rs:8 · effective_device_junction_gmin",
-        time_stepped_only: false,
+        reach: OptionReach::EverySolve,
     },
     OptionSpec {
         option: NumericOverrideOption::Itl1,
@@ -86,7 +89,7 @@ pub(super) const GLOBAL: [OptionSpec; 21] = [
         value_hint: "iteration count",
         config_field: "max_iterations",
         consumer: "engine/convergence/tolerances.rs:20 · nonlinear_iteration_budget",
-        time_stepped_only: false,
+        reach: OptionReach::EverySolve,
     },
     OptionSpec {
         option: NumericOverrideOption::Itl4,
@@ -98,7 +101,7 @@ pub(super) const GLOBAL: [OptionSpec; 21] = [
         value_hint: "iteration count",
         config_field: "transient_max_iterations",
         consumer: "engine/transient/step_control.rs:191 · transient_max_iterations",
-        time_stepped_only: true,
+        reach: OptionReach::TimeStepped,
     },
     OptionSpec {
         option: NumericOverrideOption::GminStepping,
@@ -110,7 +113,7 @@ pub(super) const GLOBAL: [OptionSpec; 21] = [
         value_hint: "on · off",
         config_field: "convergence_config.gmin_stepping",
         consumer: "engine/convergence/solve.rs:137 · gmin_stepping fallback",
-        time_stepped_only: false,
+        reach: OptionReach::EverySolve,
     },
     OptionSpec {
         option: NumericOverrideOption::SourceStepping,
@@ -122,7 +125,7 @@ pub(super) const GLOBAL: [OptionSpec; 21] = [
         value_hint: "on · off",
         config_field: "convergence_config.source_stepping",
         consumer: "engine/convergence/solve.rs:154 · source_stepping fallback",
-        time_stepped_only: false,
+        reach: OptionReach::EverySolve,
     },
     OptionSpec {
         option: NumericOverrideOption::PseudoTransient,
@@ -134,7 +137,7 @@ pub(super) const GLOBAL: [OptionSpec; 21] = [
         value_hint: "on · off",
         config_field: "convergence_config.pseudo_transient",
         consumer: "engine/convergence/solve.rs:605 · pseudo_transient fallback",
-        time_stepped_only: false,
+        reach: OptionReach::EverySolve,
     },
     OptionSpec {
         option: NumericOverrideOption::ArcLength,
@@ -146,7 +149,7 @@ pub(super) const GLOBAL: [OptionSpec; 21] = [
         value_hint: "on · off",
         config_field: "convergence_config.arc_length",
         consumer: "engine/convergence/solve.rs:607 · arc_length fallback",
-        time_stepped_only: false,
+        reach: OptionReach::EverySolve,
     },
     OptionSpec {
         option: NumericOverrideOption::Damping,
@@ -158,7 +161,7 @@ pub(super) const GLOBAL: [OptionSpec; 21] = [
         value_hint: "NONE · LINESEARCH · VOLTAGELIMITING · BANKROSE · COMBINED",
         config_field: "convergence_config.damping_strategy",
         consumer: "engine/convergence/damping.rs:272 · damping_strategy",
-        time_stepped_only: false,
+        reach: OptionReach::EverySolve,
     },
     // -------------------------------------------------------------- charge
     OptionSpec {
@@ -174,7 +177,7 @@ pub(super) const GLOBAL: [OptionSpec; 21] = [
         // Every read of `charge_abstol` outside the resolver is under
         // `engine/transient`: it floors the charge the truncation estimate
         // divides by. A DC solve never forms one.
-        time_stepped_only: true,
+        reach: OptionReach::TimeStepped,
     },
     // --------------------------------------------------------- integration
     OptionSpec {
@@ -187,7 +190,7 @@ pub(super) const GLOBAL: [OptionSpec; 21] = [
         value_hint: "positive real",
         config_field: "transient_trtol",
         consumer: "engine/convergence/tolerances.rs:85 · transient_trtol",
-        time_stepped_only: true,
+        reach: OptionReach::TimeStepped,
     },
     OptionSpec {
         option: NumericOverrideOption::IntegrationMethod,
@@ -199,7 +202,7 @@ pub(super) const GLOBAL: [OptionSpec; 21] = [
         value_hint: "TRAP · EULER · GEAR2 · TRAPGEAR",
         config_field: "integration_method",
         consumer: "engine/transient.rs:2451 · fixed_method",
-        time_stepped_only: true,
+        reach: OptionReach::TimeStepped,
     },
     // -------------------------------------------------------------- matrix
     OptionSpec {
@@ -212,7 +215,7 @@ pub(super) const GLOBAL: [OptionSpec; 21] = [
         value_hint: "positive real",
         config_field: "matrix_pivot_tolerance",
         consumer: "engine/matrix.rs:1711 · solver_options.pivot_tolerance",
-        time_stepped_only: false,
+        reach: OptionReach::EverySolve,
     },
     OptionSpec {
         option: NumericOverrideOption::Pivtol,
@@ -224,7 +227,7 @@ pub(super) const GLOBAL: [OptionSpec; 21] = [
         value_hint: "positive real",
         config_field: "matrix_absolute_pivot_tolerance",
         consumer: "engine/matrix.rs:1712 · solver_options.absolute_pivot_tolerance",
-        time_stepped_only: false,
+        reach: OptionReach::EverySolve,
     },
     OptionSpec {
         option: NumericOverrideOption::Solver,
@@ -236,7 +239,7 @@ pub(super) const GLOBAL: [OptionSpec; 21] = [
         value_hint: "KLU · FAER",
         config_field: "matrix_solver",
         consumer: "engine/matrix.rs:1708 · solver_options.real_backend",
-        time_stepped_only: false,
+        reach: OptionReach::EverySolve,
     },
     // ------------------------------------------------------- device bypass
     OptionSpec {
@@ -249,7 +252,7 @@ pub(super) const GLOBAL: [OptionSpec; 21] = [
         value_hint: "on · off",
         config_field: "bypass_config.enabled",
         consumer: "engine/builder.rs:8626 · set_b3soi_bypass_tolerances",
-        time_stepped_only: false,
+        reach: OptionReach::EverySolve,
     },
     OptionSpec {
         option: NumericOverrideOption::BypassReltol,
@@ -261,7 +264,7 @@ pub(super) const GLOBAL: [OptionSpec; 21] = [
         value_hint: "positive real",
         config_field: "bypass_config.reltol",
         consumer: "engine/builder.rs:8627 · set_b3soi_bypass_tolerances",
-        time_stepped_only: false,
+        reach: OptionReach::EverySolve,
     },
     OptionSpec {
         option: NumericOverrideOption::BypassAbstol,
@@ -273,6 +276,6 @@ pub(super) const GLOBAL: [OptionSpec; 21] = [
         value_hint: "positive real",
         config_field: "bypass_config.abstol",
         consumer: "engine/builder.rs:8629 · set_b3soi_bypass_tolerances",
-        time_stepped_only: false,
+        reach: OptionReach::EverySolve,
     },
 ];

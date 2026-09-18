@@ -269,3 +269,57 @@ impl MatrixSolver {
         }
     }
 }
+
+/// How a harmonic-balance solve builds its first iterate.
+///
+/// Xyce's `.OPTIONS HBINT TAHB`. The deck carries the integer, which is why
+/// [`Self::spice_name`] returns a digit rather than a word: the engine's parser
+/// reads `0`, `1` and `2` and nothing else. What a reader chooses is the
+/// sentence, because "transient-assisted" is the fact and `1` is the encoding.
+///
+/// There is no automatic setting. Stating nothing leaves the engine on its own
+/// default DC seed (`engine/hb.rs:1150`), and an analysis returns to it by
+/// clearing the option rather than by naming a fourth mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub enum HbTimeDomainMode {
+    /// `TAHB=0`: solve in the frequency domain from the zero state, with
+    /// neither a transient nor a DC initial-state construction.
+    #[default]
+    Direct,
+    /// `TAHB=1`: run a transient over the fundamental period first and seed
+    /// the harmonics from its trajectory.
+    TransientAssisted,
+    /// `TAHB=2`: seed every collocation point from one DC operating point.
+    DcOperatingPoint,
+}
+
+impl HbTimeDomainMode {
+    /// What the chooser offers and the ledger reports.
+    #[must_use]
+    pub const fn display_name(self) -> &'static str {
+        match self {
+            Self::Direct => "Frequency domain only",
+            Self::TransientAssisted => "Transient-assisted",
+            Self::DcOperatingPoint => "DC operating point",
+        }
+    }
+
+    /// The `.OPTIONS HBINT TAHB` spelling the engine's parser accepts.
+    #[must_use]
+    pub const fn spice_name(self) -> &'static str {
+        match self {
+            Self::Direct => "0",
+            Self::TransientAssisted => "1",
+            Self::DcOperatingPoint => "2",
+        }
+    }
+
+    #[must_use]
+    pub const fn all() -> &'static [Self] {
+        &[
+            Self::Direct,
+            Self::TransientAssisted,
+            Self::DcOperatingPoint,
+        ]
+    }
+}
