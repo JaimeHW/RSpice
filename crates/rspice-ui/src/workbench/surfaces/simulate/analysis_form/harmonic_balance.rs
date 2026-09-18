@@ -89,8 +89,18 @@ pub(super) fn fields(
     );
     engineering_input_row(ui, HB_FIELD_LABELS[8], &mut setup.reltol);
     engineering_input_row(ui, HB_FIELD_LABELS[9], &mut setup.abstol);
-    input_row(ui, HB_FIELD_LABELS[10], &mut setup.damping);
-    input_row(ui, HB_FIELD_LABELS[11], &mut setup.min_damping);
+    // The same quantity and the same domain the PSS form states beside its own
+    // `Damping`, so it is stated the same way. `HbConfig::with_damping` bounds
+    // the factor to `[0.1, 1]` and the floor to the interval below it, and a
+    // field that left the domain unsaid asked a reader to discover it by being
+    // refused.
+    hinted_input_row(ui, HB_FIELD_LABELS[10], &mut setup.damping, "0.1 to 1");
+    hinted_input_row(
+        ui,
+        HB_FIELD_LABELS[11],
+        &mut setup.min_damping,
+        "above 0, up to damping",
+    );
     // Withheld rather than hidden on the Newton choice: the restart is the
     // Krylov solver's own parameter, and a row that disappeared would move
     // every field under it when the chooser moved
