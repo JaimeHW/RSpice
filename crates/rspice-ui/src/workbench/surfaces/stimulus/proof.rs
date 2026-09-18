@@ -8,13 +8,21 @@
 //! plot states that instead of drawing the flat line the spec would return,
 //! because a flat line looks like an answer.
 //!
-//! The strip above the plot carries the three spans, the derived readouts the
-//! engine resolved, the transient those substitutions were made against, and
-//! the hover readout. Nothing in it is computed here.
+//! A window holding more cycles than it has columns is drawn as a band between
+//! each column's measured extremes rather than as a polyline through samples
+//! that would land wherever the grid's own phase put them. Which of the two it
+//! is comes from the realization, is stated on the strip and in the plot's own
+//! announcement, and changes what a hover can honestly report: a band covers a
+//! range, and naming one value out of it would be a number the run never
+//! produced.
+//!
+//! The strip above the plot carries the three spans, what the trace is, the
+//! derived readouts the engine resolved, the transient those substitutions were
+//! made against, and the hover readout. Nothing in it is computed here.
 
 use egui::{Align2, Color32, Pos2, Rect, Sense, Stroke, Ui, Vec2};
 
-use crate::simulation::stimulus_realize::Guide;
+use crate::simulation::stimulus_realize::{EnvelopeColumn, Guide, TraceReading, WaveformTrace};
 use crate::state::format_engineering_display;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -59,7 +67,7 @@ fn strip_row(
     state: &AppState,
     stage: &Stage,
     rect: Rect,
-    hover: Option<(f64, f64)>,
+    hover: Option<TraceReading>,
     actions: &mut Vec<StageAction>,
 ) {
     let messages = state.ui.messages();
@@ -99,7 +107,20 @@ fn strip_row(
         if let Some(index) = view_switch(ui, "workbench.stimulus.proof.span", &options, selected) {
             actions.push(StageAction::SetSpan(PreviewSpan::ALL[index]));
         }
-        ui.add_space(12.0);
+        ui.add_space(10.0);
+        // What the reader is looking at comes before what it measures: a band
+        // read as a curve is a waveform with a period nobody authored.
+        if let Some(caption) = stage.realization.trace.caption() {
+            ui.add(
+                egui::Label::new(
+                    egui::RichText::new(caption)
+                        .font(theme::mono(tokens::FS_MICRO, FontWeight::Regular))
+                        .color(tokens.color.warn),
+                )
+                .truncate(),
+            );
+            ui.add_space(10.0);
+        }
         for (label, value) in &stage.realization.derived {
             // A readout is a label and its value, and it is painted whole or
             // not at all: half a number beside a full one reads as a different
@@ -148,12 +169,26 @@ fn strip_row(
         }
     });
 
+    // A band has no single value at a time, and picking one out of the range it
+    // covers would be a number the run never produced.
     let readout = match hover {
-        Some((time, value)) => format!(
+        Some(TraceReading::Sample { time, value }) => format!(
             "t = {}s \u{b7} {} = {}{}",
             format_engineering_display(time),
             stage.working.kind().letter().to_lowercase(),
             format_engineering_display(value),
+            unit(stage)
+        ),
+        Some(TraceReading::Band {
+            time,
+            minimum,
+            maximum,
+        }) => format!(
+            "t = {}s \u{b7} {} = {} to {}{}",
+            format_engineering_display(time),
+            stage.working.kind().letter().to_lowercase(),
+            format_engineering_display(minimum),
+            format_engineering_display(maximum),
             unit(stage)
         ),
         None => messages.text(MessageId::StimulusHoverUnset),
@@ -235,7 +270,7 @@ fn plot_body(
     stage: &Stage,
     rect: Rect,
     actions: &mut Vec<StageAction>,
-) -> Option<(f64, f64)> {
+) -> Option<TraceReading> {
     let tokens = Tokens::get(ui.ctx());
     let colors = tokens.color;
     let response = ui.interact(
@@ -312,22 +347,45 @@ fn plot_body(
     }
     paint_guides(ui, &projector, &stage.realization.guides, colors.warn);
 
-    let points = stage
-        .realization
-        .samples
-        .iter()
-        .map(|(time, value)| Pos2::new(projector.x(*time), projector.y(*value)))
-        .collect::<Vec<_>>();
-    ui.painter()
-        .add(egui::Shape::line(points, Stroke::new(1.4, colors.accent)));
+    match &stage.realization.trace {
+        WaveformTrace::Curve(samples) => {
+            let points = samples
+                .iter()
+                .map(|(time, value)| Pos2::new(projector.x(*time), projector.y(*value)))
+                .collect::<Vec<_>>();
+            ui.painter()
+                .add(egui::Shape::line(points, Stroke::new(1.4, colors.accent)));
+        }
+        WaveformTrace::Envelope { columns, .. } => {
+            paint_envelope(ui, &projector, columns, colors.accent);
+        }
+    }
 
     if paint_markers(ui, stage, &projector, &response, actions) {
         return None;
     }
     response.hover_pos().and_then(|pointer| {
         let fraction = ((pointer.x - plot.left()) / plot.width()).clamp(0.0, 1.0) as f64;
-        nearest_sample(&stage.realization.samples, fraction * projector.span)
+        stage
+            .realization
+            .trace
+            .reading_at(fraction * projector.span)
     })
+}
+
+/// The band between each column's extremes, projected onto the plot.
+fn paint_envelope(ui: &Ui, projector: &Projector, columns: &[EnvelopeColumn], color: Color32) {
+    let projected = columns
+        .iter()
+        .map(|column| {
+            let x = projector.x(column.time);
+            (
+                Pos2::new(x, projector.y(column.maximum)),
+                Pos2::new(x, projector.y(column.minimum)),
+            )
+        })
+        .collect::<Vec<_>>();
+    crate::ui::plot::paint_min_max_band(ui.painter(), &projected, color, 1.2);
 }
 
 /// Where a `(time, value)` lands inside the plot.
@@ -359,20 +417,30 @@ impl Projector {
 }
 
 /// What a reader who cannot see the plot is told about it.
+///
+/// A band says so here as well as on the strip: the one thing a reader who
+/// cannot see this surface most needs from it is whether the shape it states is
+/// one curve or the extremes of five hundred of them.
 fn accessible_label(state: &AppState, stage: &Stage) -> String {
     let messages = state.ui.messages();
     match stage.realization.defect.as_deref() {
         Some(defect) => defect.to_owned(),
-        None => messages.format(
-            MessageId::StimulusWaveformOf,
-            &[
-                ("name", stage.working.name()),
-                (
-                    "span",
-                    &format!("{}s", format_engineering_display(stage.realization.span)),
-                ),
-            ],
-        ),
+        None => {
+            let waveform = messages.format(
+                MessageId::StimulusWaveformOf,
+                &[
+                    ("name", stage.working.name()),
+                    (
+                        "span",
+                        &format!("{}s", format_engineering_display(stage.realization.span)),
+                    ),
+                ],
+            );
+            match stage.realization.trace.caption() {
+                Some(caption) => format!("{waveform} \u{b7} {caption}"),
+                None => waveform,
+            }
+        }
     }
 }
 
@@ -625,17 +693,6 @@ fn paint_markers(
         }
     }
     over_marker
-}
-
-/// The sample nearest a time, which is what the hover readout states.
-///
-/// Nearest rather than interpolated: the curve is the engine's own samples,
-/// and a value between two of them is a number the run never produced.
-fn nearest_sample(samples: &[(f64, f64)], time: f64) -> Option<(f64, f64)> {
-    samples
-        .iter()
-        .copied()
-        .min_by(|left, right| (left.0 - time).abs().total_cmp(&(right.0 - time).abs()))
 }
 
 /// The unit the hover readout states its value in.

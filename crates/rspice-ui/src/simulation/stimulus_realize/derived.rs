@@ -1,12 +1,14 @@
 //! Where the proof surface looks, what it marks, and what it states.
 //!
 //! Everything here is a choice of *x-range* or a restatement of a number the
-//! engine resolved. Nothing evaluates a waveform: the curve comes from
-//! [`evaluate_waveform`], which is the transient's own evaluator, and every
+//! engine resolved. Nothing evaluates a waveform: the trace comes from
+//! [`sample_trace`], which asks the transient's own evaluator, and every
 //! substituted field — a pulse width the card omitted, a sine frequency that
 //! defaults to `1 / TSTOP`, an exponential time constant that defaults to
 //! TSTEP — is read back out of `rspice_core`'s resolvers rather than worked
-//! out again up here.
+//! out again up here. The breakpoints a trace is measured at come from those
+//! same resolvers, which is why they are stated here beside the guides that
+//! label a handful of them.
 //!
 //! That is the whole discipline of this module. The mockup carries a
 //! substitution table because a browser has no engine to ask; the application
@@ -24,8 +26,8 @@ use rspice_core::circuit::VoltageSources;
 use rspice_core::netlist::SourceSpec;
 
 use super::{
-    DETACHED_NETS, PREVIEW_DIALECT, PreviewTiming, PreviewWindow, WaveformReadouts,
-    evaluate_waveform, preview_defect, source_spec, transient_part,
+    DETACHED_NETS, PREVIEW_DIALECT, PreviewTiming, PreviewWindow, WaveformReadouts, WaveformTrace,
+    preview_defect, sample_trace, source_spec, transient_part,
 };
 use crate::state::format_engineering_display;
 use crate::state::stimulus_library::definition::{
@@ -82,8 +84,9 @@ pub(crate) struct StimulusRealization {
     pub span: f64,
     /// The fundamental period, where this family has one.
     pub fundamental: Option<f64>,
-    /// The curve, as the engine steps it.
-    pub samples: Vec<(f64, f64)>,
+    /// The waveform, as the engine steps it: a curve where the window can
+    /// carry one, a measured envelope where it cannot.
+    pub trace: WaveformTrace,
     /// Breakpoint rules, already clipped to the window.
     pub guides: Vec<Guide>,
     /// Authored PWL points inside the window.
@@ -106,7 +109,7 @@ impl StimulusRealization {
                 return Self {
                     span: timing.tstop,
                     fundamental: None,
-                    samples: Vec::new(),
+                    trace: WaveformTrace::Curve(Vec::new()),
                     guides: Vec::new(),
                     markers: Vec::new(),
                     derived: unresolved_readouts(record),
@@ -128,30 +131,35 @@ impl StimulusRealization {
             timing.tstop
         };
         let defect = preview_defect(&spec);
-        let samples = if defect.is_some() {
-            Vec::new()
+        let trace = if defect.is_some() {
+            WaveformTrace::Curve(Vec::new())
         } else {
-            evaluate_waveform(
+            sample_trace(
                 &spec,
                 PreviewWindow {
                     start: 0.0,
                     stop: span,
                     samples: PREVIEW_SAMPLES,
                 },
-                timing.tstep,
-                timing.tstop,
-                PREVIEW_DIALECT,
+                timing,
             )
         };
-        let readouts = WaveformReadouts::of(&samples);
+        let readouts = trace.readouts();
+        // A band drawn over five hundred cycles has every breakpoint a family
+        // names inside its first column, and five rules on one column is five
+        // labels on top of each other. Keep what the window can tell apart.
+        let resolution = matches!(trace, WaveformTrace::Envelope { .. })
+            .then(|| span / (PREVIEW_SAMPLES - 1) as f64);
         let mut guides = guides(transient, timing);
         guides.retain(|guide| guide.time > 0.0 && guide.time <= span && guide.time.is_finite());
+        collapse(&mut guides, resolution, |guide| guide.time);
         let mut markers = markers(transient);
         markers.retain(|marker| marker.time >= 0.0 && marker.time <= span);
+        collapse(&mut markers, resolution, |marker| marker.time);
         Self {
             span,
             fundamental,
-            samples,
+            trace,
             guides,
             markers,
             derived: readouts_of(record, transient, timing, span),
@@ -168,6 +176,26 @@ impl StimulusRealization {
     pub fn card(record: &StimulusDefinition) -> Result<String, Vec<String>> {
         record.card_text(DETACHED_NETS)
     }
+}
+
+/// Drop the entries a window cannot draw apart from the one before them.
+///
+/// `None` keeps every entry: only a window measured column by column packs
+/// enough of them into one column for this to be the difference between a mark
+/// and a smear.
+fn collapse<T>(entries: &mut Vec<T>, resolution: Option<f64>, time: impl Fn(&T) -> f64) {
+    let Some(resolution) = resolution.filter(|resolution| *resolution > 0.0) else {
+        return;
+    };
+    let mut previous: Option<f64> = None;
+    entries.retain(|entry| {
+        let at = time(entry);
+        if previous.is_some_and(|previous| (at - previous).abs() < resolution) {
+            return false;
+        }
+        previous = Some(at);
+        true
+    });
 }
 
 /// The unit a definition of this kind is measured in.
@@ -199,12 +227,56 @@ fn design_variable(value: &str) -> Option<String> {
     (!inner.is_empty()).then(|| inner.to_owned())
 }
 
+/// The period a preview may measure one column's extremes over, instead of the
+/// whole of the time that column covers.
+///
+/// For every family that repeats exactly, this is the fundamental: the values a
+/// strictly periodic waveform takes over one period are the values it takes
+/// over any longer stretch, so a window holding five hundred cycles costs the
+/// same to measure as one holding five.
+///
+/// `AM` and `SFFM` are the deliberate exception, and it is the carrier rather
+/// than the fundamental they answer with. Their fundamental is the modulating
+/// period, and measuring a column over one of those would flatten the
+/// modulation into a single band; measuring it over one carrier period reports
+/// the carrier's swing *at that column's time*, which is what makes the
+/// modulation visible at all.
+pub(super) fn resolution_period(spec: &SourceSpec, timing: PreviewTiming) -> Option<f64> {
+    match spec {
+        SourceSpec::Sffm {
+            carrier_freq,
+            modulation_index,
+            signal_freq,
+            ..
+        } => {
+            let (fc, _, _) =
+                sffm_parameters(*carrier_freq, *modulation_index, *signal_freq, timing);
+            positive_period(1.0 / fc)
+        }
+        SourceSpec::Am {
+            modulating_freq,
+            carrier_freq,
+            ..
+        } => {
+            let (_, fc) = am_frequencies(*modulating_freq, *carrier_freq, timing);
+            positive_period(1.0 / fc)
+        }
+        other => fundamental_period(other, timing),
+    }
+}
+
+/// A period a window can be divided by, or `None` for one that cannot.
+fn positive_period(period: f64) -> Option<f64> {
+    (period.is_finite() && period > 0.0).then_some(period)
+}
+
 /// The period this waveform repeats at, where it has one.
 fn fundamental_period(spec: &SourceSpec, timing: PreviewTiming) -> Option<f64> {
-    let positive = |period: f64| (period.is_finite() && period > 0.0).then_some(period);
     match spec {
-        SourceSpec::Pulse { .. } => positive(pulse_timing(spec, timing)?.4),
-        SourceSpec::Sin { frequency, .. } => positive(1.0 / sin_frequency(*frequency, timing)),
+        SourceSpec::Pulse { .. } => positive_period(pulse_timing(spec, timing)?.4),
+        SourceSpec::Sin { frequency, .. } => {
+            positive_period(1.0 / sin_frequency(*frequency, timing))
+        }
         SourceSpec::Sffm {
             carrier_freq,
             modulation_index,
@@ -213,7 +285,7 @@ fn fundamental_period(spec: &SourceSpec, timing: PreviewTiming) -> Option<f64> {
         } => {
             let (_, fm, _) =
                 sffm_parameters(*carrier_freq, *modulation_index, *signal_freq, timing);
-            positive(1.0 / fm)
+            positive_period(1.0 / fm)
         }
         SourceSpec::Am {
             modulating_freq,
@@ -221,10 +293,10 @@ fn fundamental_period(spec: &SourceSpec, timing: PreviewTiming) -> Option<f64> {
             ..
         } => {
             let (fm, _) = am_frequencies(*modulating_freq, *carrier_freq, timing);
-            positive(1.0 / fm)
+            positive_period(1.0 / fm)
         }
         SourceSpec::Pat { sample, data, .. } => {
-            positive(pattern_bits(data).len() as f64 * resolved_sample(*sample, timing))
+            positive_period(pattern_bits(data).len() as f64 * resolved_sample(*sample, timing))
         }
         _ => None,
     }
@@ -263,14 +335,7 @@ fn fit_span(spec: &SourceSpec, timing: PreviewTiming) -> f64 {
             tau2,
             ..
         } => {
-            let (td1, tau1, td2, tau2) = VoltageSources::resolve_exp_timing_with_defaults(
-                *td1,
-                *tau1,
-                *td2,
-                *tau2,
-                timing.tstep,
-                PREVIEW_DIALECT,
-            );
+            let (td1, tau1, td2, tau2) = exp_timing(*td1, *tau1, *td2, *tau2, timing);
             (td2 + 6.0 * tau2).max(td1 + 6.0 * tau1)
         }
         SourceSpec::Pwl {
@@ -377,14 +442,7 @@ fn guides(spec: &SourceSpec, timing: PreviewTiming) -> Vec<Guide> {
             tau2,
             ..
         } => {
-            let (td1, _, td2, _) = VoltageSources::resolve_exp_timing_with_defaults(
-                *td1,
-                *tau1,
-                *td2,
-                *tau2,
-                timing.tstep,
-                PREVIEW_DIALECT,
-            );
+            let (td1, _, td2, _) = exp_timing(*td1, *tau1, *td2, *tau2, timing);
             guides.push(Guide {
                 time: td1,
                 label: "TD1",
@@ -437,6 +495,195 @@ fn guides(spec: &SourceSpec, timing: PreviewTiming) -> Vec<Guide> {
         _ => {}
     }
     guides
+}
+
+/// Everything the waveform's own timing says happens inside a window.
+pub(super) struct Breakpoints {
+    /// The times, clipped to the window, in no particular order.
+    pub times: Vec<f64>,
+    /// Whether this family has more corners in this window than the caller
+    /// asked for. A window carrying more corners than a plot has columns
+    /// cannot be drawn as a polyline at all, which is what makes it an
+    /// envelope by construction rather than a curve with corners missing.
+    pub saturated: bool,
+}
+
+/// Where this waveform changes direction or value inside `[from, to]`.
+///
+/// These are the engine's own resolved times — the edges a transient schedules
+/// its own breakpoints at — and they exist so that a preview never has to guess
+/// one. A 1 ns edge in a 100 µs window falls between two columns of any grid a
+/// plot can afford, and the sample that lands nearest it draws a level the
+/// source held for a nanosecond as if it had held it for a microsecond.
+///
+/// `budget` bounds the work and the answer both: a family with more corners
+/// here than the budget reports `saturated`, and stops looking.
+///
+/// Two limits are deliberate. A `PWL FILE=` table's knots live behind the
+/// engine's own loader cache and are not reachable from here, so that family
+/// reports none. A repeating `PWL`'s later passes are not enumerated either:
+/// where the seam falls is `rspice_core`'s geometry, and restating it up here
+/// would be a second answer to a question the engine already answers.
+pub(super) fn breakpoints_between(
+    spec: &SourceSpec,
+    timing: PreviewTiming,
+    from: f64,
+    to: f64,
+    budget: usize,
+) -> Breakpoints {
+    let mut collector = Collector::new(from, to, budget);
+    match spec {
+        SourceSpec::Pulse { pulse_count, .. } => {
+            if let Some((delay, rise, fall, width, period)) = pulse_timing(spec, timing) {
+                collector.corner(delay);
+                if period.is_finite() && period > 0.0 {
+                    let ends = if *pulse_count > 0.0 {
+                        delay + pulse_count * period
+                    } else {
+                        f64::INFINITY
+                    };
+                    let mut cycle = ((from - delay) / period).floor().max(0.0);
+                    while !collector.full() {
+                        let base = delay + cycle * period;
+                        if base > to || base > ends {
+                            break;
+                        }
+                        collector.corner(base);
+                        collector.corner(base + rise);
+                        collector.corner(base + rise + width);
+                        collector.corner(base + rise + width + fall);
+                        cycle += 1.0;
+                    }
+                    if *pulse_count > 0.0 {
+                        collector.corner(ends);
+                    }
+                }
+            }
+        }
+        SourceSpec::Exp {
+            td1,
+            tau1,
+            td2,
+            tau2,
+            ..
+        } => {
+            let (td1, _, td2, _) = exp_timing(*td1, *tau1, *td2, *tau2, timing);
+            collector.corner(td1);
+            collector.corner(td2);
+        }
+        SourceSpec::Sin { delay, .. }
+        | SourceSpec::Sffm { delay, .. }
+        | SourceSpec::Am { delay, .. } => collector.step(*delay),
+        SourceSpec::Pwl { points, delay, .. } => {
+            // The source is exactly zero until TD, so a table whose first
+            // level is not zero opens with a jump rather than a corner.
+            if let Some((first, value)) = points.first()
+                && *value != 0.0
+            {
+                collector.step(delay + first);
+            }
+            let ahead = points.partition_point(|(time, _)| delay + time < from);
+            for (time, _) in &points[ahead..] {
+                if collector.full() || delay + time > to {
+                    break;
+                }
+                collector.corner(delay + time);
+            }
+        }
+        SourceSpec::Pat {
+            delay,
+            rise,
+            fall,
+            sample,
+            data,
+            repeat_count,
+            ..
+        } => {
+            let sample = resolved_sample(*sample, timing);
+            let bits = pattern_bits(data).len() as f64;
+            if sample.is_finite() && sample > 0.0 && bits > 0.0 {
+                let ends = if *repeat_count < 0 {
+                    f64::INFINITY
+                } else {
+                    delay + bits * sample * (f64::from(*repeat_count) + 1.0)
+                };
+                let mut index = ((from - delay) / sample).floor().max(0.0);
+                while !collector.full() {
+                    let edge = delay + index * sample;
+                    if edge > to || edge > ends {
+                        break;
+                    }
+                    collector.corner(edge);
+                    collector.corner(edge + rise);
+                    collector.corner(edge + fall);
+                    index += 1.0;
+                }
+            }
+        }
+        _ => {}
+    }
+    collector.finish()
+}
+
+/// Collects the breakpoints inside one interval, and stops looking once it has
+/// more of them than the caller can use.
+struct Collector {
+    times: Vec<f64>,
+    from: f64,
+    to: f64,
+    budget: usize,
+    saturated: bool,
+}
+
+impl Collector {
+    const fn new(from: f64, to: f64, budget: usize) -> Self {
+        Self {
+            times: Vec::new(),
+            from,
+            to,
+            budget,
+            saturated: false,
+        }
+    }
+
+    /// A corner of a continuous waveform: one time, where the slope changes.
+    fn corner(&mut self, time: f64) {
+        if !time.is_finite() || time < self.from || time > self.to {
+            return;
+        }
+        if self.times.len() >= self.budget {
+            self.saturated = true;
+            return;
+        }
+        self.times.push(time);
+    }
+
+    /// A step: the instant before the jump as well as the jump, so that the
+    /// edge is drawn where it happens rather than as a ramp from wherever the
+    /// grid last landed.
+    fn step(&mut self, time: f64) {
+        self.corner(just_before(time));
+        self.corner(time);
+    }
+
+    /// Whether the budget is spent and nothing more is worth computing.
+    const fn full(&self) -> bool {
+        self.saturated
+    }
+
+    fn finish(self) -> Breakpoints {
+        Breakpoints {
+            times: self.times,
+            saturated: self.saturated,
+        }
+    }
+}
+
+/// The instant before a discontinuity, at the finest separation the time
+/// itself can carry. A jump at zero has no instant before it inside a window
+/// that starts there, and the clip drops the negative result.
+fn just_before(time: f64) -> f64 {
+    time - (time.abs() * 8.0 * f64::EPSILON).max(f64::MIN_POSITIVE)
 }
 
 /// The authored points a PWL table marks on the plot.
@@ -574,14 +821,7 @@ fn readouts_of(
             td2,
             tau2,
         } => {
-            let (_, tau1, _, tau2) = VoltageSources::resolve_exp_timing_with_defaults(
-                *td1,
-                *tau1,
-                *td2,
-                *tau2,
-                timing.tstep,
-                PREVIEW_DIALECT,
-            );
+            let (_, tau1, _, tau2) = exp_timing(*td1, *tau1, *td2, *tau2, timing);
             rows.push(row("τ rise", seconds_free(tau1, "s")));
             rows.push(row("τ fall", seconds_free(tau2, "s")));
             rows.push(row("Δ", seconds_free(v2 - v1, unit)));
@@ -684,6 +924,27 @@ fn pulse_timing(spec: &SourceSpec, timing: PreviewTiming) -> Option<(f64, f64, f
         timing.tstop,
         PREVIEW_DIALECT,
     ))
+}
+
+/// The `EXP` timing this transient resolves, in card order: TD1, TAU1, TD2,
+/// TAU2. Every one of the four has a substitution the card does not show, and
+/// the fit span, the guides, the readouts and the breakpoints all have to be
+/// looking at the same four numbers.
+fn exp_timing(
+    td1: f64,
+    tau1: f64,
+    td2: f64,
+    tau2: f64,
+    timing: PreviewTiming,
+) -> (f64, f64, f64, f64) {
+    VoltageSources::resolve_exp_timing_with_defaults(
+        td1,
+        tau1,
+        td2,
+        tau2,
+        timing.tstep,
+        PREVIEW_DIALECT,
+    )
 }
 
 fn sin_frequency(frequency: f64, timing: PreviewTiming) -> f64 {
@@ -952,7 +1213,7 @@ mod tests {
                 .as_deref()
                 .is_some_and(|defect| defect.contains("TRNOISE"))
         );
-        assert!(realization.samples.is_empty());
+        assert!(realization.trace.is_empty());
         assert_eq!(readout(&realization, "RMS"), "20µV");
         assert_eq!(readout(&realization, "NT"), "1µs");
     }
@@ -990,6 +1251,52 @@ mod tests {
         assert_eq!(readout(&realization, "level"), "1.800V");
         assert_eq!(realization.fundamental, None);
         assert_eq!(realization.span, 1e-3);
+    }
+
+    /// A transient window holding hundreds of cycles is measured, and the rules
+    /// that label a family's breakpoints collapse to the ones the window can
+    /// still tell apart: TD, TR, PW, TF and PER all land inside the first
+    /// column of a five-hundred-cycle band, and five labels on one column is
+    /// five labels on top of each other.
+    #[test]
+    fn a_many_cycle_transient_window_bands_the_curve_and_keeps_one_guide() {
+        let record = definition(
+            ComponentType::VoltageSourcePulse,
+            "1",
+            "v2=5 td=100u tr=1n tf=1n pw=1u per=2u",
+        );
+        let realization = StimulusRealization::of(&record, SpanChoice::Transient, timing(1e-3));
+
+        assert_eq!(
+            realization.trace.caption().as_deref(),
+            Some("500 cycles \u{b7} envelope")
+        );
+        assert_eq!(realization.guides.len(), 1);
+        // `100u` is a hundred times a millionth, which is not the same float as
+        // `1e-4`; the guide is the engine's own resolved delay, so it is read
+        // to within a picosecond rather than bit for bit.
+        assert!(
+            guide(&realization, "TD").is_some_and(|time| (time - 1e-4).abs() < 1e-12),
+            "{:?}",
+            realization.guides
+        );
+        let readouts = realization.readouts.expect("a band has readouts");
+        assert_eq!((readouts.minimum, readouts.maximum), (1.0, 5.0));
+    }
+
+    /// The same definition over one period is a curve, and says nothing about
+    /// cycles because there is one.
+    #[test]
+    fn one_period_of_the_same_train_is_a_curve() {
+        let record = definition(
+            ComponentType::VoltageSourcePulse,
+            "1",
+            "v2=5 td=100u tr=1n tf=1n pw=1u per=2u",
+        );
+        let realization = StimulusRealization::of(&record, SpanChoice::Period, timing(1e-3));
+
+        assert_eq!(realization.span, 2e-6);
+        assert_eq!(realization.trace.caption(), None);
     }
 
     /// Period falls back to the fit span for a family with no fundamental, so

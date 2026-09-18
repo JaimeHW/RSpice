@@ -5,6 +5,17 @@ use super::*;
 use crate::state::stimulus_library::definition::{StimulusFamily, StimulusKind};
 use crate::state::{PropertyRegistry, SchematicState, Wire};
 
+/// The samples of a trace the window can carry, or a failure naming the band
+/// it produced instead.
+fn curve_of(trace: &WaveformTrace) -> &[(f64, f64)] {
+    match trace {
+        WaveformTrace::Curve(samples) => samples,
+        WaveformTrace::Envelope { cycles, .. } => {
+            panic!("this window is a {cycles:?}-cycle band, not a curve")
+        }
+    }
+}
+
 fn timing(tstop: f64) -> PreviewTiming {
     PreviewTiming {
         tstep: tstop / 1000.0,
@@ -131,6 +142,11 @@ fn a_component_that_is_not_an_independent_source_is_not_realized() {
 /// width, then V1 for the rest of the run. The old hand-rolled sampler read the
 /// same card as a 50 % square wave.
 ///
+/// The triangle is two nanoseconds wide in a millisecond window, so no grid a
+/// plot can afford lands on it: sampled uniformly, this card drew a flat line
+/// at V1 and the one event in the whole run was invisible. Merging the
+/// waveform's own breakpoints is what puts it back.
+///
 /// The card is spelled here rather than emitted from a placed component,
 /// because the netlist generator cannot write this form: `format_source_value`
 /// substitutes its own `pw=1u per=2u` for an omitted width and period, so the
@@ -143,37 +159,29 @@ fn an_edges_only_pulse_previews_as_one_zero_width_pulse_then_v1() {
         rspice_core::netlist::parse_source_spec_text("PULSE(0 5 0 1n 1n)", 0, &ParamContext::new())
             .expect("spec");
     let timing = timing(1e-3);
-    let peak = evaluate_waveform(
-        &spec,
-        PreviewWindow {
-            start: 0.5e-9,
-            stop: 0.5e-9,
-            samples: 2,
-        },
-        timing.tstep,
-        timing.tstop,
-        PREVIEW_DIALECT,
-    );
+    let peak = evaluate_at(&spec, 0.5e-9, timing);
     assert!(
-        (peak[0].1 - 2.5).abs() < 1e-9,
-        "halfway up the rising edge is halfway to V2: {peak:?}"
+        (peak - 2.5).abs() < 1e-9,
+        "halfway up the rising edge is halfway to V2: {peak}"
     );
 
-    // Every later sample is back at V1, for the whole stop time — the period is
-    // TSTOP, so the triangle never comes round again.
-    let run = evaluate_waveform(
-        &spec,
-        timing.window(64),
-        timing.tstep,
-        timing.tstop,
-        PREVIEW_DIALECT,
-    );
+    let trace = sample_trace(&spec, timing.window(64), timing);
+    let run = curve_of(&trace);
     assert!(
-        run.iter().skip(1).all(|(_, value)| value.abs() < 1e-12),
+        run.iter()
+            .any(|(time, value)| (time - 1e-9).abs() < 1e-16 && (value - 5.0).abs() < 1e-12),
+        "the one event of the whole run is drawn at its own crest: {run:?}"
+    );
+    // Past the falling edge it is back at V1 for the whole stop time — the
+    // period is TSTOP, so the triangle never comes round again.
+    assert!(
+        run.iter()
+            .filter(|(time, _)| *time > 2e-9)
+            .all(|(_, value)| value.abs() < 1e-12),
         "a zero-width pulse contributes nothing after its edges: {run:?}"
     );
-    let readouts = WaveformReadouts::of(&run).expect("readouts");
-    assert!(readouts.span() < 1e-12);
+    let readouts = trace.readouts().expect("readouts");
+    assert!((readouts.span() - 5.0).abs() < 1e-12, "{readouts:?}");
 }
 
 /// A pulse that authors its width is the square wave it looks like, so the
@@ -186,18 +194,17 @@ fn an_authored_pulse_width_still_previews_as_a_train() {
     source.params = "v2=5 tr=1n tf=1n pw=1u per=2u".to_owned();
 
     let spec = source_spec(&source).expect("spec");
-    let samples = evaluate_waveform(
+    let readouts = sample_trace(
         &spec,
         PreviewWindow {
             start: 0.0,
             stop: 4e-6,
             samples: 401,
         },
-        1e-9,
-        1e-3,
-        PREVIEW_DIALECT,
-    );
-    let readouts = WaveformReadouts::of(&samples).expect("readouts");
+        timing(1e-3),
+    )
+    .readouts()
+    .expect("readouts");
     assert!((readouts.maximum - 5.0).abs() < 1e-9, "{readouts:?}");
     assert!(readouts.minimum.abs() < 1e-9, "{readouts:?}");
 }
@@ -218,15 +225,15 @@ fn an_sffm_carrier_of_zero_previews_with_the_engine_tstop_substitution() {
         stop: 1e-3,
         samples: 129,
     };
-    let fast = evaluate_waveform(&spec, window, 1e-6, 1e-3, PREVIEW_DIALECT);
-    let slow = evaluate_waveform(&spec, window, 1e-6, 1e-1, PREVIEW_DIALECT);
+    let fast = sample_trace(&spec, window, timing(1e-3));
+    let slow = sample_trace(&spec, window, timing(1e-1));
 
     assert_ne!(
         fast, slow,
         "an omitted carrier resolves against TSTOP, so the two runs cannot agree"
     );
-    let fast_span = WaveformReadouts::of(&fast).expect("readouts").span();
-    let slow_span = WaveformReadouts::of(&slow).expect("readouts").span();
+    let fast_span = fast.readouts().expect("readouts").span();
+    let slow_span = slow.readouts().expect("readouts").span();
     assert!(
         fast_span > slow_span,
         "5 / TSTOP is a faster carrier at the shorter stop time: {fast_span} vs {slow_span}"
@@ -261,7 +268,8 @@ fn a_noise_source_says_it_has_no_waveform_until_a_run_builds_one() {
     let defect = preview_defect(&spec).expect("a stated defect");
     assert!(defect.contains("TRNOISE"), "{defect}");
 
-    let samples = evaluate_waveform(&spec, timing(1e-3).window(16), 1e-6, 1e-3, PREVIEW_DIALECT);
+    let trace = sample_trace(&spec, timing(1e-3).window(16), timing(1e-3));
+    let samples = curve_of(&trace);
     assert!(
         samples.iter().all(|(_, value)| *value == 0.0),
         "the defect is stated because the evaluator has nothing: {samples:?}"
@@ -319,7 +327,8 @@ fn a_random_source_says_it_has_no_waveform_until_a_run_builds_one() {
     let defect = preview_defect(&spec).expect("a stated defect");
     assert!(defect.contains("TRRANDOM"), "{defect}");
 
-    let samples = evaluate_waveform(&spec, timing(1e-3).window(16), 1e-6, 1e-3, PREVIEW_DIALECT);
+    let trace = sample_trace(&spec, timing(1e-3).window(16), timing(1e-3));
+    let samples = curve_of(&trace);
     assert!(
         samples.iter().all(|(_, value)| *value == 2e-3),
         "the defect is stated because the evaluator returns PARAM2: {samples:?}"
@@ -372,19 +381,22 @@ fn a_window_of_fewer_than_two_samples_is_no_curve() {
     source.value = "1.8".to_owned();
     let spec = source_spec(&source).expect("spec");
 
-    assert!(
-        evaluate_waveform(
-            &spec,
-            PreviewWindow {
-                start: 0.0,
-                stop: 1e-3,
-                samples: 1,
-            },
-            1e-9,
-            1e-3,
-            PREVIEW_DIALECT,
-        )
-        .is_empty()
-    );
+    for window in [
+        PreviewWindow {
+            start: 0.0,
+            stop: 1e-3,
+            samples: 1,
+        },
+        // A window that starts where it stops is not a window either, and a
+        // caller that hands one over gets nothing rather than a point drawn as
+        // if it were a shape.
+        PreviewWindow {
+            start: 1e-3,
+            stop: 1e-3,
+            samples: 64,
+        },
+    ] {
+        assert!(sample_trace(&spec, window, timing(1e-3)).is_empty());
+    }
     assert!(WaveformReadouts::of(&[]).is_none());
 }

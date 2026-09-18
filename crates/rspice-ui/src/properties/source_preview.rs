@@ -14,7 +14,7 @@
 
 use egui::{Sense, Stroke, Ui, pos2, vec2};
 
-use crate::simulation::stimulus_realize::{self, PreviewTiming, WaveformReadouts};
+use crate::simulation::stimulus_realize::{self, PreviewTiming, WaveformTrace};
 use crate::state::Component;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -37,16 +37,14 @@ pub(crate) const PREVIEW_HEIGHT: f32 = 132.0;
 pub(crate) fn source_curve(
     component: &Component,
     timing: PreviewTiming,
-) -> Result<Vec<(f64, f64)>, String> {
+) -> Result<WaveformTrace, String> {
     let spec = stimulus_realize::source_spec(component)?;
     match stimulus_realize::preview_defect(&spec) {
         Some(defect) => Err(defect),
-        None => Ok(stimulus_realize::evaluate_waveform(
+        None => Ok(stimulus_realize::sample_trace(
             &spec,
             timing.window(PREVIEW_SAMPLES),
-            timing.tstep,
-            timing.tstop,
-            stimulus_realize::PREVIEW_DIALECT,
+            timing,
         )),
     }
 }
@@ -59,16 +57,18 @@ pub(crate) fn source_curve(
 /// the curve would have filled.
 pub(crate) fn paint_source_preview(
     ui: &mut Ui,
-    curve: &Result<Vec<(f64, f64)>, String>,
+    curve: &Result<WaveformTrace, String>,
     timing: PreviewTiming,
 ) {
     let (rect, response) =
         ui.allocate_exact_size(vec2(ui.available_width(), PREVIEW_HEIGHT), Sense::hover());
-    let caption = timing.caption();
-    let readouts = curve
-        .as_ref()
-        .ok()
-        .and_then(|samples| WaveformReadouts::of(samples));
+    // A band says it is one beside the transient it was measured over: read as
+    // a curve, it is a waveform with a period nobody authored.
+    let caption = match curve.as_ref().ok().and_then(WaveformTrace::caption) {
+        Some(kind) => format!("{kind} \u{b7} {}", timing.caption()),
+        None => timing.caption(),
+    };
+    let readouts = curve.as_ref().ok().and_then(WaveformTrace::readouts);
     let label = match (curve, readouts) {
         (Ok(_), Some(_)) => format!("Engine-evaluated waveform of this source over {caption}"),
         (Ok(_), None) => format!("This source has no curve over {caption}"),
@@ -100,7 +100,7 @@ pub(crate) fn paint_source_preview(
             .hline(plot.x_range(), y, Stroke::new(0.5, t.color.border));
     }
 
-    let (samples, readouts) = match (curve, readouts) {
+    let (trace, readouts) = match (curve, readouts) {
         (Err(reason), _) => {
             statement(ui, plot, reason, t.color.text_dim);
             rule(ui, rect, t.color.border);
@@ -116,7 +116,7 @@ pub(crate) fn paint_source_preview(
             rule(ui, rect, t.color.border);
             return;
         }
-        (Ok(samples), Some(readouts)) => (samples, readouts),
+        (Ok(trace), Some(readouts)) => (trace, readouts),
     };
 
     let span = readouts.span().max(1e-12);
@@ -148,25 +148,42 @@ pub(crate) fn paint_source_preview(
             t.color.text_faint,
         );
     }
-    let points = samples
-        .iter()
-        .enumerate()
-        .map(|(index, (_, value))| {
-            let x = egui::lerp(
-                plot.left()..=plot.right(),
-                index as f32 / (samples.len() - 1) as f32,
-            );
-            let normalized = if readouts.span() <= 1e-12 {
-                0.5
-            } else {
-                ((value - readouts.minimum) / span) as f32
-            };
-            let y = egui::lerp(plot.bottom()..=plot.top(), normalized);
-            pos2(x, y)
-        })
-        .collect::<Vec<_>>();
-    ui.painter()
-        .add(egui::Shape::line(points, Stroke::new(1.5, t.color.accent)));
+    // Placed by time, not by index: the trace carries the waveform's own
+    // breakpoints between its grid samples, so its points are not evenly spaced.
+    let place = |time: f64, value: f64| {
+        let x = egui::lerp(
+            plot.left()..=plot.right(),
+            (time / timing.tstop.max(f64::MIN_POSITIVE)).clamp(0.0, 1.0) as f32,
+        );
+        let normalized = if readouts.span() <= 1e-12 {
+            0.5
+        } else {
+            ((value - readouts.minimum) / span) as f32
+        };
+        pos2(x, egui::lerp(plot.bottom()..=plot.top(), normalized))
+    };
+    match trace {
+        WaveformTrace::Curve(samples) => {
+            let points = samples
+                .iter()
+                .map(|(time, value)| place(*time, *value))
+                .collect::<Vec<_>>();
+            ui.painter()
+                .add(egui::Shape::line(points, Stroke::new(1.5, t.color.accent)));
+        }
+        WaveformTrace::Envelope { columns, .. } => {
+            let band = columns
+                .iter()
+                .map(|column| {
+                    (
+                        place(column.time, column.minimum),
+                        place(column.time, column.maximum),
+                    )
+                })
+                .collect::<Vec<_>>();
+            crate::ui::plot::paint_min_max_band(ui.painter(), &band, t.color.accent, 1.5);
+        }
+    }
     rule(ui, rect, t.color.border);
 }
 

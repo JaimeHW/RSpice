@@ -160,6 +160,58 @@ fn resolved_trace_marker(
         .or_else(|| (show_single_point && point_count == 1).then_some(TraceMarkerShape::Circle))
 }
 
+/// How much of its colour a measured band's fill carries. Low enough that the
+/// grid and anything ruled across the band stay readable through it, dark
+/// enough that it reads as one filled range rather than as two unrelated
+/// curves.
+const BAND_FILL_ALPHA: f32 = 0.28;
+
+/// A filled band between a low and a high boundary, with both boundaries
+/// outlined.
+///
+/// `columns` carries one `(high, low)` pair per position, already projected,
+/// and the band is drawn in `color`: filled at [`BAND_FILL_ALPHA`] and outlined
+/// at full strength.
+///
+/// The fill is one mesh rather than a filled rectangle per column: two
+/// translucent rectangles sharing an edge blend twice along it, and a fill that
+/// darkens every few pixels reads as a grid nobody drew. The two boundaries are
+/// separate polylines for the same reason — a closed path around the band would
+/// trace the two ends twice and leave a hairline at each.
+///
+/// It lives here because two surfaces draw a band of measured extremes — the
+/// stimulus instrument's proof band and the properties dialog's preview card —
+/// and a band that read as a fill on one and as a stack of quads on the other
+/// would be two answers to what a range looks like in this product.
+pub(crate) fn paint_min_max_band(
+    painter: &egui::Painter,
+    columns: &[(Pos2, Pos2)],
+    color: Color32,
+    width: f32,
+) {
+    let fill = color.gamma_multiply(BAND_FILL_ALPHA);
+    let stroke = Stroke::new(width, color);
+    let mut mesh = egui::Mesh::default();
+    mesh.reserve_vertices(columns.len() * 2);
+    mesh.reserve_triangles(columns.len().saturating_sub(1) * 2);
+    let mut high = Vec::with_capacity(columns.len());
+    let mut low = Vec::with_capacity(columns.len());
+    for (ordinal, (top, bottom)) in columns.iter().enumerate() {
+        let index = (ordinal * 2) as u32;
+        mesh.colored_vertex(*top, fill);
+        mesh.colored_vertex(*bottom, fill);
+        if index >= 2 {
+            mesh.add_triangle(index - 2, index - 1, index);
+            mesh.add_triangle(index - 1, index, index + 1);
+        }
+        high.push(*top);
+        low.push(*bottom);
+    }
+    painter.add(Shape::mesh(mesh));
+    painter.add(Shape::line(high, stroke));
+    painter.add(Shape::line(low, stroke));
+}
+
 fn paint_trace_marker(
     painter: &egui::Painter,
     center: Pos2,
