@@ -1222,6 +1222,69 @@ mod manifest_tests {
         }
     }
 
+    /// The three step sizes the search actually uses are authored, not
+    /// hardcoded.
+    ///
+    /// The configuration, its bounds and the runner's copy were all in place;
+    /// what was missing was any control, so every run used the literals in
+    /// `OptimizationConfig::default`. The assertion is against the typed
+    /// specification the runner dispatches on, which is what
+    /// `runner::spec::device::run_optimization` copies field by field into
+    /// `OptimizationRunConfig` — not against the numbers themselves, which
+    /// would pass just as well if the form were still ignored.
+    #[test]
+    fn the_optimizer_step_sizes_are_authorable_and_reach_the_run() {
+        let controller = SimulationController::new();
+        let mut state = AppState::default();
+        state.sim_setup.optimization.ensure_initialized();
+
+        let defaults = state
+            .sim_setup
+            .optimization
+            .to_config()
+            .expect("the default optimization draft is runnable");
+
+        state.sim_setup.optimization.fd_step = "2.5e-3".to_owned();
+        state.sim_setup.optimization.initial_step = "0.25".to_owned();
+        state.sim_setup.optimization.min_step = "1e-6".to_owned();
+
+        let index = AnalysisKind::Optimization.legacy_index();
+        let spec = controller
+            .build_analysis_spec_for_index(&state, index)
+            .expect("an authored optimization draft builds its spec");
+        let AnalysisSpec::Optimization {
+            fd_step,
+            initial_step,
+            min_step,
+            ..
+        } = spec
+        else {
+            panic!("the optimization index builds an optimization spec");
+        };
+
+        assert_eq!(fd_step, 2.5e-3);
+        assert_eq!(initial_step, 0.25);
+        assert_eq!(min_step, 1e-6);
+        assert!(
+            fd_step != defaults.fd_step
+                && initial_step != defaults.initial_step
+                && min_step != defaults.min_step,
+            "the authored values must differ from the defaults, or this test cannot tell a \
+             wired form from an ignored one"
+        );
+
+        // The engine's own bound, refused at the boundary rather than clamped:
+        // a first step smaller than the smallest one describes no search.
+        state.sim_setup.optimization.min_step = "0.5".to_owned();
+        let error = controller
+            .build_analysis_spec_for_index(&state, index)
+            .expect_err("a smallest step above the first step is not a search");
+        assert!(
+            error.contains("min_step"),
+            "the refusal must name the control it is about: {error}"
+        );
+    }
+
     #[test]
     fn sp_noise_dialog_reaches_the_typed_request() {
         let controller = SimulationController::new();
