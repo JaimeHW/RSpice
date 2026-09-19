@@ -944,6 +944,7 @@ fn completed_transient_result_reuses_owned_waveform_buffers_in_run_history() {
     controller
         .runner
         .store_pending_result(Ok(crate::simulation::SimulationResult::Transient {
+            spectra: Vec::new(),
             time,
             waveforms,
             measurements: Vec::new(),

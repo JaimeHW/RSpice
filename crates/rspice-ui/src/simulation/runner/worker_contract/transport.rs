@@ -21,6 +21,7 @@ use super::*;
 mod dc_sweep;
 #[cfg(test)]
 mod tests;
+use super::recorded_fft::WorkerRecordedFftSpectrumTransport;
 use dc_sweep::WorkerDcSweepEvidence;
 
 impl WorkerResponseTransport {
@@ -85,6 +86,15 @@ pub(super) fn validate_worker_response_before_transport(
             && let Some(history) = &events.current_impulses
         {
             history.validate()?;
+        }
+        match result.as_ref() {
+            WorkerSimulationResult::Transient { spectra, .. } => {
+                super::recorded_fft::validate_worker_spectra(spectra)?;
+            }
+            WorkerSimulationResult::Fft { spectrum, .. } => {
+                super::recorded_fft::validate_worker_spectra(std::slice::from_ref(spectrum))?;
+            }
+            _ => {}
         }
         validate_worker_measurements(result)?;
         if let WorkerSimulationResult::DcSweep {
@@ -1197,6 +1207,12 @@ pub(crate) enum WorkerSimulationResultTransport {
         /// a resampling of `time`.
         #[serde(default)]
         events: WorkerEventHistory,
+        #[serde(default)]
+        spectra: Vec<WorkerRecordedFftSpectrumTransport>,
+    },
+    Fft {
+        spectrum: WorkerRecordedFftSpectrumTransport,
+        convergence: Option<crate::simulation::results::ConvergenceTransport<WorkerF64Series>>,
     },
     Pss {
         measurements: Vec<WorkerMeasurement>,
@@ -1375,6 +1391,7 @@ impl WorkerSimulationResultTransport {
                 measurements,
                 convergence,
                 events,
+                spectra,
             } => Self::Transient {
                 time: WorkerF64Series::from_vec(time, buffers),
                 waveforms: transport_waveforms(waveforms, buffers),
@@ -1386,6 +1403,21 @@ impl WorkerSimulationResultTransport {
                     )
                 }),
                 events,
+                spectra: WorkerRecordedFftSpectrumTransport::from_spectra(spectra, buffers),
+            },
+            WorkerSimulationResult::Fft {
+                spectrum,
+                convergence,
+            } => Self::Fft {
+                spectrum: WorkerRecordedFftSpectrumTransport::from_spectra(vec![spectrum], buffers)
+                    .pop()
+                    .expect("one spectrum in, one spectrum out"),
+                convergence: convergence.as_ref().map(|quality| {
+                    crate::simulation::results::ConvergenceTransport::from_evidence(
+                        quality,
+                        |values| WorkerF64Series::from_vec(values.into_owned(), buffers),
+                    )
+                }),
             },
             WorkerSimulationResult::Pss {
                 measurements,
@@ -1579,6 +1611,7 @@ impl WorkerSimulationResultTransport {
                         | WorkerSimulationResult::Transient { .. }
                         | WorkerSimulationResult::Ac { .. }
                         | WorkerSimulationResult::Soa { .. }
+                        | WorkerSimulationResult::Fft { .. }
                 ) {
                     return Err(
                         "Waveform and convergence results must use the dedicated transfer-buffer transport"
@@ -1650,6 +1683,7 @@ impl WorkerSimulationResultTransport {
                 measurements,
                 convergence,
                 events,
+                spectra,
             } => Ok(WorkerSimulationResult::Transient {
                 time: time.into_vec(buffers)?,
                 waveforms: worker_waveforms_from_transport(waveforms, buffers)?,
@@ -1662,6 +1696,25 @@ impl WorkerSimulationResultTransport {
                     })
                     .transpose()?,
                 events,
+                spectra: WorkerRecordedFftSpectrumTransport::into_spectra(spectra, buffers)?,
+            }),
+            Self::Fft {
+                spectrum,
+                convergence,
+            } => Ok(WorkerSimulationResult::Fft {
+                spectrum: WorkerRecordedFftSpectrumTransport::into_spectra(
+                    vec![spectrum],
+                    buffers,
+                )?
+                .pop()
+                .expect("one spectrum in, one spectrum out"),
+                convergence: convergence
+                    .map(|quality| {
+                        quality.into_evidence(WorkerF64Series::len, |series| {
+                            series.into_convergence_values(buffers)
+                        })
+                    })
+                    .transpose()?,
             }),
             Self::Pss {
                 measurements,
@@ -1893,6 +1946,12 @@ fn validate_transient_source_payload_size(result: &WorkerSimulationResult) -> Re
         values = values.saturating_add(2);
         for trace in &history.traces {
             values = values.saturating_add(trace.points.len().saturating_mul(2));
+        }
+    }
+    if let WorkerSimulationResult::Transient { spectra, .. } = result {
+        for spectrum in spectra {
+            values = values.saturating_add(spectrum.numeric_value_count());
+            buffers = buffers.saturating_add(3);
         }
     }
     for waveform in waveforms {

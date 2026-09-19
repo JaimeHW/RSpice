@@ -11,7 +11,10 @@ impl SimulationResult {
         match self {
             Self::Transient { convergence, .. }
             | Self::Ac { convergence, .. }
-            | Self::Soa { convergence, .. } => convergence.as_ref(),
+            | Self::Soa { convergence, .. }
+            // A recorded FFT runs no solve of its own, so the quality of the
+            // transient that computed it is the only quality it has.
+            | Self::Fft { convergence, .. } => convergence.as_ref(),
             _ => None,
         }
     }
@@ -199,6 +202,9 @@ impl SimulationResult {
             SimulationResult::Soa {
                 time, waveforms, ..
             } => !time.is_empty() && !waveforms.is_empty(),
+            // The transform the engine performed is a fact even when the
+            // record ran short and there are no coefficients to draw.
+            SimulationResult::Fft { .. } => true,
             SimulationResult::MeasurementsOnly { measurements } => !measurements.is_empty(),
         }
     }
@@ -224,6 +230,7 @@ impl SimulationResult {
             SimulationResult::Reliability { .. } => "Reliability",
             SimulationResult::Optimization { .. } => "Optimization",
             SimulationResult::Soa { .. } => "Safety (SOA)",
+            SimulationResult::Fft { .. } => "FFT",
             SimulationResult::MeasurementsOnly { .. } => "Measurements Only",
         }
     }

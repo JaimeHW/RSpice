@@ -30,6 +30,7 @@ fn transient_convergence_survives_worker_round_trip() {
     .unwrap();
     let expected = convergence.clone();
     let result = SimulationResult::Transient {
+        spectra: Vec::new(),
         time: vec![0.0, 1e-9],
         waveforms: HashMap::from([(
             "V(out)".to_owned(),
@@ -96,6 +97,7 @@ fn worker_result_round_trip() {
     }
 
     let transient = SimulationResult::Transient {
+        spectra: Vec::new(),
         time: vec![0.0, 1e-9],
         waveforms: HashMap::from([(
             "V(out)".to_string(),
@@ -562,6 +564,7 @@ fn convergence_source_evidence_survives_derived_worker_transports() {
     let quality = std::sync::Arc::new(quality);
     for result in [
         SimulationResult::Transient {
+            spectra: Vec::new(),
             time: vec![0.6, 1.0],
             waveforms: HashMap::new(),
             measurements: Vec::new(),
@@ -614,6 +617,7 @@ fn convergence_worker_transport_rejects_inline_and_malformed_quality_buffers() {
     )
     .unwrap();
     let result = SimulationResult::Transient {
+        spectra: Vec::new(),
         time: vec![0.0, 1.0],
         waveforms: HashMap::new(),
         measurements: Vec::new(),
@@ -719,4 +723,106 @@ fn a_dc_mismatch_result_survives_the_worker_wire() {
         }
         other => panic!("expected dc mismatch result, got {other:?}"),
     }
+}
+
+/// A recorded FFT crosses the worker boundary with every bit intact.
+///
+/// The coefficients ride the transfer-buffer channel, so this goes through the
+/// transport encoding rather than only the in-process conversion: the JSON
+/// envelope carries lengths and indices, and the numbers are compared by bit
+/// pattern, not by tolerance.
+#[test]
+fn a_recorded_fft_spectrum_survives_the_worker_boundary_bit_for_bit() {
+    use crate::simulation::results::RecordedFftSpectrum;
+    use crate::state::{
+        FftSpectrumEvidence, FftSpectrumFormatEvidence, FftSpectrumModeEvidence,
+        FftSpectrumStatusEvidence,
+    };
+
+    let point_count = 8usize;
+    let bins = point_count / 2 + 1;
+    let resolution = 125.0_f64;
+    let spectrum = RecordedFftSpectrum {
+        request_key: ".fft V(OUT) NP=8 WINDOW=RECT".to_owned(),
+        evidence: FftSpectrumEvidence {
+            status: FftSpectrumStatusEvidence::Complete,
+            output: "V(OUT)".to_owned(),
+            physical_type: "voltage".to_owned(),
+            start_time_s: 0.0,
+            stop_time_s: 1.0 / resolution,
+            sample_interval_s: (1.0 / resolution) / point_count as f64,
+            point_count,
+            accurate_sampling: true,
+            format: FftSpectrumFormatEvidence::Unnormalized,
+            mode: FftSpectrumModeEvidence::HspiceCompatible,
+            window: "RECT".to_owned(),
+            alpha: 3.0,
+            coherent_gain: 1.0,
+            frequency_resolution_hz: resolution,
+            fundamental_bin: 1,
+            minimum_metric_bin: 1,
+            maximum_metric_bin: point_count / 2,
+            metrics: None,
+        },
+        frequency: (0..bins).map(|bin| bin as f64 * resolution).collect(),
+        real: vec![0.1, 0.987_654_321_012_345_6, -0.25, 1.0e-17, 0.0],
+        imaginary: vec![0.0, -0.123_456_789_012_345_6, 0.5, -1.0e-17, 0.0],
+    };
+    spectrum
+        .validate()
+        .expect("the fixture is a valid spectrum");
+    let recorded = std::sync::Arc::new(spectrum.clone());
+
+    // The transient that computed it carries it out.
+    let carried = SimulationResult::Transient {
+        time: vec![0.0, 1e-9, 2e-9],
+        waveforms: HashMap::new(),
+        measurements: Vec::new(),
+        periodic_state: None,
+        convergence: None,
+        events: Default::default(),
+        spectra: vec![std::sync::Arc::clone(&recorded)],
+    };
+    let SimulationResult::Transient {
+        spectra: restored, ..
+    } = round_trip_result(carried)
+    else {
+        panic!("a transient result");
+    };
+    assert_eq!(restored.len(), 1);
+    assert_eq!(restored[0].as_ref(), &spectrum);
+
+    // And the FFT task's own result, through the transfer-buffer transport.
+    let result = SimulationResult::Fft {
+        spectrum: std::sync::Arc::clone(&recorded),
+        convergence: None,
+    };
+    let transport = WorkerResponseTransport::from_response(
+        WorkerResponse::from_result_for_transfer(9, Ok(result)),
+    )
+    .expect("the response encodes");
+    let response = transport.into_response().expect("the response decodes");
+    let WorkerOutcome::Success(worker) = response.outcome else {
+        panic!("a successful response");
+    };
+    let SimulationResult::Fft { spectrum: back, .. } = SimulationResult::from(*worker) else {
+        panic!("an FFT result");
+    };
+    for (actual, expected) in back
+        .frequency
+        .iter()
+        .chain(&back.real)
+        .chain(&back.imaginary)
+        .zip(
+            spectrum
+                .frequency
+                .iter()
+                .chain(&spectrum.real)
+                .chain(&spectrum.imaginary),
+        )
+    {
+        assert_eq!(actual.to_bits(), expected.to_bits());
+    }
+    assert_eq!(back.evidence, spectrum.evidence);
+    assert_eq!(back.request_key, spectrum.request_key);
 }

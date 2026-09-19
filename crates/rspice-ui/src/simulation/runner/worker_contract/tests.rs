@@ -301,8 +301,8 @@ pub(super) fn nondefault_op_config() -> crate::simulation::dialog::OpConfig {
 
 #[test]
 fn browser_worker_transfer_protocol_matches_rust_transport() {
-    assert_eq!(WORKER_RESPONSE_TRANSPORT_PROTOCOL, 22);
-    assert_eq!(WORKER_REQUEST_TRANSPORT_PROTOCOL, 10);
+    assert_eq!(WORKER_RESPONSE_TRANSPORT_PROTOCOL, 23);
+    assert_eq!(WORKER_REQUEST_TRANSPORT_PROTOCOL, 11);
     let source = include_str!("../../../../web/simulation-worker.js");
     assert!(source.contains(&format!(
         "const WORKER_PROTOCOL_VERSION = {WORKER_RESPONSE_TRANSPORT_PROTOCOL};"
@@ -572,6 +572,7 @@ fn fourier_worker_consumes_exact_transient_dependency_artifact() {
         .map(|time| (2.0 * std::f64::consts::PI * 2.0 * time).sin())
         .collect::<Vec<_>>();
     let transient = SimulationResult::Transient {
+        spectra: Vec::new(),
         time: time.clone(),
         waveforms: HashMap::from([(
             "V(out)".to_owned(),
@@ -589,6 +590,7 @@ fn fourier_worker_consumes_exact_transient_dependency_artifact() {
         config_digest,
         &transient,
         &["out".to_owned()],
+        false,
     )
     .unwrap()
     .unwrap();
@@ -1077,6 +1079,7 @@ fn an_hb_wire_written_before_the_solver_controls_restores_with_the_engine_defaul
 #[test]
 fn transient_worker_result_round_trips_through_json() {
     let result = WorkerSimulationResult::Transient {
+        spectra: Vec::new(),
         convergence: None,
         time: vec![0.0, 1e-9],
         waveforms: vec![WorkerWaveform {
@@ -1151,6 +1154,7 @@ fn response_with_measurement(measurement: WorkerMeasurement) -> WorkerResponse {
     WorkerResponse {
         id: 901,
         outcome: WorkerOutcome::Success(Box::new(WorkerSimulationResult::Transient {
+            spectra: Vec::new(),
             convergence: None,
             time: vec![0.0],
             waveforms: Vec::new(),
@@ -1306,6 +1310,7 @@ fn a_transient_result_without_an_events_field_still_decodes() {
 #[test]
 fn event_histories_survive_the_worker_edge_in_both_directions() {
     let source = SimulationResult::Transient {
+        spectra: Vec::new(),
         time: vec![0.0, 1e-9],
         waveforms: HashMap::new(),
         measurements: Vec::new(),
@@ -1428,6 +1433,7 @@ fn monte_carlo_worker_result_round_trips_seed_and_exact_samples_through_json() {
 #[test]
 fn worker_result_payload_estimate_counts_high_volume_arrays() {
     let transient = WorkerSimulationResult::Transient {
+        spectra: Vec::new(),
         convergence: None,
         time: vec![0.0, 1.0],
         waveforms: vec![WorkerWaveform {
@@ -1477,6 +1483,7 @@ fn worker_result_payload_estimate_counts_high_volume_arrays() {
 #[test]
 fn worker_response_rejects_payloads_that_exceed_transport_limit() {
     let result = SimulationResult::Transient {
+        spectra: Vec::new(),
         time: vec![0.0, 1.0],
         waveforms: HashMap::from([(
             "V(out)".to_string(),
@@ -1505,6 +1512,7 @@ fn worker_response_rejects_payloads_that_exceed_transport_limit() {
 #[test]
 fn worker_transfer_response_does_not_apply_legacy_clone_budget() {
     let result = SimulationResult::Transient {
+        spectra: Vec::new(),
         time: vec![0.0, 1.0],
         waveforms: HashMap::from([(
             "V(out)".to_string(),
@@ -1543,6 +1551,7 @@ fn worker_transport_extracts_transient_waveform_buffers() {
     let response = WorkerResponse {
         id: 77,
         outcome: WorkerOutcome::Success(Box::new(WorkerSimulationResult::Transient {
+            spectra: Vec::new(),
             convergence: None,
             time: vec![0.0, 1.0],
             waveforms: vec![WorkerWaveform {
@@ -1944,6 +1953,7 @@ fn worker_transport_rejects_missing_or_mismatched_buffers() {
     let response = WorkerResponse {
         id: 12,
         outcome: WorkerOutcome::Success(Box::new(WorkerSimulationResult::Transient {
+            spectra: Vec::new(),
             convergence: None,
             time: vec![0.0, 1.0],
             waveforms: vec![WorkerWaveform {
@@ -1982,6 +1992,7 @@ fn worker_transport_validates_complex_waveform_shape() {
         response: WorkerResponseTransportMetadata {
             id: 44,
             outcome: WorkerOutcomeTransport::Success(WorkerSimulationResultTransport::Transient {
+                spectra: Vec::new(),
                 convergence: None,
                 time: WorkerF64Series::Buffer { buffer: 0, len: 2 },
                 waveforms: vec![WorkerWaveformTransport {
@@ -2008,6 +2019,7 @@ fn worker_transport_validates_complex_waveform_shape() {
         response: WorkerResponseTransportMetadata {
             id: 45,
             outcome: WorkerOutcomeTransport::Success(WorkerSimulationResultTransport::Transient {
+                spectra: Vec::new(),
                 convergence: None,
                 time: WorkerF64Series::Buffer { buffer: 0, len: 2 },
                 waveforms: vec![WorkerWaveformTransport {
