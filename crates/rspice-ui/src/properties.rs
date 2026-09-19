@@ -20,6 +20,6 @@ pub(crate) mod tabbed_dialog;
 
 pub use tabbed_dialog::{
     ComponentEditorContext, ComponentModelContext, ComponentOperatingPointContext,
-    ComponentPropertySession, ComponentTerminalContext, StimulusEditorContext, TabbedDialogResult,
-    TabbedPropertyDialogState, render_tabbed_property_dialog,
+    ComponentPropertySession, ComponentTerminalContext, RetainedTableFile, StimulusEditorContext,
+    TabbedDialogResult, TabbedPropertyDialogState, render_tabbed_property_dialog,
 };

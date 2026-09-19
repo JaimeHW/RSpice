@@ -31,6 +31,7 @@ pub(crate) mod runner;
 pub(crate) mod spice_value;
 pub(crate) mod status;
 pub(crate) mod stimulus_realize;
+pub(crate) mod table_route;
 pub(crate) mod veriloga;
 
 // The optimizer, reliability engine, netlist generator, options translator, and

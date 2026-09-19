@@ -46,6 +46,7 @@ mod instances;
 mod magnetics;
 mod master_index;
 mod models;
+mod source_tables;
 mod subcircuits;
 mod vector_display;
 mod vector_names;

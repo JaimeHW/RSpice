@@ -35,14 +35,18 @@ pub(super) struct PendingPreparedRun {
     permit: ExecutionPermit,
 }
 
-/// Let the deck resolve project-relative data-file references.
+/// Let the deck find the data files its sources name.
 ///
-/// An unsaved project has no folder to resolve against, so its references stay
-/// as written and the netlist generator reports the ones it cannot check.
-fn bind_data_root<'a>(
+/// Project-relative references resolve against the project's folder; an
+/// unsaved project has none, so its references stay as written and the netlist
+/// generator reports the ones it cannot check. The stimulus library goes with
+/// it, so a file-backed source whose named table is not reachable runs from the
+/// copy its definition retains instead of being refused.
+fn bind_project_data<'a>(
     hierarchy: crate::simulation::netlist_gen::HierarchySource<'a>,
-    state: &AppState,
+    state: &'a AppState,
 ) -> crate::simulation::netlist_gen::HierarchySource<'a> {
+    let hierarchy = hierarchy.with_stimulus_library(&state.workspace.stimulus_library);
     match state.workspace.project.data_root() {
         Some(root) => hierarchy.with_data_root(root),
         None => hierarchy,
@@ -575,7 +579,7 @@ impl SimulationController {
             )
         })?;
         validate_projected_model_binding_authority(state, &projection)?;
-        let hierarchy = bind_data_root(
+        let hierarchy = bind_project_data(
             crate::simulation::netlist_gen::HierarchySource::from_execution_projection(
                 &state.library_manager,
                 &projection,
@@ -1052,7 +1056,7 @@ impl SimulationController {
                 ),
             ));
         }
-        let hierarchy = bind_data_root(
+        let hierarchy = bind_project_data(
             crate::simulation::netlist_gen::HierarchySource::from_execution_projection(
                 &state.library_manager,
                 &execution_projection,

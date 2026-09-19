@@ -539,6 +539,12 @@ fn component_stimulus_context(
             .map(crate::state::stimulus_library::definition::StimulusDefinition::revision),
         definition,
         library_is_empty: library.is_empty(),
+        retained_table: library.retained_pwl_table(component).and_then(|table| {
+            Some(crate::properties::RetainedTableFile {
+                reference: crate::simulation::stimulus_realize::data_file_reference(component)?,
+                path: crate::simulation::table_route::materialized(table).ok()?,
+            })
+        }),
     })
 }
 

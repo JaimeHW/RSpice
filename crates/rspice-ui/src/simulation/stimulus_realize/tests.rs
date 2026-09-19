@@ -352,6 +352,86 @@ fn an_absolute_data_file_that_is_not_there_is_refused_at_the_card() {
     assert!(error.contains("bridge_step.csv"), "{error}");
 }
 
+/// The same missing file, in a definition that retains the table: the preview
+/// draws the retained bytes, and the card the library shows still names the
+/// file, because that is what a deck would carry.
+#[test]
+fn a_definition_previews_the_table_it_retains_when_the_named_file_is_gone() {
+    use crate::state::stimulus_library::definition::RetainedPwlFile;
+
+    let mut definition =
+        StimulusDefinition::new("bridge_step", ComponentType::VoltageSourcePwlFile)
+            .expect("a definition");
+    definition.params = "file=bridge_step_not_here.csv".to_owned();
+    let without = StimulusRealization::of(&definition, SpanChoice::Transient, timing(4e-9));
+    assert!(
+        without.defect.is_some(),
+        "nothing retained, nothing to draw"
+    );
+
+    definition.pwl_file = Some(RetainedPwlFile::new(
+        "bridge_step.csv",
+        "0 0\n1e-9 1.5\n3e-9 0.25\n",
+        0,
+    ));
+    let with = StimulusRealization::of(&definition, SpanChoice::Transient, timing(4e-9));
+    assert_eq!(with.defect, None);
+    let readouts = with.readouts.expect("a drawn table has extremes");
+    assert!(readouts.minimum.abs() < 1e-9, "{readouts:?}");
+    assert!((readouts.maximum - 1.5).abs() < 1e-2, "{readouts:?}");
+
+    let card = definition.card_text(DETACHED_NETS).expect("card");
+    assert!(card.contains("bridge_step_not_here.csv"), "{card}");
+}
+
+/// A placed source's project-relative reference is found the way a run finds
+/// it: against the project's folder first, then the retained copy.
+#[test]
+fn a_placed_source_previews_the_file_a_run_would_read() {
+    let folder = crate::fixture_root::canonical_temp_dir()
+        .join(format!("rspice-preview-table-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(folder.join("data")).expect("a scratch folder");
+    std::fs::write(folder.join("data/step.csv"), "0 0\n1e-9 2\n").expect("a table");
+    let mut source = Component::new(1, ComponentType::VoltageSourcePwlFile, Point::origin());
+    source.name = "V1".to_owned();
+    source.params = "file=data/step.csv".to_owned();
+
+    let unbound = reading_reachable_table(&source, TableSources::default());
+    assert!(
+        preview_defect(&source_spec(&unbound).expect("spec")).is_some(),
+        "relative to nothing, the file is not found"
+    );
+    let bound = reading_reachable_table(
+        &source,
+        TableSources {
+            data_root: Some(&folder),
+            retained: None,
+        },
+    );
+    assert_eq!(
+        preview_defect(&source_spec(&bound).expect("spec")),
+        None,
+        "{}",
+        bound.params
+    );
+
+    let retained = folder.join("retained.csv");
+    std::fs::write(&retained, "0 0\n1e-9 3\n").expect("a retained copy");
+    source.params = "file=data/gone.csv".to_owned();
+    let fallen_back = reading_reachable_table(
+        &source,
+        TableSources {
+            data_root: Some(&folder),
+            retained: Some(&retained),
+        },
+    );
+    assert_eq!(
+        preview_defect(&source_spec(&fallen_back).expect("spec")),
+        None
+    );
+    let _ = std::fs::remove_dir_all(&folder);
+}
+
 #[test]
 fn the_timing_caption_names_the_transient_and_whether_the_plan_holds_one() {
     assert_eq!(

@@ -15,6 +15,6 @@ pub(crate) use render::provenance_colour;
 pub use render::render_tabbed_property_dialog;
 pub use state::{
     ComponentEditorContext, ComponentModelContext, ComponentOperatingPointContext,
-    ComponentPropertySession, ComponentTerminalContext, StimulusEditorContext, TabbedDialogResult,
-    TabbedPropertyDialogState,
+    ComponentPropertySession, ComponentTerminalContext, RetainedTableFile, StimulusEditorContext,
+    TabbedDialogResult, TabbedPropertyDialogState,
 };

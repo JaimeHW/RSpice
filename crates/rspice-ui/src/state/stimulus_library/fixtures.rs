@@ -105,10 +105,16 @@ const ROWS: [Row; 14] = [
 ];
 
 /// The retained table `bridge_meas_step` carries, so the file editor has bytes
-/// to describe without reaching a lab share that is not there.
-const MEASURED_TABLE: &str = "0 0\n200u 0\n210u 8.2m\n230u 11.6m\n260u 12.4m\n300u 10.4m\n\
-                              360u 9.2m\n430u 9.7m\n520u 10.15m\n650u 9.94m\n800u 10.02m\n\
-                              1m 9.99m\n1.4m 10m\n2m 10m\n";
+/// to describe — and the preview a waveform to draw — without reaching a lab
+/// share that is not there.
+///
+/// Plain numbers, as an instrument exports them: the engine's table loader
+/// reads decimal text and no SPICE suffixes, so `200u` here would be a file
+/// the engine refuses at its second line.
+const MEASURED_TABLE: &str = "0 0\n200e-6 0\n210e-6 8.2e-3\n230e-6 11.6e-3\n260e-6 12.4e-3\n\
+                              300e-6 10.4e-3\n360e-6 9.2e-3\n430e-6 9.7e-3\n520e-6 10.15e-3\n\
+                              650e-6 9.94e-3\n800e-6 10.02e-3\n1e-3 9.99e-3\n1.4e-3 10e-3\n\
+                              2e-3 10e-3\n";
 
 /// One definition, by the name the mockup gives it.
 pub(crate) fn definition(name: &str) -> StimulusDefinition {

@@ -268,6 +268,17 @@ pub(crate) fn import_data_file(state: &mut AppState) {
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_else(|| reference.clone());
+    // Asked of the engine's own loader, before anything is retained: a
+    // definition that kept bytes the engine refuses would preview as nothing
+    // and block every run that adopted it.
+    if let Some(refusal) =
+        crate::simulation::table_route::engine_refusal(&absolute.to_string_lossy())
+    {
+        state.push_user_message(ConsoleMessage::warning(format!(
+            "'{name}' is not a table the engine reads: {refusal}"
+        )));
+        return;
+    }
     let retained = match retained_table(
         &name,
         bytes,

@@ -1112,56 +1112,6 @@ impl<'a> NetlistGenerator<'a> {
         ))
     }
 
-    /// Reason a file-backed PWL source cannot run, or `None` when its data file
-    /// is present and readable.
-    ///
-    /// The engine already refuses to build a circuit whose PWL file will not
-    /// load, but that happens after a run has been dispatched and reports a
-    /// resolved absolute path the user never typed. Catching it here names the
-    /// component and blocks the run before it starts.
-    fn pwl_data_file_defect(
-        &self,
-        component: &Component,
-        params: &std::collections::HashMap<String, String>,
-    ) -> Option<String> {
-        let stored = params
-            .get("file")
-            .map(String::as_str)
-            .unwrap_or(component.value.as_str())
-            .trim();
-        if stored.is_empty() {
-            return Some(format!(
-                "{} '{}' has no data file selected",
-                component.kind.display_name(),
-                component.name
-            ));
-        }
-
-        let resolved = self.resolve_data_file_path(stored);
-        // Only a bound data root makes the reference checkable: without one a
-        // relative path is resolved by the engine against its own working
-        // directory, which is not this process's to test.
-        if std::path::Path::new(&resolved).is_relative() {
-            return None;
-        }
-        match std::fs::metadata(&resolved) {
-            Ok(metadata) if metadata.is_file() => None,
-            Ok(_) => Some(format!(
-                "{} '{}' data file '{}' is a directory",
-                component.kind.display_name(),
-                component.name,
-                stored
-            )),
-            Err(error) => Some(format!(
-                "{} '{}' cannot read data file '{}': {}",
-                component.kind.display_name(),
-                component.name,
-                stored,
-                error
-            )),
-        }
-    }
-
     fn generate_independent_source(
         &mut self,
         component: &Component,
@@ -1214,11 +1164,14 @@ impl<'a> NetlistGenerator<'a> {
             return None;
         }
 
-        if component.kind.is_pwl_file_source()
-            && let Some(message) = self.pwl_data_file_defect(component, &params)
-        {
-            self.errors.push(message);
-            return None;
+        if component.kind.is_pwl_file_source() {
+            if let Some(message) = self.pwl_data_file_defect(component, &params) {
+                self.errors.push(message);
+                return None;
+            }
+            if let Some(notice) = self.pwl_table_notice(component, &params) {
+                self.warnings.push(notice);
+            }
         }
 
         let noise_suffix = if params

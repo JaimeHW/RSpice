@@ -25,6 +25,7 @@ use rspice_core::circuit::VoltageSources;
 use rspice_core::config::SpiceDialect;
 use rspice_core::netlist::{ParamContext, SourceSpec};
 
+use crate::simulation::table_route::{self, TableRoute, TableSources};
 use crate::state::stimulus_library::definition::StimulusDefinition;
 use crate::state::{Component, ComponentType, Point};
 
@@ -80,6 +81,74 @@ impl StimulusDefinition {
     /// deck line cannot spell the same definition differently.
     pub fn card_text(&self, nets: [&str; 2]) -> Result<String, Vec<String>> {
         source_card_text(&self.transient_component(), nets)
+    }
+
+    /// [`Self::transient_component`] as a preview evaluates it: a `PWL FILE`
+    /// definition whose named file is not here reads the table it retains.
+    ///
+    /// Kept apart from the component the card is written from, because the
+    /// realization line states the card a deck would carry and that card names
+    /// the file, not a cache path.
+    #[must_use]
+    pub(crate) fn preview_component(&self) -> Component {
+        let component = self.transient_component();
+        let Some(stored) = data_file_reference(&component) else {
+            return component;
+        };
+        let (route, _) = table_route::route_retaining(&stored, None, self.pwl_file.as_ref());
+        reading_table(&component, &route).unwrap_or(component)
+    }
+}
+
+/// The data file a file-backed source's card names, as stored.
+pub(crate) fn data_file_reference(component: &Component) -> Option<String> {
+    if !component.kind.is_pwl_file_source() {
+        return None;
+    }
+    let params = crate::state::parse_params_string(&component.params);
+    Some(
+        params
+            .get("file")
+            .map_or(component.value.as_str(), String::as_str)
+            .trim()
+            .to_owned(),
+    )
+}
+
+/// This source with its card pointed at the file `route` names, or `None` when
+/// that is the file it names already.
+fn reading_table(component: &Component, route: &TableRoute) -> Option<Component> {
+    let stored = data_file_reference(component)?;
+    if route.path() == stored {
+        return None;
+    }
+    let params =
+        crate::state::params_string::set_parameter_value(&component.params, "file", route.path())
+            .ok()?;
+    let mut reading = component.clone();
+    reading.params = params;
+    Some(reading)
+}
+
+/// A placed source as a preview evaluates it: its data-file reference resolved
+/// the way a run resolves it, against the project's folder and then the copy
+/// its definition retains.
+///
+/// Without this a preview and a run read different files — a project-relative
+/// reference is relative to the project for a run and to the process's working
+/// directory for the parser — and a preview refused a table the run would
+/// have read.
+#[must_use]
+pub(crate) fn reading_reachable_table<'c>(
+    component: &'c Component,
+    sources: TableSources<'_>,
+) -> std::borrow::Cow<'c, Component> {
+    let Some(stored) = data_file_reference(component) else {
+        return std::borrow::Cow::Borrowed(component);
+    };
+    match reading_table(component, &table_route::route(&stored, sources)) {
+        Some(reading) => std::borrow::Cow::Owned(reading),
+        None => std::borrow::Cow::Borrowed(component),
     }
 }
 
@@ -286,11 +355,12 @@ impl WaveformReadouts {
 ///
 /// - `PWL FILE=` is read from the path the card names, and when that read fails
 ///   the evaluator logs and returns the value offset — a flat line that looks
-///   like a waveform and is not one. A definition's retained copy of the table
-///   deliberately does not rescue this: the loader takes a path, not bytes, so
-///   bytes the app is holding are not something it can be asked to step
-///   through. The retained copy is what makes a project self-contained when it
-///   is reopened somewhere the file exists again.
+///   like a waveform and is not one. A caller holding the definition's retained
+///   copy of the table has already pointed the card at it by the time the spec
+///   arrives here ([`StimulusDefinition::preview_component`],
+///   [`reading_reachable_table`]), so what is refused is a table nobody has —
+///   or a file that is there and that the engine's loader will not read, which
+///   is refused in the loader's own words.
 /// - `TRNOISE` evaluates to exactly 0 here. The noise train is expanded into a
 ///   seeded PWL sample series when the transient's circuit is built, so it is
 ///   not a function of time the spec can be asked for, which is the same reason
@@ -305,6 +375,10 @@ pub(crate) fn preview_defect(spec: &SourceSpec) -> Option<String> {
         SourceSpec::PwlFile { path, .. } if !std::path::Path::new(path).is_file() => Some(format!(
             "This preview needs the data file '{path}', which is not readable here."
         )),
+        // There, and not a table: the evaluator would log the load failure and
+        // return the offset, which is the same flat line a missing file draws.
+        SourceSpec::PwlFile { path, .. } => table_route::engine_refusal(path)
+            .map(|refusal| format!("The engine cannot read the table in '{path}': {refusal}.")),
         SourceSpec::TrNoise { .. } => Some(
             "A noise source has no waveform until a run builds it: the engine expands TRNOISE \
              into a seeded sample train when the transient starts, and the source contributes \

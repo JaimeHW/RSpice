@@ -731,7 +731,7 @@ fn evidence_contents(
     model_binding_card(ui, state, context, action);
     operating_point_card(ui, context, action);
     if supports_source_preview(component_type) {
-        source_preview_card(ui, state, component_type, registry);
+        source_preview_card(ui, state, context, component_type, registry);
         stimulus_library_card(ui, state, context, action);
     }
     terminals_card(ui, context);
@@ -1288,6 +1288,7 @@ fn terminal_table_row(
 fn source_preview_card(
     ui: &mut Ui,
     state: &TabbedPropertyDialogState,
+    context: &ComponentEditorContext,
     kind: crate::state::ComponentType,
     registry: &PropertyRegistry,
 ) {
@@ -1299,7 +1300,10 @@ fn source_preview_card(
         .map_or("V", crate::simulation::placed_sources::source_unit);
     let curve = component
         .ok_or_else(|| "This editor has no instance to evaluate.".to_owned())
-        .and_then(|component| crate::properties::source_preview::source_curve(&component, timing));
+        .and_then(|component| {
+            let tables = preview_tables(state, context, &component);
+            crate::properties::source_preview::source_curve(&component, timing, tables)
+        });
     egui::Frame::NONE
         .fill(Tokens::get(ui.ctx()).color.bg_panel)
         .inner_margin(Margin {
@@ -1344,6 +1348,26 @@ fn preview_component(
     )
     .ok()?;
     Some(component)
+}
+
+/// What the draft's data file can be found with: the project's folder, and the
+/// adopted definition's retained copy while the draft still names the file
+/// that copy stands in for.
+fn preview_tables<'a>(
+    state: &'a TabbedPropertyDialogState,
+    context: &'a ComponentEditorContext,
+    draft: &crate::state::Component,
+) -> crate::simulation::table_route::TableSources<'a> {
+    let reference = crate::simulation::stimulus_realize::data_file_reference(draft);
+    crate::simulation::table_route::TableSources {
+        data_root: state.data_root.as_deref(),
+        retained: context
+            .stimulus
+            .as_ref()
+            .and_then(|stimulus| stimulus.retained_table.as_ref())
+            .filter(|table| reference.as_deref() == Some(table.reference.as_str()))
+            .map(|table| table.path.as_path()),
+    }
 }
 
 /// Folder inside a project that attached waveform data is copied into.
@@ -1801,8 +1825,12 @@ mod tests {
         let component = preview_component(state, kind, registry).expect("a component");
         // Through the shared painter's own evaluation, so a test cannot agree
         // with a sampling the card does not use.
-        crate::properties::source_preview::source_curve(&component, state.preview_timing())
-            .expect("curve")
+        crate::properties::source_preview::source_curve(
+            &component,
+            state.preview_timing(),
+            crate::simulation::table_route::TableSources::default(),
+        )
+        .expect("curve")
     }
 
     /// Every independent source has a card, so every independent source gets a
@@ -1909,6 +1937,7 @@ mod tests {
                 definition: Some("sensor_drive".to_owned()),
                 library_revision: Some(2),
                 library_is_empty: false,
+                retained_table: None,
             }),
             ..ComponentEditorContext::default()
         }

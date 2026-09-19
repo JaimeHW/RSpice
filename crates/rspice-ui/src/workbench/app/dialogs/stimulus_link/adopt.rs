@@ -666,9 +666,24 @@ fn preview_pane(
         .show(ui, |ui| {
             ui.set_width(width - 2.0 * f32::from(shell::PANE_INSET));
             ui.spacing_mut().item_spacing.y = 0.0;
-            let now = source_preview::source_curve(component, session.timing);
-            let next =
-                after.map(|candidate| source_preview::source_curve(candidate, session.timing));
+            let now =
+                source_preview::source_curve(component, session.timing, session.instance_tables());
+            // The candidate carries the picked definition's card, so its table
+            // is found with that definition's retained copy, not the one the
+            // instance may have adopted before.
+            let picked_table = picked
+                .and_then(|definition| definition.pwl_file.as_ref())
+                .and_then(|table| crate::simulation::table_route::materialized(table).ok());
+            let next = after.map(|candidate| {
+                source_preview::source_curve(
+                    candidate,
+                    session.timing,
+                    crate::simulation::table_route::TableSources {
+                        retained: picked_table.as_deref(),
+                        ..session.instance_tables()
+                    },
+                )
+            });
             let after_caption = picked.map(|definition| {
                 format!(
                     "After adoption \u{00b7} {} r{} \u{00b7} {}",

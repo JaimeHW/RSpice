@@ -21,7 +21,8 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use super::definition::{
-    StimulusDefinition, StimulusDefinitionError, StimulusFamily, StimulusKind, normalize_params,
+    RetainedPwlFile, StimulusDefinition, StimulusDefinitionError, StimulusFamily, StimulusKind,
+    normalize_params,
 };
 use super::library::StimulusLibrary;
 use crate::state::{Component, ComponentType};
@@ -395,11 +396,12 @@ impl StimulusLibrary {
     /// describe a run that will not happen.
     ///
     /// This is what makes a project self-contained — it is written into the
-    /// document and travels with it — and it is deliberately *not* what a
-    /// preview evaluates: the engine's PWL loader takes a path, so bytes the
-    /// app is holding are not something it can be asked to step through.
+    /// document and travels with it. The engine's PWL loader takes a path, so
+    /// a reader that finds the named file gone has the simulation layer write
+    /// this table out and reads that instead; the rule is owned there, by
+    /// `simulation::table_route`.
     #[must_use]
-    pub fn retained_pwl_contents(&self, component: &Component) -> Option<&str> {
+    pub fn retained_pwl_table(&self, component: &Component) -> Option<&RetainedPwlFile> {
         if !matches!(
             self.provenance_state(component),
             ProvenanceState::Adopted { .. } | ProvenanceState::Behind { .. }
@@ -407,8 +409,7 @@ impl StimulusLibrary {
             return None;
         }
         let provenance = component.stimulus_provenance.as_ref()?;
-        let retained = self.get(&provenance.definition)?.pwl_file.as_ref()?;
-        Some(retained.contents.as_str())
+        self.get(&provenance.definition)?.pwl_file.as_ref()
     }
 }
 
@@ -416,7 +417,6 @@ impl StimulusLibrary {
 mod tests {
     use super::*;
     use crate::state::Point;
-    use crate::state::stimulus_library::definition::RetainedPwlFile;
 
     fn source(kind: ComponentType, value: &str, params: &str) -> Component {
         let mut component = Component::new(7, kind, Point::new(0, 0));
@@ -798,11 +798,13 @@ mod tests {
         let library = library(vec![definition]);
 
         assert_eq!(
-            library.retained_pwl_contents(&component),
+            library
+                .retained_pwl_table(&component)
+                .map(|table| table.contents.as_str()),
             Some("0 0\n1e-9 1\n")
         );
 
         component.params = "file=other.csv".to_owned();
-        assert_eq!(library.retained_pwl_contents(&component), None);
+        assert_eq!(library.retained_pwl_table(&component), None);
     }
 }

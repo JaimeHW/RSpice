@@ -128,7 +128,7 @@ fn source_curve(
     session: &StimulusLinkDialogState,
 ) -> Result<WaveformTrace, String> {
     let (window, _) = source_preview::shape_window(session.timing);
-    source_preview::source_curve(component, window)
+    source_preview::source_curve(component, window, session.instance_tables())
 }
 
 /// How tall the body is: what the right pane needs, never less than the form.

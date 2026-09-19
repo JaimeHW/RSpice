@@ -20,6 +20,7 @@
 use egui::{Align2, Rect, Sense, Stroke, Ui, Vec2, pos2, vec2};
 
 use crate::simulation::stimulus_realize::{self, PreviewTiming, WaveformReadouts, WaveformTrace};
+use crate::simulation::table_route::TableSources;
 use crate::state::Component;
 use crate::state::stimulus_library::definition::{StimulusDefinition, StimulusFamily};
 use crate::ui::plot::si_tick_label;
@@ -90,7 +91,7 @@ pub(crate) fn ensure_minis(
         // a flat line that says nothing.
         cache.insert(
             key,
-            stimulus_realize::shape_trace(&definition.transient_component(), MINI_SAMPLES, timing),
+            stimulus_realize::shape_trace(&definition.preview_component(), MINI_SAMPLES, timing),
         );
         evaluated += 1;
     }
@@ -107,11 +108,16 @@ pub(crate) static NO_MINI: std::sync::LazyLock<Result<WaveformTrace, String>> =
 /// The generator's and the parser's refusals already name the component and
 /// the field, so they are carried through unrewritten: a preview that reworded
 /// them would be a second voice saying the same thing differently.
+///
+/// `tables` is what a file-backed source's table can be found with here, so
+/// the preview reads the file the run would.
 pub(crate) fn source_curve(
     component: &Component,
     timing: PreviewTiming,
+    tables: TableSources<'_>,
 ) -> Result<WaveformTrace, String> {
-    let spec = stimulus_realize::source_spec(component)?;
+    let component = stimulus_realize::reading_reachable_table(component, tables);
+    let spec = stimulus_realize::source_spec(&component)?;
     match stimulus_realize::preview_defect(&spec) {
         Some(defect) => Err(defect),
         None => Ok(stimulus_realize::sample_trace(

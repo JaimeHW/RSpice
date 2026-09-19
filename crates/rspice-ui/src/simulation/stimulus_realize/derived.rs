@@ -104,7 +104,7 @@ pub(crate) struct StimulusRealization {
 impl StimulusRealization {
     /// Realize one definition over one span, under this transient.
     pub fn of(record: &StimulusDefinition, choice: SpanChoice, timing: PreviewTiming) -> Self {
-        let component = record.transient_component();
+        let component = record.preview_component();
         let spec = match source_spec(&component) {
             Ok(spec) => spec,
             Err(reason) => {

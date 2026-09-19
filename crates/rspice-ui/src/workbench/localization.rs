@@ -970,7 +970,7 @@ define_messages! {
     StimulusImportFile => "Import file…",
     StimulusNoFileRetained => "no file retained",
     StimulusRetainedFileDetail => "{name} · {bytes} B retained · {digest}",
-    StimulusRetainedNote => "The definition retains the file's bytes in the project document, so the project reopens where the original share is not reachable. The card still names the file.",
+    StimulusRetainedNote => "The definition retains the file's bytes in the project document. The card still names the file; where that file is not reachable, previews and runs read the retained copy and the run log says so.",
     StimulusRealizationSingular => "Realization · {count} adopter",
     StimulusRealization => "Realization · {count} adopters",
     StimulusRealizationNoAdopters => "Realization · no adopters",

@@ -36,6 +36,7 @@ mod shell;
 use egui::Context;
 
 use crate::simulation::stimulus_realize::{self, PreviewTiming};
+use crate::simulation::table_route::TableSources;
 use crate::state::Component;
 use crate::state::stimulus_library::definition::{
     StimulusDefinition, StimulusDefinitionError, StimulusFamily,
@@ -73,6 +74,10 @@ pub(crate) struct StimulusLinkDialogState {
     card: String,
     nets: [String; 2],
     timing: PreviewTiming,
+    /// Where a file-backed instance's table is found: the project's folder,
+    /// and the copy the definition it has already adopted retains.
+    data_root: Option<std::path::PathBuf>,
+    retained_table: Option<std::path::PathBuf>,
     /// Adopt: the definition the reader has picked.
     pick: Option<String>,
     /// Adopt: what the reader has typed into the list filter.
@@ -102,6 +107,8 @@ impl Default for StimulusLinkDialogState {
             card: String::new(),
             nets: [String::new(), String::new()],
             timing: PreviewTiming::default(),
+            data_root: None,
+            retained_table: None,
             pick: None,
             filter: String::new(),
             name: String::new(),
@@ -116,6 +123,14 @@ impl Default for StimulusLinkDialogState {
 impl StimulusLinkDialogState {
     pub(crate) fn close(&mut self) {
         *self = Self::default();
+    }
+
+    /// What the instance's own data file is found with, as it stands now.
+    fn instance_tables(&self) -> TableSources<'_> {
+        TableSources {
+            data_root: self.data_root.as_deref(),
+            retained: self.retained_table.as_deref(),
+        }
     }
 }
 
@@ -190,6 +205,16 @@ pub(crate) fn open_stimulus_link(
         card,
         nets,
         timing: crate::workbench::app::actions::property_edit::stimulus_preview_timing(state),
+        data_root: state
+            .workspace
+            .project
+            .data_root()
+            .map(std::path::Path::to_path_buf),
+        retained_table: state
+            .workspace
+            .stimulus_library
+            .retained_pwl_table(&component)
+            .and_then(|table| crate::simulation::table_route::materialized(table).ok()),
         pick,
         name,
         select_name: true,

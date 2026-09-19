@@ -198,6 +198,22 @@ pub struct StimulusEditorContext {
     /// Whether the project has authored any definition at all: with none,
     /// there is nothing to adopt and the section says so instead.
     pub library_is_empty: bool,
+    /// The table the adopted definition retains, so the preview of a
+    /// `PWL FILE` source whose named file is not reachable draws what the run
+    /// would read.
+    pub retained_table: Option<RetainedTableFile>,
+}
+
+/// A definition's retained table as a file the engine can open.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RetainedTableFile {
+    /// The data-file reference the adopted card carries. The retained copy
+    /// stands in for that file and no other: a draft that has been pointed
+    /// somewhere else is no longer the copy, and a run of it would not be
+    /// offered these bytes either.
+    pub reference: String,
+    /// Where the copy is.
+    pub path: std::path::PathBuf,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

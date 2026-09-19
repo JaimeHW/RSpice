@@ -27,6 +27,7 @@ pub struct HierarchySource<'a> {
     execution_plan: Option<ConfigurationExecutionPlan>,
     connectivity: Option<&'a crate::state::ConnectivityContract>,
     data_root: Option<std::path::PathBuf>,
+    stimulus_library: Option<&'a crate::state::StimulusLibrary>,
 }
 
 impl<'a> HierarchySource<'a> {
@@ -49,7 +50,27 @@ impl<'a> HierarchySource<'a> {
             execution_plan: None,
             connectivity: None,
             data_root: None,
+            stimulus_library: None,
         }
+    }
+
+    /// Bind the project's stimulus library, so a file-backed source whose named
+    /// table is not reachable runs from the copy its definition retains.
+    ///
+    /// Execution paths set it; an inspection-only caller that does not is told
+    /// about the missing file exactly as before.
+    pub fn with_stimulus_library(mut self, library: &'a crate::state::StimulusLibrary) -> Self {
+        self.stimulus_library = Some(library);
+        self
+    }
+
+    /// The table this source's definition retains, when it has adopted one that
+    /// does.
+    pub(super) fn retained_table(
+        &self,
+        component: &crate::state::Component,
+    ) -> Option<&'a crate::state::stimulus_library::definition::RetainedPwlFile> {
+        self.stimulus_library?.retained_pwl_table(component)
     }
 
     /// Bind the directory that project-relative data-file references resolve
@@ -125,6 +146,7 @@ impl<'a> HierarchySource<'a> {
             execution_plan: None,
             connectivity: None,
             data_root: None,
+            stimulus_library: None,
         }
     }
 
