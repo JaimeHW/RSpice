@@ -549,6 +549,13 @@ fn every_draft_field_moves_the_engine_facing_projection() {
             with_all_booleans(&body, true),
             with_all_booleans(&body, false),
         ];
+        // Bootstrap-only editors are active under this explicit estimator.
+        // Seed it directly instead of exhaustively trying unrelated modes.
+        if kind == AnalysisKind::MonteCarlo {
+            let mut bootstrap = body.clone();
+            bootstrap.insert("confidence_method_idx".into(), Value::from(1));
+            bodies.push(bootstrap);
+        }
         // A secondary logarithmic density needs three choices together:
         // nesting on, a logarithmic mode, and a positive start. The generic
         // one-sibling search cannot open that conjunction. Exercise valid
