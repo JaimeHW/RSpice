@@ -158,7 +158,30 @@ pub(crate) fn ships(path: &std::path::Path, test_only_roots: &[std::path::PathBu
             .any(|root| path == root.with_extension("rs") || path.starts_with(root))
 }
 
-/// Where the `#[cfg(test)] mod <name>;` children of `path` would live.
+/// An item's text with any leading `pub`, `pub(crate)` or `pub(in path)` taken
+/// off.
+///
+/// A fixture module several suites share is declared `pub(crate) mod`, and a
+/// scan that only knew the bare spelling read that file as shipped code.
+#[cfg(test)]
+fn without_visibility(item: &str) -> &str {
+    let Some(rest) = item.strip_prefix("pub") else {
+        return item;
+    };
+    if let Some(scoped) = rest.strip_prefix('(') {
+        return scoped
+            .split_once(')')
+            .map_or(item, |(_, after)| after.trim_start());
+    }
+    if rest.starts_with(char::is_whitespace) {
+        rest.trim_start()
+    } else {
+        item
+    }
+}
+
+/// Where the `#[cfg(test)] mod <name>;` children of `path` would live, whatever
+/// visibility they are declared with.
 #[cfg(test)]
 pub(crate) fn test_only_roots(path: &std::path::Path, source: &str) -> Vec<std::path::PathBuf> {
     const ATTRIBUTE: &str = "#[cfg(test)]";
@@ -176,7 +199,7 @@ pub(crate) fn test_only_roots(path: &std::path::Path, source: &str) -> Vec<std::
     source
         .match_indices(ATTRIBUTE)
         .filter_map(|(index, _)| {
-            let rest = source[index + ATTRIBUTE.len()..].trim_start();
+            let rest = without_visibility(source[index + ATTRIBUTE.len()..].trim_start());
             let declaration = rest.strip_prefix("mod ")?;
             let name = declaration.split(';').next()?.trim();
             (!name.is_empty()
@@ -244,6 +267,40 @@ mod tests {
     #[should_panic(expected = "no `#[cfg(test)] mod tests` block")]
     fn test_only_code_without_the_boundary_is_still_refused() {
         let _ = production_source("#[cfg(test)]\nfn fixture() {}\nfn shipped() {}\n");
+    }
+
+    /// A test-only module is test-only whatever visibility it is declared with.
+    /// The stimulus fixtures are `pub(crate) mod fixtures;` because three
+    /// suites share them, and the scan read that file as shipped code until it
+    /// learned the spelling.
+    #[test]
+    fn a_test_only_module_is_found_under_any_visibility() {
+        let parent = Path::new("src/state/stimulus_library.rs");
+        let expected = vec![PathBuf::from("src/state/stimulus_library/fixtures")];
+        for declaration in [
+            "#[cfg(test)]\nmod fixtures;\n",
+            "#[cfg(test)]\npub mod fixtures;\n",
+            "#[cfg(test)]\npub(crate) mod fixtures;\n",
+            "#[cfg(test)]\r\npub(in super::super) mod fixtures;\r\n",
+        ] {
+            assert_eq!(
+                test_only_roots(parent, declaration),
+                expected,
+                "{declaration:?}"
+            );
+        }
+        // A shipped module and a test-only item that is not a module are not
+        // roots, and neither is an identifier that merely starts with `pub`.
+        for declaration in [
+            "pub(crate) mod fixtures;\n",
+            "#[cfg(test)]\npub(crate) use fixtures::library;\n",
+            "#[cfg(test)]\npublished mod fixtures;\n",
+        ] {
+            assert!(
+                test_only_roots(parent, declaration).is_empty(),
+                "{declaration:?}"
+            );
+        }
     }
 
     /// Every shape a `#[cfg(test)]` item takes in this crate, and the one
