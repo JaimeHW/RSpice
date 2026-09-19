@@ -39,11 +39,12 @@ pub struct SParameterRun {
 impl Engine {
     /// Run one authored `.SP` card.
     ///
-    /// The card supplies the frequency grid and whether port noise is
-    /// requested; the deck's `portnum=` annotations supply the ports. Two-port
-    /// noise parameters that are not physical are a typed failure, not a
-    /// published placeholder: a noise figure that is present but meaningless
-    /// will be believed.
+    /// The card supplies the frequency grid, whether port noise is requested,
+    /// and — when the deck declares none — the reference planes themselves,
+    /// written `PORT<k>=(<n+>[,<n->[,<z0>]])`. Otherwise the deck's `portnum=`
+    /// annotations supply the ports. Two-port noise parameters that are not
+    /// physical are a typed failure, not a published placeholder: a noise
+    /// figure that is present but meaningless will be believed.
     pub fn run_sp_with_abort(
         &self,
         netlist: &Netlist,
@@ -56,6 +57,7 @@ impl Engine {
             start_freq,
             stop_freq,
             do_noise,
+            ports,
         } = card
         else {
             return Err(SimulationError::Netlist(
@@ -63,7 +65,17 @@ impl Engine {
             ));
         };
         let frequencies = card_frequency_grid(*variation, *points, *start_freq, *stop_freq, abort)?;
-        self.run_sp_over_grid_with_abort(netlist, &frequencies, *do_noise, abort)
+        let planes = ports
+            .iter()
+            .map(crate::analysis::s_param::Port::from)
+            .collect::<Vec<_>>();
+        self.run_sp_over_grid_with_default_ports_and_abort(
+            netlist,
+            &frequencies,
+            *do_noise,
+            &planes,
+            abort,
+        )
     }
 
     /// Run a scattering sweep over an explicit frequency grid.

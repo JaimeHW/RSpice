@@ -34,6 +34,20 @@ impl Port {
     }
 }
 
+/// A `.SP` card's analysis plane restated as the port annotation it stands
+/// for, so the card and the deck's own `portnum=` sources reach the scattering
+/// run through one type.
+impl From<&crate::netlist::SpCardPort> for Port {
+    fn from(port: &crate::netlist::SpCardPort) -> Self {
+        Self {
+            number: port.number,
+            node_pos: port.node_pos.clone(),
+            node_neg: port.node_neg.clone(),
+            z0: port.z0,
+        }
+    }
+}
+
 //=============================================================================
 // S-Matrix
 //=============================================================================

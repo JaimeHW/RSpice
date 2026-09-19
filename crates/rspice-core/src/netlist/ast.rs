@@ -2184,6 +2184,31 @@ pub enum LinAnalysis {
     AcOnly,
 }
 
+/// One analysis reference plane named on a `.SP` card.
+///
+/// An analysis port exists for the scattering run that names it and for
+/// nothing else. One executable deck carries every task's card, and a port is
+/// a voltage source standing behind a reference impedance, so stating one as a
+/// deck element would load every other analysis in the same deck. Naming it
+/// here instead keeps the plane inside the run that asked for it; the
+/// scattering runner realizes each entry as the `portnum=`/`z0=` annotation it
+/// is equivalent to, for the duration of that run only.
+///
+/// Numbers run `1..=N` without gaps and each appears once. `node_neg` is
+/// ground and `z0` is 50 ohms unless the card says otherwise; both nodes are
+/// upper-cased by the parser, as every other card's names are.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SpCardPort {
+    /// Port number, one-indexed and dense across the card.
+    pub number: usize,
+    /// Positive reference-plane node.
+    pub node_pos: String,
+    /// Negative reference-plane node; `0` unless the card names another.
+    pub node_neg: String,
+    /// Reference impedance in ohms: finite and strictly positive.
+    pub z0: Value,
+}
+
 /// Analysis command from netlist
 #[derive(Debug, Clone)]
 pub enum AnalysisCommand {
@@ -2221,7 +2246,8 @@ pub enum AnalysisCommand {
     /// basis in the engine.
     Hb { frequencies: Vec<Value> },
 
-    /// S-parameter analysis: `.SP DEC|LIN|OCT np fstart fstop [donoise]`
+    /// S-parameter analysis:
+    /// `.SP DEC|LIN|OCT np fstart fstop [donoise] [PORT<k>=(<n+>[,<n->[,<z0>]]) ...]`
     Sp {
         variation: FreqVariation,
         points: usize,
@@ -2231,6 +2257,12 @@ pub enum AnalysisCommand {
         /// parses and carries it so decks round-trip even though the CLI
         /// currently exports the S-matrix only.
         do_noise: bool,
+        /// Reference planes this run inserts, in port order.
+        ///
+        /// Empty on a deck whose ports are `portnum=` source annotations,
+        /// which is the other way of saying the same thing; a card that
+        /// states ports beside a circuit that declares them is refused.
+        ports: Vec<SpCardPort>,
     },
 
     /// Loop-stability analysis: .STB DEC|LIN|OCT np fstart fstop PROBE=vname
@@ -2837,6 +2869,7 @@ pub enum AnalysisCard {
     Pstb,
     Envelope,
     DcMatch,
+    Sp,
 }
 
 impl AnalysisCard {
@@ -2850,6 +2883,7 @@ impl AnalysisCard {
             Self::Pstb => ".PSTB",
             Self::Envelope => ".ENVELOPE",
             Self::DcMatch => ".DCMATCH",
+            Self::Sp => ".SP",
         }
     }
 }

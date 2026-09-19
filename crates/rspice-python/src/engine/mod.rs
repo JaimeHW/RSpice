@@ -508,7 +508,7 @@ impl PyEngine {
         frequencies: Vec<f64>,
         do_noise: bool,
     ) -> PyResult<PySParameterResult> {
-        self.sparameter_impl(py, netlist, frequencies, do_noise)
+        self.sparameter_impl(py, netlist, frequencies, do_noise, &[])
     }
 
     /// Run Tian double-injection loop-stability analysis.

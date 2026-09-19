@@ -358,6 +358,127 @@ fn an_authored_sp_card_publishes_the_shared_sp_and_port_noise_documents() {
     assert_eq!(port_noise.point_count(), noise.points.len());
 }
 
+/// A bare series resistor between two reference planes, whose scattering
+/// matrix is closed form for any pair of real reference impedances:
+///
+/// ```text
+/// S11 = (R + Z2 - Z1) / (R + Z1 + Z2)
+/// S22 = (R + Z1 - Z2) / (R + Z1 + Z2)
+/// S21 = S12 = 2 sqrt(Z1 Z2) / (R + Z1 + Z2)
+/// ```
+///
+/// Nothing in the deck is frequency dependent, so the same numbers must come
+/// back at every swept point.
+const SERIES_R: f64 = 50.0;
+
+fn series_resistor_deck(title: &str, body: &str, keywords: &str) -> String {
+    format!(
+        "{title}\n\
+         R1 p1 p2 {SERIES_R}\n\
+         {body}\
+         .SP LIN 2 1meg 2meg {keywords}\n\
+         .END\n"
+    )
+}
+
+fn sp_run(deck: &str) -> rspice_core::engine::SParameterRun {
+    let netlist = Netlist::parse(deck).expect("deck parses");
+    let sp = card(&netlist, |command| {
+        matches!(command, AnalysisCommand::Sp { .. })
+    });
+    Engine::new(SimulationConfig::default())
+        .run_sp_with_abort(&netlist, &sp, &NoAbort)
+        .expect(".SP runs")
+}
+
+#[test]
+fn a_series_resistor_between_card_ports_scatters_as_its_closed_form() {
+    for (keywords, z1, z2) in [
+        ("PORT1=(p1) PORT2=(p2)", 50.0_f64, 50.0_f64),
+        ("PORT1=(p1,0,50) PORT2=(p2,0,75)", 50.0, 75.0),
+    ] {
+        let run = sp_run(&series_resistor_deck(
+            "Series resistor between analysis ports",
+            "",
+            keywords,
+        ));
+        assert_eq!(
+            run.ports.len(),
+            2,
+            "the card's two planes are the run's two ports"
+        );
+        let total = SERIES_R + z1 + z2;
+        let expected = [
+            ((1, 1), (SERIES_R + z2 - z1) / total),
+            ((2, 2), (SERIES_R + z1 - z2) / total),
+            ((2, 1), 2.0 * (z1 * z2).sqrt() / total),
+            ((1, 2), 2.0 * (z1 * z2).sqrt() / total),
+        ];
+        assert!(
+            !run.scattering.data.is_empty(),
+            "the sweep published points"
+        );
+        for matrix in &run.scattering.data {
+            for ((row, column), want) in expected {
+                let got = matrix.get(row, column);
+                assert!(
+                    (got.re - want).abs() < 1e-12 && got.im.abs() < 1e-12,
+                    "S{row}{column} at {:e} Hz with Z0 = ({z1}, {z2}): got {got}, want {want}",
+                    matrix.frequency
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn card_ports_and_element_ports_give_the_same_scattering_matrix() {
+    // The same physical network, with the planes named on the card in one
+    // deck and annotated on port sources in the other. The card route is a
+    // second spelling of one analysis, not a second analysis, so the two
+    // agree to the bit rather than to a tolerance.
+    let from_card = sp_run(&series_resistor_deck(
+        "Series resistor between analysis ports",
+        "",
+        "PORT1=(p1) PORT2=(p2)",
+    ));
+    let from_elements = sp_run(&series_resistor_deck(
+        "Series resistor between element ports",
+        "V1 p1 0 AC 0 portnum=1 z0=50\nV2 p2 0 AC 0 portnum=2 z0=50\n",
+        "",
+    ));
+
+    assert_eq!(from_card.ports.len(), from_elements.ports.len());
+    for (card_port, element_port) in from_card.ports.iter().zip(&from_elements.ports) {
+        assert_eq!(card_port.number, element_port.number);
+        assert_eq!(card_port.node_pos, element_port.node_pos);
+        assert_eq!(card_port.node_neg, element_port.node_neg);
+        assert_eq!(card_port.z0, element_port.z0);
+    }
+    assert_eq!(
+        from_card.scattering.data.len(),
+        from_elements.scattering.data.len()
+    );
+    for (card_point, element_point) in from_card
+        .scattering
+        .data
+        .iter()
+        .zip(&from_elements.scattering.data)
+    {
+        assert_eq!(card_point.frequency, element_point.frequency);
+        for row in 1..=2 {
+            for column in 1..=2 {
+                assert_eq!(
+                    card_point.get(row, column),
+                    element_point.get(row, column),
+                    "S{row}{column} at {:e} Hz differs between the two spellings",
+                    card_point.frequency
+                );
+            }
+        }
+    }
+}
+
 #[test]
 fn a_stability_document_from_an_uncrossed_loop_records_the_absent_crossover() {
     // A single-pole loop below unity gain never crosses 0 dB, so its Tian

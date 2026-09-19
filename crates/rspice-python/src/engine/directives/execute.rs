@@ -222,6 +222,7 @@ pub(super) fn execute(
             start_freq,
             stop_freq,
             do_noise,
+            ports,
         } => {
             let frequencies = sweep_frequencies(
                 *variation,
@@ -230,8 +231,12 @@ pub(super) fn execute(
                 *stop_freq,
                 max_analysis_points(),
             )?;
+            let planes = ports
+                .iter()
+                .map(rspice_core::analysis::s_param::Port::from)
+                .collect::<Vec<_>>();
             out.s_parameters.push(identified(
-                py_engine.sparameter_impl(py, netlist, frequencies, *do_noise)?,
+                py_engine.sparameter_impl(py, netlist, frequencies, *do_noise, &planes)?,
                 context,
             ));
             out.records.push(PyAnalysisRecord::executed(

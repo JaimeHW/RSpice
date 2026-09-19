@@ -532,12 +532,17 @@ impl PyEngine {
         Ok(PyAcSensitivityResult::from_core(&result))
     }
 
+    /// `planes` are the reference planes an authored `.SP` card names; they
+    /// reach the same entry point every other surface uses, so a card that
+    /// states ports beside a circuit declaring them is refused here too rather
+    /// than silently ignored.
     pub(super) fn sparameter_impl(
         &self,
         py: Python<'_>,
         netlist: &PyNetlist,
         frequencies: Vec<f64>,
         do_noise: bool,
+        planes: &[rspice_core::analysis::s_param::Port],
     ) -> PyResult<PySParameterResult> {
         validate_frequencies(&frequencies)?;
         if frequencies.contains(&0.0) {
@@ -547,7 +552,13 @@ impl PyEngine {
         }
         let engine = self.engine_for_netlist(&netlist.inner);
         let run = run_interruptible(py, &self.active_runs, |abort| {
-            engine.run_sp_over_grid_with_abort(&netlist.inner, &frequencies, do_noise, abort)
+            engine.run_sp_over_grid_with_default_ports_and_abort(
+                &netlist.inner,
+                &frequencies,
+                do_noise,
+                planes,
+                abort,
+            )
         })?;
         Ok(PySParameterResult::from_run(&run))
     }
