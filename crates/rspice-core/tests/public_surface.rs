@@ -957,6 +957,24 @@ use rspice_core::analysis::harmonic_balance::{
 /// through no longer exists. Established by compiling the CLI, the Python and
 /// WASM bindings, the engine adapter and the conformance suite against its
 /// removal: no dependent named it.
+///
+/// +1 is `netlist::SpCardPort`, the reference plane a `.SP` card names. It is
+/// a second spelling of `analysis::s_param::Port` rather than that type
+/// itself because `netlist` sits below `analysis` in this crate's layer order
+/// (`tests/module_layering.rs`), and an AST that named an analysis type would
+/// invert it. The conversion between the two is a `From` impl in `analysis`,
+/// which reads downward and costs nothing here.
+///
+/// -1: `StbConfig::with_thresholds`, and with it the three fields it set —
+/// `min_gain_margin_db`, `min_phase_margin_deg` and `max_loop_gain_db`. They
+/// were written, defaulted and checked finite, and then read by nothing in
+/// any crate: the margins are always extracted and always reported, so no
+/// solve, no result and no projection ever consulted a threshold. A pass/fail
+/// margin is a specification about a result, which belongs to the layer that
+/// judges results, not to the configuration of the run that produces them.
+/// Established by `git grep` over `crates/` and by compiling the CLI, the
+/// Python and WASM bindings, the engine adapter and the conformance suite
+/// against the removal: no dependent named any of them.
 const MAX_PUBLIC_ITEMS: usize = 5071;
 
 /// How far under the ceiling the count may sit before the ceiling is
