@@ -1052,10 +1052,13 @@ fn encode_result_payload(
                 writer.u8(soa_violation_severity_tag(violation.severity));
             }
         }
-        // Tag 11, the next unused payload tag. Appended, never reused: these
-        // bytes identify every retained result already on disk.
+        // Tag 12: DC mismatch evidence holds 11. Appended, never reused: these
+        // bytes identify every retained result already on disk, and two
+        // payloads under one tag would let a spectrum and a contributor table
+        // with equal leading bytes digest alike
+        // (`every_typed_payload_digests_under_its_own_tag`).
         AnalysisResultPayload::FftSpectrum { spectrum } => {
-            writer.u8(11);
+            writer.u8(12);
             encode_fft_spectrum_evidence(writer, spectrum);
         }
         AnalysisResultPayload::TransientEvents {
