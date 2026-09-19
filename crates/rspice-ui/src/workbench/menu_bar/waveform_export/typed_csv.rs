@@ -24,9 +24,56 @@ pub(super) fn prepare_typed_result_csv(
     match payload {
         // DC exports its sampled curves through the ordinary waveform CSV path.
         AnalysisResultPayload::DcSweep { .. } => None,
-        // Published by the export commit that follows; retaining the payload
-        // came first so there is something to export.
-        AnalysisResultPayload::DcMismatch { .. } => None,
+        // One row per retained contributor, with the run's own facts repeated
+        // in trailing columns: a contributor table read without the spread it
+        // divides, or without the limits that trimmed it, says nothing. The
+        // signs are kept — a negative share reduces the variance — and every
+        // number is exact, because this file is what a reader takes away.
+        AnalysisResultPayload::DcMismatch { evidence } => {
+            let cumulative = evidence.cumulative_shares();
+            let output = csv_text(&evidence.output);
+            let unit = csv_text(&evidence.output_unit);
+            let mut contents = String::from(
+                "rank,instance,parameter,scope,sigma_parameter,sensitivity,contribution,share,\
+                 cumulative_share,output,output_unit,nominal_value,sigma_total,sigma_mismatch,\
+                 sigma_process,sigma_multiplier,quoted_sigma,evaluated_contributors,\
+                 applied_correlations_mismatch,applied_correlations_process\n",
+            );
+            for (rank, (row, running)) in evidence.contributors.iter().zip(&cumulative).enumerate()
+            {
+                contents.push_str(&format!(
+                    "{},{},{},{},{:.17e},{:.17e},{:.17e},{:.17e},{:.17e},{output},{unit},\
+                     {:.17e},{:.17e},{:.17e},{:.17e},{:.17e},{:.17e},{},{},{}\n",
+                    rank + 1,
+                    csv_text(&row.instance),
+                    csv_text(&row.parameter),
+                    row.scope.tag(),
+                    row.sigma_parameter,
+                    row.sensitivity,
+                    row.contribution,
+                    row.share,
+                    running,
+                    evidence.nominal_value,
+                    evidence.sigma_total,
+                    evidence.sigma_mismatch,
+                    evidence.sigma_process,
+                    evidence.sigma_multiplier,
+                    evidence.quoted_sigma(),
+                    evidence.evaluated_contributors,
+                    evidence.applied_correlations_mismatch,
+                    evidence.applied_correlations_process,
+                ));
+            }
+            Some(PreparedTypedResultCsv {
+                default_name: "dc-mismatch.csv",
+                contents,
+                detail: format!(
+                    "{} of {} exact DC mismatch contributors",
+                    evidence.retained_contributors(),
+                    evidence.evaluated_contributors
+                ),
+            })
+        }
         AnalysisResultPayload::OperatingPoint {
             temperature_mode,
             temperature_celsius,

@@ -2470,3 +2470,4 @@ fn typed_pstb_table_summary_preserves_complete_modes_and_global_evidence() {
 }
 
 mod app_resolution;
+mod contribution;

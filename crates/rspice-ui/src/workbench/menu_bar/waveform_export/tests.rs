@@ -2296,3 +2296,85 @@ fn every_analysis_type_pins_the_coordinate_identity_it_exports() {
         "AnalysisType has a variant this table does not pin; add its row and this count",
     );
 }
+
+/// One exact row per retained contributor, with the run's facts repeated.
+///
+/// The trailing columns are not redundancy: a contributor table taken out of
+/// the studio and read without the spread it divides, or without the limits
+/// that trimmed it, cannot be interpreted at all. Signs are kept, because a
+/// negative share is a variable that reduces the variance.
+#[test]
+fn a_dc_mismatch_result_exports_one_exact_row_per_contributor() {
+    use crate::state::{
+        DcMismatchContributorEvidence, DcMismatchEvidence, DcMismatchScopeEvidence,
+    };
+
+    let evidence = DcMismatchEvidence {
+        output: "V(OUT,IN)".to_owned(),
+        output_unit: "V".to_owned(),
+        nominal_value: 0.5,
+        sigma_multiplier: 3.0,
+        sigma_total: 2.0e-3,
+        sigma_mismatch: 2.0e-3,
+        sigma_process: 0.0,
+        include_mismatch: true,
+        include_process: false,
+        contributor_limit: 2,
+        threshold: 0.0,
+        normalized_contributions: true,
+        applied_correlations_mismatch: 1,
+        applied_correlations_process: 0,
+        evaluated_contributors: 6,
+        contributors: vec![
+            DcMismatchContributorEvidence {
+                instance: "R1".to_owned(),
+                parameter: "R1V".to_owned(),
+                scope: DcMismatchScopeEvidence::Mismatch,
+                sigma_parameter: 10.0,
+                sensitivity: 2.0e-4,
+                contribution: 2.0e-3,
+                share: 0.75,
+            },
+            DcMismatchContributorEvidence {
+                instance: "R2".to_owned(),
+                parameter: "R2V".to_owned(),
+                scope: DcMismatchScopeEvidence::Mismatch,
+                sigma_parameter: 10.0,
+                sensitivity: -1.0e-4,
+                contribution: -1.0e-3,
+                share: -0.25,
+            },
+        ],
+    };
+    let analysis = AnalysisResult::new(1, AnalysisType::DcMismatch, "DCMATCH").with_result_payload(
+        AnalysisResultPayload::DcMismatch {
+            evidence: std::sync::Arc::new(evidence),
+        },
+    );
+    let csv = prepare_typed_result_csv(&analysis).expect("a DC mismatch result exports a table");
+    assert_eq!(csv.default_name, "dc-mismatch.csv");
+    assert_eq!(csv.detail, "2 of 6 exact DC mismatch contributors");
+
+    let rows: Vec<Vec<&str>> = csv
+        .contents
+        .lines()
+        .map(|line| line.split(',').collect())
+        .collect();
+    assert_eq!(rows.len(), 3, "a header and one row per contributor");
+    assert_eq!(rows[0][0], "rank");
+    assert_eq!(rows[0][8], "cumulative_share");
+    assert_eq!(rows[0][19], "applied_correlations_process");
+    assert!(rows.iter().all(|row| row.len() == 20), "{rows:?}");
+
+    assert_eq!(&rows[1][0..4], ["1", "R1", "R1V", "mismatch"]);
+    assert_eq!(rows[1][7].parse::<f64>().unwrap(), 0.75);
+    assert_eq!(rows[1][8].parse::<f64>().unwrap(), 0.75);
+    assert_eq!(rows[1][16].parse::<f64>().unwrap(), 6.0e-3);
+    assert_eq!(rows[1][17], "6");
+    assert_eq!(rows[1][18], "1");
+
+    // The sign survives, and the cumulative column is the signed running sum.
+    assert_eq!(rows[2][7].parse::<f64>().unwrap(), -0.25);
+    assert_eq!(rows[2][6].parse::<f64>().unwrap(), -1.0e-3);
+    assert!((rows[2][8].parse::<f64>().unwrap() - 0.5).abs() < 1.0e-12);
+}

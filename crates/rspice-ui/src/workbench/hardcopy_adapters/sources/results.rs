@@ -1149,31 +1149,98 @@ pub(super) fn semantic_result_summary(
                 ],
             });
         }
-        ResultViewer::Contribution => {
-            let Some(AnalysisResultPayload::Sensitivity { output, rows, .. }) =
-                &analysis.result_payload
-            else {
-                return Err(HardcopySourceError::MissingViewerEvidence("sensitivity"));
-            };
-            tables.push(SemanticTable {
-                title: format!("Sensitivity of {output}"),
-                columns: vec![
-                    "Parameter".to_owned(),
-                    "Raw".to_owned(),
-                    "Normalized".to_owned(),
-                ],
-                rows: rows
-                    .iter()
-                    .map(|row| {
+        // The sheet serves two families, so the print does too — and the
+        // refusal names the one that is actually missing rather than blaming
+        // the sensitivity payload for a DC mismatch result's absence.
+        ResultViewer::Contribution => match &analysis.result_payload {
+            Some(AnalysisResultPayload::Sensitivity { output, rows, .. }) => {
+                tables.push(SemanticTable {
+                    title: format!("Sensitivity of {output}"),
+                    columns: vec![
+                        "Parameter".to_owned(),
+                        "Raw".to_owned(),
+                        "Normalized".to_owned(),
+                    ],
+                    rows: rows
+                        .iter()
+                        .map(|row| {
+                            vec![
+                                row.parameter.clone(),
+                                sensitivity_number(row.raw),
+                                sensitivity_number(row.normalized),
+                            ]
+                        })
+                        .collect(),
+                });
+            }
+            Some(AnalysisResultPayload::DcMismatch { evidence }) => {
+                // The spread first, then the ranked list: a contributor table
+                // read without the total it divides says nothing.
+                tables.push(SemanticTable {
+                    title: format!("DC mismatch of {}", evidence.output),
+                    columns: vec!["Quantity".to_owned(), "Value".to_owned()],
+                    rows: vec![
+                        vec!["Nominal".to_owned(), exact_number(evidence.nominal_value)],
+                        vec!["Sigma total".to_owned(), exact_number(evidence.sigma_total)],
                         vec![
-                            row.parameter.clone(),
-                            sensitivity_number(row.raw),
-                            sensitivity_number(row.normalized),
-                        ]
-                    })
-                    .collect(),
-            });
-        }
+                            "Sigma mismatch".to_owned(),
+                            exact_number(evidence.sigma_mismatch),
+                        ],
+                        vec![
+                            "Sigma process".to_owned(),
+                            exact_number(evidence.sigma_process),
+                        ],
+                        vec![
+                            format!("{} sigma", evidence.sigma_multiplier),
+                            exact_number(evidence.quoted_sigma()),
+                        ],
+                        vec![
+                            "Retained".to_owned(),
+                            format!(
+                                "{} of {} evaluated",
+                                evidence.retained_contributors(),
+                                evidence.evaluated_contributors
+                            ),
+                        ],
+                    ],
+                });
+                let cumulative = evidence.cumulative_shares();
+                tables.push(SemanticTable {
+                    title: "Contributors".to_owned(),
+                    columns: vec![
+                        "Rank".to_owned(),
+                        "Instance".to_owned(),
+                        "Parameter".to_owned(),
+                        "Scope".to_owned(),
+                        "Contribution".to_owned(),
+                        "Share".to_owned(),
+                        "Cumulative".to_owned(),
+                    ],
+                    rows: evidence
+                        .contributors
+                        .iter()
+                        .zip(&cumulative)
+                        .enumerate()
+                        .map(|(rank, (row, running))| {
+                            vec![
+                                (rank + 1).to_string(),
+                                row.instance.clone(),
+                                row.parameter.clone(),
+                                row.scope.tag().to_owned(),
+                                exact_number(row.contribution),
+                                exact_number(row.share),
+                                exact_number(*running),
+                            ]
+                        })
+                        .collect(),
+                });
+            }
+            _ => {
+                return Err(HardcopySourceError::MissingViewerEvidence(
+                    "sensitivity or DC mismatch",
+                ));
+            }
+        },
         ResultViewer::TransferFunction => {
             let Some(AnalysisResultPayload::TransferFunction {
                 input_source,
