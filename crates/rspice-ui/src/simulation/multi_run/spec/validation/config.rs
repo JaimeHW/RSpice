@@ -150,6 +150,7 @@ pub(super) fn validate(spec: &AnalysisSpec) -> Result<(), String> {
             output_var,
             ac_mode,
             frequency,
+            filter,
         } => {
             if output_var.trim().is_empty() {
                 return Err("Sensitivity output_var is required".to_string());
@@ -163,7 +164,11 @@ pub(super) fn validate(spec: &AnalysisSpec) -> Result<(), String> {
             } else if frequency.is_some() {
                 return Err("Sensitivity frequency is only valid in AC mode".to_string());
             }
-            Ok(())
+            // The filter reaches the `.SENS` card as written, so a token the
+            // card would read as its own keyword, or a character its grammar
+            // has no place for, is refused here rather than silently changing
+            // the analysis the engine runs.
+            crate::simulation::config::validate_sensitivity_filter(filter)
         }
         AnalysisSpec::PoleZero {
             input_node,

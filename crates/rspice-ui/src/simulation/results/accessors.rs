@@ -156,18 +156,10 @@ impl SimulationResult {
                             )
                         ))
             }
-            SimulationResult::Sensitivity {
-                output,
-                sensitivities,
-                normalized,
-                ..
-            } => {
-                !output.trim().is_empty()
-                    && sensitivities.len() == normalized.len()
-                    && sensitivities
-                        .keys()
-                        .all(|parameter| normalized.contains_key(parameter))
-            }
+            // The engine's own refusal already rejects a filter that selected
+            // nothing, so what makes a study empty here is having no probe to
+            // report against.
+            SimulationResult::SensitivityStudy { evidence } => !evidence.output.trim().is_empty(),
             // A spread is an answer even when it is zero and even when no
             // contributor cleared the card's threshold: what makes this
             // result empty is having no probe to report against.
@@ -221,7 +213,7 @@ impl SimulationResult {
             SimulationResult::HarmonicBalance { .. } => "Harmonic Balance",
             SimulationResult::Noise { .. } => "Noise Analysis",
             SimulationResult::PoleZero { .. } => "Pole-Zero",
-            SimulationResult::Sensitivity { .. } => "Sensitivity",
+            SimulationResult::SensitivityStudy { .. } => "Sensitivity",
             SimulationResult::DcMismatch { .. } => "DC Mismatch",
             SimulationResult::TransferFunction { .. } => "Transfer Function",
             SimulationResult::MonteCarlo { .. } => "Monte Carlo",

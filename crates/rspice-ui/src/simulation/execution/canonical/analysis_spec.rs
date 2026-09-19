@@ -297,10 +297,20 @@ pub(super) fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &Analysis
             output_var,
             ac_mode,
             frequency,
+            filter,
         } => {
             writer.string(output_var);
             writer.bool(*ac_mode);
             writer.option(frequency.as_ref(), |w, v| w.f64(*v));
+            // The filter is appended only when it differs from what a plan
+            // saved before filters existed computed. `PARAM:*` is that value,
+            // not the empty string: a plan restored from an older project
+            // keeps its identity because it keeps its computation, and an
+            // emptied filter is a different run that must digest differently.
+            // Never `writer.option`: an absent tail is the old encoding.
+            if filter != crate::simulation::config::DESIGN_PARAMETERS_FILTER {
+                writer.string(filter);
+            }
         }
         AnalysisSpec::PoleZero {
             input_node,

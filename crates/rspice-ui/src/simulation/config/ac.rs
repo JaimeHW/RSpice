@@ -24,7 +24,12 @@ impl AcSweepType {
         }
     }
 
-    pub(super) fn freq_variation(&self) -> rspice_core::netlist::FreqVariation {
+    /// The engine's own sweep kind, which is what its grid functions take.
+    ///
+    /// Crate-visible rather than config-visible: the sensitivity bridge
+    /// builds its grid with the same public engine function the command line
+    /// uses, and it needs the same spelling of the variation to do it.
+    pub(crate) fn freq_variation(&self) -> rspice_core::netlist::FreqVariation {
         match self {
             AcSweepType::Decade => rspice_core::netlist::FreqVariation::Dec,
             AcSweepType::Octave => rspice_core::netlist::FreqVariation::Oct,

@@ -396,7 +396,8 @@ impl AnalysisKind {
             }
             Self::PoleZero => "Pole and zero extraction from the linearized state-space model.",
             Self::Sensitivity => {
-                "Adjoint influence of one output on every parameter the circuit exposes."
+                "Derivatives of one output with respect to device, model and design \
+                 parameters, at the operating point or across an AC sweep."
             }
             Self::Stb => "Loop gain, gain margin, phase margin, and instability detection.",
             Self::TransferFunction => "DC transfer gain plus input and output resistance.",

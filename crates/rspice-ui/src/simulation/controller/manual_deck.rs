@@ -1164,8 +1164,8 @@ fn command_to_queue_item(
             output_node,
             reference_node,
             output_is_current,
+            filters,
             ac_sweep,
-            ..
         } => {
             let output_var = if *output_is_current {
                 format!("I({output_node})")
@@ -1176,10 +1176,15 @@ fn command_to_queue_item(
                 }
             };
             let frequency = ac_sweep.as_ref().map(|sweep| sweep.start_freq);
+            // The card's own filter list reaches the run. A bare `.sens
+            // V(out)` therefore means here exactly what it means to the
+            // engine: every device and model parameter, no design parameter.
+            let filter = filters.join(" ");
             let spec = AnalysisSpec::Sensitivity {
                 output_var: output_var.clone(),
                 ac_mode: ac_sweep.is_some(),
                 frequency,
+                filter: filter.clone(),
             };
             Ok(QueuedAnalysis {
                 numeric_override: None,
@@ -1187,6 +1192,8 @@ fn command_to_queue_item(
                     output_var,
                     ac_mode: ac_sweep.is_some(),
                     frequency,
+                    filter,
+                    sweep: None,
                 })),
                 analysis_line: ".sens".to_string(),
                 spec,

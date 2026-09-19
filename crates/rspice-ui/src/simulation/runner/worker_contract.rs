@@ -822,12 +822,8 @@ pub(crate) enum WorkerSimulationResult {
         #[serde(default)]
         gain: Option<f64>,
     },
-    Sensitivity {
-        output: String,
-        ac_mode: bool,
-        frequency_hz: Option<f64>,
-        sensitivities: HashMap<String, rspice_core::analysis::sensitivity::SensitivityValue<f64>>,
-        normalized: HashMap<String, rspice_core::analysis::sensitivity::SensitivityValue<f64>>,
+    SensitivityStudy {
+        evidence: crate::state::SensitivityStudyEvidence,
     },
     /// Linearized DC mismatch spread and its ranked contributors.
     ///
@@ -1390,19 +1386,22 @@ impl WorkerSimulationResult {
                 complex_pair_payload_bytes(zeros.len()),
                 f64_payload_bytes(1),
             ]),
-            WorkerSimulationResult::Sensitivity {
-                frequency_hz,
-                sensitivities,
-                normalized,
-                ..
-            } => sum_payload_bytes([
-                f64_payload_bytes(usize::from(frequency_hz.is_some())),
-                sensitivities.len().saturating_mul(std::mem::size_of::<
-                    rspice_core::analysis::sensitivity::SensitivityValue<f64>,
-                >()),
-                normalized.len().saturating_mul(std::mem::size_of::<
-                    rspice_core::analysis::sensitivity::SensitivityValue<f64>,
-                >()),
+            WorkerSimulationResult::SensitivityStudy { evidence } => sum_payload_bytes([
+                // The grid, and its nominal output as a complex pair.
+                f64_payload_bytes(evidence.point_count().saturating_mul(3)),
+                evidence
+                    .rows
+                    .iter()
+                    .map(|row| {
+                        row.raw
+                            .len()
+                            .saturating_add(row.normalized.len())
+                            .saturating_add(row.phase.len())
+                            .saturating_mul(std::mem::size_of::<
+                                rspice_core::analysis::sensitivity::SensitivityValue<f64>,
+                            >())
+                    })
+                    .fold(0_usize, usize::saturating_add),
             ]),
             WorkerSimulationResult::DcMismatch { evidence } => sum_payload_bytes([
                 // Five sigmas, the nominal value and the multiplier.
@@ -1504,8 +1503,11 @@ impl WorkerSimulationResult {
 /// 22: live samples carry sequenced current-impulse suffixes and loss accounting.
 /// 23: a transient carries the spectra of the `.fft` cards it evaluated, and a
 ///     recorded FFT result is its own response variant.
+/// 24: a sensitivity result is one study — its filter, every frequency it
+///     solved, and a raw, normalized and phase column per variable — in place
+///     of two maps read at a single point.
 /// Earlier workers silently omit numerical quality or current observations.
-const WORKER_RESPONSE_TRANSPORT_PROTOCOL: u8 = 23;
+const WORKER_RESPONSE_TRANSPORT_PROTOCOL: u8 = 24;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct WorkerResponseTransport {
@@ -1691,18 +1693,8 @@ impl TryFrom<SimulationResult> for WorkerSimulationResult {
                 zero_evidence,
                 gain,
             }),
-            SimulationResult::Sensitivity {
-                output,
-                ac_mode,
-                frequency_hz,
-                sensitivities,
-                normalized,
-            } => Ok(Self::Sensitivity {
-                output,
-                ac_mode,
-                frequency_hz,
-                sensitivities,
-                normalized,
+            SimulationResult::SensitivityStudy { evidence } => Ok(Self::SensitivityStudy {
+                evidence: std::sync::Arc::unwrap_or_clone(evidence),
             }),
             SimulationResult::DcMismatch { evidence } => Ok(Self::DcMismatch {
                 evidence: (*evidence).clone(),
@@ -2006,18 +1998,8 @@ impl From<WorkerSimulationResult> for SimulationResult {
                 zero_evidence,
                 gain,
             },
-            WorkerSimulationResult::Sensitivity {
-                output,
-                ac_mode,
-                frequency_hz,
-                sensitivities,
-                normalized,
-            } => Self::Sensitivity {
-                output,
-                ac_mode,
-                frequency_hz,
-                sensitivities,
-                normalized,
+            WorkerSimulationResult::SensitivityStudy { evidence } => Self::SensitivityStudy {
+                evidence: std::sync::Arc::new(evidence),
             },
             WorkerSimulationResult::DcMismatch { evidence } => Self::DcMismatch {
                 evidence: std::sync::Arc::new(evidence),

@@ -1725,6 +1725,7 @@ R2 out 0 1k\n\
                 output_var: "V(out)".to_string(),
                 ac_mode: false,
                 frequency: None,
+                filter: String::new(),
             },
         ]
     }

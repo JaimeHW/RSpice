@@ -130,6 +130,8 @@ pub(crate) enum WorkerAnalysisSpec {
         output_var: String,
         ac_mode: bool,
         frequency: Option<f64>,
+        #[serde(default = "crate::simulation::config::design_parameters_filter")]
+        filter: String,
     },
     PoleZero {
         input_node: String,

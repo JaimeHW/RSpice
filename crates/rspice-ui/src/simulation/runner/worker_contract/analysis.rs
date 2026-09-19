@@ -749,6 +749,8 @@ pub(crate) enum WorkerAnalysisConfig {
         output_var: String,
         ac_mode: bool,
         frequency: Option<f64>,
+        #[serde(default = "crate::simulation::config::design_parameters_filter")]
+        filter: String,
     },
 }
 
@@ -806,6 +808,7 @@ impl From<&AnalysisConfig> for WorkerAnalysisConfig {
                 output_var: config.output_var.clone(),
                 ac_mode: config.ac_mode,
                 frequency: config.frequency,
+                filter: config.filter.clone(),
             },
         }
     }
@@ -907,10 +910,13 @@ impl From<WorkerAnalysisConfig> for AnalysisConfig {
                 output_var,
                 ac_mode,
                 frequency,
+                filter,
             } => Self::Sensitivity(SensitivityConfig {
                 output_var,
                 ac_mode,
                 frequency,
+                filter,
+                sweep: None,
             }),
         }
     }
@@ -1036,10 +1042,12 @@ impl TryFrom<&AnalysisSpec> for WorkerAnalysisSpec {
                 output_var,
                 ac_mode,
                 frequency,
+                filter,
             } => Ok(Self::Sensitivity {
                 output_var: output_var.clone(),
                 ac_mode: *ac_mode,
                 frequency: *frequency,
+                filter: filter.clone(),
             }),
             AnalysisSpec::PoleZero {
                 input_node,
@@ -1423,10 +1431,12 @@ impl From<WorkerAnalysisSpec> for AnalysisSpec {
                 output_var,
                 ac_mode,
                 frequency,
+                filter,
             } => Self::Sensitivity {
                 output_var,
                 ac_mode,
                 frequency,
+                filter,
             },
             WorkerAnalysisSpec::PoleZero {
                 input_node,
