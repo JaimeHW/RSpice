@@ -479,11 +479,11 @@ fn announced(node: &Node) -> String {
 const PRESSED_PER_SURFACE: &[(&str, usize)] = &[
     ("Analyses/Transient", 47),
     ("Analyses/Ac", 3),
-    ("Analyses/DcSweep", 4),
+    ("Analyses/DcSweep", 7),
     ("Analyses/Noise", 9),
     ("Analyses/Stb", 3),
     ("Analyses/Pss", 13),
-    ("Analyses/Temperature", 8),
+    ("Analyses/Temperature", 7),
     ("Analyses/Corner", 9),
     ("Excitations", 2),
     ("Variables", 2),
@@ -503,7 +503,7 @@ const PRESSED_PER_SURFACE: &[(&str, usize)] = &[
     ("analysis catalogue · Solver", 0),
     ("analysis catalogue · Save", 0),
     ("analysis catalogue · Results workspace", 0),
-    ("analysis options · Operating point", 12),
+    ("analysis options · Operating point", 11),
     ("plan manager", 12),
     ("rename analysis", 4),
     ("run points", 12),
@@ -542,7 +542,11 @@ const PRESSED_PER_SURFACE: &[(&str, usize)] = &[
 /// And the catalogue gained the frequency-table AC kind: one more row to add.
 /// Then DC mismatch became addable, which is one more again.
 /// And the FFT spectrum kind, for the same one row.
-const PRESSED_FLOOR: usize = 294;
+/// The typed DC-axis editor adds a sweep-mode selector. Its new grid position
+/// also makes DC the first publisher of two shared option widgets previously
+/// first seen under Temperature and Operating point. Their forms are unchanged;
+/// the reviewed enumeration grows by one distinct control overall (295).
+const PRESSED_FLOOR: usize = 295;
 
 /// Controls that are wired to nothing.
 ///
