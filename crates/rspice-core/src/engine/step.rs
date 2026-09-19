@@ -1863,17 +1863,24 @@ impl Engine {
                 multiplicity,
                 ..
             } => {
-                if matches_param(&["M", "MULT"]) {
-                    multiplicity.value = value;
-                    multiplicity.value_expr = None;
-                    multiplicity.given = true;
-                } else if matches_param(&["GM", "TRANSCONDUCTANCE", "VALUE"]) {
-                    *transconductance = value;
-                    *transconductance_expr = None;
-                } else {
-                    return Err(SimulationError::Circuit(
-                        "Unsupported VCCS step parameter; use GM or M".to_string(),
-                    ));
+                // An unnamed target names the device's value, which for a VCCS
+                // is GM -- the same reading `canonical_device_parameter` gives
+                // the `.DC` and `alter` routes. `M` remains reachable by name.
+                match param_upper.as_deref() {
+                    None | Some("GM") | Some("TRANSCONDUCTANCE") | Some("VALUE") => {
+                        *transconductance = value;
+                        *transconductance_expr = None;
+                    }
+                    Some("M") | Some("MULT") => {
+                        multiplicity.value = value;
+                        multiplicity.value_expr = None;
+                        multiplicity.given = true;
+                    }
+                    Some(_) => {
+                        return Err(SimulationError::Circuit(
+                            "Unsupported VCCS step parameter; use GM or M".to_string(),
+                        ));
+                    }
                 }
                 Ok(())
             }
@@ -1903,19 +1910,33 @@ impl Engine {
                 multiplicity,
                 ..
             } => {
-                if matches_param(&["M", "MULT"]) {
-                    multiplicity.value = value;
-                    multiplicity.value_expr = None;
-                    multiplicity.given = true;
-                } else if matches_param(&["TC", "TC1"]) {
-                    *tc1 = value;
-                } else if matches_param(&["TC2"]) {
-                    *tc2 = value;
-                } else {
-                    return Err(SimulationError::Circuit(
-                        "Unsupported behavioral-source step parameter; use M, TC1, or TC2"
-                            .to_string(),
-                    ));
+                // A behavioral source's value is the expression itself: the
+                // element stores no number for this field
+                // (`ElementKind::BehavioralVoltage { expression: String, .. }`
+                // in `netlist::ast`), so overriding it would mean re-spelling
+                // the swept number as deck text and parsing it back. That
+                // round trip belongs to no sweep, so the target is refused by
+                // name rather than silently landing on a neighbouring field.
+                match param_upper.as_deref() {
+                    Some("M") | Some("MULT") => {
+                        multiplicity.value = value;
+                        multiplicity.value_expr = None;
+                        multiplicity.given = true;
+                    }
+                    Some("TC") | Some("TC1") => *tc1 = value,
+                    Some("TC2") => *tc2 = value,
+                    None | Some("VALUE") => {
+                        return Err(SimulationError::Circuit(
+                            "A behavioral source's value is an expression, not a number this element stores; sweep M, TC1 or TC2, or sweep a parameter the expression reads"
+                                .to_string(),
+                        ));
+                    }
+                    Some(_) => {
+                        return Err(SimulationError::Circuit(
+                            "Unsupported behavioral-source step parameter; use M, TC1, or TC2"
+                                .to_string(),
+                        ));
+                    }
                 }
                 Ok(())
             }
