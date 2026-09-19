@@ -37,7 +37,7 @@ use super::{
     PoleZeroTransferType, PrintDelimiter, PspiceChebyshevKind, PspiceUTiming, PspiceUTimingMode,
     PssCard, PstbCard, PxfCard, RemoveUnusedDeviceType, RemoveUnusedPolicy, SaveSet, SaveSignal,
     SensitivityAcSweep, SimulationOptions, SourceMultiplicity, SourceRfPort, SourceSpec,
-    SpectreStatisticsPlan, StartupDiagnosticCode, StartupDirectiveDisposition,
+    SpCardPort, SpectreStatisticsPlan, StartupDiagnosticCode, StartupDirectiveDisposition,
     StartupDirectiveEntry, StartupDirectiveKind, StartupDirectiveRecord, StartupDirectiveScope,
     StatisticalParamMode, StepCommand, StepSweep, StepTarget, SubcircuitDef, SwitchState,
     TransientNoiseConfig, VerilogAInclude, XyceAddResistorMode, XyceAddResistorSpec,
