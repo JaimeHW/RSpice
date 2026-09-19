@@ -54,13 +54,14 @@ pub struct SParameterRunConfig {
 
 impl SParameterRunConfig {
     fn validate(&self) -> Result<(), String> {
-        if !self.start_freq.is_finite() || self.start_freq <= 0.0 {
-            return Err("S-parameter start frequency must be positive".to_string());
+        if !self.start_freq.is_finite()
+            || self.start_freq < 0.0
+            || (self.start_freq == 0.0 && (self.sweep != SParameterSweep::Linear || self.do_noise))
+        {
+            return Err("Start frequency must be nonnegative for LIN, and positive for logarithmic sweeps or noise".into());
         }
-        if !self.stop_freq.is_finite() || self.stop_freq <= self.start_freq {
-            return Err(
-                "S-parameter stop frequency must be greater than start frequency".to_string(),
-            );
+        if !self.stop_freq.is_finite() || self.stop_freq < self.start_freq {
+            return Err("Stop frequency must be finite and at least the start frequency".into());
         }
         if self.points_per_unit == 0 {
             return Err("S-parameter points per unit must be greater than zero".to_string());

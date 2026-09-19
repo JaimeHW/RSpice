@@ -1585,6 +1585,107 @@ R2 out 0 1k\n\
     /// Analyses page displays, because the axis reaches the engine only
     /// through them.
     #[test]
+    fn sp_single_point_and_zero_linear_grids_survive_configuration_and_solve() {
+        use crate::simulation::dialog::sp::SpSweepType;
+        use crate::simulation::dialog::{SpConfig, SpDialogState};
+        use crate::simulation::multi_run::FrequencySweep;
+        for (kind, sweep, start, stop, count, expected, noise) in [
+            (
+                SpSweepType::Linear,
+                FrequencySweep::Linear,
+                0.0,
+                0.0,
+                1,
+                vec![0.0],
+                false,
+            ),
+            (
+                SpSweepType::Linear,
+                FrequencySweep::Linear,
+                0.0,
+                1000.0,
+                3,
+                vec![0.0, 500.0, 1000.0],
+                false,
+            ),
+            (
+                SpSweepType::Decade,
+                FrequencySweep::Decade,
+                1000.0,
+                1000.0,
+                10,
+                vec![1000.0],
+                false,
+            ),
+            (
+                SpSweepType::Octave,
+                FrequencySweep::Octave,
+                1000.0,
+                1000.0,
+                10,
+                vec![1000.0],
+                true,
+            ),
+        ] {
+            let config = SpConfig {
+                sweep_type: kind,
+                start_freq: start,
+                stop_freq: stop,
+                num_points: count,
+                do_noise: noise,
+                ports: Vec::new(),
+                ..Default::default()
+            };
+            config.validate().unwrap();
+            SpDialogState::from_config(&config).to_config(None).unwrap();
+            let result = run_spec_request(
+                &EngineBridge::new(),
+                AnalysisSpec::SParameter {
+                    start_freq: start,
+                    stop_freq: stop,
+                    points_per_unit: count as usize,
+                    sweep,
+                    z0: 50.0,
+                    ports: Vec::new(),
+                    do_noise: noise,
+                },
+                SpecExecutionOptions::default(),
+                "SP grid\nP1 in 0 PORT=1 Z0=50\nP2 out 0 PORT=2 Z0=50\nR1 in out 50\n.end\n",
+                None,
+                &ResolvedExecutionDependencies::default(),
+                &rspice_core::NoAbort,
+            )
+            .unwrap();
+            let SimulationResult::Ac {
+                frequencies,
+                waveforms,
+                ..
+            } = result
+            else {
+                panic!("expected SP")
+            };
+            assert_eq!(frequencies, expected);
+            let reflection = &waveforms["S11"];
+            assert!(
+                reflection
+                    .y_values
+                    .iter()
+                    .all(|value| (value - 1.0 / 3.0).abs() < 1e-10)
+            );
+        }
+        let config = SpConfig {
+            sweep_type: SpSweepType::Linear,
+            start_freq: 0.0,
+            do_noise: true,
+            ..Default::default()
+        };
+        assert!(
+            config.validate().is_err(),
+            "noise never evaluates at zero Hz"
+        );
+    }
+
+    #[test]
     fn an_explicit_frequency_table_reaches_the_ac_solve() {
         const RESISTANCE: f64 = 1.0e3;
         const CAPACITANCE: f64 = 1.0e-6;

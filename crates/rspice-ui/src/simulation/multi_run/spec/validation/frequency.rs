@@ -41,21 +41,27 @@ pub(super) fn validate(spec: &AnalysisSpec) -> Result<(), String> {
             points_per_unit,
             z0,
             ports,
+            sweep,
+            do_noise,
             ..
         } => {
-            if *start_freq <= 0.0 {
-                return Err("S-parameter start_freq must be > 0".to_string());
+            if !start_freq.is_finite()
+                || *start_freq < 0.0
+                || (*start_freq == 0.0
+                    && (*sweep != crate::simulation::multi_run::FrequencySweep::Linear
+                        || *do_noise))
+            {
+                return Err("SP start frequency must be nonnegative for LIN, and positive for logarithmic sweeps or noise".into());
             }
-            if *stop_freq <= 0.0 {
-                return Err("S-parameter stop_freq must be > 0".to_string());
-            }
-            if *stop_freq <= *start_freq {
-                return Err("S-parameter stop_freq must be > start_freq".to_string());
+            if !stop_freq.is_finite() || *stop_freq < *start_freq {
+                return Err(
+                    "SP stop frequency must be finite and at least the start frequency".into(),
+                );
             }
             if *points_per_unit == 0 {
                 return Err("S-parameter points_per_unit must be > 0".to_string());
             }
-            if *z0 <= 0.0 {
+            if !z0.is_finite() || *z0 <= 0.0 {
                 return Err("S-parameter z0 must be > 0".to_string());
             }
             // An empty list uses the deck's authored ports; the engine

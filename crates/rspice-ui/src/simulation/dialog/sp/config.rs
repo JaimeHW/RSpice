@@ -147,14 +147,14 @@ impl SpConfig {
 
     /// Validate configuration
     pub fn validate(&self) -> Result<(), String> {
-        if !self.start_freq.is_finite() || self.start_freq <= 0.0 {
-            return Err("Start frequency must be positive".to_string());
+        if !self.start_freq.is_finite()
+            || self.start_freq < 0.0
+            || (self.start_freq == 0.0 && (self.sweep_type != SpSweepType::Linear || self.do_noise))
+        {
+            return Err("Start frequency must be nonnegative for LIN, and positive for logarithmic sweeps or noise".into());
         }
-        if !self.stop_freq.is_finite() || self.stop_freq <= 0.0 {
-            return Err("Stop frequency must be positive".to_string());
-        }
-        if self.start_freq >= self.stop_freq {
-            return Err("Start frequency must be less than stop frequency".to_string());
+        if !self.stop_freq.is_finite() || self.stop_freq < self.start_freq {
+            return Err("Stop frequency must be finite and at least the start frequency".into());
         }
         if self.num_points == 0 {
             return Err("Number of points must be at least 1".to_string());

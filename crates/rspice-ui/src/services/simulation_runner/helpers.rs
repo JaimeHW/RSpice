@@ -245,24 +245,6 @@ pub(crate) fn generate_freq_points_with_limit_and_abort(
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<Vec<Value>> {
     ensure_not_aborted(abort)?;
-    let validation = if points == 0 {
-        Err(ServiceRunError::Failure(
-            "frequency sweep must request at least one point".to_string(),
-        ))
-    } else if !start.is_finite() || !stop.is_finite() || start <= 0.0 || stop <= 0.0 {
-        Err(ServiceRunError::Failure(format!(
-            "frequency sweep bounds must be finite and positive (start={start}, stop={stop})"
-        )))
-    } else if stop < start {
-        Err(ServiceRunError::Failure(format!(
-            "frequency sweep stop frequency ({stop}) must be greater than or equal to start frequency ({start})"
-        )))
-    } else {
-        Ok(())
-    };
-    ensure_not_aborted(abort)?;
-    validation?;
-
     let variation = match sweep_type.to_ascii_lowercase().as_str() {
         "dec" | "decade" => FreqVariation::Dec,
         "oct" | "octave" => FreqVariation::Oct,
@@ -274,107 +256,29 @@ pub(crate) fn generate_freq_points_with_limit_and_abort(
             )));
         }
     };
-    generate_spice_frequency_points_with_limit_and_abort(
+    let result = rspice_core::analysis::ac::try_ac_sweep_frequencies_bounded_with_abort(
         variation,
         points,
         start,
         stop,
         max_analysis_points,
         abort,
-    )
-}
-
-/// Generate the same grid as the exported SPICE `.ac` request while retaining
-/// service-layer cancellation and resource-limit enforcement. Keeping one
-/// sweep definition prevents PAC/PNOISE/RF analyses from solving a different
-/// set of frequencies than AC, Noise, CLI, or an exported deck.
-fn generate_spice_frequency_points_with_limit_and_abort(
-    variation: FreqVariation,
-    points: usize,
-    start: Value,
-    stop: Value,
-    max_analysis_points: usize,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<Vec<Value>> {
-    ensure_not_aborted(abort)?;
-    if variation == FreqVariation::Lin && points > 2 {
-        ensure_analysis_point_limit(points, max_analysis_points)?;
-    }
-
-    const SWEEP_RELTOL: Value = 1.0e-3;
-    let delta = match variation {
-        FreqVariation::Dec => {
-            if stop / 10.0 < start {
-                if stop == start {
-                    1.0
-                } else {
-                    (std::f64::consts::LN_10 / points as Value).exp()
-                }
-            } else {
-                let num_steps = ((stop / start).log10().abs() * points as Value).floor();
-                ((stop / start).ln() / num_steps).exp()
-            }
-        }
-        FreqVariation::Oct => (std::f64::consts::LN_2 / points as Value).exp(),
-        FreqVariation::Lin => {
-            if points > 2 {
-                (stop - start) / (points - 1) as Value
-            } else {
-                0.0
-            }
-        }
-    };
-    let frequency_tolerance = match variation {
-        FreqVariation::Lin => delta * SWEEP_RELTOL,
-        _ => delta * stop * SWEEP_RELTOL,
-    };
-
-    let mut frequencies = Vec::new();
-    let mut frequency = start;
-    while frequency <= stop + frequency_tolerance {
-        let requested = frequencies.len().saturating_add(1);
-        ensure_analysis_point_limit(requested, max_analysis_points)?;
-        poll_periodically(abort, frequencies.len())?;
-        frequencies.try_reserve(1).map_err(|error| {
-            ServiceRunError::Failure(format!(
-                "frequency sweep allocation for {requested} points failed: {error}"
-            ))
-        })?;
-        frequencies.push(frequency);
-        match variation {
-            FreqVariation::Lin => {
-                if delta == 0.0 {
-                    break;
-                }
-                frequency += delta;
-            }
-            _ => {
-                if delta == 1.0 {
-                    break;
-                }
-                frequency *= delta;
-            }
-        }
-    }
-    ensure_not_aborted(abort)?;
-    debug_assert_eq!(
-        frequencies,
-        rspice_core::analysis::ac::ac_sweep_frequencies(variation, points, start, stop),
-        "service frequency grid must match the exported SPICE sweep"
     );
-    Ok(frequencies)
-}
-
-fn ensure_analysis_point_limit(requested: usize, limit: usize) -> ServiceRunResult<()> {
-    if requested <= limit {
-        Ok(())
-    } else {
-        Err(ServiceRunError::resource_limit(
+    ensure_not_aborted(abort)?;
+    result.map_err(|error| match error {
+        rspice_core::analysis::frequency_grid::FrequencyGridError::Aborted => {
+            ServiceRunError::Aborted
+        }
+        rspice_core::analysis::frequency_grid::FrequencyGridError::LimitExceeded {
+            requested,
+            limit,
+        } => ServiceRunError::resource_limit(
             rspice_core::ResourceKind::AnalysisPoints,
             requested,
             limit,
-        ))
-    }
+        ),
+        other => ServiceRunError::Failure(format!("frequency sweep: {other}")),
+    })
 }
 
 #[cfg(test)]
@@ -495,6 +399,9 @@ mod tests {
             (FreqVariation::Oct, "oct", 3, 10.0, 80.0),
             (FreqVariation::Lin, "lin", 7, 1.0e3, 2.0e3),
             (FreqVariation::Lin, "lin", 2, 1.0e3, 2.0e3),
+            (FreqVariation::Lin, "lin", 3, 0.0, 2.0e3),
+            (FreqVariation::Lin, "lin", 1, 0.0, 0.0),
+            (FreqVariation::Dec, "dec", 10, 1.0e3, 1.0e3),
         ] {
             let service =
                 generate_freq_points_with_abort(start, stop, points, name, &rspice_core::NoAbort)
