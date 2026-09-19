@@ -159,25 +159,187 @@ pub(super) fn validate(spec: &AnalysisSpec) -> Result<(), String> {
         AnalysisSpec::DcMismatch {
             output_expression,
             sigma_multiplier,
-            contributor_limit,
             include_process,
             include_mismatch,
             ..
         } => {
+            // No bound of its own on `contributor_limit`: zero is the card's
+            // authored spelling of "list every contributor", so a limit this
+            // layer refused would refuse a card the engine accepts.
             if output_expression.trim().is_empty() {
-                return Err("DCMATCH output_expression is required".to_owned());
+                return Err(dc_mismatch_missing_output());
             }
             if !sigma_multiplier.is_finite() || *sigma_multiplier <= 0.0 {
-                return Err("DCMATCH sigma_multiplier must be finite and > 0".to_owned());
-            }
-            if *contributor_limit == 0 {
-                return Err("DCMATCH contributor_limit must be > 0".to_owned());
+                return Err(dc_mismatch_sigma_out_of_range(*sigma_multiplier));
             }
             if !include_process && !include_mismatch {
-                return Err("DCMATCH requires process or mismatch contributions".to_owned());
+                return Err(dc_mismatch_no_scope());
             }
             Ok(())
         }
         other => Err(super::misrouted_specification("device-level", other)),
+    }
+}
+
+/// `.DCMATCH` refuses in the engine's own words, and this is where they are
+/// written.
+///
+/// Every sentence below is built from `rspice-core`'s own `AnalysisCard` and
+/// `AnalysisCardIssue` rather than spelled again here, so a Studio-authored
+/// study and a hand-written card are refused by the same words for the same
+/// reason. A reader who sees one of these in the Analyses page and then looks
+/// the card up finds the identical sentence.
+///
+/// The plan draft reaches these through the specification rather than
+/// directly: it parses its own text, assembles the specification the run
+/// would carry, and asks *that*. So this file stays the only account of what
+/// `.DCMATCH` refuses on, and the page cannot disagree with the run.
+///
+/// The card cannot default a probe, so this is the parser's
+/// `MissingField { field: "OUT" }`.
+fn dc_mismatch_missing_output() -> String {
+    card_refusal(rspice_core::netlist::AnalysisCardIssue::MissingField { field: "OUT" })
+}
+
+/// The parser's `SIGMA` range, which is `value > 0.0`.
+fn dc_mismatch_sigma_out_of_range(value: f64) -> String {
+    card_refusal(rspice_core::netlist::AnalysisCardIssue::InvalidNumber {
+        field: "SIGMA",
+        value,
+        expected: "a positive multiple of sigma",
+    })
+}
+
+/// Both scopes off, in the *analysis* layer's words rather than the parser's.
+///
+/// The parser answers this as an invalid `PROCESS=` keyword, which reads
+/// wrong on a form that offers two switches and no keywords. `Engine::
+/// run_dc_match` refuses the same card in a sentence that names the scopes,
+/// and that is the one a Studio operator gets.
+fn dc_mismatch_no_scope() -> String {
+    ".DCMATCH has nothing to vary: the card selects neither the mismatch nor the process scope"
+        .to_owned()
+}
+
+/// `{card} {issue}`: the directive, then the parser's account of the field.
+fn card_refusal(issue: rspice_core::netlist::AnalysisCardIssue) -> String {
+    format!("{} {issue}", rspice_core::netlist::AnalysisCard::DcMatch)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn refusal(spec: &AnalysisSpec) -> String {
+        validate(spec).expect_err("the specification is refused")
+    }
+
+    /// The engine's refusal has to carry the card and the issue the Studio
+    /// quotes.
+    ///
+    /// The core parser locates its refusals — `.DCMATCH at line 5: ...` —
+    /// while a form has no line to name, so the two are tied by the card and
+    /// the issue rather than by one whole string.
+    fn tied_to_the_engine(core: &str, studio: &str) {
+        assert!(core.contains(".DCMATCH"), "core `{core}` names no card");
+        let issue = studio
+            .strip_prefix(".DCMATCH ")
+            .unwrap_or_else(|| panic!("`{studio}` does not open with the card it refuses"));
+        assert!(
+            core.contains(issue),
+            "the engine says `{core}`, the Studio says `{issue}`"
+        );
+    }
+
+    fn dc_mismatch(
+        output_expression: &str,
+        sigma_multiplier: f64,
+        scopes: (bool, bool),
+    ) -> AnalysisSpec {
+        AnalysisSpec::DcMismatch {
+            output_expression: output_expression.to_owned(),
+            sigma_multiplier,
+            contributor_limit: 10,
+            include_mismatch: scopes.0,
+            include_process: scopes.1,
+            normalized_contributions: true,
+        }
+    }
+
+    /// Every DC mismatch refusal is the sentence the engine writes, tied to
+    /// the engine that writes it.
+    ///
+    /// Not a string comparison against a second copy of the words: each
+    /// Studio sentence is looked for inside the refusal `rspice-core` itself
+    /// produces for the equivalent card, so a reworded core refusal fails
+    /// here rather than leaving the Analyses page quoting a sentence no
+    /// engine says any more.
+    #[test]
+    fn a_dc_mismatch_refusal_is_the_sentence_the_engine_writes() {
+        let deck = |card: &str| {
+            format!("dc mismatch refusals\nV1 in 0 1\nR1 in out 1k\nR2 out 0 2k\n{card}\n.end\n")
+        };
+
+        // `OUT` cannot be defaulted, and the parser says so by name.
+        let core = rspice_core::netlist::Netlist::parse(&deck(".DCMATCH MISMATCH=yes"))
+            .expect_err("a card without OUT is refused")
+            .to_string();
+        tied_to_the_engine(&core, &refusal(&dc_mismatch("   ", 1.0, (true, false))));
+
+        // `SIGMA` must be positive.
+        let core = rspice_core::netlist::Netlist::parse(&deck(".DCMATCH OUT=V(out) SIGMA=0"))
+            .expect_err("a zero multiplier is refused")
+            .to_string();
+        tied_to_the_engine(&core, &refusal(&dc_mismatch("V(out)", 0.0, (true, false))));
+
+        // Both scopes off is the analysis layer's refusal, not the parser's:
+        // the parser answers it as an invalid `PROCESS=` keyword, which reads
+        // wrong on a form that has switches. A card built in code reaches
+        // `Engine::run_dc_match` and gets the sentence this form quotes.
+        let netlist =
+            rspice_core::netlist::Netlist::parse(&deck(".op")).expect("the fixture design parses");
+        let card = rspice_core::netlist::DcMatchCard {
+            output_node: "OUT".to_owned(),
+            reference_node: None,
+            output_is_current: false,
+            mismatch: false,
+            process: false,
+            contributor_limit: 10,
+            threshold: 0.0,
+            sigma_multiplier: 1.0,
+        };
+        let engine =
+            rspice_core::engine::Engine::try_new(rspice_core::engine::SimulationConfig::default())
+                .expect("the default numerical policy is valid");
+        let core = engine
+            .run_dc_match(&netlist, &card)
+            .expect_err("a card with neither scope is refused")
+            .to_string();
+        tied_to_the_engine(&core, &refusal(&dc_mismatch("V(out)", 1.0, (false, false))));
+    }
+
+    /// The limit the card calls "all" is not a refusal here either.
+    #[test]
+    fn a_contributor_limit_of_zero_is_a_valid_specification() {
+        let AnalysisSpec::DcMismatch {
+            output_expression,
+            sigma_multiplier,
+            include_mismatch,
+            include_process,
+            normalized_contributions,
+            ..
+        } = dc_mismatch("V(out)", 1.0, (true, false))
+        else {
+            unreachable!("the fixture is a DC mismatch specification");
+        };
+        let spec = AnalysisSpec::DcMismatch {
+            output_expression,
+            sigma_multiplier,
+            contributor_limit: 0,
+            include_mismatch,
+            include_process,
+            normalized_contributions,
+        };
+        assert_eq!(validate(&spec), Ok(()));
     }
 }

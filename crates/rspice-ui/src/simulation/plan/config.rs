@@ -459,12 +459,19 @@ pub struct DcMismatchDraft {
     pub normalized_contributions: bool,
 }
 
+/// A fresh draft is the bare card `.DCMATCH OUT=V(out)`.
+///
+/// Every default here is the engine card's own, read from `DcMatchCard`
+/// rather than copied: a default Studio run and a hand-written `.DCMATCH
+/// OUT=V(out)` are then the same analysis, and the engine remains the one
+/// place a default is decided. The two numbers were `3` and `25`, which named
+/// a study the card never described.
 impl Default for DcMismatchDraft {
     fn default() -> Self {
         Self {
             output_expression: "V(out)".to_owned(),
-            sigma_multiplier: "3".to_owned(),
-            contributor_limit: "25".to_owned(),
+            sigma_multiplier: "1".to_owned(),
+            contributor_limit: rspice_core::netlist::DcMatchCard::DEFAULT_CONTRIBUTORS.to_string(),
             include_process: false,
             include_mismatch: true,
             normalized_contributions: true,
@@ -1433,17 +1440,36 @@ fn validate_transient_noise(draft: &TransientNoiseDraft) -> Option<String> {
     .err()
 }
 
+/// What a DC mismatch draft refuses on, in the engine card's own words.
+///
+/// Text that is not a number at all is this layer's own to answer — the
+/// engine never sees a half-typed field — but every *range* belongs to the
+/// card, so the parsed draft is assembled into the specification the run
+/// would carry and that specification is asked. There is then exactly one
+/// account of what `.DCMATCH` refuses on, and the form and a hand-written
+/// deck are refused by the same sentence.
+///
+/// A contributor limit of zero is legal here because it is legal on the card:
+/// zero is how a deck asks for every contributor.
 fn validate_dc_mismatch(draft: &DcMismatchDraft) -> Option<String> {
     (|| {
-        if draft.output_expression.trim().is_empty() {
-            return Err("DC mismatch requires an output expression".to_owned());
+        let sigma_multiplier =
+            crate::simulation::dialog::options::parse_si_value(&draft.sigma_multiplier)
+                .map_err(|error| format!("invalid sigma multiplier: {error}"))?;
+        let contributor_limit = draft
+            .contributor_limit
+            .trim()
+            .parse::<usize>()
+            .map_err(|_| "contributor limit must be a non-negative integer".to_owned())?;
+        crate::simulation::multi_run::AnalysisSpec::DcMismatch {
+            output_expression: draft.output_expression.trim().to_owned(),
+            sigma_multiplier,
+            contributor_limit,
+            include_process: draft.include_process,
+            include_mismatch: draft.include_mismatch,
+            normalized_contributions: draft.normalized_contributions,
         }
-        parse_positive(&draft.sigma_multiplier, "sigma multiplier")?;
-        parse_positive_usize(&draft.contributor_limit, "contributor limit")?;
-        if !draft.include_process && !draft.include_mismatch {
-            return Err("enable process or mismatch contributions".to_owned());
-        }
-        Ok(())
+        .validate()
     })()
     .err()
 }
@@ -2007,6 +2033,62 @@ mod tests {
         let mut mismatch = DcMismatchDraft::default();
         mismatch.include_mismatch = false;
         assert!(validate_dc_mismatch(&mismatch).is_some());
+
+        // Zero contributors is the card's own spelling of "list every one",
+        // so the draft accepts it rather than refusing a legal card.
+        let mut all = DcMismatchDraft::default();
+        all.contributor_limit = "0".to_owned();
+        assert!(
+            validate_dc_mismatch(&all).is_none(),
+            "{:?}",
+            validate_dc_mismatch(&all)
+        );
+    }
+
+    /// A fresh DC mismatch draft is the bare card `.DCMATCH OUT=V(out)`.
+    ///
+    /// Read from the engine rather than pinned to numbers: the card's
+    /// defaults are parsed out of a bare `.DCMATCH` line and compared with
+    /// the draft's, so a default Studio run and a hand-written card are the
+    /// same analysis by construction. The draft used to open at `3` sigma
+    /// over `25` contributors, which named a study no card described.
+    #[test]
+    fn a_default_dc_mismatch_draft_is_the_bare_engine_card() {
+        let draft = DcMismatchDraft::default();
+        assert!(validate_dc_mismatch(&draft).is_none());
+
+        let netlist = rspice_core::netlist::Netlist::parse(
+            "dc mismatch defaults\nV1 in 0 1\nR1 in out 1k\nR2 out 0 2k\n.DCMATCH \
+             OUT=V(out)\n.end\n",
+        )
+        .expect("a bare .DCMATCH card parses");
+        let [rspice_core::netlist::AnalysisCommand::DcMatch(card)] = netlist.analyses.as_slice()
+        else {
+            panic!("the deck holds one .DCMATCH: {:?}", netlist.analyses);
+        };
+
+        assert_eq!(
+            draft
+                .sigma_multiplier
+                .parse::<f64>()
+                .expect("the default multiplier is a number"),
+            card.sigma_multiplier
+        );
+        assert_eq!(
+            draft
+                .contributor_limit
+                .parse::<usize>()
+                .expect("the default limit is a count"),
+            card.contributor_limit
+        );
+        assert_eq!(draft.include_mismatch, card.mismatch);
+        assert_eq!(draft.include_process, card.process);
+        // The parser canonicalizes the probe to upper case; the probe itself
+        // is the same one.
+        assert_eq!(
+            draft.output_expression.to_ascii_uppercase(),
+            format!("V({})", card.output_node)
+        );
     }
 
     #[test]
