@@ -451,7 +451,8 @@ impl SimSetupState {
             | AnalysisKind::Qpnoise
             | AnalysisKind::Qpxf
             | AnalysisKind::TransientNoise
-            | AnalysisKind::DcMismatch => AnalysisDraft::for_kind(kind),
+            | AnalysisKind::DcMismatch
+            | AnalysisKind::AcData => AnalysisDraft::for_kind(kind),
         }
     }
 
@@ -508,7 +509,8 @@ impl SimSetupState {
             | AnalysisDraft::Qpnoise(_)
             | AnalysisDraft::Qpxf(_)
             | AnalysisDraft::TransientNoise(_)
-            | AnalysisDraft::DcMismatch(_) => {}
+            | AnalysisDraft::DcMismatch(_)
+            | AnalysisDraft::AcData(_) => {}
         }
     }
 }

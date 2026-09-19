@@ -843,6 +843,34 @@ fn every_graded_sweep_form_names_what_a_point_is() {
     );
 }
 
+/// Every kind the catalog offers draws a form with something in it.
+///
+/// A kind reaches the catalog by being added to `AnalysisKind::ALL`, and the
+/// form dispatch is a separate match: a kind can therefore be offered, be
+/// insertable, validate, and run, while its panel is blank — which is what the
+/// reader would see after picking it. Nothing else notices, because every
+/// other test about a form names the form it is about.
+///
+/// Painted text rather than height, because an empty form still allocates the
+/// panel it was given.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn every_catalog_kind_draws_a_form() {
+    let mut blank = Vec::new();
+    for kind in AnalysisKind::ALL {
+        let (height, painted) =
+            render_analysis_form(AnalysisDraft::for_kind(kind), NoiseDomain::default());
+        if painted.is_empty() || height <= 0.0 {
+            blank.push(format!("{} ({kind:?})", kind.label()));
+        }
+    }
+    assert!(
+        blank.is_empty(),
+        "catalog kinds whose form paints nothing:\n  {}",
+        blank.join("\n  ")
+    );
+}
+
 #[test]
 fn noise_form_matches_mockup_owned_contract() {
     assert_eq!(

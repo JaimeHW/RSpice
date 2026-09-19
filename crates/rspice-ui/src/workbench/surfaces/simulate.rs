@@ -1902,6 +1902,7 @@ fn analysis_icon(kind: AnalysisKind) -> WorkbenchIcon {
         }
         AnalysisKind::Reliability => WorkbenchIcon::Verify,
         AnalysisKind::Ac
+        | AnalysisKind::AcData
         | AnalysisKind::DcSweep
         | AnalysisKind::Fourier
         | AnalysisKind::TransferFunction

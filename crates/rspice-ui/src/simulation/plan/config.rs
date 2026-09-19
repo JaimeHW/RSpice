@@ -23,6 +23,10 @@ use crate::workbench::app_state::{AcSetup, DcSetup, TranSetup};
 
 use super::AnalysisKind;
 
+mod frequency_table;
+
+pub use frequency_table::AcDataDraft;
+
 /// AC sweep draft shared structurally by AC and DISTO, but never shared by
 /// identity. Each analysis instance owns a deep copy.
 pub type AcDraft = AcSetup;
@@ -194,31 +198,7 @@ fn parse_noise_output_expression(
 }
 
 fn parse_noise_frequency_list(text: &str) -> Result<Vec<f64>, String> {
-    let values = text
-        .split(|character: char| character == ',' || character == ';' || character.is_whitespace())
-        .filter(|value| !value.is_empty())
-        .map(|value| {
-            parse_spice_value_checked(value)
-                .map_err(|error| format!("invalid explicit noise frequency '{value}': {error}"))
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    if values.is_empty() {
-        return Err("explicit frequency list must contain at least one value".to_owned());
-    }
-    let mut previous = None;
-    for value in &values {
-        if *value <= 0.0 {
-            return Err("explicit noise frequencies must be greater than zero".to_owned());
-        }
-        if previous.is_some_and(|previous| *value <= previous) {
-            return Err(
-                "explicit noise frequencies must be strictly increasing without duplicates"
-                    .to_owned(),
-            );
-        }
-        previous = Some(*value);
-    }
-    Ok(values)
+    crate::simulation::config::parse_explicit_frequency_list(text)
 }
 
 /// DISTO draft with its own AC sweep and optional second-tone ratio.
@@ -569,6 +549,8 @@ pub enum AnalysisDraft {
     TransientNoise(TransientNoiseDraft),
     #[serde(rename = "dcmatch")]
     DcMismatch(DcMismatchDraft),
+    #[serde(rename = "acdata")]
+    AcData(AcDataDraft),
 }
 
 macro_rules! initialized_default {
@@ -628,6 +610,7 @@ impl AnalysisDraft {
             AnalysisKind::Qpxf => Self::Qpxf(QuasiPeriodicTransferDraft::default()),
             AnalysisKind::TransientNoise => Self::TransientNoise(TransientNoiseDraft::default()),
             AnalysisKind::DcMismatch => Self::DcMismatch(DcMismatchDraft::default()),
+            AnalysisKind::AcData => Self::AcData(AcDataDraft::default()),
         }
     }
 
@@ -705,6 +688,7 @@ impl AnalysisDraft {
             Self::Qpxf(_) => AnalysisKind::Qpxf,
             Self::TransientNoise(_) => AnalysisKind::TransientNoise,
             Self::DcMismatch(_) => AnalysisKind::DcMismatch,
+            Self::AcData(_) => AnalysisKind::AcData,
         }
     }
 
@@ -764,7 +748,8 @@ impl AnalysisDraft {
             | Self::Qpnoise(_)
             | Self::Qpxf(_)
             | Self::TransientNoise(_)
-            | Self::DcMismatch(_) => {}
+            | Self::DcMismatch(_)
+            | Self::AcData(_) => {}
         }
     }
 
@@ -782,6 +767,7 @@ impl AnalysisDraft {
             Self::Qpxf(draft) => validate_qpxf(draft),
             Self::TransientNoise(draft) => validate_transient_noise(draft),
             Self::DcMismatch(draft) => validate_dc_mismatch(draft),
+            Self::AcData(draft) => draft.to_config().err(),
             _ => None,
         }
     }
@@ -828,6 +814,7 @@ impl AnalysisDraft {
                 "{} · {}σ · top {}",
                 draft.output_expression, draft.sigma_multiplier, draft.contributor_limit
             )),
+            Self::AcData(draft) => Some(draft.summary()),
             Self::TransferFunction(draft) => Some(format!(
                 "{} <- {} - DC operating point",
                 draft.output_expression, draft.input_source
@@ -1480,7 +1467,7 @@ mod tests {
             let value = serde_json::to_value(&draft).expect("draft serializes");
             assert_eq!(value["kind"], kind.stable_id());
         }
-        assert!(AnalysisDraft::from_legacy_index(34).is_none());
+        assert!(AnalysisDraft::from_legacy_index(35).is_none());
     }
 
     #[test]
@@ -1895,6 +1882,7 @@ mod tests {
             AnalysisKind::Qpxf,
             AnalysisKind::TransientNoise,
             AnalysisKind::DcMismatch,
+            AnalysisKind::AcData,
         ] {
             let draft = AnalysisDraft::for_kind(kind);
             assert_eq!(draft.kind(), kind);
@@ -1905,6 +1893,36 @@ mod tests {
                 serde_json::from_slice(&bytes).expect("draft deserializes");
             assert_eq!(restored.kind(), kind);
         }
+    }
+
+    /// A plan that stated only its frequencies still opens, referring to the
+    /// table the writer will generate.
+    ///
+    /// The draft carries `deny_unknown_fields`, so a key it does not know is
+    /// refused and an absent key is the `serde(default)` — this is the test
+    /// that the default is the generated table name rather than an empty
+    /// string, which would refuse the restored plan at its first validation.
+    #[test]
+    fn a_saved_frequency_table_plan_reopens_on_the_generated_table_name() {
+        let saved = serde_json::json!({ "frequencies": "1k, 10k, 100k" });
+        let draft: AcDataDraft =
+            serde_json::from_value(saved).expect("a plan that stated only its axis still opens");
+        assert_eq!(
+            draft.table_name,
+            crate::simulation::config::AC_FREQUENCY_TABLE
+        );
+        assert_eq!(draft.frequencies, "1k, 10k, 100k");
+        let config = draft.to_config().expect("the restored plan is executable");
+        assert_eq!(config.frequencies, vec![1.0e3, 1.0e4, 1.0e5]);
+
+        // And the tagged draft round-trips under its own serde name, which is
+        // what a saved project holds.
+        let tagged = serde_json::to_string(&AnalysisDraft::AcData(draft))
+            .expect("the tagged draft serializes");
+        assert!(tagged.contains("\"acdata\""), "{tagged}");
+        let restored: AnalysisDraft =
+            serde_json::from_str(&tagged).expect("the tagged draft deserializes");
+        assert_eq!(restored.kind(), AnalysisKind::AcData);
     }
 
     /// A plan saved before the noise floor field existed still opens, running

@@ -98,7 +98,7 @@ const FIXTURE_TONE_SOURCE: &str = "VCC";
 /// This is a floor on coverage rather than a count of the catalogue: it may
 /// rise freely, and a change that lowers it has narrowed what the ratchet
 /// watches and should say so out loud rather than coast.
-const EXECUTABLE_KINDS_THIS_FIXTURE_COMPILES: usize = 24;
+const EXECUTABLE_KINDS_THIS_FIXTURE_COMPILES: usize = 25;
 
 /// Point a PSS instance at the source the fixture design actually has.
 fn name_the_fixture_tone_source(plan: &mut SimulationPlan, pss: AnalysisInstanceId) {

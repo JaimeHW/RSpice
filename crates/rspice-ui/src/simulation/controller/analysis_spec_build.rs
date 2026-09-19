@@ -187,6 +187,13 @@ impl SimulationController {
                 scale: parse_si(&draft.scale, "TNOISE noise scale")?,
                 uic: draft.use_initial_conditions,
             },
+            AnalysisDraft::AcData(draft) => {
+                let config = draft.to_config()?;
+                AnalysisSpec::AcData {
+                    table_name: config.table_name,
+                    frequencies: config.frequencies,
+                }
+            }
             AnalysisDraft::DcMismatch(draft) => AnalysisSpec::DcMismatch {
                 output_expression: draft.output_expression.trim().to_owned(),
                 sigma_multiplier: parse_si(&draft.sigma_multiplier, "DCMATCH sigma multiplier")?,

@@ -86,6 +86,8 @@ pub enum AnalysisKind {
     TransientNoise,
     #[serde(rename = "dcmatch")]
     DcMismatch,
+    #[serde(rename = "acdata")]
+    AcData,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -98,7 +100,7 @@ pub struct AnalysisCategory {
 
 impl AnalysisKind {
     /// All plan-recognized kinds in the stable historical-index order.
-    pub const ALL: [Self; 34] = [
+    pub const ALL: [Self; 35] = [
         Self::OperatingPoint,
         Self::Transient,
         Self::Ac,
@@ -133,14 +135,18 @@ impl AnalysisKind {
         Self::Qpxf,
         Self::TransientNoise,
         Self::DcMismatch,
+        Self::AcData,
     ];
 
     /// Canonical display order from `product-manifest.js`. This is separate
     /// from [`Self::ALL`] so the historical singleton indices remain stable.
-    pub const MANIFEST_ORDER: [Self; 34] = [
+    pub const MANIFEST_ORDER: [Self; 35] = [
         Self::OperatingPoint,
         Self::Transient,
         Self::Ac,
+        // The table-driven sweep reads as a mode of the AC response it sits
+        // beside, even though it is its own sealed request.
+        Self::AcData,
         Self::DcSweep,
         Self::Noise,
         Self::PoleZero,
@@ -211,6 +217,7 @@ impl AnalysisKind {
             Self::Qpxf => "qpxf",
             Self::TransientNoise => "tnoise",
             Self::DcMismatch => "dcmatch",
+            Self::AcData => "acdata",
         }
     }
 
@@ -251,6 +258,7 @@ impl AnalysisKind {
             Self::Qpxf => 31,
             Self::TransientNoise => 32,
             Self::DcMismatch => 33,
+            Self::AcData => 34,
         }
     }
 
@@ -291,6 +299,7 @@ impl AnalysisKind {
             Self::Qpxf => "Quasi-periodic transfer",
             Self::TransientNoise => "Transient noise",
             Self::DcMismatch => "DC mismatch contribution",
+            Self::AcData => "AC frequency table",
         }
     }
 
@@ -330,6 +339,7 @@ impl AnalysisKind {
             Self::Reliability => "REL",
             Self::Soa => "SOA",
             Self::Optimization => "OPT",
+            Self::AcData => "ACTAB",
         }
     }
 
@@ -354,6 +364,7 @@ impl AnalysisKind {
             Self::Reliability => "REL",
             Self::Soa => "SOA",
             Self::Optimization => "OPT",
+            Self::AcData => "ACT",
             other => other.code(),
         }
     }
@@ -366,6 +377,10 @@ impl AnalysisKind {
                  initial-condition control."
             }
             Self::Ac => "Linearized complex frequency response over a swept band.",
+            Self::AcData => {
+                "Linearized complex frequency response at exactly the frequencies a \
+                 stated table lists."
+            }
             Self::DcSweep => "Single or nested bias source sweep with solver continuation.",
             Self::Noise => {
                 "Input- and output-referred noise with band integration and contributor ranking."
@@ -437,14 +452,17 @@ impl AnalysisKind {
 
     pub const fn category(self) -> AnalysisCategory {
         match self {
-            Self::OperatingPoint | Self::Transient | Self::Ac | Self::DcSweep | Self::Noise => {
-                AnalysisCategory {
-                    id: "core",
-                    label: "Core analyses",
-                    glyph: "DC",
-                    detail: "Bias, time, AC, DC and noise",
-                }
-            }
+            Self::OperatingPoint
+            | Self::Transient
+            | Self::Ac
+            | Self::AcData
+            | Self::DcSweep
+            | Self::Noise => AnalysisCategory {
+                id: "core",
+                label: "Core analyses",
+                glyph: "DC",
+                detail: "Bias, time, AC, DC and noise",
+            },
             Self::PoleZero | Self::Sensitivity | Self::Stb | Self::TransferFunction => {
                 AnalysisCategory {
                     id: "transfer",
@@ -515,16 +533,24 @@ impl AnalysisKind {
     /// The canonical execution-tag kind a task of this analysis carries.
     ///
     /// A plan kind and an execution specification are not the same vocabulary:
-    /// Temperature executes as a parametric sweep, and the table-driven AC
-    /// specification has no plan kind at all. The correspondence is therefore
-    /// stated rather than assumed, and stating it here — against the tag table
-    /// instead of against a second list of numbers — is what lets persisted
-    /// receipt validation and live dispatch agree on one tag per analysis.
+    /// Temperature executes as a parametric sweep, and a PSS spectrum is a
+    /// projection of a PSS solve rather than a kind anyone catalogs. The
+    /// correspondence is therefore stated rather than assumed, and stating it
+    /// here — against the tag table instead of against a second list of
+    /// numbers — is what lets persisted receipt validation and live dispatch
+    /// agree on one tag per analysis.
+    ///
+    /// This is also why the table-driven AC sweep is its own catalog kind
+    /// rather than a fourth mode on [`Self::Ac`]: this function is of the kind
+    /// alone, a kind therefore names exactly one tag, and the tag a `.AC DATA=`
+    /// run carries is [`CanonicalAnalysisKind::AcData`], not
+    /// [`CanonicalAnalysisKind::Ac`]. One kind cannot answer with both.
     pub const fn canonical_kind(self) -> CanonicalAnalysisKind {
         match self {
             Self::OperatingPoint => CanonicalAnalysisKind::DcOp,
             Self::DcSweep => CanonicalAnalysisKind::DcSweep,
             Self::Ac => CanonicalAnalysisKind::Ac,
+            Self::AcData => CanonicalAnalysisKind::AcData,
             Self::Disto => CanonicalAnalysisKind::Disto,
             Self::Transient => CanonicalAnalysisKind::Transient,
             Self::Noise => CanonicalAnalysisKind::Noise,
@@ -613,6 +639,7 @@ impl AnalysisKind {
 
         match self {
             Self::Ac
+            | Self::AcData
             | Self::Noise
             | Self::PoleZero
             | Self::Sensitivity
@@ -738,7 +765,7 @@ mod tests {
             );
         }
         assert_eq!(ids.len(), AnalysisKind::ALL.len());
-        assert_eq!(AnalysisKind::from_legacy_index(34), None);
+        assert_eq!(AnalysisKind::from_legacy_index(35), None);
         assert_eq!(AnalysisKind::from_stable_id("AC"), None);
     }
 
@@ -746,6 +773,7 @@ mod tests {
     fn prerequisite_map_matches_the_canonical_current_kind_contract() {
         let expected = [
             (AnalysisKind::Ac, AnalysisKind::OperatingPoint),
+            (AnalysisKind::AcData, AnalysisKind::OperatingPoint),
             (AnalysisKind::Noise, AnalysisKind::OperatingPoint),
             (AnalysisKind::PoleZero, AnalysisKind::OperatingPoint),
             (AnalysisKind::Sensitivity, AnalysisKind::OperatingPoint),
@@ -785,11 +813,12 @@ mod tests {
     #[test]
     fn canonical_manifest_order_and_metadata_are_complete() {
         let manifest = AnalysisKind::MANIFEST_ORDER;
-        assert_eq!(manifest.len(), 34);
-        assert_eq!(manifest[10], AnalysisKind::Qpss);
-        assert_eq!(manifest[13], AnalysisKind::Hbsp);
-        assert_eq!(manifest[24], AnalysisKind::TransientNoise);
-        assert_eq!(manifest[28], AnalysisKind::DcMismatch);
+        assert_eq!(manifest.len(), 35);
+        assert_eq!(manifest[3], AnalysisKind::AcData);
+        assert_eq!(manifest[11], AnalysisKind::Qpss);
+        assert_eq!(manifest[14], AnalysisKind::Hbsp);
+        assert_eq!(manifest[25], AnalysisKind::TransientNoise);
+        assert_eq!(manifest[29], AnalysisKind::DcMismatch);
         let identities = manifest
             .into_iter()
             .map(AnalysisKind::stable_id)

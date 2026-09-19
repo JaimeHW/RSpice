@@ -8,7 +8,7 @@
 
 use super::*;
 
-pub const ANALYSIS_AVAILABILITY_ROWS: [AnalysisAvailabilityRow; 34] = [
+pub const ANALYSIS_AVAILABILITY_ROWS: [AnalysisAvailabilityRow; 35] = [
     AnalysisAvailabilityRow {
         id: "op",
         code: "OP",
@@ -183,6 +183,13 @@ pub const ANALYSIS_AVAILABILITY_ROWS: [AnalysisAvailabilityRow; 34] = [
         title: "Transient noise",
         intended_tier: AnalysisIntendedTier::PreviewNonSignOff,
         analysis_kind: Some(AnalysisKind::TransientNoise),
+    },
+    AnalysisAvailabilityRow {
+        id: "acdata",
+        code: "ACTAB",
+        title: "AC frequency table",
+        intended_tier: AnalysisIntendedTier::ReleaseTarget,
+        analysis_kind: Some(AnalysisKind::AcData),
     },
     AnalysisAvailabilityRow {
         id: "mc",

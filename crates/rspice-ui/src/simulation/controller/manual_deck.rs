@@ -676,45 +676,24 @@ fn pz_config_type(analysis_type: PoleZeroAnalysisType) -> PzAnalysisType {
     }
 }
 
+/// The frequency axis a `.AC DATA=` card refers to, resolved the way the
+/// engine resolves it.
+///
+/// Delegated to `Netlist::frequency_data_table_points`, which is the resolver
+/// `Engine::run_ac_data` itself uses, exactly as the `.NOISE DATA=` arm above
+/// delegates to it. This function used to re-state the rule and stated it
+/// differently: it accepted a `FREQ` column only, while the engine accepts
+/// `FREQ` *or* `HERTZ`. A hand-written deck whose table said `HERTZ` therefore
+/// ran in the engine and in the CLI and was refused here — and so did the
+/// Studio's own generated table, which is written in the one spelling both
+/// analyses share.
 fn ac_data_table_frequencies(netlist: &Netlist, table_name: &str) -> Result<Vec<f64>, String> {
-    let table = netlist
-        .data_tables
-        .iter()
-        .find(|table| table.name.eq_ignore_ascii_case(table_name))
-        .ok_or_else(|| format!(".AC DATA table '{table_name}' not found"))?;
-    let freq_column = table
-        .params
-        .iter()
-        .position(|param| param.eq_ignore_ascii_case("FREQ"))
-        .ok_or_else(|| format!(".AC DATA table '{}' must contain a FREQ column", table.name))?;
-
-    if table.rows.is_empty() {
-        return Err(format!(".AC DATA table '{}' has no rows", table.name));
-    }
-
-    let mut frequencies = Vec::with_capacity(table.rows.len());
-    for (row_idx, row) in table.rows.iter().enumerate() {
-        if row.len() != table.params.len() {
-            return Err(format!(
-                ".AC DATA table '{}' row {} has {} value(s), expected {}",
-                table.name,
-                row_idx + 1,
-                row.len(),
-                table.params.len()
-            ));
-        }
-        let frequency = row[freq_column];
-        if !frequency.is_finite() || frequency < 0.0 {
-            return Err(format!(
-                ".AC DATA table '{}' row {} has invalid frequency {}",
-                table.name,
-                row_idx + 1,
-                frequency
-            ));
-        }
-        frequencies.push(frequency);
-    }
-    Ok(frequencies)
+    Ok(netlist
+        .frequency_data_table_points(table_name)
+        .map_err(|error| format!(".AC DATA {error}"))?
+        .into_iter()
+        .map(|point| point.frequency)
+        .collect())
 }
 
 /// The engine's own default transient-noise seed.
@@ -1565,6 +1544,89 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// A deck someone wrote by hand, with its own table name and its own row
+    /// order, opens as the frequency-table analysis on exactly that axis.
+    ///
+    /// The two halves that could go wrong independently: the card has to be
+    /// recognized as this kind rather than as a graded `.ac`, and the axis has
+    /// to come from the deck's table rather than from any default — including
+    /// when the table is not sorted, which is the author's choice to make and
+    /// not a list this reader may reorder.
+    #[test]
+    fn a_hand_written_ac_data_deck_is_read_as_the_frequency_table_analysis() {
+        let specs = specs_for(
+            "hand written ac data\n\
+             I1 out 0 AC 1\n\
+             R1 out 0 1k\n\
+             .ac data=measured\n\
+             .data measured\n\
+             + FREQ\n\
+             + 1k\n\
+             + 100\n\
+             + 10k\n\
+             .enddata\n\
+             .print ac V(out)\n\
+             .end\n",
+        );
+        let [
+            AnalysisSpec::AcData {
+                table_name,
+                frequencies,
+            },
+        ] = specs.as_slice()
+        else {
+            panic!("a hand-written `.ac data=` deck is one frequency-table analysis: {specs:?}");
+        };
+        assert!(table_name.eq_ignore_ascii_case("measured"));
+        assert_eq!(frequencies.as_slice(), [1.0e3, 100.0, 1.0e4]);
+    }
+
+    /// The card the Studio writes for a stated axis, read back by the reader a
+    /// hand-written deck goes through, is the specification it came from.
+    #[test]
+    fn the_studio_ac_frequency_table_cards_round_trip_through_the_manual_deck_reader() {
+        use crate::simulation::controller::SimulationController;
+
+        let authored = AnalysisSpec::AcData {
+            table_name: crate::simulation::config::AC_FREQUENCY_TABLE.to_owned(),
+            frequencies: vec![37.0, 74.0, 148.5],
+        };
+        let cards = SimulationController::build_ac_data_command(&authored)
+            .expect("the plan writes its card and its table");
+        let specs = specs_for(&format!(
+            "round trip\n\
+             I1 out 0 AC 1\n\
+             R1 out 0 1k\n\
+             {cards}\n\
+             .end\n"
+        ));
+        let [
+            AnalysisSpec::AcData {
+                table_name,
+                frequencies,
+            },
+        ] = specs.as_slice()
+        else {
+            panic!("the cards `{cards}` read back as something else: {specs:?}");
+        };
+        let AnalysisSpec::AcData {
+            table_name: authored_table,
+            frequencies: authored_frequencies,
+        } = &authored
+        else {
+            unreachable!("the fixture is a frequency-table specification");
+        };
+        // The axis round-trips exactly. The table name round-trips up to case:
+        // the parser canonicalizes an identifier to upper case and the
+        // engine's table lookup is case-insensitive, so both spellings name
+        // the same table.
+        assert_eq!(frequencies, authored_frequencies, "{cards}");
+        assert!(
+            table_name.eq_ignore_ascii_case(authored_table),
+            "the cards `{cards}` came back naming '{table_name}'"
+        );
     }
 
     /// A deck that says nothing about the seed carries the seed the engine

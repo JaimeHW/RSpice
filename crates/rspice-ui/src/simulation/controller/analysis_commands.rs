@@ -84,6 +84,7 @@ impl SimulationController {
             AnalysisSpec::Hbnoise { .. } => Self::build_hbnoise_command(spec),
             AnalysisSpec::Tf { .. } => Self::build_tf_command(spec),
             AnalysisSpec::TransientNoise { .. } => Self::build_transient_noise_command(spec),
+            AnalysisSpec::AcData { .. } => Self::build_ac_data_command(spec),
             AnalysisSpec::Qpss { .. }
             | AnalysisSpec::Qpac { .. }
             | AnalysisSpec::Qpnoise { .. }
@@ -508,6 +509,37 @@ impl SimulationController {
             command.push_str(&format!(" NOISESCALE={scale}"));
         }
         Ok(command)
+    }
+
+    /// The `.ac DATA=` directive and the `.DATA` table it reads.
+    ///
+    /// This is the one analysis card that is two cards: the sweep refers to a
+    /// table by name, and for an authored axis that table does not otherwise
+    /// exist in the deck, so the writer emits both and the table body comes
+    /// from the writer noise shares (`config::explicit_frequency_table`).
+    ///
+    /// Visible across `simulation` rather than to the controller alone, for
+    /// the same reason the transient-noise writer is: the axis reaches the
+    /// solver *only* through this pair of cards, so a run fixture that spelled
+    /// its own table would prove the engine can sweep a table while proving
+    /// nothing about whether the Studio writes one.
+    pub(in crate::simulation) fn build_ac_data_command(
+        spec: &AnalysisSpec,
+    ) -> Result<String, String> {
+        let AnalysisSpec::AcData {
+            table_name,
+            frequencies,
+        } = spec
+        else {
+            return Err("failed to build AC frequency-table command".to_string());
+        };
+        let config = crate::simulation::config::AcDataAnalysisConfig {
+            table_name: table_name.clone(),
+            frequencies: frequencies.clone(),
+            authored: true,
+        };
+        config.validate().map_err(|errors| errors.join("; "))?;
+        Ok(config.to_spice())
     }
 
     /// The `.tf` directive: the output expression, then the source it is
@@ -1055,6 +1087,81 @@ mod tests {
             assert_eq!(noise.fmin, noise_fmin, "{card}");
             assert_eq!(noise.seed, Some(seed), "{card}");
             assert_eq!(noise.scale, scale, "{card}");
+        }
+    }
+
+    /// The `.ac DATA=` card and its table are read back by the engine as the
+    /// same axis the specification holds.
+    ///
+    /// Pinned as well as parsed: this is two cards that refer to each other by
+    /// name, so a writer that renamed the table on one line and not the other
+    /// would emit a deck the engine rejects, and a writer that lost a decimal
+    /// digit would emit one it accepts and sweeps somewhere else.
+    #[test]
+    fn the_ac_frequency_table_card_parses_as_the_engine_reads_it() {
+        let frequencies = vec![37.0, 74.0, 148.5];
+        let spec = AnalysisSpec::AcData {
+            table_name: crate::simulation::config::AC_FREQUENCY_TABLE.to_owned(),
+            frequencies: frequencies.clone(),
+        };
+        let cards = SimulationController::build_ac_data_command(&spec)
+            .expect("an AC frequency-table specification writes its own cards");
+        assert_eq!(
+            cards,
+            ".ac DATA=rspice_ac_frequency\n\
+             .DATA rspice_ac_frequency\n\
+             + HERTZ\n\
+             + 3.70000000000000000e1\n\
+             + 7.40000000000000000e1\n\
+             + 1.48500000000000000e2\n\
+             .ENDDATA"
+        );
+
+        let deck = rspice_core::netlist::Netlist::parse(&format!(
+            "ac frequency table card\nV1 in 0 AC 1\nR1 in 0 1k\n{cards}\n.end\n"
+        ))
+        .unwrap_or_else(|error| panic!("the engine must read `{cards}` back: {error}"));
+
+        let [rspice_core::netlist::AnalysisCommand::AcData { table_name }] =
+            deck.analyses.as_slice()
+        else {
+            panic!(
+                "the cards are one table-driven AC sweep: {:?}",
+                deck.analyses
+            );
+        };
+        // The parser canonicalizes an identifier to upper case, and the
+        // engine's own table lookup is case-insensitive, so the name is
+        // compared the way the resolver compares it.
+        assert!(
+            table_name.eq_ignore_ascii_case(crate::simulation::config::AC_FREQUENCY_TABLE),
+            "the card refers to '{table_name}'"
+        );
+
+        // The axis the engine resolves from the table it was handed is the
+        // axis the form authored, value for value.
+        let resolved = deck
+            .frequency_data_table_points(table_name)
+            .expect("the written table resolves to a frequency axis")
+            .into_iter()
+            .map(|point| point.frequency)
+            .collect::<Vec<_>>();
+        assert_eq!(resolved, frequencies);
+    }
+
+    /// An axis the specification cannot execute is refused where the card is
+    /// written, not at the solver.
+    #[test]
+    fn an_ac_frequency_table_card_is_refused_for_an_axis_that_cannot_run() {
+        for frequencies in [vec![], vec![100.0, 10.0], vec![0.0]] {
+            let spec = AnalysisSpec::AcData {
+                table_name: crate::simulation::config::AC_FREQUENCY_TABLE.to_owned(),
+                frequencies: frequencies.clone(),
+            };
+            assert!(
+                SimulationController::build_ac_data_command(&spec).is_err(),
+                "{frequencies:?} wrote a card"
+            );
         }
     }
 

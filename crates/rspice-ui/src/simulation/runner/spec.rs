@@ -1570,6 +1570,90 @@ R2 out 0 1k\n\
         ));
     }
 
+    /// A stated frequency axis reaches the AC solve, and the answer is the one
+    /// the circuit has at exactly those frequencies.
+    ///
+    /// The deck is the smallest circuit with an exact closed-form response: a
+    /// series RC low-pass, whose transfer function is `1/(1 + j·2πfRC)`. Three
+    /// frequencies are authored an octave apart and deliberately *not* on any
+    /// decade or octave grid a graded `.ac` would land on, so a run that
+    /// quietly substituted a graded sweep could not pass.
+    ///
+    /// The deck the run executes is the pair of cards the Studio writes —
+    /// `.ac DATA=` and its `.DATA` table — spliced in by the same builder the
+    /// Analyses page displays, because the axis reaches the engine only
+    /// through them.
+    #[test]
+    fn an_explicit_frequency_table_reaches_the_ac_solve() {
+        const RESISTANCE: f64 = 1.0e3;
+        const CAPACITANCE: f64 = 1.0e-6;
+        const DECK: &str = "ac frequency table low pass\n\
+                            V1 in 0 AC 1\n\
+                            R1 in out 1k\n\
+                            C1 out 0 1u\n\
+                            .end\n";
+        let authored = vec![37.0, 74.0, 148.0];
+
+        let spec = AnalysisSpec::AcData {
+            table_name: crate::simulation::config::AC_FREQUENCY_TABLE.to_owned(),
+            frequencies: authored.clone(),
+        };
+        let cards =
+            crate::simulation::controller::SimulationController::build_ac_data_command(&spec)
+                .expect("the specification writes its card and its table");
+        let deck = DECK.replace(".end\n", &format!("{cards}\n.end\n"));
+
+        let result = run_spec_request(
+            &EngineBridge::new(),
+            spec,
+            SpecExecutionOptions::default(),
+            &deck,
+            None,
+            &ResolvedExecutionDependencies::default(),
+            &rspice_core::abort_signal::NoAbort,
+        )
+        .expect("an AC frequency-table specification reaches the engine");
+
+        let SimulationResult::Ac {
+            frequencies,
+            waveforms,
+            ..
+        } = result
+        else {
+            panic!("an AC frequency table retains the AC result family");
+        };
+        assert_eq!(
+            frequencies, authored,
+            "the solved axis must be exactly the authored one"
+        );
+
+        let response = waveforms
+            .iter()
+            .find(|(name, _)| name.to_ascii_lowercase().contains("out"))
+            .map(|(_, waveform)| waveform.clone())
+            .unwrap_or_else(|| {
+                panic!(
+                    "the low-pass output is retained; the run returned {:?}",
+                    waveforms.keys().collect::<Vec<_>>()
+                )
+            });
+        let imaginary = response
+            .y_imag
+            .as_ref()
+            .expect("an AC response retains both components");
+        assert_eq!(response.y_values.len(), authored.len());
+
+        for (index, frequency) in authored.iter().copied().enumerate() {
+            let magnitude = response.y_values[index].hypot(imaginary[index]);
+            let omega_rc = std::f64::consts::TAU * frequency * RESISTANCE * CAPACITANCE;
+            let exact = 1.0 / (1.0 + omega_rc * omega_rc).sqrt();
+            assert!(
+                (magnitude - exact).abs() <= 1.0e-9 * exact,
+                "at {frequency} Hz the solve returned {magnitude} and the circuit has {exact}"
+            );
+        }
+    }
+
     #[test]
     fn ac_data_dispatch_threads_cancellation_into_the_frequency_solver_path() {
         let signal = AbortOnPoll::new(5);

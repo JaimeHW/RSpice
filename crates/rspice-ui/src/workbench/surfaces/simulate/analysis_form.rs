@@ -8,6 +8,7 @@
 //! about. Validation is rendered by the caller.
 
 mod ac;
+mod ac_data;
 mod dc_mismatch;
 mod dc_sweep;
 mod disto;
@@ -1112,6 +1113,7 @@ pub(super) fn form(
         AnalysisDraft::Qpxf(setup) => quasi_periodic::transfer_fields(ui, setup, policy, locale),
         AnalysisDraft::TransientNoise(setup) => transient_noise::fields(ui, setup, policy, locale),
         AnalysisDraft::DcMismatch(setup) => dc_mismatch::fields(ui, setup),
+        AnalysisDraft::AcData(setup) => ac_data::fields(ui, setup),
     }
     clear_pending_cell(ui);
 }
