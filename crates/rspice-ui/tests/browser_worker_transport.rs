@@ -231,3 +231,65 @@ fn nested_dc_curves_and_exact_traversal_survive_the_worker_and_structured_clone(
         assert!((actual - expected).abs() < 1e-20);
     }
 }
+
+#[wasm_bindgen_test]
+fn scoped_soa_current_rules_reach_the_solver_and_transfer_complete_evidence() {
+    let request = serde_json::json!({
+        "protocolVersion": 11,
+        "request": {
+            "request": {
+                "id": 4,
+                "request": {"Spec": {"spec": {"Soa": {
+                    "stop_time": 1e-8, "step_time": 1e-9,
+                    "observation": {"start_time": 2e-9, "max_step": 5e-10, "devices": ["M1"]},
+                    "rules": [{"parameter": "Id", "max_value": 0.004, "models": ["NM"]}],
+                    "check_vgs_max": false, "max_vgs": 1.8,
+                    "check_vds_max": false, "max_vds": 3.3,
+                    "check_vbe_max": false, "max_vbe": 0.9,
+                    "check_vce_max": false, "max_vce": 5.0
+                }}, "options": {}}},
+                "netlist": "Browser SOA\nVd d 0 3\nVg g 0 2\nM1 d g 0 0 NM W=10u L=1u\n.model NM NMOS LEVEL=1 VTO=1 KP=1m LAMBDA=0\n.save V(d)\n.end\n",
+                "source_path": null,
+                "project_veriloga_runtimes": {"runtimes": [], "connections": []}
+            },
+            "dependency_metadata": "{\"snapshot_digest\":null,\"bindings\":[],\"artifacts\":[]}",
+            "dependency_buffer_count": 0
+        }, "buffers": []
+    });
+    let response =
+        rspice_ui::run_rspice_ui_worker_request(js_sys::JSON::parse(&request.to_string()).unwrap())
+            .unwrap();
+    let response = structured_clone(&response);
+    let buffers = js_sys::Reflect::get(&response, &"buffers".into())
+        .unwrap()
+        .dyn_into::<js_sys::Array>()
+        .unwrap();
+    let metadata: serde_json::Value = serde_wasm_bindgen::from_value(
+        js_sys::Reflect::get(&response, &"response".into()).unwrap(),
+    )
+    .unwrap();
+    let soa = &metadata["outcome"]["Success"]["Soa"];
+    let time = transferred_series(&buffers, &soa["time"]).to_vec();
+    assert!(time[0] >= 2e-9);
+    assert!(time.windows(2).all(|pair| pair[1] - pair[0] <= 5.00001e-10));
+    let evaluations = soa["evaluations"]
+        .as_array()
+        .expect("SOA has rule evidence");
+    assert_eq!(evaluations.len(), 1);
+    assert_eq!(evaluations[0]["parameter"], "Id");
+    assert_eq!(evaluations[0]["unit"], "A");
+    assert_eq!(
+        evaluations[0]["sample_count"].as_u64(),
+        Some(time.len() as u64)
+    );
+    assert!((evaluations[0]["worst_actual_value"].as_f64().unwrap() - 0.005).abs() < 1e-8);
+    let stress = soa["waveforms"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|trace| trace["name"] == "SOA_ID(M1)")
+        .unwrap();
+    let values = transferred_series(&buffers, &stress["y_values"]).to_vec();
+    assert_eq!(values.len(), time.len());
+    assert!(values.iter().all(|value| (*value - 0.005).abs() < 1e-8));
+}

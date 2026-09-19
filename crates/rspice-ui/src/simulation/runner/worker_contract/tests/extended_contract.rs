@@ -437,6 +437,12 @@ fn analysis_spec_round_trips_supported_variants() {
             min_step: 1e-7,
         },
         AnalysisSpec::Soa {
+            rules: vec![crate::services::simulation_runner::SoaRuleConfig {
+                parameter: crate::services::safety::SoAParameter::Id,
+                max_value: 0.0123456789012345,
+                devices: vec!["X1:M1".into()],
+                models: vec![],
+            }],
             observation: crate::services::simulation_runner::SoaObservationConfig {
                 start_time: 2e-6,
                 max_step: Some(1e-9),

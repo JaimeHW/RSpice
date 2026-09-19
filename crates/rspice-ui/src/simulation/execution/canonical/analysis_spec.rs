@@ -20,6 +20,65 @@ use crate::simulation::multi_run::{
 
 use super::{CanonicalWriter, canonical_analysis_kind, encode_op_config, encode_op_fields};
 
+#[cfg(test)]
+#[test]
+fn soa_legacy_identity_is_preserved_and_every_scoped_rule_field_is_authenticated() {
+    use crate::services::{safety::SoAParameter, simulation_runner::SoaRuleConfig};
+    let spec = AnalysisSpec::Soa {
+        observation: Default::default(),
+        rules: vec![],
+        stop_time: 1e-6,
+        step_time: 1e-9,
+        check_vgs_max: true,
+        max_vgs: 1.8,
+        check_vds_max: true,
+        max_vds: 3.3,
+        check_vbe_max: true,
+        max_vbe: 0.9,
+        check_vce_max: true,
+        max_vce: 5.0,
+    };
+    let digest = |spec: &AnalysisSpec| {
+        let mut writer = CanonicalWriter::new("test");
+        encode_analysis_spec(&mut writer, spec);
+        writer.finish()
+    };
+    let mut legacy = CanonicalWriter::new("test");
+    legacy.domain("analysis-spec");
+    legacy.u8(analysis_kind_tag(&spec));
+    legacy.f64(1e-6);
+    legacy.f64(1e-9);
+    for value in [1.8, 3.3, 0.9, 5.0] {
+        legacy.bool(true);
+        legacy.f64(value);
+    }
+    assert_eq!(digest(&spec), legacy.finish());
+    let mut configured = spec.clone();
+    let AnalysisSpec::Soa { rules, .. } = &mut configured else {
+        unreachable!()
+    };
+    rules.push(SoaRuleConfig {
+        parameter: SoAParameter::Id,
+        max_value: 1e-3,
+        devices: vec!["M1".into()],
+        models: vec!["NM".into()],
+    });
+    assert_ne!(digest(&spec), digest(&configured));
+    for field in 0..4 {
+        let mut changed = configured.clone();
+        let AnalysisSpec::Soa { rules, .. } = &mut changed else {
+            unreachable!()
+        };
+        match field {
+            0 => rules[0].parameter = SoAParameter::Vgd,
+            1 => rules[0].max_value = 2e-3,
+            2 => rules[0].devices = vec!["M2".into()],
+            _ => rules[0].models = vec!["PM".into()],
+        }
+        assert_ne!(digest(&changed), digest(&configured), "rule field {field}");
+    }
+}
+
 pub(super) fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &AnalysisSpec) {
     writer.domain("analysis-spec");
     writer.u8(analysis_kind_tag(spec));
@@ -415,6 +474,7 @@ pub(super) fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &Analysis
         }
         AnalysisSpec::Soa {
             observation,
+            rules,
             stop_time,
             step_time,
             check_vgs_max,
@@ -450,6 +510,22 @@ pub(super) fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &Analysis
                 writer.sequence(observation.models.len());
                 for name in &observation.models {
                     writer.string(name);
+                }
+            }
+            if !rules.is_empty() {
+                writer.string("soa-scoped-rules-v1");
+                writer.sequence(rules.len());
+                for rule in rules {
+                    writer.string(rule.parameter.stress_code());
+                    writer.f64(rule.max_value);
+                    writer.sequence(rule.devices.len());
+                    for name in &rule.devices {
+                        writer.string(name);
+                    }
+                    writer.sequence(rule.models.len());
+                    for name in &rule.models {
+                        writer.string(name);
+                    }
                 }
             }
         }

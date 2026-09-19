@@ -193,6 +193,8 @@ pub(crate) enum WorkerAnalysisSpec {
     Soa {
         #[serde(default)]
         observation: crate::services::simulation_runner::SoaObservationConfig,
+        #[serde(default)]
+        rules: Vec<crate::services::simulation_runner::SoaRuleConfig>,
         stop_time: f64,
         step_time: f64,
         check_vgs_max: bool,

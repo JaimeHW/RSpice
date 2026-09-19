@@ -885,6 +885,7 @@ impl SimulationController {
             .map_err(|e| format!("invalid SOA settings: {}", e))?;
         Ok(AnalysisSpec::Soa {
             observation: cfg.observation,
+            rules: cfg.rules,
             stop_time: cfg.stop_time,
             step_time: cfg.step_time,
             check_vgs_max: cfg.check_vgs_max,

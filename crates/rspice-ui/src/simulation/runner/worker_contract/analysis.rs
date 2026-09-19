@@ -1161,6 +1161,7 @@ impl TryFrom<&AnalysisSpec> for WorkerAnalysisSpec {
             }),
             AnalysisSpec::Soa {
                 observation,
+                rules,
                 stop_time,
                 step_time,
                 check_vgs_max,
@@ -1173,6 +1174,7 @@ impl TryFrom<&AnalysisSpec> for WorkerAnalysisSpec {
                 max_vce,
             } => Ok(Self::Soa {
                 observation: observation.clone(),
+                rules: rules.clone(),
                 stop_time: *stop_time,
                 step_time: *step_time,
                 check_vgs_max: *check_vgs_max,
@@ -1560,6 +1562,7 @@ impl From<WorkerAnalysisSpec> for AnalysisSpec {
             },
             WorkerAnalysisSpec::Soa {
                 observation,
+                rules,
                 stop_time,
                 step_time,
                 check_vgs_max,
@@ -1572,6 +1575,7 @@ impl From<WorkerAnalysisSpec> for AnalysisSpec {
                 max_vce,
             } => Self::Soa {
                 observation,
+                rules,
                 stop_time,
                 step_time,
                 check_vgs_max,

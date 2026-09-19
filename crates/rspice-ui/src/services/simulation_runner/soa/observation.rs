@@ -47,7 +47,12 @@ impl SoaObservationConfig {
                         "SOA {kind} filters require exact names separated by spaces"
                     ));
                 }
-                if !seen.insert(name.to_ascii_uppercase()) {
+                let key = if kind == "device" {
+                    name.replace(':', ".")
+                } else {
+                    name.clone()
+                };
+                if !seen.insert(key.to_ascii_uppercase()) {
                     return Err(format!("SOA {kind} filter repeats '{name}'"));
                 }
             }
@@ -57,9 +62,10 @@ impl SoaObservationConfig {
 
     pub(super) fn validate_selection(&self, elements: &[Element]) -> Result<(), String> {
         for name in &self.devices {
-            if !elements.iter().any(|element| {
-                element.name.eq_ignore_ascii_case(name) && Self::model(element).is_some()
-            }) {
+            if !elements
+                .iter()
+                .any(|element| same_name(&element.name, name) && Self::model(element).is_some())
+            {
                 return Err(format!(
                     "SOA device filter '{name}' does not name an eligible concrete device"
                 ));
@@ -75,7 +81,7 @@ impl SoaObservationConfig {
         Ok(())
     }
 
-    fn model(element: &Element) -> Option<&str> {
+    pub(super) fn model(element: &Element) -> Option<&str> {
         match &element.kind {
             ElementKind::Mosfet { model, .. }
             | ElementKind::Bjt { model, .. }
@@ -90,7 +96,7 @@ impl SoaObservationConfig {
             && !self
                 .devices
                 .iter()
-                .any(|name| name.eq_ignore_ascii_case(&element.name))
+                .any(|name| same_name(name, &element.name))
         {
             return false;
         }
@@ -103,6 +109,18 @@ impl SoaObservationConfig {
                 .iter()
                 .any(|name| name.eq_ignore_ascii_case(model))
     }
+}
+
+/// The flattener uses dots; authored SPICE paths also accept colons.
+pub(super) fn same_name(left: &str, right: &str) -> bool {
+    let canonical = |byte: u8| {
+        if byte == b':' {
+            b'.'
+        } else {
+            byte.to_ascii_uppercase()
+        }
+    };
+    left.bytes().map(canonical).eq(right.bytes().map(canonical))
 }
 
 #[cfg(test)]
@@ -122,6 +140,8 @@ mod tests {
         assert!(config.validate(1.0).is_err());
         config.max_step = Some(0.01);
         config.devices = vec!["M1".into(), "m1".into()];
+        assert!(config.validate(1.0).is_err());
+        config.devices = vec!["X1:M1".into(), "x1.m1".into()];
         assert!(config.validate(1.0).is_err());
         config.devices = vec!["X1:M1".into()];
         config.models = vec!["NM".into()];

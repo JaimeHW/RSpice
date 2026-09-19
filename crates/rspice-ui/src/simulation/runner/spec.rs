@@ -1457,6 +1457,7 @@ R2 out 0 1k\n\
             (
                 "device",
                 AnalysisSpec::Soa {
+                    rules: Vec::new(),
                     observation: Default::default(),
                     stop_time: 1.0e-6,
                     step_time: 1.0e-9,

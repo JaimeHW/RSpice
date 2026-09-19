@@ -122,6 +122,7 @@ pub(super) fn validate(spec: &AnalysisSpec) -> Result<(), String> {
         }
         AnalysisSpec::Soa {
             observation,
+            rules,
             stop_time,
             step_time,
             check_vgs_max,
@@ -134,6 +135,9 @@ pub(super) fn validate(spec: &AnalysisSpec) -> Result<(), String> {
             max_vce,
         } => {
             observation.validate(*stop_time)?;
+            for rule in rules {
+                rule.validate()?;
+            }
             if !stop_time.is_finite() || *stop_time <= 0.0 {
                 return Err("SOA stop_time must be finite and > 0".to_string());
             }
@@ -143,7 +147,12 @@ pub(super) fn validate(spec: &AnalysisSpec) -> Result<(), String> {
             if step_time > stop_time {
                 return Err("SOA step_time must be <= stop_time".to_string());
             }
-            if !check_vgs_max && !check_vds_max && !check_vbe_max && !check_vce_max {
+            if rules.is_empty()
+                && !check_vgs_max
+                && !check_vds_max
+                && !check_vbe_max
+                && !check_vce_max
+            {
                 return Err("SOA requires at least one enabled check".to_string());
             }
             if *check_vgs_max && (!max_vgs.is_finite() || *max_vgs <= 0.0) {

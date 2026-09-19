@@ -50,6 +50,7 @@ pub(super) fn run_device_spec(
         ),
         AnalysisSpec::Soa {
             observation,
+            rules,
             stop_time,
             step_time,
             check_vgs_max,
@@ -63,6 +64,7 @@ pub(super) fn run_device_spec(
         } => run_soa(
             netlist,
             observation,
+            rules,
             stop_time,
             step_time,
             check_vgs_max,
@@ -271,6 +273,7 @@ fn run_optimization(
 fn run_soa(
     netlist: &str,
     observation: svc_runner::SoaObservationConfig,
+    rules: Vec<svc_runner::SoaRuleConfig>,
     stop_time: f64,
     step_time: f64,
     check_vgs_max: bool,
@@ -286,6 +289,7 @@ fn run_soa(
 ) -> Result<SimulationResult, SimulationError> {
     let cfg = svc_runner::SoaRunConfig {
         observation,
+        rules,
         stop_time,
         step_time,
         check_vgs_max,

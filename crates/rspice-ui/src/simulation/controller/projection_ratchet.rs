@@ -138,6 +138,11 @@ const ENUM_CANDIDATES: &[&str] = &[
 /// projection on its own merit.
 const ARRAY_SEEDS: &[(AnalysisKind, &str, &str)] = &[
     (
+        AnalysisKind::Soa,
+        "rules",
+        r#"{"parameter":6,"max_value":"1m","devices":"M1","models":""}"#,
+    ),
+    (
         AnalysisKind::HarmonicBalance,
         "additional_tones",
         r#"{"frequency": "2G", "harmonics": "3", "name": "tone2", "source": ""}"#,

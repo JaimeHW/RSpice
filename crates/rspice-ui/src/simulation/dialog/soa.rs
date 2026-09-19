@@ -1,14 +1,17 @@
 //! Safety / SOA analysis dialog configuration.
 //!
-//! Defines transient-window SOA checks against per-device voltage limits.
+//! Defines transient-window SOA checks against scoped terminal stress limits.
 
 use super::options::parse_si_value;
-use crate::services::simulation_runner::SoaObservationConfig;
+use crate::services::simulation_runner::{SoaObservationConfig, SoaRuleConfig};
+mod rules;
+pub use rules::SoaRuleDraft;
 
 /// Typed SOA analysis configuration.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SoaConfig {
     pub observation: SoaObservationConfig,
+    pub rules: Vec<SoaRuleConfig>,
     /// Transient stop time.
     pub stop_time: f64,
     /// Transient step time.
@@ -35,6 +38,7 @@ impl Default for SoaConfig {
     fn default() -> Self {
         Self {
             observation: SoaObservationConfig::default(),
+            rules: Vec::new(),
             stop_time: 1e-6,
             step_time: 1e-9,
             check_vgs_max: true,
@@ -53,6 +57,9 @@ impl SoaConfig {
     /// Validate configuration.
     pub fn validate(&self) -> Result<(), String> {
         self.observation.validate(self.stop_time)?;
+        for rule in &self.rules {
+            rule.validate()?;
+        }
         if self.stop_time <= 0.0 || !self.stop_time.is_finite() {
             return Err("SOA stop_time must be finite and > 0".to_string());
         }
@@ -62,7 +69,11 @@ impl SoaConfig {
         if self.step_time > self.stop_time {
             return Err("SOA step_time must be <= stop_time".to_string());
         }
-        if !self.check_vgs_max && !self.check_vds_max && !self.check_vbe_max && !self.check_vce_max
+        if self.rules.is_empty()
+            && !self.check_vgs_max
+            && !self.check_vds_max
+            && !self.check_vbe_max
+            && !self.check_vce_max
         {
             return Err("SOA requires at least one enabled check".to_string());
         }
@@ -109,6 +120,15 @@ impl SoaConfig {
                 self.observation.models.join(" ")
             ));
         }
+        for rule in &self.rules {
+            card.push_str(&format!(
+                " rule=({} {} devices=({}) models=({}))",
+                rule.parameter.stress_code(),
+                rule.max_value,
+                rule.devices.join(" "),
+                rule.models.join(" ")
+            ));
+        }
         card
     }
 }
@@ -125,6 +145,8 @@ fn yes_no(v: bool) -> &'static str {
 #[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SoaDialogState {
+    #[serde(default)]
+    pub rules: Vec<SoaRuleDraft>,
     #[serde(default = "zero_time")]
     pub start_time: String,
     #[serde(default)]
@@ -164,6 +186,7 @@ impl SoaDialogState {
     /// Build UI state from config.
     pub fn from_config(config: &SoaConfig) -> Self {
         Self {
+            rules: config.rules.iter().map(SoaRuleDraft::from_config).collect(),
             start_time: config.observation.start_time.to_string(),
             max_step: config
                 .observation
@@ -190,6 +213,11 @@ impl SoaDialogState {
     /// Convert state to config.
     pub fn to_config(&self) -> Result<SoaConfig, String> {
         let cfg = SoaConfig {
+            rules: self
+                .rules
+                .iter()
+                .map(SoaRuleDraft::to_config)
+                .collect::<Result<_, _>>()?,
             observation: SoaObservationConfig {
                 start_time: if self.start_time.trim().is_empty() {
                     0.0
@@ -258,6 +286,7 @@ impl SoaDialogState {
                 && self.max_step.is_empty()
                 && self.devices.is_empty()
                 && self.models.is_empty()
+                && self.rules.is_empty()
                 && !self.use_initial_conditions
                 && (self.start_time.is_empty() || self.start_time == "0")
             {
@@ -306,6 +335,12 @@ mod tests {
     #[test]
     fn soa_authored_observation_settings_survive_restore_and_full_precision_cards() {
         let config = SoaConfig {
+            rules: vec![SoaRuleConfig {
+                parameter: crate::services::safety::SoAParameter::Id,
+                max_value: 0.0123456789012345,
+                devices: vec!["X1:M1".into()],
+                models: vec!["NM".into()],
+            }],
             stop_time: 1.23456789123e-6,
             observation: SoaObservationConfig {
                 start_time: 1.23456789123e-7,
@@ -327,6 +362,7 @@ mod tests {
         let card = config.to_spice();
         for value in [
             config.stop_time,
+            config.rules[0].max_value,
             config.observation.start_time,
             config.observation.max_step.unwrap(),
         ] {
@@ -335,6 +371,7 @@ mod tests {
         assert!(card.contains("devices=(X1:M1) models=(NM)"));
         let mut legacy = serde_json::to_value(&draft).unwrap();
         for key in [
+            "rules",
             "start_time",
             "max_step",
             "use_initial_conditions",
@@ -349,6 +386,7 @@ mod tests {
             restored.to_config().unwrap().observation,
             SoaObservationConfig::default()
         );
+        assert!(restored.to_config().unwrap().rules.is_empty());
         assert_eq!(restored.to_config().unwrap().stop_time, config.stop_time);
     }
 }

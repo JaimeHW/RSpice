@@ -17,12 +17,17 @@ use std::collections::HashMap;
 use std::path::Path;
 
 mod observation;
+mod rules;
+#[cfg(test)]
+mod rules_tests;
 pub use observation::SoaObservationConfig;
+pub use rules::SoaRuleConfig;
 
 /// Configuration for SOA analysis.
 #[derive(Debug, Clone)]
 pub struct SoaRunConfig {
     pub observation: SoaObservationConfig,
+    pub rules: Vec<SoaRuleConfig>,
     /// Transient stop time.
     pub stop_time: Value,
     /// Transient step time.
@@ -49,6 +54,7 @@ impl Default for SoaRunConfig {
     fn default() -> Self {
         Self {
             observation: SoaObservationConfig::default(),
+            rules: Vec::new(),
             stop_time: 1e-6,
             step_time: 1e-9,
             check_vgs_max: true,
@@ -66,6 +72,9 @@ impl Default for SoaRunConfig {
 impl SoaRunConfig {
     pub(super) fn validate(&self) -> Result<(), String> {
         self.observation.validate(self.stop_time)?;
+        for rule in &self.rules {
+            rule.validate()?;
+        }
         if !self.stop_time.is_finite() || self.stop_time <= 0.0 {
             return Err("SOA stop_time must be finite and > 0".to_string());
         }
@@ -75,7 +84,11 @@ impl SoaRunConfig {
         if self.step_time > self.stop_time {
             return Err("SOA step_time must be <= stop_time".to_string());
         }
-        if !self.check_vgs_max && !self.check_vds_max && !self.check_vbe_max && !self.check_vce_max
+        if self.rules.is_empty()
+            && !self.check_vgs_max
+            && !self.check_vds_max
+            && !self.check_vbe_max
+            && !self.check_vce_max
         {
             return Err("SOA requires at least one enabled check".to_string());
         }
@@ -174,8 +187,19 @@ pub fn run_soa_analysis_with_config_and_source_path_and_abort(
         .validate_selection(&flattened.elements)
         .map_err(ServiceRunError::Failure)?;
     let mut manager = SoAManager::new();
-    let registered_rules =
-        register_soa_limits_for_netlist(&mut manager, &flattened.elements, config, abort)?;
+    let resolved = rules::resolve(&flattened.elements, config, abort)?;
+    let registered_rules: usize = resolved
+        .iter()
+        .map(|(_, definition)| definition.limits.len())
+        .sum();
+    for (element_index, definition) in &resolved {
+        manager
+            .register_device(
+                flattened.elements[*element_index].name.clone(),
+                definition.clone(),
+            )
+            .map_err(ServiceRunError::Failure)?;
+    }
     if registered_rules == 0 {
         return Err(ServiceRunError::Failure(
             "SOA analysis found no semiconductor device with an applicable enabled rule"
@@ -197,6 +221,19 @@ pub fn run_soa_analysis_with_config_and_source_path_and_abort(
                 .map(rspice_core::netlist::SaveSignal::Voltage)
         })
         .collect();
+    for (index, definition) in &resolved {
+        for limit in &definition.limits {
+            if let Some(parameter) = rules::current_parameter(limit.parameter) {
+                netlist
+                    .saves
+                    .signals
+                    .push(rspice_core::netlist::SaveSignal::DeviceParam {
+                        device: flattened.elements[*index].name.clone(),
+                        param: parameter.into(),
+                    });
+            }
+        }
+    }
     let engine = rspice_core::engine::Engine::new(super::build_engine_config(&netlist, None));
     let result = engine
         .run_tran_with_startup_mode_and_abort(
@@ -219,6 +256,38 @@ pub fn run_soa_analysis_with_config_and_source_path_and_abort(
         abort,
     )
     .map_err(ServiceRunError::from)?;
+    let mut currents = HashMap::new();
+    for (element_index, definition) in &resolved {
+        let element = &flattened.elements[*element_index];
+        for limit in &definition.limits {
+            if let Some(parameter) = rules::current_parameter(limit.parameter) {
+                ensure_not_aborted(abort)?;
+                let samples = result.try_device_op_waveform_named(&element.name, parameter)
+                    .ok_or_else(|| ServiceRunError::Failure(format!(
+                        "SOA requires accepted terminal current {}({}); the device returned no trace",
+                        parameter, element.name
+                    )))?;
+                if samples.len() != result.time.len() {
+                    return Err(ServiceRunError::Failure(format!(
+                        "SOA current trace for '{}' has incomplete sample coverage",
+                        element.name
+                    )));
+                }
+                let mut values = Vec::with_capacity(samples.len());
+                for (index, sample) in samples.iter().copied().enumerate() {
+                    poll_periodically(abort, index)?;
+                    if !sample.is_finite() {
+                        return Err(ServiceRunError::Failure(format!(
+                            "SOA current trace for '{}' contains a non-finite sample",
+                            element.name
+                        )));
+                    }
+                    values.push(sample);
+                }
+                currents.insert((*element_index, limit.parameter), values);
+            }
+        }
+    }
     let names = result.node_names.clone();
     let mut transient = super::TransientData::from_result_with_abort(result, &names, abort)?;
     transient.convergence = Some(std::sync::Arc::new(convergence));
@@ -245,58 +314,36 @@ pub fn run_soa_analysis_with_config_and_source_path_and_abort(
         poll_periodically(abort, idx)?;
         let mut values: HashMap<String, HashMap<SoAParameter, Value>> = HashMap::new();
 
-        for (element_index, element) in flattened.elements.iter().enumerate() {
-            poll_periodically(abort, element_index)?;
-            if !config.observation.includes(element) {
-                continue;
+        for (element_index, definition) in &resolved {
+            poll_periodically(abort, *element_index)?;
+            let element = &flattened.elements[*element_index];
+            let mut device_values = HashMap::new();
+            for limit in &definition.limits {
+                let value =
+                    if let Some((positive, reference)) = rules::terminal_pair(limit.parameter) {
+                        if element.nodes.len() <= positive.max(reference) {
+                            return Err(ServiceRunError::Failure(format!(
+                                "SOA device '{}' has an incomplete terminal basis",
+                                element.name
+                            )));
+                        }
+                        sample_node_waveform(&node_waveforms, &element.nodes[positive], idx)?
+                            - sample_node_waveform(&node_waveforms, &element.nodes[reference], idx)?
+                    } else {
+                        currents
+                            .get(&(*element_index, limit.parameter))
+                            .and_then(|trace| trace.get(idx + first))
+                            .copied()
+                            .ok_or_else(|| {
+                                ServiceRunError::Failure(format!(
+                                    "SOA current rule for '{}' is missing an accepted sample",
+                                    element.name
+                                ))
+                            })?
+                    };
+                device_values.insert(limit.parameter, value.abs());
             }
-            match &element.kind {
-                ElementKind::Mosfet { .. }
-                | ElementKind::Jfet { .. }
-                | ElementKind::Mesfet { .. } => {
-                    if element.nodes.len() < 3 {
-                        return Err(ServiceRunError::Failure(format!(
-                            "SOA device '{}' has an incomplete drain/gate/source terminal basis",
-                            element.name
-                        )));
-                    }
-                    let vd = sample_node_waveform(&node_waveforms, &element.nodes[0], idx)?;
-                    let vg = sample_node_waveform(&node_waveforms, &element.nodes[1], idx)?;
-                    let vs = sample_node_waveform(&node_waveforms, &element.nodes[2], idx)?;
-                    let mut device_values = HashMap::new();
-                    if config.check_vgs_max {
-                        device_values.insert(SoAParameter::Vgs, (vg - vs).abs());
-                    }
-                    if config.check_vds_max {
-                        device_values.insert(SoAParameter::Vds, (vd - vs).abs());
-                    }
-                    if !device_values.is_empty() {
-                        values.insert(element.name.clone(), device_values);
-                    }
-                }
-                ElementKind::Bjt { .. } => {
-                    if element.nodes.len() < 3 {
-                        return Err(ServiceRunError::Failure(format!(
-                            "SOA device '{}' has an incomplete collector/base/emitter terminal basis",
-                            element.name
-                        )));
-                    }
-                    let vc = sample_node_waveform(&node_waveforms, &element.nodes[0], idx)?;
-                    let vb = sample_node_waveform(&node_waveforms, &element.nodes[1], idx)?;
-                    let ve = sample_node_waveform(&node_waveforms, &element.nodes[2], idx)?;
-                    let mut device_values = HashMap::new();
-                    if config.check_vbe_max {
-                        device_values.insert(SoAParameter::Vbe, (vb - ve).abs());
-                    }
-                    if config.check_vce_max {
-                        device_values.insert(SoAParameter::Vce, (vc - ve).abs());
-                    }
-                    if !device_values.is_empty() {
-                        values.insert(element.name.clone(), device_values);
-                    }
-                }
-                _ => {}
-            }
+            values.insert(element.name.clone(), device_values);
         }
 
         manager
@@ -358,73 +405,6 @@ pub fn run_soa_analysis_with_config_and_source_path_and_abort(
         evaluations,
         stress_history,
     })
-}
-
-fn register_soa_limits_for_netlist(
-    manager: &mut SoAManager,
-    elements: &[Element],
-    config: &SoaRunConfig,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<usize> {
-    let mut registered_rules = 0usize;
-    for (element_index, element) in elements.iter().enumerate() {
-        poll_periodically(abort, element_index)?;
-        if !config.observation.includes(element) {
-            continue;
-        }
-        let mut def = SoADefinition::new();
-        match &element.kind {
-            ElementKind::Mosfet { .. } | ElementKind::Jfet { .. } | ElementKind::Mesfet { .. } => {
-                if config.check_vgs_max {
-                    def.add_limit(SoALimit {
-                        parameter: SoAParameter::Vgs,
-                        max_value: config.max_vgs,
-                        unit: "V".to_string(),
-                        description: "Maximum gate-source voltage".to_string(),
-                    });
-                }
-                if config.check_vds_max {
-                    def.add_limit(SoALimit {
-                        parameter: SoAParameter::Vds,
-                        max_value: config.max_vds,
-                        unit: "V".to_string(),
-                        description: "Maximum drain-source voltage".to_string(),
-                    });
-                }
-            }
-            ElementKind::Bjt { .. } => {
-                if config.check_vbe_max {
-                    def.add_limit(SoALimit {
-                        parameter: SoAParameter::Vbe,
-                        max_value: config.max_vbe,
-                        unit: "V".to_string(),
-                        description: "Maximum base-emitter voltage".to_string(),
-                    });
-                }
-                if config.check_vce_max {
-                    def.add_limit(SoALimit {
-                        parameter: SoAParameter::Vce,
-                        max_value: config.max_vce,
-                        unit: "V".to_string(),
-                        description: "Maximum collector-emitter voltage".to_string(),
-                    });
-                }
-            }
-            _ => continue,
-        }
-        if !def.limits.is_empty() {
-            registered_rules = registered_rules
-                .checked_add(def.limits.len())
-                .ok_or_else(|| {
-                    ServiceRunError::Failure("SOA rule count overflows the platform".to_owned())
-                })?;
-            manager
-                .register_device(element.name.clone(), def)
-                .map_err(ServiceRunError::Failure)?;
-        }
-    }
-    ensure_not_aborted(abort)?;
-    Ok(registered_rules)
 }
 
 fn build_transient_node_lookup(
@@ -762,11 +742,9 @@ mod tests {
             check_vce_max: true,
             ..SoaRunConfig::default()
         };
-        let mut manager = SoAManager::new();
-
-        let count =
-            register_soa_limits_for_netlist(&mut manager, &netlist.elements, &bjt_only, &NoAbort)
-                .expect("rule registration completes");
+        let count = rules::resolve(&netlist.elements, &bjt_only, &NoAbort)
+            .expect("rule registration completes")
+            .len();
 
         assert_eq!(count, 0);
     }
