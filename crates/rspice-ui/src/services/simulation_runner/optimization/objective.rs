@@ -75,6 +75,67 @@ mod tests {
     use rspice_core::abort_signal::NoAbort;
 
     #[test]
+    fn failed_expression_trials_never_beat_large_valid_objectives() {
+        let deck = "Bounded objective\n.param X=0.51\nV1 in 0 {X}\nR1 in 0 1k\n.end\n";
+        for algorithm in [
+            OptimizationAlgorithmMode::PatternSearch,
+            OptimizationAlgorithmMode::GradientDescent,
+            OptimizationAlgorithmMode::SimulatedAnnealing,
+        ] {
+            let config = OptimizationRunConfig {
+                objective_expression: Some("1e40*(1+V(in))/(V(in)>=0.5)".into()),
+                variables: vec![OptimizationVariable {
+                    name: "X".into(),
+                    min: 0.0,
+                    max: 1.0,
+                    initial: 0.51,
+                }],
+                goal: OptimizationGoalMode::Minimize,
+                algorithm,
+                fd_step: 0.1,
+                max_iterations: 40,
+                ..Default::default()
+            };
+            let result = run_optimization_analysis_with_config_and_source_path_and_abort(
+                deck, &config, None, &NoAbort,
+            )
+            .unwrap();
+            let best_x = result.best_variables["X"];
+            assert!((0.5..=0.51).contains(&best_x), "{algorithm:?}: {result:?}");
+            let expected = 1e40 * (1.0 + best_x);
+            assert!((result.best_cost / expected - 1.0).abs() < 1e-12);
+            for (&x, &cost) in result.variable_traces["X"].iter().zip(&result.costs) {
+                assert!((0.5..=1.0).contains(&x), "{algorithm:?}: {x}");
+                assert!(cost.is_finite() && cost >= 1e40, "{algorithm:?}: {cost}");
+                assert!((cost / (1e40 * (1.0 + x)) - 1.0).abs() < 1e-12);
+            }
+        }
+    }
+
+    #[test]
+    fn invalid_initial_objectives_and_overflowing_target_costs_are_errors() {
+        let deck = "Objective failure\n.param RLOAD=1k\nV1 out 0 1\nR1 out 0 {RLOAD}\n.end\n";
+        for (expression, target, expected) in [
+            ("V(out)/0", 0.0, "Optimization expression"),
+            ("1e200*V(out)", -1e200, "cost is not finite"),
+        ] {
+            let config = OptimizationRunConfig {
+                objective_expression: Some(expression.into()),
+                target: Some(target),
+                ..Default::default()
+            };
+            let error = run_optimization_analysis_with_config_and_source_path_and_abort(
+                deck, &config, None, &NoAbort,
+            )
+            .unwrap_err();
+            assert!(
+                error.to_string().contains(expected),
+                "{expression}: {error}"
+            );
+        }
+    }
+
+    #[test]
     fn optimization_expressions_use_signed_current_power_parameters_and_functions() {
         let deck = "Objective expressions\n.param RLOAD=2k gain=4\nV1 in 0 1\nR1 in 0 {RLOAD}\n.save V(in)\n.end\n";
         let netlist = parse_runner_netlist_with_abort(deck, None, &NoAbort).unwrap();

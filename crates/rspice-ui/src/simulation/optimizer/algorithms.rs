@@ -19,6 +19,12 @@ impl OptimizerEngine {
     {
         // Compute gradient
         self.compute_gradient(cost_fn);
+        // Failed neighboring circuit evaluations have infinite cost. A
+        // derivative across that boundary is undefined; use bounded
+        // exploratory moves without propagating NaN into design variables.
+        if self.gradient.iter().any(|value| !value.is_finite()) {
+            return self.step_pattern_search(cost_fn, current_cost);
+        }
 
         // Compute descent direction (negative gradient)
         let direction: Vec<f64> = self.gradient.iter().map(|g| -g).collect();

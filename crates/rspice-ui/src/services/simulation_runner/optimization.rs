@@ -319,32 +319,33 @@ pub fn run_optimization_analysis_with_config_and_source_path_and_abort(
     let mut costs = Vec::with_capacity(config.max_iterations + 1);
 
     let eval_error: RefCell<Option<ServiceRunError>> = RefCell::new(None);
-    let successful_evals = Cell::new(0usize);
     let abort_seen = Cell::new(false);
     let fatal_error_seen = Cell::new(false);
     let mut cost_fn = |vars: &HashMap<String, Value>| -> Value {
         if abort_seen.get() || fatal_error_seen.get() {
-            return 1e30;
+            return Value::INFINITY;
         }
-        match evaluate_optimization_objective(netlist_text, vars, config, source_path, abort) {
-            Ok(value) => {
-                successful_evals.set(successful_evals.get().saturating_add(1));
-                objective_to_cost(value, config.goal, config.target)
-            }
+        let evaluation =
+            evaluate_optimization_objective(netlist_text, vars, config, source_path, abort)
+                .and_then(|value| objective_to_cost(value, config.goal, config.target));
+        match evaluation {
+            Ok(cost) => cost,
             Err(ServiceRunError::Aborted) => {
                 abort_seen.set(true);
-                1e30
+                Value::INFINITY
             }
             Err(error @ ServiceRunError::ResourceLimit(_)) => {
                 fatal_error_seen.set(true);
                 *eval_error.borrow_mut() = Some(error);
-                1e30
+                Value::INFINITY
             }
             Err(error @ ServiceRunError::Failure(_)) => {
                 if eval_error.borrow().is_none() {
                     *eval_error.borrow_mut() = Some(error);
                 }
-                1e30
+                // A failed circuit or expression must never outrank a valid
+                // finite objective, regardless of that objective's scale.
+                Value::INFINITY
             }
         }
     };
@@ -353,6 +354,13 @@ pub fn run_optimization_analysis_with_config_and_source_path_and_abort(
     let initial_cost = cost_fn(&initial_vars);
     propagate_optimization_fatal_error(&fatal_error_seen, &eval_error)?;
     ensure_optimization_not_aborted(abort, &abort_seen)?;
+    if !initial_cost.is_finite() {
+        return Err(eval_error.borrow_mut().take().unwrap_or_else(|| {
+            ServiceRunError::Failure(
+                "Optimization requires a finite objective cost at the initial design".into(),
+            )
+        }));
+    }
     optimizer.observe_candidate(&initial_vars, initial_cost);
     record_optimization_state(
         0.0,
@@ -384,14 +392,6 @@ pub fn run_optimization_analysis_with_config_and_source_path_and_abort(
             &mut variable_traces,
             abort,
         )?;
-    }
-
-    if successful_evals.get() == 0 {
-        return Err(eval_error.into_inner().unwrap_or_else(|| {
-            ServiceRunError::Failure(
-                "Optimization failed: objective evaluation returned no valid samples".to_string(),
-            )
-        }));
     }
 
     ensure_not_aborted(abort)?;
@@ -441,6 +441,11 @@ fn record_optimization_state(
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<()> {
     ensure_not_aborted(abort)?;
+    if !cost.is_finite() || vars.values().any(|value| !value.is_finite()) {
+        return Err(ServiceRunError::Failure(
+            "Optimization cannot record a non-finite accepted design or cost".into(),
+        ));
+    }
     iterations.push(iteration);
     costs.push(cost);
     for (trace_index, (name, trace)) in variable_traces.iter_mut().enumerate() {
@@ -455,14 +460,25 @@ fn record_optimization_state(
     ensure_not_aborted(abort)
 }
 
-fn objective_to_cost(objective: Value, goal: OptimizationGoalMode, target: Option<Value>) -> Value {
-    match goal {
+fn objective_to_cost(
+    objective: Value,
+    goal: OptimizationGoalMode,
+    target: Option<Value>,
+) -> ServiceRunResult<Value> {
+    let cost = match goal {
         OptimizationGoalMode::Minimize => objective,
         OptimizationGoalMode::Maximize => -objective,
         OptimizationGoalMode::Target => {
             let t = target.expect("validated target optimization must carry a target value");
             (objective - t).powi(2)
         }
+    };
+    if cost.is_finite() {
+        Ok(cost)
+    } else {
+        Err(ServiceRunError::Failure(
+            "Optimization objective cost is not finite; reduce the expression scale or change the target".into(),
+        ))
     }
 }
 
@@ -843,19 +859,19 @@ R2 out 0 1k
     #[test]
     fn signed_optimization_objectives_preserve_minimize_and_maximize_ordering() {
         assert_eq!(
-            objective_to_cost(-2.0, OptimizationGoalMode::Minimize, None),
+            objective_to_cost(-2.0, OptimizationGoalMode::Minimize, None).unwrap(),
             -2.0
         );
         assert_eq!(
-            objective_to_cost(-2.0, OptimizationGoalMode::Maximize, None),
+            objective_to_cost(-2.0, OptimizationGoalMode::Maximize, None).unwrap(),
             2.0
         );
         assert_eq!(
-            objective_to_cost(2.0, OptimizationGoalMode::Maximize, None),
+            objective_to_cost(2.0, OptimizationGoalMode::Maximize, None).unwrap(),
             -2.0
         );
         assert_eq!(
-            objective_to_cost(2.0, OptimizationGoalMode::Target, Some(-1.0)),
+            objective_to_cost(2.0, OptimizationGoalMode::Target, Some(-1.0)).unwrap(),
             9.0
         );
     }
@@ -890,5 +906,16 @@ R2 out 0 1k
         let gradient = optimizer.compute_gradient(&mut |vars| vars["X"] * vars["X"]);
 
         assert_eq!(gradient, vec![1.0]);
+    }
+
+    #[test]
+    fn largest_finite_cost_is_a_valid_initial_candidate() {
+        let mut optimizer = OptimizerEngine::new();
+        optimizer.add_var(DesignVar::new("X", 0.5, 0.0, 1.0));
+        let initial = optimizer.current_vars();
+        optimizer.observe_candidate(&initial, f64::INFINITY);
+        assert!(optimizer.best_result().0.is_empty());
+        optimizer.observe_candidate(&initial, f64::MAX);
+        assert_eq!(optimizer.best_result(), (&initial, f64::MAX));
     }
 }

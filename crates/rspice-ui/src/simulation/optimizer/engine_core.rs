@@ -54,7 +54,7 @@ impl OptimizerEngine {
     /// point must participate in the final optimum just like every generated
     /// candidate.
     pub fn observe_candidate(&mut self, vars: &HashMap<String, f64>, cost: f64) {
-        if cost.is_finite() && cost < self.best_cost {
+        if cost.is_finite() && (self.best_vars.is_empty() || cost < self.best_cost) {
             self.best_cost = cost;
             self.best_vars = vars.clone();
         }

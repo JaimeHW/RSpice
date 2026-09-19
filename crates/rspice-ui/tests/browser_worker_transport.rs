@@ -397,3 +397,45 @@ fn envelope_initializer_settings_execute_and_pss_budget_survives_worker_transpor
     let failed = run("periodic_steady_state", 1);
     assert!(failed["outcome"].get("Failure").is_some(), "{failed}");
 }
+
+#[wasm_bindgen_test]
+fn optimization_rejects_failed_and_overflowed_costs_through_the_worker() {
+    let run = |expression: &str, goal: &str, target: f64| {
+        let request = serde_json::json!({
+            "protocolVersion": 11,
+            "request": {
+                "request": {
+                    "id": 8,
+                    "request": {"Spec": {"spec": {"Optimization": {
+                        "variables": [{"name": "X", "min": 0.0, "max": 1.0, "initial": 0.51}],
+                        "objective_expression": expression, "objective_node": "", "objective_ref": "",
+                        "goal": goal, "target": target, "algorithm": "PatternSearch",
+                        "max_iterations": 40, "cost_tolerance": 1e-8,
+                        "fd_step": 0.1, "initial_step": 0.1, "min_step": 1e-8
+                    }}, "options": {}}},
+                    "netlist": "Worker objective validity\n.param X=0.51\nV1 in 0 {X}\nR1 in 0 1k\n.end\n",
+                    "source_path": null,
+                    "project_veriloga_runtimes": {"runtimes": [], "connections": []}
+                },
+                "dependency_metadata": "{\"snapshot_digest\":null,\"bindings\":[],\"artifacts\":[]}",
+                "dependency_buffer_count": 0
+            }, "buffers": []
+        });
+        let response = rspice_ui::run_rspice_ui_worker_request(
+            js_sys::JSON::parse(&request.to_string()).unwrap(),
+        )
+        .unwrap();
+        let response = structured_clone(&response);
+        serde_wasm_bindgen::from_value::<serde_json::Value>(
+            js_sys::Reflect::get(&response, &"response".into()).unwrap(),
+        )
+        .unwrap()
+    };
+    let valid = run("1e40*(1+V(in))/(V(in)>=0.5)", "Minimize", 0.0);
+    let result = &valid["outcome"]["Success"]["Optimization"];
+    let x = result["best_variables"]["X"].as_f64().unwrap();
+    assert!((0.5..=0.51).contains(&x), "{valid}");
+    assert!((result["best_cost"].as_f64().unwrap() / (1e40 * (1.0 + x)) - 1.0).abs() < 1e-12);
+    let overflow = run("1e200*V(in)", "Target", -1e200);
+    assert!(overflow["outcome"].get("Failure").is_some(), "{overflow}");
+}
