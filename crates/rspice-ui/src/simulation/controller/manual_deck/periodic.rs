@@ -65,18 +65,26 @@ struct ParsedCard {
     keyed: HashMap<String, String>,
 }
 
-/// What the deck's one `.PSS` card settled, as every dependent card needs it.
+/// What the deck's periodic solve settled, as every dependent card needs it.
 ///
 /// The four numbers travel together because they describe one operating point:
 /// splitting them across argument lists let a dependent card be bound to three
 /// of them and not the fourth, which is how `noiseref=phase` used to reach a
 /// driven carrier.
+///
+/// Read off whichever family the dependent card's `FROM=` names — the deck's
+/// one `.PSS`, or its `.HB`. For a harmonic-balance carrier the three numbers
+/// are the authored basis rather than the solved one: `prepare_periodic_ac`
+/// replaces a dependent's fundamental with the retained state's own before it
+/// solves anything, and the retained state is what the Studio hands over.
 #[derive(Debug, Clone, Copy, Default)]
 struct PeriodicCarrier {
     fundamental_freq: f64,
     num_harmonics: usize,
     tolerance: f64,
     /// Whether the period is a solver unknown rather than authored input.
+    /// Never true of a harmonic-balance carrier: its period is the authored
+    /// tone.
     autonomous: bool,
 }
 
@@ -103,20 +111,21 @@ pub(super) fn parse_periodic_tasks(
         return Err(errors);
     }
 
-    // The carrier selector is read before the `.PSS` precondition below, and
-    // not inside each card's parser, because a card that names a
-    // harmonic-balance carrier is not a card that forgot its `.PSS`. Read in
-    // the old order, the deck the engine actually runs -- an `.HB` with a
-    // `FROM=HB` card and no `.PSS` at all -- was refused here for the one
-    // reason that is untrue of it, while the same card beside a `.PSS` was
-    // refused for the real one. One card, two answers, neither the whole
-    // story. `.PSTB` is deliberately absent: it has no `FROM=` key in either
-    // reader, so `from=` on one is an unknown keyword and stays one.
+    // The carrier selector is read before the precondition below, and not
+    // inside each card's parser, because a malformed selector is not a card
+    // that forgot its carrier. `.PSTB` is deliberately absent: it has no
+    // `FROM=` key in either reader, so `from=` on one is an unknown keyword
+    // and stays one.
+    let mut selectors = HashMap::new();
     for (line, head, card) in &parsed {
-        if matches!(head.as_str(), ".pac" | ".pnoise" | ".pxf")
-            && let Err(error) = periodic_source_selector(card, &head.to_ascii_uppercase())
-        {
-            errors.push(format!("line {line}: {error}"));
+        if !matches!(head.as_str(), ".pac" | ".pnoise" | ".pxf") {
+            continue;
+        }
+        match periodic_source_selector(card, &head.to_ascii_uppercase()) {
+            Ok(selector) => {
+                selectors.insert(*line, selector);
+            }
+            Err(error) => errors.push(format!("line {line}: {error}")),
         }
     }
     if !errors.is_empty() {
@@ -133,11 +142,70 @@ pub(super) fn parse_periodic_tasks(
             pss_cards.len()
         )]);
     }
-    let pss_dependent_count = parsed
-        .iter()
-        .filter(|(_, head, _)| matches!(head.as_str(), ".pac" | ".pnoise" | ".pxf" | ".pstb"))
+    // The deck's harmonic-balance carrier, read off the command the engine
+    // parsed rather than off the card text: `.HB` belongs to the manual
+    // reader's own dispatch, which is the one place that knows how the card's
+    // positional tones and the deck's `.OPTIONS HBINT NUMFREQ=` combine. The
+    // line it was written on comes from the source, so a card without `FROM=`
+    // can be bound the way the engine binds it.
+    let hb_carrier = harmonic_balance_carrier(netlist);
+    let hb_lines = harmonic_balance_card_lines(source);
+    let pss_line = pss_cards.first().map(|(line, _, _)| *line);
+    // Which family each dependent card reads, resolved once so the
+    // precondition below and the basis each card is bound to cannot disagree.
+    let mut families = HashMap::new();
+    for (line, head, _) in &parsed {
+        let family = match head.as_str() {
+            // `.PSTB` reads a monodromy matrix and only a shooting solve
+            // produces one, so it has no family to resolve.
+            ".pstb" => CarrierSelector::Pss,
+            ".pac" | ".pnoise" | ".pxf" => {
+                match selectors.get(line).copied().unwrap_or_default() {
+                    CarrierSelector::Pss => CarrierSelector::Pss,
+                    CarrierSelector::Hb => CarrierSelector::Hb,
+                    // The absent keyword: the nearest *preceding* periodic
+                    // solve of either family, which is
+                    // `resolve_periodic_source`'s rule. A card written above
+                    // its own solve keeps today's acceptance rather than
+                    // gaining a refusal — manual-deck analysis directives are
+                    // declarative, and `prepare_manual_tasks` orders the
+                    // producer before its consumer whatever order the deck
+                    // wrote them in.
+                    CarrierSelector::Preceding => {
+                        let nearest_hb = hb_lines.iter().copied().filter(|hb| hb < line).max();
+                        let nearest_pss = pss_line.filter(|pss| pss < line);
+                        match (nearest_pss, nearest_hb) {
+                            (Some(pss), Some(hb)) if hb > pss => CarrierSelector::Hb,
+                            (Some(_), _) => CarrierSelector::Pss,
+                            (None, Some(_)) => CarrierSelector::Hb,
+                            (None, None) if pss_line.is_none() && hb_carrier.is_some() => {
+                                CarrierSelector::Hb
+                            }
+                            (None, None) => CarrierSelector::Pss,
+                        }
+                    }
+                }
+            }
+            _ => continue,
+        };
+        families.insert(*line, family);
+    }
+    let dependents_needing_shooting = families
+        .values()
+        .filter(|family| matches!(family, CarrierSelector::Pss))
         .count();
-    if pss_dependent_count > 0 && pss_cards.is_empty() {
+    if dependents_needing_shooting > 0 && pss_cards.is_empty() {
+        // `.PSTB` reads a monodromy matrix and only a shooting solve produces
+        // one, so a deck whose nearest carrier is `.HB` is answered in the
+        // engine's own words rather than told it forgot a `.PSS` it may have
+        // meant to leave out. `DeckPlan::from_netlist` states the same thing
+        // for the same deck.
+        if hb_carrier.is_some() && parsed.iter().any(|(_, head, _)| head == ".pstb") {
+            return Err(vec![
+                ".PSTB requires a preceding .PSS; a harmonic-balance carrier has no monodromy matrix in the same deck."
+                    .to_owned(),
+            ]);
+        }
         return Err(vec![
             ".PAC, .PNOISE, .PXF, and .PSTB require one .PSS directive in the same manual deck so the exact periodic operating point can be bound."
                 .to_owned(),
@@ -152,11 +220,11 @@ pub(super) fn parse_periodic_tasks(
         })
         .transpose()
         .map_err(|error| vec![error])?;
-    // A dependent card without a `.PSS` was refused above, and a `.PSS` that
-    // retains no harmonic is refused by `parse_pss` — the engine's card has no
-    // `HARMS=0` — so the fallbacks here are only reached when the deck holds
-    // no periodic analysis at all, and nothing reads them.
-    let carrier = match &pss_spec {
+    // A dependent card with no carrier at all was refused above, and a `.PSS`
+    // that retains no harmonic is refused by `parse_pss` — the engine's card
+    // has no `HARMS=0` — so the fallbacks here are only reached when the deck
+    // holds no periodic analysis at all, and nothing reads them.
+    let shooting_carrier = match &pss_spec {
         Some(AnalysisSpec::Pss {
             fundamental_freq,
             num_harmonics,
@@ -182,6 +250,13 @@ pub(super) fn parse_periodic_tasks(
 
     let mut tasks = Vec::new();
     for (line, head, card) in parsed {
+        // The basis a dependent card binds is the basis of the family it
+        // reads. A card bound to the `.HB` and handed the `.PSS`'s four
+        // numbers would be authenticated against a solve it never reads.
+        let carrier = match families.get(&line).copied().unwrap_or_default() {
+            CarrierSelector::Hb => hb_carrier.unwrap_or(shooting_carrier),
+            _ => shooting_carrier,
+        };
         let task = match head.as_str() {
             ".pss" => QueuedAnalysis {
                 numeric_override: None,
@@ -933,22 +1008,66 @@ fn reject_unsupported_keys(
 /// named it, and a deck that does not writes no keyword and binds to the
 /// preceding periodic solve — the same three positions the form offers.
 ///
-/// A carrier this crate has no runner for is refused in the *shared* sentence
-/// rather than one written here, so a deck and a form that name the same
-/// carrier are told the same thing about it.
+/// Every spelling the engine accepts is accepted here: the two families both
+/// have a runner in this crate, so the only refusal left is the engine's own
+/// `InvalidChoice`.
 fn periodic_source_selector(card: &ParsedCard, directive: &str) -> Result<CarrierSelector, String> {
     let Some(value) = card.keyed.get("from") else {
         return Ok(CarrierSelector::Preceding);
     };
     let spelling = unquote(value).trim();
-    let Some(carrier) = CarrierSelector::from_spice_name(spelling) else {
+    CarrierSelector::from_spice_name(spelling)
         // The engine's own `InvalidChoice` on this field, in its own words.
-        return Err(format!("{directive} from={spelling:?} must be PSS or HB"));
-    };
-    match carrier.unroutable_reason(directive) {
-        Some(reason) => Err(reason),
-        None => Ok(carrier),
-    }
+        .ok_or_else(|| format!("{directive} from={spelling:?} must be PSS or HB"))
+}
+
+/// The basis the deck's `.HB` card settled, or `None` for a deck without one.
+///
+/// Read off `AnalysisCommand::Hb` — the command the engine's parser produced —
+/// and the deck's own `.OPTIONS HBINT NUMFREQ=`, exactly as the manual
+/// reader's `.HB` dispatch builds the harmonic-balance specification it
+/// queues. A second reading of the card here could bind a dependent to a basis
+/// the queued `.HB` task does not solve on.
+fn harmonic_balance_carrier(netlist: &Netlist) -> Option<PeriodicCarrier> {
+    use rspice_core::netlist::AnalysisCommand;
+
+    let frequencies = netlist.analyses.iter().find_map(|command| match command {
+        AnalysisCommand::Hb { frequencies } => Some(frequencies),
+        _ => None,
+    })?;
+    let fundamental = frequencies.first().copied()?;
+    let defaults = rspice_core::analysis::HbConfig::new(fundamental);
+    let num_harmonics = netlist
+        .options
+        .hb_num_frequencies
+        .first()
+        .copied()
+        .unwrap_or(defaults.num_harmonics);
+    Some(PeriodicCarrier {
+        fundamental_freq: fundamental,
+        num_harmonics,
+        tolerance: defaults.tolerance,
+        // A harmonic-balance orbit's period is the authored tone, never a
+        // solver unknown.
+        autonomous: false,
+    })
+}
+
+/// Which lines of the deck carry a `.HB` card.
+///
+/// The basis above comes from the engine's parsed command, which carries no
+/// line; the lines come from the same logical-card scan every other card in
+/// this reader is found by. Both are needed: a card without `FROM=` binds to
+/// the nearest *preceding* periodic solve, and "preceding" is a statement
+/// about where the cards were written.
+fn harmonic_balance_card_lines(source: &str) -> Vec<usize> {
+    logical_cards(source)
+        .into_iter()
+        .filter_map(|(line, card)| {
+            let head = card.split_whitespace().next()?;
+            matches_ignore_ascii_case(head, &[".hb"]).then_some(line)
+        })
+        .collect()
 }
 
 /// Read the sideband range the card states, in either of the engine's two
@@ -1652,30 +1771,51 @@ mod tests {
         }
     }
 
-    /// `FROM=HB` is the one card in the family the two readers answer
-    /// differently, and the difference is a limitation rather than a drift.
+    /// A harmonic-balance carrier is read, bound and run, on every card of the
+    /// family that can read one.
     ///
-    /// The agreement test above has no case for it because it cannot: the
-    /// engine *accepts* `FROM=HB`. Core's `.PAC`, `.PNOISE` and `.PXF`
-    /// grammars all admit `FROM=PSS|HB`, the plan binds such a card to the
-    /// deck's preceding `.HB`, and the CLI runs it through
-    /// `Engine::run_pxf_card_from_hb_with_abort`. The Studio has no runner
-    /// that takes a harmonic-balance operating point for any of the three, and
-    /// a manual deck binds them to the `.PSS` in the same deck, so it refuses.
-    ///
-    /// Pinned from both sides, and in both deck shapes, because the refusal
-    /// has to say the same thing whether or not a `.PSS` happens to be present
-    /// — the deck the engine actually runs is the one with no `.PSS` at all,
-    /// and that is the shape that used to be told it was missing one.
+    /// Core's `.PAC`, `.PNOISE` and `.PXF` grammars all admit `FROM=PSS|HB`,
+    /// the plan binds such a card to the deck's preceding `.HB`, and the
+    /// engine runs it through `Engine::run_pac_from_hb_with_abort` and its two
+    /// siblings. This reader used to refuse all three by name with "no route
+    /// in the Studio" — a limitation of this crate stated as a fact about the
+    /// card. The route exists now, so the test that pinned the refusal is
+    /// replaced by one that drives it: the same three cards, in both deck
+    /// shapes, read into a queue whose dependent carries a harmonic-balance
+    /// basis, and then run through the three service entries against a real
+    /// converged `.HB` operating point.
     #[test]
-    fn a_harmonic_balance_carrier_the_engine_accepts_is_refused_by_the_studio_alone() {
-        const CIRCUIT: &str = "periodic\nV1 in 0 SIN(0 1 1Meg)\nR1 in out 1k\nC1 out 0 1n\n";
+    fn an_hb_carrier_accepts_the_periodic_dependents_that_can_read_it() {
+        use crate::services::simulation_runner::{
+            self as svc, HbRunConfig, HbToneRunConfig, run_hb_analysis_with_source_path_and_abort,
+        };
+        use rspice_core::abort_signal::NoAbort;
+
+        const CIRCUIT: &str =
+            "periodic\nV1 in 0 SIN(0 0.001 1Meg) AC 1\nR1 in out 1k\nC1 out 0 159.154943091895p\n";
         const HB: &str = ".hb 1Meg\n";
+        const FUNDAMENTAL: f64 = 1.0e6;
+
+        // One converged carrier for all three runs, as the plan hands the one
+        // artifact to every dependent bound to that instance.
+        let carrier_deck = format!("{CIRCUIT}.end\n");
+        let operating_point = run_hb_analysis_with_source_path_and_abort(
+            &carrier_deck,
+            &HbRunConfig {
+                tones: vec![HbToneRunConfig::new(FUNDAMENTAL, 12)],
+                reltol: 1.0e-10,
+                ..HbRunConfig::default()
+            },
+            None,
+            &NoAbort,
+        )
+        .expect("the harmonic-balance carrier converges")
+        .operating_point;
 
         for card in [
             ".pxf dec 10 1k 1Meg input=V1 out=out from=hb",
             ".pac dec 10 1k 1Meg input=V1 out=out from=hb",
-            ".pnoise dec 10 1 1Meg out=out from=hb",
+            ".pnoise dec 10 1k 1Meg out=out from=hb",
         ] {
             for seed in ["", ".pss fund=1Meg\n"] {
                 let source = format!("{CIRCUIT}{HB}{seed}{card}\n.end\n");
@@ -1690,19 +1830,160 @@ mod tests {
                     panic!("the engine binds `{card}` to the deck's .HB carrier: {error}")
                 });
 
-                let studio_circuit = Netlist::parse(&format!("{CIRCUIT}.end\n"))
-                    .expect("the fixture circuit must parse");
-                let errors = parse_periodic_tasks(&studio_circuit, &source)
-                    .expect_err("the Studio has no route for a harmonic-balance carrier");
+                let tasks = parse_periodic_tasks(&netlist, &source)
+                    .unwrap_or_else(|errors| panic!("`{card}` must read: {errors:?}"));
+                let dependent = tasks
+                    .iter()
+                    .find(|task| {
+                        matches!(
+                            task.spec,
+                            AnalysisSpec::Pac | AnalysisSpec::Pxf | AnalysisSpec::Pnoise
+                        )
+                    })
+                    .unwrap_or_else(|| panic!("`{card}` queues a dependent task"));
+                let options = &dependent.spec_options;
+                // Bound to the harmonic-balance basis, not to the `.PSS`
+                // that may be sitting beside it.
+                let basis = options
+                    .pac
+                    .as_ref()
+                    .map(|config| (config.carrier, config.pss_fundamental_freq))
+                    .or_else(|| {
+                        options
+                            .pxf
+                            .as_ref()
+                            .map(|config| (config.carrier, config.pss_fundamental_freq))
+                    })
+                    .or_else(|| {
+                        options
+                            .pnoise
+                            .as_ref()
+                            .map(|config| (config.carrier, config.pss_fundamental_freq))
+                    })
+                    .unwrap_or_else(|| panic!("`{card}` freezes its run configuration"));
+                assert_eq!(basis.0, CarrierSelector::Hb, "`{card}`");
                 assert!(
-                    errors
-                        .iter()
-                        .any(|error| error.contains("from=hb") && error.contains("command line")),
-                    "`{card}` must be refused as the carrier it names, in every deck shape, and \
-                     must say where it does run: {errors:?}"
+                    (basis.1 - FUNDAMENTAL).abs() < 1.0,
+                    "`{card}` must carry the .HB fundamental, got {}",
+                    basis.1
                 );
+
+                // And it runs. The service entries below are the ones the
+                // dispatch calls once the plan has handed over the artifact.
+                if let Some(config) = options.pac.as_ref() {
+                    let data = svc::run_pac_analysis_from_hb_with_source_path_and_abort(
+                        &carrier_deck,
+                        config,
+                        operating_point.as_ref(),
+                        None,
+                        &NoAbort,
+                    )
+                    .unwrap_or_else(|error| panic!("`{card}` must run: {error}"));
+                    assert!(!data.frequencies.is_empty(), "`{card}`");
+                    assert!(!data.traces.is_empty(), "`{card}`");
+                } else if let Some(config) = options.pxf.as_ref() {
+                    let data = svc::run_pxf_analysis_from_hb_with_source_path_and_abort(
+                        &carrier_deck,
+                        config,
+                        operating_point.as_ref(),
+                        None,
+                        &NoAbort,
+                    )
+                    .unwrap_or_else(|error| panic!("`{card}` must run: {error}"));
+                    assert!(!data.transfer.is_empty(), "`{card}`");
+                } else if let Some(config) = options.pnoise.as_ref() {
+                    let data = svc::run_pnoise_analysis_from_hb_with_source_path_and_abort(
+                        &carrier_deck,
+                        config,
+                        operating_point.as_ref(),
+                        None,
+                        &NoAbort,
+                    )
+                    .unwrap_or_else(|error| panic!("`{card}` must run: {error}"));
+                    assert!(
+                        data.output_noise.iter().all(|value| *value > 0.0),
+                        "`{card}` must publish a positive spectrum"
+                    );
+                } else {
+                    panic!("`{card}` queues one of the three typed configurations");
+                }
             }
         }
+    }
+
+    /// A card without `FROM=` follows the deck, exactly as the engine does.
+    ///
+    /// `resolve_periodic_source` binds such a card to the nearest preceding
+    /// `.PSS` **or** `.HB`. A deck holding only an `.HB` therefore carries its
+    /// dependents on that `.HB`, and a deck that writes a `.PSS` after it
+    /// carries them on the `.PSS`.
+    #[test]
+    fn a_hand_written_hb_then_pac_deck_runs_around_the_harmonic_balance_solution() {
+        const CIRCUIT: &str =
+            "periodic\nV1 in 0 SIN(0 0.001 1Meg) AC 1\nR1 in out 1k\nC1 out 0 1n\n";
+        const PAC: &str = ".pac dec 10 1k 1Meg input=V1 out=out";
+
+        for (solves, expected_fundamental) in [
+            (".hb 2Meg\n", 2.0e6),
+            (".hb 2Meg\n.pss fund=1Meg\n", 1.0e6),
+            (".pss fund=1Meg\n.hb 2Meg\n", 2.0e6),
+        ] {
+            let source = format!("{CIRCUIT}{solves}{PAC}\n.end\n");
+            let netlist = Netlist::parse(&source)
+                .unwrap_or_else(|error| panic!("the engine reads `{solves}`: {error}"));
+            rspice_core::execution::DeckPlan::from_netlist(
+                &netlist,
+                &rspice_core::resource::ResourceLimits::default(),
+            )
+            .unwrap_or_else(|error| panic!("the engine binds the card in `{solves}`: {error}"));
+
+            let tasks = parse_periodic_tasks(&netlist, &source)
+                .unwrap_or_else(|errors| panic!("`{solves}` must read: {errors:?}"));
+            let config = tasks
+                .iter()
+                .find_map(|task| task.spec_options.pac.as_ref())
+                .unwrap_or_else(|| panic!("`{solves}` queues a .PAC configuration"));
+            assert_eq!(config.carrier, CarrierSelector::Preceding, "`{solves}`");
+            assert!(
+                (config.pss_fundamental_freq - expected_fundamental).abs() < 1.0,
+                "`{solves}` must bind the periodic solve written last, got {}",
+                config.pss_fundamental_freq
+            );
+        }
+    }
+
+    /// `.PSTB` after a harmonic balance is refused in the engine's own words.
+    ///
+    /// The engine's `resolve_periodic_source` never sees this card: the plan
+    /// binds `.PSTB` to the preceding `.PSS` unconditionally, because
+    /// `PssAnalysisResult` is the only thing carrying a monodromy matrix. A
+    /// deck whose only periodic solve is an `.HB` is refused there, and the
+    /// clause this asserts is the engine's own — taken off
+    /// `DeckPlan::from_netlist` rather than written out a second time.
+    #[test]
+    fn a_pstb_after_harmonic_balance_is_refused_in_the_engines_words() {
+        const CIRCUIT: &str = "periodic\nV1 in 0 SIN(0 1 1Meg)\nL1 in out 1u\nR1 out 0 1k\n";
+        let source = format!("{CIRCUIT}.hb 1Meg\n.pstb probe=L1\n.end\n");
+        let netlist = Netlist::parse(&source).expect("the engine reads the deck");
+        let engine_error = rspice_core::execution::DeckPlan::from_netlist(
+            &netlist,
+            &rspice_core::resource::ResourceLimits::default(),
+        )
+        .expect_err("a harmonic-balance carrier has no monodromy matrix")
+        .to_string();
+        assert!(
+            engine_error.contains("monodromy matrix"),
+            "the engine's own refusal must name the missing object: {engine_error}"
+        );
+
+        let errors = parse_periodic_tasks(&netlist, &source)
+            .expect_err("the Studio refuses the deck the engine refuses");
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.contains("monodromy matrix") && error.contains(".PSS")),
+            "the Studio must answer in the engine's words: {errors:?}"
+        );
     }
 
     /// The reader's key set is the engine's key set, key for key.

@@ -178,19 +178,6 @@ impl PeriodicCarrier {
     pub fn at(index: usize) -> Self {
         Self::ALL.get(index).copied().unwrap_or_default()
     }
-
-    /// Why this carrier cannot be run here, in the engine's own terms, or
-    /// `None` where the Studio has the route.
-    pub fn unroutable_reason(self, directive: &str) -> Option<String> {
-        match self {
-            Self::Preceding | Self::Pss => None,
-            Self::Hb => Some(format!(
-                "{directive} from=hb has no route in the Studio: no runner here linearizes a \
-                 harmonic-balance carrier for this card. The engine does, so a deck carrying it \
-                 runs on the command line; author from=pss to run it here"
-            )),
-        }
-    }
 }
 
 #[cfg(test)]
