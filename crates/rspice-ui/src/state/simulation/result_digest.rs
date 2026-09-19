@@ -1505,6 +1505,16 @@ fn encode_noise_summary(
         writer.f64(row.power);
         writer.f64(row.share_pct);
     }
+    if let Some(figure) = &summary.noise_figure {
+        writer.string("source-referenced-ssb-noise-figure-v1");
+        writer.string(&figure.input_source);
+        writer.string(&figure.source_resistor);
+        writer.f64(figure.source_resistance_ohm);
+        writer.f64(figure.source_temperature_kelvin);
+        writer.f64(figure.reference_temperature_kelvin);
+        writer.f64_slice(&figure.frequencies);
+        writer.f64_slice(&figure.decibels);
+    }
 }
 
 fn encode_family_metadata(

@@ -1070,6 +1070,7 @@ mod tests {
     /// trims each one and a fixture that came in clean would not say so.
     fn hbnoise_spec() -> AnalysisSpec {
         AnalysisSpec::Hbnoise {
+            noise_reference: None,
             start_freq: 1.0e1,
             stop_freq: 1.0e4,
             points_per_unit: 21,

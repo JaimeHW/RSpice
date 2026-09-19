@@ -363,6 +363,15 @@ fn worker_result_round_trip() {
     }
 
     let noise_summary = crate::state::NoiseSummary {
+        noise_figure: Some(std::sync::Arc::new(crate::state::NoiseFigureEvidence {
+            input_source: "V1".into(),
+            source_resistor: "Rs".into(),
+            source_resistance_ohm: 75.0,
+            source_temperature_kelvin: 325.0,
+            reference_temperature_kelvin: 290.0,
+            frequencies: vec![1.0, 10.0],
+            decibels: vec![2.1, 2.5],
+        })),
         rows: vec![
             crate::state::NoiseContributorRow {
                 device: "R1".to_string(),

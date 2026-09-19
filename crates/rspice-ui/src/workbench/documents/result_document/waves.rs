@@ -977,7 +977,14 @@ pub(super) fn build_models(
                     continue;
                 }
             }
-            let kind = if (analysis.analysis_type.uses_complex_bode_projection() && is_phase)
+            let kind = if analysis.analysis_type == AnalysisType::Hbnoise
+                && waveform.name == "Noise figure (SSB)"
+                && waveform.unit.as_deref() == Some("dB")
+            {
+                // Noise figure is already in decibels and has its own unit
+                // pane; only power spectra receive the square-root mapping.
+                TraceKind::Value
+            } else if (analysis.analysis_type.uses_complex_bode_projection() && is_phase)
                 || is_time_complex_phase
             {
                 match complex_display {

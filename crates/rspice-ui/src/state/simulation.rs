@@ -24,7 +24,9 @@ pub use dc_sweep::{
 mod cross_probe;
 mod executed_deck;
 mod family_measurements;
+mod noise_figure;
 mod result_digest;
+pub use noise_figure::NoiseFigureEvidence;
 mod result_import;
 mod run;
 mod run_history;

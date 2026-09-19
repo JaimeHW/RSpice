@@ -51,7 +51,7 @@ pub(crate) use hb::build_core_hb_config;
 pub use hb::{HbRunConfig, HbToneRunConfig, run_hb_analysis_with_source_path_and_abort};
 pub(crate) use hbnoise::integrate_psd;
 pub use hbnoise::{
-    HbnoiseFrequencySweep, HbnoiseRunConfig,
+    HbNoiseReference, HbnoiseFrequencySweep, HbnoiseRunConfig,
     run_hbnoise_analysis_from_hb_with_source_path_and_abort,
 };
 use helpers::{

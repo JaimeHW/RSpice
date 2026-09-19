@@ -162,6 +162,26 @@ impl ProjectSimulationResultsData {
 
     fn migrate_to_current_in_place(&mut self, project_id: ProjectId) -> Result<(), String> {
         let source_schema = self.schema_version;
+        if source_schema < NOISE_FIGURE_RESULTS_SCHEMA_VERSION
+            && self
+                .runs
+                .iter()
+                .flat_map(|run| &run.analyses)
+                .any(|analysis| {
+                    analysis
+                        .noise_summary
+                        .as_ref()
+                        .is_some_and(|summary| summary.noise_figure.is_some())
+                })
+        {
+            return Err(
+                "result schemas before v32 cannot contain noise-figure reference evidence".into(),
+            );
+        }
+        if source_schema == MONTE_CARLO_TRIAL_RESULTS_SCHEMA_VERSION {
+            self.schema_version = PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION;
+            return self.validate();
+        }
         if source_schema < MONTE_CARLO_TRIAL_RESULTS_SCHEMA_VERSION
             && self
                 .runs
@@ -2137,6 +2157,8 @@ impl From<&OperatingPointValue> for ProjectOperatingPointValue {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ProjectNoiseSummary {
     #[serde(default)]
+    pub noise_figure: Option<std::sync::Arc<crate::state::NoiseFigureEvidence>>,
+    #[serde(default)]
     pub rows: Vec<ProjectNoiseContributorRow>,
     #[serde(default)]
     pub total_rms: Option<f64>,
@@ -2148,6 +2170,7 @@ pub struct ProjectNoiseSummary {
 impl ProjectNoiseSummary {
     pub(super) fn into_noise_summary(self) -> NoiseSummary {
         NoiseSummary {
+            noise_figure: self.noise_figure,
             rows: self
                 .rows
                 .into_iter()
@@ -2160,6 +2183,9 @@ impl ProjectNoiseSummary {
     }
 
     fn validate(&self, prefix: &str) -> Result<(), String> {
+        if let Some(figure) = &self.noise_figure {
+            figure.validate()?;
+        }
         if let Some(total_rms) = self.total_rms {
             require_finite(total_rms, &format!("{prefix}.total_rms"))?;
         }
@@ -2178,6 +2204,7 @@ impl ProjectNoiseSummary {
 impl From<&NoiseSummary> for ProjectNoiseSummary {
     fn from(summary: &NoiseSummary) -> Self {
         Self {
+            noise_figure: summary.noise_figure.clone(),
             rows: summary
                 .rows
                 .iter()

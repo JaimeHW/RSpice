@@ -134,7 +134,7 @@ fn is_ordinary_noise_result(analysis: &AnalysisResult) -> bool {
 }
 
 fn noise_waveform_is_renderable(waveform: &crate::state::WaveformData) -> bool {
-    if waveform.x.len() != waveform.y.len() || waveform.x.len() < 2 {
+    if waveform.x.len() != waveform.y.len() || waveform.x.is_empty() {
         return false;
     }
     super::frame_work::note(super::frame_work::DatasetWalk::NoiseSpectrumScan);
@@ -157,7 +157,7 @@ fn noise_waveform_is_renderable(waveform: &crate::state::WaveformData) -> bool {
         previous = Some(frequency);
         positive_count += 1;
     }
-    positive_count >= 2
+    positive_count >= 1
 }
 
 /// The same question without a session to memoize against, for the printed
@@ -835,6 +835,18 @@ mod tests {
                 "#fff",
             )]);
         assert!(!ordinary_noise_spectrum_is_renderable(&contributor_only));
+    }
+
+    #[test]
+    fn hbnoise_spot_spectrum_keeps_its_result_inspector_accessible() {
+        let analysis =
+            AnalysisResult::new(1, AnalysisType::Hbnoise, "spot HBNOISE").with_waveforms(vec![
+                WaveformData::new("onoise", vec![1e3], vec![1e-18], "#fff"),
+            ]);
+        assert!(ordinary_noise_spectrum_is_renderable(&analysis));
+        let shape = resolve_noise_spectrum_shape(&analysis).unwrap();
+        assert_eq!(shape.anchor, 0);
+        assert_eq!(shape.trace_count, 1);
     }
 
     #[test]

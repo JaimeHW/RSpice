@@ -16,6 +16,8 @@ use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{measurement_table, section_header};
 use crate::workbench::AppState;
 
+mod figure;
+
 const RANK_W: f32 = 30.0;
 const SOURCE_W: f32 = 132.0;
 const POWER_W: f32 = 94.0;
@@ -57,14 +59,14 @@ pub(crate) fn export_csv(
     analysis_indices: &[usize],
 ) -> Option<super::ResultSheetCsv> {
     let mut contents = String::from(
-        "record,analysis_sequence,analysis_label,trace,device,mechanism,sample_index,frequency_hz,spectral_density,power_v2,share_pct,total_rms_v,input_rms_v,band_start_hz,band_end_hz\n",
+        "record,analysis_sequence,analysis_label,trace,device,mechanism,sample_index,frequency_hz,spectral_density,power_v2,share_pct,total_rms_v,input_rms_v,band_start_hz,band_end_hz,noise_figure_db,source_generator,source_resistor,source_resistance_ohm,source_temperature_kelvin,reference_temperature_kelvin\n",
     );
     let mut rows = 0usize;
     for &index in analysis_indices {
         let analysis = run.analyses.get(index)?;
         if let Some(summary) = analysis.noise_summary.as_ref() {
             contents.push_str(&format!(
-                "summary,{},{},,,,,,,,,{},{},{:.17e},{:.17e}\n",
+                "summary,{},{},,,,,,,,,{},{},{:.17e},{:.17e},,,,,,\n",
                 analysis.id,
                 super::csv_field(&analysis.label),
                 summary
@@ -79,9 +81,31 @@ pub(crate) fn export_csv(
                 summary.band.1,
             ));
             rows += 1;
+            if let Some(figure) = &summary.noise_figure {
+                for (sample_index, (&frequency, &decibels)) in
+                    figure.frequencies.iter().zip(&figure.decibels).enumerate()
+                {
+                    let mut fields = vec![String::new(); 21];
+                    fields[0] = "noise_figure".into();
+                    fields[1] = analysis.id.to_string();
+                    fields[2] = super::csv_field(&analysis.label);
+                    fields[3] = "Noise figure (SSB)".into();
+                    fields[6] = sample_index.to_string();
+                    fields[7] = format!("{frequency:.17e}");
+                    fields[15] = format!("{decibels:.17e}");
+                    fields[16] = super::csv_field(&figure.input_source);
+                    fields[17] = super::csv_field(&figure.source_resistor);
+                    fields[18] = format!("{:.17e}", figure.source_resistance_ohm);
+                    fields[19] = format!("{:.17e}", figure.source_temperature_kelvin);
+                    fields[20] = format!("{:.17e}", figure.reference_temperature_kelvin);
+                    contents.push_str(&fields.join(","));
+                    contents.push('\n');
+                    rows += 1;
+                }
+            }
             for contributor in &summary.rows {
                 contents.push_str(&format!(
-                    "contributor,{},{},,{},{},,,,{:.17e},{:.17e},,,{:.17e},{:.17e}\n",
+                    "contributor,{},{},,{},{},,,,{:.17e},{:.17e},,,{:.17e},{:.17e},,,,,,\n",
                     analysis.id,
                     super::csv_field(&analysis.label),
                     super::csv_field(&contributor.device),
@@ -97,13 +121,13 @@ pub(crate) fn export_csv(
         for waveform in analysis
             .waveforms
             .iter()
-            .filter(|waveform| waveform.visible)
+            .filter(|waveform| waveform.visible && waveform.name != "Noise figure (SSB)")
         {
             for (sample_index, (&frequency, &value)) in
                 waveform.x.iter().zip(waveform.y.iter()).enumerate()
             {
                 contents.push_str(&format!(
-                    "spectrum,{},{},{},,,{},{:.17e},{:.17e},,,,,,\n",
+                    "spectrum,{},{},{},,,{},{:.17e},{:.17e},,,,,,,,,,,,\n",
                     analysis.id,
                     super::csv_field(&analysis.label),
                     super::csv_field(&waveform.name),
@@ -161,6 +185,10 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
             ("Contributors", count.as_str()),
         ],
     );
+
+    if let Some(figure) = &summary.noise_figure {
+        figure::show(ui, figure, &mut state.ui.results.cache);
+    }
 
     ui.add_space(8.0);
     section_header(ui, "Ranked contributors", Some("integrated V²"));
@@ -354,6 +382,79 @@ mod tests {
     use crate::state::{AnalysisResult, AnalysisType, SimulationRun, WaveformData};
 
     #[test]
+    fn hbnoise_csv_separates_decibels_from_density_and_retains_source_reference() {
+        let figure = std::sync::Arc::new(crate::state::NoiseFigureEvidence {
+            input_source: "V1".into(),
+            source_resistor: "Rs".into(),
+            source_resistance_ohm: 50.0,
+            source_temperature_kelvin: 300.15,
+            reference_temperature_kelvin: 290.0,
+            frequencies: vec![1e3, 1e4],
+            decibels: vec![2.0, 3.0],
+        });
+        let mut run = SimulationRun::new(1);
+        run.add_analysis(
+            AnalysisResult::new(1, AnalysisType::Hbnoise, "HBNOISE")
+                .with_waveforms(vec![
+                    WaveformData::new(
+                        "onoise",
+                        figure.frequencies.clone(),
+                        vec![1e-18, 2e-18],
+                        "#fff",
+                    ),
+                    WaveformData::new(
+                        "Noise figure (SSB)",
+                        figure.frequencies.clone(),
+                        figure.decibels.clone(),
+                        "#fff",
+                    )
+                    .with_unit("dB"),
+                ])
+                .with_noise_summary(NoiseSummary {
+                    noise_figure: Some(figure),
+                    band: (1e3, 1e4),
+                    rows: vec![crate::state::NoiseContributorRow {
+                        device: "Rs".into(),
+                        mechanism: "thermal".into(),
+                        power: 9e-15,
+                        share_pct: 50.0,
+                    }],
+                    ..Default::default()
+                }),
+        );
+        let export = export_csv(&run, &[0]).unwrap();
+        let lines: Vec<Vec<&str>> = export
+            .contents
+            .lines()
+            .map(|line| line.split(',').collect())
+            .collect();
+        assert_eq!(lines.len(), 7);
+        assert!(lines.iter().all(|row| row.len() == 21), "{:?}", lines);
+        let figure_rows: Vec<_> = lines
+            .iter()
+            .filter(|row| row[0] == "noise_figure")
+            .collect();
+        assert_eq!(figure_rows.len(), 2);
+        assert_eq!(figure_rows[0][15].parse::<f64>().unwrap(), 2.0);
+        assert_eq!(figure_rows[1][15].parse::<f64>().unwrap(), 3.0);
+        for row in figure_rows {
+            assert!(row[8].is_empty());
+            assert_eq!(row[16], "V1");
+            assert_eq!(row[17], "Rs");
+            assert_eq!(row[18].parse::<f64>().unwrap(), 50.0);
+            assert_eq!(row[19].parse::<f64>().unwrap(), 300.15);
+            assert_eq!(row[20].parse::<f64>().unwrap(), 290.0);
+        }
+        let densities: Vec<_> = lines.iter().filter(|row| row[0] == "spectrum").collect();
+        assert_eq!(densities.len(), 2);
+        assert!(
+            densities
+                .iter()
+                .all(|row| row[3] == "onoise" && row[15].is_empty())
+        );
+    }
+
+    #[test]
     fn contributor_table_preserves_all_columns_at_narrow_inspector_width() {
         assert_eq!(contributor_table_width(), 326.0);
         assert!(SOURCE_W >= 120.0);
@@ -366,6 +467,7 @@ mod tests {
             WaveformData::new("inoise", vec![1.0, 10.0], vec![1.0e-9, 2.0e-9], "#fff"),
         ]);
         first.noise_summary = Some(NoiseSummary {
+            noise_figure: None,
             band: (1.0, 10.0),
             ..NoiseSummary::default()
         });
@@ -374,6 +476,7 @@ mod tests {
                 WaveformData::new("inoise", vec![1.0, 10.0], vec![3.0e-9, 4.0e-9], "#fff"),
             ]);
         second.noise_summary = Some(NoiseSummary {
+            noise_figure: None,
             band: (2.0, 20.0),
             ..NoiseSummary::default()
         });

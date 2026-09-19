@@ -574,6 +574,7 @@ fn run_pnoise(
             data.frequencies.last().copied().unwrap_or_default(),
         );
         crate::state::NoiseSummary {
+            noise_figure: None,
             rows: Vec::new(),
             total_rms: Some(total_rms),
             input_rms: data.input_rms,

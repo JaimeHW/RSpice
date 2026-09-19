@@ -50,7 +50,7 @@ pub(super) fn retained_noise_contributor(name: &str) -> bool {
 }
 
 pub(super) fn retained_noise_waveform_is_renderable(waveform: &WaveformData) -> bool {
-    if waveform.x.len() != waveform.y.len() || waveform.x.len() < 2 {
+    if waveform.x.len() != waveform.y.len() || waveform.x.is_empty() {
         return false;
     }
     if waveform

@@ -22,6 +22,72 @@ use super::{CanonicalWriter, canonical_analysis_kind, encode_op_config, encode_o
 
 #[cfg(test)]
 #[test]
+fn hbnoise_reference_changes_identity_and_absence_preserves_legacy_bytes() {
+    let mut spec = AnalysisSpec::Hbnoise {
+        noise_reference: None,
+        start_freq: 1e3,
+        stop_freq: 1e4,
+        points_per_unit: 3,
+        sweep: FrequencySweep::Linear,
+        output_node: "out".into(),
+        output_ref: "0".into(),
+        input_source: "V1".into(),
+        max_sideband: 1,
+        integrated_noise: false,
+        noise_figure: false,
+        contributor_ranking: false,
+    };
+    let digest = |spec: &AnalysisSpec| {
+        let mut writer = CanonicalWriter::new("test");
+        encode_analysis_spec(&mut writer, spec);
+        writer.finish()
+    };
+    let mut legacy = CanonicalWriter::new("test");
+    legacy.domain("analysis-spec");
+    legacy.u8(analysis_kind_tag(&spec));
+    legacy.f64(1e3);
+    legacy.f64(1e4);
+    legacy.usize(3);
+    encode_frequency_sweep(&mut legacy, FrequencySweep::Linear);
+    legacy.string("out");
+    legacy.string("0");
+    legacy.string("V1");
+    legacy.usize(1);
+    legacy.bool(false);
+    legacy.bool(false);
+    legacy.bool(false);
+    assert_eq!(digest(&spec), legacy.finish());
+    let baseline = digest(&spec);
+    if let AnalysisSpec::Hbnoise {
+        noise_reference,
+        noise_figure,
+        ..
+    } = &mut spec
+    {
+        *noise_figure = true;
+        *noise_reference = Some(crate::services::simulation_runner::HbNoiseReference {
+            source_resistor: "Rs".into(),
+            temperature_kelvin: 290.0,
+        });
+    }
+    let configured = digest(&spec);
+    assert_ne!(configured, baseline);
+    for (resistor, temperature) in [("Rs2", 290.0), ("Rs", 300.0)] {
+        let mut changed = spec.clone();
+        if let AnalysisSpec::Hbnoise {
+            noise_reference: Some(reference),
+            ..
+        } = &mut changed
+        {
+            reference.source_resistor = resistor.into();
+            reference.temperature_kelvin = temperature;
+        }
+        assert_ne!(digest(&changed), configured);
+    }
+}
+
+#[cfg(test)]
+#[test]
 fn envelope_initializer_authenticates_every_control_and_preserves_legacy_identity() {
     use crate::services::simulation_runner::EnvelopeInitializationConfig;
     let spec = AnalysisSpec::Envelope {
@@ -782,6 +848,7 @@ pub(super) fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &Analysis
             encode_manifest_network(writer, spec);
         }
         AnalysisSpec::Hbnoise {
+            noise_reference,
             start_freq,
             stop_freq,
             points_per_unit,
@@ -805,6 +872,11 @@ pub(super) fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &Analysis
             writer.bool(*integrated_noise);
             writer.bool(*noise_figure);
             writer.bool(*contributor_ranking);
+            if let Some(reference) = noise_reference {
+                writer.string("hbnoise-source-reference-v1");
+                writer.string(&reference.source_resistor);
+                writer.f64(reference.temperature_kelvin);
+            }
         }
         AnalysisSpec::Qpac { .. } => {
             encode_quasi_periodic_transfer(writer, spec);

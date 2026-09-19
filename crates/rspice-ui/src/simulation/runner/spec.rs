@@ -889,6 +889,10 @@ R2 out 0 1k\n\
         assert!(waveforms.contains_key("S21[k=+0,m=+0]"));
 
         let hbnoise = AnalysisSpec::Hbnoise {
+            noise_reference: Some(svc_runner::HbNoiseReference {
+                source_resistor: "RNOISE".into(),
+                temperature_kelvin: 290.0,
+            }),
             start_freq: 1.0e4,
             stop_freq: 1.0e5,
             points_per_unit: 2,
@@ -898,7 +902,7 @@ R2 out 0 1k\n\
             input_source: "VIN".to_owned(),
             max_sideband: 1,
             integrated_noise: true,
-            noise_figure: false,
+            noise_figure: true,
             contributor_ranking: true,
         };
         assert_eq!(
@@ -925,6 +929,17 @@ R2 out 0 1k\n\
             panic!("HBNOISE must retain the noise result family");
         };
         assert!(frequencies.len() >= 2);
+        assert!(
+            summary
+                .as_ref()
+                .unwrap()
+                .noise_figure
+                .as_ref()
+                .unwrap()
+                .decibels
+                .iter()
+                .all(|value| value.is_finite())
+        );
         assert_eq!(output_noise.len(), frequencies.len());
         assert!(
             output_noise

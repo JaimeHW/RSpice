@@ -4,6 +4,63 @@
 use super::*;
 
 #[test]
+fn hbnoise_retains_noise_figure_as_decibels_with_its_source_reference() {
+    let figure = std::sync::Arc::new(crate::state::NoiseFigureEvidence {
+        input_source: "V1".into(),
+        source_resistor: "Rs".into(),
+        source_resistance_ohm: 50.0,
+        source_temperature_kelvin: 300.15,
+        reference_temperature_kelvin: 290.0,
+        frequencies: vec![1e3, 1e4],
+        decibels: vec![2.0, 3.0],
+    });
+    let summary = crate::state::NoiseSummary {
+        noise_figure: Some(figure.clone()),
+        band: (1e3, 1e4),
+        ..Default::default()
+    };
+    let result = SimulationController::new().convert_to_analysis_result_with_metadata_owned(
+        crate::simulation::SimulationResult::Noise {
+            frequencies: figure.frequencies.clone(),
+            output_noise: vec![1e-18, 2e-18],
+            input_noise: Some(vec![3e-18, 4e-18]),
+            contributors: HashMap::new(),
+            summary: Some(summary),
+            measurements: vec![],
+        },
+        AnalysisType::Hbnoise,
+        "HBNOISE",
+    );
+    let waveform = result
+        .waveforms
+        .iter()
+        .find(|wave| wave.name == "Noise figure (SSB)")
+        .unwrap();
+    assert_eq!(waveform.unit.as_deref(), Some("dB"));
+    assert_eq!(waveform.x.as_slice(), figure.frequencies.as_slice());
+    assert_eq!(waveform.y.as_slice(), figure.decibels.as_slice());
+    assert_eq!(result.validate_retained_evidence(), Ok(()));
+    let index = result
+        .waveforms
+        .iter()
+        .position(|wave| wave.name == "Noise figure (SSB)")
+        .unwrap();
+    let mut changed = result.clone();
+    changed.waveforms[index].unit = Some("V²/Hz".into());
+    assert!(changed.validate_retained_evidence().is_err());
+    let mut changed = result.clone();
+    changed.waveforms[index].y = vec![2.0, 4.0].into();
+    assert!(changed.validate_retained_evidence().is_err());
+    let mut changed = result.clone();
+    changed.waveforms.remove(index);
+    assert!(changed.validate_retained_evidence().is_err());
+    assert_eq!(
+        result.noise_summary.unwrap().noise_figure.as_ref(),
+        Some(&figure)
+    );
+}
+
+#[test]
 fn descending_data_axis_is_retained_monotonically_with_every_series_paired() {
     let sim_result = crate::simulation::SimulationResult::Noise {
         frequencies: vec![10.0, 1.0, 10.0],

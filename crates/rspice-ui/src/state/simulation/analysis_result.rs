@@ -328,6 +328,7 @@ pub struct NoiseContributorRow {
 /// first.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct NoiseSummary {
+    pub noise_figure: Option<std::sync::Arc<super::NoiseFigureEvidence>>,
     /// Contributors, ranked by integrated power, descending.
     pub rows: Vec<NoiseContributorRow>,
     /// Total integrated output noise over the band (V rms). `None` means the

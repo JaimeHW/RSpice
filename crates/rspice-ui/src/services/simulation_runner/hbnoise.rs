@@ -37,8 +37,31 @@ impl HbnoiseFrequencySweep {
 }
 
 /// Exact retained-HB noise request.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HbNoiseReference {
+    pub source_resistor: String,
+    pub temperature_kelvin: Value,
+}
+
+impl HbNoiseReference {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.source_resistor.trim().is_empty()
+            || self.source_resistor.chars().any(char::is_whitespace)
+        {
+            return Err("HBNOISE noise figure requires one source resistor name".into());
+        }
+        if !self.temperature_kelvin.is_finite() || self.temperature_kelvin <= 0.0 {
+            return Err("HBNOISE reference temperature must be finite and positive kelvin".into());
+        }
+        Ok(())
+    }
+}
+
+/// Exact retained-HB noise request.
 #[derive(Debug, Clone)]
 pub struct HbnoiseRunConfig {
+    pub noise_reference: Option<HbNoiseReference>,
     pub start_freq: Value,
     pub stop_freq: Value,
     pub points_per_unit: usize,
@@ -85,10 +108,16 @@ impl HbnoiseRunConfig {
             ));
         }
         if self.noise_figure {
-            return Err(ServiceRunError::Failure(
-                "HBNOISE noise figure requires an explicit source impedance and available-noise temperature contract; disable noise figure until those port references are configured"
-                    .to_owned(),
-            ));
+            self.noise_reference
+                .as_ref()
+                .ok_or_else(|| {
+                    ServiceRunError::Failure(
+                        "HBNOISE noise figure requires source impedance and temperature references"
+                            .into(),
+                    )
+                })?
+                .validate()
+                .map_err(ServiceRunError::Failure)?;
         }
         Ok(())
     }
@@ -97,6 +126,7 @@ impl HbnoiseRunConfig {
 /// Exact HBNOISE spectra and band-integrated evidence.
 #[derive(Debug, Clone)]
 pub struct HbnoiseData {
+    pub noise_figure: Option<std::sync::Arc<crate::state::NoiseFigureEvidence>>,
     pub frequencies: Vec<Value>,
     pub output_noise: Vec<Value>,
     pub input_noise: Vec<Value>,
@@ -152,18 +182,53 @@ pub fn run_hbnoise_analysis_from_hb_with_source_path_and_abort(
         operating_point.config().tolerance,
         "HBNOISE resolved producer configuration is invalid",
     )?;
-    let exact = engine
-        .run_pnoise_from_hb_with_abort(
-            &netlist,
-            &frequencies,
-            config.output_node.trim(),
-            output_ref,
-            Some(source_name),
-            config.max_sideband as i32,
-            operating_point,
-            abort,
-        )
-        .map_err(|error| ServiceRunError::from_core("exact retained-state HBNOISE", error))?;
+    let (exact, noise_figure) = if config.noise_figure {
+        let reference = config
+            .noise_reference
+            .as_ref()
+            .expect("validated noise reference");
+        let result = engine
+            .run_hb_noise_figure_with_abort(
+                &netlist,
+                &rspice_core::engine::HbNoiseFigureRequest {
+                    frequencies: frequencies.clone(),
+                    output_node: config.output_node.trim().into(),
+                    output_ref: output_ref.map(str::to_owned),
+                    input_source: source_name.into(),
+                    max_sideband: config.max_sideband as i32,
+                    source_resistor: reference.source_resistor.clone(),
+                    reference_temperature: reference.temperature_kelvin,
+                },
+                operating_point,
+                abort,
+            )
+            .map_err(|error| ServiceRunError::from_core("HBNOISE noise figure", error))?;
+        let evidence = crate::state::NoiseFigureEvidence {
+            input_source: source_name.into(),
+            source_resistor: result.figure.source_resistor,
+            source_resistance_ohm: result.figure.source_resistance,
+            source_temperature_kelvin: result.figure.source_temperature,
+            reference_temperature_kelvin: result.figure.reference_temperature,
+            frequencies: frequencies.clone(),
+            decibels: result.figure.decibels,
+        };
+        evidence.validate().map_err(ServiceRunError::Failure)?;
+        (result.noise, Some(std::sync::Arc::new(evidence)))
+    } else {
+        let exact = engine
+            .run_pnoise_from_hb_with_abort(
+                &netlist,
+                &frequencies,
+                config.output_node.trim(),
+                output_ref,
+                Some(source_name),
+                config.max_sideband as i32,
+                operating_point,
+                abort,
+            )
+            .map_err(|error| ServiceRunError::from_core("exact retained-state HBNOISE", error))?;
+        (exact, None)
+    };
     let input_noise = exact.input_noise.ok_or_else(|| {
         ServiceRunError::Failure(
             "exact retained-state HBNOISE did not produce its required input-referred spectrum"
@@ -198,6 +263,7 @@ pub fn run_hbnoise_analysis_from_hb_with_source_path_and_abort(
     };
     ensure_not_aborted(abort)?;
     Ok(HbnoiseData {
+        noise_figure,
         frequencies,
         output_noise: exact.output_noise,
         input_noise,
@@ -295,6 +361,7 @@ mod tests {
     fn hbnoise_returns_exact_psd_integration_and_ranked_contributors() {
         let deck = "* HBNOISE service fixture\nvin in 0 dc 0\nr1 in out 1k\nr2 out 0 1k\n.end\n";
         let config = HbnoiseRunConfig {
+            noise_reference: None,
             start_freq: 1.0e3,
             stop_freq: 1.0e4,
             points_per_unit: 3,
@@ -321,11 +388,36 @@ mod tests {
         assert!(data.output_rms.is_some_and(|value| value > 0.0));
         assert!(data.input_rms.is_some_and(|value| value > 0.0));
         assert_eq!(data.contributors.len(), 2);
+
+        let mut with_reference = config;
+        with_reference.noise_figure = true;
+        with_reference.noise_reference = Some(HbNoiseReference {
+            source_resistor: "r1".into(),
+            temperature_kelvin: 300.15,
+        });
+        let nf = run_hbnoise_analysis_from_hb_with_source_path_and_abort(
+            deck,
+            &with_reference,
+            &retained_hb(deck),
+            None,
+            &NoAbort,
+        )
+        .unwrap();
+        let evidence = nf.noise_figure.unwrap();
+        assert_eq!(evidence.frequencies, nf.frequencies);
+        assert!(
+            evidence
+                .decibels
+                .iter()
+                .all(|value| (*value - 10.0 * 2.0_f64.log10()).abs() < 1e-10)
+        );
+        assert_eq!(data.output_noise, nf.output_noise);
     }
 
     #[test]
     fn hbnoise_noise_figure_fails_closed_without_a_port_reference() {
         let config = HbnoiseRunConfig {
+            noise_reference: None,
             start_freq: 1.0,
             stop_freq: 10.0,
             points_per_unit: 2,

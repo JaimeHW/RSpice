@@ -346,6 +346,7 @@ pub(super) fn validate(spec: &AnalysisSpec) -> Result<(), String> {
             Ok(())
         }
         AnalysisSpec::Hbnoise {
+            noise_reference,
             start_freq,
             stop_freq,
             points_per_unit,
@@ -363,10 +364,10 @@ pub(super) fn validate(spec: &AnalysisSpec) -> Result<(), String> {
                 return Err("HBNOISE max_sideband must be > 0".to_owned());
             }
             if *noise_figure {
-                return Err(
-                    "HBNOISE noise figure requires explicit source impedance and available-noise temperature references"
-                        .to_owned(),
-                );
+                noise_reference
+                    .as_ref()
+                    .ok_or("HBNOISE noise figure requires a source resistor reference")?
+                    .validate()?;
             }
             Ok(())
         }

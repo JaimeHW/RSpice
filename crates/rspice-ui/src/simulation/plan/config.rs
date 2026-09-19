@@ -308,6 +308,10 @@ impl Default for PeriodicNetworkDraft {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct HbNoiseDraft {
+    #[serde(default)]
+    pub source_resistor: String,
+    #[serde(default = "default_noise_reference_temperature")]
+    pub reference_temperature: String,
     pub sweep: FrequencySweepDraft,
     pub output_node: String,
     pub output_ref: String,
@@ -321,6 +325,8 @@ pub struct HbNoiseDraft {
 impl Default for HbNoiseDraft {
     fn default() -> Self {
         Self {
+            source_resistor: String::new(),
+            reference_temperature: default_noise_reference_temperature(),
             sweep: FrequencySweepDraft::default(),
             output_node: "out".to_owned(),
             output_ref: "0".to_owned(),
@@ -329,12 +335,34 @@ impl Default for HbNoiseDraft {
             // larger spans remain available when the producer retains them.
             max_sideband: "4".to_owned(),
             integrated_noise: true,
-            // NF needs an explicit source impedance and available-noise
-            // temperature. The current HBNOISE contract intentionally leaves
-            // it off rather than assuming 50 ohms and 290 K.
+            // The user must select the circuit's actual source resistor
+            // before enabling the reference-temperature calculation.
             noise_figure: false,
             contributor_ranking: true,
         }
+    }
+}
+
+fn default_noise_reference_temperature() -> String {
+    "290".into()
+}
+
+impl HbNoiseDraft {
+    pub(crate) fn noise_reference(
+        &self,
+    ) -> Result<Option<crate::services::simulation_runner::HbNoiseReference>, String> {
+        if !self.noise_figure {
+            return Ok(None);
+        }
+        let reference = crate::services::simulation_runner::HbNoiseReference {
+            source_resistor: self.source_resistor.trim().into(),
+            temperature_kelvin: parse_positive(
+                &self.reference_temperature,
+                "noise reference temperature (K)",
+            )?,
+        };
+        reference.validate()?;
+        Ok(Some(reference))
     }
 }
 
@@ -1509,12 +1537,7 @@ fn validate_hbnoise(draft: &HbNoiseDraft) -> Option<String> {
             return Err("HBNOISE requires an input source".to_owned());
         }
         parse_positive_usize(&draft.max_sideband, "maximum sideband")?;
-        if draft.noise_figure {
-            return Err(
-                "HBNOISE noise figure requires explicit source impedance and available-noise temperature references"
-                    .to_owned(),
-            );
-        }
+        draft.noise_reference()?;
         Ok(())
     })()
     .err()
@@ -2331,5 +2354,29 @@ mod tests {
             draft.max_sideband = invalid.to_owned();
             assert!(validate_periodic_network(&draft).is_some());
         }
+    }
+    #[test]
+    fn hbnoise_reference_drafts_round_trip_and_legacy_defaults_remain_disabled() {
+        let mut draft = HbNoiseDraft::default();
+        draft.noise_figure = true;
+        draft.source_resistor = "Rs".into();
+        draft.reference_temperature = "325".into();
+        let expected = draft.noise_reference().unwrap();
+        let json = serde_json::to_string(&draft).unwrap();
+        let ron = ron::to_string(&draft).unwrap();
+        let from_json: HbNoiseDraft = serde_json::from_str(&json).unwrap();
+        let from_ron: HbNoiseDraft = ron::from_str(&ron).unwrap();
+        assert_eq!(from_json.noise_reference().unwrap(), expected);
+        assert_eq!(from_ron.noise_reference().unwrap(), expected);
+        let mut legacy = serde_json::to_value(HbNoiseDraft::default()).unwrap();
+        legacy.as_object_mut().unwrap().remove("source_resistor");
+        legacy
+            .as_object_mut()
+            .unwrap()
+            .remove("reference_temperature");
+        let restored: HbNoiseDraft = serde_json::from_value(legacy).unwrap();
+        assert!(!restored.noise_figure);
+        assert_eq!(restored.noise_reference().unwrap(), None);
+        assert_eq!(restored.reference_temperature, "290");
     }
 }

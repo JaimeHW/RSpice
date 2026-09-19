@@ -245,6 +245,7 @@ pub(super) fn run_periodic_spec(
             abort,
         ),
         AnalysisSpec::Hbnoise {
+            noise_reference,
             start_freq,
             stop_freq,
             points_per_unit,
@@ -259,6 +260,7 @@ pub(super) fn run_periodic_spec(
         } => run_hbnoise(
             netlist,
             HbnoiseRunRequest {
+                noise_reference,
                 start_freq,
                 stop_freq,
                 points_per_unit,
@@ -280,6 +282,7 @@ pub(super) fn run_periodic_spec(
 }
 
 struct HbnoiseRunRequest {
+    noise_reference: Option<svc_runner::HbNoiseReference>,
     start_freq: f64,
     stop_freq: f64,
     points_per_unit: usize,
@@ -306,6 +309,7 @@ fn run_hbnoise(
         ))
     })?;
     let config = svc_runner::HbnoiseRunConfig {
+        noise_reference: request.noise_reference,
         start_freq: request.start_freq,
         stop_freq: request.stop_freq,
         points_per_unit: request.points_per_unit,
@@ -371,14 +375,14 @@ fn run_hbnoise(
         SimulationError::SolverError("HBNOISE result has no frequency points".to_owned())
     })?;
     let band = (band_start, band_stop);
-    let summary = (config.integrated_noise || config.contributor_ranking).then_some(
-        crate::state::NoiseSummary {
+    let summary = (config.integrated_noise || config.contributor_ranking || config.noise_figure)
+        .then_some(crate::state::NoiseSummary {
+            noise_figure: data.noise_figure,
             rows,
             total_rms: data.output_rms,
             input_rms: data.input_rms,
             band,
-        },
-    );
+        });
     Ok(SimulationResult::Noise {
         frequencies: data.frequencies,
         output_noise: data.output_noise,

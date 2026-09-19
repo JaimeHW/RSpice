@@ -91,6 +91,7 @@ const DESIGN_NAMED_FIELDS: &[(AnalysisKind, &str, &str)] = &[
     ),
     (AnalysisKind::Pss, "tone_sources", "VSRC"),
     (AnalysisKind::Envelope, "modulation_sources", "VSRC"),
+    (AnalysisKind::Hbnoise, "source_resistor", "RSRC"),
     (AnalysisKind::Fft, "output", "V(n_out)"),
 ];
 
@@ -1080,5 +1081,22 @@ fn envelope_initializer_fields_reach_the_execution_spec() {
                 "{method}: {path} did not move {baseline}"
             );
         }
+    }
+}
+
+#[test]
+fn hbnoise_reference_fields_reach_the_execution_spec() {
+    let kind = AnalysisKind::Hbnoise;
+    let draft = fixture_draft(kind);
+    let mut body = draft_body(&draft).unwrap();
+    body.insert("noise_figure".into(), Value::from(true));
+    let ready = rebuild(&draft, body.clone()).unwrap();
+    let baseline = projection(kind, &ready);
+    assert!(!baseline.starts_with("spec-error"), "{baseline}");
+    for path in ["source_resistor", "reference_temperature", "noise_figure"] {
+        assert!(
+            matches!(judge(kind, &draft, &body, path), FieldOutcome::Moved),
+            "{path}: {baseline}"
+        );
     }
 }

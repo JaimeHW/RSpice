@@ -1342,3 +1342,28 @@ fn dc_axis_modes_survive_both_worker_contracts() {
     };
     assert_eq!(restored, modes);
 }
+
+#[test]
+fn hbnoise_source_reference_survives_the_worker_request() {
+    let spec = AnalysisSpec::Hbnoise {
+        noise_reference: Some(crate::services::simulation_runner::HbNoiseReference {
+            source_resistor: "X1.Rs".into(),
+            temperature_kelvin: 327.125,
+        }),
+        start_freq: 100.0,
+        stop_freq: 1e6,
+        points_per_unit: 23,
+        sweep: FrequencySweep::Octave,
+        output_node: "out".into(),
+        output_ref: "ref".into(),
+        input_source: "V1".into(),
+        max_sideband: 7,
+        integrated_noise: true,
+        noise_figure: true,
+        contributor_ranking: true,
+    };
+    let wire = WorkerAnalysisSpec::try_from(&spec).unwrap();
+    let restored: WorkerAnalysisSpec =
+        serde_json::from_str(&serde_json::to_string(&wire).unwrap()).unwrap();
+    assert_eq!(AnalysisSpec::from(restored), spec);
+}

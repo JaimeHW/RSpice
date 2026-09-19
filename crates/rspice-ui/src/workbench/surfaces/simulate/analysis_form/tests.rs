@@ -23,6 +23,25 @@ use super::transfer_function::{
     xf_output_presets,
 };
 use super::*;
+
+#[test]
+fn hbnoise_form_exposes_source_reference_when_noise_figure_is_enabled() {
+    let mut setup = crate::simulation::plan::HbNoiseDraft::default();
+    for enabled in [false, true] {
+        setup.noise_figure = enabled;
+        let (_, painted) = render_analysis_form(
+            AnalysisDraft::Hbnoise(setup.clone()),
+            NoiseDomain::default(),
+        );
+        for field in ["Source resistor", "Reference temperature (K)"] {
+            assert_eq!(
+                painted.iter().filter(|text| text.as_str() == field).count(),
+                usize::from(enabled),
+                "{field}: {painted:?}"
+            );
+        }
+    }
+}
 use crate::simulation::config::{NoiseContributionDetail, NoiseIntegrationMode, NoiseSweepType};
 use crate::simulation::dialog::hb::HbConfig;
 use crate::simulation::dialog::{HbDialogState, PssConfig, PssDialogState};

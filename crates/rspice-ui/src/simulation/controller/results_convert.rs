@@ -338,6 +338,17 @@ impl SimulationController {
                     ))
                     .with_measurements(measurements);
                 if let Some(summary) = summary {
+                    if let Some(figure) = &summary.noise_figure {
+                        result.waveforms.push(
+                            crate::state::WaveformData::new(
+                                "Noise figure (SSB)",
+                                figure.frequencies.clone(),
+                                figure.decibels.clone(),
+                                Self::color_for_index(result.waveforms.len()),
+                            )
+                            .with_unit("dB"),
+                        );
+                    }
                     result = result.with_noise_summary(summary);
                 }
                 result

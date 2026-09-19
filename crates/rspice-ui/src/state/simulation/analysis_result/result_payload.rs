@@ -1052,6 +1052,32 @@ impl AnalysisResult {
             }
         }
         if let Some(noise) = &self.noise_summary {
+            if let Some(figure) = &noise.noise_figure {
+                figure.validate()?;
+                let mut curves = self
+                    .waveforms
+                    .iter()
+                    .filter(|wave| wave.name == "Noise figure (SSB)");
+                let matches = curves.next().is_some_and(|wave| {
+                    wave.unit.as_deref() == Some("dB")
+                        && wave.x.as_slice() == figure.frequencies.as_slice()
+                        && wave.y.as_slice() == figure.decibels.as_slice()
+                });
+                if self.analysis_type != AnalysisType::Hbnoise
+                    || !matches
+                    || curves.next().is_some()
+                {
+                    return Err("Noise figure must match its retained HBNOISE decibel curve".into());
+                }
+                if noise.band
+                    != (
+                        *figure.frequencies.first().unwrap(),
+                        *figure.frequencies.last().unwrap(),
+                    )
+                {
+                    return Err("Noise figure does not cover the retained noise band".into());
+                }
+            }
             if !noise.band.0.is_finite()
                 || !noise.band.1.is_finite()
                 || noise.band.0 < 0.0

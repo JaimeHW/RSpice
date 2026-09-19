@@ -1256,6 +1256,35 @@ fn noise_strip_uses_spectral_density_unit_without_db_conversion() {
 }
 
 #[test]
+fn hbnoise_figure_keeps_decibels_in_a_separate_pane_from_density() {
+    let mut simulation = SimulationState::default();
+    simulation.start_run().add_analysis(
+        AnalysisResult::new(1, AnalysisType::Hbnoise, "HBNOISE").with_waveforms(vec![
+            WaveformData::new("onoise", vec![1e3, 1e4], vec![1e-18, 4e-18], "#fff"),
+            WaveformData::new("Noise figure (SSB)", vec![1e3, 1e4], vec![0.0, 3.0], "#fff")
+                .with_unit("dB"),
+        ]),
+    );
+    let mut derived = DerivedSeries::default();
+    let models = build_models(
+        &simulation,
+        &mut derived,
+        &Tokens::default(),
+        false,
+        ComplexNumberDisplay::MagnitudePhaseDegrees,
+        None,
+        &HashSet::new(),
+    );
+    assert_eq!(models.len(), 1);
+    assert!(matches!(models[0].traces[0].kind, TraceKind::NoiseDensity));
+    assert_eq!(models[0].traces[0].y.as_slice(), &[1.0, 2.0]);
+    assert!(matches!(models[0].traces[1].kind, TraceKind::Value));
+    assert_eq!(models[0].traces[1].unit.as_deref(), Some("dB"));
+    assert_eq!(models[0].traces[1].y.as_slice(), &[0.0, 3.0]);
+    assert_eq!(models[0].unit_panes().len(), 2);
+}
+
+#[test]
 fn family_selection_projects_exact_source_rows_without_mutating_the_run() {
     let mut simulation = SimulationState::default();
     simulation.start_run().add_analysis(

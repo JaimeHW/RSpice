@@ -12,8 +12,8 @@ use egui::Ui;
 use crate::simulation::plan::{HbNoiseDraft, NetworkPortDraft, PeriodicNetworkDraft};
 
 use super::{
-    QuantityPresentationPolicy, UiNumberLocale, action_line, frequency_sweep_fields, input_row,
-    sub_header, switch_row,
+    QuantityPresentationPolicy, UiNumberLocale, action_line, field_note, frequency_sweep_fields,
+    input_row, sub_header, switch_row,
 };
 
 /// Render the scattering fields PSP and HBSP share.
@@ -65,5 +65,17 @@ pub(super) fn noise_fields(
     input_row(ui, "Max sideband", &mut setup.max_sideband);
     switch_row(ui, "Integrated noise", &mut setup.integrated_noise);
     switch_row(ui, "Noise figure", &mut setup.noise_figure);
+    if setup.noise_figure {
+        input_row(ui, "Source resistor", &mut setup.source_resistor);
+        input_row(
+            ui,
+            "Reference temperature (K)",
+            &mut setup.reference_temperature,
+        );
+        field_note(
+            ui,
+            "SSB noise figure uses the named series source resistor and sideband-zero signal gain. The resistor must already be in the HB circuit. Reference temperature rescales its thermal noise only.",
+        );
+    }
     switch_row(ui, "Contributor ranking", &mut setup.contributor_ranking);
 }

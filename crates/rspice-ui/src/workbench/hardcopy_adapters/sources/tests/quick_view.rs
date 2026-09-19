@@ -81,6 +81,24 @@ fn hbnoise_quick_view_exports_retained_psd_as_amplitude_density() {
 }
 
 #[test]
+fn hbnoise_spot_spectrum_exports_the_exact_single_sample() {
+    let analysis =
+        AnalysisResult::new(9, AnalysisType::Hbnoise, "spot HBNOISE").with_waveforms(vec![
+            WaveformData::new("onoise", vec![1e3], vec![4e-18], "#fff"),
+        ]);
+    let state = quick_view_state(analysis, ResultViewer::NoiseContrib);
+    let resolved = resolve_quick_view(&state).unwrap();
+    let HardcopySemanticDocument::Plot(plot) = resolved.semantic_document() else {
+        panic!("expected spectrum")
+    };
+    assert_eq!(plot.traces.len(), 1);
+    assert_eq!(
+        plot.traces[0].source_samples,
+        vec![(1e3_f64.to_bits(), 2.0_f64.to_bits())]
+    );
+}
+
+#[test]
 fn noise_quick_view_rejects_contributor_only_evidence() {
     let analysis = AnalysisResult::new(10, AnalysisType::Noise, "Noise").with_waveforms(vec![
         WaveformData::new(
