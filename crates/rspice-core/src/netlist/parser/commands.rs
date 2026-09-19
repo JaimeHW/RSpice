@@ -427,18 +427,19 @@ pub(super) fn parse_command(
         ".SPEF_INCLUDE" => {
             // SPEF parasitics back-annotate after parsing (netlist::spef);
             // the path-aware parse entry points resolve and apply them.
-            let path = match &stream.peek().kind {
-                TokenKind::StringLit(s) => s.clone(),
-                TokenKind::Ident(s) => s.clone(),
-                _ => {
+            if let Some(path) = super::command_parsers::quoted_path_lexeme(stream) {
+                spef_includes.push(path);
+            } else {
+                let TokenKind::Ident(path) = &stream.peek().kind else {
                     return Err(ParseError::Syntax {
                         line: line_num,
                         message: ".spef_include requires a file path".to_string(),
                     });
-                }
-            };
-            stream.advance();
-            spef_includes.push(path);
+                };
+                let path = path.clone();
+                stream.advance();
+                spef_includes.push(path);
+            }
         }
         ".LIB" => {
             // Library directives are handled in a preprocessing pass
@@ -5030,9 +5031,9 @@ fn parse_measure_file_path(
     stream: &mut TokenStream,
     line_num: usize,
 ) -> Result<String, ParseError> {
-    if let TokenKind::StringLit(path) = &stream.peek().kind {
-        let path = path.clone();
-        stream.advance();
+    if matches!(stream.peek().kind, TokenKind::StringLit(_))
+        && let Some(path) = super::command_parsers::quoted_path_lexeme(stream)
+    {
         if path.is_empty() {
             return Err(ParseError::MissingParameter(format!(
                 "FILE path in .MEAS ERROR at line {line_num}"

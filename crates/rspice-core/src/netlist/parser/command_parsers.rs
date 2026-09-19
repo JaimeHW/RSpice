@@ -66,18 +66,29 @@ pub(super) fn parse_device_initial_condition_command(
     Ok(())
 }
 
-fn take_authored_initcond_path(stream: &mut TokenStream) -> Option<String> {
-    let token = stream.peek().clone();
-    let raw = token.lexeme.as_str();
-    if raw.len() >= 2 {
-        let first = raw.as_bytes()[0];
-        let last = raw.as_bytes()[raw.len() - 1];
-        if (first == b'"' && last == b'"') || (first == b'\'' && last == b'\'') {
-            stream.advance();
-            return Some(raw[1..raw.len() - 1].to_string());
-        }
+/// A quoted path as it was written, with its quotes taken off, or `None` when
+/// the next token is not a quoted run.
+///
+/// Every directive that names a file reads its path through here, because a
+/// path is literal. The lexer decodes a backslash inside a string literal as
+/// an escape and drops it, which turns each Windows path into one that does
+/// not exist: `"C:\meas\step.csv"` decodes to `C:measstep.csv`. What the
+/// author wrote between the quotes is what the file is called.
+pub(super) fn quoted_path_lexeme(stream: &mut TokenStream) -> Option<String> {
+    let raw = stream.peek().lexeme.as_str();
+    let mut characters = raw.chars();
+    let opening = characters.next()?;
+    let closing = characters.next_back()?;
+    if !matches!(opening, '"' | '\'') || opening != closing {
+        return None;
     }
-    take_authored_initcond_token(stream)
+    let path = raw[opening.len_utf8()..raw.len() - closing.len_utf8()].to_owned();
+    stream.advance();
+    Some(path)
+}
+
+fn take_authored_initcond_path(stream: &mut TokenStream) -> Option<String> {
+    quoted_path_lexeme(stream).or_else(|| take_authored_initcond_token(stream))
 }
 
 fn take_authored_initcond_token(stream: &mut TokenStream) -> Option<String> {
@@ -707,6 +718,89 @@ pub(super) fn parse_sp_command(
         stop_freq,
         do_noise,
     })
+}
+
+#[cfg(test)]
+mod quoted_path_tests {
+    use super::quoted_path_lexeme;
+    use crate::netlist::Netlist;
+    use crate::netlist::lexer::{TokenStream, tokenize};
+    use crate::netlist::measure::MeasureType;
+
+    fn taken(source: &str) -> (Option<String>, bool) {
+        let mut stream = TokenStream::new(tokenize(source).expect("the source lexes"));
+        let path = quoted_path_lexeme(&mut stream);
+        (path, stream.is_eof())
+    }
+
+    /// A quoted path is the path that was written. Decoding it as a string
+    /// literal drops every backslash, which is every Windows path there is.
+    #[test]
+    fn a_quoted_path_keeps_every_backslash_it_was_written_with() {
+        for written in [
+            r"C:\meas\step.csv",
+            r"\\server\share\meas\step.csv",
+            r"C:\new folder\tab\step.csv",
+            "meas/step.csv",
+            "",
+        ] {
+            assert_eq!(taken(&format!("\"{written}\"")).0.as_deref(), Some(written));
+            assert_eq!(taken(&format!("'{written}'")).0.as_deref(), Some(written));
+        }
+    }
+
+    /// An unquoted run is the caller's to read, and nothing is consumed here.
+    #[test]
+    fn an_unquoted_run_is_left_where_it_was() {
+        for source in [r"C:\meas\step.csv", "step.csv"] {
+            let (path, consumed_everything) = taken(source);
+            assert_eq!(path, None, "{source}");
+            assert!(!consumed_everything, "{source}");
+        }
+    }
+
+    /// The directives that name a file all read their path this way.
+    #[test]
+    fn every_directive_that_names_a_file_keeps_its_path() {
+        let measured = Netlist::parse(concat!(
+            "measure file path\n",
+            "V1 in 0 1\n",
+            "R1 in out 1k\n",
+            "C1 out 0 1u\n",
+            ".TRAN 1u 1m\n",
+            ".MEAS TRAN drift ERROR V(out) FILE=\"C:\\meas\\golden.csv\" DEPVARCOL=1\n",
+            ".END\n",
+        ))
+        .expect(".MEAS ERROR with a quoted path parses");
+        let file = measured
+            .measurements
+            .iter()
+            .find_map(|measure| match &measure.measure_type {
+                MeasureType::FileError { file, .. } => Some(file.clone()),
+                _ => None,
+            })
+            .expect("one .MEAS ERROR");
+        assert_eq!(file, r"C:\meas\golden.csv");
+    }
+
+    /// `.SPEF_INCLUDE` only resolves under a path-backed parse, so what this
+    /// pins is the path the resolver was handed: the file is not there, and
+    /// the refusal names it exactly as the deck wrote it.
+    #[test]
+    fn a_quoted_spef_include_keeps_its_path() {
+        let error = Netlist::parse_with_path(
+            concat!(
+                "spef include path\n",
+                "R1 in out 1k\n",
+                ".SPEF_INCLUDE \"C:\\extract\\no-such-top.spef\"\n",
+                ".END\n",
+            ),
+            std::path::Path::new("C:/decks/top.cir"),
+        )
+        .expect_err("the SPEF file is not there")
+        .to_string();
+        assert!(error.contains(r"C:\extract\no-such-top.spef"), "{error}");
+    }
 }
 
 #[cfg(test)]

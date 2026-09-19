@@ -1245,21 +1245,8 @@ fn parse_pwl_file_path(
     line_num: usize,
     has_paren: bool,
 ) -> Result<String, ParseError> {
-    if matches!(stream.peek().kind, TokenKind::StringLit(_)) {
-        // The lexeme with its quotes taken off, rather than the decoded string
-        // literal. The lexer reads a backslash as an escape and drops it, and a
-        // Windows path is mostly backslashes: the decoded form of
-        // `"C:\meas\step.csv"` is `C:measstep.csv`, a file that does not exist
-        // and that no reader typed. A quoted path is literal here, exactly as a
-        // quoted `.INITCOND FILE` path is — see `take_authored_initcond_path`.
-        let token = stream.peek().clone();
-        stream.advance();
-        let raw = token.lexeme.as_str();
-        let path = raw
-            .strip_prefix('"')
-            .and_then(|quoted| quoted.strip_suffix('"'))
-            .unwrap_or(raw);
-        return Ok(path.to_owned());
+    if let Some(path) = super::command_parsers::quoted_path_lexeme(stream) {
+        return Ok(path);
     }
 
     let mut path = String::new();
