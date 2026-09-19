@@ -35,9 +35,65 @@ fn context_key_input(key: Key) -> egui::RawInput {
     }
 }
 
+fn labels_of(entries: &[ContextEntry]) -> Vec<&'static str> {
+    entries
+        .iter()
+        .filter_map(|entry| match entry {
+            ContextEntry::Command(command) => Some(command.label),
+            ContextEntry::Separator => None,
+        })
+        .collect()
+}
+
+fn separators_in(entries: &[ContextEntry]) -> usize {
+    entries
+        .iter()
+        .filter(|entry| matches!(entry, ContextEntry::Separator))
+        .count()
+}
+
+/// One placed sine source, selected, in a project whose library holds
+/// `sensor_drive` at the given revision-bumping edits.
+fn state_with_selected_source(library_edits: usize, adopt: bool) -> AppState {
+    use crate::state::stimulus_library::definition::StimulusDefinition;
+
+    let mut state = AppState::default();
+    state.schematic.components.clear();
+    let mut definition = StimulusDefinition::new("sensor_drive", ComponentType::VoltageSourceSin)
+        .expect("a definition");
+    definition.value = "0".to_owned();
+    definition.params = "va=1 freq=1k".to_owned();
+    let mut source = Component::new(7, ComponentType::VoltageSourceSin, Point::origin());
+    source.name = "V1".to_owned();
+    if adopt {
+        definition.adopt_onto(&mut source).expect("adopt");
+    }
+    state
+        .workspace
+        .stimulus_library
+        .insert(definition)
+        .expect("insert");
+    for edit in 0..library_edits {
+        let held = state
+            .workspace
+            .stimulus_library
+            .get("sensor_drive")
+            .expect("held")
+            .clone();
+        let mut draft = crate::state::stimulus_library::draft::DefinitionDraft::new(held);
+        draft.edit(|working| working.params = format!("va=1 freq={}k", edit + 2));
+        state.workspace.stimulus_library.apply(&mut draft);
+    }
+    state.schematic.components.push(source);
+    state.schematic.selection.select_component(7);
+    state
+}
+
+/// Every target but a placed source sees the mockup's catalog, rule for rule.
 #[test]
 fn command_catalog_matches_the_mockup_exactly() {
-    let labels: Vec<_> = CONTEXT_ENTRIES
+    let entries = menu_entries(&AppState::default());
+    let labels: Vec<_> = entries
         .iter()
         .filter_map(|entry| match entry {
             ContextEntry::Command(command) => Some((command.label, command.shortcut_command)),
@@ -77,13 +133,101 @@ fn command_catalog_matches_the_mockup_exactly() {
             ),
         ]
     );
+    assert_eq!(separators_in(&entries), 4);
+}
+
+/// A placed source's menu states the stimulus-library verbs its standing calls
+/// for, in a group of their own, in place of the three rows about a cell
+/// instance's master.
+#[test]
+fn a_placed_source_gets_the_stimulus_verbs_its_standing_calls_for() {
+    let group = |state: &AppState| -> Vec<&'static str> {
+        labels_of(&menu_entries(state))
+            .into_iter()
+            .filter(|label| label.contains("timulus") || label.contains("Re-adopt"))
+            .collect()
+    };
+
+    // Drawn on the sheet: adopt one, or publish this one.
+    let local = state_with_selected_source(0, false);
     assert_eq!(
-        CONTEXT_ENTRIES
-            .iter()
-            .filter(|entry| matches!(entry, ContextEntry::Separator))
-            .count(),
-        4
+        group(&local),
+        vec!["Adopt stimulus definition…", "Save as stimulus definition…"]
     );
+    // Adopted and current: the definition can also be opened.
+    let adopted = state_with_selected_source(0, true);
+    assert_eq!(
+        group(&adopted),
+        vec![
+            "Adopt stimulus definition…",
+            "Save as stimulus definition…",
+            "Open in Stimulus Library",
+        ]
+    );
+    // The library has published past the copy: re-adoption takes adopt's row.
+    let behind = state_with_selected_source(1, true);
+    assert_eq!(
+        group(&behind),
+        vec![
+            "Re-adopt library revision",
+            "Save as stimulus definition…",
+            "Open in Stimulus Library",
+        ]
+    );
+
+    for state in [&local, &adopted, &behind] {
+        let entries = menu_entries(state);
+        let labels = labels_of(&entries);
+        for master_row in [
+            "Descend into selected instance",
+            "Update instance interface",
+            "Replace instance…",
+        ] {
+            assert!(!labels.contains(&master_row), "{labels:?}");
+        }
+        assert_eq!(separators_in(&entries), 5);
+        assert!(
+            !matches!(entries.first(), Some(ContextEntry::Separator))
+                && !matches!(entries.last(), Some(ContextEntry::Separator))
+        );
+    }
+}
+
+/// The verbs are the editor's: the same entry points, so the same outcomes.
+#[test]
+fn a_stimulus_verb_goes_where_component_properties_sends_it() {
+    let mut behind = state_with_selected_source(1, true);
+    assert!(action_availability(ContextAction::ReadoptStimulus, &behind).0);
+    stimulus::execute(ContextAction::ReadoptStimulus, &mut behind);
+    let source = &behind.schematic.components[0];
+    assert!(source.params.contains("freq=2k"), "{}", source.params);
+    assert_eq!(
+        behind
+            .workspace
+            .stimulus_library
+            .provenance_state(source)
+            .label(),
+        "adopted · r2"
+    );
+
+    let mut local = state_with_selected_source(0, false);
+    stimulus::execute(ContextAction::SaveStimulus, &mut local);
+    assert!(local.dialogs.stimulus_link.open);
+
+    let mut adopted = state_with_selected_source(0, true);
+    stimulus::execute(ContextAction::OpenStimulusDefinition, &mut adopted);
+    assert_eq!(
+        adopted.workbench.selected_stimulus_definition.as_deref(),
+        Some("sensor_drive")
+    );
+
+    // With nothing in the library there is nothing to adopt, and the row says
+    // what to do about it rather than opening a dialog that refuses.
+    let mut empty = state_with_selected_source(0, false);
+    empty.workspace.stimulus_library = crate::state::StimulusLibrary::default();
+    let (enabled, reason) = action_availability(ContextAction::AdoptStimulus, &empty);
+    assert!(!enabled);
+    assert!(reason.contains("save this source"), "{reason}");
 }
 
 #[test]
@@ -105,9 +249,11 @@ fn header_summary_uses_the_selected_instance_identity_and_master() {
 
 #[test]
 fn surface_geometry_matches_desktop_and_touch_contracts() {
-    let desktop = SurfaceGeometry::for_viewport(vec2(1440.0, 900.0), ContextInvocation::Pointer);
+    let catalog = menu_entries(&AppState::default());
+    let desktop =
+        SurfaceGeometry::for_viewport(vec2(1440.0, 900.0), ContextInvocation::Pointer, &catalog);
     assert_eq!(desktop.width, 286.0);
-    assert_eq!(desktop.max_height, 520.0);
+    assert_eq!(desktop.max_height, 528.0);
     assert_eq!(desktop.row_height, 27.0);
     assert_eq!(desktop.radius, 3);
     // Sixteen rows and four separators on the mockup's 27 px row measure
@@ -121,8 +267,26 @@ fn surface_geometry_matches_desktop_and_touch_contracts() {
         desktop.outer_height() < desktop.max_height,
         "the desktop context menu must fit without scrolling"
     );
+    // The tallest menu there is: a placed source whose standing calls for
+    // three stimulus verbs, at sixteen rows and a fifth separator.
+    for state in [
+        state_with_selected_source(0, true),
+        state_with_selected_source(1, true),
+    ] {
+        let source = SurfaceGeometry::for_viewport(
+            vec2(1440.0, 900.0),
+            ContextInvocation::Pointer,
+            &menu_entries(&state),
+        );
+        assert_eq!(source.outer_height(), 526.0);
+        assert!(
+            source.outer_height() < source.max_height,
+            "a placed source's context menu must fit without scrolling"
+        );
+    }
 
-    let touch = SurfaceGeometry::for_viewport(vec2(390.0, 844.0), ContextInvocation::TouchSheet);
+    let touch =
+        SurfaceGeometry::for_viewport(vec2(390.0, 844.0), ContextInvocation::TouchSheet, &catalog);
     assert_eq!(touch.width, 374.0);
     assert_eq!(touch.max_height, 560.0);
     assert_eq!(touch.row_height, 44.0);
@@ -130,7 +294,7 @@ fn surface_geometry_matches_desktop_and_touch_contracts() {
     assert_eq!(touch.outer_height(), 560.0);
 
     let short_touch =
-        SurfaceGeometry::for_viewport(vec2(1024.0, 500.0), ContextInvocation::TouchSheet);
+        SurfaceGeometry::for_viewport(vec2(1024.0, 500.0), ContextInvocation::TouchSheet, &catalog);
     assert_eq!(short_touch.width, 420.0);
     assert_eq!(short_touch.max_height, 350.0);
     assert_eq!(short_touch.outer_height(), 350.0);
@@ -139,7 +303,11 @@ fn surface_geometry_matches_desktop_and_touch_contracts() {
 #[test]
 fn desktop_origin_and_keyboard_anchor_match_the_mockup_contract() {
     let screen = Rect::from_min_size(pos2(0.0, 0.0), vec2(800.0, 600.0));
-    let desktop = SurfaceGeometry::for_viewport(screen.size(), ContextInvocation::Pointer);
+    let desktop = SurfaceGeometry::for_viewport(
+        screen.size(),
+        ContextInvocation::Pointer,
+        &menu_entries(&AppState::default()),
+    );
 
     assert_eq!(
         clamp_desktop_surface_origin(screen, pos2(-20.0, -10.0), desktop),

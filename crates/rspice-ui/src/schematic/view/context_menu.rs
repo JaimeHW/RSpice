@@ -2,7 +2,9 @@
 //!
 //! Right-click, Shift+F10 and a touch long-press all open the same command
 //! contract. Every visible command is backed by a real schematic or results
-//! operation; unsupported targets stay visibly disabled with an explanation.
+//! operation; a command that cannot be taken right now stays visibly disabled
+//! with an explanation, and only one that could never apply to the kind of
+//! object selected is left out (`menu_entries`).
 
 use std::collections::BTreeSet;
 
@@ -24,7 +26,10 @@ use crate::workbench::design_system::WorkbenchIcon;
 use crate::workbench::state::Workspace;
 use crate::workbench::{
     ResultViewer,
-    app::{open_replace_instance_dialog, replace_instance_available},
+    app::{
+        StimulusLinkMode, commit_readoption, open_replace_instance_dialog,
+        open_stimulus_definition, open_stimulus_link, replace_instance_available,
+    },
 };
 
 use super::SchematicSymbolContext;
@@ -36,8 +41,13 @@ use super::sheet_visibility::{
 };
 use super::viewport::Viewport;
 
+mod stimulus;
+
 const DESKTOP_WIDTH: f32 = 286.0;
-const DESKTOP_MAX_HEIGHT: f32 = 520.0;
+/// Tall enough for the tallest menu there is without a scroller: a placed
+/// source's, at sixteen rows and five separators — 526 px with the header and
+/// the border. Every other target's menu is one separator shorter.
+const DESKTOP_MAX_HEIGHT: f32 = 528.0;
 const DESKTOP_VIEWPORT_INSET: f32 = 6.0;
 /// The mockup's `.menu-item { min-height: 27px }`. The row was drawn three
 /// pixels taller here, which cost the surface a row's worth of height for no
@@ -70,6 +80,10 @@ enum ContextAction {
     Properties,
     Rotate,
     Mirror,
+    AdoptStimulus,
+    ReadoptStimulus,
+    SaveStimulus,
+    OpenStimulusDefinition,
     Copy,
     Duplicate,
     Delete,
@@ -132,6 +146,34 @@ const CONTEXT_ENTRIES: &[ContextEntry] = &[
         icon: ContextIcon::Mirror,
         label: "Mirror",
         shortcut_command: Some(Command::MirrorSelectionHorizontal),
+    }),
+    // The stimulus-library group, which exists only in a placed source's menu
+    // and states the verbs that source's standing with the library calls for;
+    // see `stimulus`.
+    ContextEntry::Separator,
+    ContextEntry::Command(ContextCommand {
+        action: ContextAction::AdoptStimulus,
+        icon: ContextIcon::Waveform,
+        label: "Adopt stimulus definition…",
+        shortcut_command: None,
+    }),
+    ContextEntry::Command(ContextCommand {
+        action: ContextAction::ReadoptStimulus,
+        icon: ContextIcon::Waveform,
+        label: "Re-adopt library revision",
+        shortcut_command: None,
+    }),
+    ContextEntry::Command(ContextCommand {
+        action: ContextAction::SaveStimulus,
+        icon: ContextIcon::Waveform,
+        label: "Save as stimulus definition…",
+        shortcut_command: None,
+    }),
+    ContextEntry::Command(ContextCommand {
+        action: ContextAction::OpenStimulusDefinition,
+        icon: ContextIcon::Waveform,
+        label: "Open in Stimulus Library",
+        shortcut_command: None,
     }),
     ContextEntry::Separator,
     ContextEntry::Command(ContextCommand {
@@ -221,6 +263,60 @@ const CONTEXT_ENTRIES: &[ContextEntry] = &[
     }),
 ];
 
+/// The one independent source the menu is about, when that is all that is
+/// selected.
+fn clicked_source(state: &AppState) -> Option<&crate::state::Component> {
+    let id = state.schematic.selection.single_component()?;
+    state
+        .schematic
+        .components
+        .iter()
+        .find(|component| component.id == id)
+        .filter(|component| {
+            crate::simulation::stimulus_realize::is_independent_source(component.kind)
+        })
+}
+
+/// The entries the menu is made of, for what is selected.
+///
+/// The catalog is one list, and almost all of it is every target's: a verb that
+/// cannot be taken right now stays where it is, disabled, and says why. What is
+/// left out is a verb that could never apply to the *kind* of object selected.
+/// A placed source gets the stimulus-library group and loses the three rows
+/// that are about a cell instance's master, which is also what lets the group
+/// in without turning the menu into a scroller; everything else gets the
+/// catalog without that group. A rule with nothing left under it goes too.
+fn menu_entries(state: &AppState) -> Vec<ContextEntry> {
+    let source = clicked_source(state).is_some();
+    let mut entries: Vec<ContextEntry> = Vec::with_capacity(CONTEXT_ENTRIES.len());
+    for entry in CONTEXT_ENTRIES {
+        let shown = match entry {
+            ContextEntry::Separator => {
+                matches!(entries.last(), Some(ContextEntry::Command(_)))
+            }
+            ContextEntry::Command(command) if stimulus::owns(command.action) => {
+                stimulus::shown(command.action, state)
+            }
+            ContextEntry::Command(command) => {
+                !(source
+                    && matches!(
+                        command.action,
+                        ContextAction::DescendHierarchy
+                            | ContextAction::UpdateInstanceInterface
+                            | ContextAction::ReplaceInstance
+                    ))
+            }
+        };
+        if shown {
+            entries.push(*entry);
+        }
+    }
+    if matches!(entries.last(), Some(ContextEntry::Separator)) {
+        entries.pop();
+    }
+    entries
+}
+
 #[derive(Debug, Clone)]
 struct DeleteSelectionRequest {
     selection: Selection,
@@ -294,7 +390,7 @@ pub(super) fn handle_context_menu(
     let invocation = ctx
         .data(|data| data.get_temp::<ContextInvocation>(invocation_id))
         .unwrap_or(ContextInvocation::Pointer);
-    let geometry = SurfaceGeometry::resolve(ctx, invocation);
+    let geometry = SurfaceGeometry::resolve(ctx, invocation, &menu_entries(state));
     let t = Tokens::get(ctx);
     let frame = Frame::new()
         .fill(t.color.bg_elevated)
@@ -576,10 +672,10 @@ fn render_context_contents(
     let summary = selection_summary(state, target);
     menu_header(ui, &summary);
 
-    let mut rows = Vec::with_capacity(14);
+    let mut rows = Vec::with_capacity(16);
     let mut keyboard_or_pointer_action = None;
-    for entry in CONTEXT_ENTRIES {
-        match *entry {
+    for entry in menu_entries(state) {
+        match entry {
             ContextEntry::Separator => menu_separator(ui),
             ContextEntry::Command(command) => {
                 let (enabled, reason) = action_availability(command.action, state);
@@ -1102,6 +1198,10 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
             writable && has_component,
             "Select at least one editable component",
         ),
+        ContextAction::AdoptStimulus
+        | ContextAction::ReadoptStimulus
+        | ContextAction::SaveStimulus
+        | ContextAction::OpenStimulusDefinition => stimulus::availability(action, state),
         ContextAction::Copy => (
             copyable_objects_only,
             "Select at least one component, wire, bus, tap, junction, net label, probe, design note, or documentation shape",
@@ -1202,6 +1302,10 @@ fn execute_context_action(
             schematic
                 .mirror_selection_h_resolved(|component| symbol_context.terminal_points(component))
         }),
+        ContextAction::AdoptStimulus
+        | ContextAction::ReadoptStimulus
+        | ContextAction::SaveStimulus
+        | ContextAction::OpenStimulusDefinition => stimulus::execute(action, state),
         ContextAction::Copy => {
             state.copy_active_schematic_selection();
         }
@@ -1813,20 +1917,36 @@ struct SurfaceGeometry {
     max_height: f32,
     row_height: f32,
     radius: u8,
+    /// How many rows and rules the menu being placed is made of.
+    commands: u32,
+    separators: u32,
 }
 
 impl SurfaceGeometry {
-    fn resolve(ctx: &Context, invocation: ContextInvocation) -> Self {
-        Self::for_viewport(ctx.content_rect().size(), invocation)
+    fn resolve(ctx: &Context, invocation: ContextInvocation, entries: &[ContextEntry]) -> Self {
+        Self::for_viewport(ctx.content_rect().size(), invocation, entries)
     }
 
-    fn for_viewport(viewport: egui::Vec2, invocation: ContextInvocation) -> Self {
+    fn for_viewport(
+        viewport: egui::Vec2,
+        invocation: ContextInvocation,
+        entries: &[ContextEntry],
+    ) -> Self {
+        let (commands, separators) = entries.iter().fold(
+            (0_u32, 0_u32),
+            |(commands, separators), entry| match entry {
+                ContextEntry::Command(_) => (commands + 1, separators),
+                ContextEntry::Separator => (commands, separators + 1),
+            },
+        );
         if invocation == ContextInvocation::TouchSheet {
             Self {
                 width: (viewport.x - 2.0 * TOUCH_VIEWPORT_INSET).clamp(1.0, TOUCH_MAX_WIDTH),
                 max_height: (viewport.y * TOUCH_VIEWPORT_FRACTION).min(TOUCH_MAX_HEIGHT),
                 row_height: TOUCH_ROW_HEIGHT,
                 radius: TOUCH_RADIUS,
+                commands,
+                separators,
             }
         } else {
             Self {
@@ -1834,21 +1954,16 @@ impl SurfaceGeometry {
                 max_height: DESKTOP_MAX_HEIGHT.min((viewport.y - 12.0).max(1.0)),
                 row_height: DESKTOP_ROW_HEIGHT,
                 radius: DESKTOP_RADIUS,
+                commands,
+                separators,
             }
         }
     }
 
     fn outer_height(self) -> f32 {
-        let (commands, separators) = CONTEXT_ENTRIES.iter().fold(
-            (0_u32, 0_u32),
-            |(commands, separators), entry| match entry {
-                ContextEntry::Command(_) => (commands + 1, separators),
-                ContextEntry::Separator => (commands, separators + 1),
-            },
-        );
         (HEADER_HEIGHT
-            + commands as f32 * self.row_height
-            + separators as f32 * SEPARATOR_HEIGHT
+            + self.commands as f32 * self.row_height
+            + self.separators as f32 * SEPARATOR_HEIGHT
             + SURFACE_BORDER_WIDTH)
             .min(self.max_height)
     }

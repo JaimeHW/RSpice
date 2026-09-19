@@ -220,7 +220,9 @@ pub(crate) use dialogs::hierarchy::descend::open_descend_hierarchy_dialog;
 pub(crate) use dialogs::replace_instance::{
     open_replace_instance_dialog, replace_instance_available,
 };
-pub(crate) use dialogs::stimulus_link::{commit_readoption, open_stimulus_definition};
+pub(crate) use dialogs::stimulus_link::{
+    StimulusLinkMode, commit_readoption, open_stimulus_definition, open_stimulus_link,
+};
 pub(crate) use dialogs::view_operations::{
     open_full_screen_workflow, open_reset_active_view_workflow,
 };
