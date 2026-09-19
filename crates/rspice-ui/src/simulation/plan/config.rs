@@ -825,7 +825,7 @@ impl AnalysisDraft {
                 draft.stop_time, draft.step_time, draft.seed
             )),
             Self::DcMismatch(draft) => Some(format!(
-                "{} · {}σ · top {}",
+                "{} · {} sigma · top {}",
                 draft.output_expression, draft.sigma_multiplier, draft.contributor_limit
             )),
             Self::AcData(draft) => Some(draft.summary()),
