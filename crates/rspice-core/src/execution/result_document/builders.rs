@@ -2129,7 +2129,9 @@ impl AnalysisResultDocument {
     /// the authored output, its operating-point value, the parameter's nominal
     /// value, and both the absolute and the normalized derivative — so the
     /// probe publishes the same document a `.SENS` card does rather than a
-    /// narrower one.
+    /// narrower one — including the row's identity: a design parameter is
+    /// named `PARAM:<NAME>` here exactly as a `.SENS` card names it, so a
+    /// probe document and a card document can be read by one reader.
     pub fn from_parameter_sensitivity(
         analysis: AnalysisInstanceId,
         output: &str,
@@ -2159,13 +2161,14 @@ impl AnalysisResultDocument {
             SignalUnit::Dimensionless,
             output_value,
         )?];
+        let name = parameter.to_ascii_uppercase();
         let payload = SensitivityPayload {
             output: output.to_owned(),
             entries: vec![SensitivityEntry {
-                vector_name: parameter.to_owned(),
-                element: parameter.to_owned(),
+                vector_name: format!("PARAM:{name}"),
+                element: name.clone(),
                 element_kind: SensitivityElementTag::Parameter,
-                parameter: parameter.to_owned(),
+                parameter: name,
                 nominal_value,
                 absolute,
                 normalized,

@@ -1750,22 +1750,16 @@ impl From<ElementType> for SensitivityElementTag {
     }
 }
 
-/// A published sensitivity target that names no circuit element.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-#[error("a sensitivity to a netlist parameter names no circuit element type")]
-pub struct NotAnElementSensitivity;
-
-impl TryFrom<SensitivityElementTag> for ElementType {
-    type Error = NotAnElementSensitivity;
-
-    /// Recover the element type a published sensitivity entry names.
+impl From<SensitivityElementTag> for ElementType {
+    /// Recover the target kind a published sensitivity entry names.
     ///
-    /// A parameter sensitivity has none: a `.PARAM` may drive several elements
-    /// at once, so mapping it onto one element kind would attribute the
-    /// derivative to a device the study never differentiated.
-    fn try_from(kind: SensitivityElementTag) -> Result<Self, Self::Error> {
-        Ok(match kind {
-            SensitivityElementTag::Parameter => return Err(NotAnElementSensitivity),
+    /// A parameter sensitivity names the design-parameter namespace rather
+    /// than a device: a `.PARAM` may drive several elements at once, so
+    /// mapping it onto one element kind would attribute the derivative to a
+    /// device the study never differentiated.
+    fn from(kind: SensitivityElementTag) -> Self {
+        match kind {
+            SensitivityElementTag::Parameter => Self::DesignParameter,
             SensitivityElementTag::Resistor => Self::Resistor,
             SensitivityElementTag::Capacitor => Self::Capacitor,
             SensitivityElementTag::Inductor => Self::Inductor,
@@ -1785,7 +1779,7 @@ impl TryFrom<SensitivityElementTag> for ElementType {
             SensitivityElementTag::Xspice => Self::Xspice,
             SensitivityElementTag::Model => Self::Model,
             SensitivityElementTag::Other => Self::Other,
-        })
+        }
     }
 }
 

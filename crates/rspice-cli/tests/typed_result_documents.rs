@@ -671,7 +671,11 @@ fn the_parameter_sensitivity_probe_publishes_the_shared_document() {
         .as_array()
         .expect("entry list");
     assert_eq!(entries.len(), 1, "the probe computes one derivative");
-    assert_eq!(entries[0]["parameter"], "bias");
+    assert_eq!(entries[0]["parameter"], "BIAS");
+    assert_eq!(
+        entries[0]["vectorName"], "PARAM:BIAS",
+        "the probe names its row the way a .SENS card names the same parameter"
+    );
     assert_eq!(entries[0]["elementKind"], "parameter");
     assert!(
         entries[0]["normalized"]
@@ -686,6 +690,57 @@ fn the_parameter_sensitivity_probe_publishes_the_shared_document() {
             .iter()
             .any(|scalar| scalar["name"] == "output_value"),
         "the normalized derivative has no operating point to be relative to"
+    );
+}
+
+/// A `.SENS` card that names the design parameters reports them on the command
+/// line, beside the device rows of the same study, under the engine's own
+/// spelling. `I(V1) = -drive/R1` gives `d/d(drive) = -1/R1` and
+/// `d/d(R1) = +drive/R1^2` in closed form.
+#[test]
+fn the_command_line_reports_the_design_parameters_a_sens_card_names() {
+    let dir = test_dir("sens_design_parameters");
+    let (output, requested) = run(
+        &dir,
+        Some(
+            "* design parameter sensitivity\n\
+             .param drive=2\n\
+             V1 out 0 {drive}\n\
+             R1 out 0 2\n",
+        ),
+        ".SENS I(V1) R1 PARAM:*\n",
+        &[],
+        "json",
+    );
+    assert!(
+        output.status.success(),
+        ".SENS with a PARAM: filter failed:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let document = read_json(&requested);
+    assert_eq!(document["resultKind"], "sensitivity");
+    let entries = document["payload"]["entries"]
+        .as_array()
+        .expect("entry list");
+    let entry = |name: &str| {
+        entries
+            .iter()
+            .find(|entry| entry["vectorName"] == name)
+            .unwrap_or_else(|| panic!("no {name} row in {document:#}"))
+    };
+    assert_eq!(entries.len(), 2, "one device row and one design row");
+    let design = entry("PARAM:DRIVE");
+    assert_eq!(design["elementKind"], "parameter");
+    assert_eq!(design["nominalValue"].as_f64(), Some(2.0));
+    let derivative = design["absolute"].as_f64().expect("design derivative");
+    assert!(
+        (derivative + 0.5).abs() < 1e-9,
+        "dI(V1)/d(drive) = -1/R1 = -0.5, got {derivative}"
+    );
+    let device = entry("R1")["absolute"].as_f64().expect("device derivative");
+    assert!(
+        (device - 0.5).abs() < 1e-8,
+        "dI(V1)/dR1 = drive/R1^2 = +0.5, got {device}"
     );
 }
 

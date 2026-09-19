@@ -1420,6 +1420,100 @@ fn sensitivity_availability_survives_document_round_trip_and_rejects_legacy_zero
     }
 }
 
+/// A design-parameter row is an ordinary entry of the version-8 document: it
+/// is tagged `parameter`, named `PARAM:<NAME>`, and survives the round trip
+/// beside the device rows of the same study. No field was added to carry it.
+#[test]
+fn a_sens_document_tags_a_design_parameter_as_a_parameter() {
+    use crate::analysis::sensitivity::{AcSensitivity, AcSensitivityResult, SensitivityValue};
+
+    let mut dc = sensitivity_result();
+    dc.add(Sensitivity::new_named(
+        "PARAM:RLOAD",
+        "RLOAD",
+        ElementType::DesignParameter,
+        "RLOAD",
+        1.0e3,
+        -2.5e-4,
+        0.5,
+    ));
+    let document =
+        AnalysisResultDocument::from_sensitivity(instance(AnalysisKind::Sensitivity), &dc)
+            .unwrap()
+            .build()
+            .unwrap();
+    assert_eq!(document.schema_version(), ANALYSIS_RESULT_DOCUMENT_VERSION);
+    let json = document.to_json().unwrap();
+    assert_eq!(AnalysisResultDocument::from_json(&json).unwrap(), document);
+    let raw: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(raw["payload"]["entries"][1]["vectorName"], "PARAM:RLOAD");
+    assert_eq!(raw["payload"]["entries"][1]["elementKind"], "parameter");
+    assert_eq!(raw["payload"]["entries"][1]["parameter"], "RLOAD");
+    assert_eq!(
+        ElementType::from(SensitivityElementTag::Parameter),
+        ElementType::DesignParameter
+    );
+
+    let trace = |vector_name: &str, element_type| AcSensitivity {
+        vector_name: vector_name.to_owned(),
+        element: "RLOAD".to_owned(),
+        element_type,
+        parameter: "RLOAD".to_owned(),
+        nominal_value: 1.0e3,
+        absolute: vec![Complex64::new(-2.5e-4, 0.0)],
+        normalized: vec![SensitivityValue::Available(Complex64::new(-0.5, 0.0))],
+        magnitude: vec![SensitivityValue::Available(-2.5e-4)],
+        phase: vec![SensitivityValue::Available(0.0)],
+    };
+    let ac = AcSensitivityResult {
+        output: "V(out)".to_owned(),
+        frequencies: vec![1.0e3],
+        output_values: vec![Complex64::new(0.5, 0.0)],
+        sensitivities: vec![
+            trace("R1", ElementType::Resistor),
+            trace("PARAM:RLOAD", ElementType::DesignParameter),
+        ],
+    };
+    let document =
+        AnalysisResultDocument::from_ac_sensitivity(instance(AnalysisKind::Sensitivity), &ac)
+            .unwrap()
+            .build()
+            .unwrap();
+    assert_eq!(document.schema_version(), ANALYSIS_RESULT_DOCUMENT_VERSION);
+    let json = document.to_json().unwrap();
+    assert_eq!(AnalysisResultDocument::from_json(&json).unwrap(), document);
+    let raw: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(raw["payload"]["acEntries"][1]["vectorName"], "PARAM:RLOAD");
+    assert_eq!(raw["payload"]["acEntries"][1]["elementKind"], "parameter");
+}
+
+/// The single-parameter probe names its row the way a `.SENS` card names the
+/// same design parameter, so one reader serves both documents.
+#[test]
+fn a_probed_design_parameter_is_named_as_a_sens_card_names_it() {
+    let document = AnalysisResultDocument::from_parameter_sensitivity(
+        instance(AnalysisKind::Sensitivity),
+        "V(out)",
+        0.5,
+        "bias",
+        2.0,
+        -0.25,
+    )
+    .unwrap()
+    .build()
+    .unwrap();
+    let ResultPayload::Sensitivity(payload) = document.payload() else {
+        panic!("sensitivity payload");
+    };
+    assert_eq!(payload.entries[0].vector_name, "PARAM:BIAS");
+    assert_eq!(payload.entries[0].element, "BIAS");
+    assert_eq!(payload.entries[0].parameter, "BIAS");
+    assert_eq!(
+        payload.entries[0].element_kind,
+        SensitivityElementTag::Parameter
+    );
+}
+
 #[test]
 fn incomplete_fft_documents_preserve_status_without_spectral_data() {
     use crate::engine::TransientFftStatus;

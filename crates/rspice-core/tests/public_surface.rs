@@ -948,7 +948,16 @@ use rspice_core::analysis::harmonic_balance::{
 /// parser does not scope is read as an ordinary global key, so every key after
 /// it lands in the wrong place. The writer checks its headers against the
 /// reader's own list rather than against a second copy of it.
-const MAX_PUBLIC_ITEMS: usize = 5072;
+///
+/// -1: `NotAnElementSensitivity`, the error that said a published sensitivity
+/// to a netlist parameter names no element type. Now that a `.SENS` card
+/// differentiates the design parameters as well, the design-parameter
+/// namespace IS one of the target kinds `ElementType` names, so recovering the
+/// kind of a published entry is total and the fallible conversion it reported
+/// through no longer exists. Established by compiling the CLI, the Python and
+/// WASM bindings, the engine adapter and the conformance suite against its
+/// removal: no dependent named it.
+const MAX_PUBLIC_ITEMS: usize = 5071;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently
