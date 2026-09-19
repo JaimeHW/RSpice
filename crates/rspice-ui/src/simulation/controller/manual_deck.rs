@@ -15,6 +15,7 @@ use crate::services::simulation_runner::{
 };
 
 mod periodic;
+mod recorded_fft;
 
 /// Apply the reviewed source contract before model binding or include parsing.
 pub(super) fn adapt_owned_execution_profile<'a>(
@@ -221,6 +222,13 @@ pub(super) fn build_manual_deck_queue(
         }
     }
     queue.extend(periodic_tasks);
+    // The deck already carries these cards and the engine already evaluates
+    // them inside the transient; what was missing was the task that publishes
+    // the spectrum, so that is all this adds.
+    match recorded_fft::manual_fft_tasks(&parsed) {
+        Ok(tasks) => queue.extend(tasks),
+        Err(mut card_errors) => errors.append(&mut card_errors),
+    }
 
     if errors.is_empty() && queue.is_empty() {
         Err(vec![

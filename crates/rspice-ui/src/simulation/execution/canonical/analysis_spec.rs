@@ -619,6 +619,23 @@ pub(super) fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &Analysis
                 writer.f64(*threshold);
             }
         }
+        // A brand-new arm, so `writer.option` is free here: there is no
+        // previously sealed encoding of this shape for an absent field to
+        // move. The card's own qualifiers are optional in the engine too.
+        AnalysisSpec::Fft { request } => {
+            writer.string(&request.output);
+            writer.usize(request.points);
+            writer.string(&request.window);
+            writer.option(request.start.as_ref(), |w, value| w.f64(*value));
+            writer.option(request.stop.as_ref(), |w, value| w.f64(*value));
+            writer.option(request.format.as_ref(), |w, value| {
+                w.string(value.keyword())
+            });
+            writer.option(request.alfa.as_ref(), |w, value| w.f64(*value));
+            writer.option(request.fundamental.as_ref(), |w, value| w.f64(*value));
+            writer.option(request.fmin.as_ref(), |w, value| w.f64(*value));
+            writer.option(request.fmax.as_ref(), |w, value| w.f64(*value));
+        }
     }
 }
 
