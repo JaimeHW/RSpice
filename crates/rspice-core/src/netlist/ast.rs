@@ -2265,7 +2265,8 @@ pub enum AnalysisCommand {
         ports: Vec<SpCardPort>,
     },
 
-    /// Loop-stability analysis: .STB DEC|LIN|OCT np fstart fstop PROBE=vname
+    /// Loop-stability analysis:
+    /// `.STB DEC|LIN|OCT np fstart fstop PROBE=vname [NYQUIST=yes|no]`
     ///
     /// Tian double-injection loop gain at a designated 0 V voltage source
     /// placed in series with the feedback path (the Spectre probe
@@ -2277,6 +2278,14 @@ pub enum AnalysisCommand {
         stop_freq: Value,
         /// Name of the 0 V voltage source serving as the loop probe.
         probe: String,
+        /// Whether the run also samples the Nyquist contour.
+        ///
+        /// This is an engine input, not a display choice: it sizes the
+        /// result and its resource accounting, and decides whether the
+        /// stability document carries contour samples at all. Yes unless
+        /// the card says otherwise, which is what every surface ran before
+        /// the keyword existed. The margins are extracted either way.
+        compute_nyquist: bool,
     },
 
     /// Distortion analysis: `.DISTO DEC|LIN|OCT np fstart fstop [f2overf1]`
@@ -2870,6 +2879,7 @@ pub enum AnalysisCard {
     Envelope,
     DcMatch,
     Sp,
+    Stb,
 }
 
 impl AnalysisCard {
@@ -2884,6 +2894,7 @@ impl AnalysisCard {
             Self::Envelope => ".ENVELOPE",
             Self::DcMatch => ".DCMATCH",
             Self::Sp => ".SP",
+            Self::Stb => ".STB",
         }
     }
 }

@@ -238,38 +238,33 @@ c1 ctrl 0 159.154943091895n
     let card = netlist
         .analyses
         .iter()
-        .find_map(|analysis| match analysis {
-            AnalysisCommand::Stb {
-                variation,
-                points,
-                start_freq,
-                stop_freq,
-                probe,
-            } => Some((*variation, *points, *start_freq, *stop_freq, probe.clone())),
-            _ => None,
-        })
+        .find(|analysis| matches!(analysis, AnalysisCommand::Stb { .. }))
         .expect(".stb card parses into an analysis");
 
-    let (variation, points, start_freq, stop_freq, probe) = card;
-    assert_eq!(variation, FreqVariation::Dec);
-    assert_eq!(points, 20);
+    let AnalysisCommand::Stb {
+        variation,
+        points,
+        start_freq,
+        stop_freq,
+        probe,
+        compute_nyquist,
+    } = card
+    else {
+        unreachable!("the card was selected by its variant");
+    };
+    assert_eq!(*variation, FreqVariation::Dec);
+    assert_eq!(*points, 20);
     assert!((start_freq - 10.0).abs() < 1e-12);
     assert!((stop_freq - 10.0e6).abs() < 1e-3);
     assert!(
         probe.eq_ignore_ascii_case("vprobe"),
         "probe name survives parsing: {probe}"
     );
+    assert!(*compute_nyquist, "an unauthored contour switch is on");
 
-    // Map card -> config exactly the way the CLI dispatch does.
-    let sweep_type = match variation {
-        FreqVariation::Lin => StbSweepType::Linear,
-        FreqVariation::Dec => StbSweepType::Decade,
-        FreqVariation::Oct => StbSweepType::Octave,
-    };
-    let config = StbConfig::new()
-        .with_sweep(start_freq, stop_freq, points)
-        .with_sweep_type(sweep_type)
-        .with_probe(&probe);
+    // Map card -> config exactly the way every surface now does.
+    let config = StbConfig::try_from(card).expect("the card is a configuration");
+    assert_eq!(config.sweep_type, StbSweepType::Decade);
     let engine = Engine::new(SimulationConfig::default());
     let analysis = engine.run_stb(&netlist, config).expect("STB completes");
 

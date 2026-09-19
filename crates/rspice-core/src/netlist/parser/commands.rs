@@ -1,5 +1,6 @@
 //! Dot-command parsing for analyses, options, measurements, params, and functions.
 
+use super::analysis_card_scan::*;
 use super::scoping::ModelDefinitionDeferrals;
 use crate::config::DampingStrategy;
 use crate::netlist::lexer::Token;
@@ -182,41 +183,7 @@ pub(super) fn parse_command(
             analyses.push(sp);
         }
         ".STB" => {
-            let var_str = expect_ident(stream, line_num)?;
-            let variation = match var_str.as_str() {
-                "LIN" => FreqVariation::Lin,
-                "OCT" => FreqVariation::Oct,
-                "DEC" => FreqVariation::Dec,
-                _ => {
-                    return Err(ParseError::Syntax {
-                        line: line_num,
-                        message: format!("Unknown frequency variation: {}", var_str),
-                    });
-                }
-            };
-            let points = expect_value(stream, line_num, params)? as usize;
-            let start_freq = expect_value(stream, line_num, params)?;
-            let stop_freq = expect_value(stream, line_num, params)?;
-
-            // The probe designates the 0 V source standing in the loop:
-            // PROBE=vname (the Spectre flavor) or a bare trailing name.
-            let mut probe = expect_ident(stream, line_num).map_err(|_| ParseError::Syntax {
-                line: line_num,
-                message: ".STB requires a probe: name a 0 V voltage source placed in \
-                          the loop, e.g. .STB DEC 10 1 100MEG PROBE=VPRB"
-                    .to_string(),
-            })?;
-            if probe.eq_ignore_ascii_case("probe") && stream.consume(&TokenKind::Equals) {
-                probe = expect_ident(stream, line_num)?;
-            }
-
-            analyses.push(AnalysisCommand::Stb {
-                variation,
-                points,
-                start_freq,
-                stop_freq,
-                probe,
-            });
+            analyses.push(parse_stb_command(stream, line_num, params)?);
         }
         ".DISTO" => {
             let disto = parse_disto_command(stream, line_num, params)?;
@@ -600,6 +567,158 @@ pub(super) fn parse_command(
     }
 
     Ok(())
+}
+
+/// Parse `.STB DEC|LIN|OCT np fstart fstop PROBE=<v>|<v> [NYQUIST=yes|no]`.
+///
+/// The probe designates the 0 V source standing in the loop: `PROBE=vname`
+/// (the Spectre flavour) or, for decks written before the keyword existed, a
+/// single bare trailing name. Either spelling names it once.
+///
+/// `NYQUIST=` is on the card because it is an engine input: it sizes the
+/// result and its resource accounting and decides whether the contour is
+/// sampled at all. Absent, it is yes — what every surface ran before the
+/// keyword existed, so no deck changes what it computes.
+fn parse_stb_command(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+) -> Result<AnalysisCommand, ParseError> {
+    const CARD: AnalysisCard = AnalysisCard::Stb;
+
+    let var_str = expect_ident(stream, line_num)?;
+    let variation = match var_str.as_str() {
+        "LIN" => FreqVariation::Lin,
+        "OCT" => FreqVariation::Oct,
+        "DEC" => FreqVariation::Dec,
+        _ => {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!("Unknown frequency variation: {}", var_str),
+            });
+        }
+    };
+    let points = expect_value(stream, line_num, params)? as usize;
+    let start_freq = expect_value(stream, line_num, params)?;
+    let stop_freq = expect_value(stream, line_num, params)?;
+
+    let mut probe: Option<String> = None;
+    let mut compute_nyquist: Option<bool> = None;
+    loop {
+        skip_commas(stream);
+        if at_card_end(stream) {
+            break;
+        }
+        if let Some(keyword) = take_keyword(stream) {
+            match keyword.as_str() {
+                "PROBE" => bind_once(
+                    &mut probe,
+                    card_name(stream, line_num, CARD, "PROBE")?.to_ascii_uppercase(),
+                    CARD,
+                    line_num,
+                    "PROBE",
+                )?,
+                "NYQUIST" => bind_once(
+                    &mut compute_nyquist,
+                    card_bool(stream, line_num, CARD, "NYQUIST")?,
+                    CARD,
+                    line_num,
+                    "NYQUIST",
+                )?,
+                _ => {
+                    return Err(card_error(
+                        CARD,
+                        line_num,
+                        AnalysisCardIssue::UnknownKeyword { keyword },
+                    ));
+                }
+            }
+            continue;
+        }
+        // The legacy positional form. It names the probe and nothing else, so
+        // a second bare token is the same field authored twice.
+        let name = card_name(stream, line_num, CARD, "PROBE")?.to_ascii_uppercase();
+        bind_once(&mut probe, name, CARD, line_num, "PROBE")?;
+    }
+
+    let Some(probe) = probe else {
+        return Err(card_error(
+            CARD,
+            line_num,
+            AnalysisCardIssue::MissingField { field: "PROBE" },
+        ));
+    };
+
+    Ok(AnalysisCommand::Stb {
+        variation,
+        points,
+        start_freq,
+        stop_freq,
+        probe,
+        compute_nyquist: compute_nyquist.unwrap_or(true),
+    })
+}
+
+#[cfg(test)]
+mod stb_command_tests {
+    use crate::netlist::{AnalysisCommand, Netlist};
+
+    fn stb_deck(tail: &str) -> String {
+        format!(
+            "STB card\n\
+             E1 eo 0 ctrl 0 -2\n\
+             Vprobe eo x DC 0\n\
+             R1 x ctrl 1k\n\
+             C1 ctrl 0 1n\n\
+             .stb dec 10 1 1meg {tail}\n\
+             .end\n"
+        )
+    }
+
+    fn parsed(tail: &str) -> (String, bool) {
+        let netlist = Netlist::parse(&stb_deck(tail)).expect(".STB card parses");
+        let [
+            AnalysisCommand::Stb {
+                probe,
+                compute_nyquist,
+                ..
+            },
+        ] = netlist.analyses.as_slice()
+        else {
+            panic!("expected one .STB analysis, got {:?}", netlist.analyses);
+        };
+        (probe.clone(), *compute_nyquist)
+    }
+
+    #[test]
+    fn stb_reads_the_nyquist_switch_beside_either_probe_spelling() {
+        let probe = "VPROBE".to_owned();
+        assert_eq!(parsed("probe=vprobe"), (probe.clone(), true));
+        assert_eq!(parsed("vprobe"), (probe.clone(), true));
+        assert_eq!(parsed("probe=vprobe nyquist=no"), (probe.clone(), false));
+        assert_eq!(parsed("NYQUIST=YES probe=vprobe"), (probe.clone(), true));
+        assert_eq!(parsed("nyquist=0 vprobe"), (probe, false));
+    }
+
+    #[test]
+    fn an_stb_card_refuses_an_unknown_or_repeated_keyword() {
+        for (tail, named) in [
+            ("probe=vprobe margins=yes", "MARGINS"),
+            ("probe=vprobe probe=vother", "PROBE"),
+            ("probe=vprobe nyquist=yes nyquist=no", "NYQUIST"),
+            ("vprobe vother", "PROBE"),
+            ("probe=vprobe nyquist=maybe", "NYQUIST"),
+            ("", "PROBE"),
+        ] {
+            let error =
+                Netlist::parse(&stb_deck(tail)).expect_err("a malformed .STB card must fail");
+            let message = error.to_string();
+            assert!(
+                message.contains(".STB") && message.to_ascii_uppercase().contains(named),
+                "the refusal names the card and the field for '{tail}': {message}"
+            );
+        }
+    }
 }
 
 fn push_xyce_inconsistent_dc_sweep_warning(

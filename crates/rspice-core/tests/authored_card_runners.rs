@@ -517,26 +517,10 @@ fn a_stability_document_from_an_uncrossed_loop_records_the_absent_crossover() {
     )
     .expect("deck parses");
     let engine = Engine::new(SimulationConfig::default());
-    let AnalysisCommand::Stb {
-        variation,
-        points,
-        start_freq,
-        stop_freq,
-        probe,
-    } = card(&netlist, |command| {
+    let config = rspice_core::analysis::StbConfig::try_from(&card(&netlist, |command| {
         matches!(command, AnalysisCommand::Stb { .. })
-    })
-    else {
-        panic!("the deck authors a .STB card");
-    };
-    let config = rspice_core::analysis::StbConfig::new()
-        .with_sweep(start_freq, stop_freq, points)
-        .with_sweep_type(match variation {
-            rspice_core::netlist::FreqVariation::Lin => rspice_core::analysis::StbSweepType::Linear,
-            rspice_core::netlist::FreqVariation::Dec => rspice_core::analysis::StbSweepType::Decade,
-            rspice_core::netlist::FreqVariation::Oct => rspice_core::analysis::StbSweepType::Octave,
-        })
-        .with_probe(&probe);
+    }))
+    .expect("the authored card is a configuration");
     let result = engine
         .run_stb_with_abort(&netlist, config, &NoAbort)
         .expect(".STB runs");
@@ -556,6 +540,120 @@ fn a_stability_document_from_an_uncrossed_loop_records_the_absent_crossover() {
             ScalarValue::Real { .. } | ScalarValue::Unavailable { .. }
         ),
         "a margin is either a number or a typed determination"
+    );
+}
+
+/// A single-pole loop `T(jw) = A / (1 + j f/fp)`, which crosses unity gain at
+/// `fp*sqrt(A^2 - 1)` where its phase is `-atan(sqrt(A^2 - 1))`. With `A = 2`
+/// that is `1 kHz * sqrt(3)` and a phase margin of `180 - 60 = 120` degrees.
+const STB_LOOP_GAIN: f64 = 2.0;
+const STB_POLE_HZ: f64 = 1.0e3;
+
+fn single_pole_loop_deck(sweep: &str, tail: &str) -> String {
+    format!(
+        "Single-pole loop\n\
+         E1 eo 0 ctrl 0 -{STB_LOOP_GAIN}\n\
+         Vprobe eo x DC 0\n\
+         R1 x ctrl 1k\n\
+         C1 ctrl 0 159.154943091895n\n\
+         .stb {sweep} probe=Vprobe{tail}\n\
+         .end\n"
+    )
+}
+
+fn stb_card(netlist: &Netlist) -> AnalysisCommand {
+    card(netlist, |command| {
+        matches!(command, AnalysisCommand::Stb { .. })
+    })
+}
+
+#[test]
+fn the_nyquist_switch_changes_what_is_retained_and_not_the_margins() {
+    let run = |tail: &str| {
+        let netlist =
+            Netlist::parse(&single_pole_loop_deck("dec 200 10 100k", tail)).expect("deck parses");
+        let config = rspice_core::analysis::StbConfig::try_from(&stb_card(&netlist))
+            .expect("the card is a configuration");
+        Engine::new(SimulationConfig::default())
+            .run_stb_with_abort(&netlist, config, &NoAbort)
+            .expect(".STB runs")
+    };
+    let kept = run(" nyquist=yes");
+    let dropped = run(" NYQUIST=no");
+
+    let excess = (STB_LOOP_GAIN * STB_LOOP_GAIN - 1.0).sqrt();
+    let crossover = STB_POLE_HZ * excess;
+    let phase_margin = 180.0 - excess.atan().to_degrees();
+    for analysis in [&kept, &dropped] {
+        let margins = &analysis.result.margins;
+        // The margins are interpolated on the swept grid; 200 points per
+        // decade puts neighbouring samples 1.2% apart, which is the whole
+        // budget these two bounds spend.
+        assert!(
+            (margins.phase_margin_freq - crossover).abs() <= 0.02 * crossover,
+            "crossover: got {}, want {crossover}",
+            margins.phase_margin_freq
+        );
+        assert!(
+            (margins.phase_margin_deg - phase_margin).abs() <= 1.0,
+            "phase margin: got {}, want {phase_margin}",
+            margins.phase_margin_deg
+        );
+    }
+
+    assert_eq!(
+        kept.result.margins.phase_margin_deg, dropped.result.margins.phase_margin_deg,
+        "the contour switch decides what is retained, never what is measured"
+    );
+    assert_eq!(
+        kept.result.margins.phase_margin_freq, dropped.result.margins.phase_margin_freq,
+        "the contour switch decides what is retained, never what is measured"
+    );
+    assert_eq!(
+        kept.result.nyquist_points.len(),
+        kept.frequencies.len(),
+        "NYQUIST=yes samples the contour at every swept point"
+    );
+    assert!(
+        dropped.result.nyquist_points.is_empty(),
+        "NYQUIST=no retains no contour at all"
+    );
+}
+
+#[test]
+fn an_stb_card_becomes_its_configuration_in_one_place() {
+    use rspice_core::analysis::{StbConfig, StbSweepType};
+
+    for (tail, contour) in [(" nyquist=yes", true), (" nyquist=no", false), ("", true)] {
+        let netlist =
+            Netlist::parse(&single_pole_loop_deck("oct 5 10 1k", tail)).expect("deck parses");
+        let converted =
+            StbConfig::try_from(&stb_card(&netlist)).expect("the card is a configuration");
+        let chain = StbConfig::new()
+            .with_sweep(10.0, 1.0e3, 5)
+            .with_sweep_type(StbSweepType::Octave)
+            .with_probe("Vprobe")
+            .with_nyquist(contour);
+        assert_eq!(converted.freq_start, chain.freq_start);
+        assert_eq!(converted.freq_stop, chain.freq_stop);
+        assert_eq!(converted.num_points, chain.num_points);
+        assert_eq!(converted.sweep_type, chain.sweep_type);
+        assert_eq!(converted.probe_node, chain.probe_node);
+        assert_eq!(
+            converted.compute_nyquist, chain.compute_nyquist,
+            "the card carries the contour switch for '{tail}'"
+        );
+    }
+
+    let netlist =
+        Netlist::parse("Not a stability card\nV1 in 0 AC 1\nR1 in 0 1k\n.ac dec 5 1 1k\n.end\n")
+            .expect("deck parses");
+    let ac = card(&netlist, |command| {
+        matches!(command, AnalysisCommand::Ac { .. })
+    });
+    assert!(
+        StbConfig::try_from(&ac).is_err(),
+        "only a .STB card becomes a stability configuration"
     );
 }
 

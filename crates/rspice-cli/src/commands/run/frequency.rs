@@ -820,15 +820,23 @@ pub(super) fn finish_ac_results(
 /// source, with gain/phase margins extracted from the sweep.
 pub(super) fn run_stb(
     ctx: &RunContext<'_>,
-    variation: rspice_core::netlist::FreqVariation,
-    points: usize,
-    start_freq: f64,
-    stop_freq: f64,
-    probe: &str,
+    card: &rspice_core::netlist::AnalysisCommand,
 ) -> Result<(), CliError> {
-    use rspice_core::analysis::{StbConfig, StbSweepType};
-    use rspice_core::netlist::FreqVariation;
+    use rspice_core::analysis::StbConfig;
+    use rspice_core::netlist::AnalysisCommand;
 
+    let AnalysisCommand::Stb {
+        start_freq,
+        stop_freq,
+        probe,
+        ..
+    } = card
+    else {
+        return Err(CliError::SimulationError {
+            message: "run_stb was given a card that is not .STB".to_string(),
+            analysis: Some("STB".to_string()),
+        });
+    };
     if !ctx.quiet {
         println!(
             "Running STB (loop stability) analysis: {} to {} Hz, probe {}...",
@@ -836,15 +844,12 @@ pub(super) fn run_stb(
         );
     }
 
-    let sweep_type = match variation {
-        FreqVariation::Lin => StbSweepType::Linear,
-        FreqVariation::Dec => StbSweepType::Decade,
-        FreqVariation::Oct => StbSweepType::Octave,
-    };
-    let config = StbConfig::new()
-        .with_sweep(start_freq, stop_freq, points)
-        .with_sweep_type(sweep_type)
-        .with_probe(probe);
+    // The card is the whole request: one conversion in the engine crate, so
+    // `rspice run` cannot honour a keyword the other surfaces drop.
+    let config = StbConfig::try_from(card).map_err(|error| CliError::SimulationError {
+        message: format!("invalid .STB card: {error}"),
+        analysis: Some("STB".to_string()),
+    })?;
 
     let stb = ctx
         .engine

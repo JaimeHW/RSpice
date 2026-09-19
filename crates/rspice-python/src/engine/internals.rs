@@ -295,27 +295,16 @@ impl PyEngine {
         Ok(PyTransferFunctionResult::from_core(&result))
     }
 
-    #[allow(clippy::too_many_arguments)]
+    /// The card carries the whole request, including whether the Nyquist
+    /// contour is kept, and core's own conversion is what reads it.
     pub(super) fn stb_impl(
         &self,
         py: Python<'_>,
         netlist: &PyNetlist,
-        probe: &str,
-        variation: FreqVariation,
-        points: usize,
-        start_freq: f64,
-        stop_freq: f64,
+        card: &rspice_core::netlist::AnalysisCommand,
     ) -> PyResult<PyStbResult> {
-        let sweep_type = match variation {
-            FreqVariation::Lin => StbSweepType::Linear,
-            FreqVariation::Dec => StbSweepType::Decade,
-            FreqVariation::Oct => StbSweepType::Octave,
-        };
-        let config = StbConfig::new()
-            .with_sweep(start_freq, stop_freq, points)
-            .with_sweep_type(sweep_type)
-            .with_probe(probe)
-            .with_nyquist(true);
+        let config = StbConfig::try_from(card)
+            .map_err(|error| crate::errors::value_error(format!("invalid .STB card: {error}")))?;
         let engine = self.engine_for_netlist(&netlist.inner);
         let result = run_interruptible(py, &self.active_runs, |abort| {
             engine.run_stb_with_abort(&netlist.inner, config, abort)

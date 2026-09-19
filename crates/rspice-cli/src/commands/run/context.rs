@@ -899,13 +899,7 @@ impl<'a> RunContext<'a> {
                 advanced::run_hb_from_command(self, frequencies)?
             }
             AnalysisCommand::Sp { .. } => advanced::run_sparam_from_command(self, analysis)?,
-            AnalysisCommand::Stb {
-                variation,
-                points,
-                start_freq,
-                stop_freq,
-                probe,
-            } => frequency::run_stb(self, *variation, *points, *start_freq, *stop_freq, probe)?,
+            AnalysisCommand::Stb { .. } => frequency::run_stb(self, analysis)?,
             AnalysisCommand::Disto {
                 variation,
                 points,

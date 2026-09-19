@@ -358,22 +358,8 @@ pub(super) fn execute(
                 format!(".tf {output_node} {input_source}"),
             ));
         }
-        AnalysisCommand::Stb {
-            variation,
-            points,
-            start_freq,
-            stop_freq,
-            probe,
-        } => {
-            let result = py_engine.stb_impl(
-                py,
-                netlist,
-                probe,
-                *variation,
-                *points,
-                *start_freq,
-                *stop_freq,
-            )?;
+        AnalysisCommand::Stb { .. } => {
+            let result = py_engine.stb_impl(py, netlist, analysis)?;
             out.stb.push(identified(result, context));
             out.records.push(PyAnalysisRecord::executed(
                 "stb",
