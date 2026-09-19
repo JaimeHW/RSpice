@@ -75,23 +75,41 @@ pub struct HbnoiseRunConfig {
     pub contributor_ranking: bool,
 }
 
+/// Shared authoring and execution bounds, including a one-frequency spectrum.
+pub(crate) fn validate_hbnoise_frequency_options(
+    start: Value,
+    stop: Value,
+    points: usize,
+    linear: bool,
+    max_sideband: usize,
+    band_evidence: bool,
+) -> Result<(), String> {
+    if !start.is_finite() || start <= 0.0 || !stop.is_finite() || stop < start {
+        return Err("HBNOISE frequencies must be finite with 0 < start <= stop".into());
+    }
+    if points == 0 {
+        return Err("HBNOISE points per unit must be greater than zero".into());
+    }
+    if max_sideband > i32::MAX as usize {
+        return Err("HBNOISE maximum sideband must be within 0..=2147483647".into());
+    }
+    if band_evidence && (start == stop || (linear && points == 1)) {
+        return Err("HBNOISE integrated noise and contributor ranking require at least two distinct frequencies; disable both for a spot spectrum".into());
+    }
+    Ok(())
+}
+
 impl HbnoiseRunConfig {
     fn validate(&self) -> Result<(), ServiceRunError> {
-        if !self.start_freq.is_finite() || self.start_freq <= 0.0 {
-            return Err(ServiceRunError::Failure(
-                "HBNOISE start frequency must be finite and positive".to_owned(),
-            ));
-        }
-        if !self.stop_freq.is_finite() || self.stop_freq < self.start_freq {
-            return Err(ServiceRunError::Failure(
-                "HBNOISE stop frequency must be finite and >= start frequency".to_owned(),
-            ));
-        }
-        if self.points_per_unit == 0 {
-            return Err(ServiceRunError::Failure(
-                "HBNOISE points per unit must be greater than zero".to_owned(),
-            ));
-        }
+        validate_hbnoise_frequency_options(
+            self.start_freq,
+            self.stop_freq,
+            self.points_per_unit,
+            self.sweep == HbnoiseFrequencySweep::Linear,
+            self.max_sideband,
+            self.integrated_noise || self.contributor_ranking,
+        )
+        .map_err(ServiceRunError::Failure)?;
         if self.output_node.trim().is_empty() {
             return Err(ServiceRunError::Failure(
                 "HBNOISE output node must be specified".to_owned(),
@@ -100,11 +118,6 @@ impl HbnoiseRunConfig {
         if self.input_source.trim().is_empty() {
             return Err(ServiceRunError::Failure(
                 "HBNOISE input source must be specified".to_owned(),
-            ));
-        }
-        if self.max_sideband == 0 || self.max_sideband > i32::MAX as usize {
-            return Err(ServiceRunError::Failure(
-                "HBNOISE maximum sideband must be within 1..=2147483647".to_owned(),
             ));
         }
         if self.noise_figure {
@@ -439,5 +452,72 @@ mod tests {
         let error = integrate_psd(&[1.0e3], &[2.0e-18], &NoAbort)
             .expect_err("a one-point PSD has no integration bandwidth");
         assert!(error.to_string().contains("at least two"));
+    }
+
+    #[test]
+    fn hbnoise_spot_and_zero_sideband_execute_with_source_referenced_noise_figure() {
+        let deck = "spot noise\nV1 in 0 0\nRs in out 1k\nRl out 0 1k\n.end\n";
+        let state = retained_hb(deck);
+        for sweep in [
+            HbnoiseFrequencySweep::Linear,
+            HbnoiseFrequencySweep::Decade,
+            HbnoiseFrequencySweep::Octave,
+        ] {
+            let mut config = HbnoiseRunConfig {
+                noise_reference: Some(HbNoiseReference {
+                    source_resistor: "Rs".into(),
+                    temperature_kelvin: 300.15,
+                }),
+                start_freq: 1e3,
+                stop_freq: 1e3,
+                points_per_unit: 1,
+                sweep,
+                output_node: "out".into(),
+                output_ref: None,
+                input_source: "V1".into(),
+                max_sideband: 0,
+                integrated_noise: false,
+                noise_figure: true,
+                contributor_ranking: false,
+            };
+            let result = run_hbnoise_analysis_from_hb_with_source_path_and_abort(
+                deck, &config, &state, None, &NoAbort,
+            )
+            .unwrap();
+            assert_eq!(result.frequencies, vec![1e3]);
+            assert_eq!(result.output_rms, None);
+            assert_eq!(result.input_rms, None);
+            assert!(result.contributors.is_empty());
+            assert!(
+                (result.noise_figure.unwrap().decibels[0] - 10.0 * 2.0_f64.log10()).abs() < 1e-10
+            );
+            for (integrated, ranking) in [(true, false), (false, true)] {
+                config.integrated_noise = integrated;
+                config.contributor_ranking = ranking;
+                assert!(
+                    config
+                        .validate()
+                        .unwrap_err()
+                        .to_string()
+                        .contains("at least two distinct")
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn hbnoise_grid_bounds_reject_unrepresentable_sidebands_and_one_point_band_evidence() {
+        assert!(validate_hbnoise_frequency_options(1e3, 1e4, 1, true, 0, false).is_ok());
+        assert!(validate_hbnoise_frequency_options(1e3, 1e4, 1, true, 0, true).is_err());
+        for invalid in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+            assert!(validate_hbnoise_frequency_options(invalid, 1e4, 2, true, 0, false).is_err());
+            assert!(validate_hbnoise_frequency_options(1e3, invalid, 2, true, 0, false).is_err());
+        }
+        assert!(validate_hbnoise_frequency_options(1e4, 1e3, 2, true, 0, false).is_err());
+        assert!(validate_hbnoise_frequency_options(1e3, 1e4, 0, true, 0, false).is_err());
+        assert!(
+            validate_hbnoise_frequency_options(1e3, 1e4, 2, true, i32::MAX as usize + 1, false)
+                .is_err()
+        );
     }
 }

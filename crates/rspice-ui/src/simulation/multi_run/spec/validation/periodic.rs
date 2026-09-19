@@ -350,18 +350,25 @@ pub(super) fn validate(spec: &AnalysisSpec) -> Result<(), String> {
             start_freq,
             stop_freq,
             points_per_unit,
+            sweep,
             output_node,
             input_source,
             max_sideband,
             noise_figure,
+            integrated_noise,
+            contributor_ranking,
             ..
         } => {
-            validate_frequency_sweep(*start_freq, *stop_freq, *points_per_unit)?;
+            crate::services::simulation_runner::validate_hbnoise_frequency_options(
+                *start_freq,
+                *stop_freq,
+                *points_per_unit,
+                *sweep == crate::simulation::multi_run::FrequencySweep::Linear,
+                *max_sideband,
+                *integrated_noise || *contributor_ranking,
+            )?;
             if output_node.trim().is_empty() || input_source.trim().is_empty() {
                 return Err("HBNOISE requires an output node and input source".to_owned());
-            }
-            if *max_sideband == 0 {
-                return Err("HBNOISE max_sideband must be > 0".to_owned());
             }
             if *noise_figure {
                 noise_reference

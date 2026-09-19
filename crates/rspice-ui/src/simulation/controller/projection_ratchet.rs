@@ -1100,3 +1100,62 @@ fn hbnoise_reference_fields_reach_the_execution_spec() {
         );
     }
 }
+
+#[test]
+fn hbnoise_spot_and_zero_sideband_authoring_reach_a_valid_spec() {
+    for sweep in 0..=2 {
+        let mut setup = crate::simulation::plan::HbNoiseDraft::default();
+        setup.sweep.sweep = sweep;
+        setup.sweep.start = "1k".into();
+        setup.sweep.stop = "1k".into();
+        setup.sweep.points = "1".into();
+        setup.max_sideband = "0".into();
+        setup.integrated_noise = false;
+        setup.contributor_ranking = false;
+        let draft = AnalysisDraft::Hbnoise(setup.clone());
+        assert_eq!(draft.manifest_configuration_error(), None);
+        let controller = SimulationController::new();
+        let spec = controller
+            .build_manifest_preview_spec(&engine_facing_state(&draft), &draft)
+            .unwrap()
+            .unwrap();
+        spec.validate().unwrap();
+        assert!(matches!(
+            spec,
+            crate::simulation::multi_run::AnalysisSpec::Hbnoise {
+                start_freq: 1000.0,
+                stop_freq: 1000.0,
+                max_sideband: 0,
+                points_per_unit: 1,
+                ..
+            }
+        ));
+        for (integrated, ranking) in [(true, false), (false, true)] {
+            setup.integrated_noise = integrated;
+            setup.contributor_ranking = ranking;
+            let draft = AnalysisDraft::Hbnoise(setup.clone());
+            assert!(
+                draft
+                    .manifest_configuration_error()
+                    .unwrap()
+                    .contains("at least two distinct")
+            );
+            let mut invalid_spec = spec.clone();
+            if let crate::simulation::multi_run::AnalysisSpec::Hbnoise {
+                integrated_noise,
+                contributor_ranking,
+                ..
+            } = &mut invalid_spec
+            {
+                *integrated_noise = integrated;
+                *contributor_ranking = ranking;
+            }
+            assert!(
+                invalid_spec
+                    .validate()
+                    .unwrap_err()
+                    .contains("at least two distinct")
+            );
+        }
+    }
+}

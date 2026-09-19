@@ -50,6 +50,7 @@ pub use error::{ServiceRunError, ServiceRunResult};
 pub(crate) use hb::build_core_hb_config;
 pub use hb::{HbRunConfig, HbToneRunConfig, run_hb_analysis_with_source_path_and_abort};
 pub(crate) use hbnoise::integrate_psd;
+pub(crate) use hbnoise::validate_hbnoise_frequency_options;
 pub use hbnoise::{
     HbNoiseReference, HbnoiseFrequencySweep, HbnoiseRunConfig,
     run_hbnoise_analysis_from_hb_with_source_path_and_abort,

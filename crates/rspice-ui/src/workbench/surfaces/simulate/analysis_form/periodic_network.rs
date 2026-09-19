@@ -63,6 +63,10 @@ pub(super) fn noise_fields(
     input_row(ui, "Output ref", &mut setup.output_ref);
     input_row(ui, "Input source", &mut setup.input_source);
     input_row(ui, "Max sideband", &mut setup.max_sideband);
+    field_note(
+        ui,
+        "Zero sidebands selects the central band. For a spot frequency, set start equal to stop and disable integrated noise and contributor ranking.",
+    );
     switch_row(ui, "Integrated noise", &mut setup.integrated_noise);
     switch_row(ui, "Noise figure", &mut setup.noise_figure);
     if setup.noise_figure {

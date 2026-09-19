@@ -1529,14 +1529,27 @@ fn validate_psp_network(draft: &PeriodicNetworkDraft) -> Option<String> {
 
 fn validate_hbnoise(draft: &HbNoiseDraft) -> Option<String> {
     (|| {
-        validate_sweep(&draft.sweep)?;
+        if draft.sweep.sweep > 2 {
+            return Err("frequency sweep mode is outside the supported schema".to_owned());
+        }
+        let max_sideband =
+            draft.max_sideband.trim().parse::<usize>().map_err(|_| {
+                "maximum sideband must be an integer from 0 to 2147483647".to_owned()
+            })?;
+        crate::services::simulation_runner::validate_hbnoise_frequency_options(
+            parse_positive(&draft.sweep.start, "start frequency")?,
+            parse_positive(&draft.sweep.stop, "stop frequency")?,
+            parse_positive_usize(&draft.sweep.points, "sweep point count")?,
+            draft.sweep.sweep == 2,
+            max_sideband,
+            draft.integrated_noise || draft.contributor_ranking,
+        )?;
         if draft.output_node.trim().is_empty() {
             return Err("HBNOISE requires an output node".to_owned());
         }
         if draft.input_source.trim().is_empty() {
             return Err("HBNOISE requires an input source".to_owned());
         }
-        parse_positive_usize(&draft.max_sideband, "maximum sideband")?;
         draft.noise_reference()?;
         Ok(())
     })()
