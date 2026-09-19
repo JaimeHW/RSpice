@@ -731,6 +731,7 @@ pub(crate) fn mark_project_closed(state: &mut AppState) {
     // offer to publish a revision of a definition it does not hold.
     state.workbench.selected_stimulus_definition = None;
     state.workbench.stimulus_editor.clear();
+    state.workbench.stimulus_browser.clear();
     state.clear_project_design_history();
     state.dialogs.check_and_save.close();
     state.native_project_binding_receipt = None;
@@ -1837,6 +1838,7 @@ fn revert_document_in_place(
             // whose saved side no longer exists, and Apply would publish it as
             // a revision of a definition the revert removed.
             state.workbench.stimulus_editor.clear();
+            state.workbench.stimulus_browser.clear();
         }
         ProjectDocumentId::NetlistSource => {
             state.workspace.netlist_source = baseline.workspace.netlist_source;

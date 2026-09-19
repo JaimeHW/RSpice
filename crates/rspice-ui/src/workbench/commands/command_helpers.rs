@@ -251,6 +251,7 @@ pub(crate) fn reset_active_view(app: &mut RSpiceApp) {
         Workspace::Stimulus => {
             app.state.workbench.selected_stimulus_definition = None;
             app.state.workbench.stimulus_editor.clear();
+            app.state.workbench.stimulus_browser.clear();
         }
         Workspace::Results => {
             let viewer = app.state.ui.results.viewer;

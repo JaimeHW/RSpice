@@ -8,11 +8,13 @@ mod navigator_tree;
 pub(crate) mod plan_provenance;
 pub(crate) mod retired_documents;
 mod session_views;
+mod stimulus_browser;
 mod stimulus_editor;
 mod workflow_drafts;
 
 pub use navigator_tree::*;
 pub use session_views::*;
+pub use stimulus_browser::*;
 pub use stimulus_editor::*;
 pub use workflow_drafts::*;
 
@@ -1347,6 +1349,11 @@ pub struct WorkbenchState {
     /// never published.
     #[serde(skip)]
     pub stimulus_editor: StimulusEditorState,
+    /// How the library browser is looking at that library: the scope strip's
+    /// slice, and the waveform each row draws. Runtime-only, because both are
+    /// readings of the project rather than part of it.
+    #[serde(skip)]
+    pub stimulus_browser: StimulusBrowserState,
     /// Where each workspace's navigator tree is unfolded, and what its filter
     /// box narrows the listing to. Runtime-only.
     #[serde(skip)]
@@ -1540,6 +1547,7 @@ impl Default for WorkbenchState {
             selected_model: None,
             selected_stimulus_definition: None,
             stimulus_editor: StimulusEditorState::default(),
+            stimulus_browser: StimulusBrowserState::default(),
             navigator_trees: NavigatorTrees::default(),
             netlist_outline_collapsed: std::collections::BTreeSet::new(),
             command_query: String::new(),

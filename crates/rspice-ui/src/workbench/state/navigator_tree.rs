@@ -103,6 +103,19 @@ impl NavigatorTrees {
     pub fn filter_mut(&mut self, workspace: Workspace) -> &mut String {
         self.filters.entry(workspace).or_default()
     }
+
+    /// Whether this workspace's tree holds `node`, asked without taking the
+    /// tree.
+    ///
+    /// [`Self::for_workspace`] mints a state for a workspace nobody has touched
+    /// yet, which a painter that only reads has no business doing — and cannot
+    /// do at all from the shared borrow a frame resolves its rows under.
+    #[must_use]
+    pub fn holds(&self, workspace: Workspace, node: &NavigatorTreeNode) -> bool {
+        self.trees
+            .get(&workspace)
+            .is_some_and(|tree| tree.is_expanded(node))
+    }
 }
 
 impl WorkbenchState {
