@@ -153,7 +153,7 @@ pub(crate) fn run_monte_carlo_analysis_with_environment_and_source_path_and_abor
                 supply_source_names: supply_source_names.to_vec(),
             },
         );
-    let result = engine
+    let mut result = engine
         .run_monte_carlo_with_options_environment_and_abort(
             &netlist,
             mc_cmd.runs,
@@ -164,6 +164,15 @@ pub(crate) fn run_monte_carlo_analysis_with_environment_and_source_path_and_abor
             abort,
         )
         .map_err(|error| ServiceRunError::from_core("Monte Carlo analysis error", error))?;
+
+    result
+        .compute_mean_confidence(
+            mc_cmd.confidence_pct,
+            mc_cmd.confidence_method.into(),
+            engine.config().resource_limits,
+            abort,
+        )
+        .map_err(|error| ServiceRunError::from_core("Monte Carlo confidence error", error))?;
 
     let mut variables = Vec::with_capacity(result.variables.len());
     for (index, stats) in result.variables.into_values().enumerate() {
@@ -260,13 +269,16 @@ pub(crate) fn run_statistical_monte_carlo_with_environment_and_source_path_and_a
     }
     ensure_not_aborted(abort)?;
 
-    let (runs, base_seed) = netlist
+    let (runs, base_seed, confidence_pct, confidence_method) = netlist
         .analyses
         .iter()
         .find_map(|analysis| match analysis {
-            AnalysisCommand::MonteCarlo(cmd) => {
-                Some((cmd.runs, cmd.seed.unwrap_or(DEFAULT_MONTE_CARLO_SEED)))
-            }
+            AnalysisCommand::MonteCarlo(cmd) => Some((
+                cmd.runs,
+                cmd.seed.unwrap_or(DEFAULT_MONTE_CARLO_SEED),
+                cmd.confidence_pct,
+                cmd.confidence_method,
+            )),
             _ => None,
         })
         .ok_or_else(|| {
@@ -362,8 +374,8 @@ pub(crate) fn run_statistical_monte_carlo_with_environment_and_source_path_and_a
         .map_err(|error| ServiceRunError::from_core("Monte Carlo analysis error", error))?;
     result
         .compute_mean_confidence(
-            95.0,
-            rspice_core::analysis::monte_carlo::MeanConfidenceMethod::StudentT,
+            confidence_pct,
+            confidence_method.into(),
             engine.config().resource_limits,
             abort,
         )

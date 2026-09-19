@@ -61,6 +61,7 @@ pub(super) fn fields(ui: &mut Ui, setup: &mut McDialogState) {
         "empty = every parameter",
         states_spread,
     );
+    confidence_fields(ui, setup);
     // Which spread is drawn from is the `From` choice's own answer, and
     // the two rows above say so by going quiet. What they cannot say is
     // how far the deck's statistics reach, and a reader who expects
@@ -72,4 +73,24 @@ pub(super) fn fields(ui: &mut Ui, setup: &mut McDialogState) {
              cards included.",
         );
     }
+}
+
+fn confidence_fields(ui: &mut Ui, setup: &mut McDialogState) {
+    input_row(ui, "Confidence %", &mut setup.confidence_pct)
+        .on_hover_text("Two-sided confidence interval for each population mean; strictly between 0 and 100%. This is separate from yield confidence and population percentiles.");
+    choice_row(
+        ui,
+        "Mean interval",
+        &["Student t", "bootstrap"],
+        &mut setup.confidence_method_idx,
+    );
+    let bootstrap = setup.confidence_method_idx == 1;
+    input_row_enabled(ui, "Resamples", &mut setup.bootstrap_resamples, bootstrap)
+        .on_hover_text("Number of percentile-bootstrap resamples, at least two. More resamples improve percentile resolution and take longer.");
+    input_row_enabled(ui, "Bootstrap seed", &mut setup.bootstrap_seed, bootstrap)
+        .on_hover_text("An integer from 0 to 18446744073709551615 for the resampling stream. Changing it leaves the circuit trials unchanged.");
+    field_note(
+        ui,
+        "Mean intervals assume independent trials. Student t is exact for normal observations; bootstrap accuracy depends on the sample size and resampling count.",
+    );
 }

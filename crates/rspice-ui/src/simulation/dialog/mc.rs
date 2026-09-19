@@ -51,6 +51,9 @@ impl McVariationSource {
 /// Monte Carlo analysis configuration
 #[derive(Debug, Clone)]
 pub struct McConfig {
+    /// Two-sided uncertainty in the population mean, independent of yield.
+    pub confidence_pct: f64,
+    pub confidence_method: crate::state::MonteCarloMeanMethod,
     /// Number of runs
     pub num_runs: u32,
     /// Explicit random seed; absence selects the runner's repeatable default.
@@ -77,6 +80,8 @@ impl Default for McConfig {
     fn default() -> Self {
         Self {
             num_runs: 100,
+            confidence_pct: 95.0,
+            confidence_method: crate::state::MonteCarloMeanMethod::StudentT,
             seed: None,
             variation_source: McVariationSource::ParameterTolerance,
             distribution: McDistribution::Gaussian,
@@ -88,6 +93,18 @@ impl Default for McConfig {
 
 impl McConfig {
     pub fn validate(&self) -> Result<(), String> {
+        if !self.confidence_pct.is_finite()
+            || self.confidence_pct <= 0.0
+            || self.confidence_pct >= 100.0
+        {
+            return Err(
+                "Mean confidence must be finite and strictly between 0 and 100 percent".into(),
+            );
+        }
+        if matches!(self.confidence_method, crate::state::MonteCarloMeanMethod::PercentileBootstrap { resamples, .. } if resamples < 2)
+        {
+            return Err("Bootstrap confidence requires at least two resamples".into());
+        }
         if self.num_runs == 0 {
             return Err("Number of runs must be at least 1".into());
         }
@@ -146,8 +163,12 @@ fn parse_parameter_subset(text: &str) -> Result<Vec<String>, String> {
     Ok(names)
 }
 
-#[derive(Debug, Clone, Default, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct McDialogState {
+    pub confidence_pct: String,
+    pub confidence_method_idx: usize,
+    pub bootstrap_resamples: String,
+    pub bootstrap_seed: String,
     pub num_runs: String,
     #[serde(rename = "explicit_seed")]
     pub seed: String,
@@ -160,10 +181,36 @@ pub struct McDialogState {
     pub initialized: bool,
 }
 
+impl Default for McDialogState {
+    fn default() -> Self {
+        Self {
+            num_runs: String::new(),
+            seed: String::new(),
+            variation_source_idx: 0,
+            distribution_idx: 0,
+            variation_pct: String::new(),
+            vary_only: String::new(),
+            confidence_pct: default_confidence_pct(),
+            confidence_method_idx: 0,
+            bootstrap_resamples: default_bootstrap_resamples(),
+            bootstrap_seed: default_bootstrap_seed(),
+            initialized: false,
+        }
+    }
+}
+
 /// Persisted editor state. New fields serialize; retired fields only decode.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PersistedMcDialogState {
+    #[serde(default = "default_confidence_pct")]
+    confidence_pct: String,
+    #[serde(default)]
+    confidence_method_idx: usize,
+    #[serde(default = "default_bootstrap_resamples")]
+    bootstrap_resamples: String,
+    #[serde(default = "default_bootstrap_seed")]
+    bootstrap_seed: String,
     #[serde(default)]
     num_runs: String,
     #[serde(default)]
@@ -202,6 +249,16 @@ struct PersistedMcDialogState {
     save_all_runs: serde::de::IgnoredAny,
 }
 
+fn default_confidence_pct() -> String {
+    "95".into()
+}
+fn default_bootstrap_resamples() -> String {
+    "10000".into()
+}
+fn default_bootstrap_seed() -> String {
+    "0".into()
+}
+
 fn deserialize_explicit_seed<'de, D: Deserializer<'de>>(
     deserializer: D,
 ) -> Result<Option<String>, D::Error> {
@@ -228,6 +285,10 @@ impl<'de> Deserialize<'de> for McDialogState {
         };
         Ok(Self {
             num_runs: persisted.num_runs,
+            confidence_pct: persisted.confidence_pct,
+            confidence_method_idx: persisted.confidence_method_idx,
+            bootstrap_resamples: persisted.bootstrap_resamples,
+            bootstrap_seed: persisted.bootstrap_seed,
             seed,
             variation_source_idx: persisted.variation_source_idx,
             distribution_idx: persisted.distribution_idx,
@@ -242,6 +303,23 @@ impl McDialogState {
     pub fn from_config(config: &McConfig) -> Self {
         Self {
             num_runs: config.num_runs.to_string(),
+            confidence_pct: config.confidence_pct.to_string(),
+            confidence_method_idx: usize::from(matches!(
+                config.confidence_method,
+                crate::state::MonteCarloMeanMethod::PercentileBootstrap { .. }
+            )),
+            bootstrap_resamples: match config.confidence_method {
+                crate::state::MonteCarloMeanMethod::StudentT => default_bootstrap_resamples(),
+                crate::state::MonteCarloMeanMethod::PercentileBootstrap { resamples, .. } => {
+                    resamples.to_string()
+                }
+            },
+            bootstrap_seed: match config.confidence_method {
+                crate::state::MonteCarloMeanMethod::StudentT => default_bootstrap_seed(),
+                crate::state::MonteCarloMeanMethod::PercentileBootstrap { seed, .. } => {
+                    seed.to_string()
+                }
+            },
             seed: config
                 .seed
                 .map_or_else(String::new, |seed| seed.to_string()),
@@ -295,7 +373,28 @@ impl McDialogState {
         } else {
             Vec::new()
         };
+        let confidence_pct = self
+            .confidence_pct
+            .trim()
+            .parse::<f64>()
+            .map_err(|_| "Invalid mean confidence percentage")?;
+        let confidence_method = match self.confidence_method_idx {
+            0 => crate::state::MonteCarloMeanMethod::StudentT,
+            1 => crate::state::MonteCarloMeanMethod::PercentileBootstrap {
+                resamples: self
+                    .bootstrap_resamples
+                    .trim()
+                    .parse::<usize>()
+                    .map_err(|_| "Bootstrap resamples must be an integer of at least two")?,
+                seed: self.bootstrap_seed.trim().parse::<u64>().map_err(
+                    |_| "Bootstrap seed must be an integer from 0 to 18446744073709551615",
+                )?,
+            },
+            _ => return Err("Invalid mean-confidence estimator".into()),
+        };
         let config = McConfig {
+            confidence_pct,
+            confidence_method,
             num_runs: runs,
             seed,
             variation_source,
@@ -507,5 +606,82 @@ mod tests {
         ] {
             assert!(encoded.get(retired).is_none(), "{retired}");
         }
+    }
+}
+
+#[cfg(test)]
+mod confidence_tests {
+    use super::*;
+    use crate::simulation::plan::AnalysisDraft;
+    use crate::state::MonteCarloMeanMethod;
+
+    #[test]
+    fn monte_carlo_confidence_draft_round_trips_and_migrates() {
+        let config = McConfig {
+            confidence_pct: 90.12345678912345,
+            confidence_method: MonteCarloMeanMethod::PercentileBootstrap {
+                resamples: 257,
+                seed: u64::MAX,
+            },
+            ..Default::default()
+        };
+        let draft = AnalysisDraft::MonteCarlo(McDialogState::from_config(&config));
+        for mut decoded in [
+            serde_json::from_str::<AnalysisDraft>(&serde_json::to_string(&draft).unwrap()).unwrap(),
+            ron::from_str::<AnalysisDraft>(&ron::to_string(&draft).unwrap()).unwrap(),
+        ] {
+            decoded.prepare_after_restore();
+            let AnalysisDraft::MonteCarlo(mut state) = decoded else {
+                panic!("MC")
+            };
+            state.ensure_initialized();
+            let restored = state.to_config().unwrap();
+            assert_eq!(restored.confidence_pct, config.confidence_pct);
+            assert_eq!(restored.confidence_method, config.confidence_method);
+        }
+        let mut old: serde_json::Value = serde_json::to_value(&draft).unwrap();
+        let body = old["draft"].as_object_mut().unwrap();
+        for key in [
+            "confidence_pct",
+            "confidence_method_idx",
+            "bootstrap_resamples",
+            "bootstrap_seed",
+        ] {
+            body.remove(key);
+        }
+        let mut decoded: AnalysisDraft = serde_json::from_value(old).unwrap();
+        decoded.prepare_after_restore();
+        let AnalysisDraft::MonteCarlo(state) = decoded else {
+            panic!("MC")
+        };
+        assert_eq!(state.to_config().unwrap().confidence_pct, 95.0);
+        assert_eq!(
+            state.to_config().unwrap().confidence_method,
+            MonteCarloMeanMethod::StudentT
+        );
+    }
+
+    #[test]
+    fn monte_carlo_confidence_validates_active_fields_and_preserves_inactive_drafts() {
+        let mut state = McDialogState::from_config(&McConfig::default());
+        for level in ["NaN", "inf", "0", "100", "-1"] {
+            state.confidence_pct = level.into();
+            assert!(state.to_config().is_err(), "{level}");
+        }
+        state.confidence_pct = "95".into();
+        state.bootstrap_resamples = "unfinished(".into();
+        state.bootstrap_seed = "unfinished(".into();
+        assert!(state.to_config().is_ok());
+        state.confidence_method_idx = 1;
+        assert!(state.to_config().is_err());
+        state.bootstrap_seed = u64::MAX.to_string();
+        for count in ["0", "1", "2.5", "-1"] {
+            state.bootstrap_resamples = count.into();
+            assert!(state.to_config().is_err());
+        }
+        state.bootstrap_resamples = "2".into();
+        assert!(state.to_config().is_ok());
+        state.confidence_method_idx = 2;
+        assert!(state.to_config().is_err());
     }
 }

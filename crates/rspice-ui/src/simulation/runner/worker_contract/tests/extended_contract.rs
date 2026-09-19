@@ -471,7 +471,7 @@ fn worker_spec_request_preserves_monte_carlo() {
         options: Box::new(SpecExecutionOptions::default()),
     };
     let input = NetlistInput {
-        netlist: "V1 in 0 1\nR1 in out 1k\nR2 out 0 1k\n.mc 10 R1 0.05 gaussian\n.end\n"
+        netlist: "MC worker\n.param rload=1k\nV1 in 0 1\nR1 in out {rload}\nR2 out 0 1k\n.mc 10 GAUSS 0.05 CONFIDENCE 90 CI BOOTSTRAP RESAMPLES 257 BOOTSEED 18446744073709551615 PARAMS RLOAD\n.end\n"
             .to_string(),
         source_path: None,
         project_veriloga_runtimes: Default::default(),
@@ -482,7 +482,22 @@ fn worker_spec_request_preserves_monte_carlo() {
 
     let worker =
         WorkerRequest::from_runner_parts(101, &request, &input).expect("Monte Carlo converts");
-    let (round_tripped, _) = worker.into_runner_parts();
+    let encoded = serde_json::to_string(&worker).unwrap();
+    let worker: WorkerRequest = serde_json::from_str(&encoded).unwrap();
+    let (round_tripped, restored_input) = worker.into_runner_parts();
+    assert_eq!(restored_input.netlist, input.netlist);
+    let parsed = rspice_core::Netlist::parse(&restored_input.netlist).unwrap();
+    let rspice_core::netlist::AnalysisCommand::MonteCarlo(card) = &parsed.analyses[0] else {
+        panic!("MC")
+    };
+    assert_eq!(card.confidence_pct, 90.0);
+    assert_eq!(
+        card.confidence_method,
+        rspice_core::netlist::MonteCarloMeanConfidenceMethod::PercentileBootstrap {
+            resamples: 257,
+            seed: u64::MAX
+        }
+    );
 
     match round_tripped {
         SimulationRequest::Spec { spec, options } => {

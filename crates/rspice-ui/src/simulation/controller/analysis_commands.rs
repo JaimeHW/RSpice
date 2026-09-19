@@ -124,6 +124,16 @@ impl SimulationController {
         if let Some(seed) = mc_cfg.seed {
             cmd.push_str(&format!(" SEED {seed}"));
         }
+        if mc_cfg.confidence_pct != 95.0 {
+            cmd.push_str(&format!(" CONFIDENCE {}", mc_cfg.confidence_pct));
+        }
+        if let crate::state::MonteCarloMeanMethod::PercentileBootstrap { resamples, seed } =
+            mc_cfg.confidence_method
+        {
+            cmd.push_str(&format!(
+                " CI BOOTSTRAP RESAMPLES {resamples} BOOTSEED {seed}"
+            ));
+        }
         // `PARAMS` is written only when a subset was named. The card refuses
         // the keyword with an empty list, and an absent keyword is how it
         // spells "every eligible parameter", so this stays a conditional tail.
@@ -722,6 +732,56 @@ mod tests {
                 panic!("missing MC command")
             };
             assert_eq!(mc.seed, Some(seed), "{command}");
+        }
+    }
+
+    #[test]
+    fn monte_carlo_confidence_draft_emits_exact_reproducible_card() {
+        use crate::simulation::dialog::McDialogState;
+        use crate::simulation::dialog::mc::McConfig;
+        use crate::state::MonteCarloMeanMethod;
+        for method in [
+            MonteCarloMeanMethod::StudentT,
+            MonteCarloMeanMethod::PercentileBootstrap {
+                resamples: 257,
+                seed: u64::MAX,
+            },
+        ] {
+            let mut state = AppState::default();
+            state.sim_setup.mc = McDialogState::from_config(&McConfig {
+                confidence_pct: 90.12345678912345,
+                confidence_method: method,
+                params: vec!["rload".into()],
+                ..Default::default()
+            });
+            let command = SimulationController::new()
+                .build_monte_carlo_command(&state)
+                .unwrap();
+            let parsed =
+                rspice_core::Netlist::parse(&format!("MC confidence\n{command}\n.end\n")).unwrap();
+            let rspice_core::netlist::AnalysisCommand::MonteCarlo(card) = &parsed.analyses[0]
+            else {
+                panic!("MC")
+            };
+            assert_eq!(card.confidence_pct, 90.12345678912345);
+            assert_eq!(card.params, ["RLOAD"]);
+            match (method, card.confidence_method) {
+                (
+                    MonteCarloMeanMethod::StudentT,
+                    rspice_core::netlist::MonteCarloMeanConfidenceMethod::StudentT,
+                ) => (),
+                (
+                    MonteCarloMeanMethod::PercentileBootstrap { resamples, seed },
+                    rspice_core::netlist::MonteCarloMeanConfidenceMethod::PercentileBootstrap {
+                        resamples: actual,
+                        seed: actual_seed,
+                    },
+                ) => {
+                    assert_eq!(actual, resamples);
+                    assert_eq!(actual_seed, seed);
+                }
+                _ => panic!("method changed"),
+            }
         }
     }
 
