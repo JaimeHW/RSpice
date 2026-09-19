@@ -744,3 +744,58 @@ fn an_autonomous_pss_round_trips_through_the_deck_reader_as_autonomous() {
     assert_eq!(oscillator_node, None);
     assert_eq!(tone_sources, vec!["VSRC".to_owned()]);
 }
+
+/// The `.MC` card carries the varied subset, in the order it was authored, and
+/// carries no `PARAMS` keyword at all when no subset was named.
+///
+/// Both halves matter to the engine. `PARAMS` with an empty list is a parse
+/// error, so a blank field that wrote the keyword would refuse every plan; and
+/// an absent keyword is the card's own spelling for "vary everything
+/// eligible", which is what the studio asked for until this field existed.
+#[test]
+fn the_monte_carlo_directive_carries_only_the_parameters_it_was_given() {
+    use crate::simulation::plan::AnalysisDraft;
+    use rspice_core::netlist::{AnalysisCommand, parse_netlist};
+
+    let directive_for_subset = |vary_only: &str| -> String {
+        let mut draft = fixture_draft(AnalysisKind::MonteCarlo);
+        let AnalysisDraft::MonteCarlo(mc) = &mut draft else {
+            panic!("the Monte Carlo kind carries a Monte Carlo draft");
+        };
+        mc.vary_only = vary_only.to_owned();
+        let state = engine_facing_state(&draft);
+        SimulationController::new()
+            .analysis_draft_directive(&state, &draft)
+            .expect("a Monte Carlo draft emits a card")
+    };
+
+    let params_of = |directive: &str| -> Vec<String> {
+        let deck = format!("{FIXTURE_DECK}{directive}\n.end\n");
+        let netlist = parse_netlist(&deck)
+            .unwrap_or_else(|error| panic!("the .MC directive must parse: {error}\n{deck}"));
+        let [AnalysisCommand::MonteCarlo(command)] = netlist.analyses.as_slice() else {
+            panic!(
+                "a Monte Carlo plan writes exactly one .MC card: {:?}",
+                netlist.analyses
+            );
+        };
+        command.params.clone()
+    };
+
+    let unnamed = directive_for_subset("  ");
+    assert!(
+        !unnamed.to_ascii_uppercase().contains("PARAMS"),
+        "a blank subset must write no keyword: {unnamed}"
+    );
+    assert!(
+        params_of(&unnamed).is_empty(),
+        "an absent list is every eligible parameter"
+    );
+
+    let named = directive_for_subset("rload, cload");
+    assert_eq!(
+        params_of(&named),
+        ["RLOAD".to_owned(), "CLOAD".to_owned()],
+        "the card carries the authored names in the authored order: {named}"
+    );
+}

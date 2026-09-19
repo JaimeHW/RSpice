@@ -120,6 +120,12 @@ impl SimulationController {
         if let Some(seed) = mc_cfg.seed {
             cmd.push_str(&format!(" SEED {seed}"));
         }
+        // `PARAMS` is written only when a subset was named. The card refuses
+        // the keyword with an empty list, and an absent keyword is how it
+        // spells "every eligible parameter", so this stays a conditional tail.
+        if !mc_cfg.params.is_empty() {
+            cmd.push_str(&format!(" PARAMS {}", mc_cfg.params.join(" ")));
+        }
         Ok(cmd)
     }
 

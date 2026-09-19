@@ -1095,6 +1095,54 @@ mod tests {
         assert_ne!(authored.finish(), absent.finish());
     }
 
+    /// A Monte Carlo plan that named no subset digests to exactly the bytes it
+    /// digested to when the arm wrote nothing at all.
+    ///
+    /// The arm was empty, so the reference is the kind tag and nothing after
+    /// it. That makes the conditional tail load-bearing in both directions: an
+    /// unnamed subset must not move a saved plan's identity, and two runs that
+    /// vary different parameters must not share one.
+    #[test]
+    fn an_unauthored_vary_only_leaves_the_plan_digest_unchanged() {
+        let monte_carlo = |params: Vec<String>| AnalysisSpec::MonteCarlo {
+            variation_source: crate::simulation::dialog::McVariationSource::ParameterTolerance,
+            params,
+        };
+        let spec = monte_carlo(Vec::new());
+        let mut encoded = CanonicalWriter::new("test");
+        encode_analysis_spec(&mut encoded, &spec);
+
+        let mut before_the_field = CanonicalWriter::new("test");
+        before_the_field.domain("analysis-spec");
+        before_the_field.u8(analysis_kind_tag(&spec));
+
+        assert_eq!(
+            encoded.finish(),
+            before_the_field.finish(),
+            "an unnamed Monte Carlo subset must not move a saved plan's identity"
+        );
+
+        let mut named = CanonicalWriter::new("test");
+        encode_analysis_spec(&mut named, &monte_carlo(vec!["RLOAD".to_owned()]));
+        let mut unnamed = CanonicalWriter::new("test");
+        encode_analysis_spec(&mut unnamed, &spec);
+        assert_ne!(named.finish(), unnamed.finish());
+
+        // Order is part of the request the card writes, so it is part of the
+        // identity too.
+        let mut forward = CanonicalWriter::new("test");
+        encode_analysis_spec(
+            &mut forward,
+            &monte_carlo(vec!["RA".to_owned(), "RB".to_owned()]),
+        );
+        let mut reversed = CanonicalWriter::new("test");
+        encode_analysis_spec(
+            &mut reversed,
+            &monte_carlo(vec!["RB".to_owned(), "RA".to_owned()]),
+        );
+        assert_ne!(forward.finish(), reversed.finish());
+    }
+
     #[test]
     fn a_pss_spectrum_digest_follows_its_harmonic_count() {
         let twenty = AnalysisSpec::PssSpectrum { num_harmonics: 20 };

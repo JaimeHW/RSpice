@@ -906,4 +906,65 @@ R2 out 0 1k
 
         assert!(data.trial_measurements.is_empty());
     }
+
+    /// Two dividers, one parameter each, so each node reports exactly one
+    /// parameter's spread. `PARAMS ra` must leave the other node identical
+    /// across every trial.
+    ///
+    /// A shared node would prove nothing: a subset that was silently ignored
+    /// still moves a node both parameters reach. Separating them is what makes
+    /// "only" checkable.
+    const SUBSET_DECK: &str = "\
+Monte Carlo subset
+.param ra=1k
+.param rb=1k
+V1 in 0 1
+R1 in na {ra}
+R2 na 0 1k
+R3 in nb {rb}
+R4 nb 0 1k
+.mc 8 gauss 0.2 seed 31{subset}
+.end
+";
+
+    fn subset_run(subset: &str) -> MonteCarloData {
+        run_monte_carlo_analysis(&SUBSET_DECK.replace("{subset}", subset))
+            .expect("the subset deck runs")
+    }
+
+    fn is_constant(values: &[Value]) -> bool {
+        values.windows(2).all(|pair| pair[0] == pair[1])
+    }
+
+    #[test]
+    fn a_monte_carlo_run_varies_only_the_named_parameters() {
+        let both = subset_run("");
+        assert!(
+            !is_constant(samples(&both, "V(na)")) && !is_constant(samples(&both, "V(nb)")),
+            "with no subset both parameters vary, or this deck cannot show a subset at all"
+        );
+
+        let only_ra = subset_run(" params ra");
+        assert!(
+            !is_constant(samples(&only_ra, "V(na)")),
+            "the named parameter must still vary"
+        );
+        let unnamed = samples(&only_ra, "V(nb)");
+        assert!(
+            is_constant(unnamed),
+            "the unnamed parameter's node moved, so the subset did not reach the engine: \
+             {unnamed:?}"
+        );
+    }
+
+    #[test]
+    fn a_monte_carlo_subset_naming_nothing_eligible_is_refused() {
+        let error = run_monte_carlo_analysis(&SUBSET_DECK.replace("{subset}", " params rz"))
+            .expect_err("a parameter the deck does not define cannot be varied");
+
+        assert!(
+            error.contains("not defined or not eligible"),
+            "the engine's own refusal must reach the caller: {error}"
+        );
+    }
 }

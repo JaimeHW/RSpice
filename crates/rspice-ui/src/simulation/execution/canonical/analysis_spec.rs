@@ -59,9 +59,21 @@ pub(super) fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &Analysis
         | AnalysisSpec::Pnoise
         | AnalysisSpec::Pxf
         | AnalysisSpec::Pstb
-        | AnalysisSpec::MonteCarlo { .. }
         | AnalysisSpec::Parametric
         | AnalysisSpec::Corner => {}
+        // Monte Carlo digested nothing, because the trial count and the spread
+        // travel on the card rather than in the specification. The varied
+        // subset does decide which run this is, so it is appended as a
+        // conditional tail: an unnamed subset writes nothing and digests
+        // exactly as it did before the field existed.
+        AnalysisSpec::MonteCarlo { params, .. } => {
+            if !params.is_empty() {
+                writer.sequence(params.len());
+                for name in params {
+                    writer.string(name);
+                }
+            }
+        }
         AnalysisSpec::Tf {
             input_source,
             output_expression,

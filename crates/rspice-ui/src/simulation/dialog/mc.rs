@@ -62,6 +62,15 @@ pub struct McConfig {
     /// Variation percentage (sigma for Gaussian, ± for Uniform). Applies to
     /// [`McVariationSource::ParameterTolerance`].
     pub variation_pct: f64,
+    /// The subset of eligible parameters a trial is allowed to vary, in
+    /// authored order. Empty means every eligible parameter, which is the
+    /// card's own meaning for an absent `PARAMS` list.
+    ///
+    /// Only [`McVariationSource::ParameterTolerance`] reads it: the deck's own
+    /// `agauss`/`gauss`/`unif` expressions name what they vary themselves, and
+    /// the engine refuses a generic filter alongside native Spectre statistics
+    /// rather than pretending to narrow them.
+    pub params: Vec<String>,
 }
 
 impl Default for McConfig {
@@ -72,6 +81,7 @@ impl Default for McConfig {
             variation_source: McVariationSource::ParameterTolerance,
             distribution: McDistribution::Gaussian,
             variation_pct: 5.0,
+            params: Vec::new(),
         }
     }
 }
@@ -98,6 +108,44 @@ impl McConfig {
     }
 }
 
+/// One `PARAMS` entry as the card's token stream spells it: an identifier of
+/// ASCII letters, digits and underscores that does not begin with a digit.
+fn is_parameter_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    if !(first.is_ascii_alphabetic() || first == '_') {
+        return false;
+    }
+    chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
+/// Read the "Vary only" field as the `PARAMS` list it writes.
+///
+/// The card separates entries by commas or whitespace and drops a repeat, so
+/// this accepts both spellings and keeps the first of each name. An all-blank
+/// field is the absent list, not an empty one: `.MC ... PARAMS` with nothing
+/// after it is a parse error, so a blank field must write no keyword at all.
+fn parse_parameter_subset(text: &str) -> Result<Vec<String>, String> {
+    let mut names: Vec<String> = Vec::new();
+    for entry in text.split([',', ' ', '\t']) {
+        let entry = entry.trim();
+        if entry.is_empty() {
+            continue;
+        }
+        if !is_parameter_name(entry) {
+            return Err(format!(
+                "Invalid .MC parameter list token {entry:?}: expected identifier"
+            ));
+        }
+        if !names.iter().any(|name| name.eq_ignore_ascii_case(entry)) {
+            names.push(entry.to_owned());
+        }
+    }
+    Ok(names)
+}
+
 #[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct McDialogState {
     pub num_runs: String,
@@ -106,6 +154,8 @@ pub struct McDialogState {
     pub variation_source_idx: usize,
     pub distribution_idx: usize,
     pub variation_pct: String,
+    /// The "Vary only" field, as authored. Commas or spaces separate names.
+    pub vary_only: String,
     #[serde(skip)]
     pub initialized: bool,
 }
@@ -128,6 +178,10 @@ struct PersistedMcDialogState {
     distribution_idx: usize,
     #[serde(default)]
     variation_pct: String,
+    /// A project saved before the field opened carries no subset, which is the
+    /// card's own "vary everything eligible".
+    #[serde(default)]
+    vary_only: String,
     /// Retired. Every trial is an operating point; the choice named base
     /// analyses that were never dispatched.
     #[serde(default)]
@@ -178,6 +232,7 @@ impl<'de> Deserialize<'de> for McDialogState {
             variation_source_idx: persisted.variation_source_idx,
             distribution_idx: persisted.distribution_idx,
             variation_pct: persisted.variation_pct,
+            vary_only: persisted.vary_only,
             initialized: false,
         })
     }
@@ -200,6 +255,7 @@ impl McDialogState {
                 McDistribution::WorstCase => 2,
             },
             variation_pct: format!("{}", config.variation_pct),
+            vary_only: config.params.join(", "),
             initialized: true,
         }
     }
@@ -230,12 +286,22 @@ impl McDialogState {
             _ if !variation_source.uses_stated_spread() => McDistribution::default(),
             _ => return Err("Invalid distribution".to_owned()),
         };
+        // A subset only narrows the parameter-tolerance source. Under deck
+        // statistics the engine refuses a generic filter outright, so the
+        // draft keeps the authored text for switching back and contributes
+        // nothing to the run.
+        let params = if variation_source.uses_stated_spread() {
+            parse_parameter_subset(&self.vary_only)?
+        } else {
+            Vec::new()
+        };
         let config = McConfig {
             num_runs: runs,
             seed,
             variation_source,
             distribution: dist,
             variation_pct: pct,
+            params,
         };
         config.validate()?;
         Ok(config)
@@ -334,6 +400,84 @@ mod tests {
             draft.to_config().is_err(),
             "a missing distribution is not Worst Case"
         );
+    }
+
+    #[test]
+    fn a_monte_carlo_subset_survives_a_reopen_and_keeps_the_cards_grammar() {
+        use crate::simulation::plan::AnalysisDraft;
+
+        let mut state = McDialogState::from_config(&McConfig::default());
+        state.vary_only = "rload, cload  rseries".to_owned();
+        assert_eq!(
+            state.to_config().unwrap().params,
+            ["rload", "cload", "rseries"],
+            "commas and whitespace both separate names, as the card's own list does"
+        );
+
+        let draft = AnalysisDraft::MonteCarlo(state.clone());
+        let json = serde_json::to_string(&draft).unwrap();
+        let ron = ron::to_string(&draft).unwrap();
+        for mut restored in [
+            serde_json::from_str::<AnalysisDraft>(&json).unwrap(),
+            ron::from_str::<AnalysisDraft>(&ron).unwrap(),
+        ] {
+            restored.prepare_after_restore();
+            let AnalysisDraft::MonteCarlo(mut restored) = restored else {
+                panic!("wrong restored draft");
+            };
+            restored.ensure_initialized();
+            assert_eq!(restored.vary_only, state.vary_only);
+            assert_eq!(
+                restored.to_config().unwrap().params,
+                ["rload", "cload", "rseries"]
+            );
+        }
+
+        // A project saved before the field existed asks for the card's absent
+        // list, which is every eligible parameter.
+        let mut older: McDialogState = serde_json::from_str(r#"{"num_runs":"32"}"#).unwrap();
+        older.ensure_initialized();
+        assert!(older.to_config().unwrap().params.is_empty());
+    }
+
+    #[test]
+    fn a_monte_carlo_subset_refuses_what_the_card_cannot_spell() {
+        let mut state = McDialogState::from_config(&McConfig::default());
+        for text in ["2rload", "r-load", "r.load", "V(out)", "r+load"] {
+            state.vary_only = text.to_owned();
+            assert!(
+                state.to_config().is_err(),
+                "{text:?} is not a parameter name the .MC PARAMS list accepts"
+            );
+        }
+        // A space is a separator on the card, not a character in a name, so
+        // "r load" is two names rather than one bad one.
+        state.vary_only = "r load".to_owned();
+        assert_eq!(state.to_config().unwrap().params, ["r", "load"]);
+        // A repeat is what the card does with one: keep the first.
+        state.vary_only = "rload, RLOAD".to_owned();
+        assert_eq!(state.to_config().unwrap().params, ["rload"]);
+        // Blank is the absent list, not an empty one: `.MC ... PARAMS` with
+        // nothing after it is a parse error.
+        state.vary_only = " , \t ".to_owned();
+        assert!(state.to_config().unwrap().params.is_empty());
+    }
+
+    #[test]
+    fn a_deck_stated_spread_contributes_no_subset_but_keeps_the_draft() {
+        let mut state = McDialogState::from_config(&McConfig::default());
+        state.vary_only = "rload".to_owned();
+        state.variation_source_idx = McVariationSource::ALL
+            .iter()
+            .position(|source| *source == McVariationSource::DeckStatistics)
+            .expect("deck statistics is a source");
+
+        let config = state.to_config().expect("deck statistics runs");
+        assert!(
+            config.params.is_empty(),
+            "the engine refuses a generic filter beside native statistics, so none is sent"
+        );
+        assert_eq!(state.vary_only, "rload", "the authored text is kept");
     }
 
     #[test]

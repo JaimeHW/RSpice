@@ -22,9 +22,12 @@ pub(super) fn run_sweep_spec(
 ) -> Result<SimulationResult, SimulationError> {
     super::ensure_not_aborted(abort)?;
     match spec {
-        AnalysisSpec::MonteCarlo { variation_source } => {
-            run_monte_carlo(variation_source, netlist, source_path, environment, abort)
-        }
+        // The varied subset reaches the engine on the `.MC` card's `PARAMS`
+        // list, which this deck already carries, so the specification's copy
+        // is read for identity rather than re-applied here.
+        AnalysisSpec::MonteCarlo {
+            variation_source, ..
+        } => run_monte_carlo(variation_source, netlist, source_path, environment, abort),
         AnalysisSpec::Parametric => run_parametric(netlist, options, source_path, abort),
         // A corner declaration is expanded into one task per declared point
         // before the run is authorized, and its plotting family is assembled

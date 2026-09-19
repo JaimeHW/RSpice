@@ -550,6 +550,7 @@ impl SimulationController {
             .map_err(|e| format!("invalid Monte Carlo settings: {}", e))?;
         Ok(AnalysisSpec::MonteCarlo {
             variation_source: mc_cfg.variation_source,
+            params: mc_cfg.params,
         })
     }
 

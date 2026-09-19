@@ -11,7 +11,10 @@ use egui::Ui;
 
 use crate::simulation::dialog::McDialogState;
 
-use super::{choice_row, choice_row_with_disabled, field_note, input_row, input_row_enabled};
+use super::{
+    choice_row, choice_row_with_disabled, field_note, hinted_input_row_enabled, input_row,
+    input_row_enabled,
+};
 
 /// Render the Monte Carlo fields.
 pub(super) fn fields(ui: &mut Ui, setup: &mut McDialogState) {
@@ -47,6 +50,16 @@ pub(super) fn fields(ui: &mut Ui, setup: &mut McDialogState) {
                 .map(|index| (index, "the deck states its own distribution"))
                 .collect::<Vec<_>>()
         },
+    );
+    // The subset narrows only the stated-spread source. A deck that states its
+    // own statistics names what it varies itself, and the engine refuses a
+    // generic filter beside them, so the field goes quiet with the two above.
+    hinted_input_row_enabled(
+        ui,
+        "Vary only",
+        &mut setup.vary_only,
+        "empty = every parameter",
+        states_spread,
     );
     // Which spread is drawn from is the `From` choice's own answer, and
     // the two rows above say so by going quiet. What they cannot say is

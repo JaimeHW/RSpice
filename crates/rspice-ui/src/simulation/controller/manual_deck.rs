@@ -1251,10 +1251,15 @@ fn command_to_queue_item(
             };
             fourier_queue_item(netlist, *fundamental, output, *num_harmonics)
         }
-        AnalysisCommand::MonteCarlo(_) => Ok(QueuedAnalysis {
+        AnalysisCommand::MonteCarlo(command) => Ok(QueuedAnalysis {
             numeric_override: None,
             spec: AnalysisSpec::MonteCarlo {
                 variation_source: Default::default(),
+                // The card's own `PARAMS` list, so a hand-written subset is the
+                // same run identity as the authored one. The engine reads the
+                // list off this deck; carrying it here is what keeps two
+                // different subsets from digesting as one run.
+                params: command.params.clone(),
             },
             config: None,
             spec_options,

@@ -157,6 +157,10 @@ pub(crate) enum WorkerAnalysisSpec {
     MonteCarlo {
         #[serde(default)]
         variation_source: crate::simulation::dialog::McVariationSource,
+        /// An older worker's request carries no subset, which the card spells
+        /// as an absent `PARAMS` list: vary everything eligible.
+        #[serde(default)]
+        params: Vec<String>,
     },
     Reliability {
         target_years: Vec<f64>,

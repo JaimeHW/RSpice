@@ -1053,8 +1053,12 @@ impl TryFrom<&AnalysisSpec> for WorkerAnalysisSpec {
             AnalysisSpec::Pstb => Ok(Self::Pstb),
             AnalysisSpec::Parametric => Ok(Self::Parametric),
             AnalysisSpec::Corner => Ok(Self::Corner),
-            AnalysisSpec::MonteCarlo { variation_source } => Ok(Self::MonteCarlo {
+            AnalysisSpec::MonteCarlo {
+                variation_source,
+                params,
+            } => Ok(Self::MonteCarlo {
                 variation_source: *variation_source,
+                params: params.clone(),
             }),
             AnalysisSpec::Reliability {
                 target_years,
@@ -1431,9 +1435,13 @@ impl From<WorkerAnalysisSpec> for AnalysisSpec {
             WorkerAnalysisSpec::Pstb => Self::Pstb,
             WorkerAnalysisSpec::Parametric => Self::Parametric,
             WorkerAnalysisSpec::Corner => Self::Corner,
-            WorkerAnalysisSpec::MonteCarlo { variation_source } => {
-                Self::MonteCarlo { variation_source }
-            }
+            WorkerAnalysisSpec::MonteCarlo {
+                variation_source,
+                params,
+            } => Self::MonteCarlo {
+                variation_source,
+                params,
+            },
             WorkerAnalysisSpec::Reliability {
                 target_years,
                 enable_hci,

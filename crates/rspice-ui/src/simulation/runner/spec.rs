@@ -1446,6 +1446,7 @@ R2 out 0 1k\n\
                 "sweep",
                 AnalysisSpec::MonteCarlo {
                     variation_source: Default::default(),
+                    params: Vec::new(),
                 },
             ),
             (

@@ -307,6 +307,7 @@ fn analysis_spec_round_trips_supported_variants() {
         AnalysisSpec::Corner,
         AnalysisSpec::MonteCarlo {
             variation_source: Default::default(),
+            params: vec!["RLOAD".to_owned(), "CLOAD".to_owned()],
         },
         AnalysisSpec::Stb {
             probe_node: "Vprobe".to_string(),
@@ -446,6 +447,7 @@ fn worker_spec_request_preserves_monte_carlo() {
     let request = SimulationRequest::Spec {
         spec: Box::new(AnalysisSpec::MonteCarlo {
             variation_source: Default::default(),
+            params: vec!["RLOAD".to_owned()],
         }),
         options: Box::new(SpecExecutionOptions::default()),
     };
@@ -465,7 +467,14 @@ fn worker_spec_request_preserves_monte_carlo() {
 
     match round_tripped {
         SimulationRequest::Spec { spec, options } => {
-            assert!(matches!(*spec, AnalysisSpec::MonteCarlo { .. }));
+            let AnalysisSpec::MonteCarlo { params, .. } = *spec else {
+                panic!("a Monte Carlo request round-trips as one");
+            };
+            assert_eq!(
+                params,
+                ["RLOAD".to_owned()],
+                "the varied subset is part of the request, not a local detail"
+            );
             assert!(options.temp.is_none());
             assert!(options.corner.is_none());
             assert!(options.pac.is_none());

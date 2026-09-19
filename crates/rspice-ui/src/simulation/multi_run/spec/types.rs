@@ -446,6 +446,12 @@ pub enum AnalysisSpec {
         /// values, so that is the serde default.
         #[serde(default)]
         variation_source: crate::simulation::dialog::McVariationSource,
+        /// The eligible parameters a trial may vary, in authored order. Empty
+        /// is the card's absent `PARAMS` list: vary everything eligible, which
+        /// is also what every specification sealed before the field existed
+        /// asked for.
+        #[serde(default)]
+        params: Vec<String>,
     },
     /// Parametric sweep
     Parametric,

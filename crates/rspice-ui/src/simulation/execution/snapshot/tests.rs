@@ -73,6 +73,7 @@ fn monte_carlo_task() -> QueuedAnalysis {
         numeric_override: None,
         spec: AnalysisSpec::MonteCarlo {
             variation_source: crate::simulation::dialog::McVariationSource::ParameterTolerance,
+            params: vec!["RLOAD".to_owned()],
         },
         config: None,
         spec_options: SpecExecutionOptions::default(),
