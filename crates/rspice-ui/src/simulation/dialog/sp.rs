@@ -9,4 +9,6 @@ mod format;
 mod state;
 
 pub use config::{SpConfig, SpPortConfig, SpSweepType};
-pub use state::{SpDialogState, SpPortSource, TOUCHSTONE_VERSION_LABELS, TOUCHSTONE_VERSIONS};
+#[cfg(test)]
+pub use state::TOUCHSTONE_VERSIONS;
+pub use state::{SpDialogState, SpPortSource, TOUCHSTONE_VERSION_LABELS};
