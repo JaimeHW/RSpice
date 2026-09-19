@@ -1684,7 +1684,7 @@ fn serialize_manifest(run: &SimulationRun) -> Result<String, String> {
         .map(|analysis| {
             json!({
                 "sequence": analysis.id,
-                "analysis": analysis.analysis_type.display_name(),
+                "analysis": analysis.kind_display_name(),
                 "label": analysis.label,
                 "timestamp_epoch_seconds": analysis.timestamp,
                 "success": analysis.success,
