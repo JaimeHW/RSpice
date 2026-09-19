@@ -858,7 +858,7 @@ impl AuthorizedTaskDispatch {
             self.dependency_bindings.clone(),
             artifacts,
         )?;
-        dependencies.validate_for_spec(&self.task.spec)?;
+        dependencies.validate_for_spec(&self.task.spec, &self.task.spec_options)?;
         Ok(ResolvedTaskDispatch {
             dispatch: self,
             dependencies,
@@ -1246,24 +1246,11 @@ impl PreparedRunSnapshot {
                 }
             }
 
-            let expected_artifact_kind = match task.task.spec {
-                AnalysisSpec::Fourier { .. } => Some(ExecutionArtifactKind::TransientTrajectory),
-                AnalysisSpec::Hbsp { .. } | AnalysisSpec::Hbnoise { .. } => {
-                    Some(ExecutionArtifactKind::HbState)
-                }
-                AnalysisSpec::Pss {
-                    method: crate::simulation::multi_run::PssMethod::Shooting,
-                    ..
-                } => Some(ExecutionArtifactKind::DcOperatingPointSeed),
-                AnalysisSpec::PssSpectrum { .. }
-                | AnalysisSpec::Pac
-                | AnalysisSpec::Pxf
-                | AnalysisSpec::Pnoise
-                | AnalysisSpec::Pstb
-                | AnalysisSpec::Psp { .. } => Some(ExecutionArtifactKind::PeriodicState),
-                _ => None,
-            };
-            let expected_binding_count = usize::from(expected_artifact_kind.is_some());
+            let expected_artifact_kinds = crate::simulation::execution::required_artifact_kinds(
+                &task.task.spec,
+                &task.task.spec_options,
+            );
+            let expected_binding_count = usize::from(!expected_artifact_kinds.is_empty());
             if task.dependency_bindings.len() != expected_binding_count {
                 return Err(PreparationError::new(
                     PreparationStage::AnalysisPlan,
@@ -1312,7 +1299,7 @@ impl PreparedRunSnapshot {
                         AnalysisSpec::LegacyDcOp | AnalysisSpec::DcOp { .. }
                     ),
                 };
-                if Some(binding.kind()) != expected_artifact_kind
+                if !expected_artifact_kinds.contains(&binding.kind())
                     || !producer_kind_matches
                     || binding.producer_source_revision() != producer.source_revision
                     || binding.producer_config_digest() != producer.config_digest

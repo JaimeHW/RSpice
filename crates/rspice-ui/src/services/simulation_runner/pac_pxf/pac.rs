@@ -11,7 +11,7 @@ use rspice_core::Value;
 use rspice_core::abort_signal::AbortSignal;
 
 use super::super::error::{ensure_not_aborted, poll_periodically};
-use super::super::periodic_carrier::PeriodicCarrier;
+use super::super::periodic_carrier::{PeriodicCarrier, PeriodicCarrierState};
 use super::super::{
     ServiceRunError, ServiceRunResult, build_resolved_periodic_engine,
     parse_runner_netlist_with_abort,
@@ -71,9 +71,9 @@ pub struct PacRunConfig {
     /// Which periodic solve this run linearizes around.
     ///
     /// The card's `FROM=` keyword, in the engine's own vocabulary. It is part
-    /// of the request rather than of the dispatch because the two positions
-    /// the Studio runs bind different producers in the plan, and because the
-    /// third has to be refused with the value in the sentence.
+    /// of the request rather than of the dispatch because the three positions
+    /// bind different producers in the plan, and because the state the run is
+    /// handed has to be checked against the family the request named.
     pub carrier: PeriodicCarrier,
 }
 
@@ -148,13 +148,9 @@ impl PacRunConfig {
         if !self.abstol.is_finite() || self.abstol <= 0.0 {
             return Err("PAC absolute tolerance must be positive".to_string());
         }
-        // Refused here rather than bound to whatever periodic state the plan
-        // happens to hold: a run linearized about a carrier other than the one
-        // the request names is a different measurement reported under this
-        // one's name.
-        if let Some(reason) = self.carrier.unroutable_reason(".PAC") {
-            return Err(reason);
-        }
+        // The carrier itself is not a range check: it names a family, and
+        // whether the state this run was handed belongs to that family is
+        // `PeriodicCarrierState::accepted_by`, asked where both are in hand.
         Ok(())
     }
 }
@@ -193,27 +189,34 @@ pub(super) fn run_pac_internal_with_abort(
     run_pac_internal_impl(netlist, config, None, abort)
 }
 
-pub(crate) fn run_pac_internal_from_pss_with_abort(
+pub(crate) fn run_pac_internal_from_carrier_with_abort(
     netlist: &rspice_core::Netlist,
     config: &PacRunConfig,
-    operating_point: &rspice_core::engine::PssOperatingPoint,
+    carrier: PeriodicCarrierState<'_>,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<PacInternalResult> {
-    run_pac_internal_impl(netlist, config, Some(operating_point), abort)
+    run_pac_internal_impl(netlist, config, Some(carrier), abort)
 }
 
 fn run_pac_internal_impl(
     netlist: &rspice_core::Netlist,
     config: &PacRunConfig,
-    operating_point: Option<&rspice_core::engine::PssOperatingPoint>,
+    carrier: Option<PeriodicCarrierState<'_>>,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<PacInternalResult> {
     ensure_not_aborted(abort)?;
     config.validate().map_err(ServiceRunError::Failure)?;
+    if let Some(carrier_state) = carrier {
+        carrier_state
+            .accepted_by(config.carrier, ".PAC")
+            .map_err(ServiceRunError::Failure)?;
+    }
 
     let engine = build_resolved_periodic_engine(
         netlist,
-        config.pss_tolerance,
+        carrier.map_or(config.pss_tolerance, |carrier| {
+            carrier.engine_tolerance(config.pss_tolerance)
+        }),
         "PAC resolved producer configuration is invalid",
     )?;
 
@@ -221,11 +224,15 @@ fn run_pac_internal_impl(
 
     ensure_not_aborted(abort)?;
 
-    // The engine solves the periodic operating point with harmonic balance
-    // and the sideband-coupled small-signal system around it.
-    let pac_result = match operating_point {
-        Some(operating_point) => {
+    // The engine solves the sideband-coupled small-signal system about the
+    // retained periodic solution, whichever family produced it. Both entries
+    // consume the frozen state directly and never re-solve it.
+    let pac_result = match carrier {
+        Some(PeriodicCarrierState::Shooting(operating_point)) => {
             engine.run_pac_from_pss_with_abort(netlist, pac_config, operating_point, abort)
+        }
+        Some(PeriodicCarrierState::HarmonicBalance(operating_point)) => {
+            engine.run_pac_from_hb_with_abort(netlist, pac_config, operating_point, abort)
         }
         None => engine.run_pac_with_abort(netlist, pac_config, abort),
     }
@@ -235,7 +242,7 @@ fn run_pac_internal_impl(
     finish_pac_internal(
         pac_result,
         config,
-        carrier_fundamental(config, operating_point),
+        carrier_fundamental(config, carrier),
         abort,
     )
 }
@@ -260,15 +267,13 @@ fn run_pac_internal_impl(
 /// question, asked earlier and elsewhere: `PeriodicStateArtifact::
 /// validate_consumer_basis` compares the authored basis against the producer's
 /// authored basis before the run is dispatched.
-fn carrier_fundamental(
-    config: &PacRunConfig,
-    operating_point: Option<&rspice_core::engine::PssOperatingPoint>,
-) -> Value {
+fn carrier_fundamental(config: &PacRunConfig, carrier: Option<PeriodicCarrierState<'_>>) -> Value {
     // With no retained carrier the engine keeps the authored fundamental, so
     // that is what its result is built on.
-    operating_point.map_or(config.pss_fundamental_freq, |point| {
-        point.analysis().result.frequency
-    })
+    carrier.map_or(
+        config.pss_fundamental_freq,
+        PeriodicCarrierState::fundamental,
+    )
 }
 
 fn build_core_pac_config(
@@ -506,13 +511,46 @@ pub fn run_pac_analysis_from_pss_with_source_path_and_abort(
     source_path: Option<&Path>,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<PacData> {
-    let netlist = parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
-    run_pac_analysis_for_netlist_with_operating_point_abort(
-        &netlist,
+    run_pac_analysis_from_carrier_with_source_path_and_abort(
+        netlist_text,
         config,
-        Some(operating_point),
+        PeriodicCarrierState::Shooting(operating_point),
+        source_path,
         abort,
     )
+}
+
+/// Run PAC from an exact retained harmonic-balance state.
+///
+/// The same conversion analysis about the other carrier the engine accepts.
+/// One result-conversion path serves both: the engine's `.PAC` result is the
+/// same object with the same axes whichever family froze the large-signal
+/// solution, so the sideband traces below are assembled once.
+pub fn run_pac_analysis_from_hb_with_source_path_and_abort(
+    netlist_text: &str,
+    config: &PacRunConfig,
+    operating_point: &rspice_core::engine::HbOperatingPoint,
+    source_path: Option<&Path>,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<PacData> {
+    run_pac_analysis_from_carrier_with_source_path_and_abort(
+        netlist_text,
+        config,
+        PeriodicCarrierState::HarmonicBalance(operating_point),
+        source_path,
+        abort,
+    )
+}
+
+fn run_pac_analysis_from_carrier_with_source_path_and_abort(
+    netlist_text: &str,
+    config: &PacRunConfig,
+    carrier: PeriodicCarrierState<'_>,
+    source_path: Option<&Path>,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<PacData> {
+    let netlist = parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
+    run_pac_analysis_for_netlist_with_operating_point_abort(&netlist, config, Some(carrier), abort)
 }
 
 /// Run PAC analysis with source-path resolution and cooperative cancellation,
@@ -533,13 +571,11 @@ pub fn run_pac_analysis_with_source_path_and_abort(
 fn run_pac_analysis_for_netlist_with_operating_point_abort(
     netlist: &rspice_core::Netlist,
     config: &PacRunConfig,
-    operating_point: Option<&rspice_core::engine::PssOperatingPoint>,
+    carrier: Option<PeriodicCarrierState<'_>>,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<PacData> {
-    let pac_internal = match operating_point {
-        Some(operating_point) => {
-            run_pac_internal_from_pss_with_abort(netlist, config, operating_point, abort)?
-        }
+    let pac_internal = match carrier {
+        Some(carrier) => run_pac_internal_from_carrier_with_abort(netlist, config, carrier, abort)?,
         None => run_pac_internal_with_abort(netlist, config, abort)?,
     };
     let pac_result = pac_internal.pac_result;
@@ -688,6 +724,138 @@ mod tests {
             reltol: 1.0e-9,
             abstol: 1.0e-15,
             carrier: PeriodicCarrier::Preceding,
+        }
+    }
+
+    /// Both carriers linearize the same circuit, so both must report the
+    /// circuit.
+    ///
+    /// The fixture is an RC low-pass driven by one tone. Its small-signal
+    /// linearization is the network itself — a resistor's conductance and a
+    /// capacitor's capacitance do not depend on the operating point — so the
+    /// periodically time-varying system is time *invariant*, its conversion
+    /// matrix is diagonal, and the sideband-zero channel is the ordinary AC
+    /// transfer `1/(1 + j2*pi*f*R*C)`. That closed form is the oracle for both
+    /// runs: pinning one solver's output as the other's would prove only that
+    /// the two agree, not that either is right.
+    ///
+    /// The bound is `1e-9` relative. It is not either solver's convergence
+    /// tolerance, because neither one's iteration enters this number: for a
+    /// linear network the shooting solve and the harmonic-balance solve both
+    /// reach the exact orbit, and the sampled linearization is a constant
+    /// either way. What is left is the two solvers' different floating-point
+    /// paths — a different collocation count, a different lifted system size,
+    /// a different elimination order — so the bound is a round-off budget with
+    /// room for the wider of the two, and a real disagreement between the
+    /// carriers is orders of magnitude larger than it.
+    #[test]
+    fn pac_around_hb_and_pac_around_pss_agree_on_a_linear_circuit() {
+        use crate::services::simulation_runner::hb::{
+            HbRunConfig, HbToneRunConfig, run_hb_analysis_with_abort,
+        };
+
+        // R = 1 kOhm, C = 159.154943091895 pF: the corner sits at 1 MHz, so
+        // the swept offsets below cover both sides of it.
+        const DECK: &str = "PAC carrier agreement fixture\n\
+             V1 in 0 SIN(0 0.001 1Meg) AC 1\n\
+             R1 in out 1k\n\
+             C1 out 0 159.154943091895p\n\
+             .end\n";
+        const FUNDAMENTAL: Value = 1.0e6;
+        const RESISTANCE: Value = 1.0e3;
+        const CAPACITANCE: Value = 159.154_943_091_895e-12;
+        const HARMONICS: usize = 8;
+        const BOUND: Value = 1.0e-9;
+
+        let mut config = one_point_config();
+        config.pss_fundamental_freq = FUNDAMENTAL;
+        config.pss_num_harmonics = HARMONICS;
+        config.start_freq = 1.0e5;
+        config.stop_freq = 1.0e7;
+        config.points_per_unit = 2;
+        config.sweep = PacFrequencySweep::Decade;
+        config.pac_magnitude = 1.0;
+        config.sideband_min = -1;
+        config.sideband_max = 1;
+
+        let netlist =
+            parse_runner_netlist_with_abort(DECK, None, &NoAbort).expect("the deck parses");
+        let engine = build_resolved_periodic_engine(&netlist, config.pss_tolerance, "fixture")
+            .expect("the fixture engine resolves");
+        let shooting = engine
+            .run_pss_operating_point_with_abort(
+                &netlist,
+                rspice_core::analysis::PssConfig::new(FUNDAMENTAL)
+                    .with_harmonics(HARMONICS)
+                    .with_points_per_period(64)
+                    .with_tstab_periods(2)
+                    .with_tolerance(config.pss_tolerance),
+                &NoAbort,
+            )
+            .expect("the driven RC orbit converges");
+        let harmonic_balance = run_hb_analysis_with_abort(
+            DECK,
+            &HbRunConfig {
+                tones: vec![HbToneRunConfig::new(FUNDAMENTAL, HARMONICS)],
+                reltol: 1.0e-10,
+                ..HbRunConfig::default()
+            },
+            &NoAbort,
+        )
+        .expect("the harmonic-balance carrier converges")
+        .operating_point;
+
+        let from_pss = run_pac_analysis_from_pss_with_source_path_and_abort(
+            DECK, &config, &shooting, None, &NoAbort,
+        )
+        .expect("the shooting-carried run completes");
+        let from_hb = run_pac_analysis_from_hb_with_source_path_and_abort(
+            DECK,
+            &config,
+            harmonic_balance.as_ref(),
+            None,
+            &NoAbort,
+        )
+        .expect("the harmonic-balance-carried run completes");
+
+        assert_eq!(from_pss.frequencies, from_hb.frequencies);
+        assert!(!from_pss.frequencies.is_empty());
+
+        let channel = |data: &PacData| {
+            data.traces
+                .iter()
+                .find(|trace| trace.name.eq_ignore_ascii_case("V(out)[sb=+0]"))
+                .expect("the sideband-zero output channel is retained")
+                .values
+                .clone()
+        };
+        let shooting_channel = channel(&from_pss);
+        let hb_channel = channel(&from_hb);
+
+        for (index, frequency) in from_pss.frequencies.iter().copied().enumerate() {
+            let closed_form = Complex64::new(1.0, 0.0)
+                / Complex64::new(
+                    1.0,
+                    std::f64::consts::TAU * frequency * RESISTANCE * CAPACITANCE,
+                );
+            for (label, value) in [
+                ("shooting", shooting_channel[index]),
+                ("harmonic balance", hb_channel[index]),
+            ] {
+                let error = (value - closed_form).norm() / closed_form.norm();
+                assert!(
+                    error <= BOUND,
+                    "the {label} carrier reports {value} at {frequency} Hz, and the network's own \
+                     transfer is {closed_form} (relative error {error:e})"
+                );
+            }
+            let between = (shooting_channel[index] - hb_channel[index]).norm() / closed_form.norm();
+            assert!(
+                between <= BOUND,
+                "the two carriers disagree by {between:e} at {frequency} Hz: {} versus {}",
+                shooting_channel[index],
+                hb_channel[index]
+            );
         }
     }
 
@@ -853,8 +1021,13 @@ mod tests {
             carrier.analysis().result.frequency.to_bits()
         );
 
-        let internal = run_pac_internal_from_pss_with_abort(&netlist, &config, &carrier, &NoAbort)
-            .expect("a run against its own carrier is admitted");
+        let internal = run_pac_internal_from_carrier_with_abort(
+            &netlist,
+            &config,
+            PeriodicCarrierState::Shooting(&carrier),
+            &NoAbort,
+        )
+        .expect("a run against its own carrier is admitted");
 
         assert_eq!(
             internal.pac_result.fundamental_frequency.to_bits(),

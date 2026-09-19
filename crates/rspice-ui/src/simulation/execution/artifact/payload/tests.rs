@@ -404,7 +404,9 @@ fn hb_state_transfer_round_trips_and_rejects_tamper() {
         noise_parameters: false,
     };
     validate_prepared_dependency_contract(&hbsp, &hb_spec()).unwrap();
-    resolved.validate_for_spec(&hbsp).unwrap();
+    resolved
+        .validate_for_spec(&hbsp, &SpecExecutionOptions::default())
+        .unwrap();
     let hbnoise = AnalysisSpec::Hbnoise {
         start_freq: 1.0e3,
         stop_freq: 1.0e6,
@@ -419,7 +421,9 @@ fn hb_state_transfer_round_trips_and_rejects_tamper() {
         contributor_ranking: true,
     };
     validate_prepared_dependency_contract(&hbnoise, &hb_spec()).unwrap();
-    resolved.validate_for_spec(&hbnoise).unwrap();
+    resolved
+        .validate_for_spec(&hbnoise, &SpecExecutionOptions::default())
+        .unwrap();
     assert_eq!(
         resolved.hb_state().unwrap().operating_point().iterations(),
         4
@@ -539,7 +543,10 @@ fn shooting_pss_seed_round_trips_in_one_exact_buffer_and_rejects_tamper() {
     )
     .unwrap();
     resolved
-        .validate_for_spec(&pss_spec(PssMethod::Shooting))
+        .validate_for_spec(
+            &pss_spec(PssMethod::Shooting),
+            &SpecExecutionOptions::default(),
+        )
         .unwrap();
     let seed = resolved.dc_operating_point_seed().unwrap();
     assert_eq!(seed.effective_source_content_digest(), source);
@@ -891,7 +898,7 @@ fn periodic_state_transfer_round_trips_and_rejects_tamper_or_config_drift() {
         Err(ExecutionArtifactError::StaleSnapshot { .. })
     ));
     resolved
-        .validate_for_spec(&AnalysisSpec::Pac)
+        .validate_for_spec(&AnalysisSpec::Pac, &SpecExecutionOptions::default())
         .expect("PAC accepts the exact periodic-state binding");
     resolved
         .periodic_state()
