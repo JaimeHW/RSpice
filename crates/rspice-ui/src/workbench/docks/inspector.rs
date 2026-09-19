@@ -5,7 +5,10 @@ mod executed_deck;
 mod models;
 mod result_authority;
 mod simulation;
-mod stimulus;
+/// Visible to the dock layer so the library browser's own gate can render this
+/// pane beside it: the two docks state the same counts about the same design,
+/// and a review that only ever opened one of them would not see them disagree.
+pub(super) mod stimulus;
 mod symbol;
 
 use egui::{Align2, Color32, Pos2, Rect, Response, ScrollArea, Sense, Stroke, Ui, Vec2};
@@ -420,7 +423,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
                 }
                 Workspace::Design => design::show(ui, app),
                 Workspace::Simulate => simulation::simulate(ui, app),
-                Workspace::Stimulus => stimulus::show(ui, &app.state),
+                Workspace::Stimulus => stimulus::show(ui, &mut app.state),
                 Workspace::Results => results(ui, app),
                 Workspace::Verify => verify(ui, app),
                 Workspace::Models => models::show(ui, app),
