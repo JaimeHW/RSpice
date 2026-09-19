@@ -167,6 +167,7 @@ impl PacConfig {
     /// The two spellings are alternatives the card refuses together, so the
     /// form withholds the one it is not using rather than painting two
     /// controls that contradict each other.
+    #[cfg(test)]
     pub(crate) fn states_symmetric_sidebands(&self) -> bool {
         self.sideband_min.is_none() && self.sideband_max.is_none()
     }

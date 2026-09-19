@@ -55,6 +55,7 @@ impl PeriodicCarrier {
     }
 
     /// This carrier's chooser label.
+    #[cfg(test)]
     pub fn display_name(self) -> &'static str {
         match self {
             Self::Preceding => "preceding solve",

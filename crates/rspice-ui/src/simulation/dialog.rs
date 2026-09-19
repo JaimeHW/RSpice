@@ -83,7 +83,9 @@ pub use pxf::PxfDialogState;
 // Re-exports - RF/Microwave
 #[cfg(test)]
 pub use sp::SpConfig;
-pub use sp::{SpDialogState, SpPortSource, TOUCHSTONE_VERSION_LABELS, TOUCHSTONE_VERSIONS};
+#[cfg(test)]
+pub use sp::TOUCHSTONE_VERSIONS;
+pub use sp::{SpDialogState, SpPortSource, TOUCHSTONE_VERSION_LABELS};
 
 // Re-exports - Transfer Function
 pub use pz::PzDialogState;
