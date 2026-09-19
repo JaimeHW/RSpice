@@ -493,7 +493,7 @@ const PRESSED_PER_SURFACE: &[(&str, usize)] = &[
     ("Models", 1),
     ("Solver", 32),
     ("Save", 6),
-    ("analysis catalogue · Analyses", 30),
+    ("analysis catalogue · Analyses", 31),
     ("analysis catalogue · Excitations", 0),
     ("analysis catalogue · Variables", 0),
     ("analysis catalogue · Outputs", 0),
@@ -538,7 +538,9 @@ const PRESSED_PER_SURFACE: &[(&str, usize)] = &[
 ///
 /// And once more for the HB and PSS Verbose switches: two controls in all,
 /// with the PSS form's extra row handing three shared identities on to Corner.
-const PRESSED_FLOOR: usize = 291;
+///
+/// And the catalogue gained the frequency-table AC kind: one more row to add.
+const PRESSED_FLOOR: usize = 292;
 
 /// Controls that are wired to nothing.
 ///
