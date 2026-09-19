@@ -1013,6 +1013,14 @@ fn initial_status_for_spec(
             freq: *fundamental_freq,
             stop_freq: *fundamental_freq * (*num_harmonics).max(1) as f64,
         },
+        // The spectrum the transient already computed is selected, not solved.
+        // Its band is stated in bins, because the bin width depends on the
+        // record the engine actually retained and is only known once the
+        // artifact is open.
+        AnalysisSpec::Fft { request } => SimulationStatus::AcAnalysis {
+            freq: 0.0,
+            stop_freq: (request.points / 2) as f64,
+        },
         AnalysisSpec::Qpss { tones, .. } => SimulationStatus::AcAnalysis {
             freq: tones.first().map_or(0.0, |tone| tone.frequency),
             stop_freq: tones.iter().map(|tone| tone.frequency).fold(0.0, f64::max),

@@ -987,6 +987,7 @@ pub(in crate::simulation) const fn canonical_analysis_kind(
         AnalysisSpec::TransientNoise { .. } => CanonicalAnalysisKind::TransientNoise,
         AnalysisSpec::DcMismatch { .. } => CanonicalAnalysisKind::DcMismatch,
         AnalysisSpec::PssSpectrum { .. } => CanonicalAnalysisKind::PssSpectrum,
+        AnalysisSpec::Fft { .. } => CanonicalAnalysisKind::Fft,
     }
 }
 

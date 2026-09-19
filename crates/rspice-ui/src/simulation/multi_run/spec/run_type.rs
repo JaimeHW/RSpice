@@ -43,6 +43,7 @@ impl AnalysisSpec {
             AnalysisSpec::Qpxf { .. } => AnalysisRunType::Qpxf,
             AnalysisSpec::TransientNoise { .. } => AnalysisRunType::TransientNoise,
             AnalysisSpec::DcMismatch { .. } => AnalysisRunType::DcMismatch,
+            AnalysisSpec::Fft { .. } => AnalysisRunType::Fft,
         }
     }
 }

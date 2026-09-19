@@ -15,6 +15,7 @@ fn digest(byte: u8) -> ContentDigest {
 fn transient() -> SimulationResult {
     let time = vec![0.0, 0.5, 1.0];
     SimulationResult::Transient {
+        spectra: Vec::new(),
         time: time.clone(),
         waveforms: HashMap::from([
             (
@@ -44,6 +45,7 @@ fn transient_convergence_changes_dependency_artifact_identity() {
             digest(2),
             result,
             &["out".to_owned()],
+            false,
         )
         .unwrap()
         .unwrap()
@@ -182,6 +184,7 @@ fn periodic_result() -> SimulationResult {
         rspice_core::engine::PssOperatingPoint::try_from_parts(config, analysis, vec![0.25])
             .unwrap();
     SimulationResult::Transient {
+        spectra: Vec::new(),
         time: time.clone(),
         waveforms: HashMap::from([(
             "V(out)".to_owned(),
@@ -231,6 +234,7 @@ fn authenticated_periodic_result() -> SimulationResult {
         })
         .collect();
     SimulationResult::Transient {
+        spectra: Vec::new(),
         time: result.time.clone(),
         waveforms,
         measurements: Vec::new(),
@@ -633,6 +637,7 @@ fn exact_binding_resolves_and_tampered_payload_fails_closed() {
         digest(2),
         &transient(),
         &["out".to_owned()],
+        false,
     )
     .unwrap()
     .unwrap();
@@ -676,6 +681,7 @@ fn wrong_or_stale_producer_artifacts_are_rejected() {
         digest(3),
         &transient(),
         &["out".to_owned()],
+        false,
     )
     .unwrap()
     .unwrap();
@@ -735,6 +741,7 @@ fn large_artifact_transfer_uses_constant_size_metadata_and_exact_buffers() {
         .map(|time| (2.0 * std::f64::consts::PI * 1.0e6 * time).sin())
         .collect::<Vec<_>>();
     let result = SimulationResult::Transient {
+        spectra: Vec::new(),
         time: time.clone(),
         waveforms: HashMap::from([(
             "V(out)".to_owned(),
@@ -752,6 +759,7 @@ fn large_artifact_transfer_uses_constant_size_metadata_and_exact_buffers() {
         config,
         &result,
         &["out".to_owned()],
+        false,
     )
     .unwrap()
     .unwrap();
