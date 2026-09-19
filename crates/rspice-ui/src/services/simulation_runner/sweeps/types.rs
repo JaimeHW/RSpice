@@ -173,7 +173,7 @@ pub enum CornerBaseMode {
     Op,
     /// Run DC sweep and record the final converged point at each corner.
     DcSweep {
-        modes: crate::simulation::config::DcSweepModes,
+        modes: super::DcSweepModes,
         source_name: String,
         start: Value,
         stop: Value,
@@ -181,7 +181,7 @@ pub enum CornerBaseMode {
     },
     /// Run an authored two-source nested DC sweep at each point.
     DcSweepNested {
-        modes: crate::simulation::config::DcSweepModes,
+        modes: super::DcSweepModes,
         source_name: String,
         start: Value,
         stop: Value,
@@ -211,38 +211,6 @@ pub enum CornerBaseMode {
 }
 
 impl CornerBaseMode {
-    pub(crate) fn from_dc_config(config: &crate::simulation::config::DcSweepConfig) -> Self {
-        if let (Some(source2), Some(start2), Some(stop2), Some(step2)) =
-            (&config.source2, config.start2, config.stop2, config.step2)
-        {
-            Self::DcSweepNested {
-                source_name: config.source.clone(),
-                start: config.start,
-                stop: config.stop,
-                step: config.step,
-                source2: source2.clone(),
-                start2,
-                stop2,
-                step2,
-                modes: config.modes.clone(),
-            }
-        } else {
-            let mut modes = config.modes.clone();
-            if config.hysteresis {
-                modes.primary = crate::simulation::config::DcAxisMode::List {
-                    values: config.retrace_points(),
-                };
-            }
-            Self::DcSweep {
-                source_name: config.source.clone(),
-                start: config.start,
-                stop: config.stop,
-                step: config.step,
-                modes,
-            }
-        }
-    }
-
     pub(crate) fn metric_label(&self) -> CornerMetricLabel {
         match self {
             Self::Ac { .. } => CornerMetricLabel::AcMagnitude,

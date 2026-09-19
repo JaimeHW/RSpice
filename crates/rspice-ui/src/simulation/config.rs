@@ -15,9 +15,9 @@ mod recorded_fft;
 mod sensitivity;
 mod transient;
 
+pub use crate::services::simulation_runner::{DcAxisMode, DcSweepModes};
 pub use ac::{AcAnalysisConfig, AcDataAnalysisConfig, AcSweepType};
 pub use dc::DcSweepConfig;
-pub use dc_mode::{DcAxisMode, DcSweepModes};
 pub use frequency_table::{AC_FREQUENCY_TABLE, parse_explicit_frequency_list};
 pub use noise::{
     NoiseAnalysisConfig, NoiseContributionDetail, NoiseIntegrationMode, NoiseSweepType,

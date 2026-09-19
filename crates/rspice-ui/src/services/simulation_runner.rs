@@ -36,13 +36,15 @@ pub use dcmatch::run_dc_mismatch_analysis_with_source_path_and_abort;
 pub use disto::{
     DistoFrequencySweep, DistoRunConfig, run_disto_analysis_with_source_path_and_abort,
 };
+#[cfg(test)]
+pub(crate) use envelope_fourier::run_fourier_from_signal_with_abort;
 pub use envelope_fourier::{
     EnvelopeRunConfig, FourierData, FourierRunConfig,
     run_envelope_analysis_with_source_path_and_abort,
 };
 pub(crate) use envelope_fourier::{
     fourier_card_output, fourier_output_is_current, run_fourier_from_observation_with_abort,
-    run_fourier_from_signal_with_abort, split_fourier_output, validate_fourier_output_accessor,
+    split_fourier_output, validate_fourier_output_accessor,
 };
 pub use error::{ServiceRunError, ServiceRunResult};
 pub(crate) use hb::build_core_hb_config;
@@ -105,7 +107,8 @@ pub use sparameter::{
 pub use stb::run_stb_analysis_with_sweep_and_source_path_and_abort;
 pub use sweeps::{
     CornerBaseMode, CornerFrequencySweep, CornerModelBinding, CornerPoint, CornerProcess,
-    CornerRunConfig, TempRunConfig, run_parametric_analysis_with_base_and_source_path_and_abort,
+    CornerRunConfig, DcAxisMode, DcSweepModes, TempRunConfig,
+    run_parametric_analysis_with_base_and_source_path_and_abort,
     run_parametric_analysis_with_source_path_and_abort,
 };
 pub(crate) use sweeps::{

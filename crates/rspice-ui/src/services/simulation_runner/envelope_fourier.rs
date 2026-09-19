@@ -1195,6 +1195,7 @@ pub fn run_fourier_analysis_with_source_path_and_abort(
 /// Prepared dependency consumers use this path so they share the standalone
 /// Fourier implementation's validation, windowing, resource checks, and
 /// cooperative cancellation without launching a replacement transient solve.
+#[cfg(test)]
 pub(crate) fn run_fourier_from_signal_with_abort(
     time: &[Value],
     signal: &[Value],

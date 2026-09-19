@@ -5,6 +5,8 @@
 use super::ServiceRunError;
 
 mod corner;
+mod dc_axis;
+pub use dc_axis::{DcAxisMode, DcSweepModes};
 mod execution;
 mod mapping;
 mod netlist_mutation;
