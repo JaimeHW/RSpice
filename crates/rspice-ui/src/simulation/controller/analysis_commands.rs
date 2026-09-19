@@ -85,11 +85,11 @@ impl SimulationController {
             AnalysisSpec::Tf { .. } => Self::build_tf_command(spec),
             AnalysisSpec::TransientNoise { .. } => Self::build_transient_noise_command(spec),
             AnalysisSpec::AcData { .. } => Self::build_ac_data_command(spec),
+            AnalysisSpec::DcMismatch { .. } => Self::build_dc_mismatch_command(spec),
             AnalysisSpec::Qpss { .. }
             | AnalysisSpec::Qpac { .. }
             | AnalysisSpec::Qpnoise { .. }
             | AnalysisSpec::Qpxf { .. }
-            | AnalysisSpec::DcMismatch { .. }
             | AnalysisSpec::Reliability { .. } => Err(format!(
                 "{} is configured but cannot produce an engine directive: {}",
                 spec.run_type().display_name(),
@@ -560,6 +560,54 @@ impl SimulationController {
         ))
     }
 
+    /// The `.dcmatch` directive: the probe, both statistical scopes, the
+    /// report's trimming controls and the multiple of sigma it quotes.
+    ///
+    /// Every keyword but `THRESHOLD` is always written. A Studio-dispatched
+    /// run states what it ran — the same reason `NOISESEED=` is always
+    /// written — so the card cannot change meaning because an engine default
+    /// moved under a saved plan. `THRESHOLD=` is written only when the form
+    /// authored one: the engine's default share is exactly zero, so an
+    /// unauthored threshold and `THRESHOLD=0` are the same analysis and share
+    /// one spelling.
+    ///
+    /// There is no keyword for the run's report basis. `.DCMATCH` always
+    /// computes both the signed contribution and the share; whether the sheet
+    /// draws one or the other is a presentation choice the result carries, not
+    /// something the engine is asked for.
+    ///
+    /// The expression is written verbatim after trimming. The engine's parser
+    /// is the only probe grammar in this build — it accepts `V(node)`,
+    /// `V(node,ref)`, `I(element)` and a bare node name — and a second
+    /// Studio-side grammar would refuse decks the engine reads.
+    ///
+    /// Visible across `simulation` rather than to the controller alone,
+    /// because the DC mismatch service executes the line this writes rather
+    /// than one it spells itself: the probe and every trimming control reach
+    /// the engine *only* through this card.
+    pub(in crate::simulation) fn build_dc_mismatch_command(
+        spec: &AnalysisSpec,
+    ) -> Result<String, String> {
+        let AnalysisSpec::DcMismatch {
+            output_expression,
+            sigma_multiplier,
+            contributor_limit,
+            include_process,
+            include_mismatch,
+            ..
+        } = spec
+        else {
+            return Err("failed to build DC mismatch command".to_string());
+        };
+        Ok(format!(
+            ".dcmatch OUT={} MISMATCH={} PROCESS={} CONTRIBUTORS={contributor_limit} \
+             SIGMA={sigma_multiplier}",
+            output_expression.trim(),
+            yes_or_no(*include_mismatch),
+            yes_or_no(*include_process),
+        ))
+    }
+
     /// Inject non-default UI simulation options before `.end`.
     pub(crate) fn apply_simulation_options_to_netlist(
         netlist: &str,
@@ -609,6 +657,11 @@ impl SimulationController {
 /// fact, and they were drifting: the same unavailable solver was described
 /// two different ways depending on which guard the reader hit first. Whoever
 /// unblocks a kind now edits exactly one string.
+/// How a keyword card spells a switch the engine reads with `card_bool`.
+const fn yes_or_no(value: bool) -> &'static str {
+    if value { "yes" } else { "no" }
+}
+
 fn manifest_spec_execution_blocker(spec: &AnalysisSpec) -> &'static str {
     const UNMAPPED: &str = "the selected engine capability is unavailable";
     let Some(kind) = manifest_spec_kind(spec) else {
@@ -1241,5 +1294,111 @@ mod tests {
             SimulationController::build_transient_noise_command(&tf_spec()),
             Err("failed to build transient noise command".to_owned())
         );
+        assert_eq!(
+            SimulationController::build_dc_mismatch_command(&tf_spec()),
+            Err("failed to build DC mismatch command".to_owned())
+        );
+    }
+
+    /// The card the Studio writes is the card the engine reads, field for
+    /// field.
+    ///
+    /// Not a string assertion alone. `.DCMATCH` is a pure keyword card, so a
+    /// keyword the parser does not define, a switch spelled `true` instead of
+    /// `yes`, or a count the parser reads as an expression would all pass an
+    /// expected-text comparison while configuring a study the form never
+    /// asked for. The emitted line is read back through `rspice-core` and
+    /// every field is recovered from the `DcMatchCard` the parser built.
+    #[test]
+    fn a_dc_mismatch_spec_writes_the_card_the_engine_parses() {
+        for (expression, limit, mismatch, process, sigma) in [
+            (" V(out,in) ", 3_usize, false, true, 6.0),
+            ("V(out)", 10, true, false, 1.0),
+            ("I(V1)", 0, true, true, 3.0),
+            ("out", 0, true, false, 0.5),
+        ] {
+            let spec = AnalysisSpec::DcMismatch {
+                output_expression: expression.to_owned(),
+                sigma_multiplier: sigma,
+                contributor_limit: limit,
+                include_process: process,
+                include_mismatch: mismatch,
+                normalized_contributions: true,
+            };
+            let card = SimulationController::build_dc_mismatch_command(&spec)
+                .expect("a DC mismatch specification writes its own card");
+
+            let card = read_back_dc_mismatch_card(&card, expression, |parsed, card| {
+                assert_eq!(parsed.mismatch, mismatch, "{card}");
+                assert_eq!(parsed.process, process, "{card}");
+                assert_eq!(parsed.contributor_limit, limit, "{card}");
+                assert_eq!(parsed.sigma_multiplier, sigma, "{card}");
+                // Unauthored on this specification, and the engine's own
+                // default is the value the card leaves unsaid.
+                assert_eq!(parsed.threshold, 0.0, "{card}");
+                assert!(!card.contains("THRESHOLD"), "{card}");
+            });
+            // Pinned as well as read back, so a reader of this test sees the
+            // spelling a colleague handed this deck would read.
+            if expression.trim() == "V(out,in)" {
+                assert_eq!(
+                    card,
+                    ".dcmatch OUT=V(out,in) MISMATCH=no PROCESS=yes CONTRIBUTORS=3 SIGMA=6"
+                );
+            }
+        }
+    }
+
+    /// Zero contributors is the card's own spelling of "list every one", and
+    /// the Studio writes it rather than refusing it.
+    #[test]
+    fn a_contributor_limit_of_zero_keeps_every_contributor() {
+        let spec = AnalysisSpec::DcMismatch {
+            output_expression: "V(out)".to_owned(),
+            sigma_multiplier: 1.0,
+            contributor_limit: 0,
+            include_process: false,
+            include_mismatch: true,
+            normalized_contributions: true,
+        };
+        let card = SimulationController::build_dc_mismatch_command(&spec)
+            .expect("a limit of zero is a card the engine reads");
+        assert!(card.contains("CONTRIBUTORS=0"), "{card}");
+        read_back_dc_mismatch_card(&card, "V(out)", |parsed, card| {
+            assert_eq!(parsed.contributor_limit, 0, "{card}");
+        });
+    }
+
+    /// Parse one emitted `.dcmatch` line through the engine and check the
+    /// probe it recovered, then hand the card to the caller's own assertions.
+    fn read_back_dc_mismatch_card(
+        card: &str,
+        expression: &str,
+        check: impl FnOnce(&rspice_core::netlist::DcMatchCard, &str),
+    ) -> String {
+        use rspice_core::netlist::AnalysisCommand;
+
+        let deck = rspice_core::netlist::Netlist::parse(&format!(
+            "dc mismatch card\nV1 in 0 1\nR1 in out 1k\nR2 out 0 2k\n{card}\n.end\n"
+        ))
+        .unwrap_or_else(|error| panic!("the engine must read `{card}` back: {error}"));
+        let [AnalysisCommand::DcMatch(parsed)] = deck.analyses.as_slice() else {
+            panic!("the card is one .DCMATCH request: {:?}", deck.analyses);
+        };
+        // The parser canonicalizes the probe to upper case, which is the only
+        // transformation the round trip is allowed to make.
+        let expected = expression.trim().to_ascii_uppercase();
+        let recovered = if parsed.output_is_current {
+            format!("I({})", parsed.output_node)
+        } else {
+            match &parsed.reference_node {
+                Some(reference) => format!("V({},{reference})", parsed.output_node),
+                None if expected.starts_with("V(") => format!("V({})", parsed.output_node),
+                None => parsed.output_node.clone(),
+            }
+        };
+        assert_eq!(recovered, expected, "{card}");
+        check(parsed, card);
+        card.to_owned()
     }
 }
