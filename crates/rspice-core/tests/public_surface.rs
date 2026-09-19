@@ -984,7 +984,8 @@ use rspice_core::analysis::harmonic_balance::{
 /// reaches the CLI, the Python and WASM bindings, the engine adapter and the
 /// Studio at once. Its fields and the `AnalysisCommand::Hb` variant that
 /// boxes it are free; nothing else was added.
-const MAX_PUBLIC_ITEMS: usize = 5072;
+// Studio validates authored DC grids with the engine's bounded point generator.
+const MAX_PUBLIC_ITEMS: usize = 5073;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

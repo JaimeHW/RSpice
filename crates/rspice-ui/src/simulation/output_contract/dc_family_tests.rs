@@ -19,6 +19,7 @@ fn spec(nested: bool, retraced: bool) -> AnalysisSpec {
         stop2: nested.then_some(3e-7),
         step2: nested.then_some(1e-7),
         hysteresis: retraced,
+        modes: Default::default(),
     }
 }
 

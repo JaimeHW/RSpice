@@ -31,12 +31,14 @@ fn base_modes() -> [CornerBaseMode; 6] {
     [
         CornerBaseMode::Op,
         CornerBaseMode::DcSweep {
+            modes: Default::default(),
             source_name: "VDD".to_owned(),
             start: 0.0,
             stop: 1.8,
             step: 0.9,
         },
         CornerBaseMode::DcSweepNested {
+            modes: Default::default(),
             source_name: "VDD".to_owned(),
             start: 0.0,
             stop: 1.8,
@@ -203,6 +205,7 @@ fn pvt_nested_dc_reduces_the_last_solved_pair_in_both_traversal_directions() {
     for family in [AnalysisType::Parametric, AnalysisType::Corner] {
         for descending in [false, true] {
             let base = CornerBaseMode::DcSweepNested {
+                modes: Default::default(),
                 source_name: "VDD".to_owned(),
                 start: if descending { 1.0 } else { 0.0 },
                 stop: if descending { 0.0 } else { 1.0 },

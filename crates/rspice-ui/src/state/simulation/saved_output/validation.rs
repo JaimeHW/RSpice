@@ -135,7 +135,7 @@ impl AnalysisResult {
                                     );
                                 }
                             } else {
-                                super::super::dc_sweep::validate_axis(&waveform.x)?;
+                                evidence.validate_axis(&waveform.x)?;
                                 raw_dc_axis = Some(&waveform.x);
                             }
                         }

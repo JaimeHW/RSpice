@@ -12,14 +12,40 @@ use egui::Ui;
 
 use crate::workbench::app_state::DcSetup;
 
-use super::{clear_pending_cell, field_note, input_row, input_row_enabled, switch_row};
+use super::{choice_row, clear_pending_cell, field_note, input_row, input_row_enabled, switch_row};
 
 /// Render the DC sweep fields.
 pub(super) fn fields(ui: &mut Ui, setup: &mut DcSetup) {
     input_row(ui, "Source", &mut setup.source);
-    input_row(ui, "Start", &mut setup.start);
-    input_row(ui, "Stop", &mut setup.stop);
-    input_row(ui, "Step", &mut setup.step);
+    choice_row(
+        ui,
+        "Sweep",
+        &["Linear", "List", "Decade", "Octave"],
+        &mut setup.mode,
+    );
+    if setup.mode == 1 {
+        input_row(ui, "Values", &mut setup.values);
+        field_note(
+            ui,
+            "Values run in the authored order, including repeats. SI suffixes are accepted.",
+        );
+    } else {
+        input_row(ui, "Start", &mut setup.start);
+        input_row(ui, "Stop", &mut setup.stop);
+        if setup.mode == 0 {
+            input_row(ui, "Step", &mut setup.step);
+        } else {
+            input_row(
+                ui,
+                if setup.mode == 2 {
+                    "Points / decade"
+                } else {
+                    "Points / octave"
+                },
+                &mut setup.points,
+            );
+        }
+    }
     // Disabled rather than merely refused: a control that can be set and then
     // rejected at preflight teaches the reader nothing a greyed one does not.
     ui.add_enabled_ui(!setup.nested, |ui| {
@@ -38,9 +64,33 @@ pub(super) fn fields(ui: &mut Ui, setup: &mut DcSetup) {
     // field by one column and leaves Step 2 stranded on a partial final row.
     clear_pending_cell(ui);
     input_row_enabled(ui, "Source 2", &mut setup.source2, setup.nested);
-    input_row_enabled(ui, "Start 2", &mut setup.start2, setup.nested);
-    input_row_enabled(ui, "Stop 2", &mut setup.stop2, setup.nested);
-    input_row_enabled(ui, "Step 2", &mut setup.step2, setup.nested);
+    ui.add_enabled_ui(setup.nested, |ui| {
+        choice_row(
+            ui,
+            "Sweep 2",
+            &["Linear", "List", "Decade", "Octave"],
+            &mut setup.mode2,
+        );
+        if setup.mode2 == 1 {
+            input_row(ui, "Values 2", &mut setup.values2);
+        } else {
+            input_row(ui, "Start 2", &mut setup.start2);
+            input_row(ui, "Stop 2", &mut setup.stop2);
+            if setup.mode2 == 0 {
+                input_row(ui, "Step 2", &mut setup.step2);
+            } else {
+                input_row(
+                    ui,
+                    if setup.mode2 == 2 {
+                        "Points / decade 2"
+                    } else {
+                        "Points / octave 2"
+                    },
+                    &mut setup.points2,
+                );
+            }
+        }
+    });
 }
 
 /// What a retrace will actually do, stated rather than implied. `None` while

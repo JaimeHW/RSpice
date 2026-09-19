@@ -1297,7 +1297,7 @@ impl DcSweepSpec {
             .unwrap_or_default()
     }
 
-    pub(crate) fn points_bounded_with_abort(
+    pub fn points_bounded_with_abort(
         &self,
         max_points: usize,
         abort: &dyn AbortSignal,

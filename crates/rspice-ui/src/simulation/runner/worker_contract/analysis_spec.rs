@@ -87,6 +87,8 @@ pub(crate) enum WorkerAnalysisSpec {
         /// sweep it described.
         #[serde(default)]
         hysteresis: bool,
+        #[serde(default)]
+        modes: crate::simulation::config::DcSweepModes,
     },
     Transient {
         stop_time: f64,

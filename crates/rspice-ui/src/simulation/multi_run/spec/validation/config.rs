@@ -20,49 +20,22 @@ pub(super) fn validate(spec: &AnalysisSpec) -> Result<(), String> {
             start2,
             stop2,
             step2,
-            // Whether the sweep retraces adds no constraint of its own: the
-            // range and step are what have to be valid, and they are
-            // checked below for either direction of travel.
-            hysteresis: _,
-        } => {
-            if source_name.trim().is_empty() {
-                return Err("DC sweep source_name is required".to_string());
-            }
-            if *step == 0.0 {
-                return Err("DC sweep step cannot be zero".to_string());
-            }
-            if (stop - start).signum() != step.signum() {
-                return Err("DC sweep step direction must match start/stop".to_string());
-            }
-
-            match (source2, start2, stop2, step2) {
-                (None, None, None, None) => {}
-                (Some(source2), Some(start2), Some(stop2), Some(step2)) => {
-                    if source2.trim().is_empty() {
-                        return Err("DC sweep secondary source2 is required".to_string());
-                    }
-                    if source2.eq_ignore_ascii_case(source_name) {
-                        return Err(
-                            "DC sweep secondary source2 must differ from source_name".to_string()
-                        );
-                    }
-                    if *step2 == 0.0 {
-                        return Err("DC sweep secondary step2 cannot be zero".to_string());
-                    }
-                    if (stop2 - start2).signum() != step2.signum() {
-                        return Err(
-                            "DC sweep secondary step direction must match start2/stop2".to_string()
-                        );
-                    }
-                }
-                _ => {
-                    return Err(
-                        "DC sweep secondary sweep requires source2/start2/stop2/step2".to_string(),
-                    );
-                }
-            }
-            Ok(())
+            hysteresis,
+            modes,
+        } => crate::simulation::config::DcSweepConfig {
+            source: source_name.clone(),
+            start: *start,
+            stop: *stop,
+            step: *step,
+            source2: source2.clone(),
+            start2: *start2,
+            stop2: *stop2,
+            step2: *step2,
+            hysteresis: *hysteresis,
+            modes: modes.clone(),
         }
+        .validate()
+        .map_err(|errors| errors.join("; ")),
         AnalysisSpec::Ac {
             start_freq,
             stop_freq,

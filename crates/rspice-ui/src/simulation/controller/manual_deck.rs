@@ -525,10 +525,16 @@ fn temperature_base_mode(command: &AnalysisCommand) -> Result<CornerBaseMode, St
             stop,
             step,
             sweep2,
-            mode: _,
+            mode,
         } => {
             if let Some(second) = sweep2 {
                 return Ok(CornerBaseMode::DcSweepNested {
+                    modes: crate::simulation::config::DcSweepModes {
+                        primary: mode.into(),
+                        secondary: sweep2
+                            .as_ref()
+                            .map_or_else(Default::default, |second| (&second.mode).into()),
+                    },
                     source_name: source.clone(),
                     start: *start,
                     stop: *stop,
@@ -540,6 +546,12 @@ fn temperature_base_mode(command: &AnalysisCommand) -> Result<CornerBaseMode, St
                 });
             }
             Ok(CornerBaseMode::DcSweep {
+                modes: crate::simulation::config::DcSweepModes {
+                    primary: mode.into(),
+                    secondary: sweep2
+                        .as_ref()
+                        .map_or_else(Default::default, |second| (&second.mode).into()),
+                },
                 source_name: source.clone(),
                 start: *start,
                 stop: *stop,
@@ -786,7 +798,7 @@ fn command_to_queue_item(
             stop,
             step,
             sweep2,
-            mode: _,
+            mode,
         } => {
             let (source2, start2, stop2, step2) = match sweep2 {
                 Some(second) => (
@@ -806,11 +818,14 @@ fn command_to_queue_item(
                 start2,
                 stop2,
                 step2,
-                // A hand-written `.dc` card states its own point order. This
-                // arm reads the range form, which travels one way; a deck that
-                // wanted a retrace would spell it as an explicit value list and
-                // would not reach here.
+                // LIST retains the card's visiting order, including retraces.
                 hysteresis: false,
+                modes: crate::simulation::config::DcSweepModes {
+                    primary: mode.into(),
+                    secondary: sweep2
+                        .as_ref()
+                        .map_or_else(Default::default, |second| (&second.mode).into()),
+                },
             };
             Ok(QueuedAnalysis {
                 numeric_override: None,
@@ -824,6 +839,12 @@ fn command_to_queue_item(
                     stop2,
                     step2,
                     hysteresis: false,
+                    modes: crate::simulation::config::DcSweepModes {
+                        primary: mode.into(),
+                        secondary: sweep2
+                            .as_ref()
+                            .map_or_else(Default::default, |second| (&second.mode).into()),
+                    },
                 })),
                 analysis_line: ".dc".to_string(),
                 spec,

@@ -384,6 +384,7 @@ fn point_base_analysis_request(
             )
         }
         CornerBaseMode::DcSweep {
+            modes,
             source_name,
             start,
             stop,
@@ -398,21 +399,19 @@ fn point_base_analysis_request(
                 start2: None,
                 stop2: None,
                 step2: None,
-                // A point-family base sweep travels once through its range.
-                //
-                // The base is taken from the plan's DC sweep draft, which *can*
-                // declare a retrace, but `CornerBaseMode::DcSweep` carries no
-                // such field — it is the run's wire contract to the worker as
-                // well as its in-process form — so the flag is dropped rather
-                // than carried. The Corner and Temperature forms say so beside
-                // the Base control instead of leaving "repeats the base
-                // analysis" to imply otherwise.
+                // Retraces in study bases are already represented by an explicit
+                // continued list, so do not retrace that list a second time.
                 hysteresis: false,
+                modes: modes.clone(),
             },
             None,
-            format!(".dc {source_name} {start} {stop} {step}"),
+            format!(
+                ".dc {}",
+                modes.primary.card_axis(source_name, *start, *stop, *step)
+            ),
         ),
         CornerBaseMode::DcSweepNested {
+            modes,
             source_name,
             start,
             stop,
@@ -431,12 +430,16 @@ fn point_base_analysis_request(
                 start2: Some(*start2),
                 stop2: Some(*stop2),
                 step2: Some(*step2),
-                // As above: a corner base sweep travels once, and a nested one
-                // could not retrace anyway.
+                // Both axes retain their exact authored modes.
                 hysteresis: false,
+                modes: modes.clone(),
             },
             None,
-            format!(".dc {source_name} {start} {stop} {step} {source2} {start2} {stop2} {step2}"),
+            format!(
+                ".dc {} {}",
+                modes.primary.card_axis(source_name, *start, *stop, *step),
+                modes.secondary.card_axis(source2, *start2, *stop2, *step2)
+            ),
         ),
         CornerBaseMode::Transient {
             stop_time,

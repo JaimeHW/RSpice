@@ -995,6 +995,7 @@ fn completed_dc_sweep_result_reuses_owned_shared_axis_buffers_in_run_history() {
         stop2: None,
         step2: None,
         hysteresis: false,
+        modes: Default::default(),
     });
     controller.current_provenance = Some(synthetic_result_provenance());
     controller.current_analysis_idx = 1;

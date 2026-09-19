@@ -7,6 +7,8 @@ use std::collections::{HashMap, HashSet};
 pub enum DcSweepDirection {
     Ascending,
     Descending,
+    /// LIST coordinates remain in execution order, including repeats.
+    AsAuthored,
 }
 
 impl DcSweepDirection {
@@ -14,6 +16,7 @@ impl DcSweepDirection {
         match self {
             Self::Ascending => "Ascending",
             Self::Descending => "Descending",
+            Self::AsAuthored => "As authored",
         }
     }
 }
@@ -178,6 +181,17 @@ impl DcSweepEvidence {
         }
     }
 
+    pub(crate) fn validate_axis(&self, axis: &[f64]) -> Result<(), String> {
+        if self.direction == DcSweepDirection::AsAuthored {
+            if axis.is_empty() || axis.iter().any(|value| !value.is_finite()) {
+                return Err("DC list coordinates must be finite and nonempty".into());
+            }
+            Ok(())
+        } else {
+            validate_axis(axis)
+        }
+    }
+
     pub fn validate(&self) -> Result<(), String> {
         if self.source.trim().is_empty() || self.source.trim() != self.source {
             return Err("DC sweep evidence has an invalid primary source".to_owned());
@@ -213,20 +227,6 @@ impl DcSweepEvidence {
             }
             if values.iter().any(|value| !value.is_finite()) {
                 return Err("Nested DC evidence contains a non-finite coordinate".to_owned());
-            }
-            if values.len() > 1 {
-                let descending = values[1] < values[0];
-                if values.windows(2).any(|pair| {
-                    if descending {
-                        pair[1] >= pair[0]
-                    } else {
-                        pair[1] <= pair[0]
-                    }
-                }) {
-                    return Err(
-                        "Nested DC coordinates must follow one strict traversal order".to_owned(),
-                    );
-                }
             }
         }
         if let DcCurveSelection::Saved(curves) = &self.selection {
@@ -285,7 +285,7 @@ impl DcSweepEvidence {
             );
         }
         if let Some(axis) = primary_axis {
-            validate_axis(axis)?;
+            self.validate_axis(axis)?;
         }
         let mut reference_axis = primary_axis;
         for curve in self.curve_indices() {
@@ -310,7 +310,7 @@ impl DcSweepEvidence {
                     return Err("DC sweep curves have different primary axes".to_owned());
                 }
             } else {
-                validate_axis(trace.x)?;
+                self.validate_axis(trace.x)?;
                 reference_axis = Some(trace.x);
             }
         }

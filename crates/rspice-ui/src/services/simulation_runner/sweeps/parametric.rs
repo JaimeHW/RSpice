@@ -200,13 +200,20 @@ fn run_base_analysis(
             Ok(analog_node_voltages(&result))
         }
         CornerBaseMode::DcSweep {
+            modes,
             source_name,
             start,
             stop,
             step,
         } => {
             let result = engine
-                .run_dc_sweep_with_abort(netlist, source_name, *start, *stop, *step, abort)?
+                .run_dc_sweep2_spec_with_report_and_abort(
+                    netlist,
+                    source_name,
+                    &modes.primary.spec(*start, *stop, *step),
+                    None,
+                    abort,
+                )?
                 .into_iter()
                 .last()
                 .ok_or_else(|| {
@@ -214,10 +221,11 @@ fn run_base_analysis(
                         "DC base sweep produced no points".to_owned(),
                     )
                 })?
-                .1;
+                .result;
             Ok(analog_node_voltages(&result))
         }
         CornerBaseMode::DcSweepNested {
+            modes,
             source_name,
             start,
             stop,
@@ -227,21 +235,19 @@ fn run_base_analysis(
             stop2,
             step2,
         } => {
-            let second = rspice_core::netlist::DcSecondSweep::linear(
-                source2.clone(),
-                *start2,
-                *stop2,
-                *step2,
-            );
+            let second_spec = modes.secondary.spec(*start2, *stop2, *step2);
+            let second = rspice_core::netlist::DcSecondSweep {
+                source: source2.clone(),
+                start: second_spec.start,
+                stop: second_spec.stop,
+                step: second_spec.step,
+                mode: second_spec.mode,
+            };
             let result = engine
-                .run_dc_sweep2_with_abort(
+                .run_dc_sweep2_spec_with_report_and_abort(
                     netlist,
                     source_name,
-                    rspice_core::engine::DcSweepRange {
-                        start: *start,
-                        stop: *stop,
-                        step: *step,
-                    },
+                    &modes.primary.spec(*start, *stop, *step),
                     Some(&second),
                     abort,
                 )?
@@ -252,7 +258,7 @@ fn run_base_analysis(
                         "Nested DC base sweep produced no points".to_owned(),
                     )
                 })?
-                .1;
+                .result;
             Ok(analog_node_voltages(&result))
         }
         CornerBaseMode::Transient {

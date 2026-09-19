@@ -190,13 +190,9 @@ pub(super) fn temperature_form(
 const POINT_EXPANSION_NOTE: &str = "This instance owns a point expansion, so the plan is refused \
                                     while any global run-set axis is enabled.";
 
-/// The base analysis's configuration travels to every point; its Bidirectional
-/// flag does not. `CornerBaseMode::DcSweep` has no field for one, so a
-/// retracing DC sweep runs one-way at every point. Said where the base is
-/// chosen, because "repeats the base analysis" otherwise implies it.
-const DC_BASE_TRAVELS_ONCE_NOTE: &str = "The DC base travels its range once at each \
-                                         point: a Bidirectional retrace belongs to that analysis \
-                                         instance and the point family does not carry it.";
+/// DC studies retain the configured visiting order at every study point.
+const DC_BASE_TRAVELS_ONCE_NOTE: &str = "The DC base retains both sweep axes, list order and any \
+    bidirectional retrace at each study point. Each study point starts a new sweep.";
 
 /// The one line that says which axis is in force, and what it costs to differ.
 ///

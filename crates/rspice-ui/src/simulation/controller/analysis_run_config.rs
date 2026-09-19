@@ -262,22 +262,7 @@ impl SimulationController {
         let base_mode = match temp_cfg.base_analysis {
             TempBaseAnalysis::Op => CornerBaseMode::Op,
             TempBaseAnalysis::Dc => {
-                let source_name = state.sim_setup.dc.source.trim();
-                if source_name.is_empty() {
-                    return Err(
-                        "temperature sweep DC base analysis requires a non-empty sweep source"
-                            .to_string(),
-                    );
-                }
-                CornerBaseMode::DcSweep {
-                    source_name: source_name.to_string(),
-                    start: parse_spice_value_checked(&state.sim_setup.dc.start)
-                        .map_err(|e| format!("invalid temperature DC start value: {}", e))?,
-                    stop: parse_spice_value_checked(&state.sim_setup.dc.stop)
-                        .map_err(|e| format!("invalid temperature DC stop value: {}", e))?,
-                    step: parse_spice_value_checked(&state.sim_setup.dc.step)
-                        .map_err(|e| format!("invalid temperature DC step value: {}", e))?,
-                }
+                CornerBaseMode::from_dc_config(&state.sim_setup.dc.to_config()?)
             }
             TempBaseAnalysis::Transient => CornerBaseMode::Transient {
                 stop_time: parse_spice_value_checked(&state.sim_setup.tran.stop)
@@ -359,21 +344,7 @@ impl SimulationController {
         let base_mode = match corner_cfg.base_analysis {
             CornerBaseAnalysis::Op => CornerBaseMode::Op,
             CornerBaseAnalysis::Dc => {
-                let source_name = state.sim_setup.dc.source.trim();
-                if source_name.is_empty() {
-                    return Err(
-                        "corner DC base analysis requires a non-empty sweep source".to_string()
-                    );
-                }
-                CornerBaseMode::DcSweep {
-                    source_name: source_name.to_string(),
-                    start: parse_spice_value_checked(&state.sim_setup.dc.start)
-                        .map_err(|e| format!("invalid corner DC start value: {}", e))?,
-                    stop: parse_spice_value_checked(&state.sim_setup.dc.stop)
-                        .map_err(|e| format!("invalid corner DC stop value: {}", e))?,
-                    step: parse_spice_value_checked(&state.sim_setup.dc.step)
-                        .map_err(|e| format!("invalid corner DC step value: {}", e))?,
-                }
+                CornerBaseMode::from_dc_config(&state.sim_setup.dc.to_config()?)
             }
             CornerBaseAnalysis::Transient => CornerBaseMode::Transient {
                 stop_time: parse_spice_value_checked(&state.sim_setup.tran.stop)

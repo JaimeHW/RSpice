@@ -173,6 +173,7 @@ pub enum CornerBaseMode {
     Op,
     /// Run DC sweep and record the final converged point at each corner.
     DcSweep {
+        modes: crate::simulation::config::DcSweepModes,
         source_name: String,
         start: Value,
         stop: Value,
@@ -180,6 +181,7 @@ pub enum CornerBaseMode {
     },
     /// Run an authored two-source nested DC sweep at each point.
     DcSweepNested {
+        modes: crate::simulation::config::DcSweepModes,
         source_name: String,
         start: Value,
         stop: Value,
@@ -209,6 +211,38 @@ pub enum CornerBaseMode {
 }
 
 impl CornerBaseMode {
+    pub(crate) fn from_dc_config(config: &crate::simulation::config::DcSweepConfig) -> Self {
+        if let (Some(source2), Some(start2), Some(stop2), Some(step2)) =
+            (&config.source2, config.start2, config.stop2, config.step2)
+        {
+            Self::DcSweepNested {
+                source_name: config.source.clone(),
+                start: config.start,
+                stop: config.stop,
+                step: config.step,
+                source2: source2.clone(),
+                start2,
+                stop2,
+                step2,
+                modes: config.modes.clone(),
+            }
+        } else {
+            let mut modes = config.modes.clone();
+            if config.hysteresis {
+                modes.primary = crate::simulation::config::DcAxisMode::List {
+                    values: config.retrace_points(),
+                };
+            }
+            Self::DcSweep {
+                source_name: config.source.clone(),
+                start: config.start,
+                stop: config.stop,
+                step: config.step,
+                modes,
+            }
+        }
+    }
+
     pub(crate) fn metric_label(&self) -> CornerMetricLabel {
         match self {
             Self::Ac { .. } => CornerMetricLabel::AcMagnitude,
@@ -388,33 +422,18 @@ pub(super) fn validate_base_mode(context: &str, base_mode: &CornerBaseMode) -> R
             start,
             stop,
             step,
+            modes,
         } => {
             if source_name.trim().is_empty() {
-                return Err(format!(
-                    "{} DC sweep base mode requires a non-empty source name",
-                    context
-                ));
+                return Err(format!("{context} DC sweep requires a source name"));
             }
-            if !start.is_finite() || !stop.is_finite() || !step.is_finite() {
-                return Err(format!(
-                    "{} DC sweep base mode requires finite start/stop/step values",
-                    context
-                ));
-            }
-            if *step == 0.0 {
-                return Err(format!(
-                    "{} DC sweep base mode step cannot be zero",
-                    context
-                ));
-            }
-            if (stop - start).abs() > 0.0 && (stop - start).signum() != step.signum() {
-                return Err(format!(
-                    "{} DC sweep base mode step direction must match start/stop range",
-                    context
-                ));
-            }
+            modes
+                .primary
+                .validate(*start, *stop, *step)
+                .map_err(|error| format!("{context}: {error}"))?;
         }
         CornerBaseMode::DcSweepNested {
+            modes,
             source_name,
             start,
             stop,
@@ -424,8 +443,13 @@ pub(super) fn validate_base_mode(context: &str, base_mode: &CornerBaseMode) -> R
             stop2,
             step2,
         } => {
-            validate_dc_base(context, source_name, *start, *stop, *step)?;
-            validate_dc_base(context, source2, *start2, *stop2, *step2)?;
+            if source_name.trim().is_empty() || source2.trim().is_empty() {
+                return Err(format!(
+                    "{context} nested DC sweep requires two source names"
+                ));
+            }
+            modes.primary.validate(*start, *stop, *step)?;
+            modes.secondary.validate(*start2, *stop2, *step2)?;
             if source_name.eq_ignore_ascii_case(source2) {
                 return Err(format!(
                     "{context} nested DC base mode requires two distinct sources"
@@ -484,34 +508,6 @@ pub(super) fn validate_base_mode(context: &str, base_mode: &CornerBaseMode) -> R
                 ));
             }
         }
-    }
-    Ok(())
-}
-
-fn validate_dc_base(
-    context: &str,
-    source_name: &str,
-    start: Value,
-    stop: Value,
-    step: Value,
-) -> Result<(), String> {
-    if source_name.trim().is_empty() {
-        return Err(format!(
-            "{context} DC sweep base mode requires a non-empty source name"
-        ));
-    }
-    if !start.is_finite() || !stop.is_finite() || !step.is_finite() {
-        return Err(format!(
-            "{context} DC sweep base mode requires finite start/stop/step values"
-        ));
-    }
-    if step == 0.0 {
-        return Err(format!("{context} DC sweep base mode step cannot be zero"));
-    }
-    if (stop - start).abs() > 0.0 && (stop - start).signum() != step.signum() {
-        return Err(format!(
-            "{context} DC sweep base mode step direction must match start/stop range"
-        ));
     }
     Ok(())
 }

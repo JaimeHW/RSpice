@@ -169,6 +169,7 @@ fn analysis_config_round_trips_supported_variants() {
             stop2: Some(1.0),
             step2: Some(0.25),
             hysteresis: false,
+            modes: Default::default(),
         }),
         // A retracing sweep is a different analysis from the one-way sweep over
         // the same range, so the flag has to survive the worker boundary rather
@@ -183,6 +184,7 @@ fn analysis_config_round_trips_supported_variants() {
             stop2: None,
             step2: None,
             hysteresis: true,
+            modes: Default::default(),
         }),
         AnalysisConfig::Transient(TransientAnalysisConfig {
             stop_time: 1e-6,
@@ -259,6 +261,7 @@ fn analysis_spec_round_trips_supported_variants() {
             // Retracing, so the round trip proves the flag crosses rather than
             // being defaulted back to a one-way sweep on the far side.
             hysteresis: true,
+            modes: Default::default(),
         },
         AnalysisSpec::Transient {
             stop_time: 2e-6,
@@ -1183,18 +1186,21 @@ fn assert_corner_base_mode_matches(
         (CornerBaseMode::Op, CornerBaseMode::Op) => {}
         (
             CornerBaseMode::DcSweep {
+                modes: actual_modes,
                 source_name: actual_source,
                 start: actual_start,
                 stop: actual_stop,
                 step: actual_step,
             },
             CornerBaseMode::DcSweep {
+                modes: expected_modes,
                 source_name: expected_source,
                 start: expected_start,
                 stop: expected_stop,
                 step: expected_step,
             },
         ) => {
+            assert_eq!(actual_modes, expected_modes);
             assert_eq!(actual_source, expected_source);
             assert_eq!(actual_start, expected_start);
             assert_eq!(actual_stop, expected_stop);
@@ -1236,4 +1242,50 @@ fn assert_corner_base_mode_matches(
             panic!("base mode mismatch: actual={actual:?}, expected={expected:?}")
         }
     }
+}
+
+#[test]
+fn dc_axis_modes_survive_both_worker_contracts() {
+    use crate::simulation::config::{DcAxisMode, DcSweepConfig, DcSweepModes};
+    let modes = DcSweepModes {
+        primary: DcAxisMode::List {
+            values: vec![1.0, 0.0, 1.0],
+        },
+        secondary: DcAxisMode::Decade {
+            points_per_decade: 7,
+        },
+    };
+    let config = AnalysisConfig::DcSweep(DcSweepConfig {
+        modes: modes.clone(),
+        ..Default::default()
+    });
+    let wire = WorkerAnalysisConfig::from(&config);
+    let decoded: WorkerAnalysisConfig =
+        serde_json::from_str(&serde_json::to_string(&wire).unwrap()).unwrap();
+    let AnalysisConfig::DcSweep(restored) = AnalysisConfig::from(decoded) else {
+        panic!("expected DC");
+    };
+    assert_eq!(restored.modes, modes);
+    let spec = AnalysisSpec::DcSweep {
+        source_name: "V1".into(),
+        start: 1.0,
+        stop: 1.0,
+        step: 0.0,
+        source2: Some("V2".into()),
+        start2: Some(1.0),
+        stop2: Some(10.0),
+        step2: Some(7.0),
+        hysteresis: false,
+        modes: modes.clone(),
+    };
+    let wire = WorkerAnalysisSpec::try_from(&spec).unwrap();
+    let decoded: WorkerAnalysisSpec =
+        serde_json::from_str(&serde_json::to_string(&wire).unwrap()).unwrap();
+    let AnalysisSpec::DcSweep {
+        modes: restored, ..
+    } = AnalysisSpec::from(decoded)
+    else {
+        panic!("expected DC");
+    };
+    assert_eq!(restored, modes);
 }

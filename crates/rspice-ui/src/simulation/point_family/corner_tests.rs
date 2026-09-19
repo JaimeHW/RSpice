@@ -118,6 +118,7 @@ fn an_operating_point_corner_contributes_its_converged_node_voltages() {
 #[test]
 fn a_dc_sweep_corner_contributes_its_terminal_swept_point() {
     let (_, traces) = family(CornerBaseMode::DcSweep {
+        modes: Default::default(),
         source_name: "VDD".to_owned(),
         start: 0.0,
         stop: 1.0,

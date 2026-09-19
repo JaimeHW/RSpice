@@ -609,6 +609,7 @@ fn encode_result_payload(
             writer.u8(match evidence.direction {
                 DcSweepDirection::Ascending => 0,
                 DcSweepDirection::Descending => 1,
+                DcSweepDirection::AsAuthored => 2,
             });
             writer.sequence(evidence.quantities.len());
             for quantity in &evidence.quantities {

@@ -864,11 +864,37 @@ fn encode_spec_options(writer: &mut CanonicalWriter, options: &SpecExecutionOpti
     });
 }
 
+fn encode_dc_modes(writer: &mut CanonicalWriter, modes: &crate::simulation::config::DcSweepModes) {
+    use crate::simulation::config::{DcAxisMode, DcSweepModes};
+    if modes == &DcSweepModes::default() {
+        return;
+    }
+    writer.string("dc-axis-modes-v1");
+    for mode in [&modes.primary, &modes.secondary] {
+        match mode {
+            DcAxisMode::Linear => writer.u8(0),
+            DcAxisMode::List { values } => {
+                writer.u8(1);
+                encode_f64_slice(writer, values);
+            }
+            DcAxisMode::Decade { points_per_decade } => {
+                writer.u8(2);
+                writer.usize(*points_per_decade);
+            }
+            DcAxisMode::Octave { points_per_octave } => {
+                writer.u8(3);
+                writer.usize(*points_per_octave);
+            }
+        }
+    }
+}
+
 fn encode_corner_base_mode(writer: &mut CanonicalWriter, mode: &CornerBaseMode) {
     writer.domain("corner-base-mode");
     match mode {
         CornerBaseMode::Op => writer.u8(0),
         CornerBaseMode::DcSweep {
+            modes,
             source_name,
             start,
             stop,
@@ -879,8 +905,10 @@ fn encode_corner_base_mode(writer: &mut CanonicalWriter, mode: &CornerBaseMode) 
             writer.f64(*start);
             writer.f64(*stop);
             writer.f64(*step);
+            encode_dc_modes(writer, modes);
         }
         CornerBaseMode::DcSweepNested {
+            modes,
             source_name,
             start,
             stop,
@@ -899,6 +927,7 @@ fn encode_corner_base_mode(writer: &mut CanonicalWriter, mode: &CornerBaseMode) 
             writer.f64(*start2);
             writer.f64(*stop2);
             writer.f64(*step2);
+            encode_dc_modes(writer, modes);
         }
         CornerBaseMode::Transient {
             stop_time,

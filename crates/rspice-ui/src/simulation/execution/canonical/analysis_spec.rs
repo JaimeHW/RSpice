@@ -6,6 +6,8 @@
 //! may be reordered, widened or re-tagged without a version bump — see
 //! `CANONICAL_VERSION` in the parent.
 
+use super::encode_dc_modes;
+
 use crate::services::simulation_runner::{
     CornerProcess, PacFrequencySweep, PeriodicCarrier, PnoiseFrequencySweep, PxfFrequencySweep,
 };
@@ -110,6 +112,7 @@ pub(super) fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &Analysis
             stop2,
             step2,
             hysteresis,
+            modes,
         } => {
             writer.string(source_name);
             writer.f64(*start);
@@ -124,6 +127,7 @@ pub(super) fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &Analysis
             // over the same range. Leaving it out of the identity would let
             // the two share a cache entry.
             writer.bool(*hysteresis);
+            encode_dc_modes(writer, modes);
         }
         AnalysisSpec::Ac {
             start_freq,

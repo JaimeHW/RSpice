@@ -19,6 +19,7 @@ pub(super) fn dc() -> AnalysisSpec {
         stop2: Some(1.0),
         step2: Some(1.0),
         hysteresis: false,
+        modes: Default::default(),
     }
 }
 

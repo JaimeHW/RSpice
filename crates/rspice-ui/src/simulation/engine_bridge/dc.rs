@@ -159,7 +159,12 @@ impl EngineBridge {
         let mut measurements = Vec::new();
         let mut evidence = DcSweepEvidence {
             source: config.source.clone(),
-            direction: if config.stop < config.start {
+            direction: if matches!(
+                config.modes.primary,
+                crate::simulation::config::DcAxisMode::List { .. }
+            ) {
+                DcSweepDirection::AsAuthored
+            } else if config.stop < config.start {
                 DcSweepDirection::Descending
             } else {
                 DcSweepDirection::Ascending
@@ -170,9 +175,31 @@ impl EngineBridge {
         };
 
         if let Some((source2, start2, stop2, step2)) = nested_cfg {
-            let sweep2 =
-                rspice_core::analysis::DcSweep::new(source2.to_string(), start2, stop2, step2);
+            let sweep2 = config.modes.secondary.spec(start2, stop2, step2);
             let sweep2_values = sweep2.points();
+            let second = rspice_core::netlist::DcSecondSweep {
+                source: source2.to_owned(),
+                start: sweep2.start,
+                stop: sweep2.stop,
+                step: sweep2.step,
+                mode: sweep2.mode,
+            };
+            let points_per_member = config.forward_points().len();
+            let points = engine
+                .run_dc_sweep2_spec_with_report_and_abort(
+                    netlist,
+                    &config.source,
+                    &config.primary_spec(),
+                    Some(&second),
+                    abort,
+                )
+                .map_err(|error| self.translate_error(error))?;
+            if points_per_member.checked_mul(sweep2_values.len()) != Some(points.len()) {
+                return Err(SimulationError::SolverError(
+                    "Nested DC result does not cover the requested axis grid".into(),
+                ));
+            }
+            let mut points = points.into_iter();
             ensure_not_aborted(abort)?;
             if sweep2_values.is_empty() {
                 return Err(SimulationError::InvalidConfig(
@@ -190,26 +217,16 @@ impl EngineBridge {
                 };
                 let sweep2_value = values[member];
                 ensure_not_aborted(abort)?;
-                let mut nested_netlist = netlist.clone();
-                set_dc_source_value(&mut nested_netlist, source2, sweep2_value, abort)?;
-
-                let sweep_results = engine
-                    .run_dc_sweep_with_abort(
-                        &nested_netlist,
-                        &config.source,
-                        config.start,
-                        config.stop,
-                        config.step,
-                        abort,
-                    )
-                    .map_err(|e| self.translate_error(e))?;
+                let sweep_results = points
+                    .by_ref()
+                    .take(points_per_member)
+                    .map(|point| (point.sweep_value, point.result))
+                    .collect::<Vec<_>>();
 
                 validate_dc_sweep_results(&sweep_results, "nested DC sweep")?;
                 ensure_not_aborted(abort)?;
-                let mut point_measurements = rspice_core::analysis::evaluate_dc_measurements(
-                    &nested_netlist,
-                    &sweep_results,
-                );
+                let mut point_measurements =
+                    rspice_core::analysis::evaluate_dc_measurements(netlist, &sweep_results);
                 for measurement in &mut point_measurements {
                     measurement.name =
                         format!("{} [{}={:.16e}]", measurement.name, source2, sweep2_value);
@@ -386,15 +403,17 @@ impl EngineBridge {
             }
         } else {
             let sweep_results = engine
-                .run_dc_sweep_with_abort(
+                .run_dc_sweep2_spec_with_report_and_abort(
                     netlist,
                     &config.source,
-                    config.start,
-                    config.stop,
-                    config.step,
+                    &config.primary_spec(),
+                    None,
                     abort,
                 )
-                .map_err(|e| self.translate_error(e))?;
+                .map_err(|e| self.translate_error(e))?
+                .into_iter()
+                .map(|point| (point.sweep_value, point.result))
+                .collect::<Vec<_>>();
 
             validate_dc_sweep_results(&sweep_results, "DC sweep")?;
             ensure_not_aborted(abort)?;
@@ -766,55 +785,6 @@ fn nested_dc_sweep_config(
     }
 }
 
-fn set_dc_source_value(
-    netlist: &mut rspice_core::Netlist,
-    source_name: &str,
-    value: f64,
-    abort: &dyn AbortSignal,
-) -> Result<(), SimulationError> {
-    ensure_not_aborted(abort)?;
-    if source_name.trim().is_empty() {
-        return Err(SimulationError::InvalidConfig(
-            "DC sweep source name cannot be empty".to_string(),
-        ));
-    }
-
-    for element in &mut netlist.elements {
-        ensure_not_aborted(abort)?;
-        if !element.name.eq_ignore_ascii_case(source_name) {
-            continue;
-        }
-        if let rspice_core::netlist::ElementKind::VoltageSource(spec) = &mut element.kind {
-            if set_source_spec_dc(spec, value) {
-                return Ok(());
-            }
-            return Err(SimulationError::InvalidConfig(format!(
-                "Source '{}' is not a DC or DC/AC voltage source",
-                source_name
-            )));
-        }
-    }
-
-    Err(SimulationError::InvalidConfig(format!(
-        "Source '{}' not found in netlist",
-        source_name
-    )))
-}
-
-fn set_source_spec_dc(spec: &mut rspice_core::netlist::SourceSpec, value: f64) -> bool {
-    match spec {
-        rspice_core::netlist::SourceSpec::Dc(v) => {
-            *v = value;
-            true
-        }
-        rspice_core::netlist::SourceSpec::DcAc { dc_value, .. } => {
-            *dc_value = value;
-            true
-        }
-        _ => false,
-    }
-}
-
 #[cfg(test)]
 mod operating_point_contract_tests {
     use super::*;
@@ -939,6 +909,7 @@ mod operating_point_contract_tests {
                     stop: 1.0,
                     step: 0.5,
                     hysteresis: true,
+                    modes: Default::default(),
                     ..DcSweepConfig::default()
                 }),
                 deck,

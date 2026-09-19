@@ -308,45 +308,18 @@ impl SimulationController {
             }),
             24 => self.build_disto_spec(state),
             3 => {
-                let (source2, start2, stop2, step2) = if state.sim_setup.dc.nested {
-                    let source2 = state.sim_setup.dc.source2.trim();
-                    if source2.is_empty() {
-                        return Err(
-                            "nested DC sweep requires a non-empty secondary sweep source"
-                                .to_string(),
-                        );
-                    }
-                    (
-                        Some(source2.to_string()),
-                        Some(
-                            parse_spice_value_checked(&state.sim_setup.dc.start2)
-                                .map_err(|e| format!("invalid secondary start value: {}", e))?,
-                        ),
-                        Some(
-                            parse_spice_value_checked(&state.sim_setup.dc.stop2)
-                                .map_err(|e| format!("invalid secondary stop value: {}", e))?,
-                        ),
-                        Some(
-                            parse_spice_value_checked(&state.sim_setup.dc.step2)
-                                .map_err(|e| format!("invalid secondary step value: {}", e))?,
-                        ),
-                    )
-                } else {
-                    (None, None, None, None)
-                };
+                let config = state.sim_setup.dc.to_config()?;
                 Ok(AnalysisSpec::DcSweep {
-                    source_name: state.sim_setup.dc.source.trim().to_string(),
-                    start: parse_spice_value_checked(&state.sim_setup.dc.start)
-                        .map_err(|e| format!("invalid start value: {}", e))?,
-                    stop: parse_spice_value_checked(&state.sim_setup.dc.stop)
-                        .map_err(|e| format!("invalid stop value: {}", e))?,
-                    step: parse_spice_value_checked(&state.sim_setup.dc.step)
-                        .map_err(|e| format!("invalid step value: {}", e))?,
-                    source2,
-                    start2,
-                    stop2,
-                    step2,
-                    hysteresis: state.sim_setup.dc.hysteresis,
+                    source_name: config.source,
+                    start: config.start,
+                    stop: config.stop,
+                    step: config.step,
+                    source2: config.source2,
+                    start2: config.start2,
+                    stop2: config.stop2,
+                    step2: config.step2,
+                    hysteresis: config.hysteresis,
+                    modes: config.modes,
                 })
             }
             4 => match self.build_manifest_preview_spec(
@@ -431,6 +404,7 @@ impl SimulationController {
                 stop2,
                 step2,
                 hysteresis,
+                modes,
             } => Ok(AnalysisConfig::DcSweep(DcSweepConfig {
                 source: source_name.clone(),
                 start: *start,
@@ -441,6 +415,7 @@ impl SimulationController {
                 stop2: *stop2,
                 step2: *step2,
                 hysteresis: *hysteresis,
+                modes: modes.clone(),
             })),
             AnalysisSpec::Ac {
                 start_freq,

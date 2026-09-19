@@ -51,6 +51,7 @@ pub(super) fn analysis_config_from_spec(spec: &AnalysisSpec) -> Option<AnalysisC
             stop2,
             step2,
             hysteresis,
+            modes,
         } => Some(AnalysisConfig::DcSweep(DcSweepConfig {
             source: source_name.clone(),
             start: *start,
@@ -61,6 +62,7 @@ pub(super) fn analysis_config_from_spec(spec: &AnalysisSpec) -> Option<AnalysisC
             stop2: *stop2,
             step2: *step2,
             hysteresis: *hysteresis,
+            modes: modes.clone(),
         })),
         AnalysisSpec::Transient {
             stop_time,

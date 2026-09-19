@@ -20,6 +20,7 @@ fn dc(nested: bool, retraced: bool) -> AnalysisSpec {
         stop2: nested.then_some(0.0),
         step2: nested.then_some(1.0),
         hysteresis: retraced,
+        modes: Default::default(),
     }
 }
 

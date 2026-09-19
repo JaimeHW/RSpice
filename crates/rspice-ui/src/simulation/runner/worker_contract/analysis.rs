@@ -249,12 +249,16 @@ impl From<WorkerCornerRunConfig> for crate::services::simulation_runner::CornerR
 pub(crate) enum WorkerCornerBaseMode {
     Op,
     DcSweep {
+        #[serde(default)]
+        modes: crate::simulation::config::DcSweepModes,
         source_name: String,
         start: f64,
         stop: f64,
         step: f64,
     },
     DcSweepNested {
+        #[serde(default)]
+        modes: crate::simulation::config::DcSweepModes,
         source_name: String,
         start: f64,
         stop: f64,
@@ -288,17 +292,20 @@ impl From<&crate::services::simulation_runner::CornerBaseMode> for WorkerCornerB
         match value {
             crate::services::simulation_runner::CornerBaseMode::Op => Self::Op,
             crate::services::simulation_runner::CornerBaseMode::DcSweep {
+                modes,
                 source_name,
                 start,
                 stop,
                 step,
             } => Self::DcSweep {
+                modes: modes.clone(),
                 source_name: source_name.clone(),
                 start: *start,
                 stop: *stop,
                 step: *step,
             },
             crate::services::simulation_runner::CornerBaseMode::DcSweepNested {
+                modes,
                 source_name,
                 start,
                 stop,
@@ -308,6 +315,7 @@ impl From<&crate::services::simulation_runner::CornerBaseMode> for WorkerCornerB
                 stop2,
                 step2,
             } => Self::DcSweepNested {
+                modes: modes.clone(),
                 source_name: source_name.clone(),
                 start: *start,
                 stop: *stop,
@@ -357,17 +365,20 @@ impl From<WorkerCornerBaseMode> for crate::services::simulation_runner::CornerBa
         match value {
             WorkerCornerBaseMode::Op => Self::Op,
             WorkerCornerBaseMode::DcSweep {
+                modes,
                 source_name,
                 start,
                 stop,
                 step,
             } => Self::DcSweep {
+                modes,
                 source_name,
                 start,
                 stop,
                 step,
             },
             WorkerCornerBaseMode::DcSweepNested {
+                modes,
                 source_name,
                 start,
                 stop,
@@ -377,6 +388,7 @@ impl From<WorkerCornerBaseMode> for crate::services::simulation_runner::CornerBa
                 stop2,
                 step2,
             } => Self::DcSweepNested {
+                modes,
                 source_name,
                 start,
                 stop,
@@ -704,6 +716,8 @@ pub(crate) enum WorkerAnalysisConfig {
         /// sweep it described.
         #[serde(default)]
         hysteresis: bool,
+        #[serde(default)]
+        modes: crate::simulation::config::DcSweepModes,
     },
     Transient {
         stop_time: f64,
@@ -770,6 +784,7 @@ impl From<&AnalysisConfig> for WorkerAnalysisConfig {
                 stop2: config.stop2,
                 step2: config.step2,
                 hysteresis: config.hysteresis,
+                modes: config.modes.clone(),
             },
             AnalysisConfig::Transient(config) => Self::Transient {
                 stop_time: config.stop_time,
@@ -832,6 +847,7 @@ impl From<WorkerAnalysisConfig> for AnalysisConfig {
                 stop2,
                 step2,
                 hysteresis,
+                modes,
             } => Self::DcSweep(DcSweepConfig {
                 source,
                 start,
@@ -842,6 +858,7 @@ impl From<WorkerAnalysisConfig> for AnalysisConfig {
                 stop2,
                 step2,
                 hysteresis,
+                modes,
             }),
             WorkerAnalysisConfig::Transient {
                 stop_time,
@@ -973,12 +990,14 @@ impl TryFrom<&AnalysisSpec> for WorkerAnalysisSpec {
                 stop2,
                 step2,
                 hysteresis,
+                modes,
             } => Ok(Self::DcSweep {
                 source_name: source_name.clone(),
                 start: *start,
                 stop: *stop,
                 step: *step,
                 hysteresis: *hysteresis,
+                modes: modes.clone(),
                 source2: source2.clone(),
                 start2: *start2,
                 stop2: *stop2,
@@ -1366,6 +1385,7 @@ impl From<WorkerAnalysisSpec> for AnalysisSpec {
                 stop2,
                 step2,
                 hysteresis,
+                modes,
             } => Self::DcSweep {
                 source_name,
                 start,
@@ -1376,6 +1396,7 @@ impl From<WorkerAnalysisSpec> for AnalysisSpec {
                 stop2,
                 step2,
                 hysteresis,
+                modes,
             },
             WorkerAnalysisSpec::Transient {
                 stop_time,

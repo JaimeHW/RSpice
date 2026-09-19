@@ -147,6 +147,19 @@ pub struct DcSetup {
     /// the one-way sweep it was authored as, rather than failing to load.
     #[serde(default)]
     pub hysteresis: bool,
+    /// 0 = linear, 1 = ordered list, 2 = decade, 3 = octave.
+    #[serde(default)]
+    pub mode: usize,
+    #[serde(default)]
+    pub values: String,
+    #[serde(default = "default_dc_points")]
+    pub points: String,
+    #[serde(default)]
+    pub mode2: usize,
+    #[serde(default)]
+    pub values2: String,
+    #[serde(default = "default_dc_points")]
+    pub points2: String,
 }
 
 impl Default for DcSetup {
@@ -162,7 +175,66 @@ impl Default for DcSetup {
             stop2: "3.3".to_owned(),
             step2: "0.1".to_owned(),
             hysteresis: false,
+            mode: 0,
+            values: "0 1 2 3 4 5".into(),
+            points: default_dc_points(),
+            mode2: 0,
+            values2: "0 1 2 3.3".into(),
+            points2: default_dc_points(),
         }
+    }
+}
+
+fn default_dc_points() -> String {
+    "10".into()
+}
+
+impl DcSetup {
+    pub fn to_config(&self) -> Result<crate::simulation::config::DcSweepConfig, String> {
+        use crate::simulation::config::{DcAxisMode, DcSweepConfig, DcSweepModes};
+        use crate::simulation::spice_value::parse_spice_value_checked as parse;
+        let primary = DcAxisMode::from_draft(self.mode, &self.values, &self.points)?;
+        let axis = |mode: &DcAxisMode, start: &str, stop: &str, step: &str| {
+            if let DcAxisMode::List { values } = mode {
+                Ok((values[0], *values.last().unwrap(), 0.0))
+            } else {
+                let step = if matches!(mode, DcAxisMode::Linear) {
+                    parse(step)?
+                } else {
+                    0.0
+                };
+                Ok::<_, String>((parse(start)?, parse(stop)?, step))
+            }
+        };
+        let (start, stop, step) = axis(&primary, &self.start, &self.stop, &self.step)?;
+        let mut config = DcSweepConfig {
+            source: self.source.trim().into(),
+            start,
+            stop,
+            step,
+            hysteresis: self.hysteresis,
+            modes: DcSweepModes {
+                primary,
+                secondary: DcAxisMode::Linear,
+            },
+            ..Default::default()
+        };
+        if self.nested {
+            config.modes.secondary =
+                DcAxisMode::from_draft(self.mode2, &self.values2, &self.points2)?;
+            let (start, stop, step) = axis(
+                &config.modes.secondary,
+                &self.start2,
+                &self.stop2,
+                &self.step2,
+            )?;
+            config.source2 = Some(self.source2.trim().into());
+            config.start2 = Some(start);
+            config.stop2 = Some(stop);
+            config.step2 = Some(step);
+        }
+        config.validate().map_err(|errors| errors.join("; "))?;
+        Ok(config)
     }
 }
 

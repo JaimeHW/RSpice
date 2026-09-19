@@ -250,6 +250,8 @@ pub enum AnalysisSpec {
         /// loads as the analysis it actually ran.
         #[serde(default)]
         hysteresis: bool,
+        #[serde(default)]
+        modes: crate::simulation::config::DcSweepModes,
     },
     /// AC analysis
     Ac {

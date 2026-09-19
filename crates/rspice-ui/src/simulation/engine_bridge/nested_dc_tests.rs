@@ -146,6 +146,7 @@ fn single_point_and_retraced_dc_keep_member_traversal() {
             stop,
             step,
             hysteresis: retrace,
+            modes: Default::default(),
             ..Default::default()
         }));
         assert!(result.success, "{:?}", result.error_message);
@@ -342,6 +343,7 @@ fn filtered_dc_curves_and_derived_aliases_keep_exact_projection_evidence() {
         stop2: None,
         step2: None,
         hysteresis: false,
+        modes: Default::default(),
     };
     let output = SavedOutput::new(
         SavedOutputKind::RawVoltageOrCurrent,
@@ -373,4 +375,104 @@ fn filtered_dc_curves_and_derived_aliases_keep_exact_projection_evidence() {
     ));
     analysis.validate_retained_evidence().unwrap();
     stored(analysis).validate().unwrap();
+}
+
+#[test]
+fn ordered_dc_lists_preserve_repeats_on_both_axes_and_in_retained_results() {
+    use crate::simulation::config::{DcAxisMode, DcSweepModes};
+    let primary = vec![1.0, 0.25, 0.25, -0.5, 1.0];
+    let secondary = vec![2.0, -1.0, 2.0];
+    let config = DcSweepConfig {
+        modes: DcSweepModes {
+            primary: DcAxisMode::List {
+                values: primary.clone(),
+            },
+            secondary: DcAxisMode::List {
+                values: secondary.clone(),
+            },
+        },
+        ..nested_config()
+    };
+    config.validate().unwrap();
+    let retained = retain(solve(config));
+    assert!(retained.success, "{:?}", retained.error_message);
+    retained.validate_retained_evidence().unwrap();
+    let metadata = evidence(&retained);
+    assert_eq!(
+        metadata.direction,
+        crate::state::DcSweepDirection::AsAuthored
+    );
+    for (member, outer) in secondary.iter().enumerate() {
+        let name = metadata.trace_name(
+            &crate::state::DcSweepQuantity::BranchCurrent("V1".into()),
+            member,
+        );
+        let trace = retained
+            .waveforms
+            .iter()
+            .find(|trace| trace.name == name)
+            .unwrap();
+        assert_eq!(trace.x.as_slice(), primary);
+        for (x, current) in primary.iter().zip(trace.y.iter()) {
+            assert!((current + (x - outer) / 1000.0).abs() < 1e-12);
+        }
+        assert_eq!(
+            metadata.terminal_sample(member, primary.len()),
+            Some(primary.len() - 1)
+        );
+    }
+}
+
+#[test]
+fn logarithmic_dc_axes_and_a_current_source_outer_sweep_execute_exact_points() {
+    use crate::simulation::config::{DcAxisMode, DcSweepModes};
+    let config = DcSweepConfig {
+        source: "V1".into(),
+        start: 1.0,
+        stop: 100.0,
+        step: 0.0,
+        source2: Some("I2".into()),
+        start2: Some(0.001),
+        stop2: Some(0.004),
+        step2: Some(0.0),
+        modes: DcSweepModes {
+            primary: DcAxisMode::Decade {
+                points_per_decade: 1,
+            },
+            secondary: DcAxisMode::Octave {
+                points_per_octave: 1,
+            },
+        },
+        ..Default::default()
+    };
+    let result = EngineBridge::new()
+        .run(
+            &AnalysisConfig::DcSweep(config),
+            "Nested current\nV1 in 0 0\nI2 0 out DC 0 AC 1\nR1 in out 1k\n.end\n",
+        )
+        .unwrap();
+    let retained = retain(result);
+    assert!(retained.success, "{:?}", retained.error_message);
+    retained.validate_retained_evidence().unwrap();
+    let metadata = evidence(&retained);
+    assert_eq!(metadata.member_count(), 3);
+    for (member, offset) in [1.0, 2.0, 4.0].into_iter().enumerate() {
+        let name = metadata.trace_name(
+            &crate::state::DcSweepQuantity::NodeVoltage("OUT".into()),
+            member,
+        );
+        let trace = retained
+            .waveforms
+            .iter()
+            .find(|trace| trace.name == name)
+            .unwrap();
+        assert_eq!(trace.x.as_slice(), [1.0, 10.0, 100.0]);
+        for (x, y) in trace.x.iter().zip(trace.y.iter()) {
+            assert!(
+                (y - x - offset).abs() < 1e-11 * (x + offset).abs().max(1.0),
+                "outer={offset}, x={x}, y={y}, error={}",
+                y - x - offset
+            );
+        }
+    }
 }

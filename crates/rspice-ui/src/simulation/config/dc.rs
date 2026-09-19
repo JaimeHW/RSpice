@@ -31,6 +31,7 @@ pub struct DcSweepConfig {
     /// branch is only meaningful if it starts from the state the forward branch
     /// finished in.
     pub hysteresis: bool,
+    pub modes: crate::simulation::config::DcSweepModes,
 }
 
 impl Default for DcSweepConfig {
@@ -45,6 +46,7 @@ impl Default for DcSweepConfig {
             stop2: None,
             step2: None,
             hysteresis: false,
+            modes: Default::default(),
         }
     }
 }
@@ -58,7 +60,11 @@ impl DcSweepConfig {
     /// evenly. `config/ac.rs` derives its frequency axis the same way.
     #[must_use]
     pub fn forward_points(&self) -> Vec<f64> {
-        rspice_core::netlist::DcSweepSpec::linear(self.start, self.stop, self.step).points()
+        self.primary_spec().points()
+    }
+
+    pub fn primary_spec(&self) -> rspice_core::netlist::DcSweepSpec {
+        self.modes.primary.spec(self.start, self.stop, self.step)
     }
 
     /// Every value a retracing sweep visits, forward then back.
@@ -101,14 +107,19 @@ impl DcSweepConfig {
             cmd
         } else {
             format!(
-                ".dc {} {} {} {}",
-                self.source, self.start, self.stop, self.step
+                ".dc {}",
+                self.modes
+                    .primary
+                    .card_axis(&self.source, self.start, self.stop, self.step)
             )
         };
         if let (Some(src2), Some(start2), Some(stop2), Some(step2)) =
             (&self.source2, self.start2, self.stop2, self.step2)
         {
-            cmd.push_str(&format!(" {} {} {} {}", src2, start2, stop2, step2));
+            cmd.push_str(&format!(
+                " {}",
+                self.modes.secondary.card_axis(src2, start2, stop2, step2)
+            ));
         }
         cmd
     }
@@ -120,17 +131,12 @@ impl DcSweepConfig {
         if self.source.trim().is_empty() {
             errors.push("Source name is required".to_string());
         }
-        if self.step == 0.0 {
-            errors.push("Step size cannot be zero".to_string());
-        }
-        if [self.start, self.stop, self.step]
-            .iter()
-            .any(|value| !value.is_finite())
+        if let Err(error) = self
+            .modes
+            .primary
+            .validate(self.start, self.stop, self.step)
         {
-            errors.push("Sweep start, stop, and step must be finite".to_owned());
-        }
-        if self.stop != self.start && (self.stop - self.start).signum() != self.step.signum() {
-            errors.push("Step direction must match sweep direction".to_string());
+            errors.push(error);
         }
 
         match (&self.source2, self.start2, self.stop2, self.step2) {
@@ -142,17 +148,8 @@ impl DcSweepConfig {
                 if source2.eq_ignore_ascii_case(&self.source) {
                     errors.push("Secondary source must differ from primary source".to_string());
                 }
-                if step2 == 0.0 {
-                    errors.push("Secondary step size cannot be zero".to_string());
-                }
-                if [start2, stop2, step2]
-                    .iter()
-                    .any(|value| !value.is_finite())
-                {
-                    errors.push("Secondary sweep start, stop, and step must be finite".to_owned());
-                }
-                if stop2 != start2 && (stop2 - start2).signum() != step2.signum() {
-                    errors.push("Secondary step direction must match sweep direction".to_string());
+                if let Err(error) = self.modes.secondary.validate(start2, stop2, step2) {
+                    errors.push(format!("Secondary {error}"));
                 }
             }
             _ => errors
@@ -285,6 +282,7 @@ mod tests {
             stop: 1.0,
             step: 0.5,
             hysteresis: true,
+            modes: Default::default(),
             ..DcSweepConfig::default()
         }
     }

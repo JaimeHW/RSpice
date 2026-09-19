@@ -2268,6 +2268,7 @@ fn a_corner_point_that_cannot_be_solved_is_retained_as_a_failure() {
         full_matrix: true,
         nominal_voltage: Some(1.8),
         base_mode: CornerBaseMode::DcSweep {
+            modes: Default::default(),
             source_name: "VMISSING".to_owned(),
             start: 0.0,
             stop: 1.0,
