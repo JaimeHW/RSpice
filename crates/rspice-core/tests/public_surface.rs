@@ -942,7 +942,13 @@ use rspice_core::analysis::harmonic_balance::{
 /// show — an omitted SIN frequency becomes 1/TSTOP, an SFFM carrier 5/TSTOP,
 /// an EXP time constant TSTEP — and without them the only way for a surface
 /// to name the number the run will use is to reimplement the rule.
-const MAX_PUBLIC_ITEMS: usize = 5071;
+///
+/// +1 is `netlist::option_package_key_is_known` (widened from `pub(super)`):
+/// the Studio writes one `.OPTIONS` card per package, and a package header the
+/// parser does not scope is read as an ordinary global key, so every key after
+/// it lands in the wrong place. The writer checks its headers against the
+/// reader's own list rather than against a second copy of it.
+const MAX_PUBLIC_ITEMS: usize = 5072;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently
