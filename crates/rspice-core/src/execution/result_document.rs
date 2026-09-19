@@ -206,7 +206,7 @@ use crate::execution::topology::TopologyFingerprint;
 pub const ANALYSIS_RESULT_DOCUMENT_SCHEMA: &str = "rspice-analysis-result";
 
 /// Schema version this build produces.
-pub const ANALYSIS_RESULT_DOCUMENT_VERSION: u32 = 7;
+pub const ANALYSIS_RESULT_DOCUMENT_VERSION: u32 = 8;
 
 /// Every schema version this build decodes, oldest first.
 ///
@@ -230,6 +230,11 @@ pub const ANALYSIS_RESULT_DOCUMENT_VERSION: u32 = 7;
 /// with unavailable impulse history, without asserting that no impulse occurred.
 /// Version 7 names device-lead impulse owners and explicit per-current coverage.
 /// Version-6 rows retain their data with unqualified completeness.
+/// Version 8 states how many `correlate` statements a DC mismatch result
+/// applied, per statistical scope. A version-7 DC-mismatch document decodes
+/// with both counts zero, which is what it meant: the analysis that wrote it
+/// summed its contributions as independent variables and read no `correlate`
+/// statement of the design's `statistics` block at all.
 ///
 /// A new result *family* costs no version. No document of an existing family
 /// changes shape, and no reader of an earlier version has a document of the
@@ -237,7 +242,7 @@ pub const ANALYSIS_RESULT_DOCUMENT_VERSION: u32 = 7;
 /// Bumping for one would instead make every family's freshly produced
 /// document undecodable by every current reader, which is the compatibility
 /// break this constant exists to avoid.
-const DECODABLE_ANALYSIS_RESULT_DOCUMENT_VERSIONS: [u32; 7] = [1, 2, 3, 4, 5, 6, 7];
+const DECODABLE_ANALYSIS_RESULT_DOCUMENT_VERSIONS: [u32; 8] = [1, 2, 3, 4, 5, 6, 7, 8];
 
 /// First version whose transient payload may declare a digital bus.
 const FIRST_DIGITAL_BUS_DOCUMENT_VERSION: u32 = 2;

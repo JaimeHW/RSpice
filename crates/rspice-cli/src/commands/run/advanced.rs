@@ -1820,6 +1820,14 @@ fn report_dc_match(ctx: &RunContext<'_>, result: &rspice_core::analysis::dcmatch
         result.quoted_sigma(),
         result.sigma_multiplier
     );
+    // Printed only when the design declared one: a line reading "0, 0" on
+    // every uncorrelated deck would say nothing and hide the case that matters.
+    if result.applied_correlations_mismatch + result.applied_correlations_process > 0 {
+        println!(
+            "correlations applied: process {}, mismatch {}",
+            result.applied_correlations_process, result.applied_correlations_mismatch
+        );
+    }
     if result.contributors.is_empty() {
         println!(
             "contributors: none of the {} evaluated pass the card's limits",
@@ -1828,7 +1836,7 @@ fn report_dc_match(ctx: &RunContext<'_>, result: &rspice_core::analysis::dcmatch
         return;
     }
     println!(
-        "contributors ({} listed of {} evaluated, largest variance share first):",
+        "contributors ({} listed of {} evaluated, largest variance share first, by magnitude):",
         result.contributors.len(),
         result.evaluated_contributors
     );

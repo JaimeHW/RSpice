@@ -906,6 +906,8 @@ fn dc_match_result() -> DcMatchResult {
         sigma_process: 0.0,
         contributors: vec![contributor("M1", 10.0, 0.5), contributor("M2", -10.0, 0.5)],
         evaluated_contributors: 2,
+        applied_correlations_mismatch: 0,
+        applied_correlations_process: 0,
     }
 }
 

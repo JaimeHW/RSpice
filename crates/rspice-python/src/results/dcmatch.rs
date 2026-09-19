@@ -35,7 +35,9 @@ pub struct PyDcMatchContributor {
     /// produces, so a reader can tell which way the output moves.
     #[pyo3(get)]
     pub contribution: f64,
-    /// This contributor's fraction of the total output variance.
+    /// This contributor's allocation of the total output variance. Signed: a
+    /// variable whose correlated partner cancels it carries a negative share,
+    /// and the shares still sum to one.
     #[pyo3(get)]
     pub share: f64,
 }

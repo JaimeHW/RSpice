@@ -1460,7 +1460,9 @@ pub struct DcMatchContributorDocument {
     pub sensitivity: f64,
     /// Signed output displacement one standard deviation produces.
     pub contribution: f64,
-    /// This contributor's fraction of the total output variance.
+    /// This contributor's Euler allocation of the total output variance.
+    /// Signed: a variable whose correlated partner cancels it carries a
+    /// negative share, and the shares still sum to one.
     pub share: f64,
 }
 
@@ -1480,12 +1482,23 @@ pub struct DcMatchPayload {
     pub sigma_mismatch: f64,
     /// The process scope's part of `sigma_total`.
     pub sigma_process: f64,
-    /// Contributors the card retained, largest share first.
+    /// Contributors the card retained, largest share first by magnitude.
     pub contributors: Vec<DcMatchContributorDocument>,
     /// How many contributors were evaluated, including any the card's
     /// `CONTRIBUTORS` and `THRESHOLD` limits dropped. A reader can tell a
     /// short list that is the whole truth from one that was trimmed.
     pub evaluated_contributors: usize,
+    /// How many `correlate` statements of the design's `statistics` block
+    /// entered the mismatch variance, and how many entered the process
+    /// variance. Zero means that scope was summed as independent variables.
+    ///
+    /// Requires version 8. A version-7 document decodes with both zero, which
+    /// is true of every one of them: the analysis that wrote them summed
+    /// squares and read no `correlate` statement at all.
+    #[serde(default)]
+    pub applied_correlations_mismatch: usize,
+    #[serde(default)]
+    pub applied_correlations_process: usize,
 }
 
 impl DcMatchPayload {

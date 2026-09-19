@@ -1873,6 +1873,8 @@ impl AnalysisResultDocument {
                 })
                 .collect(),
             evaluated_contributors: result.evaluated_contributors,
+            applied_correlations_mismatch: result.applied_correlations_mismatch,
+            applied_correlations_process: result.applied_correlations_process,
         };
         Ok(Self::builder(analysis, ResultPayload::DcMatch(payload), 0).scalars(scalars))
     }
