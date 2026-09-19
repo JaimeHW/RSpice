@@ -436,6 +436,30 @@ fn a_series_resistor_between_card_ports_scatters_as_its_closed_form() {
 }
 
 #[test]
+fn a_sweep_over_card_ports_projects_the_shared_s_parameter_document() {
+    // The shared document reads the ports the run returned. A run whose planes
+    // were named on the card returns exactly the shape a deck-annotated run
+    // does, so the projection must accept it without a second code path.
+    let deck = series_resistor_deck(
+        "Series resistor between analysis ports",
+        "",
+        "PORT1=(p1,0,50) PORT2=(p2,0,75)",
+    );
+    let netlist = Netlist::parse(&deck).expect("deck parses");
+    let run = sp_run(&deck);
+    let document =
+        AnalysisResultDocument::from_s_parameters(instance(&netlist, "sp-001"), &run.scattering)
+            .expect("the shared S-parameter document accepts a card-ported sweep")
+            .build()
+            .expect("document builds");
+    assert_eq!(document.point_count(), run.scattering.data.len());
+    let ResultPayload::Sp(payload) = document.payload() else {
+        panic!("a .SP card projects an S-parameter payload");
+    };
+    assert_eq!(payload.ports.len(), 2);
+}
+
+#[test]
 fn card_ports_and_element_ports_give_the_same_scattering_matrix() {
     // The same physical network, with the planes named on the card in one
     // deck and annotated on port sources in the other. The card route is a
@@ -617,6 +641,30 @@ fn the_nyquist_switch_changes_what_is_retained_and_not_the_margins() {
     assert!(
         dropped.result.nyquist_points.is_empty(),
         "NYQUIST=no retains no contour at all"
+    );
+
+    // An empty contour is a complete stability result, not a defective one:
+    // the shared document publishes the margins and carries no samples.
+    let netlist = Netlist::parse(&single_pole_loop_deck("dec 200 10 100k", " NYQUIST=no"))
+        .expect("deck parses");
+    let document =
+        AnalysisResultDocument::from_stability(instance(&netlist, "stb-001"), &dropped.result)
+            .expect("the shared stability document accepts a run that kept no contour")
+            .build()
+            .expect("document builds");
+    let ResultPayload::Stb(payload) = document.payload() else {
+        panic!("a .STB card projects a stability payload");
+    };
+    assert!(
+        payload.nyquist.is_empty(),
+        "the document carries no contour samples when the card asked for none"
+    );
+    assert!(
+        document
+            .scalars()
+            .iter()
+            .any(|scalar| scalar.name() == "phase_margin_deg"),
+        "the margins are published either way"
     );
 }
 
