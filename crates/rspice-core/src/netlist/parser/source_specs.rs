@@ -1245,10 +1245,21 @@ fn parse_pwl_file_path(
     line_num: usize,
     has_paren: bool,
 ) -> Result<String, ParseError> {
-    if let TokenKind::StringLit(path) = &stream.peek().kind {
-        let path = path.clone();
+    if matches!(stream.peek().kind, TokenKind::StringLit(_)) {
+        // The lexeme with its quotes taken off, rather than the decoded string
+        // literal. The lexer reads a backslash as an escape and drops it, and a
+        // Windows path is mostly backslashes: the decoded form of
+        // `"C:\meas\step.csv"` is `C:measstep.csv`, a file that does not exist
+        // and that no reader typed. A quoted path is literal here, exactly as a
+        // quoted `.INITCOND FILE` path is — see `take_authored_initcond_path`.
+        let token = stream.peek().clone();
         stream.advance();
-        return Ok(path);
+        let raw = token.lexeme.as_str();
+        let path = raw
+            .strip_prefix('"')
+            .and_then(|quoted| quoted.strip_suffix('"'))
+            .unwrap_or(raw);
+        return Ok(path.to_owned());
     }
 
     let mut path = String::new();
@@ -1844,6 +1855,38 @@ fn is_xyce_ignored_source_instance_parameter(keyword: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A quoted `PWL FILE=` path is the path that was written, backslashes and
+    /// all. Reading it as an escaped string literal turned every Windows path
+    /// into one that does not exist — `C:\meas\step.csv` came back as
+    /// `C:measstep.csv` — so a file-backed source could not run from an
+    /// absolute path at all. `.INITCOND FILE` states the same contract.
+    #[test]
+    fn a_quoted_pwl_file_path_retains_drive_and_unc_backslashes() {
+        for path in [
+            r"C:\meas\step.csv",
+            r"\\server\share\meas\step.csv",
+            r"C:\new folder\tab\step.csv",
+            "relative/meas/step.csv",
+        ] {
+            let spec = parse_source_spec_text(
+                &format!("PWL(FILE=\"{path}\" TD=1u)"),
+                0,
+                &ParamContext::new(),
+            )
+            .unwrap_or_else(|error| panic!("{path}: {error}"));
+            let SourceSpec::PwlFile {
+                path: parsed,
+                delay,
+                ..
+            } = spec
+            else {
+                panic!("{path}: not a file-backed PWL")
+            };
+            assert_eq!(parsed, path);
+            assert!((delay - 1e-6).abs() < f64::EPSILON, "{path}");
+        }
+    }
 
     #[test]
     fn source_value_mapping_preserves_grammar_scope_and_random_draws() {
