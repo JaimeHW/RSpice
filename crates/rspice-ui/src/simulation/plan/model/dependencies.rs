@@ -37,8 +37,7 @@ impl SimulationPlan {
             move |candidate, revision| {
                 let dependent_index = candidate.index_of(dependent)?;
                 candidate.ensure_editable(dependent_index)?;
-                if !candidate.instances[dependent_index]
-                    .prerequisite_roles()
+                if !Self::resolved_prerequisite_roles(&candidate.instances, dependent_index)
                     .contains(&prerequisite)
                 {
                     return Err(AnalysisPlanError::UnexpectedDependencyRole {
@@ -127,8 +126,8 @@ impl SimulationPlan {
             .instance(dependent)
             .ok_or(AnalysisPlanError::InstanceNotFound(dependent))?;
         let name = dependent_instance.display_name().to_owned();
-        if dependent_instance
-            .prerequisite_roles()
+        if self
+            .required_prerequisite_roles(dependent)
             .contains(&AnalysisKind::Pss)
             && let Some(detail) = context.availability_error()
         {
@@ -157,11 +156,11 @@ impl SimulationPlan {
             move |candidate, revision| {
                 let dependent_index = candidate.index_of(dependent)?;
                 candidate.ensure_editable(dependent_index)?;
-                let prerequisites = candidate.instances[dependent_index]
-                    .prerequisite_roles()
-                    .to_vec();
+                let prerequisites =
+                    Self::resolved_prerequisite_roles(&candidate.instances, dependent_index);
                 let dependencies = prerequisites
-                    .into_iter()
+                    .iter()
+                    .copied()
                     .filter_map(|prerequisite| {
                         candidate.instances[..dependent_index]
                             .iter()
@@ -170,6 +169,7 @@ impl SimulationPlan {
                                 instance.enabled
                                     && Self::dependency_candidate_compatibility(
                                         &candidate.instances[dependent_index],
+                                        &prerequisites,
                                         prerequisite,
                                         instance,
                                     )
@@ -283,11 +283,11 @@ impl SimulationPlan {
                 actual,
             });
         }
-        let dependent_instance = self
-            .instance(dependent)
-            .ok_or(AnalysisPlanError::InstanceNotFound(dependent))?;
-        if !dependent_instance
-            .prerequisite_roles()
+        if self.instance(dependent).is_none() {
+            return Err(AnalysisPlanError::InstanceNotFound(dependent));
+        }
+        if !self
+            .required_prerequisite_roles(dependent)
             .contains(&prerequisite)
         {
             return Err(AnalysisPlanError::UnexpectedDependencyRole {
@@ -367,9 +367,7 @@ impl SimulationPlan {
         let dependent_index = self.index_of(dependent)?;
         self.ensure_editable(dependent_index)?;
         visiting.push(dependent);
-        let prerequisites = self.instances[dependent_index]
-            .prerequisite_roles()
-            .to_vec();
+        let prerequisites = Self::resolved_prerequisite_roles(&self.instances, dependent_index);
         let removed = self.instances[dependent_index]
             .dependencies
             .iter()
@@ -435,10 +433,16 @@ impl SimulationPlan {
     ) -> Result<AnalysisInstanceId, AnalysisPlanError> {
         let dependent_index = self.index_of(dependent)?;
         let dependent_draft = self.instances[dependent_index].draft.clone();
+        let dependent_roles = Self::resolved_prerequisite_roles(&self.instances, dependent_index);
         let is_compatible = |candidate: &AnalysisInstance| {
             let dependent_instance = &self.instances[dependent_index];
-            Self::dependency_candidate_compatibility(dependent_instance, prerequisite, candidate)
-                .is_ok_and(|compatible| compatible)
+            Self::dependency_candidate_compatibility(
+                dependent_instance,
+                &dependent_roles,
+                prerequisite,
+                candidate,
+            )
+            .is_ok_and(|compatible| compatible)
                 && dependency_candidate_context_issue(prerequisite, &candidate.draft, context)
                     .is_none()
         };

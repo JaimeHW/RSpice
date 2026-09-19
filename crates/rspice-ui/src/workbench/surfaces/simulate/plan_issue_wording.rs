@@ -113,6 +113,7 @@ pub(super) fn dependency_closure_ids(
             continue;
         }
         if let Some(instance) = plan.instance(id) {
+            let required_roles = plan.required_prerequisite_roles(id);
             pending.extend(instance.dependencies().iter().filter_map(|dependency| {
                 let target = dependency.target();
                 let role_is_unique = instance
@@ -123,9 +124,7 @@ pub(super) fn dependency_closure_ids(
                     == 1;
                 if target == id
                     || !role_is_unique
-                    || !instance
-                        .prerequisite_roles()
-                        .contains(&dependency.prerequisite())
+                    || !required_roles.contains(&dependency.prerequisite())
                 {
                     return None;
                 }

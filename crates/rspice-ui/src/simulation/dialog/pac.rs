@@ -310,14 +310,12 @@ impl PacConfig {
             return Err("PAC magnitude must be positive".to_string());
         }
 
-        // The engine accepts all three carriers on this card and the Studio
-        // runs two of them, so the third is refused here with the reason and
-        // the place it does run. The chooser paints it disabled for the same
-        // reason; this is what answers a project or a deck that names it.
-        if let Some(reason) = self.carrier.unroutable_reason(".PAC") {
-            return Err(reason);
-        }
-
+        // The carrier is not validated here: it is a *dependency*, and the
+        // plan owns it. `AnalysisDraft::prerequisite_roles` turns this
+        // position into the prerequisite family this request requires, and
+        // `dependency_configuration_issue` asks whether the bound carrier can
+        // answer the measurement — which is the question a form field cannot
+        // ask, because the answer depends on the instance it is bound to.
         Ok(())
     }
 }
@@ -597,27 +595,23 @@ mod tests {
         );
     }
 
-    /// A carrier the Studio cannot run is refused by name, with the place it
-    /// does run, rather than bound to whichever periodic state is at hand.
+    /// Every carrier the engine's card accepts is a carrier this form accepts.
+    ///
+    /// The carrier is a *dependency*, not a field with a range: which family
+    /// this request requires is `AnalysisDraft::prerequisite_roles`, and
+    /// whether the bound instance can answer the measurement is
+    /// `dependency_configuration_issue`. A refusal written here would have to
+    /// decide without knowing the instance, which is how the harmonic-balance
+    /// position came to be refused on a card the engine runs.
     #[test]
-    fn a_carrier_without_a_studio_route_is_refused_by_name() {
-        let error = PacConfig {
-            carrier: PeriodicCarrier::Hb,
-            ..PacConfig::default()
-        }
-        .validate()
-        .expect_err("a harmonic-balance carrier has no PAC runner in this crate");
-        assert!(
-            error.contains("from=hb") && error.contains("command line"),
-            "the refusal must name the carrier and where it runs: {error}"
-        );
-        for carrier in [PeriodicCarrier::Preceding, PeriodicCarrier::Pss] {
+    fn every_carrier_the_engine_accepts_is_a_carrier_this_form_accepts() {
+        for carrier in PeriodicCarrier::ALL {
             PacConfig {
-                carrier,
+                carrier: *carrier,
                 ..PacConfig::default()
             }
             .validate()
-            .unwrap_or_else(|error| panic!("{carrier:?} is routable here: {error}"));
+            .unwrap_or_else(|error| panic!("{carrier:?} is a carrier the engine has: {error}"));
         }
     }
 

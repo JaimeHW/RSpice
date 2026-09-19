@@ -5,12 +5,14 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::services::simulation_runner::PeriodicCarrier;
 use crate::simulation::config::{
     AcSweepType, NoiseAnalysisConfig, NoiseContributionDetail, NoiseIntegrationMode, NoiseSweepType,
 };
 use crate::simulation::dependency_contract::{
     FourierTransientRequirement, PeriodicStateCapability, TransientCapability,
-    validate_fourier_transient_contract, validate_periodic_state_contract,
+    validate_fourier_transient_contract, validate_harmonic_balance_carrier_contract,
+    validate_periodic_state_contract,
 };
 use crate::simulation::dialog::{
     CornerDialogState, EnvelopeDialogState, FourierDialogState, HbDialogState, McDialogState,
@@ -698,9 +700,59 @@ impl AnalysisDraft {
     /// authenticated execution. Exposing a separate HB/PSS task here would be
     /// incorrect until that task can publish a typed continuation artifact
     /// that Envelope actually consumes.
+    ///
+    /// The periodic small-signal family is the one place a *draft* moves this
+    /// away from its kind's declaration: the carrier the request names is the
+    /// family it linearizes around, so a `.PAC` carried by `FROM=HB` requires
+    /// a harmonic-balance solve and not a shooting `.PSS`. The third carrier
+    /// position names neither family — see [`Self::prerequisite_alternatives`]
+    /// — and reads as this kind's declared role until the plan resolves it.
     #[must_use]
     pub fn prerequisite_roles(&self) -> &'static [AnalysisKind] {
-        self.kind().prerequisites()
+        const HB: &[AnalysisKind] = &[AnalysisKind::HarmonicBalance];
+
+        match self.periodic_carrier() {
+            Some(PeriodicCarrier::Hb) => HB,
+            _ => self.kind().prerequisites(),
+        }
+    }
+
+    /// The prerequisite kinds that may fill this draft's one declared role
+    /// where more than its own kind can, in the order the plan prefers them.
+    ///
+    /// Empty for everything but a periodic small-signal request whose carrier
+    /// is the *preceding* periodic solve. That position writes no `FROM=`
+    /// keyword, and `resolve_periodic_source` in
+    /// `rspice-core/src/execution/plan.rs` binds such a card to the nearest
+    /// preceding `.PSS` **or** `.HB` — whichever the deck wrote last. So the
+    /// role is not a property of the request alone, and the plan resolves it
+    /// by the same rule against its own order.
+    #[must_use]
+    pub fn prerequisite_alternatives(&self) -> &'static [AnalysisKind] {
+        const EITHER_PERIODIC_SOLVE: &[AnalysisKind] =
+            &[AnalysisKind::Pss, AnalysisKind::HarmonicBalance];
+        const NONE: &[AnalysisKind] = &[];
+
+        match self.periodic_carrier() {
+            Some(PeriodicCarrier::Preceding) => EITHER_PERIODIC_SOLVE,
+            _ => NONE,
+        }
+    }
+
+    /// The carrier a periodic small-signal draft linearizes around, or `None`
+    /// for every draft that names no carrier.
+    ///
+    /// `.PSTB` is deliberately absent: its card has no `FROM=` arm, and the
+    /// engine binds it to the preceding `.PSS` unconditionally because only a
+    /// shooting solve carries a monodromy matrix.
+    #[must_use]
+    fn periodic_carrier(&self) -> Option<PeriodicCarrier> {
+        match self {
+            Self::Pac(draft) => Some(PeriodicCarrier::at(draft.carrier_idx)),
+            Self::Pxf(draft) => Some(PeriodicCarrier::at(draft.carrier_idx)),
+            Self::Pnoise(draft) => Some(PeriodicCarrier::at(draft.carrier_idx)),
+            _ => None,
+        }
     }
 
     /// Current singleton-model index, for deterministic migration only.
@@ -1059,6 +1111,23 @@ pub(super) fn dependency_configuration_issue(
         .map(DependencyConfigurationIssue::Incompatible);
     }
 
+    // The same question asked of the other periodic carrier the engine
+    // accepts. `.PSTB` is absent because it cannot reach here: it declares no
+    // harmonic-balance role in any carrier position.
+    if matches!(
+        dependent,
+        AnalysisDraft::Pac(_) | AnalysisDraft::Pnoise(_) | AnalysisDraft::Pxf(_)
+    ) && matches!(prerequisite, AnalysisDraft::HarmonicBalance(_))
+    {
+        let (consumer, require_autonomous) = match periodic_state_requirement(dependent) {
+            Ok(requirement) => requirement,
+            Err(detail) => return Some(DependencyConfigurationIssue::InvalidDependent(detail)),
+        };
+        return validate_harmonic_balance_carrier_contract(consumer, require_autonomous)
+            .err()
+            .map(DependencyConfigurationIssue::Incompatible);
+    }
+
     let (AnalysisDraft::Fourier(fourier), AnalysisDraft::Transient(transient)) =
         (dependent, prerequisite)
     else {
@@ -1129,7 +1198,16 @@ pub(super) fn prerequisite_draft_for(
         }
         return Ok(draft);
     }
-    Ok(AnalysisDraft::for_kind(prerequisite))
+    let draft = AnalysisDraft::for_kind(prerequisite);
+    // A synthesized carrier is refused here for the same reason a chosen one
+    // is: a repair that inserted it would leave the plan holding a dependency
+    // its own contract rejects, with no further repair to offer.
+    if prerequisite == AnalysisKind::HarmonicBalance
+        && let Some(issue) = dependency_configuration_issue(dependent, &draft)
+    {
+        return Err(issue.detail().to_owned());
+    }
+    Ok(draft)
 }
 
 pub(super) fn dependency_candidate_context_issue(
