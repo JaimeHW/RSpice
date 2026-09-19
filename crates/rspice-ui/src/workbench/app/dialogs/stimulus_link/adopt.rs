@@ -16,7 +16,7 @@ use egui::{Key, Modifiers, Rect, Sense, Ui, vec2};
 
 use crate::properties::source_preview;
 use crate::simulation::placed_sources;
-use crate::simulation::stimulus_realize::{self, PreviewTiming, WaveformTrace};
+use crate::simulation::stimulus_realize::{self, WaveformTrace};
 use crate::state::Component;
 use crate::state::stimulus_library::definition::{StimulusDefinition, StimulusFamily};
 use crate::state::stimulus_library::provenance::AdoptionFit;
@@ -116,7 +116,7 @@ pub(super) fn adopt_groups<'a>(
             family: definition.family(),
             meta: meta_line(definition, fit == AdoptionFit::Same, unit, curve),
             refusal: (fit == AdoptionFit::Kind).then(|| definition.kind_refusal(component)),
-            curve: curve.unwrap_or(&NO_MINI),
+            curve: curve.unwrap_or(&source_preview::NO_MINI),
         };
         match fit {
             AdoptionFit::Same => same.push(row),
@@ -150,11 +150,6 @@ pub(super) fn adopt_groups<'a>(
     .map(|(label, rows)| AdoptGroup { label, rows })
     .collect()
 }
-
-/// What a row shows before its mini has been evaluated, which is only ever the
-/// frame a definition is added on.
-static NO_MINI: std::sync::LazyLock<Result<WaveformTrace, String>> =
-    std::sync::LazyLock::new(|| Ok(WaveformTrace::Curve(Vec::new())));
 
 /// Whether one definition answers the filter: its name, the family keyword its
 /// card carries, or the purpose it was saved with.
@@ -207,35 +202,6 @@ fn meta_line(
     parts
 }
 
-/// Evaluate every definition's mini that is not already held, and report how
-/// many were evaluated.
-///
-/// The count is what the tests read: a list that re-evaluated on every pointer
-/// move would be one engine parse and sixty-four sample steps per definition
-/// per frame, and nothing about the drawing would show it.
-pub(super) fn ensure_minis(
-    cache: &mut MiniCache,
-    library: &crate::state::StimulusLibrary,
-    timing: PreviewTiming,
-) -> usize {
-    let (window, _) = source_preview::shape_window(timing);
-    let mut evaluated = 0;
-    for definition in library.definitions() {
-        let key = (definition.name().to_owned(), definition.revision());
-        if cache.contains_key(&key) {
-            continue;
-        }
-        let curve = source_preview::source_curve_with_samples(
-            &definition.transient_component(),
-            window,
-            source_preview::MINI_SAMPLES,
-        );
-        cache.insert(key, curve);
-        evaluated += 1;
-    }
-    evaluated
-}
-
 /// Render the adopt transaction.
 pub(super) fn render(
     ctx: &egui::Context,
@@ -244,7 +210,7 @@ pub(super) fn render(
     component: &Component,
     cache: &mut MiniCache,
 ) {
-    ensure_minis(cache, &state.workspace.stimulus_library, session.timing);
+    source_preview::ensure_minis(cache, &state.workspace.stimulus_library, session.timing);
     let groups = adopt_groups(state, component, &session.filter, cache);
     let picked = session.pick.as_ref().and_then(|name| {
         state

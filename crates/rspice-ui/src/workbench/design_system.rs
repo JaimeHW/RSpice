@@ -101,66 +101,13 @@ pub enum WorkbenchIcon {
     StarFilled,
 }
 
-/// Compact semantic status marks painted as vector geometry.
+/// The kit's status marks, under the name every workbench surface already
+/// imports them by.
 ///
-/// These deliberately replace Unicode check/triangle characters in dense
-/// engineering rows. The bundled text faces are not the authority for icon
-/// coverage, and a missing fallback must never turn a status into a tofu box.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum StatusMark {
-    Success,
-    Warning,
-    Failure,
-    Neutral,
-}
-
-pub fn paint_status_mark(painter: &egui::Painter, rect: Rect, mark: StatusMark, color: Color32) {
-    let side = rect.width().min(rect.height()).max(1.0);
-    let center = rect.center();
-    let half = side * 0.42;
-    let stroke = Stroke::new((side * 0.11).max(1.0), color);
-    match mark {
-        StatusMark::Success => {
-            painter.add(Shape::line(
-                vec![
-                    Pos2::new(center.x - half, center.y),
-                    Pos2::new(center.x - half * 0.22, center.y + half * 0.72),
-                    Pos2::new(center.x + half, center.y - half * 0.78),
-                ],
-                stroke,
-            ));
-        }
-        StatusMark::Warning => {
-            painter.add(Shape::closed_line(
-                vec![
-                    Pos2::new(center.x, center.y - half),
-                    Pos2::new(center.x + half, center.y + half * 0.82),
-                    Pos2::new(center.x - half, center.y + half * 0.82),
-                ],
-                stroke,
-            ));
-        }
-        StatusMark::Failure => {
-            painter.line_segment(
-                [
-                    Pos2::new(center.x - half, center.y - half),
-                    Pos2::new(center.x + half, center.y + half),
-                ],
-                stroke,
-            );
-            painter.line_segment(
-                [
-                    Pos2::new(center.x + half, center.y - half),
-                    Pos2::new(center.x - half, center.y + half),
-                ],
-                stroke,
-            );
-        }
-        StatusMark::Neutral => {
-            painter.circle_filled(center, (side * 0.18).max(1.25), color);
-        }
-    }
-}
+/// They moved down to [`crate::ui::widgets`] when a painter below the shell
+/// needed the same warning triangle: a mini that cannot draw the engine's
+/// refusal has to say so with the mark the row beside it uses.
+pub use crate::ui::widgets::{StatusMark, paint_status_mark};
 
 impl WorkbenchIcon {
     pub fn paint(self, painter: &egui::Painter, rect: Rect, color: Color32) {
@@ -1707,6 +1654,47 @@ fn property_row_with_tone(
     });
     response.on_hover_text(format!("{full_label}: {full_value}"))
 }
+
+/// One deck line in the inset well every surface shows a card in.
+///
+/// The well is what says "this is text the netlister wrote" rather than a
+/// sentence about it, and it is sized to the card so a short one does not leave
+/// a slab of inset beside it. `trailing_inset` is the room the caller's row
+/// keeps at its right edge, so the elision happens against the track the card
+/// really has rather than against the whole row.
+///
+/// Shared because the Stimulus Library's realization band and its inspector
+/// show the same instance's card side by side: two wells with two paddings read
+/// as two different kinds of text.
+pub fn card_well(ui: &mut Ui, text: &str, color: Color32, trailing_inset: f32) -> Response {
+    const PAD: f32 = 6.0;
+    let palette = Tokens::get(ui.ctx()).color;
+    let font = theme::mono(tokens::FS_0, FontWeight::Regular);
+    let room = (ui.available_width() - 2.0 * PAD - trailing_inset).max(0.0);
+    let shown = elide_text(ui, text, &font, room);
+    let elided = shown != text;
+    let galley = ui.painter().layout_no_wrap(shown, font, color);
+    let (rect, response) = ui.allocate_exact_size(
+        Vec2::new(galley.size().x + 2.0 * PAD, CARD_WELL_HEIGHT),
+        Sense::hover(),
+    );
+    ui.painter().rect_filled(rect, 2.0, palette.bg_inset);
+    ui.painter().galley(
+        Pos2::new(rect.left() + PAD, rect.center().y - galley.size().y * 0.5),
+        galley,
+        color,
+    );
+    response
+        .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), text));
+    if elided {
+        return response.on_hover_text(text);
+    }
+    response
+}
+
+/// The height a [`card_well`] claims, so a band can reserve its rows before it
+/// paints them.
+pub const CARD_WELL_HEIGHT: f32 = 18.0;
 
 pub(crate) fn elide_text(ui: &Ui, text: &str, font: &egui::FontId, max_width: f32) -> String {
     if max_width <= 0.0 {

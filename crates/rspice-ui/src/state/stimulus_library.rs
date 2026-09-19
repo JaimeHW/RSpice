@@ -22,6 +22,10 @@ pub(crate) mod draft;
 pub(crate) mod library;
 pub(crate) mod provenance;
 
+/// The authored library the stimulus surfaces are gated and rendered against.
+#[cfg(test)]
+pub(crate) mod fixtures;
+
 /// Wall-clock milliseconds, through the shim the browser build needs.
 fn now_unix_ms() -> u64 {
     u64::try_from(crate::time_compat::unix_epoch().as_millis()).unwrap_or(u64::MAX)

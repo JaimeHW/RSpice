@@ -609,22 +609,10 @@ fn sentence_case(text: &str) -> String {
     }
 }
 
-/// A checkpoint's creation time in UTC, for the row's tooltip.
+/// A checkpoint's creation time in UTC, for the row's tooltip, in the spelling
+/// every stored timestamp in this product is written out in.
 fn utc_stamp(created_unix_ms: u64) -> String {
-    let Ok(seconds) = i64::try_from(created_unix_ms / 1_000) else {
-        return "at an unknown time".to_owned();
-    };
-    let Ok(stamp) = time::OffsetDateTime::from_unix_timestamp(seconds) else {
-        return "at an unknown time".to_owned();
-    };
-    format!(
-        "{:04}-{:02}-{:02} {:02}:{:02} UTC",
-        stamp.year(),
-        u8::from(stamp.month()),
-        stamp.day(),
-        stamp.hour(),
-        stamp.minute()
-    )
+    crate::time_compat::utc_stamp(created_unix_ms)
 }
 
 pub(super) fn ensure_project_recovery_catalog(ctx: &Context, state: &mut AppState) {

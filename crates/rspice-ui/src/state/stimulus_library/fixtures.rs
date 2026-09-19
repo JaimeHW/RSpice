@@ -1,16 +1,22 @@
-//! The library the instrument is reviewed and gated against.
+//! The library every stimulus surface is reviewed and gated against.
 //!
 //! The mockup's fourteen definitions, in the application's own spelling: the
 //! same component type, the same primary value and the same parameter string a
 //! placed source of that shape would carry. They are a fixture and nothing
 //! else — no surface reads them and no project ships them — but they are the
-//! only set that covers every family the stage has a distinct layout for, so
-//! the rasters and the fit gates seed from here rather than from whatever
-//! definition a test happened to write.
+//! only set that covers every family a stimulus surface has a distinct layout
+//! for, so the rasters and the fit gates seed from here rather than from
+//! whatever definition a test happened to write.
+//!
+//! They sit beside the model rather than beside one surface because three
+//! surfaces are gated against them — the instrument, the library browser and
+//! the inspector — and they name nothing above `state`. A copy per surface
+//! would be three libraries drifting apart under three sets of renders.
 
 use crate::state::ComponentType;
-use crate::state::stimulus_library::definition::{RetainedPwlFile, StimulusDefinition};
-use crate::state::stimulus_library::library::StimulusLibrary;
+
+use super::definition::{RetainedPwlFile, StimulusDefinition};
+use super::library::StimulusLibrary;
 
 /// One fixture row: name, type, primary value, parameter string.
 type Row = (&'static str, ComponentType, &'static str, &'static str);
@@ -105,7 +111,7 @@ const MEASURED_TABLE: &str = "0 0\n200u 0\n210u 8.2m\n230u 11.6m\n260u 12.4m\n30
                               1m 9.99m\n1.4m 10m\n2m 10m\n";
 
 /// One definition, by the name the mockup gives it.
-pub(super) fn definition(name: &str) -> StimulusDefinition {
+pub(crate) fn definition(name: &str) -> StimulusDefinition {
     let (_, kind, value, params) = ROWS
         .into_iter()
         .find(|(row, ..)| *row == name)
@@ -124,7 +130,7 @@ pub(super) fn definition(name: &str) -> StimulusDefinition {
 }
 
 /// Every fixture definition, in the order the mockup lists them.
-pub(super) fn library() -> StimulusLibrary {
+pub(crate) fn library() -> StimulusLibrary {
     let mut library = StimulusLibrary::default();
     for (name, ..) in ROWS {
         library
@@ -135,6 +141,6 @@ pub(super) fn library() -> StimulusLibrary {
 }
 
 /// The name of every fixture definition.
-pub(super) fn names() -> Vec<&'static str> {
+pub(crate) fn names() -> Vec<&'static str> {
     ROWS.into_iter().map(|(name, ..)| name).collect()
 }

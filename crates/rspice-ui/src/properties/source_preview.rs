@@ -39,6 +39,65 @@ pub(crate) const MINI_SAMPLES: usize = 64;
 /// The inset well a list mini is drawn in.
 pub(crate) const MINI_SIZE: Vec2 = Vec2::new(44.0, 20.0);
 
+/// How a stimulus surface spells a number beside its unit.
+///
+/// The display form every axis label, tick and readout on these surfaces uses,
+/// with a space before its unit: the deck's own `2us` belongs in a netlist
+/// column, not two lines under a plot whose axis says `2 µs`. Two significant
+/// figures is what a list row can carry and what separates two definitions of a
+/// family.
+///
+/// Here rather than in one of the three surfaces that spell numbers this way,
+/// because the link dialog's row and the library browser's row state the same
+/// figure about the same definition and a reader moving between them must not
+/// meet two spellings of it.
+pub(crate) fn display_spelling(value: f64, unit: &str) -> String {
+    si_tick_label(value, unit, 2)
+}
+
+/// One definition's evaluated mini, keyed by name and revision.
+///
+/// Every list that draws a library beside its names holds one of these: the
+/// link dialog's pick list and the Stimulus Library's browser. Evaluating per
+/// frame is one engine parse and [`MINI_SAMPLES`] steps per definition per
+/// frame — for a twenty-four row library, 1,536 sample steps for every pointer
+/// move, and nothing about the drawing would show it.
+///
+/// The revision is part of the key so a definition published in another surface
+/// while the list is up redraws rather than showing the picture it had.
+pub(crate) type MiniCache = std::collections::HashMap<(String, u32), Result<WaveformTrace, String>>;
+
+/// Evaluate every definition's mini that is not already held, and report how
+/// many were evaluated.
+///
+/// The count is what the tests read: a claim about per-frame cost is only worth
+/// making if something can hold the surface to it.
+pub(crate) fn ensure_minis(
+    cache: &mut MiniCache,
+    library: &crate::state::StimulusLibrary,
+    timing: PreviewTiming,
+) -> usize {
+    let (window, _) = shape_window(timing);
+    let mut evaluated = 0;
+    for definition in library.definitions() {
+        let key = (definition.name().to_owned(), definition.revision());
+        if cache.contains_key(&key) {
+            continue;
+        }
+        cache.insert(
+            key,
+            source_curve_with_samples(&definition.transient_component(), window, MINI_SAMPLES),
+        );
+        evaluated += 1;
+    }
+    evaluated
+}
+
+/// What a row shows before its mini has been evaluated, which is only ever the
+/// frame a definition is added on.
+pub(crate) static NO_MINI: std::sync::LazyLock<Result<WaveformTrace, String>> =
+    std::sync::LazyLock::new(|| Ok(WaveformTrace::Curve(Vec::new())));
+
 /// This source's waveform over `timing`, or why the engine cannot draw one.
 ///
 /// The generator's and the parser's refusals already name the component and
@@ -612,8 +671,157 @@ pub(crate) fn paint_mini(
             };
             paint_trace(painter, trace, &placement, ink, 1.0);
         }
-        _ => paint_family_mark(painter, plot, family, t.color.text_faint),
+        // A card the engine refused, for a family that does have a waveform at
+        // this boundary, is the one case a mark must not read as data: the flat
+        // line this used to draw is a level the definition does not hold.
+        (Err(_), _) if !boundary_family(family) => crate::ui::widgets::paint_status_mark(
+            painter,
+            Rect::from_center_size(plot.center(), Vec2::splat(plot.height())),
+            crate::ui::widgets::StatusMark::Warning,
+            t.color.warn,
+        ),
+        _ => paint_boundary_mark(painter, plot, family, t.color.text_faint),
     }
+}
+
+/// Whether this family has no waveform at this boundary at all, as opposed to
+/// one the engine declined to evaluate.
+///
+/// The three are `preview_defect`'s own: a noise train and a random train are
+/// expanded when a transient starts, and a `PWL FILE` table is read from a path
+/// this process may not be able to reach.
+const fn boundary_family(family: StimulusFamily) -> bool {
+    matches!(
+        family,
+        StimulusFamily::Trnoise | StimulusFamily::Trrandom | StimulusFamily::PwlFile
+    )
+}
+
+/// The family's own mark, drawn as geometry.
+///
+/// Vectors rather than glyphs: the bundled text faces carry no sine wave, pulse
+/// train or noise band, and a missing glyph is a tofu box in the one place a
+/// reader looks first to know what they are looking at. Three surfaces show it
+/// — the instrument's identity band, the library browser's group headings, and
+/// any list that names a family without room for a curve — so it is painted
+/// once, at whatever size the caller's rectangle states.
+pub(crate) fn paint_family_mark(
+    painter: &egui::Painter,
+    rect: Rect,
+    family: StimulusFamily,
+    color: egui::Color32,
+) {
+    let stroke = Stroke::new(1.3, color);
+    let box_rect = rect.shrink(2.0);
+    let x = |fraction: f32| egui::lerp(box_rect.left()..=box_rect.right(), fraction);
+    let y = |fraction: f32| egui::lerp(box_rect.bottom()..=box_rect.top(), fraction);
+    let line = |points: Vec<egui::Pos2>| painter.add(egui::Shape::line(points, stroke));
+    match family {
+        StimulusFamily::Dc => {
+            line(vec![pos2(x(0.0), y(0.5)), pos2(x(1.0), y(0.5))]);
+        }
+        StimulusFamily::Ac => {
+            line(vec![pos2(x(0.0), y(0.5)), pos2(x(1.0), y(0.5))]);
+            line(family_sine(&x, &y, 1.0, 0.18));
+        }
+        StimulusFamily::Sin => {
+            line(family_sine(&x, &y, 1.0, 0.42));
+        }
+        StimulusFamily::Pulse => {
+            line(vec![
+                pos2(x(0.0), y(0.15)),
+                pos2(x(0.2), y(0.15)),
+                pos2(x(0.2), y(0.85)),
+                pos2(x(0.6), y(0.85)),
+                pos2(x(0.6), y(0.15)),
+                pos2(x(1.0), y(0.15)),
+            ]);
+        }
+        StimulusFamily::Pwl | StimulusFamily::PwlFile => {
+            line(vec![
+                pos2(x(0.0), y(0.2)),
+                pos2(x(0.3), y(0.85)),
+                pos2(x(0.6), y(0.4)),
+                pos2(x(1.0), y(0.6)),
+            ]);
+        }
+        StimulusFamily::Exp => {
+            line(
+                (0..=12_u8)
+                    .map(|step| {
+                        let fraction = f32::from(step) / 12.0;
+                        pos2(x(fraction), y(0.15 + 0.7 * (1.0 - (-3.0 * fraction).exp())))
+                    })
+                    .collect(),
+            );
+        }
+        StimulusFamily::Sffm => {
+            line(family_sine(&x, &y, 3.0, 0.35));
+        }
+        StimulusFamily::Am => {
+            line(family_sine(&x, &y, 4.0, 0.42));
+            line(vec![
+                pos2(x(0.0), y(0.6)),
+                pos2(x(0.5), y(0.95)),
+                pos2(x(1.0), y(0.6)),
+            ]);
+        }
+        StimulusFamily::Pat => {
+            line(vec![
+                pos2(x(0.0), y(0.15)),
+                pos2(x(0.25), y(0.15)),
+                pos2(x(0.25), y(0.85)),
+                pos2(x(0.5), y(0.85)),
+                pos2(x(0.5), y(0.15)),
+                pos2(x(0.75), y(0.15)),
+                pos2(x(0.75), y(0.85)),
+                pos2(x(1.0), y(0.85)),
+            ]);
+        }
+        StimulusFamily::Trnoise => {
+            line(
+                (0..=16_u8)
+                    .map(|step| {
+                        let fraction = f32::from(step) / 16.0;
+                        let jitter =
+                            [0.5, 0.8, 0.3, 0.65, 0.2, 0.75, 0.45, 0.6][usize::from(step) % 8];
+                        pos2(x(fraction), y(jitter))
+                    })
+                    .collect(),
+            );
+        }
+        StimulusFamily::Trrandom => {
+            line(vec![
+                pos2(x(0.0), y(0.4)),
+                pos2(x(0.25), y(0.4)),
+                pos2(x(0.25), y(0.8)),
+                pos2(x(0.5), y(0.8)),
+                pos2(x(0.5), y(0.25)),
+                pos2(x(0.75), y(0.25)),
+                pos2(x(0.75), y(0.6)),
+                pos2(x(1.0), y(0.6)),
+            ]);
+        }
+    }
+}
+
+/// `cycles` periods of a sine across a family mark, at `amplitude` of its
+/// height.
+fn family_sine(
+    x: &impl Fn(f32) -> f32,
+    y: &impl Fn(f32) -> f32,
+    cycles: f32,
+    amplitude: f32,
+) -> Vec<egui::Pos2> {
+    (0..=24_u8)
+        .map(|step| {
+            let fraction = f32::from(step) / 24.0;
+            pos2(
+                x(fraction),
+                y(0.5 + amplitude * (fraction * cycles * std::f32::consts::TAU).sin()),
+            )
+        })
+        .collect()
 }
 
 /// The mark a family with no waveform at this boundary shows instead of a
@@ -623,7 +831,10 @@ pub(crate) fn paint_mini(
 /// a character here would rasterize as a tofu box, and the three families that
 /// reach this arm are exactly the three the engine cannot step through until a
 /// run builds them.
-fn paint_family_mark(
+///
+/// Deliberately not [`paint_family_mark`]: this arm is drawn because there is
+/// no waveform, and the identity mark is a picture of one.
+fn paint_boundary_mark(
     painter: &egui::Painter,
     plot: Rect,
     family: StimulusFamily,

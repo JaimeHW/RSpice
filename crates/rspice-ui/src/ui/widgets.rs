@@ -31,6 +31,7 @@ mod section;
 mod segmented;
 mod select;
 mod selection_command;
+mod status_mark;
 mod switch;
 mod table;
 mod toast;
@@ -58,6 +59,7 @@ pub(crate) use selection_command::{
     NotePreviewStyle, PreviewPoint, SelectionImpact, SelectionPreview, ShapePreviewStroke,
     selection_command_workflow, workflow_preview_status,
 };
+pub use status_mark::{StatusMark, paint_status_mark};
 pub(crate) use switch::{SWITCH_WIDTH, paint_switch};
 pub use table::measurement_table;
 pub use toast::{

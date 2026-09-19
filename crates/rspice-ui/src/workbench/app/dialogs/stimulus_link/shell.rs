@@ -12,29 +12,20 @@
 
 use egui::{Align, Layout, Rect, Sense, Stroke, Ui, vec2};
 
-use crate::simulation::stimulus_realize::WaveformTrace;
 use crate::state::stimulus_library::provenance::ProvenanceState;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 
 /// One definition's evaluated mini, kept for as long as the dialog is open.
 ///
-/// Keyed by name *and* revision so a definition edited in another surface while
-/// this dialog is up redraws, and so nothing is evaluated twice: a 24 row
-/// library evaluated per frame is 24 engine parses and 1,536 sample steps for
-/// every pointer move.
-pub(super) type MiniCache = std::collections::HashMap<(String, u32), Result<WaveformTrace, String>>;
+/// The cache and the evaluation that fills it belong to the painter of the
+/// picture, because the Stimulus Library's browser holds exactly the same list
+/// against exactly the same cost.
+pub(super) use crate::properties::source_preview::MiniCache;
 
-/// How this dialog spells a number.
-///
-/// The display form every axis label, tick and readout on this surface uses,
-/// with a space before its unit. The deck's own `2us` belongs in a netlist
-/// column, not two lines under a plot whose axis says `2 µs`: one surface, one
-/// spelling. Two significant figures is what a row this narrow can carry and
-/// what separates two definitions of a family.
-pub(super) fn display_spelling(value: f64, unit: &str) -> String {
-    crate::ui::plot::si_tick_label(value, unit, 2)
-}
+/// How this dialog spells a number, which is how the library browser spells it
+/// too — see [`crate::properties::source_preview::display_spelling`].
+pub(super) use crate::properties::source_preview::display_spelling;
 
 /// The vertical pitch of a fact row, and the inset every pane keeps.
 pub(super) const FACT_PITCH: f32 = 22.0;

@@ -7,9 +7,10 @@
 //! cross-kind adoption is refused rather than converted, and the list a reader
 //! walks never arrives on a row the primary would refuse.
 
-use super::adopt::{adopt_groups, ensure_minis, stepped};
+use super::adopt::{adopt_groups, stepped};
 use super::shell::MiniCache;
 use super::*;
+use crate::properties::source_preview::ensure_minis;
 use crate::state::stimulus_library::provenance::ProvenanceState;
 use crate::state::{ComponentType, Point};
 #[cfg(not(target_arch = "wasm32"))]

@@ -2,9 +2,9 @@
 
 use egui::{Pos2, Rect, vec2};
 
-use super::fixtures;
 use super::*;
 use crate::state::stimulus_library::definition::StimulusFamily;
+use crate::state::stimulus_library::fixtures;
 use crate::state::{Component, ComponentType, Point};
 use crate::workbench::RSpiceApp;
 

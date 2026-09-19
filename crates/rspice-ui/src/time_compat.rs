@@ -52,6 +52,39 @@ pub(crate) fn unix_epoch() -> std::time::Duration {
     checked_unix_epoch().unwrap_or_default()
 }
 
+/// A stored millisecond timestamp written out for a reader, in UTC.
+///
+/// Every durable record in the project — a checkpoint, a revision, a stimulus
+/// definition — keeps its time as milliseconds since the epoch, and every
+/// surface that shows one owes the reader the same spelling. UTC rather than
+/// the local zone because these timestamps travel with the document: a project
+/// mailed across a border must not describe itself as having been edited at two
+/// different times.
+///
+/// Zero is the reserved "unknown historical time" of
+/// [`checked_unix_time_ms`], and a timestamp the calendar cannot place is the
+/// same absence, so both say so rather than printing 1970.
+pub(crate) fn utc_stamp(unix_ms: u64) -> String {
+    const UNKNOWN: &str = "at an unknown time";
+    if unix_ms == 0 {
+        return UNKNOWN.to_owned();
+    }
+    let Ok(seconds) = i64::try_from(unix_ms / 1_000) else {
+        return UNKNOWN.to_owned();
+    };
+    let Ok(stamp) = time::OffsetDateTime::from_unix_timestamp(seconds) else {
+        return UNKNOWN.to_owned();
+    };
+    format!(
+        "{:04}-{:02}-{:02} {:02}:{:02} UTC",
+        stamp.year(),
+        u8::from(stamp.month()),
+        stamp.day(),
+        stamp.hour(),
+        stamp.minute()
+    )
+}
+
 #[cfg(test)]
 pub(crate) use tests::with_unix_epoch;
 
