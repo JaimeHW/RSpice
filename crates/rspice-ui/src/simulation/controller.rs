@@ -67,6 +67,7 @@ mod manual_deck;
 pub(crate) mod prepared_run;
 #[cfg(test)]
 mod projection_ratchet;
+mod recorded_fft_result;
 mod results_convert;
 mod results_post;
 mod results_update;
@@ -1664,6 +1665,16 @@ impl SimulationController {
                         })
                         .unwrap_or_else(|| "Analysis".to_owned());
 
+                    // A short FFT record is a successful result with no
+                    // spectrum. It is stated on the Console as well as on the
+                    // sheet, because the reader is looking at the run here.
+                    if let crate::simulation::SimulationResult::Fft { spectrum, .. } = &sim_result
+                        && let Some(notice) =
+                            recorded_fft_result::incomplete_history_notice(spectrum)
+                    {
+                        state.push_sim_message(ConsoleMessage::warning(notice));
+                    }
+
                     // Convert SimulationResult to AnalysisResult and add to run
                     let analysis_type = self
                         .current_spec
@@ -1724,6 +1735,18 @@ impl SimulationController {
                         })
                         .flatten()
                         .collect::<Vec<_>>();
+                    // A recorded FFT reads no waveform at all: it selects the
+                    // spectrum the engine already computed inside this solve.
+                    let recorded_spectra_required = self
+                        .current_provenance
+                        .as_ref()
+                        .map(|provenance| provenance.source_instance_id())
+                        .is_some_and(|producer| {
+                            self.pending_analyses.iter().any(|task| {
+                                task.dependencies().contains(&producer)
+                                    && matches!(task.spec(), AnalysisSpec::Fft { .. })
+                            })
+                        });
                     let periodic_artifact_required = self
                         .current_provenance
                         .as_ref()
@@ -1779,7 +1802,9 @@ impl SimulationController {
                             Some(AnalysisSpec::Transient { .. }),
                             Some(provenance),
                             Some(config_digest),
-                        ) if !required_artifact_waveforms.is_empty() => {
+                        ) if !required_artifact_waveforms.is_empty()
+                            || recorded_spectra_required =>
+                        {
                             ExecutionArtifactEnvelope::from_transient_result(
                                 provenance.prepared_snapshot_digest(),
                                 provenance.source_instance_id(),
@@ -1787,6 +1812,7 @@ impl SimulationController {
                                 config_digest,
                                 &sim_result,
                                 &required_artifact_waveforms,
+                                recorded_spectra_required,
                             )
                             .map_err(|error| {
                                 format!(

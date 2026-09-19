@@ -7,7 +7,7 @@
 use super::*;
 use std::collections::HashMap;
 
-use crate::simulation::execution::{PreparedDependencyBinding, PreparedTask};
+use crate::simulation::execution::{PreparedDependencyBinding, PreparedTask, bound_cards};
 use crate::simulation::plan::FrozenSimulationPlan;
 
 impl SimulationController {
@@ -281,6 +281,12 @@ impl SimulationController {
         if !errors.is_empty() {
             Err(errors)
         } else {
+            // Before the producer identities are taken, because attaching a
+            // card to a transient changes that transient's payload digest —
+            // and the bindings below capture the digest a dependent must see.
+            // A `.fft` card makes every requested sample time a solver stop,
+            // so it is part of the solve it rides on, not an observation of it.
+            bound_cards::attach_bound_observation_cards(&mut queue);
             let producer_identities = queue
                 .iter()
                 .map(|task| {
@@ -305,7 +311,7 @@ impl SimulationController {
                 .collect::<HashMap<_, _>>();
             for task in &mut queue {
                 let required_kind = match task.queued_analysis().spec {
-                    AnalysisSpec::Fourier { .. } => Some(
+                    AnalysisSpec::Fourier { .. } | AnalysisSpec::Fft { .. } => Some(
                         crate::simulation::execution::ExecutionArtifactKind::TransientTrajectory,
                     ),
                     AnalysisSpec::Pss {
@@ -398,6 +404,7 @@ impl SimulationController {
                 | AnalysisSpec::SParameter { .. }
                 | AnalysisSpec::Envelope { .. }
                 | AnalysisSpec::Fourier { .. }
+                | AnalysisSpec::Fft { .. }
                 | AnalysisSpec::Reliability { .. }
                 | AnalysisSpec::Optimization { .. }
                 | AnalysisSpec::Soa { .. }

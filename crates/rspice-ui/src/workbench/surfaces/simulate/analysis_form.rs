@@ -33,6 +33,7 @@ mod pss;
 mod pstb;
 mod pxf;
 mod quasi_periodic;
+mod recorded_fft;
 mod reliability;
 mod run_space;
 mod s_parameter;
@@ -1114,6 +1115,7 @@ pub(super) fn form(
         AnalysisDraft::TransientNoise(setup) => transient_noise::fields(ui, setup, policy, locale),
         AnalysisDraft::DcMismatch(setup) => dc_mismatch::fields(ui, setup),
         AnalysisDraft::AcData(setup) => ac_data::fields(ui, setup),
+        AnalysisDraft::Fft(setup) => recorded_fft::fields(ui, setup, policy, locale),
     }
     clear_pending_cell(ui);
 }

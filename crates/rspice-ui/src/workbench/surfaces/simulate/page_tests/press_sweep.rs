@@ -493,7 +493,7 @@ const PRESSED_PER_SURFACE: &[(&str, usize)] = &[
     ("Models", 1),
     ("Solver", 32),
     ("Save", 6),
-    ("analysis catalogue · Analyses", 32),
+    ("analysis catalogue · Analyses", 33),
     ("analysis catalogue · Excitations", 0),
     ("analysis catalogue · Variables", 0),
     ("analysis catalogue · Outputs", 0),
@@ -541,7 +541,8 @@ const PRESSED_PER_SURFACE: &[(&str, usize)] = &[
 ///
 /// And the catalogue gained the frequency-table AC kind: one more row to add.
 /// Then DC mismatch became addable, which is one more again.
-const PRESSED_FLOOR: usize = 293;
+/// And the FFT spectrum kind, for the same one row.
+const PRESSED_FLOOR: usize = 294;
 
 /// Controls that are wired to nothing.
 ///
