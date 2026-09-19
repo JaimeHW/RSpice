@@ -75,6 +75,8 @@ pub(super) fn monte_carlo_card(
     Ok(AnalysisCommand::MonteCarlo(
         rspice_core::netlist::MonteCarloCommand {
             runs: num_runs,
+            confidence_pct: 95.0,
+            confidence_method: Default::default(),
             seed,
             distribution,
             relative_spread: spread,

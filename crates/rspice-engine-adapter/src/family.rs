@@ -531,7 +531,7 @@ pub(crate) fn run_directive(
                     tolerance: card.relative_spread,
                 },
             };
-            let result = engine.run_monte_carlo_with_options_and_abort(
+            let mut result = engine.run_monte_carlo_with_options_and_abort(
                 netlist,
                 card.runs,
                 // A deck that does not seed its own Monte Carlo is still
@@ -546,6 +546,12 @@ pub(crate) fn run_directive(
                 ),
                 distribution,
                 (!card.params.is_empty()).then_some(card.params.as_slice()),
+                abort,
+            )?;
+            result.compute_mean_confidence(
+                card.confidence_pct,
+                card.confidence_method.into(),
+                engine.config().resource_limits,
                 abort,
             )?;
             AnalysisResultDocument::from_monte_carlo(id, &result).map_err(map_result_document_error)

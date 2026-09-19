@@ -538,3 +538,68 @@ fn confidence_reports_unrepresentable_student_t_limits_without_losing_bootstrap_
         })
     );
 }
+
+#[test]
+fn authored_monte_carlo_confidence_is_exact_and_rejects_ignored_options() {
+    use rspice_core::netlist::{AnalysisCommand, MonteCarloMeanConfidenceMethod};
+    for (tail, level, method) in [
+        ("", 95.0, MonteCarloMeanConfidenceMethod::StudentT),
+        (
+            "CONFIDENCE=90.12345678912345 CI STUDENTT",
+            90.12345678912345,
+            MonteCarloMeanConfidenceMethod::StudentT,
+        ),
+        (
+            "BOOTSEED=18446744073709551615 RESAMPLES 257 CI=BOOTSTRAP CONFIDENCE 99",
+            99.0,
+            MonteCarloMeanConfidenceMethod::PercentileBootstrap {
+                resamples: 257,
+                seed: u64::MAX,
+            },
+        ),
+        (
+            "CI BOOTSTRAP",
+            95.0,
+            MonteCarloMeanConfidenceMethod::PercentileBootstrap {
+                resamples: 10_000,
+                seed: 0,
+            },
+        ),
+    ] {
+        let net =
+            Netlist::parse(&format!("MC confidence\n.mc 8 {tail} PARAMS rload\n.end\n")).unwrap();
+        let AnalysisCommand::MonteCarlo(card) = &net.analyses[0] else {
+            panic!("MC")
+        };
+        assert_eq!(card.confidence_pct, level);
+        assert_eq!(card.confidence_method, method);
+        assert_eq!(card.params, ["RLOAD"]);
+        assert_eq!(
+            MeanConfidenceMethod::from(card.confidence_method),
+            match method {
+                MonteCarloMeanConfidenceMethod::StudentT => MeanConfidenceMethod::StudentT,
+                MonteCarloMeanConfidenceMethod::PercentileBootstrap { resamples, seed } =>
+                    MeanConfidenceMethod::PercentileBootstrap { resamples, seed },
+            }
+        );
+    }
+    for tail in [
+        "CONFIDENCE 0",
+        "CONFIDENCE 100",
+        "CONFIDENCE -1",
+        "CONFIDENCE 1e999",
+        "CI UNKNOWN",
+        "CI BOOTSTRAP RESAMPLES 1",
+        "CI BOOTSTRAP RESAMPLES 2.5",
+        "BOOTSEED 0",
+        "RESAMPLES 100",
+        "CI STUDENTT RESAMPLES 100",
+        "CI BOOTSTRAP BOOTSEED 18446744073709551616",
+        "CONFIDENCE 90 CONFIDENCE 95",
+    ] {
+        assert!(
+            Netlist::parse(&format!("MC confidence\n.mc 8 {tail}\n.end\n")).is_err(),
+            "accepted {tail}"
+        );
+    }
+}

@@ -3062,9 +3062,21 @@ impl AnalysisCardError {
     }
 }
 
+/// Mean-confidence estimator selected by an authored Monte Carlo card.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum MonteCarloMeanConfidenceMethod {
+    #[default]
+    StudentT,
+    /// Percentile bootstrap with a stream independent of circuit sampling.
+    PercentileBootstrap { resamples: usize, seed: u64 },
+}
+
 /// Monte Carlo command configuration
 #[derive(Debug, Clone)]
 pub struct MonteCarloCommand {
+    /// Two-sided confidence level in percent, strictly between zero and 100.
+    pub confidence_pct: Value,
+    pub confidence_method: MonteCarloMeanConfidenceMethod,
     /// Number of Monte Carlo runs
     pub runs: usize,
     /// Optional RNG seed (deterministic when set)
@@ -3085,6 +3097,8 @@ impl MonteCarloCommand {
     pub fn new(runs: usize) -> Self {
         Self {
             runs,
+            confidence_pct: 95.0,
+            confidence_method: MonteCarloMeanConfidenceMethod::StudentT,
             seed: None,
             distribution: MonteCarloDistribution::Gaussian,
             relative_spread: 0.01,

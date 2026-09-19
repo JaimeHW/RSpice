@@ -987,7 +987,9 @@ use rspice_core::analysis::harmonic_balance::{
 // Studio validates authored DC grids with the engine's bounded point generator.
 // Studio also transforms a retained current trace without reconstructing an engine result.
 // Retained oscillator consumers can request the authored-card band integration.
-const MAX_PUBLIC_ITEMS: usize = 5075;
+// +1 deliberate authored-card API: MonteCarloMeanConfidenceMethod is read by
+// Studio, CLI, Python, WASM and the adapter when executing .MC confidence options.
+const MAX_PUBLIC_ITEMS: usize = 5076;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

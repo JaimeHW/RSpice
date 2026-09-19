@@ -25,6 +25,18 @@ pub enum MeanConfidenceMethod {
     PercentileBootstrap { resamples: usize, seed: u64 },
 }
 
+impl From<crate::netlist::MonteCarloMeanConfidenceMethod> for MeanConfidenceMethod {
+    fn from(method: crate::netlist::MonteCarloMeanConfidenceMethod) -> Self {
+        match method {
+            crate::netlist::MonteCarloMeanConfidenceMethod::StudentT => Self::StudentT,
+            crate::netlist::MonteCarloMeanConfidenceMethod::PercentileBootstrap {
+                resamples,
+                seed,
+            } => Self::PercentileBootstrap { resamples, seed },
+        }
+    }
+}
+
 impl MeanConfidenceMethod {
     pub const fn tag(self) -> &'static str {
         match self {

@@ -183,6 +183,10 @@ pub(super) fn run_monte_carlo(
     seed: u64,
     distribution: rspice_core::analysis::Distribution,
     parameter_filter: Option<&[String]>,
+    mean_confidence: Option<(
+        f64,
+        rspice_core::analysis::monte_carlo::MeanConfidenceMethod,
+    )>,
 ) -> Result<(), CliError> {
     if !ctx.quiet {
         println!(
@@ -216,7 +220,19 @@ pub(super) fn run_monte_carlo(
         parameter_filter,
         &crate::abort::ProcessAbort,
     ) {
-        Ok(result) => {
+        Ok(mut result) => {
+            if let Some((level, method)) = mean_confidence {
+                result
+                    .compute_mean_confidence(
+                        level,
+                        method,
+                        ctx.engine.config().resource_limits,
+                        &crate::abort::ProcessAbort,
+                    )
+                    .map_err(|error| {
+                        map_advanced_simulation_error(ctx, "Monte Carlo confidence", error)
+                    })?;
+            }
             pb.finish_and_clear();
             ensure_not_cancelled(ctx)?;
 
@@ -392,7 +408,14 @@ pub(super) fn run_monte_carlo_from_command(
         Some(mc_cmd.params.as_slice())
     };
 
-    run_monte_carlo(ctx, mc_cmd.runs, seed, distribution, parameter_filter)
+    run_monte_carlo(
+        ctx,
+        mc_cmd.runs,
+        seed,
+        distribution,
+        parameter_filter,
+        Some((mc_cmd.confidence_pct, mc_cmd.confidence_method.into())),
+    )
 }
 
 /// The `--pss-freq` route. It supersedes the deck's authored cards outright,

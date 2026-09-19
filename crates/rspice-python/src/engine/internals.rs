@@ -122,14 +122,21 @@ impl PyEngine {
         let params = (!command.params.is_empty()).then(|| command.params.clone());
         let engine = self.engine_for_netlist(&netlist.inner);
         let result = run_interruptible(py, &self.active_runs, |abort| {
-            engine.run_monte_carlo_with_options_and_abort(
+            let mut result = engine.run_monte_carlo_with_options_and_abort(
                 &netlist.inner,
                 command.runs,
                 seed,
                 distribution,
                 params.as_deref(),
                 abort,
-            )
+            )?;
+            result.compute_mean_confidence(
+                command.confidence_pct,
+                command.confidence_method.into(),
+                engine.config().resource_limits,
+                abort,
+            )?;
+            Ok(result)
         })?;
         Ok(PyMonteCarloResult::from_core(&result))
     }

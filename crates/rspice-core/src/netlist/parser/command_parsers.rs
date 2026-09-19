@@ -1653,7 +1653,8 @@ pub(super) fn parse_pz_command(
 }
 
 /// Parse .MC command:
-/// .MC runs [SEED n] [DIST GAUSS|UNIFORM|WORSTCASE] [SPREAD rel] [PARAMS p1 p2 ...]
+/// .MC runs [SEED n] [DIST GAUSS|UNIFORM|WORSTCASE] [SPREAD rel]
+/// [CONFIDENCE pct] [CI STUDENTT|BOOTSTRAP] [RESAMPLES n] [BOOTSEED n] [PARAMS p1 p2 ...]
 ///
 /// Supported shorthand:
 /// .MC runs GAUSS sigma
@@ -1682,6 +1683,10 @@ pub(super) fn parse_mc_command(
         max_analysis_points,
     )?;
     let mut command = MonteCarloCommand::new(runs);
+    let mut bootstrap = false;
+    let mut resamples = None;
+    let mut bootstrap_seed = None;
+    let mut confidence_seen = std::collections::HashSet::new();
 
     let parse_distribution = |s: &str| -> Option<MonteCarloDistribution> {
         match s.to_ascii_uppercase().as_str() {
@@ -1694,7 +1699,49 @@ pub(super) fn parse_mc_command(
 
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
         let keyword = expect_ident(stream, line_num)?;
+        if matches!(
+            keyword.as_str(),
+            "CONFIDENCE" | "CI" | "RESAMPLES" | "BOOTSEED"
+        ) && !confidence_seen.insert(keyword.clone())
+        {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!("Duplicate .MC {keyword}"),
+            });
+        }
         match keyword.as_str() {
+            "CONFIDENCE" => {
+                stream.consume(&TokenKind::Equals);
+                command.confidence_pct = expect_value(stream, line_num, params)?;
+            }
+            "CI" => {
+                stream.consume(&TokenKind::Equals);
+                let method = expect_ident(stream, line_num)?;
+                bootstrap = match method.as_str() {
+                    "STUDENTT" => false,
+                    "BOOTSTRAP" => true,
+                    _ => {
+                        return Err(ParseError::Syntax {
+                            line: line_num,
+                            message: format!(
+                                "Invalid .MC CI {method}: expected STUDENTT or BOOTSTRAP"
+                            ),
+                        });
+                    }
+                };
+            }
+            "RESAMPLES" => {
+                stream.consume(&TokenKind::Equals);
+                let count = expect_u64_value(stream, line_num, params, ".MC RESAMPLES")?;
+                resamples = Some(usize::try_from(count).map_err(|_| ParseError::Syntax {
+                    line: line_num,
+                    message: ".MC RESAMPLES exceeds the platform range".into(),
+                })?);
+            }
+            "BOOTSEED" => {
+                stream.consume(&TokenKind::Equals);
+                bootstrap_seed = Some(expect_u64_value(stream, line_num, params, ".MC BOOTSEED")?);
+            }
             "SEED" => {
                 stream.consume(&TokenKind::Equals);
                 command.seed = Some(expect_u64_value(stream, line_num, params, ".MC SEED")?);
@@ -1772,7 +1819,7 @@ pub(super) fn parse_mc_command(
                 return Err(ParseError::Syntax {
                     line: line_num,
                     message: format!(
-                        "Invalid .MC keyword '{}': expected SEED, DIST, SPREAD, or PARAMS",
+                        "Invalid .MC keyword '{}': expected SEED, DIST, SPREAD, CONFIDENCE, CI, RESAMPLES, BOOTSEED, or PARAMS",
                         keyword
                     ),
                 });
@@ -1790,6 +1837,39 @@ pub(super) fn parse_mc_command(
         });
     }
 
+    if !command.confidence_pct.is_finite()
+        || command.confidence_pct <= 0.0
+        || command.confidence_pct >= 100.0
+    {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: ".MC CONFIDENCE must be finite and strictly between 0 and 100 percent".into(),
+        });
+    }
+    if bootstrap {
+        let resamples = resamples.unwrap_or(10_000);
+        if resamples < 2 {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: ".MC RESAMPLES must be at least two".into(),
+            });
+        }
+        crate::resource::ResourceLimitError::ensure(
+            crate::resource::ResourceKind::AnalysisPoints,
+            resamples,
+            max_analysis_points,
+        )?;
+        command.confidence_method =
+            crate::netlist::MonteCarloMeanConfidenceMethod::PercentileBootstrap {
+                resamples,
+                seed: bootstrap_seed.unwrap_or(0),
+            };
+    } else if resamples.is_some() || bootstrap_seed.is_some() {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: ".MC RESAMPLES and BOOTSEED require CI BOOTSTRAP".into(),
+        });
+    }
     Ok(command)
 }
 

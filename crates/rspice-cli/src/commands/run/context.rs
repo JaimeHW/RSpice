@@ -1273,6 +1273,7 @@ pub(super) fn run_requested_mode(
             ctx.args.seed.unwrap_or(1),
             distribution,
             parameter_filter,
+            None,
         )?;
         return Ok(RequestedModeOutcome::RanNeedsMeasurementFinalization);
     }

@@ -716,3 +716,52 @@ fn a_dcmatch_card_without_statistics_reports_the_engines_remedy() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn authored_monte_carlo_confidence_survives_cli_export() {
+    let dir = test_dir("mc_confidence");
+    let deck = write_deck(
+        &dir,
+        "confidence.sp",
+        "MC confidence\n.param rload=1k\nV1 in 0 1\nR1 in out {rload}\nR2 out 0 1k\n.mc 8 SEED 7 UNIFORM 0.1 CONFIDENCE 90 CI BOOTSTRAP RESAMPLES 257 BOOTSEED 18446744073709551615\n.end\n",
+    );
+    let output_path = dir.join("confidence.json");
+    let output = run_rspice(&[
+        "--quiet",
+        "run",
+        deck.to_str().unwrap(),
+        "-o",
+        output_path.to_str().unwrap(),
+        "-f",
+        "json",
+    ]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let result: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(output_path).unwrap()).unwrap();
+    assert_eq!(scalar_value(&result, "mean_confidence_level_pct"), 90.0);
+    assert_eq!(
+        scalar_value(&result, "mean_confidence_bootstrap_resamples"),
+        257.0
+    );
+    let scalar = |name: &str| {
+        result["scalars"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|s| s["name"] == name)
+            .unwrap()["value"]["value"]
+            .clone()
+    };
+    assert_eq!(
+        scalar("mean_confidence_method"),
+        "percentile-bootstrap-mean-v1"
+    );
+    assert_eq!(
+        scalar("mean_confidence_bootstrap_seed").as_u64(),
+        Some(u64::MAX)
+    );
+}

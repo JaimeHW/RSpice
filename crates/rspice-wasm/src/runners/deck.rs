@@ -543,13 +543,21 @@ fn execute_analysis(
                 request.seed.unwrap_or(0),
                 coordinate,
             );
-            let result = engine
+            let mut result = engine
                 .run_monte_carlo_with_options_and_abort(
                     netlist,
                     request.runs,
                     seed,
                     distribution,
                     filter,
+                    abort,
+                )
+                .map_err(simulation_error)?;
+            result
+                .compute_mean_confidence(
+                    request.confidence_pct,
+                    request.confidence_method.into(),
+                    engine.config().resource_limits,
                     abort,
                 )
                 .map_err(simulation_error)?;

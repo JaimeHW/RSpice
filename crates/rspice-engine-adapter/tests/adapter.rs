@@ -1104,6 +1104,35 @@ fn a_monte_carlo_result_retains_every_trial_and_its_statistics() {
 }
 
 #[test]
+fn a_monte_carlo_card_publishes_the_selected_mean_confidence() {
+    let job = Job::new("mc-confidence");
+    let response = job.execute(
+        "MC confidence\n.param rload=1k\nV1 in 0 1\nR1 in out {rload}\nR2 out 0 1k\n.mc 8 SEED 7 UNIFORM 0.1 CONFIDENCE 90 CI BOOTSTRAP RESAMPLES 257 BOOTSEED 18446744073709551615\n.end\n",
+        "monte_carlo",
+    );
+    assert_eq!(response["status"], "succeeded", "{response}");
+    let document = typed_result(&job, &response, "mc-001.result.json");
+    assert_eq!(
+        scalar_value(&document, "mean_confidence_level_pct"),
+        ScalarValue::Real { value: Some(90.0) }
+    );
+    assert_eq!(
+        scalar_value(&document, "mean_confidence_method"),
+        ScalarValue::Text {
+            value: "percentile-bootstrap-mean-v1".into()
+        }
+    );
+    assert_eq!(
+        scalar_value(&document, "mean_confidence_bootstrap_resamples"),
+        ScalarValue::Count { value: 257 }
+    );
+    assert_eq!(
+        scalar_value(&document, "mean_confidence_bootstrap_seed"),
+        ScalarValue::Count { value: u64::MAX }
+    );
+}
+
+#[test]
 fn a_pac_result_names_the_pss_it_linearized_around() {
     let job = Job::new("rf-pac");
     let response = job.execute(
