@@ -1650,6 +1650,7 @@ mod tests {
             num_harmonics: 10,
             output_node: "out".to_owned(),
             output_ref: "0".to_owned(),
+            additional_outputs: Vec::new(),
             start_time: 0.0,
             stop_time: 10.0e-6,
             compute_thd,
@@ -1662,6 +1663,68 @@ mod tests {
         let baseline = digest(&spec(true, false));
         assert_ne!(baseline, digest(&spec(false, false)));
         assert_ne!(baseline, digest(&spec(true, true)));
+    }
+
+    /// A Fourier plan that names one output digests to exactly the bytes it
+    /// digested to when the arm ended at `normalize`.
+    ///
+    /// The output list is appended as a conditional tail for that reason: a
+    /// one-output plan saved before the list existed must keep its identity,
+    /// while two runs that decompose different outputs must not share one.
+    #[test]
+    fn a_single_output_fourier_leaves_the_plan_digest_unchanged() {
+        let fourier = |additional_outputs: Vec<String>| AnalysisSpec::Fourier {
+            fundamental_freq: 1.0e6,
+            num_harmonics: 10,
+            output_node: "out".to_owned(),
+            output_ref: "0".to_owned(),
+            additional_outputs,
+            start_time: 0.0,
+            stop_time: 10.0e-6,
+            compute_thd: true,
+            normalize: false,
+        };
+        let spec = fourier(Vec::new());
+        let mut encoded = CanonicalWriter::new("test");
+        encode_analysis_spec(&mut encoded, &spec);
+
+        let mut before_the_field = CanonicalWriter::new("test");
+        before_the_field.domain("analysis-spec");
+        before_the_field.u8(analysis_kind_tag(&spec));
+        before_the_field.f64(1.0e6);
+        before_the_field.usize(10);
+        before_the_field.string("out");
+        before_the_field.string("0");
+        before_the_field.f64(0.0);
+        before_the_field.f64(10.0e-6);
+        before_the_field.bool(true);
+        before_the_field.bool(false);
+
+        assert_eq!(
+            encoded.finish(),
+            before_the_field.finish(),
+            "a one-output Fourier plan must not move a saved plan's identity"
+        );
+
+        let mut one = CanonicalWriter::new("test");
+        encode_analysis_spec(&mut one, &spec);
+        let mut two = CanonicalWriter::new("test");
+        encode_analysis_spec(&mut two, &fourier(vec!["V(mid)".to_owned()]));
+        assert_ne!(one.finish(), two.finish());
+
+        // The card writes the list in authored order, so the order is part of
+        // the identity too.
+        let mut forward = CanonicalWriter::new("test");
+        encode_analysis_spec(
+            &mut forward,
+            &fourier(vec!["V(mid)".to_owned(), "I(V1)".to_owned()]),
+        );
+        let mut reversed = CanonicalWriter::new("test");
+        encode_analysis_spec(
+            &mut reversed,
+            &fourier(vec!["I(V1)".to_owned(), "V(mid)".to_owned()]),
+        );
+        assert_ne!(forward.finish(), reversed.finish());
     }
 
     #[test]

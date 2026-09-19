@@ -458,6 +458,7 @@ pub(super) fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &Analysis
             num_harmonics,
             output_node,
             output_ref,
+            additional_outputs,
             start_time,
             stop_time,
             compute_thd,
@@ -471,6 +472,16 @@ pub(super) fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &Analysis
             writer.f64(*stop_time);
             writer.bool(*compute_thd);
             writer.bool(*normalize);
+            // Which outputs a run decomposes decides which run it is, so the
+            // list past the first is appended as a conditional tail: a
+            // one-output specification writes nothing here and digests to
+            // exactly the bytes it did before the list existed.
+            if !additional_outputs.is_empty() {
+                writer.sequence(additional_outputs.len());
+                for output in additional_outputs {
+                    writer.string(output);
+                }
+            }
         }
         AnalysisSpec::Qpss {
             tones,

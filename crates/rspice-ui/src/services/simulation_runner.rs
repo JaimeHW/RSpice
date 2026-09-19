@@ -39,7 +39,8 @@ pub use envelope_fourier::{
     run_envelope_analysis_with_source_path_and_abort,
 };
 pub(crate) use envelope_fourier::{
-    fourier_output_is_current, run_fourier_from_signal_with_abort, validate_fourier_output_accessor,
+    fourier_card_output, fourier_output_is_current, run_fourier_from_signal_with_abort,
+    split_fourier_output, validate_fourier_output_accessor,
 };
 pub use error::{ServiceRunError, ServiceRunResult};
 pub(crate) use hb::build_core_hb_config;

@@ -765,6 +765,7 @@ impl SimulationController {
             num_harmonics: fourier_cfg.num_harmonics as usize,
             output_node: fourier_cfg.output_node.clone(),
             output_ref: fourier_cfg.output_ref.clone(),
+            additional_outputs: fourier_cfg.additional_outputs.clone(),
             start_time: fourier_cfg.start_time,
             stop_time: fourier_cfg.stop_time,
             compute_thd: fourier_cfg.compute_thd,

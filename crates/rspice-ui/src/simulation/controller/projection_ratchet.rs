@@ -141,6 +141,10 @@ const ARRAY_SEEDS: &[(AnalysisKind, &str, &str)] = &[
         "additional_tones",
         r#"{"frequency": "2G", "harmonics": "3", "name": "tone2", "source": ""}"#,
     ),
+    // One further `.FOUR` output, spelled the way the card spells it. A bare
+    // node is not a legal entry — the added rows take the card's own accessor
+    // grammar — so the seed carries the `V(...)` the form's hint states.
+    (AnalysisKind::Fourier, "additional_outputs", r#""V(n_out)""#),
     // The `Corner` composition seeds that stood here are gone with the run set
     // they addressed: a composition is declared on the plan, not on the draft
     // this ratchet perturbs.

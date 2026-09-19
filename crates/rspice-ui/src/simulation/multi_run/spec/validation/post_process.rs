@@ -15,6 +15,7 @@ pub(super) fn validate(spec: &AnalysisSpec) -> Result<(), String> {
             num_harmonics,
             output_node,
             output_ref,
+            additional_outputs,
             start_time,
             stop_time,
             ..
@@ -32,6 +33,18 @@ pub(super) fn validate(spec: &AnalysisSpec) -> Result<(), String> {
                 output_node,
                 Some(output_ref),
             )?;
+            // Every further output reads the same trajectory through the same
+            // accessor grammar, so it is refused on the same terms.
+            for (index, output) in additional_outputs.iter().enumerate() {
+                let (node, reference) =
+                    crate::services::simulation_runner::split_fourier_output(output)
+                        .map_err(|error| format!("Fourier output {}: {error}", index + 2))?;
+                crate::services::simulation_runner::validate_fourier_output_accessor(
+                    &node,
+                    Some(&reference),
+                )
+                .map_err(|error| format!("Fourier output {}: {error}", index + 2))?;
+            }
             if !start_time.is_finite() || *start_time < 0.0 {
                 return Err("Fourier start_time must be finite and >= 0".to_string());
             }

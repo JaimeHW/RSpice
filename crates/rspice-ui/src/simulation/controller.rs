@@ -1687,6 +1687,7 @@ impl SimulationController {
                                 let AnalysisSpec::Fourier {
                                     output_node,
                                     output_ref,
+                                    additional_outputs,
                                     ..
                                 } = task.spec()
                                 else {
@@ -1698,6 +1699,24 @@ impl SimulationController {
                                         && !output_ref.trim().eq_ignore_ascii_case("0")
                                     {
                                         required.push(output_ref.clone());
+                                    }
+                                    // Every further output reads the same
+                                    // trajectory, so the waveforms it projects
+                                    // are required of the producer too.
+                                    for output in additional_outputs {
+                                        let Ok((node, reference)) =
+                                            crate::services::simulation_runner::split_fourier_output(
+                                                output,
+                                            )
+                                        else {
+                                            continue;
+                                        };
+                                        required.push(node);
+                                        if !reference.trim().is_empty()
+                                            && !reference.trim().eq_ignore_ascii_case("0")
+                                        {
+                                            required.push(reference);
+                                        }
                                     }
                                     required
                                 })

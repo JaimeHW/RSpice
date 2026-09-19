@@ -147,6 +147,7 @@ pub(super) fn run_periodic_spec(
             num_harmonics,
             output_node,
             output_ref,
+            additional_outputs,
             start_time,
             stop_time,
             compute_thd,
@@ -157,6 +158,7 @@ pub(super) fn run_periodic_spec(
                 num_harmonics,
                 output_node,
                 output_ref,
+                additional_outputs,
                 start_time,
                 stop_time,
                 compute_thd,
@@ -843,12 +845,22 @@ struct FourierRunRequest {
     num_harmonics: usize,
     output_node: String,
     output_ref: String,
+    additional_outputs: Vec<String>,
     start_time: f64,
     stop_time: f64,
     compute_thd: bool,
     normalize: bool,
 }
 
+/// Decompose every output the card named, from the one transient trajectory
+/// all of them read.
+///
+/// The card takes a list, and a list of outputs is a list of projections of
+/// one solve rather than a list of runs: the harmonic grid is shared, so the
+/// result carries one group per output in the waveform map it already keys by
+/// output label. A single output keeps the exact names it had before the list
+/// existed; a list qualifies its derived quantities by output, because two
+/// outputs cannot both own the name `THD(%)`.
 fn run_fourier(
     fundamental_freq: f64,
     request: FourierRunRequest,
@@ -859,71 +871,104 @@ fn run_fourier(
         num_harmonics,
         output_node,
         output_ref,
+        additional_outputs,
         start_time,
         stop_time,
         compute_thd,
         normalize,
     } = request;
-    let output_unit = if normalize {
-        "ratio"
-    } else {
-        fourier_output_unit(&output_node)
-    };
-    let output_ref = (!output_ref.trim().is_empty()).then_some(output_ref);
-    let cfg = svc_runner::FourierRunConfig {
-        fundamental_freq,
-        num_harmonics,
-        output_node,
-        output_ref,
-        start_time,
-        stop_time,
-        compute_thd,
-        normalize,
-    };
-    cfg.validate().map_err(SimulationError::InvalidConfig)?;
-    let data = fourier_from_transient_artifact(trajectory, &cfg, abort)?;
-
-    let mut real = Vec::with_capacity(data.response.len());
-    let mut imaginary = Vec::with_capacity(data.response.len());
-    for (value_idx, value) in data.response.iter().enumerate() {
-        poll_periodically(abort, value_idx)?;
-        real.push(value.re);
-        imaginary.push(value.im);
+    let mut projections = Vec::with_capacity(1 + additional_outputs.len());
+    projections.push((output_node, output_ref));
+    for (index, output) in additional_outputs.iter().enumerate() {
+        super::ensure_not_aborted(abort)?;
+        let projection = svc_runner::split_fourier_output(output).map_err(|error| {
+            SimulationError::InvalidConfig(format!("Fourier output {}: {error}", index + 2))
+        })?;
+        projections.push(projection);
     }
+    let qualify = projections.len() > 1;
+
     let mut waveforms = HashMap::new();
-    let spectrum_name = format!("{} Spectrum", data.output_label);
-    let mut spectrum = WaveformData::new_complex(
-        spectrum_name.clone(),
-        clone_values_with_abort(&data.frequencies, abort)?,
-        real,
-        imaginary,
-    );
-    spectrum.y_unit = output_unit.to_string();
-    waveforms.insert(spectrum_name, spectrum);
-    if let Some(thd_percent) = data.thd_percent {
+    let mut harmonic_frequencies = Vec::new();
+    for (output_node, output_ref) in projections {
+        super::ensure_not_aborted(abort)?;
+        let output_unit = if normalize {
+            "ratio"
+        } else {
+            fourier_output_unit(&output_node)
+        };
+        let output_ref = (!output_ref.trim().is_empty()).then_some(output_ref);
+        let cfg = svc_runner::FourierRunConfig {
+            fundamental_freq,
+            num_harmonics,
+            output_node,
+            output_ref,
+            start_time,
+            stop_time,
+            compute_thd,
+            normalize,
+        };
+        cfg.validate().map_err(SimulationError::InvalidConfig)?;
+        let data = fourier_from_transient_artifact(trajectory, &cfg, abort)?;
+
+        let mut real = Vec::with_capacity(data.response.len());
+        let mut imaginary = Vec::with_capacity(data.response.len());
+        for (value_idx, value) in data.response.iter().enumerate() {
+            poll_periodically(abort, value_idx)?;
+            real.push(value.re);
+            imaginary.push(value.im);
+        }
+        let spectrum_name = format!("{} Spectrum", data.output_label);
+        if waveforms.contains_key(&spectrum_name) {
+            return Err(SimulationError::InvalidConfig(format!(
+                "Fourier output '{}' is decomposed twice by the same analysis",
+                data.output_label
+            )));
+        }
+        let mut spectrum = WaveformData::new_complex(
+            spectrum_name.clone(),
+            clone_values_with_abort(&data.frequencies, abort)?,
+            real,
+            imaginary,
+        );
+        spectrum.y_unit = output_unit.to_string();
+        waveforms.insert(spectrum_name, spectrum);
+        if let Some(thd_percent) = data.thd_percent {
+            insert_scalar_waveform(
+                &mut waveforms,
+                if qualify {
+                    format!("{} THD(%)", data.output_label)
+                } else {
+                    "THD(%)".to_string()
+                },
+                vec![fundamental_freq],
+                vec![thd_percent],
+                "%",
+                "Hz",
+            );
+        }
         insert_scalar_waveform(
             &mut waveforms,
-            "THD(%)".to_string(),
-            vec![fundamental_freq],
-            vec![thd_percent],
-            "%",
+            if qualify {
+                format!("{} DC", data.output_label)
+            } else {
+                "DC".to_string()
+            },
+            vec![0.0],
+            vec![data.dc_component],
+            output_unit,
             "Hz",
         );
+        if harmonic_frequencies.is_empty() {
+            harmonic_frequencies = data.frequencies;
+        }
     }
-    insert_scalar_waveform(
-        &mut waveforms,
-        "DC".to_string(),
-        vec![0.0],
-        vec![data.dc_component],
-        output_unit,
-        "Hz",
-    );
 
     Ok(SimulationResult::Ac {
         convergence: trajectory.convergence().cloned(),
         noise_reference_temperature_kelvin: None,
         reference_impedances_ohm: None,
-        frequencies: data.frequencies,
+        frequencies: harmonic_frequencies,
         waveforms,
         measurements: Vec::new(),
     })
@@ -1277,6 +1322,124 @@ mod tests {
         assert_eq!(fourier_output_unit("  i(Rload)"), "A");
     }
 
+    /// Two outputs on one card are two projections of one transient, so the
+    /// run reports two spectra with their own derived quantities beside them,
+    /// from a single solve.
+    #[test]
+    fn an_authored_fourier_run_reports_every_output() {
+        use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
+        use crate::simulation::execution::ExecutionArtifactEnvelope;
+        let time = (0..=64)
+            .map(|index| f64::from(index) / 64.0)
+            .collect::<Vec<_>>();
+        let fundamental = time
+            .iter()
+            .map(|time| (std::f64::consts::TAU * time).sin())
+            .collect::<Vec<_>>();
+        let halved = fundamental.iter().map(|value| value / 2.0).collect();
+        let transient = SimulationResult::Transient {
+            time: time.clone(),
+            waveforms: HashMap::from([
+                (
+                    "out".to_owned(),
+                    WaveformData::new_time_domain("out", time.clone(), fundamental),
+                ),
+                (
+                    "mid".to_owned(),
+                    WaveformData::new_time_domain("mid", time, halved),
+                ),
+            ]),
+            measurements: Vec::new(),
+            periodic_state: None,
+            convergence: None,
+            events: Default::default(),
+        };
+        let artifact = ExecutionArtifactEnvelope::from_transient_result(
+            ContentDigest::from_bytes([3; 32]),
+            AnalysisInstanceId::new(),
+            ObjectRevision::new(1).unwrap(),
+            ContentDigest::from_bytes([4; 32]),
+            &transient,
+            &["out".to_owned(), "mid".to_owned()],
+        )
+        .unwrap()
+        .unwrap();
+        let request = |additional_outputs: Vec<String>| FourierRunRequest {
+            num_harmonics: 3,
+            output_node: "out".to_owned(),
+            output_ref: "0".to_owned(),
+            additional_outputs,
+            start_time: 0.0,
+            stop_time: 1.0,
+            compute_thd: true,
+            normalize: false,
+        };
+        let SimulationResult::Ac {
+            frequencies,
+            waveforms,
+            ..
+        } = run_fourier(
+            1.0,
+            request(vec!["V(mid)".to_owned()]),
+            artifact.trajectory().unwrap(),
+            &rspice_core::abort_signal::NoAbort,
+        )
+        .unwrap()
+        else {
+            panic!("a Fourier run reports a spectrum");
+        };
+
+        let first = &waveforms["V(out) Spectrum"];
+        let second = &waveforms["V(mid) Spectrum"];
+        assert_eq!(first.x_values, frequencies);
+        assert_eq!(second.x_values, frequencies);
+        // The same solve, projected twice: the halved output's fundamental is
+        // half of the first's.
+        let magnitude = |waveform: &WaveformData| {
+            let real = waveform.y_values[1];
+            let imaginary = waveform.y_imag.as_ref().unwrap()[1];
+            real.hypot(imaginary)
+        };
+        assert!(
+            (magnitude(second) / magnitude(first) - 0.5).abs() < 1.0e-9,
+            "{:?} vs {:?}",
+            magnitude(second),
+            magnitude(first)
+        );
+        for name in ["V(out) THD(%)", "V(mid) THD(%)", "V(out) DC", "V(mid) DC"] {
+            assert!(waveforms.contains_key(name), "{:?}", waveforms.keys());
+        }
+        // A list qualifies its derived quantities by output, so the unqualified
+        // names belong to a one-output run alone.
+        assert!(!waveforms.contains_key("THD(%)"));
+        assert!(!waveforms.contains_key("DC"));
+
+        let SimulationResult::Ac { waveforms, .. } = run_fourier(
+            1.0,
+            request(Vec::new()),
+            artifact.trajectory().unwrap(),
+            &rspice_core::abort_signal::NoAbort,
+        )
+        .unwrap() else {
+            panic!("a Fourier run reports a spectrum");
+        };
+        assert!(waveforms.contains_key("V(out) Spectrum"));
+        assert!(waveforms.contains_key("THD(%)"));
+        assert!(waveforms.contains_key("DC"));
+
+        // One output twice is a name collision, refused rather than silently
+        // half-reported.
+        assert!(matches!(
+            run_fourier(
+                1.0,
+                request(vec!["V(out)".to_owned()]),
+                artifact.trajectory().unwrap(),
+                &rspice_core::abort_signal::NoAbort,
+            ),
+            Err(SimulationError::InvalidConfig(_))
+        ));
+    }
+
     #[test]
     fn convergence_fourier_retains_its_source_quality_through_native_conversion() {
         use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
@@ -1326,6 +1489,7 @@ mod tests {
                 num_harmonics: 3,
                 output_node: "out".to_owned(),
                 output_ref: "0".to_owned(),
+                additional_outputs: Vec::new(),
                 start_time: 0.0,
                 stop_time: 1.0,
                 compute_thd: true,

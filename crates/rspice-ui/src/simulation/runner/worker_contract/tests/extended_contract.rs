@@ -387,6 +387,7 @@ fn analysis_spec_round_trips_supported_variants() {
             num_harmonics: 9,
             output_node: "out".to_string(),
             output_ref: "0".to_string(),
+            additional_outputs: vec!["V(mid,out)".to_string(), "I(V1)".to_string()],
             start_time: 1e-6,
             stop_time: 10e-6,
             compute_thd: false,

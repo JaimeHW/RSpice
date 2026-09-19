@@ -16,6 +16,10 @@ pub struct FourierConfig {
     pub output_node: String,
     /// Reference node (ground if empty)
     pub output_ref: String,
+    /// Every further output the same card asks for, in authored order, each
+    /// spelled the way the card spells it: `V(node)`, `V(node+, node-)`, or
+    /// `I(device)`. Empty is a one-output card.
+    pub additional_outputs: Vec<String>,
     /// Analysis window start time
     pub start_time: f64,
     /// Analysis window stop time
@@ -33,6 +37,7 @@ impl Default for FourierConfig {
             num_harmonics: 10,
             output_node: "VOUT".to_string(),
             output_ref: String::new(),
+            additional_outputs: Vec::new(),
             start_time: 0.0,
             stop_time: 10e-6,
             compute_thd: true,
@@ -67,14 +72,33 @@ impl FourierConfig {
         }
     }
 
+    /// Every output this card asks for, in authored order, spelled the way the
+    /// card spells it.
+    pub fn outputs(&self) -> Vec<String> {
+        let mut outputs = Vec::with_capacity(1 + self.additional_outputs.len());
+        if !self.output_node.trim().is_empty() {
+            outputs.push(crate::services::simulation_runner::fourier_card_output(
+                &self.output_node,
+                &self.output_ref,
+            ));
+        }
+        outputs.extend(
+            self.additional_outputs
+                .iter()
+                .map(|output| output.trim().to_owned()),
+        );
+        outputs
+    }
+
     pub fn to_spice(&self) -> String {
         let mut cmd = format!(
             ".four {} {}",
             format_freq(self.fundamental_freq),
             self.num_harmonics
         );
-        if !self.output_node.is_empty() {
-            cmd.push_str(&format!(" V({})", self.output_node));
+        for output in self.outputs() {
+            cmd.push(' ');
+            cmd.push_str(&output);
         }
         cmd
     }
@@ -88,6 +112,10 @@ impl FourierConfig {
         }
         if self.output_node.is_empty() {
             return Err("Output node must be specified".into());
+        }
+        for (index, output) in self.additional_outputs.iter().enumerate() {
+            crate::services::simulation_runner::split_fourier_output(output)
+                .map_err(|error| format!("Output {}: {error}", index + 2))?;
         }
         if !self.start_time.is_finite() || !self.stop_time.is_finite() {
             return Err("Analysis window times must be finite".into());
@@ -111,6 +139,11 @@ pub struct FourierDialogState {
     pub fundamental: String,
     pub harmonics: String,
     pub output_node: String,
+    /// The outputs authored beside the first one, each one row. A draft saved
+    /// before the list existed carries none, which is the one-output card it
+    /// was.
+    #[serde(default)]
+    pub additional_outputs: Vec<String>,
     pub start_time: String,
     pub stop_time: String,
     pub compute_thd: bool,
@@ -125,6 +158,7 @@ impl FourierDialogState {
             fundamental: format_freq(config.fundamental_freq),
             harmonics: config.num_harmonics.to_string(),
             output_node: config.output_node.clone(),
+            additional_outputs: config.additional_outputs.clone(),
             start_time: format_time(config.start_time),
             stop_time: format_time(config.stop_time),
             compute_thd: config.compute_thd,
@@ -144,6 +178,12 @@ impl FourierDialogState {
             num_harmonics: harm,
             output_node: self.output_node.clone(),
             output_ref: String::new(),
+            additional_outputs: self
+                .additional_outputs
+                .iter()
+                .map(|output| output.trim().to_owned())
+                .filter(|output| !output.is_empty())
+                .collect(),
             start_time: start,
             stop_time: stop,
             compute_thd: self.compute_thd,
@@ -199,6 +239,98 @@ mod tests {
             .to_config()
             .expect_err("invalid Fourier start time must not silently default");
         assert!(err.contains("start"));
+    }
+
+    /// The card the form writes is the card the engine reads: every output in
+    /// authored order, on one `.FOUR` line, because one transient serves them
+    /// all.
+    #[test]
+    fn the_fourier_card_carries_every_output_it_was_given() {
+        let mut config = FourierConfig::new(1.0e3, 9).with_window(0.0, 5.0e-3);
+        config.output_node = "out".to_owned();
+        config.additional_outputs = vec![
+            "V(mid,out)".to_owned(),
+            " I(V1) ".to_owned(),
+            "V(in)".to_owned(),
+        ];
+        config.validate().expect("every output is well spelled");
+        let card = config.to_spice();
+        assert_eq!(card, ".four 1k 9 V(out) V(mid,out) I(V1) V(in)");
+
+        let netlist = rspice_core::Netlist::parse(&format!(
+            "Fourier card\nV1 in 0 SIN(0 1 1k)\nR1 in mid 1k\nR2 mid out 1k\nR3 out 0 1k\n{card}\n.tran 10u 5m\n.end\n"
+        ))
+        .expect("the engine parses the card the form wrote");
+        let outputs = netlist
+            .analyses
+            .iter()
+            .find_map(|command| match command {
+                rspice_core::netlist::AnalysisCommand::Four { outputs, .. } => {
+                    Some(outputs.clone())
+                }
+                _ => None,
+            })
+            .expect("the deck carries a .four card");
+        let spelled = outputs
+            .iter()
+            .map(|output| {
+                output
+                    .chars()
+                    .filter(|character| !character.is_whitespace())
+                    .flat_map(char::to_uppercase)
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            spelled,
+            vec!["V(OUT)", "V(MID,OUT)", "I(V1)", "V(IN)"],
+            "{outputs:?}"
+        );
+    }
+
+    /// A draft that names one output restores as a list of exactly one, and a
+    /// draft saved before the list existed is such a draft.
+    #[test]
+    fn a_fourier_draft_saved_with_one_output_restores_as_a_list_of_one() {
+        let mut state = FourierDialogState::from_config(&FourierConfig::default());
+        state.output_node = "out".to_owned();
+        assert!(state.additional_outputs.is_empty());
+        let restored: FourierDialogState =
+            serde_json::from_str(&serde_json::to_string(&state).expect("a draft serializes"))
+                .expect("a draft restores");
+        assert!(restored.additional_outputs.is_empty());
+        assert_eq!(
+            restored.to_config().expect("the draft is valid").outputs(),
+            vec!["V(out)".to_owned()]
+        );
+
+        // The key did not exist when older drafts were written, and its
+        // absence is the one-output card they were.
+        let legacy: FourierDialogState = serde_json::from_str(
+            r#"{"fundamental":"1Meg","harmonics":"10","output_node":"out","start_time":"0","stop_time":"10u","compute_thd":true,"normalize":true}"#,
+        )
+        .expect("a draft written before the list existed restores");
+        assert_eq!(
+            legacy.to_config().expect("the draft is valid").outputs(),
+            vec!["V(out)".to_owned()]
+        );
+
+        let mut two = state.clone();
+        two.additional_outputs = vec!["V(mid)".to_owned()];
+        assert_eq!(
+            two.to_config().expect("the draft is valid").outputs(),
+            vec!["V(out)".to_owned(), "V(mid)".to_owned()]
+        );
+    }
+
+    #[test]
+    fn a_fourier_draft_refuses_an_unspellable_added_output() {
+        let mut state = FourierDialogState::from_config(&FourierConfig::default());
+        state.additional_outputs = vec!["mid".to_owned()];
+        let error = state
+            .to_config()
+            .expect_err("an added output must be spelled the way the card spells it");
+        assert!(error.contains("Output 2"), "{error}");
     }
 
     #[test]

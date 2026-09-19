@@ -1289,6 +1289,9 @@ fn fourier_queue_item(
             num_harmonics,
             output_node,
             output_ref,
+            // The manual route fans one card's output list into one queued
+            // analysis per output, so each of those carries exactly its own.
+            additional_outputs: Vec::new(),
             // Bound to the exact manual .TRAN window after the complete
             // directive list has been compiled.
             start_time: 0.0,
@@ -1373,41 +1376,15 @@ fn validate_manual_fourier_current_capability(
     Ok(())
 }
 
+/// Read one card output through the shared `.FOUR` accessor grammar, and say
+/// where a refusal came from: a hand-written deck's own card.
 fn parse_fourier_output(output: &str) -> Result<(String, String), String> {
-    let trimmed = output.trim();
-    if trimmed.len() >= 4
-        && (trimmed.starts_with("I(") || trimmed.starts_with("i("))
-        && trimmed.ends_with(')')
-    {
-        let device = trimmed[2..trimmed.len() - 1].trim();
-        if !device.is_empty() && !device.contains(',') {
-            return Ok((format!("I({device})"), String::new()));
-        }
-        return Err(format!(
-            "Manual-deck .FOUR current output '{trimmed}' must identify exactly one device"
-        ));
-    }
-    if trimmed.len() < 4
-        || !(trimmed.starts_with("V(") || trimmed.starts_with("v("))
-        || !trimmed.ends_with(')')
-    {
-        return Err(format!(
-            "Manual-deck .FOUR output '{trimmed}' is unsupported; use V(node), V(node+, node-), or I(device)"
-        ));
-    }
-    let nodes = trimmed[2..trimmed.len() - 1]
-        .split(',')
-        .map(str::trim)
-        .collect::<Vec<_>>();
-    match nodes.as_slice() {
-        [node] if !node.is_empty() => Ok(((*node).to_owned(), "0".to_owned())),
-        [positive, reference] if !positive.is_empty() && !reference.is_empty() => {
-            Ok(((*positive).to_owned(), (*reference).to_owned()))
-        }
-        _ => Err(format!(
-            "Manual-deck .FOUR output '{trimmed}' must contain one node or one differential node pair"
-        )),
-    }
+    crate::services::simulation_runner::split_fourier_output(output).map_err(|error| {
+        format!(
+            "Manual-deck .FOUR output '{}' is unsupported: {error}",
+            output.trim()
+        )
+    })
 }
 
 #[cfg(test)]

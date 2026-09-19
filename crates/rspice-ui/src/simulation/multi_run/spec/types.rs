@@ -529,6 +529,13 @@ pub enum AnalysisSpec {
         num_harmonics: usize,
         output_node: String,
         output_ref: String,
+        /// The outputs decomposed beside the first one, in authored order,
+        /// each spelled as the card spells it (`V(node)`, `V(node+, node-)`,
+        /// `I(device)`). One transient serves them all: this is a list of
+        /// projections, not a list of runs. Empty is the one-output card every
+        /// specification sealed before the list existed asked for.
+        #[serde(default)]
+        additional_outputs: Vec<String>,
         start_time: f64,
         stop_time: f64,
         /// Retain the derived total-harmonic-distortion result.

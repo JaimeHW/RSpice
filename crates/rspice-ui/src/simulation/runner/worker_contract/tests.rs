@@ -560,6 +560,7 @@ fn fourier_worker_consumes_exact_transient_dependency_artifact() {
                 num_harmonics: 4,
                 output_node: "out".to_owned(),
                 output_ref: "0".to_owned(),
+                additional_outputs: Vec::new(),
                 start_time: 0.0,
                 stop_time: 1.0,
                 compute_thd: true,

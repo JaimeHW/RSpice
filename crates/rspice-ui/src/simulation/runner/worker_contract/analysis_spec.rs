@@ -299,6 +299,10 @@ pub(crate) enum WorkerAnalysisSpec {
         num_harmonics: usize,
         output_node: String,
         output_ref: String,
+        /// An older worker's request carries no further outputs, which is the
+        /// one-output card it was asked to run.
+        #[serde(default)]
+        additional_outputs: Vec<String>,
         start_time: f64,
         stop_time: f64,
         #[serde(default = "worker_default_true")]
