@@ -4,7 +4,7 @@
 use egui::Ui;
 
 use crate::quantity::QuantityInputKind;
-use crate::simulation::dialog::SpDialogState;
+use crate::simulation::dialog::{SpDialogState, TOUCHSTONE_VERSION_LABELS};
 use crate::simulation::placed_sources::PlacedRfPort;
 
 use super::{
@@ -121,5 +121,14 @@ pub(super) fn fields(
     input_row(ui, "Z0", &mut setup.z0);
     switch_row(ui, "Noise parameters", &mut setup.do_noise);
     switch_row(ui, "Touchstone export", &mut setup.touchstone_export);
+    // The version belongs to the export, so it is painted only when there is
+    // an export to write. Greying it would announce a choice about a file that
+    // is not produced; the export switch above already answers that.
+    if setup.touchstone_export {
+        let mut version_idx = setup.touchstone_version_index();
+        if choice_row(ui, "Version", &TOUCHSTONE_VERSION_LABELS, &mut version_idx) {
+            setup.set_touchstone_version_index(version_idx);
+        }
+    }
     sp_port_fields(ui, setup, placed_rf_ports)
 }

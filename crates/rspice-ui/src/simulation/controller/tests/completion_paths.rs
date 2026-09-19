@@ -61,6 +61,89 @@ fn touchstone_auto_export_uses_export_workflow_io() {
     assert!(writes[0].1.contains("[Reference] 5e1 7.5e1"));
 }
 
+/// The version the form chose is the version the file is written in.
+///
+/// The writer produced both formats and the configuration carried the choice;
+/// the form had no control, so every export went out in the default. This
+/// drives the whole path the chooser feeds — dialog state, the prepared export
+/// policy, the writer — and reads the header line back, because the header is
+/// the whole of what a consumer uses to tell the two apart.
+#[test]
+fn the_exported_file_is_the_version_that_was_chosen() {
+    use crate::simulation::dialog::{SpConfig, SpDialogState, TOUCHSTONE_VERSIONS};
+
+    for (index, version) in TOUCHSTONE_VERSIONS.iter().copied().enumerate() {
+        let mut authored = SpConfig::default();
+        authored.touchstone_export = true;
+        let mut dialog = SpDialogState::from_config(&authored);
+        dialog.set_touchstone_version_index(index);
+        assert_eq!(dialog.touchstone_version, version);
+
+        let policy =
+            crate::simulation::controller::prepared_run::touchstone_export_policy_for_dialog(
+                &dialog,
+                &[],
+                Some(&PathBuf::from("designs").join("amp.sch")),
+            )
+            .expect("an enabled export prepares a policy");
+
+        let mut state = AppState::default();
+        state.simulation.start_run();
+        let mut controller = SimulationController::new();
+        controller.touchstone_export_policy = policy;
+        // Uniform references throughout: v1 cannot carry per-port impedances
+        // and the writer refuses that combination by name, which would hide
+        // the header this test is about behind an unrelated refusal.
+        controller.current_spec = Some(AnalysisSpec::SParameter {
+            do_noise: false,
+            start_freq: 1.0e6,
+            stop_freq: 2.0e6,
+            points_per_unit: 2,
+            sweep: FrequencySweep::Linear,
+            z0: 50.0,
+            ports: vec![
+                SpPort {
+                    node_pos: "IN".to_string(),
+                    node_neg: "0".to_string(),
+                    z0: None,
+                },
+                SpPort {
+                    node_pos: "OUT".to_string(),
+                    node_neg: "0".to_string(),
+                    z0: None,
+                },
+            ],
+        });
+        controller.current_analysis_idx = 0;
+
+        let export_io = MockExportWorkflowIo::default();
+        let prepared = controller
+            .prepare_touchstone_export(&synthetic_sparameter_result(), 1)
+            .expect("valid Touchstone export")
+            .expect("enabled Touchstone export");
+        SimulationController::commit_touchstone_export(&mut state, &export_io, prepared);
+
+        let writes = export_io.create_only_writes.borrow();
+        assert_eq!(writes.len(), 1);
+        let contents = &writes[0].1;
+        if version >= 2 {
+            assert!(
+                contents.contains("[Version] 2.0") && contents.contains("[End]"),
+                "version {version} must write the keyword block: {contents}"
+            );
+        } else {
+            assert!(
+                !contents.contains("[Version]") && !contents.contains("[Network Data]"),
+                "a v1 file states no version and opens on its option line: {contents}"
+            );
+            assert!(
+                contents.contains("# Hz S RI R 50"),
+                "version {version} must still write the option line: {contents}"
+            );
+        }
+    }
+}
+
 #[test]
 fn touchstone_native_completion_message_confirms_file_export() {
     let message = SimulationController::touchstone_export_completed_message(Path::new("amp.s2p"));

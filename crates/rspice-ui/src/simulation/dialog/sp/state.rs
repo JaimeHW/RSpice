@@ -131,7 +131,13 @@ pub struct SpDialogState {
     pub do_noise: bool,
     /// Enable Touchstone export
     pub touchstone_export: bool,
-    /// Touchstone format version (1 or 2).
+    /// Touchstone format version the export writes: `1` for an unversioned v1
+    /// file, `2` for a `[Version] 2.0` file.
+    ///
+    /// Defaulted so a project saved before the chooser existed opens on the
+    /// version its exports were already being written in, rather than on
+    /// `u32::default()`, which is not a format at all.
+    #[serde(default = "default_touchstone_version")]
     pub touchstone_version: u32,
     /// Initialized flag
     #[serde(skip)]
@@ -143,6 +149,27 @@ impl Default for SpDialogState {
         Self::from_config(&SpConfig::default())
     }
 }
+
+/// The version an export was written in before the form could choose one.
+fn default_touchstone_version() -> u32 {
+    SpConfig::default().touchstone_version
+}
+
+/// The two versions the export writer can actually produce, in chooser order.
+///
+/// Both are real paths through `WaveformWriter::touchstone_text`: v1 opens on
+/// the option line alone, v2 on `[Version] 2.0` with the keyword block the
+/// specification requires. The chooser offers exactly these because offering a
+/// third would be offering a file the writer cannot write. v1 additionally
+/// cannot carry per-port reference impedances, and the writer refuses that
+/// combination by name rather than dropping them.
+pub const TOUCHSTONE_VERSIONS: [u32; 2] = [1, 2];
+
+/// Chooser labels for [`TOUCHSTONE_VERSIONS`], in the same order.
+///
+/// A v1 file states no version of its own, so it is spelled as the writer
+/// writes it rather than as a specification revision the file never names.
+pub const TOUCHSTONE_VERSION_LABELS: [&str; 2] = ["v1", "v2.0"];
 
 impl SpDialogState {
     pub(super) fn default_port_node(index: usize) -> String {
@@ -189,6 +216,24 @@ impl SpDialogState {
             touchstone_export: config.touchstone_export,
             touchstone_version: config.touchstone_version.clamp(1, 2),
             initialized: true,
+        }
+    }
+
+    /// The Touchstone version this draft writes, as an index into
+    /// [`TOUCHSTONE_VERSIONS`].
+    ///
+    /// A stored value the writer does not produce resolves to the nearer
+    /// offered one, the way [`Self::to_config`] already clamps it, so the
+    /// chooser never paints a position that is not one of its own.
+    #[must_use]
+    pub fn touchstone_version_index(&self) -> usize {
+        usize::from(self.touchstone_version >= 2)
+    }
+
+    /// Record a version the chooser selected.
+    pub fn set_touchstone_version_index(&mut self, index: usize) {
+        if let Some(version) = TOUCHSTONE_VERSIONS.get(index) {
+            self.touchstone_version = *version;
         }
     }
 
@@ -505,6 +550,55 @@ mod tests {
         }
         assert_eq!(serde_json::to_value(&restored).unwrap(), authored);
         assert!(restored.to_config(Some(&[])).is_err());
+    }
+
+    /// The chosen export version is part of the draft, and a project saved
+    /// before the chooser existed opens on the version its exports were
+    /// already written in.
+    #[test]
+    fn a_touchstone_version_choice_survives_a_reopen() {
+        for (index, version) in TOUCHSTONE_VERSIONS.iter().copied().enumerate() {
+            let mut state = dialog();
+            state.set_touchstone_version_index(index);
+            assert_eq!(state.touchstone_version_index(), index);
+
+            let authored = serde_json::to_value(&state).expect("the dialog serializes");
+            let mut restored: SpDialogState =
+                serde_json::from_value(authored).expect("the draft decodes");
+            restored.ensure_initialized();
+            assert_eq!(restored.touchstone_version, version);
+            assert_eq!(restored.touchstone_version_index(), index);
+            assert_eq!(
+                restored
+                    .to_config(Some(&[]))
+                    .expect("the draft is runnable")
+                    .touchstone_version,
+                version,
+                "the chosen version must reach the configuration the export reads"
+            );
+        }
+
+        // A project saved before the key existed must still open, on the
+        // version it was already exporting in rather than on zero.
+        let saved = serde_json::to_value(dialog()).expect("the dialog serializes");
+        let mut without = saved.as_object().expect("an object").clone();
+        assert!(
+            without.remove("touchstone_version").is_some(),
+            "the key is written"
+        );
+        let decoded: SpDialogState =
+            serde_json::from_value(without.into()).expect("a project without the key decodes");
+        assert_eq!(
+            decoded.touchstone_version,
+            SpConfig::default().touchstone_version
+        );
+
+        // A stored value the writer cannot produce resolves to an offered
+        // position rather than painting the chooser out of range.
+        let mut odd = dialog();
+        odd.touchstone_version = 7;
+        assert_eq!(odd.touchstone_version_index(), 1);
+        assert_eq!(odd.to_config(Some(&[])).unwrap().touchstone_version, 2);
     }
 
     #[test]
