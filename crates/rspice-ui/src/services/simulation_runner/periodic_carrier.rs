@@ -179,14 +179,6 @@ impl PeriodicCarrier {
         Self::ALL.get(index).copied().unwrap_or_default()
     }
 
-    /// The few words a chooser paints beside a position it cannot select.
-    pub fn chooser_restriction(self) -> Option<&'static str> {
-        match self {
-            Self::Preceding | Self::Pss => None,
-            Self::Hb => Some("no Studio route; runs on the command line"),
-        }
-    }
-
     /// Why this carrier cannot be run here, in the engine's own terms, or
     /// `None` where the Studio has the route.
     pub fn unroutable_reason(self, directive: &str) -> Option<String> {
