@@ -2454,6 +2454,36 @@ impl Engine {
         targets
     }
 
+    /// Refuse a filter item that selects nothing.
+    ///
+    /// A list containing a name this deck does not have is a study that would
+    /// silently answer a narrower question than the one asked — a mistyped
+    /// `GIAN` beside a working `R*` cost the author the row they came for.
+    /// Every dead item is named, not only the case where all of them are.
+    fn refuse_dead_sensitivity_filters(
+        candidates: &[AcSensitivityTarget],
+        filters: &[String],
+        domain: &str,
+        noun: &str,
+    ) -> Result<(), SimulationError> {
+        let dead = filters
+            .iter()
+            .filter(|filter| {
+                !candidates
+                    .iter()
+                    .any(|target| Self::sensitivity_filter_selects(target, filter))
+            })
+            .map(String::as_str)
+            .collect::<Vec<_>>();
+        if dead.is_empty() {
+            return Ok(());
+        }
+        Err(SimulationError::Circuit(format!(
+            "{domain} sensitivity cannot run: no {noun} matched filter(s) {}",
+            dead.join(", ")
+        )))
+    }
+
     fn complete_sensitivity_step(target: &AcSensitivityTarget) -> Value {
         let parameter = target.parameter.to_ascii_uppercase();
         let absolute_floor = if parameter.contains("PHASE") {
@@ -2752,16 +2782,13 @@ impl Engine {
             .filter(Self::dc_sensitivity_target_active)
             .chain(Self::collect_design_parameter_targets(netlist))
             .collect::<Vec<_>>();
+        Self::refuse_dead_sensitivity_filters(&candidates, filters, "DC", "DC parameter")?;
         let targets = Self::select_sensitivity_targets(candidates, filters);
         if targets.is_empty() {
-            let detail = if filters.is_empty() {
-                "the flattened circuit has no eligible real-valued DC parameters".to_string()
-            } else {
-                format!("no DC parameter matched filter(s) {}", filters.join(", "))
-            };
-            return Err(SimulationError::Circuit(format!(
-                "DC sensitivity cannot run: {detail}"
-            )));
+            return Err(SimulationError::Circuit(
+                "DC sensitivity cannot run: the flattened circuit has no eligible real-valued DC parameters"
+                    .to_string(),
+            ));
         }
         self.ensure_batch_runs(1)?;
         self.ensure_result_values(targets.len().saturating_mul(3).saturating_add(1))?;
@@ -2895,16 +2922,13 @@ impl Engine {
             .into_iter()
             .chain(Self::collect_design_parameter_targets(netlist))
             .collect::<Vec<_>>();
+        Self::refuse_dead_sensitivity_filters(&candidates, filters, "AC", "parameter")?;
         let targets = Self::select_sensitivity_targets(candidates, filters);
         if targets.is_empty() {
-            let detail = if filters.is_empty() {
-                "the flattened circuit has no eligible real-valued parameters".to_string()
-            } else {
-                format!("no parameter matched filter(s) {}", filters.join(", "))
-            };
-            return Err(SimulationError::Circuit(format!(
-                "AC sensitivity cannot run: {detail}"
-            )));
+            return Err(SimulationError::Circuit(
+                "AC sensitivity cannot run: the flattened circuit has no eligible real-valued parameters"
+                    .to_string(),
+            ));
         }
         self.ensure_batch_runs(1)?;
         // Count numerical slots, including unavailable derived samples and

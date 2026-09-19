@@ -267,3 +267,44 @@ fn an_empty_param_filter_is_refused() {
         );
     }
 }
+
+/// A filter item that selects nothing is a study that would silently answer a
+/// narrower question. Every dead item is named, not only the all-dead case.
+#[test]
+fn a_filter_that_selects_nothing_is_refused_by_name() {
+    let netlist = Netlist::parse(RATIOMETRIC_DIVIDER).expect("deck parses");
+    let engine = Engine::default();
+
+    let message = engine
+        .run_sensitivity_dc_complete(&netlist, probe(2), &filters(&["R1", "GIAN", "R9*"]))
+        .expect_err("a live filter must not excuse the dead ones")
+        .to_string();
+    assert!(
+        message.ends_with("DC sensitivity cannot run: no DC parameter matched filter(s) GIAN, R9*"),
+        "unexpected refusal: {message}"
+    );
+
+    let message = engine
+        .run_sensitivity_dc_complete(&netlist, probe(2), &filters(&["PARAM:GIAN"]))
+        .expect_err("a dead design-parameter filter is refused the same way")
+        .to_string();
+    assert!(
+        message
+            .ends_with("DC sensitivity cannot run: no DC parameter matched filter(s) PARAM:GIAN"),
+        "unexpected refusal: {message}"
+    );
+
+    let message = engine
+        .run_sensitivity_ac_complete(&netlist, probe(2), &[1.0e3], &filters(&["R1", "GIAN"]))
+        .expect_err("the AC entry refuses the same list")
+        .to_string();
+    assert!(
+        message.ends_with("AC sensitivity cannot run: no parameter matched filter(s) GIAN"),
+        "unexpected refusal: {message}"
+    );
+
+    // A list in which every item selects something still runs.
+    engine
+        .run_sensitivity_dc_complete(&netlist, probe(2), &filters(&["R*", "PARAM:R"]))
+        .expect("a wholly live filter list runs");
+}
