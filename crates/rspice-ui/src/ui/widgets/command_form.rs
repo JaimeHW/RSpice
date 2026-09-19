@@ -265,9 +265,22 @@ fn middle_elided(ui: &Ui, text: &str, font: &egui::FontId, color: Color32, width
         return text.to_owned();
     }
     let chars: Vec<char> = text.chars().collect();
+    // Keep a complete final path component where it fits: the cell-view kind
+    // is more useful than an arbitrary half of the trailing text.
+    let final_component = text
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or(text)
+        .chars()
+        .count();
     let elide = |keep: usize| -> String {
-        let head = keep.div_ceil(2);
-        let tail = keep - head;
+        let balanced_tail = keep / 2;
+        let tail = if final_component < chars.len() && final_component < keep {
+            balanced_tail.max(final_component)
+        } else {
+            balanced_tail
+        };
+        let head = keep - tail;
         let mut candidate: String = chars[..head].iter().collect();
         candidate.push('\u{2026}');
         candidate.extend(chars[chars.len() - tail..].iter());
@@ -547,7 +560,10 @@ mod tests {
                         ),
                     );
                 });
-                painted.assert_inside_clip_and_surface(&format!("{screen:?} {mode:?}"));
+                painted.assert_inside_clip_and_surface_with_horizontal_scroll(
+                    &format!("{screen:?} {mode:?}"),
+                    &["VERY_LONG_INTERFACE_NAME_1 VERY_LONG_INTERFACE_NAME_2"],
+                );
                 assert!(
                     painted.surface.height() < screen.y,
                     "{screen:?} {mode:?}: the form is taller than the viewport ({:?})",
@@ -628,6 +644,10 @@ mod tests {
                     assert!(elided.starts_with("analog"), "{elided}");
                     assert!(elided.ends_with("schematic"), "{elided}");
                     assert!(elided.chars().count() < long.chars().count());
+                    let width = ui.fonts_mut(|fonts| {
+                        fonts.layout_no_wrap(elided, font, Color32::WHITE).size().x
+                    });
+                    assert!(width <= 120.0, "elided path is {width} points wide");
                 });
             },
         );

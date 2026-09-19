@@ -33,19 +33,18 @@ fn key_event(key: egui::Key) -> egui::Event {
     }
 }
 
-fn open_with(app: &mut RSpiceApp, names: &str) {
-    open_create_pins(&mut app.state);
-    app.state.dialogs.pin_port.names = names.to_owned();
+fn open_with(state: &mut AppState, names: &str) {
+    open_create_pins(state);
+    state.dialogs.pin_port.names = names.to_owned();
 }
 
 /// One port already on the sheet, so duplicate refusals have something to
 /// collide with.
-fn place_port(app: &mut RSpiceApp, name: &str) {
-    let id = app
-        .state
+fn place_port(state: &mut AppState, name: &str) {
+    let id = state
         .schematic
         .add_component(crate::state::ComponentType::Port, Point::origin());
-    app.state
+    state
         .schematic
         .components
         .iter_mut()
@@ -57,7 +56,7 @@ fn place_port(app: &mut RSpiceApp, name: &str) {
 #[test]
 fn names_split_on_whitespace_and_each_is_validated_in_the_models_words() {
     let mut app = RSpiceApp::test_instance();
-    open_with(&mut app, "  INP   INN\tOUT  ");
+    open_with(&mut app.state, "  INP   INN\tOUT  ");
     assert_eq!(
         draft(&app.state),
         Draft::Ready(vec!["INP".to_owned(), "INN".to_owned(), "OUT".to_owned()])
@@ -84,7 +83,7 @@ fn names_split_on_whitespace_and_each_is_validated_in_the_models_words() {
 #[test]
 fn a_name_listed_twice_is_refused_before_arming() {
     let mut app = RSpiceApp::test_instance();
-    open_with(&mut app, "EN OUT en");
+    open_with(&mut app.state, "EN OUT en");
     assert_eq!(
         draft(&app.state),
         Draft::Refused("en is listed twice.".to_owned())
@@ -177,7 +176,7 @@ fn discipline_follows_signal_until_touched() {
     );
 
     let mut app = RSpiceApp::test_instance();
-    open_with(&mut app, "EN");
+    open_with(&mut app.state, "EN");
     assert!(!app.state.dialogs.pin_port.discipline_touched);
     app.state.dialogs.pin_port.signal_type = PortSignalType::Logic;
     app.state.dialogs.pin_port.discipline = discipline_for(PortSignalType::Logic);
@@ -193,7 +192,7 @@ fn discipline_follows_signal_until_touched() {
 #[test]
 fn the_derived_line_states_pins_conductors_and_port_list_positions() {
     let mut app = RSpiceApp::test_instance();
-    open_with(&mut app, "EN");
+    open_with(&mut app.state, "EN");
     assert_eq!(
         declaration_line(&app.state, draft(&app.state).names()).as_deref(),
         Some("1 pin \u{00b7} 1 conductor \u{00b7} port-list position 1")
@@ -228,7 +227,7 @@ fn enter_arms_the_whole_sequence_without_touching_the_document() {
     let ctx = Context::default();
     crate::ui::Theme::default().apply(&ctx);
     let mut app = RSpiceApp::test_instance();
-    open_with(&mut app, "INP INN OUT VDD");
+    open_with(&mut app.state, "INP INN OUT VDD");
     app.state.dialogs.pin_port.signal_type = PortSignalType::Logic;
     app.state.dialogs.pin_port.discipline = PortDiscipline::Logic;
 
@@ -276,7 +275,7 @@ fn reopening_while_armed_offers_the_remaining_names() {
     let ctx = Context::default();
     crate::ui::Theme::default().apply(&ctx);
     let mut app = RSpiceApp::test_instance();
-    open_with(&mut app, "INP INN OUT");
+    open_with(&mut app.state, "INP INN OUT");
     app.state.dialogs.pin_port.signal_type = PortSignalType::Logic;
     app.state.dialogs.pin_port.discipline_touched = true;
     app.state.dialogs.pin_port.discipline = PortDiscipline::Wreal;
@@ -323,7 +322,7 @@ fn the_prefill_is_empty_until_a_batch_has_been_armed() {
         app.render_pin_port_dialog(ctx)
     });
     app.state.schematic.cancel_tool();
-    place_port(&mut app, "BIAS");
+    place_port(&mut app.state, "BIAS");
 
     open_create_pins(&mut app.state);
     assert_eq!(app.state.dialogs.pin_port.names, "BIAS_2");
@@ -332,7 +331,7 @@ fn the_prefill_is_empty_until_a_batch_has_been_armed() {
 #[test]
 fn a_read_only_or_changed_document_blocks_the_form_and_says_so() {
     let mut app = RSpiceApp::test_instance();
-    open_with(&mut app, "EN");
+    open_with(&mut app.state, "EN");
     app.state.schematic.read_only = true;
     assert_eq!(draft(&app.state), Draft::Blocked(READ_ONLY));
 
@@ -348,7 +347,7 @@ fn a_blocked_form_never_arms_on_enter() {
         let ctx = Context::default();
         crate::ui::Theme::default().apply(&ctx);
         let mut app = RSpiceApp::test_instance();
-        open_with(&mut app, "EN");
+        open_with(&mut app.state, "EN");
         if blocked == 0 {
             app.state.schematic.read_only = true;
         } else {
@@ -376,7 +375,7 @@ fn escape_closes_the_form_at_once() {
     let ctx = Context::default();
     crate::ui::Theme::default().apply(&ctx);
     let mut app = RSpiceApp::test_instance();
-    open_with(&mut app, "INP INN");
+    open_with(&mut app.state, "INP INN");
 
     let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
         app.render_pin_port_dialog(ctx)
@@ -395,8 +394,8 @@ fn escape_closes_the_form_at_once() {
 #[test]
 fn a_name_already_on_the_sheet_is_refused_before_arming() {
     let mut app = RSpiceApp::test_instance();
-    place_port(&mut app, "BIAS_EN");
-    open_with(&mut app, "bias_en");
+    place_port(&mut app.state, "BIAS_EN");
+    open_with(&mut app.state, "bias_en");
     let expected = app
         .state
         .schematic
@@ -449,16 +448,16 @@ fn two_dozen_names() -> String {
 /// The two tallest drafts: a valid batch, whose derived line wraps, and a
 /// refused one, whose message runs the full two lines the slot reserves.
 #[cfg(not(target_arch = "wasm32"))]
-fn worst_cases() -> [(&'static str, fn(&mut RSpiceApp)); 2] {
+fn worst_cases() -> [(&'static str, fn(&mut AppState)); 2] {
     [
-        ("valid", |app: &mut RSpiceApp| {
-            open_create_pins(&mut app.state);
-            app.state.dialogs.pin_port.names = two_dozen_names();
+        ("valid", |state: &mut AppState| {
+            open_create_pins(state);
+            state.dialogs.pin_port.names = two_dozen_names();
         }),
-        ("refused", |app: &mut RSpiceApp| {
-            place_port(app, "VERY_LONG_INTERFACE_NAME_7");
-            open_create_pins(&mut app.state);
-            app.state.dialogs.pin_port.names = two_dozen_names();
+        ("refused", |state: &mut AppState| {
+            place_port(state, "VERY_LONG_INTERFACE_NAME_7");
+            open_create_pins(state);
+            state.dialogs.pin_port.names = two_dozen_names();
         }),
     ]
 }
@@ -477,13 +476,14 @@ fn create_pins_fits_every_viewport() {
         for mode in [Mode::Dark, Mode::Light] {
             for (draft_stem, prepare) in worst_cases() {
                 let mut app = RSpiceApp::test_instance();
-                prepare(&mut app);
+                prepare(&mut app.state);
+                let names = app.state.dialogs.pin_port.names.clone();
                 let painted =
                     crate::ui::widgets::painted_runs::painted_runs(screen, mode, 3, |ctx| {
                         app.render_pin_port_dialog(ctx);
                     });
                 let label = format!("{screen:?} {mode:?} {draft_stem}");
-                painted.assert_inside_clip_and_surface(&label);
+                painted.assert_inside_clip_and_surface_with_horizontal_scroll(&label, &[&names]);
                 assert!(
                     painted.surface.height() < screen.y,
                     "{label}: the form is taller than the viewport ({:?})",
@@ -529,17 +529,17 @@ fn render_create_pins() {
     let mut report = stderr.lock();
 
     for (stem, prepare) in [
-        ("empty", (|_: &mut RSpiceApp| {}) as fn(&mut RSpiceApp)),
-        ("four-names", |app: &mut RSpiceApp| {
-            app.state.dialogs.pin_port.names = "INP INN OUT VDD".to_owned();
+        ("empty", (|_: &mut AppState| {}) as fn(&mut AppState)),
+        ("four-names", |state: &mut AppState| {
+            state.dialogs.pin_port.names = "INP INN OUT VDD".to_owned();
         }),
-        ("refusal", |app: &mut RSpiceApp| {
-            place_port(app, "OUT");
-            app.state.dialogs.pin_port.names = "INP INN OUT VDD".to_owned();
+        ("refusal", |state: &mut AppState| {
+            place_port(state, "OUT");
+            state.dialogs.pin_port.names = "INP INN OUT VDD".to_owned();
         }),
-        ("read-only", |app: &mut RSpiceApp| {
-            app.state.dialogs.pin_port.names = "INP INN".to_owned();
-            app.state.schematic.read_only = true;
+        ("read-only", |state: &mut AppState| {
+            state.dialogs.pin_port.names = "INP INN".to_owned();
+            state.schematic.read_only = true;
         }),
     ] {
         for (size_stem, size) in [
@@ -550,7 +550,7 @@ fn render_create_pins() {
             for (mode_stem, mode) in [("dark", Mode::Dark), ("light", Mode::Light)] {
                 let mut app = RSpiceApp::test_instance();
                 open_create_pins(&mut app.state);
-                prepare(&mut app);
+                prepare(&mut app.state);
                 let canvas = crate::ui::raster::render_themed(
                     crate::ui::Theme {
                         mode,

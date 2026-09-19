@@ -24,14 +24,35 @@ pub(crate) struct PaintedRuns {
 }
 
 impl PaintedRuns {
-    /// Nothing painted leaves its clip rect, and nothing leaves the surface —
-    /// in both axes, to a point.
-    pub(crate) fn assert_inside_clip_and_surface(&self, label: &str) {
+    /// Single-line editors scroll their content within a fixed clip. Require
+    /// those explicitly named runs to retain a visible horizontal slice and
+    /// keep the clip inside the card; all other text must fit in full.
+    pub(crate) fn assert_inside_clip_and_surface_with_horizontal_scroll(
+        &self,
+        label: &str,
+        scroll_values: &[&str],
+    ) {
         assert!(
             self.surface.is_finite() && self.surface.width() > 1.0,
             "{label}: no dialog surface was painted"
         );
         for (text, rect, clip) in &self.runs {
+            if scroll_values.contains(&text.as_str()) {
+                assert!(
+                    self.surface.expand(1.0).contains_rect(*clip),
+                    "{label}: editor clip {clip:?} leaves the card {:?}",
+                    self.surface
+                );
+                assert!(
+                    rect.top() >= clip.top() - 1.0 && rect.bottom() <= clip.bottom() + 1.0,
+                    "{label}: editor {text:?} is vertically clipped"
+                );
+                assert!(
+                    rect.intersect(*clip).width() > 1.0,
+                    "{label}: editor {text:?} has no visible content"
+                );
+                continue;
+            }
             let past_surface = (self.surface.left() - rect.left())
                 .max(rect.right() - self.surface.right())
                 .max(self.surface.top() - rect.top())

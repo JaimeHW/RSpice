@@ -1460,7 +1460,8 @@ mod tests {
             candidate.params = crate::state::format_params_string(&params);
             candidate
         };
-        let invalid_pair = rewrite(&baseline, "signal_type", "logic".to_owned());
+        // Output logic is supported; a power signal cannot be output-only.
+        let invalid_pair = rewrite(&baseline, "signal_type", "power".to_owned());
         assert!(matches!(
             state.validate_edited_port_contract(second_id, &invalid_pair),
             Err(PortPlacementError::InvalidContract(_))
