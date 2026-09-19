@@ -154,6 +154,18 @@ pub fn run_soa_analysis_with_config_and_source_path_and_abort(
     ensure_not_aborted(abort)?;
     config.validate().map_err(ServiceRunError::Failure)?;
     let netlist = parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
+    // The solver evaluates the expanded hierarchy. Register and observe those
+    // same concrete instances, including devices inside PDK subcircuits.
+    let flattened = rspice_core::netlist::flatten_netlist_with_models_with_abort(&netlist, abort)
+        .map_err(|error| match error {
+        rspice_core::netlist::ParseWithAbortError::Aborted => ServiceRunError::Aborted,
+        rspice_core::netlist::ParseWithAbortError::Parse(
+            rspice_core::netlist::ParseError::ResourceLimit(error),
+        ) => ServiceRunError::ResourceLimit(error),
+        rspice_core::netlist::ParseWithAbortError::Parse(error) => {
+            ServiceRunError::Failure(format!("SOA hierarchy error: {error}"))
+        }
+    })?;
     let transient = run_transient_analysis_with_source_path_and_abort(
         netlist_text,
         config.stop_time,
@@ -164,7 +176,7 @@ pub fn run_soa_analysis_with_config_and_source_path_and_abort(
 
     let mut manager = SoAManager::new();
     let registered_rules =
-        register_soa_limits_for_netlist(&mut manager, &netlist.elements, config, abort)?;
+        register_soa_limits_for_netlist(&mut manager, &flattened.elements, config, abort)?;
     if registered_rules == 0 {
         return Err(ServiceRunError::Failure(
             "SOA analysis found no semiconductor device with an applicable enabled rule"
@@ -180,7 +192,7 @@ pub fn run_soa_analysis_with_config_and_source_path_and_abort(
         poll_periodically(abort, idx)?;
         let mut values: HashMap<String, HashMap<SoAParameter, Value>> = HashMap::new();
 
-        for (element_index, element) in netlist.elements.iter().enumerate() {
+        for (element_index, element) in flattened.elements.iter().enumerate() {
             poll_periodically(abort, element_index)?;
             match &element.kind {
                 ElementKind::Mosfet { .. }
@@ -470,6 +482,47 @@ mod tests {
         assert_eq!(basis.start_s, result.time[0]);
         assert_eq!(basis.stop_s, *result.time.last().unwrap());
         assert!(!result.evaluations.is_empty());
+    }
+
+    #[test]
+    fn soa_evaluates_each_concrete_device_inside_nested_subcircuits() {
+        let deck = "Nested SOA\nVd d 0 1.5\nVlow low 0 0.5\nVhigh high 0 2.5\nXlow d low cell\nXhigh d high cell\n.subckt cell drain gate\nXinner drain gate inner\n.ends cell\n.subckt inner d g\nM1 d g 0 0 NM\n.model NM NMOS LEVEL=1\n.ends inner\n.end\n";
+        let result = run_soa_analysis_with_config_and_source_path_and_abort(
+            deck,
+            &SoaRunConfig {
+                stop_time: 1e-8,
+                step_time: 1e-9,
+                ..Default::default()
+            },
+            None,
+            &NoAbort,
+        )
+        .unwrap();
+        assert_eq!(result.evaluations.len(), 4);
+        let mut gates = result
+            .evaluations
+            .iter()
+            .filter(|rule| rule.parameter == SoAParameter::Vgs)
+            .collect::<Vec<_>>();
+        gates.sort_by(|a, b| a.worst_actual_value.total_cmp(&b.worst_actual_value));
+        assert_eq!(gates.len(), 2);
+        assert_ne!(gates[0].device_id, gates[1].device_id);
+        assert!((gates[0].worst_actual_value - 0.5).abs() < 1e-10);
+        assert!((gates[1].worst_actual_value - 2.5).abs() < 1e-10);
+        assert_eq!(
+            gates[0].verdict,
+            crate::services::safety::SoARuleVerdict::Pass
+        );
+        assert_eq!(
+            gates[1].verdict,
+            crate::services::safety::SoARuleVerdict::Critical
+        );
+        assert!(
+            result
+                .evaluations
+                .iter()
+                .all(|rule| rule.sample_count == result.time.len() as u64)
+        );
     }
 
     #[test]
