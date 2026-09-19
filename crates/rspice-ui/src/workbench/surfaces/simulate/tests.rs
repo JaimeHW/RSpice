@@ -424,7 +424,7 @@ fn every_declared_prerequisite_kind_has_a_contextual_add_action() {
         .into_iter()
         .filter(|kind| !kind.prerequisites().is_empty())
         .collect::<Vec<_>>();
-    assert_eq!(dependent_kinds.len(), 24);
+    assert_eq!(dependent_kinds.len(), 25);
 
     for kind in dependent_kinds {
         let mut plan = crate::simulation::plan::SimulationPlan::empty();
