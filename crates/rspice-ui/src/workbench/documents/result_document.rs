@@ -2414,6 +2414,8 @@ pub struct ResultsState {
     /// Polar sheet controls: the network term, the radius ruling, the decade
     /// marks and the normalization.
     pub(crate) polar: polar::PolarSheetState,
+    /// Contribution sheet control: the frequency a swept study is read at.
+    pub(crate) study: sensitivity::SensitivitySheetState,
     network_matrix: network_matrix::NetworkMatrixState,
     /// Scatter sheet controls and the brushed trial selection.
     pub(crate) scatter: scatter::ScatterSheetState,
@@ -5410,6 +5412,7 @@ fn sheet_domain_controls(ui: &mut Ui, state: &mut AppState) -> bool {
     let mut context = SheetContext::of(state);
     match viewer {
         ResultViewer::Polar => polar::domain_bar(ui, &mut context),
+        ResultViewer::Contribution => sensitivity::domain_bar(ui, &mut context),
         ResultViewer::Scatter => scatter::domain_bar(ui, &mut context),
         ResultViewer::BoxViolin => box_violin::domain_bar(ui, &mut context),
         ResultViewer::Events => events::domain_bar(ui, &mut context),
