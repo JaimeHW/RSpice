@@ -159,10 +159,13 @@ pub(super) fn analysis_config_from_spec(spec: &AnalysisSpec) -> Option<AnalysisC
             output_var,
             ac_mode,
             frequency,
+            filter,
         } => Some(AnalysisConfig::Sensitivity(SensitivityConfig {
             output_var: output_var.clone(),
             ac_mode: *ac_mode,
             frequency: *frequency,
+            filter: filter.clone(),
+            sweep: None,
         })),
         _ => None,
     }

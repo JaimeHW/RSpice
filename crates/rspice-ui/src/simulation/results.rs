@@ -289,18 +289,10 @@ pub enum SimulationResult {
         evidence: std::sync::Arc<crate::state::DcMismatchEvidence>,
     },
 
-    /// Sensitivity analysis results
-    Sensitivity {
-        /// Canonical output expression evaluated by the analysis.
-        output: String,
-        /// Whether the analysis used an AC small-signal basis.
-        ac_mode: bool,
-        /// Resolved AC frequency in hertz. `None` for DC sensitivity.
-        frequency_hz: Option<f64>,
-        /// Parameter sensitivities
-        sensitivities: HashMap<String, rspice_core::analysis::sensitivity::SensitivityValue<f64>>,
-        /// Normalized sensitivities (% change in output / % change in param)
-        normalized: HashMap<String, rspice_core::analysis::sensitivity::SensitivityValue<f64>>,
+    /// One `.SENS` study, exactly as the engine's complete entries answered
+    /// it: one filter, one grid, and one column per variable per point.
+    SensitivityStudy {
+        evidence: std::sync::Arc<crate::state::SensitivityStudyEvidence>,
     },
 
     /// Scalar DC small-signal transfer function around the converged

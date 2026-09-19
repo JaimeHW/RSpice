@@ -72,6 +72,7 @@ mod recorded_fft_result;
 mod results_convert;
 mod results_post;
 mod results_update;
+mod sensitivity_result;
 pub(crate) mod spice_value;
 mod touchstone;
 mod transient_post;

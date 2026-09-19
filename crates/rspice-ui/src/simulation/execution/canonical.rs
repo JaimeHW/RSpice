@@ -1108,6 +1108,67 @@ mod tests {
         assert_ne!(authored.finish(), absent.finish());
     }
 
+    /// A sensitivity plan restored from a project saved before filters
+    /// existed digests to exactly the bytes it digested to then.
+    ///
+    /// Same shape of reference as the two above — the three fields the arm
+    /// wrote, nothing appended — with one difference that is the whole point:
+    /// the value that leaves the digest alone is `PARAM:*`, not the empty
+    /// string. A saved plan computed the deck's design parameters, so that is
+    /// what it must go on computing, and a plan whose filter was emptied runs
+    /// a different analysis and has to say so.
+    #[test]
+    fn a_design_parameter_filter_at_one_frequency_leaves_the_plan_digest_unchanged() {
+        let sensitivity = |filter: &str| AnalysisSpec::Sensitivity {
+            output_var: "V(out)".to_owned(),
+            ac_mode: true,
+            frequency: Some(1.0e6),
+            filter: filter.to_owned(),
+        };
+        let spec = sensitivity(crate::simulation::config::DESIGN_PARAMETERS_FILTER);
+        let mut encoded = CanonicalWriter::new("test");
+        encode_analysis_spec(&mut encoded, &spec);
+
+        let mut before_the_field = CanonicalWriter::new("test");
+        before_the_field.domain("analysis-spec");
+        before_the_field.u8(analysis_kind_tag(&spec));
+        before_the_field.string("V(out)");
+        before_the_field.bool(true);
+        before_the_field.option(Some(&1.0e6), |writer, value| writer.f64(*value));
+
+        assert_eq!(
+            encoded.finish(),
+            before_the_field.finish(),
+            "a plan restored from before filters existed must keep its identity"
+        );
+    }
+
+    /// Emptying the filter is a different analysis, and a different plan.
+    ///
+    /// The engine reads an empty filter as every device and model parameter
+    /// and no design parameter — the opposite selection from `PARAM:*`. If
+    /// the two digested alike, a stored result computed under one would be
+    /// presented as current for the other.
+    #[test]
+    fn an_emptied_filter_is_a_different_plan_from_one_saved_before_filters() {
+        let sensitivity = |filter: &str| AnalysisSpec::Sensitivity {
+            output_var: "V(out)".to_owned(),
+            ac_mode: false,
+            frequency: None,
+            filter: filter.to_owned(),
+        };
+        let digest = |filter: &str| {
+            let mut writer = CanonicalWriter::new("test");
+            encode_analysis_spec(&mut writer, &sensitivity(filter));
+            writer.finish()
+        };
+        let legacy = digest(crate::simulation::config::DESIGN_PARAMETERS_FILTER);
+        assert_ne!(legacy, digest(""));
+        assert_ne!(legacy, digest("R* PARAM:*"));
+        assert_ne!(digest(""), digest("R*"));
+        assert_eq!(digest("R*"), digest("R*"));
+    }
+
     /// A DC mismatch plan with no authored share threshold digests to exactly
     /// the bytes it digested to before the field existed.
     ///

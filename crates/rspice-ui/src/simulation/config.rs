@@ -24,7 +24,10 @@ pub use pole_zero::{PoleZeroConfig, PzAnalysisType};
 pub use recorded_fft::{
     FFT_DEFAULT_POINTS, FFT_WINDOWS, FftFormatChoice, FftRequest, fft_point_counts, window_keyword,
 };
-pub use sensitivity::SensitivityConfig;
+pub use sensitivity::{
+    DESIGN_PARAMETERS_FILTER, SensitivityConfig, SensitivitySweep, canonical_sensitivity_filter,
+    design_parameters_filter, validate_sensitivity_filter,
+};
 pub use transient::TransientAnalysisConfig;
 
 //=============================================================================

@@ -543,10 +543,13 @@ impl SimulationController {
                 output_var,
                 ac_mode,
                 frequency,
+                filter,
             } => Ok(AnalysisConfig::Sensitivity(SensitivityConfig {
                 output_var: output_var.clone(),
                 ac_mode: *ac_mode,
                 frequency: *frequency,
+                filter: filter.clone(),
+                sweep: None,
             })),
             _ => Err(format!(
                 "{} runs through the spec-driven simulation path and cannot be converted to a legacy analysis config",
@@ -1044,6 +1047,7 @@ impl SimulationController {
             output_var: sens_cfg.output_expr,
             ac_mode,
             frequency: ac_mode.then_some(sens_cfg.ac_freq),
+            filter: sens_cfg.filter,
         })
     }
 }

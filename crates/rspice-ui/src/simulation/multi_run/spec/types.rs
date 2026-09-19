@@ -407,6 +407,12 @@ pub enum AnalysisSpec {
         output_var: String,
         ac_mode: bool,
         frequency: Option<f64>,
+        /// The `.SENS` filter list, canonical and space separated. Empty is
+        /// the engine's default — every device and model parameter — and it
+        /// is always serialized, because an absent filter means "saved before
+        /// filters existed", which is a different statement.
+        #[serde(default = "crate::simulation::config::design_parameters_filter")]
+        filter: String,
     },
     /// Pole-zero
     PoleZero {

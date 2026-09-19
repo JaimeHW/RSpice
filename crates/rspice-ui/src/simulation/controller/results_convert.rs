@@ -582,62 +582,8 @@ impl SimulationController {
                 self.analysis_result_with_validated_payload(analysis_type, label, payload)
             }
 
-            SimulationResult::Sensitivity {
-                output,
-                ac_mode,
-                frequency_hz,
-                sensitivities,
-                normalized,
-            } => {
-                let result_mode = match (ac_mode, frequency_hz) {
-                    (false, None) => SensitivityResultMode::Dc,
-                    (true, Some(frequency_hz)) => SensitivityResultMode::Ac { frequency_hz },
-                    (false, Some(_)) => {
-                        return AnalysisResult::failed(
-                            1,
-                            analysis_type,
-                            label.to_string(),
-                            "Sensitivity result contract supplied an AC frequency for DC mode",
-                        );
-                    }
-                    (true, None) => {
-                        return AnalysisResult::failed(
-                            1,
-                            analysis_type,
-                            label.to_string(),
-                            "Sensitivity result contract omitted its AC frequency",
-                        );
-                    }
-                };
-
-                let mut parameters: Vec<_> = sensitivities.keys().cloned().collect();
-                parameters.sort();
-                if parameters.len() != normalized.len()
-                    || parameters
-                        .iter()
-                        .any(|parameter| !normalized.contains_key(parameter))
-                {
-                    return AnalysisResult::failed(
-                        1,
-                        analysis_type,
-                        label.to_string(),
-                        "Sensitivity result contract has misaligned raw and normalized parameters",
-                    );
-                }
-                let rows = parameters
-                    .into_iter()
-                    .map(|parameter| SensitivityResultRow {
-                        raw: sensitivities[&parameter],
-                        normalized: normalized[&parameter],
-                        parameter,
-                    })
-                    .collect();
-                let payload = AnalysisResultPayload::Sensitivity {
-                    output,
-                    result_mode,
-                    rows,
-                };
-                self.analysis_result_with_validated_payload(analysis_type, label, payload)
+            SimulationResult::SensitivityStudy { evidence } => {
+                sensitivity_result::analysis_result(analysis_type, label, evidence)
             }
 
             SimulationResult::DcMismatch { evidence } => self
