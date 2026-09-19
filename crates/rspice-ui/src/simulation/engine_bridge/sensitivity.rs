@@ -189,7 +189,13 @@ impl EngineBridge {
             variation, points, start, stop, abort,
         )
         .map(Some)
-        .map_err(|error| self.translate_error(error))
+        // The engine's own sentence, verbatim: the grid this refuses is the
+        // grid `rspice run` would refuse on the same card, and a Studio
+        // paraphrase would make the two disagree about why.
+        .map_err(|error| match error {
+            rspice_core::analysis::FrequencyGridError::Aborted => SimulationError::Aborted,
+            error => SimulationError::InvalidConfig(error.to_string()),
+        })
     }
 }
 
@@ -679,7 +685,7 @@ mod tests {
     fn one_point_per_decade_from_f_to_f_is_exactly_f() {
         for frequency in [1.0_f64, 60.0, 1.0e6, 2.5e9] {
             let grid = rspice_core::analysis::ac::try_ac_sweep_frequencies_with_abort(
-                rspice_core::netlist::FreqVariation::Decade,
+                rspice_core::netlist::FreqVariation::Dec,
                 1,
                 frequency,
                 frequency,
@@ -713,7 +719,7 @@ mod tests {
             )
             .expect_err("a descending decade sweep is not a grid");
         let sentence = rspice_core::analysis::ac::try_ac_sweep_frequencies_with_abort(
-            rspice_core::netlist::FreqVariation::Decade,
+            rspice_core::netlist::FreqVariation::Dec,
             10,
             1.0e6,
             1.0,
@@ -721,10 +727,10 @@ mod tests {
         )
         .expect_err("the engine refuses the same grid")
         .to_string();
-        assert!(
-            format!("{error:?}").contains(sentence.trim_start_matches("Circuit error: ")),
-            "{error:?} does not carry the engine's own sentence {sentence:?}"
-        );
+        let SimulationError::InvalidConfig(message) = &error else {
+            panic!("a refused grid is an invalid configuration: {error:?}");
+        };
+        assert_eq!(message, &sentence);
     }
 
     #[test]

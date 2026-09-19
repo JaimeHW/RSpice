@@ -74,11 +74,11 @@ mod tests {
         assert!(!failed.success);
         assert!(
             failed
-                .error
+                .error_message
                 .as_deref()
-                .is_some_and(|error| error.contains("Invalid retained analysis payload")),
+                .is_some_and(|error: &str| error.contains("Invalid retained analysis payload")),
             "{:?}",
-            failed.error
+            failed.error_message
         );
     }
 

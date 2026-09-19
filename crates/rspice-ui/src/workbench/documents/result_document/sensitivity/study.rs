@@ -444,7 +444,7 @@ pub(super) fn show(ui: &mut Ui, state: &mut AppState) {
                 });
                 let hovered = response.hovered();
                 let phase = row.phase.get(index).copied();
-                let _ = response.on_hover_ui(|ui| {
+                let response = response.on_hover_ui(|ui| {
                     ui.label(
                         egui::RichText::new(row.parameter.as_str())
                             .font(theme::mono(tokens::FS_1, FontWeight::Medium)),
