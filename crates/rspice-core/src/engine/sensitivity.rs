@@ -1,5 +1,7 @@
 #[cfg(test)]
 mod design_parameter_tests;
+#[cfg(test)]
+mod expression_value_tests;
 mod parameter;
 mod refinement;
 
