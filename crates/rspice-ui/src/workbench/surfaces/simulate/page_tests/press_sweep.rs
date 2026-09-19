@@ -493,7 +493,7 @@ const PRESSED_PER_SURFACE: &[(&str, usize)] = &[
     ("Models", 1),
     ("Solver", 32),
     ("Save", 6),
-    ("analysis catalogue · Analyses", 31),
+    ("analysis catalogue · Analyses", 32),
     ("analysis catalogue · Excitations", 0),
     ("analysis catalogue · Variables", 0),
     ("analysis catalogue · Outputs", 0),
@@ -540,7 +540,10 @@ const PRESSED_PER_SURFACE: &[(&str, usize)] = &[
 /// with the PSS form's extra row handing three shared identities on to Corner.
 ///
 /// And the catalogue gained the frequency-table AC kind: one more row to add.
-const PRESSED_FLOOR: usize = 292;
+///
+/// And the FFT spectrum kind, for the same one row.
+/// The manager's full run re-measures this; the number here is +1 per kind.
+const PRESSED_FLOOR: usize = 293;
 
 /// Controls that are wired to nothing.
 ///

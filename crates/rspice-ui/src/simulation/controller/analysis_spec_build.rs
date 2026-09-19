@@ -194,6 +194,9 @@ impl SimulationController {
                     frequencies: config.frequencies,
                 }
             }
+            AnalysisDraft::Fft(draft) => AnalysisSpec::Fft {
+                request: draft.to_request()?,
+            },
             AnalysisDraft::DcMismatch(draft) => AnalysisSpec::DcMismatch {
                 output_expression: draft.output_expression.trim().to_owned(),
                 sigma_multiplier: parse_si(&draft.sigma_multiplier, "DCMATCH sigma multiplier")?,
@@ -1315,6 +1318,7 @@ mod manifest_tests {
             AnalysisKind::Qpxf,
             AnalysisKind::TransientNoise,
             AnalysisKind::DcMismatch,
+            AnalysisKind::Fft,
         ] {
             let draft = AnalysisDraft::for_kind(kind);
             let spec = controller
@@ -1335,6 +1339,7 @@ mod manifest_tests {
                         AnalysisSpec::TransientNoise { .. }
                     )
                     | (AnalysisKind::DcMismatch, AnalysisSpec::DcMismatch { .. })
+                    | (AnalysisKind::Fft, AnalysisSpec::Fft { .. })
             ));
             assert!(spec.validate().is_ok());
         }

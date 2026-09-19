@@ -24,8 +24,10 @@ use crate::workbench::app_state::{AcSetup, DcSetup, TranSetup};
 use super::AnalysisKind;
 
 mod frequency_table;
+mod recorded_fft;
 
 pub use frequency_table::AcDataDraft;
+pub use recorded_fft::FftDraft;
 
 /// AC sweep draft shared structurally by AC and DISTO, but never shared by
 /// identity. Each analysis instance owns a deep copy.
@@ -551,6 +553,8 @@ pub enum AnalysisDraft {
     DcMismatch(DcMismatchDraft),
     #[serde(rename = "acdata")]
     AcData(AcDataDraft),
+    #[serde(rename = "fft")]
+    Fft(FftDraft),
 }
 
 macro_rules! initialized_default {
@@ -611,6 +615,7 @@ impl AnalysisDraft {
             AnalysisKind::TransientNoise => Self::TransientNoise(TransientNoiseDraft::default()),
             AnalysisKind::DcMismatch => Self::DcMismatch(DcMismatchDraft::default()),
             AnalysisKind::AcData => Self::AcData(AcDataDraft::default()),
+            AnalysisKind::Fft => Self::Fft(FftDraft::default()),
         }
     }
 
@@ -689,6 +694,7 @@ impl AnalysisDraft {
             Self::TransientNoise(_) => AnalysisKind::TransientNoise,
             Self::DcMismatch(_) => AnalysisKind::DcMismatch,
             Self::AcData(_) => AnalysisKind::AcData,
+            Self::Fft(_) => AnalysisKind::Fft,
         }
     }
 
@@ -749,7 +755,8 @@ impl AnalysisDraft {
             | Self::Qpxf(_)
             | Self::TransientNoise(_)
             | Self::DcMismatch(_)
-            | Self::AcData(_) => {}
+            | Self::AcData(_)
+            | Self::Fft(_) => {}
         }
     }
 
@@ -768,6 +775,7 @@ impl AnalysisDraft {
             Self::TransientNoise(draft) => validate_transient_noise(draft),
             Self::DcMismatch(draft) => validate_dc_mismatch(draft),
             Self::AcData(draft) => draft.to_config().err(),
+            Self::Fft(draft) => draft.to_request().err(),
             _ => None,
         }
     }
@@ -815,6 +823,7 @@ impl AnalysisDraft {
                 draft.output_expression, draft.sigma_multiplier, draft.contributor_limit
             )),
             Self::AcData(draft) => Some(draft.summary()),
+            Self::Fft(draft) => Some(draft.summary()),
             Self::TransferFunction(draft) => Some(format!(
                 "{} <- {} - DC operating point",
                 draft.output_expression, draft.input_source
@@ -1059,6 +1068,36 @@ pub(super) fn dependency_configuration_issue(
         .map(DependencyConfigurationIssue::Incompatible);
     }
 
+    // The engine's own rule, before the run rather than during it: a card
+    // whose STOP is past a transient's stop time fails that transient.
+    if let (AnalysisDraft::Fft(fft), AnalysisDraft::Transient(transient)) =
+        (dependent, prerequisite)
+    {
+        let request = match fft.to_request() {
+            Ok(request) => request,
+            Err(detail) => {
+                return Some(DependencyConfigurationIssue::InvalidDependent(format!(
+                    "FFT configuration is invalid: {detail}"
+                )));
+            }
+        };
+        let capability = match transient_capability(transient) {
+            Ok(capability) => capability,
+            Err(detail) => {
+                return Some(DependencyConfigurationIssue::InvalidPrerequisite(format!(
+                    "Transient configuration is invalid: {detail}"
+                )));
+            }
+        };
+        let stop = request.stop.unwrap_or(capability.stop_time);
+        return (stop > capability.stop_time).then(|| {
+            DependencyConfigurationIssue::Incompatible(format!(
+                "STOP {stop} exceeds transient stop time {}",
+                capability.stop_time
+            ))
+        });
+    }
+
     let (AnalysisDraft::Fourier(fourier), AnalysisDraft::Transient(transient)) =
         (dependent, prerequisite)
     else {
@@ -1104,6 +1143,28 @@ pub(super) fn prerequisite_draft_for(
             step: format!("{interval:.12e}"),
             start: format!("{:.12e}", requirement.start_time),
             max_step: format!("{interval:.12e}"),
+            uic: false,
+        }));
+    }
+    if prerequisite == AnalysisKind::Transient
+        && let AnalysisDraft::Fft(fft) = dependent
+    {
+        let request = fft
+            .to_request()
+            .map_err(|detail| format!("FFT configuration is invalid: {detail}"))?;
+        // Only an authored STOP can size a transient. Without one the card
+        // takes the transient's own stop time, and the default transient is
+        // exactly the run the author has not yet constrained.
+        let Some(stop) = request.stop else {
+            return Ok(AnalysisDraft::for_kind(prerequisite));
+        };
+        let start = request.start.unwrap_or(0.0);
+        let step = (stop - start) / request.points as f64;
+        return Ok(AnalysisDraft::Transient(TranSetup {
+            stop: format!("{stop:.12e}"),
+            step: format!("{step:.12e}"),
+            start: format!("{:.12e}", 0.0),
+            max_step: format!("{step:.12e}"),
             uic: false,
         }));
     }

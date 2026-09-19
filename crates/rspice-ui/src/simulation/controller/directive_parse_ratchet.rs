@@ -54,7 +54,7 @@ R2 n_out 0 10k
 /// or ask for something no default can invent — and which ones those are is
 /// [`KINDS_THAT_STATE_NO_DIRECTIVE`], not something the reader has to work out
 /// from the gap.
-const KINDS_THAT_EMIT_A_DIRECTIVE: usize = 28;
+const KINDS_THAT_EMIT_A_DIRECTIVE: usize = 29;
 
 /// The kinds whose default draft reaches no directive, and what they are
 /// waiting for.
