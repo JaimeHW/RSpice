@@ -1322,10 +1322,17 @@ fn key_figure(
         })
     };
     match component.kind {
+        // A level held by a design variable is named rather than left blank:
+        // `{VSUP}` is the one fact that tells two supply definitions apart, and
+        // the netlister, not this row, is who resolves it.
         ComponentType::VoltageSource | ComponentType::CurrentSource => {
             crate::quantity::parse_engineering_value(&component.value)
                 .ok()
                 .map(|value| spell(value, quantity))
+                .or_else(|| {
+                    crate::simulation::stimulus_realize::design_variable(&component.value)
+                        .map(|variable| format!("{{{variable}}}"))
+                })
                 .unwrap_or_default()
         }
         ComponentType::VoltageSourceAc | ComponentType::CurrentSourceAc => {

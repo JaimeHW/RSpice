@@ -137,7 +137,7 @@ pub(super) fn definition_row(ui: &mut Ui, row: &Row<'_>, selected: bool) -> egui
         ),
         source_preview::MINI_SIZE,
     );
-    source_preview::paint_mini(ui.painter(), &t, mini, row.curve, row.family, true);
+    source_preview::paint_mini(ui.painter(), &t, mini, row.curve, row.gap, true);
     if row.dirty {
         state_mark(
             ui,
@@ -156,8 +156,8 @@ pub(super) fn definition_row(ui: &mut Ui, row: &Row<'_>, selected: bool) -> egui
     let revision_width = measured(ui, &revision, revision_font.clone());
     // A definition with nothing to say in its second register takes the whole
     // row for its name rather than leaving a band of nothing under it: a
-    // refused DC level has no key figure and no adopters, and an empty line is
-    // a fact the reader looks for and does not find.
+    // level the engine refused has no key figure, and with no adopters either
+    // an empty line is a fact the reader looks for and does not find.
     let (name_band, meta_band) = if row.meta.is_empty() {
         ((rect.top() + 9.0, rect.bottom() - 9.0), None)
     } else {

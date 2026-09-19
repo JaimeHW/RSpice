@@ -348,7 +348,9 @@ pub(crate) fn is_independent_source(kind: ComponentType) -> bool {
 mod derived;
 mod trace;
 
-pub(crate) use derived::{Guide, SpanChoice, StimulusRealization};
+pub(crate) use derived::{
+    Guide, SpanChoice, StimulusRealization, design_variable, names_design_variable, shape_trace,
+};
 pub(crate) use trace::{EnvelopeColumn, TraceReading, WaveformTrace, sample_trace};
 
 #[cfg(test)]

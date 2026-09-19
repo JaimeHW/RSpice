@@ -21,7 +21,7 @@ use egui::{Align2, Rect, Sense, Stroke, Ui, Vec2, pos2, vec2};
 
 use crate::simulation::stimulus_realize::{self, PreviewTiming, WaveformReadouts, WaveformTrace};
 use crate::state::Component;
-use crate::state::stimulus_library::definition::StimulusFamily;
+use crate::state::stimulus_library::definition::{StimulusDefinition, StimulusFamily};
 use crate::ui::plot::si_tick_label;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -32,8 +32,9 @@ use crate::ui::tokens::{self, Tokens};
 /// always drawn at.
 const PREVIEW_SAMPLES: usize = 96;
 
-/// How many points a list mini asks for. One per half point of its width: past
-/// that the extra samples land on pixels already inked.
+/// How many columns a list mini resolves: more than one per point of its
+/// width, so a shape repeating faster than the slot can show is drawn as the
+/// band it covers rather than as a scribble.
 pub(crate) const MINI_SAMPLES: usize = 64;
 
 /// The inset well a list mini is drawn in.
@@ -77,16 +78,19 @@ pub(crate) fn ensure_minis(
     library: &crate::state::StimulusLibrary,
     timing: PreviewTiming,
 ) -> usize {
-    let (window, _) = shape_window(timing);
     let mut evaluated = 0;
     for definition in library.definitions() {
         let key = (definition.name().to_owned(), definition.revision());
         if cache.contains_key(&key) {
             continue;
         }
+        // Over the shape's own fit span, which is the window the instrument
+        // opens a definition in: a list row says what a definition is, and a
+        // forty millisecond brownout drawn over a one millisecond transient is
+        // a flat line that says nothing.
         cache.insert(
             key,
-            source_curve_with_samples(&definition.transient_component(), window, MINI_SAMPLES),
+            stimulus_realize::shape_trace(&definition.transient_component(), MINI_SAMPLES, timing),
         );
         evaluated += 1;
     }
@@ -107,39 +111,26 @@ pub(crate) fn source_curve(
     component: &Component,
     timing: PreviewTiming,
 ) -> Result<WaveformTrace, String> {
-    source_curve_with_samples(component, timing, PREVIEW_SAMPLES)
-}
-
-/// [`source_curve`] at an explicit sample count, for a mini that is 44 points
-/// wide.
-pub(crate) fn source_curve_with_samples(
-    component: &Component,
-    timing: PreviewTiming,
-    samples: usize,
-) -> Result<WaveformTrace, String> {
     let spec = stimulus_realize::source_spec(component)?;
     match stimulus_realize::preview_defect(&spec) {
         Some(defect) => Err(defect),
         None => Ok(stimulus_realize::sample_trace(
             &spec,
-            timing.window(samples),
+            timing.window(PREVIEW_SAMPLES),
             timing,
         )),
     }
 }
 
-/// The window a stored *shape* is drawn over, and the caption that says what
-/// that window is.
+/// The window the Save strip draws a placed source over, and the caption that
+/// says what that window is.
 ///
-/// A definition is a shape rather than a run, so the window a reader would want
-/// is one fit span of its family — a period of a pulse train, a few cycles of a
-/// sinusoid. Nothing in the crate owns a per-family fit span yet, so today the
-/// window is the project's own preview transient and the caption states exactly
-/// that, because a caption that promised a period while the strip drew a
-/// millisecond would be worse than no caption at all.
-///
-/// Both the list minis and the Save strip come through here, so there is one
-/// call to change when the fit span lands.
+/// The strip shows the card the dialog is about to publish as the instance
+/// drives it today, under the project's own transient, and the caption states
+/// exactly that window. The list minis do not come through here: a stored
+/// definition is drawn over its own fit span
+/// ([`stimulus_realize::shape_trace`]), because a row says what a shape is
+/// rather than what one run makes of it.
 pub(crate) fn shape_window(timing: PreviewTiming) -> (PreviewTiming, String) {
     let caption = timing.caption();
     (timing, caption)
@@ -644,7 +635,7 @@ pub(crate) fn paint_mini(
     t: &Tokens,
     rect: Rect,
     curve: &Result<WaveformTrace, String>,
-    family: StimulusFamily,
+    gap: MiniGap,
     enabled: bool,
 ) {
     painter.rect(
@@ -671,16 +662,45 @@ pub(crate) fn paint_mini(
             };
             paint_trace(painter, trace, &placement, ink, 1.0);
         }
-        // A card the engine refused, for a family that does have a waveform at
-        // this boundary, is the one case a mark must not read as data: the flat
-        // line this used to draw is a level the definition does not hold.
-        (Err(_), _) if !boundary_family(family) => crate::ui::widgets::paint_status_mark(
+        // A card the engine refused, for a definition that should have drawn,
+        // is the one case a mark must not read as data: the flat line this
+        // used to draw is a level the definition does not hold.
+        (Err(_), _) if !gap.ordinary => crate::ui::widgets::paint_status_mark(
             painter,
             Rect::from_center_size(plot.center(), Vec2::splat(plot.height())),
             crate::ui::widgets::StatusMark::Warning,
             t.color.warn,
         ),
-        _ => paint_boundary_mark(painter, plot, family, t.color.text_faint),
+        _ => paint_boundary_mark(painter, plot, gap.family, t.color.text_faint),
+    }
+}
+
+/// What a mini draws in the slot a curve would have filled.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct MiniGap {
+    /// The family whose mark stands in for the curve.
+    family: StimulusFamily,
+    /// Whether having no curve is ordinary for this definition, so the mark is
+    /// the family's own rather than a warning.
+    ordinary: bool,
+}
+
+impl MiniGap {
+    /// What a definition with no curve shows.
+    ///
+    /// Two cases are ordinary. A noise train, a random train and a `PWL FILE`
+    /// table have no waveform until a run builds them. And a definition that
+    /// names a design variable (`{VSUP}` for a supply level is how most
+    /// libraries are written) resolves when a deck knows its own `.param`s,
+    /// which a preview parsing against an empty scope never does. A warning on
+    /// either would teach a reader to ignore the mark.
+    pub(crate) fn of(definition: &StimulusDefinition) -> Self {
+        let family = definition.family();
+        Self {
+            family,
+            ordinary: boundary_family(family)
+                || stimulus_realize::names_design_variable(definition),
+        }
     }
 }
 

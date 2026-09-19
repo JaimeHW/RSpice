@@ -66,7 +66,7 @@ fn wide_fixture() -> (RSpiceApp, u64) {
             "probe_tone",
             ComponentType::CurrentSourceSin,
             "0",
-            "va=1u freq=10k",
+            "ia=1u freq=10k",
         ),
     ] {
         app.state
@@ -91,7 +91,7 @@ fn kind_only_fixture() -> (RSpiceApp, u64) {
             "probe_tone",
             ComponentType::CurrentSourceSin,
             "0",
-            "va=1u freq=10k",
+            "ia=1u freq=10k",
         ),
     ] {
         app.state

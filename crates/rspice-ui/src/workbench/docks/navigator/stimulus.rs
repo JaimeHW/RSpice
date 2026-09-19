@@ -64,7 +64,8 @@ struct Group<'a> {
 struct Row<'a> {
     name: String,
     revision: u32,
-    family: StimulusFamily,
+    /// What the mini shows if this definition has no curve.
+    gap: crate::properties::source_preview::MiniGap,
     /// `I · PER 1 ms · →2 ↑`, assembled from the owner of each part.
     meta: String,
     /// The editor is holding an unapplied draft for this definition.
@@ -303,7 +304,7 @@ fn row<'a>(
     Row {
         name: definition.name().to_owned(),
         revision: definition.revision(),
-        family: definition.family(),
+        gap: crate::properties::source_preview::MiniGap::of(definition),
         meta: meta_line(definition, tally),
         dirty,
         refused: dirty && draft_is_refused(state, definition),

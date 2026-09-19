@@ -29,6 +29,7 @@ use super::{
     DETACHED_NETS, PREVIEW_DIALECT, PreviewTiming, PreviewWindow, WaveformReadouts, WaveformTrace,
     preview_defect, sample_trace, source_spec, transient_part,
 };
+use crate::state::Component;
 use crate::state::format_engineering_display;
 use crate::state::stimulus_library::definition::{
     StimulusDefinition, StimulusFamily, StimulusKind,
@@ -220,13 +221,6 @@ fn unresolved_readouts(record: &StimulusDefinition) -> Vec<(String, String)> {
     rows
 }
 
-/// The variable a `{NAME}` level names, if the text is one.
-fn design_variable(value: &str) -> Option<String> {
-    let trimmed = value.trim();
-    let inner = trimmed.strip_prefix('{')?.strip_suffix('}')?.trim();
-    (!inner.is_empty()).then(|| inner.to_owned())
-}
-
 /// The period a preview may measure one column's extremes over, instead of the
 /// whole of the time that column covers.
 ///
@@ -300,6 +294,62 @@ fn fundamental_period(spec: &SourceSpec, timing: PreviewTiming) -> Option<f64> {
         }
         _ => None,
     }
+}
+
+/// A stored shape over its own fit span, at the density a list mini draws at.
+///
+/// A list row shows what a definition *is*, not what one run makes of it: a
+/// supply brownout that takes forty milliseconds is a flat line over a
+/// millisecond transient, and a row of flat lines tells a reader nothing about
+/// which definition they want. The instrument's Fit view and this are the same
+/// window, so the picture in the list is the picture the row opens.
+///
+/// The refusals are the instrument's too, carried through unrewritten.
+pub(crate) fn shape_trace(
+    component: &Component,
+    samples: usize,
+    timing: PreviewTiming,
+) -> Result<WaveformTrace, String> {
+    let spec = source_spec(component)?;
+    if let Some(defect) = preview_defect(&spec) {
+        return Err(defect);
+    }
+    let span = fit_span(transient_part(&spec), timing);
+    let stop = if span.is_finite() && span > 0.0 {
+        span
+    } else {
+        timing.tstop
+    };
+    Ok(sample_trace(
+        &spec,
+        PreviewWindow {
+            start: 0.0,
+            stop,
+            samples,
+        },
+        timing,
+    ))
+}
+
+/// The variable a `{NAME}` level names, if the text is one.
+///
+/// A level held by a design variable is the ordinary case rather than a
+/// defect: the netlister resolves it at elaboration, and only a preview parsing
+/// against an empty scope cannot. Surfaces that draw a mark where a curve would
+/// be ask this, so that ordinary case never wears a warning.
+pub(crate) fn design_variable(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    let inner = trimmed.strip_prefix('{')?.strip_suffix('}')?.trim();
+    (!inner.is_empty()).then(|| inner.to_owned())
+}
+
+/// Whether any field of this definition is held by a design variable.
+///
+/// Read off the authored text, because that is all there is at this boundary:
+/// the parser refuses a braced field against an empty scope without saying
+/// that a brace was why.
+pub(crate) fn names_design_variable(record: &StimulusDefinition) -> bool {
+    record.value.contains('{') || record.params.contains('{')
 }
 
 /// How much of this waveform you have to see before you have seen it.

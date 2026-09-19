@@ -55,7 +55,8 @@ const PURPOSE: &str =
 pub(super) struct AdoptRow<'a> {
     pub(super) name: String,
     pub(super) revision: u32,
-    pub(super) family: StimulusFamily,
+    /// What the mini shows if this definition has no curve.
+    pub(super) gap: source_preview::MiniGap,
     /// The dim line under the name, in the order a narrow row should give them
     /// up: the family when its group does not already say it, the key figure,
     /// then the levels. Held apart rather than joined so a row too narrow for
@@ -113,7 +114,7 @@ pub(super) fn adopt_groups<'a>(
         let row = AdoptRow {
             name: definition.name().to_owned(),
             revision: definition.revision(),
-            family: definition.family(),
+            gap: source_preview::MiniGap::of(definition),
             meta: meta_line(definition, fit == AdoptionFit::Same, unit, curve),
             refusal: (fit == AdoptionFit::Kind).then(|| definition.kind_refusal(component)),
             curve: curve.unwrap_or(&source_preview::NO_MINI),
@@ -555,7 +556,7 @@ fn definition_row(ui: &mut Ui, row: &AdoptRow<'_>, selected: bool) -> egui::Resp
         ),
         source_preview::MINI_SIZE,
     );
-    source_preview::paint_mini(ui.painter(), &t, mini, row.curve, row.family, enabled);
+    source_preview::paint_mini(ui.painter(), &t, mini, row.curve, row.gap, enabled);
 
     let revision_left = rect.right() - 34.0;
     ui.painter().rect_filled(
