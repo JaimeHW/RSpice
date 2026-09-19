@@ -9,11 +9,14 @@
 //! It is a linearization, not a sampling. For every statistical variable in
 //! scope the analysis takes the derivative of the output with respect to that
 //! variable and multiplies it by the variable's standard deviation; the
-//! variance of the output is the sum of the squares of those products,
-//! because mismatch variables of different instances are independent by
-//! construction and a process variable is one variable the whole design
-//! shares. Each product's square over that total is the contributor's share,
-//! and the shares are what tells a designer which device to make bigger.
+//! variance of the output is the quadratic form `c^T R c` over those signed
+//! products, where `R` is the correlation the design's own `correlate`
+//! statements declare between variables that are drawn together. Mismatch
+//! variables of different instances are independent by construction and a
+//! process variable is one variable the whole design shares, so a design that
+//! correlates nothing gets the plain sum of squares. Each contributor's share
+//! is its Euler allocation `c_i * (R c)_i` over that total, and the shares are
+//! what tells a designer which device to make bigger.
 //!
 //! Every standard deviation comes from the deck's own
 //! `statistics { process { vary ... } mismatch { vary ... } }` block. There is
@@ -41,8 +44,16 @@ pub struct DcMatchContributor {
     /// deviation of this variable produces. Signed, so a reader can tell
     /// which way the output moves.
     pub contribution: Value,
-    /// `contribution^2 / sigma_total^2`. Zero when the total variance is
-    /// zero, which is the only case where the shares do not sum to one.
+    /// This contributor's Euler allocation of the total variance,
+    /// `contribution * (R * contributions)_i / sigma_total^2`, which is
+    /// `contribution^2 / sigma_total^2` when nothing is correlated. Zero when
+    /// the total variance is zero, which is the only case where the shares do
+    /// not sum to one.
+    ///
+    /// Signed. A negative share is a variable whose correlated partner cancels
+    /// it — it removes variance from the total rather than adding to it — and
+    /// is a statement the design made, not an error. Rank and threshold on the
+    /// magnitude.
     pub share: Value,
 }
 
@@ -84,11 +95,20 @@ pub struct DcMatchResult {
     /// The part of `sigma_total` the design-wide process variables own.
     pub sigma_process: Value,
     /// Contributors retained by the card's `CONTRIBUTORS` and `THRESHOLD`
-    /// limits, largest share first.
+    /// limits, largest share first by magnitude — a correlated share carries a
+    /// sign, and both limits read the magnitude.
     pub contributors: Vec<DcMatchContributor>,
     /// How many contributors the analysis evaluated, including any the
     /// card's limits dropped from `contributors`.
     pub evaluated_contributors: usize,
+    /// How many `correlate` statements of the design's `statistics` block
+    /// entered the mismatch variance. Zero means the mismatch variables were
+    /// summed as independent — either because the block declares no mismatch
+    /// correlation or because the card did not ask for the scope.
+    pub applied_correlations_mismatch: usize,
+    /// How many `correlate` statements entered the process variance, on the
+    /// same terms.
+    pub applied_correlations_process: usize,
 }
 
 impl DcMatchResult {

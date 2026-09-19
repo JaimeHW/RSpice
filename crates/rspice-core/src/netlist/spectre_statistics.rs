@@ -499,6 +499,46 @@ impl SpectreStatisticsPlan {
             .collect()
     }
 
+    /// The correlation one scope's `correlate` statements declare, validated,
+    /// in the order [`Self::scope_standard_deviations`] reports its variables.
+    ///
+    /// `None` when the scope has no `correlate` statement and no matrix is
+    /// built: independent variables are the overwhelmingly common case, and a
+    /// caller that has a linear path for them must keep it rather than
+    /// multiply by an identity.
+    ///
+    /// This is the **target** correlation — the linear (Pearson) correlation
+    /// the `correlate` statements state about the variables themselves. It is
+    /// deliberately not the Gaussian-copula latent matrix
+    /// [`Self::sample_scope`] factorizes: the latent matrix exists only so a
+    /// non-Gaussian draw reproduces this one, and a second-moment statement
+    /// about the variables — a linearized variance, for instance — is about
+    /// the variables, not about the normal scores behind them.
+    ///
+    /// Validated by [`SpectreCorrelationMatrix::new`], the same call
+    /// [`Self::sample_scope`] makes, so an asymmetric or indefinite matrix is
+    /// refused in one vocabulary whatever consumes the statistics block.
+    pub(crate) fn scope_target_correlation(
+        &self,
+        scope: SpectreVariationScope,
+        params: &ParamContext,
+        process: &BTreeMap<String, Value>,
+    ) -> Result<Option<SpectreCorrelationMatrix>, SpectreStatisticsError> {
+        if !self
+            .correlations
+            .iter()
+            .any(|correlation| correlation.scope == scope)
+        {
+            return Ok(None);
+        }
+        let variations = self.resolve_scope(scope, params, process)?;
+        if variations.is_empty() {
+            return Ok(None);
+        }
+        let target = self.target_correlation_matrix(scope, &variations, params)?;
+        Ok(Some(SpectreCorrelationMatrix::new(target)?))
+    }
+
     fn sample_scope(
         &self,
         scope: SpectreVariationScope,
