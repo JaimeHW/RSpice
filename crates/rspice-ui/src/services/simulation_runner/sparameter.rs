@@ -279,7 +279,11 @@ endmodule"#,
             } else {
                 deck.clone()
             };
-            let result = run_sparameter_analysis_with_abort(&source, &config, &NoAbort).unwrap();
+            let mut request = config.clone();
+            if declared {
+                request.ports.clear();
+            }
+            let result = run_sparameter_analysis_with_abort(&source, &request, &NoAbort).unwrap();
             assert_eq!(result.data.len(), 1);
             assert_eq!(result.data[0].frequency, config.start_freq);
             assert_eq!(result.num_ports, 2);
@@ -327,9 +331,13 @@ endmodule"#,
             "X1 p 0 generator\n.subckt generator a b params: reference=75\nP1 a b portnum=1 z0={reference}\n.ends generator",
         ] {
             let deck = format!("* declared single port\n{declaration}\nR1 p 0 100\n.end\n");
-            // The configured planes do not even occur in this circuit.
-            let result =
-                run_sparameter_analysis_with_abort(&deck, &two_port_config(), &NoAbort).unwrap();
+            // Explicit and circuit-declared ports are separate authorities.
+            assert!(
+                run_sparameter_analysis_with_abort(&deck, &two_port_config(), &NoAbort).is_err()
+            );
+            let mut config = two_port_config();
+            config.ports.clear();
+            let result = run_sparameter_analysis_with_abort(&deck, &config, &NoAbort).unwrap();
             assert_eq!(result.num_ports, 1);
             assert_eq!(result.ports[0].z0, 75.0);
             for point in result.data {
