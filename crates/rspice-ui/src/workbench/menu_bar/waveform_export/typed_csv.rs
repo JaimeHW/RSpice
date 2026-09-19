@@ -656,6 +656,9 @@ pub(super) fn prepare_typed_result_csv(
                 ),
             })
         }
+        // A recorded spectrum exports through the ordinary complex waveform
+        // CSV path; its payload states the transform, not a table.
+        AnalysisResultPayload::FftSpectrum { .. } => None,
         AnalysisResultPayload::TransientEvents {
             digital_traces,
             real_traces,

@@ -442,6 +442,15 @@ impl SimulationController {
                 )));
             }
 
+            SimulationResult::Fft { spectrum, .. } => {
+                state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(
+                    "FFT: {} coefficients of {} over {} points",
+                    spectrum.frequency.len(),
+                    spectrum.evidence.output,
+                    spectrum.evidence.point_count
+                )));
+            }
+
             SimulationResult::MeasurementsOnly { .. } => {
                 state.push_sim_message(crate::diagnostics::ConsoleMessage::info(
                     "Analysis complete (scalar result evidence retained)".to_string(),

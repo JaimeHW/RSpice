@@ -1596,7 +1596,7 @@ fn selected_result_artifact(
         run.dataset_id
     );
     let analysis_label = analysis.label.clone();
-    let analysis_kind = analysis.analysis_type.display_name().to_owned();
+    let analysis_kind = analysis.kind_display_name().to_owned();
     let dataset = run.dataset_id.to_string();
 
     section_header(ui, "Typed result selection", None);

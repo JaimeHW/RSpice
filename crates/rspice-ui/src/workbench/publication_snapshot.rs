@@ -1098,7 +1098,7 @@ fn results_section(
         analyses.push(AnalysisRecord {
             id: analysis_id,
             label: analysis.label.clone(),
-            card: analysis.analysis_type.spice_command().to_string(),
+            card: analysis.spice_card().to_string(),
         });
 
         datasets.append(&mut analysis_datasets(

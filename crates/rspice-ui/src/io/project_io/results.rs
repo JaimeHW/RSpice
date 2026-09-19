@@ -162,6 +162,29 @@ impl ProjectSimulationResultsData {
 
     fn migrate_to_current_in_place(&mut self, project_id: ProjectId) -> Result<(), String> {
         let source_schema = self.schema_version;
+        if source_schema < RECORDED_FFT_RESULTS_SCHEMA_VERSION
+            && self
+                .runs
+                .iter()
+                .flat_map(|run| &run.analyses)
+                .any(|analysis| {
+                    matches!(
+                        analysis.result_payload.as_ref(),
+                        Some(AnalysisResultPayload::FftSpectrum { .. })
+                    )
+                })
+        {
+            return Err("result schemas before v28 cannot contain recorded FFT spectra".into());
+        }
+        if source_schema == CURRENT_IMPULSE_RESULTS_SCHEMA_VERSION {
+            // Nothing this lane added changed the digest of any shape that
+            // could exist at v27: the FFT payload is a new arm with a new tag
+            // and the encoding version did not move. So a v27 document
+            // re-validates under the *current* digest function, with no legacy
+            // encoder, and is stamped current.
+            self.schema_version = PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION;
+            return self.validate();
+        }
         if source_schema < CURRENT_IMPULSE_RESULTS_SCHEMA_VERSION
             && self
                 .runs
