@@ -10,6 +10,8 @@ pub(in crate::simulation) type EncodedArtifactTransfer<'a> =
 pub(in crate::simulation) struct TransientTrajectoryArtifact {
     #[serde(with = "f64_bits_vec")]
     time: Vec<f64>,
+    #[serde(default)]
+    current_impulses: Option<crate::state::CurrentImpulseHistoryEvidence>,
     #[serde(with = "f64_bits_map")]
     waveforms: BTreeMap<String, Vec<f64>>,
     #[serde(default)]
@@ -132,6 +134,32 @@ impl TransientTrajectoryArtifact {
             .map(|(_, values)| values.as_slice())
     }
 
+    pub(in crate::simulation) fn current_impulse_trace(
+        &self,
+        requested: &str,
+    ) -> Result<Option<&rspice_core::CurrentImpulseTrace>, String> {
+        let Some(history) = &self.current_impulses else {
+            return Ok(None);
+        };
+        if !history.delivery_complete {
+            return Err("Fourier current requires complete impulse delivery".into());
+        }
+        let canonical = |name: &str| name.trim().replace(':', ".").to_ascii_uppercase();
+        let mut matches = history
+            .traces
+            .iter()
+            .filter(|trace| canonical(&trace.owner.to_string()) == canonical(requested));
+        let trace = matches.next().ok_or_else(|| {
+            format!("Fourier current '{requested}' has no complete impulse history")
+        })?;
+        if matches.next().is_some() {
+            return Err(format!(
+                "Fourier current '{requested}' has ambiguous impulse history"
+            ));
+        }
+        Ok(Some(trace))
+    }
+
     /// The spectrum whose request key is `key`, if this solve recorded one.
     pub(in crate::simulation) fn spectrum(
         &self,
@@ -153,6 +181,11 @@ impl TransientTrajectoryArtifact {
                 0,
                 crate::state::TransientConvergenceEvidence::transfer_value_count,
             ))
+            .saturating_add(self.current_impulses.as_ref().map_or(0, |history| {
+                history.traces.iter().fold(2usize, |sum, trace| {
+                    sum.saturating_add(trace.points.len().saturating_mul(2))
+                })
+            }))
             .saturating_add(
                 self.spectra
                     .iter()
@@ -189,6 +222,18 @@ impl TransientTrajectoryArtifact {
             return Err(ExecutionArtifactError::InvalidPayload(
                 "transient trajectory time axis is not strictly increasing".to_owned(),
             ));
+        }
+        if let Some(history) = &self.current_impulses {
+            history
+                .validate()
+                .map_err(ExecutionArtifactError::InvalidPayload)?;
+            if history.start_time_s > self.time[0]
+                || history.stop_time_s < self.time[self.time.len() - 1]
+            {
+                return Err(ExecutionArtifactError::InvalidPayload(
+                    "current impulse history does not cover the trajectory".into(),
+                ));
+            }
         }
         // A trajectory with no waveform is meaningful only when it carries
         // something else this solve produced. A recorded spectrum is exactly
@@ -261,6 +306,35 @@ impl TransientTrajectoryArtifact {
                     for value in column {
                         writer.f64(*value);
                     }
+                }
+            }
+        }
+        if let Some(history) = &self.current_impulses {
+            writer.domain("current-impulse-history-v1");
+            writer.f64(history.start_time_s);
+            writer.f64(history.stop_time_s);
+            writer.bool(history.delivery_complete);
+            writer.sequence(history.traces.len());
+            for trace in &history.traces {
+                match &trace.owner {
+                    rspice_core::CurrentImpulseOwner::Branch { branch_name } => {
+                        writer.u8(0);
+                        writer.string(branch_name);
+                    }
+                    rspice_core::CurrentImpulseOwner::DeviceLead {
+                        device_name,
+                        parameter,
+                    } => {
+                        writer.u8(1);
+                        writer.string(device_name);
+                        writer.string(parameter);
+                    }
+                }
+                writer.bool(trace.complete);
+                writer.sequence(trace.points.len());
+                for point in &trace.points {
+                    writer.f64(point.time);
+                    writer.f64(point.charge_coulombs);
                 }
             }
         }
@@ -923,6 +997,7 @@ impl ExecutionArtifactEnvelope {
             waveforms,
             convergence,
             spectra,
+            events,
             ..
         } = result
         else {
@@ -996,6 +1071,7 @@ impl ExecutionArtifactEnvelope {
         }
         let trajectory = TransientTrajectoryArtifact {
             time: time.clone(),
+            current_impulses: events.current_impulses.clone(),
             waveforms: artifact_waveforms,
             convergence: convergence.clone(),
             spectra: carried,
@@ -1532,7 +1608,7 @@ impl ResolvedExecutionDependencies {
                             })
                             .collect();
                         ExecutionArtifactPayloadTransferMetadata::TransientTrajectory(Box::new(
-                            TransientTrajectoryTransferMetadata { time, waveforms, convergence, spectra },
+                            TransientTrajectoryTransferMetadata { time, waveforms, convergence, spectra, current_impulses: trajectory.current_impulses.clone() },
                         ))
                     }
                     ExecutionArtifactPayload::PeriodicState(periodic) => {
@@ -1806,7 +1882,7 @@ impl ResolvedExecutionDependencies {
                                 },
                             ));
                         }
-                        let trajectory = TransientTrajectoryArtifact { time, waveforms, convergence, spectra };
+                        let trajectory = TransientTrajectoryArtifact { time, waveforms, convergence, spectra, current_impulses: metadata.current_impulses };
                         trajectory.validate()?;
                         ExecutionArtifactPayload::TransientTrajectory(Arc::new(trajectory))
                     }
@@ -2117,6 +2193,8 @@ struct TransferBufferRef {
 #[cfg(any(target_arch = "wasm32", test))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 struct TransientTrajectoryTransferMetadata {
+    #[serde(default)]
+    current_impulses: Option<crate::state::CurrentImpulseHistoryEvidence>,
     time: TransferBufferRef,
     waveforms: BTreeMap<String, TransferBufferRef>,
     #[serde(default)]

@@ -1201,6 +1201,16 @@ pub(crate) fn run_fourier_from_signal_with_abort(
     config: &FourierRunConfig,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<FourierData> {
+    run_fourier_from_observation_with_abort(time, signal, None, config, abort)
+}
+
+pub(crate) fn run_fourier_from_observation_with_abort(
+    time: &[Value],
+    signal: &[Value],
+    current: Option<&rspice_core::CurrentImpulseTrace>,
+    config: &FourierRunConfig,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<FourierData> {
     ensure_not_aborted(abort)?;
     let validation = config.validate();
     ensure_not_aborted(abort)?;
@@ -1249,6 +1259,7 @@ pub(crate) fn run_fourier_from_signal_with_abort(
         config.fundamental_freq,
         config.num_harmonics,
         config.num_periods,
+        current,
         abort,
     )?;
     if config.normalize {
@@ -1415,17 +1426,29 @@ fn analyze_fourier_with_abort(
     fundamental_freq: Value,
     num_harmonics: usize,
     num_periods: usize,
+    current: Option<&rspice_core::CurrentImpulseTrace>,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<FourierDecomposition> {
     let mut config = rspice_core::analysis::fourier::FourierConfig::new(fundamental_freq)
         .with_harmonics(num_harmonics);
     config.num_periods = num_periods;
-    let result = rspice_core::analysis::fourier::FourierAnalysis::new(config)
-        .analyze_with_abort(time, values, abort)
-        .map_err(|error| match error {
-            rspice_core::analysis::fourier::FourierError::Aborted => ServiceRunError::Aborted,
-            error => ServiceRunError::Failure(error.to_string()),
-        })?;
+    let analysis = rspice_core::analysis::fourier::FourierAnalysis::new(config);
+    let result = match current {
+        Some(current) => {
+            let mut trace = current.clone();
+            let first = time.first().copied().unwrap_or(0.0);
+            let last = time.last().copied().unwrap_or(0.0);
+            trace
+                .points
+                .retain(|point| point.time >= first && point.time <= last);
+            analysis.analyze_current_with_abort(time, values, &trace, abort)
+        }
+        None => analysis.analyze_with_abort(time, values, abort),
+    }
+    .map_err(|error| match error {
+        rspice_core::analysis::fourier::FourierError::Aborted => ServiceRunError::Aborted,
+        error => ServiceRunError::Failure(error.to_string()),
+    })?;
     let mut frequencies = Vec::with_capacity(result.harmonics.len());
     let mut response = Vec::with_capacity(result.harmonics.len());
     for harmonic in &result.harmonics {
@@ -1852,9 +1875,79 @@ mod tests {
             .map(|time| (2.0 * std::f64::consts::PI * 10.0e6 * time).sin())
             .collect();
 
-        let result = analyze_fourier_with_abort(&time, &values, 10.0e6, 10, 1, &abort);
+        let result = analyze_fourier_with_abort(&time, &values, 10.0e6, 10, 1, None, &abort);
 
         assert!(matches!(result, Err(ServiceRunError::Aborted)));
+    }
+
+    #[test]
+    fn fourier_current_combines_samples_and_charge_over_requested_periods() {
+        let time = (0..=4096).map(|i| i as f64 / 2048.0).collect::<Vec<_>>();
+        let samples = vec![1.0; time.len()];
+        let mut trace = rspice_core::CurrentImpulseTrace {
+            owner: rspice_core::CurrentImpulseOwner::Branch {
+                branch_name: "V1".into(),
+            },
+            complete: true,
+            points: vec![rspice_core::CurrentImpulsePoint {
+                time: 1.25,
+                charge_coulombs: 0.002,
+            }],
+        };
+        let mut config = FourierRunConfig {
+            fundamental_freq: 1.0,
+            num_harmonics: 4,
+            num_periods: 2,
+            output_node: "I(V1)".into(),
+            output_ref: None,
+            start_time: 0.0,
+            stop_time: 2.0,
+            compute_thd: false,
+            normalize: false,
+        };
+        let result = run_fourier_from_observation_with_abort(
+            &time,
+            &samples,
+            Some(&trace),
+            &config,
+            &NoAbort,
+        )
+        .unwrap();
+        assert!((result.dc_component - 1.001).abs() < 1e-13);
+        assert!((result.response[1] - Complex64::new(0.0, -0.002)).norm() < 1e-13);
+        config.num_periods = 1;
+        let result = run_fourier_from_observation_with_abort(
+            &time,
+            &samples,
+            Some(&trace),
+            &config,
+            &NoAbort,
+        )
+        .unwrap();
+        assert!((result.dc_component - 1.002).abs() < 1e-13);
+        assert!((result.response[1] - Complex64::new(0.0, -0.004)).norm() < 1e-13);
+        config.stop_time = 1.0;
+        let excluded = run_fourier_from_observation_with_abort(
+            &time,
+            &samples,
+            Some(&trace),
+            &config,
+            &NoAbort,
+        )
+        .unwrap();
+        assert!((excluded.dc_component - 1.0).abs() < 1e-13);
+        assert!(excluded.response[1].norm() < 1e-13);
+        trace.complete = false;
+        assert!(
+            run_fourier_from_observation_with_abort(
+                &time,
+                &samples,
+                Some(&trace),
+                &config,
+                &NoAbort
+            )
+            .is_err()
+        );
     }
 
     #[test]
@@ -1904,7 +1997,7 @@ mod tests {
             .analyze(&time, &values)
             .expect("qualified waveform should have a core Fourier decomposition");
 
-        let actual = analyze_fourier_with_abort(&time, &values, fundamental, 6, 1, &NoAbort)
+        let actual = analyze_fourier_with_abort(&time, &values, fundamental, 6, 1, None, &NoAbort)
             .expect("cancellable decomposition should succeed");
 
         assert_eq!(actual.response.len(), expected.harmonics.len());

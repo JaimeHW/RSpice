@@ -1019,8 +1019,26 @@ fn fourier_from_transient_artifact(
         signal.push(reference_values.map_or(value, |reference| value - reference[index]));
     }
 
+    let current = if config
+        .output_node
+        .trim()
+        .to_ascii_uppercase()
+        .starts_with("I(")
+    {
+        trajectory
+            .current_impulse_trace(&config.output_node)
+            .map_err(SimulationError::InvalidConfig)?
+    } else {
+        None
+    };
     super::run_abort_aware_service(abort, || {
-        svc_runner::run_fourier_from_signal_with_abort(trajectory.time(), &signal, config, abort)
+        svc_runner::run_fourier_from_observation_with_abort(
+            trajectory.time(),
+            &signal,
+            current,
+            config,
+            abort,
+        )
     })
 }
 

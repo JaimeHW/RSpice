@@ -1207,3 +1207,63 @@ fn periodic_artifact_rejects_a_returned_state_from_the_wrong_frozen_config() {
     assert!(matches!(error, ExecutionArtifactError::ContractMismatch(_)));
     assert!(error.to_string().contains("frozen producer specification"));
 }
+
+#[test]
+fn current_impulses_are_authenticated_and_preserved_in_fourier_dependencies() {
+    let producer = AnalysisInstanceId::new();
+    let create = |result: &SimulationResult| {
+        ExecutionArtifactEnvelope::from_transient_result(
+            digest(1),
+            producer,
+            ObjectRevision::new(3).unwrap(),
+            digest(2),
+            result,
+            &["out".into()],
+            false,
+        )
+        .unwrap()
+        .unwrap()
+    };
+    let mut result = transient();
+    let legacy = create(&result);
+    if let SimulationResult::Transient { events, .. } = &mut result {
+        events.current_impulses = Some(crate::state::CurrentImpulseHistoryEvidence::fixture());
+    }
+    let artifact = create(&result);
+    assert_ne!(legacy.payload_digest, artifact.payload_digest);
+    let binding = PreparedDependencyBinding::transient_trajectory(
+        producer,
+        ObjectRevision::new(3).unwrap(),
+        digest(2),
+    );
+    let resolved = ResolvedExecutionDependencies::resolve(
+        digest(1),
+        vec![binding],
+        &HashMap::from([(producer, artifact)]),
+    )
+    .unwrap();
+    let (metadata, buffers) = resolved.encode_transfer().unwrap();
+    let restored =
+        ResolvedExecutionDependencies::decode_transfer(&metadata, buffers.clone()).unwrap();
+    assert_eq!(restored, resolved);
+    let current = restored
+        .transient_trajectory()
+        .unwrap()
+        .current_impulse_trace("i(v1)")
+        .unwrap()
+        .unwrap();
+    assert_eq!(current.points[0].charge_coulombs, -0.002);
+    assert!(
+        restored
+            .transient_trajectory()
+            .unwrap()
+            .current_impulse_trace("I(Vmissing)")
+            .is_err()
+    );
+    let altered = metadata.replace("-0.002", "-0.003");
+    assert_ne!(metadata, altered);
+    assert!(matches!(
+        ResolvedExecutionDependencies::decode_transfer(&altered, buffers),
+        Err(ExecutionArtifactError::PayloadDigestMismatch { .. })
+    ));
+}

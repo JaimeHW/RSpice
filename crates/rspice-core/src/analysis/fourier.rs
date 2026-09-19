@@ -340,6 +340,37 @@ impl FourierAnalysis {
         self.analyze_observation(&result.time, values, &impulses, abort)
     }
 
+    /// Analyze sampled current together with its complete signed charge history.
+    /// The caller identifies the trace; impulses are integrated on `(start, stop]`
+    /// by the same physical transform used for authored `.FOUR` cards.
+    pub fn analyze_current_with_abort(
+        &self,
+        time: &[Value],
+        values: &[Value],
+        trace: &crate::CurrentImpulseTrace,
+        abort: &dyn AbortSignal,
+    ) -> Result<FourierResult, FourierError> {
+        if abort.is_aborted() {
+            return Err(FourierError::Aborted);
+        }
+        self.validate_configuration()?;
+        validate_waveform(time, values, abort)?;
+        if !trace.complete {
+            return Err(FourierError::CurrentObservation {
+                detail: format!("current '{}' has incomplete impulse history", trace.owner),
+            });
+        }
+        trace
+            .validate(time[0], time[time.len() - 1])
+            .map_err(|detail| FourierError::CurrentObservation { detail })?;
+        self.analyze_observation(
+            time,
+            values,
+            &[CurrentImpulseContribution { trace, weight: 1.0 }],
+            abort,
+        )
+    }
+
     fn analyze_observation(
         &self,
         time: &[Value],

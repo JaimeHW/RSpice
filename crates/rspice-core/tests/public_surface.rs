@@ -985,7 +985,8 @@ use rspice_core::analysis::harmonic_balance::{
 /// Studio at once. Its fields and the `AnalysisCommand::Hb` variant that
 /// boxes it are free; nothing else was added.
 // Studio validates authored DC grids with the engine's bounded point generator.
-const MAX_PUBLIC_ITEMS: usize = 5073;
+// Studio also transforms a retained current trace without reconstructing an engine result.
+const MAX_PUBLIC_ITEMS: usize = 5074;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently
