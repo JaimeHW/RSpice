@@ -1263,11 +1263,46 @@ fn command_to_queue_item(
                  the PSS operating point; reaching this route means the deck walk did not skip it",
             command_name(command)
         )),
-        // `.DCMATCH` joins `.ENVELOPE` here: the queue carries an
-        // `AnalysisSpec`, and neither the mismatch card's probe nor its
-        // statistical scopes have one yet. Refusing by name is the honest
-        // answer until the Studio's own mismatch route exists.
-        AnalysisCommand::Envelope(_) | AnalysisCommand::DcMatch(_) => Err(format!(
+        // Every field of the card is already resolved by the parser — the
+        // defaults among them — so the reader converts rather than
+        // re-deriving what the deck asked for. The probe is rebuilt in the
+        // spelling the engine itself echoes back, which is also the spelling
+        // the `.TF` arm above uses.
+        AnalysisCommand::DcMatch(card) => {
+            let output_expression = if card.output_is_current {
+                format!("I({})", card.output_node)
+            } else if let Some(reference_node) = &card.reference_node {
+                format!("V({},{reference_node})", card.output_node)
+            } else {
+                format!("V({})", card.output_node)
+            };
+            Ok(QueuedAnalysis {
+                numeric_override: None,
+                config: None,
+                analysis_line: ".dcmatch".to_string(),
+                spec: AnalysisSpec::DcMismatch {
+                    output_expression,
+                    sigma_multiplier: card.sigma_multiplier,
+                    contributor_limit: card.contributor_limit,
+                    include_process: card.process,
+                    include_mismatch: card.mismatch,
+                    // The card has no operand for the report basis — the
+                    // engine always computes both the signed contribution and
+                    // the share — so the product default applies, exactly as
+                    // the `.TF` arm above takes the product's numerical
+                    // policy for operands the directive does not carry.
+                    normalized_contributions: true,
+                    // The engine's own default threshold is exactly zero, so
+                    // an unstated one and a `THRESHOLD=0` are the same card
+                    // and read back as the same specification.
+                    contribution_threshold: (card.threshold != 0.0).then_some(card.threshold),
+                },
+                spec_options,
+            })
+        }
+        // `.ENVELOPE` stays refused: the queue carries an `AnalysisSpec`, and
+        // an envelope run's modulation sources have none yet.
+        AnalysisCommand::Envelope(_) => Err(format!(
             "{} has no manual-deck queue route in this build",
             command_name(command)
         )),
@@ -2271,4 +2306,6 @@ Rload out 0 {rload}\n\
                 .any(|e| e.contains("No analysis command in netlist"))
         );
     }
+
+    mod dc_mismatch;
 }
