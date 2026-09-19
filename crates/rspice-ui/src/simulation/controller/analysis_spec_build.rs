@@ -784,6 +784,7 @@ impl SimulationController {
         Self::reject_optimization_of_fixed_design_variables(state, &cfg.variables)?;
 
         Ok(AnalysisSpec::Optimization {
+            search: cfg.search,
             variables: cfg
                 .variables
                 .into_iter()

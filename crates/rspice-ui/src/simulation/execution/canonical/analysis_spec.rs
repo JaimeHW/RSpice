@@ -366,6 +366,7 @@ pub(super) fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &Analysis
             writer.f64(*min_stress_voltage);
         }
         AnalysisSpec::Optimization {
+            search,
             variables,
             objective_node,
             objective_ref,
@@ -403,6 +404,14 @@ pub(super) fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &Analysis
             writer.f64(*fd_step);
             writer.f64(*initial_step);
             writer.f64(*min_step);
+            if search != &crate::services::simulation_runner::OptimizationSearchControls::default()
+            {
+                writer.string("optimization-search-v1");
+                writer.f64(search.var_tolerance);
+                writer.f64(search.sa_initial_temp);
+                writer.f64(search.sa_cooling_rate);
+                writer.u64(search.random_seed);
+            }
         }
         AnalysisSpec::Soa {
             stop_time,

@@ -34,6 +34,7 @@ pub(super) fn validate(spec: &AnalysisSpec) -> Result<(), String> {
             Ok(())
         }
         AnalysisSpec::Optimization {
+            search,
             variables,
             objective_node,
             objective_ref,
@@ -46,6 +47,7 @@ pub(super) fn validate(spec: &AnalysisSpec) -> Result<(), String> {
             min_step,
             ..
         } => {
+            search.validate()?;
             if variables.is_empty() {
                 return Err("Optimization variables must not be empty".to_string());
             }

@@ -29,6 +29,8 @@ pub enum OptimizerAlgo {
 /// Configuration for the optimizer
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OptimizerConfig {
+    #[serde(default = "default_random_seed")]
+    pub random_seed: u64,
     /// Algorithm to use
     pub algorithm: OptimizerAlgo,
     /// Maximum iterations
@@ -49,9 +51,14 @@ pub struct OptimizerConfig {
     pub sa_cooling_rate: f64,
 }
 
+fn default_random_seed() -> u64 {
+    0xDEAD_BEEF_CAFE_BABE
+}
+
 impl Default for OptimizerConfig {
     fn default() -> Self {
         Self {
+            random_seed: default_random_seed(),
             algorithm: OptimizerAlgo::GradientDescent,
             max_iterations: 100,
             cost_tolerance: 1e-8,

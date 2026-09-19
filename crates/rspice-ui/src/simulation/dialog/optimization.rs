@@ -3,6 +3,7 @@
 //! Provides a typed UI surface for closed-loop parameter optimization.
 
 use super::options::parse_si_value;
+use crate::services::simulation_runner::OptimizationSearchControls;
 
 /// Optimization objective strategy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -92,6 +93,7 @@ impl OptimizationVariableConfig {
 /// Typed optimization configuration.
 #[derive(Debug, Clone, PartialEq)]
 pub struct OptimizationConfig {
+    pub search: OptimizationSearchControls,
     /// Variable set to optimize.
     pub variables: Vec<OptimizationVariableConfig>,
     /// Objective node (V(node,ref)).
@@ -119,6 +121,7 @@ pub struct OptimizationConfig {
 impl Default for OptimizationConfig {
     fn default() -> Self {
         Self {
+            search: OptimizationSearchControls::default(),
             variables: vec![
                 OptimizationVariableConfig {
                     name: "RLOAD".to_string(),
@@ -150,6 +153,7 @@ impl Default for OptimizationConfig {
 impl OptimizationConfig {
     /// Validate optimization settings.
     pub fn validate(&self) -> Result<(), String> {
+        self.search.validate()?;
         if self.variables.is_empty() {
             return Err("At least one optimization variable is required".to_string());
         }
@@ -236,6 +240,13 @@ impl OptimizationConfig {
             self.min_step,
             vars
         );
+        line.push_str(&format!(
+            " gtol={} temp={} cooling={} seed={}",
+            self.search.var_tolerance,
+            self.search.sa_initial_temp,
+            self.search.sa_cooling_rate,
+            self.search.random_seed
+        ));
         if let Some(target) = self.target_value {
             line.push_str(&format!(" target={:.6e}", target));
         }
@@ -247,6 +258,14 @@ impl OptimizationConfig {
 #[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct OptimizationDialogState {
+    #[serde(default = "default_gradient_tolerance")]
+    pub var_tolerance: String,
+    #[serde(default = "default_annealing_temperature")]
+    pub sa_initial_temp: String,
+    #[serde(default = "default_cooling_rate")]
+    pub sa_cooling_rate: String,
+    #[serde(default = "default_seed")]
+    pub random_seed: String,
     /// Variables encoded as `name:min:max[:initial]`, separated by newline/comma.
     pub variables_text: String,
     /// Objective node.
@@ -293,6 +312,10 @@ impl OptimizationDialogState {
             .join("\n");
 
         Self {
+            var_tolerance: config.search.var_tolerance.to_string(),
+            sa_initial_temp: config.search.sa_initial_temp.to_string(),
+            sa_cooling_rate: config.search.sa_cooling_rate.to_string(),
+            random_seed: config.search.random_seed.to_string(),
             variables_text,
             objective_node: config.objective_node.clone(),
             objective_ref: config.objective_ref.clone(),
@@ -350,6 +373,19 @@ impl OptimizationDialogState {
             .map_err(|_| "Invalid max iterations".to_string())?;
         let variables = parse_variable_specs(&self.variables_text)?;
         let config = OptimizationConfig {
+            search: OptimizationSearchControls {
+                var_tolerance: parse_si_value(&self.var_tolerance)
+                    .map_err(|e| format!("Invalid gradient tolerance: {e}"))?,
+                sa_initial_temp: parse_si_value(&self.sa_initial_temp)
+                    .map_err(|e| format!("Invalid annealing temperature: {e}"))?,
+                sa_cooling_rate: parse_si_value(&self.sa_cooling_rate)
+                    .map_err(|e| format!("Invalid cooling rate: {e}"))?,
+                random_seed: self
+                    .random_seed
+                    .trim()
+                    .parse()
+                    .map_err(|_| "Seed must be an unsigned 64-bit integer")?,
+            },
             variables,
             objective_node: self.objective_node.trim().to_string(),
             objective_ref: self.objective_ref.trim().to_string(),
@@ -379,11 +415,27 @@ impl OptimizationDialogState {
 }
 
 fn format_scalar(v: f64) -> String {
-    if v.abs() >= 1e4 || (v.abs() > 0.0 && v.abs() < 1e-3) {
-        format!("{:.6e}", v)
-    } else {
-        format!("{:.6}", v)
-    }
+    v.to_string()
+}
+fn default_gradient_tolerance() -> String {
+    OptimizationSearchControls::default()
+        .var_tolerance
+        .to_string()
+}
+fn default_annealing_temperature() -> String {
+    OptimizationSearchControls::default()
+        .sa_initial_temp
+        .to_string()
+}
+fn default_cooling_rate() -> String {
+    OptimizationSearchControls::default()
+        .sa_cooling_rate
+        .to_string()
+}
+fn default_seed() -> String {
+    OptimizationSearchControls::default()
+        .random_seed
+        .to_string()
 }
 
 fn is_valid_identifier(name: &str) -> bool {
@@ -437,4 +489,37 @@ fn parse_variable_specs(input: &str) -> Result<Vec<OptimizationVariableConfig>, 
         return Err("At least one optimization variable must be provided".to_string());
     }
     Ok(variables)
+}
+
+#[cfg(test)]
+mod search_tests {
+    use super::*;
+    #[test]
+    fn optimization_search_controls_survive_drafts_and_legacy_loading() {
+        let mut config = OptimizationConfig::default();
+        config.search = OptimizationSearchControls {
+            var_tolerance: 7.123456789e-8,
+            sa_initial_temp: 12.25,
+            sa_cooling_rate: 0.875,
+            random_seed: u64::MAX,
+        };
+        let draft = OptimizationDialogState::from_config(&config);
+        let json = serde_json::to_string(&draft).unwrap();
+        let restored: OptimizationDialogState = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.to_config().unwrap(), config);
+        let mut old = serde_json::to_value(&draft).unwrap();
+        for name in [
+            "var_tolerance",
+            "sa_initial_temp",
+            "sa_cooling_rate",
+            "random_seed",
+        ] {
+            old.as_object_mut().unwrap().remove(name);
+        }
+        let legacy: OptimizationDialogState = serde_json::from_value(old).unwrap();
+        assert_eq!(
+            legacy.to_config().unwrap().search,
+            OptimizationSearchControls::default()
+        );
+    }
 }

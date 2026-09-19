@@ -176,6 +176,8 @@ pub(crate) enum WorkerAnalysisSpec {
         min_stress_voltage: f64,
     },
     Optimization {
+        #[serde(default)]
+        search: crate::services::simulation_runner::OptimizationSearchControls,
         variables: Vec<OptimizationVariable>,
         objective_node: String,
         objective_ref: String,

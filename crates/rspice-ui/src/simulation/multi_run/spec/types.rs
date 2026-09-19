@@ -493,6 +493,8 @@ pub enum AnalysisSpec {
     },
     /// Optimization analysis.
     Optimization {
+        #[serde(default)]
+        search: crate::services::simulation_runner::OptimizationSearchControls,
         variables: Vec<OptimizationVariable>,
         objective_node: String,
         objective_ref: String,

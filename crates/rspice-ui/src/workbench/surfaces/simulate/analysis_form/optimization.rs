@@ -16,8 +16,8 @@ use egui::Ui;
 use crate::simulation::dialog::OptimizationDialogState;
 
 use super::{
-    choice_row, clear_pending_cell, engineering_input_row, hinted_input_row, input_row,
-    input_row_enabled, sub_header,
+    choice_row, clear_pending_cell, engineering_input_row, engineering_input_row_enabled,
+    hinted_input_row, input_row, input_row_enabled, sub_header,
 };
 
 /// Render the optimization fields.
@@ -38,7 +38,18 @@ pub(super) fn fields(ui: &mut Ui, setup: &mut OptimizationDialogState) {
     input_row(ui, "Tolerance", &mut setup.cost_tolerance);
 
     sub_header(ui, "Step sizes");
-    engineering_input_row(ui, "Gradient probe", &mut setup.fd_step);
+    engineering_input_row_enabled(
+        ui,
+        "Gradient probe",
+        &mut setup.fd_step,
+        setup.algorithm == 0,
+    );
+    engineering_input_row_enabled(
+        ui,
+        "Gradient stop",
+        &mut setup.var_tolerance,
+        setup.algorithm == 0,
+    );
     engineering_input_row(ui, "First step", &mut setup.initial_step);
     hinted_input_row(
         ui,
@@ -46,7 +57,26 @@ pub(super) fn fields(ui: &mut Ui, setup: &mut OptimizationDialogState) {
         &mut setup.min_step,
         "at most the first step",
     );
-    // Three rows leave a half-filled grid row behind, and the next form's
-    // first field would otherwise be dealt into it.
+    clear_pending_cell(ui);
+    sub_header(ui, "Annealing");
+    engineering_input_row_enabled(
+        ui,
+        "Initial temperature",
+        &mut setup.sa_initial_temp,
+        setup.algorithm == 2,
+    );
+    engineering_input_row_enabled(
+        ui,
+        "Cooling factor",
+        &mut setup.sa_cooling_rate,
+        setup.algorithm == 2,
+    );
+    input_row_enabled(
+        ui,
+        "Random seed",
+        &mut setup.random_seed,
+        setup.algorithm == 2,
+    )
+    .on_hover_text("Repeatable random sequence. Seeds 0 and 1 select the same sequence.");
     clear_pending_cell(ui);
 }

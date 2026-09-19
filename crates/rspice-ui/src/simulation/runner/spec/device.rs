@@ -19,6 +19,7 @@ pub(super) fn run_device_spec(
     super::ensure_not_aborted(abort)?;
     match spec {
         AnalysisSpec::Optimization {
+            search,
             variables,
             objective_node,
             objective_ref,
@@ -32,6 +33,7 @@ pub(super) fn run_device_spec(
             min_step,
         } => run_optimization(
             netlist,
+            search,
             variables,
             objective_node,
             objective_ref,
@@ -170,6 +172,7 @@ fn run_dc_mismatch(
 
 fn run_optimization(
     netlist: &str,
+    search: svc_runner::OptimizationSearchControls,
     variables: Vec<crate::simulation::multi_run::OptimizationVariable>,
     objective_node: String,
     objective_ref: String,
@@ -195,6 +198,7 @@ fn run_optimization(
         });
     }
     let cfg = svc_runner::OptimizationRunConfig {
+        search,
         variables: configured_variables,
         objective_node,
         objective_ref,

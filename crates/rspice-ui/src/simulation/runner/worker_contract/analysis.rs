@@ -1133,6 +1133,7 @@ impl TryFrom<&AnalysisSpec> for WorkerAnalysisSpec {
                 min_stress_voltage: *min_stress_voltage,
             }),
             AnalysisSpec::Optimization {
+                search,
                 variables,
                 objective_node,
                 objective_ref,
@@ -1145,6 +1146,7 @@ impl TryFrom<&AnalysisSpec> for WorkerAnalysisSpec {
                 initial_step,
                 min_step,
             } => Ok(Self::Optimization {
+                search: search.clone(),
                 variables: variables.clone(),
                 objective_node: objective_node.clone(),
                 objective_ref: objective_ref.clone(),
@@ -1528,6 +1530,7 @@ impl From<WorkerAnalysisSpec> for AnalysisSpec {
                 min_stress_voltage,
             },
             WorkerAnalysisSpec::Optimization {
+                search,
                 variables,
                 objective_node,
                 objective_ref,
@@ -1540,6 +1543,7 @@ impl From<WorkerAnalysisSpec> for AnalysisSpec {
                 initial_step,
                 min_step,
             } => Self::Optimization {
+                search,
                 variables,
                 objective_node,
                 objective_ref,

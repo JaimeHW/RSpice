@@ -15,13 +15,13 @@ impl OptimizerEngine {
             variables: Vec::new(),
             step_size: config.initial_step,
             temperature: config.sa_initial_temp,
+            rng_state: config.random_seed.max(1),
             config,
             iteration: 0,
             best_cost: f64::MAX,
             best_vars: HashMap::new(),
             gradient: Vec::new(),
             cost_history: Vec::new(),
-            rng_state: 0xDEAD_BEEF_CAFE_BABE,
         }
     }
 
@@ -29,6 +29,7 @@ impl OptimizerEngine {
         Self {
             step_size: config.initial_step,
             temperature: config.sa_initial_temp,
+            rng_state: config.random_seed.max(1),
             config,
             ..Self::new()
         }

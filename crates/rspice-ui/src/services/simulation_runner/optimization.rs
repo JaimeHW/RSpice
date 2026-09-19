@@ -49,9 +49,50 @@ pub struct OptimizationVariable {
     pub initial: Value,
 }
 
+/// Stopping and stochastic-search controls shared by drafts, workers and runs.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct OptimizationSearchControls {
+    pub var_tolerance: Value,
+    pub sa_initial_temp: Value,
+    pub sa_cooling_rate: Value,
+    pub random_seed: u64,
+}
+
+impl Default for OptimizationSearchControls {
+    fn default() -> Self {
+        let defaults = OptimizerConfig::default();
+        Self {
+            var_tolerance: defaults.var_tolerance,
+            sa_initial_temp: defaults.sa_initial_temp,
+            sa_cooling_rate: defaults.sa_cooling_rate,
+            random_seed: defaults.random_seed,
+        }
+    }
+}
+
+impl OptimizationSearchControls {
+    pub(crate) fn validate(&self) -> Result<(), String> {
+        if !self.var_tolerance.is_finite() || self.var_tolerance <= 0.0 {
+            return Err("Optimization gradient tolerance must be finite and positive".into());
+        }
+        if !self.sa_initial_temp.is_finite() || self.sa_initial_temp <= 0.0 {
+            return Err("Annealing temperature must be finite and positive".into());
+        }
+        if !self.sa_cooling_rate.is_finite()
+            || !(0.0..1.0).contains(&self.sa_cooling_rate)
+            || self.sa_cooling_rate == 0.0
+        {
+            return Err("Annealing cooling rate must be between zero and one".into());
+        }
+        Ok(())
+    }
+}
+
 /// Optimization run configuration.
 #[derive(Debug, Clone)]
 pub struct OptimizationRunConfig {
+    pub search: OptimizationSearchControls,
     /// Optimization variables.
     pub variables: Vec<OptimizationVariable>,
     /// Objective node.
@@ -79,6 +120,7 @@ pub struct OptimizationRunConfig {
 impl Default for OptimizationRunConfig {
     fn default() -> Self {
         Self {
+            search: OptimizationSearchControls::default(),
             variables: vec![OptimizationVariable {
                 name: "RLOAD".to_string(),
                 min: 500.0,
@@ -101,6 +143,7 @@ impl Default for OptimizationRunConfig {
 
 impl OptimizationRunConfig {
     pub(super) fn validate(&self) -> Result<(), String> {
+        self.search.validate()?;
         if self.variables.is_empty() {
             return Err("Optimization requires at least one variable".to_string());
         }
@@ -238,7 +281,10 @@ pub fn run_optimization_analysis_with_config_and_source_path_and_abort(
         fd_step: config.fd_step,
         initial_step: config.initial_step,
         min_step: config.min_step,
-        ..OptimizerConfig::default()
+        var_tolerance: config.search.var_tolerance,
+        sa_initial_temp: config.search.sa_initial_temp,
+        sa_cooling_rate: config.search.sa_cooling_rate,
+        random_seed: config.search.random_seed,
     };
 
     let mut optimizer = OptimizerEngine::with_config(optimizer_config);
@@ -727,6 +773,42 @@ R2 out 0 1k
 .op
 .end
 ";
+
+    #[test]
+    fn optimization_seed_temperature_cooling_and_gradient_threshold_govern_the_search() {
+        let run = |config: &OptimizationRunConfig| {
+            run_optimization_analysis_with_config_and_source_path_and_abort(
+                OPTIMIZATION_DECK,
+                config,
+                None,
+                &rspice_core::NoAbort,
+            )
+            .unwrap()
+        };
+        let mut config = OptimizationRunConfig {
+            algorithm: OptimizationAlgorithmMode::SimulatedAnnealing,
+            max_iterations: 25,
+            cost_tolerance: 1e-30,
+            ..Default::default()
+        };
+        config.search.random_seed = 42;
+        let first = run(&config);
+        assert_eq!(first.costs, run(&config).costs);
+        config.search.random_seed = 43;
+        assert_ne!(first.variable_traces, run(&config).variable_traces);
+        config.search.random_seed = 42;
+        config.search.sa_initial_temp = 1e-12;
+        assert_ne!(first.costs, run(&config).costs);
+        config.search.sa_initial_temp = 100.0;
+        config.search.sa_cooling_rate = 0.01;
+        assert_ne!(first.costs, run(&config).costs);
+        config.algorithm = OptimizationAlgorithmMode::GradientDescent;
+        config.search.var_tolerance = 1e9;
+        let loose = run(&config);
+        config.search.var_tolerance = 1e-14;
+        let strict = run(&config);
+        assert!(strict.iterations.len() > loose.iterations.len());
+    }
 
     #[test]
     fn optimization_honors_early_abort_before_invalid_input() {
