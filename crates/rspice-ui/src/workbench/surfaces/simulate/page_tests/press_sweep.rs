@@ -482,9 +482,9 @@ const PRESSED_PER_SURFACE: &[(&str, usize)] = &[
     ("Analyses/DcSweep", 4),
     ("Analyses/Noise", 9),
     ("Analyses/Stb", 3),
-    ("Analyses/Pss", 14),
+    ("Analyses/Pss", 13),
     ("Analyses/Temperature", 8),
-    ("Analyses/Corner", 6),
+    ("Analyses/Corner", 9),
     ("Excitations", 2),
     ("Variables", 2),
     ("Outputs", 0),
@@ -535,7 +535,10 @@ const PRESSED_PER_SURFACE: &[(&str, usize)] = &[
 /// packages became form fields: the time-domain forms gained their sections,
 /// the same identity sharing moved one control each away from DC sweep and
 /// Corner, and the Excitations page gained the Stimulus Library's entry.
-const PRESSED_FLOOR: usize = 289;
+///
+/// And once more for the HB and PSS Verbose switches: two controls in all,
+/// with the PSS form's extra row handing three shared identities on to Corner.
+const PRESSED_FLOOR: usize = 291;
 
 /// Controls that are wired to nothing.
 ///
