@@ -603,8 +603,10 @@ mod tests {
                     panic!("expected sensitivity study evidence")
                 };
 
-                // The card the Studio wrote, parsed and run by the engine.
-                let card_deck = format!("{deck}{}\n", config.to_spice());
+                // The card the Studio wrote, spliced into the deck ahead of
+                // `.end` exactly as preparation splices it, then parsed and
+                // run by the engine.
+                let card_deck = deck.replace(".end\n", &format!("{}\n.end\n", config.to_spice()));
                 let card_netlist = rspice_core::Netlist::parse(&card_deck).unwrap();
                 let card = card_netlist
                     .analyses

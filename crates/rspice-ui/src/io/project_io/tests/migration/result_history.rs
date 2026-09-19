@@ -1827,7 +1827,10 @@ fn a_results_history_saved_at_schema_27_restores_with_its_digests_unchanged() {
     at_v27
         .migrate_to_current(ProjectId::new())
         .expect("a v27 history migrates");
-    assert_eq!(at_v27.schema_version, RECORDED_FFT_RESULTS_SCHEMA_VERSION);
+    assert_eq!(
+        at_v27.schema_version,
+        PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION
+    );
     let after = at_v27.runs[0]
         .analyses
         .iter()
