@@ -1205,6 +1205,44 @@ mod tests {
         }
     }
 
+    /// The solver trace is part of the request's identity.
+    ///
+    /// It changes no number the solve produces, and it is still encoded, for
+    /// the reason the whole encoder works on: a digest identifies the request
+    /// the engine was handed, not the answer it gave back. The byte was
+    /// already on the end of the harmonic-balance arm before any form could
+    /// author it, so a request that leaves the switch off digests exactly as
+    /// it did — which is what lets every sealed manifest still open.
+    #[test]
+    fn a_harmonic_balance_request_that_asks_for_a_solver_trace_is_a_different_request() {
+        let base = AnalysisSpec::HarmonicBalance {
+            tones: vec![crate::simulation::multi_run::HbToneSpec::new(1.0e9, 9)],
+            reltol: 1.0e-6,
+            abstol: 1.0e-12,
+            max_iterations: 100,
+            damping: 1.0,
+            min_damping: 0.01,
+            oversample: 2,
+            collocation_points: None,
+            max_mixing_order: 5,
+            use_krylov: false,
+            gmres_restart: 30,
+            source_stepping: false,
+            use_exact_jacobian: true,
+            verbose: false,
+        };
+        let digest = |spec: &AnalysisSpec| {
+            analysis_config_digest(".hb", spec, None, &SpecExecutionOptions::default(), None)
+        };
+        let quiet = digest(&base);
+        let mut traced = base.clone();
+        let AnalysisSpec::HarmonicBalance { verbose, .. } = &mut traced else {
+            unreachable!()
+        };
+        *verbose = true;
+        assert_ne!(quiet, digest(&traced));
+    }
+
     #[test]
     fn sp_noise_changes_identity_even_when_the_directive_is_unchanged() {
         let mut spec = AnalysisSpec::SParameter {

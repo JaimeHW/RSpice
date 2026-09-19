@@ -366,6 +366,7 @@ fn hb_field_order_and_wording_match_the_canonical_mockup() {
             "GMRES restart",
             "Collocation points",
             "Exact Jacobian",
+            "Verbose",
         ]
     );
     assert_eq!(HB_SOLVER_CHOICES, ["newton", "krylov"]);

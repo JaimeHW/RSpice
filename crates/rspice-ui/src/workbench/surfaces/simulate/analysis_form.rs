@@ -887,6 +887,26 @@ fn switch_row(ui: &mut Ui, label: &str, value: &mut bool) -> bool {
     })
 }
 
+/// A switch whose hint slot says what turning it on produces.
+///
+/// [`switch_row`] fills that slot with "domain constrained", which is true of
+/// every boolean and therefore says nothing about any particular one. A switch
+/// whose whole point is an output the reader has to know where to look for —
+/// the solver trace, which appears in the Console and nowhere else — says that
+/// there instead.
+fn hinted_switch_row(ui: &mut Ui, label: &str, value: &mut bool, hint: &str) -> bool {
+    if !uses_two_column_fields(ui) {
+        return inspector_switch_row(ui, label, value);
+    }
+    field_cell(ui, label, Some(hint), |ui| {
+        let row_size = vec2(ui.available_width(), Tokens::get(ui.ctx()).metrics.ctl_h);
+        ui.allocate_ui_with_layout(row_size, Layout::left_to_right(Align::Center), |ui| {
+            super::page_kit::switch_cell(ui, label, value).changed()
+        })
+        .inner
+    })
+}
+
 fn property_row(ui: &mut Ui, label: &str, value: &str) {
     if !uses_two_column_fields(ui) {
         inspector_property_row(ui, label, value);

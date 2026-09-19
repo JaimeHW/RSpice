@@ -73,6 +73,12 @@ pub struct HbDialogState {
     /// Exact real-split Jacobian enabled.
     #[serde(default = "default_use_exact_jacobian")]
     pub use_exact_jacobian: bool,
+    /// Whether the solve traces its Newton iterations to the Console.
+    ///
+    /// Defaulted on read: a draft written before the Console could show that
+    /// trace ran without it, which is exactly what `false` means.
+    #[serde(default)]
+    pub verbose: bool,
     /// Additional tone rows.
     pub additional_tones: Vec<HbToneDialogState>,
     /// Initialized flag
@@ -135,6 +141,7 @@ impl HbDialogState {
             },
             source_stepping: config.source_stepping,
             use_exact_jacobian: config.use_exact_jacobian,
+            verbose: config.verbose,
             additional_tones: config
                 .additional_tones
                 .iter()
@@ -218,12 +225,7 @@ impl HbDialogState {
             gmres_restart,
             source_stepping: self.source_stepping,
             use_exact_jacobian: self.use_exact_jacobian,
-            // No control authors this: the core's HB verbose output is
-            // `log::debug!` on the `rspice_core` target, which reaches stderr
-            // under `RSPICE_LOG` and never the studio's Console — there is no
-            // bridge from the `log` crate into `diagnostics::LogBuffer`. A
-            // switch here would turn on output the product cannot show.
-            verbose: false,
+            verbose: self.verbose,
         };
 
         for (idx, tone) in self.additional_tones.iter().enumerate() {
@@ -317,6 +319,7 @@ mod tests {
             "min_damping",
             "collocation_points",
             "use_exact_jacobian",
+            "verbose",
         ] {
             assert!(object.remove(key).is_some(), "{key} is a draft key");
         }
@@ -330,6 +333,10 @@ mod tests {
         assert_eq!(config.min_damping, engine.min_damping);
         assert_eq!(config.collocation_points, None);
         assert_eq!(config.use_exact_jacobian, engine.use_exact_jacobian);
+        assert!(
+            !config.verbose,
+            "a draft that never asked for a trace gets none"
+        );
     }
 
     /// Every control the form paints reaches the configuration it authors.
@@ -348,6 +355,7 @@ mod tests {
         state.gmres_restart = "16".to_owned();
         state.collocation_points = "37".to_owned();
         state.use_exact_jacobian = false;
+        state.verbose = true;
 
         let config = state.to_config().expect("the authored draft configures");
         assert_eq!(config.max_mixing_order, 7);
@@ -358,6 +366,31 @@ mod tests {
         assert_eq!(config.gmres_restart, 16);
         assert_eq!(config.collocation_points, Some(37));
         assert!(!config.use_exact_jacobian);
+        assert!(
+            config.verbose,
+            "the solver trace the form asked for reaches the configuration"
+        );
+    }
+
+    /// The solver trace survives a save and an open.
+    ///
+    /// It is the one control on this form whose whole product is text in the
+    /// Console, so a draft that forgot it would be a run that silently stopped
+    /// explaining itself.
+    #[test]
+    fn a_saved_hb_draft_restores_the_solver_trace_it_asked_for() {
+        let mut state = HbDialogState::from_config(&HbConfig::default());
+        state.verbose = true;
+
+        let saved = serde_json::to_string(&state).expect("the draft serializes");
+        let restored: HbDialogState = serde_json::from_str(&saved).expect("the saved draft opens");
+        assert!(restored.verbose);
+        assert!(
+            restored
+                .to_config()
+                .expect("the restored draft configures")
+                .verbose
+        );
     }
 
     /// The floor is bounded by the factor it is a floor for, and the factor by

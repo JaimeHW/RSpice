@@ -9,11 +9,13 @@
 //! reads. Eight of them used to be literals wired in three layers down —
 //! mixing order 5, abstol 1e-12, an automatic collocation grid, the exact
 //! Jacobian — or buffers the dialog carried with no row to type into, and an
-//! RF designer could not reach any of them without hand-writing a deck. The
-//! one control this form still does not offer is the verbose solver log: the
-//! engine writes it with `log::debug!` on the `rspice_core` target, which
-//! reaches stderr under `RSPICE_LOG` and never the studio's Console, so a
-//! switch here would turn on output the product cannot show.
+//! RF designer could not reach any of them without hand-writing a deck.
+//!
+//! `Verbose` is the last of them, and it was the last for a reason: the engine
+//! writes that trace with `log::debug!` on the `rspice_core` target, which used
+//! to reach stderr and nothing else, so a switch for it would have turned on
+//! output the product could not show. A run now carries what the engine logs
+//! into its own Console log, so the switch turns on something a reader reads.
 
 use egui::Ui;
 
@@ -22,7 +24,8 @@ use crate::simulation::dialog::HbDialogState;
 
 use super::{
     QuantityPresentationPolicy, UiNumberLocale, action_line, choice_row, engineering_input_row,
-    hinted_input_row, input_row, input_row_enabled, quantity_input_row, sub_header, switch_row,
+    hinted_input_row, hinted_switch_row, input_row, input_row_enabled, quantity_input_row,
+    sub_header, switch_row,
 };
 
 /// The order and wording of the harmonic-balance form's own fields.
@@ -30,7 +33,7 @@ use super::{
 /// The tone sub-rows are not here: they are the same three captions repeated
 /// under a numbered sub-header, and they belong to the tone rather than to the
 /// form.
-pub(super) const HB_FIELD_LABELS: [&str; 15] = [
+pub(super) const HB_FIELD_LABELS: [&str; 16] = [
     "Fundamental",
     "Harmonics",
     "Source",
@@ -46,6 +49,7 @@ pub(super) const HB_FIELD_LABELS: [&str; 15] = [
     "GMRES restart",
     "Collocation points",
     "Exact Jacobian",
+    "Verbose",
 ];
 
 /// The solver choices, in the order the engine's own flag reads them: index
@@ -118,6 +122,14 @@ pub(super) fn fields(
         "odd, empty is automatic",
     );
     switch_row(ui, HB_FIELD_LABELS[14], &mut setup.use_exact_jacobian);
+    // Last of the solver controls and above the tones, because it is about how
+    // the solve runs rather than about the spectrum it is solving for.
+    hinted_switch_row(
+        ui,
+        HB_FIELD_LABELS[15],
+        &mut setup.verbose,
+        "solver trace to the Console",
+    );
     let mut remove: Option<usize> = None;
     for (idx, tone) in setup.additional_tones.iter_mut().enumerate() {
         sub_header(ui, &format!("Tone {}", idx + 2));
