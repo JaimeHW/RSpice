@@ -95,9 +95,6 @@ struct FieldEdit {
     text: String,
 }
 
-/// The net each placed terminal sits on, keyed by component id and pin name.
-type TerminalNets = HashMap<(u64, String), String>;
-
 /// Every definition the instrument has open, and the preview it last drew.
 #[derive(Debug, Clone, Default)]
 pub struct StimulusEditorState {
@@ -108,7 +105,6 @@ pub struct StimulusEditorState {
     pub span: PreviewSpan,
     cache: Option<PreviewCache>,
     field: Option<FieldEdit>,
-    nets: Option<(u64, TerminalNets)>,
     focus_name: bool,
     pending_delete: Option<String>,
     /// How many times the engine has been asked to evaluate a waveform for
@@ -328,43 +324,6 @@ impl StimulusEditorState {
         live
     }
 
-    /// The net every placed terminal sits on, extracted once per schematic
-    /// revision.
-    ///
-    /// Naming the nets of a placed adopter means resolving the whole sheet's
-    /// connectivity, which is not something to do on every frame of an
-    /// instrument that is not the schematic. The design's own epoch is the
-    /// key: it advances whenever the active buffer changes, which is exactly
-    /// when a net name can.
-    pub fn instance_nets(
-        &mut self,
-        epoch: u64,
-        schematic: &crate::state::SchematicState,
-    ) -> &TerminalNets {
-        if self
-            .nets
-            .as_ref()
-            .is_none_or(|(cached, _)| *cached != epoch)
-        {
-            let nets = crate::simulation::netlist_gen::design_nets(schematic)
-                .into_iter()
-                .flat_map(|net| {
-                    let name = net.name.clone();
-                    net.terminals
-                        .into_iter()
-                        .map(move |terminal| ((terminal.component_id, terminal.pin), name.clone()))
-                })
-                .collect();
-            self.nets = Some((epoch, nets));
-        }
-        // The branch above has just written it when it was not there.
-        &self
-            .nets
-            .as_ref()
-            .expect("the net cache was filled above")
-            .1
-    }
-
     fn key(name: &str) -> String {
         name.trim().to_lowercase()
     }
@@ -374,6 +333,14 @@ impl StimulusEditorState {
 /// typed. It is not a property of the sheet, and `name` is the spelling every
 /// source sheet already uses for an instance's own name.
 pub const NAME_FIELD: &str = "name";
+
+/// The field the author's note about a definition is filed under.
+///
+/// Like the name, it is a property of the library record rather than of the
+/// source sheet — no independent source carries a `purpose` parameter — and it
+/// goes through the same in-progress slot so typing a sentence is one undo step
+/// rather than one per keystroke.
+pub const PURPOSE_FIELD: &str = "purpose";
 
 /// Write one field into a record, in the instance's own spelling.
 ///
@@ -385,6 +352,10 @@ pub const NAME_FIELD: &str = "name";
 pub fn write_field(record: &mut StimulusDefinition, field: &str, value: &str) {
     if field == NAME_FIELD {
         let _ = record.rename(value.trim());
+        return;
+    }
+    if field == PURPOSE_FIELD {
+        record.purpose = value.trim().to_owned();
         return;
     }
     let primary =
@@ -408,6 +379,9 @@ pub fn write_field(record: &mut StimulusDefinition, field: &str, value: &str) {
 pub fn read_field(record: &StimulusDefinition, field: &str) -> String {
     if field == NAME_FIELD {
         return record.name().to_owned();
+    }
+    if field == PURPOSE_FIELD {
+        return record.purpose.clone();
     }
     let primary =
         crate::properties::property_bridge::get_primary_property_name(record.component_type());

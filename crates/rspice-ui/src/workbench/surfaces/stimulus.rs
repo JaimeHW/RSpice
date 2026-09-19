@@ -30,8 +30,6 @@ mod pwl;
 mod realization;
 
 #[cfg(test)]
-mod fixtures;
-#[cfg(test)]
 mod tests;
 
 use egui::{Rect, Sense, Ui, UiBuilder, Vec2};
@@ -42,6 +40,7 @@ use crate::state::stimulus_library::definition::{
     StimulusDefinition, StimulusFamily, StimulusKind,
 };
 use crate::ui::tokens::Tokens;
+use crate::workbench::app::actions::stimulus::StimulusAdopter;
 use crate::workbench::state::PreviewSpan;
 use crate::workbench::{AppState, MessageId};
 
@@ -92,29 +91,12 @@ pub(super) enum StageAction {
     ImportDataFile,
     /// Copy text to the clipboard.
     Copy(String),
+    /// Arm the placement cursor with the saved revision.
+    Place,
     /// Re-adopt the current revision onto one placed source.
     Readopt(u64),
     /// Open Component Properties for one placed source.
     OpenProperties(u64),
-}
-
-/// One placed source that adopted the definition on the stage.
-#[derive(Debug, Clone)]
-pub(super) struct AdopterRow {
-    /// The component's id, for the verbs that act on it.
-    pub id: u64,
-    /// The instance name the card carries.
-    pub name: String,
-    /// The card this instance emits, or why it emits none.
-    pub card: Result<String, String>,
-    /// The lifecycle chip, in the provenance vocabulary.
-    pub chip: String,
-    /// Whether re-adopting would change anything.
-    pub offers_readoption: bool,
-    /// Whether the library has published past this instance's copy.
-    pub behind: bool,
-    /// Whether the instance's card has been edited away from its copy.
-    pub modified: bool,
 }
 
 /// One line of the audit strip.
@@ -146,8 +128,8 @@ pub(super) struct Stage {
     pub selected_point: Option<usize>,
     /// The definition's own card, or the generator's refusals.
     pub card: Result<String, Vec<String>>,
-    /// Every placed source that adopted this definition.
-    pub adopters: Vec<AdopterRow>,
+    /// Every placed source in the design that adopted this definition.
+    pub adopters: Vec<StimulusAdopter>,
     /// Everything the audit strip states, errors first.
     pub findings: Vec<Finding>,
     /// The field the reader is typing into, if any.
@@ -287,7 +269,7 @@ fn resolve(state: &mut AppState) -> Option<Stage> {
     let focus_name = editor.take_focus_name();
     let live = editor.live_record(saved.name(), &working);
     let card = StimulusRealization::card(&live);
-    let adopters = adopters(state, &name);
+    let adopters = crate::workbench::app::actions::stimulus::design_adopters(state, &name);
     let findings = findings(state, &live, &card);
     let realization = state
         .workbench
@@ -332,77 +314,6 @@ fn select_first_if_unresolved(state: &mut AppState) {
         .definitions()
         .first()
         .map(|definition| definition.name().to_owned());
-}
-
-/// The placed sources that adopted this definition.
-///
-/// The active sheet's components, because that is the buffer whose instances
-/// this process can read without elaborating the hierarchy. A definition
-/// adopted on another sheet of the same design is a real adopter and is not
-/// listed here; the hierarchy-wide list arrives with the inspector lane, which
-/// owns the projection that resolves an occurrence to its component.
-fn adopters(state: &mut AppState, name: &str) -> Vec<AdopterRow> {
-    use crate::state::stimulus_library::provenance::ProvenanceState;
-
-    let mut rows = state
-        .workspace
-        .stimulus_library
-        .adopters(&state.schematic.components);
-    let Some(adopters) = rows.remove(name) else {
-        return Vec::new();
-    };
-    let cards = adopters
-        .iter()
-        .map(|component| {
-            let provenance = state.workspace.stimulus_library.provenance_state(component);
-            (
-                component.id,
-                component.name.clone(),
-                provenance,
-                (*component).clone(),
-            )
-        })
-        .collect::<Vec<_>>();
-    let epoch = state.active_schematic_epoch;
-    let nets = state
-        .workbench
-        .stimulus_editor
-        .instance_nets(epoch, &state.schematic)
-        .clone();
-    cards
-        .into_iter()
-        .map(|(id, instance, provenance, component)| {
-            let terminals = component
-                .terminal_positions()
-                .into_iter()
-                .map(|(pin, _)| {
-                    nets.get(&(id, pin.to_owned()))
-                        .cloned()
-                        .unwrap_or_else(|| "unconnected".to_owned())
-                })
-                .collect::<Vec<_>>();
-            let named = [
-                terminals.first().map_or("unconnected", String::as_str),
-                terminals.get(1).map_or("unconnected", String::as_str),
-            ];
-            AdopterRow {
-                id,
-                name: instance,
-                card: crate::simulation::stimulus_realize::source_card_text(&component, named)
-                    .map_err(|errors| errors.join("; ")),
-                chip: provenance.label(),
-                offers_readoption: provenance.offers_readoption(),
-                behind: matches!(
-                    provenance,
-                    ProvenanceState::Behind { .. } | ProvenanceState::ModifiedBehind { .. }
-                ),
-                modified: matches!(
-                    provenance,
-                    ProvenanceState::Modified { .. } | ProvenanceState::ModifiedBehind { .. }
-                ),
-            }
-        })
-        .collect()
 }
 
 /// Everything the audit strip states about this record.
@@ -666,7 +577,12 @@ fn apply(state: &mut AppState, stage: &Stage, action: StageAction) {
         }
         StageAction::ImportDataFile => stimulus::import_data_file(state),
         StageAction::Copy(text) => state.ui.clipboard_text_request = Some(text),
-        StageAction::Readopt(id) => stimulus::readopt_instance(state, id),
-        StageAction::OpenProperties(id) => stimulus::open_instance_properties(state, id),
+        StageAction::Place => stimulus::place_selected_definition(state),
+        StageAction::Readopt(id) => {
+            stimulus::readopt_adopter(state, id, stage.saved.name());
+        }
+        StageAction::OpenProperties(id) => {
+            crate::workbench::app::open_property_editor(state, id);
+        }
     }
 }

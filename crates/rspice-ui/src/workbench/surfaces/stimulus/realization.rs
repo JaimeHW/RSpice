@@ -8,10 +8,13 @@
 //! reading "behind" until someone re-adopts, and that is what this band is for
 //! looking at.
 //!
-//! The list is the active sheet's instances. A definition adopted on another
-//! sheet of the same design is a real adopter and is not listed here; the
-//! hierarchy-wide list arrives with the inspector, which owns the projection
-//! that resolves an occurrence to its component.
+//! The list is the whole design's, through
+//! [`crate::workbench::app::actions::stimulus::design_adopters`]: a definition
+//! adopted inside a child master drives the circuit exactly as one adopted at
+//! the root does, and a master two instances reach adopts it twice. A row drawn
+//! in another occurrence says where it is and carries no verbs, because both of
+//! them address an instance by a component id that means something only inside
+//! the buffer on screen.
 
 use egui::Ui;
 
@@ -19,7 +22,11 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::workbench::{AppState, MessageId};
 
-use super::super::super::design_system::{WorkbenchIcon, icon_button, labeled_icon_button_sized};
+use crate::workbench::app::actions::stimulus::StimulusAdopter;
+
+use super::super::super::design_system::{
+    WorkbenchIcon, card_well, icon_button, labeled_icon_button_sized,
+};
 use super::{Stage, StageAction};
 
 const ROW_HEIGHT: f32 = 24.0;
@@ -33,7 +40,12 @@ const READOPT_WIDTH: f32 = 104.0;
 /// Room each row keeps at its right edge, sized to the verbs and note it
 /// carries there. The card on the left is elided into what remains.
 const HEADER_NOTE_WIDTH: f32 = 170.0;
-const DEFINITION_TRAIL_WIDTH: f32 = 260.0;
+const DEFINITION_TRAIL_WIDTH: f32 = 352.0;
+/// The Place verb on the definition line, which is the row that states what
+/// adoption copies — and therefore the row a reader is on when they decide to
+/// put one on the sheet. Wide enough for its icon and its whole word: a verb
+/// elided to `Plac…` is a control that reads as broken.
+const PLACE_WIDTH: f32 = 86.0;
 const ADOPTER_TRAIL_WIDTH: f32 = 280.0;
 /// Horizontal room the fixed items of a trailing group take, so its text is
 /// elided against what is actually left.
@@ -114,7 +126,7 @@ fn definition_line(ui: &mut Ui, state: &AppState, stage: &Stage, actions: &mut V
         DEFINITION_TRAIL_WIDTH,
         |ui| {
             ui.add_space(INSET);
-            card_well(ui, &text, color);
+            card_well(ui, &text, color, INSET);
         },
         |ui| {
             ui.add_space(8.0);
@@ -131,6 +143,20 @@ fn definition_line(ui: &mut Ui, state: &AppState, stage: &Stage, actions: &mut V
                 trailing.push(StageAction::Copy(text.clone()));
             }
             ui.add_space(TRAIL_GAP);
+            if labeled_icon_button_sized(
+                ui,
+                WorkbenchIcon::Source,
+                &messages.text(MessageId::StimulusPlace),
+                false,
+                PLACE_WIDTH,
+                20.0,
+            )
+            .on_hover_text(messages.text(MessageId::StimulusPlaceHint))
+            .clicked()
+            {
+                trailing.push(StageAction::Place);
+            }
+            ui.add_space(TRAIL_GAP);
             super::trailing_text(
                 ui,
                 &messages.format(
@@ -143,7 +169,7 @@ fn definition_line(ui: &mut Ui, state: &AppState, stage: &Stage, actions: &mut V
                 ),
                 theme::sans(tokens::FS_MICRO, FontWeight::Regular),
                 palette.text_faint,
-                DEFINITION_TRAIL_WIDTH - TRAIL_INSET - BUTTON.x - TRAIL_GAP,
+                DEFINITION_TRAIL_WIDTH - TRAIL_INSET - BUTTON.x - PLACE_WIDTH - 3.0 * TRAIL_GAP,
             );
         },
     );
@@ -151,105 +177,89 @@ fn definition_line(ui: &mut Ui, state: &AppState, stage: &Stage, actions: &mut V
 }
 
 /// One placed adopter: its card, its provenance, and the two verbs on it.
+///
+/// An adopter drawn inside another occurrence carries neither verb. Both of
+/// them address the instance by a component id that is unique only inside one
+/// buffer, so offering them for a row of a child master would edit whichever
+/// instance of the open sheet happened to carry that id; the row states which
+/// occurrence to open instead.
 fn adopter_line(
     ui: &mut Ui,
     state: &AppState,
     stage: &Stage,
-    adopter: &super::AdopterRow,
+    adopter: &StimulusAdopter,
     actions: &mut Vec<StageAction>,
 ) {
     let messages = state.ui.messages();
     let palette = Tokens::get(ui.ctx()).color;
-    let (text, color) = match &adopter.card {
+    let (text, color) = match &adopter.source.card {
         Ok(card) => (card.clone(), palette.text_dim),
         Err(error) => (error.clone(), palette.err),
     };
     let mut trailing = Vec::new();
+    let mut note_width = ADOPTER_TRAIL_WIDTH - TRAIL_INSET - TRAIL_GAP;
     super::split_row(
         ui,
         ROW_HEIGHT,
         ADOPTER_TRAIL_WIDTH,
         |ui| {
             ui.add_space(INSET);
-            card_well(ui, &text, color);
+            card_well(ui, &text, color, INSET);
         },
         |ui| {
             ui.add_space(8.0);
-            if icon_button(
-                ui,
-                WorkbenchIcon::Sliders,
-                &messages.format(
-                    MessageId::StimulusOpenProperties,
-                    &[("instance", adopter.name.as_str())],
-                ),
-                false,
-                BUTTON,
-            )
-            .clicked()
-            {
-                trailing.push(StageAction::OpenProperties(adopter.id));
-            }
-            ui.add_space(6.0);
-            if adopter.offers_readoption
-                && labeled_icon_button_sized(
+            if adopter.on_this_sheet {
+                note_width -= BUTTON.x + READOPT_WIDTH + 2.0 * TRAIL_GAP;
+                if icon_button(
                     ui,
-                    WorkbenchIcon::Refresh,
+                    WorkbenchIcon::Sliders,
                     &messages.format(
-                        MessageId::StimulusReadopt,
-                        &[("revision", &stage.saved.revision().to_string())],
+                        MessageId::StimulusOpenProperties,
+                        &[("instance", adopter.source.reference.as_str())],
                     ),
                     false,
-                    READOPT_WIDTH,
-                    20.0,
+                    BUTTON,
                 )
                 .clicked()
-            {
-                trailing.push(StageAction::Readopt(adopter.id));
+                {
+                    trailing.push(StageAction::OpenProperties(adopter.source.component_id));
+                }
+                ui.add_space(6.0);
+                if adopter.offers_readoption
+                    && labeled_icon_button_sized(
+                        ui,
+                        WorkbenchIcon::Refresh,
+                        &messages.format(
+                            MessageId::StimulusReadopt,
+                            &[("revision", &stage.saved.revision().to_string())],
+                        ),
+                        false,
+                        READOPT_WIDTH,
+                        20.0,
+                    )
+                    .clicked()
+                {
+                    trailing.push(StageAction::Readopt(adopter.source.component_id));
+                }
+                ui.add_space(TRAIL_GAP);
             }
-            ui.add_space(TRAIL_GAP);
+            let note = if adopter.on_this_sheet {
+                adopter.chip.clone()
+            } else {
+                format!("{} \u{b7} {}", adopter.occurrence, adopter.chip)
+            };
             super::trailing_text(
                 ui,
-                &adopter.chip,
+                &note,
                 theme::mono(tokens::FS_MICRO, FontWeight::Regular),
                 if adopter.behind || adopter.modified {
                     palette.warn
                 } else {
                     palette.text_faint
                 },
-                ADOPTER_TRAIL_WIDTH - TRAIL_INSET - BUTTON.x - READOPT_WIDTH - 3.0 * TRAIL_GAP,
+                note_width,
             );
         },
     );
     actions.append(&mut trailing);
-}
-
-/// One card, in the inset well every card on this band sits in.
-///
-/// The well is what says "this is text the netlister wrote" rather than a
-/// sentence about it, and it is sized to the card so a short one does not
-/// leave a slab of inset beside it. A card longer than its room is elided and
-/// keeps its whole text under the pointer.
-fn card_well(ui: &mut Ui, text: &str, color: egui::Color32) {
-    const PAD: f32 = 6.0;
-    let palette = Tokens::get(ui.ctx()).color;
-    let font = theme::mono(tokens::FS_0, FontWeight::Regular);
-    let room = (ui.available_width() - 2.0 * PAD - INSET).max(0.0);
-    let shown = crate::workbench::design_system::elide_text(ui, text, &font, room);
-    let elided = shown != text;
-    let galley = ui.painter().layout_no_wrap(shown, font, color);
-    let (rect, response) = ui.allocate_exact_size(
-        egui::Vec2::new(galley.size().x + 2.0 * PAD, 18.0),
-        egui::Sense::hover(),
-    );
-    ui.painter().rect_filled(rect, 2.0, palette.bg_inset);
-    ui.painter().galley(
-        egui::pos2(rect.left() + PAD, rect.center().y - galley.size().y * 0.5),
-        galley,
-        color,
-    );
-    response
-        .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), text));
-    if elided {
-        response.on_hover_text(text);
-    }
 }

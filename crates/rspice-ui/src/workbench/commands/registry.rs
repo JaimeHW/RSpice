@@ -549,6 +549,7 @@ impl Command {
                 | Self::StimulusApplyDraft
                 | Self::StimulusRevertDraft
                 | Self::StimulusValidateLibrary
+                | Self::StimulusPlaceDefinition
                 | Self::StimulusShowAdopter
                 | Self::CompileVerilogA
                 | Self::AutomationConsole
@@ -1262,15 +1263,19 @@ impl Command {
             }
             Self::StimulusDuplicateDefinition
             | Self::StimulusDeleteDefinition
+            | Self::StimulusPlaceDefinition
             | Self::StimulusShowAdopter
                 if app.state.workbench.workspace != Workspace::Stimulus =>
             {
                 "open the Stimulus Library"
             }
             Self::StimulusShowAdopter => "no placed source has adopted this definition",
-            Self::StimulusDuplicateDefinition | Self::StimulusDeleteDefinition => {
-                "select a stimulus definition"
+            Self::StimulusPlaceDefinition if app.state.schematic_edit_read_only() => {
+                "the active schematic view is read-only"
             }
+            Self::StimulusDuplicateDefinition
+            | Self::StimulusDeleteDefinition
+            | Self::StimulusPlaceDefinition => "select a stimulus definition",
             Self::StimulusApplyDraft | Self::StimulusRevertDraft
                 if app.state.workbench.workspace != Workspace::Stimulus =>
             {

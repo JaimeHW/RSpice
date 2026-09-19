@@ -11,11 +11,14 @@
 //! Apply publishes. That is what makes Ctrl+Z on this workspace mean "step my
 //! edit back" rather than "undo whatever the application did last".
 
+use std::collections::HashMap;
+
 use crate::diagnostics::ConsoleMessage;
 use crate::state::stimulus_library::definition::{
     RetainedPwlFile, StimulusDefinition, StimulusFamily, StimulusKind,
 };
 use crate::state::stimulus_library::draft::DefinitionDraft;
+use crate::state::stimulus_library::provenance::ProvenanceState;
 use crate::ui::accessibility::counted;
 use crate::workbench::app_state::AppState;
 use crate::workbench::state::write_field;
@@ -69,12 +72,7 @@ pub(crate) fn delete_definition(state: &mut AppState) {
     let Some(name) = selected(state) else {
         return;
     };
-    let adopters = state
-        .workspace
-        .stimulus_library
-        .adopters(&state.schematic.components)
-        .remove(&name)
-        .map_or(0, |adopters| adopters.len());
+    let adopters = design_adopters(state, &name).len();
     if state.workspace.stimulus_library.delete(&name).is_none() {
         return;
     }
@@ -107,12 +105,7 @@ pub(crate) fn delete_definition(state: &mut AppState) {
 #[must_use]
 pub(crate) fn delete_needs_confirmation(state: &AppState) -> Option<String> {
     let name = state.workbench.selected_stimulus_definition.as_deref()?;
-    let adopters = state
-        .workspace
-        .stimulus_library
-        .adopters(&state.schematic.components)
-        .remove(name)
-        .map_or(0, |adopters| adopters.len());
+    let adopters = design_adopters(state, name).len();
     let dirty = state.workbench.stimulus_editor.is_dirty(name);
     match (adopters, dirty) {
         (0, false) => None,
@@ -178,12 +171,7 @@ pub(crate) fn apply_draft(state: &mut AppState) {
         *state.workbench.stimulus_editor.draft_for(&record) = published;
     }
     state.workbench.selected_stimulus_definition = Some(renamed.clone());
-    let behind = state
-        .workspace
-        .stimulus_library
-        .adopters(&state.schematic.components)
-        .remove(&renamed)
-        .map_or(0, |adopters| adopters.len());
+    let behind = design_adopters(state, &renamed).len();
     state.push_user_message(ConsoleMessage::info(if behind == 0 {
         format!("Stimulus definition '{renamed}' published at r{revision}; no adopter")
     } else {
@@ -328,43 +316,48 @@ pub(crate) fn retained_table(
     ))
 }
 
-/// Copy the definition's current revision onto one placed adopter.
-pub(crate) fn readopt_instance(state: &mut AppState, component_id: u64) {
+/// Copy the library's current revision of `definition` onto one adopter, and
+/// say what happened where the reader is looking.
+///
+/// The transaction is [`crate::workbench::app::commit_readoption`] — the one
+/// the link dialog, the Studio's Excitations rows and the component editor all
+/// commit through — and this adds only the console sentence it hands back. The
+/// instrument used to own a second re-adoption with its own undo group and its
+/// own wording, so the same verb on two surfaces produced two different
+/// receipts for one edit.
+pub(crate) fn readopt_adopter(state: &mut AppState, component_id: u64, definition: &str) {
+    let outcome = crate::workbench::app::commit_readoption(state, component_id, definition);
+    state.push_user_message(match outcome {
+        Ok(line) => ConsoleMessage::info(line),
+        Err(refusal) => ConsoleMessage::warning(refusal),
+    });
+}
+
+/// Arm the next placement with the selected definition's saved revision.
+///
+/// A definition with an unapplied draft is armed anyway, and the console says
+/// which revision the pointer is carrying. Refusing would be the wrong trade:
+/// the reader asked to place the definition, the library's published revision
+/// is the only thing anything can adopt, and a verb that declines rather than
+/// stating what it did sends them looking for a setting.
+pub(crate) fn place_selected_definition(state: &mut AppState) {
     let Some(name) = selected(state) else {
         return;
     };
-    let Some(definition) = state.workspace.stimulus_library.get(&name).cloned() else {
-        return;
-    };
-    let revision = definition.revision();
-    let mut outcome = None;
-    state
-        .schematic
-        .with_undo("Re-adopt stimulus definition", |schematic| {
-            if let Some(component) = schematic
-                .components
-                .iter_mut()
-                .find(|component| component.id == component_id)
-            {
-                let instance = component.name.clone();
-                outcome = Some(definition.readopt_onto(component).map(|()| instance));
-            }
-        });
-    state.sync_active_schematic_to_workspace();
-    match outcome {
-        Some(Ok(instance)) => state.push_user_message(ConsoleMessage::info(format!(
-            "{instance} re-adopted '{name}' at r{revision}"
-        ))),
-        Some(Err(error)) => state.push_user_message(ConsoleMessage::warning(error)),
-        None => {}
+    let saved = state
+        .workspace
+        .stimulus_library
+        .get(&name)
+        .map_or(0, StimulusDefinition::revision);
+    if state.workbench.stimulus_editor.is_dirty(&name) {
+        state.push_user_message(ConsoleMessage::warning(format!(
+            "Placement copies the saved r{saved} of '{name}'; apply the draft first to place what \
+             you are editing"
+        )));
     }
-}
-
-/// Open Component Properties on one placed adopter.
-pub(crate) fn open_instance_properties(state: &mut AppState, component_id: u64) {
-    state.schematic.selection.clear();
-    state.schematic.selection.select_component(component_id);
-    crate::workbench::app::actions::property_edit::open_selected_object_properties(state);
+    if let Err(refusal) = crate::workbench::app::arm_placement_from_definition(state, &name) {
+        state.push_user_message(ConsoleMessage::warning(refusal));
+    }
 }
 
 /// Audit every definition in the library and report the totals.
@@ -417,32 +410,159 @@ pub(crate) fn contract_findings(
     crate::properties::property_bridge::component_source_contract(&component, &values, sheet)
 }
 
-/// The first placed source that adopted the selected definition.
+/// Every placed source in the whole design that adopted one definition.
+///
+/// The design rather than the open sheet, because that is what the run builds:
+/// a definition adopted inside a child master is a real adopter, and a
+/// definition two instances of one master reach is adopted twice. The walk is
+/// [`crate::simulation::placed_sources::whole_design_excitations`] — the same
+/// reading the Studio's Excitations page lists — so the instrument's count, the
+/// inspector's cards and that ledger cannot disagree about who is carrying a
+/// copy.
+///
+/// Matching is by what the library resolves the receipt to, never by comparing
+/// the receipt's spelling with the browser's: a definition that has been
+/// renamed still answers to the name its adopters copied, and a hand-written
+/// comparison would report every one of them as an adopter of nothing.
 #[must_use]
-pub(crate) fn first_adopter(state: &AppState) -> Option<u64> {
-    let name = state.workbench.selected_stimulus_definition.as_deref()?;
-    state
-        .workspace
-        .stimulus_library
-        .adopters(&state.schematic.components)
-        .remove(name)?
-        .first()
-        .map(|component| component.id)
+pub(crate) fn design_adopters(state: &AppState, name: &str) -> Vec<StimulusAdopter> {
+    let library = &state.workspace.stimulus_library;
+    let Some(held) = library.get(name).map(StimulusDefinition::name) else {
+        return Vec::new();
+    };
+    let (sources, _) = crate::simulation::placed_sources::whole_design_excitations(
+        &state.library_manager,
+        &state.workspace,
+        &state.schematic,
+        state.sim_setup.analysis_plan.as_ref(),
+    );
+    sources
+        .into_iter()
+        .filter(|source| {
+            source
+                .definition
+                .as_deref()
+                .and_then(|adopted| library.get(adopted))
+                .is_some_and(|resolved| resolved.name() == held)
+        })
+        .map(|source| StimulusAdopter {
+            on_this_sheet: crate::workbench::app::actions::reveal::reaches(
+                state,
+                source.occurrence.as_ref(),
+            ),
+            occurrence: source.occurrence_label(),
+            chip: source.provenance.label(),
+            offers_readoption: source.provenance.offers_readoption(),
+            behind: matches!(
+                source.provenance,
+                ProvenanceState::Behind { .. } | ProvenanceState::ModifiedBehind { .. }
+            ),
+            modified: matches!(
+                source.provenance,
+                ProvenanceState::Modified { .. } | ProvenanceState::ModifiedBehind { .. }
+            ),
+            source,
+        })
+        .collect()
 }
 
-/// Select the first adopter on the sheet, so the design workspace opens on it.
+/// One placed source that adopted the definition a surface is showing.
+///
+/// It carries the walk's own row rather than a copy of its fields, so a surface
+/// that needs the terminals, the key figure or the analyses reading it takes
+/// them from the list the run was built from.
+#[derive(Debug, Clone)]
+pub(crate) struct StimulusAdopter {
+    /// The row [`design_adopters`] resolved this from.
+    pub source: crate::simulation::placed_sources::PlacedSource,
+    /// Whether the buffer on screen is the one this instance is drawn in, and
+    /// therefore whether the verbs that edit it can reach it at all.
+    pub on_this_sheet: bool,
+    /// The occurrence the run reaches it through, as a column states it.
+    pub occurrence: String,
+    /// The lifecycle chip, in the provenance vocabulary.
+    pub chip: String,
+    /// Whether re-adopting would change anything.
+    pub offers_readoption: bool,
+    /// Whether the library has published past this instance's copy.
+    pub behind: bool,
+    /// Whether the instance's card has been edited away from its copy.
+    pub modified: bool,
+}
+
+/// How many placed sources carry each definition, and how many of those the
+/// library has published past.
+///
+/// One walk for the whole library rather than [`design_adopters`] per row: a
+/// browser listing fourteen definitions would otherwise resolve the design
+/// fourteen times for two numbers per row.
+#[must_use]
+pub(crate) fn design_adopter_tally(state: &AppState) -> HashMap<String, AdopterTally> {
+    let library = &state.workspace.stimulus_library;
+    let (sources, _) = crate::simulation::placed_sources::whole_design_excitations(
+        &state.library_manager,
+        &state.workspace,
+        &state.schematic,
+        state.sim_setup.analysis_plan.as_ref(),
+    );
+    let mut tally: HashMap<String, AdopterTally> = HashMap::new();
+    for source in &sources {
+        let Some(held) = source
+            .definition
+            .as_deref()
+            .and_then(|adopted| library.get(adopted))
+        else {
+            continue;
+        };
+        let entry = tally.entry(held.name().to_owned()).or_default();
+        entry.adopters += 1;
+        entry.references.push(source.reference.clone());
+        if matches!(
+            source.provenance,
+            ProvenanceState::Behind { .. } | ProvenanceState::ModifiedBehind { .. }
+        ) {
+            entry.behind += 1;
+        }
+    }
+    tally
+}
+
+/// What one definition's adopters amount to, for a row that has space for two
+/// numbers and a filter that searches for a third thing.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct AdopterTally {
+    /// How many placed sources carry a copy of this definition.
+    pub adopters: usize,
+    /// How many of them the library has published past.
+    pub behind: usize,
+    /// The deck spelling of each adopter, so a browser can answer a filter
+    /// naming an instance without walking the design once per row.
+    pub references: Vec<String>,
+}
+
+/// Whether anything in the design has adopted the selected definition.
+#[must_use]
+pub(crate) fn selected_definition_has_adopter(state: &AppState) -> bool {
+    state
+        .workbench
+        .selected_stimulus_definition
+        .as_deref()
+        .is_some_and(|name| !design_adopters(state, name).is_empty())
+}
+
+/// Show the first adopter of the selected definition on the drawing.
 pub(crate) fn show_adopter_on_schematic(state: &mut AppState) {
-    let Some(id) = first_adopter(state) else {
+    let Some(name) = selected(state) else {
         return;
     };
-    state.schematic.selection.clear();
-    state.schematic.selection.select_component(id);
-    state.schematic.center_request = state
-        .schematic
-        .components
-        .iter()
-        .find(|component| component.id == id)
-        .map(|component| component.pos);
+    let Some(first) = design_adopters(state, &name).first().cloned() else {
+        return;
+    };
+    crate::workbench::app::actions::reveal::placed_instance(
+        state,
+        first.source.occurrence.as_ref(),
+        first.source.component_id,
+    );
 }
 
 /// Whether the selected definition has an unapplied draft.

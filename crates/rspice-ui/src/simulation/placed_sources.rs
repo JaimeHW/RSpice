@@ -142,6 +142,16 @@ pub struct PlacedSource {
     /// The definition the receipt names, for the verb that opens it. `None`
     /// when the instance adopted nothing.
     pub definition: Option<String>,
+    /// The deck line this instance emits between its own nets, or why the
+    /// generator will not write one.
+    ///
+    /// Resolved here because this is the one walk that holds both the component
+    /// and the nets it sits across. Every surface that shows an adopter's card —
+    /// the Stimulus Library's realization band and its inspector — used to
+    /// re-resolve the sheet's connectivity to name those two nets, which is how
+    /// a stage listing one sheet and an inspector listing the design came to
+    /// print two different cards for one instance.
+    pub card: Result<String, String>,
     /// Terminal nets in pin order.
     pub nets: Vec<String>,
     pub consumers: Vec<SourceConsumer>,
@@ -741,6 +751,15 @@ fn placed_source(
 ) -> Option<(PlacedSource, SourceDrive)> {
     let family = source_family(component.kind)?;
     let params = crate::state::parse_params_string(&component.params);
+    let terminals = terminal_nets(component, nets);
+    let card = crate::simulation::stimulus_realize::source_card_text(
+        component,
+        [
+            terminals.first().map_or("unconnected", String::as_str),
+            terminals.get(1).map_or("unconnected", String::as_str),
+        ],
+    )
+    .map_err(|errors| errors.join("; "));
     Some((
         PlacedSource {
             component_id: component.id,
@@ -754,7 +773,8 @@ fn placed_source(
                 .stimulus_provenance
                 .as_ref()
                 .map(|provenance| provenance.definition.clone()),
-            nets: terminal_nets(component, nets),
+            card,
+            nets: terminals,
             consumers: Vec::new(),
             occurrence: None,
         },

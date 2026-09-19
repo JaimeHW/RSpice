@@ -6,7 +6,7 @@
 //! answer "which definition am I editing and is it saved", so nothing that
 //! cannot be read at a glance belongs in it.
 
-use egui::{Color32, Pos2, Rect, Sense, Stroke, Ui, Vec2};
+use egui::{Color32, Pos2, Sense, Stroke, Ui, Vec2};
 
 use crate::state::stimulus_library::definition::{StimulusFamily, StimulusKind};
 use crate::ui::theme::{self, FontWeight};
@@ -24,9 +24,9 @@ const NAME_WIDTH: f32 = 168.0;
 const COMBO_WIDTH: f32 = 96.0;
 const KIND_WIDTH: f32 = 56.0;
 const BUTTON: Vec2 = Vec2::new(28.0, 26.0);
-/// Room the four verbs keep at the right of the identity row: Apply plus three
+/// Room the five verbs keep at the right of the identity row: Apply plus four
 /// icon buttons and the spacing between them.
-const VERB_WIDTH: f32 = 216.0;
+const VERB_WIDTH: f32 = 250.0;
 
 pub(super) fn show(ui: &mut Ui, state: &AppState, stage: &Stage, actions: &mut Vec<StageAction>) {
     let messages = state.ui.messages();
@@ -105,6 +105,20 @@ pub(super) fn show(ui: &mut Ui, state: &AppState, stage: &Stage, actions: &mut V
             .clicked()
             {
                 trailing.push(StageAction::Duplicate);
+            }
+            ui.add_space(6.0);
+            // Leftmost of the group, clear of the two verbs that change the
+            // record: placing is the one verb here that acts on the design.
+            if icon_button(
+                ui,
+                WorkbenchIcon::Source,
+                &messages.text(MessageId::StimulusPlaceHint),
+                false,
+                BUTTON,
+            )
+            .clicked()
+            {
+                trailing.push(StageAction::Place);
             }
         },
     );
@@ -259,7 +273,7 @@ fn adopter_summary(ui: &mut Ui, state: &AppState, stage: &Stage) {
             .map(|adopter| {
                 format!(
                     "{}{}{}",
-                    adopter.name,
+                    adopter.source.reference,
                     if adopter.behind { "\u{2191}" } else { "" },
                     if adopter.modified { "\u{270e}" } else { "" }
                 )
@@ -299,7 +313,7 @@ fn adopter_summary(ui: &mut Ui, state: &AppState, stage: &Stage) {
             stage
                 .adopters
                 .iter()
-                .map(|adopter| format!("{} \u{b7} {}", adopter.name, adopter.chip))
+                .map(|adopter| format!("{} \u{b7} {}", adopter.source.reference, adopter.chip))
                 .collect::<Vec<_>>()
                 .join("\n"),
         );
@@ -369,125 +383,10 @@ fn chip(ui: &mut Ui, text: &str, color: Color32) -> egui::Response {
     response
 }
 
-/// The family's mark, drawn as geometry.
+/// The family's mark, from the one painter of it.
 ///
-/// Vectors rather than glyphs: the bundled text faces do not carry a sine
-/// wave, a pulse train or a noise band, and a missing glyph is a tofu box in
-/// the one place the reader looks first to know what they are editing.
-pub(super) fn paint_family_mark(
-    painter: &egui::Painter,
-    rect: Rect,
-    family: StimulusFamily,
-    color: Color32,
-) {
-    let stroke = Stroke::new(1.3, color);
-    let box_rect = rect.shrink(2.0);
-    let x = |fraction: f32| egui::lerp(box_rect.left()..=box_rect.right(), fraction);
-    let y = |fraction: f32| egui::lerp(box_rect.bottom()..=box_rect.top(), fraction);
-    let line = |points: Vec<Pos2>| painter.add(egui::Shape::line(points, stroke));
-    match family {
-        StimulusFamily::Dc => {
-            line(vec![Pos2::new(x(0.0), y(0.5)), Pos2::new(x(1.0), y(0.5))]);
-        }
-        StimulusFamily::Ac => {
-            line(vec![Pos2::new(x(0.0), y(0.5)), Pos2::new(x(1.0), y(0.5))]);
-            line(sine(&x, &y, 1.0, 0.18));
-        }
-        StimulusFamily::Sin => {
-            line(sine(&x, &y, 1.0, 0.42));
-        }
-        StimulusFamily::Pulse => {
-            line(vec![
-                Pos2::new(x(0.0), y(0.15)),
-                Pos2::new(x(0.2), y(0.15)),
-                Pos2::new(x(0.2), y(0.85)),
-                Pos2::new(x(0.6), y(0.85)),
-                Pos2::new(x(0.6), y(0.15)),
-                Pos2::new(x(1.0), y(0.15)),
-            ]);
-        }
-        StimulusFamily::Pwl | StimulusFamily::PwlFile => {
-            line(vec![
-                Pos2::new(x(0.0), y(0.2)),
-                Pos2::new(x(0.3), y(0.85)),
-                Pos2::new(x(0.6), y(0.4)),
-                Pos2::new(x(1.0), y(0.6)),
-            ]);
-        }
-        StimulusFamily::Exp => {
-            line(
-                (0..=12_u8)
-                    .map(|step| {
-                        let fraction = f32::from(step) / 12.0;
-                        Pos2::new(x(fraction), y(0.15 + 0.7 * (1.0 - (-3.0 * fraction).exp())))
-                    })
-                    .collect(),
-            );
-        }
-        StimulusFamily::Sffm => {
-            line(sine(&x, &y, 3.0, 0.35));
-        }
-        StimulusFamily::Am => {
-            line(sine(&x, &y, 4.0, 0.42));
-            line(vec![
-                Pos2::new(x(0.0), y(0.6)),
-                Pos2::new(x(0.5), y(0.95)),
-                Pos2::new(x(1.0), y(0.6)),
-            ]);
-        }
-        StimulusFamily::Pat => {
-            line(vec![
-                Pos2::new(x(0.0), y(0.15)),
-                Pos2::new(x(0.25), y(0.15)),
-                Pos2::new(x(0.25), y(0.85)),
-                Pos2::new(x(0.5), y(0.85)),
-                Pos2::new(x(0.5), y(0.15)),
-                Pos2::new(x(0.75), y(0.15)),
-                Pos2::new(x(0.75), y(0.85)),
-                Pos2::new(x(1.0), y(0.85)),
-            ]);
-        }
-        StimulusFamily::Trnoise => {
-            line(
-                (0..=16_u8)
-                    .map(|step| {
-                        let fraction = f32::from(step) / 16.0;
-                        let jitter =
-                            [0.5, 0.8, 0.3, 0.65, 0.2, 0.75, 0.45, 0.6][usize::from(step) % 8];
-                        Pos2::new(x(fraction), y(jitter))
-                    })
-                    .collect(),
-            );
-        }
-        StimulusFamily::Trrandom => {
-            line(vec![
-                Pos2::new(x(0.0), y(0.4)),
-                Pos2::new(x(0.25), y(0.4)),
-                Pos2::new(x(0.25), y(0.8)),
-                Pos2::new(x(0.5), y(0.8)),
-                Pos2::new(x(0.5), y(0.25)),
-                Pos2::new(x(0.75), y(0.25)),
-                Pos2::new(x(0.75), y(0.6)),
-                Pos2::new(x(1.0), y(0.6)),
-            ]);
-        }
-    }
-}
-
-/// `cycles` periods of a sine across the mark, at `amplitude` of its height.
-fn sine(
-    x: &impl Fn(f32) -> f32,
-    y: &impl Fn(f32) -> f32,
-    cycles: f32,
-    amplitude: f32,
-) -> Vec<Pos2> {
-    (0..=24_u8)
-        .map(|step| {
-            let fraction = f32::from(step) / 24.0;
-            Pos2::new(
-                x(fraction),
-                y(0.5 + amplitude * (fraction * cycles * std::f32::consts::TAU).sin()),
-            )
-        })
-        .collect()
-}
+/// It moved beside the mini painter when the library browser's group headings
+/// needed the same twelve shapes: a second set drawn one layer up would be the
+/// same twelve waveforms at a second weight, and a reader would have to learn
+/// which of the two they were looking at.
+pub(super) use crate::properties::source_preview::paint_family_mark;

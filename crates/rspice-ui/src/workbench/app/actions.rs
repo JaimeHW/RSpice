@@ -9,6 +9,7 @@
 pub(in crate::workbench) mod export_image;
 pub(in crate::workbench) mod file;
 pub(in crate::workbench) mod property_edit;
+pub(in crate::workbench) mod reveal;
 pub(in crate::workbench) mod sheets;
 pub(in crate::workbench) mod stimulus;
 pub(in crate::workbench) mod stimulus_placement;

@@ -114,11 +114,16 @@ const MODELS_TOOLBAR_COMMANDS: [(Command, WorkbenchIcon, Option<&str>); 4] = [
     (Command::CompileVerilogA, WorkbenchIcon::Netlist, None),
 ];
 
-const STIMULUS_TOOLBAR_COMMANDS: [(Command, WorkbenchIcon, Option<&str>); 5] = [
+const STIMULUS_TOOLBAR_COMMANDS: [(Command, WorkbenchIcon, Option<&str>); 6] = [
     (
         Command::StimulusNewDefinition,
         WorkbenchIcon::Add,
         Some("New definition"),
+    ),
+    (
+        Command::StimulusPlaceDefinition,
+        WorkbenchIcon::Source,
+        Some("Place source from definition"),
     ),
     (
         Command::StimulusDuplicateDefinition,
@@ -1188,7 +1193,9 @@ fn verification_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec
 /// the two that act on the library and the design around it.
 fn stimulus_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
     for (index, (command, icon, label)) in STIMULUS_TOOLBAR_COMMANDS.into_iter().enumerate() {
-        if index == 3 {
+        // After Place: the first two verbs make and use a definition, the rest
+        // act on the one the browser is reading.
+        if index == 2 || index == 4 {
             context_separator(ui, layout);
         }
         if let Some(label) = label {

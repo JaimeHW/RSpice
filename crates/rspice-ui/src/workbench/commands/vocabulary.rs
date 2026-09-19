@@ -270,6 +270,7 @@ pub enum Command {
     StimulusApplyDraft,
     StimulusRevertDraft,
     StimulusValidateLibrary,
+    StimulusPlaceDefinition,
     StimulusShowAdopter,
     CompileVerilogA,
     AutomationConsole,
@@ -988,6 +989,9 @@ impl Command {
             Self::StimulusValidateLibrary => {
                 spec("stimulus-validate", "Validate stimulus library", "Stimulus")
             }
+            Self::StimulusPlaceDefinition => {
+                spec("stimulus-place", "Place source from definition", "Stimulus")
+            }
             Self::StimulusShowAdopter => spec(
                 "stimulus-show-adopter",
                 "Show adopter on schematic",
@@ -1348,6 +1352,7 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::StimulusApplyDraft,
     Command::StimulusRevertDraft,
     Command::StimulusValidateLibrary,
+    Command::StimulusPlaceDefinition,
     Command::StimulusShowAdopter,
     Command::CompileVerilogA,
     Command::AutomationConsole,

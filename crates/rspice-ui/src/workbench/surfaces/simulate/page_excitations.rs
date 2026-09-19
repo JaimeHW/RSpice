@@ -29,7 +29,6 @@ use crate::simulation::placed_sources::{
 use crate::state::InstancePath;
 use crate::state::stimulus_library::provenance::ProvenanceState;
 use crate::workbench::app_state::AppState;
-use crate::workbench::state::Workspace;
 
 use super::page_kit;
 use super::page_kit::{RowPress, Tone, card, card_note, ledger_head, ledger_row};
@@ -443,11 +442,11 @@ fn take_source_verb(
         }
         SourceVerb::Readopt(definition) => {
             reveal(state, occurrence, component_id);
-            let outcome = crate::workbench::app::commit_readoption(state, component_id, definition);
-            state.push_user_message(match outcome {
-                Ok(line) => crate::diagnostics::ConsoleMessage::info(line),
-                Err(refusal) => crate::diagnostics::ConsoleMessage::warning(refusal),
-            });
+            crate::workbench::app::actions::stimulus::readopt_adopter(
+                state,
+                component_id,
+                definition,
+            );
         }
     }
 }
@@ -604,34 +603,13 @@ fn row_tooltip(
 
 /// Select the instance and centre the drawing on it, then show the drawing.
 ///
-/// The same select-and-centre transaction the result viewers use to reach a
-/// device, because arriving at a selected-but-offscreen instance is the one
-/// outcome that reads as a broken link.
-///
-/// A row naming an instance of another occurrence shows the drawing and stops
-/// there. Selecting is a transaction against the buffer on screen, and a
-/// component id is unique only inside one — running it for a row of a child
-/// master would select whatever instance of the sheet in front of the reader
-/// happened to carry that id. Descending to the owning occurrence first is the
-/// Design navigator's own excitation rail, which lists the same row and lands
-/// on it; the tooltip here says which occurrence to look in.
+/// The transaction itself is
+/// [`crate::workbench::app::actions::reveal::placed_instance`], which every
+/// list that names an instance elsewhere comes through; the tooltip on this
+/// page is what says which occurrence to descend to when the row's instance is
+/// not in the buffer on screen.
 fn reveal(state: &mut AppState, occurrence: Option<&InstancePath>, component_id: u64) {
-    state.workbench.activate(Workspace::Design);
-    if occurrence.is_some_and(|occurrence| *occurrence != state.workspace.occurrence_path()) {
-        return;
-    }
-    let position = state
-        .schematic
-        .components
-        .iter()
-        .find(|component| component.id == component_id)
-        .map(|component| component.pos);
-    state
-        .schematic
-        .selection
-        .select_only_component(component_id);
-    state.schematic.net_highlight.clear();
-    state.schematic.center_request = position;
+    crate::workbench::app::actions::reveal::placed_instance(state, occurrence, component_id);
 }
 
 #[cfg(test)]

@@ -857,13 +857,22 @@ impl Command {
                 state.workbench.workspace == Workspace::Stimulus
                     && state.workbench.selected_stimulus_definition.is_some()
             }
+            // Placing is an edit of the schematic, so a read-only view is the
+            // one extra thing it needs beyond a definition to place.
+            Self::StimulusPlaceDefinition => {
+                state.workbench.workspace == Workspace::Stimulus
+                    && state.workbench.selected_stimulus_definition.is_some()
+                    && !state.schematic_edit_read_only()
+            }
             Self::StimulusApplyDraft | Self::StimulusRevertDraft => {
                 state.workbench.workspace == Workspace::Stimulus
                     && crate::workbench::app::actions::stimulus::selected_draft_is_dirty(state)
             }
             Self::StimulusShowAdopter => {
                 state.workbench.workspace == Workspace::Stimulus
-                    && crate::workbench::app::actions::stimulus::first_adopter(state).is_some()
+                    && crate::workbench::app::actions::stimulus::selected_definition_has_adopter(
+                        state,
+                    )
             }
             Self::ModelRunQualificationTests => state
                 .workbench
@@ -2102,6 +2111,9 @@ impl Command {
             }
             Self::StimulusValidateLibrary => {
                 crate::workbench::app::actions::stimulus::validate_library(&mut app.state);
+            }
+            Self::StimulusPlaceDefinition => {
+                crate::workbench::app::actions::stimulus::place_selected_definition(&mut app.state);
             }
             Self::StimulusShowAdopter => {
                 crate::workbench::app::actions::stimulus::show_adopter_on_schematic(&mut app.state);
