@@ -395,6 +395,11 @@ fn scope_strip(ui: &mut Ui, scope: StimulusScope, counts: &ScopeCounts) -> Stimu
 
 /// What the library amounts to: who is carrying it, and what the engine says
 /// about it.
+///
+/// This counts placed sources where the scope strip above counts definitions,
+/// so it says "adopters" — the word the inspector's own section uses for them.
+/// Both spelled "adopted", the two numbers disagreed about a library they were
+/// describing correctly.
 fn footer(ui: &mut Ui, state: &AppState, counts: &ScopeCounts) {
     let messages = state.ui.messages();
     let palette = Tokens::get(ui.ctx()).color;
@@ -402,12 +407,20 @@ fn footer(ui: &mut Ui, state: &AppState, counts: &ScopeCounts) {
         messages.text(MessageId::StimulusNoAdopters)
     } else if counts.total.behind == 0 {
         messages.format(
-            MessageId::StimulusBrowserAdopted,
+            if counts.total.adopters == 1 {
+                MessageId::StimulusBrowserAdoptedSingular
+            } else {
+                MessageId::StimulusBrowserAdopted
+            },
             &[("count", &counts.total.adopters.to_string())],
         )
     } else {
         messages.format(
-            MessageId::StimulusBrowserAdoptedBehind,
+            if counts.total.adopters == 1 {
+                MessageId::StimulusBrowserAdoptedBehindSingular
+            } else {
+                MessageId::StimulusBrowserAdoptedBehind
+            },
             &[
                 ("count", &counts.total.adopters.to_string()),
                 ("behind", &counts.total.behind.to_string()),

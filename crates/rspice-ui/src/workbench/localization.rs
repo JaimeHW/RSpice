@@ -900,8 +900,15 @@ define_messages! {
     StimulusBrowserEmpty => "This project has no stimulus definitions",
     StimulusBrowserNoMatch => "No definition matches this filter",
     StimulusBrowserClearFilters => "Clear filters",
-    StimulusBrowserAdopted => "{count} adopted",
-    StimulusBrowserAdoptedBehind => "{count} adopted · {behind} behind",
+    // Placed sources, where the scope strip a few rows above counts
+    // definitions. Both were spelled "adopted", so the footer read `2 adopted`
+    // under a tab reading `Adopted 1` and neither said what it had counted.
+    // "Adopter" is the word the inspector's own section uses for a placed
+    // source carrying a copy.
+    StimulusBrowserAdoptedSingular => "{count} adopter",
+    StimulusBrowserAdopted => "{count} adopters",
+    StimulusBrowserAdoptedBehindSingular => "{count} adopter · {behind} behind",
+    StimulusBrowserAdoptedBehind => "{count} adopters · {behind} behind",
     StimulusBrowserFooterHint => "Placed sources carrying a copy of a definition, and what the engine contract says about the library",
     StimulusAdoptersSection => "Adopters",
     StimulusAdoptersNone => "Nothing in this design has adopted this definition. Place one from the toolbar, or adopt it onto a placed source from Component Properties.",

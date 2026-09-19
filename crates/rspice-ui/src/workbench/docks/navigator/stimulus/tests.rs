@@ -293,6 +293,30 @@ fn an_unauthored_library_and_a_filter_that_matched_nothing_read_differently() {
     assert!(!published.contains(&"This project has no stimulus definitions".to_owned()));
 }
 
+/// The scope strip counts definitions and the footer counts placed sources, so
+/// the two say different numbers about the same library and each has to name
+/// what it counted. Spelled the same way — `Adopted 1` over `2 adopted` — a
+/// reader can only read one of them as a mistake.
+#[test]
+fn the_scope_strip_and_the_footer_name_the_different_things_they_count() {
+    let mut app = RSpiceApp::test_instance();
+    library(&mut app.state);
+    adopt(&mut app.state, 1, "V1", "bridge_cal_step");
+    adopt(&mut app.state, 2, "V2", "bridge_cal_step");
+
+    let published = browser(&mut app.state);
+    assert!(
+        published.iter().any(|run| run == "Adopted 1"),
+        "the scope strip counts definitions: {published:?}"
+    );
+    assert!(
+        published
+            .iter()
+            .any(|run| run.starts_with("2 adopters \u{b7} ")),
+        "the footer counts the placed sources: {published:?}"
+    );
+}
+
 /// The footer states who is carrying the library and what the engine says
 /// about it, and warns while anything is behind.
 #[test]
@@ -310,7 +334,7 @@ fn the_footer_states_the_adoption_and_the_library_audit() {
     assert!(
         browser(&mut app.state)
             .iter()
-            .any(|run| run.starts_with("1 adopted \u{b7} ")),
+            .any(|run| run.starts_with("1 adopter \u{b7} ")),
         "the footer did not count the adopter"
     );
 
@@ -327,7 +351,7 @@ fn the_footer_states_the_adoption_and_the_library_audit() {
     assert!(
         browser(&mut app.state)
             .iter()
-            .any(|run| run.starts_with("1 adopted \u{b7} 1 behind \u{b7} ")),
+            .any(|run| run.starts_with("1 adopter \u{b7} 1 behind \u{b7} ")),
         "the footer did not count what the publish left behind"
     );
 }
