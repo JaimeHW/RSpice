@@ -1047,6 +1047,87 @@ pub(super) fn emit_worker_transient_sample(sample: &super::super::TransientSampl
     let _ = post_message.call1(&global, &JsValue::from(message));
 }
 
+/// Post one line the engine logged back to the UI instance.
+///
+/// The worker is its own wasm instance, so there is no queue on this side of
+/// the boundary for a run to write: the same shape as
+/// [`emit_worker_transient_sample`], one message per line, keyed by the active
+/// request so a superseded run's lines cannot land in a newer run's Console.
+#[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
+pub(super) fn emit_worker_engine_log(line: &crate::diagnostics::engine_log::EngineLogLine) {
+    use wasm_bindgen::JsCast as _;
+    use wasm_bindgen::JsValue;
+
+    let id = ACTIVE_WORKER_PROGRESS_ID.with(|active| active.get());
+    let Some(id) = id else {
+        return;
+    };
+    let message = js_sys::Object::new();
+    let _ = js_sys::Reflect::set(
+        &message,
+        &JsValue::from_str("type"),
+        &JsValue::from_str("engineLog"),
+    );
+    let _ = js_sys::Reflect::set(
+        &message,
+        &JsValue::from_str("id"),
+        &JsValue::from_f64(id as f64),
+    );
+    if let Ok(line) = serde_wasm_bindgen::to_value(line) {
+        let _ = js_sys::Reflect::set(&message, &JsValue::from_str("line"), &line);
+    } else {
+        return;
+    }
+
+    let global = js_sys::global();
+    let Ok(post_message) = js_sys::Reflect::get(&global, &JsValue::from_str("postMessage"))
+        .and_then(|value| value.dyn_into::<js_sys::Function>())
+    else {
+        return;
+    };
+    let _ = post_message.call1(&global, &JsValue::from(message));
+}
+
+/// The worker image's whole logger: it feeds the run's sink and nothing else.
+///
+/// This image has no terminal and paints nothing, so there is no second reader
+/// to filter for — where the desktop's `StudioLogger` wraps `env_logger`, this
+/// is the sink half alone.
+#[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
+struct WorkerEngineLogger;
+
+#[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
+impl log::Log for WorkerEngineLogger {
+    fn enabled(&self, metadata: &log::Metadata<'_>) -> bool {
+        crate::diagnostics::engine_log::admits(metadata)
+    }
+
+    fn log(&self, record: &log::Record<'_>) {
+        crate::diagnostics::engine_log::offer(record);
+    }
+
+    fn flush(&self) {}
+}
+
+/// Install [`WorkerEngineLogger`] on this worker, once.
+///
+/// Called at the head of a request rather than from a bootstrap export: the
+/// worker script's startup sequence is a published contract with the page, and
+/// a logger the first run installs needs no place in it. `set_boxed_logger`
+/// succeeds once per instance, and the worker instance outlives many requests,
+/// so the guard is a `OnceLock` rather than a per-run install.
+#[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
+fn install_worker_engine_logger() {
+    static INSTALLED: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+    INSTALLED.get_or_init(|| {
+        if log::set_boxed_logger(Box::new(WorkerEngineLogger)).is_ok() {
+            // No stderr half at all on this image, so the level the process
+            // admits is exactly what the run's sink asks for.
+            crate::diagnostics::engine_log::note_stderr_level(log::LevelFilter::Off);
+        }
+    });
+}
+
 #[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
 pub(crate) fn run_worker_request_value(
     value: wasm_bindgen::JsValue,
@@ -1063,6 +1144,8 @@ fn run_decoded_worker_request(
     ACTIVE_WORKER_PROGRESS_ID.with(|active| active.set(Some(id)));
     let stream_transient_samples = request.stream_transient_samples;
     let (request, input) = request.into_runner_parts();
+    install_worker_engine_logger();
+    let verbose = super::super::request_asked_for_verbose(&request);
     let progress = Arc::new(Mutex::new(SimulationProgress::default()));
     let abort_flag = Arc::new(AtomicBool::new(false));
     let response = WorkerResponse::from_result_for_transfer(
@@ -1076,6 +1159,10 @@ fn run_decoded_worker_request(
                 progress_observer: Some(emit_worker_progress_snapshot),
                 transient_sample_observer: stream_transient_samples
                     .then_some(emit_worker_transient_sample),
+                engine_log: Some(crate::diagnostics::engine_log::RunLogSink::observed(
+                    emit_worker_engine_log,
+                    verbose,
+                )),
                 ..Default::default()
             },
         ),

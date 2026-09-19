@@ -48,6 +48,7 @@ mod browser {
     use wasm_bindgen::prelude::*;
 
     use super::{next_request_id, request_id_from_js_number, stale_result, stale_worker_epoch};
+    use crate::diagnostics::engine_log::{EngineLogLine, EngineLogQueue};
     use crate::simulation::results::SimulationResult;
     use crate::simulation::runner::worker_contract::{
         WORKER_REQUEST_TRANSPORT_PROTOCOL, WorkerProgressSnapshot, WorkerRequest,
@@ -69,6 +70,12 @@ mod browser {
         active_request_id: Option<u64>,
         active_progress: Option<Arc<Mutex<SimulationProgress>>>,
         active_transient_samples: Option<Arc<Mutex<LiveTransientQueue>>>,
+        /// The Console log of the run this worker is executing.
+        ///
+        /// Held here rather than sent to the worker: the queue lives in this
+        /// wasm instance, and the run — which is a separate instance with its
+        /// own memory — posts its lines back across the contract one at a time.
+        active_engine_log: Option<Arc<Mutex<EngineLogQueue>>>,
         pending_result: Option<Result<SimulationResult, SimulationError>>,
     }
 
@@ -153,6 +160,7 @@ mod browser {
                 state.active_request_id = None;
                 state.active_progress = None;
                 state.active_transient_samples = None;
+                state.active_engine_log = None;
             }
             result
         }
@@ -169,6 +177,7 @@ mod browser {
             state.active_request_id = None;
             state.active_progress = None;
             state.active_transient_samples = None;
+            state.active_engine_log = None;
             state.pending_result = Some(Err(SimulationError::Aborted));
             drop(state);
             drop_cached_worker(&self.worker);
@@ -296,6 +305,7 @@ mod browser {
         progress: Arc<Mutex<SimulationProgress>>,
         abort_flag: Arc<AtomicBool>,
         transient_samples: Option<Arc<Mutex<LiveTransientQueue>>>,
+        engine_log: Arc<Mutex<EngineLogQueue>>,
     ) -> Result<(), SimulationError> {
         if handle.is_running() || handle.has_unpolled_result() {
             return Err(SimulationError::AlreadyRunning);
@@ -312,6 +322,7 @@ mod browser {
             state.active_request_id = Some(id);
             state.active_progress = Some(Arc::clone(&progress));
             state.active_transient_samples = transient_samples;
+            state.active_engine_log = Some(engine_log);
             state.pending_result = None;
         }
 
@@ -322,6 +333,7 @@ mod browser {
                 state.active_request_id = None;
                 state.active_progress = None;
                 state.active_transient_samples = None;
+                state.active_engine_log = None;
                 return Err(error);
             }
         };
@@ -331,6 +343,7 @@ mod browser {
             state.active_request_id = None;
             state.active_progress = None;
             state.active_transient_samples = None;
+            state.active_engine_log = None;
             drop(state);
             let message = format!(
                 "failed to post simulation request to worker: {}",
@@ -357,6 +370,7 @@ mod browser {
             }
             "progress" => handle_progress_message(state, &data),
             "transientSample" => handle_transient_sample_message(state, &data),
+            "engineLog" => handle_engine_log_message(state, &data),
             "result" => handle_result_message(state, &data),
             "error" => {
                 let startup_error = Reflect::get(&data, &JsValue::from_str("id"))
@@ -483,6 +497,7 @@ mod browser {
         state.active_request_id = None;
         state.active_progress = None;
         state.active_transient_samples = None;
+        state.active_engine_log = None;
         state.pending_result = Some(result);
     }
 
@@ -516,6 +531,43 @@ mod browser {
         push_live_transient_sample(&samples, sample);
     }
 
+    /// One line the worker's run logged, into this run's Console queue.
+    ///
+    /// Keyed by the active request like every other streamed message, so a
+    /// superseded run's lines are discarded rather than landing in the Console
+    /// of the run that replaced it. A malformed message is warned about and
+    /// dropped: the two sides are one build, so there is no version to
+    /// negotiate and nothing here should ever panic over an unexpected shape.
+    fn handle_engine_log_message(state: &Rc<RefCell<WorkerState>>, data: &JsValue) {
+        let id = numeric_property(data, "id").unwrap_or(0);
+        let engine_log = {
+            let state = state.borrow();
+            if stale_result(state.active_request_id, id) {
+                web_sys::console::warn_1(&JsValue::from_str(&format!(
+                    "Ignoring stale simulation worker engine log id {id}"
+                )));
+                return;
+            }
+            state.active_engine_log.as_ref().cloned()
+        };
+        let Some(engine_log) = engine_log else {
+            return;
+        };
+        let line = Reflect::get(data, &JsValue::from_str("line"))
+            .map_err(js_error_message)
+            .and_then(|value| {
+                serde_wasm_bindgen::from_value::<EngineLogLine>(value)
+                    .map_err(|error| error.to_string())
+            });
+        let Ok(line) = line else {
+            web_sys::console::warn_1(&JsValue::from_str(
+                "Ignoring malformed simulation worker engine log message",
+            ));
+            return;
+        };
+        crate::diagnostics::engine_log::lock_queue(&engine_log).push(line);
+    }
+
     fn handle_error_message(state: &Rc<RefCell<WorkerState>>, data: &JsValue) {
         let id = numeric_property(data, "id").unwrap_or(0);
         let message = worker_error_message(data);
@@ -531,6 +583,7 @@ mod browser {
         state.active_request_id = None;
         state.active_progress = None;
         state.active_transient_samples = None;
+        state.active_engine_log = None;
         state.pending_result = Some(Err(SimulationError::InvalidConfig(message)));
     }
 
@@ -553,6 +606,7 @@ mod browser {
         }
         state.active_progress = None;
         state.active_transient_samples = None;
+        state.active_engine_log = None;
         drop(state);
         drop_cached_worker(worker);
     }
