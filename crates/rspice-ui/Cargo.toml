@@ -82,7 +82,7 @@ similar = "2.7"
 # Signed PDK callbacks run in a deterministic, fuel-metered interpreter on
 # every supported target. No WASI integration is linked, so callbacks receive
 # only the explicit RSpice host capabilities declared by their signed contract.
-wasmi = { version = "1.1.0", default-features = false, features = ["std", "extra-checks", "prefer-btree-collections"] }
+wasmi = { version = "2.0.0", default-features = false, features = ["std", "extra-checks", "prefer-btree-collections"] }
 
 # Logging
 log = "0.4"
