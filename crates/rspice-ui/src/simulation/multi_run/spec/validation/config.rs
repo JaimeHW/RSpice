@@ -67,21 +67,21 @@ pub(super) fn validate(spec: &AnalysisSpec) -> Result<(), String> {
             start_freq,
             stop_freq,
             points_per_unit,
-            ..
+            sweep,
         } => {
-            if *start_freq <= 0.0 {
-                return Err("AC start_freq must be > 0".to_string());
+            use crate::simulation::multi_run::FrequencySweep;
+            crate::simulation::config::AcAnalysisConfig {
+                start_freq: *start_freq,
+                stop_freq: *stop_freq,
+                num_points: *points_per_unit,
+                sweep_type: match sweep {
+                    FrequencySweep::Decade => AcSweepType::Decade,
+                    FrequencySweep::Octave => AcSweepType::Octave,
+                    FrequencySweep::Linear => AcSweepType::Linear,
+                },
             }
-            if *stop_freq <= 0.0 {
-                return Err("AC stop_freq must be > 0".to_string());
-            }
-            if *stop_freq <= *start_freq {
-                return Err("AC stop_freq must be > start_freq".to_string());
-            }
-            if *points_per_unit == 0 {
-                return Err("AC points_per_unit must be > 0".to_string());
-            }
-            Ok(())
+            .validate()
+            .map_err(|errors| errors.join("; "))
         }
         AnalysisSpec::AcData {
             table_name,

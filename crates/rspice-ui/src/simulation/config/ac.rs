@@ -80,19 +80,23 @@ impl AcAnalysisConfig {
 
         if !self.start_freq.is_finite() {
             errors.push("Start frequency must be finite".to_string());
-        } else if self.start_freq <= 0.0 {
-            errors.push("Start frequency must be positive".to_string());
+        } else if self.start_freq < 0.0
+            || (self.start_freq == 0.0 && self.sweep_type != AcSweepType::Linear)
+        {
+            errors.push(
+                "Start frequency must be nonnegative for LIN and positive for DEC/OCT".to_string(),
+            );
         }
         if !self.stop_freq.is_finite() {
             errors.push("Stop frequency must be finite".to_string());
-        } else if self.stop_freq <= 0.0 {
-            errors.push("Stop frequency must be positive".to_string());
+        } else if self.stop_freq < 0.0 {
+            errors.push("Stop frequency must be nonnegative".to_string());
         }
         if self.start_freq.is_finite()
             && self.stop_freq.is_finite()
-            && self.start_freq >= self.stop_freq
+            && self.start_freq > self.stop_freq
         {
-            errors.push("Start frequency must be less than stop frequency".to_string());
+            errors.push("Start frequency must not exceed stop frequency".to_string());
         }
         if self.num_points == 0 {
             errors.push("Number of points must be positive".to_string());
@@ -286,5 +290,81 @@ mod tests {
             ..AcDataAnalysisConfig::default()
         };
         assert!(config.validate().is_ok());
+    }
+}
+
+#[cfg(test)]
+mod single_frequency_tests {
+    use super::*;
+    use crate::simulation::results::SimulationResult;
+    use crate::simulation::{AnalysisConfig, EngineBridge};
+
+    #[test]
+    fn single_frequency_and_zero_start_lin_run_the_requested_grid() {
+        for (kind, start, stop, count, expected) in [
+            (AcSweepType::Linear, 0.0, 0.0, 1, vec![0.0]),
+            (
+                AcSweepType::Linear,
+                0.0,
+                1000.0,
+                3,
+                vec![0.0, 500.0, 1000.0],
+            ),
+            (AcSweepType::Decade, 1000.0, 1000.0, 10, vec![1000.0]),
+            (AcSweepType::Octave, 1000.0, 1000.0, 4, vec![1000.0]),
+        ] {
+            let config = AcAnalysisConfig {
+                sweep_type: kind,
+                start_freq: start,
+                stop_freq: stop,
+                num_points: count,
+            };
+            config.validate().unwrap();
+            let result = EngineBridge::new()
+                .run(
+                    &AnalysisConfig::Ac(config),
+                    "AC divider\nV1 in 0 DC 0 AC 1\nR1 in out 1k\nR2 out 0 1k\n.end\n",
+                )
+                .unwrap();
+            let SimulationResult::Ac {
+                frequencies,
+                waveforms,
+                ..
+            } = result
+            else {
+                panic!("expected AC");
+            };
+            assert_eq!(frequencies, expected);
+            let trace = &waveforms["V(OUT)"];
+            assert!(
+                trace
+                    .y_values
+                    .iter()
+                    .all(|value| (value - 0.5).abs() < 1e-12)
+            );
+            assert!(
+                trace
+                    .y_imag
+                    .as_ref()
+                    .unwrap()
+                    .iter()
+                    .all(|value| value.abs() < 1e-12)
+            );
+        }
+    }
+
+    #[test]
+    fn zero_frequency_remains_invalid_on_a_logarithmic_axis() {
+        for kind in [AcSweepType::Decade, AcSweepType::Octave] {
+            assert!(
+                AcAnalysisConfig {
+                    sweep_type: kind,
+                    start_freq: 0.0,
+                    ..Default::default()
+                }
+                .validate()
+                .is_err()
+            );
+        }
     }
 }
