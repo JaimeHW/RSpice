@@ -118,40 +118,42 @@ fn every_workspace_exposes_the_mockup_reset_active_view_workflow() {
 }
 
 #[test]
-fn full_screen_command_opens_review_before_host_or_layout_mutation() {
+fn full_screen_command_enters_in_the_same_frame_with_no_dialog() {
     let mut app = RSpiceApp::test_instance();
     assert!(!app.state.workbench.full_screen_presentation);
     assert_eq!(app.state.ui.take_full_screen_request(), None);
 
     Command::ToggleFullScreen.execute(&mut app);
 
-    assert!(app.state.dialogs.view_operation.open);
-    assert_eq!(
-        app.state.dialogs.view_operation.operation,
-        crate::workbench::app::ViewOperation::FullScreen
-    );
-    assert!(app.state.dialogs.application_modal_open());
+    assert!(!app.state.dialogs.application_modal_open());
+    assert!(app.state.workbench.full_screen_presentation);
+    assert!(app.state.workbench.full_screen);
+    assert_eq!(app.state.ui.take_full_screen_request(), Some(true));
+
+    Command::ToggleFullScreen.execute(&mut app);
+
     assert!(!app.state.workbench.full_screen_presentation);
-    assert_eq!(app.state.ui.take_full_screen_request(), None);
+    assert!(!app.state.workbench.full_screen);
+    assert_eq!(app.state.ui.take_full_screen_request(), Some(false));
 }
 
 #[test]
-fn reset_active_view_command_captures_the_exact_workspace_for_review() {
+fn reset_active_view_command_resets_and_reports_in_the_same_frame() {
     let mut app = RSpiceApp::test_instance();
-    app.state.workbench.activate(Workspace::Results);
+    app.state.workbench.activate(Workspace::Design);
 
     Command::ResetActiveView.execute(&mut app);
 
-    assert!(app.state.dialogs.view_operation.open);
+    assert!(!app.state.dialogs.application_modal_open());
     assert_eq!(
-        app.state.dialogs.view_operation.operation,
-        crate::workbench::app::ViewOperation::ResetActiveView
+        app.state
+            .log_buffer
+            .entries_by_source(crate::diagnostics::LogSource::User)
+            .last()
+            .expect("the command reports to the console")
+            .message,
+        "Design view reset."
     );
-    assert_eq!(
-        app.state.dialogs.view_operation.workspace,
-        Workspace::Results
-    );
-    assert!(app.state.dialogs.application_modal_open());
 }
 
 #[test]

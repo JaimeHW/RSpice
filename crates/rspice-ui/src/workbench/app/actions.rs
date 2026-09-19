@@ -1118,15 +1118,15 @@ impl RSpiceApp {
     }
 
     pub(in crate::workbench) fn action_edit_cut(&mut self) {
-        crate::workbench::app::open_cut_selection_dialog(&mut self.state);
+        crate::workbench::app::cut_schematic_selection(&mut self.state);
     }
 
     pub(in crate::workbench) fn action_edit_delete(&mut self) {
-        crate::workbench::app::open_delete_selection_dialog(&mut self.state);
+        crate::workbench::app::delete_schematic_selection(&mut self.state);
     }
 
     pub(in crate::workbench) fn action_edit_select_all(&mut self) {
-        crate::workbench::app::open_select_all_dialog(&mut self.state);
+        crate::workbench::app::select_all_schematic_objects(&mut self.state);
     }
 }
 

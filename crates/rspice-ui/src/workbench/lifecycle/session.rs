@@ -688,16 +688,6 @@ impl GridStyle {
     }
 }
 
-/// Transient, device-local recovery point for a governed Select All command.
-///
-/// It is intentionally excluded from [`UiSessionStateSer`]: selection is
-/// runtime editor state, not project data or a durable user preference.
-#[derive(Debug, Clone)]
-pub(crate) struct SchematicSelectionRecovery {
-    pub(crate) active_key: String,
-    pub(crate) selections: std::collections::HashMap<String, crate::state::Selection>,
-}
-
 /// Transient, device-local recovery point for a visibility-policy change.
 #[derive(Debug, Clone)]
 pub(crate) struct SchematicVisibilityRecovery {
@@ -779,9 +769,9 @@ pub struct UiSessionState {
     /// vertical-first orthogonal preference that the display policy's
     /// user-facing three-way style intentionally abstracts.
     pub schematic_routing_mode: crate::state::WireRoutingMode,
-    /// Last governed Select All selection snapshot, including visible
-    /// edit-in-place hierarchy buffers.
-    pub(crate) schematic_selection_recovery: Option<SchematicSelectionRecovery>,
+    /// What Duplicate does with a terminal whose net keeps existing outside
+    /// the copied set. Restored with the UI session; never project data.
+    pub duplicate_external_nets: crate::state::DuplicateExternalNets,
     /// Last visibility-policy presentation snapshot for the active view.
     pub(crate) schematic_visibility_recovery: Option<SchematicVisibilityRecovery>,
     /// Device-local edge-triggered schematic selection synchronization.
@@ -903,6 +893,8 @@ pub struct UiSessionStateSer {
     #[serde(default)]
     schematic_routing_mode: Option<crate::state::WireRoutingMode>,
     #[serde(default)]
+    duplicate_external_nets: crate::state::DuplicateExternalNets,
+    #[serde(default)]
     engineering_table_views: crate::state::engineering_table::EngineeringTableViewStore,
     #[serde(default = "default_autosave_minutes")]
     autosave_minutes: u8,
@@ -967,6 +959,7 @@ impl From<&UiSessionState> for UiSessionStateSer {
             drawing_sheet_layers: session.drawing_sheet_layers,
             schematic_snap: session.schematic_snap.clone(),
             schematic_routing_mode: Some(session.schematic_routing_mode),
+            duplicate_external_nets: session.duplicate_external_nets,
             engineering_table_views: session.engineering_table_views.clone(),
             autosave_minutes: normalize_autosave_minutes(session.autosave_minutes),
             preferences: session.preferences.clone(),
@@ -1022,6 +1015,7 @@ impl From<UiSessionStateSer> for UiSessionState {
             drawing_sheet_layers: ser.drawing_sheet_layers,
             schematic_snap: ser.schematic_snap,
             schematic_routing_mode,
+            duplicate_external_nets: ser.duplicate_external_nets,
             engineering_table_views: ser.engineering_table_views,
             autosave_minutes: normalize_autosave_minutes(ser.autosave_minutes),
             preferences,
@@ -1326,6 +1320,24 @@ mod symbol_selection_tests {
     }
 
     #[test]
+    fn duplicate_external_nets_round_trips_with_the_ui_session() {
+        let mut session = UiSessionState::new();
+        session.duplicate_external_nets =
+            crate::state::DuplicateExternalNets::PreserveNamedNetAttachment;
+
+        let serialized =
+            serde_json::to_value(UiSessionStateSer::from(&session)).expect("serialize session");
+        let restored = UiSessionState::from(
+            serde_json::from_value::<UiSessionStateSer>(serialized).expect("deserialize session"),
+        );
+
+        assert_eq!(
+            restored.duplicate_external_nets,
+            crate::state::DuplicateExternalNets::PreserveNamedNetAttachment
+        );
+    }
+
+    #[test]
     fn legacy_ui_session_uses_snap_and_routing_defaults() {
         let restored = UiSessionState::from(
             serde_json::from_value::<UiSessionStateSer>(serde_json::json!({}))
@@ -1336,6 +1348,10 @@ mod symbol_selection_tests {
         assert_eq!(
             restored.schematic_routing_mode,
             crate::state::WireRoutingMode::HorizontalFirst
+        );
+        assert_eq!(
+            restored.duplicate_external_nets,
+            crate::state::DuplicateExternalNets::LeaveUnconnected
         );
     }
 }

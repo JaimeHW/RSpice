@@ -207,8 +207,13 @@ pub(crate) fn retain_selection_on_active_sheet(state: &mut AppState) {
     state.schematic.selection = selection;
 }
 
-#[cfg(test)]
-pub(crate) fn select_all_on_active_sheet(state: &mut AppState) {
+/// Every complete object on the active sheet the session's selection filter
+/// admits.
+///
+/// This is what Select all selects. It is written here, beside the other
+/// active-sheet predicates, because "which objects does the reader see" is
+/// this module's question and not the edit command's.
+pub(crate) fn selectable_objects_on_active_sheet(state: &AppState) -> Selection {
     let filter = state.ui.schematic_selection_filter;
     let mut selection = Selection::default();
     if filter.instances {
@@ -264,7 +269,7 @@ pub(crate) fn select_all_on_active_sheet(state: &mut AppState) {
             }
         }
     }
-    state.schematic.selection = selection;
+    selection
 }
 
 pub(super) fn select_in_rect_on_active_sheet(
@@ -606,7 +611,7 @@ mod tests {
         retain_selection_on_active_sheet(&mut state);
         assert!(state.schematic.selection.is_empty());
 
-        select_all_on_active_sheet(&mut state);
+        state.schematic.selection = selectable_objects_on_active_sheet(&state);
         assert!(state.schematic.selection.has_component(10));
         assert!(!state.schematic.selection.has_component(20));
     }
@@ -619,7 +624,7 @@ mod tests {
         state.schematic.wires = vec![Wire::segment(11, Point::origin(), Point::new(20, 0))];
         state.ui.schematic_selection_filter.instances = false;
 
-        select_all_on_active_sheet(&mut state);
+        state.schematic.selection = selectable_objects_on_active_sheet(&state);
 
         assert!(!state.schematic.selection.has_component(10));
         assert!(state.schematic.selection.has_wire(11));

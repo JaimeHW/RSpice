@@ -58,12 +58,6 @@ pub struct InteractionState {
     #[serde(skip)]
     pub context_target: Option<(ContextTarget, (i32, i32))>,
 
-    /// Whether the schematic selection-deletion review owns modal keyboard
-    /// intent. The review payload remains in egui's temporary data, but this
-    /// retained flag is available before shortcut dispatch paints the dialog.
-    #[serde(skip)]
-    pub schematic_delete_confirmation_open: bool,
-
     /// Focus identity for spatial arrow traversal on the schematic canvas.
     /// This is device-local presentation state and never project data.
     #[serde(skip)]
@@ -91,7 +85,6 @@ impl InteractionState {
         self.last_click_pos = None;
         self.hover_wire_vertex = None;
         self.context_target = None;
-        self.schematic_delete_confirmation_open = false;
         self.schematic_keyboard_focus = None;
     }
 }
@@ -101,16 +94,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn clear_releases_schematic_delete_modal_ownership() {
+    fn clear_releases_canvas_keyboard_focus() {
         let mut state = InteractionState {
-            schematic_delete_confirmation_open: true,
             schematic_keyboard_focus: Some(SchematicKeyboardFocus::Probe(17)),
             ..InteractionState::default()
         };
 
         state.clear();
 
-        assert!(!state.schematic_delete_confirmation_open);
         assert_eq!(state.schematic_keyboard_focus, None);
     }
 }

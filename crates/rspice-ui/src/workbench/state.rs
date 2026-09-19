@@ -1104,16 +1104,12 @@ pub struct WorkbenchState {
     /// honored and must never restore a stale platform window state.
     #[serde(skip)]
     pub full_screen: bool,
-    /// RSpice-owned presentation state. Unlike `full_screen`, this also
-    /// covers the mockup's "Active canvas only" scope and remains true while
-    /// application chrome is intentionally suppressed.
+    /// RSpice-owned presentation state. Unlike `full_screen`, which mirrors
+    /// what the host window is doing, this stays true for as long as the
+    /// application chrome is intentionally suppressed — including while a
+    /// browser is still deciding whether to honour the request.
     #[serde(skip)]
     pub full_screen_presentation: bool,
-    /// Whether the current full-screen transaction temporarily suppresses
-    /// the Navigator and Inspector. Their durable visibility flags are never
-    /// rewritten, so exiting restores the exact prior dock composition.
-    #[serde(skip)]
-    pub full_screen_hide_context_panels: bool,
     /// Capability-derived touch composition. Once a native touch event is
     /// observed it remains enabled for this process; browsers also refresh it
     /// from the exact `(pointer: coarse)` media query every frame.
@@ -1486,7 +1482,6 @@ impl Default for WorkbenchState {
             split_with_results: false,
             full_screen: false,
             full_screen_presentation: false,
-            full_screen_hide_context_panels: false,
             coarse_pointer: false,
             project_launcher_open: false,
             project_launcher_query: String::new(),

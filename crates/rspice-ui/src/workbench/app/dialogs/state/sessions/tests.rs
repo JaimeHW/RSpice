@@ -73,7 +73,6 @@ fn every_retained_dialog_owner_blocks_background_shortcuts() {
             .documentation_shape
             .open(0, 0, 0, "user/top/schematic".to_owned(), Vec::new());
     });
-    assert_blocks_shortcuts(|dialogs| dialogs.selection_workflow.open = true);
     assert_blocks_shortcuts(|dialogs| {
         dialogs.move_selection.open(super::SchematicEditAuthority {
             design_execution_epoch: 0,
@@ -177,9 +176,6 @@ fn every_retained_dialog_owner_blocks_background_shortcuts() {
     });
     assert_blocks_shortcuts(|dialogs| dialogs.selection_bulk_edit.open = true);
     assert_blocks_shortcuts(|dialogs| dialogs.technology_attachment.open = true);
-    assert_blocks_shortcuts(|dialogs| {
-        dialogs.interaction.schematic_delete_confirmation_open = true;
-    });
     assert_blocks_shortcuts(|dialogs| {
         dialogs.library_deletion_review.target = Some(LibraryDeletionTarget::Cell {
             library: "work".to_owned(),

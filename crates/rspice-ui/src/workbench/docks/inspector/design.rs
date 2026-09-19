@@ -1333,14 +1333,7 @@ fn multi_panel(ui: &mut Ui, app: &mut RSpiceApp) {
             "Mirror about vertical axis",
             false,
         );
-        command_action(
-            ui,
-            app,
-            Command::Duplicate,
-            Icon::Copy,
-            "Duplicate and place…",
-            false,
-        );
+        command_action(ui, app, Command::Duplicate, Icon::Copy, "Duplicate", false);
         command_action(
             ui,
             app,

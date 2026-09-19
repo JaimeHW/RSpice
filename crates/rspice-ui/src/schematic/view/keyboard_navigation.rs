@@ -1,7 +1,7 @@
 //! Keyboard-owned actions for the focused schematic canvas.
 //!
-//! Arrow traversal changes only presentation selection. Backspace delegates
-//! to the same state-layer deletion transaction as the Edit command.
+//! Arrow traversal changes only presentation selection. Backspace deletes, by
+//! the same route as the Edit menu's Delete, with undo as the way back.
 
 use egui::{Event, InputState, Key, Popup, Response};
 
@@ -45,7 +45,7 @@ pub(super) fn handle_keyboard_object_navigation(
         .input_mut(|input| consume_unmodified_key(input, Key::Backspace))
     {
         if !state.schematic.read_only && !state.active_view_read_only() {
-            crate::workbench::app::open_delete_selection_dialog(state);
+            crate::workbench::app::delete_schematic_selection(state);
         }
         return true;
     }
@@ -785,10 +785,11 @@ mod tests {
     }
 
     #[test]
-    fn focused_select_canvas_backspace_opens_governed_delete_review() {
+    fn focused_select_canvas_backspace_deletes_immediately_in_one_undo_entry() {
         let ctx = Context::default();
         let mut state = AppState::default();
         state.schematic.components = components();
+        state.sync_active_schematic_to_workspace();
         state.schematic.selection.select_only_component(22);
         state.schematic.init_undo_history();
 
@@ -797,8 +798,11 @@ mod tests {
 
         assert!(handled);
         assert!(!key_still_available);
+        assert_eq!(state.schematic.components.len(), 2);
+        assert!(!state.dialogs.application_modal_open());
+        assert_eq!(state.schematic.undo_description(), Some("delete selection"));
+        assert!(state.schematic.undo());
         assert_eq!(state.schematic.components.len(), 3);
-        assert!(state.dialogs.selection_workflow.open);
         assert!(!state.schematic.can_undo());
     }
 

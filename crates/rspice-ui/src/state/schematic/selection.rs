@@ -38,6 +38,21 @@ impl Default for SchematicSelectionFilter {
     }
 }
 
+/// What Duplicate does with a terminal whose net keeps existing outside the
+/// copied set.
+///
+/// This is a sticky editor preference rather than a per-command decision: a
+/// user who works on one style of schematic wants the same answer every time,
+/// and the alternative was a modal in front of every Ctrl+D.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DuplicateExternalNets {
+    /// The copy's terminals come out unconnected.
+    #[default]
+    LeaveUnconnected,
+    /// The copy keeps the named connection the original terminal had.
+    PreserveNamedNetAttachment,
+}
+
 impl SchematicSelectionFilter {
     #[must_use]
     #[cfg(test)]

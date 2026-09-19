@@ -182,14 +182,13 @@ pub(crate) use dialogs::state::{
     DescendHierarchyDialogState, DesignNoteDialogState, DesignNoteObjectPropertiesDraft,
     DocumentationShapeDialogState, DocumentationShapeObjectPropertiesDraft,
     EngineeringTableDialogPage, EngineeringTableDialogState, EngineeringTableExportFormat,
-    EngineeringTableExportScope, FullScreenPanels, FullScreenScope, GridSnapRoutingDialogState,
-    GridSnapRoutingDraft, GridSnapRoutingFocusTarget, GridSnapSpacingChoice, HelpCenterPage,
-    HierarchyDescendEditMode, HierarchyParentContext, MoveSelectionDialogState,
-    NamedNetObjectPropertiesDraft, NetLabelObjectPropertiesDraft, NetLabelPlacementDialogState,
-    NewWindowInitialContent, ObjectPropertiesDraft, PinPortDialogState, PlanRemovalConsequence,
-    PlanRemovalTarget, PlanRemovalTone, RenameSelectionTarget, ReplaceInstanceOpen,
-    StretchSelectionDialogState, TechnologyAttachmentDialogState, ViewOperation,
-    ViewOperationDialogState, WindowLayoutChoice, WindowSessionPage, WindowWorkflow,
+    EngineeringTableExportScope, GridSnapRoutingDialogState, GridSnapRoutingDraft,
+    GridSnapRoutingFocusTarget, GridSnapSpacingChoice, HelpCenterPage, HierarchyDescendEditMode,
+    HierarchyParentContext, MoveSelectionDialogState, NamedNetObjectPropertiesDraft,
+    NetLabelObjectPropertiesDraft, NetLabelPlacementDialogState, NewWindowInitialContent,
+    ObjectPropertiesDraft, PlanRemovalConsequence, PlanRemovalTarget, PlanRemovalTone,
+    RenameSelectionTarget, ReplaceInstanceOpen, StretchSelectionDialogState,
+    TechnologyAttachmentDialogState, WindowLayoutChoice, WindowSessionPage, WindowWorkflow,
 };
 pub use dialogs::state::{DialogState, LicensePhase};
 
@@ -200,9 +199,9 @@ pub(in crate::workbench) use dialogs::plan_removal::REVEAL_BLOCKER;
 
 pub(crate) use schematic::edit_authority::SchematicEditAuthority;
 
-pub(crate) use dialogs::selection::workflow::{
-    SelectionWorkflowDialogState, open_cut_selection_dialog, open_delete_selection_dialog,
-    open_duplicate_selection_dialog, open_duplicate_selection_dialog_at, open_select_all_dialog,
+pub(crate) use dialogs::selection::commands::{
+    cut_schematic_selection, delete_schematic_selection, duplicate_schematic_selection,
+    duplicate_schematic_selection_at, select_all_schematic_objects,
 };
 
 pub(crate) use schematic::named_net::{
@@ -223,9 +222,6 @@ pub(crate) use dialogs::replace_instance::{
 };
 pub(crate) use dialogs::stimulus_link::{
     StimulusLinkMode, commit_readoption, open_stimulus_definition, open_stimulus_link,
-};
-pub(crate) use dialogs::view_operations::{
-    open_full_screen_workflow, open_reset_active_view_workflow,
 };
 pub(crate) use dialogs::window_session::open_window_workflow;
 
@@ -856,7 +852,6 @@ impl RSpiceApp {
         self.render_design_review_comments_dialog(ctx);
         self.render_design_note_dialog(ctx);
         self.render_documentation_shape_dialog(ctx);
-        self.render_selection_workflow_dialog(ctx);
         self.render_move_selection_dialog(ctx);
         self.render_stretch_selection_dialog(ctx);
         self.render_array_selection_dialog(ctx);
@@ -881,7 +876,6 @@ impl RSpiceApp {
         self.render_hardcopy_dialog(ctx);
         self.render_object_properties_dialog(ctx);
         self.render_rename_selection_dialog(ctx);
-        self.render_view_operation_dialog(ctx);
         self.render_window_session_dialog(ctx);
         self.render_help_center_dialog(ctx);
         self.render_about_dialog(ctx);

@@ -64,7 +64,6 @@ pub use bus::{
     BusTap, BusTapOrientation, BusTargetKind, MAX_BUS_MEMBER_INDEX, PendingBusTap,
     VectorConnectivity, declared_vector, declared_width, vector_connectivity,
 };
-pub use clipboard::ClipboardData;
 pub use component::{
     BuiltinXspiceInstance, BuiltinXspicePortBinding, BuiltinXspicePortDirection,
     BuiltinXspicePortType, Component, ComponentDisplayMode, GeneratedVerilogAInstance,
@@ -129,7 +128,9 @@ pub(crate) use replacement::{
     valid_replacement_parameter_name,
 };
 pub use rotation::Rotation;
-pub use selection::{JunctionSelection, SchematicSelectionFilter, Selection};
+pub use selection::{
+    DuplicateExternalNets, JunctionSelection, SchematicSelectionFilter, Selection,
+};
 pub use snap::{SnapEngine, SnapResult, SnapTarget, SnapTargetType};
 pub use state::{
     MoveSelectionMode, PendingStimulusPlacement, SchematicState, StretchOrthogonalPolicy,

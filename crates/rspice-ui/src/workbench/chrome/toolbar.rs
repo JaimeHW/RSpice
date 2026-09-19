@@ -580,7 +580,7 @@ fn design_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
         Command::Duplicate,
         WorkbenchIcon::Copy,
         false,
-        "Duplicate and place",
+        "Duplicate",
         layout,
     );
     toolbar_icon_command(ui, app, Command::Delete, WorkbenchIcon::Trash, layout);

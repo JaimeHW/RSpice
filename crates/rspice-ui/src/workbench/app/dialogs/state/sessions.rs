@@ -183,8 +183,6 @@ pub struct DialogState {
     pub(crate) help_center: HelpCenterDialogState,
     /// Device-local window, document, and session presentation manager.
     pub(crate) window_session: WindowSessionDialogState,
-    /// Mockup-authored full-screen and reset-view transaction.
-    pub(crate) view_operation: ViewOperationDialogState,
     /// New Cell creation dialog
     pub new_cell_dialog: bool,
     /// New Cell name input
@@ -411,9 +409,6 @@ pub struct DialogState {
     /// Non-electrical typed documentation-shape placement transaction.
     pub(crate) documentation_shape: DocumentationShapeDialogState,
 
-    /// Governed Cut, Duplicate, Delete, and Select All schematic selection workflow.
-    pub(crate) selection_workflow: crate::workbench::app::SelectionWorkflowDialogState,
-
     /// Connectivity-aware selected-object movement transaction.
     pub(crate) move_selection: MoveSelectionDialogState,
 
@@ -509,7 +504,6 @@ impl DialogState {
             || self.shortcuts_help
             || self.help_center.open
             || self.window_session.open
-            || self.view_operation.open
             || self.new_cell_dialog
             || self.new_view_dialog
             || self.copy_cell_dialog
@@ -548,7 +542,6 @@ impl DialogState {
             || self.pin_port.open
             || self.design_note.open
             || self.documentation_shape.open
-            || self.selection_workflow.open
             || self.move_selection.open
             || self.stretch_selection.open
             || self.array_selection.open
@@ -568,7 +561,6 @@ impl DialogState {
             || self.object_properties.open
             || self.rename_selection.open
             || self.technology_attachment.open
-            || self.interaction.schematic_delete_confirmation_open
             || self.confirmation_dialog.visible
             || self.project_review_dialog.request.is_some()
             || autosave_restore_open

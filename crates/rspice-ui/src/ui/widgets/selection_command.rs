@@ -58,9 +58,6 @@ const OPTIONS_HEIGHT: f32 = 356.0;
 
 #[derive(Debug, Clone)]
 pub(crate) enum SelectionPreview {
-    Component {
-        label: String,
-    },
     Bus {
         points: Vec<PreviewPoint>,
         label: String,
@@ -310,8 +307,7 @@ fn selection_canvas(ui: &mut Ui, code: &str, preview: &SelectionPreview) {
         egui::WidgetInfo::labeled(egui::WidgetType::Image, true, "Selected object preview")
     });
     let accessible_description = match preview {
-        SelectionPreview::Component { label }
-        | SelectionPreview::Bus { label, .. }
+        SelectionPreview::Bus { label, .. }
         | SelectionPreview::BusTap { label, .. }
         | SelectionPreview::NetLabel { label, .. }
         | SelectionPreview::DesignNote { label, .. }
@@ -336,81 +332,6 @@ fn selection_canvas(ui: &mut Ui, code: &str, preview: &SelectionPreview) {
 
     let content = rect.shrink2(Vec2::new(34.0, 38.0));
     let selection = match preview {
-        SelectionPreview::Component { .. } => {
-            // The mockup's selected-object canvas shows the selected instance
-            // in circuit context: op-amp, load, capacitor, and retained wires.
-            // Keep these percentages aligned with `.selection-object` and
-            // `.selection-wire` in the restored design source.
-            let opamp = Rect::from_min_size(
-                egui::pos2(
-                    rect.left() + rect.width() * 0.26,
-                    rect.top() + rect.height() * 0.31,
-                ),
-                Vec2::new(64.0, 70.0),
-            );
-            painter.add(egui::Shape::convex_polygon(
-                vec![opamp.left_top(), opamp.left_bottom(), opamp.right_center()],
-                t.color.symbol.gamma_multiply(0.08),
-                Stroke::new(2.0, t.color.symbol),
-            ));
-            let resistor = Rect::from_min_size(
-                egui::pos2(
-                    rect.left() + rect.width() * 0.54,
-                    rect.top() + rect.height() * 0.41,
-                ),
-                Vec2::new(72.0, 20.0),
-            );
-            painter.rect_filled(resistor, 0.0, t.color.symbol.gamma_multiply(0.08));
-            painter.rect_stroke(
-                resistor,
-                0.0,
-                Stroke::new(2.0, t.color.symbol),
-                egui::StrokeKind::Inside,
-            );
-            let capacitor = Rect::from_min_size(
-                egui::pos2(
-                    rect.left() + rect.width() * 0.67,
-                    rect.top() + rect.height() * 0.58,
-                ),
-                Vec2::new(24.0, 42.0),
-            );
-            for x in [capacitor.left(), capacitor.right()] {
-                painter.vline(x, capacitor.y_range(), Stroke::new(2.0, t.color.symbol));
-            }
-            painter.line_segment(
-                [
-                    egui::pos2(
-                        rect.left() + rect.width() * 0.09,
-                        rect.top() + rect.height() * 0.46,
-                    ),
-                    egui::pos2(
-                        rect.left() + rect.width() * 0.85,
-                        rect.top() + rect.height() * 0.46,
-                    ),
-                ],
-                Stroke::new(2.0, t.color.wire),
-            );
-            painter.line_segment(
-                [
-                    egui::pos2(
-                        rect.left() + rect.width() * 0.70,
-                        rect.top() + rect.height() * 0.67,
-                    ),
-                    egui::pos2(
-                        rect.left() + rect.width() * 0.70,
-                        rect.top() + rect.height() * 0.87,
-                    ),
-                ],
-                Stroke::new(2.0, t.color.wire),
-            );
-            Rect::from_min_size(
-                egui::pos2(
-                    rect.left() + rect.width() * 0.20,
-                    rect.top() + rect.height() * 0.23,
-                ),
-                Vec2::new(rect.width() * 0.58, rect.height() * 0.58),
-            )
-        }
         SelectionPreview::Bus { points, label } => {
             let mapped = map_points(points, content);
             for pair in mapped.windows(2) {

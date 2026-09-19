@@ -775,7 +775,6 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     ("commands", "menu_bar", 5),
     ("commands", "surfaces", 8),
     ("commands", "account_organization", 1),
-    ("commands", "frame", 1),
     ("commands", "preflight", 1),
     ("commands", "tools/jobs_manager", 1),
     ("commands", "tools/specialist_tool_browser", 1),

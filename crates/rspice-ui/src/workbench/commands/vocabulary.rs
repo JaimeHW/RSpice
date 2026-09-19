@@ -431,7 +431,7 @@ impl Command {
             Self::Paste => spec("paste-selection", "Paste", "Edit"),
             Self::Duplicate => spec("duplicate-selection", "Duplicate selection", "Edit"),
             Self::Delete => spec("delete-selection", "Delete selection", "Edit"),
-            Self::SelectAll => spec("select-all", "Select all in edit context", "Edit"),
+            Self::SelectAll => spec("select-all", "Select all", "Edit"),
             Self::RenameSelection => spec("rename-selection", "Rename selected object…", "Edit"),
             Self::ObjectProperties => spec("object-properties", "Object properties…", "Edit"),
             Self::FindInDesign => spec("find-design", "Find in design…", "Edit"),

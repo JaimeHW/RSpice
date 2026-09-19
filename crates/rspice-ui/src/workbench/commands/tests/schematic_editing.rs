@@ -238,14 +238,46 @@ fn delete_promotes_live_wire_handles_without_enabling_partial_copy_or_cut() {
 }
 
 #[test]
-fn select_all_command_opens_the_governed_schematic_scope_workflow() {
+fn select_all_command_selects_the_active_sheet_without_a_dialog() {
     let mut app = app_with_every_complete_schematic_object();
+    assert_eq!(Command::SelectAll.spec().label, "Select all");
 
     Command::SelectAll.execute(&mut app);
 
-    assert!(app.state.dialogs.selection_workflow.open);
-    assert!(app.state.dialogs.application_modal_open());
-    assert!(app.state.schematic.selection.is_empty());
+    assert!(!app.state.dialogs.application_modal_open());
+    for id in [1_u64, 2, 5, 6] {
+        assert!(
+            app.state.schematic.selection.has_component(id)
+                || app.state.schematic.selection.has_wire(id)
+                || app.state.schematic.selection.has_bus(id)
+                || app.state.schematic.selection.has_bus_tap(id),
+            "object {id} is on the active sheet and passes the filter"
+        );
+    }
+    assert!(app.state.schematic.selection.has_net_label(4));
+    assert_eq!(app.state.schematic.selection.count(), 6);
+}
+
+#[test]
+fn delete_cut_and_duplicate_act_on_the_schematic_without_a_dialog() {
+    let mut app = app_with_every_complete_schematic_object();
+    app.state.sync_active_schematic_to_workspace();
+    app.state.schematic.init_undo_history();
+    app.state.schematic.selection.select_only_component(1);
+
+    Command::Duplicate.execute(&mut app);
+    assert!(!app.state.dialogs.application_modal_open());
+    assert_eq!(app.state.schematic.components.len(), 2);
+
+    Command::Cut.execute(&mut app);
+    assert!(!app.state.dialogs.application_modal_open());
+    assert_eq!(app.state.schematic.components.len(), 1);
+    assert_eq!(app.state.schematic.clipboard.components.len(), 1);
+
+    app.state.schematic.selection.select_only_component(1);
+    Command::Delete.execute(&mut app);
+    assert!(!app.state.dialogs.application_modal_open());
+    assert!(app.state.schematic.components.is_empty());
 }
 
 #[test]

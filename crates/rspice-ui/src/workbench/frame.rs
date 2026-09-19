@@ -19,19 +19,15 @@ use super::layout::LayoutSpec;
 use super::state::Workspace;
 use super::*;
 
-pub(crate) fn enter_full_screen_presentation(
-    app: &mut RSpiceApp,
-    scope: crate::workbench::app::FullScreenScope,
-    panels: crate::workbench::app::FullScreenPanels,
-) {
-    let platform_full_screen = scope == crate::workbench::app::FullScreenScope::ApplicationWindow;
+/// Put the application window into full screen, keeping the panels the reader
+/// has open.
+///
+/// Hiding the navigator and inspector is its own command — Focus mode — so it
+/// is not asked again here.
+pub(crate) fn enter_full_screen_presentation(app: &mut RSpiceApp) {
     app.state.workbench.full_screen_presentation = true;
-    app.state.workbench.full_screen_hide_context_panels =
-        panels == crate::workbench::app::FullScreenPanels::HideNavigatorAndInspector;
-    app.state.workbench.full_screen = platform_full_screen;
-    if platform_full_screen {
-        app.state.ui.request_full_screen(true);
-    }
+    app.state.workbench.full_screen = true;
+    app.state.ui.request_full_screen(true);
 }
 
 pub(crate) fn exit_full_screen_presentation(app: &mut RSpiceApp) {
@@ -42,7 +38,6 @@ fn clear_full_screen_presentation(app: &mut RSpiceApp, request_platform_exit: bo
     let platform_full_screen = app.state.workbench.full_screen;
     app.state.workbench.full_screen = false;
     app.state.workbench.full_screen_presentation = false;
-    app.state.workbench.full_screen_hide_context_panels = false;
     if request_platform_exit && platform_full_screen {
         app.state.ui.request_full_screen(false);
     }
@@ -299,11 +294,10 @@ fn announce_run_completion(ctx: &Context, app: &mut RSpiceApp) {
 fn show_full_screen_presentation(root: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
     let ctx = root.ctx().clone();
     let ctx = &ctx;
-    let hide_context_panels = app.state.workbench.full_screen_hide_context_panels;
-    if !hide_context_panels && layout.show_navigator_dock {
+    if layout.show_navigator_dock {
         docks::show_navigator(root, app, layout);
     }
-    if !hide_context_panels && layout.show_inspector_dock {
+    if layout.show_inspector_dock {
         docks::show_inspector(root, app, layout);
     }
     docks::show_console(root, app, layout);
@@ -316,7 +310,7 @@ fn show_full_screen_presentation(root: &mut egui::Ui, app: &mut RSpiceApp, layou
             surfaces::show(ui, app);
         });
 
-    if !hide_context_panels && layout.has_overlay_drawer {
+    if layout.has_overlay_drawer {
         docks::show_drawers(root, app, layout);
     }
 
@@ -931,33 +925,9 @@ mod tests {
     }
 
     #[test]
-    fn active_canvas_full_screen_never_requests_host_window_mutation() {
-        let mut app = RSpiceApp::test_instance();
-        enter_full_screen_presentation(
-            &mut app,
-            crate::workbench::app::FullScreenScope::ActiveCanvasOnly,
-            crate::workbench::app::FullScreenPanels::HideNavigatorAndInspector,
-        );
-
-        assert!(app.state.workbench.full_screen_presentation);
-        assert!(app.state.workbench.full_screen_hide_context_panels);
-        assert!(!app.state.workbench.full_screen);
-        assert_eq!(app.state.ui.take_full_screen_request(), None);
-
-        exit_full_screen_presentation(&mut app);
-        assert!(!app.state.workbench.full_screen_presentation);
-        assert!(!app.state.workbench.full_screen_hide_context_panels);
-        assert_eq!(app.state.ui.take_full_screen_request(), None);
-    }
-
-    #[test]
     fn application_full_screen_has_exactly_one_enter_and_exit_request() {
         let mut app = RSpiceApp::test_instance();
-        enter_full_screen_presentation(
-            &mut app,
-            crate::workbench::app::FullScreenScope::ApplicationWindow,
-            crate::workbench::app::FullScreenPanels::KeepCurrent,
-        );
+        enter_full_screen_presentation(&mut app);
 
         assert!(app.state.workbench.full_screen_presentation);
         assert!(app.state.workbench.full_screen);

@@ -107,8 +107,8 @@ fn command_catalog_matches_the_mockup_exactly() {
             ("Rotate 90°", Some(Command::RotateSelection)),
             ("Mirror", Some(Command::MirrorSelectionHorizontal)),
             ("Copy selection", Some(Command::Copy)),
-            ("Duplicate and place", Some(Command::Duplicate)),
-            ("Delete selection…", Some(Command::Delete)),
+            ("Duplicate", Some(Command::Duplicate)),
+            ("Delete", Some(Command::Delete)),
             (
                 "Descend into selected instance",
                 Some(Command::DescendHierarchyDirect),
@@ -624,132 +624,45 @@ fn documentation_shape_context_exposes_the_complete_non_electrical_lifecycle() {
 }
 
 #[test]
-fn duplicate_and_delete_are_real_undoable_transactions() {
+fn duplicate_and_delete_rows_run_the_real_undoable_commands() {
     let mut state = AppState::default();
     state.schematic.components.clear();
     state.schematic.wires.clear();
-    state.schematic.init_undo_history();
     let mut component = Component::new(41, ComponentType::Resistor, Point::new(20, 30));
     component.name = "R1".to_owned();
     state.schematic.components.push(component);
+    state.sync_active_schematic_to_workspace();
+    state.schematic.init_undo_history();
     state.schematic.selection.select_component(41);
 
-    duplicate_selection_at(&mut state, Point::new(20, 30));
+    crate::workbench::app::duplicate_schematic_selection_at(&mut state, Point::new(22, 32));
     assert_eq!(state.schematic.components.len(), 2);
     assert!(state.schematic.can_undo());
     assert!(state.schematic.undo());
     assert_eq!(state.schematic.components.len(), 1);
 
     state.schematic.selection.select_component(41);
-    let request = DeleteSelectionRequest {
-        selection: state.schematic.selection.clone(),
-        topology_version: state.schematic.topology_version(),
-        expected_junctions: Vec::new(),
-        expected_design_notes: Vec::new(),
-        expected_documentation_shapes: Vec::new(),
-    };
-    apply_delete_request(&mut state, request);
+    crate::workbench::app::delete_schematic_selection(&mut state);
     assert!(state.schematic.components.is_empty());
     assert!(state.schematic.undo());
     assert_eq!(state.schematic.components.len(), 1);
 
-    let label = NetLabel::new(73, Point::new(40, 40), "afe_out");
+    let label = NetLabel::new(73, Point::new(40, 40), "sense_out");
     state.schematic.net_labels.push(label.clone());
+    state.sync_active_schematic_to_workspace();
     state.schematic.selection.select_only_net_label(label.id);
 
-    duplicate_selection_at(&mut state, label.pos);
+    crate::workbench::app::duplicate_schematic_selection_at(&mut state, Point::new(42, 42));
     assert_eq!(state.schematic.net_labels.len(), 2);
     assert!(state.schematic.can_undo());
     assert!(state.schematic.undo());
     assert_eq!(state.schematic.net_labels, vec![label.clone()]);
 
     state.schematic.selection.select_only_net_label(label.id);
-    let request = DeleteSelectionRequest {
-        selection: state.schematic.selection.clone(),
-        topology_version: state.schematic.topology_version(),
-        expected_junctions: Vec::new(),
-        expected_design_notes: Vec::new(),
-        expected_documentation_shapes: Vec::new(),
-    };
-    apply_delete_request(&mut state, request);
+    crate::workbench::app::delete_schematic_selection(&mut state);
     assert!(state.schematic.net_labels.is_empty());
     assert!(state.schematic.undo());
     assert_eq!(state.schematic.net_labels, vec![label]);
-}
-
-#[test]
-fn stale_delete_review_fails_closed() {
-    let mut state = AppState::default();
-    state.schematic.components.clear();
-    let component = Component::new(9, ComponentType::Capacitor, Point::new(0, 0));
-    state.schematic.components.push(component);
-    state.schematic.selection.select_component(9);
-    let request = DeleteSelectionRequest {
-        selection: state.schematic.selection.clone(),
-        topology_version: state.schematic.topology_version(),
-        expected_junctions: Vec::new(),
-        expected_design_notes: Vec::new(),
-        expected_documentation_shapes: Vec::new(),
-    };
-    state.schematic.bump_topology_version();
-
-    apply_delete_request(&mut state, request);
-
-    assert_eq!(state.schematic.components.len(), 1);
-}
-
-#[test]
-fn documentation_shape_delete_review_fails_closed_on_non_topological_drift() {
-    let mut state = AppState::default();
-    let shape = DocumentationShape::new(
-        93,
-        DocumentationShapeGeometry::Line {
-            start: Point::new(0, 0),
-            end: Point::new(20, 10),
-        },
-    )
-    .unwrap();
-    state.schematic.documentation_shapes.push(shape.clone());
-    state
-        .schematic
-        .selection
-        .select_only_documentation_shape(shape.id);
-    let request = DeleteSelectionRequest {
-        selection: state.schematic.selection.clone(),
-        topology_version: state.schematic.topology_version(),
-        expected_junctions: Vec::new(),
-        expected_design_notes: Vec::new(),
-        expected_documentation_shapes: vec![shape],
-    };
-    state.schematic.documentation_shapes[0].translate(Point::new(1, 0));
-
-    apply_delete_request(&mut state, request);
-
-    assert_eq!(state.schematic.documentation_shapes.len(), 1);
-}
-
-#[test]
-fn delete_review_owns_modal_shortcuts_and_fails_closed_without_payload() {
-    let ctx = Context::default();
-    let mut state = AppState::default();
-    state.schematic.selection.select_component(23);
-    state.schematic.selection.select_wire_segment(17, 0);
-    state.schematic.selection.select_junction(Point::new(5, 8));
-    request_delete_confirmation(&ctx, &mut state);
-
-    assert!(state.dialogs.interaction.schematic_delete_confirmation_open);
-    assert!(state.dialogs.application_modal_open());
-    let request = ctx
-        .data(|data| data.get_temp::<DeleteSelectionRequest>(delete_request_id()))
-        .expect("delete request is retained");
-    assert!(request.selection.has_component(23));
-    assert!(request.selection.wire_segments.is_empty());
-    assert!(request.selection.has_junction(Point::new(5, 8)));
-
-    ctx.data_mut(|data| data.remove::<DeleteSelectionRequest>(delete_request_id()));
-    let symbol_context = SchematicSymbolContext::from_state(&state);
-    assert!(!show_delete_confirmation(&ctx, &mut state, &symbol_context,));
-    assert!(!state.dialogs.interaction.schematic_delete_confirmation_open);
 }
 
 /// The canvas row asks the schematic the same staleness question the

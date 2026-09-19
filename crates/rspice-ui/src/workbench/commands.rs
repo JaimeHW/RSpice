@@ -1156,7 +1156,7 @@ impl Command {
                 if active_symbol_editor(app) {
                     app.delete_selected_symbol_item(true);
                 } else {
-                    crate::workbench::app::open_cut_selection_dialog(&mut app.state);
+                    crate::workbench::app::cut_schematic_selection(&mut app.state);
                 }
             }
             Self::Copy => {
@@ -1189,21 +1189,21 @@ impl Command {
                     app.copy_selected_symbol_shape();
                     app.paste_symbol_shape();
                 } else {
-                    crate::workbench::app::open_duplicate_selection_dialog(&mut app.state);
+                    crate::workbench::app::duplicate_schematic_selection(&mut app.state);
                 }
             }
             Self::Delete => {
                 if active_symbol_editor(app) {
                     app.delete_selected_symbol_item(false);
                 } else {
-                    crate::workbench::app::open_delete_selection_dialog(&mut app.state);
+                    crate::workbench::app::delete_schematic_selection(&mut app.state);
                 }
             }
             Self::SelectAll => {
                 if active_symbol_editor(app) {
                     app.select_all_symbol_items();
                 } else {
-                    crate::workbench::app::open_select_all_dialog(&mut app.state);
+                    crate::workbench::app::select_all_schematic_objects(&mut app.state);
                 }
             }
             Self::RenameSelection => {
@@ -1308,12 +1308,18 @@ impl Command {
                 if app.state.workbench.full_screen_presentation {
                     crate::workbench::exit_full_screen_presentation(app);
                 } else {
-                    crate::workbench::app::open_full_screen_workflow(&mut app.state);
+                    crate::workbench::enter_full_screen_presentation(app);
                 }
             }
             Self::ResetActiveView => {
                 if reset_active_view_available(app.state.workbench.workspace) {
-                    crate::workbench::app::open_reset_active_view_workflow(&mut app.state);
+                    let workspace = app.state.workbench.workspace;
+                    reset_active_view(app);
+                    app.state
+                        .push_user_message(crate::diagnostics::ConsoleMessage::info(format!(
+                            "{} view reset.",
+                            workspace.label()
+                        )));
                 }
             }
             Self::EngineeringTableView => {
