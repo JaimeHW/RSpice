@@ -381,7 +381,7 @@ impl Engine {
         // results in run order, so statistics match a serial sweep exactly;
         // failed runs are skipped just as before.
         // (node voltages, node names) of a converged run; None = failed run.
-        type RunResult = Option<(Vec<Value>, Vec<String>)>;
+        type RunResult = Option<(Vec<Value>, Vec<String>, Vec<usize>)>;
         type RunOutcome = Result<RunResult, SimulationError>;
 
         let workers = std::thread::available_parallelism()
@@ -397,7 +397,12 @@ impl Engine {
                 }
                 let run_netlist = materialize_run(run_index)?;
                 let outcome = match self.run_dc_op_with_abort(&run_netlist, abort) {
-                    Ok(result) => Ok(Some((result.node_voltages, result.node_names))),
+                    Ok(result) => {
+                        let excluded = (1..result.node_names.len())
+                            .filter(|&node| result.event_only_node_kind(node).is_some())
+                            .collect();
+                        Ok(Some((result.node_voltages, result.node_names, excluded)))
+                    }
                     Err(error @ SimulationError::Aborted)
                     | Err(error @ SimulationError::TimeLimitExceeded)
                     | Err(error @ SimulationError::ResourceLimit(_))
@@ -443,7 +448,12 @@ impl Engine {
                                 }
                             };
                             let outcome = match engine.run_dc_op_with_abort(&run_netlist, abort) {
-                                Ok(result) => Ok(Some((result.node_voltages, result.node_names))),
+                                Ok(result) => {
+                                    let excluded = (1..result.node_names.len())
+                                        .filter(|&node| result.event_only_node_kind(node).is_some())
+                                        .collect();
+                                    Ok(Some((result.node_voltages, result.node_names, excluded)))
+                                }
                                 Err(error @ SimulationError::Aborted)
                                 | Err(error @ SimulationError::TimeLimitExceeded)
                                 | Err(error @ SimulationError::ResourceLimit(_))
@@ -477,8 +487,10 @@ impl Engine {
             return Err(SimulationError::from_abort(abort));
         }
 
-        let mut result =
-            self.monte_carlo_result_from_trials(run_outcomes.into_iter().flatten(), num_runs)?;
+        let mut result = self.monte_carlo_result_from_observed_trials(
+            run_outcomes.into_iter().flatten(),
+            num_runs,
+        )?;
         result.sampling = Some(MonteCarloSampling {
             seed,
             policy: if has_spectre_statistics {
@@ -552,6 +564,22 @@ impl Engine {
         trials: impl IntoIterator<Item = (Vec<Value>, Vec<String>)>,
         requested_runs: usize,
     ) -> Result<MonteCarloResult, SimulationError> {
+        self.monte_carlo_result_from_observed_trials(
+            trials
+                .into_iter()
+                .map(|(values, names)| (values, names, Vec::new())),
+            requested_runs,
+        )
+    }
+
+    /// Aggregate solved trials while excluding event-domain placeholder rows.
+    /// The third tuple member contains original MNA node indices with no analog
+    /// voltage. Keeping the full basis preserves numeric aliases of analog nodes.
+    pub fn monte_carlo_result_from_observed_trials(
+        &self,
+        trials: impl IntoIterator<Item = (Vec<Value>, Vec<String>, Vec<usize>)>,
+        requested_runs: usize,
+    ) -> Result<MonteCarloResult, SimulationError> {
         if requested_runs == 0 {
             return Err(SimulationError::Circuit(
                 "Monte Carlo requires at least one requested trial".to_owned(),
@@ -560,8 +588,9 @@ impl Engine {
         self.ensure_batch_runs(requested_runs)?;
         let mut results = Vec::new();
         let mut first_node_names: Option<Vec<String>> = None;
+        let mut excluded_nodes: Option<HashSet<usize>> = None;
         let mut retained_values = 0usize;
-        for (trial_index, (node_voltages, node_names)) in trials.into_iter().enumerate() {
+        for (trial_index, (node_voltages, node_names, excluded)) in trials.into_iter().enumerate() {
             if trial_index >= requested_runs {
                 return Err(SimulationError::Circuit(
                     "Monte Carlo returned more converged trials than requested".to_owned(),
@@ -574,6 +603,26 @@ impl Engine {
                     node_names.len(),
                     node_voltages.len()
                 )));
+            }
+            let excluded: HashSet<_> = excluded.into_iter().collect();
+            if excluded
+                .iter()
+                .any(|&node| node == 0 || node >= node_names.len())
+            {
+                return Err(SimulationError::Circuit(
+                    "Monte Carlo event-only node index is outside the solved basis".into(),
+                ));
+            }
+            if excluded_nodes
+                .as_ref()
+                .is_some_and(|expected| *expected != excluded)
+            {
+                return Err(SimulationError::Circuit(
+                    "Monte Carlo trial changed its analog observation basis".into(),
+                ));
+            }
+            if excluded_nodes.is_none() {
+                excluded_nodes = Some(excluded);
             }
             if node_voltages.iter().any(|value| !value.is_finite()) {
                 return Err(SimulationError::Circuit(format!(
@@ -637,6 +686,12 @@ impl Engine {
             .map(|name| format!("V({})", name.to_ascii_uppercase()))
             .collect();
         for node_id in 1..=max_node_id {
+            if excluded_nodes
+                .as_ref()
+                .is_some_and(|excluded| excluded.contains(&node_id))
+            {
+                continue;
+            }
             let samples: Vec<Value> = results.iter().map(|result| result[node_id]).collect();
 
             if !samples.is_empty() {

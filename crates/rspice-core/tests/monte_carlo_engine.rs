@@ -603,3 +603,64 @@ fn authored_monte_carlo_confidence_is_exact_and_rejects_ignored_options() {
         );
     }
 }
+
+#[test]
+fn monte_carlo_observations_exclude_event_placeholders_without_renumbering_analog_aliases() {
+    let net = Netlist::parse("Mixed MC\n.param rval=1k\nV1 in 0 3.3\nR1 in out {rval}\nR2 out 0 9k\na_adc [out] [digital] adc\n.model adc adc_bridge(in_low=1.6 in_high=1.7)\nV2 later 0 2\nR3 later 0 1k\n.end\n").unwrap();
+    let engine = Engine::default();
+    let nominal = engine.run_dc_op(&net).unwrap();
+    let digital_id = nominal
+        .node_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case("digital"))
+        .unwrap();
+    let later_id = nominal
+        .node_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case("later"))
+        .unwrap();
+    assert!(nominal.event_only_node_kind(digital_id).is_some());
+    assert!(
+        later_id > digital_id,
+        "fixture must exercise stable indices after an event row"
+    );
+    for workers in [1, 2] {
+        let mut config = SimulationConfig::default();
+        config.resource_limits.max_parallel_workers = workers;
+        let result = Engine::new(config)
+            .run_monte_carlo_with_options(
+                &net,
+                4,
+                7,
+                Distribution::Uniform { tolerance: 0.1 },
+                None,
+            )
+            .unwrap();
+        assert_eq!(result.num_failures, 0);
+        assert!(!result.variables.contains_key("V(DIGITAL)"));
+        assert!(!result.variables.contains_key(&format!("V({digital_id})")));
+        assert_eq!(result.variables["V(LATER)"].samples, vec![2.0; 4]);
+        assert_eq!(
+            result.variables[&format!("V({later_id})")].samples,
+            vec![2.0; 4]
+        );
+    }
+}
+
+#[test]
+fn monte_carlo_observation_masks_must_match_the_solved_basis() {
+    let engine = Engine::default();
+    let trial = |mask| (vec![0.0, 1.0], vec!["0".into(), "out".into()], mask);
+    for mask in [vec![0], vec![2]] {
+        assert!(
+            engine
+                .monte_carlo_result_from_observed_trials([trial(mask)], 1)
+                .is_err()
+        );
+    }
+    assert!(
+        engine
+            .monte_carlo_result_from_observed_trials([trial(vec![]), trial(vec![1])], 2)
+            .is_err()
+    );
+}

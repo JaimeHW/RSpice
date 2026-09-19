@@ -292,7 +292,7 @@ pub(crate) fn run_statistical_monte_carlo_with_environment_and_source_path_and_a
         ));
     }
 
-    let mut trials: Vec<(Vec<Value>, Vec<String>)> = Vec::new();
+    let mut trials: Vec<(Vec<Value>, Vec<String>, Vec<usize>)> = Vec::new();
     // The identity of every trial that converged, in the order `trials` holds
     // them. A trial that failed to converge is dropped from the distribution,
     // so the retained positions are not 0..runs and cannot be renumbered into
@@ -325,52 +325,32 @@ pub(crate) fn run_statistical_monte_carlo_with_environment_and_source_path_and_a
         // cancellation stops the analysis.
         match engine.run_dc_op_with_abort(&trial_netlist, abort) {
             Ok(result) => {
-                // A net only the event domain resolves has no node voltage to
-                // put a distribution under, and its slot holds the placeholder
-                // row's zero, so it is dropped from the trial's evidence by
-                // blanking its name — the same filter an unnamed MNA quantity
-                // already meets below.
-                let node_names: Vec<String> = result
-                    .node_names
-                    .iter()
-                    .enumerate()
-                    .map(|(node, name)| {
-                        if result.event_only_node_kind(node).is_some() {
-                            String::new()
-                        } else {
-                            name.clone()
-                        }
-                    })
+                // Event-only MNA rows close the matrix but carry no voltage.
+                // Keep their original indices so analog numeric aliases stay exact.
+                let excluded = (1..result.node_names.len())
+                    .filter(|&node| result.event_only_node_kind(node).is_some())
                     .collect();
-                trials.push((result.node_voltages, node_names));
+                trials.push((result.node_voltages, result.node_names, excluded));
                 retained.push((trial, seed));
             }
-            Err(rspice_core::SimulationError::Aborted) => {
-                return Err(ServiceRunError::Aborted);
+            Err(error @ rspice_core::SimulationError::Aborted)
+            | Err(error @ rspice_core::SimulationError::TimeLimitExceeded)
+            | Err(error @ rspice_core::SimulationError::ResourceLimit(_))
+            | Err(error @ rspice_core::SimulationError::Configuration(_)) => {
+                return Err(ServiceRunError::from_core("Monte Carlo trial error", error));
             }
             Err(_) => {}
         }
     }
     ensure_not_aborted(abort)?;
 
-    // A deck that states no statistical variation produces identical trials.
-    // Reporting a zero-width distribution would read as "this design has no
-    // spread" when the truth is that nothing was asked to vary.
-    if trials.len() > 1 && trials.windows(2).all(|pair| pair[0].0 == pair[1].0) {
-        return Err(ServiceRunError::Failure(
-            "every trial resolved to the same operating point: this deck states no statistical \
-             variation. Statistical Monte Carlo draws from agauss/gauss/unif expressions in the \
-             deck and its model cards; add them, or select the parameter-tolerance variation \
-             source."
-                .to_string(),
-        ));
-    }
-
+    // Constant observations are valid: an ideal source or feedback can keep
+    // the output fixed even when hidden device parameters vary.
     let trial_measurements = trial_measurements_from(&trials, &retained);
 
     let engine = Engine::new(build_engine_config(&netlist, None));
     let mut result = engine
-        .monte_carlo_result_from_trials(trials, runs)
+        .monte_carlo_result_from_observed_trials(trials, runs)
         .map_err(|error| ServiceRunError::from_core("Monte Carlo analysis error", error))?;
     result
         .compute_mean_confidence(
@@ -425,7 +405,7 @@ pub(crate) fn run_statistical_monte_carlo_with_environment_and_source_path_and_a
 /// against a name, and emitting both would double every trial's evidence to
 /// carry a spelling no limit binds.
 fn trial_measurements_from(
-    trials: &[(Vec<Value>, Vec<String>)],
+    trials: &[(Vec<Value>, Vec<String>, Vec<usize>)],
     retained: &[(usize, u64)],
 ) -> Vec<crate::state::FamilyMemberMeasurements> {
     use crate::state::{FamilyMeasurementEvidence, FamilyMemberId, FamilyMemberMeasurements};
@@ -433,7 +413,7 @@ fn trial_measurements_from(
     trials
         .iter()
         .zip(retained)
-        .map(|((node_voltages, node_names), (index, seed))| {
+        .map(|((node_voltages, node_names, excluded), (index, seed))| {
             // Index 0 is ground in every trial, and ground is not evidence.
             let measurements = node_names
                 .iter()
@@ -441,7 +421,7 @@ fn trial_measurements_from(
                 .skip(1)
                 .filter_map(|(node_id, node_name)| {
                     let name = node_name.trim();
-                    if name.is_empty() {
+                    if name.is_empty() || excluded.contains(&node_id) {
                         return None;
                     }
                     let value = node_voltages.get(node_id).copied()?;
@@ -711,14 +691,59 @@ R2 out 0 1k
     }
 
     #[test]
-    fn statistical_monte_carlo_refuses_a_deck_that_states_no_variation() {
-        let error = run_statistical(NO_STATISTICS_DECK).expect_err("a degenerate deck is refused");
+    fn statistical_monte_carlo_retains_constant_observations() {
+        for deck in [NO_STATISTICS_DECK.to_owned(),
+            "Constant MC output\n.param rload=agauss(1000,100,1)\nV1 out 0 1\nR1 out 0 {rload}\n.mc 8 seed 7\n.end\n".to_owned()] {
+            let data = run_statistical(&deck).unwrap();
+            assert_eq!(data.runs_completed, data.runs_requested);
+            assert!(data.variables.iter().all(|variable| variable.std_dev == 0.0));
+            assert_eq!(data.trial_measurements.len(), data.runs_completed);
+        }
+    }
 
-        let message = error.to_string();
-        assert!(
-            message.contains("no statistical variation"),
-            "the refusal must name the cause, got: {message}"
-        );
+    #[test]
+    fn both_monte_carlo_drivers_exclude_digital_placeholder_voltages() {
+        let deck = "Mixed MC\n.param rval=agauss(1000,100,1)\nV1 in 0 3.3\nR1 in out {rval}\nR2 out 0 9k\na_adc [out] [digital] adc\n.model adc adc_bridge(in_low=1.6 in_high=1.7)\nV2 later 0 2\nR3 later 0 1k\n.mc 4 uniform 0.1 seed 7\n.end\n";
+        let parsed = rspice_core::Netlist::parse(deck).unwrap();
+        let nominal = Engine::default().run_dc_op(&parsed).unwrap();
+        let digital_id = nominal
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("digital"))
+            .unwrap();
+        let later_id = nominal
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("later"))
+            .unwrap();
+        for data in [
+            run_monte_carlo_analysis(deck).unwrap(),
+            run_statistical(deck).unwrap(),
+        ] {
+            assert_eq!(data.runs_completed, 4);
+            assert!(
+                !data
+                    .variables
+                    .iter()
+                    .any(|variable| variable.name == "V(DIGITAL)"
+                        || variable.name == format!("V({digital_id})"))
+            );
+            let analog = data
+                .variables
+                .iter()
+                .find(|variable| variable.name == format!("V({later_id})"))
+                .unwrap();
+            assert_eq!(analog.samples, vec![2.0; 4]);
+            for trial in data.trial_measurements {
+                assert!(!trial.measurements.iter().any(|m| m.name == "V(DIGITAL)"));
+                assert!(
+                    trial
+                        .measurements
+                        .iter()
+                        .any(|m| m.name == "V(LATER)" && m.value == Some(2.0))
+                );
+            }
+        }
     }
 
     #[test]
