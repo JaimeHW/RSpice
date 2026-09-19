@@ -470,7 +470,7 @@ fn advanced_result_conversion_retains_exact_family_metadata() {
 fn scalar_and_complex_analysis_conversion_retains_exact_typed_payloads() {
     use crate::state::{
         AnalysisResultPayload, ComplexResultValue, PoleZeroRootSetEvidence,
-        PoleZeroSpectrumCertificate, SensitivityResultMode, SensitivityResultRow,
+        PoleZeroSpectrumCertificate,
     };
 
     let controller = SimulationController::new();
