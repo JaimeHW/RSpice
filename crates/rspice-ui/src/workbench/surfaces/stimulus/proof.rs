@@ -496,7 +496,7 @@ fn value_ticks(ui: &Ui, minimum: f64, maximum: f64, height: f32, unit: &str) -> 
             let text = if anchor.is_some() || value == 0.0 {
                 label
             } else {
-                format!("{label}{unit}")
+                crate::ui::plot::tick_with_unit(&label, unit)
             };
             let width = ui
                 .painter()
@@ -560,7 +560,7 @@ fn paint_grid(ui: &Ui, projector: &Projector, color: Color32, axis: &ValueAxis) 
         let text = if time == 0.0 {
             label
         } else {
-            format!("{label}s")
+            crate::ui::plot::tick_with_unit(&label, "s")
         };
         let galley = ui
             .painter()

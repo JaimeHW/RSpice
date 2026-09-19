@@ -128,6 +128,18 @@ pub fn si_tick_label(value: f64, unit: &str, digits: usize) -> String {
     format!("{mantissa} {prefix}{unit}").trim_end().to_owned()
 }
 
+/// A ladder tick with the unit its axis has no caption to carry:
+/// `tick_with_unit("2m", "V")` → `"2 mV"`, `tick_with_unit("1.5", "V")` →
+/// `"1.5 V"`.
+///
+/// The spelling [`si_tick_label`] gives a tick that is not on a ladder, so a
+/// number reads one way on every surface whose ticks state their own unit.
+pub fn tick_with_unit(label: &str, unit: &str) -> String {
+    let mantissa = label.trim_end_matches(char::is_alphabetic);
+    let prefix = &label[mantissa.len()..];
+    format!("{mantissa} {prefix}{unit}").trim_end().to_owned()
+}
+
 /// Format a result readout with an exact number of significant digits while
 /// retaining SI-prefix presentation. This is intentionally separate from
 /// engineering export, which serializes the original `f64` samples.
@@ -309,6 +321,18 @@ fn tick_label_with_decimals(value: f64, decimals: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A ladder tick and an off-ladder tick of the same number read alike,
+    /// which is the whole reason the first one has a spelling of its own.
+    #[test]
+    fn a_ladder_tick_with_its_unit_reads_like_an_off_ladder_one() {
+        assert_eq!(tick_with_unit("2m", "V"), "2 mV");
+        assert_eq!(tick_with_unit("500µ", "s"), "500 µs");
+        assert_eq!(tick_with_unit("−1.5", "A"), "−1.5 A");
+        assert_eq!(tick_with_unit("4k", ""), "4 k");
+        assert_eq!(tick_with_unit("2m", "V"), si_tick_label(2e-3, "V", 2));
+        assert_eq!(tick_with_unit("500µ", "s"), si_tick_label(5e-4, "s", 2));
+    }
 
     /// A step with no positive magnitude falls back to three decimals.
     ///
