@@ -381,14 +381,18 @@ fn series_resistor_deck(title: &str, body: &str, keywords: &str) -> String {
     )
 }
 
-fn sp_run(deck: &str) -> rspice_core::engine::SParameterRun {
+fn sp_outcome(
+    deck: &str,
+) -> Result<rspice_core::engine::SParameterRun, rspice_core::engine::SimulationError> {
     let netlist = Netlist::parse(deck).expect("deck parses");
     let sp = card(&netlist, |command| {
         matches!(command, AnalysisCommand::Sp { .. })
     });
-    Engine::new(SimulationConfig::default())
-        .run_sp_with_abort(&netlist, &sp, &NoAbort)
-        .expect(".SP runs")
+    Engine::new(SimulationConfig::default()).run_sp_with_abort(&netlist, &sp, &NoAbort)
+}
+
+fn sp_run(deck: &str) -> rspice_core::engine::SParameterRun {
+    sp_outcome(deck).expect(".SP runs")
 }
 
 #[test]
@@ -477,6 +481,23 @@ fn card_ports_and_element_ports_give_the_same_scattering_matrix() {
             }
         }
     }
+}
+
+#[test]
+fn ports_stated_on_the_card_and_in_the_circuit_are_refused_by_name() {
+    let error = sp_outcome(&series_resistor_deck(
+        "Ports stated twice",
+        "V1 p1 0 AC 0 portnum=1 z0=50\nV2 p2 0 AC 0 portnum=2 z0=50\n",
+        "PORT1=(p1) PORT2=(p2)",
+    ))
+    .expect_err("a run whose ports are stated twice must be refused");
+    let message = error.to_string();
+    assert!(
+        message.contains("declares 2 RF port(s)")
+            && message.contains("names 2 analysis port(s)")
+            && message.contains("PORT<k>="),
+        "the refusal counts both statements and names the remedy: {message}"
+    );
 }
 
 #[test]

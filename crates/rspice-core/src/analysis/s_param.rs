@@ -52,7 +52,7 @@ pub use network::{
 pub use noise_params::{TwoPortNoise, derive_two_port_noise};
 pub use port_noise::PortNoiseAssembly;
 pub(crate) use port_noise::{PortNoiseAssemblyError, assemble_port_noise_with_abort};
-pub(crate) use ports::{MaterializedRfPort, materialize_rf_ports};
+pub(crate) use ports::{MaterializedRfPort, RfPortOrigin, materialize_rf_ports};
 pub use ports::{
     PortError, PortRealization, SParameterPort, collect_ports, declare_ports_with_abort,
     normalize_ports, set_excitations,

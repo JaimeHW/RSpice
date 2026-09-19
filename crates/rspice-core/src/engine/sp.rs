@@ -10,7 +10,7 @@ use super::noise::{PreparedPortNoise, validate_port_noise_frequencies};
 use crate::abort_signal::AbortSignal;
 use crate::analysis::s_param::{
     MaterializedRfPort, NetworkError, PortError, PortNoiseAssembly, PortNoiseAssemblyError,
-    SMatrix, SParameterPort, SParameterResult, assemble_port_noise_with_abort,
+    RfPortOrigin, SMatrix, SParameterPort, SParameterResult, assemble_port_noise_with_abort,
     s_column_from_port_voltages,
 };
 use crate::netlist::AnalysisCommand;
@@ -99,10 +99,18 @@ impl Engine {
         )
     }
 
-    /// Run SP, using configured planes only if the elaborated circuit declares no RF ports.
-    /// Authored ports take precedence, including scoped and hierarchical declarations.
-    /// Port discovery, configured helper insertion and device construction share one
-    /// elaboration and statistical sequence. The returned ports are authoritative.
+    /// Run SP over an explicit grid with caller-supplied reference planes.
+    ///
+    /// A scattering run takes its ports from ONE place. `default_ports` are
+    /// used when the elaborated circuit declares none; when it declares its
+    /// own — including scoped and hierarchical declarations — supplying planes
+    /// as well is refused by name before anything is solved, rather than
+    /// silently passed over. A caller that means the deck's ports passes an
+    /// empty slice, which every route that has no planes of its own does.
+    ///
+    /// Port discovery, configured helper insertion and device construction
+    /// share one elaboration and statistical sequence. The returned ports are
+    /// authoritative.
     pub fn run_sp_over_grid_with_default_ports_and_abort(
         &self,
         netlist: &Netlist,
@@ -128,8 +136,17 @@ impl Engine {
         let run_scope = crate::abort_signal::ModelRunSignal::if_needed(abort);
         let abort: &dyn AbortSignal = run_scope.as_ref().map_or(abort, |scope| scope);
         Self::ensure_model_run_active(abort)?;
-        let (circuit, rf_ports) =
-            engine.build_circuit_with_rf_ports(netlist, default_ports, abort)?;
+        let built = engine.build_circuit_with_rf_ports(netlist, default_ports, abort)?;
+        if !default_ports.is_empty() && built.rf_port_origin == RfPortOrigin::Circuit {
+            return Err(SimulationError::Circuit(format!(
+                "the circuit declares {} RF port(s) and the .SP request names {} analysis \
+                 port(s); an S-parameter run takes its ports from one place — remove the \
+                 PORT<k>= keywords or the port elements",
+                built.rf_ports.len(),
+                default_ports.len()
+            )));
+        }
+        let (circuit, rf_ports) = (built.circuit, built.rf_ports);
         if rf_ports.is_empty() {
             return Err(PortError::NoPortsDeclared.into());
         }

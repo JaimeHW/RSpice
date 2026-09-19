@@ -471,6 +471,19 @@ pub fn normalize_ports(
     normalize_port_elements(&mut netlist.elements, ports, &mut names, &NoAbort)
 }
 
+/// Which statement of the reference planes an elaboration used.
+///
+/// A scattering run takes its ports from one place. This says which, so a
+/// caller that also supplied planes can refuse the ambiguity by name instead
+/// of solving a network whose ports are not the ones it asked for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RfPortOrigin {
+    /// The deck's own `portnum=`/`P` annotations declared them.
+    Circuit,
+    /// The analysis request supplied them; the deck declared none.
+    Request,
+}
+
 /// Expand concise RF annotations after hierarchy and parameter resolution.
 pub(crate) fn materialize_rf_ports(
     netlist: &Netlist,
@@ -478,10 +491,12 @@ pub(crate) fn materialize_rf_ports(
     default_ports: &[super::Port],
     max_elements: usize,
     abort: &dyn AbortSignal,
-) -> Result<Vec<MaterializedRfPort>, PortError> {
-    let ports = match collect_element_ports(elements, abort) {
-        Ok(ports) => ports,
-        Err(PortError::NoPortsDeclared) if default_ports.is_empty() => return Ok(Vec::new()),
+) -> Result<(Vec<MaterializedRfPort>, RfPortOrigin), PortError> {
+    let (ports, origin) = match collect_element_ports(elements, abort) {
+        Ok(ports) => (ports, RfPortOrigin::Circuit),
+        Err(PortError::NoPortsDeclared) if default_ports.is_empty() => {
+            return Ok((Vec::new(), RfPortOrigin::Circuit));
+        }
         Err(PortError::NoPortsDeclared) => {
             ResourceLimitError::ensure(
                 ResourceKind::FlattenedElements,
@@ -494,7 +509,7 @@ pub(crate) fn materialize_rf_ports(
             let (additions, ports) =
                 configured_port_elements(netlist, elements, default_ports, abort)?;
             elements.extend(additions);
-            ports
+            (ports, RfPortOrigin::Request)
         }
         Err(error) => return Err(error),
     };
@@ -541,7 +556,7 @@ pub(crate) fn materialize_rf_ports(
             termination: termination.0.name.to_ascii_lowercase(),
         });
     }
-    Ok(materialized)
+    Ok((materialized, origin))
 }
 
 fn normalize_port_elements(
