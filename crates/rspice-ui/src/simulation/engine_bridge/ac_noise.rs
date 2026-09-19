@@ -43,6 +43,56 @@ impl EngineBridge {
         let ac_results = engine
             .run_ac_with_abort(netlist, &frequencies, abort)
             .map_err(|e| self.translate_error(e))?;
+        Self::finish_ac_run(netlist, frequencies, ac_results, abort)
+    }
+
+    /// Apply the exact frequency-table rows, including row-local parameters.
+    pub(super) fn run_ac_data(
+        &self,
+        netlist: &rspice_core::Netlist,
+        table_name: &str,
+        frequencies: Vec<f64>,
+        abort: &dyn AbortSignal,
+    ) -> Result<SimulationResult, SimulationError> {
+        ensure_not_aborted(abort)?;
+        // Older direct worker requests carry only an axis, without a table in
+        // their source. A present table is authoritative and must match it.
+        if !netlist
+            .data_tables
+            .iter()
+            .any(|table| table.name.eq_ignore_ascii_case(table_name))
+        {
+            return self.run_ac_frequencies(netlist, frequencies, abort);
+        }
+        let rows = netlist
+            .frequency_data_table_points(table_name)
+            .map_err(|error| SimulationError::InvalidConfig(format!("AC DATA {error}")))?;
+        if rows.len() != frequencies.len()
+            || rows
+                .iter()
+                .zip(&frequencies)
+                .any(|(row, frequency)| row.frequency.to_bits() != frequency.to_bits())
+        {
+            return Err(SimulationError::InvalidConfig(
+                "AC DATA table does not match the configured frequency axis".into(),
+            ));
+        }
+        let (_, ac_results) = self
+            .engine_for_netlist(netlist)
+            .run_ac_data_with_abort(netlist, table_name, abort)
+            .map_err(|error| self.translate_error(error))?;
+        // An accepted model $finish can terminate the authored row sequence.
+        let mut frequencies = frequencies;
+        frequencies.truncate(ac_results.len());
+        Self::finish_ac_run(netlist, frequencies, ac_results, abort)
+    }
+
+    fn finish_ac_run(
+        netlist: &rspice_core::Netlist,
+        frequencies: Vec<f64>,
+        ac_results: Vec<rspice_core::analysis::AcResult>,
+        abort: &dyn AbortSignal,
+    ) -> Result<SimulationResult, SimulationError> {
         ensure_not_aborted(abort)?;
         validate_ac_results(&frequencies, &ac_results)?;
 

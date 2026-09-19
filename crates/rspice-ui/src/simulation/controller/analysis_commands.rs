@@ -1213,7 +1213,7 @@ mod tests {
     /// written, not at the solver.
     #[test]
     fn an_ac_frequency_table_card_is_refused_for_an_axis_that_cannot_run() {
-        for frequencies in [vec![], vec![100.0, 10.0], vec![0.0]] {
+        for frequencies in [vec![], vec![-1.0], vec![f64::NAN]] {
             let spec = AnalysisSpec::AcData {
                 table_name: crate::simulation::config::AC_FREQUENCY_TABLE.to_owned(),
                 frequencies: frequencies.clone(),

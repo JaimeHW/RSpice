@@ -174,14 +174,8 @@ impl AcDataAnalysisConfig {
         if self.table_name.trim().is_empty() {
             errors.push("AC DATA table name must not be empty".to_owned());
         }
-        let ordering = if self.authored {
-            super::frequency_table::FrequencyOrdering::StrictlyIncreasing
-        } else {
-            super::frequency_table::FrequencyOrdering::AsAuthored
-        };
-        errors.extend(super::frequency_table::validate_explicit_frequencies(
+        errors.extend(super::frequency_table::validate_ac_frequencies(
             &self.frequencies,
-            ordering,
         ));
         if errors.is_empty() {
             Ok(())
@@ -277,8 +271,8 @@ mod tests {
     }
 
     #[test]
-    fn an_authored_axis_is_refused_unless_it_ascends_and_is_positive() {
-        for frequencies in [vec![], vec![1.0, 1.0], vec![10.0, 1.0], vec![0.0]] {
+    fn an_ac_axis_requires_finite_nonnegative_values_and_preserves_order() {
+        for frequencies in [vec![], vec![-1.0], vec![f64::NAN], vec![f64::INFINITY]] {
             let config = AcDataAnalysisConfig {
                 frequencies,
                 ..AcDataAnalysisConfig::default()
@@ -286,7 +280,7 @@ mod tests {
             assert!(config.validate().is_err(), "{config:?}");
         }
         let config = AcDataAnalysisConfig {
-            frequencies: vec![1.0, 10.0, 100.0],
+            frequencies: vec![100.0, 0.0, 10.0, 10.0],
             ..AcDataAnalysisConfig::default()
         };
         assert!(config.validate().is_ok());

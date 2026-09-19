@@ -88,9 +88,13 @@ pub(super) fn run_spec_request_with_environment(
             sweeps::run_sweep_spec(spec, options, netlist, source_path, environment, abort_flag)
         }
         AnalysisSpec::Fft { request } => recorded_fft::run(&request, dependencies, abort_flag),
-        AnalysisSpec::AcData { frequencies, .. } => bridge.run_ac_frequencies_with_source_path(
+        AnalysisSpec::AcData {
+            table_name,
+            frequencies,
+        } => bridge.run_ac_data_with_source_path(
             netlist,
             source_path,
+            &table_name,
             frequencies,
             abort_flag,
         ),
@@ -1694,7 +1698,7 @@ R2 out 0 1k\n\
                             R1 in out 1k\n\
                             C1 out 0 1u\n\
                             .end\n";
-        let authored = vec![37.0, 74.0, 148.0];
+        let authored = vec![148.0, 0.0, 37.0, 37.0, 74.0];
 
         let spec = AnalysisSpec::AcData {
             table_name: crate::simulation::config::AC_FREQUENCY_TABLE.to_owned(),
@@ -1754,6 +1758,44 @@ R2 out 0 1k\n\
                 "at {frequency} Hz the solve returned {magnitude} and the circuit has {exact}"
             );
         }
+    }
+
+    #[test]
+    fn ac_table_row_parameters_reach_the_studio_result_and_axis_mismatch_is_refused() {
+        let deck = "AC table\nV1 in 0 AC 1\n.param load=1k\nR1 in out 1k\nR2 out 0 {load}\n.data pts FREQ load\n1000 1000\n0 2000\n1000 500\n.enddata\n.end\n";
+        let run = |frequencies| {
+            run_spec_request(
+                &EngineBridge::new(),
+                AnalysisSpec::AcData {
+                    table_name: "pts".into(),
+                    frequencies,
+                },
+                SpecExecutionOptions::default(),
+                deck,
+                None,
+                &ResolvedExecutionDependencies::default(),
+                &rspice_core::NoAbort,
+            )
+        };
+        let SimulationResult::Ac {
+            frequencies,
+            waveforms,
+            ..
+        } = run(vec![1000.0, 0.0, 1000.0]).unwrap()
+        else {
+            panic!("expected AC")
+        };
+        assert_eq!(frequencies, vec![1000.0, 0.0, 1000.0]);
+        for (value, expected) in
+            waveforms["V(OUT)"]
+                .y_values
+                .iter()
+                .zip([0.5, 2.0 / 3.0, 1.0 / 3.0])
+        {
+            assert!((value - expected).abs() < 1e-10);
+        }
+        let error = run(vec![1000.0, 10.0, 1000.0]).unwrap_err();
+        assert!(error.to_string().contains("does not match"), "{error}");
     }
 
     #[test]

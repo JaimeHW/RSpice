@@ -45,13 +45,9 @@ pub fn explicit_frequency_table(table_name: &str, frequencies: &[f64]) -> String
 /// Whether duplicate or descending entries are refused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FrequencyOrdering {
-    /// The axis is the analysis's own output order, so it must ascend without
-    /// repeats: two identical frequencies would publish two points at one
-    /// abscissa, and a descending pair would draw a curve backwards.
+    /// Integration requires an ascending axis without repeated samples.
     StrictlyIncreasing,
-    /// The rows come from a table the deck already carries, whose order is the
-    /// author's and whose row-local parameter overrides make two rows at one
-    /// frequency a meaningful request rather than a duplicate.
+    /// Solve rows in their authored order, including repeated frequencies.
     AsAuthored,
 }
 
@@ -93,18 +89,44 @@ pub fn validate_explicit_frequencies(
 ///
 /// SI suffixes are accepted, because the field is where an author types `1k`.
 pub fn parse_explicit_frequency_list(text: &str) -> Result<Vec<f64>, String> {
-    let frequencies = text
-        .split(|character: char| character == ',' || character == ';' || character.is_whitespace())
+    let frequencies = parse_frequency_values(text)?;
+    match validate_explicit_frequencies(&frequencies, FrequencyOrdering::StrictlyIncreasing) {
+        Some(error) => Err(error),
+        None => Ok(frequencies),
+    }
+}
+
+fn parse_frequency_values(text: &str) -> Result<Vec<f64>, String> {
+    text.split(|character: char| character == ',' || character == ';' || character.is_whitespace())
         .filter(|value| !value.is_empty())
         .map(|value| {
             parse_spice_value_checked(value)
                 .map_err(|error| format!("invalid explicit frequency '{value}': {error}"))
         })
-        .collect::<Result<Vec<_>, _>>()?;
-    match validate_explicit_frequencies(&frequencies, FrequencyOrdering::StrictlyIncreasing) {
-        Some(error) => Err(error),
-        None => Ok(frequencies),
+        .collect()
+}
+
+/// Parse an AC table without reordering or deduplicating its authored rows.
+pub fn parse_ac_frequency_list(text: &str) -> Result<Vec<f64>, String> {
+    let frequencies = parse_frequency_values(text)?;
+    validate_ac_frequencies(&frequencies).map_or(Ok(frequencies), Err)
+}
+
+pub(super) fn validate_ac_frequencies(frequencies: &[f64]) -> Option<String> {
+    if frequencies.is_empty() {
+        return Some("explicit frequency list must contain at least one value".into());
     }
+    frequencies
+        .iter()
+        .enumerate()
+        .find_map(|(index, &frequency)| {
+            (!frequency.is_finite() || frequency < 0.0).then(|| {
+                format!(
+                    "explicit frequency {} must be finite and nonnegative",
+                    index + 1
+                )
+            })
+        })
 }
 
 #[cfg(test)]

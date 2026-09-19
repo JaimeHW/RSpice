@@ -67,7 +67,7 @@ pub enum FrequencyDataTableError {
         column_name: String,
         value: Value,
     },
-    /// A frequency-axis value is not strictly positive and finite.
+    /// A frequency-axis value is not nonnegative and finite.
     InvalidFrequency {
         table_name: String,
         row: usize,
@@ -126,7 +126,7 @@ impl fmt::Display for FrequencyDataTableError {
                 frequency,
             } => write!(
                 formatter,
-                "table '{table_name}' row {row} frequency must be positive and finite, got {frequency}"
+                "table '{table_name}' row {row} frequency must be nonnegative and finite, got {frequency}"
             ),
         }
     }
@@ -135,7 +135,8 @@ impl fmt::Display for FrequencyDataTableError {
 impl std::error::Error for FrequencyDataTableError {}
 
 impl DataTable {
-    /// Validate and materialize every row using the table's frequency axis.
+    /// Validate and materialize every row using the table's nonnegative frequency axis.
+    /// Consumers such as noise analysis additionally require strictly positive values.
     pub fn frequency_points(&self) -> Result<Vec<FrequencyDataPoint>, FrequencyDataTableError> {
         if self.params.is_empty() {
             return Err(FrequencyDataTableError::EmptyColumns {
@@ -206,7 +207,7 @@ impl DataTable {
                     });
                 }
                 let frequency = row[frequency_column];
-                if !frequency.is_finite() || frequency <= 0.0 {
+                if !frequency.is_finite() || frequency < 0.0 {
                     return Err(FrequencyDataTableError::InvalidFrequency {
                         table_name: self.name.clone(),
                         row: row_number,

@@ -200,16 +200,17 @@ impl EngineBridge {
         )
     }
 
-    pub(crate) fn run_ac_frequencies_with_source_path(
+    pub(crate) fn run_ac_data_with_source_path(
         &self,
         netlist_str: &str,
         source_path: Option<&Path>,
+        table_name: &str,
         frequencies: Vec<f64>,
         abort_flag: &dyn rspice_core::abort_signal::AbortSignal,
     ) -> Result<SimulationResult, SimulationError> {
         let netlist =
             self.parse_netlist_with_abort_and_source_path(netlist_str, source_path, abort_flag)?;
-        self.run_ac_frequencies(&netlist, frequencies, abort_flag)
+        self.run_ac_data(&netlist, table_name, frequencies, abort_flag)
     }
 
     fn run_request(

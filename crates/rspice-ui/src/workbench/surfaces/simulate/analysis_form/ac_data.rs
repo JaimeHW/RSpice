@@ -19,7 +19,7 @@ pub(super) fn fields(ui: &mut Ui, setup: &mut AcDataDraft) {
         ui,
         "Frequencies",
         &mut setup.frequencies,
-        "Hz, comma- or space-separated",
+        "Hz in solve order; zero and repeats allowed",
     );
     input_row(ui, "Table", &mut setup.table_name);
     match setup.to_config() {

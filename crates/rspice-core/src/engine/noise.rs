@@ -3143,6 +3143,14 @@ impl Engine {
         let points = netlist
             .frequency_data_table_points(table_name)
             .map_err(|error| SimulationError::Circuit(format!(".NOISE DATA {error}")))?;
+        // Reject the whole table before running any row: unlike AC, a noise
+        // density (in particular 1/f noise) has no zero-frequency sample.
+        if let Some(point) = points.iter().find(|point| point.frequency <= 0.0) {
+            return Err(SimulationError::Circuit(format!(
+                ".NOISE DATA frequencies must be strictly positive, got {}",
+                point.frequency
+            )));
+        }
         self.ensure_analysis_points(points.len())?;
         self.ensure_batch_runs(points.len())?;
         let override_plan = FrequencyDataOverridePlan::resolve(netlist, &points)?;

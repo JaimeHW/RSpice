@@ -11,7 +11,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::simulation::config::{
-    AC_FREQUENCY_TABLE, AcDataAnalysisConfig, parse_explicit_frequency_list,
+    AC_FREQUENCY_TABLE, AcDataAnalysisConfig, parse_ac_frequency_list,
 };
 
 /// Raw form state for `.AC DATA=<table>`.
@@ -55,7 +55,7 @@ impl AcDataDraft {
         }
         let config = AcDataAnalysisConfig {
             table_name: table_name.to_owned(),
-            frequencies: parse_explicit_frequency_list(&self.frequencies)?,
+            frequencies: parse_ac_frequency_list(&self.frequencies)?,
             authored: true,
         };
         config.validate().map_err(|errors| errors.join("; "))?;
@@ -99,16 +99,14 @@ mod tests {
     }
 
     #[test]
-    fn a_list_that_does_not_ascend_or_a_missing_table_is_refused_with_its_cause() {
+    fn an_ordered_list_keeps_repeats_and_zero_and_a_missing_table_is_refused() {
         let descending = AcDataDraft {
-            frequencies: "10k, 1k".to_owned(),
+            frequencies: "10k, 0, 1k, 1k".to_owned(),
             ..AcDataDraft::default()
         };
-        assert!(
-            descending
-                .to_config()
-                .expect_err("a descending axis is refused")
-                .contains("strictly increasing")
+        assert_eq!(
+            descending.to_config().unwrap().frequencies,
+            vec![10_000.0, 0.0, 1_000.0, 1_000.0]
         );
         let nameless = AcDataDraft {
             table_name: "  ".to_owned(),
