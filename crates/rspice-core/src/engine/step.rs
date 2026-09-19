@@ -1610,8 +1610,19 @@ impl Engine {
             })
     }
 
+    /// A swept model parameter sets the model card's parameter.
+    ///
+    /// A card that spelled the parameter as an expression keeps that spelling
+    /// in `expr_params`, and subcircuit model scoping resolves those
+    /// expressions *over* `params` (`netlist::flattener`, the
+    /// `scoped_model.params.push` arm of its scoped-model resolution), so the
+    /// authored spelling has to go with the number or the sweep is undone the
+    /// moment the design elaborates.
     fn apply_model_step_value(model: &mut ModelDef, param_name: &str, value: Value) {
         let param_upper = param_name.to_ascii_uppercase();
+        model
+            .expr_params
+            .retain(|(name, _)| !name.eq_ignore_ascii_case(&param_upper));
         if let Some((_, existing)) = model
             .params
             .iter_mut()
