@@ -289,7 +289,8 @@ pub fn run_soa_analysis_with_config_and_source_path_and_abort(
         }
     }
     let names = result.node_names.clone();
-    let mut transient = super::TransientData::from_result_with_abort(result, &names, abort)?;
+    let mut transient =
+        super::TransientData::from_retained_voltage_history_with_abort(result, &names, abort)?;
     transient.convergence = Some(std::sync::Arc::new(convergence));
     let first = transient
         .time

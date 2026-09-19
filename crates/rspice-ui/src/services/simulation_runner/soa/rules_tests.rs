@@ -167,3 +167,29 @@ fn soa_scoped_rules_override_defaults_without_ambiguous_precedence() {
         );
     }
 }
+
+#[test]
+fn soa_checks_grounded_devices_without_retaining_unrelated_voltage_columns() {
+    let deck = "Grounded SOA device\nV1 unrelated 0 1\nR1 unrelated 0 1k\nM1 0 0 0 0 NM W=10u L=1u\n.model NM NMOS LEVEL=1 VTO=1 KP=1m\n.save V(unrelated)\n.end\n";
+    let mut cfg = config(vec![
+        rule(SoAParameter::Vgs, 1.0, &["M1"], &[]),
+        rule(SoAParameter::Id, 1e-6, &["M1"], &[]),
+    ]);
+    cfg.observation.devices = vec!["M1".into()];
+    cfg.observation.start_time = 5e-9;
+    let data =
+        run_soa_analysis_with_config_and_source_path_and_abort(deck, &cfg, None, &NoAbort).unwrap();
+    assert!(!data.time.is_empty());
+    assert!(data.time[0] >= 5e-9);
+    assert!(data.violations.is_empty());
+    assert_eq!(data.evaluations.len(), 2);
+    assert!(data.convergence.is_some());
+    for trace in &data.stress_history {
+        assert_eq!(trace.values.len(), data.time.len());
+        assert!(trace.values.iter().all(|value| value.abs() < 1e-12));
+    }
+    for evaluation in &data.evaluations {
+        assert_eq!(evaluation.sample_count, data.time.len() as u64);
+        assert_eq!(evaluation.device_id, "M1");
+    }
+}

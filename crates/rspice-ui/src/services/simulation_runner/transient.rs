@@ -73,6 +73,23 @@ impl TransientData {
         node_names: &[String],
         abort: &dyn AbortSignal,
     ) -> ServiceRunResult<Self> {
+        let data = Self::from_retained_voltage_history_with_abort(result, node_names, abort)?;
+        if data.voltages.is_empty() {
+            return Err(ServiceRunError::Failure(
+                "Transient engine returned no non-ground voltage waveforms".to_owned(),
+            ));
+        }
+        Ok(data)
+    }
+
+    /// Validate the time axis and every retained voltage without requiring a
+    /// non-ground voltage column. Terminal checks may observe grounded devices
+    /// or accepted current traces retained separately from these voltages.
+    pub(super) fn from_retained_voltage_history_with_abort(
+        result: TransientResult,
+        node_names: &[String],
+        abort: &dyn AbortSignal,
+    ) -> ServiceRunResult<Self> {
         ensure_not_aborted(abort)?;
         let invalid_time_axis = || {
             ServiceRunError::Failure(
@@ -130,12 +147,6 @@ impl TransientData {
 
             voltages.push((format!("V({name})"), samples));
         }
-        if voltages.is_empty() {
-            return Err(ServiceRunError::Failure(
-                "Transient engine returned no non-ground voltage waveforms".to_owned(),
-            ));
-        }
-
         ensure_not_aborted(abort)?;
         Ok(Self {
             time: result.time,
