@@ -517,6 +517,7 @@ fn parse_pac(
     let (sweep, points_per_unit, start_freq, stop_freq) = frequency_sweep(card, ".PAC", params)?;
     let input_source = required_text(card, "input", ".PAC")?;
     let (output_node, output_ref) = required_output(card, ".PAC")?;
+    let (sideband_min, sideband_max) = sideband_range(card, ".PAC", 5, params)?;
     let config = PacRunConfig {
         pss_fundamental_freq: carrier.fundamental_freq,
         pss_num_harmonics: carrier.num_harmonics,
@@ -529,8 +530,8 @@ fn parse_pac(
             FrequencySweepKind::Octave => PacFrequencySweep::Octave,
             FrequencySweepKind::Linear => PacFrequencySweep::Linear,
         },
-        sideband_min: -sideband_bound(card, ".PAC", 5, params)?,
-        sideband_max: sideband_bound(card, ".PAC", 5, params)?,
+        sideband_min,
+        sideband_max,
         input_source,
         output_node,
         output_ref,
@@ -544,7 +545,7 @@ fn parse_pac(
         // the card constant and the one this reader has always given.
         reltol: optional_value(card, "reltol", reltol, params)?,
         abstol: optional_value(card, "abstol", abstol, params)?,
-        carrier: CarrierSelector::Preceding,
+        carrier: periodic_source_selector(card, ".PAC")?,
     };
     validate_frequency_contract(
         ".PAC",
@@ -666,7 +667,7 @@ fn parse_pnoise(
         noise_summary: optional_bool(card, "noisesummary", true)?,
         reltol,
         abstol,
-        carrier: CarrierSelector::Preceding,
+        carrier: periodic_source_selector(card, ".PNOISE")?,
     };
     if config.max_sideband < 1 {
         return Err(".PNOISE maxsideband must be at least 1".to_owned());
@@ -734,7 +735,7 @@ fn parse_pxf(
         // the card's constant.
         reltol: optional_value(card, "reltol", reltol, params)?,
         abstol: optional_value(card, "abstol", abstol, params)?,
-        carrier: CarrierSelector::Preceding,
+        carrier: periodic_source_selector(card, ".PXF")?,
     };
     validate_frequency_contract(
         ".PXF",
@@ -925,41 +926,49 @@ fn reject_unsupported_keys(
     Ok(())
 }
 
-/// Read the engine's `FROM=PSS|HB` selector.
+/// Read the engine's `FROM=PSS|HB` selector into the carrier the run states.
 ///
-/// A manual deck binds its dependent cards to the one `.PSS` the deck is
-/// required to carry, so `FROM=PSS` is the selector the run already
-/// implements and `FROM=HB` names a binding this pipeline does not have.
-fn periodic_source_selector(card: &ParsedCard, directive: &str) -> Result<(), String> {
+/// The value the card carries, not a yes/no: the selector is part of the
+/// request now, so a deck that names its carrier reaches the engine having
+/// named it, and a deck that does not writes no keyword and binds to the
+/// preceding periodic solve — the same three positions the form offers.
+///
+/// A carrier this crate has no runner for is refused in the *shared* sentence
+/// rather than one written here, so a deck and a form that name the same
+/// carrier are told the same thing about it.
+fn periodic_source_selector(card: &ParsedCard, directive: &str) -> Result<CarrierSelector, String> {
     let Some(value) = card.keyed.get("from") else {
-        return Ok(());
+        return Ok(CarrierSelector::Preceding);
     };
-    match unquote(value).trim().to_ascii_lowercase().as_str() {
-        "pss" => Ok(()),
-        "hb" => Err(format!(
-            "{directive} from=hb has no route in the Studio: a manual-deck periodic analysis \
-             binds to the .PSS operating point in the same deck, and no Studio runner linearizes \
-             a harmonic-balance carrier for this card. The engine does, so a deck carrying it \
-             runs on the command line; author from=pss to run it here"
-        )),
-        other => Err(format!("{directive} from={other:?} must be PSS")),
+    let spelling = unquote(value).trim();
+    let Some(carrier) = CarrierSelector::from_spice_name(spelling) else {
+        // The engine's own `InvalidChoice` on this field, in its own words.
+        return Err(format!("{directive} from={spelling:?} must be PSS or HB"));
+    };
+    match carrier.unroutable_reason(directive) {
+        Some(reason) => Err(reason),
+        None => Ok(carrier),
     }
 }
 
-/// Read the sideband bound the card states, in either of the engine's two
+/// Read the sideband range the card states, in either of the engine's two
 /// spellings.
 ///
-/// `MAXSIDEBAND=n` is the symmetric range `-n..=n`, and the studio's typed
-/// periodic configurations hold exactly that one number. `SIDEBANDMIN`/
-/// `SIDEBANDMAX` can state an asymmetric range, which is refused rather than
-/// widened to the enclosing symmetric one: a run over sidebands the deck did
-/// not ask for is not the analysis that was authored.
-fn sideband_bound(
+/// `MAXSIDEBAND=n` is the symmetric range `-n..=n`; `SIDEBANDMIN=`/
+/// `SIDEBANDMAX=` state the two ends independently, and the card refuses the
+/// two spellings together. An asymmetric range used to be refused here and
+/// widened nowhere, because the typed configuration held one symmetric
+/// number; it holds both ends now, so the deck's own range is what runs.
+///
+/// The resolution is `parse_pac_command`'s, line for line: a stated symmetric
+/// bound is `(-n, n)`, and otherwise each end is its own authored value or
+/// the card's default for that end.
+fn sideband_range(
     card: &ParsedCard,
     directive: &str,
     default: i32,
     params: &ParamContext,
-) -> Result<i32, String> {
+) -> Result<(i32, i32), String> {
     let minimum = card
         .keyed
         .contains_key("sidebandmin")
@@ -980,21 +989,15 @@ fn sideband_bound(
         (Some(_), Some(_), _) | (Some(_), _, Some(_)) => Err(format!(
             "{directive} states both maxsideband= and sidebandmin=/sidebandmax="
         )),
-        (Some(bound), None, None) => Ok(bound),
-        (None, None, None) => Ok(default),
+        (Some(bound), None, None) => Ok((-bound, bound)),
+        (None, None, None) => Ok((-default, default)),
         (None, minimum, maximum) => {
             let minimum = minimum.unwrap_or(-default);
             let maximum = maximum.unwrap_or(default);
             if minimum > maximum {
                 return Err(format!("{directive} sidebandmin= exceeds sidebandmax="));
             }
-            if minimum != -maximum {
-                return Err(format!(
-                    "{directive} runs a symmetric sideband range; author maxsideband={maximum} \
-                     rather than sidebandmin={minimum} sidebandmax={maximum}"
-                ));
-            }
-            Ok(maximum)
+            Ok((minimum, maximum))
         }
     }
 }
@@ -1721,16 +1724,30 @@ mod tests {
         const SEED: &str = ".pss fund=1Meg\n";
         const PXF_BASE: &str = ".pxf dec 10 1k 1Meg input=V1 out=out";
         const PSTB_BASE: &str = ".pstb probe=l1";
+        const PAC_BASE: &str = ".pac dec 10 1k 1Meg input=V1 out=out";
+        const PNOISE_BASE: &str = ".pnoise dec 10 1 1Meg out=out";
 
         const PXF_EVERY_KEY: &str = ".pxf dec 10 1k 1Meg input=V1 out=out inputsideband=-1 \
              outsideband=2 maxsideband=4 reltol=1e-4 abstol=1e-14 from=pss";
         const PSTB_EVERY_KEY: &str = ".pstb probe=l1 maxharm=8 nmults=6 stabilitythreshold=1.5 \
              detectsubharmonics=no eigentol=1e-9";
+        // `MAXSIDEBAND=` is deliberately absent beside the two ends: the card
+        // refuses the two spellings together, so "every key" on `.PAC` is
+        // every key one line may carry at once.
+        const PAC_EVERY_KEY: &str = ".pac dec 10 1k 1Meg input=V1 out=out sidebandmin=-2 \
+             sidebandmax=4 reltol=1e-5 abstol=1e-15 pacmag=0.05 includedc=no from=pss";
+        const PNOISE_EVERY_KEY: &str = ".pnoise dec 10 1 1Meg out=out maxsideband=3 \
+             noiseref=output integratednoise=yes noisesummary=no from=pss";
 
-        let mut cards = vec![PXF_EVERY_KEY.to_owned(), PSTB_EVERY_KEY.to_owned()];
-        // One line per arm of `parse_pxf_command` and `parse_pstb_command`.
-        // `INPUT=`/`OUT=`/`PROBE=` are in every base above because neither
-        // card defaults them.
+        let mut cards = vec![
+            PXF_EVERY_KEY.to_owned(),
+            PSTB_EVERY_KEY.to_owned(),
+            PAC_EVERY_KEY.to_owned(),
+            PNOISE_EVERY_KEY.to_owned(),
+        ];
+        // One line per arm of `parse_pac_command`, `parse_pnoise_command`,
+        // `parse_pxf_command` and `parse_pstb_command`. `INPUT=`/`OUT=`/
+        // `PROBE=` are in the bases above because no card defaults them.
         for (base, key, value) in [
             (PXF_BASE, "inputsideband", "-1"),
             (PXF_BASE, "outsideband", "2"),
@@ -1743,6 +1760,19 @@ mod tests {
             (PSTB_BASE, "stabilitythreshold", "1.5"),
             (PSTB_BASE, "detectsubharmonics", "no"),
             (PSTB_BASE, "eigentol", "1e-9"),
+            (PAC_BASE, "maxsideband", "3"),
+            (PAC_BASE, "sidebandmin", "-2"),
+            (PAC_BASE, "sidebandmax", "4"),
+            (PAC_BASE, "reltol", "1e-5"),
+            (PAC_BASE, "abstol", "1e-15"),
+            (PAC_BASE, "pacmag", "0.05"),
+            (PAC_BASE, "includedc", "no"),
+            (PAC_BASE, "from", "pss"),
+            (PNOISE_BASE, "maxsideband", "3"),
+            (PNOISE_BASE, "noiseref", "output"),
+            (PNOISE_BASE, "integratednoise", "yes"),
+            (PNOISE_BASE, "noisesummary", "no"),
+            (PNOISE_BASE, "from", "pss"),
         ] {
             cards.push(format!("{base} {key}={value}"));
         }
@@ -1782,6 +1812,69 @@ mod tests {
         assert_eq!(pxf.input_sideband, -1);
         assert_eq!(pxf.output_sideband, 2);
         assert_eq!(pxf.max_sideband, 4);
+        assert_eq!(pxf.carrier, CarrierSelector::Pss);
+    }
+
+    /// Every keyword this lane taught the form reaches the same typed request
+    /// from a hand-written deck, valued as the deck authored it.
+    ///
+    /// Accepting a key is not carrying it, and three of these were accepted
+    /// and dropped: `FROM=` was read only to decide whether to refuse the
+    /// card, and an asymmetric `SIDEBANDMIN=`/`SIDEBANDMAX=` pair was refused
+    /// outright because the typed request held one symmetric number. So each
+    /// is read back off the queued configuration rather than merely tolerated.
+    #[test]
+    fn the_reader_carries_the_carrier_the_sideband_ends_and_the_tolerances() {
+        const CIRCUIT: &str = "periodic\nV1 in 0 SIN(0 1 1Meg)\nR1 in out 1k\nC1 out 0 1n\n";
+        const DECK: &str = ".pss fund=1Meg\n\
+             .pac dec 10 1k 1Meg input=V1 out=out sidebandmin=-2 sidebandmax=4 reltol=1e-5 \
+             abstol=1e-15 from=pss\n\
+             .pxf dec 10 1k 1Meg input=V1 out=out reltol=2e-5 abstol=2e-15 from=pss\n\
+             .pnoise dec 10 1 1Meg out=out from=pss\n";
+
+        let source = format!("{CIRCUIT}{DECK}.end\n");
+        let netlist = Netlist::parse(&source).expect("the engine reads the deck");
+        let tasks = parse_periodic_tasks(&netlist, &source).expect("and so does the studio");
+
+        let pac = tasks
+            .iter()
+            .find_map(|task| task.spec_options.pac.as_ref())
+            .expect("the .PAC card is queued");
+        assert_eq!(
+            (pac.sideband_min, pac.sideband_max),
+            (-2, 4),
+            "an asymmetric range is the range the deck asked for"
+        );
+        assert_eq!(pac.carrier, CarrierSelector::Pss);
+        assert!((pac.reltol - 1.0e-5).abs() <= 1.0e-20, "{}", pac.reltol);
+        assert!((pac.abstol - 1.0e-15).abs() <= 1.0e-30, "{}", pac.abstol);
+
+        let pxf = tasks
+            .iter()
+            .find_map(|task| task.spec_options.pxf.as_ref())
+            .expect("the .PXF card is queued");
+        assert_eq!(pxf.carrier, CarrierSelector::Pss);
+        assert!((pxf.reltol - 2.0e-5).abs() <= 1.0e-20, "{}", pxf.reltol);
+
+        let pnoise = tasks
+            .iter()
+            .find_map(|task| task.spec_options.pnoise.as_ref())
+            .expect("the .PNOISE card is queued");
+        assert_eq!(pnoise.carrier, CarrierSelector::Pss);
+
+        // A deck that names no carrier binds to the preceding periodic solve,
+        // which is the third position rather than a default spelling of the
+        // one above.
+        let unnamed =
+            format!("{CIRCUIT}.pss fund=1Meg\n.pac dec 10 1k 1Meg input=V1 out=out\n.end\n");
+        let netlist = Netlist::parse(&unnamed).expect("the engine reads the unnamed deck");
+        let tasks = parse_periodic_tasks(&netlist, &unnamed).expect("and so does the studio");
+        let pac = tasks
+            .iter()
+            .find_map(|task| task.spec_options.pac.as_ref())
+            .expect("the .PAC card is queued");
+        assert_eq!(pac.carrier, CarrierSelector::Preceding);
+        assert_eq!((pac.sideband_min, pac.sideband_max), (-5, 5));
     }
 
     /// A `.PSTB` card the engine's `validate_card` refuses is refused here, in
