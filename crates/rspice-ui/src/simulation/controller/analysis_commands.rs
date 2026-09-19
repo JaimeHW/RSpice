@@ -688,7 +688,6 @@ const fn manifest_spec_kind(spec: &AnalysisSpec) -> Option<crate::simulation::pl
         AnalysisSpec::Qpac { .. } => AnalysisKind::Qpac,
         AnalysisSpec::Qpnoise { .. } => AnalysisKind::Qpnoise,
         AnalysisSpec::Qpxf { .. } => AnalysisKind::Qpxf,
-        AnalysisSpec::DcMismatch { .. } => AnalysisKind::DcMismatch,
         AnalysisSpec::Reliability { .. } => AnalysisKind::Reliability,
         _ => return None,
     })

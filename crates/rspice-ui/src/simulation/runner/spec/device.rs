@@ -72,8 +72,100 @@ pub(super) fn run_device_spec(
             source_path,
             abort,
         ),
+        // Dispatched by the whole specification rather than destructured
+        // here: the card is written by the one writer the Analyses page also
+        // displays, so the run cannot ask for a study the page did not state.
+        ref dc_mismatch @ AnalysisSpec::DcMismatch { .. } => {
+            run_dc_mismatch(netlist, dc_mismatch, source_path, abort)
+        }
         other => Err(super::misrouted_spec_error("device", &other)),
     }
+}
+
+/// Solve one DC mismatch spread and retain it as typed evidence.
+fn run_dc_mismatch(
+    netlist: &str,
+    spec: &AnalysisSpec,
+    source_path: Option<&Path>,
+    abort: &dyn AbortSignal,
+) -> Result<SimulationResult, SimulationError> {
+    let AnalysisSpec::DcMismatch {
+        normalized_contributions,
+        ..
+    } = spec
+    else {
+        return Err(super::misrouted_spec_error("device", spec));
+    };
+    let card_line = crate::simulation::SimulationController::build_dc_mismatch_command(spec)
+        .map_err(SimulationError::InvalidConfig)?;
+    let data = super::run_abort_aware_service(abort, || {
+        svc_runner::run_dc_mismatch_analysis_with_source_path_and_abort(
+            netlist,
+            &card_line,
+            source_path,
+            abort,
+        )
+    })?;
+    super::ensure_not_aborted(abort)?;
+
+    let result = &data.result;
+    let count = |value: usize| -> Result<u64, SimulationError> {
+        u64::try_from(value).map_err(|_| {
+            SimulationError::InvalidConfig(
+                "the DC mismatch report counted more contributors than can be retained".to_owned(),
+            )
+        })
+    };
+    // The unit follows the probe the engine echoed back, which is the rule
+    // the core result document uses for the same scalars.
+    let output_unit = if result.output.starts_with("I(") {
+        "A"
+    } else {
+        "V"
+    };
+    let evidence = crate::state::DcMismatchEvidence {
+        output: result.output.clone(),
+        output_unit: output_unit.to_owned(),
+        nominal_value: result.nominal_value,
+        sigma_multiplier: result.sigma_multiplier,
+        sigma_total: result.sigma_total,
+        sigma_mismatch: result.sigma_mismatch,
+        sigma_process: result.sigma_process,
+        include_mismatch: data.card.mismatch,
+        include_process: data.card.process,
+        contributor_limit: count(data.card.contributor_limit)?,
+        threshold: data.card.threshold,
+        normalized_contributions: *normalized_contributions,
+        applied_correlations_mismatch: count(result.applied_correlations_mismatch)?,
+        applied_correlations_process: count(result.applied_correlations_process)?,
+        evaluated_contributors: count(result.evaluated_contributors)?,
+        contributors: result
+            .contributors
+            .iter()
+            .map(|row| crate::state::DcMismatchContributorEvidence {
+                instance: row.instance.clone(),
+                parameter: row.parameter.clone(),
+                scope: match row.scope {
+                    rspice_core::analysis::dcmatch::DcMatchScope::Mismatch => {
+                        crate::state::DcMismatchScopeEvidence::Mismatch
+                    }
+                    rspice_core::analysis::dcmatch::DcMatchScope::Process => {
+                        crate::state::DcMismatchScopeEvidence::Process
+                    }
+                },
+                sigma_parameter: row.sigma_parameter,
+                sensitivity: row.sensitivity,
+                contribution: row.contribution,
+                share: row.share,
+            })
+            .collect(),
+    };
+    evidence
+        .validate()
+        .map_err(SimulationError::InvalidConfig)?;
+    Ok(SimulationResult::DcMismatch {
+        evidence: std::sync::Arc::new(evidence),
+    })
 }
 
 fn run_optimization(

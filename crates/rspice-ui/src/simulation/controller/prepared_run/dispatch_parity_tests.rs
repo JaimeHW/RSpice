@@ -90,7 +90,7 @@ fn only(state: &mut AppState, kinds: &[AnalysisKind]) -> Vec<AnalysisInstanceId>
 /// The one independent source the fixture design owns.
 const FIXTURE_TONE_SOURCE: &str = "VCC";
 
-/// How many of the 28 kinds with no execution blocker compile a queue from
+/// How many of the 29 kinds with no execution blocker compile a queue from
 /// their default draft on this fixture, measured.
 ///
 /// The other four ask for something no default can invent — an output node, an
@@ -368,7 +368,7 @@ fn a_kind_without_a_solver_is_still_refused_by_its_own_blocker() {
         blocked += 1;
     }
     assert_eq!(
-        blocked, 6,
+        blocked, 5,
         "the engine-blocked catalogue changed; re-read what the blockers now cover"
     );
 }

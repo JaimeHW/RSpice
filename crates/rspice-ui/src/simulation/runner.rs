@@ -1057,7 +1057,10 @@ fn initial_status_for_spec(
             time: 0.0,
             stop_time: *stop_time,
         },
-        AnalysisSpec::DcMismatch { .. } => SimulationStatus::PostProcessing,
+        // What it solves: one nominal operating point, then two more per
+        // statistical variable. `PostProcessing` described a kind that never
+        // reached a solver.
+        AnalysisSpec::DcMismatch { .. } => SimulationStatus::DcOperatingPoint,
     }
 }
 

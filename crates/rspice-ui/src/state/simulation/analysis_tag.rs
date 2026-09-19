@@ -268,9 +268,6 @@ impl CanonicalAnalysisKind {
             Self::Qpxf => Some(
                 "quasi-periodic translated-transfer execution is not available in this engine build",
             ),
-            Self::DcMismatch => {
-                Some("DC mismatch contribution extraction is not available in this engine build")
-            }
             Self::Reliability => Some(
                 "reliability execution requires PDK-qualified aging models; the former hard-coded demonstration equations have been removed",
             ),
@@ -403,6 +400,7 @@ mod tests {
                 CanonicalAnalysisKind::Hbnoise,
                 CanonicalAnalysisKind::Psp,
                 CanonicalAnalysisKind::TransientNoise,
+                CanonicalAnalysisKind::DcMismatch,
             ]
         );
 
@@ -418,7 +416,6 @@ mod tests {
                 CanonicalAnalysisKind::Qpac,
                 CanonicalAnalysisKind::Qpnoise,
                 CanonicalAnalysisKind::Qpxf,
-                CanonicalAnalysisKind::DcMismatch,
             ]
         );
         assert!(blocked.into_iter().all(|kind| {

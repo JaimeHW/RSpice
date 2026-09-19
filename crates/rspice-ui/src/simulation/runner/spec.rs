@@ -92,7 +92,9 @@ pub(super) fn run_spec_request_with_environment(
             frequencies,
             abort_flag,
         ),
-        AnalysisSpec::Optimization { .. } | AnalysisSpec::Soa { .. } => {
+        AnalysisSpec::Optimization { .. }
+        | AnalysisSpec::Soa { .. }
+        | AnalysisSpec::DcMismatch { .. } => {
             device::run_device_spec(spec, netlist, source_path, abort_flag)
         }
         AnalysisSpec::Pss { .. }
@@ -124,7 +126,6 @@ pub(super) fn run_spec_request_with_environment(
         | AnalysisSpec::Qpac { .. }
         | AnalysisSpec::Qpnoise { .. }
         | AnalysisSpec::Qpxf { .. }
-        | AnalysisSpec::DcMismatch { .. }
         | AnalysisSpec::Reliability { .. }) => {
             let kind = crate::simulation::execution::canonical_analysis_kind(&blocked);
             let reason = kind
@@ -527,15 +528,6 @@ mod tests {
                 input_lattice: [0, 0],
                 output_lattice: [0, 0],
                 group_delay: true,
-            },
-            AnalysisSpec::DcMismatch {
-                output_expression: "V(out)".to_owned(),
-                sigma_multiplier: 3.0,
-                contributor_limit: 25,
-                include_process: false,
-                include_mismatch: true,
-                normalized_contributions: true,
-                contribution_threshold: None,
             },
             AnalysisSpec::Reliability {
                 target_years: vec![1.0, 10.0],
@@ -980,17 +972,21 @@ R2 out 0 1k\n\
         assert!(waveforms.contains_key("S21[k=+0,m=+0]"));
     }
 
+    /// A kind with no solver in this build is refused before the engine is
+    /// asked, and refused by its own name.
+    ///
+    /// The fixture is taken from [`blocked_preview_specs`] rather than
+    /// spelled here. It used to be DC mismatch, which now runs; taking the
+    /// first still-blocked kind means this test keeps asking the question it
+    /// was written to ask instead of having to be rewritten each time a kind
+    /// gains a solver.
     #[test]
     fn unavailable_manifest_spec_is_rejected_before_engine_dispatch() {
-        let spec = AnalysisSpec::DcMismatch {
-            output_expression: "V(out)".to_owned(),
-            sigma_multiplier: 3.0,
-            contributor_limit: 25,
-            include_process: false,
-            include_mismatch: true,
-            normalized_contributions: true,
-            contribution_threshold: None,
-        };
+        let spec = blocked_preview_specs()
+            .into_iter()
+            .next()
+            .expect("this build still has a blocked preview kind");
+        let display_name = spec.run_type().display_name().to_owned();
         let result = run_spec_request(
             &EngineBridge::new(),
             spec,
@@ -1002,9 +998,9 @@ R2 out 0 1k\n\
         );
         match result {
             Err(SimulationError::InvalidConfig(message)) => {
-                assert!(message.contains("DC Mismatch Contribution"));
-                assert!(message.contains("unavailable"));
-                assert!(message.contains("rejected before dispatch"));
+                assert!(message.contains(&display_name), "{message}");
+                assert!(message.contains("unavailable"), "{message}");
+                assert!(message.contains("rejected before dispatch"), "{message}");
             }
             other => panic!("expected fail-closed capability rejection, got {other:?}"),
         }
@@ -1049,7 +1045,6 @@ R2 out 0 1k\n\
                 crate::state::CanonicalAnalysisKind::Qpac,
                 crate::state::CanonicalAnalysisKind::Qpnoise,
                 crate::state::CanonicalAnalysisKind::Qpxf,
-                crate::state::CanonicalAnalysisKind::DcMismatch,
                 crate::state::CanonicalAnalysisKind::Reliability,
             ]
         );
@@ -1728,5 +1723,234 @@ R2 out 0 1k\n\
                 frequency: None,
             },
         ]
+    }
+
+    // ------------------------------------------------------------ DC mismatch
+    //
+    // `.DCMATCH` has no default spread: a deck with no `statistics` block is
+    // refused by name. So the fixture brings one, lowered through the same
+    // public Spectre adapter the include expander runs a `.scs` library
+    // through — which means these tests need no file system and run on a
+    // wasm-shaped target.
+
+    /// Two resistances with independent per-instance mismatch, declared the
+    /// way a PDK declares it.
+    const DIVIDER_STATISTICS: &str = "\
+// Resistor divider mismatch.
+parameters r1v=1000 r2v=2000
+statistics {
+ mismatch {
+  vary r1v dist=gauss std=10
+  vary r2v dist=gauss std=10
+ }
+}
+";
+
+    const MISMATCH_DIVIDER: &str = "dc mismatch divider\n\
+V1 in 0 1\n\
+R1 in out {r1v}\n\
+R2 out 0 {r2v}\n";
+
+    /// The divider deck with the statistics library lowered into it.
+    fn statistical_divider(cards: &str) -> String {
+        let lowered = rspice_core::library::adapt_spectre_model_library(
+            std::path::Path::new("statistics.scs"),
+            DIVIDER_STATISTICS,
+        )
+        .expect("the statistics library lowers to executable SPICE");
+        let (title, body) = MISMATCH_DIVIDER
+            .split_once('\n')
+            .expect("a deck carries a title line and a body");
+        format!("{title}\n{lowered}{body}{cards}.end\n")
+    }
+
+    fn dc_mismatch_spec(sigma_multiplier: f64, contributor_limit: usize) -> AnalysisSpec {
+        AnalysisSpec::DcMismatch {
+            output_expression: "V(out)".to_owned(),
+            sigma_multiplier,
+            contributor_limit,
+            include_process: false,
+            include_mismatch: true,
+            normalized_contributions: true,
+            contribution_threshold: None,
+        }
+    }
+
+    fn run_dc_mismatch(
+        deck: &str,
+        spec: AnalysisSpec,
+    ) -> Result<SimulationResult, SimulationError> {
+        run_spec_request(
+            &EngineBridge::new(),
+            spec,
+            SpecExecutionOptions::default(),
+            deck,
+            None,
+            &ResolvedExecutionDependencies::default(),
+            &rspice_core::abort_signal::NoAbort,
+        )
+    }
+
+    /// The whole route, ending on numbers a hand calculation can check.
+    ///
+    /// A 1 V source over 1k and 2k: the output sits at 2/3, and one standard
+    /// deviation of each resistance displaces it by `V * r_other / (r1+r2)^2`
+    /// times that deviation. The two displacements are independent, so the
+    /// spread is their root sum of squares and the shares are 4/5 and 1/5.
+    /// Nothing here is a golden number — every value is the divider's own.
+    #[test]
+    fn a_dc_mismatch_run_reaches_the_engine_and_returns_the_analytic_divider_spread() {
+        let result = run_dc_mismatch(&statistical_divider(""), dc_mismatch_spec(1.0, 0))
+            .expect("a design with statistics runs");
+        let SimulationResult::DcMismatch { evidence } = result else {
+            panic!("DC mismatch must retain its own evidence family");
+        };
+        assert_eq!(evidence.validate(), Ok(()));
+        assert_eq!(evidence.output_unit, "V");
+        assert!(
+            (evidence.nominal_value - 2.0 / 3.0).abs() < 1.0e-12,
+            "{}",
+            evidence.nominal_value
+        );
+
+        let expected =
+            ((2000.0 * 10.0 / 9.0e6_f64).powi(2) + (1000.0 * 10.0 / 9.0e6_f64).powi(2)).sqrt();
+        assert!(
+            ((evidence.sigma_total - expected) / expected).abs() < 1.0e-3,
+            "{} against {expected}",
+            evidence.sigma_total
+        );
+        // Mismatch only, so the whole spread is the mismatch half.
+        assert_eq!(evidence.sigma_process, 0.0);
+        assert!((evidence.sigma_mismatch - evidence.sigma_total).abs() < 1.0e-18);
+        assert_eq!(evidence.applied_correlations_mismatch, 0);
+        assert_eq!(evidence.applied_correlations_process, 0);
+
+        // Every (instance, variable) pair is evaluated; two of them carry the
+        // variance, and a limit of zero keeps the rest rather than hiding
+        // that the analysis looked at them.
+        assert_eq!(evidence.evaluated_contributors, 6);
+        assert_eq!(evidence.retained_contributors(), 6);
+        let owners: Vec<(&str, &str, f64)> = evidence
+            .contributors
+            .iter()
+            .filter(|row| row.share != 0.0)
+            .map(|row| (row.instance.as_str(), row.parameter.as_str(), row.share))
+            .collect();
+        assert_eq!(owners.len(), 2, "{:?}", evidence.contributors);
+        assert_eq!(owners[0].0, "R1");
+        assert_eq!(owners[0].1, "R1V");
+        assert!((owners[0].2 - 0.8).abs() < 1.0e-6, "{:?}", owners[0]);
+        assert_eq!(owners[1].0, "R2");
+        assert_eq!(owners[1].1, "R2V");
+        assert!((owners[1].2 - 0.2).abs() < 1.0e-6, "{:?}", owners[1]);
+    }
+
+    /// The run executes the card the Studio wrote, not another card that
+    /// happens to be in the deck.
+    ///
+    /// A generated deck carries every queued analysis's directive and a
+    /// hand-written deck may carry several `.DCMATCH` cards; nothing in the
+    /// deck says which of them is this task's. The line the task was
+    /// dispatched with does.
+    #[test]
+    fn a_dc_mismatch_run_executes_the_card_the_studio_wrote_not_another_card_in_the_deck() {
+        let deck = statistical_divider(".DCMATCH OUT=V(out) SIGMA=6\n");
+        let result = run_dc_mismatch(&deck, dc_mismatch_spec(3.0, 2))
+            .expect("the deck's own card does not stop the task's card running");
+        let SimulationResult::DcMismatch { evidence } = result else {
+            panic!("DC mismatch must retain its own evidence family");
+        };
+        assert_eq!(evidence.sigma_multiplier, 3.0, "the spec's multiplier ran");
+        // And the spec's limit trimmed the list, not the deck's default.
+        assert_eq!(evidence.contributor_limit, 2);
+        assert_eq!(evidence.retained_contributors(), 2);
+        assert!(evidence.is_trimmed());
+    }
+
+    /// The kind is no longer refused before the engine is asked.
+    #[test]
+    fn dc_mismatch_is_no_longer_refused_before_dispatch() {
+        assert_eq!(
+            crate::state::CanonicalAnalysisKind::DcMismatch.execution_blocker(),
+            None
+        );
+        assert!(
+            !blocked_preview_specs()
+                .iter()
+                .any(|spec| matches!(spec, AnalysisSpec::DcMismatch { .. })),
+            "a runnable kind cannot also be on the blocked list"
+        );
+        let error = run_dc_mismatch(
+            "no statistics\nV1 in 0 1\nR1 in out 1k\nR2 out 0 2k\n.end\n",
+            dc_mismatch_spec(1.0, 10),
+        )
+        .expect_err("a design with no statistics is still refused");
+        assert!(
+            !format!("{error}").contains("rejected before dispatch"),
+            "{error}"
+        );
+    }
+
+    /// A design with no statistics is refused in the engine's own words,
+    /// with the Studio's remedy after them.
+    #[test]
+    fn a_design_without_statistics_is_refused_in_the_engines_words_with_the_studio_remedy() {
+        let error = run_dc_mismatch(
+            "no statistics\nV1 in 0 1\nR1 in out 1k\nR2 out 0 2k\n.end\n",
+            dc_mismatch_spec(1.0, 10),
+        )
+        .expect_err("a design with no statistics is refused");
+        let message = format!("{error}");
+        assert!(
+            message.contains(
+                ".DCMATCH needs a `statistics { mismatch { vary ... } }` block; none is bound to \
+                 this design"
+            ),
+            "{message}"
+        );
+        assert!(
+            message.contains(
+                "Attach a Spectre model library whose bound section declares one, or include a \
+                 Spectre file that does."
+            ),
+            "{message}"
+        );
+        // A design that does declare statistics and fails for another reason
+        // must not be told to attach a library it already has.
+        let error = run_dc_mismatch(
+            &statistical_divider(""),
+            AnalysisSpec::DcMismatch {
+                output_expression: "V(nowhere)".to_owned(),
+                sigma_multiplier: 1.0,
+                contributor_limit: 10,
+                include_process: false,
+                include_mismatch: true,
+                normalized_contributions: true,
+                contribution_threshold: None,
+            },
+        )
+        .expect_err("a probe that names nothing is refused");
+        assert!(
+            !format!("{error}").contains("Attach a Spectre model library"),
+            "{error}"
+        );
+    }
+
+    /// A cancelled DC mismatch run stays cancelled rather than degrading to a
+    /// configuration failure.
+    #[test]
+    fn a_cancelled_dc_mismatch_run_stays_cancelled() {
+        let error = run_spec_request(
+            &EngineBridge::new(),
+            dc_mismatch_spec(1.0, 10),
+            SpecExecutionOptions::default(),
+            &statistical_divider(""),
+            None,
+            &ResolvedExecutionDependencies::default(),
+            &rspice_core::abort_signal::ImmediateAbort,
+        )
+        .expect_err("an aborted run does not produce evidence");
+        assert!(matches!(error, SimulationError::Aborted), "{error:?}");
     }
 }

@@ -951,6 +951,16 @@ fn analysis_catalog_uses_the_mockup_dialog_and_row_contracts() {
         analysis_catalog_disposition(&[], AnalysisKind::Hbnoise),
         "Add instance"
     );
+    // DC mismatch joined them: a preview engine that runs, rather than a
+    // catalogue card that refuses.
+    assert_eq!(
+        analysis_catalog_readiness(AnalysisKind::DcMismatch),
+        Some("Preview engine · non-sign-off")
+    );
+    assert_eq!(
+        analysis_catalog_disposition(&[], AnalysisKind::DcMismatch),
+        "Add instance"
+    );
     assert_eq!(
         analysis_catalog_readiness(AnalysisKind::Qpss),
         Some("the QPSS spectral-lattice solver is not available in this engine build")
@@ -969,7 +979,6 @@ fn analysis_catalog_search_preserves_canonical_group_order() {
         AnalysisKind::Qpac,
         AnalysisKind::Qpnoise,
         AnalysisKind::Qpxf,
-        AnalysisKind::DcMismatch,
     ];
     assert_eq!(all.len(), AnalysisKind::ALL.len());
     assert!(unavailable.iter().all(|kind| all.contains(kind)));
