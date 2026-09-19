@@ -941,3 +941,125 @@ fn the_schema_v18_encoding_cannot_see_a_bus_table() {
         "V10 states the table, even an empty one, so it is a different domain"
     );
 }
+
+/// A two-contributor divider spread, shaped as the engine produces one.
+fn dc_mismatch_evidence() -> crate::state::DcMismatchEvidence {
+    use crate::state::{DcMismatchContributorEvidence, DcMismatchScopeEvidence};
+
+    crate::state::DcMismatchEvidence {
+        output: "V(OUT)".to_owned(),
+        output_unit: "V".to_owned(),
+        nominal_value: 2.0 / 3.0,
+        sigma_multiplier: 3.0,
+        sigma_total: (5.0_f64).sqrt() * 1.0e-3,
+        sigma_mismatch: (5.0_f64).sqrt() * 1.0e-3,
+        sigma_process: 0.0,
+        include_mismatch: true,
+        include_process: false,
+        contributor_limit: 10,
+        threshold: 0.0,
+        normalized_contributions: true,
+        applied_correlations_mismatch: 0,
+        applied_correlations_process: 0,
+        evaluated_contributors: 2,
+        contributors: vec![
+            DcMismatchContributorEvidence {
+                instance: "R1".to_owned(),
+                parameter: "R1V".to_owned(),
+                scope: DcMismatchScopeEvidence::Mismatch,
+                sigma_parameter: 10.0,
+                sensitivity: 2.0e-4,
+                contribution: 2.0e-3,
+                share: 0.8,
+            },
+            DcMismatchContributorEvidence {
+                instance: "R2".to_owned(),
+                parameter: "R2V".to_owned(),
+                scope: DcMismatchScopeEvidence::Mismatch,
+                sigma_parameter: 10.0,
+                sensitivity: -1.0e-4,
+                contribution: -1.0e-3,
+                share: 0.2,
+            },
+        ],
+    }
+}
+
+/// Every field of a DC mismatch payload is content identity.
+///
+/// Walked field by field rather than spot-checked: a field the encoder forgot
+/// is a field an edited result could change while keeping the seal that
+/// authenticated it. The list is the struct's own, so a field added without
+/// an encoder line fails here.
+#[test]
+fn every_dc_mismatch_evidence_field_moves_the_result_digest() {
+    let result = |evidence: crate::state::DcMismatchEvidence| {
+        AnalysisResult::new(1, AnalysisType::DcMismatch, "DCMATCH").with_result_payload(
+            AnalysisResultPayload::DcMismatch {
+                evidence: std::sync::Arc::new(evidence),
+            },
+        )
+    };
+    let source = result(dc_mismatch_evidence());
+    assert_eq!(
+        source.result_data_digest(),
+        result(dc_mismatch_evidence()).result_data_digest(),
+        "the same evidence digests to the same bytes"
+    );
+
+    let mutations: [(&str, fn(&mut crate::state::DcMismatchEvidence)); 16] = [
+        ("output", |e| e.output = "V(MID)".to_owned()),
+        ("output_unit", |e| e.output_unit = "A".to_owned()),
+        ("nominal_value", |e| e.nominal_value += 1.0e-15),
+        ("sigma_multiplier", |e| e.sigma_multiplier = 6.0),
+        ("sigma_total", |e| e.sigma_total += 1.0e-15),
+        ("sigma_mismatch", |e| e.sigma_mismatch += 1.0e-15),
+        ("sigma_process", |e| e.sigma_process = 1.0e-9),
+        ("include_mismatch", |e| e.include_mismatch = false),
+        ("include_process", |e| e.include_process = true),
+        ("contributor_limit", |e| e.contributor_limit = 0),
+        ("threshold", |e| e.threshold = 0.05),
+        ("normalized_contributions", |e| {
+            e.normalized_contributions = false
+        }),
+        ("applied_correlations_mismatch", |e| {
+            e.applied_correlations_mismatch = 1
+        }),
+        ("applied_correlations_process", |e| {
+            e.applied_correlations_process = 1
+        }),
+        ("evaluated_contributors", |e| e.evaluated_contributors = 6),
+        ("contributors", |e| e.contributors.truncate(1)),
+    ];
+    for (field, mutate) in mutations {
+        let mut evidence = dc_mismatch_evidence();
+        mutate(&mut evidence);
+        assert_ne!(
+            source.result_data_digest(),
+            result(evidence).result_data_digest(),
+            "{field} does not reach the result digest"
+        );
+    }
+
+    // And each contributor field in turn.
+    let rows: [(&str, fn(&mut crate::state::DcMismatchContributorEvidence)); 7] = [
+        ("instance", |row| row.instance = "R3".to_owned()),
+        ("parameter", |row| row.parameter = "R3V".to_owned()),
+        ("scope", |row| {
+            row.scope = crate::state::DcMismatchScopeEvidence::Process
+        }),
+        ("sigma_parameter", |row| row.sigma_parameter = 11.0),
+        ("sensitivity", |row| row.sensitivity += 1.0e-18),
+        ("contribution", |row| row.contribution += 1.0e-18),
+        ("share", |row| row.share = 0.7),
+    ];
+    for (field, mutate) in rows {
+        let mut evidence = dc_mismatch_evidence();
+        mutate(&mut evidence.contributors[0]);
+        assert_ne!(
+            source.result_data_digest(),
+            result(evidence).result_data_digest(),
+            "contributor {field} does not reach the result digest"
+        );
+    }
+}

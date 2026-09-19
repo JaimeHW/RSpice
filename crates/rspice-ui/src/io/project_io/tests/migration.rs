@@ -1978,3 +1978,58 @@ fn event_source_current_schema_seals_name_format_and_presence() {
             .is_err()
     );
 }
+
+/// A container labelled before v27 cannot carry DC mismatch evidence.
+///
+/// The schema version is not bumped for this payload — a new variant seals
+/// nothing in an existing file — but the era guard still has to exist: no
+/// build before v27 could write a DC mismatch payload, so an older label over
+/// one is an edited file wearing an authentic older digest.
+#[test]
+fn a_result_schema_before_v27_cannot_carry_dc_mismatch_evidence() {
+    use crate::state::{
+        DcMismatchContributorEvidence, DcMismatchEvidence, DcMismatchScopeEvidence,
+    };
+
+    let evidence = DcMismatchEvidence {
+        output: "V(OUT)".to_owned(),
+        output_unit: "V".to_owned(),
+        nominal_value: 2.0 / 3.0,
+        sigma_multiplier: 1.0,
+        sigma_total: 2.0e-3,
+        sigma_mismatch: 2.0e-3,
+        sigma_process: 0.0,
+        include_mismatch: true,
+        include_process: false,
+        contributor_limit: 10,
+        threshold: 0.0,
+        normalized_contributions: true,
+        applied_correlations_mismatch: 0,
+        applied_correlations_process: 0,
+        evaluated_contributors: 1,
+        contributors: vec![DcMismatchContributorEvidence {
+            instance: "R1".to_owned(),
+            parameter: "R1V".to_owned(),
+            scope: DcMismatchScopeEvidence::Mismatch,
+            sigma_parameter: 10.0,
+            sensitivity: 2.0e-4,
+            contribution: 2.0e-3,
+            share: 1.0,
+        }],
+    };
+
+    let mut persisted = persisted_periodic_at_schema_v16(AnalysisType::Pss);
+    persisted.runs[0].analyses[0].analysis_type =
+        analysis_type_key(AnalysisType::DcMismatch).to_owned();
+    persisted.runs[0].analyses[0].result_payload =
+        PersistedField::Value(AnalysisResultPayload::DcMismatch {
+            evidence: std::sync::Arc::new(evidence),
+        });
+    let error = persisted
+        .migrate_to_current(ProjectId::new())
+        .expect_err("an older label cannot carry a payload its era could not write");
+    assert!(
+        error.contains("contains DC mismatch evidence, which no build before schema v27 wrote"),
+        "{error}"
+    );
+}

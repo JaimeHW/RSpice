@@ -814,6 +814,15 @@ pub(crate) enum WorkerSimulationResult {
         sensitivities: HashMap<String, rspice_core::analysis::sensitivity::SensitivityValue<f64>>,
         normalized: HashMap<String, rspice_core::analysis::sensitivity::SensitivityValue<f64>>,
     },
+    /// Linearized DC mismatch spread and its ranked contributors.
+    ///
+    /// No transport protocol bump: a bump records a change an older worker
+    /// would answer *silently differently*, and an older worker cannot answer
+    /// a DC mismatch request at all — it refuses the specification by name
+    /// before dispatch. This variant adds no reading of any existing payload.
+    DcMismatch {
+        evidence: crate::state::DcMismatchEvidence,
+    },
     TransferFunction {
         input_source: String,
         output_expression: String,
@@ -1364,6 +1373,16 @@ impl WorkerSimulationResult {
                     rspice_core::analysis::sensitivity::SensitivityValue<f64>,
                 >()),
             ]),
+            WorkerSimulationResult::DcMismatch { evidence } => sum_payload_bytes([
+                // Five sigmas, the nominal value and the multiplier.
+                f64_payload_bytes(7),
+                evidence
+                    .contributors
+                    .len()
+                    .saturating_mul(std::mem::size_of::<
+                        crate::state::DcMismatchContributorEvidence,
+                    >()),
+            ]),
             WorkerSimulationResult::TransferFunction {
                 gain,
                 input_resistance,
@@ -1642,6 +1661,9 @@ impl TryFrom<SimulationResult> for WorkerSimulationResult {
                 frequency_hz,
                 sensitivities,
                 normalized,
+            }),
+            SimulationResult::DcMismatch { evidence } => Ok(Self::DcMismatch {
+                evidence: (*evidence).clone(),
             }),
             SimulationResult::TransferFunction {
                 input_source,
@@ -1945,6 +1967,9 @@ impl From<WorkerSimulationResult> for SimulationResult {
                 frequency_hz,
                 sensitivities,
                 normalized,
+            },
+            WorkerSimulationResult::DcMismatch { evidence } => Self::DcMismatch {
+                evidence: std::sync::Arc::new(evidence),
             },
             WorkerSimulationResult::TransferFunction {
                 input_source,

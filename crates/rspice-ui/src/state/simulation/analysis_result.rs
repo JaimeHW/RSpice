@@ -1034,6 +1034,43 @@ fn native_scalar_name_matches(name: &str, canonical: &str, dotted_compatibility:
     name.eq_ignore_ascii_case(canonical) || name.eq_ignore_ascii_case(dotted_compatibility)
 }
 
+/// The five DC mismatch scalars a specification can bound, each under its
+/// canonical name and the dotted compatibility spelling.
+///
+/// One list, read by the lookup and by the name census alike, so a
+/// specification cannot resolve against a name the census does not offer.
+fn dc_mismatch_scalar_evidence(
+    evidence: &super::DcMismatchEvidence,
+) -> [(&'static str, &'static str, f64); 5] {
+    [
+        (
+            "dcmatch_nominal_value",
+            "dcmatch.nominal_value",
+            evidence.nominal_value,
+        ),
+        (
+            "dcmatch_sigma_total",
+            "dcmatch.sigma_total",
+            evidence.sigma_total,
+        ),
+        (
+            "dcmatch_sigma_mismatch",
+            "dcmatch.sigma_mismatch",
+            evidence.sigma_mismatch,
+        ),
+        (
+            "dcmatch_sigma_process",
+            "dcmatch.sigma_process",
+            evidence.sigma_process,
+        ),
+        (
+            "dcmatch_quoted_sigma",
+            "dcmatch.quoted_sigma",
+            evidence.quoted_sigma(),
+        ),
+    ]
+}
+
 /// Immutable, analysis-native result evidence that is neither waveform data
 /// nor presentation state.
 ///
@@ -1150,6 +1187,10 @@ pub enum AnalysisResultPayload {
         output: String,
         result_mode: SensitivityResultMode,
         rows: Vec<SensitivityResultRow>,
+    },
+    /// Linearized DC mismatch spread and its ranked contributors.
+    DcMismatch {
+        evidence: std::sync::Arc<super::DcMismatchEvidence>,
     },
     ScalarMeasurements {
         values: BTreeMap<String, f64>,
@@ -1317,6 +1358,12 @@ impl AnalysisResultPayload {
                     None
                 }
             }
+            // Bounding a quoted sigma is why an engineer runs this analysis,
+            // so all five sigmas answer a specification by name.
+            Self::DcMismatch { evidence } => dc_mismatch_scalar_evidence(evidence)
+                .into_iter()
+                .find(|(native, dotted, _)| native_scalar_name_matches(name, native, dotted))
+                .map(|(_, _, value)| value),
             Self::ScalarMeasurements { values } => values
                 .iter()
                 .find(|(key, _)| key.eq_ignore_ascii_case(name))
@@ -1391,6 +1438,10 @@ impl AnalysisResultPayload {
                 }
                 names
             }
+            Self::DcMismatch { evidence } => dc_mismatch_scalar_evidence(evidence)
+                .into_iter()
+                .map(|(native, _, _)| native.to_owned())
+                .collect(),
             Self::ScalarMeasurements { values } => values.keys().cloned().collect(),
             _ => Vec::new(),
         }
@@ -1621,10 +1672,21 @@ impl AnalysisResultPayload {
                     }
                 }
             }
+            Self::DcMismatch { evidence } => {
+                if analysis_type != AnalysisType::DcMismatch {
+                    return Err(format!(
+                        "DC mismatch payload does not match analysis type {analysis_type:?}"
+                    ));
+                }
+                evidence.validate()?;
+            }
             Self::ScalarMeasurements { values } => {
                 if matches!(
                     analysis_type,
-                    AnalysisType::PoleZero | AnalysisType::Sensitivity | AnalysisType::Tf
+                    AnalysisType::PoleZero
+                        | AnalysisType::Sensitivity
+                        | AnalysisType::Tf
+                        | AnalysisType::DcMismatch
                 ) {
                     return Err(format!(
                         "scalar result payload does not match analysis type {analysis_type:?}"
@@ -1996,7 +2058,10 @@ impl AnalysisResultPayload {
             | Self::PoleZero { .. }
             | Self::PssFloquet { .. }
             | Self::Pstb { .. }
-            | Self::Sensitivity { .. } => true,
+            | Self::Sensitivity { .. }
+            // A spread is an answer even when no contributor cleared the
+            // card's own threshold.
+            | Self::DcMismatch { .. } => true,
             Self::ScalarMeasurements { values } => !values.is_empty(),
             Self::TransferFunction {
                 gain,

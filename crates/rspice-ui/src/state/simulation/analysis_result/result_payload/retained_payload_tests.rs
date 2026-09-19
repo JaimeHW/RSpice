@@ -1048,3 +1048,203 @@ fn sensitivity_availability_round_trips_and_rejects_invalid_input_markers() {
     rows[0].raw = SensitivityValue::unavailable(SensitivityUnavailability::InvalidInput);
     assert!(payload.validate_for(AnalysisType::Sensitivity).is_err());
 }
+
+/// A two-contributor divider spread, shaped as the engine produces one.
+fn dc_mismatch_evidence() -> crate::state::DcMismatchEvidence {
+    use crate::state::{DcMismatchContributorEvidence, DcMismatchScopeEvidence};
+
+    crate::state::DcMismatchEvidence {
+        output: "V(OUT)".to_owned(),
+        output_unit: "V".to_owned(),
+        nominal_value: 2.0 / 3.0,
+        sigma_multiplier: 3.0,
+        sigma_total: (5.0_f64).sqrt() * 1.0e-3,
+        sigma_mismatch: (5.0_f64).sqrt() * 1.0e-3,
+        sigma_process: 0.0,
+        include_mismatch: true,
+        include_process: false,
+        contributor_limit: 10,
+        threshold: 0.0,
+        normalized_contributions: true,
+        applied_correlations_mismatch: 0,
+        applied_correlations_process: 0,
+        evaluated_contributors: 2,
+        contributors: vec![
+            DcMismatchContributorEvidence {
+                instance: "R1".to_owned(),
+                parameter: "R1V".to_owned(),
+                scope: DcMismatchScopeEvidence::Mismatch,
+                sigma_parameter: 10.0,
+                sensitivity: 2.0e-4,
+                contribution: 2.0e-3,
+                share: 0.8,
+            },
+            DcMismatchContributorEvidence {
+                instance: "R2".to_owned(),
+                parameter: "R2V".to_owned(),
+                scope: DcMismatchScopeEvidence::Mismatch,
+                sigma_parameter: 10.0,
+                sensitivity: -1.0e-4,
+                contribution: -1.0e-3,
+                share: 0.2,
+            },
+        ],
+    }
+}
+
+fn dc_mismatch_payload() -> AnalysisResultPayload {
+    AnalysisResultPayload::DcMismatch {
+        evidence: std::sync::Arc::new(dc_mismatch_evidence()),
+    }
+}
+
+/// Every DC mismatch sigma answers a specification by name.
+///
+/// Bounding a quoted sigma is why an engineer runs this analysis, so a
+/// specification has to be able to name one. Both spellings resolve, and the
+/// census offers exactly the names that resolve.
+#[test]
+fn dc_mismatch_sigmas_answer_a_specification_by_name() {
+    let evidence = dc_mismatch_evidence();
+    let result = AnalysisResult::new(1, AnalysisType::DcMismatch, "DCMATCH")
+        .with_result_payload(dc_mismatch_payload());
+    let scalar = |name: &str| {
+        let candidates = result.scalar_evidence(name);
+        assert_eq!(candidates.len(), 1, "missing scalar evidence {name}");
+        assert!(candidates[0].passed);
+        candidates[0].value.unwrap()
+    };
+
+    assert_eq!(scalar("dcmatch_nominal_value"), evidence.nominal_value);
+    assert_eq!(scalar("dcmatch_sigma_total"), evidence.sigma_total);
+    assert_eq!(scalar("DCMATCH_SIGMA_MISMATCH"), evidence.sigma_mismatch);
+    assert_eq!(scalar("dcmatch_sigma_process"), evidence.sigma_process);
+    assert_eq!(scalar("dcmatch_quoted_sigma"), evidence.quoted_sigma());
+    assert_eq!(
+        scalar("dcmatch.quoted_sigma"),
+        evidence.quoted_sigma(),
+        "the dotted runtime spelling resolves too"
+    );
+    assert_eq!(
+        result.scalar_evidence_names(),
+        [
+            "dcmatch_nominal_value",
+            "dcmatch_sigma_total",
+            "dcmatch_sigma_mismatch",
+            "dcmatch_sigma_process",
+            "dcmatch_quoted_sigma",
+        ]
+    );
+    assert!(result.scalar_evidence("dcmatch_share").is_empty());
+}
+
+/// DC mismatch evidence refuses a ranking the engine could not have written.
+///
+/// One assertion per rule, each breaking a single field of a payload that is
+/// otherwise exactly what a divider run produces — so a failure names the
+/// invariant rather than "the fixture".
+#[test]
+fn dc_mismatch_evidence_refuses_a_ranking_the_engine_could_not_have_written() {
+    assert!(
+        dc_mismatch_payload()
+            .validate_for(AnalysisType::DcMismatch)
+            .is_ok()
+    );
+    // The payload belongs to its own kind.
+    assert!(
+        dc_mismatch_payload()
+            .validate_for(AnalysisType::Sensitivity)
+            .is_err()
+    );
+    // And loose scalars cannot stand in for it.
+    assert!(
+        AnalysisResultPayload::ScalarMeasurements {
+            values: BTreeMap::from([("sigma_total".to_owned(), 1.0)]),
+        }
+        .validate_for(AnalysisType::DcMismatch)
+        .is_err()
+    );
+
+    let broken = |mutate: fn(&mut crate::state::DcMismatchEvidence)| {
+        let mut evidence = dc_mismatch_evidence();
+        mutate(&mut evidence);
+        AnalysisResultPayload::DcMismatch {
+            evidence: std::sync::Arc::new(evidence),
+        }
+        .validate_for(AnalysisType::DcMismatch)
+    };
+
+    // The unit follows the probe rather than the report.
+    assert!(broken(|e| e.output_unit = "A".to_owned()).is_err());
+    assert!(
+        broken(|e| {
+            e.output = "I(V1)".to_owned();
+            e.output_unit = "A".to_owned();
+        })
+        .is_ok()
+    );
+    // The three sigmas satisfy one identity.
+    assert!(broken(|e| e.sigma_process = e.sigma_total).is_err());
+    // The multiplier is a positive multiple.
+    assert!(broken(|e| e.sigma_multiplier = 0.0).is_err());
+    // The threshold is a variance share.
+    assert!(broken(|e| e.threshold = 1.5).is_err());
+    // The card selected at least one scope...
+    assert!(broken(|e| e.include_mismatch = false).is_err());
+    // ...and a row from a scope it did not select cannot be listed.
+    assert!(
+        broken(|e| {
+            e.contributors[1].scope = crate::state::DcMismatchScopeEvidence::Process;
+        })
+        .is_err()
+    );
+    // The retained list is ordered by share magnitude.
+    assert!(broken(|e| e.contributors.swap(0, 1)).is_err());
+    // A row under the card's own threshold was not retained.
+    assert!(broken(|e| e.threshold = 0.5).is_err());
+    // The retained count fits inside what was evaluated...
+    assert!(broken(|e| e.evaluated_contributors = 1).is_err());
+    // ...and inside the card's limit.
+    assert!(broken(|e| e.contributor_limit = 1).is_err());
+    // Nothing is non-finite.
+    assert!(broken(|e| e.contributors[0].sensitivity = f64::NAN).is_err());
+    assert!(broken(|e| e.nominal_value = f64::INFINITY).is_err());
+}
+
+/// The shares of an untrimmed list sum to one, with their signs.
+///
+/// A negative share is a variable whose declared correlation partner cancels
+/// it: it removes variance from the total. The allocations still sum to the
+/// whole, and a validator that required every share to be a fraction in
+/// `[0, 1]` would refuse every correlated design the engine can solve.
+#[test]
+fn the_shares_of_an_untrimmed_list_sum_to_one_with_their_signs() {
+    let mut evidence = dc_mismatch_evidence();
+    // Correlated: the second variable cancels a fifth of the variance the
+    // first contributes, and the allocations still total one.
+    evidence.contributors[0].share = 1.2;
+    evidence.contributors[1].share = -0.2;
+    evidence.applied_correlations_mismatch = 1;
+    assert_eq!(evidence.validate(), Ok(()));
+    let cumulative = evidence.cumulative_shares();
+    assert_eq!(cumulative.len(), 2);
+    assert!((cumulative[0] - 1.2).abs() < 1.0e-12, "{cumulative:?}");
+    assert!((cumulative[1] - 1.0).abs() < 1.0e-12, "{cumulative:?}");
+    assert_eq!(evidence.unlisted_share(), None);
+
+    // The same allocations no longer summing to one is not a ranking the
+    // engine could have written.
+    evidence.contributors[1].share = -0.1;
+    assert!(evidence.validate().is_err());
+
+    // A trimmed list is allowed to fall short, and states its remainder.
+    let mut trimmed = dc_mismatch_evidence();
+    trimmed.evaluated_contributors = 3;
+    trimmed.contributors[1].share = 0.15;
+    assert_eq!(trimmed.validate(), Ok(()));
+    assert!(trimmed.is_trimmed());
+    let unlisted = trimmed
+        .unlisted_share()
+        .expect("a trimmed list states its remainder");
+    assert!((unlisted - 0.05).abs() < 1.0e-12, "{unlisted}");
+}

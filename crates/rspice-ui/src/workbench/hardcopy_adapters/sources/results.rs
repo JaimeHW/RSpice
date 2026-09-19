@@ -1849,6 +1849,7 @@ fn periodic_result_tables(payload: &AnalysisResultPayload) -> Option<Vec<Semanti
         | AnalysisResultPayload::OperatingPoint { .. }
         | AnalysisResultPayload::PoleZero { .. }
         | AnalysisResultPayload::Sensitivity { .. }
+        | AnalysisResultPayload::DcMismatch { .. }
         | AnalysisResultPayload::ScalarMeasurements { .. }
         | AnalysisResultPayload::TransferFunction { .. }
         | AnalysisResultPayload::Reliability { .. }

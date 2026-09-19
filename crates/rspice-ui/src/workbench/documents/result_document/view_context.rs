@@ -357,10 +357,15 @@ fn viewer_can_render(
             analysis.analysis_type == AnalysisType::DcOp
                 && operating_point_evidence_is_renderable(analysis)
         }
+        // Two families rank contributions to one number, and this sheet
+        // serves both: a sensitivity report and a DC mismatch spread.
         ResultViewer::Contribution => {
             matches!(
                 analysis.result_payload,
-                Some(AnalysisResultPayload::Sensitivity { .. })
+                Some(
+                    AnalysisResultPayload::Sensitivity { .. }
+                        | AnalysisResultPayload::DcMismatch { .. }
+                )
             )
         }
         ResultViewer::TransferFunction => {

@@ -24,6 +24,9 @@ pub(super) fn prepare_typed_result_csv(
     match payload {
         // DC exports its sampled curves through the ordinary waveform CSV path.
         AnalysisResultPayload::DcSweep { .. } => None,
+        // Published by the export commit that follows; retaining the payload
+        // came first so there is something to export.
+        AnalysisResultPayload::DcMismatch { .. } => None,
         AnalysisResultPayload::OperatingPoint {
             temperature_mode,
             temperature_celsius,

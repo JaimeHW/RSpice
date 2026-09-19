@@ -933,6 +933,41 @@ fn encode_result_payload(
                 }
             }
         }
+        // Written unconditionally of `encoding_version`. The per-era rules
+        // above replay an older encoding over a payload that era could
+        // contain; no build before this one could write a DC mismatch
+        // payload, so there is no older encoding of it to replay.
+        AnalysisResultPayload::DcMismatch { evidence } => {
+            writer.u8(11);
+            writer.string(&evidence.output);
+            writer.string(&evidence.output_unit);
+            writer.f64(evidence.nominal_value);
+            writer.f64(evidence.sigma_multiplier);
+            writer.f64(evidence.sigma_total);
+            writer.f64(evidence.sigma_mismatch);
+            writer.f64(evidence.sigma_process);
+            writer.bool(evidence.include_mismatch);
+            writer.bool(evidence.include_process);
+            writer.u64(evidence.contributor_limit);
+            writer.f64(evidence.threshold);
+            writer.bool(evidence.normalized_contributions);
+            writer.u64(evidence.applied_correlations_mismatch);
+            writer.u64(evidence.applied_correlations_process);
+            writer.u64(evidence.evaluated_contributors);
+            writer.sequence(evidence.contributors.len());
+            for row in &evidence.contributors {
+                writer.string(&row.instance);
+                writer.string(&row.parameter);
+                writer.u8(match row.scope {
+                    super::DcMismatchScopeEvidence::Mismatch => 0,
+                    super::DcMismatchScopeEvidence::Process => 1,
+                });
+                writer.f64(row.sigma_parameter);
+                writer.f64(row.sensitivity);
+                writer.f64(row.contribution);
+                writer.f64(row.share);
+            }
+        }
         AnalysisResultPayload::ScalarMeasurements { values } => {
             writer.u8(2);
             writer.sequence(values.len());

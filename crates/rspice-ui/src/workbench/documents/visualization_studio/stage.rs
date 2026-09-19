@@ -491,6 +491,7 @@ pub(super) fn retained_pole_zero_payload(
         | AnalysisResultPayload::PssFloquet { .. }
         | AnalysisResultPayload::Pstb { .. }
         | AnalysisResultPayload::Sensitivity { .. }
+        | AnalysisResultPayload::DcMismatch { .. }
         | AnalysisResultPayload::TransferFunction { .. }
         | AnalysisResultPayload::ScalarMeasurements { .. }
         | AnalysisResultPayload::Reliability { .. }
@@ -515,11 +516,15 @@ pub(super) fn retained_sensitivity_payload(
             result_mode,
             rows,
         } => Some((output.as_str(), *result_mode, rows.as_slice())),
+        // The Studio pane's exact-row machinery is sensitivity-only and says
+        // so through its own refusal; a DC mismatch payload is declined here
+        // rather than half-rendered.
         AnalysisResultPayload::DcSweep { .. }
         | AnalysisResultPayload::OperatingPoint { .. }
         | AnalysisResultPayload::PoleZero { .. }
         | AnalysisResultPayload::PssFloquet { .. }
         | AnalysisResultPayload::Pstb { .. }
+        | AnalysisResultPayload::DcMismatch { .. }
         | AnalysisResultPayload::TransferFunction { .. }
         | AnalysisResultPayload::ScalarMeasurements { .. }
         | AnalysisResultPayload::Reliability { .. }

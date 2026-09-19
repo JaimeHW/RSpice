@@ -654,3 +654,69 @@ fn convergence_worker_transport_rejects_inline_and_malformed_quality_buffers() {
             .contains("unsupported")
     );
 }
+
+/// A DC mismatch result survives the worker wire intact.
+///
+/// Every number the sheet draws and every trimming control that explains the
+/// list crosses in one typed evidence value, so this walks the whole payload
+/// rather than a sigma or two: a field dropped in transport would leave a
+/// browser run drawing a cumulative share against the wrong denominator.
+#[test]
+fn a_dc_mismatch_result_survives_the_worker_wire() {
+    use crate::state::{
+        DcMismatchContributorEvidence, DcMismatchEvidence, DcMismatchScopeEvidence,
+    };
+
+    let evidence = DcMismatchEvidence {
+        output: "V(OUT,IN)".to_owned(),
+        output_unit: "V".to_owned(),
+        nominal_value: 2.0 / 3.0,
+        sigma_multiplier: 3.0,
+        sigma_total: (5.0_f64).sqrt() * 1.0e-3,
+        sigma_mismatch: 2.0e-3,
+        sigma_process: 1.0e-3,
+        include_mismatch: true,
+        include_process: true,
+        contributor_limit: 0,
+        threshold: 0.05,
+        normalized_contributions: false,
+        applied_correlations_mismatch: 0,
+        applied_correlations_process: 1,
+        evaluated_contributors: 6,
+        contributors: vec![
+            DcMismatchContributorEvidence {
+                instance: "R1".to_owned(),
+                parameter: "R1V".to_owned(),
+                scope: DcMismatchScopeEvidence::Mismatch,
+                sigma_parameter: 10.0,
+                sensitivity: 2.0e-4,
+                contribution: 2.0e-3,
+                share: 0.8,
+            },
+            DcMismatchContributorEvidence {
+                instance: "(design)".to_owned(),
+                parameter: "XL".to_owned(),
+                scope: DcMismatchScopeEvidence::Process,
+                sigma_parameter: 1.0,
+                sensitivity: -1.0e-3,
+                contribution: -1.0e-3,
+                share: -0.2,
+            },
+        ],
+    };
+    let result = round_trip_result(SimulationResult::DcMismatch {
+        evidence: std::sync::Arc::new(evidence.clone()),
+    });
+    match result {
+        SimulationResult::DcMismatch { evidence: restored } => {
+            assert_eq!(*restored, evidence);
+            // The signs are what make the allocation readable, so they are
+            // checked as bit patterns rather than as magnitudes.
+            assert_eq!(
+                restored.contributors[1].share.to_bits(),
+                (-0.2_f64).to_bits()
+            );
+        }
+        other => panic!("expected dc mismatch result, got {other:?}"),
+    }
+}

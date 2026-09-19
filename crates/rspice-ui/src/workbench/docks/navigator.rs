@@ -3369,6 +3369,14 @@ fn retained_result_artifacts(
                 None,
                 ResultViewer::Contribution,
             ),
+            AnalysisResultPayload::DcMismatch { evidence } => (
+                "payload/dc-mismatch",
+                "DC mismatch contributors",
+                ResultArtifactKind::Contribution,
+                evidence.contributors.len(),
+                None,
+                ResultViewer::Contribution,
+            ),
             AnalysisResultPayload::ScalarMeasurements { values } => (
                 "payload/scalar-measurements",
                 "Scalar result values",

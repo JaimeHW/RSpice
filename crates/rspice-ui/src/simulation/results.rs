@@ -270,6 +270,15 @@ pub enum SimulationResult {
         gain: Option<f64>,
     },
 
+    /// Linearized DC mismatch spread and its ranked contributors.
+    ///
+    /// The whole answer is the evidence: `.DCMATCH` produces five standard
+    /// deviations and one ranked table, no waveform, and nothing a viewer
+    /// should re-derive.
+    DcMismatch {
+        evidence: std::sync::Arc<crate::state::DcMismatchEvidence>,
+    },
+
     /// Sensitivity analysis results
     Sensitivity {
         /// Canonical output expression evaluated by the analysis.

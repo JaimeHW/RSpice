@@ -566,6 +566,9 @@ fn scalar_and_complex_analysis_conversion_retains_exact_typed_payloads() {
         })
     );
 
+    // Re-pointed off DC mismatch, which now owns a typed payload and refuses
+    // loose scalars the way pole-zero, sensitivity and TF do. Disto still
+    // reports through measurements alone.
     let scalar = controller.convert_to_analysis_result_with_metadata_owned(
         crate::simulation::SimulationResult::MeasurementsOnly {
             measurements: std::collections::HashMap::from([
@@ -573,8 +576,8 @@ fn scalar_and_complex_analysis_conversion_retains_exact_typed_payloads() {
                 ("gain".to_owned(), 10.0),
             ]),
         },
-        AnalysisType::DcMismatch,
-        "DC mismatch",
+        AnalysisType::Disto,
+        "Distortion",
     );
     assert_eq!(
         scalar.result_payload,
@@ -585,6 +588,89 @@ fn scalar_and_complex_analysis_conversion_retains_exact_typed_payloads() {
             ]),
         })
     );
+}
+
+/// Loose scalars cannot stand in for DC mismatch evidence.
+///
+/// The kind owns a typed payload now, so a run that reported only
+/// measurements against it is a run that lost its answer — and a sheet handed
+/// those scalars would draw a contributor table out of nothing.
+#[test]
+fn loose_scalars_cannot_stand_in_for_dc_mismatch_evidence() {
+    let controller = SimulationController::new();
+    let retained = controller.convert_to_analysis_result_with_metadata_owned(
+        crate::simulation::SimulationResult::MeasurementsOnly {
+            measurements: std::collections::HashMap::from([("sigma_total".to_owned(), 0.7)]),
+        },
+        AnalysisType::DcMismatch,
+        "DC mismatch",
+    );
+    assert!(
+        retained.result_payload.is_none(),
+        "{:?}",
+        retained.result_payload
+    );
+}
+
+/// A finished DC mismatch run is retained as its own typed payload.
+#[test]
+fn a_dc_mismatch_result_is_retained_as_its_typed_payload() {
+    let controller = SimulationController::new();
+    let evidence = std::sync::Arc::new(dc_mismatch_evidence());
+    let retained = controller.convert_to_analysis_result_with_metadata_owned(
+        crate::simulation::SimulationResult::DcMismatch {
+            evidence: std::sync::Arc::clone(&evidence),
+        },
+        AnalysisType::DcMismatch,
+        "DC mismatch",
+    );
+    assert_eq!(
+        retained.result_payload,
+        Some(AnalysisResultPayload::DcMismatch { evidence })
+    );
+}
+
+/// A two-contributor divider spread, shaped as the engine produces one.
+fn dc_mismatch_evidence() -> crate::state::DcMismatchEvidence {
+    use crate::state::{DcMismatchContributorEvidence, DcMismatchScopeEvidence};
+
+    crate::state::DcMismatchEvidence {
+        output: "V(OUT)".to_owned(),
+        output_unit: "V".to_owned(),
+        nominal_value: 2.0 / 3.0,
+        sigma_multiplier: 3.0,
+        sigma_total: (5.0_f64).sqrt() * 1.0e-3,
+        sigma_mismatch: (5.0_f64).sqrt() * 1.0e-3,
+        sigma_process: 0.0,
+        include_mismatch: true,
+        include_process: false,
+        contributor_limit: 10,
+        threshold: 0.0,
+        normalized_contributions: true,
+        applied_correlations_mismatch: 0,
+        applied_correlations_process: 0,
+        evaluated_contributors: 2,
+        contributors: vec![
+            DcMismatchContributorEvidence {
+                instance: "R1".to_owned(),
+                parameter: "R1V".to_owned(),
+                scope: DcMismatchScopeEvidence::Mismatch,
+                sigma_parameter: 10.0,
+                sensitivity: 2.0e-4,
+                contribution: 2.0e-3,
+                share: 0.8,
+            },
+            DcMismatchContributorEvidence {
+                instance: "R2".to_owned(),
+                parameter: "R2V".to_owned(),
+                scope: DcMismatchScopeEvidence::Mismatch,
+                sigma_parameter: 10.0,
+                sensitivity: -1.0e-4,
+                contribution: -1.0e-3,
+                share: 0.2,
+            },
+        ],
+    }
 }
 
 #[test]

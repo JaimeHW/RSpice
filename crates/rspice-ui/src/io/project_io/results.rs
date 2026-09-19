@@ -26,8 +26,9 @@ mod legacy_digests;
 mod legacy_evidence;
 pub(super) use legacy_evidence::validate_result_fields_for_source_schema;
 use legacy_evidence::{
-    reject_digital_buses_before_schema_v19, reject_legacy_operating_point_evidence,
-    reject_legacy_waveform_units, reject_measurement_verification_before_schema_v18,
+    reject_dc_mismatch_payload_before_schema_v27, reject_digital_buses_before_schema_v19,
+    reject_legacy_operating_point_evidence, reject_legacy_waveform_units,
+    reject_measurement_verification_before_schema_v18,
     reject_periodic_stability_payload_before_schema_v17,
     reject_pole_zero_evidence_before_schema_v16, require_legacy_result_digest_absence,
     restore_legacy_measurement_verification, synthesize_legacy_periodic_markers,
@@ -180,6 +181,10 @@ impl ProjectSimulationResultsData {
                 "result schemas before v27 cannot contain current impulse histories".into(),
             );
         }
+        // Beside the guard above, and before the v26 fast path: an older
+        // label over a payload that era could not have produced is an edited
+        // file wearing an authentic older digest.
+        reject_dc_mismatch_payload_before_schema_v27(self, source_schema)?;
         if source_schema == SENSITIVITY_AVAILABILITY_RESULTS_SCHEMA_VERSION {
             for run in &self.runs {
                 legacy_digests::validate_v26_result_digests(run)?;

@@ -64,6 +64,38 @@ pub(super) fn reject_periodic_stability_payload_before_schema_v17(
     Ok(())
 }
 
+/// A container labelled older than v27 cannot carry DC mismatch evidence,
+/// because no build before v27 could write one.
+///
+/// The schema version is not bumped for this payload: the version selects the
+/// per-era digest RULE SET, and a new payload variant seals nothing in any
+/// existing file and changes no existing payload's encoding. What the era
+/// guards do need is this: an older label over a payload that era could not
+/// have produced is an edited file wearing an authentic older digest.
+pub(super) fn reject_dc_mismatch_payload_before_schema_v27(
+    results: &ProjectSimulationResultsData,
+    source_schema: u32,
+) -> Result<(), String> {
+    if source_schema >= DC_MISMATCH_RESULTS_SCHEMA_VERSION {
+        return Ok(());
+    }
+    for run in &results.runs {
+        for analysis in &run.analyses {
+            if matches!(
+                analysis.result_payload.as_ref(),
+                Some(AnalysisResultPayload::DcMismatch { .. })
+            ) {
+                return Err(format!(
+                    "schema-v{source_schema} analysis {} contains DC mismatch evidence, which no \
+                     build before schema v27 wrote",
+                    analysis.id
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 pub(super) fn synthesize_legacy_periodic_markers(
     run: &mut ProjectSimulationRun,
 ) -> Result<(), String> {

@@ -758,7 +758,7 @@ const fn domain_meta(analysis: AnalysisType) -> DomainMeta {
             axis: "scalar operating point",
             precision: "f64",
         },
-        A::DcSweep | A::Parametric | A::DcMismatch => DomainMeta {
+        A::DcSweep | A::Parametric => DomainMeta {
             axis: "swept source or parameter",
             precision: "f64",
         },
@@ -786,7 +786,10 @@ const fn domain_meta(analysis: AnalysisType) -> DomainMeta {
             axis: "frequency or operating point",
             precision: "complex128",
         },
-        A::Sensitivity => DomainMeta {
+        // `.DCMATCH` sweeps nothing: it solves one operating point and
+        // reports a ranked list over the design's statistical variables,
+        // which is the same abscissa a sensitivity report has.
+        A::Sensitivity | A::DcMismatch => DomainMeta {
             axis: "parameter vector",
             precision: "f64",
         },
@@ -1150,6 +1153,11 @@ fn payload_values_label(payload: &AnalysisResultPayload) -> String {
         AnalysisResultPayload::Sensitivity { rows, .. } => {
             format!("{} sensitivities", rows.len())
         }
+        AnalysisResultPayload::DcMismatch { evidence } => format!(
+            "{} of {} mismatch contributors",
+            evidence.retained_contributors(),
+            evidence.evaluated_contributors
+        ),
         AnalysisResultPayload::ScalarMeasurements { values } => {
             format!("{} scalar values", values.len())
         }

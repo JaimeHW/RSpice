@@ -1526,6 +1526,10 @@ const BOUND_OUTPUT_RESULTS_SCHEMA_VERSION: u32 = 24;
 const COMPLEX_EXPRESSION_RESULTS_SCHEMA_VERSION: u32 = 25;
 const SENSITIVITY_AVAILABILITY_RESULTS_SCHEMA_VERSION: u32 = 26;
 const CURRENT_IMPULSE_RESULTS_SCHEMA_VERSION: u32 = 27;
+/// The era DC mismatch evidence became writable. Named separately from the
+/// current version even though it shares the number: the guard says "no build
+/// before v27 wrote one", which stays true when the schema next moves.
+const DC_MISMATCH_RESULTS_SCHEMA_VERSION: u32 = 27;
 const PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION: u32 = CURRENT_IMPULSE_RESULTS_SCHEMA_VERSION;
 
 const LEGACY_PROJECT_ID_NAMESPACE: uuid::Uuid =

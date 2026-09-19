@@ -123,6 +123,17 @@ impl SimulationResult {
                     sensitivities.get(key).and_then(|value| value.value())
                 }
             }
+            // The core result document's own scalar names, plus a `dcmatch.`
+            // spelling: bounding a quoted sigma is why an engineer runs this
+            // analysis, so every one of the five answers a specification.
+            SimulationResult::DcMismatch { evidence } => dc_mismatch_scalars(evidence)
+                .into_iter()
+                .find(|(name, _)| {
+                    key.eq_ignore_ascii_case(name)
+                        || key.eq_ignore_ascii_case(&format!("dcmatch.{name}"))
+                })
+                .map(|(_, value)| value)
+                .filter(|value| value.is_finite()),
             SimulationResult::TransferFunction {
                 gain,
                 input_resistance,
@@ -288,6 +299,13 @@ impl SimulationResult {
                         .map(|value| (format!("normalized:{name}"), value))
                 }))
                 .collect(),
+            SimulationResult::DcMismatch { evidence } => dc_mismatch_scalars(evidence)
+                .into_iter()
+                .filter(|(_, value)| value.is_finite())
+                .flat_map(|(name, value)| {
+                    [(name.to_owned(), value), (format!("dcmatch.{name}"), value)]
+                })
+                .collect(),
             SimulationResult::TransferFunction {
                 gain,
                 input_resistance,
@@ -316,6 +334,22 @@ impl SimulationResult {
             SimulationResult::MeasurementsOnly { measurements } => measurements.clone(),
         }
     }
+}
+
+/// The five DC mismatch scalars, under the names the core result document
+/// gives them.
+///
+/// One list, read by both the single-name lookup and the whole map, so a
+/// specification that resolves by name and a report that lists what is
+/// available cannot offer different sets.
+fn dc_mismatch_scalars(evidence: &crate::state::DcMismatchEvidence) -> [(&'static str, f64); 5] {
+    [
+        ("nominal_value", evidence.nominal_value),
+        ("sigma_total", evidence.sigma_total),
+        ("sigma_mismatch", evidence.sigma_mismatch),
+        ("sigma_process", evidence.sigma_process),
+        ("quoted_sigma", evidence.quoted_sigma()),
+    ]
 }
 
 fn tf_scalar_finite(value: &TransferFunctionScalar) -> Option<f64> {

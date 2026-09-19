@@ -292,6 +292,22 @@ impl SimulationController {
                 }
             }
 
+            SimulationResult::DcMismatch { evidence } => {
+                state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(
+                    "DC mismatch: {} nominal {:.6e}, sigma {:.6e}, {} sigma {:.6e}",
+                    evidence.output,
+                    evidence.nominal_value,
+                    evidence.sigma_total,
+                    evidence.sigma_multiplier,
+                    evidence.quoted_sigma()
+                )));
+                state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(
+                    "  {} of {} contributors retained",
+                    evidence.retained_contributors(),
+                    evidence.evaluated_contributors
+                )));
+            }
+
             SimulationResult::TransferFunction {
                 input_source,
                 output_expression,

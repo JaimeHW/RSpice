@@ -636,6 +636,13 @@ impl SimulationController {
                 self.analysis_result_with_validated_payload(analysis_type, label, payload)
             }
 
+            SimulationResult::DcMismatch { evidence } => self
+                .analysis_result_with_validated_payload(
+                    analysis_type,
+                    label,
+                    AnalysisResultPayload::DcMismatch { evidence },
+                ),
+
             SimulationResult::TransferFunction {
                 input_source,
                 output_expression,

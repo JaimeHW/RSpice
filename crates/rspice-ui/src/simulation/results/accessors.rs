@@ -165,6 +165,10 @@ impl SimulationResult {
                         .keys()
                         .all(|parameter| normalized.contains_key(parameter))
             }
+            // A spread is an answer even when it is zero and even when no
+            // contributor cleared the card's threshold: what makes this
+            // result empty is having no probe to report against.
+            SimulationResult::DcMismatch { evidence } => !evidence.output.trim().is_empty(),
             SimulationResult::TransferFunction {
                 input_source,
                 output_expression,
@@ -212,6 +216,7 @@ impl SimulationResult {
             SimulationResult::Noise { .. } => "Noise Analysis",
             SimulationResult::PoleZero { .. } => "Pole-Zero",
             SimulationResult::Sensitivity { .. } => "Sensitivity",
+            SimulationResult::DcMismatch { .. } => "DC Mismatch",
             SimulationResult::TransferFunction { .. } => "Transfer Function",
             SimulationResult::MonteCarlo { .. } => "Monte Carlo",
             SimulationResult::Parametric { .. } => "Parametric",
