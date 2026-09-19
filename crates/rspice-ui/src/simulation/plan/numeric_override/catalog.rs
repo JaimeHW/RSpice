@@ -266,6 +266,7 @@ impl OptionPackage {
 
     /// The package name alone, which is what the parser matches. Empty for the
     /// global set, which has no name because it has no selector.
+    #[cfg(test)]
     #[must_use]
     pub const fn name(self) -> &'static str {
         match self {
@@ -566,6 +567,7 @@ impl NumericOverrideOption {
     }
 
     /// The card this option's key rides on.
+    #[cfg(test)]
     #[must_use]
     pub fn package(self) -> OptionPackage {
         self.spec().package
