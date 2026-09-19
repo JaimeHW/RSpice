@@ -40,7 +40,7 @@ impl SchematicState {
             self.pending_bus_tap = None;
         }
         if tool != Tool::Place(ComponentType::Port) {
-            self.pending_port = None;
+            self.pending_port_sequence = None;
         }
         if tool != Tool::DesignNote {
             self.pending_design_note = None;
@@ -110,7 +110,7 @@ impl SchematicState {
     pub fn cancel_tool(&mut self) {
         self.cancel_routing_gestures();
         self.pending_bus_tap = None;
-        self.pending_port = None;
+        self.pending_port_sequence = None;
         self.pending_design_note = None;
         self.pending_documentation_shape = None;
         self.documentation_shape_drawing.clear();
@@ -135,7 +135,7 @@ impl SchematicState {
         }
         if self.tool != Tool::Select
             || self.pending_bus_tap.is_some()
-            || self.pending_port.is_some()
+            || self.pending_port_sequence.is_some()
             || self.pending_design_note.is_some()
             || self.pending_documentation_shape.is_some()
             || !self.documentation_shape_drawing.points.is_empty()

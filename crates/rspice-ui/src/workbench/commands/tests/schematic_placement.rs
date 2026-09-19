@@ -57,7 +57,7 @@ fn bus_commands_have_stable_mockup_identities() {
 #[test]
 fn place_pin_command_has_the_exact_mockup_identity() {
     assert_eq!(Command::PlacePin.stable_id(), "place-pin");
-    assert_eq!(Command::PlacePin.spec().label, "Place pin or port\u{2026}");
+    assert_eq!(Command::PlacePin.spec().label, "Create pins\u{2026}");
     assert_eq!(Command::PlacePin.spec().group, "Design");
     assert_eq!(
         Command::from_stable_id("place-pin"),
@@ -122,12 +122,21 @@ fn place_pin_opens_the_isolated_mockup_transaction_without_mutating_the_document
     Command::PlacePin.execute(&mut app);
 
     assert!(app.state.dialogs.pin_port.open);
-    assert_eq!(app.state.dialogs.pin_port.name, "BIAS_EN");
+    // Empty on first use: the form used to open holding a sample name.
+    assert_eq!(app.state.dialogs.pin_port.names, "");
+    assert_eq!(
+        app.state.dialogs.pin_port.direction,
+        crate::state::PortDirection::In
+    );
+    assert_eq!(
+        app.state.dialogs.pin_port.signal_type,
+        crate::state::PortSignalType::Analog
+    );
     assert_eq!(app.state.schematic.components, components);
     assert_eq!(app.state.schematic.topology_version(), topology);
     assert_eq!(app.state.schematic.is_dirty, dirty);
     assert_eq!(app.state.schematic.tool, tool);
-    assert!(app.state.schematic.pending_port.is_none());
+    assert!(app.state.schematic.pending_port_sequence.is_none());
     assert!(!app.state.schematic.can_undo());
 }
 
@@ -185,7 +194,7 @@ fn every_raw_port_command_route_is_projected_through_the_same_dialog() {
 
     assert!(app.state.dialogs.pin_port.open);
     assert_eq!(app.state.schematic.tool, Tool::Select);
-    assert!(app.state.schematic.pending_port.is_none());
+    assert!(app.state.schematic.pending_port_sequence.is_none());
     assert!(app.state.schematic.components.is_empty());
 }
 

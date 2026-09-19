@@ -1472,18 +1472,7 @@ impl Command {
             Self::PlaceProbe => set_tool(app, Tool::Probe),
             Self::PlacePin => {
                 activate_workspace(app, Workspace::Design);
-                let name = app.state.schematic.suggested_port_name("BIAS_EN");
-                let design_execution_epoch = app.state.design_execution_epoch;
-                let active_schematic_epoch = app.state.active_schematic_epoch;
-                let topology_version = app.state.schematic.topology_version();
-                let view_path = app.state.workspace.active_view.display_path();
-                app.state.dialogs.pin_port.open(
-                    name,
-                    design_execution_epoch,
-                    active_schematic_epoch,
-                    topology_version,
-                    view_path,
-                );
+                crate::workbench::app::open_create_pins(&mut app.state);
             }
             Self::PlaceText => {
                 activate_workspace(app, Workspace::Design);

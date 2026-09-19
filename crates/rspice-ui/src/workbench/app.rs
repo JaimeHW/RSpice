@@ -147,6 +147,7 @@ pub(crate) use dialogs::design_review_comments::{
     DesignReviewCommentsDialogState, open_design_review_comments,
 };
 
+pub(crate) use dialogs::placement::pin_port::open_create_pins;
 pub(crate) use dialogs::project::new_project::open_new_project_dialog;
 
 pub(crate) use dialogs::project_revision_history::{

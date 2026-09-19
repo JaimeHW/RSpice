@@ -47,7 +47,7 @@ const DESIGN_DIRECT_TOOLBAR_COMMANDS: [(Command, WorkbenchIcon, &str); 11] = [
         WorkbenchIcon::ArrowRight,
         "Off-sheet connector",
     ),
-    (Command::PlacePin, WorkbenchIcon::Pin, "Place pin or port"),
+    (Command::PlacePin, WorkbenchIcon::Pin, "Create pin"),
     (Command::PlaceProbe, WorkbenchIcon::Probe, "Probe signal"),
     (
         Command::PlaceText,
@@ -2173,7 +2173,7 @@ mod tests {
                 "Place junction",
                 "Net label",
                 "Off-sheet connector",
-                "Place pin or port",
+                "Create pin",
                 "Probe signal",
                 "Place text or note",
             ]

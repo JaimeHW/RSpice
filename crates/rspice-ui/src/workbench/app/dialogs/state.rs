@@ -829,61 +829,55 @@ impl DescendHierarchyDialogState {
     }
 }
 
-/// Isolated draft for the mockup-owned Place pin or port transaction.
-#[derive(Debug, Clone, Default)]
+/// Draft for Create pins.
+///
+/// The contract fields outlive a close, as they do in Virtuoso: a reader who
+/// has just placed four logic inputs is far more likely to place a fifth than
+/// to want the form's defaults back. The names and the document authority do
+/// not — those belong to one batch, in one document.
+#[derive(Debug, Clone)]
 pub(crate) struct PinPortDialogState {
     pub(crate) open: bool,
-    pub(crate) name: String,
-    pub(crate) direction_type: crate::state::PortDirectionType,
+    /// Whitespace-separated pin names, exactly as typed.
+    pub(crate) names: String,
+    pub(crate) direction: crate::state::PortDirection,
+    pub(crate) signal_type: crate::state::PortSignalType,
     pub(crate) discipline: crate::state::PortDiscipline,
-    pub(crate) design_execution_epoch: u64,
-    pub(crate) active_schematic_epoch: u64,
-    pub(crate) topology_version: u64,
-    pub(crate) view_path: String,
-    pub(crate) dirty: bool,
-    pub(crate) discard_confirm: bool,
+    /// Whether the reader has picked a discipline. Until they do, it follows
+    /// the signal type.
+    pub(crate) discipline_touched: bool,
+    /// The document this batch was named for.
+    pub(crate) authority: Option<crate::state::PlacementAuthority>,
+    /// The last name armed this session, which the next open suggests from.
+    pub(crate) last_name: String,
+}
+
+impl Default for PinPortDialogState {
+    fn default() -> Self {
+        Self {
+            open: false,
+            names: String::new(),
+            direction: crate::state::PortDirection::In,
+            signal_type: crate::state::PortSignalType::Analog,
+            discipline: crate::state::PortDiscipline::Electrical,
+            discipline_touched: false,
+            authority: None,
+            last_name: String::new(),
+        }
+    }
 }
 
 impl PinPortDialogState {
-    pub(crate) fn open(
-        &mut self,
-        name: String,
-        design_execution_epoch: u64,
-        active_schematic_epoch: u64,
-        topology_version: u64,
-        view_path: String,
-    ) {
-        *self = Self {
-            open: true,
-            name,
-            direction_type: crate::state::PortDirectionType::default(),
-            discipline: crate::state::PortDiscipline::default(),
-            design_execution_epoch,
-            active_schematic_epoch,
-            topology_version,
-            view_path,
-            dirty: false,
-            discard_confirm: false,
-        };
+    pub(crate) fn open(&mut self, names: String, authority: crate::state::PlacementAuthority) {
+        self.open = true;
+        self.names = names;
+        self.authority = Some(authority);
     }
 
     pub(crate) fn close(&mut self) {
-        *self = Self::default();
-    }
-
-    pub(crate) fn mark_edited(&mut self) {
-        self.dirty = true;
-        self.discard_confirm = false;
-    }
-
-    pub(crate) fn attempt_close(&mut self) -> bool {
-        if self.dirty && !self.discard_confirm {
-            self.discard_confirm = true;
-            false
-        } else {
-            self.close();
-            true
-        }
+        self.open = false;
+        self.names.clear();
+        self.authority = None;
     }
 }
 

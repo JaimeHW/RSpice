@@ -22,7 +22,10 @@ impl PropertyRegistry {
                 .with_display_name("Port name")
                 .with_description("Named net and containing-cell interface terminal")
                 .with_type(PropertyType::String)
-                .with_default(PropertyValue::string("BIAS_EN"))
+                // No default: a pin's name is the one thing about it nobody
+                // else can supply, and a sample name here reached the property
+                // sheet of every unnamed port.
+                .with_default(PropertyValue::string(""))
                 .with_order(1)
                 .with_category("Interface")
                 .required(),

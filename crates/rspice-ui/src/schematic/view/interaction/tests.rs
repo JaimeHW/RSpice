@@ -11,7 +11,7 @@ use crate::simulation::netlist_gen::extraction::extract;
 use crate::state::{
     Bus, BusDeclaration, BusSlice, BusTap, BusTapOrientation, Component, ComponentType,
     DesignNoteKind, DocumentationShapeKind, Junction, NetLabel, PendingDesignNotePlacement,
-    PendingDocumentationShapePlacement, PendingPortPlacement, PortDirection, PortDirectionType,
+    PendingDocumentationShapePlacement, PendingPortSequence, PlacementAuthority, PortDirection,
     PortDiscipline, PortSignalType, SavedOutput, SavedOutputCompatibility, SavedOutputKind,
     SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming, SchematicProbe, SheetDefinition,
     SheetPortPolicy, SheetTemplate, Tool, WaveformData, Wire,
@@ -837,23 +837,29 @@ fn cancelling_armed_move_preserves_geometry_selection_and_history() {
     assert!(!state.schematic.can_undo());
 }
 
-#[test]
-fn validated_port_contract_places_once_and_undo_redo_is_exact() {
-    let mut state = AppState::default();
-    let pending = PendingPortPlacement::new(
-        "BIAS_EN",
-        PortDirectionType::InputLogic,
-        PortDiscipline::Logic,
-        state.schematic.topology_version(),
-        state.schematic.next_interface_order(),
-    )
-    .with_document_authority(
+/// Arm a sequence of `names` on `state`, for the document `state` is in.
+fn arm_pins(state: &mut AppState, names: &[&str], direction: PortDirection) {
+    let authority = PlacementAuthority::new(
         state.design_execution_epoch,
         state.active_schematic_epoch,
         state.workspace.active_view.display_path(),
     );
-    state.schematic.pending_port = Some(pending);
+    state.schematic.pending_port_sequence = Some(
+        PendingPortSequence::new(
+            names.iter().map(|name| (*name).to_owned()),
+            direction,
+            PortSignalType::Logic,
+            PortDiscipline::Logic,
+        )
+        .with_authority(authority),
+    );
     state.schematic.tool = Tool::Place(ComponentType::Port);
+}
+
+#[test]
+fn validated_port_contract_places_once_and_undo_redo_is_exact() {
+    let mut state = AppState::default();
+    arm_pins(&mut state, &["BIAS_EN"], PortDirection::In);
 
     place_component(&mut state, ComponentType::Port, Point::new(20, 30));
 
@@ -866,8 +872,9 @@ fn validated_port_contract_places_once_and_undo_redo_is_exact() {
     assert_eq!(contract.signal_type, PortSignalType::Logic);
     assert_eq!(contract.discipline, PortDiscipline::Logic);
     assert!(!contract.documentation.is_empty());
+    // One name, so the batch is finished and the tool returns to Select.
     assert_eq!(state.schematic.tool, Tool::Select);
-    assert!(state.schematic.pending_port.is_none());
+    assert!(state.schematic.pending_port_sequence.is_none());
     assert_eq!(
         state.schematic.undo_description(),
         Some("place interface port")
@@ -877,6 +884,101 @@ fn validated_port_contract_places_once_and_undo_redo_is_exact() {
     assert!(state.schematic.components.is_empty());
     assert!(state.schematic.redo());
     assert_eq!(state.schematic.components, [placed]);
+}
+
+/// The batch: one click per name, one undo record per click, the interface
+/// order following the document, and the tool ending itself when the names run
+/// out rather than on the first click.
+#[test]
+fn each_click_places_the_next_name_with_the_next_interface_order() {
+    let mut state = AppState::default();
+    arm_pins(&mut state, &["INP", "INN", "OUT"], PortDirection::In);
+
+    for (index, expected) in ["INP", "INN", "OUT"].into_iter().enumerate() {
+        place_component(
+            &mut state,
+            ComponentType::Port,
+            Point::new(20 * (index as i32 + 1), 30),
+        );
+        assert_eq!(state.schematic.components.len(), index + 1);
+        let placed = &state.schematic.components[index];
+        assert_eq!(placed.value, expected);
+        assert_eq!(
+            placed
+                .port_contract()
+                .and_then(|contract| contract.netlist_order),
+            Some(index + 1)
+        );
+        if index < 2 {
+            assert_eq!(
+                state.schematic.tool,
+                Tool::Place(ComponentType::Port),
+                "the tool stays armed while names remain"
+            );
+            assert_eq!(
+                state
+                    .schematic
+                    .pending_port_sequence
+                    .as_ref()
+                    .and_then(PendingPortSequence::next_name),
+                Some(["INP", "INN", "OUT"][index + 1])
+            );
+        }
+    }
+
+    assert_eq!(state.schematic.tool, Tool::Select);
+    assert!(state.schematic.pending_port_sequence.is_none());
+    for expected in [2, 1, 0] {
+        assert!(state.schematic.undo());
+        assert_eq!(state.schematic.components.len(), expected);
+    }
+}
+
+/// The ghost's rotation and mirror are the placed pin's rotation and mirror:
+/// R and M act on the object, not on a decoration of it.
+#[test]
+fn rotation_and_mirror_of_the_ghost_land_on_the_placed_pin() {
+    let mut state = AppState::default();
+    arm_pins(&mut state, &["OUT"], PortDirection::Out);
+    state.schematic.preview_rotation = crate::state::Rotation::R90;
+    state.schematic.preview_mirror_h = true;
+
+    place_component(&mut state, ComponentType::Port, Point::new(20, 30));
+
+    let placed = &state.schematic.components[0];
+    assert_eq!(placed.rotation, crate::state::Rotation::R90);
+    assert!(placed.mirror_h);
+}
+
+/// A name taken between arming and the click is refused by the model, and the
+/// batch survives: the reader can free the name and click again.
+#[test]
+fn a_name_taken_after_arming_is_refused_at_the_click_and_the_sequence_survives() {
+    let mut state = AppState::default();
+    arm_pins(&mut state, &["EN", "OUT"], PortDirection::Out);
+    let taken = state
+        .schematic
+        .add_component(ComponentType::Port, Point::origin());
+    state
+        .schematic
+        .components
+        .iter_mut()
+        .find(|component| component.id == taken)
+        .expect("the placed port exists")
+        .value = "en".to_owned();
+
+    place_component(&mut state, ComponentType::Port, Point::new(20, 30));
+
+    assert_eq!(state.schematic.components.len(), 1, "nothing was placed");
+    assert_eq!(state.schematic.tool, Tool::Place(ComponentType::Port));
+    assert_eq!(
+        state
+            .schematic
+            .pending_port_sequence
+            .as_ref()
+            .and_then(PendingPortSequence::next_name),
+        Some("EN")
+    );
 }
 
 #[test]
@@ -1138,54 +1240,31 @@ fn port_placement_without_a_current_validated_contract_fails_closed() {
     assert!(state.schematic.components.is_empty());
     assert!(!state.schematic.can_undo());
     assert_eq!(state.schematic.tool, Tool::Select);
-    assert!(state.schematic.pending_port.is_none());
+    assert!(state.schematic.pending_port_sequence.is_none());
 }
 
+/// A topology change no longer ends a batch. It cannot: the first pin placed
+/// bumps the version, so a batch that refused a changed topology could never
+/// place its second name.
 #[test]
-fn topology_change_rejects_frozen_port_without_partial_mutation() {
+fn a_topology_change_alone_does_not_end_the_sequence() {
     let mut state = AppState::default();
-    state.schematic.pending_port = Some(
-        PendingPortPlacement::new(
-            "OUT",
-            PortDirectionType::OutputAnalog,
-            PortDiscipline::Electrical,
-            state.schematic.topology_version(),
-            state.schematic.next_interface_order(),
-        )
-        .with_document_authority(
-            state.design_execution_epoch,
-            state.active_schematic_epoch,
-            state.workspace.active_view.display_path(),
-        ),
-    );
-    state.schematic.tool = Tool::Place(ComponentType::Port);
+    arm_pins(&mut state, &["OUT", "OUT_N"], PortDirection::Out);
     state.schematic.bump_topology_version();
 
     place_component(&mut state, ComponentType::Port, Point::new(40, 10));
 
-    assert!(state.schematic.components.is_empty());
-    assert!(!state.schematic.can_undo());
-    assert_eq!(state.schematic.tool, Tool::Select);
+    assert_eq!(state.schematic.components.len(), 1);
+    assert_eq!(state.schematic.components[0].value, "OUT");
+    assert_eq!(state.schematic.tool, Tool::Place(ComponentType::Port));
 }
 
+/// A batch is named for one cell. If that cell is no longer the one on
+/// screen, the batch ends rather than placing its pins somewhere else.
 #[test]
-fn armed_port_rejects_a_replaced_active_document_even_when_topology_matches() {
+fn a_changed_document_ends_the_sequence_without_placing() {
     let mut state = AppState::default();
-    state.schematic.pending_port = Some(
-        PendingPortPlacement::new(
-            "OUT",
-            PortDirectionType::OutputAnalog,
-            PortDiscipline::Electrical,
-            state.schematic.topology_version(),
-            state.schematic.next_interface_order(),
-        )
-        .with_document_authority(
-            state.design_execution_epoch,
-            state.active_schematic_epoch,
-            state.workspace.active_view.display_path(),
-        ),
-    );
-    state.schematic.tool = Tool::Place(ComponentType::Port);
+    arm_pins(&mut state, &["OUT"], PortDirection::Out);
     state.active_schematic_epoch = state.active_schematic_epoch.wrapping_add(1);
 
     place_component(&mut state, ComponentType::Port, Point::new(40, 10));
@@ -1193,6 +1272,7 @@ fn armed_port_rejects_a_replaced_active_document_even_when_topology_matches() {
     assert!(state.schematic.components.is_empty());
     assert!(!state.schematic.can_undo());
     assert_eq!(state.schematic.tool, Tool::Select);
+    assert!(state.schematic.pending_port_sequence.is_none());
 }
 
 #[test]

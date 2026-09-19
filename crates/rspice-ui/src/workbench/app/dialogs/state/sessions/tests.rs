@@ -59,11 +59,8 @@ fn every_retained_dialog_owner_blocks_background_shortcuts() {
     assert_blocks_shortcuts(|dialogs| dialogs.grid_snap_routing.open = true);
     assert_blocks_shortcuts(|dialogs| {
         dialogs.pin_port.open(
-            "BIAS_EN".to_owned(),
-            0,
-            0,
-            0,
-            "user/top/schematic".to_owned(),
+            "EN".to_owned(),
+            crate::state::PlacementAuthority::new(0, 0, "user/top/schematic"),
         );
     });
     assert_blocks_shortcuts(|dialogs| {

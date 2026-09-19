@@ -10,9 +10,9 @@ use egui::{Response, Ui};
 use crate::diagnostics::ConsoleMessage;
 use crate::simulation::netlist_gen::{DesignNet, projection_nets};
 use crate::state::{
-    ComponentType, OccurrenceProbeSpelling, Point, SavedOutput, SavedOutputCompatibility,
-    SavedOutputKind, SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming, SchematicProbe,
-    Tool, ViewType,
+    ComponentType, OccurrenceProbeSpelling, PendingPortSequence, Point, SavedOutput,
+    SavedOutputCompatibility, SavedOutputKind, SavedOutputPolicy, SavedOutputPrecision,
+    SavedOutputStreaming, SchematicProbe, Tool, ViewType,
 };
 use crate::workbench::app_state::{AppState, DragType};
 
@@ -957,48 +957,67 @@ fn place_component(state: &mut AppState, component_type: ComponentType, grid_pos
     }
 }
 
+/// Place the next name of the armed sequence, and stay armed until the names
+/// run out.
+///
+/// A refusal — a name taken since the form was filled, an order that moved —
+/// keeps the sequence: the reader can undo whatever took the name, or click
+/// again somewhere the model accepts. A *document* change ends it, because the
+/// pins were named for a cell that is no longer the one on screen.
 fn place_pending_port(state: &mut AppState, grid_pos: Point) {
-    let Some(pending) = state.schematic.pending_port.clone() else {
+    let Some(sequence) = state.schematic.pending_port_sequence.clone() else {
         state.push_user_message(ConsoleMessage::warning(
-            "Port placement requires a validated interface contract; reopen Place pin or port."
-                .to_owned(),
+            "Pin placement ended: no names are armed.".to_owned(),
         ));
         state.schematic.cancel_tool();
         return;
     };
-    let authority_matches = pending
-        .document_authority
-        .as_ref()
-        .is_some_and(|authority| {
-            authority.design_execution_epoch == state.design_execution_epoch
-                && authority.active_schematic_epoch == state.active_schematic_epoch
-                && authority.view_path == state.workspace.active_view.display_path()
-        });
-    if state.schematic_edit_read_only() || !authority_matches {
+    if state.schematic_edit_read_only() || !placement_authority_matches(state, &sequence) {
         state.push_user_message(ConsoleMessage::warning(
-            "Interface port was not placed: the active schematic authority changed; reopen Place pin or port."
-                .to_owned(),
+            "Pin placement ended: the active schematic changed.".to_owned(),
         ));
         state.schematic.cancel_tool();
         return;
     }
+    let Some(pending) = sequence.next_placement(&state.schematic) else {
+        state.schematic.cancel_tool();
+        return;
+    };
     let name = pending.name.clone();
     match state.schematic.place_pending_port(grid_pos, pending) {
         Ok(stable_id) => {
-            state.schematic.cancel_tool();
+            let more = state
+                .schematic
+                .pending_port_sequence
+                .as_mut()
+                .is_some_and(PendingPortSequence::advance);
+            if !more {
+                state.schematic.cancel_tool();
+            }
             state.sync_active_schematic_to_workspace();
             state.push_user_message(ConsoleMessage::info(format!(
-                "Placed interface port {name} as stable object {stable_id}; generated symbol synchronization completed where applicable."
+                "Placed pin {name} at ({}, {}).",
+                grid_pos.x, grid_pos.y
             )));
-            log::info!("Placed interface port {name} at {:?}", grid_pos);
+            log::info!("Placed interface port {name} as {stable_id} at {grid_pos:?}");
         }
         Err(error) => {
             state.push_user_message(ConsoleMessage::warning(format!(
-                "Interface port was not placed: {error}."
+                "Pin {name} was not placed: {error}."
             )));
-            state.schematic.cancel_tool();
         }
     }
+}
+
+/// `true` when the armed sequence names the document the click landed in.
+fn placement_authority_matches(state: &AppState, sequence: &PendingPortSequence) -> bool {
+    sequence.authority.as_ref().is_some_and(|authority| {
+        authority.matches(
+            state.design_execution_epoch,
+            state.active_schematic_epoch,
+            &state.workspace.active_view.display_path(),
+        )
+    })
 }
 
 fn place_pending_design_note(state: &mut AppState, grid_pos: Point) {

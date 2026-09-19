@@ -537,7 +537,7 @@ impl Command {
                 spec("place-off-sheet-connector", "Off-sheet connector", "Design")
             }
             Self::PlaceProbe => spec("place-probe", "Place probe", "Design"),
-            Self::PlacePin => spec("place-pin", "Place pin or port\u{2026}", "Design"),
+            Self::PlacePin => spec("place-pin", "Create pins\u{2026}", "Design"),
             Self::PlaceText => spec("place-text", "Place text or note\u{2026}", "Design"),
             Self::PlaceShape => spec("place-shape", "Draw documentation shape\u{2026}", "Design"),
             Self::MoveSelection => spec("move-selection", "Move selection", "Design"),

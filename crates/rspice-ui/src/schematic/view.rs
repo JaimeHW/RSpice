@@ -1148,8 +1148,8 @@ pub fn render_schematic_view(
             ShelfDropOutcome::RequiresConfiguration => {
                 state.ui.toasts.warn_with_title(
                     ui.ctx(),
-                    "Configuration required",
-                    "Use Place pin or port to define the interface contract before placement.",
+                    "Create pins first",
+                    "A pin needs a name. Use Create pins (Shift+P).",
                 );
             }
         }

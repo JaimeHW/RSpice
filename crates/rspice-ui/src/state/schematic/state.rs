@@ -18,7 +18,7 @@ use super::documentation_shape::{
 };
 use super::net_label::{Junction, NetLabel};
 use super::point::Point;
-use super::port::PendingPortPlacement;
+use super::port::PendingPortSequence;
 use super::rotation::Rotation;
 use super::selection::Selection;
 use super::snap::SnapEngine;
@@ -428,9 +428,10 @@ pub struct SchematicState {
     #[serde(skip)]
     pub pending_bus_tap: Option<PendingBusTap>,
 
-    /// Validated one-shot interface contract used while the port tool is armed.
+    /// Names still to place, and the contract they share, while the port tool
+    /// is armed.
     #[serde(skip)]
-    pub pending_port: Option<PendingPortPlacement>,
+    pub pending_port_sequence: Option<PendingPortSequence>,
 
     /// Validated one-shot documentation object used while the text tool is armed.
     #[serde(skip)]
@@ -563,7 +564,7 @@ impl Default for SchematicState {
             pending_part_model: None,
             pending_stimulus: None,
             pending_bus_tap: None,
-            pending_port: None,
+            pending_port_sequence: None,
             pending_design_note: None,
             pending_documentation_shape: None,
             documentation_shape_drawing: DocumentationShapeDrawing::default(),
