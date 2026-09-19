@@ -753,6 +753,7 @@ fn select_graded_sweep_mode(draft: &mut AnalysisDraft, mode: usize) -> bool {
         AnalysisDraft::Qpac(setup) => setup.sweep.sweep = mode,
         AnalysisDraft::Qpnoise(setup) => setup.sweep.sweep = mode,
         AnalysisDraft::Qpxf(setup) => setup.sweep.sweep = mode,
+        AnalysisDraft::Sensitivity(setup) => setup.ac_sweep_idx = mode,
         _ => return false,
     }
     true
@@ -825,6 +826,7 @@ fn every_graded_sweep_form_names_what_a_point_is() {
         graded,
         [
             AnalysisKind::Ac,
+            AnalysisKind::Sensitivity,
             AnalysisKind::Stb,
             AnalysisKind::SParameter,
             AnalysisKind::Pac,
