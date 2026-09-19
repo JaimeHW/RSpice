@@ -502,6 +502,15 @@ fn synchronize_activity_stream(ctx: &Context, app: &mut RSpiceApp) {
                 LogSeverity::Info => ToastKind::Info,
                 LogSeverity::Debug | LogSeverity::Trace => return None,
             };
+            // The engine's own account of a run is a log, not a stream of
+            // notices. A solve that states its transient-noise receipt, or
+            // traces a Newton iteration because the form asked it to, would
+            // otherwise raise one notification per line — and there may be two
+            // thousand of them. Its warnings and failures still reach the
+            // notice centre, which is the half a reader has to be told about.
+            if entry.source == LogSource::Engine && matches!(kind, ToastKind::Info) {
+                return None;
+            }
             if !attention.retains(matches!(kind, ToastKind::Error)) {
                 return None;
             }
@@ -1041,6 +1050,77 @@ mod tests {
         );
         synchronize_activity_stream(&ctx, &mut app);
         assert_eq!(app.state.ui.toasts.activity().len(), 1);
+    }
+
+    /// An engine line is a log entry, and the log is not the notice centre.
+    ///
+    /// The Console now carries what `rspice-core` logs during a run: a receipt
+    /// per analysis, and one line per solver step when a form asked for the
+    /// trace. Lifting those would turn a single verbose harmonic-balance solve
+    /// into hundreds of notifications. What the engine *warns* about, and what
+    /// it fails on, still reaches the notice centre — which is the half that is
+    /// worth interrupting a reader for, and which the failure path already
+    /// depends on.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn engine_info_rows_never_reach_the_notice_centre() {
+        let ctx = Context::default();
+        let mut app = RSpiceApp::test_instance();
+        app.state.log_buffer.log(
+            LogSeverity::Info,
+            LogSource::Engine,
+            "Transient noise: 4 device noise source(s) injected from seed 11",
+            None,
+        );
+        app.state.log_buffer.log(
+            LogSeverity::Debug,
+            LogSource::Engine,
+            "HB Newton step 3: relative residual 2.10e-07",
+            None,
+        );
+
+        synchronize_activity_stream(&ctx, &mut app);
+        assert!(
+            app.state.ui.toasts.activity().is_empty(),
+            "an engine log line is not a notice: {:?}",
+            app.state
+                .ui
+                .toasts
+                .activity()
+                .iter()
+                .map(|record| record.message().to_owned())
+                .collect::<Vec<_>>()
+        );
+
+        // Both halves of the rule, on the same source: a warning and a failure
+        // the engine reports are still lifted, and the studio's own Info line
+        // at the same severity is untouched.
+        app.state.log_buffer.log(
+            LogSeverity::Warning,
+            LogSource::Engine,
+            "Convergence was attributed to net out",
+            None,
+        );
+        app.state
+            .log_buffer
+            .log(LogSeverity::Info, LogSource::Simulation, "completed", None);
+        synchronize_activity_stream(&ctx, &mut app);
+        let mut lifted: Vec<String> = app
+            .state
+            .ui
+            .toasts
+            .activity()
+            .iter()
+            .map(|record| record.message().to_owned())
+            .collect();
+        lifted.sort();
+        assert_eq!(
+            lifted,
+            vec![
+                "Convergence was attributed to net out".to_owned(),
+                "completed".to_owned(),
+            ]
+        );
     }
 
     /// A plan entry is a record, and the notice centre never lifts one.
