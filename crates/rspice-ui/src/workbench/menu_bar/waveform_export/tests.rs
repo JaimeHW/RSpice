@@ -674,8 +674,72 @@ fn csv_export_publishes_canonical_sensitivity_rows_and_basis() {
     assert_eq!(
         files[0].1,
         concat!(
-            "parameter,raw_sensitivity,normalized_sensitivity,output,mode,frequency_hz,raw_status,normalized_status\n",
-            "width,2.00000000000000000e0,5.00000000000000000e-1,\"V(out), differential\",ac,1.00000000000000000e4,available,available\n",
+            "parameter,raw_sensitivity,normalized_sensitivity,output,mode,frequency_hz,raw_status,normalized_status,phase_sensitivity,phase_status\n",
+            "width,2.00000000000000000e0,5.00000000000000000e-1,\"V(out), differential\",ac,1.00000000000000000e4,available,available,,\n",
+        )
+    );
+}
+
+/// One row per variable per frequency, under the header the single-point
+/// payload writes. A study of a sweep is many answers about each variable,
+/// and a wide table keyed by frequency would make the column set depend on
+/// the sweep the run happened to ask for.
+#[test]
+fn a_swept_sensitivity_exports_one_row_per_parameter_per_frequency() {
+    use crate::state::{
+        ComplexResultValue, SensitivityBasisEvidence, SensitivityStudyEvidence, SensitivityStudyRow,
+    };
+    use rspice_core::analysis::sensitivity::SensitivityValue;
+    let analysis = AnalysisResult::new(1, AnalysisType::Sensitivity, "SENS").with_result_payload(
+        AnalysisResultPayload::SensitivityStudy {
+            evidence: std::sync::Arc::new(SensitivityStudyEvidence {
+                output: "V(OUT)".to_owned(),
+                filter: "R1 PARAM:*".to_owned(),
+                basis: SensitivityBasisEvidence::Ac {
+                    frequencies_hz: vec![10.0, 100.0],
+                    output: vec![
+                        ComplexResultValue {
+                            real: 1.0,
+                            imaginary: 0.0,
+                        },
+                        ComplexResultValue {
+                            real: 0.5,
+                            imaginary: 0.0,
+                        },
+                    ],
+                },
+                rows: vec![SensitivityStudyRow {
+                    parameter: "PARAM:GAIN".to_owned(),
+                    nominal_value: 2.0,
+                    raw: vec![
+                        SensitivityValue::Available(1.0),
+                        SensitivityValue::Available(2.0),
+                    ],
+                    normalized: vec![
+                        SensitivityValue::Available(0.25),
+                        SensitivityValue::Available(0.5),
+                    ],
+                    phase: vec![
+                        SensitivityValue::Available(0.0),
+                        SensitivityValue::Available(-1.5),
+                    ],
+                }],
+            }),
+        },
+    );
+    let mut state = state_with_typed_result(analysis);
+    let io = MockExportWorkflowIo::default();
+
+    action_export_csv_with_io(&mut state, &io);
+
+    let files = io.text_files.borrow();
+    assert_eq!(files[0].0, PathBuf::from("sensitivity.csv"));
+    assert_eq!(
+        files[0].1,
+        concat!(
+            "parameter,raw_sensitivity,normalized_sensitivity,output,mode,frequency_hz,raw_status,normalized_status,phase_sensitivity,phase_status\n",
+            "PARAM:GAIN,1.00000000000000000e0,2.50000000000000000e-1,V(OUT),ac,1.00000000000000000e1,available,available,0.00000000000000000e0,available\n",
+            "PARAM:GAIN,2.00000000000000000e0,5.00000000000000000e-1,V(OUT),ac,1.00000000000000000e2,available,available,-1.50000000000000000e0,available\n",
         )
     );
 }
@@ -702,7 +766,7 @@ fn csv_export_preserves_unavailable_sensitivity_without_fabricating_zero() {
     assert!(
         files[0]
             .1
-            .ends_with("gain,0.00000000000000000e0,,V(out),dc,,available,zero-output\n"),
+            .ends_with("gain,0.00000000000000000e0,,V(out),dc,,available,zero-output,,\n"),
         "{}",
         files[0].1
     );

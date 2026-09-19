@@ -162,6 +162,32 @@ impl ProjectSimulationResultsData {
 
     fn migrate_to_current_in_place(&mut self, project_id: ProjectId) -> Result<(), String> {
         let source_schema = self.schema_version;
+        if source_schema < SENSITIVITY_STUDY_RESULTS_SCHEMA_VERSION
+            && self
+                .runs
+                .iter()
+                .flat_map(|run| &run.analyses)
+                .any(|analysis| {
+                    matches!(
+                        analysis.result_payload.as_ref(),
+                        Some(AnalysisResultPayload::SensitivityStudy { .. })
+                    )
+                })
+        {
+            return Err(
+                "result schemas before v29 cannot contain sensitivity study evidence".into(),
+            );
+        }
+        if source_schema == RECORDED_FFT_RESULTS_SCHEMA_VERSION {
+            // Nothing this lane added changed the digest of any shape that
+            // could exist at v28: the study payload is a new arm with a new
+            // tag, the frozen `Sensitivity` arm was not edited, and the
+            // encoding version did not move. So a v28 document re-validates
+            // under the *current* digest function, with no legacy encoder,
+            // and is stamped current.
+            self.schema_version = PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION;
+            return self.validate();
+        }
         if source_schema < RECORDED_FFT_RESULTS_SCHEMA_VERSION
             && self
                 .runs

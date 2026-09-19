@@ -1281,6 +1281,17 @@ pub enum AnalysisResultPayload {
     FftSpectrum {
         spectrum: super::FftSpectrumEvidence,
     },
+    /// One `.SENS` study: the filter that chose the variables, the points the
+    /// derivatives were taken at, and one column per variable per point.
+    ///
+    /// The `Sensitivity` variant above is frozen. It still decodes, validates
+    /// and digests exactly as it always did, and nothing produces one any
+    /// more: a result retained before the Studio ran the engine's own
+    /// complete entries differentiated a different variable set, and is
+    /// labelled as what it is rather than widened into a shape it never had.
+    SensitivityStudy {
+        evidence: std::sync::Arc<super::SensitivityStudyEvidence>,
+    },
 }
 
 impl AnalysisResultPayload {
@@ -1728,6 +1739,14 @@ impl AnalysisResultPayload {
                     }
                 }
             }
+            Self::SensitivityStudy { evidence } => {
+                if analysis_type != AnalysisType::Sensitivity {
+                    return Err(format!(
+                        "sensitivity study payload does not match analysis type {analysis_type:?}"
+                    ));
+                }
+                evidence.validate()?;
+            }
             Self::DcMismatch { evidence } => {
                 if analysis_type != AnalysisType::DcMismatch {
                     return Err(format!(
@@ -2126,6 +2145,10 @@ impl AnalysisResultPayload {
             | Self::PssFloquet { .. }
             | Self::Pstb { .. }
             | Self::Sensitivity { .. }
+            // A study is an answer even when its filter selected nothing the
+            // engine could differentiate: the refusal is the run's, and what
+            // it retained states the filter that produced it.
+            | Self::SensitivityStudy { .. }
             // A spread is an answer even when no contributor cleared the
             // card's own threshold.
             | Self::DcMismatch { .. }

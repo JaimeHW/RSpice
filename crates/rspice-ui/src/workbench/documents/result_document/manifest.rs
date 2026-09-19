@@ -1153,6 +1153,17 @@ fn payload_values_label(payload: &AnalysisResultPayload) -> String {
         AnalysisResultPayload::Sensitivity { rows, .. } => {
             format!("{} sensitivities", rows.len())
         }
+        AnalysisResultPayload::SensitivityStudy { evidence } => {
+            let points = evidence.point_count();
+            if points > 1 {
+                format!(
+                    "{} sensitivities at {points} frequencies",
+                    evidence.rows.len()
+                )
+            } else {
+                format!("{} sensitivities", evidence.rows.len())
+            }
+        }
         AnalysisResultPayload::DcMismatch { evidence } => format!(
             "{} of {} mismatch contributors",
             evidence.retained_contributors(),

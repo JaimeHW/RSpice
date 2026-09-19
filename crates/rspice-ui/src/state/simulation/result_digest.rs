@@ -1061,6 +1061,15 @@ fn encode_result_payload(
             writer.u8(12);
             encode_fft_spectrum_evidence(writer, spectrum);
         }
+        // Tag 13: the recorded FFT spectrum holds 12. Written unconditionally
+        // of `encoding_version` for the same reason the DC mismatch arm above
+        // is: no build before this one could write a sensitivity study, so
+        // there is no older encoding of one to replay. The frozen
+        // `Sensitivity` arm keeps tag 1 and is untouched.
+        AnalysisResultPayload::SensitivityStudy { evidence } => {
+            writer.u8(13);
+            encode_sensitivity_study_evidence(writer, evidence);
+        }
         AnalysisResultPayload::TransientEvents {
             digital_traces,
             real_traces,
@@ -1214,6 +1223,63 @@ const fn soa_violation_severity_tag(severity: SoaViolationSeverityEvidence) -> u
         SoaViolationSeverityEvidence::Warning => 0,
         SoaViolationSeverityEvidence::Violation => 1,
         SoaViolationSeverityEvidence::Critical => 2,
+    }
+}
+
+/// Every field of a sensitivity study, in declaration order, unconditionally.
+///
+/// Nothing here is skipped when it is empty or defaulted: the filter that
+/// selected the variables and the grid they were solved on are what make two
+/// studies of one deck different runs, and a digest that dropped either would
+/// present one as the other.
+fn encode_sensitivity_study_evidence(
+    writer: &mut ResultDigestWriter,
+    evidence: &super::SensitivityStudyEvidence,
+) {
+    writer.string(&evidence.output);
+    writer.string(&evidence.filter);
+    match &evidence.basis {
+        super::SensitivityBasisEvidence::Dc { output } => {
+            writer.u8(0);
+            writer.f64(*output);
+        }
+        super::SensitivityBasisEvidence::Ac {
+            frequencies_hz,
+            output,
+        } => {
+            writer.u8(1);
+            writer.sequence(frequencies_hz.len());
+            for frequency in frequencies_hz {
+                writer.f64(*frequency);
+            }
+            writer.sequence(output.len());
+            for value in output {
+                writer.f64(value.real);
+                writer.f64(value.imaginary);
+            }
+        }
+    }
+    writer.sequence(evidence.rows.len());
+    for row in &evidence.rows {
+        writer.string(&row.parameter);
+        writer.f64(row.nominal_value);
+        for column in [&row.raw, &row.normalized, &row.phase] {
+            writer.sequence(column.len());
+            for value in column {
+                match value {
+                    rspice_core::analysis::sensitivity::SensitivityValue::Available(value) => {
+                        writer.u8(0);
+                        writer.f64(*value);
+                    }
+                    rspice_core::analysis::sensitivity::SensitivityValue::Unavailable {
+                        unavailable,
+                    } => {
+                        writer.u8(1);
+                        writer.string(unavailable.as_str());
+                    }
+                }
+            }
+        }
     }
 }
 

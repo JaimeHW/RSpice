@@ -43,6 +43,11 @@ pub const MAX_RUN_HISTORY: usize = 20;
 mod current_impulses;
 pub use current_impulses::CurrentImpulseHistoryEvidence;
 
+mod sensitivity_study;
+pub use sensitivity_study::{
+    SensitivityBasisEvidence, SensitivityStudyEvidence, SensitivityStudyRow,
+};
+
 mod fft_spectrum;
 pub use fft_spectrum::{
     FftMetricsEvidence, FftSpectrumEvidence, FftSpectrumFormatEvidence, FftSpectrumStatusEvidence,

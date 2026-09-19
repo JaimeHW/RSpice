@@ -2803,7 +2803,10 @@ fn resolved_viewer_availability_for_binding(
                 )
         }
         ResultViewer::PoleZero => retained_pole_zero_payload(analysis).is_some(),
-        ResultViewer::Contribution => retained_sensitivity_payload(analysis).is_some(),
+        ResultViewer::Contribution => {
+            retained_sensitivity_study(analysis).is_some()
+                || retained_sensitivity_payload(analysis).is_some()
+        }
         ResultViewer::TransferFunction => analysis.result_payload.as_ref().is_some_and(|payload| {
             matches!(payload, AnalysisResultPayload::TransferFunction { .. })
                 && payload.validate_for(analysis.analysis_type).is_ok()
