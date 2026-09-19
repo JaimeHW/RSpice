@@ -202,4 +202,53 @@ pub(super) fn fields(
         ENVELOPE_ADAPTIVE_CHOICES,
         &mut setup.adaptive_mode_idx,
     );
+    initializer_fields(ui, setup);
+}
+
+fn initializer_fields(ui: &mut Ui, setup: &mut EnvelopeDialogState) {
+    use super::{choice_row, field_note, input_row, sub_header, switch_row};
+    if setup.initial_periodic_solve_idx == 2 {
+        return;
+    }
+    sub_header(ui, "Initializer solver");
+    let controls = &mut setup.initialization;
+    input_row(ui, "Iteration limit", &mut controls.max_iterations);
+    input_row(ui, "Relative tolerance", &mut controls.reltol);
+    input_row(ui, "Absolute tolerance", &mut controls.abstol);
+    input_row(ui, "Newton damping", &mut controls.damping);
+    switch_row(ui, "Solver logging", &mut controls.verbose);
+    if setup.initial_periodic_solve_idx == 1 {
+        input_row(
+            ui,
+            "Stabilization periods",
+            &mut controls.pss_stabilization_periods,
+        );
+        input_row(ui, "Points per period", &mut controls.pss_points_per_period);
+        field_note(
+            ui,
+            "Empty points uses max(256, 16 × harmonic order). Zero stabilization starts shooting immediately.",
+        );
+        choice_row(
+            ui,
+            "Shooting integration",
+            &["Auto", "Euler", "Trap", "Gear2", "TrapGear"],
+            &mut controls.pss_integration_idx,
+        );
+    } else {
+        input_row(ui, "Minimum damping", &mut controls.hb_min_damping);
+        input_row(ui, "Oversampling", &mut controls.hb_oversample);
+        input_row(
+            ui,
+            "Collocation points",
+            &mut controls.hb_collocation_points,
+        );
+        field_note(
+            ui,
+            "Empty collocation points uses an automatic oversampled grid; explicit grids must be odd and resolve the harmonic order.",
+        );
+        switch_row(ui, "Force Krylov", &mut controls.hb_use_krylov);
+        input_row(ui, "GMRES restart", &mut controls.hb_gmres_restart);
+        switch_row(ui, "Source stepping", &mut controls.hb_source_stepping);
+        switch_row(ui, "Exact Jacobian", &mut controls.hb_exact_jacobian);
+    }
 }

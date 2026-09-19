@@ -539,6 +539,7 @@ fn legacy_envelope_specs_migrate_identically_across_worker_transport() {
     .expect("legacy worker spec deserializes");
 
     let expected = AnalysisSpec::Envelope {
+        initialization: Default::default(),
         fundamental_freq: 1.0e6,
         additional_carrier_tones: Vec::new(),
         stop_time: 10.0e-3,

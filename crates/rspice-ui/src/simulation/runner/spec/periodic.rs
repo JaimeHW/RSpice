@@ -117,6 +117,7 @@ pub(super) fn run_periodic_spec(
             run_harmonic_balance(netlist, &hb_cfg, true, source_path, abort)
         }
         AnalysisSpec::Envelope {
+            initialization,
             fundamental_freq,
             additional_carrier_tones,
             stop_time,
@@ -129,6 +130,7 @@ pub(super) fn run_periodic_spec(
         } => run_envelope(
             netlist,
             svc_runner::EnvelopeRunConfig {
+                initialization,
                 fundamental_freq,
                 additional_carrier_tones,
                 stop_time,

@@ -1583,3 +1583,54 @@ fn a_form_never_paints_a_quantity_it_already_owns() {
         "a Fourier measurement runs a transient, which integrates with .OPTIONS METHOD"
     );
 }
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn envelope_initializer_form_paints_each_active_solver_control() {
+    for method in [0, 1, 2] {
+        let mut draft = AnalysisDraft::for_kind(AnalysisKind::Envelope);
+        if let AnalysisDraft::Envelope(setup) = &mut draft {
+            setup.initial_periodic_solve_idx = method;
+        }
+        let (_, painted) = render_analysis_form(draft, NoiseDomain::default());
+        for label in [
+            "Iteration limit",
+            "Relative tolerance",
+            "Absolute tolerance",
+            "Newton damping",
+            "Solver logging",
+        ] {
+            assert_eq!(
+                painted.iter().filter(|text| *text == label).count(),
+                usize::from(method != 2),
+                "{method}: {label}: {painted:?}"
+            );
+        }
+        for label in [
+            "Minimum damping",
+            "Oversampling",
+            "Collocation points",
+            "Force Krylov",
+            "GMRES restart",
+            "Source stepping",
+            "Exact Jacobian",
+        ] {
+            assert_eq!(
+                painted.iter().filter(|text| *text == label).count(),
+                usize::from(method == 0),
+                "{method}: {label}: {painted:?}"
+            );
+        }
+        for label in [
+            "Stabilization periods",
+            "Points per period",
+            "Shooting integration",
+        ] {
+            assert_eq!(
+                painted.iter().filter(|text| *text == label).count(),
+                usize::from(method == 1),
+                "{method}: {label}: {painted:?}"
+            );
+        }
+    }
+}

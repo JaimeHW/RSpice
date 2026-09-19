@@ -90,6 +90,7 @@ const DESIGN_NAMED_FIELDS: &[(AnalysisKind, &str, &str)] = &[
         "V(n_out)",
     ),
     (AnalysisKind::Pss, "tone_sources", "VSRC"),
+    (AnalysisKind::Envelope, "modulation_sources", "VSRC"),
     (AnalysisKind::Fft, "output", "V(n_out)"),
 ];
 
@@ -554,6 +555,14 @@ fn every_draft_field_moves_the_engine_facing_projection() {
             with_all_booleans(&body, true),
             with_all_booleans(&body, false),
         ];
+        // Envelope initialization has distinct HB and shooting controls. The
+        // fixture binds its slow source above; exercise both actual modes so
+        // the generic sibling search need not guess that second gate.
+        if kind == AnalysisKind::Envelope {
+            let mut shooting = body.clone();
+            shooting.insert("initial_periodic_solve_idx".into(), Value::from(1));
+            bodies.push(shooting);
+        }
         // Bootstrap-only editors are active under this explicit estimator.
         // Seed it directly instead of exhaustively trying unrelated modes.
         if kind == AnalysisKind::MonteCarlo {
@@ -1044,4 +1053,32 @@ fn every_run_set_participation_moves_the_dispatched_task_set() {
         ],
         "each participation must dispatch exactly the points it declares"
     );
+}
+
+#[test]
+fn envelope_initializer_fields_reach_the_execution_spec() {
+    let kind = AnalysisKind::Envelope;
+    let draft = fixture_draft(kind);
+    let body = draft_body(&draft).unwrap();
+    let mut paths = Vec::new();
+    leaf_paths(&body, "", &mut paths);
+    for method in [0, 1] {
+        let mut configured = body.clone();
+        configured.insert("initial_periodic_solve_idx".into(), Value::from(method));
+        let ready = rebuild(&draft, configured.clone()).unwrap();
+        let baseline = projection(kind, &ready);
+        assert!(!baseline.starts_with("spec-error"), "{method}: {baseline}");
+        for path in paths
+            .iter()
+            .filter(|path| path.starts_with("initialization."))
+        {
+            if (method == 0 && path.contains(".pss_")) || (method == 1 && path.contains(".hb_")) {
+                continue;
+            }
+            assert!(
+                matches!(judge(kind, &draft, &configured, path), FieldOutcome::Moved),
+                "{method}: {path} did not move {baseline}"
+            );
+        }
+    }
 }

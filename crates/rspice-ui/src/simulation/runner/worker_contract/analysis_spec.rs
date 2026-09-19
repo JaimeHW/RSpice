@@ -292,6 +292,8 @@ pub(crate) enum WorkerAnalysisSpec {
         verbose: bool,
     },
     Envelope {
+        #[serde(default)]
+        initialization: crate::services::simulation_runner::EnvelopeInitializationConfig,
         fundamental_freq: f64,
         #[serde(default)]
         additional_carrier_tones: Vec<f64>,

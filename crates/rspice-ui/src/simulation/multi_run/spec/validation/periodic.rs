@@ -206,6 +206,7 @@ pub(super) fn validate(spec: &AnalysisSpec) -> Result<(), String> {
             Ok(())
         }
         AnalysisSpec::Envelope {
+            initialization,
             fundamental_freq,
             additional_carrier_tones,
             stop_time,
@@ -216,6 +217,15 @@ pub(super) fn validate(spec: &AnalysisSpec) -> Result<(), String> {
             adaptive_mode,
             extraction_path: _,
         } => {
+            match initial_periodic_solve {
+                EnvelopeInitialPeriodicSolve::HarmonicBalance => {
+                    initialization.hb_config(*fundamental_freq, *num_harmonics)?;
+                }
+                EnvelopeInitialPeriodicSolve::PeriodicSteadyState => {
+                    initialization.pss_config(*fundamental_freq, *num_harmonics)?;
+                }
+                EnvelopeInitialPeriodicSolve::TransientSpectralEstimate => {}
+            }
             let carrier_tones =
                 std::iter::once(fundamental_freq).chain(additional_carrier_tones.iter());
             let mut seen_tones = std::collections::HashSet::new();

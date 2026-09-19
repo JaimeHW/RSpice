@@ -54,7 +54,7 @@ R2 n_out 0 10k
 /// or ask for something no default can invent — and which ones those are is
 /// [`KINDS_THAT_STATE_NO_DIRECTIVE`], not something the reader has to work out
 /// from the gap.
-const KINDS_THAT_EMIT_A_DIRECTIVE: usize = 30;
+const KINDS_THAT_EMIT_A_DIRECTIVE: usize = 31;
 
 /// The kinds whose default draft reaches no directive, and what they are
 /// waiting for.
@@ -69,14 +69,9 @@ const KINDS_THAT_EMIT_A_DIRECTIVE: usize = 30;
 /// Each entry is `{label} — {the refusal the emitter returned}`, so the
 /// exemption is the emitter's own words rather than a second account of them.
 ///
-/// One kind, and its reason is the good one: an envelope run is a carrier
-/// modulated by sources in the user's own design, and no default draft can
-/// invent which of them carries the modulation. That is the editor's contract
-/// — [`crate::simulation::dialog::EnvelopeConfig`] refuses the draft before a
-/// directive is ever asked for — and it is why this ratchet's floor is one
-/// short of the catalogue's non-blocked kinds rather than equal to it.
-const KINDS_THAT_STATE_NO_DIRECTIVE: &[&str] =
-    &["Envelope — invalid envelope settings: At least one modulation source is required"];
+/// The envelope fixture now binds a real source, so every unblocked kind
+/// reaches a directive. Blocked kinds remain excluded by their catalogue policy.
+const KINDS_THAT_STATE_NO_DIRECTIVE: &[&str] = &[];
 
 /// The directive `kind` writes from its default draft, or why it writes none.
 ///

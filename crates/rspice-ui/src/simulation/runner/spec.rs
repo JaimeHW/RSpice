@@ -788,6 +788,7 @@ R2 out 0 1k\n\
     #[test]
     fn runnable_preview_envelope_reaches_dispatch_and_returns_complex_slow_time_data() {
         let spec = AnalysisSpec::Envelope {
+            initialization: Default::default(),
             fundamental_freq: 1.0e3,
             additional_carrier_tones: Vec::new(),
             stop_time: 2.0e-3,

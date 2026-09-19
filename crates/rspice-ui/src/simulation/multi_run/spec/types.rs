@@ -539,6 +539,8 @@ pub enum AnalysisSpec {
     },
     /// Envelope transient analysis
     Envelope {
+        #[serde(default)]
+        initialization: crate::services::simulation_runner::EnvelopeInitializationConfig,
         /// First carrier frequency. Retained as a scalar for legacy payload
         /// compatibility; subsequent carriers are stored separately.
         fundamental_freq: f64,

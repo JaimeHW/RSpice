@@ -14,10 +14,14 @@ use crate::simulation::multi_run::{
 };
 
 use super::options::parse_si_value;
+mod initialization;
+use crate::services::simulation_runner::EnvelopeInitializationConfig;
+pub use initialization::EnvelopeInitializationState;
 
 /// Complete mockup-owned envelope configuration.
 #[derive(Debug, Clone, PartialEq)]
 pub struct EnvelopeConfig {
+    pub initialization: EnvelopeInitializationConfig,
     pub carrier_tones: Vec<f64>,
     pub stop_time: f64,
     pub envelope_step: f64,
@@ -31,6 +35,7 @@ pub struct EnvelopeConfig {
 impl Default for EnvelopeConfig {
     fn default() -> Self {
         Self {
+            initialization: Default::default(),
             carrier_tones: vec![1.0e6],
             stop_time: 10.0e-3,
             envelope_step: 1.0e-6,
@@ -57,7 +62,7 @@ impl EnvelopeConfig {
             .collect::<Vec<_>>()
             .join(",");
         let sources = self.modulation_sources.join(",");
-        format!(
+        let mut line = format!(
             ".envlp carriers=[{carriers}] stop={} step={} harmonic_order={} modulation_sources=[{sources}] initial_periodic_solve={} adaptive={} extraction={}",
             format_time(self.stop_time),
             format_time(self.envelope_step),
@@ -65,7 +70,15 @@ impl EnvelopeConfig {
             initial_solve_keyword(self.initial_periodic_solve),
             adaptive_keyword(self.adaptive_mode),
             extraction_keyword(self.extraction_path),
-        )
+        );
+        if self.initialization != EnvelopeInitializationConfig::default() {
+            line.push_str(&format!(
+                " initializer={}",
+                serde_json::to_string(&self.initialization)
+                    .expect("initializer contains only serializable scalar settings")
+            ));
+        }
+        line
     }
 
     pub fn validate(&self) -> Result<(), String> {
@@ -79,6 +92,18 @@ impl EnvelopeConfig {
         if self.harmonic_order == 0 {
             return Err("Harmonic order must be a positive integer (minimum 1)".to_owned());
         }
+        match self.initial_periodic_solve {
+            EnvelopeInitialPeriodicSolve::HarmonicBalance => {
+                self.initialization
+                    .hb_config(self.carrier_tones[0], self.harmonic_order as usize)?;
+            }
+            EnvelopeInitialPeriodicSolve::PeriodicSteadyState => {
+                self.initialization
+                    .pss_config(self.carrier_tones[0], self.harmonic_order as usize)?;
+            }
+            EnvelopeInitialPeriodicSolve::TransientSpectralEstimate => {}
+        }
+
         // Empty is the legacy spelling for declared/primary-source inference.
         // It is safe only on the exact legacy transient-estimate, fixed-step
         // path; periodic/adaptive policies require explicit source identity.
@@ -97,6 +122,8 @@ impl EnvelopeConfig {
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct EnvelopeDialogState {
+    #[serde(default)]
+    pub initialization: EnvelopeInitializationState,
     #[serde(default = "default_carrier_tones_text", alias = "fundamental")]
     pub carrier_tones: String,
     #[serde(default = "default_stop_time_text")]
@@ -128,6 +155,7 @@ pub struct EnvelopeDialogState {
 impl EnvelopeDialogState {
     pub fn from_config(config: &EnvelopeConfig) -> Self {
         Self {
+            initialization: EnvelopeInitializationState::from_config(&config.initialization),
             carrier_tones: config
                 .carrier_tones
                 .iter()
@@ -181,6 +209,9 @@ impl EnvelopeDialogState {
         // One path, and no control that could ask for another.
         let extraction_path = EnvelopeExtractionPath::Projection;
         let config = EnvelopeConfig {
+            initialization: self
+                .initialization
+                .to_config(self.initial_periodic_solve_idx)?,
             carrier_tones,
             stop_time,
             envelope_step,

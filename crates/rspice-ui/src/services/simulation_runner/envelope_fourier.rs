@@ -17,7 +17,8 @@ use rspice_core::Value;
 use rspice_core::abort_signal::AbortSignal;
 #[cfg(test)]
 use rspice_core::abort_signal::NoAbort;
-use rspice_core::analysis::{HbConfig, pss::PssConfig};
+mod initialization;
+pub use initialization::{EnvelopeInitializationConfig, EnvelopeShootingIntegration};
 use rspice_core::engine::Engine;
 use std::path::Path;
 
@@ -30,6 +31,7 @@ const MAX_ENVELOPE_PROJECTION_WORK: usize = 100_000_000;
 /// Configuration for envelope analysis.
 #[derive(Debug, Clone)]
 pub struct EnvelopeRunConfig {
+    pub initialization: EnvelopeInitializationConfig,
     pub fundamental_freq: Value,
     pub additional_carrier_tones: Vec<Value>,
     pub stop_time: Value,
@@ -43,6 +45,17 @@ pub struct EnvelopeRunConfig {
 
 impl EnvelopeRunConfig {
     fn validate(&self) -> Result<(), String> {
+        match self.initial_periodic_solve {
+            EnvelopeInitialPeriodicSolve::HarmonicBalance => {
+                self.initialization
+                    .hb_config(self.fundamental_freq, self.num_harmonics)?;
+            }
+            EnvelopeInitialPeriodicSolve::PeriodicSteadyState => {
+                self.initialization
+                    .pss_config(self.fundamental_freq, self.num_harmonics)?;
+            }
+            EnvelopeInitialPeriodicSolve::TransientSpectralEstimate => {}
+        }
         let mut seen_tones = std::collections::HashSet::new();
         for frequency in
             std::iter::once(&self.fundamental_freq).chain(self.additional_carrier_tones.iter())
@@ -382,12 +395,10 @@ fn run_pss_initialized_envelope_transient(
 ) -> ServiceRunResult<TransientData> {
     validate_commensurate_carriers(config, "PSS")?;
 
-    let points_per_period = config.num_harmonics.saturating_mul(16).max(256);
-    let pss_config = PssConfig::new(config.fundamental_freq)
-        .with_harmonics(config.num_harmonics)
-        .with_tstab(20.0 / config.fundamental_freq);
-    let mut pss_config = pss_config;
-    pss_config.points_per_period = points_per_period;
+    let pss_config = config
+        .initialization
+        .pss_config(config.fundamental_freq, config.num_harmonics)
+        .map_err(ServiceRunError::Failure)?;
 
     let engine = Engine::new(build_engine_config(netlist, None));
     let (periodic, state) = engine
@@ -429,7 +440,10 @@ fn run_hb_initialized_envelope_transient(
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<TransientData> {
     validate_commensurate_carriers(config, "HB")?;
-    let hb_config = HbConfig::new(config.fundamental_freq).with_harmonics(config.num_harmonics);
+    let hb_config = config
+        .initialization
+        .hb_config(config.fundamental_freq, config.num_harmonics)
+        .map_err(ServiceRunError::Failure)?;
     let engine = Engine::new(build_engine_config(netlist, None));
     let (periodic, state) = engine
         .run_hb_envelope_continuation_state_with_abort(
@@ -1587,6 +1601,7 @@ mod tests {
     #[test]
     fn envelope_service_preserves_selected_voltage_outputs() {
         let config = EnvelopeRunConfig {
+            initialization: Default::default(),
             fundamental_freq: 1e6,
             additional_carrier_tones: Vec::new(),
             stop_time: 4e-6,
@@ -1655,6 +1670,7 @@ mod tests {
             EnvelopeInitialPeriodicSolve::HarmonicBalance,
         ] {
             let config = EnvelopeRunConfig {
+                initialization: Default::default(),
                 fundamental_freq: 1e6,
                 additional_carrier_tones: Vec::new(),
                 stop_time: 4e-6,

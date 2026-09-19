@@ -39,8 +39,8 @@ pub use disto::{
 #[cfg(test)]
 pub(crate) use envelope_fourier::run_fourier_from_signal_with_abort;
 pub use envelope_fourier::{
-    EnvelopeRunConfig, FourierData, FourierRunConfig,
-    run_envelope_analysis_with_source_path_and_abort,
+    EnvelopeInitializationConfig, EnvelopeRunConfig, EnvelopeShootingIntegration, FourierData,
+    FourierRunConfig, run_envelope_analysis_with_source_path_and_abort,
 };
 pub(crate) use envelope_fourier::{
     fourier_card_output, fourier_output_is_current, run_fourier_from_observation_with_abort,

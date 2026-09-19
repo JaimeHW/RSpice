@@ -331,3 +331,69 @@ fn optimization_expression_reaches_a_current_target_through_the_worker() {
     assert!(result["best_cost"].as_f64().unwrap() <= 1e-16);
     assert!((result["best_variables"]["RLOAD"].as_f64().unwrap() - 1000.0).abs() < 0.1);
 }
+
+#[wasm_bindgen_test]
+fn envelope_initializer_settings_execute_and_pss_budget_survives_worker_transport() {
+    let run = |method: &str, iterations: u32| {
+        let request = serde_json::json!({
+            "protocolVersion": 11,
+            "request": {
+                "request": {
+                    "id": 7,
+                    "request": {"Spec": {"spec": {"Envelope": {
+                        "initialization": {"max_iterations": iterations, "damping": 0.5,
+                            "pss_stabilization_periods": 0, "pss_points_per_period": 64,
+                            "hb_collocation_points": 17, "hb_oversample": 4,
+                            "hb_use_krylov": true, "hb_gmres_restart": 12},
+                        "fundamental_freq": 1e6, "additional_carrier_tones": [], "stop_time": 4e-6,
+                        "num_harmonics": 3, "envelope_step": 0.5e-6,
+                        "modulation_sources": ["Vmod"], "initial_periodic_solve": method,
+                        "adaptive_mode": "fixed_envelope_step", "extraction_path": "projection"
+                    }}, "options": {}}},
+                    "netlist": "Initializer controls\nV1 in mod SIN(0 1 1Meg)\nVmod mod 0 PWL(0 0 10u 0)\nR1 in out 1k\nC1 out 0 1n\n.end\n",
+                    "source_path": null,
+                    "project_veriloga_runtimes": {"runtimes": [], "connections": []}
+                },
+                "dependency_metadata": "{\"snapshot_digest\":null,\"bindings\":[],\"artifacts\":[]}",
+                "dependency_buffer_count": 0
+            },
+            "buffers": []
+        });
+        let response = rspice_ui::run_rspice_ui_worker_request(
+            js_sys::JSON::parse(&request.to_string()).unwrap(),
+        )
+        .unwrap();
+        let response = structured_clone(&response);
+        serde_wasm_bindgen::from_value::<serde_json::Value>(
+            js_sys::Reflect::get(&response, &"response".into()).unwrap(),
+        )
+        .unwrap()
+    };
+    for (method, expected) in [
+        ("harmonic_balance", "harmonic_balance"),
+        ("periodic_steady_state", "shooting"),
+    ] {
+        let response = run(method, 100);
+        let initialization = &response["outcome"]["Success"]["Transient"]["convergence"]["metadata"]
+            ["initialization"];
+        assert_eq!(initialization["method"], expected, "{response}");
+        assert!(
+            initialization["final_residual"]
+                .as_f64()
+                .unwrap()
+                .is_finite()
+        );
+        if expected == "shooting" {
+            assert!(
+                initialization["solver_iterations"]
+                    .as_str()
+                    .unwrap()
+                    .parse::<u64>()
+                    .unwrap()
+                    > 1
+            );
+        }
+    }
+    let failed = run("periodic_steady_state", 1);
+    assert!(failed["outcome"].get("Failure").is_some(), "{failed}");
+}

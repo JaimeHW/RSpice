@@ -22,6 +22,65 @@ use super::{CanonicalWriter, canonical_analysis_kind, encode_op_config, encode_o
 
 #[cfg(test)]
 #[test]
+fn envelope_initializer_authenticates_every_control_and_preserves_legacy_identity() {
+    use crate::services::simulation_runner::EnvelopeInitializationConfig;
+    let spec = AnalysisSpec::Envelope {
+        initialization: Default::default(),
+        fundamental_freq: 1e6,
+        additional_carrier_tones: vec![],
+        stop_time: 4e-6,
+        num_harmonics: 3,
+        envelope_step: Some(0.5e-6),
+        modulation_sources: vec!["VMOD".into()],
+        initial_periodic_solve: EnvelopeInitialPeriodicSolve::HarmonicBalance,
+        adaptive_mode: EnvelopeAdaptiveMode::FixedEnvelopeStep,
+        extraction_path: EnvelopeExtractionPath::Projection,
+    };
+    let digest = |spec: &AnalysisSpec| {
+        let mut writer = CanonicalWriter::new("test");
+        encode_analysis_spec(&mut writer, spec);
+        writer.finish()
+    };
+    let mut legacy = CanonicalWriter::new("test");
+    legacy.domain("analysis-spec");
+    legacy.u8(analysis_kind_tag(&spec));
+    legacy.f64(1e6);
+    legacy.sequence(0);
+    legacy.f64(4e-6);
+    legacy.usize(3);
+    legacy.option(Some(&0.5e-6), |w, value| w.f64(*value));
+    legacy.sequence(1);
+    legacy.string("VMOD");
+    legacy.u8(0);
+    legacy.u8(1);
+    legacy.u8(0);
+    assert_eq!(digest(&spec), legacy.finish());
+    let changes = serde_json::json!({
+        "max_iterations": 73, "reltol": 2.5e-7, "abstol": 3e-13,
+        "damping": 0.8, "verbose": true, "pss_stabilization_periods": 7,
+        "pss_points_per_period": 512, "pss_integration": "Gear2",
+        "hb_min_damping": 0.025, "hb_oversample": 4, "hb_collocation_points": 33,
+        "hb_use_krylov": true, "hb_gmres_restart": 19, "hb_source_stepping": true,
+        "hb_exact_jacobian": false
+    });
+    let default = serde_json::to_value(EnvelopeInitializationConfig::default()).unwrap();
+    assert_eq!(
+        changes.as_object().unwrap().len(),
+        default.as_object().unwrap().len()
+    );
+    for (field, value) in changes.as_object().unwrap() {
+        let mut config = default.clone();
+        config[field] = value.clone();
+        let mut changed = spec.clone();
+        if let AnalysisSpec::Envelope { initialization, .. } = &mut changed {
+            *initialization = serde_json::from_value(config).unwrap();
+        }
+        assert_ne!(digest(&spec), digest(&changed), "{field}");
+    }
+}
+
+#[cfg(test)]
+#[test]
 fn optimization_expression_is_authenticated_without_changing_legacy_identity() {
     let spec = AnalysisSpec::Optimization {
         search: Default::default(),
@@ -614,6 +673,7 @@ pub(super) fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &Analysis
             writer.bool(*do_noise);
         }
         AnalysisSpec::Envelope {
+            initialization,
             fundamental_freq,
             additional_carrier_tones,
             stop_time,
@@ -634,6 +694,33 @@ pub(super) fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &Analysis
                 writer.string(source);
             }
             encode_envelope_initial_periodic_solve(writer, *initial_periodic_solve);
+            if initialization
+                != &crate::services::simulation_runner::EnvelopeInitializationConfig::default()
+            {
+                writer.string("envelope-initialization-v1");
+                writer.usize(initialization.max_iterations);
+                writer.f64(initialization.reltol);
+                writer.f64(initialization.abstol);
+                writer.f64(initialization.damping);
+                writer.bool(initialization.verbose);
+                writer.usize(initialization.pss_stabilization_periods);
+                writer.option(
+                    initialization.pss_points_per_period.as_ref(),
+                    |writer, value| writer.usize(*value),
+                );
+                writer.f64(initialization.hb_min_damping);
+                writer.usize(initialization.hb_oversample);
+                writer.option(
+                    initialization.hb_collocation_points.as_ref(),
+                    |writer, value| writer.usize(*value),
+                );
+                writer.bool(initialization.hb_use_krylov);
+                writer.usize(initialization.hb_gmres_restart);
+                writer.bool(initialization.hb_source_stepping);
+                writer.bool(initialization.hb_exact_jacobian);
+                writer.u8(initialization.pss_integration as u8);
+            }
+
             encode_envelope_adaptive_mode(writer, *adaptive_mode);
             encode_envelope_extraction_path(writer, *extraction_path);
         }
