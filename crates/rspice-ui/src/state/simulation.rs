@@ -45,9 +45,13 @@ pub use current_impulses::CurrentImpulseHistoryEvidence;
 
 mod fft_spectrum;
 pub use fft_spectrum::{
-    FftMetricsEvidence, FftSpectrumEvidence, FftSpectrumFormatEvidence, FftSpectrumModeEvidence,
-    FftSpectrumStatusEvidence,
+    FftMetricsEvidence, FftSpectrumEvidence, FftSpectrumFormatEvidence, FftSpectrumStatusEvidence,
 };
+// Test-only, like the attribution vocabulary in `state.rs`: outside tests the
+// compatibility mode a spectrum was computed under is only ever read through
+// the evidence's own field, never named as a type.
+#[cfg(test)]
+pub use fft_spectrum::FftSpectrumModeEvidence;
 
 pub use ac_bode::{
     ac_bode_shape_for_analysis, ac_bode_shape_for_selection, ac_bode_summary_for_analysis,
