@@ -293,3 +293,41 @@ fn scoped_soa_current_rules_reach_the_solver_and_transfer_complete_evidence() {
     assert_eq!(values.len(), time.len());
     assert!(values.iter().all(|value| (*value - 0.005).abs() < 1e-8));
 }
+
+#[wasm_bindgen_test]
+fn optimization_expression_reaches_a_current_target_through_the_worker() {
+    let request = serde_json::json!({
+        "protocolVersion": 11,
+        "request": {
+            "request": {
+                "id": 6,
+                "request": {"Spec": {"spec": {"Optimization": {
+                    "variables": [{"name": "RLOAD", "min": 500.0, "max": 5000.0, "initial": 4000.0}],
+                    "objective_expression": "I(V1)",
+                    "objective_node": "", "objective_ref": "",
+                    "goal": "Target", "target": -0.001, "algorithm": "PatternSearch",
+                    "max_iterations": 180, "cost_tolerance": 1e-16,
+                    "fd_step": 1e-4, "initial_step": 0.1, "min_step": 1e-8
+                }}, "options": {}}},
+                "netlist": "Worker current target\n.param RLOAD=2k\nV1 in 0 1\nR1 in 0 {RLOAD}\n.save V(in)\n.end\n",
+                "source_path": null,
+                "project_veriloga_runtimes": {"runtimes": [], "connections": []}
+            },
+            "dependency_metadata": "{\"snapshot_digest\":null,\"bindings\":[],\"artifacts\":[]}",
+            "dependency_buffer_count": 0
+        },
+        "buffers": []
+    });
+    let response =
+        rspice_ui::run_rspice_ui_worker_request(js_sys::JSON::parse(&request.to_string()).unwrap())
+            .unwrap();
+    let response = structured_clone(&response);
+    let metadata: serde_json::Value = serde_wasm_bindgen::from_value(
+        js_sys::Reflect::get(&response, &"response".into()).unwrap(),
+    )
+    .unwrap();
+    let result = &metadata["outcome"]["Success"]["Optimization"];
+    assert_eq!(result["converged"], true, "{metadata}");
+    assert!(result["best_cost"].as_f64().unwrap() <= 1e-16);
+    assert!((result["best_variables"]["RLOAD"].as_f64().unwrap() - 1000.0).abs() < 0.1);
+}

@@ -413,6 +413,7 @@ fn analysis_spec_round_trips_supported_variants() {
             min_stress_voltage: 1.2,
         },
         AnalysisSpec::Optimization {
+            objective_expression: Some("-V(out)*I(VSUP)".into()),
             search: crate::services::simulation_runner::OptimizationSearchControls {
                 var_tolerance: 2e-7,
                 sa_initial_temp: 42.0,

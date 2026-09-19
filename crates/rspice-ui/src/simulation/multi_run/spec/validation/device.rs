@@ -36,6 +36,7 @@ pub(super) fn validate(spec: &AnalysisSpec) -> Result<(), String> {
         AnalysisSpec::Optimization {
             search,
             variables,
+            objective_expression,
             objective_node,
             objective_ref,
             goal,
@@ -51,14 +52,20 @@ pub(super) fn validate(spec: &AnalysisSpec) -> Result<(), String> {
             if variables.is_empty() {
                 return Err("Optimization variables must not be empty".to_string());
             }
-            if objective_node.trim().is_empty() {
-                return Err("Optimization objective_node is required".to_string());
-            }
-            if objective_ref.trim().is_empty() {
-                return Err("Optimization objective_ref is required".to_string());
-            }
-            if objective_node.eq_ignore_ascii_case(objective_ref) {
-                return Err("Optimization objective_node and objective_ref must differ".to_string());
+            if let Some(expression) = objective_expression {
+                crate::services::simulation_runner::validate_optimization_expression(expression)?;
+            } else {
+                if objective_node.trim().is_empty() {
+                    return Err("Optimization objective_node is required".to_string());
+                }
+                if objective_ref.trim().is_empty() {
+                    return Err("Optimization objective_ref is required".to_string());
+                }
+                if objective_node.eq_ignore_ascii_case(objective_ref) {
+                    return Err(
+                        "Optimization objective_node and objective_ref must differ".to_string()
+                    );
+                }
             }
             if *max_iterations == 0 {
                 return Err("Optimization max_iterations must be > 0".to_string());

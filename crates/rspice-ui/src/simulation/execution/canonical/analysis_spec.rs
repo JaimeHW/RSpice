@@ -22,6 +22,63 @@ use super::{CanonicalWriter, canonical_analysis_kind, encode_op_config, encode_o
 
 #[cfg(test)]
 #[test]
+fn optimization_expression_is_authenticated_without_changing_legacy_identity() {
+    let spec = AnalysisSpec::Optimization {
+        search: Default::default(),
+        variables: vec![],
+        objective_expression: None,
+        objective_node: "out".into(),
+        objective_ref: "0".into(),
+        goal: OptimizationGoal::Target,
+        target: Some(1.2),
+        algorithm: OptimizationAlgorithm::PatternSearch,
+        max_iterations: 80,
+        cost_tolerance: 1e-8,
+        fd_step: 1e-4,
+        initial_step: 0.2,
+        min_step: 1e-7,
+    };
+    let digest = |spec: &AnalysisSpec| {
+        let mut writer = CanonicalWriter::new("test");
+        encode_analysis_spec(&mut writer, spec);
+        writer.finish()
+    };
+    let mut legacy = CanonicalWriter::new("test");
+    legacy.domain("analysis-spec");
+    legacy.u8(analysis_kind_tag(&spec));
+    legacy.sequence(0);
+    legacy.string("out");
+    legacy.string("0");
+    legacy.u8(2);
+    legacy.option(Some(&1.2), |w, value| w.f64(*value));
+    legacy.u8(1);
+    legacy.usize(80);
+    for value in [1e-8, 1e-4, 0.2, 1e-7] {
+        legacy.f64(value);
+    }
+    assert_eq!(digest(&spec), legacy.finish());
+    let mut configured = spec.clone();
+    if let AnalysisSpec::Optimization {
+        objective_expression,
+        ..
+    } = &mut configured
+    {
+        *objective_expression = Some("I(V1)".into());
+    }
+    assert_ne!(digest(&spec), digest(&configured));
+    let before = digest(&configured);
+    if let AnalysisSpec::Optimization {
+        objective_expression,
+        ..
+    } = &mut configured
+    {
+        *objective_expression = Some("-V(out)*I(V1)".into());
+    }
+    assert_ne!(before, digest(&configured));
+}
+
+#[cfg(test)]
+#[test]
 fn soa_legacy_identity_is_preserved_and_every_scoped_rule_field_is_authenticated() {
     use crate::services::{safety::SoAParameter, simulation_runner::SoaRuleConfig};
     let spec = AnalysisSpec::Soa {
@@ -427,6 +484,7 @@ pub(super) fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &Analysis
         AnalysisSpec::Optimization {
             search,
             variables,
+            objective_expression,
             objective_node,
             objective_ref,
             goal,
@@ -470,6 +528,10 @@ pub(super) fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &Analysis
                 writer.f64(search.sa_initial_temp);
                 writer.f64(search.sa_cooling_rate);
                 writer.u64(search.random_seed);
+            }
+            if let Some(expression) = objective_expression {
+                writer.string("optimization-expression-v1");
+                writer.string(expression);
             }
         }
         AnalysisSpec::Soa {

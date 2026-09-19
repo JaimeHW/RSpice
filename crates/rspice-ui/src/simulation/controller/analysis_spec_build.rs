@@ -795,6 +795,7 @@ impl SimulationController {
                     initial: var.initial,
                 })
                 .collect(),
+            objective_expression: cfg.objective_expression,
             objective_node: cfg.objective_node,
             objective_ref: cfg.objective_ref,
             goal: match cfg.goal_mode {

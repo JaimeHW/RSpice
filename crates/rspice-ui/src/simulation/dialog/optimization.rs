@@ -96,7 +96,9 @@ pub struct OptimizationConfig {
     pub search: OptimizationSearchControls,
     /// Variable set to optimize.
     pub variables: Vec<OptimizationVariableConfig>,
-    /// Objective node (V(node,ref)).
+    /// Optional scalar operating-point expression; overrides the voltage objective.
+    pub objective_expression: Option<String>,
+    /// Objective node (V(node,ref)) when no expression is configured.
     pub objective_node: String,
     /// Objective reference node.
     pub objective_ref: String,
@@ -136,6 +138,7 @@ impl Default for OptimizationConfig {
                     initial: 1.2,
                 },
             ],
+            objective_expression: None,
             objective_node: "out".to_string(),
             objective_ref: "0".to_string(),
             goal_mode: OptimizationGoalMode::Target,
@@ -157,17 +160,21 @@ impl OptimizationConfig {
         if self.variables.is_empty() {
             return Err("At least one optimization variable is required".to_string());
         }
-        if self.objective_node.trim().is_empty() {
-            return Err("Objective node must not be empty".to_string());
-        }
-        if self.objective_ref.trim().is_empty() {
-            return Err("Objective reference must not be empty".to_string());
-        }
-        if self
-            .objective_node
-            .eq_ignore_ascii_case(&self.objective_ref)
-        {
-            return Err("Objective node and reference must differ".to_string());
+        if let Some(expression) = &self.objective_expression {
+            crate::services::simulation_runner::validate_optimization_expression(expression)?;
+        } else {
+            if self.objective_node.trim().is_empty() {
+                return Err("Objective node must not be empty".to_string());
+            }
+            if self.objective_ref.trim().is_empty() {
+                return Err("Objective reference must not be empty".to_string());
+            }
+            if self
+                .objective_node
+                .eq_ignore_ascii_case(&self.objective_ref)
+            {
+                return Err("Objective node and reference must differ".to_string());
+            }
         }
         if self.max_iterations == 0 {
             return Err("max_iterations must be > 0".to_string());
@@ -247,6 +254,9 @@ impl OptimizationConfig {
             self.search.sa_cooling_rate,
             self.search.random_seed
         ));
+        if let Some(expression) = &self.objective_expression {
+            line.push_str(&format!(" expr={{{expression}}}"));
+        }
         if let Some(target) = self.target_value {
             line.push_str(&format!(" target={:.6e}", target));
         }
@@ -268,7 +278,9 @@ pub struct OptimizationDialogState {
     pub random_seed: String,
     /// Variables encoded as `name:min:max[:initial]`, separated by newline/comma.
     pub variables_text: String,
-    /// Objective node.
+    /// Optional scalar operating-point expression.
+    #[serde(default)]
+    pub objective_expression: String,
     pub objective_node: String,
     /// Objective reference node.
     pub objective_ref: String,
@@ -317,6 +329,7 @@ impl OptimizationDialogState {
             sa_cooling_rate: config.search.sa_cooling_rate.to_string(),
             random_seed: config.search.random_seed.to_string(),
             variables_text,
+            objective_expression: config.objective_expression.clone().unwrap_or_default(),
             objective_node: config.objective_node.clone(),
             objective_ref: config.objective_ref.clone(),
             goal_mode: match config.goal_mode {
@@ -387,6 +400,8 @@ impl OptimizationDialogState {
                     .map_err(|_| "Seed must be an unsigned 64-bit integer")?,
             },
             variables,
+            objective_expression: (!self.objective_expression.trim().is_empty())
+                .then(|| self.objective_expression.trim().to_string()),
             objective_node: self.objective_node.trim().to_string(),
             objective_ref: self.objective_ref.trim().to_string(),
             goal_mode,
@@ -494,6 +509,28 @@ fn parse_variable_specs(input: &str) -> Result<Vec<OptimizationVariableConfig>, 
 #[cfg(test)]
 mod search_tests {
     use super::*;
+    #[test]
+    fn optimization_expression_survives_draft_restoration_and_legacy_omission() {
+        let config = OptimizationConfig {
+            objective_expression: Some("-V(in)*I(V1)".into()),
+            ..Default::default()
+        };
+        let draft = OptimizationDialogState::from_config(&config);
+        let json: OptimizationDialogState =
+            serde_json::from_str(&serde_json::to_string(&draft).unwrap()).unwrap();
+        let ron: OptimizationDialogState = ron::from_str(&ron::to_string(&draft).unwrap()).unwrap();
+        assert_eq!(json.to_config().unwrap(), config);
+        assert_eq!(ron.to_config().unwrap(), config);
+        assert!(config.to_spice().contains("expr={-V(in)*I(V1)}"));
+        let mut legacy = serde_json::to_value(&draft).unwrap();
+        legacy
+            .as_object_mut()
+            .unwrap()
+            .remove("objective_expression");
+        let legacy: OptimizationDialogState = serde_json::from_value(legacy).unwrap();
+        assert!(legacy.to_config().unwrap().objective_expression.is_none());
+    }
+
     #[test]
     fn optimization_search_controls_survive_drafts_and_legacy_loading() {
         let mut config = OptimizationConfig::default();

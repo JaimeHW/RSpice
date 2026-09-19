@@ -68,6 +68,7 @@ pub use optimization::{
     OptimizationAlgorithmMode, OptimizationGoalMode, OptimizationRunConfig,
     OptimizationSearchControls, OptimizationVariable,
     run_optimization_analysis_with_config_and_source_path_and_abort,
+    validate_optimization_expression,
 };
 pub use pac_pxf::{
     PacFrequencySweep, PacRunConfig, PxfFrequencySweep, PxfRunConfig,

@@ -1135,6 +1135,7 @@ impl TryFrom<&AnalysisSpec> for WorkerAnalysisSpec {
             AnalysisSpec::Optimization {
                 search,
                 variables,
+                objective_expression,
                 objective_node,
                 objective_ref,
                 goal,
@@ -1148,6 +1149,7 @@ impl TryFrom<&AnalysisSpec> for WorkerAnalysisSpec {
             } => Ok(Self::Optimization {
                 search: search.clone(),
                 variables: variables.clone(),
+                objective_expression: objective_expression.clone(),
                 objective_node: objective_node.clone(),
                 objective_ref: objective_ref.clone(),
                 goal: *goal,
@@ -1536,6 +1538,7 @@ impl From<WorkerAnalysisSpec> for AnalysisSpec {
             WorkerAnalysisSpec::Optimization {
                 search,
                 variables,
+                objective_expression,
                 objective_node,
                 objective_ref,
                 goal,
@@ -1549,6 +1552,7 @@ impl From<WorkerAnalysisSpec> for AnalysisSpec {
             } => Self::Optimization {
                 search,
                 variables,
+                objective_expression,
                 objective_node,
                 objective_ref,
                 goal,

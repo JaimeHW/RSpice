@@ -4,6 +4,9 @@
 //! the variables and their bounds, the goal formulation, and the algorithm
 //! that searches.
 
+mod objective;
+pub use objective::validate_optimization_expression;
+
 use super::error::{ServiceRunError, ServiceRunResult, ensure_not_aborted, poll_periodically};
 use super::{build_engine_config, is_ground_like, parse_runner_netlist_with_abort};
 use crate::simulation::optimizer::{DesignVar, OptimizerAlgo, OptimizerConfig, OptimizerEngine};
@@ -95,7 +98,9 @@ pub struct OptimizationRunConfig {
     pub search: OptimizationSearchControls,
     /// Optimization variables.
     pub variables: Vec<OptimizationVariable>,
-    /// Objective node.
+    /// Optional scalar operating-point expression; overrides the voltage objective.
+    pub objective_expression: Option<String>,
+    /// Objective node (V(node,ref)) when no expression is configured.
     pub objective_node: String,
     /// Objective reference node.
     pub objective_ref: String,
@@ -127,6 +132,7 @@ impl Default for OptimizationRunConfig {
                 max: 5000.0,
                 initial: 1000.0,
             }],
+            objective_expression: None,
             objective_node: "out".to_string(),
             objective_ref: "0".to_string(),
             goal: OptimizationGoalMode::Target,
@@ -147,17 +153,21 @@ impl OptimizationRunConfig {
         if self.variables.is_empty() {
             return Err("Optimization requires at least one variable".to_string());
         }
-        if self.objective_node.trim().is_empty() {
-            return Err("Optimization objective_node must not be empty".to_string());
-        }
-        if self.objective_ref.trim().is_empty() {
-            return Err("Optimization objective_ref must not be empty".to_string());
-        }
-        if self
-            .objective_node
-            .eq_ignore_ascii_case(&self.objective_ref)
-        {
-            return Err("Optimization objective_node and objective_ref must differ".to_string());
+        if let Some(expression) = &self.objective_expression {
+            crate::services::simulation_runner::validate_optimization_expression(expression)?;
+        } else {
+            if self.objective_node.trim().is_empty() {
+                return Err("Optimization objective_node must not be empty".to_string());
+            }
+            if self.objective_ref.trim().is_empty() {
+                return Err("Optimization objective_ref must not be empty".to_string());
+            }
+            if self
+                .objective_node
+                .eq_ignore_ascii_case(&self.objective_ref)
+            {
+                return Err("Optimization objective_node and objective_ref must differ".to_string());
+            }
         }
         if self.max_iterations == 0 {
             return Err("Optimization max_iterations must be > 0".to_string());
@@ -477,6 +487,9 @@ fn evaluate_optimization_objective(
             ServiceRunError::from_core("DC operating point failed during optimization", error)
         })?;
 
+    if let Some(expression) = &config.objective_expression {
+        return objective::evaluate(expression, &netlist, &dc, abort);
+    }
     let node_idx =
         resolve_node_index_case_insensitive(&dc.node_names, &config.objective_node, abort)?
             .ok_or_else(|| {

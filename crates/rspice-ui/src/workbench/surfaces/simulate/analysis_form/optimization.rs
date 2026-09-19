@@ -17,15 +17,21 @@ use crate::simulation::dialog::OptimizationDialogState;
 
 use super::{
     choice_row, clear_pending_cell, engineering_input_row, engineering_input_row_enabled,
-    hinted_input_row, input_row, input_row_enabled, sub_header,
+    field_note, hinted_input_row, input_row, input_row_enabled, sub_header,
 };
 
 /// Render the optimization fields.
 pub(super) fn fields(ui: &mut Ui, setup: &mut OptimizationDialogState) {
     input_row(ui, "Variables", &mut setup.variables_text)
         .on_hover_text("One per line or comma, spelled name:min:max[:initial].");
-    input_row(ui, "Objective", &mut setup.objective_node);
-    input_row(ui, "Obj ref", &mut setup.objective_ref);
+    input_row(ui, "Expression", &mut setup.objective_expression);
+    field_note(
+        ui,
+        "Optional scalar expression, e.g. -V(supply)*I(VSUP) for supplied power. Empty uses the node voltage below.",
+    );
+    let node_objective = setup.objective_expression.trim().is_empty();
+    input_row_enabled(ui, "Objective", &mut setup.objective_node, node_objective);
+    input_row_enabled(ui, "Obj ref", &mut setup.objective_ref, node_objective);
     choice_row(ui, "Goal", &["min", "max", "target"], &mut setup.goal_mode);
     input_row_enabled(ui, "Target", &mut setup.target_value, setup.goal_mode == 2);
     choice_row(
