@@ -1744,6 +1744,7 @@ impl From<ElementType> for SensitivityElementTag {
             ElementType::Coupling => Self::Coupling,
             ElementType::Xspice => Self::Xspice,
             ElementType::Model => Self::Model,
+            ElementType::DesignParameter => Self::Parameter,
             ElementType::Other => Self::Other,
         }
     }

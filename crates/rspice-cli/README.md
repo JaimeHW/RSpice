@@ -284,7 +284,13 @@ derivative traces sampled on the document's own frequency axis, and the
 several elements, so the derivative is attributed to the parameter rather than
 to any one device, and the entry carries the parameter's nominal value together
 with the normalized derivative against the operating point the same deck
-settles at.
+settles at. A card's device specifications are one filter list over one
+variable universe: a glob selects a device, one owner's parameter (`M1:W`,
+`RMOD:*`) or a vector name, while `PARAM:<glob>` — and only that spelling —
+selects the deck's design parameters, whose rows are named `PARAM:<NAME>` and
+tagged `parameter`. No specification at all still means every device and model
+parameter and no design parameter, and a specification that selects nothing is
+refused by name rather than silently dropped.
 
 `.FFT` keeps its own versioned bundle (`schema_version: 3`) with instance and
 coordinate identity, the transform configuration, and completion status. It

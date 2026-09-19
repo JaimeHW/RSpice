@@ -262,6 +262,12 @@ pub enum ElementType {
     Coupling,
     Xspice,
     Model,
+    /// A root-scope `.PARAM`/`.GLOBAL_PARAM`; it names no circuit element.
+    ///
+    /// A design parameter can drive several elements at once, so its
+    /// derivative belongs to the parameter rather than to any device the
+    /// parameter happens to reach.
+    DesignParameter,
     Other,
 }
 
@@ -1016,6 +1022,7 @@ impl SensitivityAnalyzer {
                 | ElementType::Coupling
                 | ElementType::Xspice
                 | ElementType::Model
+                | ElementType::DesignParameter
                 | ElementType::Other => return Ok(None),
             };
             if !absolute.is_finite() {

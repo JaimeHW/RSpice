@@ -140,6 +140,57 @@ fn an_authored_sens_card_resolves_its_own_output_node() {
         .expect("document builds");
 }
 
+/// The card runner every frontend shares carries a `PARAM:` filter through to
+/// the design-parameter traces, so a deck that asks for them gets them from
+/// `rspice run`, Python, wasm and the adapter alike. `H = 1/(1+jwRC)` with
+/// `C={c}` gives `d|H|/dc = dH/dC` exactly, so the design trace must equal the
+/// capacitor's own trace at every frequency.
+#[test]
+fn an_authored_sens_card_carries_a_design_parameter_filter_across_its_sweep() {
+    let source = "Parametric low pass\n\
+     .param c=1n\n\
+     V1 in 0 AC 1\n\
+     R1 in out 1k\n\
+     C1 out 0 {c}\n\
+     .sens V(out) C1 PARAM:* AC DEC 5 1k 100k\n\
+     .end\n";
+    let netlist = Netlist::parse(source).expect("deck parses");
+    let result = Engine::new(SimulationConfig::default())
+        .run_sensitivity_from_card_with_abort(
+            &netlist,
+            &card(&netlist, |command| {
+                matches!(command, AnalysisCommand::Sensitivity { .. })
+            }),
+            &NoAbort,
+        )
+        .expect("the authored .SENS card runs with a design-parameter filter");
+    let SensitivityCardResult::Ac(ac) = result else {
+        panic!("a .SENS card with an AC clause is a frequency-domain study");
+    };
+    let names = ac
+        .sensitivities
+        .iter()
+        .map(|trace| trace.vector_name.clone())
+        .collect::<Vec<_>>();
+    assert_eq!(names, ["C1", "PARAM:C"], "the card selected {names:?}");
+    let device = ac.get("C1").expect("capacitor trace");
+    let design = ac.get("PARAM:C").expect("design-parameter trace");
+    assert_eq!(design.nominal_value, 1.0e-9);
+    for (index, frequency) in ac.frequencies.iter().enumerate() {
+        let (device_value, design_value) = (device.absolute[index], design.absolute[index]);
+        let tolerance = device_value.norm().max(1.0) * 1e-5;
+        assert!(
+            (design_value - device_value).norm() <= tolerance,
+            "at {frequency:e} Hz the design trace {design_value} left the capacitor trace \
+             {device_value} by more than {tolerance:e}"
+        );
+    }
+    AnalysisResultDocument::from_ac_sensitivity(instance(&netlist, "sens-001"), &ac)
+        .expect("the shared document accepts a design-parameter trace")
+        .build()
+        .expect("document builds");
+}
+
 #[test]
 fn an_authored_sens_ac_card_selects_the_ac_driver_and_publishes_a_document() {
     let source = DIVIDER.replace(".sens V(out)", ".sens V(out) AC DEC 2 1k 10k");

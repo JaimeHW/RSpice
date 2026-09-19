@@ -418,6 +418,32 @@ How each analysis is reached (netlist card, CLI flag, or engine API only)
 varies. The [CLI README](../rspice-cli/README.md) documents the netlist-card
 and flag surface; anything not listed there is engine-API only.
 
+A sensitivity study differentiates one output — a node voltage, a differential
+voltage or a branch current, at the operating point or at each frequency of an
+AC sweep — with respect to the variables one filter list names. The variable
+universe is the union of two namespaces: the **device variables** of the
+flattened circuit (instance parameters, element and source values, model scalar
+and vector parameters) and the **design parameters** of the authored root scope
+(`.PARAM`/`.GLOBAL_PARAM`). A filter item addresses the design parameters if
+and only if it begins with the literal `PARAM:`, whose remainder globs
+parameter names; a filter without that prefix never selects one, not even `*`.
+An empty filter list means every device and model variable and no design
+parameter, which is ngspice's `.sens`. A design-parameter derivative is
+**total**: the deck is replayed with the parameter moved, so every parameter
+defined from it moves with it — `PARAM:a` includes `b={…a…}` while `PARAM:b`
+holds `a` fixed. Design rows are named `PARAM:<NAME>` and tagged as parameter
+sensitivities; they are computed, never recombined from device rows, because a
+parameter inside a behavioural expression, a source argument or `.options`
+reaches the circuit through no differentiated field at all.
+
+Method of record. A design parameter on a qualified linear circuit is **exact**:
+the parser's forward-mode derivative of every expression the parameter reaches
+is contracted with one transpose solve per frequency, so the error is the LU
+roundoff. Every other row — every device variable, and a design parameter on a
+nonlinear or otherwise unqualified deck — is a refined finite difference, held
+to the acceptance rule described below. One study has one nominal output and
+one run budget, whichever path each of its rows took.
+
 The low-level DC adjoint API differentiates effective linear resistances
 (including branch-form resistors) and independent source amplitudes. Its
 resistance and nonzero-output normalization arithmetic preserves finite extreme

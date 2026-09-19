@@ -1,3 +1,5 @@
+#[cfg(test)]
+mod design_parameter_tests;
 mod parameter;
 mod refinement;
 
@@ -169,6 +171,41 @@ enum AcSensitivityLocation {
         entry_index: usize,
         resolved_values: Vec<Value>,
     },
+    /// A root-scope `.PARAM`/`.GLOBAL_PARAM` of the authored deck.
+    ///
+    /// A design parameter is not a field of any element, so it is never
+    /// stamped into a perturbed circuit the way the locations above are. It is
+    /// differentiated by replaying the deck with the parameter moved, which is
+    /// what makes the derivative total: every parameter defined from it moves
+    /// with it.
+    DesignParameter {
+        name: String,
+    },
+}
+
+/// The design-parameter namespace prefix of a `.SENS` filter item.
+///
+/// A filter addresses the design parameters if and only if it begins with this
+/// literal; the remainder is a glob over parameter names. A filter without it
+/// never selects a design parameter — not `*`, and not `R*` beside a
+/// `.param rload`.
+const DESIGN_PARAMETER_FILTER_PREFIX: &str = "PARAM:";
+
+/// The glob a filter applies to design-parameter names, if it names them.
+fn design_parameter_filter_glob(filter: &str) -> Option<&str> {
+    let (prefix, glob) = filter.split_at_checked(DESIGN_PARAMETER_FILTER_PREFIX.len())?;
+    prefix
+        .eq_ignore_ascii_case(DESIGN_PARAMETER_FILTER_PREFIX)
+        .then_some(glob)
+}
+
+/// One design parameter's probe response: the nominal trace the computation
+/// observed and the derivative taken at it, one entry per frequency (one entry
+/// with a zero imaginary part for a DC study).
+#[derive(Debug, Clone)]
+struct DesignParameterResponse {
+    nominal: Vec<Complex64>,
+    derivative: Vec<Complex64>,
 }
 
 #[derive(Debug, Clone)]
@@ -765,41 +802,17 @@ impl Engine {
             return Err(SimulationError::Aborted);
         }
         Self::validate_parameter_sensitivity_inputs(param_value, delta)?;
-        if let Some((_, derivative)) = self.linear_parameter_sensitivity(
+        let response = self.design_parameter_derivatives(
             netlist,
             &output,
             param_name,
             param_value,
             None,
+            delta,
             runs,
             abort,
-        )? {
-            return Ok(derivative[0].re);
-        }
-        let h = Self::sensitivity_step(param_value, delta)?;
-        *runs = runs.saturating_add(1);
-        self.ensure_batch_runs(*runs)?;
-        let evaluate = |candidate| {
-            let (perturbed, references) = Self::create_perturbed_netlist_with_limits_and_abort(
-                netlist,
-                param_name,
-                candidate,
-                self.config.resource_limits,
-                abort,
-            )?;
-            if references == 0 {
-                return Err(SimulationError::Circuit(format!(
-                    "Parameter '{param_name}' is not bound to any netlist expression"
-                )));
-            }
-            let result = self.run_dc_op_with_abort(&perturbed, abort)?;
-            let value = Self::dc_sensitivity_output_value(&result, &output)?;
-            Ok(vec![Complex64::new(value, 0.0)])
-        };
-        let nominal = evaluate(param_value)?;
-        let derivative =
-            self.refine_sensitivity(param_name, param_value, h, &nominal, runs, abort, evaluate)?;
-        Ok(derivative[0].re)
+        )?;
+        Ok(response.derivative[0].re)
     }
 
     /// Run AC sensitivity analysis for a parameter across frequencies.
@@ -889,43 +902,100 @@ impl Engine {
         Self::validate_parameter_sensitivity_inputs(param_value, delta)?;
         super::ac::validate_ac_frequencies(frequencies)?;
         self.ensure_analysis_points(frequencies.len())?;
-        if let Some((nominal, derivatives)) = self.linear_parameter_sensitivity(
+        let response = self.design_parameter_derivatives(
             netlist,
             &output,
             param_name,
             param_value,
             Some(frequencies),
+            delta,
+            runs,
+            abort,
+        )?;
+        Self::project_parameter_magnitude(&response.nominal, response.derivative, abort)
+    }
+
+    /// Differentiate one probe with respect to one authored design parameter.
+    ///
+    /// This is the one design-parameter computation in the engine: the
+    /// single-parameter primitives above are wrappers around it, and the
+    /// complete `.SENS` entries call it for every `PARAM:` row a card selects.
+    /// A qualified linear circuit takes the exact path — the parser's captured
+    /// expression derivatives contracted with one transpose solve per
+    /// frequency; everything else replays the deck through the shared
+    /// refinement driver. The derivative is TOTAL: replaying moves every
+    /// parameter defined from this one.
+    ///
+    /// The nominal probe trace is returned beside the derivative because the
+    /// two paths obtain it differently (the exact path from its own build, the
+    /// refinement path from the replay at the requested coordinate) and the
+    /// single-parameter AC primitive projects magnitude against exactly the
+    /// one its own path produced. A complete study normalizes against its own
+    /// nominal instead, so that one study has one operating point.
+    #[allow(clippy::too_many_arguments)]
+    fn design_parameter_derivatives(
+        &self,
+        netlist: &Netlist,
+        output: &AcSensitivityOutput,
+        name: &str,
+        value: Value,
+        frequencies: Option<&[Value]>,
+        delta: Option<Value>,
+        runs: &mut usize,
+        abort: &dyn AbortSignal,
+    ) -> Result<DesignParameterResponse, SimulationError> {
+        if let Some((nominal, derivative)) = self.linear_parameter_sensitivity(
+            netlist,
+            output,
+            name,
+            value,
+            frequencies,
             runs,
             abort,
         )? {
-            return Self::project_parameter_magnitude(&nominal, derivatives, abort);
+            return Ok(DesignParameterResponse {
+                nominal,
+                derivative,
+            });
         }
-        let h = Self::sensitivity_step(param_value, delta)?;
+        let h = Self::sensitivity_step(value, delta)?;
         *runs = runs.saturating_add(1);
         self.ensure_batch_runs(*runs)?;
         // Replay at every coordinate, including the requested nominal value:
         // it need not equal the value originally authored in the netlist.
-        // Retain only this probe between runs, not every node's AC traces.
+        // Retain only this probe between runs, not every node's traces.
         let evaluate = |candidate| {
             let (perturbed, references) = Self::create_perturbed_netlist_with_limits_and_abort(
                 netlist,
-                param_name,
+                name,
                 candidate,
                 self.config.resource_limits,
                 abort,
             )?;
             if references == 0 {
                 return Err(SimulationError::Circuit(format!(
-                    "Parameter '{param_name}' is not bound to any netlist expression"
+                    "Parameter '{name}' is not bound to any netlist expression"
                 )));
             }
-            let results = self.run_ac_with_abort(&perturbed, frequencies, abort)?;
-            Self::ac_sensitivity_outputs(&results, &output, frequencies, abort)
+            match frequencies {
+                None => {
+                    let result = self.run_dc_op_with_abort(&perturbed, abort)?;
+                    let value = Self::dc_sensitivity_output_value(&result, output)?;
+                    Ok(vec![Complex64::new(value, 0.0)])
+                }
+                Some(frequencies) => {
+                    let results = self.run_ac_with_abort(&perturbed, frequencies, abort)?;
+                    Self::ac_sensitivity_outputs(&results, output, frequencies, abort)
+                }
+            }
         };
-        let nominal = evaluate(param_value)?;
-        let derivatives =
-            self.refine_sensitivity(param_name, param_value, h, &nominal, runs, abort, evaluate)?;
-        Self::project_parameter_magnitude(&nominal, derivatives, abort)
+        let nominal = evaluate(value)?;
+        let derivative =
+            self.refine_sensitivity(name, value, h, &nominal, runs, abort, evaluate)?;
+        Ok(DesignParameterResponse {
+            nominal,
+            derivative,
+        })
     }
 
     fn project_parameter_magnitude(
@@ -1725,6 +1795,36 @@ impl Engine {
         Ok(targets)
     }
 
+    /// Every root-scope design parameter a `.SENS` card can differentiate.
+    ///
+    /// Collected from the AUTHORED netlist, never from the flattened copy:
+    /// flattening discards the retained source a parameter replay needs, and
+    /// the design-parameter namespace is the root scope's own. Non-finite
+    /// values are skipped for the same reason device targets are — there is no
+    /// coordinate to perturb around. No name is excluded by spelling: a
+    /// `.param ic_bias=…` is the author's parameter like any other.
+    fn collect_design_parameter_targets(netlist: &Netlist) -> Vec<AcSensitivityTarget> {
+        let mut targets = netlist
+            .params
+            .all_params()
+            .into_iter()
+            .filter(|(_, value)| value.is_finite())
+            .map(|(name, nominal_value)| {
+                let name = name.to_ascii_uppercase();
+                AcSensitivityTarget {
+                    vector_name: format!("{DESIGN_PARAMETER_FILTER_PREFIX}{name}"),
+                    element: name.clone(),
+                    element_type: ElementType::DesignParameter,
+                    parameter: name.clone(),
+                    nominal_value,
+                    location: AcSensitivityLocation::DesignParameter { name },
+                }
+            })
+            .collect::<Vec<_>>();
+        targets.sort_by(|left, right| left.element.cmp(&right.element));
+        targets
+    }
+
     fn update_primary_instance_aliases(
         parameters: &mut [(String, Value)],
         aliases: &[&str],
@@ -2200,6 +2300,15 @@ impl Engine {
                 })?;
                 *nominal = value;
             }
+            AcSensitivityLocation::DesignParameter { name } => {
+                // A design parameter is differentiated by replaying the deck,
+                // not by editing a field of the flattened circuit. Reaching
+                // here would mean a design row was routed through the device
+                // driver and would silently return a device derivative.
+                return Err(SimulationError::Circuit(format!(
+                    "Sensitivity design parameter '{name}' cannot be stamped as a circuit field"
+                )));
+            }
         }
         Ok(())
     }
@@ -2232,16 +2341,117 @@ impl Engine {
         p == pattern.len()
     }
 
-    fn sensitivity_target_selected(target: &AcSensitivityTarget, filters: &[String]) -> bool {
-        filters.is_empty()
-            || filters.iter().any(|filter| {
+    /// Whether one filter item selects one target.
+    ///
+    /// The two namespaces never see each other's filters. A design parameter
+    /// is matched against `PARAM:<NAME>` and nothing else, so `P*` cannot leak
+    /// into it; a device, model or vector target is matched as it always was,
+    /// and only by filters that do not name the design parameters.
+    fn sensitivity_filter_selects(target: &AcSensitivityTarget, filter: &str) -> bool {
+        match (
+            &target.location,
+            design_parameter_filter_glob(filter.trim()),
+        ) {
+            (AcSensitivityLocation::DesignParameter { name }, Some(glob)) => {
+                !glob.is_empty() && Self::sensitivity_glob_matches(glob, name)
+            }
+            (AcSensitivityLocation::DesignParameter { .. }, None) | (_, Some(_)) => false,
+            (_, None) => {
                 Self::sensitivity_glob_matches(filter, &target.vector_name)
                     || Self::sensitivity_glob_matches(filter, &target.element)
                     || Self::sensitivity_glob_matches(
                         filter,
                         &format!("{}:{}", target.element, target.parameter),
                     )
+            }
+        }
+    }
+
+    /// Whether the filter list selects one target.
+    ///
+    /// An empty list keeps its meaning: every device and model variable, and
+    /// no design parameter. Design-variable sensitivity is an explicit
+    /// request, `PARAM:*`.
+    fn sensitivity_target_selected(target: &AcSensitivityTarget, filters: &[String]) -> bool {
+        if matches!(
+            target.location,
+            AcSensitivityLocation::DesignParameter { .. }
+        ) {
+            return filters
+                .iter()
+                .any(|filter| Self::sensitivity_filter_selects(target, filter));
+        }
+        filters.is_empty()
+            || filters
+                .iter()
+                .any(|filter| Self::sensitivity_filter_selects(target, filter))
+    }
+
+    /// Refuse a design-parameter filter the deck would make ambiguous.
+    ///
+    /// The only collision the `PARAM:` rule can produce is an owner literally
+    /// named `PARAM`, whose `owner:parameter` filter arm would be read as the
+    /// design-parameter namespace. That is refused by name before anything is
+    /// solved rather than silently resolved one way.
+    fn validate_design_parameter_filters(
+        flat: &Netlist,
+        filters: &[String],
+        domain: &str,
+    ) -> Result<(), SimulationError> {
+        let globs = filters
+            .iter()
+            .filter_map(|filter| {
+                design_parameter_filter_glob(filter.trim()).map(|glob| (filter, glob))
             })
+            .collect::<Vec<_>>();
+        if globs.is_empty() {
+            return Ok(());
+        }
+        if let Some((filter, _)) = globs.iter().find(|(_, glob)| glob.is_empty()) {
+            return Err(SimulationError::Circuit(format!(
+                "{domain} sensitivity cannot run: the filter '{filter}' names no design parameter; write PARAM:<name> or PARAM:* to select them"
+            )));
+        }
+        let owner = flat
+            .elements
+            .iter()
+            .find(|element| element.name.eq_ignore_ascii_case("PARAM"))
+            .map(|element| ("element", element.name.as_str()))
+            .or_else(|| {
+                flat.models
+                    .iter()
+                    .find(|model| model.name.eq_ignore_ascii_case("PARAM"))
+                    .map(|model| ("model", model.name.as_str()))
+            });
+        if let Some((kind, name)) = owner {
+            return Err(SimulationError::Circuit(format!(
+                "{domain} sensitivity cannot run: `PARAM:` names the design parameters in a .SENS filter; {kind} '{name}' must be selected as `PARAM` or renamed"
+            )));
+        }
+        Ok(())
+    }
+
+    /// Apply the filter list to the one variable universe a `.SENS` card
+    /// selects from.
+    ///
+    /// The candidates are the device and model variables of the flattened
+    /// circuit followed by the design parameters of the authored root scope;
+    /// both pass the same filter list, and what survives keeps the one row
+    /// order the result has always had.
+    fn select_sensitivity_targets(
+        candidates: Vec<AcSensitivityTarget>,
+        filters: &[String],
+    ) -> Vec<AcSensitivityTarget> {
+        let mut targets = candidates
+            .into_iter()
+            .filter(|target| Self::sensitivity_target_selected(target, filters))
+            .collect::<Vec<_>>();
+        targets.sort_by(|left, right| {
+            left.vector_name
+                .to_ascii_uppercase()
+                .cmp(&right.vector_name.to_ascii_uppercase())
+        });
+        targets
     }
 
     fn complete_sensitivity_step(target: &AcSensitivityTarget) -> Value {
@@ -2484,10 +2694,20 @@ impl Engine {
         )))
     }
 
-    /// Run complete netlist-wide DC sensitivity for every eligible real
-    /// parameter in the flattened circuit. Unlike the legacy adjoint helper,
-    /// this covers nonlinear devices, models, hierarchy, branch-current
-    /// outputs, and SPICE device filters.
+    /// Differentiate one DC probe with respect to the variables a filter list
+    /// names.
+    ///
+    /// The variable universe is the union of two namespaces: the device
+    /// variables of the flattened circuit (instance parameters, element and
+    /// source values, model parameters) and the design parameters of the
+    /// authored root scope. A filter addresses the design parameters if and
+    /// only if it begins with `PARAM:`; an empty list means every device and
+    /// model variable and no design parameter. `PARAM:a` is the TOTAL
+    /// derivative — every parameter defined from `a` moves with it.
+    /// Method: design parameters on a qualified linear deck are exact
+    /// (captured expression derivatives, one transpose solve); every other row
+    /// is a Richardson-extrapolated three-point stencil accepted only on 1e-4
+    /// relative agreement of four independent fits, else refused by name.
     pub fn run_sensitivity_dc_complete(
         &self,
         netlist: &Netlist,
@@ -2526,11 +2746,13 @@ impl Engine {
 
         let flat = self.flattened_sensitivity_netlist(netlist, abort)?;
         Self::validate_complete_dc_sensitivity_coverage(&flat)?;
-        let targets = Self::collect_ac_sensitivity_targets(&flat, self.config.resource_limits)?
+        Self::validate_design_parameter_filters(&flat, filters, "DC")?;
+        let candidates = Self::collect_ac_sensitivity_targets(&flat, self.config.resource_limits)?
             .into_iter()
             .filter(Self::dc_sensitivity_target_active)
-            .filter(|target| Self::sensitivity_target_selected(target, filters))
+            .chain(Self::collect_design_parameter_targets(netlist))
             .collect::<Vec<_>>();
+        let targets = Self::select_sensitivity_targets(candidates, filters);
         if targets.is_empty() {
             let detail = if filters.is_empty() {
                 "the flattened circuit has no eligible real-valued DC parameters".to_string()
@@ -2562,25 +2784,41 @@ impl Engine {
             if abort.is_aborted() {
                 return Err(SimulationError::Aborted);
             }
-            let h = Self::complete_sensitivity_step(&target);
-            let derivative = self.refine_sensitivity(
-                &target.vector_name,
-                target.nominal_value,
-                h,
-                &[Complex64::new(nominal_output, 0.0)],
-                &mut runs,
-                abort,
-                |candidate| {
-                    let mut perturbed = flat.clone();
-                    Self::apply_ac_sensitivity_target(&mut perturbed, &target, candidate)?;
-                    let result = self.run_dc_op_with_abort(&perturbed, abort)?;
-                    Ok(vec![Complex64::new(
-                        Self::dc_sensitivity_output_value(&result, &output)?,
-                        0.0,
-                    )])
-                },
-            )?[0]
-                .re;
+            let derivative =
+                if let AcSensitivityLocation::DesignParameter { name } = &target.location {
+                    self.design_parameter_derivatives(
+                        netlist,
+                        &output,
+                        name,
+                        target.nominal_value,
+                        None,
+                        None,
+                        &mut runs,
+                        abort,
+                    )?
+                    .derivative[0]
+                        .re
+                } else {
+                    let h = Self::complete_sensitivity_step(&target);
+                    self.refine_sensitivity(
+                        &target.vector_name,
+                        target.nominal_value,
+                        h,
+                        &[Complex64::new(nominal_output, 0.0)],
+                        &mut runs,
+                        abort,
+                        |candidate| {
+                            let mut perturbed = flat.clone();
+                            Self::apply_ac_sensitivity_target(&mut perturbed, &target, candidate)?;
+                            let result = self.run_dc_op_with_abort(&perturbed, abort)?;
+                            Ok(vec![Complex64::new(
+                                Self::dc_sensitivity_output_value(&result, &output)?,
+                                0.0,
+                            )])
+                        },
+                    )?[0]
+                        .re
+                };
             if !derivative.is_finite() {
                 return Err(SimulationError::Circuit(format!(
                     "DC sensitivity '{}' produced a non-finite derivative",
@@ -2601,10 +2839,17 @@ impl Engine {
         Ok(result)
     }
 
-    /// Run complete AC sensitivity for every eligible real-valued parameter
-    /// in the flattened netlist. The returned derivatives are complex and
+    /// Differentiate one AC probe, at every frequency, with respect to the
+    /// variables a filter list names.
+    ///
+    /// The variable universe, the `PARAM:` rule, the empty-filter default and
+    /// the total-derivative semantics are exactly those of
+    /// [`Self::run_sensitivity_dc_complete`], and so is the method of record:
+    /// exact for a design parameter on a qualified linear deck, refined finite
+    /// differences otherwise. The returned derivatives are complex and
     /// unnormalized, matching SPICE `.SENS AC` semantics; normalized,
-    /// magnitude, and phase derivatives are retained alongside them.
+    /// magnitude and phase derivatives are retained alongside them, every row
+    /// taken against the one nominal output this study solved.
     pub fn run_sensitivity_ac_complete(
         &self,
         netlist: &Netlist,
@@ -2645,10 +2890,12 @@ impl Engine {
         }
 
         let flat = self.flattened_sensitivity_netlist(netlist, abort)?;
-        let targets = Self::collect_ac_sensitivity_targets(&flat, self.config.resource_limits)?
+        Self::validate_design_parameter_filters(&flat, filters, "AC")?;
+        let candidates = Self::collect_ac_sensitivity_targets(&flat, self.config.resource_limits)?
             .into_iter()
-            .filter(|target| Self::sensitivity_target_selected(target, filters))
+            .chain(Self::collect_design_parameter_targets(netlist))
             .collect::<Vec<_>>();
+        let targets = Self::select_sensitivity_targets(candidates, filters);
         if targets.is_empty() {
             let detail = if filters.is_empty() {
                 "the flattened circuit has no eligible real-valued parameters".to_string()
@@ -2686,21 +2933,36 @@ impl Engine {
             if abort.is_aborted() {
                 return Err(SimulationError::Aborted);
             }
-            let h = Self::complete_sensitivity_step(&target);
-            let derivative = self.refine_sensitivity(
-                &target.vector_name,
-                target.nominal_value,
-                h,
-                &nominal_output,
-                &mut runs,
-                abort,
-                |candidate| {
-                    let mut perturbed = flat.clone();
-                    Self::apply_ac_sensitivity_target(&mut perturbed, &target, candidate)?;
-                    let result = self.run_ac_with_abort(&perturbed, frequencies, abort)?;
-                    Self::ac_sensitivity_outputs(&result, &output, frequencies, abort)
-                },
-            )?;
+            let derivative =
+                if let AcSensitivityLocation::DesignParameter { name } = &target.location {
+                    self.design_parameter_derivatives(
+                        netlist,
+                        &output,
+                        name,
+                        target.nominal_value,
+                        Some(frequencies),
+                        None,
+                        &mut runs,
+                        abort,
+                    )?
+                    .derivative
+                } else {
+                    let h = Self::complete_sensitivity_step(&target);
+                    self.refine_sensitivity(
+                        &target.vector_name,
+                        target.nominal_value,
+                        h,
+                        &nominal_output,
+                        &mut runs,
+                        abort,
+                        |candidate| {
+                            let mut perturbed = flat.clone();
+                            Self::apply_ac_sensitivity_target(&mut perturbed, &target, candidate)?;
+                            let result = self.run_ac_with_abort(&perturbed, frequencies, abort)?;
+                            Self::ac_sensitivity_outputs(&result, &output, frequencies, abort)
+                        },
+                    )?
+                };
             sensitivities.push(Self::complete_ac_sensitivity_trace(
                 &target,
                 &nominal_output,
@@ -2725,6 +2987,13 @@ impl Engine {
     /// selects the DC or AC driver accordingly. Which of the two a `.SENS AC`
     /// card selects is analysis semantics, so it is decided here rather than
     /// on each frontend.
+    ///
+    /// The card's device specifications are the one filter list: a glob
+    /// selects a device, one owner's parameter (`M1:W`, `RMOD:*`) or a vector
+    /// name; `PARAM:<glob>` — and only that spelling — selects the deck's
+    /// design parameters; no specification at all means every device and model
+    /// variable and no design parameter, so `.SENS V(out)` answers what it
+    /// always answered.
     pub fn run_sensitivity_from_card_with_abort(
         &self,
         netlist: &Netlist,
