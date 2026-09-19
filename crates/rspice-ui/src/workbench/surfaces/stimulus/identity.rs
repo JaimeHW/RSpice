@@ -26,7 +26,7 @@ const KIND_WIDTH: f32 = 56.0;
 const BUTTON: Vec2 = Vec2::new(28.0, 26.0);
 /// Room the four verbs keep at the right of the identity row: Apply plus three
 /// icon buttons and the spacing between them.
-const VERB_WIDTH: f32 = 208.0;
+const VERB_WIDTH: f32 = 216.0;
 
 pub(super) fn show(ui: &mut Ui, state: &AppState, stage: &Stage, actions: &mut Vec<StageAction>) {
     let messages = state.ui.messages();
