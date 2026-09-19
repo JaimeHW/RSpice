@@ -581,13 +581,26 @@ fn run_pnoise(
         }
     });
 
+    let mut measurements = Vec::new();
+    if let Some(value) = data.phase_rms_rad {
+        measurements.push(rspice_core::MeasureResult::success(
+            "phase_error_rms_rad",
+            value,
+        ));
+    }
+    if let Some(value) = data.timing_jitter_rms_s {
+        measurements.push(rspice_core::MeasureResult::success(
+            "timing_jitter_rms_s",
+            value,
+        ));
+    }
     Ok(SimulationResult::Noise {
         frequencies: data.frequencies,
         output_noise: data.output_noise,
         input_noise: data.input_noise,
         contributors,
         summary,
-        measurements: Vec::new(),
+        measurements,
     })
 }
 

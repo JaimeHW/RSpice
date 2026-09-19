@@ -3751,7 +3751,7 @@ impl AnalysisResultDocument {
                 values: finite_axis(LOCATION, "offset frequency", &result.frequencies)?,
             },
         )?;
-        let signals = vec![ResultSignal::new(
+        let mut signals = vec![ResultSignal::new(
             analysis_descriptor(
                 LOCATION,
                 "phase_noise",
@@ -3766,6 +3766,30 @@ impl AnalysisResultDocument {
                 samples: finite_samples(LOCATION, "phase_noise", &result.phase_noise_dbc)?,
             },
         )?];
+        for (label, density) in &result.phase_noise_contributors {
+            if density.len() != point_count {
+                return Err(source_error(
+                    LOCATION,
+                    format!("contributor '{label}' does not cover every swept offset"),
+                ));
+            }
+            let canonical = format!("contribution:{}", label.to_ascii_lowercase());
+            signals.push(ResultSignal::new(
+                analysis_descriptor(
+                    LOCATION,
+                    &canonical,
+                    &format!("Phase noise from {label}"),
+                    SignalUnit::Custom("rad^2/Hz".into()),
+                    SignalValueType::Real,
+                    point_count,
+                )?,
+                None,
+                SeriesAvailability::Available,
+                SeriesValues::Real {
+                    samples: finite_samples(LOCATION, &canonical, density)?,
+                },
+            )?);
+        }
         // The solved period is the carrier: reporting it as a frequency here
         // keeps the scalar name meaning the same thing it does for a driven
         // run, and the period itself is retained in the payload.
@@ -3796,6 +3820,13 @@ impl AnalysisResultDocument {
                 "Integrated phase noise",
                 SignalUnit::Radian,
                 total,
+            )?);
+            scalars.push(real_scalar(
+                LOCATION,
+                "timing_jitter_rms",
+                "RMS timing jitter",
+                SignalUnit::Second,
+                total * result.period / std::f64::consts::TAU,
             )?);
         }
         for value in [result.diffusion_constant, result.period, result.corner_hz] {

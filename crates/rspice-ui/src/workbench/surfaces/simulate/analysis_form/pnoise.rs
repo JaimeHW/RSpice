@@ -43,14 +43,17 @@ pub(super) fn fields(
     input_row(ui, "Output", &mut setup.output_node);
     input_row(ui, "Output ref", &mut setup.output_ref);
     input_row(ui, "Input src", &mut setup.input_source);
-    input_row(ui, "Max sideband", &mut setup.max_sideband);
+    ui.add_enabled_ui(setup.noise_ref_idx != 2, |ui| {
+        input_row(ui, "Max sideband", &mut setup.max_sideband);
+    }).response.on_hover_text("Driven noise truncates frequency-conversion sidebands. Phase noise integrates the PPV over the retained autonomous PSS time grid; configure that grid on the carrier.");
     choice_row(
         ui,
         "Refer to",
         &["output", "input", "phase"],
         &mut setup.noise_ref_idx,
     );
-    switch_row(ui, "Integrated noise", &mut setup.integrated_noise);
+    ui.scope(|ui| { switch_row(ui, "Integrated noise", &mut setup.integrated_noise); }).response
+        .on_hover_text("Phase mode retains RMS phase error in radians and timing jitter in seconds in Measurements; driven modes retain voltage RMS.");
     switch_row(ui, "Noise summary", &mut setup.noise_summary);
     periodic_carrier_row(ui, &mut setup.carrier_idx);
 }

@@ -52,6 +52,19 @@ pub struct OscPnoiseResult {
     /// `sqrt(2 * integral L(f) df)`, when the run was asked to integrate.
     /// `None` means integration was not requested or the sweep spans no band.
     pub integrated_phase_noise: Option<Value>,
+    /// Per-device phase-error density in rad²/Hz, on `frequencies`.
+    /// Correlated ports remain one mechanism before device contributions are summed.
+    pub phase_noise_contributors: Vec<(String, Vec<Value>)>,
+}
+
+impl OscPnoiseResult {
+    /// Integrate both sidebands over the computed offset band using the same
+    /// stable quadrature as an authored `.PNOISE INTEGRATEDNOISE=YES` card.
+    pub fn integrate_band(&mut self) -> Result<(), SimulationError> {
+        self.integrated_phase_noise =
+            integrate_phase_noise(&self.frequencies, &self.phase_noise_dbc)?;
+        Ok(())
+    }
 }
 
 /// The offset-frequency grid one authored `.PNOISE` card sweeps.
@@ -281,8 +294,10 @@ impl Engine {
                 abort,
             )?;
             if card.integrated_noise {
-                result.integrated_phase_noise =
-                    integrate_phase_noise(&result.frequencies, &result.phase_noise_dbc)?;
+                result.integrate_band()?;
+            }
+            if !card.noise_summary {
+                result.phase_noise_contributors.clear();
             }
             return Ok(PeriodicNoiseResult::Oscillator { output, result });
         }
@@ -681,6 +696,8 @@ impl Engine {
         let size = circuit.matrix_size();
         let mut white_integrals = vec![0.0; evaluation_frequencies.len()];
         let mut previous_white = vec![0.0; evaluation_frequencies.len()];
+        let mut device_integrals: HashMap<String, Vec<Value>> = HashMap::new();
+        let mut previous_devices: HashMap<String, Vec<Value>> = HashMap::new();
         let mut colored_integrals: HashMap<PssNoiseKey, Vec<Value>> = HashMap::new();
         let mut previous_colored: HashMap<PssNoiseKey, Vec<Value>> = HashMap::new();
         let mut found_noise_source = false;
@@ -748,6 +765,7 @@ impl Engine {
             );
             found_noise_source |= !sources.is_empty() || !correlated_sources.is_empty();
             let mut white = vec![0.0; evaluation_frequencies.len()];
+            let mut devices: HashMap<String, Vec<Value>> = HashMap::new();
             let mut colored: HashMap<PssNoiseKey, Vec<Value>> = HashMap::new();
             let mut colored_occurrences: HashMap<PssNoiseIdentity, usize> = HashMap::new();
             debug_assert_eq!(sources.len(), elementary_absolute_temperatures.len());
@@ -794,6 +812,12 @@ impl Engine {
                                 source.identity.device
                             )));
                         }
+                        let device = devices
+                            .entry(source.identity.device.clone())
+                            .or_insert_with(|| vec![0.0; evaluation_frequencies.len()]);
+                        for value in device {
+                            *value += contribution;
+                        }
                         for value in &mut white {
                             *value += contribution;
                             if !value.is_finite() {
@@ -833,6 +857,10 @@ impl Engine {
                             source.identity.device
                         )));
                     }
+                    devices
+                        .entry(source.identity.device.clone())
+                        .or_insert_with(|| vec![0.0; evaluation_frequencies.len()])[index] +=
+                        contribution;
                     white[index] += contribution;
                     if !white[index].is_finite() {
                         return Err(SimulationError::Circuit(
@@ -844,6 +872,28 @@ impl Engine {
 
             if k > 0 {
                 let dt = base.times[k] - base.times[k - 1];
+                for (name, values) in &devices {
+                    let previous = previous_devices.get(name);
+                    let integral = device_integrals
+                        .entry(name.clone())
+                        .or_insert_with(|| vec![0.0; evaluation_frequencies.len()]);
+                    for index in 0..integral.len() {
+                        integral[index] += 0.5
+                            * (values[index] + previous.map_or(0.0, |values| values[index]))
+                            * dt;
+                    }
+                }
+                for (name, previous) in &previous_devices {
+                    if devices.contains_key(name) {
+                        continue;
+                    }
+                    let integral = device_integrals
+                        .entry(name.clone())
+                        .or_insert_with(|| vec![0.0; evaluation_frequencies.len()]);
+                    for index in 0..integral.len() {
+                        integral[index] += 0.5 * previous[index] * dt;
+                    }
+                }
                 for index in 0..white_integrals.len() {
                     white_integrals[index] += 0.5 * (white[index] + previous_white[index]) * dt;
                 }
@@ -872,6 +922,7 @@ impl Engine {
                 }
             }
             previous_white = white;
+            previous_devices = devices;
             previous_colored = colored;
         }
         if !found_noise_source {
@@ -884,7 +935,18 @@ impl Engine {
             .into_iter()
             .map(|integral| integral / period)
             .collect();
-        for integrals in colored_integrals.values() {
+        for values in device_integrals.values_mut() {
+            for value in values {
+                *value /= period;
+            }
+        }
+        for (key, integrals) in &colored_integrals {
+            let device = device_integrals
+                .entry(key.identity.device_name.clone())
+                .or_insert_with(|| vec![0.0; evaluation_frequencies.len()]);
+            for (value, integral) in device.iter_mut().zip(integrals) {
+                *value += (integral / period).powi(2);
+            }
             for (coefficient, integral) in coefficients.iter_mut().zip(integrals) {
                 // Demir's colored-noise coefficient is |V0|^2, where V0 is
                 // the period-average signed PPV/source-amplitude projection;
@@ -918,6 +980,20 @@ impl Engine {
             })
             .collect();
 
+        let mut phase_noise_contributors = device_integrals
+            .into_iter()
+            .map(|(name, values)| {
+                let density = offsets
+                    .iter()
+                    .zip(values.iter().skip(1))
+                    .map(|(&fm, &coefficient)| {
+                        2.0 * f0 * f0 * coefficient / (corner_hz * corner_hz + fm * fm)
+                    })
+                    .collect();
+                (name, density)
+            })
+            .collect::<Vec<_>>();
+        phase_noise_contributors.sort_by(|a, b| a.0.cmp(&b.0));
         Ok(OscPnoiseResult {
             frequencies: offsets.to_vec(),
             phase_noise_dbc,
@@ -927,6 +1003,7 @@ impl Engine {
             // Integration is a card-level request; the `.PNOISE` entry point
             // that read the card fills it in.
             integrated_phase_noise: None,
+            phase_noise_contributors,
         })
     }
 }

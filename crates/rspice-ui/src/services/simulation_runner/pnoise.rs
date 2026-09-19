@@ -199,6 +199,10 @@ pub struct PnoiseData {
     /// Total input-referred noise over the swept band in volts RMS, on the
     /// same terms.
     pub input_rms: Option<Value>,
+    /// Integrated phase error in radians; distinct from the voltage totals.
+    pub phase_rms_rad: Option<Value>,
+    /// RMS timing displacement, phase RMS divided by the solved angular frequency.
+    pub timing_jitter_rms_s: Option<Value>,
 }
 
 /// Run PNoise analysis standalone -- computing its own periodic solution
@@ -366,7 +370,7 @@ fn run_pnoise_from_retained_state(
                     .to_owned(),
             ));
         };
-        let oscillator = engine
+        let mut oscillator = engine
             .run_pnoise_oscillator_from_pss_with_abort(
                 netlist,
                 operating_point.config().clone(),
@@ -375,17 +379,42 @@ fn run_pnoise_from_retained_state(
                 abort,
             )
             .map_err(|error| ServiceRunError::from_core("exact retained-state PNOISE", error))?;
+        if config.integrated_noise {
+            oscillator.integrate_band().map_err(|error| {
+                ServiceRunError::from_core("phase-noise band integration", error)
+            })?;
+        }
+        let phase_rms_rad = oscillator.integrated_phase_noise;
+        let timing_jitter_rms_s =
+            phase_rms_rad.map(|rms| rms * oscillator.period / std::f64::consts::TAU);
+        if timing_jitter_rms_s.is_some_and(|value| !value.is_finite()) {
+            return Err(ServiceRunError::Failure(
+                "integrated timing jitter is outside the representable range".into(),
+            ));
+        }
+        let contributors = if config.noise_summary {
+            let total = oscillator
+                .phase_noise_dbc
+                .iter()
+                .map(|value| 2.0 * 10.0_f64.powf(*value / 10.0))
+                .collect::<Vec<_>>();
+            contributor_percentages_with_abort(
+                &frequencies,
+                &oscillator.phase_noise_contributors,
+                &total,
+                abort,
+            )?
+        } else {
+            Vec::new()
+        };
         ensure_not_aborted(abort)?;
         return Ok(PnoiseData {
             frequencies,
             output_noise: oscillator.phase_noise_dbc,
             input_noise: None,
-            contributors: Vec::new(),
-            // A phase-noise band total is an RMS phase error in radians, and
-            // the only place this pipeline retains a band total says volts.
-            // Reporting radians there would be a mislabelled number, so the
-            // total is withheld rather than renamed; the engine's own
-            // `.PNOISE` route publishes it as `integrated_phase_noise`.
+            contributors,
+            phase_rms_rad,
+            timing_jitter_rms_s,
             output_rms: None,
             input_rms: None,
         });
@@ -474,6 +503,8 @@ fn run_pnoise_from_retained_state(
         contributors,
         output_rms,
         input_rms,
+        phase_rms_rad: None,
+        timing_jitter_rms_s: None,
     })
 }
 
@@ -833,6 +864,75 @@ mod tests {
         );
         // The spectra themselves are untouched by the request to integrate.
         assert_eq!(integrating.output_noise, plain.output_noise);
+    }
+
+    #[test]
+    fn retained_oscillator_noise_reports_phase_timing_and_device_shares() {
+        let deck = "LC phase reporting\nl1 osc 0 1u\nc1 osc 0 1u\nb1 osc 0 i=-0.051*v(osc)+0.025*v(osc)*v(osc)*v(osc)\ni1 0 osc pulse(0 1 10u 10n 10n 1u 1)\n.options rshunt=1k temp=127\n.end\n";
+        let netlist = rspice_core::Netlist::parse(deck).unwrap();
+        let engine = Engine::default().resolved_for_netlist(&netlist);
+        let pss = engine
+            .run_pss_operating_point_with_abort(
+                &netlist,
+                rspice_core::analysis::PssConfig::autonomous()
+                    .with_period_guess(6.3e-6)
+                    .with_tstab_periods(30)
+                    .with_tolerance(1e-6)
+                    .with_max_iterations(60),
+                &NoAbort,
+            )
+            .unwrap();
+        let mut config = PnoiseRunConfig {
+            noise_ref: PnoiseReference::Phase,
+            integrated_noise: true,
+            noise_summary: true,
+            output_node: "osc".into(),
+            ..Default::default()
+        };
+        let offsets = vec![1e3, 1e4, 1e5];
+        let reported = run_pnoise_from_retained_state(
+            &engine,
+            &netlist,
+            &config,
+            offsets.clone(),
+            PeriodicCarrierState::Shooting(&pss),
+            &NoAbort,
+        )
+        .unwrap();
+        let phase = reported.phase_rms_rad.unwrap();
+        let jitter = reported.timing_jitter_rms_s.unwrap();
+        assert!(phase > 0.0 && jitter > 0.0);
+        assert!(
+            (jitter / (phase * pss.analysis().result.period / std::f64::consts::TAU) - 1.0).abs()
+                < 1e-12
+        );
+        assert!(
+            (reported
+                .contributors
+                .iter()
+                .map(|(_, share)| share)
+                .sum::<f64>()
+                - 100.0)
+                .abs()
+                < 1e-8
+        );
+        assert_eq!(reported.output_rms, None);
+        assert_eq!(reported.input_rms, None);
+        config.integrated_noise = false;
+        config.noise_summary = false;
+        let plain = run_pnoise_from_retained_state(
+            &engine,
+            &netlist,
+            &config,
+            offsets,
+            PeriodicCarrierState::Shooting(&pss),
+            &NoAbort,
+        )
+        .unwrap();
+        assert_eq!(plain.phase_rms_rad, None);
+        assert_eq!(plain.timing_jitter_rms_s, None);
+        assert!(plain.contributors.is_empty());
+        assert_eq!(plain.output_noise, reported.output_noise);
     }
 
     #[test]

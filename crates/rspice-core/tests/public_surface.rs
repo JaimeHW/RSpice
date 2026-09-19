@@ -986,7 +986,8 @@ use rspice_core::analysis::harmonic_balance::{
 /// boxes it are free; nothing else was added.
 // Studio validates authored DC grids with the engine's bounded point generator.
 // Studio also transforms a retained current trace without reconstructing an engine result.
-const MAX_PUBLIC_ITEMS: usize = 5074;
+// Retained oscillator consumers can request the authored-card band integration.
+const MAX_PUBLIC_ITEMS: usize = 5075;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

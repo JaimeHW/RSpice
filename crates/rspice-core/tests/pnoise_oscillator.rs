@@ -45,9 +45,23 @@ i1 0 osc pulse(0 1 10u 10n 10n 1u 1)
         .with_max_iterations(60);
 
     let offsets = [1.0e3, 1.0e4, 1.0e5];
-    let result = engine
+    let mut result = engine
         .run_pnoise_oscillator(&netlist, config, &offsets)
         .expect("oscillator pnoise completes");
+
+    assert!(!result.phase_noise_contributors.is_empty());
+    for index in 0..offsets.len() {
+        let sum: f64 = result
+            .phase_noise_contributors
+            .iter()
+            .map(|(_, values)| values[index])
+            .sum();
+        let expected = 2.0 * 10.0_f64.powf(result.phase_noise_dbc[index] / 10.0);
+        assert!((sum / expected - 1.0).abs() < 1e-12);
+    }
+    assert_eq!(result.integrated_phase_noise, None);
+    result.integrate_band().unwrap();
+    assert!(result.integrated_phase_noise.unwrap() > 0.0);
 
     // Analytic diffusion constant for the tank-resistor source.
     let (l, c_tank, r): (f64, f64, f64) = (1.0e-6, 1.0e-6, 1.0e3);
