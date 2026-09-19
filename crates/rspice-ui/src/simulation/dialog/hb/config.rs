@@ -148,10 +148,17 @@ impl HbConfig {
         }
         let harmonics = std::iter::once(self.num_harmonics)
             .chain(self.additional_tones.iter().map(|tone| tone.harmonics))
-            .map(|count| count.to_string()).collect::<Vec<_>>().join(",");
+            .map(|count| count.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
         cmd.push_str(&format!(" HARMS={harmonics}"));
         for (index, source) in std::iter::once(self.fundamental_source.as_deref())
-            .chain(self.additional_tones.iter().map(|tone| tone.source.as_deref())).enumerate()
+            .chain(
+                self.additional_tones
+                    .iter()
+                    .map(|tone| tone.source.as_deref()),
+            )
+            .enumerate()
         {
             if let Some(source) = source {
                 cmd.push_str(&format!(" SOURCE{}={}", index + 1, source.trim()));
@@ -166,6 +173,8 @@ impl HbConfig {
         ));
         if let Some(points) = self.collocation_points {
             cmd.push_str(&format!(" POINTS={points}"));
+        } else {
+            cmd.push_str(" POINTS=AUTO");
         }
         cmd
     }
@@ -200,7 +209,9 @@ impl HbConfig {
             return Err("Absolute tolerance must be finite and positive".into());
         }
         if self.max_mixing_order == 0 || !(1..=64).contains(&self.gmres_restart) {
-            return Err("Mixing order must be positive and GMRES restart must be between 1 and 64".into());
+            return Err(
+                "Mixing order must be positive and GMRES restart must be between 1 and 64".into(),
+            );
         }
         if self.maxiter == 0 {
             return Err("Maximum iterations must be at least 1".to_string());
@@ -215,7 +226,10 @@ impl HbConfig {
             return Err("Damping factor must be between 0.1 and 1".to_string());
         }
 
-        if !self.min_damping.is_finite() || self.min_damping <= 0.0 || self.min_damping > self.damping {
+        if !self.min_damping.is_finite()
+            || self.min_damping <= 0.0
+            || self.min_damping > self.damping
+        {
             return Err(format!(
                 "Damping floor must be greater than 0 and no greater than the damping factor ({})",
                 self.damping
@@ -300,7 +314,11 @@ mod tests {
             ..HbConfig::default()
         };
 
-        assert!(config.to_spice().starts_with(".hb 2000000000 1500000 900 HARMS=9,3,2 "));
+        assert!(
+            config
+                .to_spice()
+                .starts_with(".hb 2000000000 1500000 900 HARMS=9,3,2 ")
+        );
         assert_eq!(parsed_frequencies(&config), vec![2.0e9, 1.5e6, 900.0]);
     }
 
@@ -330,7 +348,8 @@ mod tests {
             panic!("expected HB card");
         };
         assert_eq!(card.sources, vec![Some("V1".to_owned())]);
-        let restored = rspice_core::analysis::HbConfig::from_hb_card(card, &netlist.options).unwrap();
+        let restored =
+            rspice_core::analysis::HbConfig::from_hb_card(card, &netlist.options).unwrap();
         assert_eq!(restored.fundamental_freq, config.fundamental_freq);
         assert_eq!(restored.num_harmonics, 15);
         assert_eq!(restored.oversample_factor, 8);

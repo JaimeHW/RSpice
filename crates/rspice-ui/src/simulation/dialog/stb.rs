@@ -155,12 +155,13 @@ impl StbConfig {
     /// variation, points, start, stop, then the probe.
     pub fn to_spice(&self) -> String {
         format!(
-            ".stb {} {} {} {} probe={}",
+            ".stb {} {} {} {} probe={} NYQUIST={}",
             self.sweep_type.spice_keyword(),
             self.num_points,
-            format_freq(self.start_freq),
-            format_freq(self.stop_freq),
-            self.probe_source
+            self.start_freq,
+            self.stop_freq,
+            self.probe_source,
+            if self.compute_nyquist { "yes" } else { "no" }
         )
     }
 
@@ -322,7 +323,10 @@ mod tests {
     fn directive_orders_tokens_the_way_the_parser_reads_them() {
         let config = StbConfig::default();
 
-        assert_eq!(config.to_spice(), ".stb dec 10 1 1G probe=LSTB");
+        assert_eq!(
+            config.to_spice(),
+            ".stb dec 10 1 1000000000 probe=LSTB NYQUIST=yes"
+        );
     }
 
     #[test]

@@ -540,7 +540,9 @@ impl HbConfig {
         if let Some(value) = card.oversample {
             config.oversample_factor = value;
         }
-        if let Some(value) = card.collocation_points {
+        if card.automatic_collocation {
+            config.collocation_points = None;
+        } else if let Some(value) = card.collocation_points {
             config.collocation_points = Some(value);
         }
         if let Some(value) = card.max_mixing_order {

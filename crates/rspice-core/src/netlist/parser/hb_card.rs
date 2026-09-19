@@ -93,13 +93,22 @@ pub(super) fn parse_hb_command(
             // An even grid cannot carry a bilateral spectrum and a grid below
             // three cannot carry one harmonic beside DC, so both are refused
             // here rather than at the FFT plan.
-            "POINTS" => bind_once(
-                &mut card.collocation_points,
-                card_odd_count(stream, line_num, params, "POINTS")?,
-                CARD,
-                line_num,
-                "POINTS",
-            )?,
+            "POINTS" => {
+                if card.automatic_collocation || card.collocation_points.is_some() {
+                    return Err(card_error(
+                        CARD,
+                        line_num,
+                        AnalysisCardIssue::DuplicateKeyword { keyword: "POINTS" },
+                    ));
+                }
+                if stream.peek().lexeme.eq_ignore_ascii_case("AUTO") {
+                    stream.advance();
+                    card.automatic_collocation = true;
+                } else {
+                    card.collocation_points =
+                        Some(card_odd_count(stream, line_num, params, "POINTS")?);
+                }
+            }
             "MAXMIXING" => bind_once(
                 &mut card.max_mixing_order,
                 card_count(stream, line_num, params, CARD, "MAXMIXING", 1)?,

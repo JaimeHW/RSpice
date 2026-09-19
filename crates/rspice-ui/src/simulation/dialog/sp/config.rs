@@ -1,7 +1,5 @@
 //! S-parameter sweep configuration.
 
-use super::format::format_freq;
-
 /// Type of frequency sweep for S-parameter analysis
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum SpSweepType {
@@ -120,22 +118,14 @@ impl SpConfig {
     /// the card — both in ngspice, which is where `.SP` comes from, and in
     /// this engine's parser (`parser::command_parsers::parse_sp_command`).
     ///
-    /// The port table is deliberately not on it. A port is an annotation on
-    /// the element standing at it (`portnum=<n> [z0=<ohms>]`, read by
-    /// `analysis::s_param::ports`), and the studio's own table reaches the
-    /// solver typed instead: `build_sp_spec` copies it into
-    /// `AnalysisSpec::SParameter`, and `runner::spec::frequency` copies that
-    /// into `svc_runner::SParameterRunConfig`. Spelling the ports here as
-    /// `port1=IN` made a card no parser accepts, and because preparation
-    /// parses the whole executable deck, that refused every analysis in the
-    /// plan rather than just this one.
+    /// Explicit ports retain each reference plane and its effective impedance.
     pub fn to_spice(&self) -> String {
         let mut cmd = format!(
             ".sp {} {} {} {}",
             self.sweep_type.spice_keyword(),
             self.num_points,
-            format_freq(self.start_freq),
-            format_freq(self.stop_freq)
+            self.start_freq,
+            self.stop_freq
         );
 
         if self.do_noise {
@@ -143,6 +133,15 @@ impl SpConfig {
             cmd.push_str(" 1");
         }
 
+        for (index, port) in self.ports.iter().enumerate() {
+            cmd.push_str(&format!(
+                " PORT{}=({},{},{})",
+                index + 1,
+                port.node_pos,
+                port.node_neg,
+                port.z0.unwrap_or(self.z0)
+            ));
+        }
         cmd
     }
 

@@ -1753,11 +1753,15 @@ fn sp_noise_request_executes_and_retains_physical_results_through_worker_transpo
                 points_per_unit: 3,
                 sweep: FrequencySweep::Linear,
                 z0: 50.0,
-                ports: vec![SpPort {
-                    node_pos: "p1".into(),
-                    node_neg: "0".into(),
-                    z0: None,
-                }],
+                ports: if port_count == 1 {
+                    vec![SpPort {
+                        node_pos: "p1".into(),
+                        node_neg: "0".into(),
+                        z0: None,
+                    }]
+                } else {
+                    Vec::new()
+                },
                 do_noise,
             };
             let worker_spec = WorkerAnalysisSpec::try_from(&spec).unwrap();

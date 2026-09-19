@@ -866,40 +866,28 @@ fn command_to_queue_item(
             analysis_line: format!(".ac data={table_name}"),
         }),
         AnalysisCommand::Hb(hb) => {
-            let frequencies = &hb.frequencies;
-            let defaults =
-                rspice_core::analysis::HbConfig::new(frequencies.first().copied().unwrap_or(1.0));
-            let order_for = |index: usize| {
-                netlist
-                    .options
-                    .hb_num_frequencies
-                    .get(index)
-                    .copied()
-                    .or_else(|| netlist.options.hb_num_frequencies.first().copied())
-                    .unwrap_or(defaults.num_harmonics)
-            };
-            let tones = frequencies
-                .iter()
-                .enumerate()
-                .map(|(index, frequency)| {
-                    HbToneSpec::new(*frequency, order_for(index))
-                        .with_name(format!("tone{}", index + 1))
-                })
-                .collect();
-            let collocation_points = if frequencies.len() == 1
-                && !netlist.options.hb_num_frequencies.is_empty()
-            {
-                Some(
-                    order_for(0)
-                        .checked_mul(2)
-                        .and_then(|value| value.checked_add(1))
-                        .ok_or_else(|| {
-                            "HB harmonic count exceeds the addressable collocation grid".to_string()
-                        })?,
-                )
+            let defaults = rspice_core::analysis::HbConfig::from_hb_card(hb, &netlist.options)
+                .map_err(|error| error.to_string())?;
+            let tones = if defaults.tones.is_empty() {
+                vec![
+                    HbToneSpec::new(defaults.fundamental_freq, defaults.num_harmonics)
+                        .with_name("tone1"),
+                ]
             } else {
-                None
+                defaults
+                    .tones
+                    .iter()
+                    .map(|tone| {
+                        let mut spec = HbToneSpec::new(tone.frequency, tone.num_harmonics)
+                            .with_name(&tone.name);
+                        if let Some(source) = &tone.source_name {
+                            spec = spec.with_source(source);
+                        }
+                        spec
+                    })
+                    .collect()
             };
+            let collocation_points = defaults.collocation_points;
             Ok(QueuedAnalysis {
                 numeric_override: None,
                 spec: AnalysisSpec::HarmonicBalance {
@@ -929,31 +917,36 @@ fn command_to_queue_item(
             start_freq,
             stop_freq,
             do_noise,
-        } => {
-            Ok(QueuedAnalysis {
-                numeric_override: None,
-                spec: AnalysisSpec::SParameter {
-                    start_freq: *start_freq,
-                    stop_freq: *stop_freq,
-                    points_per_unit: *points,
-                    sweep: frequency_sweep(*variation),
-                    // Authored ports, including hierarchy and scoped parameters,
-                    // are resolved once by the engine when this card executes.
-                    z0: 50.0,
-                    ports: Vec::new(),
-                    do_noise: *do_noise,
-                },
-                config: None,
-                spec_options,
-                analysis_line: ".sp".to_string(),
-            })
-        }
+            ports,
+        } => Ok(QueuedAnalysis {
+            numeric_override: None,
+            spec: AnalysisSpec::SParameter {
+                start_freq: *start_freq,
+                stop_freq: *stop_freq,
+                points_per_unit: *points,
+                sweep: frequency_sweep(*variation),
+                z0: 50.0,
+                ports: ports
+                    .iter()
+                    .map(|port| crate::simulation::multi_run::SpPort {
+                        node_pos: port.node_pos.clone(),
+                        node_neg: port.node_neg.clone(),
+                        z0: Some(port.z0),
+                    })
+                    .collect(),
+                do_noise: *do_noise,
+            },
+            config: None,
+            spec_options,
+            analysis_line: ".sp".to_string(),
+        }),
         AnalysisCommand::Stb {
             variation,
             points,
             start_freq,
             stop_freq,
             probe,
+            compute_nyquist,
         } => Ok(QueuedAnalysis {
             numeric_override: None,
             spec: AnalysisSpec::Stb {
@@ -962,19 +955,18 @@ fn command_to_queue_item(
                 stop_freq: *stop_freq,
                 sweep: frequency_sweep(*variation),
                 points_per_decade: *points,
-                // The directive has no Nyquist token; a hand-written deck
-                // gets the contour, matching the editor's default.
-                compute_nyquist: true,
+                compute_nyquist: *compute_nyquist,
             },
             config: None,
             spec_options,
             analysis_line: format!(
-                ".stb {} {} {} {} probe={}",
+                ".stb {} {} {} {} probe={} NYQUIST={}",
                 frequency_sweep(*variation).runner_keyword(),
                 points,
                 start_freq,
                 stop_freq,
-                probe
+                probe,
+                if *compute_nyquist { "yes" } else { "no" }
             ),
         }),
         AnalysisCommand::Disto {
@@ -1494,6 +1486,116 @@ mod tests {
     }
     use crate::services::simulation_runner::CornerBaseMode;
     use crate::simulation::multi_run::FrequencySweep;
+
+    #[test]
+    fn studio_hb_card_retains_solver_controls_and_automatic_grid() {
+        use crate::simulation::dialog::hb::{HbConfig, HbDialogState, HbSolverType};
+        let config = HbConfig {
+            fundamental_freq: 1000.0,
+            num_harmonics: 5,
+            fundamental_source: Some("V1".into()),
+            maxiter: 42,
+            damping: 0.5,
+            min_damping: 0.02,
+            oversample: 4,
+            reltol: 2e-8,
+            abstol: 3e-13,
+            gmres_restart: 16,
+            solver: HbSolverType::Krylov,
+            source_stepping: true,
+            use_exact_jacobian: false,
+            verbose: true,
+            ..Default::default()
+        };
+        let restored = HbDialogState::from_config(&config).to_config().unwrap();
+        let specs = specs_for(&format!(
+            "HB export\nV1 in 0 AC 1\nR1 in 0 1k\n{}\n.end\n",
+            restored.to_spice()
+        ));
+        let [
+            AnalysisSpec::HarmonicBalance {
+                tones,
+                reltol,
+                abstol,
+                max_iterations,
+                damping,
+                min_damping,
+                oversample,
+                collocation_points,
+                use_krylov,
+                gmres_restart,
+                source_stepping,
+                use_exact_jacobian,
+                verbose,
+                ..
+            },
+        ] = specs.as_slice()
+        else {
+            panic!("{specs:?}");
+        };
+        assert_eq!(tones[0].source.as_deref(), Some("V1"));
+        assert_eq!(tones[0].harmonics, 5);
+        assert_eq!((*reltol, *abstol, *max_iterations), (2e-8, 3e-13, 42));
+        assert_eq!((*damping, *min_damping, *oversample), (0.5, 0.02, 4));
+        assert_eq!(*collocation_points, None);
+        assert!(*use_krylov && *source_stepping && !*use_exact_jacobian && *verbose);
+        assert_eq!(*gmres_restart, 16);
+    }
+
+    #[test]
+    fn studio_sp_card_retains_differential_ports_and_effective_impedances() {
+        use crate::simulation::dialog::sp::{SpConfig, SpPortConfig};
+        let config = SpConfig {
+            z0: 75.0,
+            ports: vec![
+                SpPortConfig::single_ended(1, "in"),
+                SpPortConfig {
+                    number: 2,
+                    node_pos: "out".into(),
+                    node_neg: "ref".into(),
+                    z0: Some(100.0),
+                },
+            ],
+            do_noise: true,
+            ..Default::default()
+        };
+        let specs = specs_for(&format!(
+            "SP export\nR1 in out 100\nR2 ref 0 50\n{}\n.end\n",
+            config.to_spice()
+        ));
+        let [
+            AnalysisSpec::SParameter {
+                ports, do_noise, ..
+            },
+        ] = specs.as_slice()
+        else {
+            panic!("{specs:?}");
+        };
+        assert_eq!(ports.len(), 2);
+        assert_eq!(ports[0].z0, Some(75.0));
+        assert_eq!(ports[1].z0, Some(100.0));
+        assert!(ports[1].node_neg.eq_ignore_ascii_case("ref"));
+        assert!(*do_noise);
+    }
+
+    #[test]
+    fn studio_stb_card_retains_disabled_nyquist() {
+        let config = crate::simulation::dialog::stb::StbConfig {
+            compute_nyquist: false,
+            ..Default::default()
+        };
+        let specs = specs_for(&format!(
+            "STB export\nV1 in 0 1\nR1 in out 1k\nLSTB out load 1n\nR2 load 0 1k\n{}\n.end\n",
+            config.to_spice()
+        ));
+        assert!(matches!(
+            &specs[0],
+            AnalysisSpec::Stb {
+                compute_nyquist: false,
+                ..
+            }
+        ));
+    }
 
     fn specs_for(source: &str) -> Vec<AnalysisSpec> {
         let state = AppState::default();

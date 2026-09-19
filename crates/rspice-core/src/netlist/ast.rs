@@ -2902,6 +2902,8 @@ pub struct HbCard {
     pub oversample: Option<usize>,
     /// `POINTS=`: exact odd collocation grid, replacing the implied one.
     pub collocation_points: Option<usize>,
+    /// `POINTS=AUTO`: retain the oversampled grid even with explicit HARMS.
+    pub automatic_collocation: bool,
     /// `MAXMIXING=`: highest intermodulation order the basis must carry.
     pub max_mixing_order: Option<usize>,
     /// `RELTOL=`: relative Newton residual tolerance.
