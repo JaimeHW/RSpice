@@ -21,10 +21,13 @@ pub(crate) fn mark_response_disabled(response: &mut egui::Response) {
 
 mod button;
 mod chip;
+mod command_form;
 mod dialog;
 mod docbar;
 mod form;
 pub(crate) mod notice;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+pub(crate) mod painted_runs;
 mod pane;
 mod schematic_command;
 mod section;
@@ -39,6 +42,7 @@ mod view_switch;
 
 pub use button::{Button, IconButton};
 pub use chip::chip;
+pub(crate) use command_form::CommandForm;
 pub use dialog::{
     Dialog, DialogChoice, DialogHintTone, DialogInitialFocus, DialogSize, DialogTransactionTone,
 };
