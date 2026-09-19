@@ -43,6 +43,7 @@ use std::sync::RwLock;
 use std::time::{Duration, Instant};
 
 mod model_resolution;
+pub(in crate::engine) use model_resolution::resolved_element_value_expression;
 use model_resolution::*;
 pub use model_resolution::{
     ModelBinAxisRange, ModelBinCardGeometry, ModelBinCardInspection, ModelBinInspection,
