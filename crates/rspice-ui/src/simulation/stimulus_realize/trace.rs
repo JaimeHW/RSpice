@@ -45,6 +45,17 @@ use super::{PreviewTiming, PreviewWindow, WaveformReadouts, evaluate_at, transie
 /// sampling rather than the waveform's own.
 const ENVELOPE_COLUMNS_PER_CYCLE: f64 = 4.0;
 
+/// How many points a curve steps across one column.
+///
+/// The column count decides the mode, and it is too coarse a grid to read a
+/// smooth family's peak off: at the four columns a cycle where a window is
+/// still a curve, a sine sampled once a column can state its own crest almost a
+/// third low, and the minimum, maximum and levels every surface prints are read
+/// off these points. Eight steps a column is thirty-two points a cycle at that
+/// worst case, which reads the crest within half a percent; the corners the
+/// engine schedules are merged in exactly either way.
+const CURVE_STEPS_PER_COLUMN: usize = 8;
+
 /// How many breakpoints a curve will merge before the window is an envelope by
 /// construction. A window carrying more corners than this has more corners than
 /// the plot has pixels, and a polyline through a decimated subset of them is a
@@ -227,9 +238,10 @@ fn curve(
     breakpoints: &[f64],
 ) -> WaveformTrace {
     let span = window.stop - window.start;
-    let mut times = Vec::with_capacity(window.samples + breakpoints.len());
-    for index in 0..window.samples {
-        times.push(window.start + span * index as f64 / (window.samples - 1) as f64);
+    let steps = (window.samples - 1) * CURVE_STEPS_PER_COLUMN;
+    let mut times = Vec::with_capacity(steps + 1 + breakpoints.len());
+    for index in 0..=steps {
+        times.push(window.start + span * index as f64 / steps as f64);
     }
     times.extend(
         breakpoints
@@ -396,9 +408,9 @@ mod tests {
         );
     }
 
-    /// A window that can carry its waveform keeps carrying it: one point per
-    /// column, no band, and nothing added to the grid a sine has no corners
-    /// to add.
+    /// A window that can carry its waveform keeps carrying it: the uniform
+    /// grid at its eight steps a column, no band, and nothing added to the grid
+    /// a sine has no corners to add.
     #[test]
     fn a_sine_the_window_can_carry_stays_a_curve() {
         let trace = sample_trace(&spec("SIN(0 2m 1k)"), window(1e-3), timing(1e-3));
@@ -406,8 +418,37 @@ mod tests {
         let WaveformTrace::Curve(samples) = &trace else {
             panic!("one cycle in four hundred and eighty columns is a curve");
         };
-        assert_eq!(samples.len(), 480);
+        assert_eq!(samples.len(), 479 * CURVE_STEPS_PER_COLUMN + 1);
         assert_eq!(trace.caption(), None);
+    }
+
+    /// The numbers a surface prints are read off the curve, so the curve has to
+    /// reach the crest. Five columns a cycle is still a curve, and stepped once
+    /// a column it states a 2 mV sine as low as 1.9 mV; at eight steps a column
+    /// the crest is read within half a percent.
+    #[test]
+    fn a_curve_near_the_envelope_threshold_still_reads_its_crest() {
+        let trace = sample_trace(
+            &spec("SIN(0 2m 1k)"),
+            PreviewWindow {
+                start: 0.0,
+                stop: 13e-3,
+                samples: 66,
+            },
+            timing(13e-3),
+        );
+
+        assert!(
+            matches!(trace, WaveformTrace::Curve(_)),
+            "five columns a cycle"
+        );
+        let readouts = trace.readouts().expect("readouts");
+        assert!(
+            (readouts.maximum - 2e-3).abs() <= 2e-3 * 0.005,
+            "the crest reads {}",
+            readouts.maximum
+        );
+        assert!((readouts.minimum + 2e-3).abs() <= 2e-3 * 0.005);
     }
 
     /// A 1 ns edge in a 100 µs window falls between two columns of any grid the
