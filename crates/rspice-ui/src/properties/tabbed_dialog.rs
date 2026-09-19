@@ -11,6 +11,7 @@ pub(crate) use editors::parse_expression_source;
 /// component editor and the Stimulus Library both import through it, so a file
 /// lands in the same place whichever surface asked for it.
 pub(crate) use render::attach_data_file;
+pub(crate) use render::provenance_colour;
 pub use render::render_tabbed_property_dialog;
 pub use state::{
     ComponentEditorContext, ComponentModelContext, ComponentOperatingPointContext,

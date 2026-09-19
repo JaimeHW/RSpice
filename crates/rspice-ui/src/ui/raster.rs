@@ -254,7 +254,22 @@ fn covered(min: f32, max: f32, extent: usize) -> std::ops::Range<usize> {
 /// to, so a render is far from free. Render once and assert over cropped
 /// regions with [`Canvas::pixels_in`] rather than rendering once per claim.
 pub(crate) fn render(size: Vec2, pass: impl FnMut(&mut egui::Ui, Color32)) -> Canvas {
-    render_at_pointer(size, None, pass)
+    render_at_pointer(super::Theme::default(), size, None, pass)
+}
+
+/// Render `pass` under an explicit theme.
+///
+/// The default theme is dark, and a surface reviewed only there can be
+/// unreadable in light without anyone seeing it: the two palettes do not
+/// differ by inversion, and a tone that separates from its background in one
+/// can sit on top of it in the other. A review that has to cover both needs
+/// the mode as an input rather than a global the renderer assumes.
+pub(crate) fn render_themed(
+    theme: super::Theme,
+    size: Vec2,
+    pass: impl FnMut(&mut egui::Ui, Color32),
+) -> Canvas {
+    render_at_pointer(theme, size, None, pass)
 }
 
 /// Render `pass` with the pointer parked at `pointer`, so a hover state and
@@ -268,16 +283,17 @@ pub(crate) fn render_with_pointer(
     pointer: egui::Pos2,
     pass: impl FnMut(&mut egui::Ui, Color32),
 ) -> Canvas {
-    render_at_pointer(size, Some(pointer), pass)
+    render_at_pointer(super::Theme::default(), size, Some(pointer), pass)
 }
 
 fn render_at_pointer(
+    theme: super::Theme,
     size: Vec2,
     pointer: Option<egui::Pos2>,
     mut pass: impl FnMut(&mut egui::Ui, Color32),
 ) -> Canvas {
     let ctx = egui::Context::default();
-    super::Theme::default().apply(&ctx);
+    theme.apply(&ctx);
     if pointer.is_some() {
         ctx.all_styles_mut(|style| {
             style.interaction.tooltip_delay = 0.0;

@@ -747,7 +747,7 @@ fn placed_source(
             reference: component.spice_instance_name(),
             is_voltage: is_voltage_source(component.kind),
             family,
-            key_figure: key_figure(component, &params),
+            key_figure: key_figure(component, &params, deck_spelling),
             definition_cell: stimulus_library.studio_definition_cell(component),
             provenance: stimulus_library.provenance_state(component),
             definition: component
@@ -1221,13 +1221,58 @@ pub fn source_identity_line(component: &Component) -> Option<String> {
     } else {
         "I"
     };
-    let params = crate::state::parse_params_string(&component.params);
-    let figure = key_figure(component, &params);
+    let figure = source_key_figure(component);
     Some(if figure.is_empty() {
         format!("{quantity} \u{00b7} {family}")
     } else {
         format!("{quantity} \u{00b7} {family} \u{00b7} {figure}")
     })
+}
+
+/// The one number that tells two sources of the same family apart, on its own.
+///
+/// [`source_identity_line`] is this number with the quantity and the family in
+/// front of it, which is what a column with no other context needs. A list
+/// already grouped by family states the family in the group label, so its rows
+/// need the number alone — and deriving it a second time there is how two
+/// surfaces come to disagree about what identifies a source.
+///
+/// Empty when the family has no such number, which the callers render as the
+/// absence it is rather than as a blank field.
+#[must_use]
+pub fn source_key_figure(component: &Component) -> String {
+    source_key_figure_spelled(component, deck_spelling)
+}
+
+/// [`source_key_figure`] with the caller's own spelling of the number.
+///
+/// *Which* number identifies a family is one fact and lives here. How a number
+/// is written is not that fact: a deck column writes `2us` because that is what
+/// a card holds, and an instrument surface writes `2 µs` because that is what
+/// every axis and readout beside it writes. Handing the spelling in keeps the
+/// one table of families from being copied to gain a space.
+#[must_use]
+pub fn source_key_figure_spelled(component: &Component, spell: fn(f64, &str) -> String) -> String {
+    if source_family(component.kind).is_none() {
+        return String::new();
+    }
+    let params = crate::state::parse_params_string(&component.params);
+    key_figure(component, &params, spell)
+}
+
+/// The spelling a netlist column uses: the deck's own suffixes, no space.
+fn deck_spelling(value: f64, unit: &str) -> String {
+    format!("{}{unit}", crate::state::format_engineering(value))
+}
+
+/// The quantity this source drives, as a unit symbol for an axis or a readout.
+#[must_use]
+pub fn source_unit(component: &Component) -> &'static str {
+    if is_voltage_source(component.kind) {
+        "V"
+    } else {
+        "A"
+    }
 }
 
 /// The one number that tells two sources of the same family apart.
@@ -1236,7 +1281,11 @@ pub fn source_identity_line(component: &Component) -> Option<String> {
 /// period, a sinusoid by its frequency, a modulated source by its carrier. The
 /// value is re-formatted rather than echoed so a row reads the same whether the
 /// field was typed as `1e6` or `1Meg`.
-fn key_figure(component: &Component, params: &HashMap<String, String>) -> String {
+fn key_figure(
+    component: &Component,
+    params: &HashMap<String, String>,
+    spell: fn(f64, &str) -> String,
+) -> String {
     let quantity = if is_voltage_source(component.kind) {
         "V"
     } else {
@@ -1245,23 +1294,24 @@ fn key_figure(component: &Component, params: &HashMap<String, String>) -> String
     let figure = |key: &str, label: &str, unit: &str| -> Option<String> {
         let raw = params.get(key)?;
         let value = crate::quantity::parse_engineering_value(raw).ok()?;
+        let number = spell(value, unit);
         Some(if label.is_empty() {
-            format!("{}{unit}", crate::state::format_engineering(value))
+            number
         } else {
-            format!("{label} {}{unit}", crate::state::format_engineering(value))
+            format!("{label} {number}")
         })
     };
     match component.kind {
         ComponentType::VoltageSource | ComponentType::CurrentSource => {
             crate::quantity::parse_engineering_value(&component.value)
                 .ok()
-                .map(|value| format!("{}{quantity}", crate::state::format_engineering(value)))
+                .map(|value| spell(value, quantity))
                 .unwrap_or_default()
         }
         ComponentType::VoltageSourceAc | ComponentType::CurrentSourceAc => {
             crate::quantity::parse_engineering_value(&component.value)
                 .ok()
-                .map(|value| format!("{}{quantity} AC", crate::state::format_engineering(value)))
+                .map(|value| format!("{} AC", spell(value, quantity)))
                 .unwrap_or_default()
         }
         ComponentType::VoltageSourcePulse | ComponentType::CurrentSourcePulse => {

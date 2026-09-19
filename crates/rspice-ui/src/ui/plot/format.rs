@@ -110,6 +110,24 @@ pub fn fmt_si(value: f64, unit: &str, digits: usize) -> String {
         .to_owned()
 }
 
+/// An axis tick that carries its own unit: `si_tick_label(5e-4, "s", 2)` →
+/// `"500 µs"`, `si_tick_label(-3e-3, "V", 2)` → `"−3 mV"`.
+///
+/// [`tick_label_with_step`] drops the unit, because a result viewer's axis
+/// states the quantity once in its own caption and has room to. A 56 point
+/// waveform strip has no caption track, so its ticks carry the unit
+/// themselves — and they have to be trimmed and signed exactly as every other
+/// tick in the product is, or the same number reads two ways on two surfaces.
+///
+/// [`fmt_si`] is the readout form of the same value and deliberately keeps its
+/// trailing zeros: a measured `1.00 ms` says three digits were resolved, which
+/// is a claim an axis label never makes.
+pub fn si_tick_label(value: f64, unit: &str, digits: usize) -> String {
+    let (scaled, prefix) = scale_si(value, digits);
+    let mantissa = trimmed(format!("{scaled:.digits$}"));
+    format!("{mantissa} {prefix}{unit}").trim_end().to_owned()
+}
+
 /// Format a result readout with an exact number of significant digits while
 /// retaining SI-prefix presentation. This is intentionally separate from
 /// engineering export, which serializes the original `f64` samples.

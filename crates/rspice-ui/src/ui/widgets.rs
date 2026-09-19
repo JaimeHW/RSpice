@@ -38,7 +38,9 @@ mod view_switch;
 
 pub use button::{Button, IconButton};
 pub use chip::chip;
-pub use dialog::{Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone};
+pub use dialog::{
+    Dialog, DialogChoice, DialogHintTone, DialogInitialFocus, DialogSize, DialogTransactionTone,
+};
 pub use docbar::docbar_at_height;
 pub(crate) use form::name_control;
 pub use form::{choice_row, input_row, kv_row, mono_input, switch_row};

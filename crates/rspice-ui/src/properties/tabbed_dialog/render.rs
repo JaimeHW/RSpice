@@ -743,7 +743,11 @@ fn evidence_contents(
 /// moved past the copy, or the definition having gone away, is a finding; a
 /// local edit is deliberate and marked rather than flagged. This is the same
 /// rule the Studio's Definition column follows, because it is the same fact.
-fn provenance_colour(
+///
+/// Shared with the stimulus link dialog, whose header carries the same chip
+/// over the same instance: two tables of this rule would let one surface call a
+/// state a finding while the other beside it called it routine.
+pub(crate) fn provenance_colour(
     ui: &Ui,
     provenance: crate::state::stimulus_library::provenance::ProvenanceState,
 ) -> egui::Color32 {
@@ -1289,10 +1293,31 @@ fn source_preview_card(
 ) {
     let timing = state.preview_timing();
     section_band(ui, "Transient stimulus preview", "engine evaluator");
-    let curve = preview_component(state, kind, registry)
+    let component = preview_component(state, kind, registry);
+    let unit = component
+        .as_ref()
+        .map_or("V", crate::simulation::placed_sources::source_unit);
+    let curve = component
         .ok_or_else(|| "This editor has no instance to evaluate.".to_owned())
         .and_then(|component| crate::properties::source_preview::source_curve(&component, timing));
-    crate::properties::source_preview::paint_source_preview(ui, &curve, timing);
+    egui::Frame::NONE
+        .fill(Tokens::get(ui.ctx()).color.bg_panel)
+        .inner_margin(Margin {
+            left: 16,
+            right: 16,
+            top: 4,
+            bottom: 10,
+        })
+        .show(ui, |ui| {
+            ui.set_min_width(ui.available_width());
+            crate::properties::source_preview::paint_preview_card(ui, &curve, timing, unit);
+        });
+    let y = ui.cursor().top();
+    ui.painter().hline(
+        ui.max_rect().x_range(),
+        y,
+        Stroke::new(1.0, Tokens::get(ui.ctx()).color.border),
+    );
 }
 
 /// The instance as the draft currently describes it.

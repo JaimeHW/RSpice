@@ -26,8 +26,8 @@
 //! cancel are never the same operation.
 
 use egui::{
-    Context, FocusDirection, Frame, Id, Key, Margin, Modifiers, Order, Popup, Rect, Sense, Stroke,
-    Ui, UiKind, WidgetInfo, WidgetType, vec2,
+    Color32, Context, FocusDirection, Frame, Id, Key, Margin, Modifiers, Order, Popup, Rect, Sense,
+    Stroke, Ui, UiKind, WidgetInfo, WidgetType, vec2,
 };
 
 use crate::ui::theme::{self, FontWeight};
@@ -63,6 +63,14 @@ pub enum DialogSize {
     /// Wide numerical/setup workflows: 980 pt wide, content-height capped at
     /// 760 pt, and edge-to-edge at the mockup's 820 pt breakpoint.
     WideWorkflow,
+    /// Two-pane pick-and-preview transactions: 860 pt wide, content-height
+    /// capped at 620 pt, edge-to-edge at the shared 820 pt breakpoint.
+    ///
+    /// Narrower than [`Self::WideWorkflow`] because the right pane holds
+    /// stacked waveform strips rather than a table: past about 860 pt the
+    /// strips stop gaining information and the list is left stranded from the
+    /// preview it drives.
+    StimulusLink,
     /// Drawing-sheet supporting workflows: 1160 pt wide, content-height
     /// capped at 760 pt, and edge-to-edge at the shared 820 pt breakpoint.
     DrawingSheetWorkflow,
@@ -204,6 +212,22 @@ impl DialogSize {
             Self::WideWorkflow => DialogSurfaceSpec {
                 width: 980.0,
                 max_height: 760.0,
+                horizontal_inset: 24.0,
+                vertical_inset: 24.0,
+                narrow_max_width: 820.0,
+                narrow_inset: 0.0,
+                narrow_vertical_inset: 0.0,
+                cap_narrow_height: false,
+                edge_to_edge_narrow: true,
+                fill_narrow_viewport: true,
+                fill_height: false,
+                app_background: true,
+                radius: 4.0,
+                top_anchored: false,
+            },
+            Self::StimulusLink => DialogSurfaceSpec {
+                width: 860.0,
+                max_height: 620.0,
                 horizontal_inset: 24.0,
                 vertical_inset: 24.0,
                 narrow_max_width: 820.0,
@@ -586,6 +610,113 @@ struct DialogFooterOutput {
     ghost_id: Option<Id>,
 }
 
+/// What a footer hint is saying, for the reader who cannot use its colour.
+///
+/// The mark is painted rather than typeset: the bundled Plex faces carry no
+/// warning or error glyph, so a character here would rasterize as a tofu box.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum DialogHintTone {
+    /// Metadata: a count, a shortcut, a reminder. No mark.
+    #[default]
+    Neutral,
+    /// What the primary is about to do that a reader would want to know
+    /// first — a re-place, a discard, a widening scope.
+    Warn,
+    /// Why the last attempt refused.
+    Error,
+}
+
+impl DialogHintTone {
+    const fn color(self, c: &crate::ui::palette::Palette) -> Color32 {
+        match self {
+            Self::Neutral => c.text_faint,
+            Self::Warn => c.warn,
+            Self::Error => c.err,
+        }
+    }
+
+    /// Paint the leading mark.
+    ///
+    /// A neutral hint has no mark, because there is nothing about it to
+    /// notice: the sentence is the whole of it.
+    fn mark(self, ui: &mut Ui, color: Color32) {
+        if self == Self::Neutral {
+            return;
+        }
+        let (rect, response) = ui.allocate_exact_size(vec2(13.0, 13.0), Sense::hover());
+        let center = rect.center();
+        let painter = ui.painter();
+        match self {
+            // A triangle for a consequence, a circle for a refusal: the two
+            // shapes the rest of the product already separates these by.
+            Self::Warn => {
+                let half = 5.5;
+                painter.add(egui::Shape::convex_polygon(
+                    vec![
+                        egui::pos2(center.x, center.y - half),
+                        egui::pos2(center.x + half, center.y + half * 0.8),
+                        egui::pos2(center.x - half, center.y + half * 0.8),
+                    ],
+                    Color32::TRANSPARENT,
+                    Stroke::new(1.2, color),
+                ));
+                painter.line_segment(
+                    [
+                        egui::pos2(center.x, center.y - 1.6),
+                        egui::pos2(center.x, center.y + 2.4),
+                    ],
+                    Stroke::new(1.2, color),
+                );
+            }
+            _ => {
+                painter.circle_stroke(center, 5.2, Stroke::new(1.2, color));
+                painter.line_segment(
+                    [
+                        egui::pos2(center.x - 2.4, center.y - 2.4),
+                        egui::pos2(center.x + 2.4, center.y + 2.4),
+                    ],
+                    Stroke::new(1.2, color),
+                );
+                painter.line_segment(
+                    [
+                        egui::pos2(center.x + 2.4, center.y - 2.4),
+                        egui::pos2(center.x - 2.4, center.y + 2.4),
+                    ],
+                    Stroke::new(1.2, color),
+                );
+            }
+        }
+        ui.ctx().accesskit_node_builder(response.id, |node| {
+            node.set_label(match self {
+                Self::Warn => "Consequence",
+                _ => "Refused",
+            });
+        });
+    }
+
+    /// The mark and its sentence, left to right in whatever track is left.
+    ///
+    /// Eight points between the two, inside this track only: they are one
+    /// statement, and the actions beside them keep the footer's own rhythm.
+    fn hint(self, ui: &mut Ui, hint: &str, color: Color32) {
+        ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+            ui.spacing_mut().item_spacing.x = HINT_MARK_GAP;
+            self.mark(ui, color);
+            ui.add(
+                egui::Label::new(
+                    egui::RichText::new(hint)
+                        .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                        .color(color),
+                )
+                .truncate(),
+            );
+        });
+    }
+}
+
+/// Air between a footer hint's mark and its sentence.
+const HINT_MARK_GAP: f32 = 8.0;
+
 /// Mockup transaction strip rendered between a workflow body and its footer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DialogTransactionTone {
@@ -618,6 +749,7 @@ pub struct Dialog<'a> {
     ghost: Option<String>,
     ghost_enabled: bool,
     hint: Option<String>,
+    hint_tone: DialogHintTone,
     transaction_state: Option<DialogTransactionState>,
     body_scroll_offset: Option<&'a mut f32>,
     flush_body: bool,
@@ -654,6 +786,7 @@ impl<'a> Dialog<'a> {
             ghost: None,
             ghost_enabled: true,
             hint: None,
+            hint_tone: DialogHintTone::Neutral,
             transaction_state: None,
             body_scroll_offset: None,
             flush_body: false,
@@ -774,6 +907,19 @@ impl<'a> Dialog<'a> {
     /// Mono footer hint (validation count, shortcut reminder).
     pub fn hint(mut self, hint: impl Into<String>) -> Self {
         self.hint = Some(hint.into());
+        self
+    }
+
+    /// Colour the footer hint and mark it.
+    ///
+    /// A hint is metadata by default — a count, a shortcut — and stays in the
+    /// faint register. A hint that states what the primary is about to *do*,
+    /// or why it refused, is not metadata: it is the last thing a reader sees
+    /// before committing, so it takes the tone of what it says and a mark that
+    /// carries the same meaning without colour, for a reader who cannot use
+    /// the colour.
+    pub fn hint_tone(mut self, tone: DialogHintTone) -> Self {
+        self.hint_tone = tone;
         self
     }
 
@@ -1664,14 +1810,19 @@ impl<'a> Dialog<'a> {
                 if stack_footer {
                     ui.spacing_mut().item_spacing.y = 6.0;
                     if let Some(hint) = self.hint.as_deref() {
-                        ui.add(
-                            egui::Label::new(
-                                egui::RichText::new(hint)
-                                    .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                                    .color(c.text_faint),
-                            )
-                            .wrap(),
-                        );
+                        let tone = self.hint_tone;
+                        let color = tone.color(&c);
+                        ui.horizontal(|ui| {
+                            tone.mark(ui, color);
+                            ui.add(
+                                egui::Label::new(
+                                    egui::RichText::new(hint)
+                                        .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                                        .color(color),
+                                )
+                                .wrap(),
+                            );
+                        });
                     }
                     let action_width = ui.available_width();
                     let action_height = if large_targets {
@@ -1731,25 +1882,20 @@ impl<'a> Dialog<'a> {
                             choice = DialogChoice::Secondary;
                         }
                     }
-                    if let Some(hint) = self.hint.as_deref() {
+                    // The component editor's hint is its unapplied-changes
+                    // notice: warn-toned, unmarked, and on the track it has
+                    // always had.
+                    if component_editor && let Some(hint) = self.hint.as_deref() {
                         let label = egui::Label::new(
                             egui::RichText::new(hint)
                                 .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                                .color(if component_editor {
-                                    c.warn
-                                } else {
-                                    c.text_faint
-                                }),
+                                .color(c.warn),
                         );
-                        if component_editor {
-                            ui.add_sized(
-                                [(ui.available_width() - 190.0).max(40.0), 18.0],
-                                label.truncate(),
-                            )
-                            .on_hover_text(hint);
-                        } else {
-                            ui.add(label);
-                        }
+                        ui.add_sized(
+                            [(ui.available_width() - 190.0).max(40.0), 18.0],
+                            label.truncate(),
+                        )
+                        .on_hover_text(hint);
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let primary = crate::ui::widgets::Button::new(&self.primary)
@@ -1784,6 +1930,17 @@ impl<'a> Dialog<'a> {
                             if ghost.clicked() {
                                 choice = DialogChoice::Ghost;
                             }
+                        }
+                        // Every other dialog's hint takes the tone it declared
+                        // and the track the actions left, measured rather than
+                        // guessed: laid out after them, it is exactly as wide
+                        // as what remains, so a long consequence sentence
+                        // elides (and states itself whole on hover) instead of
+                        // pushing the primary off the footer, and a short one
+                        // starts at the footer's left edge behind its mark
+                        // instead of floating in the middle.
+                        if !component_editor && let Some(hint) = self.hint.as_deref() {
+                            self.hint_tone.hint(ui, hint, self.hint_tone.color(&c));
                         }
                     });
                 });
