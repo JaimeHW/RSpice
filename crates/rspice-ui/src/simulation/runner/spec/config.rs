@@ -2,7 +2,8 @@
 
 use crate::simulation::config::{
     AcAnalysisConfig, AcSweepType, AnalysisConfig, DcSweepConfig, NoiseAnalysisConfig,
-    NoiseSweepType, PoleZeroConfig, PzAnalysisType, SensitivityConfig, TransientAnalysisConfig,
+    NoiseSweepType, PoleZeroConfig, PzAnalysisType, SensitivityConfig, SensitivitySweep,
+    TransientAnalysisConfig,
 };
 use crate::simulation::multi_run::{AnalysisSpec, FrequencySweep};
 
@@ -160,12 +161,13 @@ pub(super) fn analysis_config_from_spec(spec: &AnalysisSpec) -> Option<AnalysisC
             ac_mode,
             frequency,
             filter,
+            sweep,
         } => Some(AnalysisConfig::Sensitivity(SensitivityConfig {
             output_var: output_var.clone(),
             ac_mode: *ac_mode,
             frequency: *frequency,
             filter: filter.clone(),
-            sweep: None,
+            sweep: sweep.map(SensitivitySweep::from_spec),
         })),
         _ => None,
     }

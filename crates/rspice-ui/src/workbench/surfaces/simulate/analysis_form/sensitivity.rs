@@ -17,8 +17,9 @@ use crate::simulation::dialog::SensDialogState;
 use crate::ui::tokens::Tokens;
 
 use super::{
-    QuantityPresentationPolicy, UiNumberLocale, choice_row, clear_pending_cell, full_width_field,
-    input_row, mono_input, quantity_input_row_enabled,
+    QuantityPresentationPolicy, SWEEP_KINDS, UiNumberLocale, choice_row, choice_row_enabled,
+    clear_pending_cell, full_width_field, hinted_quantity_input_row_enabled, input_row,
+    input_row_enabled, mono_input, quantity_input_row_enabled, sweep_point_field_label,
 };
 
 /// The notations the filter accepts, one of each kind it can address.
@@ -28,6 +29,9 @@ const FILTER_HINT: &str = "R1 · M1:W · MOD:VTO · PARAM:name";
 const FILTER_HELP: &str = "Globs select what the output is differentiated against. \
                            Empty: every device and model parameter. \
                            PARAM:* selects the design parameters.";
+
+/// What an unfilled Stop field means, said where it is typed.
+const STOP_HINT: &str = "empty = one frequency";
 
 /// Render the sensitivity fields.
 pub(super) fn fields(
@@ -52,14 +56,37 @@ pub(super) fn fields(
                 .on_hover_text(FILTER_HELP)
         },
     );
+    // The band, greyed rather than hidden outside AC: a row that disappears
+    // takes the reason with it. An empty Stop is one frequency — the card
+    // this form has always written — so the two rows that divide a band are
+    // greyed until there is a band to divide.
+    let ac = setup.sens_type_idx == 1;
     quantity_input_row_enabled(
         ui,
-        "Frequency",
+        "Start",
         &mut setup.ac_freq,
         QuantityInputKind::Frequency,
         policy,
         locale,
-        setup.sens_type_idx == 1,
+        ac,
     );
+    hinted_quantity_input_row_enabled(
+        ui,
+        "Stop",
+        &mut setup.ac_stop,
+        STOP_HINT,
+        QuantityInputKind::Frequency,
+        policy,
+        locale,
+        ac,
+    );
+    let swept = ac && !setup.ac_stop.trim().is_empty();
+    input_row_enabled(
+        ui,
+        sweep_point_field_label(setup.ac_sweep_idx),
+        &mut setup.ac_points,
+        swept,
+    );
+    choice_row_enabled(ui, "Sweep", SWEEP_KINDS, &mut setup.ac_sweep_idx, swept);
     clear_pending_cell(ui);
 }

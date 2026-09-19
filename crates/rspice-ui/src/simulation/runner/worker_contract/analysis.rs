@@ -751,6 +751,8 @@ pub(crate) enum WorkerAnalysisConfig {
         frequency: Option<f64>,
         #[serde(default = "crate::simulation::config::design_parameters_filter")]
         filter: String,
+        #[serde(default)]
+        sweep: Option<crate::simulation::multi_run::SensitivitySweepSpec>,
     },
 }
 
@@ -809,6 +811,7 @@ impl From<&AnalysisConfig> for WorkerAnalysisConfig {
                 ac_mode: config.ac_mode,
                 frequency: config.frequency,
                 filter: config.filter.clone(),
+                sweep: config.sweep.map(SensitivitySweep::to_spec),
             },
         }
     }
@@ -911,12 +914,13 @@ impl From<WorkerAnalysisConfig> for AnalysisConfig {
                 ac_mode,
                 frequency,
                 filter,
+                sweep,
             } => Self::Sensitivity(SensitivityConfig {
                 output_var,
                 ac_mode,
                 frequency,
                 filter,
-                sweep: None,
+                sweep: sweep.map(SensitivitySweep::from_spec),
             }),
         }
     }
@@ -1043,11 +1047,13 @@ impl TryFrom<&AnalysisSpec> for WorkerAnalysisSpec {
                 ac_mode,
                 frequency,
                 filter,
+                sweep,
             } => Ok(Self::Sensitivity {
                 output_var: output_var.clone(),
                 ac_mode: *ac_mode,
                 frequency: *frequency,
                 filter: filter.clone(),
+                sweep: *sweep,
             }),
             AnalysisSpec::PoleZero {
                 input_node,
@@ -1432,11 +1438,13 @@ impl From<WorkerAnalysisSpec> for AnalysisSpec {
                 ac_mode,
                 frequency,
                 filter,
+                sweep,
             } => Self::Sensitivity {
                 output_var,
                 ac_mode,
                 frequency,
                 filter,
+                sweep,
             },
             WorkerAnalysisSpec::PoleZero {
                 input_node,

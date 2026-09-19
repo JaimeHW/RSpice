@@ -298,6 +298,7 @@ pub(super) fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &Analysis
             ac_mode,
             frequency,
             filter,
+            sweep,
         } => {
             writer.string(output_var);
             writer.bool(*ac_mode);
@@ -308,8 +309,13 @@ pub(super) fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &Analysis
             // keeps its identity because it keeps its computation, and an
             // emptied filter is a different run that must digest differently.
             // Never `writer.option`: an absent tail is the old encoding.
-            if filter != crate::simulation::config::DESIGN_PARAMETERS_FILTER {
+            if filter != crate::simulation::config::DESIGN_PARAMETERS_FILTER || sweep.is_some() {
                 writer.string(filter);
+                writer.option(sweep.as_ref(), |writer, sweep| {
+                    writer.f64(sweep.stop_frequency);
+                    writer.u64(u64::from(sweep.points));
+                    encode_frequency_sweep(writer, sweep.variation);
+                });
             }
         }
         AnalysisSpec::PoleZero {

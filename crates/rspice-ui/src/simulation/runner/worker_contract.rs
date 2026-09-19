@@ -34,7 +34,7 @@ use crate::services::safety::{
 use crate::simulation::config::{
     AcAnalysisConfig, AcSweepType, AnalysisConfig, DcSweepConfig, NoiseAnalysisConfig,
     NoiseContributionDetail, NoiseIntegrationMode, NoiseSweepType, PoleZeroConfig, PzAnalysisType,
-    SensitivityConfig, TransientAnalysisConfig,
+    SensitivityConfig, SensitivitySweep, TransientAnalysisConfig,
 };
 use crate::simulation::multi_run::{AnalysisSpec, FrequencySweep, TfAccuracy, TfNormalization};
 use crate::simulation::reliability_engine::{ParamShift, ReliabilityResult, StressMetrics};

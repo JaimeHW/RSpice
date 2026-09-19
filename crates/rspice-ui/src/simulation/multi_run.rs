@@ -16,6 +16,6 @@ mod spec;
 pub use run_type::{AnalysisRunType, FrequencySweep};
 pub use spec::{
     AnalysisSpec, EnvelopeAdaptiveMode, EnvelopeExtractionPath, EnvelopeInitialPeriodicSolve,
-    HbToneSpec, OptimizationAlgorithm, OptimizationGoal, OptimizationVariable, PssMethod, SpPort,
-    TfAccuracy, TfNormalization,
+    HbToneSpec, OptimizationAlgorithm, OptimizationGoal, OptimizationVariable, PssMethod,
+    SensitivitySweepSpec, SpPort, TfAccuracy, TfNormalization,
 };

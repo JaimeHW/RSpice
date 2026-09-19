@@ -1185,6 +1185,7 @@ fn command_to_queue_item(
                 ac_mode: ac_sweep.is_some(),
                 frequency,
                 filter: filter.clone(),
+                sweep: None,
             };
             Ok(QueuedAnalysis {
                 numeric_override: None,
