@@ -90,8 +90,8 @@ const CASES: [Case; 7] = [
 /// Index-aligned with [`CASES`].
 const FINGERPRINTS: [&str; 7] = [
     "cc2d783b369e78732b7803c2d3d64f824c2dc067557b5b7562a6b546db547f93",
-    "4306c9a51cca1a463d85872f26fd70e6efc35cfc30a65ef4819baf5efebe4afd",
-    "cbe034237de04a3b9609440aa62e0bd13663f37c7eae82d5040a5ba33eea69aa",
+    "dfc4e6c8afa110bb0fe469a93b74fb4331f6d5500ca6307eabc2b957023bb95b",
+    "e6e67caedf8f966701c0d676c7e5fde6c7a9f048b90a4cf3e685b48c0e747663",
     "c3d2b098d593e5cffcee78e05a911331afd9a0d25c21dd2adecc5425ef2ccf5a",
     "d086f8525f1da0b8fcce8d109a811adad79202c1bab5c20f77a545fe4d977ffe",
     "18e0f7f6ed4894abb70b5b9159a7e608e03789e846431c1fa923e2f97acc793d",
