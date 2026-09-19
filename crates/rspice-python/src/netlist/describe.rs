@@ -83,9 +83,11 @@ pub(crate) fn describe_analysis(analysis: &AnalysisCommand) -> String {
             start_freq,
             stop_freq,
             probe,
+            compute_nyquist,
         } => format!(
-            ".stb {} {points} {start_freq} {stop_freq} probe={probe}",
-            format!("{variation:?}").to_lowercase()
+            ".stb {} {points} {start_freq} {stop_freq} probe={probe} nyquist={}",
+            format!("{variation:?}").to_lowercase(),
+            if *compute_nyquist { "yes" } else { "no" }
         ),
         AnalysisCommand::Tran {
             step,

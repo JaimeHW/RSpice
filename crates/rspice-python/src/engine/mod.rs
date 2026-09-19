@@ -23,7 +23,7 @@ use rspice_core::analysis::AcSensitivityOutput;
 use rspice_core::analysis::PssConfig;
 use rspice_core::analysis::harmonic_balance::{HbConfig, HbTone};
 use rspice_core::analysis::pac::{PacConfig, PacSweepType};
-use rspice_core::analysis::stb::{StbConfig, StbSweepType};
+use rspice_core::analysis::stb::StbConfig;
 use rspice_core::netlist::{
     AnalysisCommand, DcSecondSweep, DcSweepMode, DcSweepSpec, FreqVariation,
     MonteCarloDistribution, PoleZeroAnalysisType, PoleZeroTransferType,
@@ -508,7 +508,7 @@ impl PyEngine {
         frequencies: Vec<f64>,
         do_noise: bool,
     ) -> PyResult<PySParameterResult> {
-        self.sparameter_impl(py, netlist, frequencies, do_noise)
+        self.sparameter_impl(py, netlist, frequencies, do_noise, &[])
     }
 
     /// Run Tian double-injection loop-stability analysis.
@@ -537,6 +537,7 @@ impl PyEngine {
                 start_freq,
                 stop_freq,
                 probe: probe.to_string(),
+                compute_nyquist: true,
             },
         )?
         .stb

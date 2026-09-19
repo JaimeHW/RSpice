@@ -295,27 +295,16 @@ impl PyEngine {
         Ok(PyTransferFunctionResult::from_core(&result))
     }
 
-    #[allow(clippy::too_many_arguments)]
+    /// The card carries the whole request, including whether the Nyquist
+    /// contour is kept, and core's own conversion is what reads it.
     pub(super) fn stb_impl(
         &self,
         py: Python<'_>,
         netlist: &PyNetlist,
-        probe: &str,
-        variation: FreqVariation,
-        points: usize,
-        start_freq: f64,
-        stop_freq: f64,
+        card: &rspice_core::netlist::AnalysisCommand,
     ) -> PyResult<PyStbResult> {
-        let sweep_type = match variation {
-            FreqVariation::Lin => StbSweepType::Linear,
-            FreqVariation::Dec => StbSweepType::Decade,
-            FreqVariation::Oct => StbSweepType::Octave,
-        };
-        let config = StbConfig::new()
-            .with_sweep(start_freq, stop_freq, points)
-            .with_sweep_type(sweep_type)
-            .with_probe(probe)
-            .with_nyquist(true);
+        let config = StbConfig::try_from(card)
+            .map_err(|error| crate::errors::value_error(format!("invalid .STB card: {error}")))?;
         let engine = self.engine_for_netlist(&netlist.inner);
         let result = run_interruptible(py, &self.active_runs, |abort| {
             engine.run_stb_with_abort(&netlist.inner, config, abort)
@@ -532,12 +521,17 @@ impl PyEngine {
         Ok(PyAcSensitivityResult::from_core(&result))
     }
 
+    /// `planes` are the reference planes an authored `.SP` card names; they
+    /// reach the same entry point every other surface uses, so a card that
+    /// states ports beside a circuit declaring them is refused here too rather
+    /// than silently ignored.
     pub(super) fn sparameter_impl(
         &self,
         py: Python<'_>,
         netlist: &PyNetlist,
         frequencies: Vec<f64>,
         do_noise: bool,
+        planes: &[rspice_core::analysis::s_param::Port],
     ) -> PyResult<PySParameterResult> {
         validate_frequencies(&frequencies)?;
         if frequencies.contains(&0.0) {
@@ -547,7 +541,13 @@ impl PyEngine {
         }
         let engine = self.engine_for_netlist(&netlist.inner);
         let run = run_interruptible(py, &self.active_runs, |abort| {
-            engine.run_sp_over_grid_with_abort(&netlist.inner, &frequencies, do_noise, abort)
+            engine.run_sp_over_grid_with_default_ports_and_abort(
+                &netlist.inner,
+                &frequencies,
+                do_noise,
+                planes,
+                abort,
+            )
         })?;
         Ok(PySParameterResult::from_run(&run))
     }

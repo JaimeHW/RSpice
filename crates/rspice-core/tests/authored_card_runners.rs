@@ -358,6 +358,148 @@ fn an_authored_sp_card_publishes_the_shared_sp_and_port_noise_documents() {
     assert_eq!(port_noise.point_count(), noise.points.len());
 }
 
+/// A bare series resistor between two reference planes, whose scattering
+/// matrix is closed form for any pair of real reference impedances:
+///
+/// ```text
+/// S11 = (R + Z2 - Z1) / (R + Z1 + Z2)
+/// S22 = (R + Z1 - Z2) / (R + Z1 + Z2)
+/// S21 = S12 = 2 sqrt(Z1 Z2) / (R + Z1 + Z2)
+/// ```
+///
+/// Nothing in the deck is frequency dependent, so the same numbers must come
+/// back at every swept point.
+const SERIES_R: f64 = 50.0;
+
+fn series_resistor_deck(title: &str, body: &str, keywords: &str) -> String {
+    format!(
+        "{title}\n\
+         R1 p1 p2 {SERIES_R}\n\
+         {body}\
+         .SP LIN 2 1meg 2meg {keywords}\n\
+         .END\n"
+    )
+}
+
+fn sp_outcome(
+    deck: &str,
+) -> Result<rspice_core::engine::SParameterRun, rspice_core::engine::SimulationError> {
+    let netlist = Netlist::parse(deck).expect("deck parses");
+    let sp = card(&netlist, |command| {
+        matches!(command, AnalysisCommand::Sp { .. })
+    });
+    Engine::new(SimulationConfig::default()).run_sp_with_abort(&netlist, &sp, &NoAbort)
+}
+
+fn sp_run(deck: &str) -> rspice_core::engine::SParameterRun {
+    sp_outcome(deck).expect(".SP runs")
+}
+
+#[test]
+fn a_series_resistor_between_card_ports_scatters_as_its_closed_form() {
+    for (keywords, z1, z2) in [
+        ("PORT1=(p1) PORT2=(p2)", 50.0_f64, 50.0_f64),
+        ("PORT1=(p1,0,50) PORT2=(p2,0,75)", 50.0, 75.0),
+    ] {
+        let run = sp_run(&series_resistor_deck(
+            "Series resistor between analysis ports",
+            "",
+            keywords,
+        ));
+        assert_eq!(
+            run.ports.len(),
+            2,
+            "the card's two planes are the run's two ports"
+        );
+        let total = SERIES_R + z1 + z2;
+        let expected = [
+            ((1, 1), (SERIES_R + z2 - z1) / total),
+            ((2, 2), (SERIES_R + z1 - z2) / total),
+            ((2, 1), 2.0 * (z1 * z2).sqrt() / total),
+            ((1, 2), 2.0 * (z1 * z2).sqrt() / total),
+        ];
+        assert!(
+            !run.scattering.data.is_empty(),
+            "the sweep published points"
+        );
+        for matrix in &run.scattering.data {
+            for ((row, column), want) in expected {
+                let got = matrix.get(row, column);
+                assert!(
+                    (got.re - want).abs() < 1e-12 && got.im.abs() < 1e-12,
+                    "S{row}{column} at {:e} Hz with Z0 = ({z1}, {z2}): got {got}, want {want}",
+                    matrix.frequency
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn card_ports_and_element_ports_give_the_same_scattering_matrix() {
+    // The same physical network, with the planes named on the card in one
+    // deck and annotated on port sources in the other. The card route is a
+    // second spelling of one analysis, not a second analysis, so the two
+    // agree to the bit rather than to a tolerance.
+    let from_card = sp_run(&series_resistor_deck(
+        "Series resistor between analysis ports",
+        "",
+        "PORT1=(p1) PORT2=(p2)",
+    ));
+    let from_elements = sp_run(&series_resistor_deck(
+        "Series resistor between element ports",
+        "V1 p1 0 AC 0 portnum=1 z0=50\nV2 p2 0 AC 0 portnum=2 z0=50\n",
+        "",
+    ));
+
+    assert_eq!(from_card.ports.len(), from_elements.ports.len());
+    for (card_port, element_port) in from_card.ports.iter().zip(&from_elements.ports) {
+        assert_eq!(card_port.number, element_port.number);
+        assert_eq!(card_port.node_pos, element_port.node_pos);
+        assert_eq!(card_port.node_neg, element_port.node_neg);
+        assert_eq!(card_port.z0, element_port.z0);
+    }
+    assert_eq!(
+        from_card.scattering.data.len(),
+        from_elements.scattering.data.len()
+    );
+    for (card_point, element_point) in from_card
+        .scattering
+        .data
+        .iter()
+        .zip(&from_elements.scattering.data)
+    {
+        assert_eq!(card_point.frequency, element_point.frequency);
+        for row in 1..=2 {
+            for column in 1..=2 {
+                assert_eq!(
+                    card_point.get(row, column),
+                    element_point.get(row, column),
+                    "S{row}{column} at {:e} Hz differs between the two spellings",
+                    card_point.frequency
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn ports_stated_on_the_card_and_in_the_circuit_are_refused_by_name() {
+    let error = sp_outcome(&series_resistor_deck(
+        "Ports stated twice",
+        "V1 p1 0 AC 0 portnum=1 z0=50\nV2 p2 0 AC 0 portnum=2 z0=50\n",
+        "PORT1=(p1) PORT2=(p2)",
+    ))
+    .expect_err("a run whose ports are stated twice must be refused");
+    let message = error.to_string();
+    assert!(
+        message.contains("declares 2 RF port(s)")
+            && message.contains("names 2 analysis port(s)")
+            && message.contains("PORT<k>="),
+        "the refusal counts both statements and names the remedy: {message}"
+    );
+}
+
 #[test]
 fn a_stability_document_from_an_uncrossed_loop_records_the_absent_crossover() {
     // A single-pole loop below unity gain never crosses 0 dB, so its Tian
@@ -375,26 +517,10 @@ fn a_stability_document_from_an_uncrossed_loop_records_the_absent_crossover() {
     )
     .expect("deck parses");
     let engine = Engine::new(SimulationConfig::default());
-    let AnalysisCommand::Stb {
-        variation,
-        points,
-        start_freq,
-        stop_freq,
-        probe,
-    } = card(&netlist, |command| {
+    let config = rspice_core::analysis::StbConfig::try_from(&card(&netlist, |command| {
         matches!(command, AnalysisCommand::Stb { .. })
-    })
-    else {
-        panic!("the deck authors a .STB card");
-    };
-    let config = rspice_core::analysis::StbConfig::new()
-        .with_sweep(start_freq, stop_freq, points)
-        .with_sweep_type(match variation {
-            rspice_core::netlist::FreqVariation::Lin => rspice_core::analysis::StbSweepType::Linear,
-            rspice_core::netlist::FreqVariation::Dec => rspice_core::analysis::StbSweepType::Decade,
-            rspice_core::netlist::FreqVariation::Oct => rspice_core::analysis::StbSweepType::Octave,
-        })
-        .with_probe(&probe);
+    }))
+    .expect("the authored card is a configuration");
     let result = engine
         .run_stb_with_abort(&netlist, config, &NoAbort)
         .expect(".STB runs");
@@ -414,6 +540,120 @@ fn a_stability_document_from_an_uncrossed_loop_records_the_absent_crossover() {
             ScalarValue::Real { .. } | ScalarValue::Unavailable { .. }
         ),
         "a margin is either a number or a typed determination"
+    );
+}
+
+/// A single-pole loop `T(jw) = A / (1 + j f/fp)`, which crosses unity gain at
+/// `fp*sqrt(A^2 - 1)` where its phase is `-atan(sqrt(A^2 - 1))`. With `A = 2`
+/// that is `1 kHz * sqrt(3)` and a phase margin of `180 - 60 = 120` degrees.
+const STB_LOOP_GAIN: f64 = 2.0;
+const STB_POLE_HZ: f64 = 1.0e3;
+
+fn single_pole_loop_deck(sweep: &str, tail: &str) -> String {
+    format!(
+        "Single-pole loop\n\
+         E1 eo 0 ctrl 0 -{STB_LOOP_GAIN}\n\
+         Vprobe eo x DC 0\n\
+         R1 x ctrl 1k\n\
+         C1 ctrl 0 159.154943091895n\n\
+         .stb {sweep} probe=Vprobe{tail}\n\
+         .end\n"
+    )
+}
+
+fn stb_card(netlist: &Netlist) -> AnalysisCommand {
+    card(netlist, |command| {
+        matches!(command, AnalysisCommand::Stb { .. })
+    })
+}
+
+#[test]
+fn the_nyquist_switch_changes_what_is_retained_and_not_the_margins() {
+    let run = |tail: &str| {
+        let netlist =
+            Netlist::parse(&single_pole_loop_deck("dec 200 10 100k", tail)).expect("deck parses");
+        let config = rspice_core::analysis::StbConfig::try_from(&stb_card(&netlist))
+            .expect("the card is a configuration");
+        Engine::new(SimulationConfig::default())
+            .run_stb_with_abort(&netlist, config, &NoAbort)
+            .expect(".STB runs")
+    };
+    let kept = run(" nyquist=yes");
+    let dropped = run(" NYQUIST=no");
+
+    let excess = (STB_LOOP_GAIN * STB_LOOP_GAIN - 1.0).sqrt();
+    let crossover = STB_POLE_HZ * excess;
+    let phase_margin = 180.0 - excess.atan().to_degrees();
+    for analysis in [&kept, &dropped] {
+        let margins = &analysis.result.margins;
+        // The margins are interpolated on the swept grid; 200 points per
+        // decade puts neighbouring samples 1.2% apart, which is the whole
+        // budget these two bounds spend.
+        assert!(
+            (margins.phase_margin_freq - crossover).abs() <= 0.02 * crossover,
+            "crossover: got {}, want {crossover}",
+            margins.phase_margin_freq
+        );
+        assert!(
+            (margins.phase_margin_deg - phase_margin).abs() <= 1.0,
+            "phase margin: got {}, want {phase_margin}",
+            margins.phase_margin_deg
+        );
+    }
+
+    assert_eq!(
+        kept.result.margins.phase_margin_deg, dropped.result.margins.phase_margin_deg,
+        "the contour switch decides what is retained, never what is measured"
+    );
+    assert_eq!(
+        kept.result.margins.phase_margin_freq, dropped.result.margins.phase_margin_freq,
+        "the contour switch decides what is retained, never what is measured"
+    );
+    assert_eq!(
+        kept.result.nyquist_points.len(),
+        kept.frequencies.len(),
+        "NYQUIST=yes samples the contour at every swept point"
+    );
+    assert!(
+        dropped.result.nyquist_points.is_empty(),
+        "NYQUIST=no retains no contour at all"
+    );
+}
+
+#[test]
+fn an_stb_card_becomes_its_configuration_in_one_place() {
+    use rspice_core::analysis::{StbConfig, StbSweepType};
+
+    for (tail, contour) in [(" nyquist=yes", true), (" nyquist=no", false), ("", true)] {
+        let netlist =
+            Netlist::parse(&single_pole_loop_deck("oct 5 10 1k", tail)).expect("deck parses");
+        let converted =
+            StbConfig::try_from(&stb_card(&netlist)).expect("the card is a configuration");
+        let chain = StbConfig::new()
+            .with_sweep(10.0, 1.0e3, 5)
+            .with_sweep_type(StbSweepType::Octave)
+            .with_probe("Vprobe")
+            .with_nyquist(contour);
+        assert_eq!(converted.freq_start, chain.freq_start);
+        assert_eq!(converted.freq_stop, chain.freq_stop);
+        assert_eq!(converted.num_points, chain.num_points);
+        assert_eq!(converted.sweep_type, chain.sweep_type);
+        assert_eq!(converted.probe_node, chain.probe_node);
+        assert_eq!(
+            converted.compute_nyquist, chain.compute_nyquist,
+            "the card carries the contour switch for '{tail}'"
+        );
+    }
+
+    let netlist =
+        Netlist::parse("Not a stability card\nV1 in 0 AC 1\nR1 in 0 1k\n.ac dec 5 1 1k\n.end\n")
+            .expect("deck parses");
+    let ac = card(&netlist, |command| {
+        matches!(command, AnalysisCommand::Ac { .. })
+    });
+    assert!(
+        StbConfig::try_from(&ac).is_err(),
+        "only a .STB card becomes a stability configuration"
     );
 }
 

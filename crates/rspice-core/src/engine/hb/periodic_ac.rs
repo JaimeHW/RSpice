@@ -121,7 +121,8 @@ impl Engine {
             point.authenticate_for_reuse(netlist, &self.config, point.config())?;
         }
 
-        let (circuit, rf_ports) = self.build_circuit_with_rf_ports(netlist, &[], abort)?;
+        let built = self.build_circuit_with_rf_ports(netlist, &[], abort)?;
+        let (circuit, rf_ports) = (built.circuit, built.rf_ports);
         // Every periodic small-signal analysis prepared here refuses a mixed
         // Verilog-AMS module for the same reason AC, noise, PSS and HB do: the
         // module's discrete half is executed by a transient event interleave,

@@ -5218,7 +5218,7 @@ impl Engine {
         abort: &dyn AbortSignal,
     ) -> Result<CircuitData, SimulationError> {
         self.build_circuit_with_rf_ports(netlist, &[], abort)
-            .map(|(circuit, _)| circuit)
+            .map(|built| built.circuit)
     }
 
     pub(super) fn build_transient_circuit_with_abort(
@@ -5228,7 +5228,7 @@ impl Engine {
         abort: &dyn AbortSignal,
     ) -> Result<CircuitData, SimulationError> {
         self.build_circuit_for_analysis(netlist, &[], Some(tstop), abort)
-            .map(|(circuit, _)| circuit)
+            .map(|built| built.circuit)
     }
 
     /// Retain RF identities from the same elaboration that constructs the circuit.
@@ -5237,13 +5237,7 @@ impl Engine {
         netlist: &Netlist,
         default_ports: &[crate::analysis::s_param::Port],
         abort: &dyn AbortSignal,
-    ) -> Result<
-        (
-            CircuitData,
-            Vec<crate::analysis::s_param::MaterializedRfPort>,
-        ),
-        SimulationError,
-    > {
+    ) -> Result<BuiltRfCircuit, SimulationError> {
         self.build_circuit_for_analysis(netlist, default_ports, None, abort)
     }
 
@@ -5253,13 +5247,7 @@ impl Engine {
         default_ports: &[crate::analysis::s_param::Port],
         transient_stop_time: Option<Value>,
         abort: &dyn AbortSignal,
-    ) -> Result<
-        (
-            CircuitData,
-            Vec<crate::analysis::s_param::MaterializedRfPort>,
-        ),
-        SimulationError,
-    > {
+    ) -> Result<BuiltRfCircuit, SimulationError> {
         self.ensure_valid_configuration()?;
         check_build_abort(abort)?;
         check_netlist_source_resource_limits(self, netlist, abort)?;
@@ -5393,7 +5381,7 @@ impl Engine {
                 abort,
             )?;
         }
-        let rf_ports = crate::analysis::s_param::materialize_rf_ports(
+        let (rf_ports, rf_port_origin) = crate::analysis::s_param::materialize_rf_ports(
             netlist,
             &mut flat_elements,
             default_ports,
@@ -9761,8 +9749,23 @@ impl Engine {
         if let Some(capture) = &mut circuit.parameter_direction {
             capture.owners = flat_elements;
         }
-        Ok((circuit, rf_ports))
+        Ok(BuiltRfCircuit {
+            circuit,
+            rf_ports,
+            rf_port_origin,
+        })
     }
+}
+
+/// One elaboration's circuit and the RF ports that elaboration materialized.
+///
+/// The origin travels with them because a caller that supplied its own
+/// reference planes cannot otherwise tell whether they were used or quietly
+/// passed over in favour of the deck's own `portnum=` annotations.
+pub(super) struct BuiltRfCircuit {
+    pub(super) circuit: CircuitData,
+    pub(super) rf_ports: Vec<crate::analysis::s_param::MaterializedRfPort>,
+    pub(super) rf_port_origin: crate::analysis::s_param::RfPortOrigin,
 }
 
 #[cfg(test)]

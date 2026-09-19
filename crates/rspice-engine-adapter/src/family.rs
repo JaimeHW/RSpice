@@ -18,9 +18,7 @@
 //! refused before any solver work rather than executed into a lossy artifact.
 
 use rspice_core::abort_signal::AbortSignal;
-use rspice_core::analysis::{
-    Distribution, HbConfig, PacConfig, PssConfig, StbConfig, StbSweepType,
-};
+use rspice_core::analysis::{Distribution, HbConfig, PacConfig, PssConfig, StbConfig};
 use rspice_core::engine::SensitivityCardResult;
 use rspice_core::execution::result_document::{AxisValues, DcSweepAxisDocument};
 use rspice_core::execution::{
@@ -479,21 +477,9 @@ pub(crate) fn run_directive(
             AnalysisResultDocument::from_transfer_function(id, &result)
                 .map_err(map_result_document_error)
         }
-        AnalysisCommand::Stb {
-            variation,
-            points,
-            start_freq,
-            stop_freq,
-            probe,
-        } => {
-            let config = StbConfig::new()
-                .with_sweep(*start_freq, *stop_freq, *points)
-                .with_sweep_type(match variation {
-                    FreqVariation::Lin => StbSweepType::Linear,
-                    FreqVariation::Dec => StbSweepType::Decade,
-                    FreqVariation::Oct => StbSweepType::Octave,
-                })
-                .with_probe(probe);
+        AnalysisCommand::Stb { .. } => {
+            let config = StbConfig::try_from(command)
+                .map_err(|error| SimulationError::Circuit(format!("invalid .STB card: {error}")))?;
             let result = engine.run_stb_with_abort(netlist, config, abort)?;
             AnalysisResultDocument::from_stability(id, &result.result)
                 .map_err(map_result_document_error)

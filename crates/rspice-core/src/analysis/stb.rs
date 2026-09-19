@@ -58,17 +58,8 @@ pub struct StbConfig {
     /// Reference node
     pub ref_node: String,
 
-    /// Gain margin minimum threshold (dB)
-    pub min_gain_margin_db: Value,
-
-    /// Phase margin minimum threshold (degrees)
-    pub min_phase_margin_deg: Value,
-
     /// Whether to compute Nyquist data
     pub compute_nyquist: bool,
-
-    /// Maximum loop gain to consider for crossover detection (dB)
-    pub max_loop_gain_db: Value,
 }
 
 /// Sweep type for STB analysis
@@ -96,10 +87,10 @@ pub enum StbConfigError {
     InvalidStopFrequency,
     /// No sweep points were requested.
     EmptySweep,
-    /// One or more margin thresholds were not finite.
-    InvalidMarginThreshold,
     /// A logarithmic sweep's implied point count exceeded `usize`.
     PointCountOverflow,
+    /// The analysis card handed to the conversion was not a `.STB` card.
+    NotAnStbCard,
 }
 
 impl std::fmt::Display for StbConfigError {
@@ -112,17 +103,54 @@ impl std::fmt::Display for StbConfigError {
                 formatter.write_str("STB stop frequency must be finite and >= start")
             }
             Self::EmptySweep => formatter.write_str("STB sweep must have at least one point"),
-            Self::InvalidMarginThreshold => {
-                formatter.write_str("STB margin thresholds must be finite")
-            }
             Self::PointCountOverflow => {
                 formatter.write_str("STB logarithmic sweep point count exceeds addressable limits")
+            }
+            Self::NotAnStbCard => {
+                formatter.write_str("the analysis card given to StbConfig is not .STB")
             }
         }
     }
 }
 
 impl std::error::Error for StbConfigError {}
+
+/// The one place an authored `.STB` card becomes a configuration.
+///
+/// `rspice run`, the Python bindings, the WASM deck runner, the engine adapter
+/// and the Studio all reach the analysis through this conversion, so a keyword
+/// the card carries cannot be honoured on one route and dropped on another —
+/// which is exactly what five hand-written builder chains used to do with the
+/// Nyquist contour. The result is validated here, so a caller that gets a
+/// configuration has one the engine will accept.
+impl TryFrom<&crate::netlist::AnalysisCommand> for StbConfig {
+    type Error = StbConfigError;
+
+    fn try_from(card: &crate::netlist::AnalysisCommand) -> Result<Self, Self::Error> {
+        let crate::netlist::AnalysisCommand::Stb {
+            variation,
+            points,
+            start_freq,
+            stop_freq,
+            probe,
+            compute_nyquist,
+        } = card
+        else {
+            return Err(StbConfigError::NotAnStbCard);
+        };
+        let config = Self::new()
+            .with_sweep(*start_freq, *stop_freq, *points)
+            .with_sweep_type(match variation {
+                crate::netlist::FreqVariation::Lin => StbSweepType::Linear,
+                crate::netlist::FreqVariation::Dec => StbSweepType::Decade,
+                crate::netlist::FreqVariation::Oct => StbSweepType::Octave,
+            })
+            .with_probe(probe)
+            .with_nyquist(*compute_nyquist);
+        config.validate()?;
+        Ok(config)
+    }
+}
 
 impl Default for StbConfig {
     fn default() -> Self {
@@ -133,10 +161,7 @@ impl Default for StbConfig {
             sweep_type: StbSweepType::Decade,
             probe_node: None,
             ref_node: "0".to_string(),
-            min_gain_margin_db: 10.0,   // 10 dB minimum
-            min_phase_margin_deg: 45.0, // 45° minimum
             compute_nyquist: true,
-            max_loop_gain_db: 200.0,
         }
     }
 }
@@ -164,13 +189,6 @@ impl StbConfig {
     /// Set probe node for loop break
     pub fn with_probe(mut self, node: &str) -> Self {
         self.probe_node = Some(node.to_uppercase());
-        self
-    }
-
-    /// Set stability thresholds
-    pub fn with_thresholds(mut self, gain_margin_db: Value, phase_margin_deg: Value) -> Self {
-        self.min_gain_margin_db = gain_margin_db;
-        self.min_phase_margin_deg = phase_margin_deg;
         self
     }
 
@@ -266,12 +284,6 @@ impl StbConfig {
         }
         if self.num_points == 0 {
             return Err(StbConfigError::EmptySweep);
-        }
-        if !self.min_gain_margin_db.is_finite()
-            || !self.min_phase_margin_deg.is_finite()
-            || !self.max_loop_gain_db.is_finite()
-        {
-            return Err(StbConfigError::InvalidMarginThreshold);
         }
         Ok(())
     }

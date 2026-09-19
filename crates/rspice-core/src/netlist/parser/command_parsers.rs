@@ -1,3 +1,4 @@
+use super::analysis_card_scan::*;
 use super::*;
 
 pub(super) fn parse_device_initial_condition_command(
@@ -651,7 +652,15 @@ mod step_command_tests {
     }
 }
 
-/// Parse .SP command: .SP DEC|LIN|OCT np fstart fstop `[donoise]`
+/// Reference impedance an analysis port takes when its keyword omits one.
+const SP_CARD_PORT_DEFAULT_Z0: Value = 50.0;
+
+/// Parse .SP command:
+/// `.SP DEC|LIN|OCT np fstart fstop [donoise] [PORT<k>=(<n+>[,<n->[,<z0>]]) ...]`
+///
+/// The noise flag stays positional, so it is read only when the next token is
+/// not a `KEYWORD =` pair: `.SP DEC 10 1k 1MEG PORT1=(in)` asks for no noise,
+/// and a flag written after a port keyword is a trailing token.
 pub(super) fn parse_sp_command(
     stream: &mut TokenStream,
     line_num: usize,
@@ -673,43 +682,41 @@ pub(super) fn parse_sp_command(
     let points = expect_value(stream, line_num, params)? as usize;
     let start_freq = expect_value(stream, line_num, params)?;
     let stop_freq = expect_value(stream, line_num, params)?;
-    let do_noise = match &stream.peek().kind {
-        TokenKind::Newline | TokenKind::Eof => false,
-        TokenKind::Ident(keyword) if keyword.eq_ignore_ascii_case("donoise") => {
-            stream.advance();
-            true
-        }
-        TokenKind::Ident(keyword)
-            if keyword.eq_ignore_ascii_case("true") || keyword.eq_ignore_ascii_case("false") =>
-        {
-            return Err(ParseError::Syntax {
-                line: line_num,
-                message: format!(".SP noise option must be DONOISE, 0, or 1; found {keyword}"),
-            });
-        }
-        _ => {
-            let raw = expect_value(stream, line_num, params)?;
-            match raw {
-                0.0 => false,
-                1.0 => true,
-                _ => {
-                    return Err(ParseError::Syntax {
-                        line: line_num,
-                        message: format!(".SP noise option must be DONOISE, 0, or 1; found {raw}"),
-                    });
+    let do_noise = if at_card_end(stream) || at_keyword(stream) {
+        false
+    } else {
+        match &stream.peek().kind {
+            TokenKind::Ident(keyword) if keyword.eq_ignore_ascii_case("donoise") => {
+                stream.advance();
+                true
+            }
+            TokenKind::Ident(keyword)
+                if keyword.eq_ignore_ascii_case("true")
+                    || keyword.eq_ignore_ascii_case("false") =>
+            {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: format!(".SP noise option must be DONOISE, 0, or 1; found {keyword}"),
+                });
+            }
+            _ => {
+                let raw = expect_value(stream, line_num, params)?;
+                match raw {
+                    0.0 => false,
+                    1.0 => true,
+                    _ => {
+                        return Err(ParseError::Syntax {
+                            line: line_num,
+                            message: format!(
+                                ".SP noise option must be DONOISE, 0, or 1; found {raw}"
+                            ),
+                        });
+                    }
                 }
             }
         }
     };
-    if !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
-        return Err(ParseError::Syntax {
-            line: line_num,
-            message: format!(
-                "unexpected trailing token '{}' after .SP noise option",
-                stream.peek().lexeme
-            ),
-        });
-    }
+    let ports = parse_sp_card_ports(stream, line_num, params)?;
 
     Ok(AnalysisCommand::Sp {
         variation,
@@ -717,6 +724,135 @@ pub(super) fn parse_sp_command(
         start_freq,
         stop_freq,
         do_noise,
+        ports,
+    })
+}
+
+/// Read the `PORT<k>=` keywords that name a `.SP` run's reference planes.
+///
+/// Each value is `(<n+>[,<n->[,<z0>]])`: the parentheses are required, so the
+/// grammar reads the same whether one node or three fields are written, and a
+/// missing node cannot be silently taken from the next keyword. After the loop
+/// the numbers must be exactly `1..=N` — the same density rule the deck's own
+/// `portnum=` annotations are held to, checked here so the card is refused
+/// where it was written rather than after elaboration.
+fn parse_sp_card_ports(
+    stream: &mut TokenStream,
+    line: usize,
+    params: &ParamContext,
+) -> Result<Vec<SpCardPort>, ParseError> {
+    const CARD: AnalysisCard = AnalysisCard::Sp;
+
+    let mut ports: Vec<SpCardPort> = Vec::new();
+    loop {
+        skip_commas(stream);
+        if at_card_end(stream) {
+            break;
+        }
+        let Some(keyword) = take_keyword(stream) else {
+            return Err(card_error(
+                CARD,
+                line,
+                AnalysisCardIssue::TrailingToken {
+                    token: stream.peek().lexeme.clone(),
+                },
+            ));
+        };
+        let digits = keyword.strip_prefix("PORT").map(str::to_owned);
+        let Some(number) = digits.and_then(|digits| digits.parse::<usize>().ok()) else {
+            return Err(card_error(
+                CARD,
+                line,
+                AnalysisCardIssue::UnknownKeyword { keyword },
+            ));
+        };
+        if number == 0 {
+            return Err(card_error(
+                CARD,
+                line,
+                AnalysisCardIssue::InvalidName {
+                    field: "PORT<k>",
+                    value: keyword,
+                },
+            ));
+        }
+        if ports.iter().any(|port| port.number == number) {
+            return Err(card_error(
+                CARD,
+                line,
+                AnalysisCardIssue::DuplicateKeyword { keyword: "PORT<k>" },
+            ));
+        }
+        ports.push(parse_sp_card_port(stream, line, params, number)?);
+    }
+
+    ports.sort_by_key(|port| port.number);
+    for (position, port) in ports.iter().enumerate() {
+        if port.number != position + 1 {
+            return Err(card_error(
+                CARD,
+                line,
+                AnalysisCardIssue::InvalidName {
+                    field: "PORT<k>",
+                    value: format!("PORT{}", port.number),
+                },
+            ));
+        }
+    }
+    Ok(ports)
+}
+
+/// Read one `(<n+>[,<n->[,<z0>]])` reference-plane value.
+fn parse_sp_card_port(
+    stream: &mut TokenStream,
+    line: usize,
+    params: &ParamContext,
+    number: usize,
+) -> Result<SpCardPort, ParseError> {
+    const CARD: AnalysisCard = AnalysisCard::Sp;
+
+    if !stream.consume(&TokenKind::LParen) {
+        return Err(card_error(
+            CARD,
+            line,
+            AnalysisCardIssue::InvalidChoice {
+                field: "PORT<k>",
+                value: stream.peek().lexeme.clone(),
+                expected: "(node+[,node-[,z0]])",
+            },
+        ));
+    }
+    let node_pos = card_name(stream, line, CARD, "PORT<k>")?.to_ascii_uppercase();
+    let mut node_neg = "0".to_owned();
+    let mut z0 = SP_CARD_PORT_DEFAULT_Z0;
+    if stream.consume(&TokenKind::Comma) {
+        node_neg = card_name(stream, line, CARD, "PORT<k>")?.to_ascii_uppercase();
+        if stream.consume(&TokenKind::Comma) {
+            z0 = card_number(
+                stream,
+                line,
+                params,
+                CARD,
+                "PORT<k>",
+                "a positive reference impedance in ohms",
+                |value| value > 0.0,
+            )?;
+        }
+    }
+    if !stream.consume(&TokenKind::RParen) {
+        return Err(card_error(
+            CARD,
+            line,
+            AnalysisCardIssue::TrailingToken {
+                token: stream.peek().lexeme.clone(),
+            },
+        ));
+    }
+    Ok(SpCardPort {
+        number,
+        node_pos,
+        node_neg,
+        z0,
     })
 }
 
@@ -837,6 +973,123 @@ mod sp_command_tests {
             assert!(
                 message.contains(".SP") || message.contains("trailing token"),
                 "unexpected error for '{option}': {message}"
+            );
+        }
+    }
+
+    /// A deck whose planes are named on the card instead of on its sources.
+    fn ported_deck(tail: &str) -> String {
+        format!(
+            "SP card ports\n\
+             V1 in 0 AC 1\n\
+             R1 in out 50\n\
+             R2 out 0 1meg\n\
+             .SP DEC 10 1k 1meg {tail}\n\
+             .END\n"
+        )
+    }
+
+    #[test]
+    fn sp_card_ports_parse_with_their_reference_impedances() {
+        let deck = ported_deck("port1=(in) PORT2=(out,0,75)");
+        let netlist = Netlist::parse(&deck).expect(".SP port keywords parse");
+        let [
+            AnalysisCommand::Sp {
+                do_noise, ports, ..
+            },
+        ] = netlist.analyses.as_slice()
+        else {
+            panic!("expected one .SP analysis, got {:?}", netlist.analyses);
+        };
+        assert!(!*do_noise, "no positional noise flag was authored");
+        assert_eq!(ports.len(), 2, "both planes survive parsing: {ports:?}");
+        assert_eq!(ports[0].number, 1);
+        assert_eq!(ports[0].node_pos, "IN");
+        assert_eq!(ports[0].node_neg, "0", "an omitted negative node is ground");
+        assert_eq!(
+            ports[0].z0, 50.0,
+            "an omitted reference impedance is 50 ohms"
+        );
+        assert_eq!(ports[1].number, 2);
+        assert_eq!(ports[1].node_pos, "OUT");
+        assert_eq!(ports[1].node_neg, "0");
+        assert_eq!(
+            ports[1].z0, 75.0,
+            "an authored impedance is carried exactly"
+        );
+    }
+
+    #[test]
+    fn sp_card_ports_must_be_numbered_from_one_without_gaps() {
+        for (tail, named) in [
+            ("PORT1=(in) PORT3=(out)", "PORT3"),
+            ("PORT2=(in) PORT3=(out)", "PORT2"),
+            ("PORT1=(in) PORT1=(out)", "PORT<k>"),
+            ("PORT0=(in)", "PORT0"),
+        ] {
+            let deck = ported_deck(tail);
+            let error = Netlist::parse(&deck)
+                .expect_err("a .SP port roster that is not dense from one must fail");
+            let message = error.to_string();
+            assert!(
+                message.contains(".SP") && message.contains(named),
+                "the refusal names the card and the keyword for '{tail}': {message}"
+            );
+        }
+    }
+
+    #[test]
+    fn sp_keeps_its_positional_noise_flag_before_the_keywords() {
+        for flag in ["1", "donoise"] {
+            let deck = ported_deck(&format!("{flag} PORT1=(in) PORT2=(out)"));
+            let netlist = Netlist::parse(&deck).expect("a flag before the keywords parses");
+            let [
+                AnalysisCommand::Sp {
+                    do_noise, ports, ..
+                },
+            ] = netlist.analyses.as_slice()
+            else {
+                panic!("expected one .SP analysis, got {:?}", netlist.analyses);
+            };
+            assert!(*do_noise, "the positional flag still reads as noise");
+            assert_eq!(ports.len(), 2);
+        }
+        let deck = ported_deck("PORT1=(in) 1");
+        let error =
+            Netlist::parse(&deck).expect_err("the noise flag is positional, so it cannot follow");
+        let message = error.to_string();
+        assert!(
+            message.contains(".SP") && message.contains("trailing token"),
+            "a flag written after a keyword is a trailing token: {message}"
+        );
+    }
+
+    #[test]
+    fn an_sp_card_written_without_keywords_parses_as_it_always_has() {
+        for (tail, noise) in [("", false), ("donoise", true), ("0", false)] {
+            let deck = ported_deck(tail);
+            let netlist = Netlist::parse(&deck).expect("a keyword-free .SP card parses");
+            let [
+                AnalysisCommand::Sp {
+                    variation,
+                    points,
+                    start_freq,
+                    stop_freq,
+                    do_noise,
+                    ports,
+                },
+            ] = netlist.analyses.as_slice()
+            else {
+                panic!("expected one .SP analysis, got {:?}", netlist.analyses);
+            };
+            assert_eq!(*variation, crate::netlist::FreqVariation::Dec);
+            assert_eq!(*points, 10);
+            assert_eq!(*start_freq, 1.0e3);
+            assert_eq!(*stop_freq, 1.0e6);
+            assert_eq!(*do_noise, noise);
+            assert!(
+                ports.is_empty(),
+                "a card with no keyword names no analysis plane: {ports:?}"
             );
         }
     }

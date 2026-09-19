@@ -66,11 +66,28 @@ pub(super) fn analysis_key(analysis: &AnalysisCommand) -> Result<Option<String>,
             start_freq,
             stop_freq,
             do_noise,
-        } => format!(
-            "{} {}",
-            frequency("sp", variation, *points, start_freq, stop_freq),
-            u8::from(*do_noise)
-        ),
+            ports,
+        } => {
+            // Analysis ports the card names are part of what was asked for, so
+            // they belong in the key. A card without them spells the key
+            // exactly as it always did, which is every reference deck: the
+            // oracle bundles captured so far stay addressable.
+            let mut key = format!(
+                "{} {}",
+                frequency("sp", variation, *points, start_freq, stop_freq),
+                u8::from(*do_noise)
+            );
+            for port in ports {
+                key.push_str(&format!(
+                    " port{}=({},{},{:.17e})",
+                    port.number,
+                    port.node_pos.to_ascii_lowercase(),
+                    port.node_neg.to_ascii_lowercase(),
+                    port.z0
+                ));
+            }
+            key
+        }
         AnalysisCommand::Tran {
             step,
             stop,

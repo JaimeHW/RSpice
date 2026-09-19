@@ -22,7 +22,7 @@
 //! projection would be applied once rather than per family.
 
 use rspice_core::analysis::{
-    Distribution, FrequencyGridError, HbConfig, PacConfig, PssConfig, StbConfig, StbSweepType,
+    Distribution, FrequencyGridError, HbConfig, PacConfig, PssConfig, StbConfig,
 };
 use rspice_core::engine::{
     CompressionConfig, HbOperatingPoint, PssOperatingPoint, SensitivityCardResult,
@@ -466,19 +466,8 @@ fn execute_analysis(
             ])
         }
 
-        AnalysisCommand::Stb {
-            variation,
-            points,
-            start_freq,
-            stop_freq,
-            probe,
-        } => {
-            let config = StbConfig::new()
-                .with_sweep(*start_freq, *stop_freq, *points)
-                .with_sweep_type(stb_sweep_type(*variation))
-                .with_probe(probe)
-                .with_nyquist(true);
-            config.validate().map_err(|message| {
+        AnalysisCommand::Stb { .. } => {
+            let config = StbConfig::try_from(command).map_err(|message| {
                 Box::new(WasmError::invalid_argument(format!(
                     "invalid .STB card: {message}"
                 )))
@@ -1099,14 +1088,6 @@ fn dc_sweep_unit(source: &str) -> SignalUnit {
         Some('V') => SignalUnit::Volt,
         Some('I') => SignalUnit::Ampere,
         _ => SignalUnit::Unspecified,
-    }
-}
-
-const fn stb_sweep_type(variation: FreqVariation) -> StbSweepType {
-    match variation {
-        FreqVariation::Lin => StbSweepType::Linear,
-        FreqVariation::Dec => StbSweepType::Decade,
-        FreqVariation::Oct => StbSweepType::Octave,
     }
 }
 
