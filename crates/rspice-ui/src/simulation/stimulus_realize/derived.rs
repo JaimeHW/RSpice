@@ -34,6 +34,7 @@ use crate::state::format_engineering_display;
 use crate::state::stimulus_library::definition::{
     StimulusDefinition, StimulusFamily, StimulusKind,
 };
+use crate::ui::plot::tick_with_unit;
 
 /// How many points the proof surface asks the engine for.
 ///
@@ -819,7 +820,10 @@ fn readouts_of(
                 "span",
                 seconds_free(points.last().map_or(0.0, |(time, _)| *time), "s"),
             ));
-            rows.push(row("max slew", seconds_free(max_slew(points), unit)));
+            rows.push(row(
+                "max slew",
+                seconds_free(max_slew(points), &format!("{unit}/s")),
+            ));
             rows.push(row(
                 "R",
                 match repeat_from {
@@ -1098,11 +1102,15 @@ const fn distribution_parameter_label(distribution: u8) -> &'static str {
 
 /// An engineering-formatted quantity with its unit, or a dash when the number
 /// is not one a reader can act on.
+///
+/// Spelled the way the axis under it spells a tick (`1 kHz`, `2 mV`): the
+/// readouts sit a few points above those ticks, and one number written two
+/// ways in one band reads as two numbers.
 fn seconds_free(value: f64, unit: &str) -> String {
     if !value.is_finite() {
         return "—".to_owned();
     }
-    format!("{}{unit}", format_engineering_display(value))
+    tick_with_unit(&format_engineering_display(value), unit)
 }
 
 #[cfg(test)]
@@ -1172,9 +1180,9 @@ mod tests {
         );
         let realization = StimulusRealization::of(&record, SpanChoice::Fit, timing(1e-2));
 
-        assert_eq!(readout(&realization, "PER"), "1ms");
+        assert_eq!(readout(&realization, "PER"), "1 ms");
         assert_eq!(readout(&realization, "duty"), "50.1 %");
-        assert_eq!(readout(&realization, "Δ"), "5V");
+        assert_eq!(readout(&realization, "Δ"), "5 V");
         assert_eq!(realization.fundamental, Some(1e-3));
         assert_eq!(guide(&realization, "PER"), Some(1e-3));
     }
@@ -1211,8 +1219,8 @@ mod tests {
         );
         let realization = StimulusRealization::of(&record, SpanChoice::Fit, timing(1e-3));
 
-        assert_eq!(readout(&realization, "FC"), "5kHz");
-        assert_eq!(readout(&realization, "FM"), "500kHz");
+        assert_eq!(readout(&realization, "FC"), "5 kHz");
+        assert_eq!(readout(&realization, "FM"), "500 kHz");
     }
 
     #[test]
@@ -1220,8 +1228,8 @@ mod tests {
         let record = definition(ComponentType::VoltageSourceExp, "0", "v2=1 tau1=0 tau2=0");
         let realization = StimulusRealization::of(&record, SpanChoice::Fit, timing(1e-3));
 
-        assert_eq!(readout(&realization, "τ rise"), "1µs");
-        assert_eq!(readout(&realization, "τ fall"), "1µs");
+        assert_eq!(readout(&realization, "τ rise"), "1 µs");
+        assert_eq!(readout(&realization, "τ fall"), "1 µs");
     }
 
     #[test]
@@ -1230,8 +1238,8 @@ mod tests {
         let realization = StimulusRealization::of(&record, SpanChoice::Fit, timing(1e-2));
 
         assert_eq!(readout(&realization, "points"), "3");
-        assert_eq!(readout(&realization, "span"), "6ms");
-        assert_eq!(readout(&realization, "max slew"), "5kV");
+        assert_eq!(readout(&realization, "span"), "6 ms");
+        assert_eq!(readout(&realization, "max slew"), "5 kV/s");
         assert_eq!(readout(&realization, "R"), "off");
         assert_eq!(realization.markers.len(), 3);
         assert_eq!(realization.markers[1].index, 1);
@@ -1247,8 +1255,8 @@ mod tests {
         let realization = StimulusRealization::of(&record, SpanChoice::Fit, timing(1e-2));
 
         assert_eq!(readout(&realization, "bits"), "5");
-        assert_eq!(readout(&realization, "rate"), "5kb/s");
-        assert_eq!(readout(&realization, "pattern"), "1ms");
+        assert_eq!(readout(&realization, "rate"), "5 kb/s");
+        assert_eq!(readout(&realization, "pattern"), "1 ms");
         assert_eq!(realization.fundamental, Some(1e-3));
     }
 
@@ -1264,8 +1272,8 @@ mod tests {
                 .is_some_and(|defect| defect.contains("TRNOISE"))
         );
         assert_eq!(realization.trace, WaveformTrace::Curve(Vec::new()));
-        assert_eq!(readout(&realization, "RMS"), "20µV");
-        assert_eq!(readout(&realization, "NT"), "1µs");
+        assert_eq!(readout(&realization, "RMS"), "20 µV");
+        assert_eq!(readout(&realization, "NT"), "1 µs");
     }
 
     #[test]
@@ -1278,8 +1286,8 @@ mod tests {
         let realization = StimulusRealization::of(&record, SpanChoice::Fit, timing(1e-3));
 
         assert_eq!(readout(&realization, "TYPE"), "Gaussian");
-        assert_eq!(readout(&realization, "TS"), "500µs");
-        assert_eq!(readout(&realization, "σ"), "2mV");
+        assert_eq!(readout(&realization, "TS"), "500 µs");
+        assert_eq!(readout(&realization, "σ"), "2 mV");
     }
 
     /// A DC level holding a design variable cannot be parsed against an empty
@@ -1298,7 +1306,7 @@ mod tests {
         let record = definition(ComponentType::VoltageSource, "1.8", "");
         let realization = StimulusRealization::of(&record, SpanChoice::Fit, timing(1e-3));
 
-        assert_eq!(readout(&realization, "level"), "1.800V");
+        assert_eq!(readout(&realization, "level"), "1.800 V");
         assert_eq!(realization.fundamental, None);
         assert_eq!(realization.span, 1e-3);
     }
