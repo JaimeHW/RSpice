@@ -1586,7 +1586,7 @@ mod tests {
             let value = serde_json::to_value(&draft).expect("draft serializes");
             assert_eq!(value["kind"], kind.stable_id());
         }
-        assert!(AnalysisDraft::from_legacy_index(35).is_none());
+        assert!(AnalysisDraft::from_legacy_index(AnalysisKind::ALL.len()).is_none());
     }
 
     #[test]
