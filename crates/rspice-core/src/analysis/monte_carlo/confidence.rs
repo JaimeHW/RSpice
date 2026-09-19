@@ -143,11 +143,21 @@ impl MonteCarloResult {
             .ok_or_else(|| {
                 SimulationError::Circuit("Monte Carlo failed runs exceed attempted runs".to_owned())
             })?;
+        if let Some(indices) = &self.successful_trial_indices {
+            if indices.len() != samples
+                || indices.iter().any(|&index| index >= self.num_runs)
+                || indices.windows(2).any(|pair| pair[0] >= pair[1])
+            {
+                return Err(SimulationError::Circuit(
+                    "Monte Carlo successful trial identities disagree with the retained population"
+                        .into(),
+                ));
+            }
+        }
         validate_request(level_pct, method, samples, self.variables.len(), limits)?;
-        let retained_values = self
-            .variables
-            .values()
-            .try_fold(0usize, |count, variable| {
+        let retained_values = self.variables.values().try_fold(
+            self.successful_trial_indices.as_ref().map_or(0, Vec::len),
+            |count, variable| {
                 if variable.samples.len() != samples {
                     return Err(SimulationError::Circuit(format!(
                         "Monte Carlo variable '{}' has invalid successful-trial samples",
@@ -170,7 +180,8 @@ impl MonteCarloResult {
                     .saturating_add(variable.histogram.len())
                     .saturating_add(variable.bin_edges.len())
                     .saturating_add(7))
-            })?;
+            },
+        )?;
         let scratch = match method {
             MeanConfidenceMethod::StudentT => 0,
             MeanConfidenceMethod::PercentileBootstrap { resamples, .. } => resamples,

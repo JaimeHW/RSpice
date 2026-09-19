@@ -395,6 +395,9 @@ pub struct MonteCarloSampling {
 /// Results from a complete Monte Carlo analysis
 #[derive(Debug, Clone)]
 pub struct MonteCarloResult {
+    /// Authored zero-based trial indices aligned with each variable's samples.
+    /// Absent for legacy aggregation that was not given original trial identities.
+    pub successful_trial_indices: Option<Vec<usize>>,
     /// Total number of attempted runs, including failed runs.
     /// Every variable contains `num_runs - num_failures` successful samples.
     pub num_runs: usize,
@@ -413,6 +416,7 @@ pub struct MonteCarloResult {
 impl MonteCarloResult {
     pub fn new() -> Self {
         Self {
+            successful_trial_indices: None,
             num_runs: 0,
             variables: HashMap::new(),
             all_converged: true,
@@ -700,9 +704,10 @@ impl MonteCarloRunner {
         let mut all_outputs: HashMap<String, Vec<Value>> = HashMap::new();
         let mut output_schema: Option<Vec<String>> = None;
         let mut num_failures = 0;
+        let mut successful_trial_indices = Vec::new();
         let mut sample_values = 0usize;
 
-        for _run in 0..self.config.num_runs {
+        for run_index in 0..self.config.num_runs {
             if abort.is_aborted() {
                 return Err(SimulationError::from_abort(abort));
             }
@@ -757,6 +762,7 @@ impl MonteCarloRunner {
                     if output_schema.is_none() {
                         output_schema = Some(names.clone());
                     }
+                    successful_trial_indices.push(run_index);
                     for name in names {
                         // The schema came directly from this map, so lookup
                         // cannot fail. Keeping insertion after whole-run
@@ -788,6 +794,7 @@ impl MonteCarloRunner {
             return Err(SimulationError::from_abort(abort));
         }
         let mut result = MonteCarloResult {
+            successful_trial_indices: Some(successful_trial_indices),
             num_runs: self.config.num_runs,
             variables,
             all_converged: num_failures == 0,
@@ -878,6 +885,10 @@ mod tests {
             .unwrap();
 
         assert_eq!(result.num_failures, 1);
+        assert_eq!(
+            result.successful_trial_indices.as_deref(),
+            Some([0, 2].as_slice())
+        );
         assert!(!result.all_converged);
         assert_eq!(result.variables["gain"].samples, vec![1.0, 3.0]);
         assert_eq!(result.variables["offset"].samples, vec![2.0, 4.0]);

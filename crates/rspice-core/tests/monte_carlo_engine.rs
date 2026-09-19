@@ -664,3 +664,52 @@ fn monte_carlo_observation_masks_must_match_the_solved_basis() {
             .is_err()
     );
 }
+
+#[test]
+fn monte_carlo_keeps_original_trial_indices_after_convergence_failures() {
+    let net = Netlist::parse(
+        "MC partial failures\n.param offset=0.2\nB1 out 0 V=V(out)^2+{offset}\nR1 out 0 1k\n.end\n",
+    )
+    .unwrap();
+    let mut reference = None;
+    for workers in [1, 2] {
+        let mut config = SimulationConfig::default();
+        config.resource_limits.max_parallel_workers = workers;
+        let mut result = Engine::new(config.clone())
+            .run_monte_carlo_with_options(
+                &net,
+                16,
+                7,
+                Distribution::Uniform { tolerance: 1.0 },
+                Some(&["OFFSET".into()]),
+            )
+            .unwrap();
+        let indices = result.successful_trial_indices.as_ref().unwrap();
+        assert!(result.num_failures > 0);
+        assert_eq!(indices.len(), 16 - result.num_failures);
+        assert!(indices.windows(2).all(|pair| pair[0] < pair[1]));
+        assert!(
+            indices
+                .iter()
+                .enumerate()
+                .any(|(retained, authored)| retained != *authored)
+        );
+        if let Some((expected_indices, expected_samples)) = &reference {
+            assert_eq!(indices, expected_indices);
+            assert_eq!(&result.variables["V(OUT)"].samples, expected_samples);
+        } else {
+            reference = Some((indices.clone(), result.variables["V(OUT)"].samples.clone()));
+        }
+        result.successful_trial_indices.as_mut().unwrap()[0] = 16;
+        assert!(
+            result
+                .compute_mean_confidence(
+                    95.0,
+                    MeanConfidenceMethod::StudentT,
+                    config.resource_limits,
+                    &rspice_core::abort_signal::NoAbort
+                )
+                .is_err()
+        );
+    }
+}

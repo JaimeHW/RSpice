@@ -487,10 +487,16 @@ impl Engine {
             return Err(SimulationError::from_abort(abort));
         }
 
+        let successful_trial_indices = run_outcomes
+            .iter()
+            .enumerate()
+            .filter_map(|(index, outcome)| outcome.as_ref().map(|_| index))
+            .collect();
         let mut result = self.monte_carlo_result_from_observed_trials(
             run_outcomes.into_iter().flatten(),
             num_runs,
         )?;
+        result.successful_trial_indices = Some(successful_trial_indices);
         result.sampling = Some(MonteCarloSampling {
             seed,
             policy: if has_spectre_statistics {
@@ -712,6 +718,7 @@ impl Engine {
         }
 
         Ok(MonteCarloResult {
+            successful_trial_indices: None,
             num_runs: requested_runs,
             variables,
             all_converged: results.len() == requested_runs,
