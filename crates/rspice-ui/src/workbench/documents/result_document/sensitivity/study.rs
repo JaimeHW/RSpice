@@ -40,7 +40,7 @@ use super::{
     unavailable_reason,
 };
 
-const TABLE_MIN_WIDTH: f32 = RANK_WIDTH + PARAMETER_WIDTH + 360.0 + VALUE_WIDTH;
+const TABLE_MIN_WIDTH: f32 = RANK_WIDTH + PARAMETER_WIDTH + 360.0 + VALUE_WIDTH + PROFILE_WIDTH;
 
 /// What a row's own measured value is worth without a reference to divide by.
 ///
@@ -98,12 +98,72 @@ pub(super) fn active_payload_is_valid(state: &AppState) -> bool {
     matches!(active_study(state), ActiveStudy::Ready(_))
 }
 
-/// The point of the study every table on this sheet is read at.
+/// The Contribution sheet's one reader control.
 ///
-/// A study of one point has one answer; a sweep is read at the card's start
+/// A ranked table of derivatives is read at one frequency — that is what a
+/// table is — so a swept study needs the reader to say which, and the answer
+/// has to outlive the frame that painted it. Index 0 is the card's start
 /// frequency, which is what the Studio showed for a swept deck before it kept
 /// the rest of the sweep.
-const READ_INDEX: usize = 0;
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(in crate::workbench::documents::result_document) struct SensitivitySheetState {
+    frequency_index: usize,
+}
+
+/// The width of the per-row frequency profile.
+const PROFILE_WIDTH: f32 = 132.0;
+
+/// The point every table on this sheet is read at, clamped on read.
+///
+/// Clamped rather than corrected in place: the retained study can change
+/// under a selection that was valid for the last one, and a sheet that wrote
+/// back on every frame would make reading a result a mutation of it.
+fn read_index(state: &AppState, evidence: &SensitivityStudyEvidence) -> usize {
+    state
+        .ui
+        .results
+        .study
+        .frequency_index
+        .min(evidence.point_count().saturating_sub(1))
+}
+
+/// The frequency a swept study is read at. `false` for anything else: a
+/// single-point study has one answer and needs no control to say so.
+pub(in crate::workbench::documents::result_document) fn domain_bar(
+    ui: &mut Ui,
+    context: &mut super::super::SheetContext<'_>,
+) -> bool {
+    let Some(analysis) = context.simulation.active_analysis() else {
+        return false;
+    };
+    let Some(AnalysisResultPayload::SensitivityStudy { evidence }) =
+        analysis.result_payload.as_ref()
+    else {
+        return false;
+    };
+    let SensitivityBasisEvidence::Ac { frequencies_hz, .. } = &evidence.basis else {
+        return false;
+    };
+    if frequencies_hz.len() < 2 {
+        return false;
+    }
+    let options: Vec<String> = frequencies_hz
+        .iter()
+        .map(|frequency| fmt_si(*frequency, "Hz", 4))
+        .collect();
+    let selected = context.results.study.frequency_index.min(options.len() - 1);
+    if let Some(picked) = crate::ui::widgets::select(
+        ui,
+        "rspice.results.sensitivity.frequency",
+        "Sensitivity frequency",
+        &options[selected],
+        &options,
+        216.0,
+    ) {
+        context.results.study.frequency_index = picked;
+    }
+    true
+}
 
 /// The ranking of one retained study at the point it is read at.
 ///
@@ -125,6 +185,16 @@ pub(in crate::workbench::documents::result_document) struct StudyPlan {
     offsets: RowOffsets,
     /// Largest normalized magnitude at the read point, which is the bar scale.
     max_magnitude: f64,
+    /// Largest normalized magnitude anywhere in the sweep.
+    ///
+    /// The profile column is scaled to this rather than to each row's own
+    /// range, so a row that matters nowhere paints flat beside one that
+    /// dominates the band — which is the comparison the column exists to make.
+    sweep_max_magnitude: f64,
+    /// Where each solved point sits across the profile cell, on a log
+    /// frequency axis, in `[0, 1]`. One walk over the grid rather than one
+    /// per painted row.
+    profile_x: Vec<f32>,
 }
 
 impl StudyPlan {
@@ -135,6 +205,33 @@ impl StudyPlan {
     pub(super) fn offsets(&self) -> &RowOffsets {
         &self.offsets
     }
+}
+
+/// Where each solved frequency sits across the profile cell.
+///
+/// Logarithmic, because an AC sensitivity band is authored in decades and a
+/// linear axis would crush every point but the last into the left edge. A
+/// degenerate band puts everything at the left, which is the honest picture
+/// of a sweep that covers no span.
+fn profile_positions(basis: &SensitivityBasisEvidence) -> Vec<f32> {
+    let SensitivityBasisEvidence::Ac { frequencies_hz, .. } = basis else {
+        return vec![0.0];
+    };
+    let (Some(first), Some(last)) = (frequencies_hz.first(), frequencies_hz.last()) else {
+        return Vec::new();
+    };
+    let (low, high) = (first.log10(), last.log10());
+    let span = high - low;
+    frequencies_hz
+        .iter()
+        .map(|frequency| {
+            if span > 0.0 {
+                (((frequency.log10() - low) / span) as f32).clamp(0.0, 1.0)
+            } else {
+                0.0
+            }
+        })
+        .collect()
 }
 
 /// Rank by normalized magnitude at one point. Equal magnitudes are ordered by
@@ -178,7 +275,7 @@ fn study_plan(state: &mut AppState) -> Option<Arc<StudyPlan>> {
     let ActiveStudy::Ready(view) = active_study(state) else {
         return None;
     };
-    let index = READ_INDEX;
+    let index = read_index(state, view.evidence);
     if let Some(plan) = state.ui.results.plans.study.as_ref()
         && plan.source == source
         && plan.analysis == analysis_key
@@ -198,6 +295,17 @@ fn study_plan(state: &mut AppState) -> Option<Arc<StudyPlan>> {
                 .map(f64::abs)
         })
         .fold(0.0_f64, f64::max);
+    // The sweep-wide scale and the x positions do not depend on the point the
+    // table is read at, so they are rebuilt only when the dataset moves. The
+    // memo is keyed by the index as well, so they ride along; a second memo
+    // keyed without it would hold the same two walks twice.
+    let sweep_max_magnitude = view
+        .evidence
+        .rows
+        .iter()
+        .flat_map(|row| &row.normalized)
+        .filter_map(|value| value.value().map(f64::abs))
+        .fold(0.0_f64, f64::max);
     let built = Arc::new(StudyPlan {
         source,
         analysis: analysis_key,
@@ -205,6 +313,8 @@ fn study_plan(state: &mut AppState) -> Option<Arc<StudyPlan>> {
         offsets: RowOffsets::from_heights(std::iter::repeat_n(ROW_HEIGHT, order.len())),
         order,
         max_magnitude,
+        sweep_max_magnitude,
+        profile_x: profile_positions(&view.evidence.basis),
     });
     state.ui.results.plans.study = Some(Arc::clone(&built));
     Some(built)
@@ -276,6 +386,82 @@ fn highest_magnitude_label(
         )
 }
 
+/// One row's normalized sensitivity across the whole band.
+///
+/// The question a table read at one frequency cannot answer is "where in the
+/// band does this variable matter", and this answers it for every visible row
+/// at once, without a second sheet and without publishing thousands of
+/// synthetic waveforms the saved-output contract could not type.
+///
+/// Drawn as ONE chained polyline rather than a stroke per segment: coincident
+/// stroke edges blend to hairlines in this renderer, and a per-segment chain
+/// would paint every interior point twice.
+fn paint_frequency_profile(
+    ui: &Ui,
+    cell: egui::Rect,
+    plan: &StudyPlan,
+    row: &crate::state::SensitivityStudyRow,
+    index: usize,
+    color: crate::ui::palette::Palette,
+) {
+    let area = cell.shrink2(egui::vec2(CELL_INSET, 6.0));
+    if area.width() <= 1.0 || area.height() <= 1.0 || plan.sweep_max_magnitude <= 0.0 {
+        return;
+    }
+    let painter = ui.painter().with_clip_rect(cell);
+    let zero_y = area.center().y;
+    let half = area.height() * 0.5;
+    painter.hline(
+        area.x_range(),
+        zero_y,
+        egui::Stroke::new(1.0, color.border.gamma_multiply(0.7)),
+    );
+
+    // Gaps where a value is unavailable: the polyline is broken there rather
+    // than bridged, because a line drawn through a point the engine refused
+    // would state a derivative it never computed.
+    let mut chain: Vec<egui::Pos2> = Vec::new();
+    let mut flush = |chain: &mut Vec<egui::Pos2>| {
+        if chain.len() >= 2 {
+            painter.add(egui::Shape::line(
+                std::mem::take(chain),
+                egui::Stroke::new(1.0, color.accent.gamma_multiply(0.85)),
+            ));
+        } else if let Some(point) = chain.pop() {
+            painter.circle_filled(point, 1.25, color.accent.gamma_multiply(0.85));
+        }
+    };
+    for (point, x) in plan.profile_x.iter().enumerate() {
+        match row
+            .normalized
+            .get(point)
+            .copied()
+            .and_then(|value| value.value())
+        {
+            Some(value) => {
+                let ratio = (value / plan.sweep_max_magnitude).clamp(-1.0, 1.0) as f32;
+                chain.push(egui::pos2(
+                    area.left() + area.width() * x,
+                    zero_y - half * ratio,
+                ));
+            }
+            None => flush(&mut chain),
+        }
+    }
+    flush(&mut chain);
+
+    // A tick at the frequency the table beside it is read at, so the row and
+    // the profile are visibly one statement about one band.
+    if let Some(x) = plan.profile_x.get(index) {
+        let tick = area.left() + area.width() * x;
+        painter.vline(
+            tick,
+            egui::Rangef::new(area.top(), area.bottom()),
+            egui::Stroke::new(1.0, color.border_strong),
+        );
+    }
+}
+
 /// Render the ranked normalized-sensitivity chart of one study.
 pub(super) fn show(ui: &mut Ui, state: &mut AppState) {
     // Ranked before the payload is borrowed, so the sort happens once per
@@ -338,9 +524,18 @@ pub(super) fn show(ui: &mut Ui, state: &mut AppState) {
             let width = viewport_width.max(TABLE_MIN_WIDTH);
             ui.set_min_width(width);
 
-            let bar_width = width - RANK_WIDTH - PARAMETER_WIDTH - VALUE_WIDTH;
+            // The profile column exists only where there is a band to
+            // profile: a one-point study would paint a column of single dots
+            // that answered nothing.
+            let profile_width = if view.evidence.is_swept() {
+                PROFILE_WIDTH
+            } else {
+                0.0
+            };
+            let bar_width = width - RANK_WIDTH - PARAMETER_WIDTH - VALUE_WIDTH - profile_width;
             let bar_offset = RANK_WIDTH + PARAMETER_WIDTH;
             let value_offset = bar_offset + bar_width;
+            let profile_offset = value_offset + VALUE_WIDTH;
             let (header, _) =
                 ui.allocate_exact_size(egui::vec2(width, HEADER_HEIGHT), Sense::hover());
             ui.painter().hline(
@@ -376,6 +571,16 @@ pub(super) fn show(ui: &mut Ui, state: &mut AppState) {
                     column_rect(header, offset, column_width),
                     text,
                     align,
+                    header_font.clone(),
+                    c.text_faint,
+                );
+            }
+            if profile_width > 0.0 {
+                paint_cell(
+                    ui,
+                    column_rect(header, profile_offset, profile_width),
+                    "VS FREQUENCY",
+                    egui::Align2::LEFT_CENTER,
                     header_font.clone(),
                     c.text_faint,
                 );
@@ -550,6 +755,16 @@ pub(super) fn show(ui: &mut Ui, state: &mut AppState) {
                     theme::mono(tokens::FS_1, FontWeight::Regular),
                     c.text,
                 );
+                if profile_width > 0.0 {
+                    paint_frequency_profile(
+                        ui,
+                        column_rect(rect, profile_offset, profile_width),
+                        &plan,
+                        row,
+                        index,
+                        c,
+                    );
+                }
                 theme::paint_focus_ring(ui, &response, rect);
             }
             ui.allocate_space(egui::vec2(width, rows.trailing));
@@ -763,6 +978,64 @@ mod tests {
         assert_eq!(first.order(), [1, 0]);
         assert_eq!(first.max_magnitude, 1.0);
         assert_eq!(first.offsets().rows(), 2);
+    }
+
+    /// The reader's frequency is what the ranking is built at, and a
+    /// selection the retained study cannot honour is clamped rather than
+    /// written back: reading a result must not mutate it.
+    #[test]
+    fn the_contribution_sheet_ranks_a_sweep_at_the_selected_frequency() {
+        let mut state = state_with(swept_evidence());
+        assert_eq!(study_plan(&mut state).unwrap().order(), [1, 0]);
+
+        // At the middle frequency PARAM:GAIN dominates the band.
+        state.ui.results.study.frequency_index = 1;
+        let middle = study_plan(&mut state).expect("the ranking follows the reader");
+        assert_eq!(middle.index, 1);
+        assert_eq!(middle.order(), [0, 1]);
+        assert_eq!(middle.max_magnitude, 9.0);
+
+        // A selection past the end of a shorter study is clamped on read, and
+        // the stored index is left exactly as the reader set it.
+        state.ui.results.study.frequency_index = 97;
+        let clamped = study_plan(&mut state).expect("a clamped selection still ranks");
+        assert_eq!(clamped.index, 2);
+        assert_eq!(state.ui.results.study.frequency_index, 97);
+    }
+
+    /// The profile column is scaled to the whole sweep, so rows are
+    /// comparable. Scaled per row, a variable that matters nowhere would
+    /// paint as tall as the one that dominates the band.
+    #[test]
+    fn the_frequency_profile_is_scaled_to_the_sweep_not_to_the_row() {
+        let mut state = state_with(swept_evidence());
+        let plan = study_plan(&mut state).expect("a retained study ranks");
+        assert_eq!(plan.sweep_max_magnitude, 9.0);
+        assert!(plan.max_magnitude < plan.sweep_max_magnitude);
+
+        // Log-frequency positions across a decade-spaced band.
+        assert_eq!(plan.profile_x, vec![0.0, 0.5, 1.0]);
+
+        // A band that covers no span puts everything at the left rather than
+        // dividing by zero.
+        let degenerate = SensitivityBasisEvidence::Ac {
+            frequencies_hz: vec![100.0, 100.0],
+            output: vec![
+                ComplexResultValue {
+                    real: 1.0,
+                    imaginary: 0.0,
+                },
+                ComplexResultValue {
+                    real: 1.0,
+                    imaginary: 0.0,
+                },
+            ],
+        };
+        assert_eq!(profile_positions(&degenerate), vec![0.0, 0.0]);
+        assert_eq!(
+            profile_positions(&SensitivityBasisEvidence::Dc { output: 1.0 }),
+            vec![0.0]
+        );
     }
 
     #[test]

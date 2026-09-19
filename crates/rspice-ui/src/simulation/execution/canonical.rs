@@ -1124,6 +1124,7 @@ mod tests {
             ac_mode: true,
             frequency: Some(1.0e6),
             filter: filter.to_owned(),
+            sweep: None,
         };
         let spec = sensitivity(crate::simulation::config::DESIGN_PARAMETERS_FILTER);
         let mut encoded = CanonicalWriter::new("test");
@@ -1156,6 +1157,7 @@ mod tests {
             ac_mode: false,
             frequency: None,
             filter: filter.to_owned(),
+            sweep: None,
         };
         let digest = |filter: &str| {
             let mut writer = CanonicalWriter::new("test");

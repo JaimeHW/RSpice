@@ -32,7 +32,7 @@ pub(super) use mismatch::MismatchPlan;
 /// Declared here for the same reason `mismatch` is — the handover is this
 /// file's.
 mod study;
-pub(super) use study::StudyPlan;
+pub(super) use study::{SensitivitySheetState, StudyPlan, domain_bar};
 
 use super::AnalysisPresentationKey;
 use super::frame_work::{self, DatasetWalk};
