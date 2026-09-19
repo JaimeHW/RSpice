@@ -1331,3 +1331,68 @@ fn monte_carlo_mean_confidence_is_authenticated_without_changing_absent_evidence
     set(&mut result, None);
     assert_eq!(absent, result.result_data_digest());
 }
+
+#[test]
+fn monte_carlo_sequence_trial_digest_seals_stream_policy_seed_and_original_index() {
+    use crate::state::{FamilyMeasurementEvidence, FamilyMemberId, FamilyMemberMeasurements};
+    let metadata = AnalysisResultFamilyMetadata::MonteCarlo {
+        seed: u64::MAX,
+        runs_requested: 1,
+        runs_completed: 1,
+        failures: 0,
+        all_converged: true,
+        variables: vec![MonteCarloVariableMetadata {
+            name: "V(out)".into(),
+            samples: vec![1.0],
+            mean: 1.0,
+            std_dev: 0.0,
+            min: 1.0,
+            max: 1.0,
+            mean_confidence: None,
+        }],
+        member_measurements: vec![FamilyMemberMeasurements::new(
+            FamilyMemberId::MonteCarloSequenceTrial {
+                index: 0,
+                seed: u64::MAX,
+                policy: "parameter-xoroshiro128plus-2018-v1".into(),
+            },
+            vec![FamilyMeasurementEvidence {
+                name: "V(out)".into(),
+                value: Some(1.0),
+                passed: true,
+                error: None,
+            }],
+        )],
+    };
+    let original = analysis(AnalysisType::MonteCarlo).with_family_metadata(metadata);
+    for mutation in 0..4 {
+        let mut changed = original.clone();
+        let Some(AnalysisResultFamilyMetadata::MonteCarlo {
+            member_measurements,
+            ..
+        }) = &mut changed.family_metadata
+        else {
+            panic!("MC")
+        };
+        let FamilyMemberId::MonteCarloSequenceTrial {
+            index,
+            seed,
+            policy,
+        } = &mut member_measurements[0].member
+        else {
+            panic!("sequence")
+        };
+        match mutation {
+            0 => *index = 1,
+            1 => *seed = 7,
+            2 => *policy = "spectre-coordinate-splitmix64-v1".into(),
+            _ => {
+                member_measurements[0].member = FamilyMemberId::MonteCarloTrial {
+                    index: 0,
+                    seed: u64::MAX,
+                }
+            }
+        }
+        assert_ne!(original.result_data_digest(), changed.result_data_digest());
+    }
+}

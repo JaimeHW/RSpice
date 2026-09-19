@@ -1450,10 +1450,23 @@ impl WorkerSimulationResult {
                 f64_payload_bytes(temperatures_c.len()),
                 waveforms_payload_bytes(waveforms),
             ]),
-            WorkerSimulationResult::MonteCarlo { variables, .. } => variables
-                .iter()
-                .map(WorkerMonteCarloVariable::estimated_numeric_payload_bytes)
-                .fold(0usize, |total, bytes| total.saturating_add(bytes)),
+            WorkerSimulationResult::MonteCarlo {
+                variables,
+                member_measurements,
+                ..
+            } => {
+                let observations = member_measurements.iter().fold(0usize, |total, member| {
+                    total
+                        .saturating_add(member.measurements.len())
+                        .saturating_add(2)
+                });
+                variables
+                    .iter()
+                    .map(WorkerMonteCarloVariable::estimated_numeric_payload_bytes)
+                    .fold(f64_payload_bytes(observations), |total, bytes| {
+                        total.saturating_add(bytes)
+                    })
+            }
             WorkerSimulationResult::Reliability {
                 years,
                 waveforms,
@@ -1507,7 +1520,8 @@ impl WorkerSimulationResult {
 ///     solved, and a raw, normalized and phase column per variable — in place
 ///     of two maps read at a single point.
 /// Earlier workers silently omit numerical quality or current observations.
-const WORKER_RESPONSE_TRANSPORT_PROTOCOL: u8 = 24;
+/// 25: Monte Carlo retains complete parameter-stream trial identities and failed observations.
+const WORKER_RESPONSE_TRANSPORT_PROTOCOL: u8 = 25;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct WorkerResponseTransport {

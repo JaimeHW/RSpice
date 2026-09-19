@@ -844,13 +844,32 @@ fn monte_carlo_mean_confidence_survives_worker_transport_and_rejects_wrong_popul
             upper: 1.1,
         },
     };
+    let members = [Some(0.9), Some(1.0), None, Some(1.1)]
+        .into_iter()
+        .enumerate()
+        .map(|(index, value)| {
+            crate::state::FamilyMemberMeasurements::new(
+                crate::state::FamilyMemberId::MonteCarloSequenceTrial {
+                    index,
+                    seed: 7,
+                    policy: "parameter-xoroshiro128plus-2018-v1".into(),
+                },
+                vec![crate::state::FamilyMeasurementEvidence {
+                    name: "V(out)".into(),
+                    value,
+                    passed: value.is_some(),
+                    error: value.is_none().then(|| "did not converge".into()),
+                }],
+            )
+        })
+        .collect::<Vec<_>>();
     let result = SimulationResult::MonteCarlo {
         seed: 7,
         runs_requested: 4,
         runs_completed: 3,
         num_failures: 1,
         all_converged: false,
-        member_measurements: Vec::new(),
+        member_measurements: members.clone(),
         variables: vec![crate::simulation::results::MonteCarloVariableResult {
             mean_confidence: Some(confidence),
             name: "V(out)".into(),
@@ -863,10 +882,35 @@ fn monte_carlo_mean_confidence_survives_worker_transport_and_rejects_wrong_popul
             bin_edges: vec![0.9, 1.0, 1.1],
         }],
     };
-    let SimulationResult::MonteCarlo { variables, .. } = round_trip_result(result) else {
+    let SimulationResult::MonteCarlo {
+        variables,
+        member_measurements,
+        ..
+    } = round_trip_result(result)
+    else {
         panic!("Monte Carlo")
     };
     assert_eq!(variables[0].mean_confidence, Some(confidence));
+    assert_eq!(member_measurements, members);
+    let mut misattributed = members;
+    misattributed[3].member = misattributed[0].member.clone();
+    let response = WorkerResponse {
+        id: 1,
+        outcome: WorkerOutcome::Success(Box::new(WorkerSimulationResult::MonteCarlo {
+            seed: 7,
+            runs_requested: 4,
+            runs_completed: 3,
+            num_failures: 1,
+            all_converged: false,
+            member_measurements: misattributed,
+            variables: vec![WorkerMonteCarloVariable::from(variables[0].clone())],
+        })),
+    };
+    assert!(
+        WorkerResponseTransport::from_response(response)
+            .unwrap_err()
+            .contains("trial population")
+    );
     let mut worker = WorkerMonteCarloVariable::from(variables[0].clone());
     worker.mean_confidence.as_mut().unwrap().successful_samples = 4;
     let response = WorkerResponse {

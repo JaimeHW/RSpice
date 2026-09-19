@@ -23,12 +23,14 @@
 
 use serde::{Deserialize, Serialize};
 
+mod monte_carlo;
+
 /// Which member of a result family produced one measurement.
 ///
 /// The variants are not interchangeable spellings of "index". A Monte Carlo
-/// trial is reproduced from its seed and nothing else, so the seed is retained
-/// with it; re-running trial 47 of a 500-trial analysis means re-deriving that
-/// seed, and a trial index alone cannot do it. A swept point is named by the
+/// trial may have its own independent seed or belong to a shared random stream.
+/// A stream trial must replay the original seed and sampling policy through its
+/// authored index. Those identities cannot be interchanged. A swept point is named by the
 /// value it was solved at, and a corner by the label its section carries.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "member", rename_all = "snake_case", deny_unknown_fields)]
@@ -41,6 +43,13 @@ pub enum FamilyMemberId {
     /// never be renumbered into that range. A verdict that names trial 47 has
     /// to mean the trial the driver called 47.
     MonteCarloTrial { index: usize, seed: u64 },
+    /// A trial drawn from the recorded run's parameter-sampling sequence.
+    /// Reproduce it using this base seed, policy, deck and original index.
+    MonteCarloSequenceTrial {
+        index: usize,
+        seed: u64,
+        policy: String,
+    },
     /// One point of a parametric sweep, named by the value it was solved at.
     SweepPoint { index: usize, value: f64 },
     /// One corner of a corner sweep, named by its section label.
@@ -53,6 +62,7 @@ impl FamilyMemberId {
     pub const fn index(&self) -> usize {
         match self {
             Self::MonteCarloTrial { index, .. }
+            | Self::MonteCarloSequenceTrial { index, .. }
             | Self::SweepPoint { index, .. }
             | Self::Corner { index, .. } => *index,
         }
@@ -81,6 +91,9 @@ impl FamilyMemberId {
     pub fn label(&self) -> String {
         match self {
             Self::MonteCarloTrial { index, seed } => format!("Trial {index} \u{00b7} seed {seed}"),
+            Self::MonteCarloSequenceTrial { index, seed, .. } => {
+                format!("Trial {index} · stream seed {seed}")
+            }
             Self::SweepPoint { value, .. } => format!(
                 "Point {}",
                 crate::state::property_types::format_engineering_display_with(

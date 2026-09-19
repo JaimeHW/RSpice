@@ -198,6 +198,8 @@ impl AnalysisResultFamilyMetadata {
                 }
             }
             Self::MonteCarlo {
+                seed,
+                member_measurements,
                 runs_requested,
                 runs_completed,
                 failures,
@@ -205,6 +207,16 @@ impl AnalysisResultFamilyMetadata {
                 variables,
                 ..
             } => {
+                FamilyMemberMeasurements::validate_monte_carlo_sequence(
+                    member_measurements,
+                    *seed,
+                    *runs_requested,
+                    *runs_completed,
+                    *failures,
+                    variables
+                        .iter()
+                        .map(|variable| (variable.name.as_str(), variable.samples.as_slice())),
+                )?;
                 if runs_completed.saturating_add(*failures) > *runs_requested {
                     return Err(
                         "Monte Carlo completed and failed counts exceed requested runs".to_owned(),
@@ -376,6 +388,7 @@ fn validate_member_measurements(metadata: &AnalysisResultFamilyMetadata) -> Resu
             ) | (
                 AnalysisResultFamilyMetadata::MonteCarlo { .. },
                 FamilyMemberId::MonteCarloTrial { .. }
+                    | FamilyMemberId::MonteCarloSequenceTrial { .. }
             )
         );
         if !matches_family {

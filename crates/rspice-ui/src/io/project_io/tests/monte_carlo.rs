@@ -43,7 +43,25 @@ fn project_file_round_trips_exact_result_family_metadata_and_migrates_v6_absence
     let mut libraries = LibraryManager::with_primitives();
     let workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
     let metadata = crate::state::AnalysisResultFamilyMetadata::MonteCarlo {
-        member_measurements: Vec::new(),
+        member_measurements: [Some(0.975), None, Some(1.025)]
+            .into_iter()
+            .enumerate()
+            .map(|(index, value)| {
+                crate::state::FamilyMemberMeasurements::new(
+                    crate::state::FamilyMemberId::MonteCarloSequenceTrial {
+                        index,
+                        seed: 42,
+                        policy: "parameter-xoroshiro128plus-2018-v1".into(),
+                    },
+                    vec![crate::state::FamilyMeasurementEvidence {
+                        name: "V(out)".into(),
+                        value,
+                        passed: value.is_some(),
+                        error: value.is_none().then(|| "did not converge".into()),
+                    }],
+                )
+            })
+            .collect(),
         seed: 42,
         runs_requested: 3,
         runs_completed: 2,
@@ -103,8 +121,22 @@ fn project_file_round_trips_exact_result_family_metadata_and_migrates_v6_absence
 
     let mut stale: serde_json::Value = serde_json::from_str(&json).unwrap();
     stale["simulation_results"]["schema_version"] =
-        serde_json::Value::from(SENSITIVITY_STUDY_RESULTS_SCHEMA_VERSION);
+        serde_json::Value::from(MONTE_CARLO_CONFIDENCE_RESULTS_SCHEMA_VERSION);
     let rejected = load_project_text(&serde_json::to_string(&stale).unwrap(), None).unwrap();
+    assert!(rejected.simulation_results.runs.is_empty());
+    assert!(
+        rejected
+            .simulation_results_warning
+            .unwrap()
+            .contains("before v31")
+    );
+
+    // A schema-29 document also cannot claim confidence evidence introduced in 30.
+    stale["simulation_results"]["schema_version"] =
+        serde_json::Value::from(SENSITIVITY_STUDY_RESULTS_SCHEMA_VERSION);
+    stale["simulation_results"]["runs"][0]["analyses"][0]["family_metadata"]["member_measurements"] =
+        serde_json::json!([]);
+    let rejected = load_project_text(&stale.to_string(), None).unwrap();
     assert!(rejected.simulation_results.runs.is_empty());
     assert!(
         rejected

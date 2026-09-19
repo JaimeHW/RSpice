@@ -162,6 +162,29 @@ impl ProjectSimulationResultsData {
 
     fn migrate_to_current_in_place(&mut self, project_id: ProjectId) -> Result<(), String> {
         let source_schema = self.schema_version;
+        if source_schema < MONTE_CARLO_TRIAL_RESULTS_SCHEMA_VERSION
+            && self
+                .runs
+                .iter()
+                .flat_map(|run| &run.analyses)
+                .filter_map(|analysis| analysis.family_metadata.as_ref())
+                .flat_map(AnalysisResultFamilyMetadata::member_measurements)
+                .any(|member| {
+                    matches!(
+                        member.member,
+                        crate::state::FamilyMemberId::MonteCarloSequenceTrial { .. }
+                    )
+                })
+        {
+            return Err(
+                "result schemas before v31 cannot contain Monte Carlo stream trial identities"
+                    .into(),
+            );
+        }
+        if source_schema == MONTE_CARLO_CONFIDENCE_RESULTS_SCHEMA_VERSION {
+            self.schema_version = PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION;
+            return self.validate();
+        }
         if source_schema < MONTE_CARLO_CONFIDENCE_RESULTS_SCHEMA_VERSION
             && self
                 .runs

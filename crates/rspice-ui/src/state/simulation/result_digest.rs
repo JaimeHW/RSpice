@@ -1658,6 +1658,16 @@ fn encode_member_measurements(
                 writer.usize(*index);
                 writer.u64(*seed);
             }
+            FamilyMemberId::MonteCarloSequenceTrial {
+                index,
+                seed,
+                policy,
+            } => {
+                writer.u8(3);
+                writer.usize(*index);
+                writer.u64(*seed);
+                writer.string(policy);
+            }
             FamilyMemberId::SweepPoint { index, value } => {
                 writer.u8(1);
                 writer.usize(*index);

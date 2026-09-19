@@ -374,7 +374,10 @@ fn evidence_for(
         if let MonteCarloSpecificationGate::YieldAtLeast { percent } = gate
             && matches!(
                 member,
-                Some(crate::state::FamilyMemberId::MonteCarloTrial { .. })
+                Some(
+                    crate::state::FamilyMemberId::MonteCarloTrial { .. }
+                        | crate::state::FamilyMemberId::MonteCarloSequenceTrial { .. }
+                )
             )
             && let Some(value) = verdict.worst_value()
         {
