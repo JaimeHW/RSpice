@@ -33,6 +33,7 @@ mod ground_names;
 mod hierarchy;
 mod net_highlight;
 mod net_label;
+mod placement_authority;
 mod point;
 mod port;
 mod probe;
@@ -107,10 +108,11 @@ pub use hierarchy::{
 };
 pub use net_highlight::NetHighlightState;
 pub use net_label::{Junction, NetLabel, NetLabelKind};
+pub use placement_authority::PlacementAuthority;
 pub use point::Point;
 pub use port::{
-    PendingPortPlacement, PortContract, PortDirection, PortDirectionType, PortDiscipline,
-    PortSignalType, PortSpec,
+    PendingPortPlacement, PendingPortSequence, PortContract, PortDirection, PortDirectionType,
+    PortDiscipline, PortSignalType, PortSpec,
 };
 pub use probe::SchematicProbe;
 pub use replacement::{

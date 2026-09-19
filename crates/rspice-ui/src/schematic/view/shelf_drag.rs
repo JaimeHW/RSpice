@@ -27,9 +27,8 @@ pub(crate) enum SchematicShelfDragPayload {
 impl SchematicShelfDragPayload {
     /// Build a directly placeable primitive payload.
     ///
-    /// Interface ports are intentionally excluded: their direction,
-    /// discipline, name, netlist order, and document authority must first be
-    /// committed by the Place pin or port transaction.
+    /// Interface ports are intentionally excluded: a pin has a name, and only
+    /// Create pins can supply one before the drop lands.
     pub(crate) fn primitive(kind: ComponentType) -> Option<Self> {
         (!matches!(kind, ComponentType::Port | ComponentType::CellInstance))
             .then_some(Self::Primitive(kind))

@@ -285,7 +285,122 @@ pub struct PortPlacementAuthority {
     pub view_path: String,
 }
 
+/// The names still to place and the contract they share.
+///
+/// Runtime only, and deliberately so: what reaches the document is one ordinary
+/// `Component` per name, with the same `params` string a single placement has
+/// always written. Naming several pins at once is a property of the command,
+/// not of the file.
+///
+/// The one-shot payload for each name is built at the click rather than when
+/// the sequence is armed — see [`Self::next_placement`] — because the topology
+/// version and the next interface order both move as the sequence is consumed,
+/// and a payload frozen at arming time would refuse its own second placement.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingPortSequence {
+    /// Names still to place, in the order they were typed.
+    pub names: std::collections::VecDeque<String>,
+    /// How many names the sequence started with, for `{k}/{n}`.
+    pub total: usize,
+    pub direction: PortDirection,
+    pub signal_type: PortSignalType,
+    pub discipline: PortDiscipline,
+    pub authority: Option<super::PlacementAuthority>,
+}
+
+impl PendingPortSequence {
+    pub fn new(
+        names: impl IntoIterator<Item = String>,
+        direction: PortDirection,
+        signal_type: PortSignalType,
+        discipline: PortDiscipline,
+    ) -> Self {
+        let names: std::collections::VecDeque<String> = names.into_iter().collect();
+        Self {
+            total: names.len(),
+            names,
+            direction,
+            signal_type,
+            discipline,
+            authority: None,
+        }
+    }
+
+    pub fn with_authority(mut self, authority: super::PlacementAuthority) -> Self {
+        self.authority = Some(authority);
+        self
+    }
+
+    /// The name the next click will place.
+    pub fn next_name(&self) -> Option<&str> {
+        self.names.front().map(String::as_str)
+    }
+
+    /// One-based position of the next name in the sequence.
+    pub fn position(&self) -> usize {
+        self.total - self.names.len() + 1
+    }
+
+    /// The one-shot payload for the next name, measured against the live
+    /// document.
+    pub fn next_placement(&self, schematic: &SchematicState) -> Option<PendingPortPlacement> {
+        let name = self.names.front()?;
+        Some(PendingPortPlacement::from_contract(
+            name,
+            self.direction,
+            self.signal_type,
+            self.discipline,
+            schematic.topology_version(),
+            schematic.next_interface_order(),
+        ))
+    }
+
+    /// Drop the name just placed. Returns `false` when nothing is left.
+    pub fn advance(&mut self) -> bool {
+        self.names.pop_front();
+        !self.names.is_empty()
+    }
+}
+
 impl PendingPortPlacement {
+    /// The payload for one name under an already-chosen contract.
+    ///
+    /// The three contract fields are separate here because the interface they
+    /// describe has always had three: [`PortDirectionType`] fuses direction and
+    /// signal type into five pairs, and no pair of those five is a logic
+    /// output, so no digital block's output can be spelled through it.
+    pub fn from_contract(
+        name: impl Into<String>,
+        direction: PortDirection,
+        signal_type: PortSignalType,
+        discipline: PortDiscipline,
+        expected_topology_version: u64,
+        expected_netlist_order: usize,
+    ) -> Self {
+        let name = name.into();
+        let contract = PortContract {
+            direction,
+            signal_type,
+            discipline,
+            netlist_order: Some(expected_netlist_order),
+            // The sentence [`PortContract::from_component`] would generate for
+            // a port carrying no `documentation=` entry, so a pin placed here
+            // reads the same as one recovered from a hand-written file.
+            documentation: format!(
+                "{name} {} {} interface port",
+                direction.keyword(),
+                discipline.keyword()
+            ),
+        };
+        Self {
+            name,
+            contract,
+            expected_topology_version,
+            expected_netlist_order,
+            document_authority: None,
+        }
+    }
+
     pub fn new(
         name: impl Into<String>,
         direction_type: PortDirectionType,
@@ -705,10 +820,22 @@ fn validate_port_name_syntax(
     Ok(())
 }
 
+/// The coherent direction/signal matrix.
+///
+/// A signal that travels either way travels either way whatever it carries, so
+/// logic and analog each take In, Out and InOut. Power is the one that is not
+/// symmetric: a rail is fed, not driven by the cell, so Power pairs with InOut
+/// (a rail the cell both draws from and can feed) and with Supply (a rail the
+/// parent feeds), and with nothing else.
+///
+/// This used to refuse `(Out, Logic)` and `(InOut, Logic)`, which is to say it
+/// refused the output of every digital block in the product.
 fn validate_contract_fields(contract: &PortContract) -> Result<(), PortPlacementError> {
     let valid_direction_type = matches!(
         (contract.direction, contract.signal_type),
         (PortDirection::In, PortSignalType::Logic)
+            | (PortDirection::Out, PortSignalType::Logic)
+            | (PortDirection::InOut, PortSignalType::Logic)
             | (PortDirection::In, PortSignalType::Analog)
             | (PortDirection::Out, PortSignalType::Analog)
             | (PortDirection::InOut, PortSignalType::Analog)
@@ -1088,7 +1215,7 @@ mod tests {
                     .find(|component| component.id == stable_id)
                     .expect("stable identity survives persistence");
                 assert_eq!(restored_port.port_contract(), Some(expected));
-                assert!(restored.pending_port.is_none());
+                assert!(restored.pending_port_sequence.is_none());
             }
         }
     }
@@ -1158,12 +1285,142 @@ mod tests {
             state.topology_version(),
             state.next_interface_order(),
         );
-        malformed.contract.signal_type = PortSignalType::Logic;
+        // A signal type that is not coherent with the direction: a rail is fed
+        // or bidirectional, never an output.
+        malformed.contract.signal_type = PortSignalType::Power;
         assert!(matches!(
             state.place_pending_port(Point::origin(), malformed),
             Err(PortPlacementError::InvalidContract(_))
         ));
         assert_eq!(state.components, baseline);
+    }
+
+    /// The matrix a digital block needs. Direction and signal type are
+    /// independent for logic and analog; power is the one pairing that is not
+    /// symmetric, because a rail is fed rather than driven.
+    #[test]
+    fn output_logic_is_a_legal_contract() {
+        let mut state = SchematicState::default();
+        for (direction, signal) in [
+            (PortDirection::In, PortSignalType::Logic),
+            (PortDirection::Out, PortSignalType::Logic),
+            (PortDirection::InOut, PortSignalType::Logic),
+            (PortDirection::In, PortSignalType::Analog),
+            (PortDirection::Out, PortSignalType::Analog),
+            (PortDirection::InOut, PortSignalType::Analog),
+            (PortDirection::InOut, PortSignalType::Power),
+            (PortDirection::Supply, PortSignalType::Power),
+        ] {
+            let pending = PendingPortPlacement::from_contract(
+                format!("PIN_{}_{}", direction.keyword(), signal.keyword()),
+                direction,
+                signal,
+                PortDiscipline::Logic,
+                state.topology_version(),
+                state.next_interface_order(),
+            );
+            state
+                .place_pending_port(Point::origin(), pending)
+                .unwrap_or_else(|error| {
+                    panic!("{direction:?}/{signal:?} is a coherent contract: {error}")
+                });
+        }
+
+        for (direction, signal) in [
+            (PortDirection::In, PortSignalType::Power),
+            (PortDirection::Out, PortSignalType::Power),
+            (PortDirection::Supply, PortSignalType::Logic),
+            (PortDirection::Supply, PortSignalType::Analog),
+        ] {
+            let pending = PendingPortPlacement::from_contract(
+                "REFUSED",
+                direction,
+                signal,
+                PortDiscipline::Electrical,
+                state.topology_version(),
+                state.next_interface_order(),
+            );
+            assert!(
+                matches!(
+                    state.place_pending_port(Point::origin(), pending),
+                    Err(PortPlacementError::InvalidContract(_))
+                ),
+                "{direction:?}/{signal:?} is not a coherent contract"
+            );
+        }
+    }
+
+    /// Each name in a sequence is measured against the document as it is when
+    /// the click happens, which is the whole reason repeat placement works: the
+    /// first placement bumps the topology version and takes the next interface
+    /// order, and a payload frozen at arming time would have refused itself.
+    #[test]
+    fn a_sequence_builds_each_payload_against_the_live_document() {
+        let mut state = SchematicState::default();
+        let mut sequence = PendingPortSequence::new(
+            ["INP", "INN", "OUT"].map(str::to_owned),
+            PortDirection::In,
+            PortSignalType::Analog,
+            PortDiscipline::Electrical,
+        );
+        assert_eq!(sequence.total, 3);
+
+        let mut placed = Vec::new();
+        for expected_order in 1..=3 {
+            assert_eq!(sequence.position(), expected_order);
+            let pending = sequence
+                .next_placement(&state)
+                .expect("a name is still pending");
+            assert_eq!(pending.expected_netlist_order, expected_order);
+            assert_eq!(pending.expected_topology_version, state.topology_version());
+            placed.push(pending.name.clone());
+            state
+                .place_pending_port(Point::new(10 * expected_order as i32, 0), pending)
+                .expect("each name places in turn");
+            let more = sequence.advance();
+            assert_eq!(more, expected_order < 3);
+        }
+
+        assert_eq!(placed, ["INP", "INN", "OUT"]);
+        assert!(sequence.next_placement(&state).is_none());
+        assert_eq!(
+            state
+                .interface_ports()
+                .into_iter()
+                .map(|port| port.name)
+                .collect::<Vec<_>>(),
+            ["INP", "INN", "OUT"]
+        );
+        assert_eq!(state.next_interface_order(), 4);
+    }
+
+    /// A name taken between arming and the click is refused by the model, in
+    /// the model's own words, and the sequence is untouched by the refusal.
+    #[test]
+    fn a_name_taken_after_arming_is_refused_at_the_click() {
+        let mut state = SchematicState::default();
+        let mut sequence = PendingPortSequence::new(
+            ["EN".to_owned(), "OUT".to_owned()],
+            PortDirection::Out,
+            PortSignalType::Logic,
+            PortDiscipline::Logic,
+        );
+        port(&mut state, "en", "dir=in");
+
+        let pending = sequence.next_placement(&state).expect("a pending name");
+        assert!(matches!(
+            state.place_pending_port(Point::origin(), pending),
+            Err(PortPlacementError::DuplicateName(_))
+        ));
+        assert_eq!(sequence.next_name(), Some("EN"));
+        assert_eq!(sequence.position(), 1);
+
+        sequence.advance();
+        let pending = sequence.next_placement(&state).expect("the second name");
+        state
+            .place_pending_port(Point::new(20, 0), pending)
+            .expect("the untaken name still places");
+        assert_eq!(sequence.next_name(), Some("OUT"));
     }
 
     #[test]

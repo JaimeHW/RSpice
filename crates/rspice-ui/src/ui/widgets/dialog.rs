@@ -43,6 +43,17 @@ pub enum DialogSize {
     /// stays a content-height card, centred with a 12 pt gutter on each side
     /// as a native alert is, rather than becoming a full-viewport sheet.
     Confirmation,
+    /// Compact command forms: the three or four fields a schematic command
+    /// needs before it arms its canvas tool. 420 pt wide, content-height,
+    /// capped at 560 pt.
+    ///
+    /// It behaves like [`Self::Confirmation`] at every viewport — a
+    /// content-height card, never a full-screen sheet — because a form of four
+    /// rows that fills a phone is a form pretending to be a workspace. Build
+    /// every one of these with [`Dialog::overlay_scrollbar`]: they are
+    /// scroll-free by construction, and the standard body otherwise withholds a
+    /// gutter that shows as bare surface down the trailing edge.
+    CommandForm,
     /// Transactional edits and confirmations: 760 pt wide, content-height,
     /// capped at 760 pt, with the full-viewport shell applied at 560 pt.
     Transaction,
@@ -116,6 +127,22 @@ impl DialogSize {
             Self::Confirmation => DialogSurfaceSpec {
                 width: 480.0,
                 max_height: 760.0,
+                horizontal_inset: 24.0,
+                vertical_inset: 24.0,
+                narrow_max_width: 560.0,
+                narrow_inset: 24.0,
+                narrow_vertical_inset: 24.0,
+                cap_narrow_height: false,
+                edge_to_edge_narrow: false,
+                fill_narrow_viewport: false,
+                fill_height: false,
+                app_background: true,
+                radius: 4.0,
+                top_anchored: false,
+            },
+            Self::CommandForm => DialogSurfaceSpec {
+                width: 420.0,
+                max_height: 560.0,
                 horizontal_inset: 24.0,
                 vertical_inset: 24.0,
                 narrow_max_width: 560.0,

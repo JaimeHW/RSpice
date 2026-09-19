@@ -7,7 +7,7 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 
 /// Label column width of inspector form grids.
-const LABEL_COL: f32 = 92.0;
+pub(crate) const LABEL_COL: f32 = 92.0;
 
 /// Announce `name` as a control's accessible name.
 ///

@@ -1,83 +1,260 @@
-//! Mockup-owned Place pin or port transaction.
+//! Create pins: name a cell's pins, then click the sheet to place each one.
 //!
-//! The dialog edits only an isolated draft. Its primary action freezes one
-//! validated interface contract; the schematic is mutated later, on the
-//! snapped canvas click, as one undoable placement transaction.
+//! The form asks four questions and shows what the answers declare. It does
+//! not preview the pin: the canvas already draws the real symbol under the
+//! pointer, with the real direction overlay, from the same contract this form
+//! arms — a second, hand-drawn pin inside the dialog could only ever disagree
+//! with it.
+//!
+//! Nothing here mutates the document. The primary freezes a sequence of names
+//! and arms the canvas tool; each click places the next name, measured against
+//! the document as it is at that click.
 
-use egui::{Align, Context, Frame, Layout, Response, Sense, Stroke, TextEdit, Ui, Vec2};
+use egui::Context;
 
 use crate::state::{
-    PendingPortPlacement, PortDirectionType, PortDiscipline, Tool, declared_vector,
+    ComponentType, PendingPortSequence, PlacementAuthority, PortDirection, PortDiscipline,
+    PortSignalType, Tool, declared_vector, declared_width,
 };
-use crate::ui::theme::{self, FontWeight};
-use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{
-    Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone, select,
-};
+use crate::ui::widgets::{CommandForm, DialogChoice};
 
 use super::vector_preview::deck_bits;
-use crate::workbench::app::{PinPortDialogState, RSpiceApp};
+use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::AppState;
 
-const EYEBROW: &str = "SCHEMATIC \u{00b7} INTERFACE CONTRACT";
-const TITLE: &str = "Place pin or port";
-const PRIMARY: &str = "Arm pin tool";
-const DESCRIPTION: &str = "Create a named typed terminal with direction, discipline, netlist order, symbol synchronization, and documentation.";
-const PREVIEW_TITLE: &str = "PIN \u{00b7} live schematic preview";
-const DIRECTION_LABEL: &str = "Direction / type";
+const TITLE: &str = "Create pins";
+const PRIMARY: &str = "Place";
+const DESCRIPTION: &str = "Name the pins of this cell, then click to place each one.";
+const NAMES_LABEL: &str = "Names";
+const NAMES_HINT: &str = "IN OUT VDD  or  DATA[7:0]";
+const DIRECTION_LABEL: &str = "Direction";
+const SIGNAL_LABEL: &str = "Signal";
 const DISCIPLINE_LABEL: &str = "Discipline";
-const DECLARES_LABEL: &str = "Declares";
-const WORKFLOW_HEIGHT: f32 = 414.0;
-const SPLIT_VIEWPORT_BREAKPOINT: f32 = 760.0;
-const COMPACT_COLUMNS_BREAKPOINT: f32 = 980.0;
-const RIGHT_MIN_WIDTH: f32 = 270.0;
-const COMPACT_RIGHT_MIN_WIDTH: f32 = 240.0;
-const PANE_PADDING: i8 = 14;
-const DISCARD_TITLE: &str = "Unsaved dialog changes";
-const DISCARD_DETAIL: &str = "Choose Discard changes again to close, or continue editing. No schematic or interface data has been changed.";
-type PreviewMarkerSegment = ((f32, f32), (f32, f32));
+const READ_ONLY: &str = "This schematic is read-only.";
+const DOCUMENT_CHANGED: &str = "The active schematic changed. Close this form and open it again.";
+const TOO_MANY: &str = "A batch holds at most 256 pins.";
 
-#[derive(Debug)]
-enum DraftValidation {
-    Invalid(String),
-    Valid(PendingPortPlacement),
+/// Directions in the order the segmented control offers them.
+const DIRECTIONS: [PortDirection; 4] = [
+    PortDirection::In,
+    PortDirection::Out,
+    PortDirection::InOut,
+    PortDirection::Supply,
+];
+const DIRECTION_SEGMENTS: [&str; 4] = ["Input", "Output", "Inout", "Supply"];
+
+/// Signal types in the order the segmented control offers them.
+const SIGNALS: [PortSignalType; 3] = [
+    PortSignalType::Analog,
+    PortSignalType::Logic,
+    PortSignalType::Power,
+];
+const SIGNAL_SEGMENTS: [&str; 3] = ["Analog", "Logic", "Power"];
+
+/// One batch's ceiling. A cell with more than this many new pins is a cell
+/// being generated, not drawn.
+const MAX_NAMES: usize = 256;
+
+fn names_field_id() -> egui::Id {
+    egui::Id::new("rspice.create-pins.names")
 }
 
-/// What a typed pin name declares, ready to render.
+/// Open Create pins for the active schematic.
 ///
-/// A name IS its declaration, so this is derived from the draft text every
-/// frame and stored nowhere. `None` is the scalar case and draws nothing: one
-/// conductor is what every name that is not a range carries, and a row stating
-/// it would be a row on every port.
+/// Reopening while a batch is armed offers the names that batch has left,
+/// under the contract it was armed with, so the reader can correct a typo in
+/// name four without replacing the three already on the sheet.
+pub(crate) fn open_create_pins(state: &mut AppState) {
+    let authority = PlacementAuthority::new(
+        state.design_execution_epoch,
+        state.active_schematic_epoch,
+        state.workspace.active_view.display_path(),
+    );
+    let armed = state
+        .schematic
+        .pending_port_sequence
+        .clone()
+        .filter(|sequence| !sequence.names.is_empty());
+    let names = match &armed {
+        Some(sequence) => sequence
+            .names
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>()
+            .join(" "),
+        // Empty on first use: a suggestion invented before the reader has
+        // named anything is sample data, and this form used to open holding
+        // one.
+        None => match state.dialogs.pin_port.last_name.as_str() {
+            "" => String::new(),
+            base => state.schematic.suggested_port_name(base),
+        },
+    };
+    let draft = &mut state.dialogs.pin_port;
+    if let Some(sequence) = armed {
+        draft.direction = sequence.direction;
+        draft.signal_type = sequence.signal_type;
+        draft.discipline = sequence.discipline;
+        draft.discipline_touched = true;
+    }
+    draft.open(names, authority);
+}
+
+/// What the typed draft is, measured against the live document.
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct DeclaredVector {
-    /// The declaration and its width, in words.
-    summary: String,
-    /// The formals the deck will carry for this pin, in declaration order.
-    formals: String,
+enum Draft {
+    /// The form cannot be used at all, and says why.
+    Blocked(&'static str),
+    /// Nothing typed. The primary is off and the form says nothing.
+    Empty,
+    /// A refusal the reader has to fix.
+    Refused(String),
+    /// Names ready to arm, in the order they were typed.
+    Ready(Vec<String>),
 }
 
-fn declared_vector_preview(name: &str) -> Option<DeclaredVector> {
-    let declaration = declared_vector(name.trim())?;
-    Some(DeclaredVector {
-        summary: format!("{declaration} \u{2014} {} conductors", declaration.width()),
-        formals: deck_bits(
-            &declaration.name,
-            declaration.members().into_iter().map(|member| member.index),
-        ),
-    })
-}
-
-impl DraftValidation {
-    fn can_commit(&self) -> bool {
-        matches!(self, Self::Valid(_))
+impl Draft {
+    fn names(&self) -> &[String] {
+        match self {
+            Self::Ready(names) => names,
+            _ => &[],
+        }
     }
 
-    fn message(&self) -> Option<&str> {
+    /// Why the primary is refused, if it is. An empty form says nothing: the
+    /// reader has not done anything wrong by not having typed yet.
+    fn refusal(&self) -> Option<String> {
         match self {
-            Self::Invalid(message) => Some(message),
-            Self::Valid(_) => None,
+            Self::Blocked(message) => Some((*message).to_owned()),
+            Self::Refused(message) => Some(message.clone()),
+            Self::Empty | Self::Ready(_) => None,
         }
+    }
+}
+
+fn draft(state: &AppState) -> Draft {
+    let form = &state.dialogs.pin_port;
+    if state.schematic_edit_read_only() {
+        return Draft::Blocked(READ_ONLY);
+    }
+    let current = form.authority.as_ref().is_some_and(|authority| {
+        authority.matches(
+            state.design_execution_epoch,
+            state.active_schematic_epoch,
+            &state.workspace.active_view.display_path(),
+        )
+    });
+    if !current {
+        return Draft::Blocked(DOCUMENT_CHANGED);
+    }
+    // A pin name can never contain whitespace under either naming policy, so
+    // splitting on it is unambiguous and needs no separator to be chosen.
+    let names: Vec<String> = form
+        .names
+        .split_whitespace()
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    if names.is_empty() {
+        return Draft::Empty;
+    }
+    if names.len() > MAX_NAMES {
+        return Draft::Refused(TOO_MANY.to_owned());
+    }
+    let mut seen = std::collections::HashSet::new();
+    for name in &names {
+        if !seen.insert(name.to_ascii_lowercase()) {
+            return Draft::Refused(format!("{name} is listed twice."));
+        }
+    }
+    let several = names.len() > 1;
+    for name in &names {
+        if let Err(error) = state.schematic.validate_new_port_name(name) {
+            // One name needs no prefix: the field it was typed in is the
+            // subject. Several do, or the reader cannot tell which one.
+            return Draft::Refused(if several {
+                format!("{name}: {error}")
+            } else {
+                error.to_string()
+            });
+        }
+    }
+    Draft::Ready(names)
+}
+
+/// What the names declare: the pins, the conductors under them, and where they
+/// will sit in the cell's port list.
+fn declaration_line(state: &AppState, names: &[String]) -> Option<String> {
+    if names.is_empty() {
+        return None;
+    }
+    let conductors: usize = names.iter().map(|name| declared_width(name.as_str())).sum();
+    let first = state.schematic.next_interface_order();
+    let positions = if names.len() == 1 {
+        format!("port-list position {first}")
+    } else {
+        format!("port-list positions {first} to {}", first + names.len() - 1)
+    };
+    Some(format!(
+        "{} {} \u{00b7} {} {} \u{00b7} {positions}",
+        names.len(),
+        plural(names.len(), "pin", "pins"),
+        conductors,
+        plural(conductors, "conductor", "conductors"),
+    ))
+}
+
+/// The deck formals, for the one case where a reader cannot work them out: a
+/// single name that declares a range.
+fn deck_bits_line(names: &[String]) -> Option<String> {
+    let [only] = names else {
+        return None;
+    };
+    let declaration = declared_vector(only)?;
+    Some(deck_bits(
+        &declaration.name,
+        declaration.members().into_iter().map(|member| member.index),
+    ))
+}
+
+fn plural(count: usize, one: &'static str, many: &'static str) -> &'static str {
+    if count == 1 { one } else { many }
+}
+
+/// Keep direction and signal type coherent by moving the *other* field.
+///
+/// The matrix the model accepts pairs power with inout and supply only, so a
+/// reader who picks Supply has already said Power, and one who picks Power has
+/// said the pin is a rail. Refusing either would be telling the reader that the
+/// thing they just asked for is not allowed, when what they meant is plain.
+fn coerce_from_direction(direction: PortDirection, signal: &mut PortSignalType) {
+    match direction {
+        PortDirection::Supply => *signal = PortSignalType::Power,
+        // Leaving Supply for a one-way direction leaves Power behind with it:
+        // only a bidirectional pin can carry power without being a rail.
+        PortDirection::In | PortDirection::Out if *signal == PortSignalType::Power => {
+            *signal = PortSignalType::Analog;
+        }
+        _ => {}
+    }
+}
+
+fn coerce_from_signal(signal: PortSignalType, direction: &mut PortDirection) {
+    match signal {
+        PortSignalType::Power if *direction != PortDirection::Supply => {
+            *direction = PortDirection::InOut;
+        }
+        PortSignalType::Analog | PortSignalType::Logic if *direction == PortDirection::Supply => {
+            *direction = PortDirection::InOut;
+        }
+        _ => {}
+    }
+}
+
+/// The discipline a signal type implies, until the reader picks one.
+fn discipline_for(signal: PortSignalType) -> PortDiscipline {
+    match signal {
+        PortSignalType::Logic => PortDiscipline::Logic,
+        PortSignalType::Analog | PortSignalType::Power => PortDiscipline::Electrical,
     }
 }
 
@@ -86,900 +263,121 @@ impl RSpiceApp {
         if !self.state.dialogs.pin_port.open {
             return;
         }
+        let current = draft(&self.state);
+        let declaration = declaration_line(&self.state, current.names());
+        let bits = deck_bits_line(current.names());
+        let usable = !matches!(current, Draft::Blocked(_));
+        let ready = matches!(current, Draft::Ready(_));
+        let refusal = current.refusal();
+        let disciplines = PortDiscipline::ALL.map(|entry| entry.keyword().to_owned());
+        // The cell whose interface this batch will change. It is the one thing
+        // about the form that is not in the form, and the reason the
+        // document-changed refusal exists at all.
+        let view_path = self.state.workspace.active_view.display_path();
 
-        let validation = validate_draft(&self.state);
-        let can_commit = validation.can_commit();
-        let validation_message = validation.message().map(str::to_owned);
-        let discard_confirm = self.state.dialogs.pin_port.discard_confirm;
-        let mut dialog = Dialog::new(EYEBROW, TITLE, PRIMARY)
-            .description(DESCRIPTION)
-            .size(DialogSize::Transaction)
-            .ghost(if discard_confirm {
-                "Discard changes"
-            } else {
-                "Cancel"
+        let form = &mut self.state.dialogs.pin_port;
+        let choice = CommandForm::new(TITLE, PRIMARY)
+            .context(Some(view_path.as_str()))
+            .describe(DESCRIPTION)
+            .primary_enabled(usable && ready)
+            .fields_enabled(usable)
+            .status(match refusal.as_deref() {
+                Some(message) => Err(message),
+                None => Ok(None),
             })
-            .primary_enabled(can_commit)
-            .initial_focus(DialogInitialFocus::Control(field_id("Name")));
-        if discard_confirm {
-            dialog = dialog.transaction_state(
-                DialogTransactionTone::Error,
-                DISCARD_TITLE,
-                DISCARD_DETAIL,
-            );
-        }
+            .status_lines(2)
+            .show(ctx, |rows| {
+                let names = rows.text(NAMES_LABEL, names_field_id(), &mut form.names, NAMES_HINT);
+                if let Some(declaration) = declaration.as_deref() {
+                    rows.derived(declaration);
+                }
+                if let Some(bits) = bits.as_deref() {
+                    rows.derived(bits);
+                }
+                let mut direction = DIRECTIONS
+                    .iter()
+                    .position(|entry| *entry == form.direction)
+                    .unwrap_or(0);
+                if rows.segmented(
+                    DIRECTION_LABEL,
+                    "rspice.create-pins.direction",
+                    &DIRECTION_SEGMENTS,
+                    &mut direction,
+                ) {
+                    form.direction = DIRECTIONS[direction];
+                    coerce_from_direction(form.direction, &mut form.signal_type);
+                    if !form.discipline_touched {
+                        form.discipline = discipline_for(form.signal_type);
+                    }
+                }
+                let mut signal = SIGNALS
+                    .iter()
+                    .position(|entry| *entry == form.signal_type)
+                    .unwrap_or(0);
+                if rows.segmented(
+                    SIGNAL_LABEL,
+                    "rspice.create-pins.signal",
+                    &SIGNAL_SEGMENTS,
+                    &mut signal,
+                ) {
+                    form.signal_type = SIGNALS[signal];
+                    coerce_from_signal(form.signal_type, &mut form.direction);
+                    if !form.discipline_touched {
+                        form.discipline = discipline_for(form.signal_type);
+                    }
+                }
+                if let Some(picked) = rows.select(
+                    DISCIPLINE_LABEL,
+                    "rspice.create-pins.discipline",
+                    form.discipline.keyword(),
+                    &disciplines,
+                ) {
+                    form.discipline = PortDiscipline::ALL[picked];
+                    form.discipline_touched = true;
+                }
+                Some(names.id)
+            });
 
-        let mut response = dialog.show_transaction(ctx, |ui| {
-            workflow_body(
-                ui,
-                validation_message.as_deref(),
-                &mut self.state.dialogs.pin_port,
-            )
-        });
-
-        match response.choice {
+        match choice {
+            // Revalidate the post-edit frame: Enter must never arm a batch the
+            // same frame's keystroke just made invalid.
             DialogChoice::Primary => {
-                // Revalidate the post-edit frame. Enter must never publish a
-                // contract made invalid by the same frame's text edit.
-                if let DraftValidation::Valid(pending) = validate_draft(&self.state) {
-                    self.state.schematic.pending_port = Some(pending);
-                    self.state
-                        .schematic
-                        .arm_tool(Tool::Place(crate::state::ComponentType::Port));
-                    self.state.dialogs.pin_port.close();
+                if let Draft::Ready(names) = draft(&self.state) {
+                    self.arm_create_pins(ctx, names);
                 }
             }
             DialogChoice::Ghost | DialogChoice::Cancelled => {
-                self.state.dialogs.pin_port.attempt_close();
-                if self.state.dialogs.pin_port.open {
-                    response.retain_cancel_focus(DialogInitialFocus::Ghost);
-                }
+                self.state.dialogs.pin_port.close();
             }
             DialogChoice::None | DialogChoice::Secondary => {}
         }
     }
-}
 
-fn validate_draft(state: &AppState) -> DraftValidation {
-    let draft = &state.dialogs.pin_port;
-    if state.schematic_edit_read_only() {
-        return DraftValidation::Invalid("The active schematic is read-only.".to_owned());
-    }
-    if draft.design_execution_epoch != state.design_execution_epoch {
-        return DraftValidation::Invalid(
-            "The design document changed. Close and reopen Place pin or port.".to_owned(),
-        );
-    }
-    if draft.active_schematic_epoch != state.active_schematic_epoch {
-        return DraftValidation::Invalid(
-            "The active schematic buffer changed. Close and reopen Place pin or port.".to_owned(),
-        );
-    }
-    if draft.topology_version != state.schematic.topology_version() {
-        return DraftValidation::Invalid(
-            "The schematic topology changed. Close and reopen Place pin or port.".to_owned(),
-        );
-    }
-    if draft.view_path != state.workspace.active_view.display_path() {
-        return DraftValidation::Invalid(
-            "The active cell/view changed. Close and reopen Place pin or port.".to_owned(),
-        );
-    }
-    let name = draft.name.trim();
-    if let Err(error) = state.schematic.validate_new_port_name(name) {
-        return DraftValidation::Invalid(error.to_string());
-    }
-    DraftValidation::Valid(
-        PendingPortPlacement::new(
-            name,
-            draft.direction_type,
-            draft.discipline,
-            draft.topology_version,
-            state.schematic.next_interface_order(),
+    /// Freeze the batch, arm the canvas tool, and give the canvas the keyboard
+    /// so R, M and Esc work before the pointer has moved over it.
+    fn arm_create_pins(&mut self, ctx: &Context, names: Vec<String>) {
+        let form = &self.state.dialogs.pin_port;
+        let Some(authority) = form.authority.clone() else {
+            return;
+        };
+        let sequence = PendingPortSequence::new(
+            names.iter().cloned(),
+            form.direction,
+            form.signal_type,
+            form.discipline,
         )
-        .with_document_authority(
-            draft.design_execution_epoch,
-            draft.active_schematic_epoch,
-            draft.view_path.clone(),
-        ),
-    )
-}
-
-fn workflow_body(
-    ui: &mut Ui,
-    validation_message: Option<&str>,
-    draft: &mut PinPortDialogState,
-) -> Option<egui::Id> {
-    let t = Tokens::get(ui.ctx());
-    let mut focus = None;
-    Frame::new()
-        .fill(t.color.bg_inset)
-        .stroke(Stroke::new(1.0, t.color.border))
-        .corner_radius(10.0)
-        .show(ui, |ui| {
-            ui.spacing_mut().item_spacing = Vec2::ZERO;
-            let viewport_width = crate::ui::viewport::root_viewport_width(ui.ctx());
-            if workflow_uses_columns(viewport_width) {
-                let divider = 1.0;
-                let content_width = (ui.available_width() - divider).max(1.0);
-                let (right_fraction, right_min_width) = workflow_right_track(viewport_width);
-                let right_width = (content_width * right_fraction)
-                    .max(right_min_width)
-                    .min((content_width - 1.0).max(1.0));
-                let left_width = (content_width - right_width).max(1.0);
-                ui.horizontal_top(|ui| {
-                    ui.allocate_ui_with_layout(
-                        Vec2::new(left_width, WORKFLOW_HEIGHT),
-                        Layout::top_down(Align::Min),
-                        |ui| preview_pane(ui, draft),
-                    );
-                    let divider_rect = ui
-                        .allocate_exact_size(Vec2::new(divider, WORKFLOW_HEIGHT), Sense::hover())
-                        .0;
-                    ui.painter().rect_filled(divider_rect, 0.0, t.color.border);
-                    ui.allocate_ui_with_layout(
-                        Vec2::new(right_width, WORKFLOW_HEIGHT),
-                        Layout::top_down(Align::Min),
-                        |ui| {
-                            focus = fields_pane(ui, validation_message, draft);
-                        },
-                    );
-                });
-            } else {
-                preview_pane(ui, draft);
-                let (divider, _) =
-                    ui.allocate_exact_size(Vec2::new(ui.available_width(), 1.0), Sense::hover());
-                ui.painter().rect_filled(divider, 0.0, t.color.border);
-                focus = fields_pane(ui, validation_message, draft);
-            }
-        });
-    focus
-}
-
-fn workflow_uses_columns(viewport_width: f32) -> bool {
-    viewport_width > SPLIT_VIEWPORT_BREAKPOINT
-}
-
-fn workflow_right_track(viewport_width: f32) -> (f32, f32) {
-    if viewport_width <= COMPACT_COLUMNS_BREAKPOINT {
-        (0.72 / 1.72, COMPACT_RIGHT_MIN_WIDTH)
-    } else {
-        (0.8 / 2.35, RIGHT_MIN_WIDTH)
+        .with_authority(authority);
+        let last_name = names.last().cloned().unwrap_or_default();
+        self.state
+            .schematic
+            .arm_tool(Tool::Place(ComponentType::Port));
+        self.state.schematic.pending_port_sequence = Some(sequence);
+        crate::schematic::view::request_schematic_canvas_focus(ctx);
+        let form = &mut self.state.dialogs.pin_port;
+        form.last_name = last_name;
+        form.close();
     }
-}
-
-fn preview_pane(ui: &mut Ui, draft: &PinPortDialogState) {
-    Frame::new()
-        .inner_margin(egui::Margin::same(PANE_PADDING))
-        .show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            section_head(ui, PREVIEW_TITLE, "100 mil grid");
-            let preview_height = if ui.available_width() >= 360.0 {
-                250.0
-            } else {
-                184.0
-            };
-            paint_preview(ui, draft, preview_height);
-            ui.add_space(9.0);
-            let values = [
-                ("Electrical outcome", "sheet/hierarchy interface".to_owned()),
-                (
-                    "Checks",
-                    "connectivity \u{00b7} discipline \u{00b7} hierarchy".to_owned(),
-                ),
-                ("Commit", "stable IDs + one undo record".to_owned()),
-            ];
-            if ui.available_width() >= 390.0 {
-                ui.spacing_mut().item_spacing.x = 8.0;
-                ui.columns(3, |columns| {
-                    for (column, (label, value)) in columns.iter_mut().zip(values.iter()) {
-                        status_card(column, label, value);
-                    }
-                });
-            } else {
-                for (label, value) in &values {
-                    status_card(ui, label, value);
-                    ui.add_space(5.0);
-                }
-            }
-        });
-}
-
-fn fields_pane(
-    ui: &mut Ui,
-    validation_message: Option<&str>,
-    draft: &mut PinPortDialogState,
-) -> Option<egui::Id> {
-    let t = Tokens::get(ui.ctx());
-    let mut focus = None;
-    Frame::new()
-        .fill(theme::mix(t.color.bg_inset, t.color.bg_panel, 0.94))
-        .inner_margin(egui::Margin::same(PANE_PADDING))
-        .show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            ui.spacing_mut().item_spacing.y = 9.0;
-            section_head(
-                ui,
-                "Placement / transform parameters",
-                if validation_message.is_some() {
-                    "blocked"
-                } else {
-                    "legal preview"
-                },
-            );
-            let name_response = input_field(ui, "Name", &mut draft.name, "BIAS_EN");
-            focus = Some(name_response.id);
-            let mut edited = name_response.changed();
-            if let Some(declared) = declared_vector_preview(&draft.name) {
-                declaration_row(ui, &declared);
-            }
-            edited |= direction_type_field(ui, &mut draft.direction_type);
-            edited |= discipline_field(ui, &mut draft.discipline);
-            if let Some(message) = validation_message {
-                ui.add(
-                    egui::Label::new(
-                        egui::RichText::new(message)
-                            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                            .color(t.color.err),
-                    )
-                    .wrap(),
-                );
-            } else {
-                ui.add(
-                    egui::Label::new(
-                        egui::RichText::new(
-                            "Pointer, touch, stylus, and keyboard entry resolve to the same exact coordinates. Escape cancels without modifying the document.",
-                        )
-                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                        .color(t.color.text_dim),
-                    )
-                    .wrap(),
-                );
-            }
-            if edited {
-                draft.mark_edited();
-            }
-        });
-    focus
-}
-
-fn section_head(ui: &mut Ui, title: &str, status: &str) {
-    if section_head_wraps(ui.available_width(), title, status) {
-        let width = ui.available_width();
-        section_title(ui, title);
-        ui.add_space(2.0);
-        ui.allocate_ui_with_layout(
-            Vec2::new(width, 14.0),
-            Layout::right_to_left(Align::Center),
-            |ui| {
-                section_status(ui, status);
-            },
-        );
-        return;
-    }
-    ui.horizontal(|ui| {
-        section_title(ui, title);
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            section_status(ui, status);
-        });
-    });
-}
-
-fn section_head_wraps(width: f32, title: &str, status: &str) -> bool {
-    width < 292.0 && title.chars().count() + status.chars().count() > 34
-}
-
-fn section_title(ui: &mut Ui, title: &str) {
-    let t = Tokens::get(ui.ctx());
-    ui.add(
-        egui::Label::new(
-            egui::RichText::new(title)
-                .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
-                .color(t.color.text),
-        )
-        .wrap(),
-    );
-}
-
-fn section_status(ui: &mut Ui, status: &str) {
-    let t = Tokens::get(ui.ctx());
-    ui.label(
-        egui::RichText::new(status)
-            .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-            .color(t.color.text_faint),
-    );
-}
-
-fn field_id(label: &str) -> egui::Id {
-    egui::Id::new(("rspice.pin-port", label))
-}
-
-fn input_field(ui: &mut Ui, label: &str, value: &mut String, hint: &str) -> Response {
-    let t = Tokens::get(ui.ctx());
-    ui.vertical(|ui| {
-        ui.spacing_mut().item_spacing.y = 5.0;
-        ui.label(
-            egui::RichText::new(label)
-                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                .color(t.color.text_dim),
-        );
-        let response = ui.add_sized(
-            Vec2::new(ui.available_width(), t.metrics.ctl_h),
-            TextEdit::singleline(value)
-                .id(field_id(label))
-                .font(egui::TextStyle::Monospace)
-                .hint_text(hint)
-                .margin(egui::Margin::symmetric(8, 4)),
-        );
-        ui.ctx().accesskit_node_builder(response.id, |node| {
-            node.set_label(label);
-            node.set_description("Named schematic net and cell-interface terminal");
-        });
-        response
-    })
-    .inner
-}
-
-/// What the typed name declares, beneath the field that types it.
-///
-/// The row exists only for a name that declares a vector, so the pane never
-/// carries an empty preview, and it shows the formals rather than only the
-/// width: eight conductors is a count, `DATA#7 … DATA#0` is the contract every
-/// parent instance of this cell will be wired to.
-fn declaration_row(ui: &mut Ui, declared: &DeclaredVector) {
-    let t = Tokens::get(ui.ctx());
-    ui.vertical(|ui| {
-        ui.spacing_mut().item_spacing.y = 3.0;
-        ui.label(
-            egui::RichText::new(DECLARES_LABEL)
-                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                .color(t.color.text_dim),
-        );
-        ui.add(
-            egui::Label::new(
-                egui::RichText::new(&declared.summary)
-                    .font(theme::mono(tokens::FS_0, FontWeight::Medium))
-                    .color(t.color.text),
-            )
-            .wrap(),
-        );
-        ui.add(
-            egui::Label::new(
-                egui::RichText::new(&declared.formals)
-                    .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                    .color(t.color.text_faint),
-            )
-            .wrap(),
-        );
-    });
-}
-
-fn direction_type_field(ui: &mut Ui, value: &mut PortDirectionType) -> bool {
-    enum_field(
-        ui,
-        "pin-port-direction-type",
-        DIRECTION_LABEL,
-        value.label(),
-        &PortDirectionType::ALL.map(|entry| entry.label().to_owned()),
-    )
-    .is_some_and(|index| {
-        *value = PortDirectionType::ALL[index];
-        true
-    })
-}
-
-fn discipline_field(ui: &mut Ui, value: &mut PortDiscipline) -> bool {
-    enum_field(
-        ui,
-        "pin-port-discipline",
-        DISCIPLINE_LABEL,
-        value.keyword(),
-        &PortDiscipline::ALL.map(|entry| entry.keyword().to_owned()),
-    )
-    .is_some_and(|index| {
-        *value = PortDiscipline::ALL[index];
-        true
-    })
-}
-
-fn enum_field(
-    ui: &mut Ui,
-    salt: &str,
-    label: &str,
-    selected: &str,
-    options: &[String],
-) -> Option<usize> {
-    let t = Tokens::get(ui.ctx());
-    ui.vertical(|ui| {
-        ui.spacing_mut().item_spacing.y = 5.0;
-        ui.label(
-            egui::RichText::new(label)
-                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                .color(t.color.text_dim),
-        );
-        select(ui, salt, label, selected, options, ui.available_width())
-    })
-    .inner
-}
-
-fn paint_preview(ui: &mut Ui, draft: &PinPortDialogState, height: f32) {
-    let t = Tokens::get(ui.ctx());
-    let width = ui.available_width().max(1.0);
-    let (rect, response) = ui.allocate_exact_size(Vec2::new(width, height), Sense::hover());
-    response.widget_info(|| {
-        egui::WidgetInfo::labeled(
-            egui::WidgetType::Other,
-            ui.is_enabled(),
-            format!(
-                "Port preview: {}, {}, {}",
-                draft.name,
-                draft.direction_type.label(),
-                draft.discipline.keyword()
-            ),
-        )
-    });
-    ui.painter().rect(
-        rect,
-        8.0,
-        t.color.canvas_bg,
-        Stroke::new(1.0, t.color.border_strong),
-        egui::StrokeKind::Inside,
-    );
-    let center = rect.center();
-    let grid_color = t.color.canvas_grid.gamma_multiply(0.5);
-    let mut y = rect.top() + 6.0;
-    while y < rect.bottom() {
-        let mut x = rect.left() + 6.0;
-        while x < rect.right() {
-            ui.painter()
-                .circle_filled(egui::pos2(x, y), 0.75, grid_color);
-            x += 12.0;
-        }
-        y += 12.0;
-    }
-    let stroke = Stroke::new(1.6, t.color.accent);
-    let tip = egui::pos2(center.x - 58.0, center.y);
-    ui.painter().line_segment(
-        [egui::pos2(rect.left() + 18.0, tip.y), tip],
-        Stroke::new(1.6, t.color.wire),
-    );
-    ui.painter().line_segment(
-        [
-            egui::pos2(tip.x, rect.top() + 20.0),
-            egui::pos2(tip.x, rect.bottom() - 20.0),
-        ],
-        Stroke::new(1.0, t.color.wire.gamma_multiply(0.55)),
-    );
-    let outline = [
-        tip,
-        egui::pos2(center.x - 46.0, center.y - 16.0),
-        egui::pos2(center.x + 44.0, center.y - 16.0),
-        egui::pos2(center.x + 44.0, center.y + 16.0),
-        egui::pos2(center.x - 46.0, center.y + 16.0),
-    ];
-    for index in 0..outline.len() {
-        ui.painter().line_segment(
-            [outline[index], outline[(index + 1) % outline.len()]],
-            stroke,
-        );
-    }
-    ui.painter().circle_filled(tip, 2.4, t.color.accent);
-    ui.painter()
-        .circle_stroke(tip, 8.0, Stroke::new(1.5, t.color.accent));
-    let direction_segments: &[PreviewMarkerSegment] = match draft.direction_type {
-        PortDirectionType::InputLogic | PortDirectionType::InputAnalog => &[
-            ((-8.0, 0.0), (9.0, 0.0)),
-            ((9.0, 0.0), (3.0, -5.0)),
-            ((9.0, 0.0), (3.0, 5.0)),
-        ],
-        PortDirectionType::OutputAnalog => &[
-            ((9.0, 0.0), (-8.0, 0.0)),
-            ((-8.0, 0.0), (-2.0, -5.0)),
-            ((-8.0, 0.0), (-2.0, 5.0)),
-        ],
-        PortDirectionType::InOutPower => &[
-            ((-8.0, 0.0), (9.0, 0.0)),
-            ((9.0, 0.0), (3.0, -5.0)),
-            ((9.0, 0.0), (3.0, 5.0)),
-            ((-8.0, 0.0), (-2.0, -5.0)),
-            ((-8.0, 0.0), (-2.0, 5.0)),
-        ],
-        // A rail is drawn as a rail: the bar-and-stem the schematic already
-        // uses for a supply, not an arrow, because a supply pin states where
-        // the net is fed from rather than which way a signal travels.
-        PortDirectionType::SupplyPower => &[
-            ((0.0, 6.0), (0.0, -6.0)),
-            ((-8.0, -6.0), (8.0, -6.0)),
-            ((-4.0, -9.0), (4.0, -9.0)),
-        ],
-    };
-    for &((x1, y1), (x2, y2)) in direction_segments {
-        ui.painter().line_segment(
-            [center + Vec2::new(x1, y1), center + Vec2::new(x2, y2)],
-            stroke,
-        );
-    }
-    let name = if draft.name.trim().is_empty() {
-        "port name"
-    } else {
-        draft.name.trim()
-    };
-    ui.painter().text(
-        center + Vec2::new(0.0, -29.0),
-        egui::Align2::CENTER_BOTTOM,
-        name,
-        theme::mono(tokens::FS_1, FontWeight::Medium),
-        t.color.text,
-    );
-    ui.painter().text(
-        center + Vec2::new(0.0, 28.0),
-        egui::Align2::CENTER_TOP,
-        format!(
-            "{} \u{00b7} {}",
-            draft.direction_type.label(),
-            draft.discipline.keyword()
-        ),
-        theme::mono(tokens::FS_0, FontWeight::Regular),
-        t.color.text_dim,
-    );
-}
-
-fn status_card(ui: &mut Ui, label: &str, value: &str) {
-    let t = Tokens::get(ui.ctx());
-    Frame::new()
-        .fill(t.color.bg_panel)
-        .stroke(Stroke::new(1.0, t.color.border))
-        .corner_radius(7.0)
-        .inner_margin(egui::Margin::same(10))
-        .show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            ui.spacing_mut().item_spacing.y = 4.0;
-            ui.label(
-                egui::RichText::new(label.to_uppercase())
-                    .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                    .color(t.color.text_faint),
-            );
-            ui.add(
-                egui::Label::new(
-                    egui::RichText::new(value)
-                        .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
-                        .color(t.color.text),
-                )
-                .wrap(),
-            );
-        });
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn dialog_input(events: Vec<egui::Event>) -> egui::RawInput {
-        egui::RawInput {
-            screen_rect: Some(egui::Rect::from_min_size(
-                egui::Pos2::ZERO,
-                egui::vec2(1_100.0, 850.0),
-            )),
-            events,
-            ..Default::default()
-        }
-    }
-
-    fn key_event(key: egui::Key) -> egui::Event {
-        egui::Event::Key {
-            key,
-            physical_key: Some(key),
-            pressed: true,
-            repeat: false,
-            modifiers: egui::Modifiers::NONE,
-        }
-    }
-
-    fn open_dialog(app: &mut RSpiceApp) {
-        let name = app.state.schematic.suggested_port_name("BIAS_EN");
-        app.state.dialogs.pin_port.open(
-            name,
-            app.state.design_execution_epoch,
-            app.state.active_schematic_epoch,
-            app.state.schematic.topology_version(),
-            app.state.workspace.active_view.display_path(),
-        );
-    }
-
-    #[test]
-    fn opening_input_reaches_the_pin_name_field() {
-        let ctx = Context::default();
-        crate::ui::Theme::default().apply(&ctx);
-        let mut app = RSpiceApp::test_instance();
-        open_dialog(&mut app);
-        let events = vec![
-            egui::Event::Key {
-                key: egui::Key::A,
-                physical_key: Some(egui::Key::A),
-                pressed: true,
-                repeat: false,
-                modifiers: egui::Modifiers::CTRL | egui::Modifiers::COMMAND,
-            },
-            egui::Event::Paste("BUSY".into()),
-        ];
-        let _ = ctx.run_ui(dialog_input(events), |ctx| app.render_pin_port_dialog(ctx));
-        assert_eq!(app.state.dialogs.pin_port.name, "BUSY");
-        assert!(app.state.dialogs.pin_port.dirty);
-        assert!(app.state.schematic.pending_port.is_none());
-    }
-
-    #[test]
-    fn mockup_contract_is_exact_and_complete() {
-        assert_eq!(EYEBROW, "SCHEMATIC \u{00b7} INTERFACE CONTRACT");
-        assert_eq!(TITLE, "Place pin or port");
-        assert_eq!(PRIMARY, "Arm pin tool");
-        assert_eq!(PortDirectionType::ALL[0].label(), "input \u{00b7} logic");
-        assert_eq!(PortDirectionType::ALL[3].label(), "inout \u{00b7} power");
-        assert_eq!(PortDirectionType::ALL[4].label(), "supply \u{00b7} power");
-        assert_eq!(PortDiscipline::ALL[2].keyword(), "wreal");
-        assert_eq!(WORKFLOW_HEIGHT, 414.0);
-        assert_eq!(PANE_PADDING, 14);
-        assert!(!workflow_uses_columns(760.0));
-        assert!(workflow_uses_columns(761.0));
-        assert_eq!(
-            workflow_right_track(980.0),
-            (0.72 / 1.72, COMPACT_RIGHT_MIN_WIDTH)
-        );
-        assert_eq!(workflow_right_track(981.0), (0.8 / 2.35, RIGHT_MIN_WIDTH));
-        assert!(section_head_wraps(
-            242.0,
-            "Placement / transform parameters",
-            "legal preview"
-        ));
-        assert!(!section_head_wraps(
-            430.0,
-            "PIN \u{00b7} live schematic preview",
-            "100 mil grid"
-        ));
-    }
-
-    /// The name is the declaration, so the preview is read off the name and
-    /// nowhere else: a range shows its width and the formals it will expand to,
-    /// and a name that declares nothing shows no row rather than an empty one.
-    #[test]
-    fn the_declaration_preview_follows_the_typed_name() {
-        let declared = declared_vector_preview("DATA[7:0]").expect("a range declares a vector");
-        assert_eq!(declared.summary, "DATA[7:0] \u{2014} 8 conductors");
-        assert_eq!(declared.formals.split_whitespace().count(), 8);
-        assert!(declared.formals.starts_with("DATA#7"));
-        assert!(declared.formals.ends_with("DATA#0"));
-
-        // Surrounding space is what a half-typed field carries; the row reads
-        // the same declaration the placement will.
-        assert_eq!(declared_vector_preview("  DATA[7:0] "), Some(declared));
-
-        let wide = declared_vector_preview("ADDR<0:31>").expect("a wide range still declares one");
-        assert_eq!(wide.summary, "ADDR<0:31> \u{2014} 32 conductors");
-        assert!(wide.formals.starts_with("ADDR#0 "));
-        assert!(wide.formals.ends_with(" ADDR#31"));
-        assert!(wide.formals.contains('\u{2026}'), "{}", wide.formals);
-
-        // No vector, no vector UI — including for a single member, which is a
-        // bit of a bus and never a pin.
-        for scalar in ["EN", "bias_1", "DATA[3]", "", "   "] {
-            assert_eq!(declared_vector_preview(scalar), None, "{scalar}");
-        }
-    }
-
-    /// A refused name is refused in the model's own words. The dialog owns no
-    /// second wording that could disagree with the placement that will reject
-    /// the same name.
-    #[test]
-    fn a_refused_name_is_reported_in_the_models_words() {
-        let mut app = RSpiceApp::test_instance();
-        open_dialog(&mut app);
-        for refused in ["DATA[3]", "DATA[3:3]", "DATA[]", "0"] {
-            app.state.dialogs.pin_port.name = refused.to_owned();
-            let expected = app
-                .state
-                .schematic
-                .validate_new_port_name(refused)
-                .expect_err("the model refuses this name")
-                .to_string();
-            let DraftValidation::Invalid(message) = validate_draft(&app.state) else {
-                panic!("{refused} must not produce a committable draft");
-            };
-            assert_eq!(message, expected);
-        }
-    }
-
-    #[test]
-    fn valid_draft_freezes_complete_pending_contract_without_mutation() {
-        let mut app = RSpiceApp::test_instance();
-        let name = app.state.schematic.suggested_port_name("BIAS_EN");
-        app.state.dialogs.pin_port.open(
-            name,
-            app.state.design_execution_epoch,
-            app.state.active_schematic_epoch,
-            app.state.schematic.topology_version(),
-            app.state.workspace.active_view.display_path(),
-        );
-        let before = app.state.schematic.components.clone();
-        let DraftValidation::Valid(pending) = validate_draft(&app.state) else {
-            panic!("default mockup draft must be valid");
-        };
-        assert_eq!(pending.name, "BIAS_EN");
-        assert_eq!(
-            pending.contract.signal_type,
-            crate::state::PortSignalType::Logic
-        );
-        assert_eq!(pending.contract.discipline, PortDiscipline::Electrical);
-        assert_eq!(app.state.schematic.components, before);
-    }
-
-    /// The rail case is offered and armed as itself. The combo lists exactly
-    /// [`PortDirectionType::ALL`], so a direction the enum declares is a
-    /// direction the author can pick, and arming it freezes the supply
-    /// contract rather than collapsing onto the inout one.
-    #[test]
-    fn the_dialog_offers_supply_and_arms_the_supply_contract() {
-        let offered = PortDirectionType::ALL.map(|entry| entry.label().to_owned());
-        assert!(offered.contains(&"supply \u{00b7} power".to_owned()));
-
-        let mut app = RSpiceApp::test_instance();
-        open_dialog(&mut app);
-        app.state.dialogs.pin_port.direction_type = PortDirectionType::SupplyPower;
-
-        let DraftValidation::Valid(pending) = validate_draft(&app.state) else {
-            panic!("a supply draft must be committable");
-        };
-        assert_eq!(
-            pending.contract.direction,
-            crate::state::PortDirection::Supply
-        );
-        assert_eq!(
-            pending.contract.signal_type,
-            crate::state::PortSignalType::Power
-        );
-    }
-
-    #[test]
-    fn duplicate_and_stale_drafts_fail_closed() {
-        let mut app = RSpiceApp::test_instance();
-        let id = app.state.schematic.add_component(
-            crate::state::ComponentType::Port,
-            crate::state::Point::origin(),
-        );
-        app.state
-            .schematic
-            .components
-            .iter_mut()
-            .find(|c| c.id == id)
-            .unwrap()
-            .value = "BIAS_EN".to_owned();
-        app.state.dialogs.pin_port.open(
-            "bias_en".to_owned(),
-            app.state.design_execution_epoch,
-            app.state.active_schematic_epoch,
-            app.state.schematic.topology_version(),
-            app.state.workspace.active_view.display_path(),
-        );
-        assert!(matches!(
-            validate_draft(&app.state),
-            DraftValidation::Invalid(_)
-        ));
-        app.state.dialogs.pin_port.name = "UNIQUE".to_owned();
-        app.state.schematic.bump_topology_version();
-        assert!(matches!(
-            validate_draft(&app.state),
-            DraftValidation::Invalid(_)
-        ));
-    }
-
-    #[test]
-    fn rendered_primary_arms_exactly_one_pending_contract_without_mutation() {
-        let ctx = Context::default();
-        crate::ui::Theme::default().apply(&ctx);
-        let mut app = RSpiceApp::test_instance();
-        open_dialog(&mut app);
-        let topology = app.state.schematic.topology_version();
-
-        let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
-            app.render_pin_port_dialog(ctx)
-        });
-        let _ = ctx.run_ui(dialog_input(vec![key_event(egui::Key::Enter)]), |ctx| {
-            app.render_pin_port_dialog(ctx)
-        });
-
-        assert!(!app.state.dialogs.pin_port.open);
-        assert_eq!(
-            app.state.schematic.tool,
-            Tool::Place(crate::state::ComponentType::Port)
-        );
-        let pending = app
-            .state
-            .schematic
-            .pending_port
-            .as_ref()
-            .expect("validated pending interface port");
-        assert_eq!(pending.name, "BIAS_EN");
-        assert_eq!(pending.expected_topology_version, topology);
-        assert_eq!(pending.contract.direction, crate::state::PortDirection::In);
-        assert_eq!(
-            pending.contract.signal_type,
-            crate::state::PortSignalType::Logic
-        );
-        assert_eq!(pending.contract.netlist_order, Some(1));
-        assert!(app.state.schematic.components.is_empty());
-        assert!(!app.state.schematic.is_dirty);
-        assert!(!app.state.schematic.can_undo());
-    }
-
-    #[test]
-    fn rendered_read_only_and_stale_dialogs_never_arm_or_publish() {
-        for stale in [false, true] {
-            let ctx = Context::default();
-            crate::ui::Theme::default().apply(&ctx);
-            let mut app = RSpiceApp::test_instance();
-            open_dialog(&mut app);
-            if stale {
-                app.state.schematic.bump_topology_version();
-            } else {
-                app.state.schematic.read_only = true;
-            }
-
-            let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
-                app.render_pin_port_dialog(ctx)
-            });
-            let _ = ctx.run_ui(dialog_input(vec![key_event(egui::Key::Enter)]), |ctx| {
-                app.render_pin_port_dialog(ctx)
-            });
-
-            assert!(app.state.dialogs.pin_port.open);
-            assert_eq!(app.state.schematic.tool, Tool::Select);
-            assert!(app.state.schematic.pending_port.is_none());
-            assert!(app.state.schematic.components.is_empty());
-        }
-    }
-
-    #[test]
-    fn rendered_escape_requires_explicit_second_discard_after_edit() {
-        let ctx = Context::default();
-        crate::ui::Theme::default().apply(&ctx);
-        let mut app = RSpiceApp::test_instance();
-        open_dialog(&mut app);
-        app.state.dialogs.pin_port.mark_edited();
-
-        let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
-            app.render_pin_port_dialog(ctx)
-        });
-        let _ = ctx.run_ui(dialog_input(vec![key_event(egui::Key::Escape)]), |ctx| {
-            app.render_pin_port_dialog(ctx)
-        });
-        assert!(app.state.dialogs.pin_port.open);
-        assert!(app.state.dialogs.pin_port.discard_confirm);
-
-        let _ = ctx.run_ui(dialog_input(vec![key_event(egui::Key::Escape)]), |ctx| {
-            app.render_pin_port_dialog(ctx)
-        });
-        assert!(!app.state.dialogs.pin_port.open);
-        assert!(app.state.schematic.pending_port.is_none());
-    }
-
-    #[test]
-    fn rendered_contract_strings_contain_no_mojibake_markers() {
-        for value in [
-            EYEBROW,
-            TITLE,
-            PRIMARY,
-            DESCRIPTION,
-            PREVIEW_TITLE,
-            DIRECTION_LABEL,
-            DISCIPLINE_LABEL,
-            DISCARD_TITLE,
-            DISCARD_DETAIL,
-        ] {
-            for forbidden in ['\u{00c2}', '\u{00e2}', '\u{fffd}'] {
-                assert!(
-                    !value.contains(forbidden),
-                    "mojibake in rendered contract string: {value:?}"
-                );
-            }
-        }
-    }
-}
+mod tests;

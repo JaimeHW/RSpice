@@ -81,6 +81,43 @@ pub(super) fn draw_interaction_previews(
         symbol_library,
     );
     draw_selection_rect(painter, state, viewport);
+    draw_placement_badge(painter, response, state);
+}
+
+/// The one line a sequenced placement owes the pointer: what the next click
+/// places, and where it is in the batch.
+///
+/// It is painted last so nothing covers it, it carries only draft-dependent
+/// text, and it states the model's refusal when the click will not succeed —
+/// which is the only way a reader learns that a name was taken by someone else
+/// without first clicking and reading the console.
+fn draw_placement_badge(painter: &Painter, response: &Response, state: &AppState) {
+    let Some(sequence) = state.schematic.pending_port_sequence.as_ref() else {
+        return;
+    };
+    let (Some(hover), Some(name)) = (response.hover_pos(), sequence.next_name()) else {
+        return;
+    };
+    let palette = crate::ui::tokens::active_palette();
+    let refusal = sequence
+        .next_placement(&state.schematic)
+        .and_then(|pending| state.schematic.validate_pending_port(&pending).err());
+    let (label, color) = match refusal {
+        None => (
+            format!("{name}  {}/{}", sequence.position(), sequence.total),
+            palette.accent,
+        ),
+        Some(error) => (format!("{name}: {error}"), palette.err),
+    };
+    let galley = painter.layout_no_wrap(
+        label,
+        crate::ui::theme::mono(
+            crate::ui::tokens::FS_0,
+            crate::ui::theme::FontWeight::Regular,
+        ),
+        color,
+    );
+    painter.galley(hover + egui::vec2(12.0, 12.0), galley, color);
 }
 
 fn draw_move_selection_preview(
@@ -1101,14 +1138,17 @@ fn draw_component_preview(
         if let Some((symbol, adjusted_rotation)) = symbol_library.and_then(|library| {
             library.get_with_rotation_variant(component_type, preview_rotation_degrees, None)
         }) {
-            let pending_port_spec = state
-                .schematic
-                .pending_port
-                .as_ref()
-                .map(|pending| PortSpec {
-                    name: pending.name.clone(),
-                    direction: pending.contract.direction,
-                });
+            let pending_port_spec =
+                state
+                    .schematic
+                    .pending_port_sequence
+                    .as_ref()
+                    .and_then(|sequence| {
+                        Some(PortSpec {
+                            name: sequence.next_name()?.to_owned(),
+                            direction: sequence.direction,
+                        })
+                    });
             let symbol_stroke = if component_type == ComponentType::Port {
                 port_symbol_stroke(
                     preview_stroke,
@@ -1139,9 +1179,9 @@ fn draw_component_preview(
                     false,
                     state
                         .schematic
-                        .pending_port
+                        .pending_port_sequence
                         .as_ref()
-                        .map(|pending| pending.contract.direction)
+                        .map(|sequence| sequence.direction)
                         .unwrap_or_default(),
                     symbol_stroke,
                 );
