@@ -885,6 +885,11 @@ define_messages! {
     StimulusLibrarySection => "Stimulus library",
     StimulusDefinitionSection => "Definition",
     StimulusSavedRevision => "saved · r{revision}",
+    // The lifecycle chip where the band is too narrow to carry the whole
+    // spelling. The word only; the revision and the error count are stated by
+    // the realization band and the audit strip.
+    StimulusSaved => "saved",
+    StimulusDraft => "draft",
     StimulusFieldDefinitions => "Definitions",
     StimulusFieldSelection => "Selection",
     StimulusFieldName => "Name",

@@ -683,15 +683,44 @@ fn a_point_table_never_runs_under_the_fields_below_it() {
 }
 
 /// The identity band says a fact whole or not at all.
+///
+/// Two ways to break that, and the second is the one that got through: a run
+/// can be elided with an ellipsis, or it can be laid out at its full width and
+/// then cut by the clip rectangle of the half it sits in. Nothing elides here,
+/// so for a long time only the first was checked — and the lifecycle chip,
+/// which allocated whatever its spelling wanted, painted `draft · 1 erro` at
+/// 1024 points and ran under the verbs beside it.
 #[test]
 fn the_identity_band_never_cuts_a_fact_short() {
     for name in fixtures::names() {
-        let mut app = seeded(name);
-        for (text, rect, _) in painted(&mut app.state, stage_size(1024.0, 640.0)) {
-            assert!(
-                !(rect.top() < IDENTITY_HEIGHT && text.contains('\u{2026}')),
-                "{name}: the identity band elided {text:?}"
-            );
+        let mut published = seeded(name);
+        // And the same definition as a draft the deck would refuse, which is
+        // the longest thing the lifecycle chip ever has to say.
+        let mut refused = seeded(name);
+        crate::workbench::app::actions::stimulus::edit_name(
+            &mut refused.state,
+            fixtures::names()
+                .into_iter()
+                .find(|other| *other != name)
+                .expect("the library holds more than one definition"),
+        );
+        for app in [&mut published, &mut refused] {
+            for (text, rect, clip) in painted(&mut app.state, stage_size(1024.0, 640.0)) {
+                if rect.top() >= IDENTITY_HEIGHT {
+                    continue;
+                }
+                assert!(
+                    !text.contains('\u{2026}'),
+                    "{name}: the identity band elided {text:?}"
+                );
+                // Half a point of tolerance: a clip rect is stated in the same
+                // float space the galley is measured in.
+                assert!(
+                    rect.left() >= clip.left() - 0.5 && rect.right() <= clip.right() + 0.5,
+                    "{name}: the identity band cut {text:?} off at its own edge \
+                     ({rect:?} outside {clip:?})"
+                );
+            }
         }
     }
 }
