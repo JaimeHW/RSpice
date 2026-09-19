@@ -3,25 +3,23 @@
 //! The resolution itself — the default harmonic order, the multi-tone common
 //! basis, and the `.OPTIONS HBINT NUMFREQ` collocation rule — belongs to
 //! `rspice_core::analysis::HbConfig::from_hb_card`. This module only hands it
-//! the card's tone list and the deck's authored harmonic-order option, and
-//! turns its typed failure into a browser error.
+//! the authored card and the deck's options, and turns its typed failure into
+//! a browser error.
 
 use rspice_core::Netlist;
 use rspice_core::analysis::HbConfig;
+use rspice_core::netlist::HbCard;
 
 use crate::DetailedWasmResult;
 use crate::errors::WasmError;
 
-/// Resolve one authored `.HB` tone list into a core configuration.
+/// Resolve one authored `.HB` card into a core configuration.
 ///
 /// The deck runner retains the result after the run, because `.ENVELOPE`
 /// continues the same carrier and must be given the identical configuration
 /// rather than a second one rebuilt from the same card.
-pub(crate) fn hb_config_for_tones(
-    netlist: &Netlist,
-    frequencies: &[f64],
-) -> DetailedWasmResult<HbConfig> {
-    HbConfig::from_hb_card(frequencies, &netlist.options.hb_num_frequencies).map_err(|error| {
+pub(crate) fn hb_config_for_card(netlist: &Netlist, card: &HbCard) -> DetailedWasmResult<HbConfig> {
+    HbConfig::from_hb_card(card, &netlist.options).map_err(|error| {
         Box::new(WasmError::invalid_argument(format!(
             "invalid .HB card: {error}"
         )))
@@ -32,6 +30,7 @@ pub(crate) fn hb_config_for_tones(
 mod tests {
     use super::*;
     use rspice_core::analysis::HbTone;
+    use rspice_core::netlist::AnalysisCommand;
 
     fn netlist(cards: &str) -> Netlist {
         Netlist::parse(&format!(
@@ -40,12 +39,31 @@ mod tests {
         .expect("the HB deck parses")
     }
 
+    /// The `.HB` card the deck authors.
+    fn hb_card(deck: &Netlist) -> HbCard {
+        deck.analyses
+            .iter()
+            .find_map(|analysis| match analysis {
+                AnalysisCommand::Hb(card) => Some((**card).clone()),
+                _ => None,
+            })
+            .expect("the deck authors one .HB card")
+    }
+
+    /// A card that states the given tones and nothing else.
+    fn tones_only(frequencies: &[f64]) -> HbCard {
+        HbCard {
+            frequencies: frequencies.to_vec(),
+            ..HbCard::default()
+        }
+    }
+
     /// A single tone becomes the core single-tone configuration, keeping the
     /// core default harmonic order rather than a browser-chosen one.
     #[test]
     fn one_tone_uses_the_core_single_tone_configuration() {
         let deck = netlist(".HB 1G\n");
-        let config = hb_config_for_tones(&deck, &[1.0e9]).expect("a one-tone .HB resolves");
+        let config = hb_config_for_card(&deck, &hb_card(&deck)).expect("a one-tone .HB resolves");
         assert_eq!(config.fundamental_freq, 1.0e9);
         assert_eq!(config.num_harmonics, HbConfig::new(1.0e9).num_harmonics);
         assert!(config.tones.is_empty());
@@ -56,7 +74,7 @@ mod tests {
     #[test]
     fn several_tones_use_the_core_common_basis_rule() {
         let deck = netlist(".HB 900MEG 800MEG\n");
-        let config = hb_config_for_tones(&deck, &[9.0e8, 8.0e8]).expect("a two-tone .HB resolves");
+        let config = hb_config_for_card(&deck, &hb_card(&deck)).expect("a two-tone .HB resolves");
         let expected = HbConfig::multi_tone(vec![
             HbTone::new(9.0e8, HbConfig::new(9.0e8).num_harmonics).with_name("tone1"),
             HbTone::new(8.0e8, HbConfig::new(8.0e8).num_harmonics).with_name("tone2"),
@@ -71,7 +89,7 @@ mod tests {
     fn impossible_tone_lists_fail_closed() {
         let deck = netlist(".HB 1G\n");
         for tones in [vec![], vec![0.0], vec![f64::NAN], vec![1.0e9, 1.0e9]] {
-            let error = *hb_config_for_tones(&deck, &tones)
+            let error = *hb_config_for_card(&deck, &tones_only(&tones))
                 .expect_err("an impossible .HB tone list must fail closed");
             assert_eq!(error.code, "invalid_argument");
             assert_eq!(error.category, "input_validation");
@@ -85,12 +103,12 @@ mod tests {
     fn an_authored_harmonic_order_list_pins_the_core_collocation_grid() {
         let deck = netlist(".OPTIONS HBINT NUMFREQ=5\n.HB 1G\n");
         let config =
-            hb_config_for_tones(&deck, &[1.0e9]).expect("an authored NUMFREQ now resolves");
+            hb_config_for_card(&deck, &hb_card(&deck)).expect("an authored NUMFREQ now resolves");
         assert_eq!(config.num_harmonics, 5);
         assert_eq!(config.collocation_points, Some(11));
         assert_eq!(
             config,
-            HbConfig::from_hb_card(&[1.0e9], &deck.options.hb_num_frequencies)
+            HbConfig::from_hb_card(&hb_card(&deck), &deck.options)
                 .expect("the core resolver agrees"),
             "the browser adds nothing of its own to the core resolution"
         );
@@ -102,7 +120,7 @@ mod tests {
     fn an_authored_order_broadcasts_across_a_multi_tone_card() {
         let deck = netlist(".OPTIONS HBINT NUMFREQ=4\n.HB 900MEG 800MEG\n");
         let config =
-            hb_config_for_tones(&deck, &[9.0e8, 8.0e8]).expect("a broadcast order resolves");
+            hb_config_for_card(&deck, &hb_card(&deck)).expect("a broadcast order resolves");
         assert_eq!(
             config
                 .tones

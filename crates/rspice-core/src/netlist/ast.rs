@@ -25,10 +25,8 @@ use super::expr::FunctionDef;
 /// field was absent or genuinely zero.
 pub const XYCE_DEFAULT_RESISTOR_VALUE_MARKER: &str = "__RSPICE_XYCE_DEFAULT_RESISTOR_VALUE";
 
-//=============================================================================
-// Parametric Values
-//=============================================================================
-
+//======================================================================// Parametric Values
+//======================================================================
 /// A value that can be either resolved or a parameter expression.
 ///
 /// Used for subcircuit instance parameters where the value may reference
@@ -144,10 +142,8 @@ impl Default for SourceMultiplicity {
     }
 }
 
-//=============================================================================
-// Circuit Elements
-//=============================================================================
-
+//======================================================================// Circuit Elements
+//======================================================================
 /// A circuit element (component instance)
 #[derive(Debug, Clone)]
 pub struct Element {
@@ -691,10 +687,8 @@ pub enum SwitchState {
     Off,
 }
 
-//=============================================================================
-// Output selection (.save / .probe / .print / .plot)
-//=============================================================================
-
+//======================================================================// Output selection (.save / .probe / .print / .plot)
+//======================================================================
 /// One requested output signal from a `.save`/`.probe`/`.print`/`.plot` card.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SaveSignal {
@@ -985,10 +979,8 @@ mod save_set_tests {
     }
 }
 
-//=============================================================================
-// XSPICE Port Types
-//=============================================================================
-
+//======================================================================// XSPICE Port Types
+//======================================================================
 /// XSPICE port connection specification
 ///
 /// XSPICE uses bracket syntax to distinguish port types. This enum captures
@@ -1170,10 +1162,8 @@ impl XspicePort {
     }
 }
 
-//=============================================================================
-// Transistor Types
-//=============================================================================
-
+//======================================================================// Transistor Types
+//======================================================================
 /// BJT transistor type
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BjtType {
@@ -1570,10 +1560,8 @@ fn logarithmic_sweep_points_controlled(
     Ok(points)
 }
 
-//=============================================================================
-// Source Specifications
-//=============================================================================
-
+//======================================================================// Source Specifications
+//======================================================================
 /// RF source metadata, including the physical impedance used in every analysis.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SourceRfPort {
@@ -2103,10 +2091,8 @@ impl SourceSpec {
     }
 }
 
-//=============================================================================
-// Analysis Commands
-//=============================================================================
-
+//======================================================================// Analysis Commands
+//======================================================================
 /// Signal sampled by an HSPICE/Xyce-style `.FFT` post-processing directive.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FftOutput {
@@ -2239,12 +2225,13 @@ pub enum AnalysisCommand {
     /// supplies an explicit `FREQ` column.
     AcData { table_name: String },
 
-    /// Harmonic-balance analysis: `.HB f1 [f2 ...]`.
+    /// Harmonic-balance analysis: `.HB f1 [f2 ...] [KEY=VALUE ...]`.
     ///
     /// Frequencies are the independent large-signal tones. A single entry
     /// is ordinary one-tone HB; multiple entries use their common spectral
-    /// basis in the engine.
-    Hb { frequencies: Vec<Value> },
+    /// basis in the engine. Every other control the solve reads is an
+    /// optional keyword on the same card: see [`HbCard`].
+    Hb(Box<HbCard>),
 
     /// S-parameter analysis:
     /// `.SP DEC|LIN|OCT np fstart fstop [donoise] [PORT<k>=(<n+>[,<n->[,<z0>]]) ...]`
@@ -2422,10 +2409,8 @@ pub enum AnalysisCommand {
     DcMatch(Box<DcMatchCard>),
 }
 
-//=============================================================================
-// DC mismatch card
-//=============================================================================
-
+//======================================================================// DC mismatch card
+//======================================================================
 /// Authored `.DCMATCH` card.
 ///
 /// `.DCMATCH OUT=V(node[,ref])|I(element) [MISMATCH=yes|no] [PROCESS=yes|no]
@@ -2480,10 +2465,8 @@ impl DcMatchCard {
     }
 }
 
-//=============================================================================
-// Periodic large-signal analysis cards
-//=============================================================================
-
+//======================================================================// Periodic large-signal analysis cards
+//======================================================================
 /// Authored `.PSS` card.
 ///
 /// Every field is validated by the parser, so the analysis layer converts
@@ -2878,6 +2861,74 @@ pub enum PeriodicSourceSelector {
     Hb,
 }
 
+/// Authored `.HB` card: the large-signal tones a harmonic-balance run solves
+/// for, and every control the solve itself reads.
+///
+/// A typed card rather than a bare frequency list, on the shape `.PSS`,
+/// `.PSTB` and `.DCMATCH` already carry: a harmonic-balance run has as many
+/// controls as a shooting one, and a card that can hold only frequencies
+/// forces every surface that wants one of the others to invent a channel of
+/// its own beside the deck.
+///
+/// The tone frequencies are positional and required; every control is an
+/// optional keyword, so an unauthored one is `None` and the resolution
+/// applies the engine's own default rather than a spelling of "default"
+/// invented by whoever wrote the card. That distinction is what lets one
+/// surface state a control while another leaves it alone and still get
+/// [`HbConfig`](crate::analysis::HbConfig)s that differ in exactly the
+/// authored field.
+///
+/// The card is the only channel:
+/// [`HbConfig::from_hb_card`](crate::analysis::HbConfig::from_hb_card) is the
+/// one place a `.HB` card becomes a configuration, and it takes the card, so
+/// a field added here reaches every surface at once.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct HbCard {
+    /// Independent large-signal tone frequencies, in authored order.
+    pub frequencies: Vec<Value>,
+    /// `HARMS=`: harmonics retained per tone, empty when unauthored.
+    ///
+    /// One entry broadcasts across every tone; one entry per tone pairs
+    /// positionally. This is the per-card statement of what
+    /// `.OPTIONS HBINT NUMFREQ` says deck-wide.
+    pub harmonics: Vec<usize>,
+    /// `SOURCE<k>=`: the independent source tone `k` drives.
+    ///
+    /// Empty when no tone names a source; otherwise one slot per tone, `None`
+    /// where the tone was not given one and so is broadcast to every
+    /// AC-capable source.
+    pub sources: Vec<Option<String>>,
+    /// `OVERSAMPLE=`: collocation oversampling factor, at least two.
+    pub oversample: Option<usize>,
+    /// `POINTS=`: exact odd collocation grid, replacing the implied one.
+    pub collocation_points: Option<usize>,
+    /// `MAXMIXING=`: highest intermodulation order the basis must carry.
+    pub max_mixing_order: Option<usize>,
+    /// `RELTOL=`: relative Newton residual tolerance.
+    pub reltol: Option<Value>,
+    /// `ABSTOL=`: absolute residual tolerance for node equations.
+    pub abstol: Option<Value>,
+    /// `MAXITER=`: Newton iteration budget for the harmonic-balance system.
+    pub max_iterations: Option<usize>,
+    /// `DAMPING=`: first trial scale of the Armijo line search, in `[0.1, 1]`.
+    pub damping: Option<Value>,
+    /// `MINDAMPING=`: smallest step scale the line search will take.
+    pub min_damping: Option<Value>,
+    /// `SOLVER=`: `AUTO` leaves the linear solve to the size rule, `KRYLOV`
+    /// forces it. Both spellings are Newton solves; only the inner linear
+    /// solve is chosen here, which is why there is no `NEWTON`.
+    pub use_krylov: Option<bool>,
+    /// `GMRESRESTART=`: retained Arnoldi vectors of the Krylov solve.
+    pub gmres_restart: Option<usize>,
+    /// `SOURCESTEPPING=`: ramp the sources for a difficult convergence.
+    pub source_stepping: Option<bool>,
+    /// `EXACTJACOBIAN=`: solve Newton steps with the exact real-split
+    /// Jacobian rather than the Toeplitz-only complex one.
+    pub use_exact_jacobian: Option<bool>,
+    /// `VERBOSE=`: log the solve's iteration history.
+    pub verbose: Option<bool>,
+}
+
 /// Which authored analysis card a card-level parse failure came from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AnalysisCard {
@@ -2891,6 +2942,7 @@ pub enum AnalysisCard {
     Sp,
     Stb,
     Four,
+    Hb,
 }
 
 impl AnalysisCard {
@@ -2907,6 +2959,7 @@ impl AnalysisCard {
             Self::Sp => ".SP",
             Self::Stb => ".STB",
             Self::Four => ".FOUR",
+            Self::Hb => ".HB",
         }
     }
 }
@@ -3463,10 +3516,8 @@ pub struct SensitivityAcSweep {
     pub stop_freq: Value,
 }
 
-//=============================================================================
-// Initial Conditions
-//=============================================================================
-
+//======================================================================// Initial Conditions
+//======================================================================
 /// Startup directive that supplied a node-voltage seed or hint.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum StartupDirectiveKind {
@@ -3745,10 +3796,8 @@ pub struct NodeSet {
     pub voltage_expr: Option<String>,
 }
 
-//=============================================================================
-// Simulation Options
-//=============================================================================
-
+//======================================================================// Simulation Options
+//======================================================================
 /// Device designator selected by Xyce `.PREPROCESS REMOVEUNUSED`.
 ///
 /// The variants are intentionally limited to the eight device families Xyce
@@ -5000,10 +5049,8 @@ impl SimulationOptions {
     }
 }
 
-//=============================================================================
-// Model and Subcircuit Definitions
-//=============================================================================
-
+//======================================================================// Model and Subcircuit Definitions
+//======================================================================
 /// Model definition: .MODEL name type (params)
 #[derive(Debug, Clone)]
 pub struct ModelDef {
@@ -5057,10 +5104,8 @@ pub struct SubcircuitDef {
     pub nested_subcircuits: Vec<SubcircuitDef>,
 }
 
-//=============================================================================
-// Include/Lib Directives
-//=============================================================================
-
+//======================================================================// Include/Lib Directives
+//======================================================================
 /// Include directive: .INCLUDE "filename"
 #[derive(Debug, Clone)]
 pub struct IncludeDirective {
@@ -5077,6 +5122,5 @@ pub struct LibDirective {
     pub section: Option<String>,
 }
 
-//=============================================================================
-// Tests
-//=============================================================================
+//======================================================================// Tests
+//======================================================================

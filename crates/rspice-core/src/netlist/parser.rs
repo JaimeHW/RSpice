@@ -27,7 +27,7 @@ use super::{
     DcMatchCard, DeviceInitialConditionDirective, DeviceInitialConditionEntry,
     DeviceInitialConditionError, DeviceInitialConditionSource, DuplicateModelParameterError,
     Element, ElementKind, EnvelopeCard, FftAnalysis, FftFormat, FftOutput, FftWindow,
-    FreqVariation, InitialCondition, JfetType, LinAnalysis, MesfetType,
+    FreqVariation, HbCard, InitialCondition, JfetType, LinAnalysis, MesfetType,
     MissingSubcircuitEndsBoundary, MissingSubcircuitEndsError, ModelDef, MonteCarloCommand,
     MonteCarloDistribution, MosType, Netlist, NetlistSourceLocation, NodeSet, OutputAnalysisKind,
     OutputDirectiveKind, OutputOperand, OutputOperandKind, OutputRequest, PacCard, ParamContext,
@@ -103,6 +103,7 @@ pub(crate) fn control_options(
 mod conditionals;
 mod dcmatch_card;
 mod elements;
+mod hb_card;
 mod laplace_synthesis;
 mod line;
 mod periodic_cards;

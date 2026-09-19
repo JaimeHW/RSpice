@@ -550,8 +550,8 @@ pub(crate) fn run_directive(
             )?;
             AnalysisResultDocument::from_monte_carlo(id, &result).map_err(map_result_document_error)
         }
-        AnalysisCommand::Hb { frequencies } => {
-            let config = hb_config(netlist, frequencies)?;
+        AnalysisCommand::Hb(card) => {
+            let config = hb_config(netlist, card)?;
             let result = engine.run_hb_with_abort(netlist, config, abort)?;
             AnalysisResultDocument::from_harmonic_balance(id, &result.result)
                 .map_err(map_result_document_error)
@@ -576,12 +576,9 @@ pub(crate) fn run_directive(
                     )?;
                     engine.run_pac_from_pss_with_abort(netlist, config, &operating_point, abort)?
                 }
-                AnalysisCommand::Hb { frequencies } => {
-                    let carrier = engine.run_hb_with_abort(
-                        netlist,
-                        hb_config(netlist, frequencies)?,
-                        abort,
-                    )?;
+                AnalysisCommand::Hb(hb) => {
+                    let carrier =
+                        engine.run_hb_with_abort(netlist, hb_config(netlist, hb)?, abort)?;
                     engine.run_pac_from_hb_with_abort(
                         netlist,
                         config,
@@ -618,12 +615,9 @@ pub(crate) fn run_directive(
                         abort,
                     )?
                 }
-                AnalysisCommand::Hb { frequencies } => {
-                    let carrier = engine.run_hb_with_abort(
-                        netlist,
-                        hb_config(netlist, frequencies)?,
-                        abort,
-                    )?;
+                AnalysisCommand::Hb(hb) => {
+                    let carrier =
+                        engine.run_hb_with_abort(netlist, hb_config(netlist, hb)?, abort)?;
                     engine.run_pxf_card_from_hb_with_abort(
                         netlist,
                         card,
@@ -678,12 +672,9 @@ pub(crate) fn run_directive(
                         abort,
                     )?
                 }
-                AnalysisCommand::Hb { frequencies } => {
-                    let carrier = engine.run_hb_with_abort(
-                        netlist,
-                        hb_config(netlist, frequencies)?,
-                        abort,
-                    )?;
+                AnalysisCommand::Hb(hb) => {
+                    let carrier =
+                        engine.run_hb_with_abort(netlist, hb_config(netlist, hb)?, abort)?;
                     engine.run_pnoise_card_from_hb_with_abort(
                         netlist,
                         card,
@@ -703,12 +694,12 @@ pub(crate) fn run_directive(
         }
         AnalysisCommand::Envelope(card) => {
             let (upstream_id, upstream) = upstream_card(analysis, peers)?;
-            let AnalysisCommand::Hb { frequencies } = upstream else {
+            let AnalysisCommand::Hb(hb) = upstream else {
                 return Err(DirectiveFailure::ResultDocument(format!(
                     "the canonical plan bound {id} to {upstream_id}, which is not a .HB carrier"
                 )));
             };
-            let config = hb_config(netlist, frequencies)?;
+            let config = hb_config(netlist, hb)?;
             let result = engine.run_envelope_with_abort(
                 netlist,
                 config,
@@ -789,9 +780,12 @@ fn sweep_frequencies(
 ///
 /// The default harmonic order, the multi-tone common basis and the
 /// `.OPTIONS HBINT NUMFREQ` collocation rule all belong to `rspice-core`; this
-/// only hands it the card's tones and the deck's authored order list.
-fn hb_config(netlist: &Netlist, frequencies: &[f64]) -> Result<HbConfig, DirectiveFailure> {
-    HbConfig::from_hb_card(frequencies, &netlist.options.hb_num_frequencies)
+/// only hands it the authored card and the deck's options.
+fn hb_config(
+    netlist: &Netlist,
+    card: &rspice_core::netlist::HbCard,
+) -> Result<HbConfig, DirectiveFailure> {
+    HbConfig::from_hb_card(card, &netlist.options)
         .map_err(|error| DirectiveFailure::InvalidAnalysis(format!("invalid .HB card: {error}")))
 }
 

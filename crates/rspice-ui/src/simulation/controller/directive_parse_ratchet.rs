@@ -153,15 +153,14 @@ fn the_harmonic_balance_directive_carries_the_tones_it_was_given() {
     let netlist = rspice_core::netlist::parse_netlist(&deck)
         .unwrap_or_else(|error| panic!("the HB directive must parse: {error}\n{deck}"));
 
-    let [rspice_core::netlist::AnalysisCommand::Hb { frequencies }] = netlist.analyses.as_slice()
-    else {
+    let [rspice_core::netlist::AnalysisCommand::Hb(card)] = netlist.analyses.as_slice() else {
         panic!(
             "an HB plan writes exactly one .HB card: {:?}",
             netlist.analyses
         );
     };
     assert_eq!(
-        frequencies,
+        &card.frequencies,
         &[crate::simulation::dialog::hb::HbConfig::default().fundamental_freq]
     );
 }

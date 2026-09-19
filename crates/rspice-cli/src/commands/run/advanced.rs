@@ -57,15 +57,14 @@ fn map_advanced_simulation_error(
 /// problem is solved once per card rather than once per dependent analysis.
 pub(super) fn run_hb_from_command(
     ctx: &RunContext<'_>,
-    frequencies: &[f64],
+    card: &rspice_core::netlist::HbCard,
 ) -> Result<(), CliError> {
-    // The default harmonic order, the multi-tone common basis, and the
-    // `.OPTIONS HBINT NUMFREQ` collocation rule all belong to `rspice-core`.
-    let config = rspice_core::analysis::HbConfig::from_hb_card(
-        frequencies,
-        &ctx.netlist.options.hb_num_frequencies,
-    )
-    .map_err(|error| CliError::simulation_error_in(error.to_string(), "HB"))?;
+    // Every control the solve reads is on the card, and the resolution of the
+    // card against the deck's options — the default harmonic order, the
+    // multi-tone common basis, the `.OPTIONS HBINT NUMFREQ` collocation rule
+    // — belongs to `rspice-core`.
+    let config = rspice_core::analysis::HbConfig::from_hb_card(card, &ctx.netlist.options)
+        .map_err(|error| CliError::simulation_error_in(error.to_string(), "HB"))?;
 
     let artifact = ctx.resolve_periodic_analysis("hb")?;
     let hb_result = solve_hb(ctx, config.clone())?;

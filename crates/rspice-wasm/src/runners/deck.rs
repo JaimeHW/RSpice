@@ -44,7 +44,7 @@ use rspice_core::{AbortSignal, Engine, Netlist, NoAbort, ResourceKind, ResourceL
 use crate::DetailedWasmResult;
 use crate::abort::{aborted_error, ensure_not_aborted};
 use crate::errors::{WasmError, resource_limit_error};
-use crate::hb_config::hb_config_for_tones;
+use crate::hb_config::hb_config_for_card;
 use crate::options::WasmExecutionOptions;
 use crate::support::{engine_with_resource_limits, parse_netlist_with_control_detailed};
 
@@ -576,8 +576,8 @@ fn execute_analysis(
             Ok(vec![builder])
         }
 
-        AnalysisCommand::Hb { frequencies } => {
-            let config = hb_config_for_tones(netlist, frequencies)?;
+        AnalysisCommand::Hb(card) => {
+            let config = hb_config_for_card(netlist, card)?;
             let result = engine
                 .run_hb_with_abort(netlist, config.clone(), abort)
                 .map_err(simulation_error)?;
@@ -982,7 +982,7 @@ fn unroutable_reason(command: &AnalysisCommand) -> Option<&'static str> {
         | AnalysisCommand::Dc { .. }
         | AnalysisCommand::Ac { .. }
         | AnalysisCommand::AcData { .. }
-        | AnalysisCommand::Hb { .. }
+        | AnalysisCommand::Hb(_)
         | AnalysisCommand::Sp { .. }
         | AnalysisCommand::Stb { .. }
         | AnalysisCommand::Disto { .. }
@@ -1012,7 +1012,7 @@ fn card_spelling(command: &AnalysisCommand) -> &'static str {
         AnalysisCommand::Op => ".OP",
         AnalysisCommand::Dc { .. } => ".DC",
         AnalysisCommand::Ac { .. } | AnalysisCommand::AcData { .. } => ".AC",
-        AnalysisCommand::Hb { .. } => ".HB",
+        AnalysisCommand::Hb(_) => ".HB",
         AnalysisCommand::Sp { .. } => ".SP",
         AnalysisCommand::Stb { .. } => ".STB",
         AnalysisCommand::Disto { .. } => ".DISTO",

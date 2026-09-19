@@ -24,7 +24,7 @@ pub(super) fn analysis_output_tag(analysis: &AnalysisCommand) -> Option<&'static
         AnalysisCommand::PoleZero { .. } => Some("pz"),
         AnalysisCommand::Sensitivity { .. } => Some("sens"),
         AnalysisCommand::Tf { .. } => Some("tf"),
-        AnalysisCommand::Hb { .. } => Some("hb"),
+        AnalysisCommand::Hb(_) => Some("hb"),
         AnalysisCommand::MonteCarlo(_) => Some("mc"),
         AnalysisCommand::Pss(_) => Some("pss"),
         AnalysisCommand::Pac(_) => Some("pac"),

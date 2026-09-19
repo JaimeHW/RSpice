@@ -304,13 +304,18 @@ impl HbConfig {
         basis
     }
 
-    /// Resolve one authored `.HB` card against `.OPTIONS HBINT NUMFREQ`.
+    /// Resolve one authored [`HbCard`](crate::netlist::HbCard) against the
+    /// deck's `.OPTIONS`.
     ///
-    /// `frequencies` is the card's tone list in authored order and
-    /// `harmonic_orders` is the option's list. The Xyce contract is:
+    /// Taking the whole card rather than its tone list is what makes this the
+    /// only channel: a control the card gains reaches every surface at once,
+    /// and a surface that would have ignored it fails to compile instead.
     ///
-    /// - no option: every tone keeps this configuration's own default order,
-    ///   and the collocation grid stays the solver's default;
+    /// The harmonic-order contract, whether the orders come from the card's
+    /// `HARMS=` or from the deck's `NUMFREQ`, is Xyce's:
+    ///
+    /// - neither authored: every tone keeps this configuration's own default
+    ///   order, and the collocation grid stays the solver's default;
     /// - one order: it is broadcast across every tone;
     /// - one order per tone: they pair positionally;
     /// - anything else is an authored-input defect.
@@ -318,17 +323,18 @@ impl HbConfig {
     /// A single tone whose order the deck stated explicitly also pins the
     /// minimal bilateral `2N+1` collocation grid, which is what an explicit
     /// `NUMFREQ` asks for. Every other shape uses the configuration's own
-    /// default grid.
+    /// default grid, unless `POINTS=` names an exact one.
     ///
     /// This is the one implementation of that rule. The CLI, the Python
-    /// bindings, the browser API, and the engine adapter all translate the
-    /// same authored card, and four independent translations of a harmonic
-    /// order list are four chances to disagree about how many harmonics a
-    /// deck asked for.
+    /// bindings, the browser API, the engine adapter and the Studio all
+    /// translate the same authored card, and independent translations of a
+    /// harmonic order list are independent chances to disagree about how many
+    /// harmonics a deck asked for.
     pub fn from_hb_card(
-        frequencies: &[Value],
-        harmonic_orders: &[usize],
+        card: &crate::netlist::HbCard,
+        options: &crate::netlist::SimulationOptions,
     ) -> Result<Self, HbConfigError> {
+        let frequencies = card.frequencies.as_slice();
         if frequencies.is_empty() {
             return Err(HbConfigError::new(
                 "tones",
@@ -354,13 +360,40 @@ impl HbConfig {
             }
         }
 
+        // One quantity, one home. `HARMS=` and `MAXITER=` are the per-card
+        // statements of what `.OPTIONS HBINT NUMFREQ` and
+        // `.OPTIONS NONLIN-HB MAXSTEP` say deck-wide; a deck that states one
+        // of them in both places is answered by name instead of being given a
+        // precedence rule it cannot see. The parser cannot judge this — an
+        // `.OPTIONS` line may follow the card — so the resolution does.
+        if !card.harmonics.is_empty() && !options.hb_num_frequencies.is_empty() {
+            return Err(HbConfigError::new(
+                "num_harmonics",
+                ".HB states the harmonic count on the card (HARMS=) and in \
+                 .OPTIONS HBINT NUMFREQ; keep one",
+            ));
+        }
+        if card.max_iterations.is_some() && options.nonlin_hb_maxstep.is_some() {
+            return Err(HbConfigError::new(
+                "max_iterations",
+                ".HB states the Newton iteration budget on the card (MAXITER=) and in \
+                 .OPTIONS NONLIN-HB MAXSTEP; keep one",
+            ));
+        }
+
+        let (harmonic_orders, spelling): (&[usize], &str) = if card.harmonics.is_empty() {
+            (&options.hb_num_frequencies, ".OPTIONS HBINT NUMFREQ")
+        } else {
+            (&card.harmonics, "the .HB card's HARMS=")
+        };
+
         let default_harmonics = Self::new(frequencies[0]).num_harmonics;
         let orders: Vec<usize> = if harmonic_orders.is_empty() {
             vec![default_harmonics; frequencies.len()]
         } else if harmonic_orders.contains(&0) {
             return Err(HbConfigError::new(
                 "num_harmonics",
-                ".OPTIONS HBINT NUMFREQ harmonic orders must all be at least 1",
+                format!("{spelling} harmonic orders must all be at least 1"),
             ));
         } else if harmonic_orders.len() == 1 {
             vec![harmonic_orders[0]; frequencies.len()]
@@ -370,7 +403,7 @@ impl HbConfig {
             return Err(HbConfigError::new(
                 "num_harmonics",
                 format!(
-                    ".HB has {} tones but .OPTIONS HBINT NUMFREQ lists {} harmonic orders; \
+                    ".HB has {} tones but {spelling} lists {} harmonic orders; \
                      provide one order to broadcast or one per tone",
                     frequencies.len(),
                     harmonic_orders.len()
@@ -383,32 +416,166 @@ impl HbConfig {
             .try_reserve_exact(frequencies.len())
             .map_err(|_| HbConfigError::new("tones", "could not allocate the .HB tone list"))?;
         for (index, (frequency, order)) in frequencies.iter().zip(&orders).enumerate() {
-            tones.push(HbTone::new(*frequency, *order).with_name(format!("tone{}", index + 1)));
+            let tone = HbTone::new(*frequency, *order).with_name(format!("tone{}", index + 1));
+            tones.push(match card.sources.get(index) {
+                Some(Some(source)) => tone.with_source(source.clone()),
+                _ => tone,
+            });
         }
 
-        let [tone] = tones.as_slice() else {
-            let config = Self::multi_tone(tones);
-            config.validate()?;
-            return Ok(config);
+        let mut config = Self::resolve_basis(tones, harmonic_orders, spelling)?;
+        Self::apply_authored_controls(card, &mut config);
+        Self::widen_basis_to_mixing_order(card, &mut config)?;
+        config.validate()?;
+        Ok(config)
+    }
+
+    /// Widen a multi-tone basis to the intermodulation order its card states.
+    ///
+    /// Without `MAXMIXING=` the basis covers each tone's own order and
+    /// nothing else, which is what every deck written before the keyword
+    /// existed resolves to. With it, the basis must also reach the highest
+    /// mixing product the card asked to see: `MAXMIXING` copies of the
+    /// highest-placed tone. 900 MHz and 800 MHz at three harmonics each sit
+    /// at harmonics 9 and 8 of a 100 MHz basis and need 27 of them; asking
+    /// for fifth-order mixing needs 45.
+    ///
+    /// One tone has nothing to mix with, so the keyword only reaches the
+    /// basis on a multi-tone card — it still reaches the Xyce APFT lattice
+    /// check through `max_mixing_order` either way.
+    fn widen_basis_to_mixing_order(
+        card: &crate::netlist::HbCard,
+        config: &mut Self,
+    ) -> Result<(), HbConfigError> {
+        let Some(mixing) = card.max_mixing_order else {
+            return Ok(());
         };
-        let config = Self::new(tone.frequency).with_harmonics(tone.num_harmonics);
-        let config = if harmonic_orders.is_empty() {
-            config
-        } else {
+        if config.tones.len() < 2 {
+            return Ok(());
+        }
+        let basis = config.fundamental_freq;
+        if !basis.is_finite() || basis <= 0.0 {
+            return Err(HbConfigError::new(
+                "fundamental_freq",
+                "must be finite and positive",
+            ));
+        }
+        let mut highest_index = 1usize;
+        for tone in &config.tones {
+            let index = (tone.frequency / basis).round();
+            if !index.is_finite() || index < 1.0 || index > usize::MAX as Value {
+                return Err(HbConfigError::new(
+                    "tones",
+                    format!(
+                        "tone '{}' does not land on a positive integer harmonic of the \
+                         {basis} Hz basis",
+                        tone.name
+                    ),
+                ));
+            }
+            highest_index = highest_index.max(index as usize);
+        }
+        let widened = mixing.checked_mul(highest_index).ok_or_else(|| {
+            HbConfigError::new(
+                "max_mixing_order",
+                "and the tone placement overflow the addressable collocation grid",
+            )
+        })?;
+        config.num_harmonics = config.num_harmonics.max(widened);
+        Ok(())
+    }
+
+    /// Place the card's tones on the basis the engine will solve them over.
+    ///
+    /// A lone tone that does not name its source needs no tone list at all:
+    /// the drive is broadcast, the basis IS the tone, and leaving `tones`
+    /// empty is what every `.HB` deck written before the card had keywords
+    /// resolves to. A lone tone that DOES name a source has to be carried as
+    /// a tone, because the source filter lives on the tone; it still sits at
+    /// harmonic one of its own frequency, so the engine drives exactly the
+    /// same single harmonic.
+    fn resolve_basis(
+        tones: Vec<HbTone>,
+        harmonic_orders: &[usize],
+        spelling: &str,
+    ) -> Result<Self, HbConfigError> {
+        let [tone] = tones.as_slice() else {
+            return Ok(Self::multi_tone(tones));
+        };
+        let (frequency, order, names_a_source) = (
+            tone.frequency,
+            tone.num_harmonics,
+            tone.source_name.is_some(),
+        );
+        let mut config = Self::new(frequency).with_harmonics(order);
+        if !harmonic_orders.is_empty() {
             let points = config.minimum_collocation_points().ok_or_else(|| {
                 HbConfigError::new(
                     "collocation_points",
                     format!(
-                        ".OPTIONS HBINT NUMFREQ harmonic count {} exceeds the addressable \
-                         collocation grid",
-                        tone.num_harmonics
+                        "{spelling} harmonic count {order} exceeds the addressable \
+                         collocation grid"
                     ),
                 )
             })?;
-            config.with_collocation_points(points)
-        };
-        config.validate()?;
+            config = config.with_collocation_points(points);
+        }
+        if names_a_source {
+            config.tones = tones;
+        }
         Ok(config)
+    }
+
+    /// Move every authored keyword onto the field it names.
+    ///
+    /// An authored value is assigned, never passed through a builder: the
+    /// builders clamp, and a clamp here would silently run a different
+    /// configuration from the one the card states. Out-of-range values are
+    /// refused — by the card's own ranges when a deck wrote them, and by
+    /// [`Self::validate`] for every other caller — rather than adjusted.
+    ///
+    /// `POINTS=` is applied after the harmonic-order rule, so an authored
+    /// grid replaces the `2N+1` one an explicit order implies.
+    fn apply_authored_controls(card: &crate::netlist::HbCard, config: &mut Self) {
+        if let Some(value) = card.oversample {
+            config.oversample_factor = value;
+        }
+        if let Some(value) = card.collocation_points {
+            config.collocation_points = Some(value);
+        }
+        if let Some(value) = card.max_mixing_order {
+            config.max_mixing_order = value;
+        }
+        if let Some(value) = card.reltol {
+            config.tolerance = value;
+        }
+        if let Some(value) = card.abstol {
+            config.abstol = value;
+        }
+        if let Some(value) = card.max_iterations {
+            config.max_iterations = value;
+        }
+        if let Some(value) = card.damping {
+            config.damping = value;
+        }
+        if let Some(value) = card.min_damping {
+            config.min_damping = value;
+        }
+        if let Some(value) = card.use_krylov {
+            config.use_krylov = value;
+        }
+        if let Some(value) = card.gmres_restart {
+            config.gmres_restart = value;
+        }
+        if let Some(value) = card.source_stepping {
+            config.source_stepping = value;
+        }
+        if let Some(value) = card.use_exact_jacobian {
+            config.use_exact_jacobian = value;
+        }
+        if let Some(value) = card.verbose {
+            config.verbose = value;
+        }
     }
 
     /// Set number of harmonics
@@ -731,6 +898,364 @@ impl Default for HbConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::netlist::{HbCard, SimulationOptions};
+
+    /// A `.HB` card that authors nothing but its tones.
+    fn tones_only(frequencies: &[Value]) -> HbCard {
+        HbCard {
+            frequencies: frequencies.to_vec(),
+            ..HbCard::default()
+        }
+    }
+
+    /// A deck whose only harmonic-balance option is `HBINT NUMFREQ`.
+    fn numfreq(orders: &[usize]) -> SimulationOptions {
+        SimulationOptions {
+            hb_num_frequencies: orders.to_vec(),
+            ..SimulationOptions::default()
+        }
+    }
+
+    /// Resolve the `.HB` card of a deck written in full, so the card under
+    /// test is the one the parser produced rather than one built by hand.
+    fn resolve(cards: &str) -> Result<HbConfig, HbConfigError> {
+        let deck = crate::netlist::Netlist::parse(&format!(
+            "hb resolution\nV1 in 0 SIN(0 1 900MEG)\nV2 lo 0 SIN(0 1 800MEG)\n\
+             R1 in out 1k\nR2 lo out 1k\nC1 out 0 1p\n{cards}\n.end\n"
+        ))
+        .unwrap_or_else(|error| panic!("the deck parses: {error}"));
+        let card = deck
+            .analyses
+            .iter()
+            .find_map(|analysis| match analysis {
+                crate::netlist::AnalysisCommand::Hb(card) => Some((**card).clone()),
+                _ => None,
+            })
+            .expect("the deck authors one .HB card");
+        HbConfig::from_hb_card(&card, &deck.options)
+    }
+
+    /// Every float of two configurations agrees to the bit, not merely to
+    /// `PartialEq` on a value that could have been produced by a different
+    /// arithmetic path.
+    fn assert_bit_identical(resolved: &HbConfig, expected: &HbConfig) {
+        assert_eq!(resolved, expected, "resolved configuration differs");
+        assert_eq!(
+            resolved.fundamental_freq.to_bits(),
+            expected.fundamental_freq.to_bits(),
+            "fundamental frequency differs in its bits"
+        );
+        for (field, left, right) in [
+            ("tolerance", resolved.tolerance, expected.tolerance),
+            ("abstol", resolved.abstol, expected.abstol),
+            ("damping", resolved.damping, expected.damping),
+            ("min_damping", resolved.min_damping, expected.min_damping),
+        ] {
+            assert_eq!(
+                left.to_bits(),
+                right.to_bits(),
+                "{field} differs in its bits"
+            );
+        }
+        for (resolved_tone, expected_tone) in resolved.tones.iter().zip(&expected.tones) {
+            assert_eq!(
+                resolved_tone.frequency.to_bits(),
+                expected_tone.frequency.to_bits(),
+                "tone {} frequency differs in its bits",
+                resolved_tone.name
+            );
+        }
+    }
+
+    /// The four shapes a `.HB` card with no keywords can take, each against
+    /// the configuration the documented rule builds by hand. This is the
+    /// guarantee every deck written before the card had keywords depends on:
+    /// the typed card changed the plumbing and nothing else.
+    #[test]
+    fn an_hb_card_without_keywords_resolves_as_it_always_has() {
+        let default_order = HbConfig::new(1.0e9).num_harmonics;
+
+        // One tone, no option: the solver's own order and its own grid.
+        assert_bit_identical(
+            &HbConfig::from_hb_card(&tones_only(&[1.0e9]), &SimulationOptions::default())
+                .expect("a one-tone .HB resolves"),
+            &HbConfig::new(1.0e9).with_harmonics(default_order),
+        );
+
+        // One tone with NUMFREQ: the stated order and the minimal 2N+1 grid.
+        assert_bit_identical(
+            &HbConfig::from_hb_card(&tones_only(&[1.0e9]), &numfreq(&[5]))
+                .expect("an explicit order resolves"),
+            &HbConfig::new(1.0e9)
+                .with_harmonics(5)
+                .with_collocation_points(11),
+        );
+
+        // Two tones, no option: the common basis at the default order.
+        let two_tone_default = HbConfig::multi_tone(vec![
+            HbTone::new(9.0e8, HbConfig::new(9.0e8).num_harmonics).with_name("tone1"),
+            HbTone::new(8.0e8, HbConfig::new(8.0e8).num_harmonics).with_name("tone2"),
+        ]);
+        assert_bit_identical(
+            &HbConfig::from_hb_card(&tones_only(&[9.0e8, 8.0e8]), &SimulationOptions::default())
+                .expect("a two-tone .HB resolves"),
+            &two_tone_default,
+        );
+
+        // Two tones with a broadcast order, and the same orders paired.
+        let two_tone_paired = HbConfig::multi_tone(vec![
+            HbTone::new(9.0e8, 4).with_name("tone1"),
+            HbTone::new(8.0e8, 4).with_name("tone2"),
+        ]);
+        assert_bit_identical(
+            &HbConfig::from_hb_card(&tones_only(&[9.0e8, 8.0e8]), &numfreq(&[4]))
+                .expect("broadcasting resolves"),
+            &two_tone_paired,
+        );
+        assert_bit_identical(
+            &HbConfig::from_hb_card(&tones_only(&[9.0e8, 8.0e8]), &numfreq(&[4, 4]))
+                .expect("pairing resolves"),
+            &two_tone_paired,
+        );
+    }
+
+    /// One row of the keyword sweep: the clause a card carries, what the
+    /// resolution must then hold, and how to put that one field back so the
+    /// rest of the configuration can be compared against the keyword-less
+    /// resolution.
+    struct KeywordRow {
+        clause: &'static str,
+        holds: fn(&HbConfig) -> bool,
+        restore: fn(&mut HbConfig, &HbConfig),
+    }
+
+    /// Every keyword, one at a time, at a value that is not its default:
+    /// the field it names moves, and nothing else does.
+    #[test]
+    fn every_hb_keyword_moves_exactly_the_field_it_names() {
+        let baseline = resolve(".HB 900MEG").expect("a keyword-less one-tone card resolves");
+        let rows = [
+            // HARMS names the harmonic count; the minimal bilateral grid an
+            // explicit count asks for comes with it, as it does for NUMFREQ.
+            KeywordRow {
+                clause: "HARMS=5",
+                holds: |config| config.num_harmonics == 5 && config.collocation_points == Some(11),
+                restore: |authored, baseline| {
+                    authored.num_harmonics = baseline.num_harmonics;
+                    authored.collocation_points = baseline.collocation_points;
+                },
+            },
+            // A named source is carried as the tone that holds the filter.
+            KeywordRow {
+                clause: "SOURCE1=V1",
+                holds: |config| {
+                    config.tones.len() == 1
+                        && config.tones[0].source_name.as_deref() == Some("V1")
+                        && config.tones[0].frequency == config.fundamental_freq
+                },
+                restore: |authored, baseline| authored.tones = baseline.tones.clone(),
+            },
+            KeywordRow {
+                clause: "OVERSAMPLE=4",
+                holds: |config| config.oversample_factor == 4,
+                restore: |authored, baseline| {
+                    authored.oversample_factor = baseline.oversample_factor
+                },
+            },
+            KeywordRow {
+                clause: "POINTS=101",
+                holds: |config| config.collocation_points == Some(101),
+                restore: |authored, baseline| {
+                    authored.collocation_points = baseline.collocation_points
+                },
+            },
+            KeywordRow {
+                clause: "MAXMIXING=7",
+                holds: |config| config.max_mixing_order == 7,
+                restore: |authored, baseline| authored.max_mixing_order = baseline.max_mixing_order,
+            },
+            KeywordRow {
+                clause: "RELTOL=1e-8",
+                holds: |config| config.tolerance == 1.0e-8,
+                restore: |authored, baseline| authored.tolerance = baseline.tolerance,
+            },
+            KeywordRow {
+                clause: "ABSTOL=1e-14",
+                holds: |config| config.abstol == 1.0e-14,
+                restore: |authored, baseline| authored.abstol = baseline.abstol,
+            },
+            KeywordRow {
+                clause: "MAXITER=42",
+                holds: |config| config.max_iterations == 42,
+                restore: |authored, baseline| authored.max_iterations = baseline.max_iterations,
+            },
+            KeywordRow {
+                clause: "DAMPING=0.5",
+                holds: |config| config.damping == 0.5,
+                restore: |authored, baseline| authored.damping = baseline.damping,
+            },
+            KeywordRow {
+                clause: "MINDAMPING=0.02",
+                holds: |config| config.min_damping == 0.02,
+                restore: |authored, baseline| authored.min_damping = baseline.min_damping,
+            },
+            KeywordRow {
+                clause: "SOLVER=KRYLOV",
+                holds: |config| config.use_krylov,
+                restore: |authored, baseline| authored.use_krylov = baseline.use_krylov,
+            },
+            KeywordRow {
+                clause: "GMRESRESTART=16",
+                holds: |config| config.gmres_restart == 16,
+                restore: |authored, baseline| authored.gmres_restart = baseline.gmres_restart,
+            },
+            KeywordRow {
+                clause: "SOURCESTEPPING=yes",
+                holds: |config| config.source_stepping,
+                restore: |authored, baseline| authored.source_stepping = baseline.source_stepping,
+            },
+            KeywordRow {
+                clause: "EXACTJACOBIAN=no",
+                holds: |config| !config.use_exact_jacobian,
+                restore: |authored, baseline| {
+                    authored.use_exact_jacobian = baseline.use_exact_jacobian
+                },
+            },
+            KeywordRow {
+                clause: "VERBOSE=yes",
+                holds: |config| config.verbose,
+                restore: |authored, baseline| authored.verbose = baseline.verbose,
+            },
+        ];
+
+        // Every field the vocabulary can reach is exercised: a keyword added
+        // to the card without a row here would leave its field unproven.
+        assert_eq!(rows.len(), 15, "one row per .HB keyword");
+
+        for row in rows {
+            let mut authored = resolve(&format!(".HB 900MEG {}", row.clause))
+                .unwrap_or_else(|error| panic!("{} resolves: {error}", row.clause));
+            assert!(
+                (row.holds)(&authored),
+                "{} did not reach its field: {authored:?}",
+                row.clause
+            );
+            assert_ne!(
+                authored, baseline,
+                "{} is written at its own default and proves nothing",
+                row.clause
+            );
+            (row.restore)(&mut authored, &baseline);
+            assert_eq!(
+                authored, baseline,
+                "{} moved a field it does not name",
+                row.clause
+            );
+        }
+    }
+
+    /// The harmonic count has one home. A deck that states it on the card and
+    /// in `.OPTIONS` is refused by name, not given a precedence rule.
+    #[test]
+    fn a_harmonic_count_stated_on_the_card_and_in_hbint_is_refused() {
+        let error = resolve(".options hbint numfreq=5\n.HB 900MEG HARMS=3")
+            .expect_err("a harmonic count stated twice is refused");
+        assert_eq!(error.field(), "num_harmonics");
+        assert_eq!(
+            error.to_string(),
+            "num_harmonics .HB states the harmonic count on the card (HARMS=) and in \
+             .OPTIONS HBINT NUMFREQ; keep one"
+        );
+        // Each spelling on its own still resolves, and to the same order.
+        assert_eq!(
+            resolve(".options hbint numfreq=3\n.HB 900MEG")
+                .expect("the option alone resolves")
+                .num_harmonics,
+            3
+        );
+        assert_eq!(
+            resolve(".HB 900MEG HARMS=3")
+                .expect("the card alone resolves")
+                .num_harmonics,
+            3
+        );
+    }
+
+    /// So does the Newton budget.
+    #[test]
+    fn a_newton_budget_stated_on_the_card_and_in_nonlin_hb_is_refused() {
+        let error = resolve(".options nonlin-hb maxstep=7\n.HB 900MEG MAXITER=42")
+            .expect_err("a Newton budget stated twice is refused");
+        assert_eq!(error.field(), "max_iterations");
+        assert_eq!(
+            error.to_string(),
+            "max_iterations .HB states the Newton iteration budget on the card (MAXITER=) and \
+             in .OPTIONS NONLIN-HB MAXSTEP; keep one"
+        );
+        assert_eq!(
+            resolve(".options nonlin-hb maxstep=7\n.HB 900MEG")
+                .expect("the option alone resolves")
+                .max_iterations,
+            HbConfig::new(9.0e8).max_iterations,
+            "the option is applied by the engine, not by this resolution"
+        );
+        assert_eq!(
+            resolve(".HB 900MEG MAXITER=42")
+                .expect("the card alone resolves")
+                .max_iterations,
+            42
+        );
+    }
+
+    /// The Studio's basis rule, now core's: 900 MHz and 800 MHz at three
+    /// harmonics each sit at harmonics 9 and 8 of a 100 MHz basis, which
+    /// needs 27 common-basis harmonics; a card that asks to see fifth-order
+    /// mixing needs 45. A card that does not ask still gets 27, so no deck
+    /// written before the keyword existed moves.
+    #[test]
+    fn an_authored_mixing_order_widens_a_two_tone_basis() {
+        let plain = resolve(".HB 900MEG 800MEG HARMS=3").expect("a two-tone card resolves");
+        assert_eq!(plain.fundamental_freq, 1.0e8);
+        assert_eq!(plain.num_harmonics, 27);
+        assert_eq!(plain.max_mixing_order, 5, "the default mixing order");
+
+        let widened =
+            resolve(".HB 900MEG 800MEG HARMS=3 MAXMIXING=5").expect("an authored order resolves");
+        assert_eq!(widened.fundamental_freq, 1.0e8);
+        assert_eq!(widened.num_harmonics, 45);
+
+        // The widening is the maximum of the two rules, so an order that asks
+        // for less than the tones already need cannot shrink the basis.
+        assert_eq!(
+            resolve(".HB 900MEG 800MEG HARMS=3 MAXMIXING=2")
+                .expect("a low mixing order resolves")
+                .num_harmonics,
+            27
+        );
+        // One tone has nothing to mix with, so its basis is untouched.
+        assert_eq!(
+            resolve(".HB 900MEG HARMS=3 MAXMIXING=5")
+                .expect("a one-tone card resolves")
+                .num_harmonics,
+            3
+        );
+    }
+
+    /// Two tones that share no low-order basis are refused by name rather
+    /// than placed on a basis the spectrum cannot reach.
+    #[test]
+    fn incommensurate_tones_are_refused_by_name() {
+        let error = HbConfig::from_hb_card(
+            &tones_only(&[1.0e9, 1.0001e9]),
+            &SimulationOptions::default(),
+        )
+        .expect_err("an incommensurate tone pair cannot be placed");
+        assert_eq!(error.field(), "tones");
+        assert_eq!(
+            error.to_string(),
+            "tones tone 0 requires common-basis harmonic 90000, beyond num_harmonics 4096"
+        );
+    }
 
     #[test]
     fn multi_tone_derives_the_common_basis() {
@@ -788,7 +1313,8 @@ mod tests {
 
     #[test]
     fn a_card_with_no_numfreq_keeps_the_core_default_order_and_grid() {
-        let config = HbConfig::from_hb_card(&[1.0e9], &[]).expect("a one-tone .HB resolves");
+        let config = HbConfig::from_hb_card(&tones_only(&[1.0e9]), &SimulationOptions::default())
+            .expect("a one-tone .HB resolves");
         assert_eq!(config.fundamental_freq, 1.0e9);
         assert_eq!(config.num_harmonics, HbConfig::new(1.0e9).num_harmonics);
         assert_eq!(
@@ -799,7 +1325,8 @@ mod tests {
 
     #[test]
     fn an_explicit_single_tone_order_pins_the_minimal_bilateral_grid() {
-        let config = HbConfig::from_hb_card(&[1.0e9], &[5]).expect("an explicit order resolves");
+        let config = HbConfig::from_hb_card(&tones_only(&[1.0e9]), &numfreq(&[5]))
+            .expect("an explicit order resolves");
         assert_eq!(config.num_harmonics, 5);
         assert_eq!(
             config.collocation_points,
@@ -810,9 +1337,10 @@ mod tests {
 
     #[test]
     fn one_order_broadcasts_across_every_tone() {
-        let broadcast =
-            HbConfig::from_hb_card(&[9.0e8, 8.0e8], &[4]).expect("broadcasting resolves");
-        let paired = HbConfig::from_hb_card(&[9.0e8, 8.0e8], &[4, 4]).expect("pairing resolves");
+        let broadcast = HbConfig::from_hb_card(&tones_only(&[9.0e8, 8.0e8]), &numfreq(&[4]))
+            .expect("broadcasting resolves");
+        let paired = HbConfig::from_hb_card(&tones_only(&[9.0e8, 8.0e8]), &numfreq(&[4, 4]))
+            .expect("pairing resolves");
         assert_eq!(broadcast.fundamental_freq, paired.fundamental_freq);
         assert_eq!(broadcast.num_harmonics, paired.num_harmonics);
         assert_eq!(broadcast.tones.len(), 2);
@@ -828,7 +1356,9 @@ mod tests {
 
     #[test]
     fn a_multi_tone_card_uses_the_core_common_basis_rule() {
-        let config = HbConfig::from_hb_card(&[9.0e8, 8.0e8], &[]).expect("a two-tone .HB resolves");
+        let config =
+            HbConfig::from_hb_card(&tones_only(&[9.0e8, 8.0e8]), &SimulationOptions::default())
+                .expect("a two-tone .HB resolves");
         let default_order = HbConfig::new(9.0e8).num_harmonics;
         let expected = HbConfig::multi_tone(vec![
             HbTone::new(9.0e8, default_order).with_name("tone1"),
@@ -848,7 +1378,7 @@ mod tests {
             (vec![1.0e9], vec![0]),
             (vec![1.0e9, 2.0e9], vec![3, 4, 5]),
         ] {
-            HbConfig::from_hb_card(&frequencies, &orders)
+            HbConfig::from_hb_card(&tones_only(&frequencies), &numfreq(&orders))
                 .expect_err("an impossible .HB card must fail before any solve");
         }
     }

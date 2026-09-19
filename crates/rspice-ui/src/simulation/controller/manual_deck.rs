@@ -608,7 +608,7 @@ fn command_name(command: &AnalysisCommand) -> &'static str {
         AnalysisCommand::Dc { .. } => ".dc",
         AnalysisCommand::Ac { .. } => ".ac",
         AnalysisCommand::AcData { .. } => ".ac data",
-        AnalysisCommand::Hb { .. } => ".hb",
+        AnalysisCommand::Hb(_) => ".hb",
         AnalysisCommand::Sp { .. } => ".sp",
         AnalysisCommand::Stb { .. } => ".stb",
         AnalysisCommand::Disto { .. } => ".disto",
@@ -865,7 +865,8 @@ fn command_to_queue_item(
             spec_options,
             analysis_line: format!(".ac data={table_name}"),
         }),
-        AnalysisCommand::Hb { frequencies } => {
+        AnalysisCommand::Hb(hb) => {
+            let frequencies = &hb.frequencies;
             let defaults =
                 rspice_core::analysis::HbConfig::new(frequencies.first().copied().unwrap_or(1.0));
             let order_for = |index: usize| {

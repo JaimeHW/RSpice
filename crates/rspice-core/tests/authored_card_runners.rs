@@ -705,8 +705,12 @@ fn an_stb_card_becomes_its_configuration_in_one_place() {
     );
 }
 
+//======================================================================}
+
 //=============================================================================
 // .PXF
+//======================================================================}
+
 //=============================================================================
 
 const PXF_FUNDAMENTAL: f64 = 1.0e6;
@@ -977,8 +981,12 @@ fn an_authored_pxf_card_honours_cancellation() {
     ));
 }
 
+//======================================================================}
+
 //=============================================================================
 // .PSTB
+//======================================================================}
+
 //=============================================================================
 
 const PSTB_FUNDAMENTAL: f64 = 1.0e6;
@@ -1410,8 +1418,12 @@ fn a_periodic_map_with_no_dynamic_state_cannot_reach_a_pstb_card() {
     );
 }
 
+//======================================================================}
+
 //=============================================================================
 // `.FOUR`
+//======================================================================}
+
 //=============================================================================
 
 /// A `.FOUR` card that authors no window keyword is the card it has always
@@ -1499,4 +1511,210 @@ fn a_four_card_without_keywords_integrates_the_last_period_as_before() {
         matches!(command, AnalysisCommand::Tran { .. })
     });
     assert!(FourierConfig::try_from(&other).is_err());
+}
+
+//=============================================================================
+// .HB — the card is the only channel a harmonic-balance control travels
+//======================================================================}
+
+//=============================================================================
+
+/// The RC low pass the closed form below describes: one tone, one pole.
+///
+/// `R * C = 1 ms` against a 1 kHz drive puts the pole an octave-and-a-bit
+/// inside the fundamental, so the transfer is a number a wrong grid or a
+/// wrong harmonic count could not accidentally reproduce.
+const HB_RC_LOW_PASS: &str = "\
+* harmonic balance RC low pass
+v1 in 0 sin(0 1 1k)
+r1 in out 1k
+c1 out 0 1u
+";
+
+/// A rectifier whose Newton solve takes more than one step.
+const HB_RECTIFIER: &str = "\
+* harmonic balance diode rectifier
+v1 in 0 sin(0 2 1meg)
+r1 in a 50
+d1 a out dmod
+rl out 0 1k
+cl out 0 10n
+.model dmod D IS=1e-14 N=1.8
+";
+
+/// Resolve the `.HB` card of a deck the way every surface does.
+fn hb_config(netlist: &Netlist) -> rspice_core::analysis::HbConfig {
+    let card = netlist
+        .analyses
+        .iter()
+        .find_map(|analysis| match analysis {
+            AnalysisCommand::Hb(card) => Some((**card).clone()),
+            _ => None,
+        })
+        .expect("the deck authors one .HB card");
+    rspice_core::analysis::HbConfig::from_hb_card(&card, &netlist.options)
+        .expect("the authored .HB card resolves")
+}
+
+/// The coefficient of one node at one harmonic.
+fn hb_coefficient(
+    result: &rspice_core::analysis::harmonic_balance::HbResult,
+    node: &str,
+    harmonic: usize,
+) -> num_complex::Complex64 {
+    result
+        .spectral_voltages
+        .iter()
+        .find(|spectrum| spectrum.node_name.eq_ignore_ascii_case(node))
+        .unwrap_or_else(|| panic!("the result carries node {node}"))
+        .coefficients[harmonic]
+}
+
+/// A `.HB` card that states its harmonic count, its oversampling and its
+/// collocation grid solves the circuit those keywords describe, and the
+/// answer is the one-pole transfer the circuit has.
+///
+/// The ratio of the output coefficient to the input coefficient at the
+/// fundamental is convention-free: whatever one-sided scaling the solver
+/// uses for a `SIN` drive divides out, leaving `1 / (1 + j2*pi*f*R*C)`
+/// exactly. Every harmonic above the first is driven by nothing in a linear
+/// circuit, so it must be zero rather than small.
+#[test]
+fn a_card_configured_harmonic_balance_solves_the_rc_low_pass_it_describes() {
+    let netlist = Netlist::parse(&format!(
+        "{HB_RC_LOW_PASS}.hb 1k HARMS=4 OVERSAMPLE=4 POINTS=33\n.end\n"
+    ))
+    .expect("the deck parses");
+    let config = hb_config(&netlist);
+    assert_eq!(config.num_harmonics, 4, "HARMS reached the solve");
+    assert_eq!(config.oversample_factor, 4, "OVERSAMPLE reached the solve");
+    assert_eq!(
+        config.collocation_points,
+        Some(33),
+        "POINTS replaced the grid the harmonic count implies"
+    );
+
+    let result = Engine::default()
+        .run_hb(&netlist, config)
+        .expect("the configured HB solve completes");
+    assert!(result.converged, "a linear HB system converges");
+    assert_eq!(result.num_harmonics, 4);
+
+    // 1 / (1 + j*omega*R*C), omega*R*C = 2*pi*1000 * 1000 * 1e-6.
+    let omega_rc = std::f64::consts::TAU * 1.0e3 * 1.0e3 * 1.0e-6;
+    let expected =
+        num_complex::Complex64::new(1.0, 0.0) / num_complex::Complex64::new(1.0, omega_rc);
+    let measured =
+        hb_coefficient(&result.result, "out", 1) / hb_coefficient(&result.result, "in", 1);
+    assert!(
+        (measured.norm() - expected.norm()).abs() < 1.0e-9,
+        "|H| is {} and the closed form is {}",
+        measured.norm(),
+        expected.norm()
+    );
+    assert!(
+        (measured.arg() - expected.arg()).abs() < 1.0e-9,
+        "arg H is {} rad and the closed form is {} rad",
+        measured.arg(),
+        expected.arg()
+    );
+
+    for harmonic in 2..=result.num_harmonics {
+        assert!(
+            hb_coefficient(&result.result, "out", harmonic).norm() < 1.0e-9,
+            "a linear circuit driven at one tone has no harmonic {harmonic}"
+        );
+    }
+}
+
+/// Naming the source a lone tone drives changes how the tone is carried —
+/// the filter lives on an `HbTone`, so the configuration gains one — but not
+/// what is solved: the same single harmonic, driven by the same source, on a
+/// circuit whose answer does not depend on the collocation grid.
+#[test]
+fn a_one_tone_card_solves_the_same_spectrum_with_and_without_its_source_named() {
+    let broadcast = Netlist::parse(&format!("{HB_RC_LOW_PASS}.hb 1k\n.end\n")).expect("parses");
+    let named = Netlist::parse(&format!("{HB_RC_LOW_PASS}.hb 1k SOURCE1=V1\n.end\n"))
+        .expect("the named-source deck parses");
+
+    let broadcast_config = hb_config(&broadcast);
+    let named_config = hb_config(&named);
+    assert!(
+        broadcast_config.tones.is_empty(),
+        "an unnamed lone tone is carried as the basis itself"
+    );
+    assert_eq!(named_config.tones.len(), 1);
+    assert_eq!(
+        named_config.tones[0].source_name.as_deref(),
+        Some("V1"),
+        "the filter is on the tone"
+    );
+
+    let broadcast_result = Engine::default()
+        .run_hb(&broadcast, broadcast_config)
+        .expect("the broadcast solve completes");
+    let named_result = Engine::default()
+        .run_hb(&named, named_config)
+        .expect("the named-source solve completes");
+    assert_eq!(
+        broadcast_result.num_harmonics, named_result.num_harmonics,
+        "naming the source cannot change the spectrum's length"
+    );
+
+    for node in ["in", "out"] {
+        for harmonic in 0..=broadcast_result.num_harmonics {
+            let left = hb_coefficient(&broadcast_result.result, node, harmonic);
+            let right = hb_coefficient(&named_result.result, node, harmonic);
+            assert!(
+                (left - right).norm() < 1.0e-9,
+                "{node} harmonic {harmonic}: {left} against {right}"
+            );
+        }
+    }
+    // The drive is real: the fundamental is not accidentally zero on both
+    // sides, which would make the comparison vacuous.
+    assert!(hb_coefficient(&broadcast_result.result, "out", 1).norm() > 0.1);
+}
+
+/// `MAXITER=` is the Newton budget, and a budget of one is not enough for a
+/// rectifier: the run is refused where the same card without the keyword
+/// converges.
+///
+/// The refusal counts more iterations than the budget because the budget is
+/// per attempt: a failed Newton solve falls back onto source stepping and a
+/// pseudo-transient continuation, each rung budgeted from the card's number,
+/// and the reported count is their total. What the card states is how long
+/// any one of those attempts may run, and at one step none of them arrive.
+#[test]
+fn a_one_iteration_budget_on_the_card_stops_a_rectifier_solve() {
+    let budgeted = Netlist::parse(&format!("{HB_RECTIFIER}.hb 1meg HARMS=8 MAXITER=1\n.end\n"))
+        .expect("the budgeted deck parses");
+    let config = hb_config(&budgeted);
+    assert_eq!(config.max_iterations, 1);
+    let error = Engine::default()
+        .run_hb(&budgeted, config)
+        .expect_err("one Newton step cannot solve a rectifier")
+        .to_string();
+    assert!(
+        error.contains("Convergence failed after"),
+        "the refusal must be the convergence failure the budget caused: {error}"
+    );
+
+    let unbudgeted =
+        Netlist::parse(&format!("{HB_RECTIFIER}.hb 1meg HARMS=8\n.end\n")).expect("parses");
+    let config = hb_config(&unbudgeted);
+    assert_eq!(
+        config.max_iterations,
+        rspice_core::analysis::HbConfig::new(1.0e6).max_iterations,
+        "an unauthored budget is the engine's own"
+    );
+    let result = Engine::default()
+        .run_hb(&unbudgeted, config)
+        .expect("the default budget solves the rectifier");
+    assert!(result.converged);
+    assert!(
+        result.result.iterations > 1,
+        "the rectifier needed more than the refused budget: {}",
+        result.result.iterations
+    );
 }

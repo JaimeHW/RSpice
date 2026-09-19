@@ -264,7 +264,7 @@ pub(super) fn analysis_record_kind(analysis: &AnalysisCommand) -> &'static str {
         AnalysisCommand::Tran { .. } => "tran",
         AnalysisCommand::Ac { .. } => "ac",
         AnalysisCommand::AcData { .. } => "ac_data",
-        AnalysisCommand::Hb { .. } => "hb",
+        AnalysisCommand::Hb(_) => "hb",
         AnalysisCommand::Disto { .. } => "disto",
         AnalysisCommand::Sp { .. } => "sp",
         AnalysisCommand::Noise { .. } => "noise",

@@ -461,7 +461,7 @@ impl XyceTestRunner {
             .analyses
             .iter()
             .filter_map(|analysis| match analysis {
-                AnalysisCommand::Hb { frequencies } => Some(frequencies),
+                AnalysisCommand::Hb(card) => Some(&card.frequencies),
                 _ => None,
             })
             .collect::<Vec<_>>();

@@ -97,12 +97,13 @@ impl XyceTestRunner {
 
         let netlist = Self::parse_xyce_netlist(&source, &deck.path)
             .map_err(|err| format!("HB netlist parse failed: {err}"))?;
-        let [AnalysisCommand::Hb { frequencies }] = netlist.analyses.as_slice() else {
+        let [AnalysisCommand::Hb(hb)] = netlist.analyses.as_slice() else {
             return Err(
                 "static HB requires exactly one .HB analysis and no other analysis cards"
                     .to_string(),
             );
         };
+        let frequencies = &hb.frequencies;
         let [frequency] = frequencies.as_slice() else {
             return Err(format!(
                 "static HB currently supports one tone, found {}",

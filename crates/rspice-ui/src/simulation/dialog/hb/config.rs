@@ -262,15 +262,13 @@ mod tests {
 
     fn parsed_frequencies(config: &HbConfig) -> Vec<f64> {
         let netlist = parse_through_the_deck(config);
-        let [rspice_core::netlist::AnalysisCommand::Hb { frequencies }] =
-            netlist.analyses.as_slice()
-        else {
+        let [rspice_core::netlist::AnalysisCommand::Hb(card)] = netlist.analyses.as_slice() else {
             panic!(
                 "the deck must carry exactly one .HB command: {:?}",
                 netlist.analyses
             );
         };
-        frequencies.clone()
+        card.frequencies.clone()
     }
 
     #[test]

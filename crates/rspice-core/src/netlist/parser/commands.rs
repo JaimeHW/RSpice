@@ -127,32 +127,7 @@ pub(super) fn parse_command(
             parse_lin_command(stream, line_num, params, lin_analysis)?;
         }
         ".HB" => {
-            let mut frequencies = Vec::new();
-            while !stream.is_eof()
-                && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof)
-            {
-                skip_commas(stream);
-                if matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
-                    break;
-                }
-                let frequency = expect_value(stream, line_num, params)?;
-                if !frequency.is_finite() || frequency <= 0.0 {
-                    return Err(ParseError::Syntax {
-                        line: line_num,
-                        message: format!(
-                            ".HB frequencies must be positive finite numbers, found {frequency}"
-                        ),
-                    });
-                }
-                frequencies.push(frequency);
-            }
-            if frequencies.is_empty() {
-                return Err(ParseError::Syntax {
-                    line: line_num,
-                    message: ".HB requires at least one positive frequency".to_string(),
-                });
-            }
-            analyses.push(AnalysisCommand::Hb { frequencies });
+            analyses.push(hb_card::parse_hb_command(stream, line_num, params)?);
         }
         ".PSS" => {
             analyses.push(periodic_cards::parse_pss_command(stream, line_num, params)?);
@@ -7519,11 +7494,10 @@ mod tests {
         )
         .expect("valid multi-tone HB deck parses");
 
-        let [crate::netlist::AnalysisCommand::Hb { frequencies }] = netlist.analyses.as_slice()
-        else {
+        let [crate::netlist::AnalysisCommand::Hb(card)] = netlist.analyses.as_slice() else {
             panic!("expected one HB analysis")
         };
-        assert_eq!(frequencies, &[10.0e3, 20.0e3]);
+        assert_eq!(card.frequencies, [10.0e3, 20.0e3]);
         assert_eq!(netlist.options.hb_num_frequencies, vec![50, 25]);
     }
 

@@ -97,6 +97,7 @@ pub(super) fn card_count(
 ) -> Result<usize, ParseError> {
     let expected: &'static str = match minimum {
         1 => "a whole number >= 1",
+        2 => "a whole number >= 2",
         16 => "a whole number >= 16",
         _ => "a whole number",
     };

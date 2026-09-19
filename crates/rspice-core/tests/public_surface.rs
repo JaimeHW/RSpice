@@ -975,7 +975,16 @@ use rspice_core::analysis::harmonic_balance::{
 /// Established by `git grep` over `crates/` and by compiling the CLI, the
 /// Python and WASM bindings, the engine adapter and the conformance suite
 /// against the removal: no dependent named any of them.
-const MAX_PUBLIC_ITEMS: usize = 5071;
+///
+/// +1 is `HbCard`, the typed `.HB` card, on the `PssCard`/`PstbCard`/
+/// `DcMatchCard` precedent. `HbConfig::from_hb_card` takes it instead of a
+/// bare frequency slice, so the card is the only channel a harmonic-balance
+/// control can reach the solve through: a surface that would have carried one
+/// beside the deck now has nowhere to put it, and a control the card gains
+/// reaches the CLI, the Python and WASM bindings, the engine adapter and the
+/// Studio at once. Its fields and the `AnalysisCommand::Hb` variant that
+/// boxes it are free; nothing else was added.
+const MAX_PUBLIC_ITEMS: usize = 5072;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

@@ -2078,7 +2078,7 @@ mod tests {
         )
         .expect("typed multi-tone Xyce deck parses");
         let frequencies = match &netlist.analyses[0] {
-            crate::netlist::AnalysisCommand::Hb { frequencies } => frequencies,
+            crate::netlist::AnalysisCommand::Hb(card) => &card.frequencies,
             other => panic!("expected parsed HB command, got {other:?}"),
         };
         assert_eq!(frequencies, &[2.0e6, 3.0e6]);

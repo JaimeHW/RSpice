@@ -505,6 +505,49 @@ fn run_family(dir: &Path, run: &FamilyRun) -> (std::process::Output, PathBuf) {
     crate::run(dir, run.circuit, run.cards, run.flags, "json")
 }
 
+/// A `.HB` card that states its own harmonic count needs no `.OPTIONS` line
+/// beside it: `rspice run` solves the spectrum the card names.
+///
+/// Five harmonics and DC are six components per node, and the frequency axis
+/// is the fundamental's multiples, so the count on the card is visible in the
+/// published document rather than only in the solver's configuration.
+#[test]
+fn the_command_line_solves_the_harmonics_an_hb_card_names() {
+    let dir = test_dir("hb_card_harmonics");
+    let (output, requested) = run(&dir, None, ".HB 1k HARMS=5\n", &[], "json");
+    assert!(
+        output.status.success(),
+        "an .HB card carrying HARMS= failed to run:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let document = read_json(&requested);
+
+    let harmonics = document["scalars"]
+        .as_array()
+        .expect("the HB document has scalars")
+        .iter()
+        .find(|scalar| scalar["name"].as_str() == Some("harmonic_count"))
+        .unwrap_or_else(|| panic!("no harmonic_count scalar in {document:#}"));
+    assert_eq!(
+        harmonics["value"]["value"], 5,
+        "the card's HARMS= is the harmonic count that was solved"
+    );
+
+    let frequency = document["axes"]
+        .as_array()
+        .expect("the HB document has axes")
+        .iter()
+        .find(|axis| axis["name"].as_str() == Some("frequency"))
+        .unwrap_or_else(|| panic!("no frequency axis in {document:#}"));
+    let values = frequency["values"]["values"]
+        .as_array()
+        .expect("the frequency axis carries its coordinates");
+    assert_eq!(values.len(), 6, "DC and five harmonics are six components");
+    assert_eq!(values[0].as_f64(), Some(0.0));
+    assert_eq!(values[1].as_f64(), Some(1.0e3));
+    assert_eq!(values[5].as_f64(), Some(5.0e3));
+}
+
 /// HDF5 keys its section group by the analysis instance, not by the result
 /// family, so two `.AC` cards in one deck cannot collide and a reader can tell
 /// which card a group came from without reading the filename.

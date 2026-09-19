@@ -165,15 +165,13 @@ pub(super) fn execute(
                 describe_analysis(analysis),
             ));
         }
-        AnalysisCommand::Hb { frequencies } => {
-            // The default harmonic order, the multi-tone common basis, and
-            // Xyce's explicit single-tone NUMFREQ collocation contract all
-            // belong to `rspice-core`.
-            let config = rspice_core::analysis::HbConfig::from_hb_card(
-                frequencies,
-                &net.options.hb_num_frequencies,
-            )
-            .map_err(|error| crate::errors::value_error(error.to_string()))?;
+        AnalysisCommand::Hb(card) => {
+            // Every control the solve reads is on the card, and resolving it
+            // against the deck's options — the default harmonic order, the
+            // multi-tone common basis, Xyce's explicit single-tone NUMFREQ
+            // collocation contract — belongs to `rspice-core`.
+            let config = rspice_core::analysis::HbConfig::from_hb_card(card, &net.options)
+                .map_err(|error| crate::errors::value_error(error.to_string()))?;
             let engine = py_engine.engine_for_netlist(net);
             let result = run_interruptible(py, &py_engine.active_runs, |abort| {
                 engine.run_hb_with_abort(net, config, abort)
