@@ -16,6 +16,8 @@ use crate::ui::tokens::Tokens;
 use crate::ui::widgets::section_header;
 use crate::workbench::AppState;
 
+mod recorded_fft;
+
 use super::strip::{self, LegendChip};
 use super::well_hint;
 
@@ -37,6 +39,12 @@ struct HarmonicBalanceModel {
     magnitude_min: f64,
     magnitude_max: f64,
     retained_frequency_count: usize,
+    /// The recorded `.FFT` evidence, when the selected analysis carries it.
+    /// Absent for HB, `.FOUR` and the PSS spectrum, which is what keeps their
+    /// rendering exactly what it was.
+    fft: Option<crate::state::FftSpectrumEvidence>,
+    /// The smallest positive magnitude retained, for the decade ordinate.
+    smallest_positive_magnitude: Option<f64>,
 }
 
 /// A waveform is an HB magnitude only when result conversion retained the
@@ -108,6 +116,7 @@ fn build_model(state: &AppState, tokens: &Tokens) -> Option<HarmonicBalanceModel
     let mut frequency_max = f64::NEG_INFINITY;
     let mut magnitude_min = f64::INFINITY;
     let mut magnitude_max = f64::NEG_INFINITY;
+    let mut smallest_positive_magnitude: Option<f64> = None;
 
     for waveform in analysis
         .waveforms
@@ -121,6 +130,11 @@ fn build_model(state: &AppState, tokens: &Tokens) -> Option<HarmonicBalanceModel
             frequency_max = frequency_max.max(frequency);
             magnitude_min = magnitude_min.min(magnitude);
             magnitude_max = magnitude_max.max(magnitude);
+            if magnitude > 0.0 {
+                smallest_positive_magnitude = Some(
+                    smallest_positive_magnitude.map_or(magnitude, |held: f64| held.min(magnitude)),
+                );
+            }
         }
         traces.push(HarmonicTrace {
             name: waveform.complex.as_ref().map_or_else(
@@ -151,6 +165,8 @@ fn build_model(state: &AppState, tokens: &Tokens) -> Option<HarmonicBalanceModel
         magnitude_min,
         magnitude_max,
         retained_frequency_count,
+        fft: recorded_fft::evidence(analysis).cloned(),
+        smallest_positive_magnitude,
     })
 }
 
@@ -192,6 +208,18 @@ fn automatic_y_range(model: &HarmonicBalanceModel) -> Option<(f64, f64)> {
     padded_bounds(lower, upper)
 }
 
+/// The sentence a selected recorded FFT with a short history states.
+///
+/// Such a result is successful and retains no waveform, so it never reaches
+/// `build_model`; without this the sheet would show the generic empty hint
+/// for a run that has a specific, stated reason.
+fn active_incomplete_fft(state: &AppState) -> Option<String> {
+    let analysis = state.simulation.active_analysis()?;
+    analysis
+        .success
+        .then(|| recorded_fft::incomplete_history_sentence(analysis))?
+}
+
 fn active_hb_failure(state: &AppState) -> Option<&str> {
     let analysis = state.simulation.active_analysis()?;
     (matches!(
@@ -219,6 +247,10 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     let Some(model) = build_model(state, &tokens) else {
         if let Some(error) = active_hb_failure(state) {
             well_hint(ui, &format!("Spectrum execution failed: {error}"));
+        } else if let Some(sentence) = active_incomplete_fft(state) {
+            // A short record is a typed outcome, not a missing result: the
+            // two retained times are what say why, so they are what is shown.
+            well_hint(ui, &sentence);
         } else {
             well_hint(
                 ui,
@@ -275,6 +307,12 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
 
     let (frequency_scale, frequency_offset, frequency_unit) =
         quantity_policy.frequency_axis_transform();
+    // A recorded FFT is drawn on logarithmic decades over the engine's own
+    // linear magnitudes: the same picture as dB, with no derived array and no
+    // second cache. HB and `.FOUR` keep the linear ordinate they had.
+    let decades = model.fft.as_ref().and_then(|_| {
+        recorded_fft::decade_ordinate(model.smallest_positive_magnitude, model.magnitude_max, "")
+    });
     let mut spec = PlotSpec::new(
         Axis::linear(x0, x1, "Hz").with_display_transform(
             frequency_scale,
@@ -282,31 +320,44 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             frequency_unit,
         ),
         XScale::Linear,
-        Axis::linear_with(y0, y1, "", 7).with_label("magnitude"),
+        decades
+            .clone()
+            .unwrap_or_else(|| Axis::linear_with(y0, y1, "", 7).with_label("magnitude")),
     )
     .accessible_name("Retained complex coefficient spectrum")
     .accessible_detail(
         "Exact retained harmonic-balance magnitude coefficients. Solver tone configuration, harmonic order, convergence iterations, fundamental, and THD are shown only when retained.",
     );
     spec.left_margin = 64.0;
-    spec.ref_lines.push(plot::RefLine { y: 0.0 });
+    if decades.is_some() {
+        spec = spec.with_log_y();
+    } else {
+        spec.ref_lines.push(plot::RefLine { y: 0.0 });
+    }
 
     // Retained coefficients are discrete.  The stem underlay makes that
     // fact clear while the thin trace preserves shared cursor/readout and
     // keyboard accessibility behaviour from the Results plot primitive.
-    let stems = model
-        .traces
-        .iter()
-        .map(|trace| {
-            (
-                Arc::clone(&trace.frequency),
-                Arc::clone(&trace.magnitude),
-                trace.color,
-            )
-        })
-        .collect::<Vec<_>>();
+    // One painted segment per coefficient, so a long spectrum draws none:
+    // a recorded FFT can hold half a million bins, where HB holds tens.
+    let stems = if model.retained_frequency_count > recorded_fft::MAX_STEMMED_COEFFICIENTS {
+        Vec::new()
+    } else {
+        model
+            .traces
+            .iter()
+            .map(|trace| {
+                (
+                    Arc::clone(&trace.frequency),
+                    Arc::clone(&trace.magnitude),
+                    trace.color,
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+    let stem_floor = decades.as_ref().map_or(0.0, |axis| axis.min);
     spec.underlay = Some(Box::new(move |painter, mapper| {
-        let baseline = mapper.y(0.0);
+        let baseline = mapper.y(stem_floor);
         for (frequency, magnitude, color) in &stems {
             for (&x, &y) in frequency.iter().zip(magnitude.iter()) {
                 painter.line_segment(
@@ -380,6 +431,8 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     let Some(model) = build_model(state, &tokens) else {
         if let Some(error) = active_hb_failure(state) {
             super::panel_note(ui, &format!("Spectrum execution failed: {error}"));
+        } else if let Some(sentence) = active_incomplete_fft(state) {
+            super::panel_note(ui, &sentence);
         } else {
             super::panel_note(
                 ui,
@@ -410,18 +463,24 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
             "s"
         }
     );
-    let rows = [
-        ("Tones / f₀", retained_samples, true),
-        ("Harmonic order", "Not retained".to_owned(), false),
-        (
-            "Convergence",
-            "Completed · solver iterations not retained".to_owned(),
-            false,
-        ),
-        ("Fundamental", "Not retained".to_owned(), false),
-        ("THD", "Not retained".to_owned(), true),
-    ];
-    super::stat_table(ui, &rows);
+    // A recorded FFT states the transform the engine performed, so the
+    // "Not retained" rows below would be false of it.
+    if let Some(spectrum) = &model.fft {
+        super::stat_table(ui, &recorded_fft::inspector_rows(spectrum));
+    } else {
+        let rows = [
+            ("Tones / f₀", retained_samples, true),
+            ("Harmonic order", "Not retained".to_owned(), false),
+            (
+                "Convergence",
+                "Completed · solver iterations not retained".to_owned(),
+                false,
+            ),
+            ("Fundamental", "Not retained".to_owned(), false),
+            ("THD", "Not retained".to_owned(), true),
+        ];
+        super::stat_table(ui, &rows);
+    }
 
     section_header(ui, "Retained spectrum", None);
     let rows = [

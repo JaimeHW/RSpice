@@ -350,6 +350,10 @@ impl SimulationController {
                 events,
                 periodic_state,
                 convergence: _,
+                // A recorded spectrum is its own analysis's result, published
+                // by the FFT task that bound this transient's trajectory. The
+                // transient's own retained result and digest are unchanged.
+                spectra: _,
             } => {
                 let result = AnalysisResult::new(1, analysis_type, label.to_string())
                     .with_waveforms(self.build_time_waveforms_owned(time, waveforms))
@@ -977,6 +981,11 @@ impl SimulationController {
                 }
             }
 
+            SimulationResult::Fft { spectrum, .. } => {
+                recorded_fft_result::analysis_result(analysis_type, label, &spectrum, |x, w| {
+                    self.build_ac_waveforms_owned(x, w)
+                })
+            }
             SimulationResult::MeasurementsOnly { measurements } => {
                 let payload = AnalysisResultPayload::ScalarMeasurements {
                     values: measurements.into_iter().collect(),
@@ -1563,6 +1572,7 @@ mod convergence_conversion_tests {
                 .unwrap(),
             ));
             let result = crate::simulation::SimulationResult::Transient {
+                spectra: Vec::new(),
                 time: time.clone(),
                 waveforms: HashMap::from([(
                     "V(out)".to_owned(),
@@ -1685,6 +1695,7 @@ mod floquet_payload_conversion_tests {
             vec![0.0, 0.0],
         );
         SimulationResult::Transient {
+            spectra: Vec::new(),
             time: vec![0.0, 1.0],
             waveforms: HashMap::from([("V(out)".to_owned(), display)]),
             measurements: Vec::new(),
@@ -1899,6 +1910,7 @@ mod waveform_unit_conversion_tests {
     #[test]
     fn a_waveform_retains_the_unit_its_producer_measured_it_in() {
         let sim_result = crate::simulation::SimulationResult::Transient {
+            spectra: Vec::new(),
             time: vec![0.0, 1.0],
             waveforms: HashMap::from([
                 (
@@ -2032,6 +2044,7 @@ mod waveform_unit_conversion_tests {
         );
         let result = SimulationController::new().convert_to_analysis_result_with_metadata_owned(
             crate::simulation::SimulationResult::Transient {
+                spectra: Vec::new(),
                 time: vec![0.0, 1.0],
                 waveforms: HashMap::from([("V(env)".to_owned(), waveform)]),
                 measurements: Vec::new(),

@@ -854,6 +854,30 @@ impl AnalysisResult {
         self
     }
 
+    /// What to call this result where a reader sees its analysis named.
+    ///
+    /// A recorded `.FFT` is retained in the Fourier family, because that is
+    /// the family the Results contract already defines for a retained
+    /// coefficient spectrum. The family is not the analysis, though, and a
+    /// reader must never be told an FFT was a `.four`: the payload is what
+    /// says which request produced the result, so it is what answers here.
+    #[must_use]
+    pub fn kind_display_name(&self) -> &'static str {
+        match &self.result_payload {
+            Some(AnalysisResultPayload::FftSpectrum { .. }) => "FFT",
+            _ => self.analysis_type.display_name(),
+        }
+    }
+
+    /// The SPICE card a reader would author to reproduce this result.
+    #[must_use]
+    pub fn spice_card(&self) -> &'static str {
+        match &self.result_payload {
+            Some(AnalysisResultPayload::FftSpectrum { .. }) => ".fft",
+            _ => self.analysis_type.spice_command(),
+        }
+    }
+
     /// Attach exact analysis-native result evidence.
     #[must_use]
     pub fn with_result_payload(mut self, payload: AnalysisResultPayload) -> Self {

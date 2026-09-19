@@ -1034,6 +1034,38 @@ fn native_scalar_name_matches(name: &str, canonical: &str, dotted_compatibility:
     name.eq_ignore_ascii_case(canonical) || name.eq_ignore_ascii_case(dotted_compatibility)
 }
 
+/// The scalars a recorded FFT exposes, and only when the run asked for them.
+const FFT_METRIC_NAMES: &[&str] = &[
+    "fft_thd_db",
+    "fft_sndr_db",
+    "fft_enob_bits",
+    "fft_snr_db",
+    "fft_sfdr_db",
+    "fft_fundamental_magnitude",
+];
+
+fn fft_metric(metrics: &super::FftMetricsEvidence, name: &str) -> Option<f64> {
+    if native_scalar_name_matches(name, "fft_thd_db", "fft.thd_db") {
+        Some(metrics.thd_db)
+    } else if native_scalar_name_matches(name, "fft_sndr_db", "fft.sndr_db") {
+        Some(metrics.sndr_db)
+    } else if native_scalar_name_matches(name, "fft_enob_bits", "fft.enob_bits") {
+        Some(metrics.enob_bits)
+    } else if native_scalar_name_matches(name, "fft_snr_db", "fft.snr_db") {
+        Some(metrics.snr_db)
+    } else if native_scalar_name_matches(name, "fft_sfdr_db", "fft.sfdr_db") {
+        Some(metrics.sfdr_db)
+    } else if native_scalar_name_matches(
+        name,
+        "fft_fundamental_magnitude",
+        "fft.fundamental_magnitude",
+    ) {
+        Some(metrics.fundamental_magnitude)
+    } else {
+        None
+    }
+}
+
 /// Immutable, analysis-native result evidence that is neither waveform data
 /// nor presentation state.
 ///
@@ -1198,6 +1230,16 @@ pub enum AnalysisResultPayload {
         #[serde(default)]
         digital_buses: Vec<DigitalBusEvidence>,
     },
+    /// One `.FFT` spectrum the transient engine computed inside the solve that
+    /// carried its card.
+    ///
+    /// The coefficients are the result's own complex waveform; what cannot be
+    /// a waveform is here — which request produced it, what transform the
+    /// engine performed, and the Xyce-compatible figures when the run asked
+    /// for them.
+    FftSpectrum {
+        spectrum: super::FftSpectrumEvidence,
+    },
 }
 
 impl AnalysisResultPayload {
@@ -1321,6 +1363,12 @@ impl AnalysisResultPayload {
                 .iter()
                 .find(|(key, _)| key.eq_ignore_ascii_case(name))
                 .map(|(_, value)| *value),
+            // Only under `FFTOUT=1`: the engine computes no figure otherwise,
+            // and a zero here would read as a measured one.
+            Self::FftSpectrum { spectrum } => spectrum
+                .metrics
+                .as_ref()
+                .and_then(|metrics| fft_metric(metrics, name)),
             _ => None,
         }?;
         if !value.is_finite() {
@@ -1392,6 +1440,14 @@ impl AnalysisResultPayload {
                 names
             }
             Self::ScalarMeasurements { values } => values.keys().cloned().collect(),
+            Self::FftSpectrum { spectrum } => {
+                spectrum.metrics.as_ref().map_or_else(Vec::new, |_| {
+                    FFT_METRIC_NAMES
+                        .iter()
+                        .map(|name| (*name).to_owned())
+                        .collect()
+                })
+            }
             _ => Vec::new(),
         }
     }
@@ -1984,6 +2040,17 @@ impl AnalysisResultPayload {
                 )
                 .map_err(|error| error.to_string())?;
             }
+            Self::FftSpectrum { spectrum } => {
+                // The Fourier family owns every retained coefficient
+                // spectrum, which is why a recorded FFT joins it rather than
+                // adding a second family that renders the same fact.
+                if analysis_type != AnalysisType::Fourier {
+                    return Err(format!(
+                        "recorded FFT payload does not match analysis type {analysis_type:?}"
+                    ));
+                }
+                spectrum.validate()?;
+            }
         }
         Ok(())
     }
@@ -1996,7 +2063,11 @@ impl AnalysisResultPayload {
             | Self::PoleZero { .. }
             | Self::PssFloquet { .. }
             | Self::Pstb { .. }
-            | Self::Sensitivity { .. } => true,
+            | Self::Sensitivity { .. }
+            // Always: an FFT payload states the transform the engine
+            // performed, which is a fact even when the record ran short and
+            // the spectrum has no coefficients.
+            | Self::FftSpectrum { .. } => true,
             Self::ScalarMeasurements { values } => !values.is_empty(),
             Self::TransferFunction {
                 gain,

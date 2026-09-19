@@ -1017,6 +1017,12 @@ fn encode_result_payload(
                 writer.u8(soa_violation_severity_tag(violation.severity));
             }
         }
+        // Tag 11, the next unused payload tag. Appended, never reused: these
+        // bytes identify every retained result already on disk.
+        AnalysisResultPayload::FftSpectrum { spectrum } => {
+            writer.u8(11);
+            encode_fft_spectrum_evidence(writer, spectrum);
+        }
         AnalysisResultPayload::TransientEvents {
             digital_traces,
             real_traces,
@@ -1171,6 +1177,68 @@ const fn soa_violation_severity_tag(severity: SoaViolationSeverityEvidence) -> u
         SoaViolationSeverityEvidence::Violation => 1,
         SoaViolationSeverityEvidence::Critical => 2,
     }
+}
+
+fn encode_fft_spectrum_evidence(
+    writer: &mut ResultDigestWriter,
+    spectrum: &super::FftSpectrumEvidence,
+) {
+    match spectrum.status {
+        super::FftSpectrumStatusEvidence::Complete => writer.u8(0),
+        super::FftSpectrumStatusEvidence::IncompleteHistory {
+            available_start_s,
+            available_stop_s,
+        } => {
+            writer.u8(1);
+            writer.f64(available_start_s);
+            writer.f64(available_stop_s);
+        }
+    }
+    writer.string(&spectrum.output);
+    writer.string(&spectrum.physical_type);
+    writer.f64(spectrum.start_time_s);
+    writer.f64(spectrum.stop_time_s);
+    writer.f64(spectrum.sample_interval_s);
+    writer.usize(spectrum.point_count);
+    writer.bool(spectrum.accurate_sampling);
+    writer.string(spectrum.format.keyword());
+    writer.string(spectrum.mode.label());
+    writer.string(&spectrum.window);
+    writer.f64(spectrum.alpha);
+    writer.f64(spectrum.coherent_gain);
+    writer.f64(spectrum.frequency_resolution_hz);
+    writer.usize(spectrum.fundamental_bin);
+    writer.usize(spectrum.minimum_metric_bin);
+    writer.usize(spectrum.maximum_metric_bin);
+    writer.option(spectrum.metrics.as_ref(), |writer, metrics| {
+        for value in [
+            metrics.fundamental_magnitude,
+            metrics.thd_ratio,
+            metrics.thd_db,
+            metrics.sndr_db,
+            metrics.enob_bits,
+            metrics.snr_db,
+            metrics.sfdr_db,
+        ] {
+            writer.f64(value);
+        }
+        writer.option(metrics.sfdr_spur_bin.as_ref(), |writer, bin| {
+            writer.usize(*bin);
+        });
+        writer.option(
+            metrics.sfdr_spur_frequency_hz.as_ref(),
+            |writer, frequency| writer.f64(*frequency),
+        );
+        writer.sequence(metrics.largest_harmonics.len());
+        for harmonic in &metrics.largest_harmonics {
+            writer.usize(harmonic.rank);
+            writer.usize(harmonic.bin);
+            writer.f64(harmonic.frequency_hz);
+            writer.f64(harmonic.magnitude);
+            writer.f64(harmonic.magnitude_db);
+            writer.f64(harmonic.phase_degrees);
+        }
+    });
 }
 
 fn encode_complex_result_values(writer: &mut ResultDigestWriter, values: &[ComplexResultValue]) {
