@@ -15,6 +15,8 @@ use std::thread::JoinHandle;
 
 use serde::{Deserialize, Serialize};
 
+use crate::diagnostics::engine_log::{EngineLogLine, EngineLogQueue, RunLogSink};
+
 use super::config::AnalysisConfig;
 use super::execution::{ResolvedExecutionDependencies, ResolvedTaskDispatch};
 use super::multi_run::AnalysisSpec;
@@ -186,6 +188,15 @@ pub struct SimulationRunner {
     /// waveform samples must remain lossless and ordered.
     transient_samples: Arc<Mutex<LiveTransientQueue>>,
 
+    /// What the engine logged during this run, waiting for the UI controller.
+    ///
+    /// Beside `transient_samples` and for the same reasons: the solver thread
+    /// writes it, the controller drains it once a frame, and it is cleared with
+    /// the rest of the per-run state when a request starts. It is not folded
+    /// into progress because a log line is a statement the run made, not a
+    /// value that may be coalesced.
+    engine_log: Arc<Mutex<EngineLogQueue>>,
+
     /// Current simulation thread handle
     thread_handle: Option<JoinHandle<Result<SimulationResult, SimulationError>>>,
 
@@ -210,6 +221,7 @@ impl SimulationRunner {
             progress: Arc::new(Mutex::new(SimulationProgress::default())),
             abort_flag: Arc::new(AtomicBool::new(false)),
             transient_samples: Arc::new(Mutex::new(LiveTransientQueue::default())),
+            engine_log: Arc::new(Mutex::new(EngineLogQueue::default())),
             thread_handle: None,
             pending_result: None,
             #[cfg(target_arch = "wasm32")]
@@ -293,6 +305,15 @@ impl SimulationRunner {
         samples.drain()
     }
 
+    /// Drain everything the engine logged since the previous UI update.
+    ///
+    /// The controller writes these into the Console as `ENG` rows. The run's
+    /// own bound is inside the queue, so a solver that never stops talking
+    /// cannot grow this without limit.
+    pub(in crate::simulation) fn drain_engine_log(&self) -> Vec<EngineLogLine> {
+        crate::diagnostics::engine_log::lock_queue(&self.engine_log).drain()
+    }
+
     /// Abort and discard all runner-local completion/progress state.
     ///
     /// Native worker threads cannot be force-killed, but setting the shared
@@ -305,6 +326,7 @@ impl SimulationRunner {
         self.abort_flag = Arc::new(AtomicBool::new(false));
         self.progress = Arc::new(Mutex::new(SimulationProgress::default()));
         self.transient_samples = Arc::new(Mutex::new(LiveTransientQueue::default()));
+        self.engine_log = Arc::new(Mutex::new(EngineLogQueue::default()));
 
         #[cfg(target_arch = "wasm32")]
         {
@@ -476,6 +498,7 @@ impl SimulationRunner {
             Ok(mut samples) => samples.clear(),
             Err(poisoned) => poisoned.into_inner().clear(),
         }
+        crate::diagnostics::engine_log::lock_queue(&self.engine_log).clear();
         {
             let mut progress = lock_progress(&self.progress, "SimulationRunner::start_request");
             *progress = SimulationProgress::new();
@@ -493,11 +516,23 @@ impl SimulationRunner {
         // Former inline browser execution is deliberately not retained.
         #[cfg(not(target_arch = "wasm32"))]
         {
+            let streams = RunStreams {
+                transient_samples,
+                engine_log: Some(RunLogSink::queued(
+                    Arc::clone(&self.engine_log),
+                    request_asked_for_verbose(&request),
+                )),
+                ..RunStreams::default()
+            };
             let handle = std::thread::spawn(move || {
-                run_simulation_thread(request, input, progress, abort_flag, transient_samples)
+                run_simulation_thread(request, input, progress, abort_flag, streams)
             });
             self.thread_handle = Some(handle);
         }
+        // The worker executes in its own wasm instance, so a queue this side
+        // of the boundary is not something its run can write: the worker-side
+        // run posts each line across the contract and the UI handler pushes it
+        // onto this runner's queue.
         #[cfg(target_arch = "wasm32")]
         {
             wasm_worker::start_worker_request(
@@ -507,10 +542,46 @@ impl SimulationRunner {
                 progress,
                 abort_flag,
                 transient_samples,
+                Arc::clone(&self.engine_log),
             )?;
         }
         Ok(())
     }
+}
+
+/// Whether this request asked the engine to trace its solve.
+///
+/// Read off the request rather than threaded separately, because the request
+/// *is* where the switch lives: the HB and PSS forms author `verbose` into
+/// their specification, and a manual deck authors it into the same field
+/// through `VERBOSE=`. Everything else the studio can run has no such control,
+/// so its engine log is receipts alone.
+pub(in crate::simulation::runner) fn request_asked_for_verbose(
+    request: &SimulationRequest,
+) -> bool {
+    match request {
+        SimulationRequest::Config(_) => false,
+        SimulationRequest::Spec { spec, .. } => match spec.as_ref() {
+            AnalysisSpec::Pss { verbose, .. } | AnalysisSpec::HarmonicBalance { verbose, .. } => {
+                *verbose
+            }
+            _ => false,
+        },
+    }
+}
+
+/// Everything a run publishes while it is still running, other than progress.
+///
+/// One parameter rather than four: the two observers exist for the browser
+/// worker, which has no shared memory to write a queue in, and the two queues
+/// exist for the native run, which does. Every future stream belongs here for
+/// the same reason.
+#[derive(Default)]
+pub(in crate::simulation::runner) struct RunStreams {
+    pub(in crate::simulation::runner) progress_observer: Option<ProgressObserver>,
+    pub(in crate::simulation::runner) transient_samples: Option<Arc<Mutex<LiveTransientQueue>>>,
+    pub(in crate::simulation::runner) transient_sample_observer: Option<TransientSampleObserver>,
+    pub(in crate::simulation::runner) engine_log: Option<RunLogSink>,
 }
 
 fn lock_progress<'a>(
@@ -1007,17 +1078,9 @@ fn run_simulation_thread(
     input: NetlistInput,
     progress: Arc<Mutex<SimulationProgress>>,
     abort_flag: Arc<AtomicBool>,
-    transient_samples: Option<Arc<Mutex<LiveTransientQueue>>>,
+    streams: RunStreams,
 ) -> Result<SimulationResult, SimulationError> {
-    run_simulation_thread_with_progress_observer(
-        request,
-        input,
-        progress,
-        abort_flag,
-        None,
-        transient_samples,
-        None,
-    )
+    run_simulation_thread_with_progress_observer(request, input, progress, abort_flag, streams)
 }
 
 pub(in crate::simulation::runner) fn run_simulation_thread_with_progress_observer(
@@ -1025,11 +1088,21 @@ pub(in crate::simulation::runner) fn run_simulation_thread_with_progress_observe
     input: NetlistInput,
     progress: Arc<Mutex<SimulationProgress>>,
     abort_flag: Arc<AtomicBool>,
-    progress_observer: Option<ProgressObserver>,
-    transient_samples: Option<Arc<Mutex<LiveTransientQueue>>>,
-    transient_sample_observer: Option<TransientSampleObserver>,
+    streams: RunStreams,
 ) -> Result<SimulationResult, SimulationError> {
     use super::engine_bridge::EngineBridge;
+
+    let RunStreams {
+        progress_observer,
+        transient_samples,
+        transient_sample_observer,
+        engine_log,
+    } = streams;
+
+    // Whatever the engine logs from here on belongs to this run, and only to
+    // it: the guard is removed on every exit path below, including a panic
+    // unwinding out of the solver.
+    let _engine_log = engine_log.map(crate::diagnostics::engine_log::install);
 
     // Update status: parsing
     {
@@ -1380,6 +1453,144 @@ impl std::fmt::Display for ResultSchemaMismatch {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Run one specification through the real runner and return what the
+    /// engine logged while it ran.
+    ///
+    /// Deliberately `run_simulation_thread_with_progress_observer` and not a
+    /// hand-installed sink: what is under test is that *the runner* installs
+    /// one for the duration of a run, which is the whole of the bridge on this
+    /// side.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn engine_log_of_run(spec: AnalysisSpec, netlist: &str) -> Vec<EngineLogLine> {
+        crate::diagnostics::engine_log::studio_logger_for_tests();
+        let queue = Arc::new(Mutex::new(EngineLogQueue::default()));
+        let verbose = request_asked_for_verbose(&SimulationRequest::Spec {
+            spec: Box::new(spec.clone()),
+            options: Box::new(SpecExecutionOptions::default()),
+        });
+        let result = run_simulation_thread_with_progress_observer(
+            SimulationRequest::Spec {
+                spec: Box::new(spec),
+                options: Box::new(SpecExecutionOptions::default()),
+            },
+            NetlistInput {
+                netlist: netlist.to_owned(),
+                source_path: None,
+                project_veriloga_runtimes: Default::default(),
+                dependencies: Default::default(),
+                environment: None,
+                stream_transient_samples: false,
+            },
+            Arc::new(Mutex::new(SimulationProgress::default())),
+            Arc::new(AtomicBool::new(false)),
+            RunStreams {
+                engine_log: Some(RunLogSink::queued(Arc::clone(&queue), verbose)),
+                ..RunStreams::default()
+            },
+        );
+        result.expect("the specification reaches the engine and converges");
+        crate::diagnostics::engine_log::lock_queue(&queue).drain()
+    }
+
+    /// A one-tone nonlinear HB solve traces its Newton iterations when the
+    /// form asks for them, and traces nothing when it does not.
+    ///
+    /// What this fixture's solve actually writes is one `log::debug!` per
+    /// Newton iteration of the nonlinear solve it runs, plus the presolve's
+    /// account of the initial guess — measured, not assumed. The engine has
+    /// other traces behind `HbConfig::verbose` itself (the certified exact
+    /// matrix-free step, the Krylov residual), and they are admitted here by
+    /// the same rule; this deck simply converges before it needs them.
+    ///
+    /// The quiet half is the half that matters. `Debug` is what the engine
+    /// writes its whole solver trace at, and the run that did not ask for it
+    /// captures none of it — so the switch on the form is what decided, not
+    /// the bridge deciding for everyone.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn an_hb_verbose_run_traces_its_newton_iterations_in_the_console() {
+        const DECK: &str = "hb verbose diode\n\
+                            VDRIVE in 0 DC 1\n\
+                            R1 in out 100\n\
+                            D1 out 0 DMOD\n\
+                            .model DMOD D (IS=1u N=1.48)\n\
+                            .end\n";
+        let spec = |verbose| AnalysisSpec::HarmonicBalance {
+            tones: vec![crate::simulation::multi_run::HbToneSpec::new(1.0e6, 1)],
+            reltol: 1.0e-6,
+            abstol: 1.0e-12,
+            max_iterations: 100,
+            damping: 1.0,
+            min_damping: 0.01,
+            oversample: 2,
+            collocation_points: None,
+            max_mixing_order: 5,
+            use_krylov: false,
+            gmres_restart: 30,
+            source_stepping: false,
+            use_exact_jacobian: true,
+            verbose,
+        };
+
+        let traced = engine_log_of_run(spec(true), DECK);
+        let iterations = traced
+            .iter()
+            .filter(|line| line.severity == crate::diagnostics::LogSeverity::Debug)
+            .filter(|line| {
+                line.message.starts_with("Newton iter") || line.message.starts_with("HB ")
+            })
+            .count();
+        assert!(
+            iterations >= 2,
+            "a verbose HB solve traced {iterations} solver iterations: {:?}",
+            traced.iter().map(|line| &line.message).collect::<Vec<_>>()
+        );
+
+        let quiet = engine_log_of_run(spec(false), DECK);
+        assert!(
+            quiet
+                .iter()
+                .all(|line| line.severity != crate::diagnostics::LogSeverity::Debug),
+            "an ordinary HB solve traced its solver anyway: {:?}",
+            quiet.iter().map(|line| &line.message).collect::<Vec<_>>()
+        );
+    }
+
+    /// Only the two analyses whose card carries `VERBOSE=` can ask for a trace.
+    #[test]
+    fn only_a_periodic_request_can_ask_the_engine_to_trace_itself() {
+        let options = Box::new(SpecExecutionOptions::default());
+        let spec = |spec| SimulationRequest::Spec {
+            spec: Box::new(spec),
+            options: options.clone(),
+        };
+        assert!(!request_asked_for_verbose(&SimulationRequest::Config(
+            Box::new(AnalysisConfig::dc_op())
+        )));
+        assert!(!request_asked_for_verbose(&spec(AnalysisSpec::LegacyDcOp)));
+
+        let pss = |verbose| AnalysisSpec::Pss {
+            method: crate::simulation::multi_run::PssMethod::Shooting,
+            fundamental_freq: 1.0e6,
+            tone_sources: vec!["V1".to_owned()],
+            tstab_periods: 20,
+            points_per_period: 512,
+            tolerance: 1.0e-7,
+            oscillator_mode: false,
+            oscillator_node: None,
+            num_harmonics: 8,
+            integration_method: None,
+            tstab: 0.0,
+            max_iterations: 100,
+            abstol: 1.0e-12,
+            damping: 1.0,
+            max_period_change: 0.1,
+            verbose,
+        };
+        assert!(!request_asked_for_verbose(&spec(pss(false))));
+        assert!(request_asked_for_verbose(&spec(pss(true))));
+    }
 
     #[test]
     fn poll_result_returns_pending_result_once() {

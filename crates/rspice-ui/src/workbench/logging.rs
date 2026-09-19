@@ -1,4 +1,10 @@
 //! Logging defaults shared by native entry points.
+//!
+//! Which filter a desktop launch starts from, and the environment variable that
+//! overrides it. The logger those build is
+//! [`crate::diagnostics::engine_log::StudioLogger`], which sends every record
+//! to this filter exactly as before and additionally offers the engine's own
+//! lines to the run that produced them.
 
 /// Default native logging filter.
 ///
@@ -19,6 +25,21 @@ pub fn native_filter_env_var() -> &'static str {
 #[cfg(not(target_arch = "wasm32"))]
 pub fn native_log_env() -> env_logger::Env<'static> {
     env_logger::Env::new().filter_or(native_filter_env_var(), native_default_filter())
+}
+
+/// Install the studio's logger as the process logger for the desktop binary.
+///
+/// Replaces the bare `env_logger::Builder::init()` this entry point used to
+/// call. The logger itself is
+/// [`crate::diagnostics::engine_log::StudioLogger`]: what the application
+/// reports about itself is that module's subject, and the run sink it feeds
+/// has to be reachable from the layers that execute a run. What stays here is
+/// what this file has always owned — which filter a desktop launch starts from.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn install_studio_logger() {
+    crate::diagnostics::engine_log::install_studio_logger(
+        env_logger::Builder::from_env(native_log_env()).build(),
+    );
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]

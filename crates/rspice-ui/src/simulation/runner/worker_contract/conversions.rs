@@ -962,9 +962,10 @@ pub(super) fn worker_response_from_request_with_progress(
             input,
             progress,
             abort_flag,
-            progress_observer,
-            None,
-            None,
+            super::super::RunStreams {
+                progress_observer,
+                ..Default::default()
+            },
         ),
     )
 }
@@ -1071,9 +1072,12 @@ fn run_decoded_worker_request(
             input,
             progress,
             abort_flag,
-            Some(emit_worker_progress_snapshot),
-            None,
-            stream_transient_samples.then_some(emit_worker_transient_sample),
+            super::super::RunStreams {
+                progress_observer: Some(emit_worker_progress_snapshot),
+                transient_sample_observer: stream_transient_samples
+                    .then_some(emit_worker_transient_sample),
+                ..Default::default()
+            },
         ),
     );
     ACTIVE_WORKER_PROGRESS_ID.with(|active| active.set(None));

@@ -11,6 +11,7 @@
 //! diagnostic and above `state`, which a log entry may anchor to.
 
 mod console;
+pub(crate) mod engine_log;
 mod log;
 
 pub use console::{ConsoleLevel, ConsoleMessage};

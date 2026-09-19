@@ -225,9 +225,10 @@ pub use workbench::{
     publish_organization_drawing_sheet_package, verify_published_drawing_sheet_package,
 };
 
-/// Native logging environment for the desktop binary.
+/// Native logging environment for the desktop binary, and the logger it
+/// installs: stderr as before, plus the running analysis's own Console log.
 #[cfg(not(target_arch = "wasm32"))]
-pub use workbench::logging::native_log_env;
+pub use workbench::logging::{install_studio_logger, native_log_env};
 
 /// Typed identities, for `tests/simulation_configuration_contract.rs`.
 pub use product::{AnalysisInstanceId, ContentDigest, ObjectRevision, ProjectId, SimulationPlanId};

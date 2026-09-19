@@ -42,8 +42,10 @@ fn load_window_icon() -> Option<egui::IconData> {
 #[cfg(not(target_arch = "wasm32"))]
 fn main() {
     // Keep RSpice diagnostics visible while suppressing routine GPU backend
-    // probe warnings from normal desktop stderr.
-    env_logger::Builder::from_env(rspice_ui::native_log_env()).init();
+    // probe warnings from normal desktop stderr — and carry what the engine
+    // logs during a run into that run's Console, which is the only place a
+    // windowed application's reader can see it.
+    rspice_ui::install_studio_logger();
 
     log::info!("Starting RSpice UI with egui (commercial-grade GPU rendering)...");
 

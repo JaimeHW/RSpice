@@ -332,6 +332,7 @@ impl SimulationController {
         }
 
         // Poll for completion
+        self.publish_engine_log(state);
         self.publish_live_transient_samples(state);
         self.poll_completion(state, export_io);
 
@@ -1166,6 +1167,20 @@ impl SimulationController {
             }
         }
         Ok(())
+    }
+
+    /// Write what the engine logged since the previous frame into the Console.
+    ///
+    /// Drained beside the live transient samples because it is the same kind of
+    /// thing: evidence the running analysis published that the UI thread owns
+    /// presenting. The severity and the `ENG` source are the queue's own
+    /// (`diagnostics::engine_log`), so the projection has one reader.
+    fn publish_engine_log(&mut self, state: &mut AppState) {
+        let lines = self.runner.drain_engine_log();
+        if lines.is_empty() {
+            return;
+        }
+        crate::diagnostics::engine_log::publish(lines, &mut state.log_buffer);
     }
 
     fn publish_live_transient_samples(&mut self, state: &mut AppState) {
