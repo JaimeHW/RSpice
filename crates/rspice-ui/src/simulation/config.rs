@@ -7,13 +7,15 @@ use crate::simulation::dialog::OpConfig;
 
 mod ac;
 mod dc;
+mod frequency_table;
 mod noise;
 mod pole_zero;
 mod sensitivity;
 mod transient;
 
-pub use ac::{AcAnalysisConfig, AcSweepType};
+pub use ac::{AcAnalysisConfig, AcDataAnalysisConfig, AcSweepType};
 pub use dc::DcSweepConfig;
+pub use frequency_table::{AC_FREQUENCY_TABLE, parse_explicit_frequency_list};
 pub use noise::{
     NoiseAnalysisConfig, NoiseContributionDetail, NoiseIntegrationMode, NoiseSweepType,
 };

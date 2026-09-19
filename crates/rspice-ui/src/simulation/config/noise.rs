@@ -282,15 +282,12 @@ impl NoiseAnalysisConfig {
             );
         }
         if let Some(frequencies) = &self.explicit_frequencies {
-            let mut deck = format!(
-                ".noise {output} {} DATA=rspice_noise_frequency\n.DATA rspice_noise_frequency\n+ HERTZ",
-                self.input_source.trim()
+            let table = super::frequency_table::NOISE_FREQUENCY_TABLE;
+            return format!(
+                ".noise {output} {} DATA={table}\n{}",
+                self.input_source.trim(),
+                super::frequency_table::explicit_frequency_table(table, frequencies),
             );
-            for frequency in frequencies {
-                deck.push_str(&format!("\n+ {frequency:.17e}"));
-            }
-            deck.push_str("\n.ENDDATA");
-            return deck;
         }
         format!(
             ".noise {output} {} {} {} {} {}",
@@ -333,29 +330,15 @@ impl NoiseAnalysisConfig {
         }
 
         if let Some(frequencies) = &self.explicit_frequencies {
-            if frequencies.is_empty() {
-                errors.push("Explicit frequency list must contain at least one value".to_owned());
-            }
-            let mut previous = None;
-            for (index, frequency) in frequencies.iter().copied().enumerate() {
-                if !frequency.is_finite() || frequency <= 0.0 {
-                    errors.push(format!(
-                        "Explicit frequency {} must be finite and greater than zero",
-                        index + 1
-                    ));
-                    break;
-                }
-                if self.data_table_name.is_none()
-                    && previous.is_some_and(|previous| frequency <= previous)
-                {
-                    errors.push(
-                        "Explicit frequencies must be strictly increasing without duplicates"
-                            .to_owned(),
-                    );
-                    break;
-                }
-                previous = Some(frequency);
-            }
+            let ordering = if self.data_table_name.is_none() {
+                super::frequency_table::FrequencyOrdering::StrictlyIncreasing
+            } else {
+                super::frequency_table::FrequencyOrdering::AsAuthored
+            };
+            errors.extend(super::frequency_table::validate_explicit_frequencies(
+                frequencies,
+                ordering,
+            ));
         } else {
             if !self.start_freq.is_finite() || self.start_freq <= 0.0 {
                 errors.push("Start frequency must be finite and positive".to_owned());

@@ -114,6 +114,74 @@ impl AcAnalysisConfig {
     }
 }
 
+/// AC analysis over a frequency axis the author states point by point.
+///
+/// This is `.AC DATA=<table>`, and it is a different request from a graded
+/// `.AC`: there is no band and no point density, only the exact frequencies to
+/// solve at. `table_name` is the `.DATA` table the card refers to — generated
+/// beside the card for an authored axis, or the deck's own name when the
+/// analysis was read from a hand-written deck.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AcDataAnalysisConfig {
+    /// Name of the `.DATA` table the `.AC` card reads its axis from.
+    pub table_name: String,
+    /// The exact frequency axis, in solve order.
+    pub frequencies: Vec<f64>,
+    /// Whether the axis was authored here, or imported with a deck's own table
+    /// whose row order and row-local overrides belong to its author.
+    pub authored: bool,
+}
+
+impl Default for AcDataAnalysisConfig {
+    fn default() -> Self {
+        Self {
+            table_name: super::frequency_table::AC_FREQUENCY_TABLE.to_owned(),
+            frequencies: Vec::new(),
+            authored: true,
+        }
+    }
+}
+
+impl AcDataAnalysisConfig {
+    /// The `.AC DATA=` card, followed by the table it reads.
+    ///
+    /// An imported table is already in the deck under its own name, so only
+    /// the card is written; an authored axis carries its table with it.
+    #[must_use]
+    pub fn to_spice(&self) -> String {
+        let table = self.table_name.trim();
+        if !self.authored {
+            return format!(".ac DATA={table}");
+        }
+        format!(
+            ".ac DATA={table}\n{}",
+            super::frequency_table::explicit_frequency_table(table, &self.frequencies)
+        )
+    }
+
+    /// Validate the complete, executable table-driven configuration.
+    pub fn validate(&self) -> Result<(), Vec<String>> {
+        let mut errors = Vec::new();
+        if self.table_name.trim().is_empty() {
+            errors.push("AC DATA table name must not be empty".to_owned());
+        }
+        let ordering = if self.authored {
+            super::frequency_table::FrequencyOrdering::StrictlyIncreasing
+        } else {
+            super::frequency_table::FrequencyOrdering::AsAuthored
+        };
+        errors.extend(super::frequency_table::validate_explicit_frequencies(
+            &self.frequencies,
+            ordering,
+        ));
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -143,5 +211,75 @@ mod tests {
     #[test]
     fn validation_keeps_finite_positive_ordered_bounds() {
         assert!(AcAnalysisConfig::default().validate().is_ok());
+    }
+
+    /// The two analyses that sweep an authored frequency axis have to write the
+    /// same table for the same axis. They did not always: the noise writer
+    /// owned the column keyword, the decimal format and the `.ENDDATA` line on
+    /// its own, so an AC copy of them could have drifted by any one of the
+    /// three and produced a deck that swept a different axis than the form.
+    #[test]
+    fn the_noise_and_ac_frequency_tables_share_one_writer() {
+        let frequencies = vec![10.0, 1.0e3, 1.0 / 3.0e-6];
+        let ac = AcDataAnalysisConfig {
+            frequencies: frequencies.clone(),
+            ..AcDataAnalysisConfig::default()
+        };
+        let noise = crate::simulation::config::NoiseAnalysisConfig {
+            output_node: "out".to_owned(),
+            input_source: "V1".to_owned(),
+            explicit_frequencies: Some(frequencies.clone()),
+            ..crate::simulation::config::NoiseAnalysisConfig::default()
+        };
+
+        let table_body = |deck: &str| {
+            deck.lines()
+                .skip_while(|line| !line.starts_with(".DATA "))
+                .skip(1)
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        assert_eq!(table_body(&ac.to_spice()), table_body(&noise.to_spice()));
+        assert!(table_body(&ac.to_spice()).starts_with("+ HERTZ\n"));
+
+        // Each analysis still names its own generated table, and each card
+        // refers to the table it wrote.
+        assert!(
+            ac.to_spice()
+                .starts_with(".ac DATA=rspice_ac_frequency\n.DATA rspice_ac_frequency\n")
+        );
+        assert!(noise.to_spice().starts_with(
+            ".noise V(out) V1 DATA=rspice_noise_frequency\n.DATA rspice_noise_frequency\n"
+        ));
+    }
+
+    #[test]
+    fn an_imported_table_is_referenced_and_not_rewritten() {
+        let imported = AcDataAnalysisConfig {
+            table_name: "pts".to_owned(),
+            frequencies: vec![10.0, 1.0],
+            authored: false,
+        };
+        assert_eq!(imported.to_spice(), ".ac DATA=pts");
+        assert!(
+            imported.validate().is_ok(),
+            "a deck's own table keeps its author's row order"
+        );
+    }
+
+    #[test]
+    fn an_authored_axis_is_refused_unless_it_ascends_and_is_positive() {
+        for frequencies in [vec![], vec![1.0, 1.0], vec![10.0, 1.0], vec![0.0]] {
+            let config = AcDataAnalysisConfig {
+                frequencies,
+                ..AcDataAnalysisConfig::default()
+            };
+            assert!(config.validate().is_err(), "{config:?}");
+        }
+        let config = AcDataAnalysisConfig {
+            frequencies: vec![1.0, 10.0, 100.0],
+            ..AcDataAnalysisConfig::default()
+        };
+        assert!(config.validate().is_ok());
     }
 }
