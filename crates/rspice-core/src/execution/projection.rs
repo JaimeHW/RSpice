@@ -508,6 +508,9 @@ impl SignalProjection {
             .cloned()
             .collect::<Vec<_>>();
 
+        // Expression-only PRINT/PLOT cards do not populate the probe SaveSet,
+        // but still restrict the output to their authored expression columns.
+        let authored = !cards.is_empty() || !netlist.saves.signals.is_empty();
         Ok(Self {
             cards,
             save_only,
@@ -516,7 +519,7 @@ impl SignalProjection {
                 .signals
                 .iter()
                 .any(|signal| matches!(signal, SaveSignal::All)),
-            authored: !netlist.saves.signals.is_empty(),
+            authored,
         })
     }
 
@@ -1418,6 +1421,28 @@ mod tests {
             .project(&netlist.params, &source, &crate::abort_signal::NoAbort)
             .expect("unauthored projection keeps everything");
         assert_eq!(names(&projected), ["V(out)", "I(V1)"]);
+    }
+
+    #[test]
+    fn expression_only_print_and_plot_cards_select_their_authored_columns() {
+        for directive in ["PRINT", "PLOT"] {
+            let netlist = parse(&format!(
+                "expression selection\nV1 out 0 2\nR1 out 0 1k\n.OP\n.{directive} OP {{-V(out)*I(V1)}}\n.END\n"
+            ));
+            let projection = SignalProjection::from_netlist(&netlist).unwrap();
+            assert!(projection.authored());
+            let source = ProjectionSource::new(AnalysisResultKind::OperatingPoint, "DC OP")
+                .with_axis(vec![0.0])
+                .with_signals(vec![
+                    real_signal("V(out)", "out", SignalKind::Voltage, vec![2.0]),
+                    real_signal("I(V1)", "v1", SignalKind::Current, vec![-0.002]),
+                ]);
+            let projected = projection
+                .project(&netlist.params, &source, &crate::abort_signal::NoAbort)
+                .unwrap();
+            assert_eq!(projected.signals().len(), 1);
+            assert_eq!(projected.signals()[0].real(), Some(&[0.004][..]));
+        }
     }
 
     #[test]
