@@ -224,7 +224,11 @@ fn analysis_config_round_trips_supported_variants() {
             ac_mode: true,
             frequency: Some(1e3),
             filter: "R* PARAM:*".to_string(),
-            sweep: None,
+            sweep: Some(crate::simulation::config::SensitivitySweep {
+                stop_frequency: 1e6,
+                points: 10,
+                variation: crate::simulation::config::AcSweepType::Octave,
+            }),
         }),
     ];
 
@@ -300,6 +304,7 @@ fn analysis_spec_round_trips_supported_variants() {
             ac_mode: false,
             frequency: None,
             filter: "PARAM:*".to_string(),
+            sweep: None,
         },
         tf_spec(),
         AnalysisSpec::Pac,

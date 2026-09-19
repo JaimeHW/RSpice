@@ -1726,6 +1726,7 @@ R2 out 0 1k\n\
                 ac_mode: false,
                 frequency: None,
                 filter: String::new(),
+                sweep: None,
             },
         ]
     }

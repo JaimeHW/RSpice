@@ -391,6 +391,55 @@ fn hinted_quantity_input_row(
     response
 }
 
+/// The same hinted row, offered or withheld by the mode that reads it.
+///
+/// A field whose empty value selects a behaviour keeps saying so while it is
+/// greyed: the reason it is disabled and the meaning of leaving it blank are
+/// two different facts, and a reader needs both.
+fn hinted_quantity_input_row_enabled(
+    ui: &mut Ui,
+    label: &str,
+    value: &mut String,
+    helper: &str,
+    kind: QuantityInputKind,
+    policy: QuantityPresentationPolicy,
+    locale: UiNumberLocale,
+    enabled: bool,
+) -> Response {
+    let response = if uses_two_column_fields(ui) {
+        field_cell(ui, label, Some(helper), |ui| {
+            ui.add_enabled_ui(enabled, |ui| {
+                mono_input(ui, label, value, ui.available_width())
+            })
+            .inner
+        })
+    } else {
+        ui.add_enabled_ui(enabled, |ui| inspector_input_row(ui, label, value))
+            .inner
+    };
+    if enabled {
+        normalize_quantity_on_focus_loss(&response, value, kind, policy, locale);
+    }
+    response
+}
+
+/// A domain selector, offered or withheld by the field that governs it.
+fn choice_row_enabled(
+    ui: &mut Ui,
+    label: &str,
+    options: &[&str],
+    value: &mut usize,
+    enabled: bool,
+) -> bool {
+    if !enabled {
+        let mut unchanged = *value;
+        return ui
+            .add_enabled_ui(false, |ui| choice_row(ui, label, options, &mut unchanged))
+            .inner;
+    }
+    choice_row(ui, label, options, value)
+}
+
 fn quantity_input_row_enabled(
     ui: &mut Ui,
     label: &str,

@@ -87,6 +87,40 @@ pub struct SensitivitySweep {
     pub variation: AcSweepType,
 }
 
+impl SensitivitySweep {
+    /// The same band in the specification's own sweep vocabulary.
+    ///
+    /// One conversion, named once, because a sweep that meant decades on the
+    /// way out and octaves on the way back would solve a different band than
+    /// the plan states.
+    pub fn to_spec(self) -> crate::simulation::multi_run::SensitivitySweepSpec {
+        use crate::simulation::multi_run::FrequencySweep;
+        crate::simulation::multi_run::SensitivitySweepSpec {
+            stop_frequency: self.stop_frequency,
+            points: self.points,
+            variation: match self.variation {
+                AcSweepType::Decade => FrequencySweep::Decade,
+                AcSweepType::Octave => FrequencySweep::Octave,
+                AcSweepType::Linear => FrequencySweep::Linear,
+            },
+        }
+    }
+
+    /// The inverse of [`SensitivitySweep::to_spec`].
+    pub fn from_spec(spec: crate::simulation::multi_run::SensitivitySweepSpec) -> Self {
+        use crate::simulation::multi_run::FrequencySweep;
+        Self {
+            stop_frequency: spec.stop_frequency,
+            points: spec.points,
+            variation: match spec.variation {
+                FrequencySweep::Decade => AcSweepType::Decade,
+                FrequencySweep::Octave => AcSweepType::Octave,
+                FrequencySweep::Linear => AcSweepType::Linear,
+            },
+        }
+    }
+}
+
 /// Sensitivity analysis configuration
 #[derive(Debug, Clone)]
 pub struct SensitivityConfig {

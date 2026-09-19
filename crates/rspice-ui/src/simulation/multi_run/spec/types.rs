@@ -8,6 +8,19 @@ use crate::simulation::dialog::{
 use crate::simulation::multi_run::FrequencySweep;
 use serde::{Deserialize, Serialize};
 
+/// The rest of an AC sensitivity band, beyond the start frequency.
+///
+/// Held beside `frequency` rather than replacing it, because one frequency
+/// and a sweep starting there are the same card with a different count, and
+/// nothing should have two spellings for the band's lower edge.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SensitivitySweepSpec {
+    pub stop_frequency: f64,
+    pub points: u32,
+    pub variation: FrequencySweep,
+}
+
 /// Numerical formulation used to solve a periodic steady-state request.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -413,6 +426,11 @@ pub enum AnalysisSpec {
         /// filters existed", which is a different statement.
         #[serde(default = "crate::simulation::config::design_parameters_filter")]
         filter: String,
+        /// The rest of the AC band, when the run asked for more than one
+        /// point. Absent is a single frequency, which is what every plan
+        /// saved before the sweep existed asked for.
+        #[serde(default)]
+        sweep: Option<SensitivitySweepSpec>,
     },
     /// Pole-zero
     PoleZero {
