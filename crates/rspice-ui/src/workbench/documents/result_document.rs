@@ -6160,11 +6160,11 @@ fn viewer_availability(state: &AppState, viewer: ResultViewer) -> ViewerAvailabi
         ResultViewer::Contribution => {
             if sensitivity::active_payload_is_valid(state) {
                 ViewerAvailability::available(
-                    "Retained sensitivity contributions are available for the active analysis",
+                    "Retained contributions are available for the active analysis",
                 )
             } else {
                 ViewerAvailability::unavailable(
-                    "Requires the active analysis to contain a valid retained sensitivity payload",
+                    "Requires a valid retained sensitivity or DC mismatch payload",
                 )
             }
         }

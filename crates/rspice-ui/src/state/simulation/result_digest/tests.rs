@@ -993,12 +993,17 @@ fn dc_mismatch_evidence() -> crate::state::DcMismatchEvidence {
 /// an encoder line fails here.
 #[test]
 fn every_dc_mismatch_evidence_field_moves_the_result_digest() {
+    // Assigned rather than attached through `with_result_payload`: that
+    // constructor debug-asserts the payload is valid, and a field-coverage
+    // walk has to perturb one field at a time, which is exactly what an
+    // invariant like the variance identity refuses. What is under test here
+    // is the encoder's reach, not the validator's.
     let result = |evidence: crate::state::DcMismatchEvidence| {
-        AnalysisResult::new(1, AnalysisType::DcMismatch, "DCMATCH").with_result_payload(
-            AnalysisResultPayload::DcMismatch {
-                evidence: std::sync::Arc::new(evidence),
-            },
-        )
+        let mut analysis = AnalysisResult::new(1, AnalysisType::DcMismatch, "DCMATCH");
+        analysis.result_payload = Some(AnalysisResultPayload::DcMismatch {
+            evidence: std::sync::Arc::new(evidence),
+        });
+        analysis
     };
     let source = result(dc_mismatch_evidence());
     assert_eq!(

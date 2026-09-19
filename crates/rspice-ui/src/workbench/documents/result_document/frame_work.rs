@@ -75,12 +75,15 @@ pub(crate) enum DatasetWalk {
     EventOrder,
     /// Validating the full sample grid and values of a legacy event projection.
     EventProjectionScan,
+    /// Accumulating the signed cumulative shares of a retained DC mismatch
+    /// result, and locating its largest contribution.
+    MismatchCumulative,
 }
 
 impl DatasetWalk {
     /// Every variant, for reporting a complete count table.
     #[cfg(test)]
-    pub(crate) const ALL: [Self; 21] = [
+    pub(crate) const ALL: [Self; 22] = [
         Self::EvidenceValidation,
         Self::DatasetDigest,
         Self::ManifestViewModel,
@@ -102,6 +105,7 @@ impl DatasetWalk {
         Self::RetainedHistoryScan,
         Self::EventOrder,
         Self::EventProjectionScan,
+        Self::MismatchCumulative,
     ];
 }
 

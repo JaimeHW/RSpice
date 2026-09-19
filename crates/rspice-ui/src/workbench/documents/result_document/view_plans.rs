@@ -42,6 +42,9 @@ pub(super) struct ViewPlans {
     /// The ranked order of the retained sensitivity result; see
     /// [`super::sensitivity`].
     pub(super) sensitivity: Option<Arc<super::sensitivity::SensitivityPlan>>,
+    /// The cumulative shares and bar scale of the retained DC mismatch
+    /// result, which the same Contribution sheet draws.
+    pub(super) mismatch: Option<Arc<super::sensitivity::MismatchPlan>>,
     /// Safe-operating-area per-rule stress facts; see [`super::soa`].
     pub(super) soa: Option<Arc<super::soa::SoaPlan>>,
 }
@@ -65,6 +68,7 @@ impl ViewPlans {
             population,
             optimization,
             sensitivity,
+            mismatch,
             soa,
         } = self;
         manifest.is_none()
@@ -75,6 +79,7 @@ impl ViewPlans {
             && population.is_none()
             && optimization.borrow().is_none()
             && sensitivity.is_none()
+            && mismatch.is_none()
             && soa.is_none()
     }
 }

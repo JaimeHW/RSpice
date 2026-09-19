@@ -20,6 +20,13 @@ use crate::workbench::AppState;
 
 use std::sync::Arc;
 
+/// The other family this sheet serves: a DC mismatch spread and its ranked
+/// statistical contributors. Declared here rather than beside the sheet
+/// registry because the handover is this file's, and `result_document.rs`
+/// has no line to spend on it.
+mod mismatch;
+pub(super) use mismatch::MismatchPlan;
+
 use super::AnalysisPresentationKey;
 use super::frame_work::{self, DatasetWalk};
 use super::strip::StripHeader;
@@ -85,6 +92,9 @@ fn active_sensitivity(state: &AppState) -> ActiveSensitivity<'_> {
 }
 
 pub(super) fn active_payload_is_valid(state: &AppState) -> bool {
+    if mismatch::serves_active_analysis(state) {
+        return mismatch::active_payload_is_valid(state);
+    }
     matches!(active_sensitivity(state), ActiveSensitivity::Ready(_))
 }
 
@@ -273,6 +283,14 @@ fn paint_cell(
 
 /// Render the retained normalized-sensitivity chart.
 pub fn show(ui: &mut Ui, state: &mut AppState) {
+    // Two families rank contributions to one number, and this is the sheet
+    // that ranks them. Handed over before anything is borrowed, so the DC
+    // mismatch spread is drawn by its own painter rather than squeezed into
+    // this one's columns.
+    if mismatch::serves_active_analysis(state) {
+        mismatch::show(ui, state);
+        return;
+    }
     // Ranked before the payload is borrowed, so the sort happens once per
     // dataset generation rather than once per frame per surface.
     let plan = sensitivity_plan(state);
@@ -552,6 +570,10 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
 
 /// Render output/basis context and the exact ranked sensitivity table.
 pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
+    if mismatch::serves_active_analysis(state) {
+        mismatch::right_panel(ui, state);
+        return;
+    }
     let plan = sensitivity_plan(state);
     let view = match active_sensitivity(state) {
         ActiveSensitivity::Ready(view) => view,

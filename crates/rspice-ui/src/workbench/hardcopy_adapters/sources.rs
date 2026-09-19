@@ -1230,9 +1230,14 @@ fn quick_result_availability(
                 )
         }
         ResultViewer::NoiseContrib => ordinary_noise_spectrum_is_renderable(analysis),
+        // Two families rank contributions to one number, and both have an
+        // exact semantic table to print.
         ResultViewer::Contribution => matches!(
             analysis.result_payload.as_ref(),
-            Some(AnalysisResultPayload::Sensitivity { .. })
+            Some(
+                AnalysisResultPayload::Sensitivity { .. }
+                    | AnalysisResultPayload::DcMismatch { .. }
+            )
         ),
         ResultViewer::TransferFunction => matches!(
             analysis.result_payload.as_ref(),
