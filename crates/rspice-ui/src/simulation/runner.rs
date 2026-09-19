@@ -1493,6 +1493,64 @@ mod tests {
         crate::diagnostics::engine_log::lock_queue(&queue).drain()
     }
 
+    /// The receipt names numbers that exist nowhere else.
+    ///
+    /// How many device noise sources were installed, and the seed they were
+    /// drawn from, are decided inside the engine while the run is building —
+    /// the form states a requested seed, the engine states the one it used —
+    /// and until a run's log reached the Console the only reader of that
+    /// sentence was a stderr stream a windowed application never shows.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn a_transient_noise_run_states_its_receipt_in_the_console() {
+        const DECK: &str = "transient noise divider\n\
+                            V1 in 0 DC 1\n\
+                            R1 in out 10k\n\
+                            R2 out 0 10k\n\
+                            .end\n";
+        let spec = AnalysisSpec::TransientNoise {
+            stop_time: 1.0e-6,
+            step_time: 1.0e-9,
+            start_time: 0.0,
+            max_timestep: 1.0e-9,
+            seed: 4_242,
+            noise_fmax: 1.0e9,
+            noise_fmin: None,
+            scale: 1.0,
+            uic: false,
+        };
+        // The deck the run executes is the card the Studio writes, spliced in
+        // by the same builder the Analyses page displays.
+        let card =
+            crate::simulation::controller::SimulationController::build_transient_noise_command(
+                &spec,
+            )
+            .expect("the specification writes its card");
+        let deck = DECK.replace(".end\n", &format!("{card}\n.end\n"));
+
+        let lines = engine_log_of_run(spec, &deck);
+        let receipt = lines
+            .iter()
+            .find(|line| line.message.starts_with("Transient noise:"))
+            .unwrap_or_else(|| {
+                panic!(
+                    "the run stated no transient-noise receipt: {:?}",
+                    lines.iter().map(|line| &line.message).collect::<Vec<_>>()
+                )
+            });
+        assert_eq!(receipt.severity, crate::diagnostics::LogSeverity::Info);
+        assert!(
+            receipt.message.contains("from seed 4242"),
+            "the receipt names the seed the form showed: {}",
+            receipt.message
+        );
+        assert!(
+            receipt.message.contains("device noise source(s)"),
+            "the receipt counts what it injected: {}",
+            receipt.message
+        );
+    }
+
     /// A one-tone nonlinear HB solve traces its Newton iterations when the
     /// form asks for them, and traces nothing when it does not.
     ///
