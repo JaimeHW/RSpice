@@ -1,3 +1,6 @@
+#[cfg(test)]
+mod expression_value_tests;
+
 use super::{Engine, SimulationError};
 use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::netlist::{ElementKind, SourceSpec, StepCommand, StepTarget};
