@@ -173,14 +173,9 @@ pub(super) fn build_manual_deck_queue(
         ) {
             continue;
         }
-        if let AnalysisCommand::Four {
-            fundamental,
-            outputs,
-            num_harmonics,
-        } = command
-        {
+        if let AnalysisCommand::Four { outputs, .. } = command {
             for output in outputs {
-                match fourier_queue_item(&parsed, *fundamental, output, *num_harmonics) {
+                match fourier_queue_item(&parsed, command, output) {
                     Ok(item) => queue.push(item),
                     Err(error) => errors.push(error),
                 }
@@ -279,8 +274,13 @@ fn finalize_manual_fourier_contracts(queue: &mut [QueuedAnalysis]) -> Result<(),
             ..
         } = &mut item.spec
         {
-            *start_time = transient_start;
-            *stop_time = transient_stop;
+            *start_time = start_time.max(transient_start);
+            if *stop_time == 0.0 {
+                *stop_time = transient_stop;
+            }
+            if *stop_time > transient_stop {
+                return Err(".FOUR TO exceeds the retained .TRAN stop time".to_owned());
+            }
         }
     }
     Ok(())
@@ -1263,15 +1263,11 @@ fn command_to_queue_item(
                 spec_options,
             })
         }
-        AnalysisCommand::Four {
-            fundamental,
-            outputs,
-            num_harmonics,
-        } => {
+        AnalysisCommand::Four { outputs, .. } => {
             let Some(output) = outputs.first() else {
                 return Err(".four requires at least one output".to_string());
             };
-            fourier_queue_item(netlist, *fundamental, output, *num_harmonics)
+            fourier_queue_item(netlist, command, output)
         }
         AnalysisCommand::MonteCarlo(command) => Ok(QueuedAnalysis {
             numeric_override: None,
@@ -1354,17 +1350,19 @@ fn command_to_queue_item(
 
 fn fourier_queue_item(
     netlist: &Netlist,
-    fundamental: f64,
+    command: &AnalysisCommand,
     output: &str,
-    num_harmonics: usize,
 ) -> Result<QueuedAnalysis, String> {
+    let configured = rspice_core::analysis::fourier::FourierConfig::try_from(command)
+        .map_err(|error| error.to_string())?;
     let (output_node, output_ref) = parse_fourier_output(output)?;
     validate_manual_fourier_current_capability(netlist, &output_node)?;
     Ok(QueuedAnalysis {
         numeric_override: None,
         spec: AnalysisSpec::Fourier {
-            fundamental_freq: fundamental,
-            num_harmonics,
+            fundamental_freq: configured.fundamental_freq,
+            num_harmonics: configured.num_harmonics,
+            num_periods: configured.num_periods,
             output_node,
             output_ref,
             // The manual route fans one card's output list into one queued
@@ -1372,8 +1370,8 @@ fn fourier_queue_item(
             additional_outputs: Vec::new(),
             // Bound to the exact manual .TRAN window after the complete
             // directive list has been compiled.
-            start_time: 0.0,
-            stop_time: 0.0,
+            start_time: configured.earliest_start.unwrap_or(0.0),
+            stop_time: configured.window_stop.unwrap_or(0.0),
             // Classic .FOUR retains THD and dimensional Fourier components.
             compute_thd: true,
             normalize: false,
@@ -1595,6 +1593,20 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn manual_fourier_retains_periods_and_explicit_window() {
+        let specs = specs_for(
+            "Fourier window\nV1 in 0 SIN(0 1 1k)\nR1 in 0 1k\n.tran 1u 10m\n.four 1k 5 V(in) PERIODS=3 FROM=2m TO=8m\n.end\n",
+        );
+        assert!(
+            specs
+                .iter()
+                .any(|spec| matches!(spec, AnalysisSpec::Fourier {
+            num_periods: 3, start_time, stop_time, ..
+        } if *start_time == 0.002 && *stop_time == 0.008))
+        );
     }
 
     fn specs_for(source: &str) -> Vec<AnalysisSpec> {
@@ -1965,6 +1977,8 @@ mod tests {
             &specs[0],
             AnalysisSpec::Fourier {
                 num_harmonics: 15,
+
+                num_periods: 1,
                 output_node,
                 ..
             } if output_node.eq_ignore_ascii_case("I(V1)")

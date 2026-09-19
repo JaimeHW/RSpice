@@ -13,6 +13,7 @@ pub(super) fn validate(spec: &AnalysisSpec) -> Result<(), String> {
         AnalysisSpec::Fourier {
             fundamental_freq,
             num_harmonics,
+            num_periods,
             output_node,
             output_ref,
             additional_outputs,
@@ -25,6 +26,16 @@ pub(super) fn validate(spec: &AnalysisSpec) -> Result<(), String> {
             }
             if *num_harmonics == 0 {
                 return Err("Fourier num_harmonics must be > 0".to_string());
+            }
+            if *num_periods == 0 {
+                return Err("Fourier num_periods must be > 0".to_owned());
+            }
+            let duration = *num_periods as f64 / *fundamental_freq;
+            if !duration.is_finite()
+                || stop_time - start_time + 16.0 * f64::EPSILON * stop_time.abs().max(duration)
+                    < duration
+            {
+                return Err("Fourier window must contain the requested complete periods".to_owned());
             }
             if output_node.trim().is_empty() {
                 return Err("Fourier output_node is required".to_string());

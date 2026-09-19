@@ -12,6 +12,7 @@ pub struct FourierConfig {
     pub fundamental_freq: f64,
     /// Number of harmonics to compute
     pub num_harmonics: u32,
+    pub num_periods: u32,
     /// Output node to analyze
     pub output_node: String,
     /// Reference node (ground if empty)
@@ -35,6 +36,7 @@ impl Default for FourierConfig {
         Self {
             fundamental_freq: 1e6,
             num_harmonics: 10,
+            num_periods: 1,
             output_node: "VOUT".to_string(),
             output_ref: String::new(),
             additional_outputs: Vec::new(),
@@ -91,15 +93,15 @@ impl FourierConfig {
     }
 
     pub fn to_spice(&self) -> String {
-        let mut cmd = format!(
-            ".four {} {}",
-            format_freq(self.fundamental_freq),
-            self.num_harmonics
-        );
+        let mut cmd = format!(".four {} {}", self.fundamental_freq, self.num_harmonics);
         for output in self.outputs() {
             cmd.push(' ');
             cmd.push_str(&output);
         }
+        cmd.push_str(&format!(
+            " PERIODS={} FROM={} TO={}",
+            self.num_periods, self.start_time, self.stop_time
+        ));
         cmd
     }
 
@@ -126,8 +128,14 @@ impl FourierConfig {
         if self.stop_time <= self.start_time {
             return Err("Stop time must be after start time".into());
         }
-        if self.periods_in_window() < 1.0 {
-            return Err("Analysis window must contain at least one period".into());
+        if self.num_periods == 0 {
+            return Err("Number of periods must be at least 1".into());
+        }
+        let available = self.periods_in_window();
+        if !available.is_finite()
+            || available + 16.0 * f64::EPSILON * available.abs() < self.num_periods as f64
+        {
+            return Err("Analysis window must contain the requested complete periods".into());
         }
         Ok(())
     }
@@ -138,6 +146,8 @@ impl FourierConfig {
 pub struct FourierDialogState {
     pub fundamental: String,
     pub harmonics: String,
+    #[serde(default = "default_period_text")]
+    pub periods: String,
     pub output_node: String,
     /// The outputs authored beside the first one, each one row. A draft saved
     /// before the list existed carries none, which is the one-output card it
@@ -157,6 +167,7 @@ impl FourierDialogState {
         Self {
             fundamental: format_freq(config.fundamental_freq),
             harmonics: config.num_harmonics.to_string(),
+            periods: config.num_periods.to_string(),
             output_node: config.output_node.clone(),
             additional_outputs: config.additional_outputs.clone(),
             start_time: format_time(config.start_time),
@@ -176,6 +187,10 @@ impl FourierDialogState {
         let config = FourierConfig {
             fundamental_freq: fund,
             num_harmonics: harm,
+            num_periods: self
+                .periods
+                .parse()
+                .map_err(|_| "Periods must be a positive integer")?,
             output_node: self.output_node.clone(),
             output_ref: String::new(),
             additional_outputs: self
@@ -255,7 +270,10 @@ mod tests {
         ];
         config.validate().expect("every output is well spelled");
         let card = config.to_spice();
-        assert_eq!(card, ".four 1k 9 V(out) V(mid,out) I(V1) V(in)");
+        assert_eq!(
+            card,
+            ".four 1000 9 V(out) V(mid,out) I(V1) V(in) PERIODS=1 FROM=0 TO=0.005"
+        );
 
         let netlist = rspice_core::Netlist::parse(&format!(
             "Fourier card\nV1 in 0 SIN(0 1 1k)\nR1 in mid 1k\nR2 mid out 1k\nR3 out 0 1k\n{card}\n.tran 10u 5m\n.end\n"
@@ -342,4 +360,8 @@ mod tests {
             .expect_err("NaN Fourier start time must be rejected");
         assert!(err.contains("finite"));
     }
+}
+
+fn default_period_text() -> String {
+    "1".to_owned()
 }

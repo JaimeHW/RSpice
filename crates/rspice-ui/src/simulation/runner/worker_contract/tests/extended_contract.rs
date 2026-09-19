@@ -393,6 +393,7 @@ fn analysis_spec_round_trips_supported_variants() {
         AnalysisSpec::Fourier {
             fundamental_freq: 1e6,
             num_harmonics: 9,
+            num_periods: 3,
             output_node: "out".to_string(),
             output_ref: "0".to_string(),
             additional_outputs: vec!["V(mid,out)".to_string(), "I(V1)".to_string()],

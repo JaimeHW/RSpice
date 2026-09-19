@@ -145,6 +145,7 @@ pub(super) fn run_periodic_spec(
         AnalysisSpec::Fourier {
             fundamental_freq,
             num_harmonics,
+            num_periods,
             output_node,
             output_ref,
             additional_outputs,
@@ -156,6 +157,8 @@ pub(super) fn run_periodic_spec(
             fundamental_freq,
             FourierRunRequest {
                 num_harmonics,
+
+                num_periods,
                 output_node,
                 output_ref,
                 additional_outputs,
@@ -845,6 +848,8 @@ fn run_envelope(
 
 struct FourierRunRequest {
     num_harmonics: usize,
+
+    num_periods: usize,
     output_node: String,
     output_ref: String,
     additional_outputs: Vec<String>,
@@ -871,6 +876,8 @@ fn run_fourier(
 ) -> Result<SimulationResult, SimulationError> {
     let FourierRunRequest {
         num_harmonics,
+
+        num_periods,
         output_node,
         output_ref,
         additional_outputs,
@@ -903,6 +910,7 @@ fn run_fourier(
         let cfg = svc_runner::FourierRunConfig {
             fundamental_freq,
             num_harmonics,
+            num_periods,
             output_node,
             output_ref,
             start_time,
@@ -1370,6 +1378,8 @@ mod tests {
         .unwrap();
         let request = |additional_outputs: Vec<String>| FourierRunRequest {
             num_harmonics: 3,
+
+            num_periods: 1,
             output_node: "out".to_owned(),
             output_ref: "0".to_owned(),
             additional_outputs,
@@ -1493,6 +1503,8 @@ mod tests {
             1.0,
             FourierRunRequest {
                 num_harmonics: 3,
+
+                num_periods: 1,
                 output_node: "out".to_owned(),
                 output_ref: "0".to_owned(),
                 additional_outputs: Vec::new(),

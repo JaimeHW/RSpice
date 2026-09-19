@@ -301,6 +301,8 @@ pub(crate) enum WorkerAnalysisSpec {
     Fourier {
         fundamental_freq: f64,
         num_harmonics: usize,
+        #[serde(default = "crate::simulation::config::default_fourier_periods")]
+        num_periods: usize,
         output_node: String,
         output_ref: String,
         /// An older worker's request carries no further outputs, which is the

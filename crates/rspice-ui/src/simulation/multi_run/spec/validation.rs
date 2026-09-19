@@ -384,6 +384,7 @@ mod tests {
         let spec = |fundamental_freq, start_time, stop_time| AnalysisSpec::Fourier {
             fundamental_freq,
             num_harmonics: 9,
+            num_periods: 1,
             output_node: "out".to_owned(),
             output_ref: "0".to_owned(),
             additional_outputs: Vec::new(),
@@ -405,6 +406,7 @@ mod tests {
         let spec = AnalysisSpec::Fourier {
             fundamental_freq: 1.0,
             num_harmonics: 9,
+            num_periods: 1,
             output_node: "I(V1)".to_owned(),
             output_ref: "0".to_owned(),
             additional_outputs: Vec::new(),

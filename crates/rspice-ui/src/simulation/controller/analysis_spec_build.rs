@@ -773,6 +773,7 @@ impl SimulationController {
         Ok(AnalysisSpec::Fourier {
             fundamental_freq: fourier_cfg.fundamental_freq,
             num_harmonics: fourier_cfg.num_harmonics as usize,
+            num_periods: fourier_cfg.num_periods as usize,
             output_node: fourier_cfg.output_node.clone(),
             output_ref: fourier_cfg.output_ref.clone(),
             additional_outputs: fourier_cfg.additional_outputs.clone(),

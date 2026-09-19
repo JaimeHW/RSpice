@@ -704,6 +704,7 @@ fn fourier_contract_rejects_out_of_window_or_undersampled_transients() {
     let fourier = AnalysisSpec::Fourier {
         fundamental_freq: 2.0,
         num_harmonics: 4,
+        num_periods: 1,
         output_node: "out".to_owned(),
         output_ref: "0".to_owned(),
         additional_outputs: Vec::new(),

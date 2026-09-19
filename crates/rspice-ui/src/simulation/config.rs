@@ -91,3 +91,8 @@ impl AnalysisConfig {
         }
     }
 }
+
+/// Legacy Fourier requests analyze one complete period.
+pub(crate) const fn default_fourier_periods() -> usize {
+    1
+}

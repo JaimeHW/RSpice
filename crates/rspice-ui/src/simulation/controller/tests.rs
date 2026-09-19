@@ -1132,6 +1132,7 @@ fn failed_prerequisite_skips_dependent_prepared_task_with_exact_provenance() {
             AnalysisSpec::Fourier {
                 fundamental_freq: 2.0,
                 num_harmonics: 4,
+                num_periods: 1,
                 output_node: "out".to_owned(),
                 output_ref: "0".to_owned(),
                 additional_outputs: Vec::new(),

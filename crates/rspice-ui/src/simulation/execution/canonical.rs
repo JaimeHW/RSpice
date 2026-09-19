@@ -1838,6 +1838,7 @@ mod tests {
         let spec = |compute_thd, normalize| AnalysisSpec::Fourier {
             fundamental_freq: 1.0e6,
             num_harmonics: 10,
+            num_periods: 1,
             output_node: "out".to_owned(),
             output_ref: "0".to_owned(),
             additional_outputs: Vec::new(),
@@ -1866,6 +1867,7 @@ mod tests {
         let fourier = |additional_outputs: Vec<String>| AnalysisSpec::Fourier {
             fundamental_freq: 1.0e6,
             num_harmonics: 10,
+            num_periods: 1,
             output_node: "out".to_owned(),
             output_ref: "0".to_owned(),
             additional_outputs,

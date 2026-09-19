@@ -1146,6 +1146,7 @@ mod tests {
         let config = crate::services::simulation_runner::FourierRunConfig {
             fundamental_freq: 1.0,
             num_harmonics: 1,
+            num_periods: 1,
             output_node: "out".to_owned(),
             output_ref: None,
             start_time: 0.125,

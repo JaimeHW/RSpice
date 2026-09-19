@@ -472,6 +472,7 @@ pub(super) fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &Analysis
         AnalysisSpec::Fourier {
             fundamental_freq,
             num_harmonics,
+            num_periods,
             output_node,
             output_ref,
             additional_outputs,
@@ -497,6 +498,10 @@ pub(super) fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &Analysis
                 for output in additional_outputs {
                     writer.string(output);
                 }
+            }
+            if *num_periods != 1 {
+                writer.string("fourier-periods-v1");
+                writer.usize(*num_periods);
             }
         }
         AnalysisSpec::Qpss {

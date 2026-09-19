@@ -608,6 +608,7 @@ fn fourier_worker_consumes_exact_transient_dependency_artifact() {
             spec: Box::new(WorkerAnalysisSpec::Fourier {
                 fundamental_freq: 2.0,
                 num_harmonics: 4,
+                num_periods: 1,
                 output_node: "out".to_owned(),
                 output_ref: "0".to_owned(),
                 additional_outputs: Vec::new(),

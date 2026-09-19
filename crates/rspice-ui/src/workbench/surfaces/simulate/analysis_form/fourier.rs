@@ -34,6 +34,9 @@ pub(super) fn fields(
         locale,
     );
     input_row(ui, "Harmonics", &mut setup.harmonics);
+    input_row(ui, "Periods", &mut setup.periods).on_hover_text(
+        "Complete fundamental periods ending at To; From is the earliest allowed start.",
+    );
     input_row(ui, "Output", &mut setup.output_node);
     quantity_input_row(
         ui,

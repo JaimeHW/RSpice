@@ -963,6 +963,7 @@ fn solve_projection_system(
 pub struct FourierRunConfig {
     pub fundamental_freq: Value,
     pub num_harmonics: usize,
+    pub num_periods: usize,
     pub output_node: String,
     pub output_ref: Option<String>,
     pub start_time: Value,
@@ -978,6 +979,9 @@ impl FourierRunConfig {
         }
         if self.num_harmonics == 0 {
             return Err("Fourier num_harmonics must be greater than zero".to_string());
+        }
+        if self.num_periods == 0 {
+            return Err("Fourier num_periods must be greater than zero".to_owned());
         }
         if self.output_node.trim().is_empty() {
             return Err("Fourier output node must be specified".to_string());
@@ -1218,12 +1222,12 @@ pub(crate) fn run_fourier_from_signal_with_abort(
     }
 
     let observed_duration = window_time[window_time.len() - 1] - window_time[0];
-    let fundamental_period = 1.0 / config.fundamental_freq;
+    let fundamental_period = config.num_periods as f64 / config.fundamental_freq;
     let duration_tolerance =
         16.0 * f64::EPSILON * observed_duration.abs().max(fundamental_period).max(1.0);
     if observed_duration + duration_tolerance < fundamental_period {
         return Err(ServiceRunError::Failure(format!(
-            "Fourier artifact window spans {observed_duration:.12e}s, shorter than one fundamental period {fundamental_period:.12e}s"
+            "Fourier artifact window spans {observed_duration:.12e}s, shorter than the requested complete periods ({fundamental_period:.12e}s)"
         )));
     }
     let mut observed_max_interval = 0.0_f64;
@@ -1244,6 +1248,7 @@ pub(crate) fn run_fourier_from_signal_with_abort(
         &window_values,
         config.fundamental_freq,
         config.num_harmonics,
+        config.num_periods,
         abort,
     )?;
     if config.normalize {
@@ -1409,123 +1414,34 @@ fn analyze_fourier_with_abort(
     values: &[Value],
     fundamental_freq: Value,
     num_harmonics: usize,
+    num_periods: usize,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<FourierDecomposition> {
-    use std::f64::consts::PI;
-
-    ensure_not_aborted(abort)?;
-    if time.len() != values.len() || time.len() < 2 {
-        return Err(ServiceRunError::Failure(
-            "Fourier time/value vectors are inconsistent".to_string(),
-        ));
-    }
-
-    let t_end = *time.last().expect("length checked");
-    let t_start = (t_end - 1.0 / fundamental_freq).max(time[0]);
-    let (window_time, window_values) = exact_fourier_window(time, values, t_start, t_end, abort)?;
-    if window_time.len() < 3 {
-        return Err(ServiceRunError::Failure(
-            "Fourier analysis period has insufficient samples".to_string(),
-        ));
-    }
-    let time = window_time.as_slice();
-    let values = window_values.as_slice();
-    let origin = time[0];
-    let duration = time[time.len() - 1] - origin;
-    if !duration.is_finite() || duration <= 0.0 {
-        return Err(ServiceRunError::Failure(
-            "Fourier analysis period has invalid duration".to_string(),
-        ));
-    }
-
-    let component_count = num_harmonics.checked_add(1).ok_or_else(|| {
-        ServiceRunError::Failure("Fourier harmonic count exceeds this platform".to_string())
-    })?;
-    let mut frequencies = Vec::new();
-    frequencies
-        .try_reserve_exact(component_count)
-        .map_err(|error| {
-            ServiceRunError::Failure(format!(
-                "Fourier frequency allocation for {component_count} components failed: {error}"
-            ))
+    let mut config = rspice_core::analysis::fourier::FourierConfig::new(fundamental_freq)
+        .with_harmonics(num_harmonics);
+    config.num_periods = num_periods;
+    let result = rspice_core::analysis::fourier::FourierAnalysis::new(config)
+        .analyze_with_abort(time, values, abort)
+        .map_err(|error| match error {
+            rspice_core::analysis::fourier::FourierError::Aborted => ServiceRunError::Aborted,
+            error => ServiceRunError::Failure(error.to_string()),
         })?;
-    let mut response = Vec::new();
-    response
-        .try_reserve_exact(component_count)
-        .map_err(|error| {
-            ServiceRunError::Failure(format!(
-                "Fourier response allocation for {component_count} components failed: {error}"
-            ))
-        })?;
-    let mut harmonic_sum_sq = 0.0;
-    let mut fundamental_magnitude = 0.0;
-    let mut dc_component = 0.0;
-
-    for harmonic in 0..=num_harmonics {
+    let mut frequencies = Vec::with_capacity(result.harmonics.len());
+    let mut response = Vec::with_capacity(result.harmonics.len());
+    for harmonic in &result.harmonics {
         ensure_not_aborted(abort)?;
-        let frequency = harmonic as Value * fundamental_freq;
-        let (real, imaginary) = if harmonic == 0 {
-            let mut integral = 0.0;
-            for idx in 1..time.len() {
-                poll_periodically(abort, idx)?;
-                let dt = time[idx] - time[idx - 1];
-                integral += 0.5 * (values[idx] + values[idx - 1]) * dt;
-            }
-            (integral / duration, 0.0)
+        frequencies.push(harmonic.frequency);
+        response.push(if harmonic.harmonic_number == 0 {
+            Complex64::new(result.dc_component, 0.0)
         } else {
-            let omega = 2.0 * PI * frequency;
-            let mut cosine_integral = 0.0;
-            let mut sine_integral = 0.0;
-            for idx in 1..time.len() {
-                poll_periodically(abort, idx)?;
-                let dt = time[idx] - time[idx - 1];
-                let phase0 = omega * (time[idx - 1] - origin);
-                let phase1 = omega * (time[idx] - origin);
-                cosine_integral +=
-                    0.5 * (values[idx - 1] * phase0.cos() + values[idx] * phase1.cos()) * dt;
-                sine_integral +=
-                    0.5 * (values[idx - 1] * phase0.sin() + values[idx] * phase1.sin()) * dt;
-            }
-            (
-                2.0 * cosine_integral / duration,
-                -2.0 * sine_integral / duration,
-            )
-        };
-        let value = Complex64::new(real, imaginary);
-        if !value.re.is_finite() || !value.im.is_finite() || !frequency.is_finite() {
-            return Err(ServiceRunError::Failure(format!(
-                "Fourier harmonic {harmonic} produced a non-finite result"
-            )));
-        }
-        let magnitude = value.norm();
-        if harmonic == 0 {
-            dc_component = real;
-        } else if harmonic == 1 {
-            fundamental_magnitude = magnitude;
-        } else {
-            harmonic_sum_sq += magnitude * magnitude;
-        }
-        frequencies.push(frequency);
-        response.push(value);
+            Complex64::from_polar(harmonic.magnitude, harmonic.phase.to_radians())
+        });
     }
-
-    let thd_percent = if fundamental_magnitude == 0.0 {
-        None
-    } else {
-        let value = harmonic_sum_sq.sqrt() / fundamental_magnitude * 100.0;
-        if !value.is_finite() {
-            return Err(ServiceRunError::Failure(
-                "Fourier THD calculation produced a non-finite result".to_owned(),
-            ));
-        }
-        Some(value)
-    };
-    ensure_not_aborted(abort)?;
     Ok(FourierDecomposition {
         frequencies,
         response,
-        thd_percent,
-        dc_component,
+        thd_percent: result.thd,
+        dc_component: result.dc_component,
     })
 }
 
@@ -1936,9 +1852,39 @@ mod tests {
             .map(|time| (2.0 * std::f64::consts::PI * 10.0e6 * time).sin())
             .collect();
 
-        let result = analyze_fourier_with_abort(&time, &values, 10.0e6, 10, &abort);
+        let result = analyze_fourier_with_abort(&time, &values, 10.0e6, 10, 1, &abort);
 
         assert!(matches!(result, Err(ServiceRunError::Aborted)));
+    }
+
+    #[test]
+    fn fourier_period_count_changes_the_actual_integration_window() {
+        let time = (0..=4096).map(|i| i as f64 / 2048.0).collect::<Vec<_>>();
+        let signal = time
+            .iter()
+            .map(|t| {
+                let amplitude = if *t < 1.0 { 1.0 } else { 3.0 };
+                amplitude * (std::f64::consts::TAU * t).sin()
+            })
+            .collect::<Vec<_>>();
+        let mut config = FourierRunConfig {
+            fundamental_freq: 1.0,
+            num_harmonics: 5,
+            num_periods: 1,
+            output_node: "out".into(),
+            output_ref: None,
+            start_time: 0.0,
+            stop_time: 2.0,
+            compute_thd: false,
+            normalize: false,
+        };
+        let last = run_fourier_from_signal_with_abort(&time, &signal, &config, &NoAbort).unwrap();
+        config.num_periods = 2;
+        let both = run_fourier_from_signal_with_abort(&time, &signal, &config, &NoAbort).unwrap();
+        assert!((last.response[1].norm() - 3.0).abs() < 1e-5);
+        assert!((both.response[1].norm() - 2.0).abs() < 1e-5);
+        config.num_periods = 3;
+        assert!(run_fourier_from_signal_with_abort(&time, &signal, &config, &NoAbort).is_err());
     }
 
     #[test]
@@ -1958,7 +1904,7 @@ mod tests {
             .analyze(&time, &values)
             .expect("qualified waveform should have a core Fourier decomposition");
 
-        let actual = analyze_fourier_with_abort(&time, &values, fundamental, 6, &NoAbort)
+        let actual = analyze_fourier_with_abort(&time, &values, fundamental, 6, 1, &NoAbort)
             .expect("cancellable decomposition should succeed");
 
         assert_eq!(actual.response.len(), expected.harmonics.len());
@@ -1986,6 +1932,7 @@ mod tests {
         let config = FourierRunConfig {
             fundamental_freq: -1.0,
             num_harmonics: 0,
+            num_periods: 1,
             output_node: String::new(),
             output_ref: None,
             start_time: -1.0,
@@ -2015,6 +1962,7 @@ mod tests {
         let config = FourierRunConfig {
             fundamental_freq: 1.0,
             num_harmonics: 1,
+            num_periods: 1,
             output_node: "I(V1)".to_owned(),
             output_ref: None,
             start_time: 0.0,
@@ -2038,6 +1986,7 @@ mod tests {
         let config = FourierRunConfig {
             fundamental_freq: 1.0,
             num_harmonics: 3,
+            num_periods: 1,
             output_node: "V(out)".to_owned(),
             output_ref: None,
             start_time: 0.0,
@@ -2064,6 +2013,7 @@ mod tests {
         let config = |compute_thd, normalize| FourierRunConfig {
             fundamental_freq: 1.0,
             num_harmonics: 2,
+            num_periods: 1,
             output_node: "V(out)".to_owned(),
             output_ref: None,
             start_time: 0.0,
@@ -2099,6 +2049,7 @@ mod tests {
         let config = FourierRunConfig {
             fundamental_freq: 1.0,
             num_harmonics: 1,
+            num_periods: 1,
             output_node: "V(out)".to_owned(),
             output_ref: None,
             start_time: 0.005,
@@ -2119,6 +2070,7 @@ mod tests {
         let config = FourierRunConfig {
             fundamental_freq: 1.0,
             num_harmonics: 1,
+            num_periods: 1,
             output_node: "I(V1)".to_owned(),
             output_ref: Some("0".to_owned()),
             start_time: 0.0,

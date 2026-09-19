@@ -551,6 +551,8 @@ pub enum AnalysisSpec {
     Fourier {
         fundamental_freq: f64,
         num_harmonics: usize,
+        #[serde(default = "crate::simulation::config::default_fourier_periods")]
+        num_periods: usize,
         output_node: String,
         output_ref: String,
         /// The outputs decomposed beside the first one, in authored order,

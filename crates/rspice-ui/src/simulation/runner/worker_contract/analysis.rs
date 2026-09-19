@@ -1296,6 +1296,7 @@ impl TryFrom<&AnalysisSpec> for WorkerAnalysisSpec {
             AnalysisSpec::Fourier {
                 fundamental_freq,
                 num_harmonics,
+                num_periods,
                 output_node,
                 output_ref,
                 additional_outputs,
@@ -1306,6 +1307,7 @@ impl TryFrom<&AnalysisSpec> for WorkerAnalysisSpec {
             } => Ok(Self::Fourier {
                 fundamental_freq: *fundamental_freq,
                 num_harmonics: *num_harmonics,
+                num_periods: *num_periods,
                 output_node: output_node.clone(),
                 output_ref: output_ref.clone(),
                 additional_outputs: additional_outputs.clone(),
@@ -1687,6 +1689,7 @@ impl From<WorkerAnalysisSpec> for AnalysisSpec {
             WorkerAnalysisSpec::Fourier {
                 fundamental_freq,
                 num_harmonics,
+                num_periods,
                 output_node,
                 output_ref,
                 additional_outputs,
@@ -1697,6 +1700,7 @@ impl From<WorkerAnalysisSpec> for AnalysisSpec {
             } => Self::Fourier {
                 fundamental_freq,
                 num_harmonics,
+                num_periods,
                 output_node,
                 output_ref,
                 additional_outputs,
