@@ -1290,6 +1290,7 @@ mod tests {
             osc_mode: false,
             osc_node: String::new(),
             num_harmonics: 15,
+            verbose: true,
         };
         authored.validate().expect("the authored request is valid");
         let directive = authored.to_spice();
@@ -1334,13 +1335,12 @@ mod tests {
         assert_eq!(abstol, 1.0e-15);
         assert_eq!(damping, 0.75);
         assert_eq!(max_period_change, 0.25);
-        assert!(!verbose, "the form authors no solver log");
+        assert!(verbose, "the form's solver log survives the deck");
     }
 
-    /// `VERBOSE=` is the one control only a deck can state, and it reaches the
-    /// engine from one.
+    /// `VERBOSE=` reaches the engine from a hand-written deck too.
     #[test]
-    fn a_deck_authors_the_solver_log_the_form_does_not_offer() {
+    fn a_deck_authors_the_solver_log_the_form_now_also_offers() {
         const CIRCUIT: &str = "pss verbose\nV1 in 0 SIN(0 1 1Meg)\nR1 in out 1k\nC1 out 0 1n\n";
         let deck = format!("{CIRCUIT}.pss fund=1Meg verbose=yes\n.end\n");
         let netlist = Netlist::parse(&deck).expect("the engine reads verbose=");

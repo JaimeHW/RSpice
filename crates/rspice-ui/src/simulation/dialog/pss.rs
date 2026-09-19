@@ -59,6 +59,13 @@ pub struct PssConfig {
     pub osc_node: String,
     /// Number of harmonics retained in the result; zero retains none.
     pub num_harmonics: usize,
+    /// Whether the shooting solve traces its iterations to the Console.
+    ///
+    /// The engine writes that trace with `log::debug!`, which used to reach
+    /// stderr and nothing a reader of this application could see; a run now
+    /// carries what it logs into its own Console log, which is what makes the
+    /// control worth offering.
+    pub verbose: bool,
 }
 
 impl Default for PssConfig {
@@ -83,6 +90,7 @@ impl Default for PssConfig {
             osc_mode: false,
             osc_node: String::new(),
             num_harmonics: 20,
+            verbose: false,
         }
     }
 }
@@ -242,6 +250,14 @@ impl PssConfig {
         if let Some(method) = self.integration_method {
             card.push_str(&format!(" method={}", method.spice_name()));
         }
+        // Conditional, unlike every control above it, because it is the one
+        // key that changes no number the run computes — only whether the run
+        // says what it is doing. Writing `verbose=no` on every card would make
+        // every deck this studio writes differ from every deck it wrote
+        // before, for a key that decides nothing about the result.
+        if self.verbose {
+            card.push_str(" verbose=yes");
+        }
         card
     }
 }
@@ -268,6 +284,8 @@ pub struct PssDialogState {
     pub osc_node: String,
     /// Numeric retained harmonic count. Zero explicitly retains no harmonics.
     pub num_harmonics: String,
+    /// Whether the solve traces its shooting iterations to the Console.
+    pub verbose: bool,
     #[serde(skip)]
     pub initialized: bool,
 }
@@ -330,6 +348,10 @@ struct PersistedPssDialogState {
     points_per_period: String,
     #[serde(default = "default_pss_tolerance")]
     tolerance: String,
+    /// Absent means off, which is what every draft written before the Console
+    /// could show a solver trace ran as.
+    #[serde(default)]
+    verbose: bool,
 }
 
 impl<'de> Deserialize<'de> for PssDialogState {
@@ -360,6 +382,7 @@ impl<'de> Deserialize<'de> for PssDialogState {
             osc_mode: persisted.osc_mode,
             osc_node: persisted.osc_node,
             num_harmonics,
+            verbose: persisted.verbose,
             initialized: false,
         })
     }
@@ -396,6 +419,7 @@ impl PssDialogState {
             osc_mode: config.osc_mode,
             osc_node: config.osc_node.clone(),
             num_harmonics: config.num_harmonics.to_string(),
+            verbose: config.verbose,
             initialized: true,
         }
     }
@@ -440,6 +464,7 @@ impl PssDialogState {
             osc_mode: self.osc_mode,
             osc_node: self.osc_node.trim().to_owned(),
             num_harmonics,
+            verbose: self.verbose,
         };
         config.validate()?;
         Ok(config)
@@ -755,6 +780,7 @@ mod tests {
             osc_mode: false,
             osc_node: "osc_out".to_owned(),
             num_harmonics: "31".to_owned(),
+            verbose: true,
             initialized: true,
         };
         let config = state.to_config().expect("valid exact PSS contract");
@@ -772,6 +798,61 @@ mod tests {
         assert!(!config.osc_mode);
         assert_eq!(config.osc_node, "osc_out");
         assert_eq!(config.num_harmonics, 31);
+        assert!(config.verbose);
+    }
+
+    /// The solver trace survives a save, an open, and the card between them.
+    ///
+    /// Three claims in one test because they are one claim: the draft keeps
+    /// the switch, a draft written before the switch existed opens with it off
+    /// — which is the run that draft described — and the card states it only
+    /// when it is on, so every deck this studio ever wrote still reads back
+    /// byte for byte as the request that produced it.
+    #[test]
+    fn the_pss_solver_trace_survives_a_save_and_reaches_the_card() {
+        let mut state = PssDialogState::from_config(&PssConfig::default());
+        state.tone_sources = "VIN".to_owned();
+        state.verbose = true;
+
+        let mut document: serde_json::Value =
+            serde_json::to_value(&state).expect("the draft serializes");
+        let restored: PssDialogState =
+            serde_json::from_value(document.clone()).expect("the saved draft opens");
+        assert!(restored.verbose);
+        assert!(
+            restored
+                .to_config()
+                .expect("the restored draft configures")
+                .verbose
+        );
+
+        let object = document
+            .as_object_mut()
+            .expect("a draft is written as an object");
+        assert!(
+            object.remove("verbose").is_some(),
+            "the fixture must state one for its removal to mean anything"
+        );
+        let older: PssDialogState = serde_json::from_value(document)
+            .expect("a draft written before the switch existed opens");
+        assert!(
+            !older.verbose,
+            "a draft that could not ask for a trace ran without one"
+        );
+
+        let quiet = PssConfig {
+            tone_sources: vec!["VIN".to_owned()],
+            ..PssConfig::default()
+        };
+        assert!(!quiet.to_spice().contains("verbose"));
+        assert!(
+            PssConfig {
+                verbose: true,
+                ..quiet
+            }
+            .to_spice()
+            .ends_with(" verbose=yes")
+        );
     }
 
     #[test]

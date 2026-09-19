@@ -601,11 +601,7 @@ impl SimulationController {
             abstol: pss_cfg.abstol,
             damping: pss_cfg.damping,
             max_period_change: pss_cfg.max_period_change,
-            // No form control reaches the solver log: the engine writes it
-            // through `log::debug!` and nothing in the product displays that
-            // channel, so a switch here would be a control with no visible
-            // effect. A manual deck may still author `VERBOSE=`.
-            verbose: false,
+            verbose: pss_cfg.verbose,
         })
     }
 

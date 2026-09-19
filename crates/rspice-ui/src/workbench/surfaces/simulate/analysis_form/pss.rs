@@ -33,11 +33,11 @@ use crate::simulation::dialog::{IntegrationMethod, PssDialogState};
 
 use super::{
     QuantityPresentationPolicy, UiNumberLocale, choice_row, enabled_choice_row,
-    engineering_input_row, hinted_input_row, hinted_input_row_enabled, input_row,
-    input_row_enabled, named_periodic_source_row, quantity_input_row,
+    engineering_input_row, hinted_input_row, hinted_input_row_enabled, hinted_switch_row,
+    input_row, input_row_enabled, named_periodic_source_row, quantity_input_row,
 };
 
-pub(super) const PSS_FIELD_LABELS: [&str; 14] = [
+pub(super) const PSS_FIELD_LABELS: [&str; 15] = [
     "Integration method",
     "Fundamental",
     "Tones",
@@ -52,6 +52,7 @@ pub(super) const PSS_FIELD_LABELS: [&str; 14] = [
     "Absolute tolerance",
     "Damping",
     "Max period change",
+    "Verbose",
 ];
 
 /// The integration methods the chooser offers, in the engine's own order.
@@ -137,6 +138,14 @@ pub(super) fn fields(
         setup.osc_mode,
     )
     .on_hover_text(MAX_PERIOD_CHANGE_HINT);
+    // Last, because it is the only control that changes nothing the solve
+    // computes — only whether the solve says what it is doing.
+    hinted_switch_row(
+        ui,
+        PSS_FIELD_LABELS[14],
+        &mut setup.verbose,
+        "solver trace to the Console",
+    );
 }
 
 /// The rule the two stabilization fields share, stated where the overriding

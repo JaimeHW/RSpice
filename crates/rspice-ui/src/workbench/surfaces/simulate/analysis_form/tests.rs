@@ -267,6 +267,7 @@ fn pss_field_order_and_wording_match_the_canonical_mockup() {
             "Absolute tolerance",
             "Damping",
             "Max period change",
+            "Verbose",
         ]
     );
     assert_eq!(
