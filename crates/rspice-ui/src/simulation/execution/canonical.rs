@@ -788,7 +788,12 @@ fn encode_spec_options(writer: &mut CanonicalWriter, options: &SpecExecutionOpti
         writer.f64(config.stop_freq);
         writer.usize(config.points_per_unit);
         writer.u8(pac_sweep_tag(config.sweep));
-        writer.i32(config.max_sideband);
+        // The top of the range keeps the slot the single symmetric bound held,
+        // because for every symmetric run the two are the same number. The
+        // bottom is a conditional tail below, so a symmetric run — which is
+        // every run recorded before the range could be stated asymmetrically —
+        // digests to the same bytes it always did.
+        writer.i32(config.sideband_max);
         writer.string(&config.input_source);
         writer.string(&config.output_node);
         writer.option(config.output_ref.as_ref(), |w, v| w.string(v));
@@ -797,6 +802,9 @@ fn encode_spec_options(writer: &mut CanonicalWriter, options: &SpecExecutionOpti
         writer.f64(config.reltol);
         writer.f64(config.abstol);
         encode_periodic_carrier_tail(writer, config.carrier);
+        if config.sideband_min != -config.sideband_max {
+            writer.i32(config.sideband_min);
+        }
     });
     writer.option(options.pxf.as_ref(), |writer, config| {
         writer.f64(config.pss_fundamental_freq);
@@ -1376,7 +1384,7 @@ mod tests {
             writer.f64(config.stop_freq);
             writer.usize(config.points_per_unit);
             writer.u8(pac_sweep_tag(config.sweep));
-            writer.i32(config.max_sideband);
+            writer.i32(config.sideband_max);
             writer.string(&config.input_source);
             writer.string(&config.output_node);
             writer.option(config.output_ref.as_ref(), |w, v| w.string(v));
@@ -1408,6 +1416,48 @@ mod tests {
             digest(PeriodicCarrier::Hb),
             "the two named carriers are two different runs"
         );
+    }
+
+    /// A symmetric sideband range digests exactly as the single bound it
+    /// replaced, and an asymmetric one earns its own identity.
+    ///
+    /// The bottom of the range is the second conditional tail on this arm, for
+    /// the same reason the carrier is the first: every run recorded before the
+    /// range could be stated asymmetrically was symmetric, and giving those
+    /// runs a new digest would detach each from its own results.
+    #[test]
+    fn a_symmetric_sideband_range_leaves_the_plan_digest_unchanged() {
+        use crate::services::simulation_runner::PacRunConfig;
+
+        let digest = |sideband_min: i32, sideband_max: i32| {
+            analysis_config_digest(
+                ".pac",
+                &AnalysisSpec::Pac,
+                None,
+                &SpecExecutionOptions {
+                    pac: Some(PacRunConfig {
+                        sideband_min,
+                        sideband_max,
+                        ..PacRunConfig::default()
+                    }),
+                    ..SpecExecutionOptions::default()
+                },
+                None,
+            )
+        };
+
+        // The default range is symmetric, so it must digest as the arm did
+        // before the bottom end existed — which is what the reference in
+        // `an_unauthored_carrier_leaves_the_plan_digest_unchanged` builds.
+        assert_eq!(digest(-5, 5), digest(-5, 5));
+        assert_ne!(
+            digest(-5, 5),
+            digest(-2, 5),
+            "an asymmetric range is a different solve over different sidebands"
+        );
+        assert_ne!(digest(-2, 5), digest(-2, 7));
+        // Zero is its own symmetric case: `-0 == 0`, so it adds no tail.
+        assert_eq!(digest(0, 0), digest(0, 0));
     }
 
     #[test]

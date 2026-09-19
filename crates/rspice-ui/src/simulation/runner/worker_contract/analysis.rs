@@ -430,7 +430,15 @@ pub(crate) struct WorkerPacRunConfig {
     pub stop_freq: f64,
     pub points_per_unit: usize,
     pub sweep: WorkerSweepType,
-    pub max_sideband: i32,
+    /// The top of the sideband range, under the wire name the single symmetric
+    /// bound had: for every symmetric run the two are the same number, so an
+    /// older worker's request decodes as exactly the run it described.
+    #[serde(rename = "max_sideband")]
+    pub sideband_max: i32,
+    /// The bottom of the range. Absent on a request an older worker wrote, and
+    /// absent means the symmetric `-max`.
+    #[serde(default)]
+    pub sideband_min: Option<i32>,
     pub input_source: String,
     pub output_node: String,
     pub output_ref: Option<String>,
@@ -454,7 +462,10 @@ impl From<&crate::services::simulation_runner::PacRunConfig> for WorkerPacRunCon
             stop_freq: value.stop_freq,
             points_per_unit: value.points_per_unit,
             sweep: WorkerSweepType::from(value.sweep),
-            max_sideband: value.max_sideband,
+            sideband_max: value.sideband_max,
+            // Written only where the range is not symmetric, so a symmetric
+            // request is the same document it has always been.
+            sideband_min: (value.sideband_min != -value.sideband_max).then_some(value.sideband_min),
             input_source: value.input_source.clone(),
             output_node: value.output_node.clone(),
             output_ref: value.output_ref.clone(),
@@ -477,7 +488,8 @@ impl From<WorkerPacRunConfig> for crate::services::simulation_runner::PacRunConf
             stop_freq: value.stop_freq,
             points_per_unit: value.points_per_unit,
             sweep: crate::services::simulation_runner::PacFrequencySweep::from(value.sweep),
-            max_sideband: value.max_sideband,
+            sideband_max: value.sideband_max,
+            sideband_min: value.sideband_min.unwrap_or(-value.sideband_max),
             input_source: value.input_source,
             output_node: value.output_node,
             output_ref: value.output_ref,

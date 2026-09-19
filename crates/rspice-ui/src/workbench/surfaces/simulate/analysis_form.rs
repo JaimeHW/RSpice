@@ -450,6 +450,24 @@ fn periodic_carrier_row(ui: &mut Ui, value: &mut usize) -> bool {
     choice_row_with_disabled(ui, "Carrier", PERIODIC_CARRIER_CHOICES, value, &disabled)
 }
 
+/// A tolerance well whose emptiness selects the plan's own policy.
+///
+/// The hint slot is the whole of what distinguishes this from an ordinary
+/// engineering field: a blank well here is not an omission, it is the
+/// selection "whatever the Solver options channel states deck-wide", and the
+/// slot says so in that channel's own words. A written value is this
+/// analysis's, and the card then states it; the two cases read differently
+/// because they are different, and a field that said `engineering notation`
+/// in both would leave the reader to guess which one an empty well was.
+fn plan_policy_tolerance_row(ui: &mut Ui, label: &str, value: &mut String) -> Response {
+    let hint = if value.trim().is_empty() {
+        "plan policy"
+    } else {
+        "engineering notation"
+    };
+    hinted_input_row(ui, label, value, hint)
+}
+
 fn enabled_choice_row(ui: &mut Ui, label: &str, enabled: &mut bool) -> bool {
     let mut selected = usize::from(!*enabled);
     let changed = choice_row(ui, label, XF_ENABLED_CHOICES, &mut selected);

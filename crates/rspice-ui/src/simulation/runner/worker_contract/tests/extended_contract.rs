@@ -529,7 +529,6 @@ fn worker_spec_request_preserves_pac_pxf_execution_options() {
         stop_freq: 10.0e6,
         points_per_unit: 13,
         sweep: crate::services::simulation_runner::PacFrequencySweep::Octave,
-        max_sideband: 4,
         input_source: "VRF".to_string(),
         output_node: "mix_out".to_string(),
         output_ref: Some("vref".to_string()),
@@ -540,6 +539,11 @@ fn worker_spec_request_preserves_pac_pxf_execution_options() {
         // Away from the default, so the round trip proves the carrier crosses
         // the wire rather than being re-derived on the far side.
         carrier: crate::services::simulation_runner::PeriodicCarrier::Pss,
+        // Asymmetric, for the same reason: the bottom of the range is written
+        // only when it is not `-max`, so a symmetric fixture would prove the
+        // absent key rather than the present one.
+        sideband_min: -2,
+        sideband_max: 4,
     };
     let pxf = crate::services::simulation_runner::PxfRunConfig {
         pss_fundamental_freq: 1.5e6,
@@ -1067,7 +1071,8 @@ fn assert_pac_config_matches(
     assert_eq!(actual.stop_freq, expected.stop_freq);
     assert_eq!(actual.points_per_unit, expected.points_per_unit);
     assert_eq!(actual.sweep, expected.sweep);
-    assert_eq!(actual.max_sideband, expected.max_sideband);
+    assert_eq!(actual.sideband_min, expected.sideband_min);
+    assert_eq!(actual.sideband_max, expected.sideband_max);
     assert_eq!(actual.input_source, expected.input_source);
     assert_eq!(actual.output_node, expected.output_node);
     assert_eq!(actual.output_ref, expected.output_ref);
@@ -1075,6 +1080,7 @@ fn assert_pac_config_matches(
     assert_eq!(actual.include_dc, expected.include_dc);
     assert_eq!(actual.reltol, expected.reltol);
     assert_eq!(actual.abstol, expected.abstol);
+    assert_eq!(actual.carrier, expected.carrier);
 }
 
 fn assert_pxf_config_matches(

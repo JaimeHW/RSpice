@@ -529,7 +529,8 @@ fn parse_pac(
             FrequencySweepKind::Octave => PacFrequencySweep::Octave,
             FrequencySweepKind::Linear => PacFrequencySweep::Linear,
         },
-        max_sideband: sideband_bound(card, ".PAC", 5, params)?,
+        sideband_min: -sideband_bound(card, ".PAC", 5, params)?,
+        sideband_max: sideband_bound(card, ".PAC", 5, params)?,
         input_source,
         output_node,
         output_ref,
@@ -550,7 +551,7 @@ fn parse_pac(
         config.start_freq,
         config.stop_freq,
         config.points_per_unit,
-        config.max_sideband,
+        config.sideband_max,
     )?;
     if !config.reltol.is_finite()
         || config.reltol <= 0.0
@@ -564,7 +565,7 @@ fn parse_pac(
     }
     // The engine's card refuses this pairing where it is written; so does the
     // reader, rather than letting the run fail with nothing to publish.
-    if !config.include_dc && config.max_sideband == 0 {
+    if !config.include_dc && config.sideband_min == 0 && config.sideband_max == 0 {
         return Err(".PAC includedc=no withholds the only sideband this card analyses".to_owned());
     }
     Ok(config)
@@ -1464,7 +1465,7 @@ mod tests {
         ));
         let pac = tasks[2].spec_options.pac.as_ref().unwrap();
         assert_eq!(pac.points_per_unit, 20);
-        assert_eq!(pac.max_sideband, 7);
+        assert_eq!((pac.sideband_min, pac.sideband_max), (-7, 7));
         assert_eq!(pac.output_ref.as_deref(), Some("0"));
         let pnoise = tasks[3].spec_options.pnoise.as_ref().unwrap();
         assert_eq!(pnoise.max_sideband, 9);

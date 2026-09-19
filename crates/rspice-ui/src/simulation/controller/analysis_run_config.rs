@@ -32,7 +32,9 @@ impl SimulationController {
 
         let output_ref =
             (!pac_cfg.output_ref.trim().is_empty()).then(|| pac_cfg.output_ref.clone());
-        let (reltol, abstol) = Self::periodic_solver_tolerances(state);
+        let (reltol, abstol) =
+            Self::authored_or_plan_tolerances(state, pac_cfg.reltol, pac_cfg.abstol);
+        let (sideband_min, sideband_max) = pac_cfg.resolved_sidebands();
 
         Ok(PacRunConfig {
             pss_fundamental_freq: pss_cfg.fund_freq,
@@ -42,7 +44,8 @@ impl SimulationController {
             stop_freq: pac_cfg.stop_freq,
             points_per_unit: pac_cfg.num_points as usize,
             sweep,
-            max_sideband: pac_cfg.max_sideband,
+            sideband_min,
+            sideband_max,
             input_source: pac_cfg.input_source,
             output_node: pac_cfg.output_node,
             output_ref,
@@ -143,7 +146,8 @@ impl SimulationController {
 
         let output_ref =
             (!pxf_cfg.output_ref.trim().is_empty()).then(|| pxf_cfg.output_ref.clone());
-        let (reltol, abstol) = Self::periodic_solver_tolerances(state);
+        let (reltol, abstol) =
+            Self::authored_or_plan_tolerances(state, pxf_cfg.reltol, pxf_cfg.abstol);
 
         Ok(PxfRunConfig {
             pss_fundamental_freq: pss_cfg.fund_freq,
@@ -373,5 +377,29 @@ impl SimulationController {
     pub(super) fn periodic_solver_tolerances(state: &AppState) -> (f64, f64) {
         let opts = &state.sim_setup.options;
         (opts.reltol, opts.abstol)
+    }
+
+    /// The tolerances a periodic small-signal run solves at.
+    ///
+    /// The plan's Solver options channel states the deck-wide policy and every
+    /// periodic dependent used to be handed it unconditionally, so an analysis
+    /// that needed a tighter periodic solve than the rest of the deck had no
+    /// way to ask. An authored field is this analysis's own and wins; an empty
+    /// one is the policy, which is what every run written before the two
+    /// fields existed asked for — so an untouched form reaches the engine with
+    /// exactly the numbers it always did.
+    ///
+    /// Only `.PAC` and `.PXF` take this. `.PNOISE` and `.PSTB` have no
+    /// `RELTOL=`/`ABSTOL=` arm on their cards
+    /// (`rspice-core/src/netlist/parser/periodic_cards.rs`), so a field for
+    /// them would be a number no deck could carry and no round trip could
+    /// preserve.
+    pub(super) fn authored_or_plan_tolerances(
+        state: &AppState,
+        reltol: Option<f64>,
+        abstol: Option<f64>,
+    ) -> (f64, f64) {
+        let (plan_reltol, plan_abstol) = Self::periodic_solver_tolerances(state);
+        (reltol.unwrap_or(plan_reltol), abstol.unwrap_or(plan_abstol))
     }
 }

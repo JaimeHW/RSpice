@@ -21,16 +21,16 @@
 //! (`rspice-core/src/netlist/parser/periodic_cards.rs`), and the grammar below
 //! is that card's grammar. Its full key set is
 //! `INPUT= OUT= [INPUTSIDEBAND=1] [OUTSIDEBAND=1] [MAXSIDEBAND=5] [RELTOL=1e-3]
-//! [ABSTOL=1e-12] [FROM=PSS|HB]`, and this form now writes all of it except
-//! the two tolerances:
+//! [ABSTOL=1e-12] [FROM=PSS|HB]`, and this form authors all of it:
 //!
-//! - `RELTOL=`/`ABSTOL=` are the deck's numerical contract, and the Solver
-//!   options channel ([`super::options`]) owns it deck-wide through
-//!   `.options`. `PacConfig`, whose card carries the identical pair at the
-//!   identical defaults, does not offer them either, and the manual-deck
-//!   reader falls back to the deck's own `.options` for both — a sharper
-//!   answer than a per-card constant. Two places to set one tolerance is a
-//!   contradiction waiting to be authored.
+//! - `RELTOL=`/`ABSTOL=` govern this analysis's own periodic solve. The Solver
+//!   options channel ([`super::options`]) still owns the deck-wide policy, and
+//!   an unauthored field here takes it; what the two fields add is the case
+//!   that had no spelling at all, where one analysis needs a tighter periodic
+//!   solve than the rest of the deck. A written value is the card's, an empty
+//!   one is the plan's, and the card states only the former — so there is one
+//!   owner of the number in either case rather than two settings to
+//!   contradict each other.
 //! - `FROM=` selects the carrier to linearize about, and the form authors it.
 //!   The engine's three positions are the whole vocabulary — the preceding
 //!   periodic solve of either family, the preceding `.PSS`, the preceding
@@ -42,6 +42,11 @@
 use crate::services::simulation_runner::PeriodicCarrier;
 
 use super::options::parse_si_value;
+// The two tolerance wells whose emptiness means "the plan's policy" are read
+// the `.PAC` form's way rather than restated here: the two cards carry the
+// identical pair at the identical defaults, and a second reading of "empty" is
+// how the two would come to disagree about what a blank field asked for.
+use super::pac::{optional_tolerance, optional_tolerance_text};
 
 // =============================================================================
 // PXF Sweep Type
@@ -104,6 +109,10 @@ pub struct PxfConfig {
     pub input_sideband: i32,
     /// Maximum sideband index
     pub max_sideband: i32,
+    /// Relative tolerance for the periodic solve, or `None` for plan policy.
+    pub reltol: Option<f64>,
+    /// Absolute tolerance for small-signal currents, or `None` for plan policy.
+    pub abstol: Option<f64>,
     /// Which periodic solve this transfer is measured around; `FROM=`.
     pub carrier: PeriodicCarrier,
 }
@@ -125,6 +134,8 @@ impl Default for PxfConfig {
             // analysis it always ran.
             input_sideband: 1,
             max_sideband: 5,
+            reltol: None,
+            abstol: None,
             carrier: PeriodicCarrier::Preceding,
         }
     }
@@ -160,6 +171,15 @@ impl PxfConfig {
         cmd.push_str(&format!(" inputsideband={}", self.input_sideband));
 
         cmd.push_str(&format!(" maxsideband={}", self.max_sideband));
+
+        // Only an authored tolerance is written; an empty field is the plan's
+        // policy, which the reader takes from the deck's own `.options`.
+        if let Some(reltol) = self.reltol {
+            cmd.push_str(&format!(" reltol={reltol:e}"));
+        }
+        if let Some(abstol) = self.abstol {
+            cmd.push_str(&format!(" abstol={abstol:e}"));
+        }
 
         // The absent key is the "preceding periodic solve" position, so an
         // untouched form writes the card it always wrote.
@@ -208,6 +228,13 @@ impl PxfConfig {
                 ));
             }
         }
+        for (label, tolerance) in [("Relative", self.reltol), ("Absolute", self.abstol)] {
+            if let Some(tolerance) = tolerance
+                && (!tolerance.is_finite() || tolerance <= 0.0)
+            {
+                return Err(format!("{label} tolerance must be finite and positive"));
+            }
+        }
         if let Some(reason) = self.carrier.unroutable_reason(".PXF") {
             return Err(reason);
         }
@@ -238,6 +265,12 @@ pub struct PxfDialogState {
     #[serde(default = "default_input_sideband_text")]
     pub input_sideband: String,
     pub max_sideband: String,
+    /// Relative tolerance buffer; empty defers to the plan's policy.
+    #[serde(default)]
+    pub reltol: String,
+    /// Absolute tolerance buffer; empty defers to the plan's policy.
+    #[serde(default)]
+    pub abstol: String,
     /// Carrier chooser position, into [`PeriodicCarrier::ALL`]. Absent means
     /// position zero, the preceding periodic solve, which is what every
     /// project saved before the row existed both wrote and ran.
@@ -269,6 +302,8 @@ impl PxfDialogState {
             input_source: config.input_source.clone(),
             input_sideband: config.input_sideband.to_string(),
             max_sideband: config.max_sideband.to_string(),
+            reltol: optional_tolerance_text(config.reltol),
+            abstol: optional_tolerance_text(config.abstol),
             carrier_idx: config.carrier.index(),
             initialized: true,
         }
@@ -311,6 +346,8 @@ impl PxfDialogState {
             input_source: self.input_source.clone(),
             input_sideband: in_sb,
             max_sideband: max_sb,
+            reltol: optional_tolerance(&self.reltol, "relative tolerance")?,
+            abstol: optional_tolerance(&self.abstol, "absolute tolerance")?,
             carrier: PeriodicCarrier::at(self.carrier_idx),
         };
 

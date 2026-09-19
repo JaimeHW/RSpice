@@ -49,7 +49,18 @@ pub struct PacRunConfig {
     pub stop_freq: Value,
     pub points_per_unit: usize,
     pub sweep: PacFrequencySweep,
-    pub max_sideband: i32,
+    /// Lowest output sideband index the lifted solve spans.
+    ///
+    /// The engine's `.PAC` card states the range in either of two ways and
+    /// refuses both at once: `MAXSIDEBAND=n` is the symmetric `-n..=n`, and
+    /// `SIDEBANDMIN=`/`SIDEBANDMAX=` state the two ends independently. Core's
+    /// own `PacConfig` has carried the pair since it existed
+    /// (`rspice-core/src/analysis/pac/config.rs`); this request collapsed it to
+    /// one symmetric number, so an asymmetric range the engine solves was not
+    /// expressible from the Studio at all.
+    pub sideband_min: i32,
+    /// Highest output sideband index the lifted solve spans.
+    pub sideband_max: i32,
     pub input_source: String,
     pub output_node: String,
     pub output_ref: Option<String>,
@@ -76,7 +87,8 @@ impl Default for PacRunConfig {
             stop_freq: 1e9,
             points_per_unit: 10,
             sweep: PacFrequencySweep::Decade,
-            max_sideband: 5,
+            sideband_min: -5,
+            sideband_max: 5,
             input_source: "VRF".to_string(),
             output_node: "VOUT".to_string(),
             output_ref: None,
@@ -109,10 +121,16 @@ impl PacRunConfig {
         if self.points_per_unit == 0 {
             return Err("PAC points per unit must be greater than zero".to_string());
         }
-        if self.max_sideband < 0 {
-            return Err("PAC max sideband must be non-negative".to_string());
+        // The engine's own two refusals on this range, in this order: the ends
+        // must not cross, and a card that withholds sideband zero while
+        // analysing no other sideband asks for a run with nothing to publish.
+        if self.sideband_min > self.sideband_max {
+            return Err(format!(
+                "PAC sideband range {}..={} is empty",
+                self.sideband_min, self.sideband_max
+            ));
         }
-        if self.max_sideband == 0 && !self.include_dc {
+        if self.sideband_min == 0 && self.sideband_max == 0 && !self.include_dc {
             return Err("PAC configuration must include at least one sideband".to_string());
         }
         if self.input_source.trim().is_empty() {
@@ -261,7 +279,7 @@ fn build_core_pac_config(
     let mut pac_config = PacConfig::new()
         .with_sweep(config.start_freq, config.stop_freq, config.points_per_unit)
         .with_sweep_type(config.sweep.to_core())
-        .with_sidebands(-config.max_sideband, config.max_sideband)
+        .with_sidebands(config.sideband_min, config.sideband_max)
         .with_input_source(config.input_source.trim())
         .with_output_node(&normalize_pac_node_name(&config.output_node))
         .with_tolerances(config.reltol, config.abstol)
@@ -331,8 +349,8 @@ fn validate_pac_result(
             result.fundamental_frequency
         )));
     }
-    if result.sideband_min != -config.max_sideband
-        || result.sideband_max != config.max_sideband
+    if result.sideband_min != config.sideband_min
+        || result.sideband_max != config.sideband_max
         || result.conversion_matrix.sideband_indices() != result.sideband_indices()
         || result.conversion_matrix.num_frequencies() != result.frequencies.len()
         || result.conversion_matrix.fundamental().to_bits()
@@ -660,7 +678,8 @@ mod tests {
             stop_freq: 1.0e4,
             points_per_unit: 1,
             sweep: PacFrequencySweep::Linear,
-            max_sideband: 0,
+            sideband_min: 0,
+            sideband_max: 0,
             input_source: "V1".to_owned(),
             output_node: "out".to_owned(),
             output_ref: None,

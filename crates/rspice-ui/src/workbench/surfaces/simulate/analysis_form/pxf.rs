@@ -12,7 +12,7 @@ use crate::simulation::dialog::PxfDialogState;
 
 use super::{
     QuantityPresentationPolicy, SWEEP_KINDS, UiNumberLocale, choice_row, input_row,
-    periodic_carrier_row, quantity_input_row, sweep_point_field_label,
+    periodic_carrier_row, plan_policy_tolerance_row, quantity_input_row, sweep_point_field_label,
 };
 
 /// Render the periodic transfer fields.
@@ -54,5 +54,7 @@ pub(super) fn fields(
     // here while its up-conversion path was.
     input_row(ui, "In sideband", &mut setup.input_sideband);
     input_row(ui, "Max sideband", &mut setup.max_sideband);
+    plan_policy_tolerance_row(ui, "Relative tolerance", &mut setup.reltol);
+    plan_policy_tolerance_row(ui, "Absolute tolerance", &mut setup.abstol);
     periodic_carrier_row(ui, &mut setup.carrier_idx);
 }

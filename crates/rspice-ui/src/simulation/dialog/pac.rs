@@ -66,8 +66,23 @@ pub struct PacConfig {
     pub num_points: u32,
     /// Sweep type
     pub sweep_type: PacSweepType,
-    /// Maximum sideband index (both positive and negative)
+    /// Maximum sideband index (both positive and negative).
+    ///
+    /// The symmetric spelling, `MAXSIDEBAND=n`, which the card reads as
+    /// `-n..=n`. Read only when neither end below is authored: the engine
+    /// refuses `MAXSIDEBAND=` beside `SIDEBANDMIN=`/`SIDEBANDMAX=` outright
+    /// (`ConflictingFields`), so the two spellings are alternatives and never
+    /// a pair of overlapping settings.
     pub max_sideband: i32,
+    /// Lowest output sideband index, when the range is stated asymmetrically.
+    ///
+    /// `None` is the unauthored field. Authoring either end selects the
+    /// asymmetric spelling, and the end left unauthored takes the card's own
+    /// default rather than anything derived from `max_sideband` — which is
+    /// exactly what `parse_pac_command` does with a card stating one of them.
+    pub sideband_min: Option<i32>,
+    /// Highest output sideband index, when the range is stated asymmetrically.
+    pub sideband_max: Option<i32>,
     /// Input source name (AC stimulus)
     pub input_source: String,
     /// Output node name
@@ -78,6 +93,17 @@ pub struct PacConfig {
     pub pac_magnitude: f64,
     /// Include DC sideband (band 0)
     pub include_dc: bool,
+    /// Relative tolerance for the periodic solve, or `None` for plan policy.
+    ///
+    /// The card carries `RELTOL=`, and until now the Studio's Solver options
+    /// channel owned it deck-wide: `periodic_solver_tolerances` forced
+    /// `.options reltol` onto every periodic dependent, so an analysis that
+    /// needed a tighter periodic solve than the rest of the deck had no way to
+    /// ask for one. An unauthored field still takes the plan's policy, which
+    /// is what every run before this authored.
+    pub reltol: Option<f64>,
+    /// Absolute tolerance for small-signal currents, or `None` for plan policy.
+    pub abstol: Option<f64>,
     /// Which periodic solve this analysis linearizes around.
     ///
     /// The card's `FROM=` keyword, and the engine's own three positions: the
@@ -94,11 +120,15 @@ impl Default for PacConfig {
             num_points: 10,  // 10 per decade
             sweep_type: PacSweepType::Decade,
             max_sideband: 5, // Sidebands -5 to +5
+            sideband_min: None,
+            sideband_max: None,
             input_source: "VRF".to_string(),
             output_node: "VOUT".to_string(),
             output_ref: String::new(),
             pac_magnitude: 1.0, // 1V default
             include_dc: true,
+            reltol: None,
+            abstol: None,
             carrier: PeriodicCarrier::Preceding,
         }
     }
@@ -109,6 +139,37 @@ impl PacConfig {
     pub(crate) const CARD_DEFAULT_PAC_MAGNITUDE: f64 = 1.0;
     /// What the engine's `.PAC` card means by an unwritten `INCLUDEDC=`.
     pub(crate) const CARD_DEFAULT_INCLUDE_DC: bool = true;
+    /// `PacCard::DEFAULT_SIDEBAND_MIN`: the lowest sideband a card that states
+    /// one end of the range asymmetrically means at the other.
+    pub(crate) const CARD_DEFAULT_SIDEBAND_MIN: i32 = -5;
+    /// `PacCard::DEFAULT_SIDEBAND_MAX`, the same fact at the top end.
+    pub(crate) const CARD_DEFAULT_SIDEBAND_MAX: i32 = 5;
+
+    /// The range this configuration actually runs, in the engine's own rule.
+    ///
+    /// `parse_pac_command` resolves it in exactly two lines: a stated
+    /// `MAXSIDEBAND=n` is `(-n, n)`, and otherwise each end is its own
+    /// authored value or the card's default for that end. Asked here rather
+    /// than recomputed at each caller, because the run configuration, the
+    /// validator and the writer all need the same answer.
+    pub(crate) fn resolved_sidebands(&self) -> (i32, i32) {
+        match (self.sideband_min, self.sideband_max) {
+            (None, None) => (-self.max_sideband, self.max_sideband),
+            (minimum, maximum) => (
+                minimum.unwrap_or(Self::CARD_DEFAULT_SIDEBAND_MIN),
+                maximum.unwrap_or(Self::CARD_DEFAULT_SIDEBAND_MAX),
+            ),
+        }
+    }
+
+    /// Whether the symmetric field is the one that states the range.
+    ///
+    /// The two spellings are alternatives the card refuses together, so the
+    /// form withholds the one it is not using rather than painting two
+    /// controls that contradict each other.
+    pub(crate) fn states_symmetric_sidebands(&self) -> bool {
+        self.sideband_min.is_none() && self.sideband_max.is_none()
+    }
 
     /// The `.PAC` card the engine reads, in the engine's own grammar.
     ///
@@ -131,7 +192,20 @@ impl PacConfig {
             format_freq(self.stop_freq)
         );
 
-        cmd.push_str(&format!(" maxsideband={}", self.max_sideband));
+        // One spelling or the other, never both: the card refuses the pairing
+        // where it is written, so the writer states whichever range the form
+        // authored and nothing else.
+        match (self.sideband_min, self.sideband_max) {
+            (None, None) => cmd.push_str(&format!(" maxsideband={}", self.max_sideband)),
+            (minimum, maximum) => {
+                if let Some(minimum) = minimum {
+                    cmd.push_str(&format!(" sidebandmin={minimum}"));
+                }
+                if let Some(maximum) = maximum {
+                    cmd.push_str(&format!(" sidebandmax={maximum}"));
+                }
+            }
+        }
 
         if !self.input_source.is_empty() {
             cmd.push_str(&format!(" input={}", self.input_source));
@@ -151,6 +225,17 @@ impl PacConfig {
 
         if self.include_dc != Self::CARD_DEFAULT_INCLUDE_DC {
             cmd.push_str(" includedc=no");
+        }
+
+        // Only an authored tolerance is written. The card's absent key means
+        // the reader falls back to the deck's own `.options`, which is the
+        // plan policy this field defers to when it is empty, so writing a
+        // resolved number here would freeze a policy the deck states once.
+        if let Some(reltol) = self.reltol {
+            cmd.push_str(&format!(" reltol={reltol:e}"));
+        }
+        if let Some(abstol) = self.abstol {
+            cmd.push_str(&format!(" abstol={abstol:e}"));
         }
 
         // `FROM=` has no spelling for "the preceding periodic solve": the
@@ -182,8 +267,34 @@ impl PacConfig {
             return Err("Number of points must be at least 1".to_string());
         }
 
+        // Each bound below is the engine's own, read off the `.PAC` arm that
+        // parses the keyword, so the form refuses exactly what the card
+        // cannot spell.
         if self.max_sideband < 0 {
             return Err("Maximum sideband must be non-negative".to_string());
+        }
+
+        let (resolved_min, resolved_max) = self.resolved_sidebands();
+        if resolved_min > resolved_max {
+            return Err(format!(
+                "Sideband min {resolved_min} is above sideband max {resolved_max}"
+            ));
+        }
+        // The engine refuses a card that both withholds sideband zero and
+        // analyses no other sideband, whichever spelling stated the range.
+        if !self.include_dc && resolved_min == 0 && resolved_max == 0 {
+            return Err(
+                "Withholding sideband zero leaves this analysis with nothing to publish"
+                    .to_string(),
+            );
+        }
+
+        for (label, tolerance) in [("Relative", self.reltol), ("Absolute", self.abstol)] {
+            if let Some(tolerance) = tolerance
+                && (!tolerance.is_finite() || tolerance <= 0.0)
+            {
+                return Err(format!("{label} tolerance must be finite and positive"));
+            }
         }
 
         if self.input_source.is_empty() {
@@ -228,6 +339,18 @@ pub struct PacDialogState {
     pub sweep_type_idx: usize,
     /// Max sideband buffer
     pub max_sideband: String,
+    /// Lowest sideband buffer; empty is the unauthored field.
+    #[serde(default)]
+    pub sideband_min: String,
+    /// Highest sideband buffer; empty is the unauthored field.
+    #[serde(default)]
+    pub sideband_max: String,
+    /// Relative tolerance buffer; empty defers to the plan's policy.
+    #[serde(default)]
+    pub reltol: String,
+    /// Absolute tolerance buffer; empty defers to the plan's policy.
+    #[serde(default)]
+    pub abstol: String,
     /// Input source buffer
     pub input_source: String,
     /// Output node buffer
@@ -263,6 +386,10 @@ impl PacDialogState {
                 PacSweepType::Linear => 2,
             },
             max_sideband: config.max_sideband.to_string(),
+            sideband_min: optional_integer_text(config.sideband_min),
+            sideband_max: optional_integer_text(config.sideband_max),
+            reltol: optional_tolerance_text(config.reltol),
+            abstol: optional_tolerance_text(config.abstol),
             input_source: config.input_source.clone(),
             output_node: config.output_node.clone(),
             output_ref: config.output_ref.clone(),
@@ -284,6 +411,10 @@ impl PacDialogState {
         let points: u32 = self.num_points.parse().map_err(|_| "Invalid point count")?;
 
         let max_sb: i32 = self.max_sideband.parse().map_err(|_| "Invalid sideband")?;
+        let sideband_min = optional_integer(&self.sideband_min, "sideband min")?;
+        let sideband_max = optional_integer(&self.sideband_max, "sideband max")?;
+        let reltol = optional_tolerance(&self.reltol, "relative tolerance")?;
+        let abstol = optional_tolerance(&self.abstol, "absolute tolerance")?;
 
         let mag: f64 = self
             .pac_magnitude
@@ -302,11 +433,15 @@ impl PacDialogState {
             num_points: points,
             sweep_type,
             max_sideband: max_sb,
+            sideband_min,
+            sideband_max,
             input_source: self.input_source.clone(),
             output_node: self.output_node.clone(),
             output_ref: self.output_ref.clone(),
             pac_magnitude: mag,
             include_dc: self.include_dc,
+            reltol,
+            abstol,
             carrier: PeriodicCarrier::at(self.carrier_idx),
         };
 
@@ -325,6 +460,42 @@ impl PacDialogState {
 // =============================================================================
 // Helper Functions
 // =============================================================================
+
+/// Read a well whose emptiness is a selection rather than an omission.
+///
+/// Three fields on this card work that way — the two sideband ends and the
+/// two tolerances — and each means something different when it is blank: an
+/// unauthored end takes the card's own default for that end, and an
+/// unauthored tolerance takes the plan's policy. Neither is a parse failure,
+/// so an empty well returns `None` and only a non-empty one is read.
+fn optional_integer(text: &str, label: &str) -> Result<Option<i32>, String> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+    trimmed
+        .parse()
+        .map(Some)
+        .map_err(|_| format!("Invalid {label}"))
+}
+
+fn optional_integer_text(value: Option<i32>) -> String {
+    value.map(|value| value.to_string()).unwrap_or_default()
+}
+
+pub(super) fn optional_tolerance(text: &str, label: &str) -> Result<Option<f64>, String> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+    parse_si_value(trimmed)
+        .map(Some)
+        .map_err(|error| format!("Invalid {label}: {error}"))
+}
+
+pub(super) fn optional_tolerance_text(value: Option<f64>) -> String {
+    value.map(|value| format!("{value:e}")).unwrap_or_default()
+}
 
 fn format_freq(freq: f64) -> String {
     if freq >= 1e9 {
@@ -449,6 +620,104 @@ mod tests {
         }
     }
 
+    /// The two sideband spellings are alternatives, and the card states
+    /// whichever one the form authored.
+    ///
+    /// `parse_pac_command` refuses `MAXSIDEBAND=` beside
+    /// `SIDEBANDMIN=`/`SIDEBANDMAX=` with `ConflictingFields`, so writing both
+    /// would be a card the engine reads and then rejects. An end left
+    /// unauthored takes the *card's* default for that end, never anything
+    /// derived from the symmetric field, which is what the engine does with
+    /// the same line.
+    #[test]
+    fn asymmetric_sidebands_reach_the_card_as_authored() {
+        let asymmetric = PacConfig {
+            sideband_min: Some(-2),
+            sideband_max: Some(7),
+            ..PacConfig::default()
+        };
+        assert_eq!(
+            asymmetric.to_spice(),
+            ".pac dec 10 1k 1G sidebandmin=-2 sidebandmax=7 input=VRF out=VOUT"
+        );
+        assert_eq!(asymmetric.resolved_sidebands(), (-2, 7));
+        assert!(!asymmetric.states_symmetric_sidebands());
+
+        // One end alone: the card states that end, and the other is the
+        // card's own default rather than the symmetric field's.
+        let one_end = PacConfig {
+            max_sideband: 3,
+            sideband_min: Some(-1),
+            ..PacConfig::default()
+        };
+        assert_eq!(
+            one_end.to_spice(),
+            ".pac dec 10 1k 1G sidebandmin=-1 input=VRF out=VOUT"
+        );
+        assert_eq!(
+            one_end.resolved_sidebands(),
+            (-1, PacConfig::CARD_DEFAULT_SIDEBAND_MAX)
+        );
+
+        // Neither end: the symmetric spelling, exactly as before.
+        assert_eq!(
+            PacConfig::default().to_spice(),
+            ".pac dec 10 1k 1G maxsideband=5 input=VRF out=VOUT"
+        );
+        assert_eq!(PacConfig::default().resolved_sidebands(), (-5, 5));
+    }
+
+    /// A range whose ends cross, and one that publishes nothing, are the
+    /// engine's two refusals on this pair.
+    #[test]
+    fn an_empty_sideband_range_is_refused_the_way_the_engine_refuses_it() {
+        let crossed = PacConfig {
+            sideband_min: Some(4),
+            sideband_max: Some(1),
+            ..PacConfig::default()
+        }
+        .validate()
+        .expect_err("a range whose ends cross contains no sideband");
+        assert!(crossed.contains("Sideband min 4"), "{crossed}");
+
+        let nothing_to_publish = PacConfig {
+            sideband_min: Some(0),
+            sideband_max: Some(0),
+            include_dc: false,
+            ..PacConfig::default()
+        }
+        .validate()
+        .expect_err("withholding the only sideband leaves nothing to publish");
+        assert!(
+            nothing_to_publish.contains("nothing to publish"),
+            "{nothing_to_publish}"
+        );
+    }
+
+    /// An authored tolerance reaches the card; an empty one leaves it unsaid,
+    /// which is how the plan's policy stays the single owner of the number.
+    #[test]
+    fn an_authored_tolerance_reaches_the_card_and_an_empty_one_leaves_it_unsaid() {
+        assert!(!PacConfig::default().to_spice().contains("reltol="));
+        assert!(!PacConfig::default().to_spice().contains("abstol="));
+        assert_eq!(
+            PacConfig {
+                reltol: Some(1.0e-5),
+                abstol: Some(1.0e-15),
+                ..PacConfig::default()
+            }
+            .to_spice(),
+            ".pac dec 10 1k 1G maxsideband=5 input=VRF out=VOUT reltol=1e-5 abstol=1e-15"
+        );
+        let refused = PacConfig {
+            reltol: Some(0.0),
+            ..PacConfig::default()
+        }
+        .validate()
+        .expect_err("the card takes a positive relative tolerance");
+        assert!(refused.contains("Relative tolerance"), "{refused}");
+    }
+
     /// A draft saved before the carrier row existed opens as the analysis it
     /// ran: the preceding periodic solve, writing no `FROM=` at all.
     #[test]
@@ -468,5 +737,28 @@ mod tests {
             .expect("the restored draft is runnable");
         assert_eq!(config.carrier, PeriodicCarrier::Preceding);
         assert!(!config.to_spice().contains("from="));
+    }
+
+    /// A draft saved before the sideband ends and the tolerances existed opens
+    /// as the analysis it ran: the symmetric range and the plan's policy.
+    #[test]
+    fn a_draft_saved_before_the_range_and_tolerance_wells_restores_unchanged() {
+        let mut document = serde_json::to_value(PacDialogState::from_config(&PacConfig::default()))
+            .expect("the draft serializes");
+        let body = document.as_object_mut().expect("the draft is an object");
+        for key in ["sideband_min", "sideband_max", "reltol", "abstol"] {
+            body.remove(key)
+                .unwrap_or_else(|| panic!("the key {key} this test removes must exist"));
+        }
+        let restored: PacDialogState =
+            serde_json::from_value(document).expect("a draft written before the wells loads");
+        let config = restored
+            .to_config()
+            .expect("the restored draft is runnable");
+        assert_eq!(config.sideband_min, None);
+        assert_eq!(config.sideband_max, None);
+        assert_eq!(config.reltol, None);
+        assert_eq!(config.abstol, None);
+        assert_eq!(config.to_spice(), PacConfig::default().to_spice());
     }
 }
