@@ -521,7 +521,10 @@ fn quiet_action(
 
 fn filters(ui: &mut Ui, view: &mut PanelView, records: &[NotificationRecord], large: bool) {
     let t = Tokens::get(ui.ctx());
-    let control_height = if large {
+    // Touch size is a taller press, not a taller control: the track is drawn
+    // the same at every size and only what answers a finger grows, into the
+    // padding the band already has.
+    let hit_height = if large {
         tokens::TOUCH_TARGET
     } else {
         SEGMENT_HEIGHT
@@ -529,7 +532,7 @@ fn filters(ui: &mut Ui, view: &mut PanelView, records: &[NotificationRecord], la
     let (rect, _) = ui.allocate_exact_size(
         vec2(
             ui.available_width(),
-            control_height + SEGMENT_TRACK_PADDING * 2.0 + FILTER_PADDING_Y * 2.0,
+            (SEGMENT_HEIGHT + SEGMENT_TRACK_PADDING * 2.0 + FILTER_PADDING_Y * 2.0).max(hit_height),
         ),
         Sense::hover(),
     );
@@ -538,9 +541,9 @@ fn filters(ui: &mut Ui, view: &mut PanelView, records: &[NotificationRecord], la
     ui.painter()
         .hline(rect.x_range(), rect.bottom() - 0.5, rule);
 
-    let segments_right = filter_segments(ui, rect, view, records, control_height);
+    let segments_right = filter_segments(ui, rect, view, records, hit_height);
     let room = rect.right() - FILTER_PADDING_RIGHT - segments_right - 8.0;
-    unread_only_switch(ui, rect, view, room, control_height);
+    unread_only_switch(ui, rect, view, room, hit_height);
 }
 
 /// The domain filter: one of these, and here are all of them, each with how
@@ -551,7 +554,7 @@ fn filter_segments(
     band: Rect,
     view: &mut PanelView,
     records: &[NotificationRecord],
-    control_height: f32,
+    hit_height: f32,
 ) -> f32 {
     let t = Tokens::get(ui.ctx());
     let label_font = theme::sans(tokens::FS_0, FontWeight::Regular);
@@ -581,11 +584,11 @@ fn filter_segments(
     let track = Rect::from_min_size(
         pos2(
             band.left() + FILTER_PADDING_LEFT,
-            band.center().y - control_height * 0.5 - SEGMENT_TRACK_PADDING,
+            band.center().y - SEGMENT_HEIGHT * 0.5 - SEGMENT_TRACK_PADDING,
         ),
         vec2(
             cells.iter().map(|cell| cell.4).sum::<f32>() + SEGMENT_TRACK_PADDING * 2.0,
-            control_height + SEGMENT_TRACK_PADDING * 2.0,
+            SEGMENT_HEIGHT + SEGMENT_TRACK_PADDING * 2.0,
         ),
     );
     ui.painter().rect(
@@ -606,10 +609,11 @@ fn filter_segments(
     for (index, (filter, count, label, count_text, width)) in cells.into_iter().enumerate() {
         let cell = Rect::from_min_size(
             pos2(left, track.top() + SEGMENT_TRACK_PADDING),
-            vec2(width, control_height),
+            vec2(width, SEGMENT_HEIGHT),
         );
         left += width;
-        let response = ui.interact(cell, segment_id(index), Sense::click());
+        let press = Rect::from_center_size(cell.center(), vec2(width, hit_height));
+        let response = ui.interact(press, segment_id(index), Sense::click());
         let selected = view.filter == filter;
         let announced = format!("{}, {count}", filter.label());
         response.widget_info(|| {
@@ -688,7 +692,7 @@ fn filter_segments(
 /// "Unread only" is a second axis, so it is a switch beside the filter and not
 /// a fourth segment inside it: unread crosses Jobs and System, it does not
 /// stand next to them.
-fn unread_only_switch(ui: &Ui, band: Rect, view: &mut PanelView, room: f32, control_height: f32) {
+fn unread_only_switch(ui: &Ui, band: Rect, view: &mut PanelView, room: f32, hit_height: f32) {
     let t = Tokens::get(ui.ctx());
     let font = theme::sans(tokens::FS_0, FontWeight::Regular);
     let measure = |text: &str| {
@@ -712,11 +716,11 @@ fn unread_only_switch(ui: &Ui, band: Rect, view: &mut PanelView, room: f32, cont
     let rect = Rect::from_min_max(
         pos2(
             band.right() - FILTER_PADDING_RIGHT - width,
-            band.center().y - control_height * 0.5,
+            band.center().y - hit_height * 0.5,
         ),
         pos2(
             band.right() - FILTER_PADDING_RIGHT,
-            band.center().y + control_height * 0.5,
+            band.center().y + hit_height * 0.5,
         ),
     );
     let response = ui
@@ -759,7 +763,8 @@ fn unread_only_switch(ui: &Ui, band: Rect, view: &mut PanelView, room: f32, cont
             },
         );
     }
-    theme::paint_focus_ring(ui, &response, rect);
+    let ring = Rect::from_center_size(rect.center(), vec2(rect.width(), SEGMENT_HEIGHT));
+    theme::paint_focus_ring(ui, &response, ring);
 }
 
 const fn filter_includes(filter: NotificationFilter, category: NotificationCategory) -> bool {

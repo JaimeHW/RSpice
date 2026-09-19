@@ -455,6 +455,54 @@ fn a_touch_sized_panel_shows_every_dismiss_mark_at_touch_size() {
     }
 }
 
+/// Touch size is a taller press and not a taller control: the filter band is
+/// the height it is on a desktop, and what grows is what answers the finger.
+#[test]
+fn the_filter_takes_a_finger_without_growing_taller() {
+    let drop_to_list = |panel: &Panel| {
+        let of = |wanted: &str| {
+            panel
+                .texts
+                .iter()
+                .find(|(text, _)| text == wanted)
+                .unwrap_or_else(|| panic!("{wanted:?} is not painted"))
+                .1
+                .center()
+                .y
+        };
+        of("RECENT") - of("All")
+    };
+    let desktop = Panel::seeded(DESKTOP);
+    let authored = drop_to_list(&desktop);
+    for size in [TABLET, PHONE] {
+        let panel = Panel::seeded(size);
+        let drop = drop_to_list(&panel);
+        assert!(
+            (drop - authored).abs() <= 0.5,
+            "{size:?}: the list starts {drop} points under the filter's label, \
+             {authored} on a desktop"
+        );
+        let heading = panel
+            .texts
+            .iter()
+            .find(|(text, _)| text == "RECENT")
+            .expect("group heading")
+            .1;
+        for segment in ["All, 4", "Jobs, 3", "System, 1"] {
+            let press = panel.control(|label| label == segment);
+            assert!(
+                press.height() >= tokens::TOUCH_TARGET - 0.5,
+                "{size:?}: {segment:?} answers {} points of finger",
+                press.height()
+            );
+            assert!(
+                press.bottom() <= heading.top(),
+                "{size:?}: {segment:?} answers presses meant for the list"
+            );
+        }
+    }
+}
+
 #[test]
 fn following_an_offer_reads_the_notice_closes_the_panel_and_goes_there() {
     let mut panel = Panel::seeded(DESKTOP);
