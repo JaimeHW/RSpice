@@ -32,10 +32,9 @@ pub(super) fn compatible_dependency_repair_label(
     repair_context: &AnalysisDependencyRepairContext,
 ) -> String {
     let qualifier = if prerequisite == AnalysisKind::Transient
-        && plan
-            .instance(dependent)
-            .is_some_and(|instance| instance.kind() == AnalysisKind::Fourier)
-    {
+        && plan.instance(dependent).is_some_and(|instance| {
+            matches!(instance.kind(), AnalysisKind::Fourier | AnalysisKind::Fft)
+        }) {
         "compatible "
     } else {
         ""

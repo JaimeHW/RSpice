@@ -218,7 +218,7 @@ fn catalog_counts_and_identities_are_exhaustive_and_unique() {
     assert_eq!(PLATFORM_AVAILABILITY_ROWS.len(), 4);
     assert_eq!(PLANNED_WORKFLOW_ROWS.len(), 11);
     assert_eq!(PLANNED_WORKFLOW_SPECIFICATIONS.len(), 11);
-    assert_eq!(ANALYSIS_AVAILABILITY_ROWS.len(), 35);
+    assert_eq!(ANALYSIS_AVAILABILITY_ROWS.len(), 36);
     assert_eq!(SPECIALIST_WORKSPACE_ROWS.len(), 41);
     assert_eq!(CAPABILITY_CLAIM_PROJECTIONS.len(), 12);
 

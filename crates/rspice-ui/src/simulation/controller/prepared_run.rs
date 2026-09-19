@@ -1211,8 +1211,12 @@ impl SimulationController {
             run_set_contract,
         );
 
+        // An FFT card is excluded from the run-level deck on purpose: it is
+        // spliced into the deck of the transient it is bound to, and into no
+        // other, because it changes the solve it rides on.
         let analysis_lines = tasks
             .iter()
+            .filter(|task| !matches!(task.queued_analysis().spec, AnalysisSpec::Fft { .. }))
             .map(|task| task.queued_analysis().analysis_line.clone())
             .collect::<Vec<_>>();
         let analysis_instances = plan
@@ -1627,6 +1631,28 @@ impl SimulationController {
             })
             .collect::<Vec<_>>();
         for task in &mut prepared {
+            if matches!(task.queued_analysis().spec, AnalysisSpec::Fft { .. }) {
+                // The engine binds every `.FFT` card in a deck to that deck's
+                // *first* transient, so the Studio binds the same one — not
+                // Fourier's stricter "exactly one transient".
+                let Some((producer_id, producer_revision, producer_config_digest)) =
+                    transient_producers.first()
+                else {
+                    return Err(PreparationError::new(
+                        PreparationStage::AnalysisPlan,
+                        ".FFT requires a completed authored .TRAN to post-process in the same deck",
+                    ));
+                };
+                task.set_dependencies(vec![*producer_id]);
+                task.set_dependency_bindings(vec![
+                    PreparedDependencyBinding::transient_trajectory(
+                        *producer_id,
+                        *producer_revision,
+                        *producer_config_digest,
+                    ),
+                ]);
+                continue;
+            }
             type ProducerIdentity = (
                 crate::product::AnalysisInstanceId,
                 crate::product::ObjectRevision,
@@ -2835,6 +2861,8 @@ fn element_model_name(element: &rspice_core::netlist::Element) -> Option<&str> {
 
 #[cfg(test)]
 mod dispatch_parity_tests;
+#[cfg(test)]
+mod recorded_fft_tests;
 // Visible to the controller rather than private, because `runnable_state` is
 // the one fixture in this layer that produces a preparable project — and the
 // projection ratchet has to prepare one without reaching up to the shell for

@@ -36,6 +36,7 @@ use super::artifact::{
 use super::canonical::{CanonicalWriter, analysis_config_digest, content_digest};
 use super::permit::ConsumedExecutionPermit;
 
+pub(in crate::simulation) mod bound_cards;
 mod declared_points;
 mod derived_identity;
 mod hierarchy_map;
@@ -492,6 +493,9 @@ pub(in crate::simulation) struct PreparedTask {
     /// decides which tasks exist, never what one task computes, so it is
     /// deliberately absent from the payload digest.
     run_at: crate::simulation::run_set::AnalysisRunAt,
+    /// Cards only this task's deck carries. See [`bound_cards`]: they change
+    /// the solve, so they are part of the payload digest.
+    bound_observation_cards: Vec<String>,
 }
 
 impl PreparedTask {
@@ -526,6 +530,7 @@ impl PreparedTask {
             declared_point: None,
             execution_environment: None,
             run_at: crate::simulation::run_set::AnalysisRunAt::default(),
+            bound_observation_cards: Vec::new(),
         }
     }
 
@@ -613,12 +618,15 @@ impl PreparedTask {
     }
 
     fn payload_digest(&self) -> ContentDigest {
-        let analysis_digest = analysis_config_digest(
-            &self.task.analysis_line,
-            &self.task.spec,
-            self.task.config.as_ref(),
-            &self.task.spec_options,
-            self.task.numeric_override.as_ref(),
+        let analysis_digest = bound_cards::digest_with_cards(
+            analysis_config_digest(
+                &self.task.analysis_line,
+                &self.task.spec,
+                self.task.config.as_ref(),
+                &self.task.spec_options,
+                self.task.numeric_override.as_ref(),
+            ),
+            &self.bound_observation_cards,
         );
         let Some(environment) = self.execution_environment.as_ref() else {
             return analysis_digest;
@@ -1175,6 +1183,18 @@ impl PreparedRunSnapshot {
             task.executable_netlist_override = Some(splice_before_terminal_end_card(deck, &block));
         }
 
+        // And the observation cards a bound FFT analysis put on its transient,
+        // into that transient's deck and no other. A manual deck already holds
+        // its own `.fft` cards, so nothing is attached on that path and this
+        // loop does nothing there.
+        if parts.intent == SimulationRunIntent::SimulateRunSet {
+            bound_cards::splice_bound_observation_cards(
+                &mut parts.tasks,
+                &parts.executable_netlist,
+            );
+            bound_cards::validate_bound_observation_cards(&parts.tasks)?;
+        }
+
         let mut positions = HashMap::with_capacity(parts.tasks.len());
         for (index, task) in parts.tasks.iter().enumerate() {
             if positions.insert(task.instance_id, index).is_some() {
@@ -1247,7 +1267,9 @@ impl PreparedRunSnapshot {
             }
 
             let expected_artifact_kind = match task.task.spec {
-                AnalysisSpec::Fourier { .. } => Some(ExecutionArtifactKind::TransientTrajectory),
+                AnalysisSpec::Fourier { .. } | AnalysisSpec::Fft { .. } => {
+                    Some(ExecutionArtifactKind::TransientTrajectory)
+                }
                 AnalysisSpec::Hbsp { .. } | AnalysisSpec::Hbnoise { .. } => {
                     Some(ExecutionArtifactKind::HbState)
                 }

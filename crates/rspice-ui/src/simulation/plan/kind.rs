@@ -88,6 +88,8 @@ pub enum AnalysisKind {
     DcMismatch,
     #[serde(rename = "acdata")]
     AcData,
+    #[serde(rename = "fft")]
+    Fft,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -100,7 +102,7 @@ pub struct AnalysisCategory {
 
 impl AnalysisKind {
     /// All plan-recognized kinds in the stable historical-index order.
-    pub const ALL: [Self; 35] = [
+    pub const ALL: [Self; 36] = [
         Self::OperatingPoint,
         Self::Transient,
         Self::Ac,
@@ -136,11 +138,12 @@ impl AnalysisKind {
         Self::TransientNoise,
         Self::DcMismatch,
         Self::AcData,
+        Self::Fft,
     ];
 
     /// Canonical display order from `product-manifest.js`. This is separate
     /// from [`Self::ALL`] so the historical singleton indices remain stable.
-    pub const MANIFEST_ORDER: [Self; 35] = [
+    pub const MANIFEST_ORDER: [Self; 36] = [
         Self::OperatingPoint,
         Self::Transient,
         Self::Ac,
@@ -174,6 +177,7 @@ impl AnalysisKind {
         Self::Corner,
         Self::DcMismatch,
         Self::Fourier,
+        Self::Fft,
         Self::Disto,
         Self::Reliability,
         Self::Soa,
@@ -218,6 +222,7 @@ impl AnalysisKind {
             Self::TransientNoise => "tnoise",
             Self::DcMismatch => "dcmatch",
             Self::AcData => "acdata",
+            Self::Fft => "fft",
         }
     }
 
@@ -259,6 +264,7 @@ impl AnalysisKind {
             Self::TransientNoise => 32,
             Self::DcMismatch => 33,
             Self::AcData => 34,
+            Self::Fft => 35,
         }
     }
 
@@ -300,6 +306,7 @@ impl AnalysisKind {
             Self::TransientNoise => "Transient noise",
             Self::DcMismatch => "DC mismatch contribution",
             Self::AcData => "AC frequency table",
+            Self::Fft => "FFT spectrum",
         }
     }
 
@@ -340,6 +347,7 @@ impl AnalysisKind {
             Self::Soa => "SOA",
             Self::Optimization => "OPT",
             Self::AcData => "ACTAB",
+            Self::Fft => "FFT",
         }
     }
 
@@ -365,6 +373,7 @@ impl AnalysisKind {
             Self::Soa => "SOA",
             Self::Optimization => "OPT",
             Self::AcData => "ACT",
+            Self::Fft => "FFT",
             other => other.code(),
         }
     }
@@ -434,6 +443,10 @@ impl AnalysisKind {
             Self::Fourier => {
                 "Fundamental and harmonic magnitudes, with total harmonic distortion, \
                  from time-domain data."
+            }
+            Self::Fft => {
+                "Windowed spectrum of one transient output, evaluated by the engine inside \
+                 the transient it is bound to and recorded with the run."
             }
             Self::Disto => {
                 "Circuit-wide second- and third-order Volterra distortion from declared DISTOF1 and DISTOF2 source excitations."
@@ -509,11 +522,11 @@ impl AnalysisKind {
                     detail: "Monte Carlo, mismatch contribution, corners and temperature",
                 }
             }
-            Self::Fourier | Self::Disto => AnalysisCategory {
+            Self::Fourier | Self::Fft | Self::Disto => AnalysisCategory {
                 id: "measurement",
                 label: "Measurements",
                 glyph: "Σ",
-                detail: "Fourier and compatibility post-processing",
+                detail: "Fourier, FFT and compatibility post-processing",
             },
             Self::Reliability | Self::Soa => AnalysisCategory {
                 id: "verification",
@@ -551,6 +564,7 @@ impl AnalysisKind {
             Self::DcSweep => CanonicalAnalysisKind::DcSweep,
             Self::Ac => CanonicalAnalysisKind::Ac,
             Self::AcData => CanonicalAnalysisKind::AcData,
+            Self::Fft => CanonicalAnalysisKind::Fft,
             Self::Disto => CanonicalAnalysisKind::Disto,
             Self::Transient => CanonicalAnalysisKind::Transient,
             Self::Noise => CanonicalAnalysisKind::Noise,
@@ -652,7 +666,7 @@ impl AnalysisKind {
             Self::Pac | Self::Pnoise | Self::Pxf | Self::Pstb | Self::Psp => PSS,
             Self::Hbsp | Self::Hbnoise => HB,
             Self::Qpac | Self::Qpnoise | Self::Qpxf => QPSS,
-            Self::Fourier | Self::TransientNoise => TRAN,
+            Self::Fourier | Self::TransientNoise | Self::Fft => TRAN,
             Self::DcMismatch => OP,
             Self::Disto => AC,
             Self::OperatingPoint
@@ -765,7 +779,7 @@ mod tests {
             );
         }
         assert_eq!(ids.len(), AnalysisKind::ALL.len());
-        assert_eq!(AnalysisKind::from_legacy_index(35), None);
+        assert_eq!(AnalysisKind::from_legacy_index(36), None);
         assert_eq!(AnalysisKind::from_stable_id("AC"), None);
     }
 
@@ -787,6 +801,7 @@ mod tests {
             (AnalysisKind::Pxf, AnalysisKind::Pss),
             (AnalysisKind::Pstb, AnalysisKind::Pss),
             (AnalysisKind::Fourier, AnalysisKind::Transient),
+            (AnalysisKind::Fft, AnalysisKind::Transient),
             (AnalysisKind::Disto, AnalysisKind::Ac),
             (AnalysisKind::Qpss, AnalysisKind::OperatingPoint),
             (AnalysisKind::Hbsp, AnalysisKind::HarmonicBalance),
@@ -813,12 +828,13 @@ mod tests {
     #[test]
     fn canonical_manifest_order_and_metadata_are_complete() {
         let manifest = AnalysisKind::MANIFEST_ORDER;
-        assert_eq!(manifest.len(), 35);
+        assert_eq!(manifest.len(), 36);
         assert_eq!(manifest[3], AnalysisKind::AcData);
         assert_eq!(manifest[11], AnalysisKind::Qpss);
         assert_eq!(manifest[14], AnalysisKind::Hbsp);
         assert_eq!(manifest[25], AnalysisKind::TransientNoise);
         assert_eq!(manifest[29], AnalysisKind::DcMismatch);
+        assert_eq!(manifest[31], AnalysisKind::Fft);
         let identities = manifest
             .into_iter()
             .map(AnalysisKind::stable_id)

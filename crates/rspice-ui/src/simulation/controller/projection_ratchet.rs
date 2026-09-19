@@ -90,6 +90,7 @@ const DESIGN_NAMED_FIELDS: &[(AnalysisKind, &str, &str)] = &[
         "V(n_out)",
     ),
     (AnalysisKind::Pss, "tone_sources", "VSRC"),
+    (AnalysisKind::Fft, "output", "V(n_out)"),
 ];
 
 /// Extra string values to try, for fields whose type is an enum.
