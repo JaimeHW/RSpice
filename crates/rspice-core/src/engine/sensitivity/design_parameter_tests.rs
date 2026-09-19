@@ -23,9 +23,9 @@ R1 out 0 2\n\
 /// `PARAM:RR` holds `r` fixed and is the second row alone.
 ///
 /// The second resistor is valued through a dependent parameter rather than
-/// written `{2*r}` inline because an element whose value is a compound
-/// expression carries no resolved value on the parsed element and therefore
-/// has no device sensitivity row at all (see the report of this lane).
+/// written `{2*r}` inline so that the dependent-parameter row `PARAM:RR` has
+/// something to be: the inline spelling is measured against the same closed
+/// form in `expression_value_tests`.
 const RATIOMETRIC_DIVIDER: &str = "Ratiometric divider\n\
 .param r=1k\n\
 .param rr={2*r}\n\
