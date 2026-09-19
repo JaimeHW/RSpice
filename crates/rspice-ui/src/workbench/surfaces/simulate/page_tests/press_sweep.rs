@@ -477,15 +477,15 @@ fn announced(node: &Node) -> String {
 /// contributed, and the Outputs registry's own actions are all disabled over
 /// an empty registry, so its enabled controls are the toolbar's.
 const PRESSED_PER_SURFACE: &[(&str, usize)] = &[
-    ("Analyses/Transient", 37),
+    ("Analyses/Transient", 47),
     ("Analyses/Ac", 3),
-    ("Analyses/DcSweep", 5),
+    ("Analyses/DcSweep", 4),
     ("Analyses/Noise", 9),
     ("Analyses/Stb", 3),
-    ("Analyses/Pss", 10),
-    ("Analyses/Temperature", 5),
-    ("Analyses/Corner", 7),
-    ("Excitations", 1),
+    ("Analyses/Pss", 14),
+    ("Analyses/Temperature", 8),
+    ("Analyses/Corner", 6),
+    ("Excitations", 2),
     ("Variables", 2),
     ("Outputs", 0),
     ("Specifications", 4),
@@ -530,7 +530,12 @@ const PRESSED_PER_SURFACE: &[(&str, usize)] = &[
 /// is its label and grid cell, so the longer PSS form also moved two identities
 /// to Temperature and one to the operating-point options, and took one from
 /// Corner, whose own form did not change.
-const PRESSED_FLOOR: usize = 273;
+///
+/// And again when the transient-Newton, output and harmonic-balance option
+/// packages became form fields: the time-domain forms gained their sections,
+/// the same identity sharing moved one control each away from DC sweep and
+/// Corner, and the Excitations page gained the Stimulus Library's entry.
+const PRESSED_FLOOR: usize = 289;
 
 /// Controls that are wired to nothing.
 ///
