@@ -1056,6 +1056,7 @@ mod tests {
                 failures: 0,
                 all_converged: true,
                 variables: vec![MonteCarloVariableMetadata {
+                    mean_confidence: None,
                     name: "RGAIN.r".to_owned(),
                     mean: (trials as f64 - 1.0) / 2.0,
                     std_dev: population::std_dev(&samples).expect("a spread"),

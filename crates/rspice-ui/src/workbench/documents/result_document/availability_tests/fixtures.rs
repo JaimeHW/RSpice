@@ -462,6 +462,7 @@ pub(super) fn monte_carlo_population_analysis() -> AnalysisResult {
             failures: 0,
             all_converged: true,
             variables: vec![MonteCarloVariableMetadata {
+                mean_confidence: None,
                 name: "XBRIDGE.dR".to_owned(),
                 mean,
                 std_dev: variance.sqrt(),
@@ -490,6 +491,7 @@ pub(super) fn monte_carlo_analysis() -> AnalysisResult {
             all_converged: true,
             member_measurements: Vec::new(),
             variables: vec![crate::state::MonteCarloVariableMetadata {
+                mean_confidence: None,
                 name: "V(out)".to_owned(),
                 samples: vec![0.95, 1.02, 0.98, 1.05],
                 mean: 1.0,

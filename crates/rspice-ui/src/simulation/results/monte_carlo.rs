@@ -6,6 +6,8 @@
 /// Monte Carlo variable summary in UI-friendly form.
 #[derive(Debug, Clone)]
 pub struct MonteCarloVariableResult {
+    /// Confidence in the mean, with estimator and successful-trial population.
+    pub mean_confidence: Option<crate::state::MonteCarloMeanConfidence>,
     /// Variable name (e.g., V(out), I(V1))
     pub name: String,
     /// Exact finite sample values in engine execution order.

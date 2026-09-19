@@ -142,6 +142,7 @@ fn hist_modes_refresh_projection_and_keep_point_density_unavailable() {
         assert!(text.contains(mode.label()), "{text}");
     }
     let mut state = state_with(MonteCarloVariableMetadata {
+        mean_confidence: None,
         name: "constant".to_owned(),
         samples: vec![1.0; 3],
         mean: 1.0,
@@ -162,6 +163,7 @@ fn hist_empirical_cdf_reuses_a_large_sorted_population() {
     use super::super::frame_work::WorkCounts;
     let count = 100_000;
     let mut state = state_with(MonteCarloVariableMetadata {
+        mean_confidence: None,
         name: "gain".to_owned(),
         samples: (0..count).map(f64::from).collect(),
         mean: (f64::from(count) - 1.0) * 0.5,
@@ -264,6 +266,7 @@ fn hist_source_yield_provenance_cannot_name_a_different_run() {
 fn hist_source_unchanged_large_histories_do_not_repeat_population_walks() {
     use super::super::frame_work::WorkCounts;
     let mut state = state_with(MonteCarloVariableMetadata {
+        mean_confidence: None,
         name: "gain".to_owned(),
         samples: vec![1.0; 100_000],
         mean: 1.0,
@@ -340,6 +343,7 @@ fn hist_source_bins_follow_display_settings_and_repaired_evidence() {
 fn hist_source_yield_requires_matching_seed_and_ordered_samples() {
     let result = super::tests::result("gain", 90.0);
     let mut state = state_with(MonteCarloVariableMetadata {
+        mean_confidence: None,
         name: "gain".to_owned(),
         samples: result.samples.clone(),
         mean: result.stats.mean,
@@ -383,6 +387,7 @@ fn hist_source_moments_preserve_representable_tiny_and_large_statistics() {
     assert!(nearly_equal(residual.mean, 1.0));
     assert!(nearly_equal(residual.std_dev, 1e100));
     let mut state = state_with(MonteCarloVariableMetadata {
+        mean_confidence: None,
         name: "large".to_owned(),
         samples: vec![1e308, 1.7e308],
         mean: 1.35e308,
@@ -392,4 +397,36 @@ fn hist_source_moments_preserve_representable_tiny_and_large_statistics() {
     });
     assert!(paint(&mut state, false).contains("large"));
     assert!(paint(&mut state, true).contains("Exact samples"));
+}
+
+#[test]
+fn histogram_shows_retained_mean_confidence_without_inventing_legacy_limits() {
+    let mut variable = super::tests::mc_variable("gain");
+    let mut legacy = state_with(variable.clone());
+    assert!(!paint(&mut legacy, true).contains("CONFIDENCE IN MEAN"));
+    variable.mean_confidence = Some(crate::state::MonteCarloMeanConfidence {
+        level_pct: 90.0,
+        method: crate::state::MonteCarloMeanMethod::PercentileBootstrap {
+            resamples: 2000,
+            seed: 7,
+        },
+        successful_samples: variable.samples.len(),
+        conditional_on_successful_trials: false,
+        interval: crate::state::MonteCarloMeanInterval::Available {
+            lower: 0.9,
+            upper: 1.1,
+        },
+    });
+    let mut state = state_with(variable);
+    let text = paint(&mut state, true);
+    for expected in [
+        "CONFIDENCE IN MEAN",
+        "90%",
+        "Mean interval",
+        "Percentile bootstrap",
+        "2000 resamples",
+        "seed 7",
+    ] {
+        assert!(text.contains(expected), "missing {expected}: {text}");
+    }
 }

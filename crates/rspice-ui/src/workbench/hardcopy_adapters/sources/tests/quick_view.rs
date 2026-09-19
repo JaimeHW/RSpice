@@ -291,6 +291,7 @@ fn histogram_quick_view_derives_only_from_active_monte_carlo_metadata() {
             failures: 0,
             all_converged: true,
             variables: vec![MonteCarloVariableMetadata {
+                mean_confidence: None,
                 name: "gain".to_owned(),
                 samples: samples.clone(),
                 mean: 0.0,

@@ -145,6 +145,9 @@ impl From<WorkerNoiseContributorRow> for NoiseContributorRow {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct WorkerMonteCarloVariable {
+    /// Confidence in the mean, with estimator and successful-trial population.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mean_confidence: Option<crate::state::MonteCarloMeanConfidence>,
     pub name: String,
     pub samples: Vec<f64>,
     pub mean: f64,
@@ -160,6 +163,11 @@ impl WorkerMonteCarloVariable {
     pub(super) fn estimated_numeric_payload_bytes(&self) -> usize {
         sum_payload_bytes([
             f64_payload_bytes(4usize.saturating_add(self.samples.len())),
+            if self.mean_confidence.is_some() {
+                48
+            } else {
+                0
+            },
             usize_payload_bytes(self.histogram.len()),
             f64_payload_bytes(self.bin_edges.len()),
         ])
@@ -169,6 +177,7 @@ impl WorkerMonteCarloVariable {
 impl From<MonteCarloVariableResult> for WorkerMonteCarloVariable {
     fn from(value: MonteCarloVariableResult) -> Self {
         Self {
+            mean_confidence: value.mean_confidence,
             name: value.name,
             samples: value.samples,
             mean: value.mean,
@@ -184,6 +193,7 @@ impl From<MonteCarloVariableResult> for WorkerMonteCarloVariable {
 impl From<WorkerMonteCarloVariable> for MonteCarloVariableResult {
     fn from(value: WorkerMonteCarloVariable) -> Self {
         Self {
+            mean_confidence: value.mean_confidence,
             name: value.name,
             samples: value.samples,
             mean: value.mean,

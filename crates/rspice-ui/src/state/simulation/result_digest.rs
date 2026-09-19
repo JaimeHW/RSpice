@@ -1552,7 +1552,11 @@ fn encode_family_metadata(
             variables,
             ..
         } => {
-            writer.u8(2);
+            let has_confidence = variables
+                .iter()
+                .any(|variable| variable.mean_confidence.is_some());
+            // Tag 2 is frozen for historic results with no mean confidence.
+            writer.u8(if has_confidence { 9 } else { 2 });
             writer.u64(*seed);
             writer.usize(*runs_requested);
             writer.usize(*runs_completed);
@@ -1566,6 +1570,12 @@ fn encode_family_metadata(
                 writer.f64(variable.std_dev);
                 writer.f64(variable.min);
                 writer.f64(variable.max);
+                if has_confidence {
+                    writer.option(
+                        variable.mean_confidence.as_ref(),
+                        encode_monte_carlo_mean_confidence,
+                    );
+                }
             }
         }
         AnalysisResultFamilyMetadata::Reliability { years } => {
@@ -1778,3 +1788,30 @@ const fn saved_output_streaming_tag(streaming: SavedOutputStreaming) -> u8 {
 
 #[cfg(test)]
 mod tests;
+
+fn encode_monte_carlo_mean_confidence(
+    writer: &mut ResultDigestWriter,
+    evidence: &super::MonteCarloMeanConfidence,
+) {
+    use super::{MonteCarloMeanInterval, MonteCarloMeanMethod};
+    writer.f64(evidence.level_pct);
+    match evidence.method {
+        MonteCarloMeanMethod::StudentT => writer.u8(0),
+        MonteCarloMeanMethod::PercentileBootstrap { resamples, seed } => {
+            writer.u8(1);
+            writer.usize(resamples);
+            writer.u64(seed);
+        }
+    }
+    writer.usize(evidence.successful_samples);
+    writer.bool(evidence.conditional_on_successful_trials);
+    match evidence.interval {
+        MonteCarloMeanInterval::Available { lower, upper } => {
+            writer.u8(0);
+            writer.f64(lower);
+            writer.f64(upper);
+        }
+        MonteCarloMeanInterval::InsufficientSamples => writer.u8(1),
+        MonteCarloMeanInterval::Unrepresentable => writer.u8(2),
+    }
+}

@@ -86,6 +86,7 @@ fn run_monte_carlo(
     for variable in data.variables {
         super::ensure_not_aborted(abort)?;
         variables.push(MonteCarloVariableResult {
+            mean_confidence: variable.mean_confidence,
             name: variable.name,
             samples: variable.samples,
             mean: variable.mean,

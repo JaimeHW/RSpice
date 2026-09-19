@@ -1680,6 +1680,7 @@ mod tests {
                 failures: 1,
                 all_converged: false,
                 variables: vec![MonteCarloVariableMetadata {
+                    mean_confidence: None,
                     name: "gain".to_owned(),
                     samples: vec![1.0],
                     mean: 1.0,

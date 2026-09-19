@@ -206,6 +206,7 @@ fn worker_result_round_trip() {
         num_failures: 2,
         all_converged: false,
         variables: vec![crate::simulation::results::MonteCarloVariableResult {
+            mean_confidence: None,
             name: "V(out)".to_string(),
             samples: vec![0.9, 1.0, 1.1],
             mean: 1.0,
@@ -825,4 +826,64 @@ fn a_recorded_fft_spectrum_survives_the_worker_boundary_bit_for_bit() {
     }
     assert_eq!(back.evidence, spectrum.evidence);
     assert_eq!(back.request_key, spectrum.request_key);
+}
+
+#[test]
+fn monte_carlo_mean_confidence_survives_worker_transport_and_rejects_wrong_population() {
+    use crate::state::{MonteCarloMeanConfidence, MonteCarloMeanInterval, MonteCarloMeanMethod};
+    let confidence = MonteCarloMeanConfidence {
+        level_pct: 90.0,
+        method: MonteCarloMeanMethod::PercentileBootstrap {
+            resamples: 1000,
+            seed: u64::MAX,
+        },
+        successful_samples: 3,
+        conditional_on_successful_trials: true,
+        interval: MonteCarloMeanInterval::Available {
+            lower: 0.9,
+            upper: 1.1,
+        },
+    };
+    let result = SimulationResult::MonteCarlo {
+        seed: 7,
+        runs_requested: 4,
+        runs_completed: 3,
+        num_failures: 1,
+        all_converged: false,
+        member_measurements: Vec::new(),
+        variables: vec![crate::simulation::results::MonteCarloVariableResult {
+            mean_confidence: Some(confidence),
+            name: "V(out)".into(),
+            samples: vec![0.9, 1.0, 1.1],
+            mean: 1.0,
+            std_dev: 0.1,
+            min: 0.9,
+            max: 1.1,
+            histogram: vec![1, 2],
+            bin_edges: vec![0.9, 1.0, 1.1],
+        }],
+    };
+    let SimulationResult::MonteCarlo { variables, .. } = round_trip_result(result) else {
+        panic!("Monte Carlo")
+    };
+    assert_eq!(variables[0].mean_confidence, Some(confidence));
+    let mut worker = WorkerMonteCarloVariable::from(variables[0].clone());
+    worker.mean_confidence.as_mut().unwrap().successful_samples = 4;
+    let response = WorkerResponse {
+        id: 1,
+        outcome: WorkerOutcome::Success(Box::new(WorkerSimulationResult::MonteCarlo {
+            seed: 7,
+            runs_requested: 4,
+            runs_completed: 3,
+            num_failures: 1,
+            all_converged: false,
+            member_measurements: Vec::new(),
+            variables: vec![worker],
+        })),
+    };
+    assert!(
+        WorkerResponseTransport::from_response(response)
+            .unwrap_err()
+            .contains("population")
+    );
 }

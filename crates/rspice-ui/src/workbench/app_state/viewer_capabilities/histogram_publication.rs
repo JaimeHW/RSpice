@@ -34,6 +34,7 @@ fn distribution() -> (AppState, String) {
                 member_measurements: Vec::new(),
                 variables: vec![
                     MonteCarloVariableMetadata {
+                        mean_confidence: None,
                         name: "offset".to_owned(),
                         samples: vec![99.0; 5],
                         mean: 99.0,
@@ -42,6 +43,7 @@ fn distribution() -> (AppState, String) {
                         max: 99.0,
                     },
                     MonteCarloVariableMetadata {
+                        mean_confidence: None,
                         name: "gain".to_owned(),
                         samples: vec![-2.0, -1.0, 0.0, 1.0, 2.0],
                         mean: 0.0,

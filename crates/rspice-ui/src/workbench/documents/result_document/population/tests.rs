@@ -13,6 +13,7 @@ fn variable(name: &str, samples: Vec<f64>) -> MonteCarloVariableMetadata {
     let mean = samples.iter().sum::<f64>() / count;
     let variance = samples.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / (count - 1.0);
     MonteCarloVariableMetadata {
+        mean_confidence: None,
         name: name.to_owned(),
         mean,
         std_dev: variance.sqrt(),

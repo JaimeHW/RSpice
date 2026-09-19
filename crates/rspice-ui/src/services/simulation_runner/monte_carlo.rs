@@ -14,9 +14,13 @@ use rspice_core::engine::Engine;
 use rspice_core::netlist::{AnalysisCommand, MonteCarloDistribution};
 use std::path::Path;
 
+mod confidence;
+
 /// Monte Carlo variable summary statistics.
 #[derive(Debug, Clone)]
 pub struct MonteCarloVariableData {
+    /// Confidence in the mean, with estimator and successful-trial population.
+    pub mean_confidence: Option<crate::state::MonteCarloMeanConfidence>,
     pub name: String,
     /// Exact finite values retained in engine execution order.
     pub samples: Vec<Value>,
@@ -165,6 +169,7 @@ pub(crate) fn run_monte_carlo_analysis_with_environment_and_source_path_and_abor
     for (index, stats) in result.variables.into_values().enumerate() {
         poll_periodically(abort, index)?;
         variables.push(MonteCarloVariableData {
+            mean_confidence: confidence::retain(result.confidence, stats.mean_confidence),
             name: stats.name,
             samples: stats.samples,
             mean: stats.mean,
@@ -352,14 +357,23 @@ pub(crate) fn run_statistical_monte_carlo_with_environment_and_source_path_and_a
     let trial_measurements = trial_measurements_from(&trials, &retained);
 
     let engine = Engine::new(build_engine_config(&netlist, None));
-    let result = engine
+    let mut result = engine
         .monte_carlo_result_from_trials(trials, runs)
         .map_err(|error| ServiceRunError::from_core("Monte Carlo analysis error", error))?;
+    result
+        .compute_mean_confidence(
+            95.0,
+            rspice_core::analysis::monte_carlo::MeanConfidenceMethod::StudentT,
+            engine.config().resource_limits,
+            abort,
+        )
+        .map_err(|error| ServiceRunError::from_core("Monte Carlo confidence error", error))?;
 
     let mut variables = Vec::with_capacity(result.variables.len());
     for (index, stats) in result.variables.into_values().enumerate() {
         poll_periodically(abort, index)?;
         variables.push(MonteCarloVariableData {
+            mean_confidence: confidence::retain(result.confidence, stats.mean_confidence),
             name: stats.name,
             samples: stats.samples,
             mean: stats.mean,
@@ -452,6 +466,11 @@ fn validate_monte_carlo_data(data: &MonteCarloData) -> ServiceRunResult<()> {
     }
     let mut names = std::collections::HashSet::with_capacity(data.variables.len());
     for variable in &data.variables {
+        if let Some(confidence) = variable.mean_confidence {
+            confidence
+                .validate(variable.samples.len(), data.num_failures)
+                .map_err(ServiceRunError::Failure)?;
+        }
         if variable.name.trim().is_empty()
             || !names.insert(variable.name.trim().to_ascii_lowercase())
             || variable.samples.len() != data.runs_completed
@@ -899,6 +918,42 @@ R2 out 0 1k
     }
 
     #[test]
+    fn both_monte_carlo_drivers_retain_the_mean_interval() {
+        let parameter = run_monte_carlo_analysis(RETENTION_DECK).unwrap();
+        let deck = run_statistical_monte_carlo_with_source_path_and_abort(
+            STATISTICAL_PARAMETER_DECK,
+            None,
+            &NoAbort,
+        )
+        .unwrap();
+        for (data, critical) in [(parameter, 2.570581835636314), (deck, 2.364624251010299)] {
+            let variable = data
+                .variables
+                .iter()
+                .find(|variable| variable.name.eq_ignore_ascii_case("V(out)"))
+                .unwrap();
+            let confidence = variable
+                .mean_confidence
+                .expect("computed mean interval retained");
+            assert_eq!(confidence.level_pct, 95.0);
+            assert_eq!(confidence.successful_samples, data.runs_completed);
+            assert!(!confidence.conditional_on_successful_trials);
+            assert_eq!(
+                confidence.method,
+                crate::state::MonteCarloMeanMethod::StudentT
+            );
+            let crate::state::MonteCarloMeanInterval::Available { lower, upper } =
+                confidence.interval
+            else {
+                panic!("finite interval")
+            };
+            let half = variable.std_dev / (variable.samples.len() as f64).sqrt() * critical;
+            assert!((lower - (variable.mean - half)).abs() < 1e-10);
+            assert!((upper - (variable.mean + half)).abs() < 1e-10);
+        }
+    }
+
+    #[test]
     fn partial_monte_carlo_failures_retain_the_successful_population() {
         // x = x^2 + offset has real operating points only for offset <= 1/4.
         // The uniform samples straddle that boundary, so this checks a real
@@ -909,6 +964,13 @@ R2 out 0 1k
         assert!(data.runs_completed > 0);
         assert_eq!(data.runs_completed + data.num_failures, 16);
         assert!(!data.all_converged);
+        for variable in &data.variables {
+            let confidence = variable
+                .mean_confidence
+                .expect("conditional mean confidence");
+            assert!(confidence.conditional_on_successful_trials);
+            assert_eq!(confidence.successful_samples, data.runs_completed);
+        }
         assert!(
             data.variables
                 .iter()

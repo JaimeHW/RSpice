@@ -1944,7 +1944,7 @@ fn a_results_history_saved_before_the_study_restores_with_its_digests_unchanged(
         .expect("a v28 history migrates");
     assert_eq!(
         at_v28.schema_version,
-        SENSITIVITY_STUDY_RESULTS_SCHEMA_VERSION
+        PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION
     );
     let after = at_v28.runs[0]
         .analyses

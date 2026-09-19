@@ -512,6 +512,7 @@ mod tests {
             num_failures: 0,
             all_converged: true,
             variables: vec![MonteCarloVariableResult {
+                mean_confidence: None,
                 name: name.to_owned(),
                 samples,
                 mean,

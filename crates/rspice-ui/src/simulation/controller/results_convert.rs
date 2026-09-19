@@ -1192,6 +1192,7 @@ impl SimulationController {
         let mut metadata = Vec::with_capacity(variables.len());
         for variable in variables {
             let crate::simulation::results::MonteCarloVariableResult {
+                mean_confidence,
                 name,
                 samples,
                 mean,
@@ -1215,6 +1216,7 @@ impl SimulationController {
                 ));
             }
             metadata.push(MonteCarloVariableMetadata {
+                mean_confidence,
                 name,
                 samples,
                 mean,

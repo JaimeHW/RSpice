@@ -960,8 +960,39 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         );
     }
 
-    section_header(ui, "Method authority", None);
     let mc = active_monte_carlo_authority(state, &histogram.name);
+    let mean_confidence = mc.and_then(|authority| authority.variable.mean_confidence);
+    if let Some(confidence) = mean_confidence {
+        section_header(ui, "Confidence in mean", None);
+        let limits = match confidence.interval {
+            crate::state::MonteCarloMeanInterval::Available { lower, upper } => {
+                format!("{} to {}", fmt_si(lower, "", 4), fmt_si(upper, "", 4))
+            }
+            crate::state::MonteCarloMeanInterval::InsufficientSamples => {
+                "Unavailable — fewer than two successful trials".into()
+            }
+            crate::state::MonteCarloMeanInterval::Unrepresentable => {
+                "Unavailable — limits exceed the finite range".into()
+            }
+        };
+        super::stat_table(
+            ui,
+            &[
+                ("Level", format!("{}%", confidence.level_pct), false),
+                ("Mean interval", limits, true),
+            ],
+        );
+        super::panel_note(
+            ui,
+            if confidence.conditional_on_successful_trials {
+                "Describes successful trials only; failed trials censor the original population. This is not a yield interval."
+            } else {
+                "Uncertainty in the population mean for independent trials. Student t is exact for normal observations; bootstrap coverage depends on sample size and resampling."
+            },
+        );
+    }
+
+    section_header(ui, "Method authority", None);
     let seed = mc.map_or_else(
         || "Unavailable — not retained".to_owned(),
         |authority| format!("{} · 0x{:X}", authority.seed, authority.seed),
@@ -982,8 +1013,15 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
             ("Run completion", completion, false),
             ("Seed", seed, false),
             (
-                "Estimator",
-                "Unavailable — method not retained".to_owned(),
+                if mean_confidence.is_some() {
+                    "Mean estimator"
+                } else {
+                    "Estimator"
+                },
+                mean_confidence.map_or_else(
+                    || "Unavailable — method not retained".to_owned(),
+                    |confidence| confidence.estimator_label(),
+                ),
                 false,
             ),
             (
@@ -1270,6 +1308,7 @@ mod tests {
 
     pub(super) fn mc_variable(name: &str) -> MonteCarloVariableMetadata {
         MonteCarloVariableMetadata {
+            mean_confidence: None,
             name: name.to_owned(),
             samples: vec![1.0, 2.0, 3.0],
             mean: 2.0,

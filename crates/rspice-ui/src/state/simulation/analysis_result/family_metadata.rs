@@ -26,6 +26,9 @@ use super::{
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MonteCarloVariableMetadata {
+    /// Confidence in the mean, with estimator and successful-trial population.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mean_confidence: Option<crate::state::MonteCarloMeanConfidence>,
     pub name: String,
     pub samples: Vec<f64>,
     pub mean: f64,
@@ -214,6 +217,12 @@ impl AnalysisResultFamilyMetadata {
                 }
                 let mut names = HashSet::with_capacity(variables.len());
                 for variable in variables {
+                    if let Some(confidence) = variable.mean_confidence {
+                        if variable.samples.len() != *runs_completed {
+                            return Err("Monte Carlo confidence sample count disagrees with successful runs".into());
+                        }
+                        confidence.validate(variable.samples.len(), *failures)?;
+                    }
                     require_non_empty(&variable.name, "Monte Carlo variable name")?;
                     if !names.insert(variable.name.as_str()) {
                         return Err(format!(

@@ -1422,6 +1422,7 @@ fn monte_carlo_worker_result_round_trips_seed_and_exact_samples_through_json() {
         num_failures: 0,
         all_converged: true,
         variables: vec![WorkerMonteCarloVariable {
+            mean_confidence: None,
             name: "V(out)".to_owned(),
             samples: vec![0.91, 0.97, 1.02, 1.08],
             mean: 0.995,
@@ -1622,6 +1623,7 @@ fn worker_transport_retains_monte_carlo_seed_and_samples() {
             num_failures: 0,
             all_converged: true,
             variables: vec![WorkerMonteCarloVariable {
+                mean_confidence: None,
                 name: "V(out)".to_owned(),
                 samples: vec![0.9, 1.0, 1.1],
                 mean: 1.0,

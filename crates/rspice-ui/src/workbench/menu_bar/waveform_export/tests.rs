@@ -349,6 +349,7 @@ fn csv_export_from_a_derived_sheet_publishes_what_that_sheet_draws() {
                 all_converged: true,
                 member_measurements: Vec::new(),
                 variables: vec![crate::state::MonteCarloVariableMetadata {
+                    mean_confidence: None,
                     name: "V(out)".to_owned(),
                     samples: vec![1.0, 2.0, 3.0],
                     mean: 2.0,

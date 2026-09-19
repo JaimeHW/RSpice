@@ -354,3 +354,5 @@ mod symbol_document_tests {
         assert_eq!(doc.pin_summary(&[]), PinSummary::NoSchematic);
     }
 }
+
+pub use simulation::{MonteCarloMeanConfidence, MonteCarloMeanInterval, MonteCarloMeanMethod};

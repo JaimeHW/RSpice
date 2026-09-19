@@ -288,6 +288,7 @@ fn advanced_result_conversion_retains_exact_family_metadata() {
             num_failures: 1,
             all_converged: false,
             variables: vec![crate::simulation::results::MonteCarloVariableResult {
+                mean_confidence: None,
                 name: "V(out)".to_owned(),
                 samples: vec![0.9, 1.0, 1.1],
                 mean: 1.0,
@@ -311,6 +312,7 @@ fn advanced_result_conversion_retains_exact_family_metadata() {
             failures: 1,
             all_converged: false,
             variables: vec![MonteCarloVariableMetadata {
+                mean_confidence: None,
                 name: "V(out)".to_owned(),
                 samples: vec![0.9, 1.0, 1.1],
                 mean: 1.0,

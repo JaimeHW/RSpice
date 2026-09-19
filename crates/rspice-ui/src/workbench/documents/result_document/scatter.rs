@@ -974,6 +974,7 @@ mod tests {
                 failures: 0,
                 all_converged: true,
                 variables: vec![MonteCarloVariableMetadata {
+                    mean_confidence: None,
                     name: "XBRIDGE.dR".to_owned(),
                     mean,
                     std_dev: variance.sqrt(),

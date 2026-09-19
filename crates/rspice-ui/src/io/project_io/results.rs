@@ -162,6 +162,27 @@ impl ProjectSimulationResultsData {
 
     fn migrate_to_current_in_place(&mut self, project_id: ProjectId) -> Result<(), String> {
         let source_schema = self.schema_version;
+        if source_schema < MONTE_CARLO_CONFIDENCE_RESULTS_SCHEMA_VERSION
+            && self
+                .runs
+                .iter()
+                .flat_map(|run| &run.analyses)
+                .any(|analysis| {
+                    matches!(analysis.family_metadata.as_ref(),
+                    Some(AnalysisResultFamilyMetadata::MonteCarlo { variables, .. })
+                    if variables.iter().any(|variable| variable.mean_confidence.is_some()))
+                })
+        {
+            return Err(
+                "result schemas before v30 cannot contain Monte Carlo mean confidence".into(),
+            );
+        }
+        if source_schema == SENSITIVITY_STUDY_RESULTS_SCHEMA_VERSION {
+            // An absent interval retains the exact v29 digest representation.
+            self.schema_version = PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION;
+            return self.validate();
+        }
+
         if source_schema < SENSITIVITY_STUDY_RESULTS_SCHEMA_VERSION
             && self
                 .runs

@@ -97,6 +97,26 @@ pub(super) fn validate_worker_response_before_transport(
             _ => {}
         }
         validate_worker_measurements(result)?;
+        if let WorkerSimulationResult::MonteCarlo {
+            variables,
+            runs_completed,
+            num_failures,
+            ..
+        } = result.as_ref()
+        {
+            for variable in variables {
+                if let Some(confidence) = variable.mean_confidence {
+                    if variable.samples.len() != *runs_completed {
+                        return Err(
+                            "Monte Carlo confidence sample count disagrees with successful runs"
+                                .into(),
+                        );
+                    }
+                    confidence.validate(variable.samples.len(), *num_failures)?;
+                }
+            }
+        }
+
         if let WorkerSimulationResult::DcSweep {
             evidence,
             waveforms,

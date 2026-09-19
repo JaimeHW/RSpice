@@ -453,6 +453,7 @@ fn family_samples_and_dataset_order_are_content_identity() {
             failures: 0,
             all_converged: true,
             variables: vec![MonteCarloVariableMetadata {
+                mean_confidence: None,
                 name: "V(out)".to_owned(),
                 samples: vec![0.99, 1.01],
                 mean: 1.0,
@@ -1250,4 +1251,83 @@ fn every_typed_payload_digests_under_its_own_tag() {
             );
         }
     }
+}
+
+#[test]
+fn monte_carlo_mean_confidence_is_authenticated_without_changing_absent_evidence() {
+    use crate::state::{MonteCarloMeanConfidence, MonteCarloMeanInterval, MonteCarloMeanMethod};
+    let mut result = analysis(AnalysisType::MonteCarlo).with_family_metadata(
+        AnalysisResultFamilyMetadata::MonteCarlo {
+            seed: 9,
+            runs_requested: 2,
+            runs_completed: 2,
+            failures: 0,
+            all_converged: true,
+            member_measurements: Vec::new(),
+            variables: vec![MonteCarloVariableMetadata {
+                name: "V(out)".into(),
+                samples: vec![0.9, 1.1],
+                mean: 1.0,
+                std_dev: 0.1,
+                min: 0.9,
+                max: 1.1,
+                mean_confidence: None,
+            }],
+        },
+    );
+    let absent = result.result_data_digest();
+    let evidence = MonteCarloMeanConfidence {
+        level_pct: 95.0,
+        method: MonteCarloMeanMethod::StudentT,
+        successful_samples: 2,
+        conditional_on_successful_trials: false,
+        interval: MonteCarloMeanInterval::Available {
+            lower: 0.5,
+            upper: 1.5,
+        },
+    };
+    let set = |result: &mut AnalysisResult, evidence| {
+        let Some(AnalysisResultFamilyMetadata::MonteCarlo { variables, .. }) =
+            &mut result.family_metadata
+        else {
+            panic!("Monte Carlo")
+        };
+        variables[0].mean_confidence = evidence;
+    };
+    set(&mut result, Some(evidence));
+    let retained = result.result_data_digest();
+    assert_ne!(absent, retained);
+    for changed in [
+        MonteCarloMeanConfidence {
+            level_pct: 90.0,
+            ..evidence
+        },
+        MonteCarloMeanConfidence {
+            method: MonteCarloMeanMethod::PercentileBootstrap {
+                resamples: 1000,
+                seed: 7,
+            },
+            ..evidence
+        },
+        MonteCarloMeanConfidence {
+            successful_samples: 3,
+            ..evidence
+        },
+        MonteCarloMeanConfidence {
+            conditional_on_successful_trials: true,
+            ..evidence
+        },
+        MonteCarloMeanConfidence {
+            interval: MonteCarloMeanInterval::Available {
+                lower: 0.4,
+                upper: 1.5,
+            },
+            ..evidence
+        },
+    ] {
+        set(&mut result, Some(changed));
+        assert_ne!(retained, result.result_data_digest());
+    }
+    set(&mut result, None);
+    assert_eq!(absent, result.result_data_digest());
 }
