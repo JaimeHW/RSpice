@@ -57,7 +57,7 @@ enum PnoiseOperatingPoint<'a> {
     HarmonicBalance(&'a HbOperatingPoint),
 }
 
-fn pnoise_physical_constants(
+pub(super) fn pnoise_physical_constants(
     dialect: crate::engine::SpiceDialect,
 ) -> crate::analysis::noise::NoisePhysicalConstants {
     match dialect {

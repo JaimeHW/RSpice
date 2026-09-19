@@ -32,6 +32,7 @@ use std::collections::BTreeSet;
 
 mod drive;
 mod envelope_result;
+mod noise_figure;
 mod pac;
 mod periodic_ac;
 mod pnoise;
@@ -42,6 +43,9 @@ mod stamping;
 mod state;
 
 pub use envelope_result::EnvelopeResult;
+pub use noise_figure::{
+    HbNoiseFigureRequest, PeriodicNoiseFigureResult, PeriodicNoiseFigureSpectrum,
+};
 pub use pac::PacAnalysisResult;
 pub use pnoise::PnoiseAnalysisResult;
 pub use psp::{PreparedPsp, PspAnalysisResult};
