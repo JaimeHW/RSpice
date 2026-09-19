@@ -1340,6 +1340,7 @@ mod tests {
             .collect::<Vec<_>>();
         let halved = fundamental.iter().map(|value| value / 2.0).collect();
         let transient = SimulationResult::Transient {
+            spectra: Vec::new(),
             time: time.clone(),
             waveforms: HashMap::from([
                 (
@@ -1363,6 +1364,7 @@ mod tests {
             ContentDigest::from_bytes([4; 32]),
             &transient,
             &["out".to_owned(), "mid".to_owned()],
+            false,
         )
         .unwrap()
         .unwrap();
