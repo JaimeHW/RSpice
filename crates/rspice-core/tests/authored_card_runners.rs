@@ -663,7 +663,7 @@ fn the_nyquist_switch_changes_what_is_retained_and_not_the_margins() {
         document
             .scalars()
             .iter()
-            .any(|scalar| scalar.name() == "phase_margin_deg"),
+            .any(|scalar| scalar.name() == "phase_margin_degrees"),
         "the margins are published either way"
     );
 }
