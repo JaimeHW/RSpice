@@ -147,8 +147,8 @@ pub const fn surface_availability(surface: SurfaceId) -> SurfaceExecutionAvailab
             evidence_boundary: "The canonical three-column project library browser, guarded cell/view mutations, exact shared selection, authored symbol preview, typed terminal and parameter-form inspection, symbol editor handoff, model-bound symbol creation/import, form editing, edit-lock inspection, audit history, and versioned project-library publication evidence are executable. Legacy or invalid symbol metadata is disclosed and fails closed; the workspace does not claim PCell, layout, extraction, characterization, protected-IP, remote collaboration, or sign-off authority.",
         },
         SurfaceId::NotificationCenter => SurfaceExecutionAvailability::Available {
-            executor: "rspice-ui retained notification and activity center",
-            evidence_boundary: "Filtering, read state, retention disclosure, notification settings routing, and clearing retained read activity operate on the real device-local activity stream; no external approval or remote background service is inferred.",
+            executor: "rspice-ui session notification panel",
+            evidence_boundary: "Filtering by domain and read state, marking read, dismissing one notice, clearing read notices, retention disclosure, and each notice's one offer (its run in Results, or the Console) operate on the real in-memory activity stream of this application session; nothing is persisted, and no external approval or remote background service is inferred.",
         },
         SurfaceId::FeatureAvailability => SurfaceExecutionAvailability::Available {
             executor: "rspice-ui capability and platform matrix manager",

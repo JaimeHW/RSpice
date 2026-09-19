@@ -1361,6 +1361,7 @@ impl Command {
                 app.state.workbench.console_visible = true;
                 app.state.workbench.console_maximized = false;
             }
+            Self::OpenNotifications => app.state.workbench.notification_center_open = true,
             Self::ToggleConsoleMaximized => {
                 app.state.workbench.focus_mode = false;
                 app.state.workbench.console_maximized = !app.state.workbench.console_maximized;

@@ -1,16 +1,17 @@
-//! Toast notifications — transient confirmations anchored to the
-//! bottom-right corner, above the status bar.
+//! Toast notifications — transient notices stacked under the toolbar's
+//! trailing edge — and the session activity they are retained in.
 
 use std::collections::HashSet;
 use std::time::Duration;
 
 use egui::{
-    Align2, Area, Context, Frame, Id, Margin, Order, Rect, Sense, Shape, Stroke, Ui, Vec2, pos2,
-    vec2,
+    Align2, Area, Context, Frame, Id, Margin, Order, Rect, Sense, Stroke, Ui, Vec2, pos2, vec2,
 };
 
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
+
+use super::notice;
 
 /// Visual severity of a toast.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -65,6 +66,10 @@ impl ToastKind {
 pub enum NotificationAction {
     /// Activate the retained dataset of the run with this display sequence.
     OpenRunInResults { run_sequence: u64 },
+    /// Open the Console, where the line this notice was lifted from sits among
+    /// the lines around it. A warning is one sentence here and a paragraph
+    /// there, and the paragraph is usually what explains it.
+    ShowInConsole,
 }
 
 impl NotificationAction {
@@ -72,6 +77,7 @@ impl NotificationAction {
     pub const fn label(self) -> &'static str {
         match self {
             Self::OpenRunInResults { .. } => "Open in Results",
+            Self::ShowInConsole => "Show in Console",
         }
     }
 
@@ -79,10 +85,13 @@ impl NotificationAction {
     ///
     /// A destination is an identity, and naming the record after it is what
     /// makes two reports of one event recognisably the same row rather than
-    /// one row headed "Information" and another headed by the run.
-    pub fn record_title(self) -> String {
+    /// one row headed "Information" and another headed by the run. The
+    /// Console is a place rather than an identity — every line lives there —
+    /// so it names nothing.
+    pub fn record_title(self) -> Option<String> {
         match self {
-            Self::OpenRunInResults { run_sequence } => format!("Run {run_sequence}"),
+            Self::OpenRunInResults { run_sequence } => Some(format!("Run {run_sequence}")),
+            Self::ShowInConsole => None,
         }
     }
 }
@@ -117,6 +126,10 @@ pub struct Toast {
     action: Option<NotificationAction>,
     /// Absolute time (egui clock) at which the toast was created.
     created: f64,
+    /// Absolute time at which it leaves. Separate from `created` because a
+    /// notice under the pointer is being read, and its clock starts over when
+    /// the pointer moves away.
+    expires: f64,
 }
 
 /// One retained session activity item. Toasts disappear after a few seconds,
@@ -184,6 +197,16 @@ const TOAST_PHONE_INSET: f32 = 8.0;
 const TOAST_PHONE_BREAKPOINT: f32 = 560.0;
 const TOAST_GAP: f32 = 7.0;
 const TOAST_MIN_HEIGHT: f32 = 49.0;
+const TOAST_RADIUS: u8 = 8;
+/// Severity rail down the card's leading edge.
+const TOAST_RAIL_WIDTH: f32 = 3.0;
+/// The drain bar: the lifetime, drawn. It empties as the notice runs out.
+const TOAST_DRAIN_HEIGHT: f32 = 2.0;
+/// How often the drain bar is redrawn. It moves about two points a step at
+/// this rate, which reads as motion without repainting the workbench at the
+/// display's full rate for five seconds per notice.
+const TOAST_DRAIN_STEP: Duration = Duration::from_millis(33);
+const TOAST_COLUMN_GAP: f32 = 10.0;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct ToastLayout {
@@ -372,6 +395,7 @@ impl Toasts {
             kind,
             action,
             created,
+            expires: created + TOAST_LIFETIME,
         });
         if self.queue.len() > MAX_VISIBLE_TOASTS {
             self.queue.drain(..self.queue.len() - MAX_VISIBLE_TOASTS);
@@ -442,18 +466,27 @@ impl Toasts {
             {
                 continue;
             }
+            // A line that names nowhere still came from somewhere. A warning
+            // or a failure is one sentence here and sits among the lines that
+            // explain it in the Console, so that is where it offers to go. An
+            // informational line explains itself, and an offer on every row
+            // would be a column of links nobody needs.
+            let offer = entry.action.or_else(|| {
+                matches!(entry.kind, ToastKind::Warn | ToastKind::Error)
+                    .then_some(NotificationAction::ShowInConsole)
+            });
             self.record_activity(
                 // A mirrored line has no title of its own, so it is filed
                 // under its severity. An entry that does name a destination
                 // has an identity worth showing instead.
-                entry.action.map_or_else(
-                    || entry.kind.label().to_owned(),
-                    NotificationAction::record_title,
-                ),
+                entry
+                    .action
+                    .and_then(NotificationAction::record_title)
+                    .unwrap_or_else(|| entry.kind.label().to_owned()),
                 entry.message,
                 entry.category,
                 entry.kind,
-                entry.action,
+                offer,
                 entry.created,
             );
         }
@@ -469,18 +502,34 @@ impl Toasts {
         self.activity.iter().filter(|item| !item.read).count()
     }
 
+    /// How many records a session keeps before the oldest is dropped. The
+    /// panel states it, so a reader who finds an old notice gone knows why.
+    pub const fn retention_limit() -> usize {
+        MAX_RETAINED_ACTIVITY
+    }
+
     /// Next structured-log identity already consumed by the activity stream.
     pub const fn observed_log_revision(&self) -> u64 {
         self.observed_log_revision
     }
 
-    #[cfg(test)]
+    /// Mark one record read. Returns whether that changed anything, so a
+    /// caller can tell a row that was already read from one that is gone.
     pub fn mark_read(&mut self, id: u64) -> bool {
         let Some(item) = self.activity.iter_mut().find(|item| item.id == id) else {
             return false;
         };
-        item.read = true;
-        true
+        !std::mem::replace(&mut item.read, true)
+    }
+
+    /// Drop one record, read or not, along with its toast if that is still on
+    /// screen: a notice the reader threw away must not reappear beside the
+    /// panel they threw it away from.
+    pub fn dismiss(&mut self, id: u64) -> bool {
+        let held = self.activity.len();
+        self.activity.retain(|item| item.id != id);
+        self.queue.retain(|toast| toast.id != id);
+        self.activity.len() != held
     }
 
     pub fn mark_all_read(&mut self) {
@@ -505,13 +554,13 @@ impl Toasts {
         ctx: &Context,
         title_bar_height: f32,
         toolbar_height: f32,
+        large_targets: bool,
     ) -> Option<NotificationAction> {
         if self.queue.is_empty() {
             return None;
         }
         let now = ctx.input(|i| i.time);
-        self.queue
-            .retain(|toast| now - toast.created < TOAST_LIFETIME);
+        self.queue.retain(|toast| now < toast.expires);
         if self.queue.is_empty() {
             return None;
         }
@@ -519,13 +568,19 @@ impl Toasts {
         let soonest_expiry = self
             .queue
             .iter()
-            .map(|toast| (toast.created + TOAST_LIFETIME - now).max(0.0))
+            .map(|toast| (toast.expires - now).max(0.0))
             .fold(f64::INFINITY, f64::min);
-        if soonest_expiry.is_finite() {
+        let animate = ctx.global_style().animation_time > 0.0;
+        if animate {
+            // The drain bar is the clock made visible, so it has to be seen
+            // moving. Reduced motion draws no bar and wakes once, at expiry.
+            ctx.request_repaint_after(
+                TOAST_DRAIN_STEP.min(Duration::from_secs_f64(soonest_expiry)),
+            );
+        } else if soonest_expiry.is_finite() {
             ctx.request_repaint_after(Duration::from_secs_f64(soonest_expiry));
         }
-        let animate_entry = ctx.global_style().animation_time > 0.0;
-        if animate_entry
+        if animate
             && self
                 .queue
                 .iter()
@@ -541,8 +596,9 @@ impl Toasts {
         if layout.width <= 0.0 {
             return None;
         }
-        let mut dismissed = None;
+        let mut answered = None;
         let mut taken = None;
+        let mut held = Vec::new();
 
         Area::new(Id::new("rspice.toasts"))
             .order(Order::Foreground)
@@ -554,60 +610,100 @@ impl Toasts {
                 ui.set_max_width(layout.width);
                 ui.spacing_mut().item_spacing.y = TOAST_GAP;
                 for toast in &self.queue {
-                    let age = now - toast.created;
-                    let opacity = toast_entry_opacity(age, animate_entry);
-                    let edge = match toast.kind {
-                        ToastKind::Success => c.ok,
-                        ToastKind::Info => c.accent,
-                        ToastKind::Warn => c.warn,
-                        ToastKind::Error => c.err,
-                    };
-                    let mut shadow = t.shadow();
-                    shadow.color = shadow.color.gamma_multiply(opacity);
-                    let frame = Frame::NONE
-                        .fill(c.bg_elevated.gamma_multiply(opacity))
-                        .stroke(Stroke::new(1.0, c.border_strong.gamma_multiply(opacity)))
-                        .corner_radius(t.radius_lg)
-                        .shadow(shadow)
-                        .inner_margin(Margin::symmetric(10, 9))
-                        .show(ui, |ui| {
-                            ui.set_min_height(TOAST_MIN_HEIGHT - 18.0 - 2.0);
-                            let outcome = toast_contents(ui, toast, edge, opacity);
-                            if outcome.taken.is_some() {
-                                taken = outcome.taken;
-                            }
-                            if outcome.dismissed || outcome.taken.is_some() {
-                                dismissed = Some(toast.id);
-                            }
-                        });
-                    let edge_rect = frame.response.rect;
-                    ui.painter().line_segment(
-                        [
-                            pos2(edge_rect.left() + 1.0, edge_rect.top() + t.radius_lg * 0.5),
-                            pos2(
-                                edge_rect.left() + 1.0,
-                                edge_rect.bottom() - t.radius_lg * 0.5,
-                            ),
-                        ],
-                        Stroke::new(2.0, edge.gamma_multiply(opacity)),
-                    );
+                    let tone = notice::tone_color(&t, toast.kind);
+                    let remaining = ((toast.expires - now) / TOAST_LIFETIME).clamp(0.0, 1.0);
+                    let card = ui
+                        .scope(|ui| {
+                            // One opacity for the whole card, so the entrance
+                            // fades the offer and the glyph with the panel
+                            // behind them instead of popping them in over it.
+                            ui.set_opacity(toast_entry_opacity(now - toast.created, animate));
+                            let frame = Frame::NONE
+                                .fill(c.bg_elevated)
+                                .stroke(Stroke::new(1.0, c.border_strong))
+                                .corner_radius(TOAST_RADIUS)
+                                .shadow(t.shadow())
+                                .inner_margin(Margin {
+                                    left: 12,
+                                    right: 10,
+                                    top: 11,
+                                    bottom: 12,
+                                })
+                                .show(ui, |ui| {
+                                    ui.set_min_height(TOAST_MIN_HEIGHT - 23.0 - 2.0);
+                                    let outcome = toast_contents(ui, toast, large_targets);
+                                    if outcome.taken.is_some() {
+                                        taken = outcome.taken;
+                                    }
+                                    if outcome.dismissed || outcome.taken.is_some() {
+                                        answered = Some(toast.id);
+                                    }
+                                });
+                            let card = frame.response.rect;
+                            paint_card_edges(ui, card, tone, animate.then_some(remaining as f32));
+                            card
+                        })
+                        .inner;
                     let toast_response = ui.interact(
-                        frame.response.rect,
+                        card,
                         ui.id().with(("toast-status", toast.id)),
                         Sense::hover(),
                     );
+                    if toast_response.contains_pointer() {
+                        held.push(toast.id);
+                    }
                     ui.ctx().accesskit_node_builder(toast_response.id, |node| {
                         node.set_role(egui::accesskit::Role::Status);
-                        node.set_label(format!("{}: {}", toast.title, toast.message));
+                        node.set_label(format!(
+                            "{}: {}. {}",
+                            toast.kind.label(),
+                            toast.title,
+                            toast.message
+                        ));
                     });
                 }
             });
 
-        if let Some(id) = dismissed {
+        // A notice under the pointer is being read. Its clock starts over when
+        // the pointer leaves rather than resuming, so the drain bar the reader
+        // comes back to is a full one and not a sliver about to vanish.
+        for toast in &mut self.queue {
+            if held.contains(&toast.id) {
+                toast.expires = now + TOAST_LIFETIME;
+            }
+        }
+        if let Some(id) = answered {
+            // Dismissing a notice, or following it, is having read it. One
+            // that simply times out was not necessarily seen, and stays unread.
             self.queue.retain(|toast| toast.id != id);
+            self.mark_read(id);
         }
         taken
     }
+}
+
+/// The severity rail and the drain bar, both cut from the card's own rounded
+/// shape so they follow its corners instead of squaring them off.
+fn paint_card_edges(ui: &Ui, card: Rect, tone: egui::Color32, remaining: Option<f32>) {
+    let inner = card.shrink(1.0);
+    let radius = f32::from(TOAST_RADIUS) - 1.0;
+    let rail = Rect::from_min_max(
+        inner.left_top(),
+        pos2(inner.left() + TOAST_RAIL_WIDTH, inner.bottom()),
+    );
+    ui.painter()
+        .with_clip_rect(rail.intersect(ui.clip_rect()))
+        .rect_filled(inner, radius, tone);
+    let Some(remaining) = remaining else {
+        return;
+    };
+    let drain = Rect::from_min_max(
+        pos2(inner.left(), inner.bottom() - TOAST_DRAIN_HEIGHT),
+        pos2(inner.left() + inner.width() * remaining, inner.bottom()),
+    );
+    ui.painter()
+        .with_clip_rect(drain.intersect(ui.clip_rect()))
+        .rect_filled(inner, radius, tone.gamma_multiply(0.55));
 }
 
 /// What one drawn toast reported back.
@@ -624,119 +720,69 @@ fn toast_entry_opacity(age: f64, animate_entry: bool) -> f32 {
     }
 }
 
-fn toast_contents(ui: &mut Ui, toast: &Toast, color: egui::Color32, opacity: f32) -> ToastOutcome {
+fn toast_contents(ui: &mut Ui, toast: &Toast, large_targets: bool) -> ToastOutcome {
     let t = Tokens::get(ui.ctx());
     let mut dismissed = false;
     let mut taken = None;
+    let dismiss_side = if large_targets {
+        tokens::TOUCH_TARGET
+    } else {
+        notice::DISMISS_SIDE
+    };
     ui.horizontal_top(|ui| {
-        ui.spacing_mut().item_spacing.x = 8.0;
-        let (icon_rect, _) = ui.allocate_exact_size(Vec2::splat(19.0), Sense::hover());
-        paint_toast_icon(ui, icon_rect, toast.kind, color.gamma_multiply(opacity));
+        ui.spacing_mut().item_spacing.x = TOAST_COLUMN_GAP;
+        let (glyph_rect, _) = ui.allocate_exact_size(
+            vec2(notice::GLYPH_SIDE, notice::GLYPH_SIDE + 1.0),
+            Sense::hover(),
+        );
+        notice::paint_tone_glyph(
+            ui.painter(),
+            Rect::from_min_size(
+                glyph_rect.left_top() + vec2(0.0, 1.0),
+                Vec2::splat(notice::GLYPH_SIDE),
+            ),
+            toast.kind,
+            notice::tone_color(&t, toast.kind),
+        );
 
-        let content_width = (ui.available_width() - 8.0 * 2.0 - 19.0).max(0.0);
+        let content_width = (ui.available_width() - TOAST_COLUMN_GAP - dismiss_side).max(0.0);
         ui.vertical(|ui| {
             ui.set_min_width(content_width);
             ui.set_max_width(content_width);
             ui.spacing_mut().item_spacing.y = 2.0;
             ui.label(
                 egui::RichText::new(&toast.title)
-                    .font(theme::sans(tokens::FS_0, FontWeight::Medium))
-                    .color(t.color.text.gamma_multiply(opacity)),
+                    .font(theme::sans(tokens::FS_1, FontWeight::SemiBold))
+                    .color(t.color.text),
             );
-            ui.label(
-                egui::RichText::new(&toast.message)
-                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                    .color(t.color.text_dim.gamma_multiply(opacity)),
-            );
+            if !toast.message.is_empty() {
+                ui.label(
+                    egui::RichText::new(&toast.message)
+                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                        .color(t.color.text_dim),
+                );
+            }
             // The offer sits under the detail rather than beside the close
             // mark: it is the notice's one positive action, and putting it in
             // the corner strip would make it a second dismissal.
             if let Some(action) = toast.action {
-                ui.add_space(4.0);
-                let response = ui.add(
-                    egui::Button::new(
-                        egui::RichText::new(action.label())
-                            .font(theme::sans(tokens::FS_0, FontWeight::Medium))
-                            .color(color.gamma_multiply(opacity)),
-                    )
-                    .frame(false),
-                );
-                theme::paint_focus_ring(ui, &response, response.rect);
-                if response.clicked() {
+                ui.add_space(1.0);
+                if notice::offer_link(ui, action.label(), &toast.title, large_targets).clicked() {
                     taken = Some(action);
                 }
             }
         });
 
-        let (close_rect, close_response) =
-            ui.allocate_exact_size(Vec2::splat(19.0), Sense::click());
-        close_response.widget_info(|| {
-            egui::WidgetInfo::labeled(
-                egui::WidgetType::Button,
-                ui.is_enabled(),
-                "Dismiss notification",
-            )
-        });
-        let close_color = if close_response.hovered() || close_response.has_focus() {
-            t.color.text
-        } else {
-            t.color.text_faint
-        };
-        paint_close_icon(ui, close_rect, close_color.gamma_multiply(opacity));
-        theme::paint_focus_ring(ui, &close_response, close_rect);
-        dismissed = close_response.clicked();
-        close_response.on_hover_text("Dismiss notification");
+        let (close_rect, _) = ui.allocate_exact_size(Vec2::splat(dismiss_side), Sense::hover());
+        dismissed = notice::dismiss_button(
+            ui,
+            close_rect.translate(vec2(0.0, -2.0)),
+            ui.id().with(("toast-dismiss", toast.id)),
+            &format!("Dismiss {}", toast.title),
+        )
+        .clicked();
     });
     ToastOutcome { dismissed, taken }
-}
-
-fn paint_toast_icon(ui: &Ui, rect: Rect, kind: ToastKind, color: egui::Color32) {
-    let side = rect.width().min(rect.height());
-    let scale = side / 24.0;
-    let origin = rect.center() - Vec2::splat(side * 0.5);
-    let point = |x: f32, y: f32| pos2(origin.x + x * scale, origin.y + y * scale);
-    let stroke = Stroke::new((1.6 * scale).max(1.0), color);
-    let line = |points: &[(f32, f32)]| {
-        ui.painter().add(Shape::line(
-            points.iter().map(|&(x, y)| point(x, y)).collect(),
-            stroke,
-        ));
-    };
-
-    match kind {
-        ToastKind::Success => line(&[(5.0, 12.0), (10.0, 17.0), (20.0, 6.0)]),
-        ToastKind::Info => {
-            ui.painter()
-                .circle_stroke(point(12.0, 12.0), 8.0 * scale, stroke);
-            ui.painter()
-                .circle_filled(point(12.0, 7.5), 1.0 * scale, color);
-            line(&[(12.0, 11.0), (12.0, 17.0)]);
-        }
-        ToastKind::Warn => {
-            ui.painter().add(Shape::closed_line(
-                [point(12.0, 3.0), point(22.0, 20.0), point(2.0, 20.0)].into(),
-                stroke,
-            ));
-            line(&[(12.0, 8.0), (12.0, 14.0)]);
-            ui.painter()
-                .circle_filled(point(12.0, 17.0), 1.0 * scale, color);
-        }
-        ToastKind::Error => {
-            ui.painter()
-                .circle_stroke(point(12.0, 12.0), 8.0 * scale, stroke);
-            line(&[(8.0, 8.0), (16.0, 16.0)]);
-            line(&[(16.0, 8.0), (8.0, 16.0)]);
-        }
-    }
-}
-
-fn paint_close_icon(ui: &Ui, rect: Rect, color: egui::Color32) {
-    let icon = Rect::from_center_size(rect.center(), Vec2::splat(14.0));
-    let stroke = Stroke::new(1.25, color);
-    ui.painter()
-        .line_segment([icon.left_top(), icon.right_bottom()], stroke);
-    ui.painter()
-        .line_segment([icon.right_top(), icon.left_bottom()], stroke);
 }
 
 #[cfg(test)]
@@ -984,6 +1030,124 @@ mod tests {
         assert_eq!(TOAST_LIFETIME, 5.2);
         assert_eq!(TOAST_MIN_HEIGHT, 49.0);
         assert_eq!(TOAST_GAP, 7.0);
+    }
+
+    /// A warning lifted from the Console offers the way back to it, and two
+    /// warnings are two events: the Console is a place, not an identity, so
+    /// the rule that collapses two reports of one run must not collapse them.
+    #[test]
+    fn mirrored_warnings_offer_the_console_and_are_not_collapsed() {
+        let mut toasts = Toasts::default();
+        toasts.synchronize_activity(
+            3,
+            [
+                mirrored(
+                    0,
+                    NotificationCategory::Job,
+                    ToastKind::Warn,
+                    "gmin stepping was needed",
+                    1.0,
+                ),
+                mirrored(
+                    1,
+                    NotificationCategory::Job,
+                    ToastKind::Error,
+                    "singular matrix at node out",
+                    2.0,
+                ),
+                mirrored(
+                    2,
+                    NotificationCategory::System,
+                    ToastKind::Info,
+                    "project opened",
+                    3.0,
+                ),
+            ],
+        );
+
+        assert_eq!(toasts.activity().len(), 3);
+        let offers: Vec<_> = toasts
+            .activity()
+            .iter()
+            .map(NotificationRecord::action)
+            .collect();
+        assert_eq!(
+            offers,
+            [
+                None,
+                Some(NotificationAction::ShowInConsole),
+                Some(NotificationAction::ShowInConsole),
+            ],
+            "newest first: the informational line explains itself, the other two lead back"
+        );
+        assert_eq!(
+            toasts.activity()[1].title(),
+            "Error",
+            "and a line headed for the Console is still filed under its severity"
+        );
+    }
+
+    #[test]
+    fn dismissing_a_record_takes_its_toast_with_it() {
+        let ctx = Context::default();
+        let mut toasts = Toasts::default();
+        toasts.success(&ctx, "Project saved", "Revision 13 is durable.");
+        toasts.info(&ctx, "kept");
+        let saved = toasts.activity()[1].id();
+
+        assert!(toasts.dismiss(saved));
+        assert_eq!(toasts.activity().len(), 1);
+        assert_eq!(toasts.activity()[0].message(), "kept");
+        assert_eq!(toasts.queue.len(), 1, "the dismissed notice left the stack");
+        assert!(!toasts.dismiss(saved), "a record is dismissed once");
+    }
+
+    #[test]
+    fn marking_read_reports_a_change_only_the_first_time() {
+        let ctx = Context::default();
+        let mut toasts = Toasts::default();
+        toasts.info(&ctx, "first");
+        let id = toasts.activity()[0].id();
+
+        assert!(toasts.mark_read(id));
+        assert!(!toasts.mark_read(id));
+        assert!(!toasts.mark_read(id + 1));
+        assert_eq!(toasts.unread_count(), 0);
+    }
+
+    /// A notice leaves at its deadline, and the deadline is its own field so a
+    /// notice being read can have it moved without rewriting when it arrived.
+    #[test]
+    fn a_toast_lives_until_its_deadline_and_a_timeout_leaves_it_unread() {
+        let ctx = Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let mut toasts = Toasts::default();
+        toasts.info(&ctx, "first");
+        assert_eq!(
+            toasts.queue[0].expires,
+            toasts.queue[0].created + TOAST_LIFETIME
+        );
+
+        let pass = |toasts: &mut Toasts, time: f64| {
+            let _ = ctx.run_ui(
+                egui::RawInput {
+                    time: Some(time),
+                    ..Default::default()
+                },
+                |ui| {
+                    let _ = toasts.show(ui.ctx(), 35.0, 45.0, false);
+                },
+            );
+        };
+        pass(&mut toasts, TOAST_LIFETIME - 0.1);
+        assert_eq!(toasts.queue.len(), 1);
+        pass(&mut toasts, TOAST_LIFETIME + 0.1);
+        assert!(toasts.queue.is_empty());
+        assert_eq!(
+            toasts.unread_count(),
+            1,
+            "a notice that timed out was not necessarily seen"
+        );
     }
 
     #[test]

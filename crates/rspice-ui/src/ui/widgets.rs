@@ -24,6 +24,7 @@ mod chip;
 mod dialog;
 mod docbar;
 mod form;
+pub(crate) mod notice;
 mod pane;
 mod schematic_command;
 mod section;

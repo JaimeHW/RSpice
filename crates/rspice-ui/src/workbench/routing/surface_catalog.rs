@@ -309,7 +309,7 @@ define_surface_catalog! {
     CommandPalette => { id: "command-palette", label: "Command palette", archetype: Overlay, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=command-palette" },
     JobsManager => { id: "jobs-manager", label: "Jobs, targets and run history", archetype: Manager, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=jobs-manager" },
     WorkflowDialog => { id: "workflow-dialog", label: "Transactional workflow dialog", archetype: Modal, tier: ReleaseTarget, status: Preview, deep_link: "?surface=workflow-dialog" },
-    NotificationCenter => { id: "notification-center", label: "Notifications and activity", archetype: Manager, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=notification-center" },
+    NotificationCenter => { id: "notification-center", label: "Notifications", archetype: Manager, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=notification-center" },
     HelpCenter => { id: "help-center", label: "Help center", archetype: Manager, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=help-center" },
     FeatureAvailability => { id: "feature-availability", label: "Capability and platform matrix", archetype: Manager, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=feature-availability" },
     ProductReadinessCenter => { id: "product-readiness-center", label: "Product readiness contracts", archetype: Internal, tier: Internal, status: InternalOnly, deep_link: "?surface=product-readiness-center" },

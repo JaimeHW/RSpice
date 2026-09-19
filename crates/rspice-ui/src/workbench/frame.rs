@@ -187,7 +187,7 @@ pub fn show(root: &mut egui::Ui, app: &mut RSpiceApp) {
         preflight::run_and_queue(app);
     }
     preflight::show(ctx, app);
-    tools::notification_center::show(ctx, app);
+    tools::notification_center::show(ctx, app, layout.title_bar_height);
     // Export requests originate in retained result-document engines but IO is
     // owned by the app boundary.
     if let Some(keys) = app.state.ui.export_result_quantities_requested.take() {
@@ -211,13 +211,19 @@ pub fn show(root: &mut egui::Ui, app: &mut RSpiceApp) {
         app.state.ui.canvas_hover = None;
         app.state.ui.canvas_view_center = None;
     }
-    if let Some(action) =
-        app.state
-            .ui
-            .toasts
-            .show(ctx, layout.title_bar_height, layout.toolbar_height)
-    {
-        commands::result_navigation::perform_notification_action(app, action);
+    // An open panel lists a notice the moment it is raised, in the corner the
+    // toast would land on. Drawing both would stack one record on itself; the
+    // toast keeps its clock and shows for whatever is left of it afterwards.
+    if !app.state.workbench.notification_center_showing() {
+        let large_targets = tools::notification_center::large_targets(ctx, &app.state);
+        if let Some(action) = app.state.ui.toasts.show(
+            ctx,
+            layout.title_bar_height,
+            layout.toolbar_height,
+            large_targets,
+        ) {
+            commands::result_navigation::perform_notification_action(app, action);
+        }
     }
     app.state.reconcile_schematic_drag(ctx, true);
     apply_platform_full_screen_request(ctx, app);
@@ -255,15 +261,26 @@ fn announce_run_completion(ctx: &Context, app: &mut RSpiceApp) {
     let title = format!("Run {run_id} {outcome}");
     let category = crate::ui::widgets::NotificationCategory::Job;
     if retained == 0 {
-        // Nothing to open, so nothing is offered. A control that arrives at
-        // an empty dataset would be worse than no control.
-        app.state.ui.toasts.notify_with_title(
-            ctx,
-            category,
-            kind,
-            title,
-            "No analysis result was retained, so there is nothing to open in Results.",
-        );
+        // Nothing to open in Results, so Results is not offered. A control
+        // that arrives at an empty dataset would be worse than no control.
+        let detail = "No analysis result was retained, so there is nothing to open in Results.";
+        if matches!(lifecycle, Lifecycle::Failed) {
+            // A failure with no dataset still has an account of itself, and
+            // it is in the Console. A cancelled run has none worth a trip.
+            app.state.ui.toasts.notify_with_action(
+                ctx,
+                category,
+                kind,
+                title,
+                detail,
+                crate::ui::widgets::NotificationAction::ShowInConsole,
+            );
+        } else {
+            app.state
+                .ui
+                .toasts
+                .notify_with_title(ctx, category, kind, title, detail);
+        }
         return;
     }
     let plural = if retained == 1 { "" } else { "es" };
@@ -341,7 +358,8 @@ fn show_full_screen_presentation(root: &mut egui::Ui, app: &mut RSpiceApp, layou
         app.state.ui.canvas_hover = None;
         app.state.ui.canvas_view_center = None;
     }
-    if let Some(action) = app.state.ui.toasts.show(ctx, 0.0, 0.0) {
+    let large_targets = tools::notification_center::large_targets(ctx, &app.state);
+    if let Some(action) = app.state.ui.toasts.show(ctx, 0.0, 0.0, large_targets) {
         commands::result_navigation::perform_notification_action(app, action);
     }
     apply_platform_full_screen_request(ctx, app);
@@ -727,10 +745,16 @@ mod tests {
                 assert_eq!(activity.len(), 1, "one terminal transition, one notice");
                 observed.push((activity[0].title().to_owned(), activity[0].kind()));
                 expected.push((title.to_owned(), kind));
-                assert_eq!(
-                    activity[0].action(),
-                    retained.then_some(NotificationAction::OpenRunInResults { run_sequence: 1 })
-                );
+                // One offer per notice. A retained dataset is the better
+                // destination; without one, only a failure has an account
+                // worth reading, and it is in the Console.
+                let offer = if retained {
+                    Some(NotificationAction::OpenRunInResults { run_sequence: 1 })
+                } else {
+                    matches!(lifecycle, Lifecycle::Failed)
+                        .then_some(NotificationAction::ShowInConsole)
+                };
+                assert_eq!(activity[0].action(), offer);
             }
         }
         assert_eq!(observed, expected);
@@ -843,16 +867,18 @@ mod tests {
         assert_eq!(app.state.ui.toasts.unread_count(), 1);
     }
 
-    /// A run that retained nothing is still reported, but with no control:
-    /// an offer that arrived at an empty dataset would be worse than none.
+    /// A run that retained nothing is still reported, but never with a way
+    /// into Results: an offer that arrived at an empty dataset would be worse
+    /// than none. A failure's account of itself is in the Console, so that is
+    /// the one place it offers to go.
     ///
     /// And it is reported *once*. The console line the run wrote is anchored
     /// to the run like any other, and the notice centre's own rule collapses
     /// two records only when both name the same destination — which this pair
-    /// never does, because neither of them offers one. So the pair used to
-    /// survive as two rows, one of which offered to open an empty dataset.
+    /// never does, because neither of them names the dataset. So the pair used
+    /// to survive as two rows, one of which offered to open an empty dataset.
     #[test]
-    fn a_run_that_retained_nothing_is_announced_once_and_without_an_offer() {
+    fn a_run_that_retained_nothing_is_announced_once_and_never_offers_its_dataset() {
         use crate::diagnostics::{LogAnchor, LogSeverity};
         use crate::state::SimulationRunLifecycle;
 
@@ -889,8 +915,9 @@ mod tests {
         assert_eq!(activity[0].title(), "Run 1 failed");
         assert_eq!(
             activity[0].action(),
-            None,
-            "nothing was retained, so nothing is offered"
+            Some(crate::ui::widgets::NotificationAction::ShowInConsole),
+            "nothing was retained, so Results is not offered; the failure's account is in the \
+             Console, so the Console is"
         );
         assert_eq!(app.state.ui.toasts.unread_count(), 1);
     }

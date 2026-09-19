@@ -1430,6 +1430,10 @@ pub struct WorkbenchState {
     pub notification_center_open: bool,
     #[serde(skip)]
     pub notification_filter: NotificationFilter,
+    /// Hide what has been read. A second axis rather than a fourth filter,
+    /// because "unread" crosses the Jobs/System split instead of joining it.
+    #[serde(skip)]
+    pub notification_unread_only: bool,
     /// Review filters plus transient presentation state for the canonical
     /// application-session-owned capability matrix. Individual fields define
     /// their own persistence boundary.
@@ -1557,6 +1561,7 @@ impl Default for WorkbenchState {
             model_correlation: crate::workbench::documents::model_correlation::ModelCorrelationWorkspaceState::default(),
             notification_center_open: false,
             notification_filter: NotificationFilter::default(),
+            notification_unread_only: false,
             capability_matrix: CapabilityMatrixState::default(),
         }
     }
@@ -1615,6 +1620,38 @@ impl WorkbenchState {
                     | SurfaceId::NotificationCenter
                     | SurfaceId::FeatureAvailability
             )
+    }
+
+    /// Whether the notification panel is on screen, for either of its owners:
+    /// the bell's transient flag, or a route that names the surface (a deep
+    /// link, the palette, restored history).
+    pub fn notification_center_showing(&self) -> bool {
+        self.notification_center_open
+            || self.current_route().surface_id() == SurfaceId::NotificationCenter
+    }
+
+    /// The bell is a toggle: pressing it again puts the panel away.
+    pub fn toggle_notification_center(&mut self) {
+        if self.notification_center_showing() {
+            self.close_notification_center();
+        } else {
+            self.notification_center_open = true;
+        }
+    }
+
+    /// Put the panel away, returning a route-owned panel to where it was
+    /// opened from so Back does not reopen it.
+    pub fn close_notification_center(&mut self) {
+        self.notification_center_open = false;
+        if self.current_route().surface_id() != SurfaceId::NotificationCenter
+            || self.navigate_back(RouteTransitionSource::User).is_some()
+        {
+            return;
+        }
+        let fallback = SurfaceRoute::surface(SurfaceId::from_workspace(self.workspace));
+        if let Err(error) = self.replace_route(fallback, RouteTransitionSource::User) {
+            self.record_route_diagnostic(format!("Notifications could not be closed: {error}"));
+        }
     }
 
     pub fn open_project_launcher(&mut self) {

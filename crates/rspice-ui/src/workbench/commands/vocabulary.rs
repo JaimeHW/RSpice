@@ -107,6 +107,9 @@ pub enum Command {
     ToggleResultsSplit,
     OpenConsole,
     OpenProblems,
+    /// Open the session notification panel. The bell opens it on a shell wide
+    /// enough to draw one; this is how every other shell reaches it.
+    OpenNotifications,
     ToggleConsoleMaximized,
     ClearConsole,
     ToggleFocusMode,
@@ -468,6 +471,7 @@ impl Command {
             Self::ToggleResultsSplit => spec("toggle-split-view", "Split with results", "Window"),
             Self::OpenConsole => spec("open-console", "Open console", "Window"),
             Self::OpenProblems => spec("open-problems", "Open Problems", "Window"),
+            Self::OpenNotifications => spec("open-notifications", "Open Notifications", "Window"),
             Self::ToggleConsoleMaximized => {
                 spec("console-maximize", "Maximize or restore console", "Window")
             }
@@ -1188,6 +1192,7 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::ToggleResultsSplit,
     Command::OpenConsole,
     Command::OpenProblems,
+    Command::OpenNotifications,
     Command::ToggleConsoleMaximized,
     Command::ClearConsole,
     Command::ToggleFocusMode,

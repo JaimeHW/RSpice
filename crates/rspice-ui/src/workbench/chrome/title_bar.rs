@@ -156,8 +156,9 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                             ui,
                             app.state.ui.toasts.unread_count(),
                             large_targets,
+                            app.state.workbench.notification_center_showing(),
                         ) {
-                            app.state.workbench.notification_center_open = true;
+                            app.state.workbench.toggle_notification_center();
                         }
                         if icon_action(
                             ui,
@@ -2184,7 +2185,30 @@ fn account_action(ui: &mut Ui, initials: &str, large_target: bool) -> bool {
     response.on_hover_text(label).clicked()
 }
 
-fn notification_action(ui: &mut Ui, unread_count: usize, large_target: bool) -> bool {
+/// Where the notification panel hangs from: the bell's rectangle as of the
+/// last pass that drew one, and the bell's identity so closing the panel from
+/// the keyboard can hand focus back to it. `None` wherever the title bar draws
+/// no bell — a phone-width shell, full-screen presentation — and the panel
+/// then anchors itself to the shell's trailing edge.
+pub(in crate::workbench) fn notification_anchor(ctx: &egui::Context) -> Option<(Rect, egui::Id)> {
+    let (pass, rect, id) =
+        ctx.data(|data| data.get_temp::<(u64, Rect, egui::Id)>(notification_anchor_id()))?;
+    // A rectangle from an older pass is a bell that is no longer on screen.
+    (ctx.cumulative_pass_nr() <= pass + 1).then_some((rect, id))
+}
+
+const NOTIFICATION_BADGE_HEIGHT: f32 = 12.0;
+
+fn notification_anchor_id() -> egui::Id {
+    egui::Id::new("rspice.title-bar.notification-anchor")
+}
+
+fn notification_action(
+    ui: &mut Ui,
+    unread_count: usize,
+    large_target: bool,
+    showing: bool,
+) -> bool {
     let t = Tokens::get(ui.ctx());
     let size = if large_target {
         Vec2::splat(44.0)
@@ -2192,10 +2216,14 @@ fn notification_action(ui: &mut Ui, unread_count: usize, large_target: bool) -> 
         Vec2::new(28.0, 27.0)
     };
     let (rect, response) = ui.allocate_exact_size(size, Sense::click());
+    let pass = ui.ctx().cumulative_pass_nr();
+    ui.ctx().data_mut(|data| {
+        data.insert_temp(notification_anchor_id(), (pass, rect, response.id));
+    });
     let accessible_label = if unread_count == 0 {
-        "Notifications and activity".to_owned()
+        "Notifications".to_owned()
     } else {
-        format!("Notifications and activity · {unread_count} unread")
+        format!("Notifications · {unread_count} unread")
     };
     response.widget_info(|| {
         egui::WidgetInfo::labeled(
@@ -2204,8 +2232,13 @@ fn notification_action(ui: &mut Ui, unread_count: usize, large_target: bool) -> 
             accessible_label.clone(),
         )
     });
-    let active = response.hovered() || response.has_focus();
-    if response.hovered() {
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_expanded(showing);
+    });
+    let active = showing || response.hovered() || response.has_focus();
+    if showing {
+        ui.painter().rect_filled(rect, t.radius, t.color.bg_active);
+    } else if response.hovered() {
         ui.painter().rect_filled(rect, t.radius, t.color.bg_hover);
     }
     WorkbenchIcon::Bell.paint(
@@ -2218,38 +2251,43 @@ fn notification_action(ui: &mut Ui, unread_count: usize, large_target: bool) -> 
         },
     );
     if unread_count > 0 {
-        let badge_text = unread_count.to_string();
-        let badge_width = (ui
-            .painter()
-            .layout_no_wrap(
-                badge_text.clone(),
-                theme::mono(tokens::FS_0, FontWeight::SemiBold),
-                t.color.accent_ink,
-            )
-            .size()
-            .x
-            + 8.0)
-            .max(14.0);
+        // The count rides the bell's shoulder rather than sitting on its
+        // face: a badge the size of the icon leaves a number with no bell
+        // under it, and the bell is what says the number is notifications.
+        let badge_font = theme::mono(tokens::FS_MICRO, FontWeight::SemiBold);
+        let badge_text =
+            ui.painter()
+                .layout_no_wrap(unread_count.to_string(), badge_font, t.color.accent_ink);
+        let badge_width = (badge_text.size().x + 6.0).max(NOTIFICATION_BADGE_HEIGHT);
         let badge_rect = egui::Rect::from_min_size(
-            egui::pos2(rect.right() - 3.0 - badge_width, rect.top() + 3.0),
-            egui::vec2(badge_width, 14.0),
+            egui::pos2(rect.right() - 2.0 - badge_width, rect.top() + 2.0),
+            egui::vec2(badge_width, NOTIFICATION_BADGE_HEIGHT),
         );
-        ui.painter().rect_filled(badge_rect, 7.0, t.color.accent);
-        ui.painter().rect_stroke(
-            badge_rect,
-            7.0,
-            egui::Stroke::new(1.0, t.color.bg_app),
-            egui::StrokeKind::Inside,
-        );
-        ui.painter().text(
-            badge_rect.center(),
-            egui::Align2::CENTER_CENTER,
+        // A ring of whatever is behind the button, so the badge reads as
+        // standing off the bell instead of being stuck to it.
+        let surface = if showing {
+            t.color.bg_active
+        } else if response.hovered() {
+            t.color.bg_hover
+        } else {
+            t.color.bg_panel
+        };
+        let radius = NOTIFICATION_BADGE_HEIGHT * 0.5 + 1.0;
+        ui.painter()
+            .rect_filled(badge_rect.expand(1.0), radius, surface);
+        ui.painter()
+            .rect_filled(badge_rect, radius - 1.0, t.color.accent);
+        ui.painter().galley(
+            badge_rect.center() - badge_text.size() * 0.5,
             badge_text,
-            theme::mono(tokens::FS_0, FontWeight::SemiBold),
             t.color.accent_ink,
         );
     }
     theme::paint_focus_ring_outset(ui, &response, rect);
+    if showing {
+        // The panel hangs where the tooltip would open, and already says it.
+        return response.clicked();
+    }
     response.on_hover_text(accessible_label).clicked()
 }
 

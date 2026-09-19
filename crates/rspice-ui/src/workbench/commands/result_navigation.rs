@@ -65,6 +65,12 @@ pub(crate) fn perform_notification_action(app: &mut RSpiceApp, action: Notificat
                 ));
             }
         }
+        NotificationAction::ShowInConsole => {
+            // The command opens the dock on whichever page was last shown.
+            // The line this notice was lifted from is on the Console page.
+            Command::OpenConsole.execute(app);
+            app.state.workbench.console_page = crate::workbench::state::ConsolePage::Console;
+        }
     }
 }
 
