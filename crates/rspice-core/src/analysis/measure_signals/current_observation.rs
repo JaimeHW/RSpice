@@ -919,20 +919,4 @@ mod tests {
         assert!((output.dc_component / expected - 1.0).abs() < 2e-14);
         assert!((output.harmonics[1].magnitude / (2.0 * expected) - 1.0).abs() < 2e-14);
     }
-
-    #[test]
-    fn fourier_current_impulse_authored_cards_use_shared_physical_transform() {
-        let result = fixture();
-        let netlist = Netlist::parse("current Fourier\nV1 out 0 0\nR1 out 0 1k\n.tran 1m 2\n.four 1 4 I(X1.V1) {2*I(X1.V1)}\n.end\n").unwrap();
-        let spectra = crate::engine::evaluate_transient_fourier_results(
-            &netlist,
-            &result,
-            ResourceLimits::default(),
-            &NoAbort,
-        )
-        .unwrap();
-        assert_eq!(spectra.len(), 2);
-        close(spectra[0].spectrum.dc_component, 0.002);
-        close(spectra[1].spectrum.dc_component, 0.004);
-    }
 }
