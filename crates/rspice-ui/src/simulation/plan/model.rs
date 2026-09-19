@@ -485,7 +485,13 @@ impl AnalysisInstance {
         &self.dependencies
     }
 
-    /// Exact dependency roles required by this instance's current draft.
+    /// Exact dependency roles declared by this instance's current draft.
+    ///
+    /// The *declaration*, which for a periodic small-signal request whose
+    /// carrier is the preceding periodic solve is only one of the two families
+    /// that may fill it. Ask [`SimulationPlan::required_prerequisite_roles`]
+    /// for the role as the plan's own order resolves it; everything that binds
+    /// or validates an edge uses that one.
     #[must_use]
     pub fn prerequisite_roles(&self) -> &'static [AnalysisKind] {
         self.draft.prerequisite_roles()
@@ -970,11 +976,12 @@ impl SimulationPlan {
         prerequisite: AnalysisKind,
         target: AnalysisInstanceId,
     ) -> bool {
+        let roles = self.required_prerequisite_roles(dependent);
         let (Some(dependent), Some(target)) = (self.instance(dependent), self.instance(target))
         else {
             return false;
         };
-        Self::dependency_candidate_compatibility(dependent, prerequisite, target)
+        Self::dependency_candidate_compatibility(dependent, &roles, prerequisite, target)
             .is_ok_and(|compatible| compatible)
     }
 
@@ -988,11 +995,12 @@ impl SimulationPlan {
         target: AnalysisInstanceId,
         context: &AnalysisDependencyRepairContext,
     ) -> bool {
+        let roles = self.required_prerequisite_roles(dependent);
         let (Some(dependent), Some(target)) = (self.instance(dependent), self.instance(target))
         else {
             return false;
         };
-        Self::dependency_candidate_compatibility(dependent, prerequisite, target)
+        Self::dependency_candidate_compatibility(dependent, &roles, prerequisite, target)
             .is_ok_and(|compatible| compatible)
             && dependency_candidate_context_issue(prerequisite, &target.draft, context).is_none()
     }
@@ -1025,7 +1033,8 @@ impl SimulationPlan {
         let Some(instance) = self.instance(dependent) else {
             return false;
         };
-        instance.prerequisite_roles().contains(&prerequisite)
+        self.required_prerequisite_roles(dependent)
+            .contains(&prerequisite)
             && (self.instances.iter().any(|candidate| {
                 self.dependency_candidate_is_compatible_with_context(
                     dependent,
@@ -1036,13 +1045,66 @@ impl SimulationPlan {
             }) || prerequisite_draft_for(&instance.draft, prerequisite, context).is_ok())
     }
 
+    /// The prerequisite roles one instance requires, as this plan's own order
+    /// resolves them.
+    ///
+    /// Identical to the draft's declaration for every kind but one: a periodic
+    /// small-signal request whose carrier is the *preceding* periodic solve
+    /// writes no `FROM=` keyword, and `resolve_periodic_source` in
+    /// `rspice-core/src/execution/plan.rs` binds such a card to the nearest
+    /// preceding `.PSS` **or** `.HB`. The plan resolves the same alternative
+    /// by the same rule, against plan order instead of deck order, so the
+    /// instance the Studio binds is the instance the emitted deck would bind.
+    ///
+    /// An edge that already names one of the alternatives wins over order: a
+    /// carrier an operator bound explicitly is not retargeted by inserting
+    /// another solve above it, and a plan edit cannot silently move a run onto
+    /// a different large-signal solution than the one it reported last.
+    #[must_use]
+    pub fn required_prerequisite_roles(&self, dependent: AnalysisInstanceId) -> Vec<AnalysisKind> {
+        self.index_of(dependent)
+            .map(|index| Self::resolved_prerequisite_roles(&self.instances, index))
+            .unwrap_or_default()
+    }
+
+    fn resolved_prerequisite_roles(
+        instances: &[AnalysisInstance],
+        index: usize,
+    ) -> Vec<AnalysisKind> {
+        let instance = &instances[index];
+        let declared = instance.draft.prerequisite_roles();
+        let alternatives = instance.draft.prerequisite_alternatives();
+        if alternatives.is_empty() {
+            return declared.to_vec();
+        }
+        let bound = instance
+            .dependencies
+            .iter()
+            .map(|dependency| dependency.prerequisite)
+            .find(|prerequisite| alternatives.contains(prerequisite));
+        let nearest = instances[..index]
+            .iter()
+            .rev()
+            .find(|candidate| candidate.enabled && alternatives.contains(&candidate.kind))
+            .map(|candidate| candidate.kind);
+        // The declaration is the fallback, so a request with nothing to bind
+        // is still missing a named role and still has an "Add ..." to offer.
+        vec![
+            bound
+                .or(nearest)
+                .or_else(|| declared.first().copied())
+                .unwrap_or(AnalysisKind::Pss),
+        ]
+    }
+
     fn dependency_candidate_compatibility(
         dependent: &AnalysisInstance,
+        dependent_roles: &[AnalysisKind],
         prerequisite: AnalysisKind,
         target: &AnalysisInstance,
     ) -> Result<bool, String> {
         if dependent.id == target.id
-            || !dependent.prerequisite_roles().contains(&prerequisite)
+            || !dependent_roles.contains(&prerequisite)
             || target.kind != prerequisite
         {
             return Ok(false);
@@ -1058,9 +1120,10 @@ impl SimulationPlan {
     /// return to an editable draft without changing durable identity or
     /// revision history.
     pub fn prepare_after_restore(&mut self) {
-        for instance in &mut self.instances {
-            instance.draft.prepare_after_restore();
-            let required_roles = instance.draft.prerequisite_roles();
+        for index in 0..self.instances.len() {
+            self.instances[index].draft.prepare_after_restore();
+            let required_roles = Self::resolved_prerequisite_roles(&self.instances, index);
+            let instance = &mut self.instances[index];
             // Schema migrations may retire a dependency role. Retaining such
             // an edge would make an otherwise valid saved plan structurally
             // corrupt, so restore prunes only roles the current typed draft no
@@ -1199,13 +1262,11 @@ impl SimulationPlan {
             .iter()
             .map(|instance| (instance.id, instance))
             .collect();
-        for instance in &self.instances {
+        for (index, instance) in self.instances.iter().enumerate() {
+            let required_roles = Self::resolved_prerequisite_roles(&self.instances, index);
             let mut roles = HashSet::new();
             for dependency in &instance.dependencies {
-                if !instance
-                    .prerequisite_roles()
-                    .contains(&dependency.prerequisite)
-                {
+                if !required_roles.contains(&dependency.prerequisite) {
                     issues.push(AnalysisPlanIssue::UnexpectedDependencyRole {
                         dependent: instance.id,
                         prerequisite: dependency.prerequisite,
@@ -1270,7 +1331,7 @@ impl SimulationPlan {
                 }
             }
             if instance.enabled {
-                for prerequisite in instance.prerequisite_roles() {
+                for prerequisite in &required_roles {
                     if !roles.contains(prerequisite) {
                         issues.push(AnalysisPlanIssue::MissingPrerequisite {
                             dependent: instance.id,
@@ -1726,10 +1787,7 @@ impl SimulationPlan {
                         reason,
                     });
                 }
-                let required_roles = candidate.instances[index]
-                    .draft
-                    .prerequisite_roles()
-                    .to_vec();
+                let required_roles = Self::resolved_prerequisite_roles(&candidate.instances, index);
                 let instance = &mut candidate.instances[index];
                 // A draft edit can legitimately change the dependency schema.
                 // Remove obsolete edges in the same atomic edit so an ordinary
@@ -1922,9 +1980,9 @@ impl SimulationPlan {
                         });
                     }
                 }
+                let required_roles = Self::resolved_prerequisite_roles(&candidate.instances, index);
                 let retained_dependencies = enabled.then(|| {
-                    candidate.instances[index]
-                        .prerequisite_roles()
+                    required_roles
                         .iter()
                         .filter_map(|prerequisite| {
                             candidate.instances[index]
@@ -1939,6 +1997,7 @@ impl SimulationPlan {
                                             && target.kind == *prerequisite
                                             && Self::dependency_candidate_compatibility(
                                                 &candidate.instances[index],
+                                                &required_roles,
                                                 *prerequisite,
                                                 target,
                                             )

@@ -429,20 +429,64 @@ fn every_declared_prerequisite_kind_has_a_contextual_add_action() {
     for kind in dependent_kinds {
         let mut plan = crate::simulation::plan::SimulationPlan::empty();
         let (dependent, _) = plan.insert(kind).expect("dependent inserts");
+        let roles = plan.required_prerequisite_roles(dependent);
+        assert_eq!(roles, vec![kind.prerequisites()[0]], "{kind}");
         let issue = AnalysisPlanIssue::MissingPrerequisite {
             dependent,
-            prerequisite: kind.prerequisites()[0],
+            prerequisite: roles[0],
         };
         let expected = if matches!(kind, AnalysisKind::Fourier | AnalysisKind::Fft) {
             "Add compatible Transient".to_owned()
         } else {
-            format!("Add {}", kind.prerequisites()[0].label())
+            format!("Add {}", roles[0].label())
         };
         assert_eq!(
             dependency_repair_cta(&plan, &[issue], &[]).as_deref(),
             Some(expected.as_str()),
             "{kind}"
         );
+    }
+}
+
+/// The carrier a periodic small-signal request names is the solve the quick
+/// action offers to add.
+///
+/// The closure test above covers the kinds whose prerequisite is fixed. These
+/// three choose theirs, so each position needs its own action: an operator who
+/// asked to linearize around a harmonic balance and has none is owed "Add
+/// Harmonic balance", not an offer of the other family.
+#[test]
+fn an_hb_carrier_with_no_harmonic_balance_instance_offers_to_add_one() {
+    use crate::services::simulation_runner::PeriodicCarrier;
+
+    for kind in [AnalysisKind::Pac, AnalysisKind::Pxf, AnalysisKind::Pnoise] {
+        for (carrier, expected) in [
+            (PeriodicCarrier::Preceding, AnalysisKind::Pss),
+            (PeriodicCarrier::Pss, AnalysisKind::Pss),
+            (PeriodicCarrier::Hb, AnalysisKind::HarmonicBalance),
+        ] {
+            let mut plan = crate::simulation::plan::SimulationPlan::empty();
+            let (dependent, _) = plan.insert(kind).expect("dependent inserts");
+            plan.edit(dependent, |draft| match draft {
+                AnalysisDraft::Pac(setup) => setup.carrier_idx = carrier.index(),
+                AnalysisDraft::Pxf(setup) => setup.carrier_idx = carrier.index(),
+                AnalysisDraft::Pnoise(setup) => setup.carrier_idx = carrier.index(),
+                _ => panic!("{kind} carries a periodic small-signal draft"),
+            })
+            .expect("a carrier position is an ordinary draft edit");
+
+            let roles = plan.required_prerequisite_roles(dependent);
+            assert_eq!(roles, vec![expected], "{kind} carried by {carrier:?}");
+            let issue = AnalysisPlanIssue::MissingPrerequisite {
+                dependent,
+                prerequisite: expected,
+            };
+            assert_eq!(
+                dependency_repair_cta(&plan, &[issue], &[]).as_deref(),
+                Some(format!("Add {}", expected.label()).as_str()),
+                "{kind} carried by {carrier:?}"
+            );
+        }
     }
 }
 
