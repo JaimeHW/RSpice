@@ -106,7 +106,7 @@ pub(super) fn active_payload_is_valid(state: &AppState) -> bool {
 /// frequency, which is what the Studio showed for a swept deck before it kept
 /// the rest of the sweep.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(in crate::workbench::documents::result_document) struct SensitivitySheetState {
+pub(crate) struct SensitivitySheetState {
     frequency_index: usize,
 }
 
