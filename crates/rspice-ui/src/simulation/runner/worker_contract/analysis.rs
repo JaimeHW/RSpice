@@ -1310,7 +1310,10 @@ impl TryFrom<&AnalysisSpec> for WorkerAnalysisSpec {
             | AnalysisSpec::Qpnoise { .. }
             | AnalysisSpec::Qpxf { .. }
             | AnalysisSpec::TransientNoise { .. }
-            | AnalysisSpec::DcMismatch { .. } => Ok(Self::CanonicalSpec(value.clone())),
+            | AnalysisSpec::DcMismatch { .. }
+            // The FFT request is the card, which is already a stable serde
+            // payload; a second mirror of it would add no transport behavior.
+            | AnalysisSpec::Fft { .. } => Ok(Self::CanonicalSpec(value.clone())),
         }
     }
 }

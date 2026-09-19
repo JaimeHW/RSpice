@@ -20,6 +20,7 @@ mod config;
 mod device;
 mod frequency;
 mod periodic;
+mod recorded_fft;
 mod sweeps;
 
 #[cfg(test)]
@@ -86,6 +87,7 @@ pub(super) fn run_spec_request_with_environment(
         AnalysisSpec::MonteCarlo { .. } | AnalysisSpec::Parametric | AnalysisSpec::Corner => {
             sweeps::run_sweep_spec(spec, options, netlist, source_path, environment, abort_flag)
         }
+        AnalysisSpec::Fft { request } => recorded_fft::run(&request, dependencies, abort_flag),
         AnalysisSpec::AcData { frequencies, .. } => bridge.run_ac_frequencies_with_source_path(
             netlist,
             source_path,
@@ -258,6 +260,7 @@ fn spec_variant_name(spec: &AnalysisSpec) -> &'static str {
         AnalysisSpec::HarmonicBalance { .. } => "AnalysisSpec::HarmonicBalance",
         AnalysisSpec::Envelope { .. } => "AnalysisSpec::Envelope",
         AnalysisSpec::Fourier { .. } => "AnalysisSpec::Fourier",
+        AnalysisSpec::Fft { .. } => "AnalysisSpec::Fft",
         AnalysisSpec::Disto { .. } => "AnalysisSpec::Disto",
         AnalysisSpec::SParameter { .. } => "AnalysisSpec::SParameter",
         AnalysisSpec::Tf { .. } => "AnalysisSpec::Tf",
@@ -430,6 +433,7 @@ mod tests {
         )
         .expect("the PSS producer converges through the resolved service path");
         let result = SimulationResult::Transient {
+            spectra: Vec::new(),
             time: produced.time,
             waveforms: HashMap::new(),
             measurements: Vec::new(),

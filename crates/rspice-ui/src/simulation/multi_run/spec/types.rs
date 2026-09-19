@@ -650,6 +650,14 @@ pub enum AnalysisSpec {
         include_mismatch: bool,
         normalized_contributions: bool,
     },
+    /// One recorded `.FFT` spectrum of a bound transient output.
+    ///
+    /// The whole request is the card, because the engine evaluates the card
+    /// inside the transient that carries it: this specification decides which
+    /// spectrum of that solve is published, never how one is computed.
+    Fft {
+        request: crate::simulation::config::FftRequest,
+    },
 }
 
 impl AnalysisSpec {

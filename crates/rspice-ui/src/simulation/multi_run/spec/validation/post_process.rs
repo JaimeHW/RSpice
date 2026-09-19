@@ -42,6 +42,8 @@ pub(super) fn validate(spec: &AnalysisSpec) -> Result<(), String> {
             }
             Ok(())
         }
+        // The card is the request, and its refusals are the engine's own.
+        AnalysisSpec::Fft { request } => request.validate(),
         other => Err(super::misrouted_specification("post-processing", other)),
     }
 }

@@ -57,6 +57,8 @@ pub enum AnalysisRunType {
     Fourier,
     /// Harmonic spectrum of a converged periodic steady state
     PssSpectrum,
+    /// One recorded `.FFT` spectrum of a bound transient output
+    Fft,
     Qpss,
     Hbsp,
     Hbnoise,
@@ -98,6 +100,7 @@ impl AnalysisRunType {
             AnalysisRunType::Envelope => "Envelope",
             AnalysisRunType::Fourier => "Fourier",
             AnalysisRunType::PssSpectrum => "PSS Spectrum",
+            AnalysisRunType::Fft => "FFT",
             AnalysisRunType::Qpss => "QPSS",
             AnalysisRunType::Hbsp => "HBSP",
             AnalysisRunType::Hbnoise => "HBNOISE",

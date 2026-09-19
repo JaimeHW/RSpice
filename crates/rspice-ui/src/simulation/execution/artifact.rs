@@ -225,6 +225,33 @@ pub(in crate::simulation) fn validate_prepared_dependency_contract_with_options(
         };
     }
 
+    // A recorded FFT's only requirement of its producer is the engine's own:
+    // a card whose STOP is past the transient's stop time fails that
+    // transient, so the pair is refused before the run rather than during it.
+    // An unauthored STOP takes the transient's stop and can never exceed it.
+    if let AnalysisSpec::Fft { request } = consumer {
+        return match producer {
+            AnalysisSpec::Transient {
+                stop_time: transient_stop,
+                ..
+            } => {
+                let stop = request.stop.unwrap_or(*transient_stop);
+                if stop > *transient_stop {
+                    Err(ExecutionArtifactError::ContractMismatch(format!(
+                        "STOP {stop} exceeds transient stop time {transient_stop}"
+                    )))
+                } else {
+                    Ok(())
+                }
+            }
+            _ => Err(ExecutionArtifactError::ContractMismatch(format!(
+                "{} cannot consume a typed artifact produced by {}",
+                consumer.run_type().display_name(),
+                producer.run_type().display_name()
+            ))),
+        };
+    }
+
     let (
         AnalysisSpec::Fourier {
             fundamental_freq,
