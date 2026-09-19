@@ -46,7 +46,23 @@ const IDENTITY_LINE: f32 = 16.0;
 /// headroom is measured in, which is why it is visible to the module.
 pub(super) const ROW_HEIGHT: f32 = 2.0 * IDENTITY_LINE;
 
-/// Inset between a split column's edge and its content, both sides.
+/// Inset between a flush table's edge and its first and last column.
+///
+/// A flush table has no box of its own: its head band, its row rules and its
+/// selection fill run to the edges of the surface it sits in, and only the cells
+/// are inset. Ten points is the toolbar band's own inset, so the first column
+/// starts under the filter field rather than a few points off it.
+const FLUSH_PAD: f32 = 10.0;
+/// The flush table's head band.
+const FLUSH_HEAD_HEIGHT: f32 = 26.0;
+/// A flush row: the two identity lines with a point of air above and below, so
+/// the name does not sit on the rule that closes the row before it.
+const FLUSH_ROW_HEIGHT: f32 = ROW_HEIGHT + 2.0;
+/// Letter spacing of an uppercase head, as a share of its font size. The
+/// authored `.data-table th` tracking.
+const HEAD_TRACKING: f32 = 0.04;
+
+/// Inset between a note's edge and its content, all sides.
 const COLUMN_PADDING: i8 = 8;
 /// Height a split column is laid out in before it sizes to its content. Large
 /// enough that no arrangement reaches it, finite because an infinite `Rect`
@@ -56,19 +72,12 @@ const UNBOUNDED_COLUMN: f32 = 10_000.0;
 const DIVIDER: f32 = 1.0;
 /// Inset below the columns, inside the split's own surface.
 ///
-/// It closes the surface under its rule, and it absorbs a shortfall in the
-/// enclosing dialog body: that body's scroll viewport comes out under the
-/// content it was measured from, so the last line of the tallest column lands
-/// just outside it and is cut mid-glyph.
-///
-/// The shortfall is the body's arithmetic and not this content's height, which
-/// is why a constant closes it: it measured the same two points whether the
-/// aside held nine rows or eleven, and the same eleven points whether its rows
-/// are 22 or 24 tall — the surface shrinks, the dialog shrinks with it, and the
-/// gap between what the body reports and what it paints does not move. Eleven of
-/// the sixteen are the aside's closing status block, whose bottom margin the
-/// body does not count.
-const SPLIT_BOTTOM_INSET: f32 = 16.0;
+/// It absorbs a shortfall in the enclosing dialog body: that body's scroll
+/// viewport comes out two points under the content it was measured from, so the
+/// last thing in the tallest column would otherwise lose its bottom edge. The
+/// shortfall is the body's arithmetic and not this content's height, which is
+/// why a constant closes it.
+const SPLIT_BOTTOM_INSET: f32 = 4.0;
 /// The hairline around a bordered surface, counted on both edges.
 ///
 /// An `egui::Frame`'s total margin is its inner margin plus its stroke width
@@ -120,6 +129,12 @@ pub(super) fn table_minimum_width(columns: &[TableColumn]) -> f32 {
         .sum::<f32>()
         + CELL_GAP * columns.len().saturating_sub(1) as f32;
     content + 2.0 * (f32::from(TABLE_PADDING) + TABLE_BORDER)
+}
+
+/// The narrowest outer width this column set can be painted in as a flush
+/// table, which spends its edge on [`FLUSH_PAD`] rather than on a box.
+pub(super) fn flush_table_minimum_width(columns: &[TableColumn]) -> f32 {
+    table_minimum_width(columns) - 2.0 * (f32::from(TABLE_PADDING) + TABLE_BORDER) + 2.0 * FLUSH_PAD
 }
 
 /// Solve the column widths for one content track.
@@ -188,6 +203,18 @@ enum RowSense {
     ReadOnly,
 }
 
+/// How a table sits in the surface around it.
+#[derive(Clone, Copy)]
+enum TableSurface {
+    /// A bordered, filled box inside a padded body. The child routes' tables.
+    Boxed,
+    /// Edge to edge inside a flush column, as the authored `.data-table` is: an
+    /// uppercase head band, a rule under every row, and an accent wash on the
+    /// selected one. The table draws no border because the surface it fills
+    /// already has one on every side.
+    Flush,
+}
+
 /// Paint a fixed-width records table whose rows select, and report which row
 /// was clicked.
 ///
@@ -203,7 +230,34 @@ pub(super) fn records_table(
     rows: &[TableRow],
     cell: impl FnMut(&mut Ui, usize, usize),
 ) -> Option<usize> {
-    table(ui, id_salt, columns, rows, RowSense::Selects, cell)
+    table(
+        ui,
+        id_salt,
+        columns,
+        rows,
+        RowSense::Selects,
+        TableSurface::Boxed,
+        cell,
+    )
+}
+
+/// [`records_table`] for a column that runs to the edges of its surface.
+pub(super) fn flush_records_table(
+    ui: &mut Ui,
+    id_salt: &str,
+    columns: &[TableColumn],
+    rows: &[TableRow],
+    cell: impl FnMut(&mut Ui, usize, usize),
+) -> Option<usize> {
+    table(
+        ui,
+        id_salt,
+        columns,
+        rows,
+        RowSense::Selects,
+        TableSurface::Flush,
+        cell,
+    )
 }
 
 /// Paint the same table for a surface that only states what it holds.
@@ -218,7 +272,15 @@ pub(super) fn read_only_records_table(
     rows: &[TableRow],
     cell: impl FnMut(&mut Ui, usize, usize),
 ) {
-    table(ui, id_salt, columns, rows, RowSense::ReadOnly, cell);
+    table(
+        ui,
+        id_salt,
+        columns,
+        rows,
+        RowSense::ReadOnly,
+        TableSurface::Boxed,
+        cell,
+    );
 }
 
 fn table(
@@ -227,119 +289,262 @@ fn table(
     columns: &[TableColumn],
     rows: &[TableRow],
     sense: RowSense,
+    surface: TableSurface,
     mut cell: impl FnMut(&mut Ui, usize, usize),
 ) -> Option<usize> {
     let selects = matches!(sense, RowSense::Selects);
+    let flush = matches!(surface, TableSurface::Flush);
     let t = Tokens::get(ui.ctx());
     let mut clicked = None;
-    egui::Frame::new()
-        .fill(t.color.bg_panel)
-        .stroke(Stroke::new(TABLE_BORDER, t.color.border))
-        .inner_margin(egui::Margin::same(TABLE_PADDING))
-        .show(ui, |ui| {
-            let track = ui.available_width();
-            let widths = column_widths(columns, track);
-            ui.spacing_mut().item_spacing.y = 0.0;
+    let frame = if flush {
+        egui::Frame::NONE
+    } else {
+        egui::Frame::new()
+            .fill(t.color.bg_panel)
+            .stroke(Stroke::new(TABLE_BORDER, t.color.border))
+            .inner_margin(egui::Margin::same(TABLE_PADDING))
+    };
+    // A boxed table insets everything through its frame. A flush one insets only
+    // its cells, so the band, the rules and the selection reach the edges.
+    let (pad, head_height, row_height) = if flush {
+        (FLUSH_PAD, FLUSH_HEAD_HEIGHT, FLUSH_ROW_HEIGHT)
+    } else {
+        (0.0, HEAD_HEIGHT, ROW_HEIGHT)
+    };
+    frame.show(ui, |ui| {
+        let track = ui.available_width();
+        let widths = column_widths(columns, track - 2.0 * pad);
+        ui.spacing_mut().item_spacing.y = 0.0;
 
-            let (head, _) = ui.allocate_exact_size(vec2(track, HEAD_HEIGHT), Sense::hover());
-            let heading_font = theme::sans(tokens::FS_0, FontWeight::SemiBold);
-            for (rect, column) in cell_rects(head, &widths).into_iter().zip(columns) {
-                let text = elide_text(ui, column.heading, &heading_font, rect.width());
-                ui.painter().text(
+        let (head, _) = ui.allocate_exact_size(vec2(track, head_height), Sense::hover());
+        if flush {
+            ui.painter().rect_filled(head, 0.0, t.color.bg_panel_2);
+        }
+        let heading_font = theme::sans(tokens::FS_0, FontWeight::SemiBold);
+        for (rect, column) in cell_rects(head.shrink2(vec2(pad, 0.0)), &widths)
+            .into_iter()
+            .zip(columns)
+        {
+            if flush {
+                paint_band_text(
+                    ui,
                     rect.left_center(),
                     Align2::LEFT_CENTER,
-                    text,
-                    heading_font.clone(),
-                    t.color.text_dim,
+                    column.heading,
+                    rect.width(),
+                    t.color.text_faint,
                 );
+                continue;
             }
-            ui.painter().hline(
-                head.x_range(),
-                head.bottom(),
-                Stroke::new(1.0, t.color.border),
+            let text = elide_text(ui, column.heading, &heading_font, rect.width());
+            ui.painter().text(
+                rect.left_center(),
+                Align2::LEFT_CENTER,
+                text,
+                heading_font.clone(),
+                t.color.text_dim,
             );
+        }
+        ui.painter().hline(
+            head.x_range(),
+            head.bottom(),
+            Stroke::new(1.0, t.color.border),
+        );
 
-            for (index, row) in rows.iter().enumerate() {
-                let (rect, response) = ui.allocate_exact_size(
-                    vec2(track, ROW_HEIGHT),
-                    if selects {
-                        Sense::click()
+        for (index, row) in rows.iter().enumerate() {
+            let (rect, response) = ui.allocate_exact_size(
+                vec2(track, row_height),
+                if selects {
+                    Sense::click()
+                } else {
+                    Sense::hover()
+                },
+            );
+            if row.selected {
+                ui.painter().rect_filled(
+                    rect,
+                    0.0,
+                    if flush {
+                        t.color.accent_dim
                     } else {
-                        Sense::hover()
+                        t.color.bg_active
                     },
                 );
-                if row.selected {
-                    ui.painter().rect_filled(rect, 0.0, t.color.bg_active);
-                    ui.painter().vline(
-                        rect.left() + 1.0,
-                        rect.y_range(),
-                        Stroke::new(2.0, t.color.accent),
-                    );
-                } else if selects && response.hovered() {
-                    ui.painter().rect_filled(rect, 0.0, t.color.bg_hover);
-                }
-                response.widget_info(|| {
-                    if selects {
-                        egui::WidgetInfo::selected(
-                            egui::WidgetType::SelectableLabel,
-                            ui.is_enabled(),
-                            row.selected,
-                            &row.announced,
-                        )
-                    } else {
-                        egui::WidgetInfo::labeled(
-                            egui::WidgetType::Label,
-                            ui.is_enabled(),
-                            &row.announced,
-                        )
-                    }
-                });
-                for (column, cell_rect) in cell_rects(rect, &widths).into_iter().enumerate() {
-                    let mut child = ui.new_child(
-                        egui::UiBuilder::new()
-                            .id_salt((id_salt, index, column))
-                            .max_rect(cell_rect)
-                            .layout(Layout::left_to_right(Align::Center)),
-                    );
-                    child.set_clip_rect(cell_rect.intersect(ui.clip_rect()));
-                    cell(&mut child, index, column);
-                }
-                // Painted after the cells so the outline sits over them: a
-                // selectable row is a tab stop and has no widget of its own to
-                // show that it holds focus.
-                theme::paint_focus_ring(ui, &response, rect);
-                if selects && response.clicked() {
-                    clicked = Some(index);
-                }
+                ui.painter().vline(
+                    rect.left() + 1.0,
+                    rect.y_range(),
+                    Stroke::new(2.0, t.color.accent),
+                );
+            } else if selects && response.hovered() {
+                ui.painter().rect_filled(rect, 0.0, t.color.bg_hover);
             }
-        });
+            if flush {
+                ui.painter().hline(
+                    rect.x_range(),
+                    rect.bottom(),
+                    Stroke::new(1.0, t.color.border.gamma_multiply(0.75)),
+                );
+            }
+            response.widget_info(|| {
+                if selects {
+                    egui::WidgetInfo::selected(
+                        egui::WidgetType::SelectableLabel,
+                        ui.is_enabled(),
+                        row.selected,
+                        &row.announced,
+                    )
+                } else {
+                    egui::WidgetInfo::labeled(
+                        egui::WidgetType::Label,
+                        ui.is_enabled(),
+                        &row.announced,
+                    )
+                }
+            });
+            for (column, cell_rect) in cell_rects(rect.shrink2(vec2(pad, 0.0)), &widths)
+                .into_iter()
+                .enumerate()
+            {
+                let mut child = ui.new_child(
+                    egui::UiBuilder::new()
+                        .id_salt((id_salt, index, column))
+                        .max_rect(cell_rect)
+                        .layout(Layout::left_to_right(Align::Center)),
+                );
+                child.set_clip_rect(cell_rect.intersect(ui.clip_rect()));
+                cell(&mut child, index, column);
+            }
+            // Painted after the cells so the outline sits over them: a
+            // selectable row is a tab stop and has no widget of its own to
+            // show that it holds focus.
+            theme::paint_focus_ring(ui, &response, rect);
+            if selects && response.clicked() {
+                clicked = Some(index);
+            }
+        }
+    });
     clicked
+}
+
+/// Uppercase, tracked, caption-sized text elided to `width`: the one treatment a
+/// flush table's head and a band heading share. Returns the painted width.
+///
+/// The text is uppercased here rather than where it is authored, so a heading
+/// keeps one spelling in the source and the tests that look for it say which
+/// treatment they expect.
+fn paint_band_text(
+    ui: &Ui,
+    anchor: egui::Pos2,
+    align: Align2,
+    text: &str,
+    width: f32,
+    color: Color32,
+) -> f32 {
+    paint_band_text_in(
+        ui,
+        anchor,
+        align,
+        text,
+        width,
+        (theme::sans(tokens::FS_MICRO, FontWeight::SemiBold), color),
+    )
+}
+
+fn paint_band_text_in(
+    ui: &Ui,
+    anchor: egui::Pos2,
+    align: Align2,
+    text: &str,
+    width: f32,
+    (font, color): (egui::FontId, Color32),
+) -> f32 {
+    let tracking = HEAD_TRACKING * tokens::FS_MICRO;
+    let upper = text.to_uppercase();
+    // `elide_text` measures untracked, so the tracking the galley will add is
+    // taken off the width it is asked to fit.
+    let budget = (width - tracking * upper.chars().count() as f32).max(0.0);
+    let shown = elide_text(ui, &upper, &font, budget);
+    let job = egui::text::LayoutJob::single_section(
+        shown,
+        egui::TextFormat {
+            font_id: font,
+            color,
+            extra_letter_spacing: tracking,
+            ..Default::default()
+        },
+    );
+    let galley = ui.fonts_mut(|fonts| fonts.layout_job(job));
+    let size = galley.size();
+    ui.painter()
+        .galley(align.anchor_size(anchor, size).min, galley, color);
+    size.x
+}
+
+/// Two stacked lines in one cell, both elided to it: what the row is, over what
+/// qualifies it.
+///
+/// Anchored to the top of the two-line block, one line each. Centring the pair
+/// on the cell's midline put the first line's box above the cell and the
+/// second's below it, so both were shaved by the cell's clip rect. A row taller
+/// than the block shares the surplus above and below it.
+fn cell_two_lines(
+    ui: &Ui,
+    (first, first_font, first_tone): (&str, egui::FontId, Color32),
+    (second, second_font, second_tone): (&str, egui::FontId, Color32),
+) {
+    let rect = ui.max_rect();
+    let first_text = elide_text(ui, first, &first_font, rect.width());
+    let second_text = elide_text(ui, second, &second_font, rect.width());
+    let top = rect.top() + ((rect.height() - ROW_HEIGHT) / 2.0).max(0.0);
+    ui.painter().text(
+        pos2(rect.left(), top),
+        Align2::LEFT_TOP,
+        first_text,
+        first_font,
+        first_tone,
+    );
+    ui.painter().text(
+        pos2(rect.left(), top + IDENTITY_LINE),
+        Align2::LEFT_TOP,
+        second_text,
+        second_font,
+        second_tone,
+    );
 }
 
 /// The plan's name over its stable identity, both elided to the cell.
 pub(super) fn cell_identity(ui: &mut Ui, name: &str, identity: &str) {
     let t = Tokens::get(ui.ctx());
-    let rect = ui.max_rect();
-    let name_font = theme::sans(tokens::FS_1, FontWeight::SemiBold);
-    let identity_font = theme::mono(tokens::FS_0, FontWeight::Regular);
-    let name_text = elide_text(ui, name, &name_font, rect.width());
-    let identity_text = elide_text(ui, identity, &identity_font, rect.width());
-    // Anchored to the top of the cell, one line each. Centring the pair on the
-    // cell's midline put the name's box above the cell and the identity's below
-    // it, so both were shaved by the cell's clip rect.
-    ui.painter().text(
-        pos2(rect.left(), rect.top()),
-        Align2::LEFT_TOP,
-        name_text,
-        name_font,
-        t.color.text,
+    cell_two_lines(
+        ui,
+        (
+            name,
+            theme::sans(tokens::FS_1, FontWeight::SemiBold),
+            t.color.text,
+        ),
+        (
+            identity,
+            theme::mono(tokens::FS_0, FontWeight::Regular),
+            t.color.text_faint,
+        ),
     );
-    ui.painter().text(
-        pos2(rect.left(), rect.top() + IDENTITY_LINE),
-        Align2::LEFT_TOP,
-        identity_text,
-        identity_font,
-        t.color.text_faint,
+}
+
+/// One exact value over the quantity that qualifies it, both mono.
+///
+/// The authored table's run-set cell: what the plan declares, over how much of
+/// it is enabled. Two facts a reader compares together down one column, which
+/// is one column's width rather than two.
+pub(super) fn cell_value_over_note(ui: &mut Ui, value: &str, note: &str, tone: Color32) {
+    let t = Tokens::get(ui.ctx());
+    cell_two_lines(
+        ui,
+        (value, theme::mono(tokens::FS_1, FontWeight::Regular), tone),
+        (
+            note,
+            theme::mono(tokens::FS_0, FontWeight::Regular),
+            t.color.text_faint,
+        ),
     );
 }
 
@@ -487,6 +692,50 @@ pub(super) fn section_head(ui: &mut Ui, label: &str, status: Option<HeadStatus<'
     }
 }
 
+/// [`section_head`] as a band: the head of a flush column.
+///
+/// The authored `.section-head` — a filled strip the width of its column, an
+/// uppercase label at its leading edge and the state at its trailing one. It is
+/// the same height and fill as a flush table's head, so the two columns of a
+/// split open on one line.
+pub(super) fn section_band(ui: &mut Ui, label: &str, status: Option<HeadStatus<'_>>) {
+    let t = Tokens::get(ui.ctx());
+    let (rect, _) = ui.allocate_exact_size(
+        vec2(ui.available_width(), FLUSH_HEAD_HEIGHT),
+        Sense::hover(),
+    );
+    ui.painter().rect_filled(rect, 0.0, t.color.bg_panel_2);
+    ui.painter().hline(
+        rect.x_range(),
+        rect.bottom(),
+        Stroke::new(1.0, t.color.border),
+    );
+    let inner = rect.shrink2(vec2(FLUSH_PAD, 0.0));
+    // The label is painted before the status so that paint order is reading
+    // order, as in `section_head`.
+    let label_width = paint_band_text(
+        ui,
+        inner.left_center(),
+        Align2::LEFT_CENTER,
+        label,
+        inner.width(),
+        t.color.text_dim,
+    );
+    if let Some(status) = status {
+        paint_band_text_in(
+            ui,
+            inner.right_center(),
+            Align2::RIGHT_CENTER,
+            status.label,
+            (inner.width() - label_width - CELL_GAP).max(0.0),
+            (
+                theme::mono(tokens::FS_MICRO, FontWeight::SemiBold),
+                status.tone.color(&t),
+            ),
+        );
+    }
+}
+
 /// Height of one detail row.
 ///
 /// `design_system::property_row` is the same row and the same columns, and it
@@ -498,14 +747,11 @@ pub(super) fn section_head(ui: &mut Ui, label: &str, status: Option<HeadStatus<'
 /// list keeps the compact row at every width, and the actions below it — which
 /// *are* controls — keep the touch height they need.
 ///
-/// Twenty points rather than the twenty-two it was. The ninth fact the list
-/// states — the analyses a plan has retired — put the aside's closing status
-/// 11 points past the dialog body's clip rect at the 820-point gate, where the
-/// aside's narrow track wraps that status onto a third line. A row holds one
-/// 14-point line, so this leaves three points above and below it: the list is
-/// the densest thing in this dialog by intention, and the height it gives up
-/// is the height the ninth fact costs.
-const DETAIL_ROW_HEIGHT: f32 = 20.0;
+/// Twenty-eight points, a point under the authored `.property-row`'s 29, and
+/// each row is closed by a rule as the authored list's are. It was twenty while
+/// the aside also carried a closing status block; without one the list has the
+/// height to be read as rows rather than as a paragraph of pairs.
+const DETAIL_ROW_HEIGHT: f32 = 28.0;
 /// Horizontal inset inside a detail row, matching `property_row`'s.
 const DETAIL_ROW_PAD: f32 = 10.0;
 /// Gap between a detail row's label and value columns, matching
@@ -538,8 +784,13 @@ pub(super) fn detail_row(
     let value_column = (columns - label_column).max(1.0);
     let (rect, response) = ui.allocate_exact_size(vec2(width, DETAIL_ROW_HEIGHT), Sense::hover());
 
+    ui.painter().hline(
+        rect.x_range(),
+        rect.bottom(),
+        Stroke::new(1.0, t.color.border.gamma_multiply(0.75)),
+    );
     let label_font = theme::sans(tokens::FS_0, FontWeight::Regular);
-    let value_font = theme::mono(tokens::FS_0, FontWeight::Regular);
+    let value_font = theme::mono(tokens::FS_0, FontWeight::Medium);
     let mark_width = if mark.is_some() {
         DETAIL_MARK_WIDTH
     } else {
@@ -642,9 +893,9 @@ pub(super) enum SplitColumn {
 pub(super) struct SplitGeometry {
     /// Whether the columns are stacked rather than side by side.
     pub(super) stacked: bool,
-    /// Content width handed to the records column, inside its padding.
+    /// Width handed to the records column.
     pub(super) records: f32,
-    /// Content width handed to the aside, inside its padding.
+    /// Width handed to the aside.
     pub(super) aside: f32,
 }
 
@@ -656,13 +907,14 @@ pub(super) struct SplitGeometry {
 /// what the records column actually contains instead of a number authored
 /// beside it and left to drift.
 pub(super) fn split_tracks(available: f32, records_minimum: f32) -> SplitGeometry {
-    let inset = 2.0 * f32::from(COLUMN_PADDING);
     // The split runs edge to edge inside a flush dialog body and carries only a
     // closing rule, so unlike a boxed surface it loses nothing to side borders.
+    // Its columns are flush too: each one's content owns its own inset, which is
+    // what lets a table's head band and a section band meet the seam.
     let surface = available;
     let usable = surface - DIVIDER;
-    let records_floor = records_minimum + inset;
-    let aside_floor = ASIDE_MINIMUM + inset;
+    let records_floor = records_minimum;
+    let aside_floor = ASIDE_MINIMUM;
     if usable >= records_floor + aside_floor {
         // Keep the authored proportion when it clears both floors. At the
         // exact breakpoint it can miss one floor by a point even though the
@@ -674,14 +926,14 @@ pub(super) fn split_tracks(available: f32, records_minimum: f32) -> SplitGeometr
         let aside = usable - records;
         SplitGeometry {
             stacked: false,
-            records: records - inset,
-            aside: aside - inset,
+            records,
+            aside,
         }
     } else {
         SplitGeometry {
             stacked: true,
-            records: surface - inset,
-            aside: surface - inset,
+            records: surface,
+            aside: surface,
         }
     }
 }
@@ -691,47 +943,76 @@ pub(super) fn split_tracks(available: f32, records_minimum: f32) -> SplitGeometr
 /// `hardcopy::render::dialog_split` is the equal-column sibling. It is a real
 /// two-column-with-breakpoint primitive and draws the same divider, but it
 /// composes with `Ui::columns`, which can only halve the width — and the
-/// authored proportion here is roughly two to one, because a seven-column
-/// records table and an eleven-row property aside do not want the same track.
-/// It also lives in an allowlisted file belonging to another program, so this
-/// is a second implementation on purpose rather than by omission.
+/// authored proportion here is roughly two to one, because a records table and
+/// a property aside do not want the same track. It also lives in an allowlisted
+/// file belonging to another program, so this is a second implementation on
+/// purpose rather than by omission.
+///
+/// `fill_to` is the bottom edge of a body whose height its surface fixes — a
+/// narrow viewport's dialog is the whole viewport, and hands the split more room
+/// than its columns need. The split takes that room, so the seam and the aside's
+/// fill run down to the footer instead of closing on a rule with bare body under
+/// it. `None` sizes the split to its content, which is what a content-height
+/// surface measures itself from.
 pub(super) fn manager_split(
     ui: &mut Ui,
     records_minimum: f32,
+    fill_to: Option<f32>,
     mut column: impl FnMut(&mut Ui, SplitColumn),
 ) {
     let t = Tokens::get(ui.ctx());
     let stroke = Stroke::new(1.0, t.color.border_strong);
     let geometry = split_tracks(ui.available_width(), records_minimum);
-    let inset = 2.0 * f32::from(COLUMN_PADDING);
     let mut seam = None;
+    let mut aside = Rect::NOTHING;
+    let mut filled = false;
+    // The aside stands on the panel fill, as the authored one does, and its
+    // height is not known until both columns are laid out — so the fill's place
+    // in the paint order is reserved here and its rect is set below.
+    let aside_fill = ui.painter().add(egui::Shape::Noop);
     // No surrounding box. Inside a flush dialog body the authored split runs
     // edge to edge and carries a closing rule instead of a border, so a boxed
     // surface here would draw two hairlines down the dialog's own edges.
     let frame = egui::Frame::NONE.show(ui, |ui| {
         ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
         if geometry.stacked {
-            let first = padded_column(ui, geometry.records + inset, |ui| {
+            let first = flush_column(ui, geometry.records, |ui| {
                 column(ui, SplitColumn::Records);
             });
             seam = Some((false, first.bottom()));
-            padded_column(ui, geometry.aside + inset, |ui| {
+            aside = flush_column(ui, geometry.aside, |ui| {
                 column(ui, SplitColumn::Aside);
             });
         } else {
             ui.horizontal_top(|ui| {
-                let first = padded_column(ui, geometry.records + inset, |ui| {
+                let first = flush_column(ui, geometry.records, |ui| {
                     column(ui, SplitColumn::Records);
                 });
                 seam = Some((true, first.right() + DIVIDER / 2.0));
                 ui.add_space(DIVIDER);
-                padded_column(ui, geometry.aside + inset, |ui| {
+                aside = flush_column(ui, geometry.aside, |ui| {
                     column(ui, SplitColumn::Aside);
                 });
             });
         }
-        ui.add_space(SPLIT_BOTTOM_INSET);
+        // Floored, so the filled split is never a fraction of a point taller than
+        // the viewport it fills and the body never finds something to scroll.
+        let slack = fill_to.map_or(0.0, |floor| {
+            (floor - SPLIT_BOTTOM_INSET - ui.cursor().top()).floor()
+        });
+        filled = slack > 0.0;
+        ui.add_space(slack.max(0.0) + SPLIT_BOTTOM_INSET);
     });
+    // Down to the closing rule whichever column is the taller, so a short aside
+    // beside a long table is still one panel rather than a card floating in it.
+    ui.painter().set(
+        aside_fill,
+        egui::Shape::rect_filled(
+            Rect::from_min_max(aside.min, pos2(aside.right(), frame.response.rect.bottom())),
+            0.0,
+            t.color.bg_panel,
+        ),
+    );
     // The internal seam, then the rule that closes the surface.
     match seam {
         Some((true, x)) => {
@@ -742,21 +1023,25 @@ pub(super) fn manager_split(
         }
         None => {}
     }
-    ui.painter().hline(
-        frame.response.rect.x_range(),
-        frame.response.rect.bottom(),
-        stroke,
-    );
+    // A filled split ends on the footer's own rule. A second one drawn on the
+    // same line blends with it into a heavier stroke than either.
+    if !filled {
+        ui.painter().hline(
+            frame.response.rect.x_range(),
+            frame.response.rect.bottom(),
+            stroke,
+        );
+    }
 }
 
-/// One padded column of the split, sized to `width`. Returns its outer rect.
+/// One flush column of the split, sized to `width`. Returns its rect.
 ///
 /// Vertical item spacing is zero, and deliberately. A property row already
 /// carries its own row height, so an inter-item gap here double-spaces it: the
 /// eleven-row aside was paying an extra eight points fifteen times over, which
 /// is 120 points of a 511-point body budget spent on nothing. Callers add space
 /// where a gap is meant.
-fn padded_column(ui: &mut Ui, width: f32, content: impl FnOnce(&mut Ui)) -> Rect {
+fn flush_column(ui: &mut Ui, width: f32, content: impl FnOnce(&mut Ui)) -> Rect {
     // The column is given its own tall `max_rect` rather than the height that
     // happens to be left in the enclosing body.
     //
@@ -774,9 +1059,9 @@ fn padded_column(ui: &mut Ui, width: f32, content: impl FnOnce(&mut Ui)) -> Rect
             .layout(Layout::top_down(Align::Min)),
     );
     column.set_width(width);
-    let rect = egui::Frame::new()
-        .inner_margin(egui::Margin::same(COLUMN_PADDING))
+    let rect = egui::Frame::NONE
         .show(&mut column, |ui| {
+            ui.set_min_width(width);
             ui.spacing_mut().item_spacing.y = 0.0;
             content(ui);
         })
@@ -820,7 +1105,7 @@ mod tests {
     /// resembled production would let the two drift, and the number these tests
     /// are about — the width below which the split can no longer stay
     /// two-column — is a property of the shipped widths or of nothing.
-    fn seven_columns() -> &'static [TableColumn] {
+    fn plan_columns() -> &'static [TableColumn] {
         &super::super::PLAN_COLUMNS
     }
 
@@ -829,7 +1114,7 @@ mod tests {
     /// reference has and this table must not.
     #[test]
     fn solved_column_widths_fill_the_track_exactly_and_never_exceed_it() {
-        let columns = seven_columns();
+        let columns = plan_columns();
         let content_minimum =
             table_minimum_width(columns) - 2.0 * (f32::from(TABLE_PADDING) + TABLE_BORDER);
         for track in [
@@ -863,7 +1148,7 @@ mod tests {
     /// across rows, so they must not shift when the dialog is resized.
     #[test]
     fn only_the_elastic_column_absorbs_the_surplus() {
-        let columns = seven_columns();
+        let columns = plan_columns();
         let narrow = column_widths(columns, 560.0);
         let wide = column_widths(columns, 900.0);
         assert!(wide[0] > narrow[0], "the identity column takes the slack");
@@ -879,7 +1164,7 @@ mod tests {
     /// own minimum and the aside clears the authored floor.
     #[test]
     fn the_split_never_hands_the_records_column_less_than_the_table_needs() {
-        let minimum = table_minimum_width(seven_columns());
+        let minimum = flush_table_minimum_width(plan_columns());
         let mut transition = None;
         for step in 0..=900 {
             let available = 400.0 + step as f32;
@@ -902,8 +1187,7 @@ mod tests {
                     minimum - geometry.records
                 );
                 assert!(geometry.aside >= ASIDE_MINIMUM);
-                let inset = 2.0 * f32::from(COLUMN_PADDING);
-                let laid_out = geometry.records + geometry.aside + 2.0 * inset + DIVIDER;
+                let laid_out = geometry.records + geometry.aside + DIVIDER;
                 assert!(
                     laid_out <= available + 0.001,
                     "the two tracks and the divider need {laid_out} of {available}"
@@ -914,10 +1198,12 @@ mod tests {
         // The split is handed the dialog's *body* width, not the viewport's.
         // 820 is `WideWorkflow`'s `narrow_max_width` — at or below it the dialog
         // stops being a fixed-width panel and becomes the whole viewport — and
-        // of those 820 points the surface's two hairlines take one each and the
-        // body's reserved scrollbar gutter takes thirteen, so what reaches the
-        // split is 805. Asserting against 820 read as twelve points of headroom
-        // that were never there. It is not a floor on the dialog's width — a
+        // of those 820 points the surface's two hairlines take one each and a
+        // body that withholds a scrollbar gutter loses thirteen more, so the
+        // least that reaches the split is 805. The browse surface floats its bar
+        // and is handed the thirteen back; holding the column set to the
+        // narrower figure keeps it true of either. Asserting against 820 read as
+        // headroom that was never there. It is not a floor on the dialog's width — a
         // narrower window makes a narrower dialog — so this asserts the column
         // set stays two-column across every landscape width from that shape up.
         // Portrait widths below it stack, which is correct there and is gated
@@ -943,7 +1229,7 @@ mod tests {
     /// existing `dialog_split` could not serve this surface.
     #[test]
     fn the_records_column_is_wider_than_the_aside() {
-        let geometry = split_tracks(978.0, table_minimum_width(seven_columns()));
+        let geometry = split_tracks(978.0, flush_table_minimum_width(plan_columns()));
         assert!(!geometry.stacked);
         assert!(
             geometry.records > geometry.aside * 1.5,

@@ -20,7 +20,7 @@ const REAL_VIEWPORT: Vec2 = egui::Vec2::new(1024.0, 640.0);
 /// Header height, footer height, the scroll area's own inset and the
 /// narrow-viewport rule all belong to that widget, and a number copied out
 /// of them here would go stale the first time one of them moved.
-/// `the_shell_composes_the_geometry_these_tests_measure` holds the two
+/// `the_shell_composes_the_geometry_these_tests_measure` holds the three
 /// builder settings this reconstructs.
 #[cfg(not(target_arch = "wasm32"))]
 fn measured_dialog_body_size(screen: Vec2) -> Vec2 {
@@ -38,6 +38,7 @@ fn measured_dialog_body_size(screen: Vec2) -> Vec2 {
                     .description(PLAN_DIALOG_DESCRIPTION)
                     .size(DialogSize::CapabilityReview)
                     .flush_body()
+                    .overlay_scrollbar()
                     .ghost("Close")
                     .show(root, |ui| {
                         // The body's clip rect is its scroll viewport, which is
@@ -383,7 +384,7 @@ pub(super) fn app_with_every_lifecycle_state() -> (
 #[test]
 fn the_manager_fits_the_real_viewport_at_every_supported_width() {
     let (app, active, _, _) = app_with_every_lifecycle_state();
-    let minimum = kit::table_minimum_width(&PLAN_COLUMNS);
+    let minimum = kit::flush_table_minimum_width(&PLAN_COLUMNS);
     // The real viewport, and the width at which `WideWorkflow` stops being a
     // fixed-width panel and becomes the whole viewport. 820 is that
     // threshold, not a floor: a narrower window makes a narrower dialog, and
@@ -427,25 +428,22 @@ fn the_manager_fits_the_real_viewport_at_every_supported_width() {
             "Compare…",
             "Export…",
             "Archive…",
-            "Selected plan",
+            // The aside's head is a band, and a band sets its label in
+            // uppercase.
+            "SELECTED PLAN",
             "Name",
             "Revision",
             "Reference PVT corner",
             "Declared run set",
             "Modelled cost",
-            "Model closure",
             "Retired analyses",
             "Regression baseline",
             "Source lineage",
-            "Switching is atomic",
-            "Results are references",
-            "Stable identity retained",
         ];
         // A property label is elided to its column, so the painted string
         // may be a prefix plus an ellipsis. Only an actually-elided string
         // is allowed to match by prefix: without that rule a shortened label
-        // would satisfy a longer one that is in fact missing, and the aside's
-        // closing status could go unnoticed behind a property row.
+        // would satisfy a longer one that is in fact missing.
         let shows = |painted: &[String], label: &str| {
             painted.iter().any(|text| {
                 text == label
@@ -457,7 +455,7 @@ fn the_manager_fits_the_real_viewport_at_every_supported_width() {
         // Vertical fit is asserted at the dialog level, where clipping is
         // real: every label this surface owes the reader has to be on
         // screen, not merely emitted. The five per-plan operations are the
-        // point of selecting a row, and the nine detail rows are the
+        // point of selecting a row, and the eight detail rows are the
         // plan's facts.
         //
         // And fitting the fixture is not enough. The records table is the
@@ -505,7 +503,7 @@ fn a_portrait_viewport_stacks_the_surface_and_still_fits() {
     let screen = vec2(560.0, 900.0);
     let body = measured_dialog_body_size(screen);
     assert!(
-        kit::split_tracks(body.x, kit::table_minimum_width(&PLAN_COLUMNS)).stacked,
+        kit::split_tracks(body.x, kit::flush_table_minimum_width(&PLAN_COLUMNS)).stacked,
         "a {} body did not stack; this test would then be asserting the \
          landscape arrangement over again",
         body.x
@@ -520,13 +518,10 @@ fn a_portrait_viewport_stacks_the_surface_and_still_fits() {
             "Compare…",
             "Export…",
             "Archive…",
-            "Selected plan",
+            "SELECTED PLAN",
             "Declared run set",
             "Modelled cost",
             "Regression baseline",
-            "Switching is atomic",
-            "Results are references",
-            "Stable identity retained",
         ] {
             let shows = |painted: &[String]| {
                 painted.iter().any(|text| {
@@ -687,18 +682,18 @@ fn the_campaign_route_fits_every_gated_viewport() {
     assert_route_fits_every_gated_viewport(SimulationPlanManagerMode::Campaign);
 }
 
-/// The seven columns are painted, in order, and the two the authored table
-/// carries and RSpice cannot own are not among them.
+/// Every column is painted, in order and in the head band's uppercase, and the
+/// two the authored table carries and RSpice cannot own are not among them.
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
-fn the_table_paints_the_seven_columns_whose_facts_have_owners() {
+fn the_table_paints_the_columns_whose_facts_have_owners() {
     let (app, active, _, _) = app_with_every_lifecycle_state();
     let mut draft = SimulationPlanManagerDraft::new(active, "Corner characterization");
     let rendered = rendered_body(&app, &mut draft, REAL_VIEWPORT);
 
     let headings = PLAN_COLUMNS
         .iter()
-        .map(|column| column.heading)
+        .map(|column| column.heading.to_uppercase())
         .collect::<Vec<_>>();
     // The aside repeats two of these words as property-row labels, so the
     // count is taken over the records column alone: everything the body
@@ -706,13 +701,13 @@ fn the_table_paints_the_seven_columns_whose_facts_have_owners() {
     let aside = rendered
         .painted
         .iter()
-        .position(|text| text == "Selected plan")
+        .position(|text| text == "SELECTED PLAN")
         .expect("the aside's head is painted");
     assert_eq!(
         rendered.painted[..aside]
             .iter()
-            .filter(|text| headings.contains(&text.as_str()))
-            .map(String::as_str)
+            .filter(|text| headings.contains(text))
+            .cloned()
             .collect::<Vec<_>>(),
         headings,
         "the column headings are painted once each, left to right"
@@ -909,7 +904,7 @@ fn import_is_a_toolbar_action_and_not_an_operation_on_the_selected_plan() {
     };
 
     assert!(
-        at("Import…") < at("Plan / identity"),
+        at("Import…") < at("PLAN / IDENTITY"),
         "Import is painted after the table's first heading, so it is not in \
          the toolbar"
     );
@@ -919,55 +914,22 @@ fn import_is_a_toolbar_action_and_not_an_operation_on_the_selected_plan() {
     );
     for kept in ["Rename…", "Clone…", "Compare…", "Export…", "Archive…"] {
         assert!(
-            at(kept) > at("Plan / identity"),
+            at(kept) > at("PLAN / IDENTITY"),
             "'{kept}' is painted before the table, so it left the \
              selected-plan action row"
         );
     }
 }
 
-/// The two boundaries are stated, and neither borrows a clause from the
-/// authored notes that RSpice has no owner for.
-#[cfg(not(target_arch = "wasm32"))]
-#[test]
-fn the_boundary_notes_claim_only_what_the_commit_paths_guarantee() {
-    let (app, active, _, _) = app_with_every_lifecycle_state();
-    let mut draft = SimulationPlanManagerDraft::new(active, "Corner characterization");
-    let rendered = rendered_body(&app, &mut draft, REAL_VIEWPORT);
-
-    for (caption, _) in PLAN_BOUNDARY_NOTES {
-        assert!(
-            rendered.painted.iter().any(|text| text == caption),
-            "the '{caption}' boundary is not painted"
-        );
-    }
-    let notes = PLAN_BOUNDARY_NOTES
-        .iter()
-        .map(|(_, body)| (*body).to_ascii_lowercase())
-        .collect::<Vec<_>>()
-        .join(" ");
-    // The four authored clauses these notes do not borrow were listed here.
-    // They are now four entries in `UNOWNED_AUTHORED_FACTS`, checked against
-    // what every route paints and announces rather than against this one
-    // constant — the notes are painted, so nothing is given up by the move.
-    for guaranteed in ["validates", "receipt"] {
-        assert!(
-            notes.contains(guaranteed),
-            "the notes never mention '{guaranteed}', which is what makes \
-             them true of RSpice"
-        );
-    }
-}
-
-/// The aside states the selected plan's lifecycle and closes with what the
-/// four operations preserve.
+/// The aside's head states the selected plan's lifecycle, and the operations
+/// under it do to a plan's identity what their labels say.
 ///
-/// The identity note's clauses are checked against the catalog itself here,
-/// not just asserted to be painted: a note that says archiving is refused on
-/// the active plan has to be a claim the commit path actually enforces.
+/// The second half is checked against the catalog itself: a rename that moved
+/// the identity, or an archive the catalog did not refuse on the active plan,
+/// would make the aside's controls mean something other than what they say.
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
-fn the_aside_states_the_lifecycle_and_the_identity_the_operations_preserve() {
+fn the_aside_states_the_lifecycle_and_the_operations_keep_the_identity() {
     let (mut app, active, available, retired) = app_with_every_lifecycle_state();
 
     for (id, word) in [
@@ -980,26 +942,21 @@ fn the_aside_states_the_lifecycle_and_the_identity_the_operations_preserve() {
         let head = rendered
             .painted
             .iter()
-            .position(|text| text == "Selected plan")
+            .position(|text| text == "SELECTED PLAN")
             .expect("the aside's head is painted");
+        // The band sets the word in uppercase; the Lifecycle column, painted
+        // before the head, keeps the projection's own spelling.
         assert_eq!(
             rendered.painted[head..]
                 .iter()
-                .find(|text| matches!(text.as_str(), "active" | "available" | "archived"))
+                .find(|text| matches!(text.as_str(), "ACTIVE" | "AVAILABLE" | "ARCHIVED"))
                 .map(String::as_str),
-            Some(word),
+            Some(word.to_uppercase().as_str()),
             "the aside head states the wrong lifecycle for {id}"
-        );
-        assert!(
-            rendered
-                .painted
-                .iter()
-                .any(|text| text == "Stable identity retained"),
-            "the aside does not close with what the operations preserve"
         );
     }
 
-    // Renaming keeps the identity and the revision, as the note claims.
+    // Renaming keeps the identity and the revision.
     let before = app
         .state
         .sim_setup
@@ -1052,7 +1009,8 @@ fn the_shell_composes_the_geometry_these_tests_measure() {
     for required in [
         "DialogSize::CapabilityReview",
         ".flush_body()",
-        "kit::table_minimum_width(&PLAN_COLUMNS)",
+        ".overlay_scrollbar()",
+        "kit::flush_table_minimum_width(&PLAN_COLUMNS)",
         "&PLAN_COLUMNS,",
     ] {
         assert!(
@@ -1115,7 +1073,7 @@ fn rendered_aside(app: &RSpiceApp, plan_id: SimulationPlanId) -> RenderedAside {
         |root| {
             egui::CentralPanel::default()
                 .frame(egui::Frame::NONE)
-                // One column, so the nine rows land in one reading order
+                // One column, so the eight rows land in one reading order
                 // for the assertions below to be about.
                 .show(root, |ui| selected_plan_properties(ui, selected, 1));
         },
@@ -1160,12 +1118,13 @@ fn aside_value<'rows>(rows: &'rows [(String, String)], label: &str) -> &'rows st
 /// The aside is the manager's only statement of what the selected plan
 /// declares. It named the plan, its identity and its result count and stopped
 /// there, so five facts the projection had already collected — the corner, the
-/// forecast, the cost it models, the model closure, the pinned baseline, and the
-/// source plan — were unreachable from the surface that exists to compare plans.
+/// forecast, the cost it models, the pinned baseline, and the source plan — were
+/// unreachable from the surface that exists to compare plans.
 ///
 /// It is also the one list, so it must not repeat the table: the stable identity
-/// is the second line of every identity cell and the result count is a column,
-/// and a row for either would be the same fact painted twice on one screen.
+/// is the second line of every identity cell, and the model bindings and the
+/// result count are each a column, so a row for any of them would be the same
+/// fact painted twice on one screen.
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn the_browse_aside_states_every_fact_the_catalog_owns_about_the_selected_plan() {
@@ -1195,10 +1154,10 @@ fn the_browse_aside_states_every_fact_the_catalog_owns_about_the_selected_plan()
             .iter()
             .filter(|text| matches!(
                 text.as_str(),
-                "Selected plan" | "Declared work" | "Plan-owned records"
+                "SELECTED PLAN" | "DECLARED WORK" | "PLAN-OWNED RECORDS"
             ))
             .collect::<Vec<_>>(),
-        ["Selected plan"],
+        ["SELECTED PLAN"],
         "the aside is grouped again; the authored one is a single list"
     );
     assert_eq!(
@@ -1211,14 +1170,13 @@ fn the_browse_aside_states_every_fact_the_catalog_owns_about_the_selected_plan()
             "Reference PVT corner",
             "Declared run set",
             "Modelled cost",
-            "Model closure",
             "Retired analyses",
             "Regression baseline",
             "Source lineage",
         ]
     );
     // Nothing the table already paints is repeated here.
-    for repeated in ["Stable identity", "Results"] {
+    for repeated in ["Stable identity", "Model closure", "Models", "Results"] {
         assert!(
             !rows.iter().any(|(label, _)| label == repeated),
             "the aside repeats '{repeated}', which every table row already paints"
@@ -1265,11 +1223,6 @@ fn the_browse_aside_states_every_fact_the_catalog_owns_about_the_selected_plan()
         );
     }
 
-    let bindings = app.state.sim_setup.model_bindings.len();
-    assert_eq!(
-        aside_value(&rows, "Model closure"),
-        format!("{bindings} binding{}", plural_suffix(bindings))
-    );
     assert_eq!(
         aside_value(&rows, "Retired analyses"),
         "none",

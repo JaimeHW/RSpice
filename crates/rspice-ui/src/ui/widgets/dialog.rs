@@ -330,6 +330,12 @@ const TITLE_FIRST_HEADER_LEAD: f32 = 9.0;
 const WORKFLOW_HEADER_HORIZONTAL_MARGIN: i8 = 15;
 const WORKFLOW_FOOTER_HORIZONTAL_MARGIN: i8 = 12;
 const WORKFLOW_FOOTER_VERTICAL_MARGIN: i8 = 10;
+/// Inset above and below a single row of touch-height footer actions.
+///
+/// The row held a 44-point action in the 48-point footer a 29-point action gets,
+/// which left two points either side and read as buttons wedged into the bar.
+/// The footer grows with the action instead.
+const TOUCH_FOOTER_VERTICAL_MARGIN: i8 = 8;
 const DIALOG_CLOSE_TARGET_WIDTH: f32 = 28.0;
 const DIALOG_CLOSE_TARGET_HEIGHT: f32 = 27.0;
 const TOUCH_TARGET_SIDE: f32 = 44.0;
@@ -615,6 +621,7 @@ pub struct Dialog<'a> {
     transaction_state: Option<DialogTransactionState>,
     body_scroll_offset: Option<&'a mut f32>,
     flush_body: bool,
+    overlay_scrollbar: bool,
     manual_body_scroll: bool,
     note_only_footer: bool,
     header_visible: bool,
@@ -650,6 +657,7 @@ impl<'a> Dialog<'a> {
             transaction_state: None,
             body_scroll_offset: None,
             flush_body: false,
+            overlay_scrollbar: false,
             manual_body_scroll: false,
             note_only_footer: false,
             header_visible: true,
@@ -797,6 +805,32 @@ impl<'a> Dialog<'a> {
     pub fn flush_body(mut self) -> Self {
         self.flush_body = true;
         self
+    }
+
+    /// Float the body's scrollbar over its content instead of withholding a
+    /// gutter for it.
+    ///
+    /// A flush body paints fills and rules to its own edges, so a withheld
+    /// gutter shows as a strip of bare surface down the dialog's trailing edge.
+    /// A floating bar allocates nothing, which leaves the body's width a function
+    /// of the surface's width alone — the same stability the gutter buys.
+    pub fn overlay_scrollbar(mut self) -> Self {
+        self.overlay_scrollbar = true;
+        self
+    }
+
+    /// Where a body that fills its surface ends, for content that wants to reach
+    /// it.
+    ///
+    /// `Some` only inside the body of a dialog whose surface height is fixed by
+    /// its layout rather than measured from its content. There the body is
+    /// handed more height than its content may need, and a surface that closes
+    /// itself with a rule leaves bare body between that rule and the footer. A
+    /// content-height surface reports `None`: filling it would hold the surface
+    /// at whatever height it was first laid out in.
+    pub(crate) fn body_fill_floor(ui: &Ui) -> Option<f32> {
+        ui.data(|data| data.get_temp::<Option<f32>>(body_fill_floor_id()))
+            .flatten()
     }
 
     /// Give the body its exact available track instead of wrapping it in the
@@ -1030,6 +1064,9 @@ impl<'a> Dialog<'a> {
                 // hosts no bar of its own, so its width never answered to its
                 // height in the first place, and the region inside it that does
                 // scroll is its owner's to lay out.
+                if self.overlay_scrollbar {
+                    ui.spacing_mut().scroll = egui::style::ScrollStyle::floating();
+                }
                 let body_width = (content.x - ui.spacing().scroll.allocated_width()).max(1.0);
                 // The body is painted once, by the surface beneath it. Its
                 // frame used to repeat the surface's fill over a rect only as
@@ -1079,6 +1116,10 @@ impl<'a> Dialog<'a> {
                     };
                     let body_output = body_scroll.show(ui, |ui| {
                         ui.set_width(body_width);
+                        // The viewport's bottom edge, while the surface rather
+                        // than the content decides it.
+                        let floor = fill_surface_height.then(|| ui.max_rect().bottom());
+                        ui.data_mut(|data| data.insert_temp(body_fill_floor_id(), floor));
                         Frame::NONE
                             .inner_margin(if self.flush_body {
                                 Margin::same(0)
@@ -1093,6 +1134,7 @@ impl<'a> Dialog<'a> {
                             .inner
                     });
                     rendered_focus.body = body_output.inner;
+                    ui.data_mut(|data| data.insert_temp(body_fill_floor_id(), None::<f32>));
                     unshown_body_height =
                         (body_output.content_size.y - body_output.inner_rect.height()).max(0.0);
                     if let Some(offset) = self.body_scroll_offset.as_deref_mut() {
@@ -1413,7 +1455,11 @@ impl<'a> Dialog<'a> {
             return 48.0;
         }
         if !self.footer_stacks(surface_width) {
-            return 48.0;
+            return if large_targets {
+                TOUCH_TARGET_SIDE + 2.0 * f32::from(TOUCH_FOOTER_VERTICAL_MARGIN)
+            } else {
+                48.0
+            };
         }
 
         let action_count =
@@ -1596,7 +1642,7 @@ impl<'a> Dialog<'a> {
             WORKFLOW_FOOTER_HORIZONTAL_MARGIN
         };
         let vertical_margin = if large_targets {
-            2
+            TOUCH_FOOTER_VERTICAL_MARGIN
         } else {
             WORKFLOW_FOOTER_VERTICAL_MARGIN
         };
@@ -1767,6 +1813,10 @@ impl<'a> Dialog<'a> {
 
 fn dialog_note_footer_rect(left: f32, top: f32, surface_width: f32) -> Rect {
     dialog_footer_rect(left, top, surface_width, 48.0)
+}
+
+fn body_fill_floor_id() -> egui::Id {
+    egui::Id::new("rspice.dialog.body-fill-floor")
 }
 
 fn dialog_footer_rect(left: f32, top: f32, surface_width: f32, height: f32) -> Rect {
