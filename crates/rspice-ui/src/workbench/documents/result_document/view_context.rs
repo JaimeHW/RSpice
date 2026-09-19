@@ -364,6 +364,7 @@ fn viewer_can_render(
                 analysis.result_payload,
                 Some(
                     AnalysisResultPayload::Sensitivity { .. }
+                        | AnalysisResultPayload::SensitivityStudy { .. }
                         | AnalysisResultPayload::DcMismatch { .. }
                 )
             )

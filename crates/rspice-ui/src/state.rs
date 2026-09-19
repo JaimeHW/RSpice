@@ -197,6 +197,7 @@ pub use simulation::{
 };
 pub use simulation::{DcMismatchContributorEvidence, DcMismatchEvidence, DcMismatchScopeEvidence};
 pub use simulation::{FftSpectrumEvidence, FftSpectrumFormatEvidence, FftSpectrumStatusEvidence};
+pub use simulation::{SensitivityBasisEvidence, SensitivityStudyEvidence, SensitivityStudyRow};
 // Test-only, like the attribution vocabulary above: outside tests the
 // compatibility mode of a recorded spectrum is only ever read through the
 // evidence's own field, never named as a type.

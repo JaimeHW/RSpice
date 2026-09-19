@@ -3369,6 +3369,17 @@ fn retained_result_artifacts(
                 None,
                 ResultViewer::Contribution,
             ),
+            // The count is the rows the study holds, not the rows times the
+            // points: one variable is one artifact of the study whether it
+            // was solved at one frequency or sixty-one.
+            AnalysisResultPayload::SensitivityStudy { evidence } => (
+                "payload/sensitivity",
+                "Sensitivity coefficients",
+                ResultArtifactKind::Array,
+                evidence.rows.len(),
+                None,
+                ResultViewer::Contribution,
+            ),
             AnalysisResultPayload::DcMismatch { evidence } => (
                 "payload/dc-mismatch",
                 "DC mismatch contributors",

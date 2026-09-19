@@ -45,6 +45,9 @@ pub(super) struct ViewPlans {
     /// The cumulative shares and bar scale of the retained DC mismatch
     /// result, which the same Contribution sheet draws.
     pub(super) mismatch: Option<Arc<super::sensitivity::MismatchPlan>>,
+    /// The ranking of a retained sensitivity study at the frequency it is
+    /// read at, and the sweep-wide scale its frequency profiles share.
+    pub(super) study: Option<Arc<super::sensitivity::StudyPlan>>,
     /// Safe-operating-area per-rule stress facts; see [`super::soa`].
     pub(super) soa: Option<Arc<super::soa::SoaPlan>>,
 }
@@ -69,6 +72,7 @@ impl ViewPlans {
             optimization,
             sensitivity,
             mismatch,
+            study,
             soa,
         } = self;
         manifest.is_none()
@@ -80,6 +84,7 @@ impl ViewPlans {
             && optimization.borrow().is_none()
             && sensitivity.is_none()
             && mismatch.is_none()
+            && study.is_none()
             && soa.is_none()
     }
 }
