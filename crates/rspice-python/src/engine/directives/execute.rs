@@ -686,20 +686,17 @@ pub(super) fn execute(
                 describe_analysis(analysis),
             ));
         }
-        AnalysisCommand::Four {
-            fundamental,
-            outputs,
-            num_harmonics,
-        } => {
+        AnalysisCommand::Four { outputs, .. } => {
             let Some(analysis_id) = context.and_then(|context| context.analysis_id.clone()) else {
                 return Err(crate::errors::value_error(
                     ".FOUR directive was planned without a stable analysis identity",
                 ));
             };
+            let config = rspice_core::analysis::FourierConfig::try_from(analysis)
+                .map_err(|error| crate::errors::value_error(error.to_string()))?;
             out.pending_fourier.push(PendingFourier {
-                fundamental: *fundamental,
+                config,
                 outputs: outputs.clone(),
-                num_harmonics: *num_harmonics,
                 analysis_id,
                 coordinate: context.and_then(|context| context.coordinate.clone()),
             });

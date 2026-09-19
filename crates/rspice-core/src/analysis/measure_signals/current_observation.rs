@@ -649,6 +649,29 @@ mod tests {
         close(output.dc_component, 0.003);
     }
 
+    /// The impulse interval is the analysis window itself, `(t0, t1]`, so a
+    /// charge step that falls after an authored window end contributes to
+    /// nothing — the window a card names bounds the singular current exactly
+    /// as it bounds the sampled one.
+    #[test]
+    fn an_impulse_after_the_window_end_is_not_counted() {
+        let result = fixture();
+        let windowed = |stop: Value| {
+            let mut config = FourierConfig::new(1.0).with_harmonics(4);
+            config.window_stop = Some(stop);
+            let finite =
+                evaluate_transient_probe_with_abort(None, &result, "I(X1.V1)", &NoAbort).unwrap();
+            FourierAnalysis::new(config)
+                .analyze_transient_output_with_abort(None, &result, "I(X1.V1)", &finite, &NoAbort)
+        };
+        // The fixture's branch carries no sampled current and one +2 mC step
+        // at t = 1.25 s, so the whole spectrum is that step or nothing.
+        close(windowed(1.5).unwrap().dc_component, 0.002);
+        let excluded = windowed(1.125).unwrap();
+        assert_eq!(excluded.dc_component, 0.0);
+        assert!(excluded.harmonics.iter().all(|h| h.magnitude == 0.0));
+    }
+
     #[test]
     fn fourier_current_impulse_combines_finite_and_singular_coefficients() {
         let mut result = fixture();

@@ -17,12 +17,12 @@ pub(super) fn evaluate_pending_fourier(
     // .four directive may precede its .tran in the deck.
     for pending in std::mem::take(&mut out.pending_fourier) {
         let PendingFourier {
-            fundamental,
+            config,
             outputs,
-            num_harmonics,
             analysis_id,
             coordinate,
         } = pending;
+        let fundamental = config.fundamental_freq;
         let records_before = out.records.len();
         let parent_analysis_id = out
             .tran_context
@@ -59,10 +59,8 @@ pub(super) fn evaluate_pending_fourier(
                     });
                     match waveform {
                         Ok(waveform) => {
-                            let analysis = rspice_core::analysis::FourierAnalysis::new(
-                                rspice_core::analysis::FourierConfig::new(fundamental)
-                                    .with_harmonics(num_harmonics),
-                            );
+                            let analysis =
+                                rspice_core::analysis::FourierAnalysis::new(config.clone());
                             // Qualification and transformation of a long
                             // waveform is unbounded work, so it runs on the
                             // interruptible worker. A cancellation is the one

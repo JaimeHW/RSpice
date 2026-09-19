@@ -1,6 +1,6 @@
-//! Authored `.SENS`, `.PZ`, `.SP`, `.PXF` and `.PSTB` cards run through core
-//! entry points that take the card, and their results project into the shared
-//! result document.
+//! Authored `.SENS`, `.PZ`, `.SP`, `.PXF`, `.PSTB` and `.FOUR` cards run
+//! through core entry points that take the card, and their results project
+//! into the shared result document.
 
 use rspice_core::abort_signal::NoAbort;
 use rspice_core::engine::SensitivityCardResult;
@@ -1408,4 +1408,95 @@ fn a_periodic_map_with_no_dynamic_state_cannot_reach_a_pstb_card() {
         message.contains("shooting-state basis"),
         "the probe must be refused before the orbit is judged: {message}"
     );
+}
+
+//=============================================================================
+// `.FOUR`
+//=============================================================================
+
+/// A `.FOUR` card that authors no window keyword is the card it has always
+/// been, on every route: the configuration read off it is field-for-field the
+/// one the evaluation site used to build by hand, and the spectrum it produces
+/// is bit-identical to that configuration's.
+///
+/// The comparison is structural rather than a golden file: it holds the two
+/// configurations side by side and then the two spectra they produce, so it
+/// stays true when the numerics legitimately change.
+#[test]
+fn a_four_card_without_keywords_integrates_the_last_period_as_before() {
+    use rspice_core::analysis::{FourierAnalysis, FourierConfig};
+
+    let netlist = Netlist::parse(
+        "plain Fourier\n\
+         V1 out 0 SIN(0 1 1k)\n\
+         R1 out 0 1k\n\
+         .tran 1u 4m\n\
+         .four 1k 6 V(out)\n\
+         .end\n",
+    )
+    .expect("the deck parses");
+    let four = card(&netlist, |command| {
+        matches!(command, AnalysisCommand::Four { .. })
+    });
+
+    let from_card = FourierConfig::try_from(&four).expect("a .FOUR card is a Fourier request");
+    // What the one evaluation site built before the card carried a window.
+    let by_hand = FourierConfig::new(1_000.0).with_harmonics(6);
+    assert_eq!(from_card.fundamental_freq, by_hand.fundamental_freq);
+    assert_eq!(from_card.num_harmonics, by_hand.num_harmonics);
+    assert_eq!(from_card.num_periods, by_hand.num_periods);
+    assert_eq!(from_card.window_stop, None);
+    assert_eq!(from_card.earliest_start, None);
+
+    // A record whose last sample is not on a period boundary, so a window that
+    // did not end exactly there would report different numbers.
+    let time = (0..=3_137)
+        .map(|index| index as f64 * 1.27e-6)
+        .collect::<Vec<_>>();
+    let values = time
+        .iter()
+        .map(|&t| {
+            0.4 + (2.0 * std::f64::consts::PI * 1_000.0 * t).sin()
+                + 0.25 * (2.0 * std::f64::consts::PI * 2_000.0 * t).cos()
+        })
+        .collect::<Vec<_>>();
+    let carded = FourierAnalysis::new(from_card)
+        .analyze(&time, &values)
+        .expect("the card's configuration analyses the record");
+    let handmade = FourierAnalysis::new(by_hand)
+        .analyze(&time, &values)
+        .expect("the hand-built configuration analyses the record");
+    assert_eq!(
+        carded, handmade,
+        "a keyword-less .FOUR card must produce the pre-window numbers to the bit"
+    );
+
+    // And a card that does author a window is a different request.
+    let windowed = Netlist::parse(
+        "windowed Fourier\n\
+         V1 out 0 SIN(0 1 1k)\n\
+         R1 out 0 1k\n\
+         .tran 1u 4m\n\
+         .four 1k 6 V(out) PERIODS=2 TO=3m\n\
+         .end\n",
+    )
+    .expect("the windowed deck parses");
+    let windowed = FourierConfig::try_from(&card(&windowed, |command| {
+        matches!(command, AnalysisCommand::Four { .. })
+    }))
+    .expect("a windowed .FOUR card is a Fourier request");
+    assert_eq!(windowed.num_periods, 2);
+    assert!(
+        windowed
+            .window_stop
+            .is_some_and(|stop| (stop - 3e-3).abs() < 1e-18),
+        "{:?}",
+        windowed.window_stop
+    );
+
+    // A card of another family is not a Fourier request.
+    let other = card(&netlist, |command| {
+        matches!(command, AnalysisCommand::Tran { .. })
+    });
+    assert!(FourierConfig::try_from(&other).is_err());
 }

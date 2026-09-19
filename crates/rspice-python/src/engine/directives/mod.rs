@@ -123,9 +123,10 @@ struct PlannedDirectiveRun<'a> {
 }
 
 struct PendingFourier {
-    fundamental: f64,
+    /// The card's own reading, window included, so the deferred evaluation
+    /// integrates exactly what the deck asked for.
+    config: rspice_core::analysis::FourierConfig,
     outputs: Vec<String>,
-    num_harmonics: usize,
     analysis_id: String,
     coordinate: Option<PyRunCoordinate>,
 }
@@ -230,7 +231,7 @@ pub(super) struct DirectiveOutcomes {
     pub(super) sensitivity_ac: LastAndAll<PyAcSensitivityResult>,
     pub(super) dcmatch: LastAndAll<PyDcMatchResult>,
     fourier: Vec<PyFourierResult>,
-    /// `(fundamental, outputs, harmonics)` per `.four` card, evaluated after
+    /// The configuration and operands of each `.four` card, evaluated after
     /// the loop.
     pending_fourier: Vec<PendingFourier>,
 }

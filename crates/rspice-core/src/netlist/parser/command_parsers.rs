@@ -414,12 +414,31 @@ pub(super) fn parse_temp_command(
     Ok(temperatures)
 }
 
-/// Parse .FOUR command: .FOUR freq `[num_harmonics]` output1 [output2...]
+/// One parsed `.FOUR` card: the spectrum it asks for and the window it asks
+/// for that spectrum over.
+pub(super) struct FourCard {
+    pub(super) fundamental: Value,
+    pub(super) num_harmonics: usize,
+    pub(super) outputs: Vec<String>,
+    pub(super) periods: usize,
+    pub(super) window_from: Option<Value>,
+    pub(super) window_to: Option<Value>,
+}
+
+/// Parse `.FOUR freq [num_harmonics] output1 [output2...]
+/// [PERIODS=k] [FROM=t] [TO=t]`.
+///
+/// The positional form is unchanged and still valid alone. The window
+/// keywords follow the outputs in any order; an output list ends at the first
+/// `IDENT =` pair, which is what keeps the two forms disjoint (a probe is
+/// never followed by `=`).
 pub(super) fn parse_four_command(
     stream: &mut TokenStream,
     line_num: usize,
     params: &ParamContext,
-) -> Result<(Value, usize, Vec<String>), ParseError> {
+) -> Result<FourCard, ParseError> {
+    const CARD: AnalysisCard = AnalysisCard::Four;
+
     let fundamental = expect_value(stream, line_num, params)?;
     if !fundamental.is_finite() || fundamental <= 0.0 {
         return Err(ParseError::Syntax {
@@ -429,14 +448,21 @@ pub(super) fn parse_four_command(
             ),
         });
     }
-    let num_harmonics = match try_value(stream, params) {
-        Some(value) => parse_four_harmonic_count(value, line_num)?,
-        None => 9,
+    let num_harmonics = if at_keyword(stream) {
+        9
+    } else {
+        match try_value(stream, params) {
+            Some(value) => parse_four_harmonic_count(value, line_num)?,
+            None => 9,
+        }
     };
 
     let mut outputs = Vec::new();
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
         skip_commas(stream);
+        if at_keyword(stream) {
+            break;
+        }
         if matches!(
             stream.peek().kind,
             TokenKind::Ident(_)
@@ -461,7 +487,95 @@ pub(super) fn parse_four_command(
         });
     }
 
-    Ok((fundamental, num_harmonics, outputs))
+    let mut periods = None;
+    let mut window_from = None;
+    let mut window_to = None;
+    loop {
+        skip_commas(stream);
+        if at_card_end(stream) {
+            break;
+        }
+        let Some(keyword) = take_keyword(stream) else {
+            return Err(card_error(
+                CARD,
+                line_num,
+                AnalysisCardIssue::TrailingToken {
+                    token: stream.peek().lexeme.clone(),
+                },
+            ));
+        };
+        match keyword.as_str() {
+            "PERIODS" => bind_once(
+                &mut periods,
+                card_count(stream, line_num, params, CARD, "PERIODS", 1)?,
+                CARD,
+                line_num,
+                "PERIODS",
+            )?,
+            "FROM" => bind_once(
+                &mut window_from,
+                card_number(
+                    stream,
+                    line_num,
+                    params,
+                    CARD,
+                    "FROM",
+                    "a time in seconds >= 0",
+                    |value| value >= 0.0,
+                )?,
+                CARD,
+                line_num,
+                "FROM",
+            )?,
+            "TO" => bind_once(
+                &mut window_to,
+                card_number(
+                    stream,
+                    line_num,
+                    params,
+                    CARD,
+                    "TO",
+                    "a positive time in seconds",
+                    |value| value > 0.0,
+                )?,
+                CARD,
+                line_num,
+                "TO",
+            )?,
+            _ => {
+                return Err(card_error(
+                    CARD,
+                    line_num,
+                    AnalysisCardIssue::UnknownKeyword { keyword },
+                ));
+            }
+        }
+    }
+
+    // A window that ends where it begins, or earlier, is not a window at all;
+    // the two keywords would then be describing the same instant from both
+    // sides. The engine's own refusal names one time, so name both here.
+    if let (Some(from), Some(to)) = (window_from, window_to)
+        && to <= from
+    {
+        return Err(card_error(
+            CARD,
+            line_num,
+            AnalysisCardIssue::ConflictingFields {
+                first: "TO",
+                second: "FROM",
+            },
+        ));
+    }
+
+    Ok(FourCard {
+        fundamental,
+        num_harmonics,
+        outputs,
+        periods: periods.unwrap_or(1),
+        window_from,
+        window_to,
+    })
 }
 
 fn parse_four_harmonic_count(value: Value, line_num: usize) -> Result<usize, ParseError> {
@@ -492,6 +606,7 @@ mod four_command_tests {
                 fundamental,
                 num_harmonics,
                 outputs,
+                ..
             },
         ] = explicit.analyses.as_slice()
         else {
@@ -523,6 +638,104 @@ mod four_command_tests {
             ))
             .expect_err("invalid harmonic count must fail closed");
             assert!(error.to_string().contains("harmonic count"), "{error}");
+        }
+    }
+
+    /// The window keywords follow the outputs, in any order, and the output
+    /// list stops at the first `IDENT =` pair rather than swallowing it.
+    #[test]
+    fn four_reads_its_window_keywords_after_the_outputs() {
+        for source in [
+            ".FOUR 1k 5 V(out) I(V1) PERIODS=4 FROM=2m TO=6m",
+            ".four 1K 5 v(out) i(v1) to=6m periods=4 from=2m",
+        ] {
+            let netlist =
+                Netlist::parse(&format!("windowed Fourier\nV1 out 0 1\n{source}\n.END\n"))
+                    .expect("a windowed .FOUR card parses");
+            let [
+                AnalysisCommand::Four {
+                    fundamental,
+                    num_harmonics,
+                    outputs,
+                    periods,
+                    window_from,
+                    window_to,
+                },
+            ] = netlist.analyses.as_slice()
+            else {
+                panic!("expected one Fourier analysis, got {:?}", netlist.analyses);
+            };
+            assert!((*fundamental - 1000.0).abs() <= f64::EPSILON * 1000.0);
+            assert_eq!(*num_harmonics, 5);
+            assert_eq!(outputs.len(), 2, "{outputs:?}");
+            assert_eq!(*periods, 4);
+            let from = window_from.expect("FROM is authored");
+            let to = window_to.expect("TO is authored");
+            assert!((from - 2e-3).abs() <= 1e-18, "{from}");
+            assert!((to - 6e-3).abs() <= 1e-18, "{to}");
+        }
+
+        // The harmonic count is still optional, and a keyword pair in its
+        // place is a keyword rather than a count.
+        let netlist = Netlist::parse(
+            "defaulted count beside a window\nV1 out 0 1\n.FOUR 1k V(out) PERIODS=2\n.END\n",
+        )
+        .expect("a window keyword may follow the outputs of a count-less card");
+        assert!(matches!(
+            netlist.analyses.as_slice(),
+            [AnalysisCommand::Four {
+                num_harmonics: 9,
+                periods: 2,
+                window_from: None,
+                window_to: None,
+                ..
+            }]
+        ));
+    }
+
+    /// A card that authors no keyword is the card it has always been: every
+    /// deck already in existence keeps its spectrum.
+    #[test]
+    fn an_unwindowed_four_card_parses_as_it_always_has() {
+        let netlist = Netlist::parse("plain Fourier\nV1 out 0 1\n.FOUR 60 15 V(out)\n.END\n")
+            .expect("a keyword-less .FOUR card parses");
+        assert!(matches!(
+            netlist.analyses.as_slice(),
+            [AnalysisCommand::Four {
+                num_harmonics: 15,
+                periods: 1,
+                window_from: None,
+                window_to: None,
+                ..
+            }]
+        ));
+    }
+
+    #[test]
+    fn a_four_card_refuses_an_unknown_repeated_or_contradictory_keyword() {
+        let cases: [(&str, &str); 5] = [
+            (
+                "PERIODS=2 PERIODS=3",
+                "keyword PERIODS authored more than once",
+            ),
+            ("TO=5m TO=6m", "keyword TO authored more than once"),
+            ("WINDOW=hann", "unknown keyword 'WINDOW'"),
+            ("PERIODS=0", "PERIODS must be a whole number >= 1, got 0"),
+            (
+                "FROM=6m TO=6m",
+                "TO and FROM set the same quantity; author only one",
+            ),
+        ];
+        for (tail, expected) in cases {
+            let error = Netlist::parse(&format!(
+                "refused Fourier window\nV1 out 0 1\n.TRAN 1u 10m\n.FOUR 1k V(out) {tail}\n.END\n"
+            ))
+            .expect_err("the card must fail closed");
+            let rendered = error.to_string();
+            assert!(
+                rendered.contains(".FOUR at line 4: ") && rendered.contains(expected),
+                "`{tail}` reported {rendered}"
+            );
         }
     }
 }

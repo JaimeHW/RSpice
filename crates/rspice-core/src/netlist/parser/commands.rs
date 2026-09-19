@@ -296,17 +296,19 @@ pub(super) fn parse_command(
         }
         ".FOUR" | ".FOURIER" => {
             let authored_source = remaining_command_source(stream);
-            let (fundamental, num_harmonics, outputs) =
-                parse_four_command(stream, line_num, params)?;
+            let card = parse_four_command(stream, line_num, params)?;
             output_requests.push(OutputRequest::from_four(
-                outputs.as_slice(),
+                card.outputs.as_slice(),
                 origin.clone(),
                 &authored_source,
             ));
             analyses.push(AnalysisCommand::Four {
-                fundamental,
-                outputs,
-                num_harmonics,
+                fundamental: card.fundamental,
+                outputs: card.outputs,
+                num_harmonics: card.num_harmonics,
+                periods: card.periods,
+                window_from: card.window_from,
+                window_to: card.window_to,
             });
         }
         ".FFT" => {

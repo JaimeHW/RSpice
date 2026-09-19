@@ -21,10 +21,21 @@ type AnalyzedSpectrum = (String, &'static str, rspice_core::analysis::FourierRes
 pub(super) fn run_fourier(
     ctx: &RunContext<'_>,
     four_index: usize,
-    fundamental: f64,
-    num_harmonics: usize,
+    card: &rspice_core::netlist::AnalysisCommand,
 ) -> Result<(), CliError> {
     use rspice_core::analysis::{FourierAnalysis, FourierConfig};
+
+    // The card states the spectrum AND the window it is taken over, and core
+    // reads both in one place. Rebuilding either here would let the command
+    // line integrate a different interval from every other surface.
+    let config = FourierConfig::try_from(card).map_err(|error| {
+        CliError::simulation_error_in(
+            format!("the .FOUR card could not be read: {error}"),
+            "Fourier",
+        )
+    })?;
+    let fundamental = config.fundamental_freq;
+    let num_harmonics = config.num_harmonics;
 
     if !fundamental.is_finite() || fundamental <= 0.0 {
         return Err(CliError::simulation_error_in(
@@ -91,7 +102,6 @@ pub(super) fn run_fourier(
             )
             .map_err(|error| map_output_projection_error(ctx, error, "Fourier"))?;
 
-            let config = FourierConfig::new(fundamental).with_harmonics(num_harmonics);
             let fourier = FourierAnalysis::new(config);
 
             let mut analyzed = Vec::new();

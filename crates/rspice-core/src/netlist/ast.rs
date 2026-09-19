@@ -2369,11 +2369,21 @@ pub enum AnalysisCommand {
         input_source: String,
     },
 
-    /// Fourier analysis: `.FOUR freq [num_harmonics] output1 [output2...]`
+    /// Fourier analysis:
+    /// `.FOUR freq [num_harmonics] output1 [output2...] [PERIODS=k] [FROM=t] [TO=t]`
     Four {
         fundamental: Value,
         outputs: Vec<String>,
         num_harmonics: usize,
+        /// Whole fundamental periods the projection integrates over (`1`
+        /// unless the card authors `PERIODS=`).
+        periods: usize,
+        /// Earliest time the window may reach (`FROM=`), or `None` when the
+        /// card states no settling guard.
+        window_from: Option<Value>,
+        /// Time the window ends at (`TO=`), or `None` for the last accepted
+        /// transient time.
+        window_to: Option<Value>,
     },
 
     /// Monte Carlo analysis:
@@ -2880,6 +2890,7 @@ pub enum AnalysisCard {
     DcMatch,
     Sp,
     Stb,
+    Four,
 }
 
 impl AnalysisCard {
@@ -2895,6 +2906,7 @@ impl AnalysisCard {
             Self::DcMatch => ".DCMATCH",
             Self::Sp => ".SP",
             Self::Stb => ".STB",
+            Self::Four => ".FOUR",
         }
     }
 }

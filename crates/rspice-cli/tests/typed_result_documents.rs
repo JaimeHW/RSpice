@@ -744,6 +744,74 @@ fn the_command_line_reports_the_design_parameters_a_sens_card_names() {
     );
 }
 
+/// `.FOUR` integrates the periods and the end time its card names, and the
+/// published document carries those numbers — the window is not a Studio-only
+/// setting that the command line quietly ignores.
+///
+/// A decaying exponential source makes the window observable in one number:
+/// the mean of `exp(-t/tau)` over `[t1 - k/f, t1]` is
+/// `tau (exp(-t0/tau) - exp(-t1/tau)) / (t1 - t0)`, which is 0.0314714 over one
+/// 1 ms period ending at 4 ms and 0.0585099 over two — the same closed form
+/// core's `the_window_ends_where_the_card_says` oracle checks.
+#[test]
+fn the_command_line_integrates_the_periods_a_four_card_names() {
+    const CIRCUIT: &str = "* windowed Fourier\n\
+                           V1 out 0 EXP(1 0 0 1m 1 1m)\n\
+                           R1 out 0 1k\n";
+    const TAU: f64 = 1e-3;
+
+    let mean =
+        |start: f64, stop: f64| TAU * ((-start / TAU).exp() - (-stop / TAU).exp()) / (stop - start);
+    let expected = [mean(3e-3, 4e-3), mean(2e-3, 4e-3)];
+
+    let mut measured = Vec::new();
+    for periods in [1_usize, 2] {
+        let dir = test_dir(&format!("four_window_{periods}"));
+        let (output, requested) = run(
+            &dir,
+            Some(CIRCUIT),
+            &format!(".TRAN 1u 5m 0 1u\n.FOUR 1k 4 V(out) PERIODS={periods} TO=4m\n"),
+            &[],
+            "json",
+        );
+        assert!(
+            output.status.success(),
+            "PERIODS={periods} failed:\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let document = read_json(&artifact_path(&requested, "four-001"));
+        measured.push(
+            document["scalars"]
+                .as_array()
+                .expect("scalar list")
+                .iter()
+                .find(|scalar| scalar["name"].as_str() == Some("dc_component"))
+                .and_then(|scalar| scalar["value"]["value"].as_f64())
+                .unwrap_or_else(|| panic!("no dc_component in {document:#}")),
+        );
+    }
+
+    // Tolerance 1e-3: what the published record carries is the transient's own
+    // output trajectory, whose interpolation between accepted steps is itself
+    // second order and contributes about 3e-5 here. The quadrature is proven
+    // to 1e-8 against the same closed form by core's own oracle; what this
+    // test decides is which interval was integrated, and the two intervals are
+    // 0.027 apart, 27 times the tolerance.
+    for (periods, (dc, want)) in measured.iter().zip(expected).enumerate() {
+        assert!(
+            (dc - want).abs() < 1e-3,
+            "PERIODS={}: the closed-form mean is {want}, the document says {dc}",
+            periods + 1
+        );
+    }
+    let separation = measured[1] - measured[0];
+    let predicted = expected[1] - expected[0];
+    assert!(
+        (separation - predicted).abs() < 1e-3,
+        "two periods must exceed one by {predicted}, the documents differ by {separation}"
+    );
+}
+
 #[test]
 fn zero_output_sensitivity_reports_unavailability_in_console_and_json() {
     for (label, clause, entries) in [("dc", "", "entries"), ("ac", " AC LIN 2 1 2", "acEntries")] {

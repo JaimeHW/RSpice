@@ -76,12 +76,12 @@ pub fn evaluate_transient_fourier_results(
                 fundamental,
                 num_harmonics,
                 ..
-            } => Some((*fundamental, *num_harmonics)),
+            } => Some((analysis, *fundamental, *num_harmonics)),
             _ => None,
         })
         .collect::<Vec<_>>();
     let mut results = Vec::new();
-    for (card_index, (fundamental, harmonic_count)) in cards.into_iter().enumerate() {
+    for (card_index, (card, fundamental, harmonic_count)) in cards.into_iter().enumerate() {
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }
@@ -97,11 +97,19 @@ pub fn evaluate_transient_fourier_results(
                 card_index + 1
             )));
         }
+        // The card is the only statement of what this spectrum is taken over,
+        // window included; reading it in one place is what keeps every surface
+        // integrating the same interval.
+        let config = FourierConfig::try_from(card).map_err(|error| {
+            SimulationError::Netlist(format!(
+                ".FOUR request {} could not be read: {error}",
+                card_index + 1
+            ))
+        })?;
         let columns = evaluate_tran_four_output_requests_with_abort(
             netlist, result, card_index, limits, abort,
         )?;
-        let analysis =
-            FourierAnalysis::new(FourierConfig::new(fundamental).with_harmonics(harmonic_count));
+        let analysis = FourierAnalysis::new(config);
         for (output, physical_type, waveform) in columns {
             let spectrum = analysis
                 .analyze_transient_output_with_abort(

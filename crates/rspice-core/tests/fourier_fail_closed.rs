@@ -385,3 +385,351 @@ fn known_dc_fundamental_and_second_harmonic_oracle_remains_accurate() {
             && component.phase.is_finite()
     }));
 }
+
+//=============================================================================
+// The window the card names
+//=============================================================================
+
+/// A configuration integrating `periods` whole fundamental periods.
+fn windowed(fundamental: f64, harmonics: usize, periods: usize) -> FourierConfig {
+    let mut config = FourierConfig::new(fundamental).with_harmonics(harmonics);
+    config.num_periods = periods;
+    config
+}
+
+/// Oracle 1. A waveform built from a constant, a fundamental sine and a third
+/// harmonic cosine decomposes back into exactly those terms, and the answer
+/// does not depend on how many whole periods of it are integrated.
+///
+/// Tolerance 1e-12 on the magnitudes: the trapezoidal rule applied to a
+/// trigonometric polynomial over a whole number of periods on a uniform grid
+/// of 256 points per period is exact up to rounding for every harmonic below
+/// 128, so what is asserted here is accumulated floating-point error and
+/// nothing else. Phases are asserted to 1e-10 degrees because a coefficient
+/// error of `e` shows up in the angle as `e/|c| * 180/pi`, two orders larger;
+/// a wrong phase reference would be off by 90 degrees or more.
+#[test]
+fn a_sine_with_a_third_harmonic_has_the_coefficients_it_was_built_from() {
+    const FUNDAMENTAL: f64 = 1.0;
+    const PER_PERIOD: usize = 256;
+    const RECORD_PERIODS: usize = 8;
+    const OFFSET: f64 = 0.75;
+    const AMPLITUDE: f64 = 2.0;
+    const PHASE: f64 = 0.3;
+    const THIRD: f64 = 0.5;
+
+    let samples = RECORD_PERIODS * PER_PERIOD;
+    let time = (0..=samples)
+        .map(|index| index as f64 / PER_PERIOD as f64)
+        .collect::<Vec<_>>();
+    let values = time
+        .iter()
+        .map(|&t| {
+            OFFSET
+                + AMPLITUDE * (2.0 * PI * FUNDAMENTAL * t + PHASE).sin()
+                + THIRD * (2.0 * PI * 3.0 * FUNDAMENTAL * t).cos()
+        })
+        .collect::<Vec<_>>();
+
+    // The record ends a whole number of periods after it starts, so every
+    // window below begins on a period boundary and shares one cosine
+    // reference: a sine of phase `PHASE` is a cosine of `PHASE - pi/2`.
+    let expected_fundamental_phase = (PHASE - std::f64::consts::FRAC_PI_2).to_degrees();
+    for periods in [1, 4] {
+        let result = FourierAnalysis::new(windowed(FUNDAMENTAL, 5, periods))
+            .analyze(&time, &values)
+            .unwrap_or_else(|error| panic!("{periods} period(s) must decompose: {error}"));
+        assert!(
+            (result.dc_component - OFFSET).abs() < 1e-12,
+            "{periods}: DC {} != {OFFSET}",
+            result.dc_component
+        );
+        let first = result.harmonic(1).expect("fundamental");
+        assert!(
+            (first.magnitude - AMPLITUDE).abs() < 1e-12,
+            "{periods}: |c1| {} != {AMPLITUDE}",
+            first.magnitude
+        );
+        assert!(
+            (first.phase - expected_fundamental_phase).abs() < 1e-10,
+            "{periods}: arg c1 {} != {expected_fundamental_phase}",
+            first.phase
+        );
+        let third = result.harmonic(3).expect("third harmonic");
+        assert!(
+            (third.magnitude - THIRD).abs() < 1e-12,
+            "{periods}: |c3| {} != {THIRD}",
+            third.magnitude
+        );
+        assert!(
+            third.phase.abs() < 1e-10,
+            "{periods}: arg c3 {}",
+            third.phase
+        );
+        for absent in [2, 4, 5] {
+            let component = result.harmonic(absent).expect("requested harmonic");
+            assert!(
+                component.magnitude < 1e-12,
+                "{periods}: harmonic {absent} is not in the waveform, got {}",
+                component.magnitude
+            );
+        }
+        let thd = result.thd.expect("a non-zero fundamental defines THD");
+        assert!(
+            (thd - 100.0 * THIRD / AMPLITUDE).abs() < 1e-10,
+            "{periods}: THD {thd}"
+        );
+    }
+}
+
+/// Oracle 2. A half-wave rectified sine of amplitude `A` has the series
+/// `A/pi + (A/2) sin(wt) - (2A/pi) sum_m cos(2 m wt)/(4 m^2 - 1)`: every odd
+/// harmonic above the fundamental is absent, and THD follows from those terms.
+///
+/// Tolerance 1e-7: the integrand's derivative jumps by `2 pi A` where the
+/// rectifier turns off, and Euler-Maclaurin leaves that single kink as the
+/// whole error of the composite rule, `(h^2/12) 2 pi A` per coefficient, about
+/// 6e-9 at 16384 samples per period. Every term asserted below differs from
+/// its neighbours by more than 1e-2.
+#[test]
+fn a_half_wave_rectified_sine_has_its_closed_form_series() {
+    const FUNDAMENTAL: f64 = 1.0;
+    const PER_PERIOD: usize = 16_384;
+    const AMPLITUDE: f64 = 1.5;
+    const HARMONICS: usize = 9;
+    const TOLERANCE: f64 = 1e-7;
+
+    let samples = 2 * PER_PERIOD;
+    let time = (0..=samples)
+        .map(|index| index as f64 / PER_PERIOD as f64)
+        .collect::<Vec<_>>();
+    let values = time
+        .iter()
+        .map(|&t| AMPLITUDE * (2.0 * PI * FUNDAMENTAL * t).sin().max(0.0))
+        .collect::<Vec<_>>();
+
+    let result = FourierAnalysis::new(windowed(FUNDAMENTAL, HARMONICS, 1))
+        .analyze(&time, &values)
+        .expect("a rectified sine has a Fourier series");
+
+    let closed_form = |n: usize| -> f64 {
+        match n {
+            0 => AMPLITUDE / PI,
+            1 => AMPLITUDE / 2.0,
+            even if even.is_multiple_of(2) => {
+                let m = (even / 2) as f64;
+                2.0 * AMPLITUDE / (PI * (4.0 * m * m - 1.0))
+            }
+            _ => 0.0,
+        }
+    };
+
+    assert!(
+        (result.dc_component - closed_form(0)).abs() < TOLERANCE,
+        "DC {} != A/pi {}",
+        result.dc_component,
+        closed_form(0)
+    );
+    for n in 1..=HARMONICS {
+        let component = result.harmonic(n).expect("requested harmonic");
+        assert!(
+            (component.magnitude - closed_form(n)).abs() < TOLERANCE,
+            "harmonic {n}: {} != {}",
+            component.magnitude,
+            closed_form(n)
+        );
+    }
+    // The window starts on a zero crossing of the generating sine, so the
+    // fundamental is a pure sine and every even term is a negated cosine.
+    let fundamental_phase = result.harmonic(1).expect("fundamental").phase;
+    assert!(
+        (fundamental_phase + 90.0).abs() < 1e-5,
+        "arg c1 {fundamental_phase}"
+    );
+    for m in 1..=4 {
+        let phase = result.harmonic(2 * m).expect("even harmonic").phase;
+        assert!(
+            (phase.abs() - 180.0).abs() < 1e-5,
+            "arg c{} = {phase}",
+            2 * m
+        );
+    }
+
+    let harmonic_norm = (2..=HARMONICS)
+        .map(|n| closed_form(n) * closed_form(n))
+        .sum::<f64>()
+        .sqrt();
+    let expected_thd = 100.0 * harmonic_norm / closed_form(1);
+    let thd = result.thd.expect("THD is defined");
+    assert!(
+        (thd - expected_thd).abs() < 1e-5,
+        "THD {thd} != {expected_thd}"
+    );
+}
+
+/// Oracle 3. `exp(-t/tau)` has mean
+/// `tau (exp(-t0/tau) - exp(-t1/tau)) / (t1 - t0)` over `[t0, t1]`, so the DC
+/// term alone says which interval was integrated. Three windows over one
+/// record: two ending where the card says, one ending at the record.
+///
+/// Tolerance 1e-8: the composite trapezoid on a smooth exponential errs by
+/// `(h^2/12)(f'(t0) - f'(t1))/(t1 - t0)`, about 1.6e-10 here, while the three
+/// windows are 0.027 apart.
+#[test]
+fn the_window_ends_where_the_card_says() {
+    const TAU: f64 = 1e-3;
+    const FUNDAMENTAL: f64 = 1_000.0;
+    const STEP: f64 = 2.5e-7;
+    const SAMPLES: usize = 20_000;
+
+    let time = (0..=SAMPLES)
+        .map(|index| index as f64 * STEP)
+        .collect::<Vec<_>>();
+    let values = time.iter().map(|&t| (-t / TAU).exp()).collect::<Vec<_>>();
+    let mean =
+        |start: f64, stop: f64| TAU * ((-start / TAU).exp() - (-stop / TAU).exp()) / (stop - start);
+
+    for (stop, periods, start) in [
+        (Some(4e-3), 1, 3e-3),
+        (Some(4e-3), 2, 2e-3),
+        (None, 1, 4e-3),
+    ] {
+        let mut config = windowed(FUNDAMENTAL, 4, periods);
+        config.window_stop = stop;
+        let end = stop.unwrap_or(SAMPLES as f64 * STEP);
+        let result = FourierAnalysis::new(config)
+            .analyze(&time, &values)
+            .unwrap_or_else(|error| panic!("{stop:?}/{periods}: {error}"));
+        let expected = mean(start, end);
+        assert!(
+            (result.dc_component - expected).abs() < 1e-8,
+            "{stop:?}/{periods}: DC {} != {expected}",
+            result.dc_component
+        );
+    }
+}
+
+/// Oracle 4. `x = t` has mean `(t0 + t1)/2` over any interval, and the
+/// trapezoidal rule is exact for it on any partition. With both window edges
+/// falling strictly between samples of a non-uniform grid, that mean is the
+/// witness that neither edge was snapped to a neighbouring sample: snapping
+/// either would move the answer by about a sample spacing, 1e-2 relative,
+/// while the assertion below holds to 1e-12.
+#[test]
+fn both_window_edges_are_interpolated_between_samples() {
+    const FUNDAMENTAL: f64 = 16.0;
+    const PERIODS: usize = 3;
+    const STOP: f64 = 0.5013;
+
+    let mut time = vec![0.0_f64];
+    let mut coarse = false;
+    while *time.last().expect("seeded") < 0.6 {
+        let next = time.last().expect("seeded") + if coarse { 0.005 } else { 0.002 };
+        coarse = !coarse;
+        time.push(next);
+    }
+    let values = time.clone();
+
+    let start = STOP - PERIODS as f64 / FUNDAMENTAL;
+    for edge in [start, STOP] {
+        let above = time.partition_point(|&sample| sample < edge);
+        assert!(
+            above > 0 && above < time.len() && time[above] > edge && time[above - 1] < edge,
+            "{edge} must fall strictly between two samples, not on one"
+        );
+    }
+
+    let mut config = windowed(FUNDAMENTAL, 1, PERIODS);
+    config.window_stop = Some(STOP);
+    let result = FourierAnalysis::new(config)
+        .analyze(&time, &values)
+        .expect("a ramp over an interpolated window has a mean");
+    let expected = 0.5 * (start + STOP);
+    assert!(
+        (result.dc_component - expected).abs() < 1e-12,
+        "DC {} != (t0 + t1)/2 = {expected}",
+        result.dc_component
+    );
+}
+
+/// One period of a 1 kHz sine sampled at 1 us, long enough for four.
+fn four_millisecond_sine() -> (Vec<f64>, Vec<f64>) {
+    let time = (0..=4_000)
+        .map(|index| index as f64 * 1e-6)
+        .collect::<Vec<_>>();
+    let values = time
+        .iter()
+        .map(|&t| (2.0 * PI * 1_000.0 * t).sin())
+        .collect::<Vec<_>>();
+    (time, values)
+}
+
+/// Oracle 5a. A window that reaches back past the authored earliest start is
+/// refused, naming both times, rather than quietly shortened: shortening it
+/// would integrate a fraction of a period and bias every coefficient.
+#[test]
+fn a_window_that_starts_before_from_is_refused_by_name() {
+    let (time, values) = four_millisecond_sine();
+
+    let mut config = windowed(1_000.0, 4, 3);
+    config.window_stop = Some(4e-3);
+    config.earliest_start = Some(2e-3);
+    let error = FourierAnalysis::new(config)
+        .analyze(&time, &values)
+        .expect_err("a window reaching back past FROM must fail closed");
+    let rendered = error.to_string();
+    assert!(
+        matches!(
+            error,
+            FourierError::WindowStartsBeforeEarliestStart { start, earliest }
+                if (start - 1e-3).abs() < 1e-12 && (earliest - 2e-3).abs() < 1e-12
+        ),
+        "{rendered}"
+    );
+    assert!(
+        rendered.contains("before FROM = 0.002 s")
+            && rendered.contains("lower PERIODS or FROM, or raise TO"),
+        "{rendered}"
+    );
+
+    // The same guard with a window that clears it runs.
+    let mut config = windowed(1_000.0, 4, 2);
+    config.window_stop = Some(4e-3);
+    config.earliest_start = Some(2e-3);
+    FourierAnalysis::new(config)
+        .analyze(&time, &values)
+        .expect("a window that starts exactly at FROM is admissible");
+}
+
+/// Oracle 5b. A window end the run never reached is refused, naming the record
+/// it would have had to lie inside, rather than silently becoming the last
+/// accepted time and reporting a different spectrum.
+#[test]
+fn a_window_end_outside_the_record_is_refused_by_name() {
+    let (time, values) = four_millisecond_sine();
+
+    for stop in [5e-3, f64::NAN, 0.0] {
+        let mut config = windowed(1_000.0, 4, 1);
+        config.window_stop = Some(stop);
+        let error = FourierAnalysis::new(config)
+            .analyze(&time, &values)
+            .expect_err("a window end outside the record must fail closed");
+        assert!(
+            matches!(error, FourierError::WindowStopOutsideRecord { .. }),
+            "{stop}: {error}"
+        );
+        assert!(
+            error.to_string().contains("no later than the last at"),
+            "{stop}: {error}"
+        );
+    }
+
+    // An end one rounding step past the record's own last time is that time: a
+    // deck writing `TO=4m` beside `.TRAN ... 4m` asks for the record it got.
+    let last = time[time.len() - 1];
+    let mut config = windowed(1_000.0, 4, 1);
+    config.window_stop = Some(last + last * f64::EPSILON);
+    FourierAnalysis::new(config)
+        .analyze(&time, &values)
+        .expect("TO at the record's own end is the record's end");
+}

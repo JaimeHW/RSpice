@@ -1002,11 +1002,7 @@ impl<'a> RunContext<'a> {
                     ),
                 });
             }
-            AnalysisCommand::Four {
-                fundamental,
-                outputs: _,
-                num_harmonics,
-            } => {
+            AnalysisCommand::Four { .. } => {
                 let ordinal = self.next_fourier_ordinal.get();
                 let next = ordinal
                     .checked_add(1)
@@ -1014,12 +1010,7 @@ impl<'a> RunContext<'a> {
                         message: "authored Fourier ordinal overflowed u32".to_string(),
                     })?;
                 self.next_fourier_ordinal.set(next);
-                fourier_document::run_fourier(
-                    self,
-                    ordinal as usize,
-                    *fundamental,
-                    *num_harmonics,
-                )?;
+                fourier_document::run_fourier(self, ordinal as usize, analysis)?;
             }
             AnalysisCommand::MonteCarlo(mc_cmd) => {
                 advanced::run_monte_carlo_from_command(self, mc_cmd)?

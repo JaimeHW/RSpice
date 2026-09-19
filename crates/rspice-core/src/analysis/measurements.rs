@@ -2598,12 +2598,18 @@ fn map_fourier_measurement_error(error: FourierError) -> MeasurementError {
         | FourierError::InsufficientSampleRate { .. } => {
             MeasurementError::InsufficientData(message)
         }
+        // `.MEAS` states its own fundamental and window, so a measurement
+        // never carries a card or the window keywords one can author; these
+        // three say the request itself was malformed.
         FourierError::Aborted
         | FourierError::HarmonicCapacity { .. }
         | FourierError::WindowCapacity { .. }
         | FourierError::InvalidFundamentalFrequency { .. }
         | FourierError::NoHarmonics
         | FourierError::NoPeriods
+        | FourierError::NotAFourierCard
+        | FourierError::WindowStopOutsideRecord { .. }
+        | FourierError::WindowStartsBeforeEarliestStart { .. }
         | FourierError::InvalidWindowDuration { .. }
         | FourierError::NonFiniteHarmonicFrequency { .. }
         | FourierError::NonFiniteCoefficient { .. }

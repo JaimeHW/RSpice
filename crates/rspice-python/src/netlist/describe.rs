@@ -166,10 +166,25 @@ pub(crate) fn describe_analysis(analysis: &AnalysisCommand) -> String {
             fundamental,
             outputs,
             num_harmonics,
-        } => format!(
-            ".four {fundamental} {} ({num_harmonics} harmonics)",
-            outputs.join(" ")
-        ),
+            periods,
+            window_from,
+            window_to,
+        } => {
+            let mut window = String::new();
+            if *periods != 1 {
+                window.push_str(&format!(", {periods} periods"));
+            }
+            if let Some(from) = window_from {
+                window.push_str(&format!(", from {from}"));
+            }
+            if let Some(to) = window_to {
+                window.push_str(&format!(", to {to}"));
+            }
+            format!(
+                ".four {fundamental} {} ({num_harmonics} harmonics{window})",
+                outputs.join(" ")
+            )
+        }
         AnalysisCommand::Pss(card) => {
             if card.is_autonomous() {
                 format!(

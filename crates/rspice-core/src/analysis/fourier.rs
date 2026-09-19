@@ -5,9 +5,10 @@
 //!
 //! # SPICE Syntax
 //! ```text
-//! .FOUR <freq> [nharms] <output> [output...]
+//! .FOUR <freq> [nharms] <output> [output...] [PERIODS=k] [FROM=t] [TO=t]
 //! .FOUR 1kHz V(out)
 //! .FOUR 60Hz 15 V(load) I(Rsense)
+//! .FOUR 1k 9 V(out) PERIODS=4 FROM=2m TO=6m
 //! ```
 //!
 //! # Output
@@ -16,11 +17,15 @@
 //!
 //! # Algorithm
 //! Uses trapezoidal Fourier integration over the last configured period(s) of
-//! the waveform.
+//! the analysis window. The window ends at the authored `TO` or, when the card
+//! states none, at the last accepted transient time; `FROM` is the earliest
+//! time that window may reach, so a card can refuse rather than integrate over
+//! a start-up transient it was meant to skip.
 
 use super::measure_signals::current_observation::{self, CurrentImpulseContribution};
 use crate::Value;
 use crate::abort_signal::{AbortSignal, NoAbort};
+use crate::netlist::AnalysisCommand;
 use crate::numerics::compensated_add;
 use std::f64::consts::PI;
 
@@ -37,6 +42,21 @@ pub struct FourierConfig {
     pub num_harmonics: usize,
     /// Number of periods to analyze (default 1)
     pub num_periods: usize,
+    /// Time the analysis window ends at, or `None` for the last accepted
+    /// transient time (`.FOUR`'s `TO=`).
+    ///
+    /// The window is the whole `num_periods` fundamental periods that END
+    /// here, so moving this end moves the whole window rather than trimming
+    /// it: a card can read the spectrum of a settled interval in the middle of
+    /// a long record.
+    pub window_stop: Option<Value>,
+    /// Earliest time that window may reach, or `None` when the card states no
+    /// settling guard (`.FOUR`'s `FROM=`).
+    ///
+    /// This is a refusal, not a clamp. Shortening the window to honour it
+    /// would integrate over a fraction of a period and bias every coefficient,
+    /// so a window that reaches back past this time is refused by name.
+    pub earliest_start: Option<Value>,
 }
 
 impl FourierConfig {
@@ -46,6 +66,8 @@ impl FourierConfig {
             fundamental_freq: freq,
             num_harmonics: 9,
             num_periods: 1,
+            window_stop: None,
+            earliest_start: None,
         }
     }
 
@@ -63,6 +85,60 @@ impl FourierConfig {
     /// Get analysis window duration
     pub(crate) fn window_duration(&self) -> Value {
         self.period() * self.num_periods as f64
+    }
+
+    /// Qualify the request itself, before any waveform evidence is read.
+    fn validate(&self) -> Result<(), FourierError> {
+        if !self.fundamental_freq.is_finite() || self.fundamental_freq <= 0.0 {
+            return Err(FourierError::InvalidFundamentalFrequency {
+                frequency: self.fundamental_freq,
+            });
+        }
+        if self.num_harmonics == 0 {
+            return Err(FourierError::NoHarmonics);
+        }
+        if self.num_harmonics.checked_add(1).is_none() {
+            return Err(FourierError::HarmonicCapacity {
+                num_harmonics: self.num_harmonics,
+            });
+        }
+        if self.num_periods == 0 {
+            return Err(FourierError::NoPeriods);
+        }
+        Ok(())
+    }
+}
+
+/// The one reading of a `.FOUR` card.
+///
+/// Every surface that runs an authored Fourier card converts the parsed card
+/// here rather than destructuring it, so the window a deck asks for cannot be
+/// honoured on one route and dropped on another. A card that authors no
+/// keyword yields exactly `FourierConfig::new(f).with_harmonics(n)`.
+impl TryFrom<&AnalysisCommand> for FourierConfig {
+    type Error = FourierError;
+
+    fn try_from(command: &AnalysisCommand) -> Result<Self, Self::Error> {
+        let AnalysisCommand::Four {
+            fundamental,
+            num_harmonics,
+            periods,
+            window_from,
+            window_to,
+            ..
+        } = command
+        else {
+            return Err(FourierError::NotAFourierCard);
+        };
+        let config = Self {
+            fundamental_freq: *fundamental,
+            num_harmonics: *num_harmonics,
+            num_periods: *periods,
+            window_stop: *window_to,
+            earliest_start: *window_from,
+        };
+        config.validate()?;
+        Ok(config)
     }
 }
 
@@ -91,6 +167,27 @@ pub enum FourierError {
     /// The analysis window must contain at least one period.
     #[error("number of analysis periods must be at least one")]
     NoPeriods,
+    /// A Fourier configuration was asked for from a card that is not `.FOUR`.
+    #[error("a Fourier configuration can only be read from a .FOUR card")]
+    NotAFourierCard,
+    /// The authored window end does not lie within the transient record.
+    ///
+    /// Integrating up to a time the run never reached would silently end the
+    /// window at the last accepted point instead, which is a different
+    /// spectrum from the one the card asked for.
+    #[error(
+        "the Fourier window ends at {stop} s; it must lie after the first transient sample at {record_start} s and no later than the last at {record_end} s"
+    )]
+    WindowStopOutsideRecord {
+        stop: Value,
+        record_start: Value,
+        record_end: Value,
+    },
+    /// The whole-period window reaches back past the authored earliest start.
+    #[error(
+        "the Fourier window begins at {start} s, before FROM = {earliest} s; lower PERIODS or FROM, or raise TO"
+    )]
+    WindowStartsBeforeEarliestStart { start: Value, earliest: Value },
     /// The requested harmonic vector cannot be represented or allocated.
     #[error("cannot allocate a Fourier result for {num_harmonics} harmonics")]
     HarmonicCapacity { num_harmonics: usize },
@@ -235,12 +332,10 @@ impl FourierAnalysis {
             return Err(FourierError::Aborted);
         }
         self.validate_configuration()?;
-        let start = self.window_start(&result.time)?;
-        let stop = result
-            .time
-            .last()
-            .copied()
-            .ok_or(FourierError::EmptyWaveform)?;
+        // The impulse interval is the analysis window itself, `(start, stop]`,
+        // so a charge step the card's window excludes is not counted and one
+        // it includes is counted exactly once.
+        let (start, stop) = self.window_bounds(&result.time)?;
         let impulses = current_observation::resolve(netlist, result, spec, (start, stop), abort)?;
         self.analyze_observation(&result.time, values, &impulses, abort)
     }
@@ -258,12 +353,13 @@ impl FourierAnalysis {
         self.validate_configuration()?;
         validate_waveform(time, values, abort)?;
 
-        let t_start = self.window_start(time)?;
+        let (t_start, t_stop) = self.window_bounds(time)?;
 
-        // Retain an exact-period window. When its leading edge lies between
-        // samples, interpolate the boundary instead of silently shortening
-        // the integration interval and biasing every coefficient.
-        let (window_time, window_values) = exact_window(time, values, t_start, abort)?;
+        // Retain an exact-period window. When either edge lies between
+        // samples, interpolate the boundary instead of silently lengthening
+        // or shortening the integration interval and biasing every
+        // coefficient.
+        let (window_time, window_values) = exact_window(time, values, t_start, t_stop, abort)?;
         if window_time.len() < 3 {
             return Err(FourierError::InsufficientWindowSamples {
                 samples: window_time.len(),
@@ -366,7 +462,15 @@ impl FourierAnalysis {
         })
     }
 
-    fn window_start(&self, time: &[Value]) -> Result<Value, FourierError> {
+    /// The `[t0, t1]` interval this configuration asks to integrate over.
+    ///
+    /// `t1` is the authored window end or, when the card states none, the last
+    /// accepted time; `t0` is `t1` less the configured whole number of
+    /// fundamental periods. Both ends are qualified against the record and
+    /// against an authored earliest start before a single sample is read, so a
+    /// window the deck cannot have meant is refused by name rather than
+    /// quietly replaced by a shorter one.
+    fn window_bounds(&self, time: &[Value]) -> Result<(Value, Value), FourierError> {
         // Find analysis window (last periods of waveform)
         let window_duration = self.config.window_duration();
         if !window_duration.is_finite() || window_duration <= 0.0 {
@@ -375,7 +479,26 @@ impl FourierAnalysis {
             });
         }
         let first = time.first().copied().ok_or(FourierError::EmptyWaveform)?;
-        let t_end = time.last().copied().ok_or(FourierError::EmptyWaveform)?;
+        let record_end = time.last().copied().ok_or(FourierError::EmptyWaveform)?;
+        let t_end = match self.config.window_stop {
+            None => record_end,
+            Some(stop) => {
+                // An authored end one rounding step past the record's own last
+                // time is that time: a deck writing `TO=5m` beside `.TRAN … 5m`
+                // asks for the record it produced, not for a refusal.
+                let tolerance = 64.0
+                    * Value::EPSILON
+                    * stop.abs().max(record_end.abs()).max(Value::MIN_POSITIVE);
+                if !stop.is_finite() || stop <= first || stop > record_end + tolerance {
+                    return Err(FourierError::WindowStopOutsideRecord {
+                        stop,
+                        record_start: first,
+                        record_end,
+                    });
+                }
+                stop.min(record_end)
+            }
+        };
         let available_duration = t_end - first;
         if !available_duration.is_finite() || available_duration <= 0.0 {
             return Err(FourierError::InvalidTimeSpan {
@@ -394,32 +517,26 @@ impl FourierAnalysis {
                 required: window_duration,
             });
         }
-        Ok(if available_duration <= window_duration {
+        let t_start = if available_duration <= window_duration {
             first
         } else {
             t_end - window_duration
-        })
+        };
+        if let Some(earliest) = self.config.earliest_start {
+            let tolerance =
+                64.0 * Value::EPSILON * t_start.abs().max(earliest.abs()).max(Value::MIN_POSITIVE);
+            if !earliest.is_finite() || t_start + tolerance < earliest {
+                return Err(FourierError::WindowStartsBeforeEarliestStart {
+                    start: t_start,
+                    earliest,
+                });
+            }
+        }
+        Ok((t_start, t_end))
     }
 
     fn validate_configuration(&self) -> Result<(), FourierError> {
-        let fundamental = self.config.fundamental_freq;
-        if !fundamental.is_finite() || fundamental <= 0.0 {
-            return Err(FourierError::InvalidFundamentalFrequency {
-                frequency: fundamental,
-            });
-        }
-        if self.config.num_harmonics == 0 {
-            return Err(FourierError::NoHarmonics);
-        }
-        if self.config.num_harmonics.checked_add(1).is_none() {
-            return Err(FourierError::HarmonicCapacity {
-                num_harmonics: self.config.num_harmonics,
-            });
-        }
-        if self.config.num_periods == 0 {
-            return Err(FourierError::NoPeriods);
-        }
-        Ok(())
+        self.config.validate()
     }
 }
 
@@ -682,22 +799,32 @@ fn ensure_finite_coefficient(
     }
 }
 
-/// Select the trailing analysis window and interpolate its leading boundary
-/// when it falls between authored transient samples.
+/// Select the analysis window `[t_start, t_stop]` and interpolate whichever of
+/// its boundaries falls between authored transient samples.
+///
+/// Snapping a boundary to the nearest sample instead would change the
+/// integration interval by up to one time step, which scales every coefficient
+/// by the wrong window length; the interpolated edge keeps the window exactly
+/// the whole number of periods the card asked for.
 fn exact_window(
     time: &[Value],
     values: &[Value],
     t_start: Value,
+    t_stop: Value,
     abort: &dyn AbortSignal,
 ) -> Result<(Vec<Value>, Vec<Value>), FourierError> {
     if abort.is_aborted() {
         return Err(FourierError::Aborted);
     }
     let first_retained = time.partition_point(|&sample| sample < t_start);
-    let interpolate_boundary = first_retained < time.len() && time[first_retained] != t_start;
-    let retained_samples = time.len().saturating_sub(first_retained);
+    let past_last_retained = time.partition_point(|&sample| sample <= t_stop);
+    let interpolate_start = first_retained < time.len() && time[first_retained] != t_start;
+    let interpolate_stop = past_last_retained < time.len()
+        && past_last_retained > 0
+        && time[past_last_retained - 1] != t_stop;
+    let retained_samples = past_last_retained.saturating_sub(first_retained);
     let window_samples = retained_samples
-        .checked_add(usize::from(interpolate_boundary))
+        .checked_add(usize::from(interpolate_start) + usize::from(interpolate_stop))
         .ok_or(FourierError::WindowCapacity {
             samples: retained_samples,
         })?;
@@ -714,23 +841,25 @@ fn exact_window(
             samples: window_samples,
         })?;
 
-    if interpolate_boundary {
+    if interpolate_start {
         let lower =
             first_retained
                 .checked_sub(1)
                 .ok_or(FourierError::InsufficientWindowSamples {
                     samples: retained_samples,
                 })?;
-        let fraction = (t_start - time[lower]) / (time[first_retained] - time[lower]);
-        let interpolated =
-            (1.0 - fraction).mul_add(values[lower], fraction * values[first_retained]);
-        ensure_finite_coefficient(interpolated, 0, "interpolated window boundary")?;
+        window_values.push(interpolated_boundary(
+            time,
+            values,
+            lower,
+            first_retained,
+            t_start,
+        )?);
         window_time.push(t_start);
-        window_values.push(interpolated);
     }
-    for (index, (&sample_time, &sample_value)) in time[first_retained..]
+    for (index, (&sample_time, &sample_value)) in time[first_retained..past_last_retained]
         .iter()
-        .zip(&values[first_retained..])
+        .zip(&values[first_retained..past_last_retained])
         .enumerate()
     {
         if index.is_multiple_of(256) && abort.is_aborted() {
@@ -739,8 +868,33 @@ fn exact_window(
         window_time.push(sample_time);
         window_values.push(sample_value);
     }
+    if interpolate_stop {
+        window_values.push(interpolated_boundary(
+            time,
+            values,
+            past_last_retained - 1,
+            past_last_retained,
+            t_stop,
+        )?);
+        window_time.push(t_stop);
+    }
 
     Ok((window_time, window_values))
+}
+
+/// Linear value at `boundary`, which lies strictly between `time[lower]` and
+/// `time[upper]`.
+fn interpolated_boundary(
+    time: &[Value],
+    values: &[Value],
+    lower: usize,
+    upper: usize,
+    boundary: Value,
+) -> Result<Value, FourierError> {
+    let fraction = (boundary - time[lower]) / (time[upper] - time[lower]);
+    let interpolated = (1.0 - fraction).mul_add(values[lower], fraction * values[upper]);
+    ensure_finite_coefficient(interpolated, 0, "interpolated window boundary")?;
+    Ok(interpolated)
 }
 
 //=============================================================================
