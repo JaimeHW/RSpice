@@ -600,6 +600,7 @@ fn run_pss(
     }
 
     Ok(SimulationResult::Transient {
+        spectra: Vec::new(),
         time,
         waveforms,
         measurements: Vec::new(),
@@ -832,6 +833,7 @@ fn run_envelope(
     }
 
     Ok(SimulationResult::Transient {
+        spectra: Vec::new(),
         time: data.time,
         waveforms,
         measurements: Vec::new(),
@@ -1463,6 +1465,7 @@ mod tests {
             .unwrap(),
         );
         let transient = SimulationResult::Transient {
+            spectra: Vec::new(),
             time: time.clone(),
             waveforms: HashMap::from([(
                 "out".to_owned(),
@@ -1480,6 +1483,7 @@ mod tests {
             ContentDigest::from_bytes([2; 32]),
             &transient,
             &["out".to_owned()],
+            false,
         )
         .unwrap()
         .unwrap();

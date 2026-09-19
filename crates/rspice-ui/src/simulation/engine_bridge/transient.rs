@@ -256,6 +256,9 @@ fn convert_transient_result(
         abort,
     )?;
     let events = collect_event_history(&tran_result, start_time, abort)?;
+    // The engine already evaluated every `.fft` card this deck carried, inside
+    // this solve. Carrying the spectra out is all that is left to do with them.
+    let spectra = super::recorded_fft::recorded_spectra(netlist, &tran_result.fft_results, abort)?;
     Ok(SimulationResult::Transient {
         time: filtered_time,
         waveforms,
@@ -264,6 +267,7 @@ fn convert_transient_result(
         // The engine is not in scope here; `run_transient` fills this in.
         convergence: Default::default(),
         events,
+        spectra,
     })
 }
 

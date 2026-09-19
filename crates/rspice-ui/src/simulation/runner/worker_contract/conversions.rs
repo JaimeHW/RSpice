@@ -1713,6 +1713,7 @@ pub(super) fn simulation_result_from_worker_pss(
         );
     }
     SimulationResult::Transient {
+        spectra: Vec::new(),
         time,
         waveforms,
         measurements: measure_results(measurements),

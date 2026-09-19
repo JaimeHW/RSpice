@@ -196,6 +196,10 @@ pub use simulation::{
     DcCurveSelection, DcSweepDirection, DcSweepEvidence, DcSweepFamily, DcSweepQuantity,
 };
 pub use simulation::{DcMismatchContributorEvidence, DcMismatchEvidence, DcMismatchScopeEvidence};
+pub use simulation::{
+    FftSpectrumEvidence, FftSpectrumFormatEvidence, FftSpectrumModeEvidence,
+    FftSpectrumStatusEvidence,
+};
 pub use simulation::{SavedOutputAxis, SavedOutputBoundSource, SavedOutputSourceBindings};
 pub(crate) use workspace::saved_output_references;
 // Only the two types the persisted model itself names are hoisted here. The
