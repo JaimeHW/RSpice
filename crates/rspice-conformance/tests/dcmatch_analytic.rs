@@ -124,6 +124,109 @@ fn dcmatch_reproduces_the_analytic_resistor_divider_variance() {
     assert_eq!(largest.parameter, "R1V");
 }
 
+const CORRELATED_DIVIDER_LIBRARY: &str = "\
+// The same divider, with both resistances moving on one process draw that
+// the library declares 80% correlated.
+parameters r1v=1000 r2v=2000
+statistics {
+ process {
+  vary r1v dist=gauss std=10
+  vary r2v dist=gauss std=10
+ }
+ correlate param=[r1v r2v] cc=0.8
+}
+";
+
+const CORRELATED_DIVIDER_DECK: &str = "\
+Resistor divider DC mismatch with a declared process correlation
+.include \"statistics.scs\"
+V1 in 0 1
+R1 in out {r1v}
+R2 out 0 {r2v}
+.DCMATCH OUT=V(out) MISMATCH=NO PROCESS=YES CONTRIBUTORS=0
+.end
+";
+
+/// The variance a declared correlation produces, against the algebra.
+///
+/// `V(out) = Vs*R2/(R1+R2)` falls when `R1` rises and rises when `R2` rises,
+/// so the two one-sigma contributions carry opposite signs and a positive
+/// coefficient *removes* variance: the correlated spread is 40% below the
+/// independent one, and a `.DCMATCH` that ignored the `correlate` statement
+/// would report the larger number with no word said.
+///
+/// The oracle is the exact central difference at step sigma —
+/// `-Vs*R2*sigma/((R1+R2)^2 - sigma^2)` — which is what the engine forms, not
+/// the continuum derivative; the two differ by one part in 1e5 at this spread.
+#[test]
+fn dcmatch_applies_a_declared_process_correlation_to_the_divider_variance() {
+    let directory = tempfile::tempdir().expect("scratch directory");
+    let netlist = deck_with_spectre_library(
+        directory.path(),
+        CORRELATED_DIVIDER_LIBRARY,
+        CORRELATED_DIVIDER_DECK,
+    );
+    assert_eq!(
+        netlist.spectre_statistics.correlations.len(),
+        1,
+        "the `correlate` statement reaches the executable plan"
+    );
+
+    let result = Engine::new(SimulationConfig::default())
+        .run_dc_match(&netlist, &dcmatch_card(&netlist))
+        .expect("the correlated divider's variance solves");
+
+    let (source, r1, r2, sigma, coefficient) = (1.0_f64, 1.0e3_f64, 2.0e3_f64, 10.0_f64, 0.8_f64);
+    let span = (r1 + r2) * (r1 + r2) - sigma * sigma;
+    let from_r1 = -source * r2 * sigma / span;
+    let from_r2 = source * r1 * sigma / span;
+    let expected =
+        (from_r1 * from_r1 + from_r2 * from_r2 + 2.0 * coefficient * from_r1 * from_r2).sqrt();
+
+    let error = (result.sigma_total - expected).abs() / expected;
+    assert!(
+        error < 1.0e-6,
+        "sigma(V(out)) is {} against the analytic c^T R c = {expected} \
+         (relative error {error})",
+        result.sigma_total
+    );
+    assert_eq!(result.applied_correlations_process, 1);
+    assert_eq!(result.applied_correlations_mismatch, 0);
+    assert_eq!(
+        result.sigma_mismatch, 0.0,
+        "the library declares no mismatch spread"
+    );
+    assert!(
+        result
+            .contributors
+            .iter()
+            .all(|entry| entry.scope == DcMatchScope::Process)
+    );
+
+    // Dropping the statement would have reported the independent sum, which is
+    // 67% larger — the defect this oracle exists to catch.
+    let independent = (from_r1 * from_r1 + from_r2 * from_r2).sqrt();
+    assert!(
+        independent / result.sigma_total > 1.6,
+        "an independent sum would have been {independent} against {}",
+        result.sigma_total
+    );
+
+    // The Euler allocations still account for the whole variance, and the
+    // cancelling contributor keeps its sign.
+    let shares: f64 = result.contributors.iter().map(|entry| entry.share).sum();
+    assert!((shares - 1.0).abs() < 1.0e-9, "shares sum to {shares}");
+    assert!(
+        result.contributors.iter().any(|entry| entry.share < 0.0),
+        "the smaller contribution is cancelled by its partner: {:?}",
+        result
+            .contributors
+            .iter()
+            .map(|entry| entry.share)
+            .collect::<Vec<_>>()
+    );
+}
+
 const PAIR_LIBRARY: &str = "\
 // Pelgrom threshold mismatch: A_VT over the square root of the drawn area,
 // with the area in the micron-valued units the coefficient is quoted in.
