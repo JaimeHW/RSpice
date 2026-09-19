@@ -544,11 +544,31 @@ fn every_draft_field_moves_the_engine_facing_projection() {
 
         // Three starting points, so a field gated behind a checkbox is judged
         // in the state where it can actually matter.
-        let bodies = vec![
+        let mut bodies = vec![
             body.clone(),
             with_all_booleans(&body, true),
             with_all_booleans(&body, false),
         ];
+        // A secondary logarithmic density needs three choices together:
+        // nesting on, a logarithmic mode, and a positive start. The generic
+        // one-sibling search cannot open that conjunction. Exercise valid
+        // axis modes explicitly; every field must still move its projection.
+        if kind == AnalysisKind::DcSweep {
+            for mode in [1, 2, 3] {
+                let mut configured = body.clone();
+                for (name, value) in [
+                    ("nested", Value::Bool(true)),
+                    ("hysteresis", Value::Bool(false)),
+                    ("mode", Value::from(mode)),
+                    ("mode2", Value::from(mode)),
+                    ("start", Value::String("1".into())),
+                    ("start2", Value::String("1".into())),
+                ] {
+                    configured.insert(name.into(), value);
+                }
+                bodies.push(configured);
+            }
+        }
 
         let mut paths = Vec::new();
         leaf_paths(&body, "", &mut paths);
