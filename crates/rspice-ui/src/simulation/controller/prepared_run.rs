@@ -14,12 +14,13 @@ use rspice_core::netlist::{parse_include_directive, parse_lib_directive};
 
 use super::*;
 use crate::simulation::execution::{
-    AuthorizedRunDispatch, CrossProbeSnapshot, ExecutionPermit, ExecutionTargetCapabilities,
-    ModelSourceIdentity, PreparationError, PreparationStage, PreparedDependencyBinding,
-    PreparedRunMetadata, PreparedRunSnapshot, PreparedTask, RunSourceReceipt, SavePolicy,
-    SnapshotParts, TouchstoneExportPolicy, analysis_kind_tag, content_digest, drc_receipt_digest,
-    generated_executable_source_digest, manual_deck_analysis_instance_id,
-    manual_executable_source_digest, manual_source_receipt_digest,
+    AuthorizedRunDispatch, CrossProbeSnapshot, ExecutionArtifactKind, ExecutionPermit,
+    ExecutionTargetCapabilities, ModelSourceIdentity, PreparationError, PreparationStage,
+    PreparedDependencyBinding, PreparedRunMetadata, PreparedRunSnapshot, PreparedTask,
+    RunSourceReceipt, SavePolicy, SnapshotParts, TouchstoneExportPolicy, analysis_kind_tag,
+    content_digest, drc_receipt_digest, generated_executable_source_digest,
+    manual_deck_analysis_instance_id, manual_executable_source_digest,
+    manual_source_receipt_digest,
 };
 
 mod dependency_expansion;
@@ -1610,6 +1611,22 @@ impl SimulationController {
                 )
             })
             .collect::<Vec<_>>();
+        let harmonic_balance_producers = prepared
+            .iter()
+            .filter(|task| {
+                matches!(
+                    &task.queued_analysis().spec,
+                    AnalysisSpec::HarmonicBalance { .. }
+                )
+            })
+            .map(|task| {
+                (
+                    task.instance_id(),
+                    task.source_revision(),
+                    task.config_digest(),
+                )
+            })
+            .collect::<Vec<_>>();
         let operating_point_producers = prepared
             .iter()
             .filter(|task| {
@@ -1637,45 +1654,69 @@ impl SimulationController {
                 crate::product::ObjectRevision,
                 crate::product::ContentDigest,
             ) -> PreparedDependencyBinding;
-            let (producers, artifact_label, binding): (
-                &[ProducerIdentity],
-                &str,
-                BindingConstructor,
-            ) = match &task.queued_analysis().spec {
-                AnalysisSpec::Fourier { .. } => (
-                    &transient_producers,
-                    "Transient trajectory",
-                    PreparedDependencyBinding::transient_trajectory,
-                ),
-                AnalysisSpec::Pss {
-                    method: PssMethod::Shooting,
-                    ..
-                } => (
-                    &operating_point_producers,
-                    "operating-point seed",
-                    PreparedDependencyBinding::dc_operating_point_seed,
-                ),
-                AnalysisSpec::PssSpectrum { .. }
-                | AnalysisSpec::Pac
-                | AnalysisSpec::Pnoise
-                | AnalysisSpec::Pxf
-                | AnalysisSpec::Pstb
-                | AnalysisSpec::Psp { .. } => (
-                    &periodic_producers,
-                    "shooting-PSS state",
-                    PreparedDependencyBinding::periodic_state,
-                ),
-                _ => continue,
-            };
-            let [(producer_id, producer_revision, producer_config_digest)] = producers else {
+            // The artifact kinds this request admits, in the order it prefers
+            // them, and the producer list each one names. A periodic
+            // small-signal request whose carrier is the preceding periodic
+            // solve admits either family, so the deck decides: a deck holding
+            // only an `.HB` binds the harmonic-balance state, and one holding
+            // a `.PSS` binds the shooting state.
+            let required_kinds = crate::simulation::execution::required_artifact_kinds(
+                &task.queued_analysis().spec,
+                &task.queued_analysis().spec_options,
+            );
+            if required_kinds.is_empty() {
+                continue;
+            }
+            let candidates = required_kinds
+                .iter()
+                .map(|kind| {
+                    let (producers, binding): (&[ProducerIdentity], BindingConstructor) = match kind
+                    {
+                        ExecutionArtifactKind::TransientTrajectory => (
+                            &transient_producers,
+                            PreparedDependencyBinding::transient_trajectory,
+                        ),
+                        ExecutionArtifactKind::PeriodicState => (
+                            &periodic_producers,
+                            PreparedDependencyBinding::periodic_state,
+                        ),
+                        ExecutionArtifactKind::HbState => (
+                            &harmonic_balance_producers,
+                            PreparedDependencyBinding::hb_state,
+                        ),
+                        ExecutionArtifactKind::DcOperatingPointSeed => (
+                            &operating_point_producers,
+                            PreparedDependencyBinding::dc_operating_point_seed,
+                        ),
+                    };
+                    (*kind, producers, binding)
+                })
+                .collect::<Vec<_>>();
+            let Some((_, producers, binding)) = candidates
+                .iter()
+                .copied()
+                .find(|(_, producers, _)| producers.len() == 1)
+            else {
                 return Err(PreparationError::new(
                     PreparationStage::AnalysisPlan,
                     format!(
-                        "Manual-deck {} requires exactly one prepared {artifact_label} producer; found {}",
+                        "Manual-deck {} requires exactly one prepared {} producer; found {}",
                         task.queued_analysis().spec.run_type().display_name(),
-                        producers.len()
+                        required_kinds
+                            .iter()
+                            .map(|kind| kind.producer_label())
+                            .collect::<Vec<_>>()
+                            .join(" or "),
+                        candidates
+                            .iter()
+                            .map(|(_, producers, _)| producers.len())
+                            .max()
+                            .unwrap_or_default()
                     ),
                 ));
+            };
+            let [(producer_id, producer_revision, producer_config_digest)] = producers else {
+                unreachable!("the selected producer list holds exactly one identity");
             };
             task.set_dependencies(vec![*producer_id]);
             task.set_dependency_bindings(vec![binding(
