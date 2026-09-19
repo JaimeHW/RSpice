@@ -69,6 +69,17 @@ fn run(seed: u64, source: &str) -> serde_json::Value {
 fn complete_seed_range_survives_the_worker_and_structured_clone() {
     for seed in [0, (1_u64 << 53) + 1, u64::MAX] {
         let first = run(seed, "parameter_tolerance");
+        let members = first["member_measurements"].as_array().unwrap();
+        assert_eq!(members.len(), 4);
+        for (index, member) in members.iter().enumerate() {
+            assert_eq!(member["member"]["member"], "monte_carlo_sequence_trial");
+            assert_eq!(member["member"]["index"].as_u64(), Some(index as u64));
+            assert_eq!(member["member"]["seed"].as_u64(), Some(seed));
+            assert_eq!(
+                member["member"]["policy"],
+                "parameter-xoroshiro128plus-2018-v1"
+            );
+        }
         assert_eq!(first, run(seed, "parameter_tolerance"));
     }
 }
@@ -117,7 +128,7 @@ fn transient_quality_survives_the_worker_and_structured_clone_before_output_crop
         js_sys::Reflect::get(&response, &"protocolVersion".into())
             .unwrap()
             .as_f64(),
-        Some(20.0)
+        Some(25.0)
     );
     let buffers = js_sys::Reflect::get(&response, &"buffers".into())
         .unwrap()
@@ -168,7 +179,7 @@ fn nested_dc_curves_and_exact_traversal_survive_the_worker_and_structured_clone(
         js_sys::Reflect::get(&response, &"protocolVersion".into())
             .unwrap()
             .as_f64(),
-        Some(20.0)
+        Some(25.0)
     );
     let buffers = js_sys::Reflect::get(&response, &"buffers".into())
         .unwrap()

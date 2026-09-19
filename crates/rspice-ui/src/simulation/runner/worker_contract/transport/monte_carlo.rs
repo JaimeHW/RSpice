@@ -19,9 +19,19 @@ pub(super) fn validate(result: &WorkerSimulationResult) -> Result<(), String> {
                 .saturating_add(2)
         });
         let values = variables.iter().fold(evidence_values, |count, variable| {
-            count.saturating_add(
-                variable.estimated_numeric_payload_bytes() / std::mem::size_of::<f64>(),
-            )
+            // Count numeric values rather than platform-sized storage bytes:
+            // histogram counts occupy the same transport budget on wasm32 and
+            // native hosts. Test-only in-memory estimates are not a wire bound.
+            count
+                .saturating_add(4)
+                .saturating_add(variable.samples.len())
+                .saturating_add(variable.histogram.len())
+                .saturating_add(variable.bin_edges.len())
+                .saturating_add(if variable.mean_confidence.is_some() {
+                    6
+                } else {
+                    0
+                })
         });
         if values > MAX_WORKER_F64_VALUES {
             return Err("Monte Carlo population exceeds the worker numeric payload limit".into());
