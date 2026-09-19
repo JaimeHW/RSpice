@@ -182,7 +182,7 @@ pub(crate) fn run_monte_carlo_analysis_with_environment_and_source_path_and_abor
     let data = MonteCarloData {
         seed,
         runs_requested: mc_cmd.runs,
-        runs_completed: result.num_runs,
+        runs_completed: result.num_runs - result.num_failures,
         num_failures: result.num_failures,
         all_converged: result.all_converged,
         variables,
@@ -376,7 +376,7 @@ pub(crate) fn run_statistical_monte_carlo_with_environment_and_source_path_and_a
     let data = MonteCarloData {
         seed: base_seed,
         runs_requested: runs,
-        runs_completed: result.num_runs,
+        runs_completed: result.num_runs - result.num_failures,
         num_failures: result.num_failures,
         all_converged: result.all_converged,
         variables,
@@ -895,6 +895,24 @@ R2 out 0 1k
             drain.windows(2).any(|pair| pair[0] != pair[1]),
             "every trial reported the same drain voltage, so the per-trial \
              evidence is a copy of one trial rather than each trial's own"
+        );
+    }
+
+    #[test]
+    fn partial_monte_carlo_failures_retain_the_successful_population() {
+        // x = x^2 + offset has real operating points only for offset <= 1/4.
+        // The uniform samples straddle that boundary, so this checks a real
+        // mixture of successful solves and convergence failures.
+        let deck = "MC partial failures\n.param offset=0.2\nB1 out 0 V=V(out)^2+{offset}\nR1 out 0 1k\n.mc 16 uniform 1 seed 7 params offset\n.end\n";
+        let data = run_monte_carlo_analysis(deck).unwrap();
+        assert!(data.num_failures > 0);
+        assert!(data.runs_completed > 0);
+        assert_eq!(data.runs_completed + data.num_failures, 16);
+        assert!(!data.all_converged);
+        assert!(
+            data.variables
+                .iter()
+                .all(|variable| variable.samples.len() == data.runs_completed)
         );
     }
 
