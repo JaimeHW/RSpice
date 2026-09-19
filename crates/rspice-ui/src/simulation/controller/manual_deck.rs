@@ -15,6 +15,7 @@ use crate::services::simulation_runner::{
 };
 
 mod periodic;
+mod recorded_fft;
 
 /// Apply the reviewed source contract before model binding or include parsing.
 pub(super) fn adapt_owned_execution_profile<'a>(
@@ -221,6 +222,13 @@ pub(super) fn build_manual_deck_queue(
         }
     }
     queue.extend(periodic_tasks);
+    // The deck already carries these cards and the engine already evaluates
+    // them inside the transient; what was missing was the task that publishes
+    // the spectrum, so that is all this adds.
+    match recorded_fft::manual_fft_tasks(&parsed) {
+        Ok(tasks) => queue.extend(tasks),
+        Err(mut card_errors) => errors.append(&mut card_errors),
+    }
 
     if errors.is_empty() && queue.is_empty() {
         Err(vec![
@@ -666,6 +674,36 @@ fn pz_analysis_name(analysis_type: PoleZeroAnalysisType) -> String {
         PoleZeroAnalysisType::ZerosOnly => "ZER",
     }
     .to_string()
+}
+
+/// The band a hand-written `.SENS ... AC` card states, or `None` when the
+/// card is the degenerate single frequency the form writes.
+///
+/// `DEC 1 f f` is what the Studio has always written for one frequency, and
+/// the engine's grid function turns it back into exactly that one point. Any
+/// other spelling — more points, or a stop above the start — is a band the
+/// reader authored, and it reaches the run whole.
+fn sensitivity_sweep_from_card(
+    sweep: &rspice_core::netlist::SensitivityAcSweep,
+) -> Option<crate::simulation::config::SensitivitySweep> {
+    use crate::simulation::config::{AcSweepType, SensitivitySweep};
+    use rspice_core::netlist::FreqVariation;
+
+    if sweep.variation == FreqVariation::Dec
+        && sweep.points == 1
+        && sweep.start_freq == sweep.stop_freq
+    {
+        return None;
+    }
+    Some(SensitivitySweep {
+        stop_frequency: sweep.stop_freq,
+        points: u32::try_from(sweep.points).unwrap_or(u32::MAX),
+        variation: match sweep.variation {
+            FreqVariation::Dec => AcSweepType::Decade,
+            FreqVariation::Oct => AcSweepType::Octave,
+            FreqVariation::Lin => AcSweepType::Linear,
+        },
+    })
 }
 
 fn pz_config_type(analysis_type: PoleZeroAnalysisType) -> PzAnalysisType {
@@ -1156,8 +1194,8 @@ fn command_to_queue_item(
             output_node,
             reference_node,
             output_is_current,
+            filters,
             ac_sweep,
-            ..
         } => {
             let output_var = if *output_is_current {
                 format!("I({output_node})")
@@ -1168,10 +1206,20 @@ fn command_to_queue_item(
                 }
             };
             let frequency = ac_sweep.as_ref().map(|sweep| sweep.start_freq);
+            // The card's own filter list reaches the run. A bare `.sens
+            // V(out)` therefore means here exactly what it means to the
+            // engine: every device and model parameter, no design parameter.
+            let filter = filters.join(" ");
+            // A card is "one frequency" only when it is exactly what the form
+            // writes for one — `DEC 1 f f`. Anything else is a band, and it
+            // is kept whole rather than collapsed to its lower edge.
+            let sweep = ac_sweep.as_ref().and_then(sensitivity_sweep_from_card);
             let spec = AnalysisSpec::Sensitivity {
                 output_var: output_var.clone(),
                 ac_mode: ac_sweep.is_some(),
                 frequency,
+                filter: filter.clone(),
+                sweep: sweep.map(crate::simulation::config::SensitivitySweep::to_spec),
             };
             Ok(QueuedAnalysis {
                 numeric_override: None,
@@ -1179,6 +1227,8 @@ fn command_to_queue_item(
                     output_var,
                     ac_mode: ac_sweep.is_some(),
                     frequency,
+                    filter,
+                    sweep,
                 })),
                 analysis_line: ".sens".to_string(),
                 spec,
@@ -2305,6 +2355,106 @@ Rload out 0 {rload}\n\
             err.iter()
                 .any(|e| e.contains("No analysis command in netlist"))
         );
+    }
+
+    /// A hand-written `.SENS` card reaches the run with its own filter and
+    /// its own band.
+    ///
+    /// Before this, the reader dropped the filter list and kept only the
+    /// band's lower edge: a deck that asked for four variables across sixty
+    /// frequencies ran every variable at one. That is the defect being fixed,
+    /// and a bare card now means what the engine means by it.
+    #[test]
+    fn a_hand_written_sens_card_keeps_its_filter_and_its_sweep() {
+        use crate::simulation::config::AcSweepType;
+
+        let deck = |card: &str| {
+            format!("sens deck\nV1 in 0 AC 1\nR1 in out 1k\nC1 out 0 1n\n{card}\n.end\n")
+        };
+        let spec_for = |card: &str| {
+            specs_for(&deck(card))
+                .into_iter()
+                .next()
+                .expect("one .sens card is one analysis")
+        };
+
+        // A bare card: the engine's own default set, and no band.
+        let AnalysisSpec::Sensitivity {
+            filter,
+            sweep,
+            ac_mode,
+            frequency,
+            ..
+        } = spec_for(".sens V(out)")
+        else {
+            panic!("a .sens card is a sensitivity analysis");
+        };
+        assert_eq!(filter, "");
+        assert_eq!(sweep, None);
+        assert!(!ac_mode);
+        assert_eq!(frequency, None);
+
+        let AnalysisSpec::Sensitivity { filter, sweep, .. } =
+            spec_for(".sens V(out) R1 PARAM:* AC DEC 1 1k 1k")
+        else {
+            panic!("a .sens card is a sensitivity analysis");
+        };
+        assert_eq!(filter, "R1 PARAM:*");
+        assert_eq!(sweep, None, "DEC 1 f f is the one-frequency card");
+
+        let AnalysisSpec::Sensitivity {
+            filter,
+            sweep,
+            frequency,
+            ..
+        } = spec_for(".sens V(out) C* AC OCT 5 10 1Meg")
+        else {
+            panic!("a .sens card is a sensitivity analysis");
+        };
+        assert_eq!(filter, "C*");
+        assert_eq!(frequency, Some(10.0));
+        let sweep = sweep.expect("an authored band reaches the spec");
+        assert_eq!(sweep.stop_frequency, 1.0e6);
+        assert_eq!(sweep.points, 5);
+        assert_eq!(
+            crate::simulation::config::SensitivitySweep::from_spec(sweep).variation,
+            AcSweepType::Octave
+        );
+    }
+
+    /// The single-frequency card and the band are told apart by exactly what
+    /// the form writes for one, not by a count alone.
+    #[test]
+    fn a_bare_hand_written_sens_card_means_what_the_engine_means() {
+        use rspice_core::netlist::{FreqVariation, SensitivityAcSweep};
+
+        assert_eq!(
+            sensitivity_sweep_from_card(&SensitivityAcSweep {
+                variation: FreqVariation::Dec,
+                points: 1,
+                start_freq: 1.0e3,
+                stop_freq: 1.0e3,
+            }),
+            None
+        );
+        // One point over a real band is a band, and so is one decade point
+        // spelled linearly.
+        for sweep in [
+            SensitivityAcSweep {
+                variation: FreqVariation::Dec,
+                points: 1,
+                start_freq: 1.0e3,
+                stop_freq: 1.0e6,
+            },
+            SensitivityAcSweep {
+                variation: FreqVariation::Lin,
+                points: 1,
+                start_freq: 1.0e3,
+                stop_freq: 1.0e3,
+            },
+        ] {
+            assert!(sensitivity_sweep_from_card(&sweep).is_some(), "{sweep:?}");
+        }
     }
 
     mod dc_mismatch;

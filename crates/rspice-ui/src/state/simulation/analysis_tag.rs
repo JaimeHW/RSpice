@@ -98,6 +98,8 @@ pub enum CanonicalAnalysisKind {
     TransientNoise,
     DcMismatch,
     PssSpectrum,
+    /// One recorded `.FFT` spectrum of a bound transient output.
+    Fft,
 }
 
 impl CanonicalAnalysisKind {
@@ -106,7 +108,7 @@ impl CanonicalAnalysisKind {
     /// This is what makes the protocol closed without a second literal:
     /// [`Self::from_tag`] searches this array, so a tag is acceptable exactly
     /// when some kind claims it.
-    pub const ALL: [Self; 36] = [
+    pub const ALL: [Self; 37] = [
         Self::DcOp,
         Self::DcSweep,
         Self::Ac,
@@ -143,6 +145,7 @@ impl CanonicalAnalysisKind {
         Self::TransientNoise,
         Self::DcMismatch,
         Self::PssSpectrum,
+        Self::Fft,
     ];
 
     /// The numeric tag stamped into prepared snapshots and receipts.
@@ -193,6 +196,7 @@ impl CanonicalAnalysisKind {
             Self::TransientNoise => 33,
             Self::DcMismatch => 34,
             Self::PssSpectrum => 35,
+            Self::Fft => 36,
         }
     }
 
@@ -296,6 +300,13 @@ impl CanonicalAnalysisKind {
             // balance viewer already draws, so the spectrum reuses that owner
             // rather than introducing a second one that renders the same fact.
             Self::HarmonicBalance | Self::PssSpectrum => AnalysisType::HarmonicBalance,
+            // Same argument, one family over: the Results contract already
+            // defines the Fourier family as bins, a window and a derivation
+            // receipt, drawn by `viewer-spectrum`. A recorded `.FFT` is that
+            // fact, so it joins that family instead of adding a second one
+            // that renders it identically. `AnalysisResult::kind_display_name`
+            // is what keeps the label honest at the sites that print one.
+            Self::Fft => AnalysisType::Fourier,
             Self::Tf => AnalysisType::Tf,
             Self::Sensitivity => AnalysisType::Sensitivity,
             Self::PoleZero => AnalysisType::PoleZero,
@@ -361,7 +372,7 @@ mod tests {
             );
         }
         let highest = CanonicalAnalysisKind::ALL[CanonicalAnalysisKind::ALL.len() - 1].tag();
-        assert_eq!(highest, 35);
+        assert_eq!(highest, 36);
         assert!(CanonicalAnalysisKind::from_tag(highest + 1).is_none());
         assert!(CanonicalAnalysisKind::from_tag(u8::MAX).is_none());
     }
@@ -376,6 +387,7 @@ mod tests {
             (28, AnalysisType::Hbnoise),
             (29, AnalysisType::Psp),
             (35, AnalysisType::HarmonicBalance),
+            (36, AnalysisType::Fourier),
         ] {
             let kind = CanonicalAnalysisKind::from_tag(tag)
                 .unwrap_or_else(|| panic!("tag {tag} must be part of the closed protocol"));

@@ -441,14 +441,15 @@ pub(super) fn prepare_typed_result_csv(
                 }
             };
             let escaped_output = csv_text(output);
-            let mut contents = String::from(
-                "parameter,raw_sensitivity,normalized_sensitivity,output,mode,frequency_hz,raw_status,normalized_status\n",
-            );
+            let mut contents = String::from(SENSITIVITY_CSV_HEADER);
             for row in rows {
                 let (raw, raw_status) = sensitivity_csv_value(row.raw);
                 let (normalized, normalized_status) = sensitivity_csv_value(row.normalized);
+                // A single-point payload has no phase column to export: the
+                // two trailing fields are blank rather than zero, which would
+                // read as a measured derivative of nothing.
                 contents.push_str(&format!(
-                    "{},{raw},{normalized},{escaped_output},{mode},{frequency},{raw_status},{normalized_status}\n",
+                    "{},{raw},{normalized},{escaped_output},{mode},{frequency},{raw_status},{normalized_status},,\n",
                     csv_text(&row.parameter),
                 ));
             }
@@ -456,6 +457,44 @@ pub(super) fn prepare_typed_result_csv(
                 default_name: "sensitivity.csv",
                 contents,
                 detail: format!("{} exact sensitivity rows", rows.len()),
+            })
+        }
+        // One row per variable per point, long form: a study of sixty-one
+        // frequencies is sixty-one answers about each variable, and a wide
+        // table keyed by frequency would make the column set depend on the
+        // sweep. The filter that chose the variables is repeated on every row
+        // for the same reason it travels with the evidence.
+        AnalysisResultPayload::SensitivityStudy { evidence } => {
+            let escaped_output = csv_text(&evidence.output);
+            let mode = evidence.basis.mode_tag();
+            let mut contents = String::from(SENSITIVITY_CSV_HEADER);
+            let points = evidence.point_count();
+            for row in &evidence.rows {
+                let parameter = csv_text(&row.parameter);
+                for point in 0..points {
+                    let frequency = evidence
+                        .frequency_at(point)
+                        .map_or_else(String::new, |frequency| format!("{frequency:.17e}"));
+                    let (raw, raw_status) = sensitivity_csv_value(row.raw[point]);
+                    let (normalized, normalized_status) =
+                        sensitivity_csv_value(row.normalized[point]);
+                    let (phase, phase_status) = row.phase.get(point).map_or_else(
+                        || (String::new(), ""),
+                        |value| sensitivity_csv_value(*value),
+                    );
+                    contents.push_str(&format!(
+                        "{parameter},{raw},{normalized},{escaped_output},{mode},{frequency},\
+                         {raw_status},{normalized_status},{phase},{phase_status}\n",
+                    ));
+                }
+            }
+            Some(PreparedTypedResultCsv {
+                default_name: "sensitivity.csv",
+                contents,
+                detail: format!(
+                    "{} exact sensitivity rows",
+                    evidence.rows.len().saturating_mul(points)
+                ),
             })
         }
         AnalysisResultPayload::ScalarMeasurements { values } => {
@@ -656,6 +695,9 @@ pub(super) fn prepare_typed_result_csv(
                 ),
             })
         }
+        // A recorded spectrum exports through the ordinary complex waveform
+        // CSV path; its payload states the transform, not a table.
+        AnalysisResultPayload::FftSpectrum { .. } => None,
         AnalysisResultPayload::TransientEvents {
             digital_traces,
             real_traces,
@@ -959,6 +1001,16 @@ fn serialized_enum_name<T: serde::Serialize>(value: &T) -> String {
         .trim_matches('"')
         .to_owned()
 }
+
+/// One header for both sensitivity payloads.
+///
+/// A reader with two files open is reading the same report of the same deck,
+/// and a column set that changed with the era the result was recorded in
+/// would make them two formats. The single-point payload leaves the two phase
+/// columns blank, which is what it has.
+const SENSITIVITY_CSV_HEADER: &str = "parameter,raw_sensitivity,normalized_sensitivity,output,\
+                                      mode,frequency_hz,raw_status,normalized_status,\
+                                      phase_sensitivity,phase_status\n";
 
 fn sensitivity_csv_value(
     value: rspice_core::analysis::sensitivity::SensitivityValue<f64>,

@@ -34,6 +34,27 @@ pub(in crate::simulation) fn validate_periodic_state_contract(
     Ok(())
 }
 
+/// Validate the execution contract shared by PAC, PXF and PNOISE when their
+/// carrier is a harmonic-balance solve.
+///
+/// A harmonic-balance orbit is driven by construction: its tones are the
+/// deck's own sources, so the period is authored rather than a solver unknown
+/// and there is no free phase to diffuse. `check_pnoise_card_carrier` in
+/// `rspice-core/src/engine/pss_noise.rs` refuses `NOISEREF=PHASE` against such
+/// a carrier for exactly that reason, and the plan editor says the same thing
+/// before a run rather than after one.
+pub(in crate::simulation) fn validate_harmonic_balance_carrier_contract(
+    consumer: &str,
+    require_autonomous: bool,
+) -> Result<(), String> {
+    if require_autonomous {
+        return Err(format!(
+            "{consumer} phase-noise analysis needs an autonomous carrier, and a harmonic-balance orbit is driven by its authored tones; carry it on an autonomous PSS or ask for output-referred noise"
+        ));
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(in crate::simulation) struct FourierTransientRequirement {
     pub start_time: f64,

@@ -6,6 +6,59 @@
 
 use super::*;
 
+/// The large-signal basis a periodic small-signal request states, read from
+/// the carrier family that request names.
+///
+/// The three numbers are the producer's, not the consumer's: the engine
+/// replaces a `.PAC`-family request's authored fundamental with the carrier's
+/// own before it solves anything. They travel on the request all the same,
+/// because a shooting carrier's retained state is authenticated against them
+/// (`PeriodicStateArtifact::validate_consumer_basis`) and because a standalone
+/// run has no carrier to read.
+///
+/// A harmonic-balance carrier reads the HB form's primary tone, its harmonic
+/// count and its relative tolerance. Reading the PSS form instead — which is
+/// what a single builder did — asked an operator who never opened that form to
+/// fill it in before a run that never touches it.
+struct PeriodicCarrierBasis {
+    fundamental_freq: f64,
+    num_harmonics: usize,
+    tolerance: f64,
+}
+
+impl PeriodicCarrierBasis {
+    fn read(
+        state: &AppState,
+        carrier: crate::services::simulation_runner::PeriodicCarrier,
+        consumer: &str,
+    ) -> Result<Self, String> {
+        use crate::services::simulation_runner::PeriodicCarrier;
+
+        if matches!(carrier, PeriodicCarrier::Hb) {
+            let mut hb_state = state.sim_setup.hb.clone();
+            hb_state.ensure_initialized();
+            let hb_cfg = hb_state
+                .to_config()
+                .map_err(|error| format!("invalid HB settings required for {consumer}: {error}"))?;
+            return Ok(Self {
+                fundamental_freq: hb_cfg.fundamental_freq,
+                num_harmonics: hb_cfg.num_harmonics as usize,
+                tolerance: hb_cfg.reltol,
+            });
+        }
+        let mut pss_state = state.sim_setup.pss.clone();
+        pss_state.ensure_initialized();
+        let pss_cfg = pss_state
+            .to_config()
+            .map_err(|error| format!("invalid PSS settings required for {consumer}: {error}"))?;
+        Ok(Self {
+            fundamental_freq: pss_cfg.fund_freq,
+            num_harmonics: pss_cfg.num_harmonics,
+            tolerance: pss_cfg.tolerance,
+        })
+    }
+}
+
 impl SimulationController {
     pub(super) fn pac_run_config_from_dialog(
         state: &AppState,
@@ -18,11 +71,7 @@ impl SimulationController {
             .to_config()
             .map_err(|e| format!("invalid PAC settings: {}", e))?;
 
-        let mut pss_state = state.sim_setup.pss.clone();
-        pss_state.ensure_initialized();
-        let pss_cfg = pss_state
-            .to_config()
-            .map_err(|e| format!("invalid PSS settings required for PAC: {}", e))?;
+        let basis = PeriodicCarrierBasis::read(state, pac_cfg.carrier, "PAC")?;
 
         let sweep = match pac_cfg.sweep_type {
             crate::simulation::dialog::pac::PacSweepType::Decade => PacFrequencySweep::Decade,
@@ -37,9 +86,9 @@ impl SimulationController {
         let (sideband_min, sideband_max) = pac_cfg.resolved_sidebands();
 
         Ok(PacRunConfig {
-            pss_fundamental_freq: pss_cfg.fund_freq,
-            pss_num_harmonics: pss_cfg.num_harmonics,
-            pss_tolerance: pss_cfg.tolerance,
+            pss_fundamental_freq: basis.fundamental_freq,
+            pss_num_harmonics: basis.num_harmonics,
+            pss_tolerance: basis.tolerance,
             start_freq: pac_cfg.start_freq,
             stop_freq: pac_cfg.stop_freq,
             points_per_unit: pac_cfg.num_points as usize,
@@ -70,11 +119,7 @@ impl SimulationController {
             .to_config()
             .map_err(|e| format!("invalid PNOISE settings: {}", e))?;
 
-        let mut pss_state = state.sim_setup.pss.clone();
-        pss_state.ensure_initialized();
-        let pss_cfg = pss_state
-            .to_config()
-            .map_err(|e| format!("invalid PSS settings required for PNOISE: {}", e))?;
+        let basis = PeriodicCarrierBasis::read(state, pnoise_cfg.carrier, "PNOISE")?;
 
         let sweep = match pnoise_cfg.sweep_type {
             crate::simulation::dialog::pnoise::PnoiseSweepType::Decade => {
@@ -101,9 +146,9 @@ impl SimulationController {
         let (reltol, abstol) = Self::periodic_solver_tolerances(state);
 
         Ok(PnoiseRunConfig {
-            pss_fundamental_freq: pss_cfg.fund_freq,
-            pss_num_harmonics: pss_cfg.num_harmonics,
-            pss_tolerance: pss_cfg.tolerance,
+            pss_fundamental_freq: basis.fundamental_freq,
+            pss_num_harmonics: basis.num_harmonics,
+            pss_tolerance: basis.tolerance,
             start_freq: pnoise_cfg.start_freq,
             stop_freq: pnoise_cfg.stop_freq,
             points_per_unit: pnoise_cfg.num_points as usize,
@@ -132,11 +177,7 @@ impl SimulationController {
             .to_config()
             .map_err(|e| format!("invalid PXF settings: {}", e))?;
 
-        let mut pss_state = state.sim_setup.pss.clone();
-        pss_state.ensure_initialized();
-        let pss_cfg = pss_state
-            .to_config()
-            .map_err(|e| format!("invalid PSS settings required for PXF: {}", e))?;
+        let basis = PeriodicCarrierBasis::read(state, pxf_cfg.carrier, "PXF")?;
 
         let sweep = match pxf_cfg.sweep_type {
             crate::simulation::dialog::pxf::PxfSweepType::Decade => PxfFrequencySweep::Decade,
@@ -150,9 +191,9 @@ impl SimulationController {
             Self::authored_or_plan_tolerances(state, pxf_cfg.reltol, pxf_cfg.abstol);
 
         Ok(PxfRunConfig {
-            pss_fundamental_freq: pss_cfg.fund_freq,
-            pss_num_harmonics: pss_cfg.num_harmonics,
-            pss_tolerance: pss_cfg.tolerance,
+            pss_fundamental_freq: basis.fundamental_freq,
+            pss_num_harmonics: basis.num_harmonics,
+            pss_tolerance: basis.tolerance,
             start_freq: pxf_cfg.start_freq,
             stop_freq: pxf_cfg.stop_freq,
             points_per_unit: pxf_cfg.num_points as usize,

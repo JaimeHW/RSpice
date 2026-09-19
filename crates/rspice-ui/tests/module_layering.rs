@@ -702,6 +702,9 @@ const WORKBENCH_LAYERS: &[&str] = &[
 /// handed a slice of the session, which is one program for all of them, not a
 /// special case for the newest.
 ///
+/// 35 -> 36, the same day and for the same reason: the swept sensitivity study
+/// sheet (`result_document/sensitivity/study.rs`) beside it.
+///
 /// The one *new* edge the window produced — `app -> preflight` — is not here,
 /// because a new edge means the code is in the wrong module rather than that
 /// the table needs another row. `RSpiceApp` was calling the preflight workflow
@@ -736,7 +739,7 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     // Downward: a module that needs one slice of the session takes the whole
     // aggregate. Each of these retires by passing the slice — the schematic,
     // the workspace, the netlist session — instead of `&AppState`.
-    ("documents/result_document", "app_state", 35),
+    ("documents/result_document", "app_state", 36),
     ("lifecycle/recovery", "app_state", 6),
     ("documents/netlist_document", "app_state", 2),
     ("lifecycle/project_lifecycle", "app_state", 3),

@@ -11,7 +11,10 @@ impl SimulationResult {
         match self {
             Self::Transient { convergence, .. }
             | Self::Ac { convergence, .. }
-            | Self::Soa { convergence, .. } => convergence.as_ref(),
+            | Self::Soa { convergence, .. }
+            // A recorded FFT runs no solve of its own, so the quality of the
+            // transient that computed it is the only quality it has.
+            | Self::Fft { convergence, .. } => convergence.as_ref(),
             _ => None,
         }
     }
@@ -153,18 +156,10 @@ impl SimulationResult {
                             )
                         ))
             }
-            SimulationResult::Sensitivity {
-                output,
-                sensitivities,
-                normalized,
-                ..
-            } => {
-                !output.trim().is_empty()
-                    && sensitivities.len() == normalized.len()
-                    && sensitivities
-                        .keys()
-                        .all(|parameter| normalized.contains_key(parameter))
-            }
+            // The engine's own refusal already rejects a filter that selected
+            // nothing, so what makes a study empty here is having no probe to
+            // report against.
+            SimulationResult::SensitivityStudy { evidence } => !evidence.output.trim().is_empty(),
             // A spread is an answer even when it is zero and even when no
             // contributor cleared the card's threshold: what makes this
             // result empty is having no probe to report against.
@@ -199,6 +194,9 @@ impl SimulationResult {
             SimulationResult::Soa {
                 time, waveforms, ..
             } => !time.is_empty() && !waveforms.is_empty(),
+            // The transform the engine performed is a fact even when the
+            // record ran short and there are no coefficients to draw.
+            SimulationResult::Fft { .. } => true,
             SimulationResult::MeasurementsOnly { measurements } => !measurements.is_empty(),
         }
     }
@@ -215,7 +213,7 @@ impl SimulationResult {
             SimulationResult::HarmonicBalance { .. } => "Harmonic Balance",
             SimulationResult::Noise { .. } => "Noise Analysis",
             SimulationResult::PoleZero { .. } => "Pole-Zero",
-            SimulationResult::Sensitivity { .. } => "Sensitivity",
+            SimulationResult::SensitivityStudy { .. } => "Sensitivity",
             SimulationResult::DcMismatch { .. } => "DC Mismatch",
             SimulationResult::TransferFunction { .. } => "Transfer Function",
             SimulationResult::MonteCarlo { .. } => "Monte Carlo",
@@ -224,6 +222,7 @@ impl SimulationResult {
             SimulationResult::Reliability { .. } => "Reliability",
             SimulationResult::Optimization { .. } => "Optimization",
             SimulationResult::Soa { .. } => "Safety (SOA)",
+            SimulationResult::Fft { .. } => "FFT",
             SimulationResult::MeasurementsOnly { .. } => "Measurements Only",
         }
     }

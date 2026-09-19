@@ -284,14 +284,17 @@ fn pss_field_order_and_wording_match_the_canonical_mockup() {
 }
 
 /// The three periodic small-signal forms name their carrier, in the engine's
-/// own vocabulary, and say which position they cannot run.
+/// own vocabulary, and every position they name is one they run.
 ///
 /// The words are the enum's, read off it rather than repeated here, because
 /// the chooser list and the card keyword are two halves of one vocabulary: a
 /// label that drifted from the carrier it selects would paint a choice the
-/// deck does not make. The disabled position is asserted present rather than
-/// absent — an operator holding a deck the engine accepts is owed the fact
-/// that the card exists and where it runs.
+/// deck does not make.
+///
+/// There is no disabled position left to assert. There was one — harmonic
+/// balance, painted with "no Studio route" beside it — and a disabled choice
+/// on a card the engine runs is a standing admission rather than a fact about
+/// the analysis, so the runners took the carrier instead.
 #[test]
 fn the_periodic_carrier_row_offers_the_carriers_the_engine_has() {
     use crate::services::simulation_runner::PeriodicCarrier;
@@ -307,15 +310,6 @@ fn the_periodic_carrier_row_offers_the_carriers_the_engine_has() {
     {
         assert_eq!(*label, carrier.display_name());
     }
-    assert_eq!(
-        PeriodicCarrier::ALL
-            .iter()
-            .filter(|carrier| carrier.chooser_restriction().is_some())
-            .copied()
-            .collect::<Vec<_>>(),
-        vec![PeriodicCarrier::Hb],
-        "harmonic balance is the one position this crate has no runner for"
-    );
 }
 
 /// Every carrier position leaves the three forms the same size.
@@ -753,6 +747,7 @@ fn select_graded_sweep_mode(draft: &mut AnalysisDraft, mode: usize) -> bool {
         AnalysisDraft::Qpac(setup) => setup.sweep.sweep = mode,
         AnalysisDraft::Qpnoise(setup) => setup.sweep.sweep = mode,
         AnalysisDraft::Qpxf(setup) => setup.sweep.sweep = mode,
+        AnalysisDraft::Sensitivity(setup) => setup.ac_sweep_idx = mode,
         _ => return false,
     }
     true
@@ -825,6 +820,7 @@ fn every_graded_sweep_form_names_what_a_point_is() {
         graded,
         [
             AnalysisKind::Ac,
+            AnalysisKind::Sensitivity,
             AnalysisKind::Stb,
             AnalysisKind::SParameter,
             AnalysisKind::Pac,

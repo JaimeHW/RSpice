@@ -37,7 +37,7 @@ fn run(seed: u64, source: &str) -> serde_json::Value {
         "MC worker boundary\n.param rval={resistance}\nV1 in 0 1\nR1 in out {{rval}}\nR2 out 0 1k\n.mc 4 seed {seed} DIST UNIFORM SPREAD .05\n.end ; done\n"
     );
     let request = serde_json::json!({
-        "protocolVersion": 10,
+        "protocolVersion": 11,
         "request": {
             "request": {
                 "id": 1,
@@ -56,7 +56,7 @@ fn run(seed: u64, source: &str) -> serde_json::Value {
         .expect("worker must return valid Monte Carlo results");
     let response = structured_clone(&response);
     let response: serde_json::Value = serde_wasm_bindgen::from_value(response).unwrap();
-    assert_eq!(response["protocolVersion"], 22);
+    assert_eq!(response["protocolVersion"], 24);
     assert_eq!(response["response"]["id"].as_u64(), Some(1));
     let result = response["response"]["outcome"]["Success"]["Inline"]["MonteCarlo"].clone();
     assert_eq!(result["seed"].as_u64(), Some(seed), "{response}");
@@ -92,7 +92,7 @@ fn deck_statistics_retain_full_width_trial_identities() {
 #[wasm_bindgen_test]
 fn transient_quality_survives_the_worker_and_structured_clone_before_output_cropping() {
     let request = serde_json::json!({
-        "protocolVersion": 10,
+        "protocolVersion": 11,
         "request": {
             "request": {
                 "id": 2,
@@ -148,7 +148,7 @@ fn transient_quality_survives_the_worker_and_structured_clone_before_output_crop
 #[wasm_bindgen_test]
 fn nested_dc_curves_and_exact_traversal_survive_the_worker_and_structured_clone() {
     let request = serde_json::json!({
-        "protocolVersion": 10,
+        "protocolVersion": 11,
         "request": {
             "request": {"id":3,"request":{"Spec":{"spec":{"DcSweep":{
                 "source_name":"V1","start":1.0,"stop":0.0,"step":-0.5,

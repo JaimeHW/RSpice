@@ -150,6 +150,8 @@ pub(super) fn validate(spec: &AnalysisSpec) -> Result<(), String> {
             output_var,
             ac_mode,
             frequency,
+            filter,
+            sweep,
         } => {
             if output_var.trim().is_empty() {
                 return Err("Sensitivity output_var is required".to_string());
@@ -162,8 +164,37 @@ pub(super) fn validate(spec: &AnalysisSpec) -> Result<(), String> {
                 }
             } else if frequency.is_some() {
                 return Err("Sensitivity frequency is only valid in AC mode".to_string());
+            } else if sweep.is_some() {
+                return Err("Sensitivity sweep is only valid in AC mode".to_string());
             }
-            Ok(())
+            // The band is checked by building it with the engine's own grid
+            // function, so a plan the Studio accepts is one the engine will
+            // solve — and a plan it refuses is refused in the engine's words.
+            if let (Some(start), Some(sweep)) = (frequency, sweep) {
+                rspice_core::analysis::ac::try_ac_sweep_frequencies_with_abort(
+                    match sweep.variation {
+                        crate::simulation::multi_run::FrequencySweep::Decade => {
+                            rspice_core::netlist::FreqVariation::Dec
+                        }
+                        crate::simulation::multi_run::FrequencySweep::Octave => {
+                            rspice_core::netlist::FreqVariation::Oct
+                        }
+                        crate::simulation::multi_run::FrequencySweep::Linear => {
+                            rspice_core::netlist::FreqVariation::Lin
+                        }
+                    },
+                    sweep.points as usize,
+                    *start,
+                    sweep.stop_frequency,
+                    &rspice_core::abort_signal::NoAbort,
+                )
+                .map_err(|error| error.to_string())?;
+            }
+            // The filter reaches the `.SENS` card as written, so a token the
+            // card would read as its own keyword, or a character its grammar
+            // has no place for, is refused here rather than silently changing
+            // the analysis the engine runs.
+            crate::simulation::config::validate_sensitivity_filter(filter)
         }
         AnalysisSpec::PoleZero {
             input_node,

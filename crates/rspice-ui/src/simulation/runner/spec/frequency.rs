@@ -339,6 +339,17 @@ fn finite_optional(value: Option<f64>, label: &str) -> Result<Option<f64>, Simul
         .transpose()
 }
 
+/// Which family froze the periodic state this task was resolved against.
+///
+/// Read off the artifact rather than off the request: the artifact is what was
+/// actually produced, and the plan already proved it is the instance this task
+/// binds. The request's own `FROM=` is checked against it inside the service,
+/// where a mismatch is answered in one sentence naming both.
+fn carrier_is_harmonic_balance(dependencies: &ResolvedExecutionDependencies) -> bool {
+    dependencies.artifact_kind()
+        == Some(crate::simulation::execution::ExecutionArtifactKind::HbState)
+}
+
 fn run_pac(
     netlist: &str,
     source_path: Option<&Path>,
@@ -351,27 +362,46 @@ fn run_pac(
         "PAC analysis requires explicit PAC execution options",
         abort,
     )?;
-    let periodic_state = dependencies.periodic_state().map_err(|error| {
-        SimulationError::InvalidConfig(format!("PAC periodic dependency is unavailable: {error}"))
-    })?;
-    periodic_state
-        .validate_consumer_basis(
-            "PAC",
-            pac_cfg.pss_fundamental_freq,
-            pac_cfg.pss_num_harmonics,
-            pac_cfg.pss_tolerance,
-            false,
-        )
-        .map_err(|error| SimulationError::InvalidConfig(error.to_string()))?;
-    let data = super::run_abort_aware_service(abort, || {
-        svc_runner::run_pac_analysis_from_pss_with_source_path_and_abort(
-            netlist,
-            &pac_cfg,
-            periodic_state.operating_point(),
-            source_path,
-            abort,
-        )
-    })?;
+    let data = if carrier_is_harmonic_balance(dependencies) {
+        let hb_state = dependencies.hb_state().map_err(|error| {
+            SimulationError::InvalidConfig(format!(
+                "PAC harmonic-balance dependency is unavailable: {error}"
+            ))
+        })?;
+        super::run_abort_aware_service(abort, || {
+            svc_runner::run_pac_analysis_from_hb_with_source_path_and_abort(
+                netlist,
+                &pac_cfg,
+                hb_state.operating_point(),
+                source_path,
+                abort,
+            )
+        })?
+    } else {
+        let periodic_state = dependencies.periodic_state().map_err(|error| {
+            SimulationError::InvalidConfig(format!(
+                "PAC periodic dependency is unavailable: {error}"
+            ))
+        })?;
+        periodic_state
+            .validate_consumer_basis(
+                "PAC",
+                pac_cfg.pss_fundamental_freq,
+                pac_cfg.pss_num_harmonics,
+                pac_cfg.pss_tolerance,
+                false,
+            )
+            .map_err(|error| SimulationError::InvalidConfig(error.to_string()))?;
+        super::run_abort_aware_service(abort, || {
+            svc_runner::run_pac_analysis_from_pss_with_source_path_and_abort(
+                netlist,
+                &pac_cfg,
+                periodic_state.operating_point(),
+                source_path,
+                abort,
+            )
+        })?
+    };
 
     let traces = data
         .traces
@@ -399,27 +429,46 @@ fn run_pxf(
         "PXF analysis requires explicit PXF execution options",
         abort,
     )?;
-    let periodic_state = dependencies.periodic_state().map_err(|error| {
-        SimulationError::InvalidConfig(format!("PXF periodic dependency is unavailable: {error}"))
-    })?;
-    periodic_state
-        .validate_consumer_basis(
-            "PXF",
-            pxf_cfg.pss_fundamental_freq,
-            pxf_cfg.pss_num_harmonics,
-            pxf_cfg.pss_tolerance,
-            false,
-        )
-        .map_err(|error| SimulationError::InvalidConfig(error.to_string()))?;
-    let data = super::run_abort_aware_service(abort, || {
-        svc_runner::run_pxf_analysis_from_pss_with_source_path_and_abort(
-            netlist,
-            &pxf_cfg,
-            periodic_state.operating_point(),
-            source_path,
-            abort,
-        )
-    })?;
+    let data = if carrier_is_harmonic_balance(dependencies) {
+        let hb_state = dependencies.hb_state().map_err(|error| {
+            SimulationError::InvalidConfig(format!(
+                "PXF harmonic-balance dependency is unavailable: {error}"
+            ))
+        })?;
+        super::run_abort_aware_service(abort, || {
+            svc_runner::run_pxf_analysis_from_hb_with_source_path_and_abort(
+                netlist,
+                &pxf_cfg,
+                hb_state.operating_point(),
+                source_path,
+                abort,
+            )
+        })?
+    } else {
+        let periodic_state = dependencies.periodic_state().map_err(|error| {
+            SimulationError::InvalidConfig(format!(
+                "PXF periodic dependency is unavailable: {error}"
+            ))
+        })?;
+        periodic_state
+            .validate_consumer_basis(
+                "PXF",
+                pxf_cfg.pss_fundamental_freq,
+                pxf_cfg.pss_num_harmonics,
+                pxf_cfg.pss_tolerance,
+                false,
+            )
+            .map_err(|error| SimulationError::InvalidConfig(error.to_string()))?;
+        super::run_abort_aware_service(abort, || {
+            svc_runner::run_pxf_analysis_from_pss_with_source_path_and_abort(
+                netlist,
+                &pxf_cfg,
+                periodic_state.operating_point(),
+                source_path,
+                abort,
+            )
+        })?
+    };
 
     let mut waveforms = HashMap::new();
     let transfer_name = format!(
@@ -467,29 +516,46 @@ fn run_pnoise(
         "PNOISE analysis requires explicit PNOISE execution options",
         abort,
     )?;
-    let periodic_state = dependencies.periodic_state().map_err(|error| {
-        SimulationError::InvalidConfig(format!(
-            "PNOISE periodic dependency is unavailable: {error}"
-        ))
-    })?;
-    periodic_state
-        .validate_consumer_basis(
-            "PNOISE",
-            pnoise_cfg.pss_fundamental_freq,
-            pnoise_cfg.pss_num_harmonics,
-            pnoise_cfg.pss_tolerance,
-            pnoise_cfg.noise_ref == svc_runner::PnoiseReference::Phase,
-        )
-        .map_err(|error| SimulationError::InvalidConfig(error.to_string()))?;
-    let data = super::run_abort_aware_service(abort, || {
-        svc_runner::run_pnoise_analysis_from_pss_with_source_path_and_abort(
-            netlist,
-            &pnoise_cfg,
-            periodic_state.operating_point(),
-            source_path,
-            abort,
-        )
-    })?;
+    let data = if carrier_is_harmonic_balance(dependencies) {
+        let hb_state = dependencies.hb_state().map_err(|error| {
+            SimulationError::InvalidConfig(format!(
+                "PNOISE harmonic-balance dependency is unavailable: {error}"
+            ))
+        })?;
+        super::run_abort_aware_service(abort, || {
+            svc_runner::run_pnoise_analysis_from_hb_with_source_path_and_abort(
+                netlist,
+                &pnoise_cfg,
+                hb_state.operating_point(),
+                source_path,
+                abort,
+            )
+        })?
+    } else {
+        let periodic_state = dependencies.periodic_state().map_err(|error| {
+            SimulationError::InvalidConfig(format!(
+                "PNOISE periodic dependency is unavailable: {error}"
+            ))
+        })?;
+        periodic_state
+            .validate_consumer_basis(
+                "PNOISE",
+                pnoise_cfg.pss_fundamental_freq,
+                pnoise_cfg.pss_num_harmonics,
+                pnoise_cfg.pss_tolerance,
+                pnoise_cfg.noise_ref == svc_runner::PnoiseReference::Phase,
+            )
+            .map_err(|error| SimulationError::InvalidConfig(error.to_string()))?;
+        super::run_abort_aware_service(abort, || {
+            svc_runner::run_pnoise_analysis_from_pss_with_source_path_and_abort(
+                netlist,
+                &pnoise_cfg,
+                periodic_state.operating_point(),
+                source_path,
+                abort,
+            )
+        })?
+    };
 
     let freq_len = data.frequencies.len().max(1);
     let mut contributors = HashMap::with_capacity(data.contributors.len());

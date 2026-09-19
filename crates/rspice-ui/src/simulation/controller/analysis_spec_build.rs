@@ -194,6 +194,9 @@ impl SimulationController {
                     frequencies: config.frequencies,
                 }
             }
+            AnalysisDraft::Fft(draft) => AnalysisSpec::Fft {
+                request: draft.to_request()?,
+            },
             AnalysisDraft::DcMismatch(draft) => AnalysisSpec::DcMismatch {
                 output_expression: draft.output_expression.trim().to_owned(),
                 sigma_multiplier: parse_si(&draft.sigma_multiplier, "DCMATCH sigma multiplier")?,
@@ -540,10 +543,14 @@ impl SimulationController {
                 output_var,
                 ac_mode,
                 frequency,
+                filter,
+                sweep,
             } => Ok(AnalysisConfig::Sensitivity(SensitivityConfig {
                 output_var: output_var.clone(),
                 ac_mode: *ac_mode,
                 frequency: *frequency,
+                filter: filter.clone(),
+                sweep: sweep.map(crate::simulation::config::SensitivitySweep::from_spec),
             })),
             _ => Err(format!(
                 "{} runs through the spec-driven simulation path and cannot be converted to a legacy analysis config",
@@ -1041,6 +1048,10 @@ impl SimulationController {
             output_var: sens_cfg.output_expr,
             ac_mode,
             frequency: ac_mode.then_some(sens_cfg.ac_freq),
+            filter: sens_cfg.filter,
+            sweep: sens_cfg
+                .sweep
+                .map(crate::simulation::config::SensitivitySweep::to_spec),
         })
     }
 }
@@ -1319,6 +1330,7 @@ mod manifest_tests {
             AnalysisKind::Qpxf,
             AnalysisKind::TransientNoise,
             AnalysisKind::DcMismatch,
+            AnalysisKind::Fft,
         ] {
             let draft = AnalysisDraft::for_kind(kind);
             let spec = controller
@@ -1339,6 +1351,7 @@ mod manifest_tests {
                         AnalysisSpec::TransientNoise { .. }
                     )
                     | (AnalysisKind::DcMismatch, AnalysisSpec::DcMismatch { .. })
+                    | (AnalysisKind::Fft, AnalysisSpec::Fft { .. })
             ));
             assert!(spec.validate().is_ok());
         }

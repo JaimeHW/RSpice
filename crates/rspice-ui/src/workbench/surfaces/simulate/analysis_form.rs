@@ -33,6 +33,7 @@ mod pss;
 mod pstb;
 mod pxf;
 mod quasi_periodic;
+mod recorded_fft;
 mod reliability;
 mod run_space;
 mod s_parameter;
@@ -81,10 +82,10 @@ const XF_ENABLED_CHOICES: &[&str] = &["Enabled", "Disabled"];
 /// The carrier positions the engine's `FROM=` keyword has, in its order.
 ///
 /// Held here rather than built from [`PeriodicCarrier`] at paint time because
-/// `choice_row_with_disabled` takes `&[&str]`, and one static list is what
-/// keeps the three periodic small-signal forms offering the same words in the
-/// same order. `periodic_carrier_labels_are_the_carriers_the_engine_has` pins
-/// it against the enum.
+/// `choice_row` takes `&[&str]`, and one static list is what keeps the three
+/// periodic small-signal forms offering the same words in the same order.
+/// `the_periodic_carrier_row_offers_the_carriers_the_engine_has` pins it
+/// against the enum.
 const PERIODIC_CARRIER_CHOICES: &[&str] = &[
     "preceding solve",
     "periodic steady state",
@@ -390,6 +391,55 @@ fn hinted_quantity_input_row(
     response
 }
 
+/// The same hinted row, offered or withheld by the mode that reads it.
+///
+/// A field whose empty value selects a behaviour keeps saying so while it is
+/// greyed: the reason it is disabled and the meaning of leaving it blank are
+/// two different facts, and a reader needs both.
+fn hinted_quantity_input_row_enabled(
+    ui: &mut Ui,
+    label: &str,
+    value: &mut String,
+    helper: &str,
+    kind: QuantityInputKind,
+    policy: QuantityPresentationPolicy,
+    locale: UiNumberLocale,
+    enabled: bool,
+) -> Response {
+    let response = if uses_two_column_fields(ui) {
+        field_cell(ui, label, Some(helper), |ui| {
+            ui.add_enabled_ui(enabled, |ui| {
+                mono_input(ui, label, value, ui.available_width())
+            })
+            .inner
+        })
+    } else {
+        ui.add_enabled_ui(enabled, |ui| inspector_input_row(ui, label, value))
+            .inner
+    };
+    if enabled {
+        normalize_quantity_on_focus_loss(&response, value, kind, policy, locale);
+    }
+    response
+}
+
+/// A domain selector, offered or withheld by the field that governs it.
+fn choice_row_enabled(
+    ui: &mut Ui,
+    label: &str,
+    options: &[&str],
+    value: &mut usize,
+    enabled: bool,
+) -> bool {
+    if !enabled {
+        let mut unchanged = *value;
+        return ui
+            .add_enabled_ui(false, |ui| choice_row(ui, label, options, &mut unchanged))
+            .inner;
+    }
+    choice_row(ui, label, options, value)
+}
+
 fn quantity_input_row_enabled(
     ui: &mut Ui,
     label: &str,
@@ -432,23 +482,13 @@ fn choice_row(ui: &mut Ui, label: &str, options: &[&str], value: &mut usize) -> 
 ///
 /// One row, because the question is one question: which large-signal periodic
 /// solve does this small signal sit on. The positions are the engine's own
-/// `FROM=` vocabulary and a position the Studio cannot run is painted rather
-/// than hidden — an operator holding a deck the engine accepts is owed the
-/// fact that the card exists and where it runs, and a silently shorter list
-/// would tell them the opposite.
+/// `FROM=` vocabulary, and every one of them is selectable: each names a
+/// prerequisite family the plan can bind and a runner this crate has. The
+/// harmonic-balance position was painted disabled until the three runners took
+/// a harmonic-balance operating point, which made the chooser state a
+/// limitation of the Studio rather than of the analysis.
 fn periodic_carrier_row(ui: &mut Ui, value: &mut usize) -> bool {
-    use crate::services::simulation_runner::PeriodicCarrier;
-
-    let disabled = PeriodicCarrier::ALL
-        .iter()
-        .enumerate()
-        .filter_map(|(index, carrier)| {
-            carrier
-                .chooser_restriction()
-                .map(|restriction| (index, restriction))
-        })
-        .collect::<Vec<_>>();
-    choice_row_with_disabled(ui, "Carrier", PERIODIC_CARRIER_CHOICES, value, &disabled)
+    choice_row(ui, "Carrier", PERIODIC_CARRIER_CHOICES, value)
 }
 
 /// A tolerance well whose emptiness selects the plan's own policy.
@@ -1114,6 +1154,7 @@ pub(super) fn form(
         AnalysisDraft::TransientNoise(setup) => transient_noise::fields(ui, setup, policy, locale),
         AnalysisDraft::DcMismatch(setup) => dc_mismatch::fields(ui, setup),
         AnalysisDraft::AcData(setup) => ac_data::fields(ui, setup),
+        AnalysisDraft::Fft(setup) => recorded_fft::fields(ui, setup, policy, locale),
     }
     clear_pending_cell(ui);
 }

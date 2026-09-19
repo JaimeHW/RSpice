@@ -420,6 +420,9 @@ pub(super) fn exact_source_rows(state: &AppState) -> Vec<ExactSourceRow> {
             payload.gain,
         );
     }
+    if let Some(evidence) = retained_sensitivity_study(analysis) {
+        return exact_sensitivity_study_rows(run, analysis, evidence);
+    }
     if let Some((output, result_mode, rows)) = retained_sensitivity_payload(analysis) {
         return exact_sensitivity_rows(run, analysis, output, result_mode, rows);
     }
@@ -491,13 +494,78 @@ pub(super) fn retained_pole_zero_payload(
         | AnalysisResultPayload::PssFloquet { .. }
         | AnalysisResultPayload::Pstb { .. }
         | AnalysisResultPayload::Sensitivity { .. }
+        | AnalysisResultPayload::SensitivityStudy { .. }
         | AnalysisResultPayload::DcMismatch { .. }
         | AnalysisResultPayload::TransferFunction { .. }
         | AnalysisResultPayload::ScalarMeasurements { .. }
         | AnalysisResultPayload::Reliability { .. }
         | AnalysisResultPayload::Soa { .. }
-        | AnalysisResultPayload::TransientEvents { .. } => None,
+        | AnalysisResultPayload::TransientEvents { .. }
+        | AnalysisResultPayload::FftSpectrum { .. } => None,
     }
+}
+
+/// The study a validated analysis retains, if that is the family it carries.
+pub(super) fn retained_sensitivity_study(
+    analysis: &AnalysisResult,
+) -> Option<&crate::state::SensitivityStudyEvidence> {
+    if !analysis.success || analysis.analysis_type != AnalysisType::Sensitivity {
+        return None;
+    }
+    let payload = analysis.result_payload.as_ref()?;
+    if payload.validate_for(analysis.analysis_type).is_err() {
+        return None;
+    }
+    match payload {
+        AnalysisResultPayload::SensitivityStudy { evidence } => Some(evidence.as_ref()),
+        _ => None,
+    }
+}
+
+/// One exact row per variable, per point, per quantity.
+///
+/// The coordinate names the point as well as the variable, because a study of
+/// a sweep answers the same question sixty-one times and a row that named
+/// only the variable would be sixty-one rows wearing one address.
+pub(super) fn exact_sensitivity_study_rows(
+    run: &SimulationRun,
+    analysis: &AnalysisResult,
+    evidence: &crate::state::SensitivityStudyEvidence,
+) -> Vec<ExactSourceRow> {
+    let points = evidence.point_count();
+    let mut exact = Vec::with_capacity(evidence.rows.len() * points * 3);
+    for (index, row) in evidence.rows.iter().enumerate() {
+        for point in 0..points {
+            let basis = evidence.frequency_at(point).map_or_else(
+                || "dc".to_owned(),
+                |frequency| format!("ac@{frequency:.17e}Hz"),
+            );
+            for (quantity, column) in [
+                ("raw", &row.raw),
+                ("normalized", &row.normalized),
+                ("phase", &row.phase),
+            ] {
+                let Some(value) = column.get(point) else {
+                    continue;
+                };
+                exact.push(ExactSourceRow {
+                    binding: short_dataset(run.dataset_id),
+                    stable_row: format!("{}:sensitivity[{index}].{quantity}[{point}]", analysis.id),
+                    coordinate: format!("parameter={};basis={basis}", row.parameter),
+                    value: match value {
+                        rspice_core::analysis::sensitivity::SensitivityValue::Available(value) => {
+                            format!("{value:.17e}")
+                        }
+                        rspice_core::analysis::sensitivity::SensitivityValue::Unavailable {
+                            unavailable,
+                        } => format!("unavailable:{}", unavailable.as_str()),
+                    },
+                    origin: evidence.output.clone(),
+                });
+            }
+        }
+    }
+    exact
 }
 
 pub(super) fn retained_sensitivity_payload(
@@ -524,12 +592,14 @@ pub(super) fn retained_sensitivity_payload(
         | AnalysisResultPayload::PoleZero { .. }
         | AnalysisResultPayload::PssFloquet { .. }
         | AnalysisResultPayload::Pstb { .. }
+        | AnalysisResultPayload::SensitivityStudy { .. }
         | AnalysisResultPayload::DcMismatch { .. }
         | AnalysisResultPayload::TransferFunction { .. }
         | AnalysisResultPayload::ScalarMeasurements { .. }
         | AnalysisResultPayload::Reliability { .. }
         | AnalysisResultPayload::Soa { .. }
-        | AnalysisResultPayload::TransientEvents { .. } => None,
+        | AnalysisResultPayload::TransientEvents { .. }
+        | AnalysisResultPayload::FftSpectrum { .. } => None,
     }
 }
 

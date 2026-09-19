@@ -8,7 +8,7 @@
 
 use super::*;
 
-pub const ANALYSIS_AVAILABILITY_ROWS: [AnalysisAvailabilityRow; 35] = [
+pub const ANALYSIS_AVAILABILITY_ROWS: [AnalysisAvailabilityRow; 36] = [
     AnalysisAvailabilityRow {
         id: "op",
         code: "OP",
@@ -225,6 +225,13 @@ pub const ANALYSIS_AVAILABILITY_ROWS: [AnalysisAvailabilityRow; 35] = [
         title: "Fourier measurements",
         intended_tier: AnalysisIntendedTier::ReleaseTarget,
         analysis_kind: Some(AnalysisKind::Fourier),
+    },
+    AnalysisAvailabilityRow {
+        id: "fft",
+        code: "FFT",
+        title: "FFT spectrum",
+        intended_tier: AnalysisIntendedTier::ReleaseTarget,
+        analysis_kind: Some(AnalysisKind::Fft),
     },
     AnalysisAvailabilityRow {
         id: "disto",

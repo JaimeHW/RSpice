@@ -327,6 +327,8 @@ pub enum OverrideValueKind {
 /// the same sentence wherever the refusal surfaces.
 pub(super) const NOT_TIME_STEPPED: &str =
     "this analysis never advances time, so a time-integration bound would not reach its solve";
+pub(super) const FFT_HAS_NO_SOLVE_OF_ITS_OWN: &str =
+    "an FFT analysis runs no solve of its own; state the option on the transient it is bound to";
 pub(super) const NOT_HARMONIC_BALANCE: &str =
     "only a harmonic-balance solve reads this package, and this analysis does not run one";
 pub(super) const TRANSIENT_OWNS_STEP_CEILING: &str =
@@ -614,6 +616,12 @@ impl NumericOverrideOption {
     /// [`Self::refusal_for_instance`] instead.
     #[must_use]
     pub fn refusal_for(self, kind: AnalysisKind) -> Option<&'static str> {
+        // Before anything else, because it is true of every option: a recorded
+        // FFT is a transform the engine performs inside another analysis's
+        // solve, so there is no solve here for a bound to reach.
+        if matches!(kind, AnalysisKind::Fft) {
+            return Some(FFT_HAS_NO_SOLVE_OF_ITS_OWN);
+        }
         if let Some(reason) = self.spec().reach.refusal_for(kind) {
             return Some(reason);
         }

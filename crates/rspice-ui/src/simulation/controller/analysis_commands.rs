@@ -86,6 +86,9 @@ impl SimulationController {
             AnalysisSpec::TransientNoise { .. } => Self::build_transient_noise_command(spec),
             AnalysisSpec::AcData { .. } => Self::build_ac_data_command(spec),
             AnalysisSpec::DcMismatch { .. } => Self::build_dc_mismatch_command(spec),
+            // The request *is* the card, so there is nothing to build: the one
+            // writer of a `.fft` line is the request itself.
+            AnalysisSpec::Fft { request } => Ok(request.to_card()),
             AnalysisSpec::Qpss { .. }
             | AnalysisSpec::Qpac { .. }
             | AnalysisSpec::Qpnoise { .. }

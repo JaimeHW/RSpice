@@ -1236,6 +1236,7 @@ fn quick_result_availability(
             analysis.result_payload.as_ref(),
             Some(
                 AnalysisResultPayload::Sensitivity { .. }
+                    | AnalysisResultPayload::SensitivityStudy { .. }
                     | AnalysisResultPayload::DcMismatch { .. }
             )
         ),

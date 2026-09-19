@@ -1,5 +1,7 @@
 #[cfg(test)]
 mod design_parameter_tests;
+#[cfg(test)]
+mod expression_value_tests;
 mod parameter;
 mod refinement;
 
@@ -1050,7 +1052,89 @@ impl Engine {
         // original hierarchy and discard those edits.
         flat.source_text = None;
         flat.source_path = None;
+        Self::resolve_element_value_expressions(&mut flat, self.config.temperature);
         Ok(flat)
+    }
+
+    /// Give an element whose value the deck spelled as an expression the number
+    /// the build resolves it to, on the copy this study perturbs.
+    ///
+    /// Only a root-scope element can still carry one here. Every element inside
+    /// a subcircuit was substituted in its instance scope while the hierarchy
+    /// was flattened (`resolve_passive_value_expr`, `netlist/flattener.rs`),
+    /// but a root-scope element is never substituted: its expression survives
+    /// to the builder, which evaluates it into the built circuit and writes
+    /// nothing back onto the element. The target collector reads the element,
+    /// so `R2 out 0 {2*r}` had no row at all — not a zero row, no row — on
+    /// every surface, while an equal `R2 out 0 2k` had one.
+    ///
+    /// Resolving here is also what makes a device target mean what it says. A
+    /// target perturbs THE ELEMENT'S VALUE, not the parameters inside its
+    /// expression: with the number in hand, a replay moves this element alone
+    /// and every other element that reads the same `.param` keeps its nominal
+    /// value. That is the whole distinction between the device row `R2` and the
+    /// design row `PARAM:R`, which is total and moves every element defined
+    /// from the parameter together. It is also why the perturbation itself
+    /// clears the expression (see `apply_ac_sensitivity_target`): a surviving
+    /// expression would win at build time and make the row a silent zero.
+    ///
+    /// An expression that is not a number is left exactly as authored. One that
+    /// reads circuit state builds a behavioural element, which has no scalar
+    /// value to differentiate and gets the treatment every behavioural element
+    /// gets: no value row, the same answer `B1 out 0 V={...}` has always given.
+    fn resolve_element_value_expressions(flat: &mut Netlist, temperature_kelvin: Value) {
+        fn scalar_value(kind: &ElementKind) -> Option<(Value, &str)> {
+            let (value, value_expr) = match kind {
+                ElementKind::Resistor {
+                    value, value_expr, ..
+                }
+                | ElementKind::Capacitor {
+                    value, value_expr, ..
+                }
+                | ElementKind::Inductor {
+                    value, value_expr, ..
+                } => (*value, value_expr.as_deref()?),
+                _ => return None,
+            };
+            Some((value, value_expr))
+        }
+
+        let pending = flat
+            .elements
+            .iter()
+            .enumerate()
+            .filter_map(|(index, element)| {
+                let (value, expression) = scalar_value(&element.kind)?;
+                (!value.is_finite()).then(|| (index, expression.to_owned()))
+            })
+            .collect::<Vec<_>>();
+        for (index, expression) in pending {
+            let Some(resolved) = crate::engine::builder::resolved_element_value_expression(
+                flat,
+                temperature_kelvin,
+                &expression,
+            ) else {
+                continue;
+            };
+            let Some(element) = flat.elements.get_mut(index) else {
+                continue;
+            };
+            match &mut element.kind {
+                ElementKind::Resistor {
+                    value, value_expr, ..
+                }
+                | ElementKind::Capacitor {
+                    value, value_expr, ..
+                }
+                | ElementKind::Inductor {
+                    value, value_expr, ..
+                } => {
+                    *value = resolved;
+                    *value_expr = None;
+                }
+                _ => {}
+            }
+        }
     }
 
     fn source_has_explicit_ac(spec: &SourceSpec) -> bool {

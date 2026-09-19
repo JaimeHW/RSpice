@@ -8,6 +8,19 @@ use crate::simulation::dialog::{
 use crate::simulation::multi_run::FrequencySweep;
 use serde::{Deserialize, Serialize};
 
+/// The rest of an AC sensitivity band, beyond the start frequency.
+///
+/// Held beside `frequency` rather than replacing it, because one frequency
+/// and a sweep starting there are the same card with a different count, and
+/// nothing should have two spellings for the band's lower edge.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SensitivitySweepSpec {
+    pub stop_frequency: f64,
+    pub points: u32,
+    pub variation: FrequencySweep,
+}
+
 /// Numerical formulation used to solve a periodic steady-state request.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -407,6 +420,17 @@ pub enum AnalysisSpec {
         output_var: String,
         ac_mode: bool,
         frequency: Option<f64>,
+        /// The `.SENS` filter list, canonical and space separated. Empty is
+        /// the engine's default — every device and model parameter — and it
+        /// is always serialized, because an absent filter means "saved before
+        /// filters existed", which is a different statement.
+        #[serde(default = "crate::simulation::config::design_parameters_filter")]
+        filter: String,
+        /// The rest of the AC band, when the run asked for more than one
+        /// point. Absent is a single frequency, which is what every plan
+        /// saved before the sweep existed asked for.
+        #[serde(default)]
+        sweep: Option<SensitivitySweepSpec>,
     },
     /// Pole-zero
     PoleZero {
@@ -665,6 +689,14 @@ pub enum AnalysisSpec {
         /// has one identity.
         #[serde(default)]
         contribution_threshold: Option<f64>,
+    },
+    /// One recorded `.FFT` spectrum of a bound transient output.
+    ///
+    /// The whole request is the card, because the engine evaluates the card
+    /// inside the transient that carries it: this specification decides which
+    /// spectrum of that solve is published, never how one is computed.
+    Fft {
+        request: crate::simulation::config::FftRequest,
     },
 }
 

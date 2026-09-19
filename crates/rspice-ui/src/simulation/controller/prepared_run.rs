@@ -14,18 +14,21 @@ use rspice_core::netlist::{parse_include_directive, parse_lib_directive};
 
 use super::*;
 use crate::simulation::execution::{
-    AuthorizedRunDispatch, CrossProbeSnapshot, ExecutionPermit, ExecutionTargetCapabilities,
-    ModelSourceIdentity, PreparationError, PreparationStage, PreparedDependencyBinding,
-    PreparedRunMetadata, PreparedRunSnapshot, PreparedTask, RunSourceReceipt, SavePolicy,
-    SnapshotParts, TouchstoneExportPolicy, analysis_kind_tag, content_digest, drc_receipt_digest,
-    generated_executable_source_digest, manual_deck_analysis_instance_id,
-    manual_executable_source_digest, manual_source_receipt_digest,
+    AuthorizedRunDispatch, CrossProbeSnapshot, ExecutionArtifactKind, ExecutionPermit,
+    ExecutionTargetCapabilities, ModelSourceIdentity, PreparationError, PreparationStage,
+    PreparedDependencyBinding, PreparedRunMetadata, PreparedRunSnapshot, PreparedTask,
+    RunSourceReceipt, SavePolicy, SnapshotParts, TouchstoneExportPolicy, analysis_kind_tag,
+    content_digest, drc_receipt_digest, generated_executable_source_digest,
+    manual_deck_analysis_instance_id, manual_executable_source_digest,
+    manual_source_receipt_digest,
 };
 
+mod deferred_sources;
 mod dependency_expansion;
 pub(crate) mod occurrence_outputs;
 mod periodic_sources;
 
+use deferred_sources::{deferred_external_source_reason, executable_source_portion};
 use dependency_expansion::{expand_manual_dependencies, validated_executable_hierarchy};
 use occurrence_outputs::{effective_plan_capture, projection_occurrence_nets};
 use periodic_sources::validate_prepared_periodic_sources;
@@ -1215,8 +1218,12 @@ impl SimulationController {
             run_set_contract,
         );
 
+        // An FFT card is excluded from the run-level deck on purpose: it is
+        // spliced into the deck of the transient it is bound to, and into no
+        // other, because it changes the solve it rides on.
         let analysis_lines = tasks
             .iter()
+            .filter(|task| !matches!(task.queued_analysis().spec, AnalysisSpec::Fft { .. }))
             .map(|task| task.queued_analysis().analysis_line.clone())
             .collect::<Vec<_>>();
         let analysis_instances = plan
@@ -1614,6 +1621,22 @@ impl SimulationController {
                 )
             })
             .collect::<Vec<_>>();
+        let harmonic_balance_producers = prepared
+            .iter()
+            .filter(|task| {
+                matches!(
+                    &task.queued_analysis().spec,
+                    AnalysisSpec::HarmonicBalance { .. }
+                )
+            })
+            .map(|task| {
+                (
+                    task.instance_id(),
+                    task.source_revision(),
+                    task.config_digest(),
+                )
+            })
+            .collect::<Vec<_>>();
         let operating_point_producers = prepared
             .iter()
             .filter(|task| {
@@ -1631,6 +1654,28 @@ impl SimulationController {
             })
             .collect::<Vec<_>>();
         for task in &mut prepared {
+            if matches!(task.queued_analysis().spec, AnalysisSpec::Fft { .. }) {
+                // The engine binds every `.FFT` card in a deck to that deck's
+                // *first* transient, so the Studio binds the same one — not
+                // Fourier's stricter "exactly one transient".
+                let Some((producer_id, producer_revision, producer_config_digest)) =
+                    transient_producers.first()
+                else {
+                    return Err(PreparationError::new(
+                        PreparationStage::AnalysisPlan,
+                        ".FFT requires a completed authored .TRAN to post-process in the same deck",
+                    ));
+                };
+                task.set_dependencies(vec![*producer_id]);
+                task.set_dependency_bindings(vec![
+                    PreparedDependencyBinding::transient_trajectory(
+                        *producer_id,
+                        *producer_revision,
+                        *producer_config_digest,
+                    ),
+                ]);
+                continue;
+            }
             type ProducerIdentity = (
                 crate::product::AnalysisInstanceId,
                 crate::product::ObjectRevision,
@@ -1641,45 +1686,69 @@ impl SimulationController {
                 crate::product::ObjectRevision,
                 crate::product::ContentDigest,
             ) -> PreparedDependencyBinding;
-            let (producers, artifact_label, binding): (
-                &[ProducerIdentity],
-                &str,
-                BindingConstructor,
-            ) = match &task.queued_analysis().spec {
-                AnalysisSpec::Fourier { .. } => (
-                    &transient_producers,
-                    "Transient trajectory",
-                    PreparedDependencyBinding::transient_trajectory,
-                ),
-                AnalysisSpec::Pss {
-                    method: PssMethod::Shooting,
-                    ..
-                } => (
-                    &operating_point_producers,
-                    "operating-point seed",
-                    PreparedDependencyBinding::dc_operating_point_seed,
-                ),
-                AnalysisSpec::PssSpectrum { .. }
-                | AnalysisSpec::Pac
-                | AnalysisSpec::Pnoise
-                | AnalysisSpec::Pxf
-                | AnalysisSpec::Pstb
-                | AnalysisSpec::Psp { .. } => (
-                    &periodic_producers,
-                    "shooting-PSS state",
-                    PreparedDependencyBinding::periodic_state,
-                ),
-                _ => continue,
-            };
-            let [(producer_id, producer_revision, producer_config_digest)] = producers else {
+            // The artifact kinds this request admits, in the order it prefers
+            // them, and the producer list each one names. A periodic
+            // small-signal request whose carrier is the preceding periodic
+            // solve admits either family, so the deck decides: a deck holding
+            // only an `.HB` binds the harmonic-balance state, and one holding
+            // a `.PSS` binds the shooting state.
+            let required_kinds = crate::simulation::execution::required_artifact_kinds(
+                &task.queued_analysis().spec,
+                &task.queued_analysis().spec_options,
+            );
+            if required_kinds.is_empty() {
+                continue;
+            }
+            let candidates = required_kinds
+                .iter()
+                .map(|kind| {
+                    let (producers, binding): (&[ProducerIdentity], BindingConstructor) = match kind
+                    {
+                        ExecutionArtifactKind::TransientTrajectory => (
+                            &transient_producers,
+                            PreparedDependencyBinding::transient_trajectory,
+                        ),
+                        ExecutionArtifactKind::PeriodicState => (
+                            &periodic_producers,
+                            PreparedDependencyBinding::periodic_state,
+                        ),
+                        ExecutionArtifactKind::HbState => (
+                            &harmonic_balance_producers,
+                            PreparedDependencyBinding::hb_state,
+                        ),
+                        ExecutionArtifactKind::DcOperatingPointSeed => (
+                            &operating_point_producers,
+                            PreparedDependencyBinding::dc_operating_point_seed,
+                        ),
+                    };
+                    (*kind, producers, binding)
+                })
+                .collect::<Vec<_>>();
+            let Some((_, producers, binding)) = candidates
+                .iter()
+                .copied()
+                .find(|(_, producers, _)| producers.len() == 1)
+            else {
                 return Err(PreparationError::new(
                     PreparationStage::AnalysisPlan,
                     format!(
-                        "Manual-deck {} requires exactly one prepared {artifact_label} producer; found {}",
+                        "Manual-deck {} requires exactly one prepared {} producer; found {}",
                         task.queued_analysis().spec.run_type().display_name(),
-                        producers.len()
+                        required_kinds
+                            .iter()
+                            .map(|kind| kind.producer_label())
+                            .collect::<Vec<_>>()
+                            .join(" or "),
+                        candidates
+                            .iter()
+                            .map(|(_, producers, _)| producers.len())
+                            .max()
+                            .unwrap_or_default()
                     ),
                 ));
+            };
+            let [(producer_id, producer_revision, producer_config_digest)] = producers else {
+                unreachable!("the selected producer list holds exactly one identity");
             };
             task.set_dependencies(vec![*producer_id]);
             task.set_dependency_bindings(vec![binding(
@@ -2439,99 +2508,6 @@ fn reject_deferred_corner_model_sources<'a>(
     Ok(())
 }
 
-fn deferred_external_source_reason(line: &str) -> Option<&'static str> {
-    let line = executable_source_portion(line);
-    if line.is_empty() {
-        return None;
-    }
-    if parse_include_directive(line).is_some() || parse_lib_directive(line).is_some() {
-        return Some("include/library directive");
-    }
-    let lower = line.to_ascii_lowercase();
-    let directive = lower.split_whitespace().next().unwrap_or_default();
-    if matches!(
-        directive,
-        ".spef_include" | ".veriloga" | ".va" | ".ahdl_include" | ".hdl" | ".verilog" | ".load"
-    ) {
-        return Some("external source directive");
-    }
-
-    let without_whitespace = lower
-        .chars()
-        .filter(|character| !character.is_whitespace())
-        .collect::<String>();
-    // File/provider assignments belong to code-model declarations or instances;
-    // identically named numeric parameters do not open external resources.
-    let code_model = directive == ".model" || directive.starts_with('a');
-    if code_model
-        && ["file", "input_file", "state_file", "process_file"]
-            .iter()
-            .any(|name| contains_parameter_assignment(&lower, name))
-    {
-        return Some("file-backed element or code-model parameter");
-    }
-    let tokens = lower
-        .split(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
-        .filter(|token| !token.is_empty())
-        .collect::<Vec<_>>();
-    if matches!(directive, ".measure" | ".meas") && tokens.contains(&"file") {
-        return Some("file-backed measurement reference");
-    }
-    // `simulation` is the d_cosim shared-library/provider selector and may be
-    // supplied either on its model or as an instance override.
-    if code_model && contains_parameter_assignment(&lower, "simulation") {
-        return Some("external co-simulation runtime");
-    }
-    const FILE_LOOKUPS: [&str; 16] = [
-        "table",
-        "tablefile",
-        "fasttable",
-        "fasttablefile",
-        "cubic",
-        "cubicfile",
-        "akima",
-        "akimafile",
-        "spline",
-        "splinefile",
-        "wodicka",
-        "wodickafile",
-        "bli",
-        "blifile",
-        "barycentric",
-        "barycentricfile",
-    ];
-    if FILE_LOOKUPS.iter().any(|function| {
-        [format!("{function}(\""), format!("{function}('")]
-            .iter()
-            .any(|needle| without_whitespace.contains(needle))
-    }) {
-        return Some("file-backed behavioral lookup");
-    }
-    None
-}
-
-fn executable_source_portion(line: &str) -> &str {
-    rspice_core::netlist::strip_spice_inline_comment(
-        line,
-        rspice_core::config::ExpressionDialect::Ngspice,
-    )
-    .trim()
-}
-
-fn contains_parameter_assignment(line: &str, parameter: &str) -> bool {
-    line.match_indices(parameter).any(|(index, _)| {
-        let has_identifier_boundary = index == 0
-            || line[..index]
-                .chars()
-                .next_back()
-                .is_some_and(|character| !(character.is_ascii_alphanumeric() || character == '_'));
-        has_identifier_boundary
-            && line[index + parameter.len()..]
-                .trim_start()
-                .starts_with('=')
-    })
-}
-
 fn append_corner_model_identities<'a>(
     tasks: impl IntoIterator<Item = &'a QueuedAnalysis>,
     identities: &mut Vec<ModelSourceIdentity>,
@@ -2839,6 +2815,8 @@ fn element_model_name(element: &rspice_core::netlist::Element) -> Option<&str> {
 
 #[cfg(test)]
 mod dispatch_parity_tests;
+#[cfg(test)]
+mod recorded_fft_tests;
 // Visible to the controller rather than private, because `runnable_state` is
 // the one fixture in this layer that produces a preparable project — and the
 // projection ratchet has to prepare one without reaching up to the shell for

@@ -1530,7 +1530,9 @@ const CURRENT_IMPULSE_RESULTS_SCHEMA_VERSION: u32 = 27;
 /// current version even though it shares the number: the guard says "no build
 /// before v27 wrote one", which stays true when the schema next moves.
 const DC_MISMATCH_RESULTS_SCHEMA_VERSION: u32 = 27;
-const PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION: u32 = CURRENT_IMPULSE_RESULTS_SCHEMA_VERSION;
+const RECORDED_FFT_RESULTS_SCHEMA_VERSION: u32 = 28;
+const SENSITIVITY_STUDY_RESULTS_SCHEMA_VERSION: u32 = 29;
+const PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION: u32 = SENSITIVITY_STUDY_RESULTS_SCHEMA_VERSION;
 
 const LEGACY_PROJECT_ID_NAMESPACE: uuid::Uuid =
     uuid::Uuid::from_u128(0x63a2_4271_a7cb_5a5e_b8bb_e783_e768_daf0);

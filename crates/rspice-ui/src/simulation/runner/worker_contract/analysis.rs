@@ -749,6 +749,10 @@ pub(crate) enum WorkerAnalysisConfig {
         output_var: String,
         ac_mode: bool,
         frequency: Option<f64>,
+        #[serde(default = "crate::simulation::config::design_parameters_filter")]
+        filter: String,
+        #[serde(default)]
+        sweep: Option<crate::simulation::multi_run::SensitivitySweepSpec>,
     },
 }
 
@@ -806,6 +810,8 @@ impl From<&AnalysisConfig> for WorkerAnalysisConfig {
                 output_var: config.output_var.clone(),
                 ac_mode: config.ac_mode,
                 frequency: config.frequency,
+                filter: config.filter.clone(),
+                sweep: config.sweep.map(SensitivitySweep::to_spec),
             },
         }
     }
@@ -907,10 +913,14 @@ impl From<WorkerAnalysisConfig> for AnalysisConfig {
                 output_var,
                 ac_mode,
                 frequency,
+                filter,
+                sweep,
             } => Self::Sensitivity(SensitivityConfig {
                 output_var,
                 ac_mode,
                 frequency,
+                filter,
+                sweep: sweep.map(SensitivitySweep::from_spec),
             }),
         }
     }
@@ -1036,10 +1046,14 @@ impl TryFrom<&AnalysisSpec> for WorkerAnalysisSpec {
                 output_var,
                 ac_mode,
                 frequency,
+                filter,
+                sweep,
             } => Ok(Self::Sensitivity {
                 output_var: output_var.clone(),
                 ac_mode: *ac_mode,
                 frequency: *frequency,
+                filter: filter.clone(),
+                sweep: *sweep,
             }),
             AnalysisSpec::PoleZero {
                 input_node,
@@ -1312,7 +1326,10 @@ impl TryFrom<&AnalysisSpec> for WorkerAnalysisSpec {
             | AnalysisSpec::Qpnoise { .. }
             | AnalysisSpec::Qpxf { .. }
             | AnalysisSpec::TransientNoise { .. }
-            | AnalysisSpec::DcMismatch { .. } => Ok(Self::CanonicalSpec(value.clone())),
+            | AnalysisSpec::DcMismatch { .. }
+            // The FFT request is the card, which is already a stable serde
+            // payload; a second mirror of it would add no transport behavior.
+            | AnalysisSpec::Fft { .. } => Ok(Self::CanonicalSpec(value.clone())),
         }
     }
 }
@@ -1420,10 +1437,14 @@ impl From<WorkerAnalysisSpec> for AnalysisSpec {
                 output_var,
                 ac_mode,
                 frequency,
+                filter,
+                sweep,
             } => Self::Sensitivity {
                 output_var,
                 ac_mode,
                 frequency,
+                filter,
+                sweep,
             },
             WorkerAnalysisSpec::PoleZero {
                 input_node,

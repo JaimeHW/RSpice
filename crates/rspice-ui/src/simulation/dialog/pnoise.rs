@@ -218,10 +218,12 @@ impl PnoiseConfig {
         if self.noise_ref == NoiseReferenceType::Input && self.input_source.trim().is_empty() {
             return Err("Input source must be specified for input-referred noise".to_string());
         }
-        if let Some(reason) = self.carrier.unroutable_reason(".PNOISE") {
-            return Err(reason);
-        }
-
+        // The carrier is not validated here: it is a *dependency*, and the
+        // plan owns it. `AnalysisDraft::prerequisite_roles` turns this
+        // position into the prerequisite family this request requires, and
+        // `dependency_configuration_issue` asks whether the bound carrier can
+        // answer the measurement — which is the question a form field cannot
+        // ask, because the answer depends on the instance it is bound to.
         Ok(())
     }
 }
@@ -501,20 +503,20 @@ mod tests {
         );
     }
 
-    /// A carrier with no route here is refused by name, not folded onto a
-    /// carrier that was not asked for.
+    /// Every carrier the engine's card accepts is a carrier this form accepts;
+    /// which family it requires is the plan's declared prerequisite role, and
+    /// whether that carrier can answer phase noise is the plan's dependency
+    /// contract rather than a field check that cannot see the instance.
     #[test]
-    fn a_carrier_without_a_studio_route_is_refused_by_name() {
-        let error = PnoiseConfig {
-            carrier: PeriodicCarrier::Hb,
-            ..PnoiseConfig::default()
+    fn every_carrier_the_engine_accepts_is_a_carrier_this_form_accepts() {
+        for carrier in PeriodicCarrier::ALL {
+            PnoiseConfig {
+                carrier: *carrier,
+                ..PnoiseConfig::default()
+            }
+            .validate()
+            .unwrap_or_else(|error| panic!("{carrier:?} is a carrier the engine has: {error}"));
         }
-        .validate()
-        .expect_err("a harmonic-balance carrier has no PNOISE runner in this crate");
-        assert!(
-            error.contains("from=hb") && error.contains("command line"),
-            "the refusal must name the carrier and where it runs: {error}"
-        );
     }
 
     /// A draft saved before the carrier row existed opens as the analysis it

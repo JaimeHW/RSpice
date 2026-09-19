@@ -1073,3 +1073,181 @@ fn every_dc_mismatch_evidence_field_moves_the_result_digest() {
         );
     }
 }
+
+/// Every field of a sensitivity study is content identity.
+///
+/// Walked field by field rather than spot-checked: a field the encoder forgot
+/// is a field an edited result could change while keeping the seal that
+/// authenticated it. The filter and the grid are in the walk for the same
+/// reason the numbers are — two studies of one deck that selected different
+/// variables, or solved different bands, are different results.
+#[test]
+fn every_sensitivity_study_field_moves_the_result_digest() {
+    use crate::state::{SensitivityBasisEvidence, SensitivityStudyEvidence, SensitivityStudyRow};
+    use rspice_core::analysis::sensitivity::{SensitivityUnavailability, SensitivityValue};
+
+    fn study() -> SensitivityStudyEvidence {
+        SensitivityStudyEvidence {
+            output: "V(OUT)".to_owned(),
+            filter: "R* PARAM:*".to_owned(),
+            basis: SensitivityBasisEvidence::Ac {
+                frequencies_hz: vec![10.0, 100.0],
+                output: vec![
+                    ComplexResultValue {
+                        real: 1.0,
+                        imaginary: 0.0,
+                    },
+                    ComplexResultValue {
+                        real: 0.5,
+                        imaginary: -0.25,
+                    },
+                ],
+            },
+            rows: vec![SensitivityStudyRow {
+                parameter: "PARAM:GAIN".to_owned(),
+                nominal_value: 2.0,
+                raw: vec![
+                    SensitivityValue::Available(1.0),
+                    SensitivityValue::Available(2.0),
+                ],
+                normalized: vec![
+                    SensitivityValue::Available(0.25),
+                    SensitivityValue::Available(0.5),
+                ],
+                phase: vec![
+                    SensitivityValue::Available(0.0),
+                    SensitivityValue::Available(-1.5),
+                ],
+            }],
+        }
+    }
+
+    // Assigned rather than attached through `with_result_payload`: that
+    // constructor debug-asserts the payload is valid, and a field-coverage
+    // walk perturbs one field at a time, which an invariant like "every
+    // column spans the grid" refuses. The encoder's reach is what is under
+    // test, not the validator's.
+    let result = |evidence: SensitivityStudyEvidence| {
+        let mut analysis = AnalysisResult::new(1, AnalysisType::Sensitivity, "SENS");
+        analysis.result_payload = Some(AnalysisResultPayload::SensitivityStudy {
+            evidence: std::sync::Arc::new(evidence),
+        });
+        analysis
+    };
+    let source = result(study());
+    assert_eq!(
+        source.result_data_digest(),
+        result(study()).result_data_digest(),
+        "the same evidence digests to the same bytes"
+    );
+
+    type StudyEdit = (&'static str, fn(&mut SensitivityStudyEvidence));
+    let mutations: [StudyEdit; 8] = [
+        ("output", |e| e.output = "V(MID)".to_owned()),
+        ("filter", |e| e.filter = "R*".to_owned()),
+        ("basis kind", |e| {
+            e.basis = SensitivityBasisEvidence::Dc { output: 1.0 }
+        }),
+        ("basis frequencies", |e| {
+            if let SensitivityBasisEvidence::Ac { frequencies_hz, .. } = &mut e.basis {
+                frequencies_hz[1] = 200.0;
+            }
+        }),
+        ("basis output", |e| {
+            if let SensitivityBasisEvidence::Ac { output, .. } = &mut e.basis {
+                output[0].imaginary = 1.0e-18;
+            }
+        }),
+        ("rows", |e| e.rows.clear()),
+        ("row parameter", |e| {
+            e.rows[0].parameter = "PARAM:SCALE".to_owned()
+        }),
+        ("row nominal_value", |e| e.rows[0].nominal_value += 1.0e-15),
+    ];
+    for (field, mutate) in mutations {
+        let mut evidence = study();
+        mutate(&mut evidence);
+        assert_ne!(
+            source.result_data_digest(),
+            result(evidence).result_data_digest(),
+            "{field} does not reach the result digest"
+        );
+    }
+
+    // Every column, at every point, including the reason an unavailable
+    // value gives: "zero output" and "out of range" are different answers.
+    type ColumnEdit = (&'static str, fn(&mut SensitivityStudyRow));
+    let columns: [ColumnEdit; 6] = [
+        ("raw[0]", |row| {
+            row.raw[0] = SensitivityValue::Available(9.0)
+        }),
+        ("raw[1]", |row| {
+            row.raw[1] = SensitivityValue::Available(9.0)
+        }),
+        ("normalized[0]", |row| {
+            row.normalized[0] = SensitivityValue::Available(9.0)
+        }),
+        ("normalized[1]", |row| {
+            row.normalized[1] = SensitivityValue::unavailable(SensitivityUnavailability::OutOfRange)
+        }),
+        ("phase[0]", |row| {
+            row.phase[0] = SensitivityValue::Available(9.0)
+        }),
+        ("phase[1]", |row| {
+            row.phase[1] =
+                SensitivityValue::unavailable(SensitivityUnavailability::NondifferentiableMagnitude)
+        }),
+    ];
+    for (field, mutate) in columns {
+        let mut evidence = study();
+        mutate(&mut evidence.rows[0]);
+        assert_ne!(
+            source.result_data_digest(),
+            result(evidence).result_data_digest(),
+            "{field} does not reach the result digest"
+        );
+    }
+}
+
+/// Every typed payload arm opens with a tag no other arm uses.
+///
+/// Two lanes added a payload on the same day and each took "the next unused
+/// tag" from its own base: both wrote 11, nothing conflicted textually, and
+/// every gate passed. The tags are read out of the encoder's own source so the
+/// list cannot fall behind it.
+#[test]
+fn every_typed_payload_digests_under_its_own_tag() {
+    let source = crate::source_guard::production_source(include_str!("../result_digest.rs"));
+    let mut tags: Vec<(u32, String)> = Vec::new();
+    let mut arm: Option<String> = None;
+    for line in source.lines() {
+        let line = line.trim();
+        if let Some(rest) = line.strip_prefix("AnalysisResultPayload::") {
+            let name: String = rest
+                .chars()
+                .take_while(|c| c.is_ascii_alphanumeric())
+                .collect();
+            arm = Some(name);
+        } else if let (Some(name), Some(rest)) = (arm.as_ref(), line.strip_prefix("writer.u8("))
+            && let Some(tag) = rest
+                .strip_suffix(");")
+                .and_then(|tag| tag.parse::<u32>().ok())
+        {
+            tags.push((tag, name.clone()));
+            arm = None;
+        }
+    }
+    assert!(
+        tags.len() >= 14,
+        "the scan stopped finding the payload arms it is here to compare: {tags:?}"
+    );
+    let mut seen = std::collections::BTreeMap::new();
+    for (tag, name) in &tags {
+        if let Some(first) = seen.insert(*tag, name.clone()) {
+            assert_eq!(
+                &first, name,
+                "payload tag {tag} is written by both {first} and {name}"
+            );
+        }
+    }
+}

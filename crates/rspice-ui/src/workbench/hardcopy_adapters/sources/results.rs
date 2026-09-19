@@ -1173,6 +1173,42 @@ pub(super) fn semantic_result_summary(
                         .collect(),
                 });
             }
+            // Long form, frequency then variable: a printed table of a swept
+            // study is read down the band for one variable and across it for
+            // one frequency, and only one of those orders can be the rows'.
+            // A DC study carries neither column, so it prints neither.
+            Some(AnalysisResultPayload::SensitivityStudy { evidence }) => {
+                let swept = evidence.frequency_at(0).is_some();
+                let mut columns = vec!["Parameter".to_owned()];
+                if swept {
+                    columns.push("Frequency".to_owned());
+                }
+                columns.push("Raw".to_owned());
+                columns.push("Normalized".to_owned());
+                if swept {
+                    columns.push("Phase".to_owned());
+                }
+                let mut printed = Vec::with_capacity(evidence.rows.len() * evidence.point_count());
+                for point in 0..evidence.point_count() {
+                    for row in &evidence.rows {
+                        let mut cells = vec![row.parameter.clone()];
+                        if let Some(frequency) = evidence.frequency_at(point) {
+                            cells.push(exact_number(frequency));
+                        }
+                        cells.push(sensitivity_number(row.raw[point]));
+                        cells.push(sensitivity_number(row.normalized[point]));
+                        if let Some(phase) = row.phase.get(point) {
+                            cells.push(sensitivity_number(*phase));
+                        }
+                        printed.push(cells);
+                    }
+                }
+                tables.push(SemanticTable {
+                    title: format!("Sensitivity of {}", evidence.output),
+                    columns,
+                    rows: printed,
+                });
+            }
             Some(AnalysisResultPayload::DcMismatch { evidence }) => {
                 // The spread first, then the ranked list: a contributor table
                 // read without the total it divides says nothing.
@@ -1916,12 +1952,16 @@ fn periodic_result_tables(payload: &AnalysisResultPayload) -> Option<Vec<Semanti
         | AnalysisResultPayload::OperatingPoint { .. }
         | AnalysisResultPayload::PoleZero { .. }
         | AnalysisResultPayload::Sensitivity { .. }
+        | AnalysisResultPayload::SensitivityStudy { .. }
         | AnalysisResultPayload::DcMismatch { .. }
         | AnalysisResultPayload::ScalarMeasurements { .. }
         | AnalysisResultPayload::TransferFunction { .. }
         | AnalysisResultPayload::Reliability { .. }
         | AnalysisResultPayload::Soa { .. }
-        | AnalysisResultPayload::TransientEvents { .. } => None,
+        | AnalysisResultPayload::TransientEvents { .. }
+        // A recorded spectrum exports through the ordinary complex waveform
+        // path; its payload states the transform, not a table of its own.
+        | AnalysisResultPayload::FftSpectrum { .. } => None,
     }
 }
 

@@ -111,6 +111,40 @@ pub(super) fn instance_parameter_eval_context(
     context
 }
 
+/// The number a scalar element value expression resolves to at build time, or
+/// `None` when the deck's spelling is not a number at all.
+///
+/// The builder resolves such an expression in two places — the scalar-primary
+/// branch of a passive element's arm, which binds it as a parameter, and
+/// [`resolve_resistor_effective_parameters`]'s fallback, which evaluates it in
+/// the passive evaluation context — and keeps the result only in the built
+/// circuit. A caller that has to know the value from the netlist alone asks
+/// here instead of evaluating a second time against a context of its own.
+///
+/// `None` says the expression is not a constant of this deck: one that reads
+/// circuit state builds a behavioural element, which has no scalar value, and
+/// one that does not evaluate at all is left to the device's own resolution to
+/// refuse by name.
+pub(in crate::engine) fn resolved_element_value_expression(
+    netlist: &Netlist,
+    temperature_kelvin: f64,
+    expression: &str,
+) -> Option<f64> {
+    let mut context = instance_parameter_eval_context(netlist, temperature_kelvin);
+    crate::netlist::expr::materialize_available_parameter_expressions(&mut context);
+    let prepared =
+        crate::netlist::expr::prepare_behavioral_expression(expression, &context).ok()?;
+    if super::behavioral::expression_references_circuit_state(&prepared) {
+        return None;
+    }
+    let value = context
+        .evaluate_parameter_binding(expression)
+        .map(|(value, _)| value.re)
+        .or_else(|_| crate::netlist::expr::eval_expression(&prepared, &context))
+        .ok()?;
+    value.is_finite().then_some(value)
+}
+
 /// [`instance_parameter_eval_context`] built at most once per instance, and
 /// only for an instance that has an expression to evaluate.
 ///

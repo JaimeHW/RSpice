@@ -25,7 +25,8 @@ use crate::simulation::config::{
     PoleZeroConfig, PzAnalysisType, SensitivityConfig, TransientAnalysisConfig,
 };
 use crate::simulation::execution::{
-    ExecutionArtifactEnvelope, TouchstoneExportPolicy, canonical_analysis_kind,
+    ExecutionArtifactEnvelope, ExecutionArtifactKind, TouchstoneExportPolicy,
+    canonical_analysis_kind,
 };
 use crate::simulation::multi_run::{
     AnalysisSpec, FrequencySweep, HbToneSpec, OptimizationAlgorithm, OptimizationGoal,
@@ -47,10 +48,9 @@ use crate::state::{
     DigitalEventPointEvidence, DigitalEventTraceEvidence, MonteCarloVariableMetadata,
     OperatingPointValue, PeriodicNoiseOutputQuantity, RealEventPointEvidence,
     RealEventTraceEvidence, ReliabilityCheckpointEvidence, ReliabilityDeviceEvidence,
-    ReliabilityShiftEvidence, ReliabilityStressEvidence, SensitivityResultMode,
-    SensitivityResultRow, SimulationRunIntent, SimulationRunLifecycle, SoaEvaluationEvidence,
-    SoaParameterEvidence, SoaRuleVerdictEvidence, SoaViolationEvidence,
-    SoaViolationSeverityEvidence, WaveformData,
+    ReliabilityShiftEvidence, ReliabilityStressEvidence, SimulationRunIntent,
+    SimulationRunLifecycle, SoaEvaluationEvidence, SoaParameterEvidence, SoaRuleVerdictEvidence,
+    SoaViolationEvidence, SoaViolationSeverityEvidence, WaveformData,
 };
 use crate::workbench::app_state::{ActiveViewer, AppState, SpecializedViewerCacheProvenance};
 use crate::workbench::workflows::export_workflow::ExportWorkflowIo;
@@ -67,9 +67,11 @@ mod manual_deck;
 pub(crate) mod prepared_run;
 #[cfg(test)]
 mod projection_ratchet;
+mod recorded_fft_result;
 mod results_convert;
 mod results_post;
 mod results_update;
+mod sensitivity_result;
 pub(crate) mod spice_value;
 mod touchstone;
 mod transient_post;
@@ -1664,6 +1666,16 @@ impl SimulationController {
                         })
                         .unwrap_or_else(|| "Analysis".to_owned());
 
+                    // A short FFT record is a successful result with no
+                    // spectrum. It is stated on the Console as well as on the
+                    // sheet, because the reader is looking at the run here.
+                    if let crate::simulation::SimulationResult::Fft { spectrum, .. } = &sim_result
+                        && let Some(notice) =
+                            recorded_fft_result::incomplete_history_notice(spectrum)
+                    {
+                        state.push_sim_message(ConsoleMessage::warning(notice));
+                    }
+
                     // Convert SimulationResult to AnalysisResult and add to run
                     let analysis_type = self
                         .current_spec
@@ -1724,23 +1736,42 @@ impl SimulationController {
                         })
                         .flatten()
                         .collect::<Vec<_>>();
-                    let periodic_artifact_required = self
+                    // A recorded FFT reads no waveform at all: it selects the
+                    // spectrum the engine already computed inside this solve.
+                    let recorded_spectra_required = self
                         .current_provenance
                         .as_ref()
                         .map(|provenance| provenance.source_instance_id())
                         .is_some_and(|producer| {
                             self.pending_analyses.iter().any(|task| {
                                 task.dependencies().contains(&producer)
-                                    && matches!(
-                                        task.spec(),
-                                        AnalysisSpec::Pac
-                                            | AnalysisSpec::Pxf
-                                            | AnalysisSpec::Pnoise
-                                            | AnalysisSpec::Pstb
-                                            | AnalysisSpec::Psp { .. }
-                                    )
+                                    && matches!(task.spec(), AnalysisSpec::Fft { .. })
                             })
                         });
+                    // Which retained state a waiting consumer asked this
+                    // producer for, read off the same table the queue bound it
+                    // with rather than a second list of consumer kinds: the
+                    // periodic small-signal family chooses its carrier, so
+                    // "does anything need a PSS state from me" and "does
+                    // anything need an HB state from me" are the same question
+                    // asked of two answers.
+                    let artifact_consumers = |kind: ExecutionArtifactKind| {
+                        self.current_provenance
+                            .as_ref()
+                            .map(|provenance| provenance.source_instance_id())
+                            .is_some_and(|producer| {
+                                self.pending_analyses.iter().any(|task| {
+                                    task.dependencies().contains(&producer)
+                                        && crate::simulation::execution::required_artifact_kinds(
+                                            task.spec(),
+                                            task.spec_options(),
+                                        )
+                                        .contains(&kind)
+                                })
+                            })
+                    };
+                    let periodic_artifact_required =
+                        artifact_consumers(ExecutionArtifactKind::PeriodicState);
                     let dc_seed_artifact_required = self
                         .current_provenance
                         .as_ref()
@@ -1757,19 +1788,7 @@ impl SimulationController {
                                     )
                             })
                         });
-                    let hb_artifact_required = self
-                        .current_provenance
-                        .as_ref()
-                        .map(|provenance| provenance.source_instance_id())
-                        .is_some_and(|producer| {
-                            self.pending_analyses.iter().any(|task| {
-                                task.dependencies().contains(&producer)
-                                    && matches!(
-                                        task.spec(),
-                                        AnalysisSpec::Hbsp { .. } | AnalysisSpec::Hbnoise { .. }
-                                    )
-                            })
-                        });
+                    let hb_artifact_required = artifact_consumers(ExecutionArtifactKind::HbState);
                     let produced_artifact = match (
                         self.current_spec.as_ref(),
                         self.current_provenance.as_ref(),
@@ -1779,7 +1798,9 @@ impl SimulationController {
                             Some(AnalysisSpec::Transient { .. }),
                             Some(provenance),
                             Some(config_digest),
-                        ) if !required_artifact_waveforms.is_empty() => {
+                        ) if !required_artifact_waveforms.is_empty()
+                            || recorded_spectra_required =>
+                        {
                             ExecutionArtifactEnvelope::from_transient_result(
                                 provenance.prepared_snapshot_digest(),
                                 provenance.source_instance_id(),
@@ -1787,6 +1808,7 @@ impl SimulationController {
                                 config_digest,
                                 &sim_result,
                                 &required_artifact_waveforms,
+                                recorded_spectra_required,
                             )
                             .map_err(|error| {
                                 format!(

@@ -1791,3 +1791,211 @@ fn point_attribution_round_trips_and_cannot_masquerade_as_a_legacy_schema() {
             .contains("pvt_point was introduced after schema v5")
     );
 }
+
+/// A results history written at v27 restores under the current digest
+/// function, without a legacy encoder.
+///
+/// Nothing in the recorded-FFT change moved the digest of any shape a v27
+/// document could hold: the payload arm is new, its tag is the next unused
+/// one, and the encoding version did not move. That claim is checkable, and
+/// this is the check — the digests are not resealed, they are re-validated.
+#[test]
+fn a_results_history_saved_at_schema_27_restores_with_its_digests_unchanged() {
+    let mut run = SimulationRun::new(42);
+    run.mark_running().expect("fixture run starts");
+    run.finish_lifecycle(SimulationRunLifecycle::Completed)
+        .expect("fixture run completes");
+    run.add_analysis(
+        AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
+            WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.0, 0.8], "#00aaff"),
+        ]),
+    );
+    seal_legacy_unattributed(&mut run);
+    let mut simulation = SimulationState::default();
+    simulation.runs = vec![run].into();
+    simulation.next_run_id = 42;
+
+    let current = ProjectSimulationResults::from_state(&simulation);
+    let digests = current.runs[0]
+        .analyses
+        .iter()
+        .map(|analysis| analysis.result_data_digest.clone())
+        .collect::<Vec<_>>();
+    let mut at_v27 = current;
+    at_v27.schema_version = CURRENT_IMPULSE_RESULTS_SCHEMA_VERSION;
+
+    at_v27
+        .migrate_to_current(ProjectId::new())
+        .expect("a v27 history migrates");
+    assert_eq!(
+        at_v27.schema_version,
+        PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION
+    );
+    let after = at_v27.runs[0]
+        .analyses
+        .iter()
+        .map(|analysis| analysis.result_data_digest.clone())
+        .collect::<Vec<_>>();
+    assert_eq!(after, digests, "no existing retained digest moved");
+}
+
+/// A recorded FFT payload cannot be smuggled into an older schema.
+#[test]
+fn a_result_schema_before_28_cannot_carry_a_recorded_fft() {
+    use crate::state::{
+        AnalysisResultPayload, FftSpectrumEvidence, FftSpectrumFormatEvidence,
+        FftSpectrumModeEvidence, FftSpectrumStatusEvidence,
+    };
+
+    let spectrum = FftSpectrumEvidence {
+        status: FftSpectrumStatusEvidence::Complete,
+        output: "V(OUT)".to_owned(),
+        physical_type: "voltage".to_owned(),
+        start_time_s: 0.0,
+        stop_time_s: 8.0e-3,
+        sample_interval_s: 8.0e-3 / 256.0,
+        point_count: 256,
+        accurate_sampling: true,
+        format: FftSpectrumFormatEvidence::Unnormalized,
+        mode: FftSpectrumModeEvidence::HspiceCompatible,
+        window: "RECT".to_owned(),
+        alpha: 3.0,
+        coherent_gain: 1.0,
+        frequency_resolution_hz: 125.0,
+        fundamental_bin: 8,
+        minimum_metric_bin: 1,
+        maximum_metric_bin: 128,
+        metrics: None,
+    };
+    let mut run = SimulationRun::new(43);
+    run.mark_running().expect("fixture run starts");
+    run.finish_lifecycle(SimulationRunLifecycle::Completed)
+        .expect("fixture run completes");
+    run.add_analysis(
+        AnalysisResult::new(1, AnalysisType::Fourier, "FFT")
+            .with_result_payload(AnalysisResultPayload::FftSpectrum { spectrum }),
+    );
+    seal_legacy_unattributed(&mut run);
+    let mut simulation = SimulationState::default();
+    simulation.runs = vec![run].into();
+    simulation.next_run_id = 43;
+
+    let mut smuggled = ProjectSimulationResults::from_state(&simulation);
+    smuggled.schema_version = CURRENT_IMPULSE_RESULTS_SCHEMA_VERSION;
+    assert!(
+        smuggled
+            .migrate_to_current(ProjectId::new())
+            .expect_err("a v27 record cannot carry a recorded FFT")
+            .contains("result schemas before v28 cannot contain recorded FFT spectra")
+    );
+}
+
+/// A results history written at v28 restores under the current digest
+/// function, without a legacy encoder.
+///
+/// Nothing in the sensitivity-study change moved the digest of any shape a
+/// v28 document could hold: the payload arm is new, its tag is the next
+/// unused one, the frozen single-point arm was not edited, and the encoding
+/// version did not move. That claim is checkable, and this is the check — the
+/// digests are not resealed, they are re-validated.
+#[test]
+fn a_results_history_saved_before_the_study_restores_with_its_digests_unchanged() {
+    use crate::state::{AnalysisResultPayload, SensitivityResultMode, SensitivityResultRow};
+
+    let mut run = SimulationRun::new(44);
+    run.mark_running().expect("fixture run starts");
+    run.finish_lifecycle(SimulationRunLifecycle::Completed)
+        .expect("fixture run completes");
+    run.add_analysis(
+        AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
+            WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.0, 0.8], "#00aaff"),
+        ]),
+    );
+    // The frozen payload, exactly as a build before this one wrote it.
+    run.add_analysis(
+        AnalysisResult::new(2, AnalysisType::Sensitivity, "SENS").with_result_payload(
+            AnalysisResultPayload::Sensitivity {
+                output: "V(out)".to_owned(),
+                result_mode: SensitivityResultMode::Dc,
+                rows: vec![SensitivityResultRow {
+                    parameter: "GAIN".to_owned(),
+                    raw: (2.0).into(),
+                    normalized: (0.5).into(),
+                }],
+            },
+        ),
+    );
+    seal_legacy_unattributed(&mut run);
+    let mut simulation = SimulationState::default();
+    simulation.runs = vec![run].into();
+    simulation.next_run_id = 44;
+
+    let current = ProjectSimulationResults::from_state(&simulation);
+    let digests = current.runs[0]
+        .analyses
+        .iter()
+        .map(|analysis| analysis.result_data_digest.clone())
+        .collect::<Vec<_>>();
+    let mut at_v28 = current;
+    at_v28.schema_version = RECORDED_FFT_RESULTS_SCHEMA_VERSION;
+
+    at_v28
+        .migrate_to_current(ProjectId::new())
+        .expect("a v28 history migrates");
+    assert_eq!(
+        at_v28.schema_version,
+        SENSITIVITY_STUDY_RESULTS_SCHEMA_VERSION
+    );
+    let after = at_v28.runs[0]
+        .analyses
+        .iter()
+        .map(|analysis| analysis.result_data_digest.clone())
+        .collect::<Vec<_>>();
+    assert_eq!(after, digests, "no existing retained digest moved");
+}
+
+/// A sensitivity study cannot be smuggled into an older schema.
+#[test]
+fn a_result_schema_before_the_study_cannot_carry_one() {
+    use crate::state::{
+        AnalysisResultPayload, SensitivityBasisEvidence, SensitivityStudyEvidence,
+        SensitivityStudyRow,
+    };
+    use rspice_core::analysis::sensitivity::SensitivityValue;
+
+    let mut run = SimulationRun::new(45);
+    run.mark_running().expect("fixture run starts");
+    run.finish_lifecycle(SimulationRunLifecycle::Completed)
+        .expect("fixture run completes");
+    run.add_analysis(
+        AnalysisResult::new(1, AnalysisType::Sensitivity, "SENS").with_result_payload(
+            AnalysisResultPayload::SensitivityStudy {
+                evidence: std::sync::Arc::new(SensitivityStudyEvidence {
+                    output: "V(OUT)".to_owned(),
+                    filter: "PARAM:*".to_owned(),
+                    basis: SensitivityBasisEvidence::Dc { output: 1.0 },
+                    rows: vec![SensitivityStudyRow {
+                        parameter: "PARAM:GAIN".to_owned(),
+                        nominal_value: 2.0,
+                        raw: vec![SensitivityValue::Available(0.5)],
+                        normalized: vec![SensitivityValue::Available(1.0)],
+                        phase: Vec::new(),
+                    }],
+                }),
+            },
+        ),
+    );
+    seal_legacy_unattributed(&mut run);
+    let mut simulation = SimulationState::default();
+    simulation.runs = vec![run].into();
+    simulation.next_run_id = 45;
+
+    let mut smuggled = ProjectSimulationResults::from_state(&simulation);
+    smuggled.schema_version = RECORDED_FFT_RESULTS_SCHEMA_VERSION;
+    assert!(
+        smuggled
+            .migrate_to_current(ProjectId::new())
+            .expect_err("a v28 record cannot carry a sensitivity study")
+            .contains("result schemas before v29 cannot contain sensitivity study evidence")
+    );
+}

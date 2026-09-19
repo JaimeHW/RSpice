@@ -69,7 +69,7 @@ pub(super) fn selected_analysis(
     let contextual_dependency_error =
         contextual_dependency_error(plan, id, &closure_ids, dependency_sources);
     let repair_context = dependency_sources.dependency_repair_context();
-    let prerequisite_roles = instance.prerequisite_roles().to_vec();
+    let prerequisite_roles = plan.required_prerequisite_roles(id);
     let prerequisite_candidates = prerequisite_roles
         .iter()
         .map(|prerequisite| {
@@ -285,9 +285,7 @@ pub(super) fn insert_analysis_instance(
     let result: InsertAnalysisResult = match app.state.sim_setup.stable_analysis_plan_mut() {
         Ok(plan) => match plan.insert(kind) {
             Ok((id, insert_receipt)) => {
-                let has_prerequisites = plan
-                    .instance(id)
-                    .is_some_and(|instance| !instance.prerequisite_roles().is_empty());
+                let has_prerequisites = !plan.required_prerequisite_roles(id).is_empty();
                 let bind_receipt = has_prerequisites.then(|| {
                     plan.auto_bind_dependencies_with_context(id, &repair_context)
                         .map_err(|error| error.to_string())
@@ -948,15 +946,17 @@ pub(super) fn dependency_repair_cta_with_context(
         _ => None,
     };
     let complete_closure_is_repairable = |dependent| {
-        plan.instance(dependent).is_some_and(|instance| {
-            instance.prerequisite_roles().iter().all(|prerequisite| {
-                plan.dependency_prerequisite_is_repairable_with_context(
-                    dependent,
-                    *prerequisite,
-                    repair_context,
-                )
-            })
-        })
+        plan.instance(dependent).is_some()
+            && plan
+                .required_prerequisite_roles(dependent)
+                .iter()
+                .all(|prerequisite| {
+                    plan.dependency_prerequisite_is_repairable_with_context(
+                        dependent,
+                        *prerequisite,
+                        repair_context,
+                    )
+                })
     };
     // Corrupt legacy state can contain an undeclared edge before a genuinely
     // repairable missing role. Do not let that unrelated issue suppress the

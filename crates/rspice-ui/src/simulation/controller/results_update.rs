@@ -251,44 +251,58 @@ impl SimulationController {
                 }
             }
 
-            SimulationResult::Sensitivity {
-                sensitivities,
-                normalized,
-                ..
-            } => {
+            SimulationResult::SensitivityStudy { evidence } => {
                 use rspice_core::analysis::sensitivity::SensitivityValue;
-                let unavailable = normalized
-                    .values()
+                let points = evidence.point_count();
+                let unavailable = evidence
+                    .rows
+                    .iter()
+                    .flat_map(|row| &row.normalized)
                     .filter(|value| value.value().is_none())
                     .count();
+                let band = if points > 1 {
+                    format!(", {points} frequencies")
+                } else {
+                    String::new()
+                };
                 state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(
-                    "Sensitivity Analysis: {} parameters, {unavailable} normalized values unavailable", sensitivities.len()
+                    "Sensitivity: {} variables{band}, {unavailable} normalized values unavailable",
+                    evidence.rows.len()
                 )));
-                let mut sorted: Vec<_> = normalized.iter().collect();
-                sorted.sort_by(|a, b| {
+                // The listing is read at the first solved point, which is the
+                // point the sheet opens at. Ten rows of one frequency is a
+                // summary; ten rows times sixty-one frequencies is a log.
+                let mut sorted: Vec<_> = evidence.rows.iter().collect();
+                sorted.sort_by(|left, right| {
                     use std::cmp::Ordering;
-                    match (a.1.value(), b.1.value()) {
-                        (Some(a), Some(b)) => b.abs().total_cmp(&a.abs()),
+                    let magnitude = |row: &crate::state::SensitivityStudyRow| {
+                        row.normalized
+                            .first()
+                            .copied()
+                            .and_then(|value| value.value())
+                    };
+                    match (magnitude(left), magnitude(right)) {
+                        (Some(left), Some(right)) => right.abs().total_cmp(&left.abs()),
                         (Some(_), None) => Ordering::Less,
                         (None, Some(_)) => Ordering::Greater,
                         _ => Ordering::Equal,
                     }
-                    .then_with(|| a.0.cmp(b.0))
+                    .then_with(|| left.parameter.cmp(&right.parameter))
                 });
-                let format_quantity = |quantity: SensitivityValue<f64>| match quantity {
-                    SensitivityValue::Available(value) => format!("{value:.3e}"),
-                    SensitivityValue::Unavailable { unavailable } => {
+                let format_quantity = |quantity: Option<SensitivityValue<f64>>| match quantity {
+                    Some(SensitivityValue::Available(value)) => format!("{value:.3e}"),
+                    Some(SensitivityValue::Unavailable { unavailable }) => {
                         format!("unavailable ({})", unavailable.as_str())
                     }
+                    None => "not retained".to_owned(),
                 };
-                for (parameter, normalized) in sorted.into_iter().take(10) {
-                    if let Some(raw) = sensitivities.get(parameter) {
-                        state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(
-                            "  {parameter}: derivative = {}, normalized = {}",
-                            format_quantity(*raw),
-                            format_quantity(*normalized)
-                        )));
-                    }
+                for row in sorted.into_iter().take(10) {
+                    state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(
+                        "  {}: derivative = {}, normalized = {}",
+                        row.parameter,
+                        format_quantity(row.raw.first().copied()),
+                        format_quantity(row.normalized.first().copied())
+                    )));
                 }
             }
 
@@ -439,6 +453,15 @@ impl SimulationController {
                     "SOA: {} sampled points, {} violations",
                     time.len(),
                     violations.len()
+                )));
+            }
+
+            SimulationResult::Fft { spectrum, .. } => {
+                state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(
+                    "FFT: {} coefficients of {} over {} points",
+                    spectrum.frequency.len(),
+                    spectrum.evidence.output,
+                    spectrum.evidence.point_count
                 )));
             }
 

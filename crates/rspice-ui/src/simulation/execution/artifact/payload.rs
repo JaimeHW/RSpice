@@ -14,6 +14,15 @@ pub(in crate::simulation) struct TransientTrajectoryArtifact {
     waveforms: BTreeMap<String, Vec<f64>>,
     #[serde(default)]
     convergence: Option<Arc<crate::state::TransientConvergenceEvidence>>,
+    /// Spectra the producing solve recorded for the `.fft` cards it carried.
+    ///
+    /// They ride this envelope rather than a sibling artifact kind because the
+    /// controller holds one artifact per producer: a transient with both a
+    /// Fourier and an FFT dependent has to hand both from one payload.
+    /// Defaulted, so an artifact without spectra is byte-identical to one
+    /// produced before they existed — including its digest.
+    #[serde(default)]
+    spectra: Vec<Arc<crate::simulation::results::RecordedFftSpectrum>>,
 }
 
 mod f64_bits_vec {
@@ -123,6 +132,16 @@ impl TransientTrajectoryArtifact {
             .map(|(_, values)| values.as_slice())
     }
 
+    /// The spectrum whose request key is `key`, if this solve recorded one.
+    pub(in crate::simulation) fn spectrum(
+        &self,
+        key: &str,
+    ) -> Option<&Arc<crate::simulation::results::RecordedFftSpectrum>> {
+        self.spectra
+            .iter()
+            .find(|spectrum| spectrum.request_key == key)
+    }
+
     fn validate(&self) -> Result<(), ExecutionArtifactError> {
         let numeric_values = self
             .waveforms
@@ -133,7 +152,13 @@ impl TransientTrajectoryArtifact {
             .saturating_add(self.convergence.as_deref().map_or(
                 0,
                 crate::state::TransientConvergenceEvidence::transfer_value_count,
-            ));
+            ))
+            .saturating_add(
+                self.spectra
+                    .iter()
+                    .map(|spectrum| spectrum.numeric_value_count())
+                    .sum(),
+            );
         if numeric_values > PeriodicStateArtifact::MAX_NUMERIC_VALUES {
             return Err(ExecutionArtifactError::InvalidPayload(
                 "Transient trajectory and convergence evidence exceed the numeric payload limit"
@@ -165,10 +190,25 @@ impl TransientTrajectoryArtifact {
                 "transient trajectory time axis is not strictly increasing".to_owned(),
             ));
         }
-        if self.waveforms.is_empty() {
+        // A trajectory with no waveform is meaningful only when it carries
+        // something else this solve produced. A recorded spectrum is exactly
+        // that: an FFT consumer reads no waveform at all.
+        if self.waveforms.is_empty() && self.spectra.is_empty() {
             return Err(ExecutionArtifactError::InvalidPayload(
                 "transient trajectory contains no waveforms".to_owned(),
             ));
+        }
+        let mut keys = std::collections::BTreeSet::new();
+        for spectrum in &self.spectra {
+            spectrum
+                .validate()
+                .map_err(ExecutionArtifactError::InvalidPayload)?;
+            if !keys.insert(spectrum.request_key.clone()) {
+                return Err(ExecutionArtifactError::InvalidPayload(format!(
+                    "transient trajectory repeats recorded FFT request '{}'",
+                    spectrum.request_key
+                )));
+            }
         }
         for (name, values) in &self.waveforms {
             if name.trim().is_empty() {
@@ -207,6 +247,21 @@ impl TransientTrajectoryArtifact {
             writer.sequence(values.len());
             for value in values {
                 writer.f64(*value);
+            }
+        }
+        // A conditional tail, so a trajectory that recorded no spectrum
+        // digests exactly as it did before spectra existed.
+        if !self.spectra.is_empty() {
+            writer.domain("recorded-fft-spectra");
+            writer.sequence(self.spectra.len());
+            for spectrum in &self.spectra {
+                writer.string(&spectrum.request_key);
+                for column in [&spectrum.frequency, &spectrum.real, &spectrum.imaginary] {
+                    writer.sequence(column.len());
+                    for value in column {
+                        writer.f64(*value);
+                    }
+                }
             }
         }
         writer.finish()
@@ -861,17 +916,21 @@ impl ExecutionArtifactEnvelope {
         producer_config_digest: ContentDigest,
         result: &SimulationResult,
         required_waveforms: &[String],
+        carry_spectra: bool,
     ) -> Result<Option<Self>, ExecutionArtifactError> {
         let SimulationResult::Transient {
             time,
             waveforms,
             convergence,
+            spectra,
             ..
         } = result
         else {
             return Ok(None);
         };
-        if required_waveforms.is_empty() {
+        // An FFT consumer reads no waveform, so a request that asks only for
+        // the recorded spectra is a complete request.
+        if required_waveforms.is_empty() && !carry_spectra {
             return Err(ExecutionArtifactError::InvalidPayload(
                 "transient artifact request contains no required waveforms".to_owned(),
             ));
@@ -921,10 +980,25 @@ impl ExecutionArtifactEnvelope {
                 )));
             }
         }
+        // Two FFT instances with identical requests put the same card in the
+        // deck twice, so the engine returns the same spectrum twice. They are
+        // equal numbers under one key, and one copy is what the artifact holds.
+        let mut carried: Vec<Arc<crate::simulation::results::RecordedFftSpectrum>> = Vec::new();
+        if carry_spectra {
+            for spectrum in spectra {
+                if !carried
+                    .iter()
+                    .any(|held| held.request_key == spectrum.request_key)
+                {
+                    carried.push(Arc::clone(spectrum));
+                }
+            }
+        }
         let trajectory = TransientTrajectoryArtifact {
             time: time.clone(),
             waveforms: artifact_waveforms,
             convergence: convergence.clone(),
+            spectra: carried,
         };
         trajectory.validate()?;
         let payload_digest = trajectory.digest();
@@ -1240,24 +1314,10 @@ impl ResolvedExecutionDependencies {
     pub(in crate::simulation) fn validate_for_spec(
         &self,
         spec: &AnalysisSpec,
+        options: &SpecExecutionOptions,
     ) -> Result<(), ExecutionArtifactError> {
-        let expected_kind = match spec {
-            AnalysisSpec::Fourier { .. } => Some(ExecutionArtifactKind::TransientTrajectory),
-            AnalysisSpec::Hbsp { .. } | AnalysisSpec::Hbnoise { .. } => {
-                Some(ExecutionArtifactKind::HbState)
-            }
-            AnalysisSpec::Pss {
-                method: PssMethod::Shooting,
-                ..
-            } => Some(ExecutionArtifactKind::DcOperatingPointSeed),
-            AnalysisSpec::Pac
-            | AnalysisSpec::Pxf
-            | AnalysisSpec::Pnoise
-            | AnalysisSpec::Pstb
-            | AnalysisSpec::Psp { .. } => Some(ExecutionArtifactKind::PeriodicState),
-            _ => None,
-        };
-        let expected_count = usize::from(expected_kind.is_some());
+        let expected_kinds = required_artifact_kinds(spec, options);
+        let expected_count = usize::from(!expected_kinds.is_empty());
         if self.bindings.len() != expected_count || self.artifacts.len() != expected_count {
             return Err(ExecutionArtifactError::ContractMismatch(format!(
                 "{} requires {expected_count} typed execution artifact(s), received {} binding(s) and {} artifact(s)",
@@ -1281,14 +1341,29 @@ impl ResolvedExecutionDependencies {
             )
         })?;
         let binding = &self.bindings[0];
-        if Some(binding.kind) != expected_kind {
+        if !expected_kinds.contains(&binding.kind) {
             return Err(ExecutionArtifactError::ContractMismatch(format!(
-                "{} requires a {:?} artifact",
+                "{} requires a {} artifact",
                 spec.run_type().display_name(),
-                expected_kind.expect("artifact-backed task has an expected kind")
+                expected_kinds
+                    .iter()
+                    .map(|kind| kind.producer_label())
+                    .collect::<Vec<_>>()
+                    .join(" or ")
             )));
         }
         self.artifacts[0].validate_against(snapshot_digest, binding)
+    }
+
+    /// Which typed artifact this task was resolved against, or `None` for a
+    /// task that binds none.
+    ///
+    /// The dispatch reads the carrier family off the artifact rather than off
+    /// the request, because the artifact is the thing that was actually
+    /// produced; the request's own `FROM=` is checked against it inside the
+    /// service, where a mismatch is one sentence naming both.
+    pub(in crate::simulation) fn artifact_kind(&self) -> Option<ExecutionArtifactKind> {
+        self.bindings.first().map(|binding| binding.kind)
     }
 
     pub(in crate::simulation) fn validate_for_config(&self) -> Result<(), ExecutionArtifactError> {
@@ -1445,8 +1520,19 @@ impl ResolvedExecutionDependencies {
                                 buffers.push(values);
                                 reference
                             }));
+                        let spectra = trajectory
+                            .spectra
+                            .iter()
+                            .map(|spectrum| RecordedFftSpectrumTransferMetadata {
+                                request_key: spectrum.request_key.clone(),
+                                evidence: spectrum.evidence.clone(),
+                                frequency: push_transfer_slice(&mut buffers, &spectrum.frequency),
+                                real: push_transfer_slice(&mut buffers, &spectrum.real),
+                                imaginary: push_transfer_slice(&mut buffers, &spectrum.imaginary),
+                            })
+                            .collect();
                         ExecutionArtifactPayloadTransferMetadata::TransientTrajectory(Box::new(
-                            TransientTrajectoryTransferMetadata { time, waveforms, convergence },
+                            TransientTrajectoryTransferMetadata { time, waveforms, convergence, spectra },
                         ))
                     }
                     ExecutionArtifactPayload::PeriodicState(periodic) => {
@@ -1702,7 +1788,25 @@ impl ResolvedExecutionDependencies {
                             quality.into_evidence(|reference| reference.len, |reference| take_transfer_buffer(&mut buffers, reference)
                                 .map_err(|error| error.to_string())))
                             .transpose().map_err(ExecutionArtifactError::Transport)?.map(Arc::new);
-                        let trajectory = TransientTrajectoryArtifact { time, waveforms, convergence };
+                        let mut spectra = Vec::with_capacity(metadata.spectra.len());
+                        for spectrum in metadata.spectra {
+                            spectra.push(Arc::new(
+                                crate::simulation::results::RecordedFftSpectrum {
+                                    request_key: spectrum.request_key,
+                                    evidence: spectrum.evidence,
+                                    frequency: take_transfer_buffer(
+                                        &mut buffers,
+                                        spectrum.frequency,
+                                    )?,
+                                    real: take_transfer_buffer(&mut buffers, spectrum.real)?,
+                                    imaginary: take_transfer_buffer(
+                                        &mut buffers,
+                                        spectrum.imaginary,
+                                    )?,
+                                },
+                            ));
+                        }
+                        let trajectory = TransientTrajectoryArtifact { time, waveforms, convergence, spectra };
                         trajectory.validate()?;
                         ExecutionArtifactPayload::TransientTrajectory(Arc::new(trajectory))
                     }
@@ -2017,6 +2121,18 @@ struct TransientTrajectoryTransferMetadata {
     waveforms: BTreeMap<String, TransferBufferRef>,
     #[serde(default)]
     convergence: Option<crate::simulation::results::ConvergenceTransport<TransferBufferRef>>,
+    #[serde(default)]
+    spectra: Vec<RecordedFftSpectrumTransferMetadata>,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+struct RecordedFftSpectrumTransferMetadata {
+    request_key: String,
+    evidence: crate::state::FftSpectrumEvidence,
+    frequency: TransferBufferRef,
+    real: TransferBufferRef,
+    imaginary: TransferBufferRef,
 }
 
 #[cfg(any(target_arch = "wasm32", test))]

@@ -54,7 +54,7 @@ R2 n_out 0 10k
 /// or ask for something no default can invent — and which ones those are is
 /// [`KINDS_THAT_STATE_NO_DIRECTIVE`], not something the reader has to work out
 /// from the gap.
-const KINDS_THAT_EMIT_A_DIRECTIVE: usize = 29;
+const KINDS_THAT_EMIT_A_DIRECTIVE: usize = 30;
 
 /// The kinds whose default draft reaches no directive, and what they are
 /// waiting for.
@@ -884,4 +884,77 @@ fn the_monte_carlo_directive_carries_only_the_parameters_it_was_given() {
         ["RLOAD".to_owned(), "CLOAD".to_owned()],
         "the card carries the authored names in the authored order: {named}"
     );
+}
+
+/// The filter and the band the sensitivity form writes are the ones the
+/// engine reads back off the card.
+///
+/// The card is the contract between the Studio and `rspice run`: a filter the
+/// parser tokenizes differently, or a band it grades differently, would make
+/// one deck two analyses. So this asserts against the parsed card rather than
+/// against the emitted string.
+#[test]
+fn a_swept_sensitivity_card_carries_its_sweep() {
+    use crate::simulation::plan::AnalysisDraft;
+    use rspice_core::netlist::{AnalysisCommand, FreqVariation, parse_netlist};
+
+    let card_of = |edit: &dyn Fn(&mut crate::simulation::dialog::SensDialogState)| {
+        let mut draft = fixture_draft(AnalysisKind::Sensitivity);
+        let AnalysisDraft::Sensitivity(sens) = &mut draft else {
+            panic!("the sensitivity kind carries a sensitivity draft");
+        };
+        edit(sens);
+        let state = engine_facing_state(&draft);
+        let directive = SimulationController::new()
+            .analysis_draft_directive(&state, &draft)
+            .expect("a sensitivity draft emits a card");
+        let deck = format!("{FIXTURE_DECK}{directive}\n.end\n");
+        let netlist = parse_netlist(&deck)
+            .unwrap_or_else(|error| panic!("the .SENS directive must parse: {error}\n{deck}"));
+        let [
+            AnalysisCommand::Sensitivity {
+                filters, ac_sweep, ..
+            },
+        ] = netlist.analyses.as_slice()
+        else {
+            panic!(
+                "a sensitivity plan writes exactly one .SENS card: {:?}",
+                netlist.analyses
+            );
+        };
+        (filters.clone(), *ac_sweep)
+    };
+
+    // A new analysis asks the engine's own default question and says so by
+    // saying nothing: no filter tokens, no AC clause.
+    let (filters, sweep) = card_of(&|_| {});
+    assert!(filters.is_empty(), "{filters:?}");
+    assert!(sweep.is_none());
+
+    let (filters, _) = card_of(&|sens| sens.filter = "r1, param:gain".to_owned());
+    assert_eq!(filters, ["R1".to_owned(), "PARAM:GAIN".to_owned()]);
+
+    // One frequency is still the degenerate decade sweep it always was.
+    let (_, sweep) = card_of(&|sens| {
+        sens.sens_type_idx = 1;
+        sens.ac_freq = "1Meg".to_owned();
+    });
+    let sweep = sweep.expect("an AC card carries a sweep clause");
+    assert_eq!(sweep.variation, FreqVariation::Dec);
+    assert_eq!(sweep.points, 1);
+    assert_eq!(sweep.start_freq, 1.0e6);
+    assert_eq!(sweep.stop_freq, 1.0e6);
+
+    let (_, sweep) = card_of(&|sens| {
+        sens.sens_type_idx = 1;
+        sens.ac_freq = "10".to_owned();
+        sens.ac_stop = "1Meg".to_owned();
+        sens.ac_points = "7".to_owned();
+        sens.ac_sweep_idx = 2;
+    });
+    let sweep = sweep.expect("a swept AC card carries its band");
+    assert_eq!(sweep.variation, FreqVariation::Lin);
+    assert_eq!(sweep.points, 7);
+    assert_eq!(sweep.start_freq, 10.0);
+    assert_eq!(sweep.stop_freq, 1.0e6);
 }

@@ -15,10 +15,12 @@ pub(crate) use convergence_transport::ConvergenceTransport;
 mod measurements;
 mod monte_carlo;
 mod operating_point;
+mod recorded_fft;
 mod waveform;
 
 pub use monte_carlo::MonteCarloVariableResult;
 pub use operating_point::DcOpResult;
+pub use recorded_fft::RecordedFftSpectrum;
 pub use waveform::WaveformData;
 
 /// The waveform a stability run retains its Nyquist contour under.
@@ -183,6 +185,14 @@ pub enum SimulationResult {
         /// onto `time`: the instant a digital node changed is the datum, and
         /// the analog grid would only approximate it.
         events: TransientEventHistory,
+        /// Spectra the engine computed for the `.fft` cards this solve carried.
+        ///
+        /// Recorded rather than derived: a `.fft` card makes every requested
+        /// sample time a solver stop, so its spectrum belongs to this solve and
+        /// nothing downstream can reproduce it from the retained waveforms.
+        /// Empty for a transient that carried no card, which is every transient
+        /// with no bound FFT analysis.
+        spectra: Vec<std::sync::Arc<RecordedFftSpectrum>>,
     },
 
     /// AC analysis results
@@ -279,18 +289,10 @@ pub enum SimulationResult {
         evidence: std::sync::Arc<crate::state::DcMismatchEvidence>,
     },
 
-    /// Sensitivity analysis results
-    Sensitivity {
-        /// Canonical output expression evaluated by the analysis.
-        output: String,
-        /// Whether the analysis used an AC small-signal basis.
-        ac_mode: bool,
-        /// Resolved AC frequency in hertz. `None` for DC sensitivity.
-        frequency_hz: Option<f64>,
-        /// Parameter sensitivities
-        sensitivities: HashMap<String, rspice_core::analysis::sensitivity::SensitivityValue<f64>>,
-        /// Normalized sensitivities (% change in output / % change in param)
-        normalized: HashMap<String, rspice_core::analysis::sensitivity::SensitivityValue<f64>>,
+    /// One `.SENS` study, exactly as the engine's complete entries answered
+    /// it: one filter, one grid, and one column per variable per point.
+    SensitivityStudy {
+        evidence: std::sync::Arc<crate::state::SensitivityStudyEvidence>,
     },
 
     /// Scalar DC small-signal transfer function around the converged
@@ -406,6 +408,14 @@ pub enum SimulationResult {
         violations: Vec<SoAViolation>,
         /// Complete evaluated-rule evidence, including passing rules.
         evaluations: Vec<SoAEvaluation>,
+    },
+
+    /// One recorded `.FFT` spectrum, selected from the transient that
+    /// computed it. The analysis runs no solve of its own, so the numbers here
+    /// are the bound transient's; its convergence evidence travels with them.
+    Fft {
+        spectrum: std::sync::Arc<RecordedFftSpectrum>,
+        convergence: Option<std::sync::Arc<crate::state::TransientConvergenceEvidence>>,
     },
 
     /// Scalar-only result payload for analyses that report measurements

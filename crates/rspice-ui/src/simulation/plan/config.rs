@@ -5,12 +5,14 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::services::simulation_runner::PeriodicCarrier;
 use crate::simulation::config::{
     AcSweepType, NoiseAnalysisConfig, NoiseContributionDetail, NoiseIntegrationMode, NoiseSweepType,
 };
 use crate::simulation::dependency_contract::{
     FourierTransientRequirement, PeriodicStateCapability, TransientCapability,
-    validate_fourier_transient_contract, validate_periodic_state_contract,
+    validate_fourier_transient_contract, validate_harmonic_balance_carrier_contract,
+    validate_periodic_state_contract,
 };
 use crate::simulation::dialog::{
     CornerDialogState, EnvelopeDialogState, FourierDialogState, HbDialogState, McDialogState,
@@ -24,8 +26,10 @@ use crate::workbench::app_state::{AcSetup, DcSetup, TranSetup};
 use super::AnalysisKind;
 
 mod frequency_table;
+mod recorded_fft;
 
 pub use frequency_table::AcDataDraft;
+pub use recorded_fft::FftDraft;
 
 /// AC sweep draft shared structurally by AC and DISTO, but never shared by
 /// identity. Each analysis instance owns a deep copy.
@@ -565,6 +569,8 @@ pub enum AnalysisDraft {
     DcMismatch(DcMismatchDraft),
     #[serde(rename = "acdata")]
     AcData(AcDataDraft),
+    #[serde(rename = "fft")]
+    Fft(FftDraft),
 }
 
 macro_rules! initialized_default {
@@ -625,6 +631,7 @@ impl AnalysisDraft {
             AnalysisKind::TransientNoise => Self::TransientNoise(TransientNoiseDraft::default()),
             AnalysisKind::DcMismatch => Self::DcMismatch(DcMismatchDraft::default()),
             AnalysisKind::AcData => Self::AcData(AcDataDraft::default()),
+            AnalysisKind::Fft => Self::Fft(FftDraft::default()),
         }
     }
 
@@ -703,6 +710,7 @@ impl AnalysisDraft {
             Self::TransientNoise(_) => AnalysisKind::TransientNoise,
             Self::DcMismatch(_) => AnalysisKind::DcMismatch,
             Self::AcData(_) => AnalysisKind::AcData,
+            Self::Fft(_) => AnalysisKind::Fft,
         }
     }
 
@@ -712,9 +720,59 @@ impl AnalysisDraft {
     /// authenticated execution. Exposing a separate HB/PSS task here would be
     /// incorrect until that task can publish a typed continuation artifact
     /// that Envelope actually consumes.
+    ///
+    /// The periodic small-signal family is the one place a *draft* moves this
+    /// away from its kind's declaration: the carrier the request names is the
+    /// family it linearizes around, so a `.PAC` carried by `FROM=HB` requires
+    /// a harmonic-balance solve and not a shooting `.PSS`. The third carrier
+    /// position names neither family — see [`Self::prerequisite_alternatives`]
+    /// — and reads as this kind's declared role until the plan resolves it.
     #[must_use]
     pub fn prerequisite_roles(&self) -> &'static [AnalysisKind] {
-        self.kind().prerequisites()
+        const HB: &[AnalysisKind] = &[AnalysisKind::HarmonicBalance];
+
+        match self.periodic_carrier() {
+            Some(PeriodicCarrier::Hb) => HB,
+            _ => self.kind().prerequisites(),
+        }
+    }
+
+    /// The prerequisite kinds that may fill this draft's one declared role
+    /// where more than its own kind can, in the order the plan prefers them.
+    ///
+    /// Empty for everything but a periodic small-signal request whose carrier
+    /// is the *preceding* periodic solve. That position writes no `FROM=`
+    /// keyword, and `resolve_periodic_source` in
+    /// `rspice-core/src/execution/plan.rs` binds such a card to the nearest
+    /// preceding `.PSS` **or** `.HB` — whichever the deck wrote last. So the
+    /// role is not a property of the request alone, and the plan resolves it
+    /// by the same rule against its own order.
+    #[must_use]
+    pub fn prerequisite_alternatives(&self) -> &'static [AnalysisKind] {
+        const EITHER_PERIODIC_SOLVE: &[AnalysisKind] =
+            &[AnalysisKind::Pss, AnalysisKind::HarmonicBalance];
+        const NONE: &[AnalysisKind] = &[];
+
+        match self.periodic_carrier() {
+            Some(PeriodicCarrier::Preceding) => EITHER_PERIODIC_SOLVE,
+            _ => NONE,
+        }
+    }
+
+    /// The carrier a periodic small-signal draft linearizes around, or `None`
+    /// for every draft that names no carrier.
+    ///
+    /// `.PSTB` is deliberately absent: its card has no `FROM=` arm, and the
+    /// engine binds it to the preceding `.PSS` unconditionally because only a
+    /// shooting solve carries a monodromy matrix.
+    #[must_use]
+    fn periodic_carrier(&self) -> Option<PeriodicCarrier> {
+        match self {
+            Self::Pac(draft) => Some(PeriodicCarrier::at(draft.carrier_idx)),
+            Self::Pxf(draft) => Some(PeriodicCarrier::at(draft.carrier_idx)),
+            Self::Pnoise(draft) => Some(PeriodicCarrier::at(draft.carrier_idx)),
+            _ => None,
+        }
     }
 
     /// Current singleton-model index, for deterministic migration only.
@@ -763,7 +821,8 @@ impl AnalysisDraft {
             | Self::Qpxf(_)
             | Self::TransientNoise(_)
             | Self::DcMismatch(_)
-            | Self::AcData(_) => {}
+            | Self::AcData(_)
+            | Self::Fft(_) => {}
         }
     }
 
@@ -782,6 +841,7 @@ impl AnalysisDraft {
             Self::TransientNoise(draft) => validate_transient_noise(draft),
             Self::DcMismatch(draft) => validate_dc_mismatch(draft),
             Self::AcData(draft) => draft.to_config().err(),
+            Self::Fft(draft) => draft.to_request().err(),
             _ => None,
         }
     }
@@ -829,6 +889,7 @@ impl AnalysisDraft {
                 draft.output_expression, draft.sigma_multiplier, draft.contributor_limit
             )),
             Self::AcData(draft) => Some(draft.summary()),
+            Self::Fft(draft) => Some(draft.summary()),
             Self::TransferFunction(draft) => Some(format!(
                 "{} <- {} - DC operating point",
                 draft.output_expression, draft.input_source
@@ -1073,6 +1134,53 @@ pub(super) fn dependency_configuration_issue(
         .map(DependencyConfigurationIssue::Incompatible);
     }
 
+    // The same question asked of the other periodic carrier the engine
+    // accepts. `.PSTB` is absent because it cannot reach here: it declares no
+    // harmonic-balance role in any carrier position.
+    if matches!(
+        dependent,
+        AnalysisDraft::Pac(_) | AnalysisDraft::Pnoise(_) | AnalysisDraft::Pxf(_)
+    ) && matches!(prerequisite, AnalysisDraft::HarmonicBalance(_))
+    {
+        let (consumer, require_autonomous) = match periodic_state_requirement(dependent) {
+            Ok(requirement) => requirement,
+            Err(detail) => return Some(DependencyConfigurationIssue::InvalidDependent(detail)),
+        };
+        return validate_harmonic_balance_carrier_contract(consumer, require_autonomous)
+            .err()
+            .map(DependencyConfigurationIssue::Incompatible);
+    }
+
+    // The engine's own rule, before the run rather than during it: a card
+    // whose STOP is past a transient's stop time fails that transient.
+    if let (AnalysisDraft::Fft(fft), AnalysisDraft::Transient(transient)) =
+        (dependent, prerequisite)
+    {
+        let request = match fft.to_request() {
+            Ok(request) => request,
+            Err(detail) => {
+                return Some(DependencyConfigurationIssue::InvalidDependent(format!(
+                    "FFT configuration is invalid: {detail}"
+                )));
+            }
+        };
+        let capability = match transient_capability(transient) {
+            Ok(capability) => capability,
+            Err(detail) => {
+                return Some(DependencyConfigurationIssue::InvalidPrerequisite(format!(
+                    "Transient configuration is invalid: {detail}"
+                )));
+            }
+        };
+        let stop = request.stop.unwrap_or(capability.stop_time);
+        return (stop > capability.stop_time).then(|| {
+            DependencyConfigurationIssue::Incompatible(format!(
+                "STOP {stop} exceeds transient stop time {}",
+                capability.stop_time
+            ))
+        });
+    }
+
     let (AnalysisDraft::Fourier(fourier), AnalysisDraft::Transient(transient)) =
         (dependent, prerequisite)
     else {
@@ -1121,6 +1229,28 @@ pub(super) fn prerequisite_draft_for(
             uic: false,
         }));
     }
+    if prerequisite == AnalysisKind::Transient
+        && let AnalysisDraft::Fft(fft) = dependent
+    {
+        let request = fft
+            .to_request()
+            .map_err(|detail| format!("FFT configuration is invalid: {detail}"))?;
+        // Only an authored STOP can size a transient. Without one the card
+        // takes the transient's own stop time, and the default transient is
+        // exactly the run the author has not yet constrained.
+        let Some(stop) = request.stop else {
+            return Ok(AnalysisDraft::for_kind(prerequisite));
+        };
+        let start = request.start.unwrap_or(0.0);
+        let step = (stop - start) / request.points as f64;
+        return Ok(AnalysisDraft::Transient(TranSetup {
+            stop: format!("{stop:.12e}"),
+            step: format!("{step:.12e}"),
+            start: format!("{:.12e}", 0.0),
+            max_step: format!("{step:.12e}"),
+            uic: false,
+        }));
+    }
     if prerequisite == AnalysisKind::Pss {
         if matches!(
             dependent,
@@ -1143,7 +1273,16 @@ pub(super) fn prerequisite_draft_for(
         }
         return Ok(draft);
     }
-    Ok(AnalysisDraft::for_kind(prerequisite))
+    let draft = AnalysisDraft::for_kind(prerequisite);
+    // A synthesized carrier is refused here for the same reason a chosen one
+    // is: a repair that inserted it would leave the plan holding a dependency
+    // its own contract rejects, with no further repair to offer.
+    if prerequisite == AnalysisKind::HarmonicBalance
+        && let Some(issue) = dependency_configuration_issue(dependent, &draft)
+    {
+        return Err(issue.detail().to_owned());
+    }
+    Ok(draft)
 }
 
 pub(super) fn dependency_candidate_context_issue(
@@ -1525,7 +1664,7 @@ mod tests {
             let value = serde_json::to_value(&draft).expect("draft serializes");
             assert_eq!(value["kind"], kind.stable_id());
         }
-        assert!(AnalysisDraft::from_legacy_index(35).is_none());
+        assert!(AnalysisDraft::from_legacy_index(AnalysisKind::ALL.len()).is_none());
     }
 
     #[test]

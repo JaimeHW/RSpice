@@ -301,8 +301,8 @@ pub(super) fn nondefault_op_config() -> crate::simulation::dialog::OpConfig {
 
 #[test]
 fn browser_worker_transfer_protocol_matches_rust_transport() {
-    assert_eq!(WORKER_RESPONSE_TRANSPORT_PROTOCOL, 22);
-    assert_eq!(WORKER_REQUEST_TRANSPORT_PROTOCOL, 10);
+    assert_eq!(WORKER_RESPONSE_TRANSPORT_PROTOCOL, 24);
+    assert_eq!(WORKER_REQUEST_TRANSPORT_PROTOCOL, 11);
     let source = include_str!("../../../../web/simulation-worker.js");
     assert!(source.contains(&format!(
         "const WORKER_PROTOCOL_VERSION = {WORKER_RESPONSE_TRANSPORT_PROTOCOL};"
@@ -572,6 +572,7 @@ fn fourier_worker_consumes_exact_transient_dependency_artifact() {
         .map(|time| (2.0 * std::f64::consts::PI * 2.0 * time).sin())
         .collect::<Vec<_>>();
     let transient = SimulationResult::Transient {
+        spectra: Vec::new(),
         time: time.clone(),
         waveforms: HashMap::from([(
             "V(out)".to_owned(),
@@ -589,6 +590,7 @@ fn fourier_worker_consumes_exact_transient_dependency_artifact() {
         config_digest,
         &transient,
         &["out".to_owned()],
+        false,
     )
     .unwrap()
     .unwrap();
@@ -1077,6 +1079,7 @@ fn an_hb_wire_written_before_the_solver_controls_restores_with_the_engine_defaul
 #[test]
 fn transient_worker_result_round_trips_through_json() {
     let result = WorkerSimulationResult::Transient {
+        spectra: Vec::new(),
         convergence: None,
         time: vec![0.0, 1e-9],
         waveforms: vec![WorkerWaveform {
@@ -1151,6 +1154,7 @@ fn response_with_measurement(measurement: WorkerMeasurement) -> WorkerResponse {
     WorkerResponse {
         id: 901,
         outcome: WorkerOutcome::Success(Box::new(WorkerSimulationResult::Transient {
+            spectra: Vec::new(),
             convergence: None,
             time: vec![0.0],
             waveforms: Vec::new(),
@@ -1306,6 +1310,7 @@ fn a_transient_result_without_an_events_field_still_decodes() {
 #[test]
 fn event_histories_survive_the_worker_edge_in_both_directions() {
     let source = SimulationResult::Transient {
+        spectra: Vec::new(),
         time: vec![0.0, 1e-9],
         waveforms: HashMap::new(),
         measurements: Vec::new(),
@@ -1337,64 +1342,73 @@ fn event_histories_survive_the_worker_edge_in_both_directions() {
     assert_eq!(events, expected);
 }
 
+/// The filter, the whole grid and all three columns survive the wire.
+///
+/// The frozen single-point payload carried two maps read at one frequency; a
+/// study carries the band, so what has to survive is every point of it — a
+/// transport that kept only the first would present a sweep as an operating
+/// point and nothing downstream could tell.
 #[test]
-fn sensitivity_worker_result_round_trips_output_basis_and_exact_values() {
+fn a_sensitivity_study_survives_the_worker_wire() {
+    use crate::state::{
+        ComplexResultValue, SensitivityBasisEvidence, SensitivityStudyEvidence, SensitivityStudyRow,
+    };
     use rspice_core::analysis::sensitivity::{SensitivityUnavailability, SensitivityValue};
-    let source = SimulationResult::Sensitivity {
+    let evidence = SensitivityStudyEvidence {
         output: "V(out)".to_owned(),
-        ac_mode: true,
-        frequency_hz: Some(10_000.0),
-        sensitivities: HashMap::from([
-            ("length".to_owned(), (-1.0).into()),
-            ("width".to_owned(), (2.0).into()),
-            (
-                "null".to_owned(),
-                SensitivityValue::unavailable(
-                    SensitivityUnavailability::NondifferentiableMagnitude,
-                ),
-            ),
-        ]),
-        normalized: HashMap::from([
-            ("length".to_owned(), (-0.25).into()),
-            ("width".to_owned(), (0.5).into()),
-            (
-                "null".to_owned(),
-                SensitivityValue::unavailable(SensitivityUnavailability::ZeroOutput),
-            ),
-        ]),
+        filter: "R* PARAM:*".to_owned(),
+        basis: SensitivityBasisEvidence::Ac {
+            frequencies_hz: vec![10_000.0, 100_000.0],
+            output: vec![
+                ComplexResultValue {
+                    real: 4.0,
+                    imaginary: 0.0,
+                },
+                ComplexResultValue {
+                    real: 0.0,
+                    imaginary: -2.0,
+                },
+            ],
+        },
+        rows: vec![
+            SensitivityStudyRow {
+                parameter: "PARAM:LENGTH".to_owned(),
+                nominal_value: 1.0e-6,
+                raw: vec![(-1.0).into(), (-2.0).into()],
+                normalized: vec![(-0.25).into(), (-0.5).into()],
+                phase: vec![(0.125).into(), (0.25).into()],
+            },
+            SensitivityStudyRow {
+                parameter: "R1".to_owned(),
+                nominal_value: 1000.0,
+                raw: vec![
+                    SensitivityValue::unavailable(
+                        SensitivityUnavailability::NondifferentiableMagnitude,
+                    ),
+                    (2.0).into(),
+                ],
+                normalized: vec![(0.5).into(), (0.75).into()],
+                phase: vec![
+                    SensitivityValue::unavailable(SensitivityUnavailability::OutOfRange),
+                    (-0.25).into(),
+                ],
+            },
+        ],
+    };
+    evidence.validate().expect("the fixture is valid evidence");
+    let source = SimulationResult::SensitivityStudy {
+        evidence: std::sync::Arc::new(evidence.clone()),
     };
     let worker = WorkerSimulationResult::try_from(source).expect("worker conversion");
-    assert_eq!(worker.estimated_numeric_payload_bytes(), 104);
     let encoded = serde_json::to_vec(&worker).expect("worker result serializes");
     let decoded: WorkerSimulationResult =
         serde_json::from_slice(&encoded).expect("worker result deserializes");
     let restored = SimulationResult::from(decoded);
 
-    let SimulationResult::Sensitivity {
-        output,
-        ac_mode,
-        frequency_hz,
-        sensitivities,
-        normalized,
-    } = restored
-    else {
-        panic!("sensitivity result")
+    let SimulationResult::SensitivityStudy { evidence: restored } = restored else {
+        panic!("sensitivity study result")
     };
-    assert_eq!(output, "V(out)");
-    assert!(ac_mode);
-    assert_eq!(frequency_hz, Some(10_000.0));
-    assert_eq!(sensitivities["length"].value().unwrap(), -1.0);
-    assert_eq!(sensitivities["width"].value().unwrap(), 2.0);
-    assert_eq!(normalized["length"].value().unwrap(), -0.25);
-    assert_eq!(normalized["width"].value().unwrap(), 0.5);
-    assert_eq!(
-        sensitivities["null"],
-        SensitivityValue::unavailable(SensitivityUnavailability::NondifferentiableMagnitude)
-    );
-    assert_eq!(
-        normalized["null"],
-        SensitivityValue::unavailable(SensitivityUnavailability::ZeroOutput)
-    );
+    assert_eq!(*restored, evidence);
 }
 
 #[test]
@@ -1428,6 +1442,7 @@ fn monte_carlo_worker_result_round_trips_seed_and_exact_samples_through_json() {
 #[test]
 fn worker_result_payload_estimate_counts_high_volume_arrays() {
     let transient = WorkerSimulationResult::Transient {
+        spectra: Vec::new(),
         convergence: None,
         time: vec![0.0, 1.0],
         waveforms: vec![WorkerWaveform {
@@ -1477,6 +1492,7 @@ fn worker_result_payload_estimate_counts_high_volume_arrays() {
 #[test]
 fn worker_response_rejects_payloads_that_exceed_transport_limit() {
     let result = SimulationResult::Transient {
+        spectra: Vec::new(),
         time: vec![0.0, 1.0],
         waveforms: HashMap::from([(
             "V(out)".to_string(),
@@ -1505,6 +1521,7 @@ fn worker_response_rejects_payloads_that_exceed_transport_limit() {
 #[test]
 fn worker_transfer_response_does_not_apply_legacy_clone_budget() {
     let result = SimulationResult::Transient {
+        spectra: Vec::new(),
         time: vec![0.0, 1.0],
         waveforms: HashMap::from([(
             "V(out)".to_string(),
@@ -1543,6 +1560,7 @@ fn worker_transport_extracts_transient_waveform_buffers() {
     let response = WorkerResponse {
         id: 77,
         outcome: WorkerOutcome::Success(Box::new(WorkerSimulationResult::Transient {
+            spectra: Vec::new(),
             convergence: None,
             time: vec![0.0, 1.0],
             waveforms: vec![WorkerWaveform {
@@ -1944,6 +1962,7 @@ fn worker_transport_rejects_missing_or_mismatched_buffers() {
     let response = WorkerResponse {
         id: 12,
         outcome: WorkerOutcome::Success(Box::new(WorkerSimulationResult::Transient {
+            spectra: Vec::new(),
             convergence: None,
             time: vec![0.0, 1.0],
             waveforms: vec![WorkerWaveform {
@@ -1982,6 +2001,7 @@ fn worker_transport_validates_complex_waveform_shape() {
         response: WorkerResponseTransportMetadata {
             id: 44,
             outcome: WorkerOutcomeTransport::Success(WorkerSimulationResultTransport::Transient {
+                spectra: Vec::new(),
                 convergence: None,
                 time: WorkerF64Series::Buffer { buffer: 0, len: 2 },
                 waveforms: vec![WorkerWaveformTransport {
@@ -2008,6 +2028,7 @@ fn worker_transport_validates_complex_waveform_shape() {
         response: WorkerResponseTransportMetadata {
             id: 45,
             outcome: WorkerOutcomeTransport::Success(WorkerSimulationResultTransport::Transient {
+                spectra: Vec::new(),
                 convergence: None,
                 time: WorkerF64Series::Buffer { buffer: 0, len: 2 },
                 waveforms: vec![WorkerWaveformTransport {

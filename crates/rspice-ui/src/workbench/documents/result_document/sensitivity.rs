@@ -27,6 +27,14 @@ use std::sync::Arc;
 mod mismatch;
 pub(super) use mismatch::MismatchPlan;
 
+/// The family this sheet was built for, in the shape the engine's own
+/// complete entries answer it: one filter, and every frequency it solved.
+/// Declared here for the same reason `mismatch` is — the handover is this
+/// file's.
+mod study;
+pub(crate) use study::SensitivitySheetState;
+pub(super) use study::{StudyPlan, domain_bar};
+
 use super::AnalysisPresentationKey;
 use super::frame_work::{self, DatasetWalk};
 use super::strip::StripHeader;
@@ -92,6 +100,9 @@ fn active_sensitivity(state: &AppState) -> ActiveSensitivity<'_> {
 }
 
 pub(super) fn active_payload_is_valid(state: &AppState) -> bool {
+    if study::serves_active_analysis(state) {
+        return study::active_payload_is_valid(state);
+    }
     if mismatch::serves_active_analysis(state) {
         return mismatch::active_payload_is_valid(state);
     }
@@ -287,6 +298,10 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     // that ranks them. Handed over before anything is borrowed, so the DC
     // mismatch spread is drawn by its own painter rather than squeezed into
     // this one's columns.
+    if study::serves_active_analysis(state) {
+        study::show(ui, state);
+        return;
+    }
     if mismatch::serves_active_analysis(state) {
         mismatch::show(ui, state);
         return;
@@ -570,6 +585,10 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
 
 /// Render output/basis context and the exact ranked sensitivity table.
 pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
+    if study::serves_active_analysis(state) {
+        study::right_panel(ui, state);
+        return;
+    }
     if mismatch::serves_active_analysis(state) {
         mismatch::right_panel(ui, state);
         return;
@@ -600,6 +619,13 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
             ("Analysis", view.analysis_label),
             ("Reference metric", view.output),
             ("Basis", basis.as_str()),
+            // What this payload actually differentiated against. It was
+            // recorded before the Studio ran the engine's own filter, so its
+            // variables are the deck's design parameters and its rows carry
+            // bare names rather than the engine's `PARAM:` spelling. Saying
+            // so is the whole migration: a reader can tell this report from a
+            // current one without guessing from the names.
+            ("Variables", "design parameters · recorded before filters"),
             ("Method", NOT_RETAINED),
             ("Normalization", "Retained per parameter"),
             ("Parameters retained", count.as_str()),
@@ -847,6 +873,50 @@ mod tests {
     #[test]
     fn unavailable_solver_contracts_are_explicit() {
         assert_eq!(NOT_RETAINED, "Not retained by sensitivity result");
+    }
+
+    /// A result retained before the Studio ran the engine's own filter
+    /// differentiated the deck's design parameters and nothing else. It still
+    /// renders exactly as it did; what changes is that the panel says what it
+    /// is, so a reader does not take it for a report of every device variable.
+    #[test]
+    fn a_sensitivity_result_recorded_before_filters_is_labelled_design_parameters() {
+        let mut state = state_with_analyses(vec![sensitivity_result(
+            1,
+            "SENS",
+            vec![SensitivityResultRow {
+                parameter: "GAIN".to_owned(),
+                raw: 2.0.into(),
+                normalized: 0.5.into(),
+            }],
+        )]);
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(520.0, 900.0),
+                )),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| right_panel(ui, &mut state));
+            },
+        );
+        let tree = output
+            .platform_output
+            .accesskit_update
+            .expect("the sensitivity panel publishes an accessibility tree");
+        assert!(
+            tree.nodes.iter().any(|(_, node)| {
+                node.value().is_some_and(|text| {
+                    text == "Variables: design parameters · recorded before filters"
+                })
+            }),
+            "{tree:?}"
+        );
     }
 
     fn ranked_state(parameters: usize) -> AppState {

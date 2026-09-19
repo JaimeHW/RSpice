@@ -987,6 +987,7 @@ pub(in crate::simulation) const fn canonical_analysis_kind(
         AnalysisSpec::TransientNoise { .. } => CanonicalAnalysisKind::TransientNoise,
         AnalysisSpec::DcMismatch { .. } => CanonicalAnalysisKind::DcMismatch,
         AnalysisSpec::PssSpectrum { .. } => CanonicalAnalysisKind::PssSpectrum,
+        AnalysisSpec::Fft { .. } => CanonicalAnalysisKind::Fft,
     }
 }
 
@@ -1105,6 +1106,69 @@ mod tests {
         let mut absent = CanonicalWriter::new("test");
         encode_analysis_spec(&mut absent, &spec);
         assert_ne!(authored.finish(), absent.finish());
+    }
+
+    /// A sensitivity plan restored from a project saved before filters
+    /// existed digests to exactly the bytes it digested to then.
+    ///
+    /// Same shape of reference as the two above — the three fields the arm
+    /// wrote, nothing appended — with one difference that is the whole point:
+    /// the value that leaves the digest alone is `PARAM:*`, not the empty
+    /// string. A saved plan computed the deck's design parameters, so that is
+    /// what it must go on computing, and a plan whose filter was emptied runs
+    /// a different analysis and has to say so.
+    #[test]
+    fn a_design_parameter_filter_at_one_frequency_leaves_the_plan_digest_unchanged() {
+        let sensitivity = |filter: &str| AnalysisSpec::Sensitivity {
+            output_var: "V(out)".to_owned(),
+            ac_mode: true,
+            frequency: Some(1.0e6),
+            filter: filter.to_owned(),
+            sweep: None,
+        };
+        let spec = sensitivity(crate::simulation::config::DESIGN_PARAMETERS_FILTER);
+        let mut encoded = CanonicalWriter::new("test");
+        encode_analysis_spec(&mut encoded, &spec);
+
+        let mut before_the_field = CanonicalWriter::new("test");
+        before_the_field.domain("analysis-spec");
+        before_the_field.u8(analysis_kind_tag(&spec));
+        before_the_field.string("V(out)");
+        before_the_field.bool(true);
+        before_the_field.option(Some(&1.0e6), |writer, value| writer.f64(*value));
+
+        assert_eq!(
+            encoded.finish(),
+            before_the_field.finish(),
+            "a plan restored from before filters existed must keep its identity"
+        );
+    }
+
+    /// Emptying the filter is a different analysis, and a different plan.
+    ///
+    /// The engine reads an empty filter as every device and model parameter
+    /// and no design parameter — the opposite selection from `PARAM:*`. If
+    /// the two digested alike, a stored result computed under one would be
+    /// presented as current for the other.
+    #[test]
+    fn an_emptied_filter_is_a_different_plan_from_one_saved_before_filters() {
+        let sensitivity = |filter: &str| AnalysisSpec::Sensitivity {
+            output_var: "V(out)".to_owned(),
+            ac_mode: false,
+            frequency: None,
+            filter: filter.to_owned(),
+            sweep: None,
+        };
+        let digest = |filter: &str| {
+            let mut writer = CanonicalWriter::new("test");
+            encode_analysis_spec(&mut writer, &sensitivity(filter));
+            writer.finish()
+        };
+        let legacy = digest(crate::simulation::config::DESIGN_PARAMETERS_FILTER);
+        assert_ne!(legacy, digest(""));
+        assert_ne!(legacy, digest("R* PARAM:*"));
+        assert_ne!(digest(""), digest("R*"));
+        assert_eq!(digest("R*"), digest("R*"));
     }
 
     /// A DC mismatch plan with no authored share threshold digests to exactly
@@ -1501,6 +1565,84 @@ mod tests {
             digest(PeriodicCarrier::Pss),
             digest(PeriodicCarrier::Hb),
             "the two named carriers are two different runs"
+        );
+    }
+
+    /// Giving the harmonic-balance carrier a route changes what a request can
+    /// *bind*, not what it digests.
+    ///
+    /// The carrier byte already distinguished the three positions, and a run
+    /// linearized about a shooting `.PSS` is the same run it was before the
+    /// other family became routable. If this moved, every saved plan carrying
+    /// a `FROM=PSS` request would be detached from its own results — and the
+    /// plumbing that chooses a producer, the prerequisite role, and the
+    /// service entry are all outside the digest for exactly that reason.
+    ///
+    /// Reconstructed from the writer primitives, in the order and at the
+    /// position the tail has always held, so a byte moved anywhere in the arm
+    /// fails here instead of being regenerated along with the defect. One arm
+    /// proves it for all three, because all three call the one
+    /// `encode_periodic_carrier_tail`, and the test above pins that function's
+    /// three positions.
+    #[test]
+    fn a_pss_carried_request_keeps_its_digest() {
+        use crate::services::simulation_runner::{PacRunConfig, PeriodicCarrier};
+
+        let config = PacRunConfig {
+            carrier: PeriodicCarrier::Pss,
+            ..PacRunConfig::default()
+        };
+        let digest = analysis_config_digest(
+            ".pac",
+            &AnalysisSpec::Pac,
+            None,
+            &SpecExecutionOptions {
+                pac: Some(config.clone()),
+                ..SpecExecutionOptions::default()
+            },
+            None,
+        );
+
+        let mut writer = CanonicalWriter::new("rspice.analysis-config/v4");
+        writer.domain("analysis-line");
+        writer.string(".pac");
+        encode_analysis_spec(&mut writer, &AnalysisSpec::Pac);
+        encode_analysis_config(&mut writer, None);
+        writer.domain("spec-execution-options");
+        for _ in 0..3 {
+            writer.option(None::<&()>, |_, _: &()| unreachable!());
+        }
+        writer.option(Some(&config), |writer, config| {
+            writer.f64(config.pss_fundamental_freq);
+            writer.usize(config.pss_num_harmonics);
+            writer.f64(config.pss_tolerance);
+            writer.f64(config.start_freq);
+            writer.f64(config.stop_freq);
+            writer.usize(config.points_per_unit);
+            writer.u8(pac_sweep_tag(config.sweep));
+            writer.i32(config.sideband_max);
+            writer.string(&config.input_source);
+            writer.string(&config.output_node);
+            writer.option(config.output_ref.as_ref(), |w, v| w.string(v));
+            writer.f64(config.pac_magnitude);
+            writer.bool(config.include_dc);
+            writer.f64(config.reltol);
+            writer.f64(config.abstol);
+            // The shooting position's one byte, last in the arm, where the
+            // symmetric sideband range adds nothing after it.
+            writer.u8(0);
+        });
+        writer.option(None::<&()>, |_, _: &()| unreachable!());
+        writer.bool(false);
+        for _ in 0..2 {
+            writer.option(None::<&()>, |_, _: &()| unreachable!());
+        }
+        encode_numeric_override(&mut writer, None);
+
+        assert_eq!(
+            digest,
+            writer.finish(),
+            "a FROM=PSS request digests the bytes it digested before the other family had a route"
         );
     }
 

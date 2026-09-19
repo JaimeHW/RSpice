@@ -1565,7 +1565,7 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                         .label
                         .eq_ignore_ascii_case(analysis.analysis_type.short_label())
                     {
-                        analysis.analysis_type.display_name().to_owned()
+                        analysis.kind_display_name().to_owned()
                     } else {
                         analysis.label.clone()
                     };
@@ -3369,6 +3369,17 @@ fn retained_result_artifacts(
                 None,
                 ResultViewer::Contribution,
             ),
+            // The count is the rows the study holds, not the rows times the
+            // points: one variable is one artifact of the study whether it
+            // was solved at one frequency or sixty-one.
+            AnalysisResultPayload::SensitivityStudy { evidence } => (
+                "payload/sensitivity",
+                "Sensitivity coefficients",
+                ResultArtifactKind::Array,
+                evidence.rows.len(),
+                None,
+                ResultViewer::Contribution,
+            ),
             AnalysisResultPayload::DcMismatch { evidence } => (
                 "payload/dc-mismatch",
                 "DC mismatch contributors",
@@ -3419,6 +3430,17 @@ fn retained_result_artifacts(
                 evaluations.len() + violations.len(),
                 None,
                 ResultViewer::Soa,
+            ),
+            AnalysisResultPayload::FftSpectrum { spectrum } => (
+                "payload/recorded-fft",
+                "Recorded FFT spectrum",
+                ResultArtifactKind::Array,
+                spectrum.bin_count(),
+                Some(format!(
+                    "{} · {} points · {}",
+                    spectrum.output, spectrum.point_count, spectrum.window
+                )),
+                ResultViewer::HarmonicBalance,
             ),
             AnalysisResultPayload::TransientEvents {
                 digital_traces,

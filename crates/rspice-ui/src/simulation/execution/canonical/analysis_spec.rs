@@ -297,10 +297,26 @@ pub(super) fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &Analysis
             output_var,
             ac_mode,
             frequency,
+            filter,
+            sweep,
         } => {
             writer.string(output_var);
             writer.bool(*ac_mode);
             writer.option(frequency.as_ref(), |w, v| w.f64(*v));
+            // The filter is appended only when it differs from what a plan
+            // saved before filters existed computed. `PARAM:*` is that value,
+            // not the empty string: a plan restored from an older project
+            // keeps its identity because it keeps its computation, and an
+            // emptied filter is a different run that must digest differently.
+            // Never `writer.option`: an absent tail is the old encoding.
+            if filter != crate::simulation::config::DESIGN_PARAMETERS_FILTER || sweep.is_some() {
+                writer.string(filter);
+                writer.option(sweep.as_ref(), |writer, sweep| {
+                    writer.f64(sweep.stop_frequency);
+                    writer.u64(u64::from(sweep.points));
+                    encode_frequency_sweep(writer, sweep.variation);
+                });
+            }
         }
         AnalysisSpec::PoleZero {
             input_node,
@@ -618,6 +634,23 @@ pub(super) fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &Analysis
             if let Some(threshold) = contribution_threshold {
                 writer.f64(*threshold);
             }
+        }
+        // A brand-new arm, so `writer.option` is free here: there is no
+        // previously sealed encoding of this shape for an absent field to
+        // move. The card's own qualifiers are optional in the engine too.
+        AnalysisSpec::Fft { request } => {
+            writer.string(&request.output);
+            writer.usize(request.points);
+            writer.string(&request.window);
+            writer.option(request.start.as_ref(), |w, value| w.f64(*value));
+            writer.option(request.stop.as_ref(), |w, value| w.f64(*value));
+            writer.option(request.format.as_ref(), |w, value| {
+                w.string(value.keyword())
+            });
+            writer.option(request.alfa.as_ref(), |w, value| w.f64(*value));
+            writer.option(request.fundamental.as_ref(), |w, value| w.f64(*value));
+            writer.option(request.fmin.as_ref(), |w, value| w.f64(*value));
+            writer.option(request.fmax.as_ref(), |w, value| w.f64(*value));
         }
     }
 }

@@ -470,7 +470,7 @@ fn advanced_result_conversion_retains_exact_family_metadata() {
 fn scalar_and_complex_analysis_conversion_retains_exact_typed_payloads() {
     use crate::state::{
         AnalysisResultPayload, ComplexResultValue, PoleZeroRootSetEvidence,
-        PoleZeroSpectrumCertificate, SensitivityResultMode, SensitivityResultRow,
+        PoleZeroSpectrumCertificate,
     };
 
     let controller = SimulationController::new();
@@ -528,41 +528,16 @@ fn scalar_and_complex_analysis_conversion_retains_exact_typed_payloads() {
     assert!(pole_zero.has_data());
 
     let sensitivity = controller.convert_to_analysis_result_with_metadata_owned(
-        crate::simulation::SimulationResult::Sensitivity {
-            output: "V(out)".to_owned(),
-            ac_mode: true,
-            frequency_hz: Some(10_000.0),
-            sensitivities: std::collections::HashMap::from([
-                ("width".to_owned(), (2.0).into()),
-                ("length".to_owned(), (-1.0).into()),
-            ]),
-            normalized: std::collections::HashMap::from([
-                ("width".to_owned(), (0.5).into()),
-                ("length".to_owned(), (-0.25).into()),
-            ]),
+        crate::simulation::SimulationResult::SensitivityStudy {
+            evidence: std::sync::Arc::new(sensitivity_study_fixture()),
         },
         AnalysisType::Sensitivity,
         "SENS",
     );
     assert_eq!(
         sensitivity.result_payload,
-        Some(AnalysisResultPayload::Sensitivity {
-            output: "V(out)".to_owned(),
-            result_mode: SensitivityResultMode::Ac {
-                frequency_hz: 10_000.0,
-            },
-            rows: vec![
-                SensitivityResultRow {
-                    parameter: "length".to_owned(),
-                    raw: (-1.0).into(),
-                    normalized: (-0.25).into(),
-                },
-                SensitivityResultRow {
-                    parameter: "width".to_owned(),
-                    raw: (2.0).into(),
-                    normalized: (0.5).into(),
-                },
-            ],
+        Some(AnalysisResultPayload::SensitivityStudy {
+            evidence: std::sync::Arc::new(sensitivity_study_fixture()),
         })
     );
 
@@ -749,21 +724,30 @@ fn sensitivity_spec_projects_frequency_only_in_ac_mode() {
 fn sensitivity_completion_preserves_unavailable_results_and_finite_console_values() {
     use rspice_core::analysis::sensitivity::{SensitivityUnavailability, SensitivityValue};
     let mut controller = SimulationController::new();
-    let result = crate::simulation::SimulationResult::Sensitivity {
-        output: "I(V1)".to_owned(),
-        ac_mode: false,
-        frequency_hz: None,
-        sensitivities: std::collections::HashMap::from([
-            ("gain".to_owned(), 0.0.into()),
-            ("large".to_owned(), 1.0.into()),
-        ]),
-        normalized: std::collections::HashMap::from([
-            (
-                "gain".to_owned(),
-                SensitivityValue::unavailable(SensitivityUnavailability::ZeroOutput),
-            ),
-            ("large".to_owned(), 1e308.into()),
-        ]),
+    let result = crate::simulation::SimulationResult::SensitivityStudy {
+        evidence: std::sync::Arc::new(crate::state::SensitivityStudyEvidence {
+            output: "I(V1)".to_owned(),
+            filter: "PARAM:*".to_owned(),
+            basis: crate::state::SensitivityBasisEvidence::Dc { output: 2.0 },
+            rows: vec![
+                crate::state::SensitivityStudyRow {
+                    parameter: "PARAM:GAIN".to_owned(),
+                    nominal_value: 1.0,
+                    raw: vec![0.0.into()],
+                    normalized: vec![SensitivityValue::unavailable(
+                        SensitivityUnavailability::OutOfRange,
+                    )],
+                    phase: Vec::new(),
+                },
+                crate::state::SensitivityStudyRow {
+                    parameter: "PARAM:LARGE".to_owned(),
+                    nominal_value: 1.0,
+                    raw: vec![1.0.into()],
+                    normalized: vec![1e308.into()],
+                    phase: Vec::new(),
+                },
+            ],
+        }),
     };
     let mut state = AppState::default();
     controller.apply_result_side_effects(&mut state, &result);
@@ -775,7 +759,7 @@ fn sensitivity_completion_preserves_unavailable_results_and_finite_console_value
     assert!(
         messages
             .iter()
-            .any(|text| text.contains("normalized = unavailable (zero-output)")),
+            .any(|text| text.contains("normalized = unavailable (out-of-range)")),
         "{messages:?}"
     );
     assert!(
@@ -790,13 +774,13 @@ fn sensitivity_completion_preserves_unavailable_results_and_finite_console_value
         "SENS",
     );
     assert!(retained.success);
-    let Some(AnalysisResultPayload::Sensitivity { rows, .. }) = retained.result_payload else {
+    let Some(AnalysisResultPayload::SensitivityStudy { evidence }) = retained.result_payload else {
         panic!("sensitivity retained")
     };
-    assert_eq!(rows[0].raw.value(), Some(0.0));
+    assert_eq!(evidence.rows[0].raw[0].value(), Some(0.0));
     assert_eq!(
-        rows[0].normalized,
-        SensitivityValue::unavailable(SensitivityUnavailability::ZeroOutput)
+        evidence.rows[0].normalized[0],
+        SensitivityValue::unavailable(SensitivityUnavailability::OutOfRange)
     );
 }
 
@@ -804,12 +788,16 @@ fn sensitivity_completion_preserves_unavailable_results_and_finite_console_value
 fn invalid_sensitivity_result_contract_fails_closed() {
     let controller = SimulationController::new();
     let analysis = controller.convert_to_analysis_result_with_metadata_owned(
-        crate::simulation::SimulationResult::Sensitivity {
-            output: "V(out)".to_owned(),
-            ac_mode: false,
-            frequency_hz: None,
-            sensitivities: std::collections::HashMap::from([("width".to_owned(), (2.0).into())]),
-            normalized: std::collections::HashMap::new(),
+        crate::simulation::SimulationResult::SensitivityStudy {
+            evidence: std::sync::Arc::new(crate::state::SensitivityStudyEvidence {
+                rows: vec![crate::state::SensitivityStudyRow {
+                    // A normalized column that does not span the grid is a
+                    // study the engine could not have produced.
+                    normalized: Vec::new(),
+                    ..sensitivity_study_fixture().rows[0].clone()
+                }],
+                ..sensitivity_study_fixture()
+            }),
         },
         AnalysisType::Sensitivity,
         "SENS",
@@ -821,8 +809,42 @@ fn invalid_sensitivity_result_contract_fails_closed() {
         analysis
             .error_message
             .as_deref()
-            .is_some_and(|message| message.contains("misaligned"))
+            .is_some_and(|message| message.contains("Invalid retained analysis payload")),
+        "{:?}",
+        analysis.error_message
     );
+}
+
+/// One AC study of two variables at one frequency, used wherever a completion
+/// path needs a study that is beyond doubt the engine's own shape.
+fn sensitivity_study_fixture() -> crate::state::SensitivityStudyEvidence {
+    crate::state::SensitivityStudyEvidence {
+        output: "V(out)".to_owned(),
+        filter: "PARAM:*".to_owned(),
+        basis: crate::state::SensitivityBasisEvidence::Ac {
+            frequencies_hz: vec![10_000.0],
+            output: vec![crate::state::ComplexResultValue {
+                real: 4.0,
+                imaginary: 0.0,
+            }],
+        },
+        rows: vec![
+            crate::state::SensitivityStudyRow {
+                parameter: "PARAM:LENGTH".to_owned(),
+                nominal_value: 1.0e-6,
+                raw: vec![(-1.0).into()],
+                normalized: vec![(-0.25).into()],
+                phase: vec![(0.0).into()],
+            },
+            crate::state::SensitivityStudyRow {
+                parameter: "PARAM:WIDTH".to_owned(),
+                nominal_value: 2.0e-6,
+                raw: vec![(2.0).into()],
+                normalized: vec![(0.5).into()],
+                phase: vec![(0.0).into()],
+            },
+        ],
+    }
 }
 
 #[test]

@@ -156,7 +156,7 @@ impl ManifestViewModel {
                 .analyses
                 .iter()
                 .map(|analysis| ManifestRow {
-                    analysis: analysis.analysis_type.display_name().to_owned(),
+                    analysis: analysis.kind_display_name().to_owned(),
                     expansion: expansion_label(analysis),
                     tasks: "1".to_owned(),
                     domain_axis: domain_meta(analysis.analysis_type).axis.to_owned(),
@@ -1153,6 +1153,17 @@ fn payload_values_label(payload: &AnalysisResultPayload) -> String {
         AnalysisResultPayload::Sensitivity { rows, .. } => {
             format!("{} sensitivities", rows.len())
         }
+        AnalysisResultPayload::SensitivityStudy { evidence } => {
+            let points = evidence.point_count();
+            if points > 1 {
+                format!(
+                    "{} sensitivities at {points} frequencies",
+                    evidence.rows.len()
+                )
+            } else {
+                format!("{} sensitivities", evidence.rows.len())
+            }
+        }
         AnalysisResultPayload::DcMismatch { evidence } => format!(
             "{} of {} mismatch contributors",
             evidence.retained_contributors(),
@@ -1172,6 +1183,12 @@ fn payload_values_label(payload: &AnalysisResultPayload) -> String {
             "{} SOA evaluations / {} violations",
             evaluations.len(),
             violations.len()
+        ),
+        AnalysisResultPayload::FftSpectrum { spectrum } => format!(
+            "{} one-sided coefficients / {} window / {} points",
+            spectrum.bin_count(),
+            spectrum.window,
+            spectrum.point_count
         ),
         AnalysisResultPayload::TransientEvents {
             digital_traces,

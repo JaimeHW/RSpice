@@ -1,3 +1,6 @@
+#[cfg(test)]
+mod expression_value_tests;
+
 use super::{Engine, SimulationError};
 use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::netlist::{ElementKind, SourceSpec, StepCommand, StepTarget};
@@ -1610,8 +1613,19 @@ impl Engine {
             })
     }
 
+    /// A swept model parameter sets the model card's parameter.
+    ///
+    /// A card that spelled the parameter as an expression keeps that spelling
+    /// in `expr_params`, and subcircuit model scoping resolves those
+    /// expressions *over* `params` (`netlist::flattener`, the
+    /// `scoped_model.params.push` arm of its scoped-model resolution), so the
+    /// authored spelling has to go with the number or the sweep is undone the
+    /// moment the design elaborates.
     fn apply_model_step_value(model: &mut ModelDef, param_name: &str, value: Value) {
         let param_upper = param_name.to_ascii_uppercase();
+        model
+            .expr_params
+            .retain(|(name, _)| !name.eq_ignore_ascii_case(&param_upper));
         if let Some((_, existing)) = model
             .params
             .iter_mut()
@@ -1628,6 +1642,23 @@ impl Engine {
         netlist.source_path = None;
     }
 
+    /// A sweep that names a device value SETS THE DEVICE'S VALUE.
+    ///
+    /// Whatever the deck spelled that field with — a literal, a parameter
+    /// expression, or an expression that reads circuit state — the sweep
+    /// replaces it for this point: the authored expression for the named field
+    /// is dropped, so the builder reads the number the sweep chose and a
+    /// state-reading resistor becomes the linear resistor of that value. Both
+    /// references agree: ngspice's `alter` writes the device's value after
+    /// expression evaluation, and Xyce's `.STEP R1:R` replaces the device
+    /// parameter's own expression dependency with the stepped value.
+    ///
+    /// The override is confined to this point and this field. Every applier
+    /// works on a per-point clone of the authored netlist
+    /// (`run_step_device`, `materialize_step_bindings`,
+    /// `Engine::replay_parameter_overrides`), so the next point starts again
+    /// from the deck, and every field this call does not name keeps its
+    /// authored spelling.
     pub(in crate::engine) fn apply_device_step_value(
         kind: &mut ElementKind,
         param_name: Option<&str>,
@@ -1640,21 +1671,26 @@ impl Engine {
                 Some(name) => aliases.iter().any(|alias| name.eq_ignore_ascii_case(alias)),
             }
         };
-        let set_instance_param =
-            |instance_params: &mut Vec<(String, Value)>, name: &str, value: Value| {
-                if let Some((_, existing)) = instance_params
-                    .iter_mut()
-                    .find(|(param, _)| param.eq_ignore_ascii_case(name))
-                {
-                    *existing = value;
-                } else {
-                    instance_params.push((name.to_ascii_uppercase(), value));
-                }
-            };
+        let set_instance_param = |instance_params: &mut Vec<(String, Value)>,
+                                  deferred_params: &mut Vec<(String, String)>,
+                                  name: &str,
+                                  value: Value| {
+            forget_deferred_params(deferred_params, &[name]);
+            if let Some((_, existing)) = instance_params
+                .iter_mut()
+                .find(|(param, _)| param.eq_ignore_ascii_case(name))
+            {
+                *existing = value;
+            } else {
+                instance_params.push((name.to_ascii_uppercase(), value));
+            }
+        };
         let set_instance_param_alias = |instance_params: &mut Vec<(String, Value)>,
+                                        deferred_params: &mut Vec<(String, String)>,
                                         aliases: &[&str],
                                         canonical_name: &str,
                                         value: Value| {
+            forget_deferred_params(deferred_params, aliases);
             if let Some((name, existing)) = instance_params.iter_mut().find(|(param, _)| {
                 aliases
                     .iter()
@@ -1670,34 +1706,41 @@ impl Engine {
         match kind {
             ElementKind::Resistor {
                 value: r,
+                value_expr,
                 model,
                 instance_params,
-                ..
+                deferred_params,
             } => {
                 match param_upper.as_deref() {
                     None | Some("R") | Some("VALUE") => {
                         *r = value;
+                        *value_expr = None;
+                        forget_deferred_params(deferred_params, &["R", "VALUE"]);
                         if model.is_some() {
-                            set_instance_param(instance_params, "R", value);
+                            set_instance_param(instance_params, deferred_params, "R", value);
                         }
                     }
                     Some(param_name) => {
-                        set_instance_param(instance_params, param_name, value);
+                        set_instance_param(instance_params, deferred_params, param_name, value);
                     }
                 }
                 Ok(())
             }
             ElementKind::Capacitor {
                 value: c,
+                value_expr,
                 initial_voltage,
                 instance_params,
+                deferred_params,
                 ..
             } => {
                 match param_upper.as_deref() {
                     None | Some("C") | Some("CAP") | Some("VALUE") | Some("CAPACITANCE") => {
                         *c = value;
+                        *value_expr = None;
                         set_instance_param_alias(
                             instance_params,
+                            deferred_params,
                             &["C", "CAP", "VALUE", "CAPACITANCE"],
                             "C",
                             value,
@@ -1705,20 +1748,39 @@ impl Engine {
                     }
                     Some("IC") => {
                         *initial_voltage = Some(value);
-                        set_instance_param(instance_params, "IC", value);
+                        set_instance_param(instance_params, deferred_params, "IC", value);
                     }
                     Some("L") | Some("LENGTH") => {
-                        set_instance_param_alias(instance_params, &["L", "LENGTH"], "L", value);
+                        set_instance_param_alias(
+                            instance_params,
+                            deferred_params,
+                            &["L", "LENGTH"],
+                            "L",
+                            value,
+                        );
                     }
                     Some("W") | Some("WIDTH") => {
-                        set_instance_param_alias(instance_params, &["W", "WIDTH"], "W", value);
+                        set_instance_param_alias(
+                            instance_params,
+                            deferred_params,
+                            &["W", "WIDTH"],
+                            "W",
+                            value,
+                        );
                     }
                     Some("M") | Some("MULT") => {
-                        set_instance_param_alias(instance_params, &["M", "MULT"], "M", value);
+                        set_instance_param_alias(
+                            instance_params,
+                            deferred_params,
+                            &["M", "MULT"],
+                            "M",
+                            value,
+                        );
                     }
                     Some("SCALE") | Some("TEMP") | Some("DTEMP") | Some("TC1") | Some("TC2") => {
                         set_instance_param(
                             instance_params,
+                            deferred_params,
                             param_upper.as_deref().expect("param is present"),
                             value,
                         );
@@ -1734,21 +1796,29 @@ impl Engine {
             }
             ElementKind::Inductor {
                 value: l,
+                value_expr,
                 model,
                 instance_params,
+                deferred_params,
                 ..
             } => {
                 match param_upper.as_deref() {
                     None | Some("L") | Some("IND") | Some("VALUE") | Some("INDUCTANCE") => {
                         *l = value;
+                        *value_expr = None;
+                        forget_deferred_params(
+                            deferred_params,
+                            &["L", "IND", "VALUE", "INDUCTANCE"],
+                        );
                         if model.is_some() {
-                            set_instance_param(instance_params, "L", value);
+                            set_instance_param(instance_params, deferred_params, "L", value);
                         }
                     }
                     Some("M") | Some("MULT") | Some("SCALE") | Some("TEMP") | Some("DTEMP")
                     | Some("TC1") | Some("TC2") => {
                         set_instance_param(
                             instance_params,
+                            deferred_params,
                             param_upper.as_deref().expect("param is present"),
                             value,
                         );
@@ -1796,17 +1866,24 @@ impl Engine {
                 multiplicity,
                 ..
             } => {
-                if matches_param(&["M", "MULT"]) {
-                    multiplicity.value = value;
-                    multiplicity.value_expr = None;
-                    multiplicity.given = true;
-                } else if matches_param(&["GM", "TRANSCONDUCTANCE", "VALUE"]) {
-                    *transconductance = value;
-                    *transconductance_expr = None;
-                } else {
-                    return Err(SimulationError::Circuit(
-                        "Unsupported VCCS step parameter; use GM or M".to_string(),
-                    ));
+                // An unnamed target names the device's value, which for a VCCS
+                // is GM -- the same reading `canonical_device_parameter` gives
+                // the `.DC` and `alter` routes. `M` remains reachable by name.
+                match param_upper.as_deref() {
+                    None | Some("GM") | Some("TRANSCONDUCTANCE") | Some("VALUE") => {
+                        *transconductance = value;
+                        *transconductance_expr = None;
+                    }
+                    Some("M") | Some("MULT") => {
+                        multiplicity.value = value;
+                        multiplicity.value_expr = None;
+                        multiplicity.given = true;
+                    }
+                    Some(_) => {
+                        return Err(SimulationError::Circuit(
+                            "Unsupported VCCS step parameter; use GM or M".to_string(),
+                        ));
+                    }
                 }
                 Ok(())
             }
@@ -1836,19 +1913,33 @@ impl Engine {
                 multiplicity,
                 ..
             } => {
-                if matches_param(&["M", "MULT"]) {
-                    multiplicity.value = value;
-                    multiplicity.value_expr = None;
-                    multiplicity.given = true;
-                } else if matches_param(&["TC", "TC1"]) {
-                    *tc1 = value;
-                } else if matches_param(&["TC2"]) {
-                    *tc2 = value;
-                } else {
-                    return Err(SimulationError::Circuit(
-                        "Unsupported behavioral-source step parameter; use M, TC1, or TC2"
-                            .to_string(),
-                    ));
+                // A behavioral source's value is the expression itself: the
+                // element stores no number for this field
+                // (`ElementKind::BehavioralVoltage { expression: String, .. }`
+                // in `netlist::ast`), so overriding it would mean re-spelling
+                // the swept number as deck text and parsing it back. That
+                // round trip belongs to no sweep, so the target is refused by
+                // name rather than silently landing on a neighbouring field.
+                match param_upper.as_deref() {
+                    Some("M") | Some("MULT") => {
+                        multiplicity.value = value;
+                        multiplicity.value_expr = None;
+                        multiplicity.given = true;
+                    }
+                    Some("TC") | Some("TC1") => *tc1 = value,
+                    Some("TC2") => *tc2 = value,
+                    None | Some("VALUE") => {
+                        return Err(SimulationError::Circuit(
+                            "A behavioral source's value is an expression, not a number this element stores; sweep M, TC1 or TC2, or sweep a parameter the expression reads"
+                                .to_string(),
+                        ));
+                    }
+                    Some(_) => {
+                        return Err(SimulationError::Circuit(
+                            "Unsupported behavioral-source step parameter; use M, TC1, or TC2"
+                                .to_string(),
+                        ));
+                    }
                 }
                 Ok(())
             }
@@ -2062,6 +2153,18 @@ impl Engine {
             )),
         }
     }
+}
+
+/// Forget the authored expression for an instance parameter a sweep has set.
+///
+/// An instance parameter captured inside a subcircuit body is resolved during
+/// flattening and merged *over* the already-resolved set
+/// (`netlist::flattener::merge_deferred_params`: "a deferred entry overrides a
+/// same-named resolved one"), so a sweep that writes only the resolved
+/// parameter is undone the moment the design elaborates.
+fn forget_deferred_params(deferred_params: &mut Vec<(String, String)>, aliases: &[&str]) {
+    deferred_params
+        .retain(|(name, _)| !aliases.iter().any(|alias| name.eq_ignore_ascii_case(alias)));
 }
 
 fn apply_temperature_scalars(netlist: &mut Netlist, temp_c: Value, vt: Value) {

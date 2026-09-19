@@ -112,16 +112,24 @@ impl SimulationResult {
                 }
                 None
             }
-            SimulationResult::Sensitivity {
-                sensitivities,
-                normalized,
-                ..
-            } => {
-                if let Some(parameter) = key.strip_prefix("normalized:") {
-                    normalized.get(parameter).and_then(|value| value.value())
-                } else {
-                    sensitivities.get(key).and_then(|value| value.value())
+            // A study of one point answers `<vector>` and
+            // `normalized:<vector>`. A swept study answers neither: there is
+            // no "the" derivative across a band, and picking one frequency
+            // for the reader would be inventing the question.
+            SimulationResult::SensitivityStudy { evidence } => {
+                if evidence.is_swept() {
+                    return None;
                 }
+                let (name, normalized) = key
+                    .strip_prefix("normalized:")
+                    .map_or((key, false), |name| (name, true));
+                let row = sensitivity_study_row(evidence, name)?;
+                let column = if normalized {
+                    &row.normalized
+                } else {
+                    &row.raw
+                };
+                column.first().copied().and_then(|value| value.value())
             }
             // The core result document's own scalar names, plus a `dcmatch.`
             // spelling: bounding a quoted sigma is why an engineer runs this
@@ -169,6 +177,9 @@ impl SimulationResult {
                     .map(|var| var.mean)
             }
             SimulationResult::MeasurementsOnly { measurements } => measurements.get(key).copied(),
+            // The figures a recorded spectrum reports are analysis-native
+            // evidence on its payload, not measurements of a waveform.
+            SimulationResult::Fft { .. } => None,
         }
     }
 
@@ -286,19 +297,31 @@ impl SimulationResult {
                 }
                 values
             }
-            SimulationResult::Sensitivity {
-                sensitivities,
-                normalized,
-                ..
-            } => sensitivities
-                .iter()
-                .filter_map(|(name, value)| value.value().map(|value| (name.clone(), value)))
-                .chain(normalized.iter().filter_map(|(name, value)| {
-                    value
-                        .value()
-                        .map(|value| (format!("normalized:{name}"), value))
-                }))
-                .collect(),
+            SimulationResult::SensitivityStudy { evidence } => {
+                if evidence.is_swept() {
+                    return HashMap::new();
+                }
+                evidence
+                    .rows
+                    .iter()
+                    .flat_map(|row| {
+                        let raw = row
+                            .raw
+                            .first()
+                            .copied()
+                            .and_then(|value| value.value())
+                            .map(|value| (row.parameter.clone(), value));
+                        let normalized = row
+                            .normalized
+                            .first()
+                            .copied()
+                            .and_then(|value| value.value())
+                            .map(|value| (format!("normalized:{}", row.parameter), value));
+                        [raw, normalized]
+                    })
+                    .flatten()
+                    .collect()
+            }
             SimulationResult::DcMismatch { evidence } => dc_mismatch_scalars(evidence)
                 .into_iter()
                 .filter(|(_, value)| value.is_finite())
@@ -332,6 +355,7 @@ impl SimulationResult {
                 .map(|var| (var.name.clone(), var.mean))
                 .collect(),
             SimulationResult::MeasurementsOnly { measurements } => measurements.clone(),
+            SimulationResult::Fft { .. } => HashMap::new(),
         }
     }
 }
@@ -350,6 +374,31 @@ fn dc_mismatch_scalars(evidence: &crate::state::DcMismatchEvidence) -> [(&'stati
         ("sigma_process", evidence.sigma_process),
         ("quoted_sigma", evidence.quoted_sigma()),
     ]
+}
+
+/// The study row a measurement name asks for.
+///
+/// The engine's vector name is the answer, matched case-insensitively. A bare
+/// name is also accepted for a design parameter: a specification saved when
+/// the Studio named its rows `GAIN` still resolves now that the engine names
+/// the same quantity `PARAM:GAIN`, and the alias is only consulted when no
+/// vector name matched exactly, so it can never shadow a device called
+/// `GAIN`.
+fn sensitivity_study_row<'a>(
+    evidence: &'a crate::state::SensitivityStudyEvidence,
+    name: &str,
+) -> Option<&'a crate::state::SensitivityStudyRow> {
+    evidence
+        .rows
+        .iter()
+        .find(|row| row.parameter.eq_ignore_ascii_case(name))
+        .or_else(|| {
+            evidence.rows.iter().find(|row| {
+                row.parameter
+                    .strip_prefix("PARAM:")
+                    .is_some_and(|parameter| parameter.eq_ignore_ascii_case(name))
+            })
+        })
 }
 
 fn tf_scalar_finite(value: &TransferFunctionScalar) -> Option<f64> {
@@ -508,44 +557,112 @@ mod transfer_function_tests {
         assert!(!measurements.contains_key("input_resistance"));
         assert!(!measurements.contains_key("output_resistance"));
     }
+    use crate::state::{
+        ComplexResultValue, SensitivityBasisEvidence, SensitivityStudyEvidence, SensitivityStudyRow,
+    };
+
+    fn study_row(parameter: &str, raw: Vec<f64>, normalized: Vec<f64>) -> SensitivityStudyRow {
+        SensitivityStudyRow {
+            parameter: parameter.to_owned(),
+            nominal_value: 1.0,
+            raw: raw.into_iter().map(Into::into).collect(),
+            normalized: normalized.into_iter().map(Into::into).collect(),
+            phase: Vec::new(),
+        }
+    }
+
     #[test]
     fn sensitivity_measurements_preserve_unavailability_and_normalized_identity() {
         use rspice_core::analysis::sensitivity::{SensitivityUnavailability, SensitivityValue};
-        let result = SimulationResult::Sensitivity {
-            output: "V(out)".to_owned(),
-            ac_mode: true,
-            frequency_hz: Some(1.0),
-            sensitivities: HashMap::from([
-                ("zero".to_owned(), 0.0.into()),
-                ("gain".to_owned(), 2.0.into()),
-                (
-                    "null".to_owned(),
-                    SensitivityValue::unavailable(
-                        SensitivityUnavailability::NondifferentiableMagnitude,
-                    ),
-                ),
-            ]),
-            normalized: HashMap::from([
-                (
-                    "zero".to_owned(),
-                    SensitivityValue::unavailable(SensitivityUnavailability::ZeroOutput),
-                ),
-                ("gain".to_owned(), 0.5.into()),
-                (
-                    "null".to_owned(),
-                    SensitivityValue::unavailable(SensitivityUnavailability::ZeroOutput),
-                ),
-            ]),
+        let result = SimulationResult::SensitivityStudy {
+            evidence: std::sync::Arc::new(SensitivityStudyEvidence {
+                output: "V(out)".to_owned(),
+                filter: String::new(),
+                basis: SensitivityBasisEvidence::Dc { output: 4.0 },
+                rows: vec![
+                    SensitivityStudyRow {
+                        normalized: vec![SensitivityValue::unavailable(
+                            SensitivityUnavailability::ZeroOutput,
+                        )],
+                        ..study_row("GAIN", vec![2.0], vec![0.5])
+                    },
+                    SensitivityStudyRow {
+                        raw: vec![SensitivityValue::unavailable(
+                            SensitivityUnavailability::NondifferentiableMagnitude,
+                        )],
+                        ..study_row("NULL", vec![0.0], vec![0.25])
+                    },
+                    study_row("ZERO", vec![0.0], vec![0.0]),
+                ],
+            }),
         };
-        assert_eq!(result.measurement("zero"), Some(0.0));
-        assert_eq!(result.measurement("normalized:zero"), None);
-        assert_eq!(result.measurement("gain"), Some(2.0));
-        assert_eq!(result.measurement("normalized:gain"), Some(0.5));
-        assert_eq!(result.measurement("null"), None);
+        assert_eq!(result.measurement("ZERO"), Some(0.0));
+        assert_eq!(result.measurement("normalized:GAIN"), None);
+        assert_eq!(result.measurement("GAIN"), Some(2.0));
+        assert_eq!(result.measurement("normalized:ZERO"), Some(0.0));
+        assert_eq!(result.measurement("NULL"), None);
         let values = result.measurements();
-        assert_eq!(values.len(), 3);
+        assert_eq!(values.len(), 4);
         for (name, value) in values {
             assert_eq!(result.measurement(&name), Some(value));
         }
+    }
+
+    /// A specification saved when the Studio named its rows `GAIN` still
+    /// resolves now that the engine names the same quantity `PARAM:GAIN`.
+    #[test]
+    fn a_bare_parameter_name_still_answers_a_sensitivity_measurement() {
+        let result = SimulationResult::SensitivityStudy {
+            evidence: std::sync::Arc::new(SensitivityStudyEvidence {
+                output: "V(out)".to_owned(),
+                filter: "PARAM:*".to_owned(),
+                basis: SensitivityBasisEvidence::Dc { output: 4.0 },
+                rows: vec![study_row("PARAM:GAIN", vec![2.0], vec![0.5])],
+            }),
+        };
+        assert_eq!(result.measurement("PARAM:GAIN"), Some(2.0));
+        assert_eq!(result.measurement("GAIN"), Some(2.0));
+        assert_eq!(result.measurement("normalized:GAIN"), Some(0.5));
+        assert_eq!(result.measurement("gain"), Some(2.0));
+        assert_eq!(result.measurement("SCALE"), None);
+        // The map is keyed by the engine's names, never by the alias: two
+        // keys for one row would double every listing that reads it.
+        let values = result.measurements();
+        assert_eq!(values.len(), 2);
+        assert!(values.contains_key("PARAM:GAIN"));
+        assert!(!values.contains_key("GAIN"));
+    }
+
+    /// A swept study answers no scalar measurement: there is no "the"
+    /// derivative across a band, and choosing one frequency for the reader
+    /// would be inventing the question.
+    #[test]
+    fn a_swept_sensitivity_answers_no_scalar_measurement() {
+        let result = SimulationResult::SensitivityStudy {
+            evidence: std::sync::Arc::new(SensitivityStudyEvidence {
+                output: "V(out)".to_owned(),
+                filter: String::new(),
+                basis: SensitivityBasisEvidence::Ac {
+                    frequencies_hz: vec![10.0, 100.0],
+                    output: vec![
+                        ComplexResultValue {
+                            real: 1.0,
+                            imaginary: 0.0,
+                        },
+                        ComplexResultValue {
+                            real: 0.5,
+                            imaginary: 0.0,
+                        },
+                    ],
+                },
+                rows: vec![SensitivityStudyRow {
+                    phase: vec![0.0.into(), 0.0.into()],
+                    ..study_row("R1", vec![2.0, 3.0], vec![0.5, 0.75])
+                }],
+            }),
+        };
+        assert_eq!(result.measurement("R1"), None);
+        assert_eq!(result.measurement("normalized:R1"), None);
+        assert!(result.measurements().is_empty());
     }
 }

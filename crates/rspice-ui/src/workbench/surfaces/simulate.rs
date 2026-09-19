@@ -1905,6 +1905,7 @@ fn analysis_icon(kind: AnalysisKind) -> WorkbenchIcon {
         | AnalysisKind::AcData
         | AnalysisKind::DcSweep
         | AnalysisKind::Fourier
+        | AnalysisKind::Fft
         | AnalysisKind::TransferFunction
         | AnalysisKind::Disto => WorkbenchIcon::Results,
         AnalysisKind::Transient

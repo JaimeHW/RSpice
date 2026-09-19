@@ -1071,6 +1071,38 @@ fn dc_mismatch_scalar_evidence(
     ]
 }
 
+/// The scalars a recorded FFT exposes, and only when the run asked for them.
+const FFT_METRIC_NAMES: &[&str] = &[
+    "fft_thd_db",
+    "fft_sndr_db",
+    "fft_enob_bits",
+    "fft_snr_db",
+    "fft_sfdr_db",
+    "fft_fundamental_magnitude",
+];
+
+fn fft_metric(metrics: &super::FftMetricsEvidence, name: &str) -> Option<f64> {
+    if native_scalar_name_matches(name, "fft_thd_db", "fft.thd_db") {
+        Some(metrics.thd_db)
+    } else if native_scalar_name_matches(name, "fft_sndr_db", "fft.sndr_db") {
+        Some(metrics.sndr_db)
+    } else if native_scalar_name_matches(name, "fft_enob_bits", "fft.enob_bits") {
+        Some(metrics.enob_bits)
+    } else if native_scalar_name_matches(name, "fft_snr_db", "fft.snr_db") {
+        Some(metrics.snr_db)
+    } else if native_scalar_name_matches(name, "fft_sfdr_db", "fft.sfdr_db") {
+        Some(metrics.sfdr_db)
+    } else if native_scalar_name_matches(
+        name,
+        "fft_fundamental_magnitude",
+        "fft.fundamental_magnitude",
+    ) {
+        Some(metrics.fundamental_magnitude)
+    } else {
+        None
+    }
+}
+
 /// Immutable, analysis-native result evidence that is neither waveform data
 /// nor presentation state.
 ///
@@ -1239,6 +1271,27 @@ pub enum AnalysisResultPayload {
         #[serde(default)]
         digital_buses: Vec<DigitalBusEvidence>,
     },
+    /// One `.FFT` spectrum the transient engine computed inside the solve that
+    /// carried its card.
+    ///
+    /// The coefficients are the result's own complex waveform; what cannot be
+    /// a waveform is here — which request produced it, what transform the
+    /// engine performed, and the Xyce-compatible figures when the run asked
+    /// for them.
+    FftSpectrum {
+        spectrum: super::FftSpectrumEvidence,
+    },
+    /// One `.SENS` study: the filter that chose the variables, the points the
+    /// derivatives were taken at, and one column per variable per point.
+    ///
+    /// The `Sensitivity` variant above is frozen. It still decodes, validates
+    /// and digests exactly as it always did, and nothing produces one any
+    /// more: a result retained before the Studio ran the engine's own
+    /// complete entries differentiated a different variable set, and is
+    /// labelled as what it is rather than widened into a shape it never had.
+    SensitivityStudy {
+        evidence: std::sync::Arc<super::SensitivityStudyEvidence>,
+    },
 }
 
 impl AnalysisResultPayload {
@@ -1368,6 +1421,12 @@ impl AnalysisResultPayload {
                 .iter()
                 .find(|(key, _)| key.eq_ignore_ascii_case(name))
                 .map(|(_, value)| *value),
+            // Only under `FFTOUT=1`: the engine computes no figure otherwise,
+            // and a zero here would read as a measured one.
+            Self::FftSpectrum { spectrum } => spectrum
+                .metrics
+                .as_ref()
+                .and_then(|metrics| fft_metric(metrics, name)),
             _ => None,
         }?;
         if !value.is_finite() {
@@ -1443,6 +1502,14 @@ impl AnalysisResultPayload {
                 .map(|(native, _, _)| native.to_owned())
                 .collect(),
             Self::ScalarMeasurements { values } => values.keys().cloned().collect(),
+            Self::FftSpectrum { spectrum } => {
+                spectrum.metrics.as_ref().map_or_else(Vec::new, |_| {
+                    FFT_METRIC_NAMES
+                        .iter()
+                        .map(|name| (*name).to_owned())
+                        .collect()
+                })
+            }
             _ => Vec::new(),
         }
     }
@@ -1671,6 +1738,14 @@ impl AnalysisResultPayload {
                         ));
                     }
                 }
+            }
+            Self::SensitivityStudy { evidence } => {
+                if analysis_type != AnalysisType::Sensitivity {
+                    return Err(format!(
+                        "sensitivity study payload does not match analysis type {analysis_type:?}"
+                    ));
+                }
+                evidence.validate()?;
             }
             Self::DcMismatch { evidence } => {
                 if analysis_type != AnalysisType::DcMismatch {
@@ -2046,6 +2121,17 @@ impl AnalysisResultPayload {
                 )
                 .map_err(|error| error.to_string())?;
             }
+            Self::FftSpectrum { spectrum } => {
+                // The Fourier family owns every retained coefficient
+                // spectrum, which is why a recorded FFT joins it rather than
+                // adding a second family that renders the same fact.
+                if analysis_type != AnalysisType::Fourier {
+                    return Err(format!(
+                        "recorded FFT payload does not match analysis type {analysis_type:?}"
+                    ));
+                }
+                spectrum.validate()?;
+            }
         }
         Ok(())
     }
@@ -2059,9 +2145,17 @@ impl AnalysisResultPayload {
             | Self::PssFloquet { .. }
             | Self::Pstb { .. }
             | Self::Sensitivity { .. }
+            // A study is an answer even when its filter selected nothing the
+            // engine could differentiate: the refusal is the run's, and what
+            // it retained states the filter that produced it.
+            | Self::SensitivityStudy { .. }
             // A spread is an answer even when no contributor cleared the
             // card's own threshold.
-            | Self::DcMismatch { .. } => true,
+            | Self::DcMismatch { .. }
+            // Always: an FFT payload states the transform the engine
+            // performed, which is a fact even when the record ran short and
+            // the spectrum has no coefficients.
+            | Self::FftSpectrum { .. } => true,
             Self::ScalarMeasurements { values } => !values.is_empty(),
             Self::TransferFunction {
                 gain,

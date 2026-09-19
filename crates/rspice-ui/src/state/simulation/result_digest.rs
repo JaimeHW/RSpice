@@ -1052,6 +1052,24 @@ fn encode_result_payload(
                 writer.u8(soa_violation_severity_tag(violation.severity));
             }
         }
+        // Tag 12: DC mismatch evidence holds 11. Appended, never reused: these
+        // bytes identify every retained result already on disk, and two
+        // payloads under one tag would let a spectrum and a contributor table
+        // with equal leading bytes digest alike
+        // (`every_typed_payload_digests_under_its_own_tag`).
+        AnalysisResultPayload::FftSpectrum { spectrum } => {
+            writer.u8(12);
+            encode_fft_spectrum_evidence(writer, spectrum);
+        }
+        // Tag 13: the recorded FFT spectrum holds 12. Written unconditionally
+        // of `encoding_version` for the same reason the DC mismatch arm above
+        // is: no build before this one could write a sensitivity study, so
+        // there is no older encoding of one to replay. The frozen
+        // `Sensitivity` arm keeps tag 1 and is untouched.
+        AnalysisResultPayload::SensitivityStudy { evidence } => {
+            writer.u8(13);
+            encode_sensitivity_study_evidence(writer, evidence);
+        }
         AnalysisResultPayload::TransientEvents {
             digital_traces,
             real_traces,
@@ -1206,6 +1224,125 @@ const fn soa_violation_severity_tag(severity: SoaViolationSeverityEvidence) -> u
         SoaViolationSeverityEvidence::Violation => 1,
         SoaViolationSeverityEvidence::Critical => 2,
     }
+}
+
+/// Every field of a sensitivity study, in declaration order, unconditionally.
+///
+/// Nothing here is skipped when it is empty or defaulted: the filter that
+/// selected the variables and the grid they were solved on are what make two
+/// studies of one deck different runs, and a digest that dropped either would
+/// present one as the other.
+fn encode_sensitivity_study_evidence(
+    writer: &mut ResultDigestWriter,
+    evidence: &super::SensitivityStudyEvidence,
+) {
+    writer.string(&evidence.output);
+    writer.string(&evidence.filter);
+    match &evidence.basis {
+        super::SensitivityBasisEvidence::Dc { output } => {
+            writer.u8(0);
+            writer.f64(*output);
+        }
+        super::SensitivityBasisEvidence::Ac {
+            frequencies_hz,
+            output,
+        } => {
+            writer.u8(1);
+            writer.sequence(frequencies_hz.len());
+            for frequency in frequencies_hz {
+                writer.f64(*frequency);
+            }
+            writer.sequence(output.len());
+            for value in output {
+                writer.f64(value.real);
+                writer.f64(value.imaginary);
+            }
+        }
+    }
+    writer.sequence(evidence.rows.len());
+    for row in &evidence.rows {
+        writer.string(&row.parameter);
+        writer.f64(row.nominal_value);
+        for column in [&row.raw, &row.normalized, &row.phase] {
+            writer.sequence(column.len());
+            for value in column {
+                match value {
+                    rspice_core::analysis::sensitivity::SensitivityValue::Available(value) => {
+                        writer.u8(0);
+                        writer.f64(*value);
+                    }
+                    rspice_core::analysis::sensitivity::SensitivityValue::Unavailable {
+                        unavailable,
+                    } => {
+                        writer.u8(1);
+                        writer.string(unavailable.as_str());
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn encode_fft_spectrum_evidence(
+    writer: &mut ResultDigestWriter,
+    spectrum: &super::FftSpectrumEvidence,
+) {
+    match spectrum.status {
+        super::FftSpectrumStatusEvidence::Complete => writer.u8(0),
+        super::FftSpectrumStatusEvidence::IncompleteHistory {
+            available_start_s,
+            available_stop_s,
+        } => {
+            writer.u8(1);
+            writer.f64(available_start_s);
+            writer.f64(available_stop_s);
+        }
+    }
+    writer.string(&spectrum.output);
+    writer.string(&spectrum.physical_type);
+    writer.f64(spectrum.start_time_s);
+    writer.f64(spectrum.stop_time_s);
+    writer.f64(spectrum.sample_interval_s);
+    writer.usize(spectrum.point_count);
+    writer.bool(spectrum.accurate_sampling);
+    writer.string(spectrum.format.keyword());
+    writer.string(spectrum.mode.label());
+    writer.string(&spectrum.window);
+    writer.f64(spectrum.alpha);
+    writer.f64(spectrum.coherent_gain);
+    writer.f64(spectrum.frequency_resolution_hz);
+    writer.usize(spectrum.fundamental_bin);
+    writer.usize(spectrum.minimum_metric_bin);
+    writer.usize(spectrum.maximum_metric_bin);
+    writer.option(spectrum.metrics.as_ref(), |writer, metrics| {
+        for value in [
+            metrics.fundamental_magnitude,
+            metrics.thd_ratio,
+            metrics.thd_db,
+            metrics.sndr_db,
+            metrics.enob_bits,
+            metrics.snr_db,
+            metrics.sfdr_db,
+        ] {
+            writer.f64(value);
+        }
+        writer.option(metrics.sfdr_spur_bin.as_ref(), |writer, bin| {
+            writer.usize(*bin);
+        });
+        writer.option(
+            metrics.sfdr_spur_frequency_hz.as_ref(),
+            |writer, frequency| writer.f64(*frequency),
+        );
+        writer.sequence(metrics.largest_harmonics.len());
+        for harmonic in &metrics.largest_harmonics {
+            writer.usize(harmonic.rank);
+            writer.usize(harmonic.bin);
+            writer.f64(harmonic.frequency_hz);
+            writer.f64(harmonic.magnitude);
+            writer.f64(harmonic.magnitude_db);
+            writer.f64(harmonic.phase_degrees);
+        }
+    });
 }
 
 fn encode_complex_result_values(writer: &mut ResultDigestWriter, values: &[ComplexResultValue]) {

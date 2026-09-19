@@ -31,13 +31,102 @@ pub enum PeriodicCarrier {
     Pss,
     /// The nearest preceding `.HB`.
     ///
-    /// Accepted by all three engine cards and by both readers, and executable
-    /// on the command line through `Engine::run_pac_from_hb_with_abort` and its
-    /// two siblings. The Studio has no runner that takes a harmonic-balance
-    /// operating point for these three kinds, so a request naming it is
-    /// refused by name rather than silently bound to a `.PSS` that is not the
-    /// carrier that was asked for.
+    /// Accepted by all three engine cards and by both readers, and run through
+    /// `Engine::run_pac_from_hb_with_abort` and its two siblings — the same
+    /// entries the command line uses, against the same retained
+    /// [`rspice_core::engine::HbOperatingPoint`] the Studio's HBSP and HBNOISE
+    /// runs already consume.
     Hb,
+}
+
+/// The retained large-signal solution a small-signal periodic run reads.
+///
+/// [`PeriodicCarrier`] is the *family* a request names; this is the converged
+/// state of one instance of that family, as the plan's typed artifact handed
+/// it over. The two are checked against each other exactly once, in
+/// [`Self::accepted_by`], because that is the only place both are in hand: a
+/// request linearized about a solution other than the one it named is a
+/// different measurement reported under this one's name.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum PeriodicCarrierState<'a> {
+    /// A converged shooting `.PSS` orbit.
+    Shooting(&'a rspice_core::engine::PssOperatingPoint),
+    /// A converged `.HB` spectral state.
+    HarmonicBalance(&'a rspice_core::engine::HbOperatingPoint),
+}
+
+impl PeriodicCarrierState<'_> {
+    /// The family this state belongs to.
+    pub(crate) fn family(self) -> PeriodicCarrier {
+        match self {
+            Self::Shooting(_) => PeriodicCarrier::Pss,
+            Self::HarmonicBalance(_) => PeriodicCarrier::Hb,
+        }
+    }
+
+    /// The fundamental the engine builds a conversion basis on for this state.
+    ///
+    /// Read off the carrier, never off the request: `prepare_periodic_ac` in
+    /// `rspice-core/src/engine/hb/periodic_ac.rs` replaces the authored
+    /// fundamental with this number before it solves anything, and the result
+    /// is constructed from it. A shooting solve of an autonomous carrier moves
+    /// its own period, and a harmonic-balance state carries the basis its
+    /// producer froze.
+    pub(crate) fn fundamental(self) -> rspice_core::Value {
+        match self {
+            Self::Shooting(point) => point.analysis().result.frequency,
+            Self::HarmonicBalance(point) => point.config().fundamental_freq,
+        }
+    }
+
+    /// The engine tolerance a run about this state must resolve with.
+    ///
+    /// A retained harmonic-balance state authenticates the *resolved engine
+    /// configuration* it was produced under
+    /// (`HbOperatingPointIdentity::resolved_simulation_identity`), and a
+    /// consumer that resolved a different tolerance is refused before its
+    /// numerical reuse — "retained HB resolved simulation configuration does
+    /// not match the current engine configuration". So the tolerance comes off
+    /// the carrier, exactly as
+    /// `run_hbnoise_analysis_from_hb_with_source_path_and_abort` takes it.
+    ///
+    /// A shooting carrier keeps the authored value: its own artifact check
+    /// compares the request's tolerance against the producer's, so reading it
+    /// off the state would make that comparison tautological.
+    pub(crate) fn engine_tolerance(self, authored: rspice_core::Value) -> rspice_core::Value {
+        match self {
+            Self::Shooting(_) => authored,
+            Self::HarmonicBalance(point) => point.config().tolerance,
+        }
+    }
+
+    /// Whether the carrier a request named admits this state, or the refusal
+    /// that names both.
+    ///
+    /// `Preceding` writes no `FROM=` keyword and admits either family, which
+    /// is what the engine's `resolve_periodic_source` does with it. The two
+    /// named positions admit only their own.
+    pub(crate) fn accepted_by(
+        self,
+        carrier: PeriodicCarrier,
+        directive: &str,
+    ) -> Result<(), String> {
+        let family = self.family();
+        if matches!(carrier, PeriodicCarrier::Preceding) || carrier == family {
+            return Ok(());
+        }
+        Err(format!(
+            "{directive} states {} but was handed a {} carrier; a small-signal run linearized \
+             about a solution it did not name reports a different measurement",
+            carrier
+                .spice_name()
+                .map_or_else(|| "no carrier".to_owned(), |name| format!("from={name}")),
+            match family {
+                PeriodicCarrier::Hb => "harmonic-balance",
+                _ => "shooting-PSS",
+            }
+        ))
+    }
 }
 
 impl PeriodicCarrier {
@@ -88,37 +177,6 @@ impl PeriodicCarrier {
     /// project saved that this build no longer offers.
     pub fn at(index: usize) -> Self {
         Self::ALL.get(index).copied().unwrap_or_default()
-    }
-
-    /// The few words a chooser paints beside a position it cannot select.
-    ///
-    /// The same fact as [`Self::unroutable_reason`], cut to what fits in a
-    /// select row. The sentence stays there, where a project or a deck that
-    /// names this carrier is answered; a row has no space for it.
-    pub fn chooser_restriction(self) -> Option<&'static str> {
-        match self {
-            Self::Preceding | Self::Pss => None,
-            Self::Hb => Some("no Studio route; runs on the command line"),
-        }
-    }
-
-    /// Why this carrier cannot be run here, in the engine's own terms, or
-    /// `None` where the Studio has the route.
-    ///
-    /// One sentence for all three kinds because the limitation is one thing:
-    /// no service runner in this crate takes a harmonic-balance operating
-    /// point for a `.PAC`-family card. It names where the card does run, so an
-    /// operator holding a deck the engine accepts is told what to do with it
-    /// instead of being told the card is wrong.
-    pub fn unroutable_reason(self, directive: &str) -> Option<String> {
-        match self {
-            Self::Preceding | Self::Pss => None,
-            Self::Hb => Some(format!(
-                "{directive} from=hb has no route in the Studio: no runner here linearizes a \
-                 harmonic-balance carrier for this card. The engine does, so a deck carrying it \
-                 runs on the command line; author from=pss to run it here"
-            )),
-        }
     }
 }
 

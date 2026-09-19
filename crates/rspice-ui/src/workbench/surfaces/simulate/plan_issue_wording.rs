@@ -32,10 +32,9 @@ pub(super) fn compatible_dependency_repair_label(
     repair_context: &AnalysisDependencyRepairContext,
 ) -> String {
     let qualifier = if prerequisite == AnalysisKind::Transient
-        && plan
-            .instance(dependent)
-            .is_some_and(|instance| instance.kind() == AnalysisKind::Fourier)
-    {
+        && plan.instance(dependent).is_some_and(|instance| {
+            matches!(instance.kind(), AnalysisKind::Fourier | AnalysisKind::Fft)
+        }) {
         "compatible "
     } else {
         ""
@@ -113,6 +112,7 @@ pub(super) fn dependency_closure_ids(
             continue;
         }
         if let Some(instance) = plan.instance(id) {
+            let required_roles = plan.required_prerequisite_roles(id);
             pending.extend(instance.dependencies().iter().filter_map(|dependency| {
                 let target = dependency.target();
                 let role_is_unique = instance
@@ -123,9 +123,7 @@ pub(super) fn dependency_closure_ids(
                     == 1;
                 if target == id
                     || !role_is_unique
-                    || !instance
-                        .prerequisite_roles()
-                        .contains(&dependency.prerequisite())
+                    || !required_roles.contains(&dependency.prerequisite())
                 {
                     return None;
                 }

@@ -9,9 +9,11 @@
 mod analysis;
 mod analysis_spec;
 mod conversions;
+mod recorded_fft;
 mod transport;
 
 pub(crate) use conversions::*;
+pub(crate) use recorded_fft::WorkerRecordedFftSpectrum;
 pub(crate) use transport::*;
 
 pub(crate) use analysis::*;
@@ -32,7 +34,7 @@ use crate::services::safety::{
 use crate::simulation::config::{
     AcAnalysisConfig, AcSweepType, AnalysisConfig, DcSweepConfig, NoiseAnalysisConfig,
     NoiseContributionDetail, NoiseIntegrationMode, NoiseSweepType, PoleZeroConfig, PzAnalysisType,
-    SensitivityConfig, TransientAnalysisConfig,
+    SensitivityConfig, SensitivitySweep, TransientAnalysisConfig,
 };
 use crate::simulation::multi_run::{AnalysisSpec, FrequencySweep, TfAccuracy, TfNormalization};
 use crate::simulation::reliability_engine::{ParamShift, ReliabilityResult, StressMetrics};
@@ -60,8 +62,10 @@ pub(crate) struct WorkerRequest {
     pub(in crate::simulation) stream_transient_samples: bool,
 }
 
+/// 11: a transient-trajectory dependency carries the spectra its solve
+///     recorded, and `AnalysisSpec::Fft` is a request a worker can be given.
 #[cfg(any(target_arch = "wasm32", test))]
-pub(crate) const WORKER_REQUEST_TRANSPORT_PROTOCOL: u8 = 10;
+pub(crate) const WORKER_REQUEST_TRANSPORT_PROTOCOL: u8 = 11;
 
 /// Browser-worker request split into compact metadata and transferable
 /// floating-point buffers. The embedded request deliberately carries empty
@@ -744,6 +748,17 @@ pub(crate) enum WorkerSimulationResult {
         convergence: Option<crate::state::TransientConvergenceEvidence>,
         #[serde(default)]
         events: WorkerEventHistory,
+        /// Spectra the engine computed for the `.fft` cards this solve carried.
+        /// Defaulted so a worker built before recorded FFT existed answers
+        /// this contract with the truth: it carried no card.
+        #[serde(default)]
+        spectra: Vec<WorkerRecordedFftSpectrum>,
+    },
+    /// One recorded `.FFT` spectrum, selected from the transient that computed
+    /// it. The task runs no solve, so no netlist and no time axis cross here.
+    Fft {
+        spectrum: WorkerRecordedFftSpectrum,
+        convergence: Option<crate::state::TransientConvergenceEvidence>,
     },
     /// PSS numerical evidence is transported once. Display waveforms are
     /// deterministically reconstructed from this retained orbit by the
@@ -807,12 +822,8 @@ pub(crate) enum WorkerSimulationResult {
         #[serde(default)]
         gain: Option<f64>,
     },
-    Sensitivity {
-        output: String,
-        ac_mode: bool,
-        frequency_hz: Option<f64>,
-        sensitivities: HashMap<String, rspice_core::analysis::sensitivity::SensitivityValue<f64>>,
-        normalized: HashMap<String, rspice_core::analysis::sensitivity::SensitivityValue<f64>>,
+    SensitivityStudy {
+        evidence: crate::state::SensitivityStudyEvidence,
     },
     /// Linearized DC mismatch spread and its ranked contributors.
     ///
@@ -1272,6 +1283,7 @@ impl WorkerSimulationResult {
                 waveforms,
                 measurements,
                 events,
+                spectra,
             } => sum_payload_bytes([
                 convergence.as_ref().map_or(0, |quality| {
                     f64_payload_bytes(quality.transfer_value_count())
@@ -1280,6 +1292,21 @@ impl WorkerSimulationResult {
                 waveforms_payload_bytes(waveforms),
                 measurements_payload_bytes(measurements),
                 event_history_payload_bytes(events),
+                f64_payload_bytes(
+                    spectra
+                        .iter()
+                        .map(WorkerRecordedFftSpectrum::numeric_value_count)
+                        .sum(),
+                ),
+            ]),
+            WorkerSimulationResult::Fft {
+                spectrum,
+                convergence,
+            } => sum_payload_bytes([
+                convergence.as_ref().map_or(0, |quality| {
+                    f64_payload_bytes(quality.transfer_value_count())
+                }),
+                f64_payload_bytes(spectrum.numeric_value_count()),
             ]),
             WorkerSimulationResult::Pss {
                 measurements,
@@ -1359,19 +1386,22 @@ impl WorkerSimulationResult {
                 complex_pair_payload_bytes(zeros.len()),
                 f64_payload_bytes(1),
             ]),
-            WorkerSimulationResult::Sensitivity {
-                frequency_hz,
-                sensitivities,
-                normalized,
-                ..
-            } => sum_payload_bytes([
-                f64_payload_bytes(usize::from(frequency_hz.is_some())),
-                sensitivities.len().saturating_mul(std::mem::size_of::<
-                    rspice_core::analysis::sensitivity::SensitivityValue<f64>,
-                >()),
-                normalized.len().saturating_mul(std::mem::size_of::<
-                    rspice_core::analysis::sensitivity::SensitivityValue<f64>,
-                >()),
+            WorkerSimulationResult::SensitivityStudy { evidence } => sum_payload_bytes([
+                // The grid, and its nominal output as a complex pair.
+                f64_payload_bytes(evidence.point_count().saturating_mul(3)),
+                evidence
+                    .rows
+                    .iter()
+                    .map(|row| {
+                        row.raw
+                            .len()
+                            .saturating_add(row.normalized.len())
+                            .saturating_add(row.phase.len())
+                            .saturating_mul(std::mem::size_of::<
+                                rspice_core::analysis::sensitivity::SensitivityValue<f64>,
+                            >())
+                    })
+                    .fold(0_usize, usize::saturating_add),
             ]),
             WorkerSimulationResult::DcMismatch { evidence } => sum_payload_bytes([
                 // Five sigmas, the nominal value and the multiplier.
@@ -1471,8 +1501,13 @@ impl WorkerSimulationResult {
 /// 20: retained PSS orbits carry canonical MNA branch-current samples.
 /// 21: transient results retain exact current impulse histories and coverage.
 /// 22: live samples carry sequenced current-impulse suffixes and loss accounting.
+/// 23: a transient carries the spectra of the `.fft` cards it evaluated, and a
+///     recorded FFT result is its own response variant.
+/// 24: a sensitivity result is one study — its filter, every frequency it
+///     solved, and a raw, normalized and phase column per variable — in place
+///     of two maps read at a single point.
 /// Earlier workers silently omit numerical quality or current observations.
-const WORKER_RESPONSE_TRANSPORT_PROTOCOL: u8 = 22;
+const WORKER_RESPONSE_TRANSPORT_PROTOCOL: u8 = 24;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct WorkerResponseTransport {
@@ -1509,6 +1544,13 @@ impl TryFrom<SimulationResult> for WorkerSimulationResult {
                 waveforms: worker_waveforms(waveforms),
                 measurements: worker_measurements(measurements),
             }),
+            SimulationResult::Fft {
+                spectrum,
+                convergence,
+            } => Ok(Self::Fft {
+                spectrum: WorkerRecordedFftSpectrum::from(spectrum.as_ref()),
+                convergence: convergence.map(std::sync::Arc::unwrap_or_clone),
+            }),
             SimulationResult::Transient {
                 time,
                 waveforms,
@@ -1516,6 +1558,7 @@ impl TryFrom<SimulationResult> for WorkerSimulationResult {
                 periodic_state,
                 convergence,
                 events,
+                spectra,
             } => match periodic_state {
                 Some(operating_point) => {
                     if convergence.is_some() {
@@ -1536,6 +1579,7 @@ impl TryFrom<SimulationResult> for WorkerSimulationResult {
                     measurements: worker_measurements(measurements),
                     convergence: convergence.map(std::sync::Arc::unwrap_or_clone),
                     events: events.into(),
+                    spectra: recorded_fft::worker_spectra(spectra),
                 }),
             },
             SimulationResult::Ac {
@@ -1649,18 +1693,8 @@ impl TryFrom<SimulationResult> for WorkerSimulationResult {
                 zero_evidence,
                 gain,
             }),
-            SimulationResult::Sensitivity {
-                output,
-                ac_mode,
-                frequency_hz,
-                sensitivities,
-                normalized,
-            } => Ok(Self::Sensitivity {
-                output,
-                ac_mode,
-                frequency_hz,
-                sensitivities,
-                normalized,
+            SimulationResult::SensitivityStudy { evidence } => Ok(Self::SensitivityStudy {
+                evidence: std::sync::Arc::unwrap_or_clone(evidence),
             }),
             SimulationResult::DcMismatch { evidence } => Ok(Self::DcMismatch {
                 evidence: (*evidence).clone(),
@@ -1838,6 +1872,7 @@ impl From<WorkerSimulationResult> for SimulationResult {
                 measurements,
                 convergence,
                 events,
+                spectra,
             } => Self::Transient {
                 time,
                 waveforms: waveform_map(waveforms),
@@ -1845,6 +1880,14 @@ impl From<WorkerSimulationResult> for SimulationResult {
                 periodic_state: None,
                 convergence: convergence.map(std::sync::Arc::new),
                 events: events.into(),
+                spectra: recorded_fft::recorded_spectra(spectra),
+            },
+            WorkerSimulationResult::Fft {
+                spectrum,
+                convergence,
+            } => Self::Fft {
+                spectrum: std::sync::Arc::new(spectrum.into()),
+                convergence: convergence.map(std::sync::Arc::new),
             },
             WorkerSimulationResult::Pss {
                 measurements,
@@ -1955,18 +1998,8 @@ impl From<WorkerSimulationResult> for SimulationResult {
                 zero_evidence,
                 gain,
             },
-            WorkerSimulationResult::Sensitivity {
-                output,
-                ac_mode,
-                frequency_hz,
-                sensitivities,
-                normalized,
-            } => Self::Sensitivity {
-                output,
-                ac_mode,
-                frequency_hz,
-                sensitivities,
-                normalized,
+            WorkerSimulationResult::SensitivityStudy { evidence } => Self::SensitivityStudy {
+                evidence: std::sync::Arc::new(evidence),
             },
             WorkerSimulationResult::DcMismatch { evidence } => Self::DcMismatch {
                 evidence: std::sync::Arc::new(evidence),

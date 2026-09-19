@@ -12,7 +12,7 @@ mod snapshot;
 
 pub(in crate::simulation) use artifact::{
     ExecutionArtifactEnvelope, ExecutionArtifactKind, PreparedDependencyBinding,
-    ResolvedExecutionDependencies, TransientTrajectoryArtifact,
+    ResolvedExecutionDependencies, TransientTrajectoryArtifact, required_artifact_kinds,
 };
 #[cfg(any(target_arch = "wasm32", test))]
 pub(in crate::simulation) use canonical::f64_sequence_digest;
@@ -26,6 +26,7 @@ pub(crate) use sealed_source::sealed_executable_source_digest;
 pub(in crate::simulation) use sealed_source::{
     generated_executable_source_digest, manual_executable_source_digest,
 };
+pub(in crate::simulation) use snapshot::bound_cards;
 pub(in crate::simulation) use snapshot::{
     AuthorizedRunDispatch, AuthorizedTaskDispatch, CrossProbeSnapshot, ExecutionTargetCapabilities,
     ModelSourceIdentity, PSS_SPECTRUM_ROLE, PreparedRunSet, PreparedRunSnapshot, PreparedTask,
