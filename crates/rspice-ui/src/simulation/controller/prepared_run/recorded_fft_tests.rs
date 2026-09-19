@@ -10,7 +10,6 @@ use crate::product::{AnalysisInstanceId, ContentDigest};
 use crate::simulation::multi_run::AnalysisSpec;
 use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
 use crate::state::SimulationRunIntent;
-use crate::workbench::app_state::AppState;
 
 fn edit_transient(
     plan: &mut crate::simulation::plan::SimulationPlan,
