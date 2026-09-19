@@ -1093,14 +1093,13 @@ fn every_typed_payload_digests_under_its_own_tag() {
                 .take_while(|c| c.is_ascii_alphanumeric())
                 .collect();
             arm = Some(name);
-        } else if let (Some(name), Some(rest)) = (arm.as_ref(), line.strip_prefix("writer.u8(")) {
-            if let Some(tag) = rest
+        } else if let (Some(name), Some(rest)) = (arm.as_ref(), line.strip_prefix("writer.u8("))
+            && let Some(tag) = rest
                 .strip_suffix(");")
                 .and_then(|tag| tag.parse::<u32>().ok())
-            {
-                tags.push((tag, name.clone()));
-                arm = None;
-            }
+        {
+            tags.push((tag, name.clone()));
+            arm = None;
         }
     }
     assert!(
