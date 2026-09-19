@@ -34,6 +34,7 @@ mod error;
 pub(crate) mod nested_dc_tests;
 mod parsing;
 mod pole_zero;
+mod recorded_fft;
 mod sensitivity;
 mod transient;
 

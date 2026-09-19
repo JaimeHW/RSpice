@@ -158,6 +158,9 @@ impl SimulationResult {
                     .map(|var| var.mean)
             }
             SimulationResult::MeasurementsOnly { measurements } => measurements.get(key).copied(),
+            // The figures a recorded spectrum reports are analysis-native
+            // evidence on its payload, not measurements of a waveform.
+            SimulationResult::Fft { .. } => None,
         }
     }
 
@@ -314,6 +317,7 @@ impl SimulationResult {
                 .map(|var| (var.name.clone(), var.mean))
                 .collect(),
             SimulationResult::MeasurementsOnly { measurements } => measurements.clone(),
+            SimulationResult::Fft { .. } => HashMap::new(),
         }
     }
 }
