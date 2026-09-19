@@ -1012,7 +1012,8 @@ fn every_dc_mismatch_evidence_field_moves_the_result_digest() {
         "the same evidence digests to the same bytes"
     );
 
-    let mutations: [(&str, fn(&mut crate::state::DcMismatchEvidence)); 16] = [
+    type EvidenceEdit = (&'static str, fn(&mut crate::state::DcMismatchEvidence));
+    let mutations: [EvidenceEdit; 16] = [
         ("output", |e| e.output = "V(MID)".to_owned()),
         ("output_unit", |e| e.output_unit = "A".to_owned()),
         ("nominal_value", |e| e.nominal_value += 1.0e-15),
@@ -1047,7 +1048,11 @@ fn every_dc_mismatch_evidence_field_moves_the_result_digest() {
     }
 
     // And each contributor field in turn.
-    let rows: [(&str, fn(&mut crate::state::DcMismatchContributorEvidence)); 7] = [
+    type ContributorEdit = (
+        &'static str,
+        fn(&mut crate::state::DcMismatchContributorEvidence),
+    );
+    let rows: [ContributorEdit; 7] = [
         ("instance", |row| row.instance = "R3".to_owned()),
         ("parameter", |row| row.parameter = "R3V".to_owned()),
         ("scope", |row| {
