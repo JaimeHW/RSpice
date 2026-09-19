@@ -23,117 +23,123 @@ use crate::state::{DuplicateExternalNets, Point, SchematicState, Selection};
 
 use crate::workbench::app_state::AppState;
 
-/// Delete what is selected on the active sheet.
-///
-/// The impact report is built before the objects are gone, because that is the
-/// only moment the design still knows which nets they were on.
-pub(crate) fn delete_schematic_selection(state: &mut AppState) -> bool {
-    if refuse_read_only(state) {
-        return false;
-    }
-    let mut target = selection_filtered_to_active_sheet(state, &state.schematic.selection);
-    promote_wire_handles_to_complete_wires(&state.schematic, &mut target);
-    let count = complete_selection_count(&state.schematic, &target);
-    if count == 0 {
-        refuse_empty(state);
-        return false;
+impl AppState {
+    /// Delete what is selected on the active sheet.
+    ///
+    /// The impact report is built before the objects are gone, because that is the
+    /// only moment the design still knows which nets they were on.
+    pub(crate) fn delete_schematic_selection(&mut self) -> bool {
+        let state = self;
+        if refuse_read_only(state) {
+            return false;
+        }
+        let mut target = selection_filtered_to_active_sheet(state, &state.schematic.selection);
+        promote_wire_handles_to_complete_wires(&state.schematic, &mut target);
+        let count = complete_selection_count(&state.schematic, &target);
+        if count == 0 {
+            refuse_empty(state);
+            return false;
+        }
+
+        let impact = delete_dependency_impact(state, &target);
+        let previous_selection = std::mem::replace(&mut state.schematic.selection, target);
+        if !with_hidden_wire_topology_preserved(state, SchematicState::delete_selection) {
+            state.schematic.selection = previous_selection;
+            state.push_user_message(ConsoleMessage::warning("Nothing was deleted."));
+            return false;
+        }
+        state.sync_active_schematic_to_workspace();
+
+        let headline = format!("Deleted {}.", object_count(count));
+        state.push_user_message(match impact.detail() {
+            Some(detail) => ConsoleMessage::warning(format!("{headline} {detail}")),
+            None => ConsoleMessage::info(headline),
+        });
+        true
     }
 
-    let impact = delete_dependency_impact(state, &target);
-    let previous_selection = std::mem::replace(&mut state.schematic.selection, target);
-    if !with_hidden_wire_topology_preserved(state, SchematicState::delete_selection) {
-        state.schematic.selection = previous_selection;
-        state.push_user_message(ConsoleMessage::warning("Nothing was deleted."));
-        return false;
-    }
-    state.sync_active_schematic_to_workspace();
+    /// Copy what is selected on the active sheet, then delete it.
+    pub(crate) fn cut_schematic_selection(&mut self) -> bool {
+        let state = self;
+        if refuse_read_only(state) {
+            return false;
+        }
+        let target = selection_filtered_to_active_sheet(state, &state.schematic.selection);
+        let count = complete_selection_count(&state.schematic, &target);
+        if count == 0 {
+            refuse_empty(state);
+            return false;
+        }
 
-    let headline = format!("Deleted {}.", object_count(count));
-    state.push_user_message(match impact.detail() {
-        Some(detail) => ConsoleMessage::warning(format!("{headline} {detail}")),
-        None => ConsoleMessage::info(headline),
-    });
-    true
-}
+        let open_nets = cut_open_net_count(state, &target);
+        let previous_clipboard = state.schematic.clipboard.clone();
+        let previous_selection = std::mem::replace(&mut state.schematic.selection, target);
+        if !state.copy_active_schematic_selection() || state.schematic.clipboard.is_empty() {
+            state.schematic.clipboard = previous_clipboard;
+            state.schematic.selection = previous_selection;
+            refuse_empty(state);
+            return false;
+        }
+        if !with_hidden_wire_topology_preserved(state, SchematicState::delete_selection) {
+            state.schematic.clipboard = previous_clipboard;
+            state.schematic.selection = previous_selection;
+            state.push_user_message(ConsoleMessage::warning("Nothing was cut."));
+            return false;
+        }
+        state.sync_active_schematic_to_workspace();
 
-/// Copy what is selected on the active sheet, then delete it.
-pub(crate) fn cut_schematic_selection(state: &mut AppState) -> bool {
-    if refuse_read_only(state) {
-        return false;
-    }
-    let target = selection_filtered_to_active_sheet(state, &state.schematic.selection);
-    let count = complete_selection_count(&state.schematic, &target);
-    if count == 0 {
-        refuse_empty(state);
-        return false;
-    }
-
-    let open_nets = cut_open_net_count(state, &target);
-    let previous_clipboard = state.schematic.clipboard.clone();
-    let previous_selection = std::mem::replace(&mut state.schematic.selection, target);
-    if !state.copy_active_schematic_selection() || state.schematic.clipboard.is_empty() {
-        state.schematic.clipboard = previous_clipboard;
-        state.schematic.selection = previous_selection;
-        refuse_empty(state);
-        return false;
-    }
-    if !with_hidden_wire_topology_preserved(state, SchematicState::delete_selection) {
-        state.schematic.clipboard = previous_clipboard;
-        state.schematic.selection = previous_selection;
-        state.push_user_message(ConsoleMessage::warning("Nothing was cut."));
-        return false;
-    }
-    state.sync_active_schematic_to_workspace();
-
-    let headline = format!("Cut {}.", object_count(count));
-    state.push_user_message(match open_nets {
-        Ok(0) | Err(_) => ConsoleMessage::info(headline),
-        Ok(open) => ConsoleMessage::warning(format!(
-            "Cut {}; {}.",
-            object_count(count),
-            open_nets_clause(open)
-        )),
-    });
-    true
-}
-
-/// Duplicate what is selected, placed just off the current paste anchor.
-pub(crate) fn duplicate_schematic_selection(state: &mut AppState) -> bool {
-    let anchor = state.schematic_paste_anchor() + Point::new(2, 2);
-    duplicate_schematic_selection_at(state, anchor)
-}
-
-/// Duplicate what is selected, placed at `anchor`.
-///
-/// The user's clipboard is theirs. Duplicate borrows it to carry the copy and
-/// hands it back byte for byte, whether the paste landed or not.
-pub(crate) fn duplicate_schematic_selection_at(state: &mut AppState, anchor: Point) -> bool {
-    if refuse_read_only(state) {
-        return false;
-    }
-    let target = selection_filtered_to_active_sheet(state, &state.schematic.selection);
-    let count = complete_selection_count(&state.schematic, &target);
-    if count == 0 {
-        refuse_empty(state);
-        return false;
+        let headline = format!("Cut {}.", object_count(count));
+        state.push_user_message(match open_nets {
+            Ok(0) | Err(_) => ConsoleMessage::info(headline),
+            Ok(open) => ConsoleMessage::warning(format!(
+                "Cut {}; {}.",
+                object_count(count),
+                open_nets_clause(open)
+            )),
+        });
+        true
     }
 
-    let previous_clipboard = state.schematic.clipboard.clone();
-    let previous_selection = std::mem::replace(&mut state.schematic.selection, target);
-    if !state.copy_active_schematic_selection() || state.schematic.clipboard.is_empty() {
-        state.schematic.clipboard = previous_clipboard;
-        state.schematic.selection = previous_selection;
-        refuse_empty(state);
-        return false;
+    /// Duplicate what is selected, placed just off the current paste anchor.
+    pub(crate) fn duplicate_schematic_selection(&mut self) -> bool {
+        let state = self;
+        let anchor = state.schematic_paste_anchor() + Point::new(2, 2);
+        state.duplicate_schematic_selection_at(anchor)
     }
 
-    // A design whose hierarchy does not resolve cannot name its nets, and a
-    // Duplicate that refuses for that reason is a Duplicate that stops working
-    // on exactly the designs a reader is trying to repair. It copies anyway and
-    // says the connections were not carried.
-    let mut unresolved_nets = false;
-    let kept =
-        if state.ui.duplicate_external_nets == DuplicateExternalNets::PreserveNamedNetAttachment {
+    /// Duplicate what is selected, placed at `anchor`.
+    ///
+    /// The user's clipboard is theirs. Duplicate borrows it to carry the copy and
+    /// hands it back byte for byte, whether the paste landed or not.
+    pub(crate) fn duplicate_schematic_selection_at(&mut self, anchor: Point) -> bool {
+        let state = self;
+        if refuse_read_only(state) {
+            return false;
+        }
+        let target = selection_filtered_to_active_sheet(state, &state.schematic.selection);
+        let count = complete_selection_count(&state.schematic, &target);
+        if count == 0 {
+            refuse_empty(state);
+            return false;
+        }
+
+        let previous_clipboard = state.schematic.clipboard.clone();
+        let previous_selection = std::mem::replace(&mut state.schematic.selection, target);
+        if !state.copy_active_schematic_selection() || state.schematic.clipboard.is_empty() {
+            state.schematic.clipboard = previous_clipboard;
+            state.schematic.selection = previous_selection;
+            refuse_empty(state);
+            return false;
+        }
+
+        // A design whose hierarchy does not resolve cannot name its nets, and a
+        // Duplicate that refuses for that reason is a Duplicate that stops working
+        // on exactly the designs a reader is trying to repair. It copies anyway and
+        // says the connections were not carried.
+        let mut unresolved_nets = false;
+        let kept = if state.ui.duplicate_external_nets
+            == DuplicateExternalNets::PreserveNamedNetAttachment
+        {
             match named_external_attachments(state) {
                 Ok(attachments) => state
                     .schematic
@@ -148,60 +154,62 @@ pub(crate) fn duplicate_schematic_selection_at(state: &mut AppState, anchor: Poi
             0
         };
 
-    let pasted = state.schematic.paste_at_checked(anchor);
-    state.schematic.clipboard = previous_clipboard;
-    if !matches!(pasted, Ok(true)) {
-        state.schematic.selection = previous_selection;
-        state.push_user_message(ConsoleMessage::warning(
-            pasted
-                .err()
-                .unwrap_or_else(|| "Nothing was duplicated.".to_owned()),
-        ));
-        return false;
-    }
-    state.sync_active_schematic_to_workspace();
+        let pasted = state.schematic.paste_at_checked(anchor);
+        state.schematic.clipboard = previous_clipboard;
+        if !matches!(pasted, Ok(true)) {
+            state.schematic.selection = previous_selection;
+            state.push_user_message(ConsoleMessage::warning(
+                pasted
+                    .err()
+                    .unwrap_or_else(|| "Nothing was duplicated.".to_owned()),
+            ));
+            return false;
+        }
+        state.sync_active_schematic_to_workspace();
 
-    let headline = format!("Duplicated {}.", object_count(count));
-    state.push_user_message(if unresolved_nets {
-        ConsoleMessage::warning(format!(
-            "Duplicated {}; named-net connections could not be resolved.",
+        let headline = format!("Duplicated {}.", object_count(count));
+        state.push_user_message(if unresolved_nets {
+            ConsoleMessage::warning(format!(
+                "Duplicated {}; named-net connections could not be resolved.",
+                object_count(count)
+            ))
+        } else if kept == 0 {
+            ConsoleMessage::info(headline)
+        } else {
+            ConsoleMessage::info(format!(
+                "Duplicated {}; kept {}.",
+                object_count(count),
+                named_net_connections(kept)
+            ))
+        });
+        true
+    }
+
+    /// Select every object on the active sheet the selection filter admits.
+    pub(crate) fn select_all_schematic_objects(&mut self) -> bool {
+        let state = self;
+        let selection = selectable_objects_on_active_sheet(state);
+        let count = selection.count();
+        if count == 0 {
+            state.push_user_message(ConsoleMessage::warning(
+                "Nothing matches the selection filter.",
+            ));
+            return false;
+        }
+        state.schematic.selection = selection;
+        // Selecting changes no document, so the buffer's selection is written on
+        // its own rather than through the whole save-and-revalidate path an edit
+        // takes.
+        let active_key = state.workspace.active_schematic_reference().key();
+        if let Some(buffer) = state.workspace.schematic_buffers.get_mut(&active_key) {
+            buffer.selection = state.schematic.selection.clone();
+        }
+        state.push_user_message(ConsoleMessage::info(format!(
+            "Selected {}.",
             object_count(count)
-        ))
-    } else if kept == 0 {
-        ConsoleMessage::info(headline)
-    } else {
-        ConsoleMessage::info(format!(
-            "Duplicated {}; kept {}.",
-            object_count(count),
-            named_net_connections(kept)
-        ))
-    });
-    true
-}
-
-/// Select every object on the active sheet the selection filter admits.
-pub(crate) fn select_all_schematic_objects(state: &mut AppState) -> bool {
-    let selection = selectable_objects_on_active_sheet(state);
-    let count = selection.count();
-    if count == 0 {
-        state.push_user_message(ConsoleMessage::warning(
-            "Nothing matches the selection filter.",
-        ));
-        return false;
+        )));
+        true
     }
-    state.schematic.selection = selection;
-    // Selecting changes no document, so the buffer's selection is written on
-    // its own rather than through the whole save-and-revalidate path an edit
-    // takes.
-    let active_key = state.workspace.active_schematic_reference().key();
-    if let Some(buffer) = state.workspace.schematic_buffers.get_mut(&active_key) {
-        buffer.selection = state.schematic.selection.clone();
-    }
-    state.push_user_message(ConsoleMessage::info(format!(
-        "Selected {}.",
-        object_count(count)
-    )));
-    true
 }
 
 fn refuse_read_only(state: &mut AppState) -> bool {

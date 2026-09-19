@@ -1287,13 +1287,10 @@ fn execute_context_action(
             state.copy_active_schematic_selection();
         }
         ContextAction::Duplicate => {
-            crate::workbench::app::duplicate_schematic_selection_at(
-                state,
-                click_pos + Point::new(2, 2),
-            );
+            state.duplicate_schematic_selection_at(click_pos + Point::new(2, 2));
         }
         ContextAction::Delete => {
-            crate::workbench::app::delete_schematic_selection(state);
+            state.delete_schematic_selection();
         }
         ContextAction::DescendHierarchy => state.open_selected_instance_master(),
         ContextAction::UpdateInstanceInterface => {

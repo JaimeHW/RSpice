@@ -1156,7 +1156,7 @@ impl Command {
                 if active_symbol_editor(app) {
                     app.delete_selected_symbol_item(true);
                 } else {
-                    crate::workbench::app::cut_schematic_selection(&mut app.state);
+                    app.state.cut_schematic_selection();
                 }
             }
             Self::Copy => {
@@ -1189,21 +1189,21 @@ impl Command {
                     app.copy_selected_symbol_shape();
                     app.paste_symbol_shape();
                 } else {
-                    crate::workbench::app::duplicate_schematic_selection(&mut app.state);
+                    app.state.duplicate_schematic_selection();
                 }
             }
             Self::Delete => {
                 if active_symbol_editor(app) {
                     app.delete_selected_symbol_item(false);
                 } else {
-                    crate::workbench::app::delete_schematic_selection(&mut app.state);
+                    app.state.delete_schematic_selection();
                 }
             }
             Self::SelectAll => {
                 if active_symbol_editor(app) {
                     app.select_all_symbol_items();
                 } else {
-                    crate::workbench::app::select_all_schematic_objects(&mut app.state);
+                    app.state.select_all_schematic_objects();
                 }
             }
             Self::RenameSelection => {
@@ -1306,9 +1306,9 @@ impl Command {
             }
             Self::ToggleFullScreen => {
                 if app.state.workbench.full_screen_presentation {
-                    crate::workbench::exit_full_screen_presentation(app);
+                    app.state.exit_full_screen_presentation();
                 } else {
-                    crate::workbench::enter_full_screen_presentation(app);
+                    app.state.enter_full_screen_presentation();
                 }
             }
             Self::ResetActiveView => {

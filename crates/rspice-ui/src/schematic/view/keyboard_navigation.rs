@@ -45,7 +45,7 @@ pub(super) fn handle_keyboard_object_navigation(
         .input_mut(|input| consume_unmodified_key(input, Key::Backspace))
     {
         if !state.schematic.read_only && !state.active_view_read_only() {
-            crate::workbench::app::delete_schematic_selection(state);
+            state.delete_schematic_selection();
         }
         return true;
     }

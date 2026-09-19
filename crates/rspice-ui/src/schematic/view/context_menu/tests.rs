@@ -635,14 +635,14 @@ fn duplicate_and_delete_rows_run_the_real_undoable_commands() {
     state.schematic.init_undo_history();
     state.schematic.selection.select_component(41);
 
-    crate::workbench::app::duplicate_schematic_selection_at(&mut state, Point::new(22, 32));
+    state.duplicate_schematic_selection_at(Point::new(22, 32));
     assert_eq!(state.schematic.components.len(), 2);
     assert!(state.schematic.can_undo());
     assert!(state.schematic.undo());
     assert_eq!(state.schematic.components.len(), 1);
 
     state.schematic.selection.select_component(41);
-    crate::workbench::app::delete_schematic_selection(&mut state);
+    state.delete_schematic_selection();
     assert!(state.schematic.components.is_empty());
     assert!(state.schematic.undo());
     assert_eq!(state.schematic.components.len(), 1);
@@ -652,14 +652,14 @@ fn duplicate_and_delete_rows_run_the_real_undoable_commands() {
     state.sync_active_schematic_to_workspace();
     state.schematic.selection.select_only_net_label(label.id);
 
-    crate::workbench::app::duplicate_schematic_selection_at(&mut state, Point::new(42, 42));
+    state.duplicate_schematic_selection_at(Point::new(42, 42));
     assert_eq!(state.schematic.net_labels.len(), 2);
     assert!(state.schematic.can_undo());
     assert!(state.schematic.undo());
     assert_eq!(state.schematic.net_labels, vec![label.clone()]);
 
     state.schematic.selection.select_only_net_label(label.id);
-    crate::workbench::app::delete_schematic_selection(&mut state);
+    state.delete_schematic_selection();
     assert!(state.schematic.net_labels.is_empty());
     assert!(state.schematic.undo());
     assert_eq!(state.schematic.net_labels, vec![label]);

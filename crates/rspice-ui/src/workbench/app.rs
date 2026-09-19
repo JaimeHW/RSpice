@@ -199,11 +199,6 @@ pub(in crate::workbench) use dialogs::plan_removal::REVEAL_BLOCKER;
 
 pub(crate) use schematic::edit_authority::SchematicEditAuthority;
 
-pub(crate) use dialogs::selection::commands::{
-    cut_schematic_selection, delete_schematic_selection, duplicate_schematic_selection,
-    duplicate_schematic_selection_at, select_all_schematic_objects,
-};
-
 pub(crate) use schematic::named_net::{
     NamedNetTarget, apply_named_net_rename, selected_named_net_target, validate_named_net_rename,
 };

@@ -52,7 +52,7 @@ fn delete_removes_the_selection_immediately_as_one_undo_entry() {
     let mut state = state_with_two_resistors();
     state.schematic.selection.select_only_component(41);
 
-    assert!(delete_schematic_selection(&mut state));
+    assert!(state.delete_schematic_selection());
 
     assert_eq!(state.schematic.components.len(), 1);
     assert_eq!(state.schematic.undo_description(), Some("delete selection"));
@@ -83,7 +83,7 @@ fn delete_promotes_a_wire_handle_to_its_whole_conductor() {
         .selection
         .select_only_wire_segment(wire.id, 1);
 
-    assert!(delete_schematic_selection(&mut state));
+    assert!(state.delete_schematic_selection());
 
     assert!(state.schematic.wires.is_empty());
     assert_eq!(
@@ -106,7 +106,7 @@ fn a_stale_wire_handle_deletes_nothing_and_says_so() {
     state.sync_active_schematic_to_workspace();
     state.schematic.selection.select_only_wire_vertex(17, 3);
 
-    assert!(!delete_schematic_selection(&mut state));
+    assert!(!state.delete_schematic_selection());
 
     assert_eq!(state.schematic.wires.len(), 1);
     assert_eq!(last_console(&state), "Select something first.");
@@ -127,7 +127,7 @@ fn delete_names_the_nets_it_took_away() {
     state.schematic.init_undo_history();
     state.schematic.selection.select_only_bus(5);
 
-    assert!(delete_schematic_selection(&mut state));
+    assert!(state.delete_schematic_selection());
 
     assert_eq!(
         last_console(&state),
@@ -151,7 +151,7 @@ fn delete_counts_the_records_that_still_reference_what_went() {
     state.schematic.init_undo_history();
     state.schematic.selection.select_only_net_label(70);
 
-    assert!(delete_schematic_selection(&mut state));
+    assert!(state.delete_schematic_selection());
 
     let reported = last_console(&state);
     assert!(reported.starts_with("Deleted 1 object."), "{reported}");
@@ -198,7 +198,7 @@ fn cut_copies_the_selection_and_then_removes_it() {
     let mut state = state_with_two_resistors();
     state.schematic.selection.select_only_component(41);
 
-    assert!(cut_schematic_selection(&mut state));
+    assert!(state.cut_schematic_selection());
 
     assert_eq!(state.schematic.components.len(), 1);
     assert_eq!(state.schematic.clipboard.components.len(), 1);
@@ -226,10 +226,7 @@ fn duplicate_leaves_the_clipboard_byte_identical() {
     let before = serde_json::to_string(&state.schematic.clipboard).expect("clipboard");
 
     state.schematic.selection.select_only_component(42);
-    assert!(duplicate_schematic_selection_at(
-        &mut state,
-        Point::new(140, 30)
-    ));
+    assert!(state.duplicate_schematic_selection_at(Point::new(140, 30)));
 
     assert_eq!(state.schematic.components.len(), 3);
     assert_eq!(
@@ -245,10 +242,7 @@ fn duplicate_selects_what_it_made_and_costs_one_undo_entry() {
     let mut state = state_with_two_resistors();
     state.schematic.selection.select_only_component(41);
 
-    assert!(duplicate_schematic_selection_at(
-        &mut state,
-        Point::new(140, 30)
-    ));
+    assert!(state.duplicate_schematic_selection_at(Point::new(140, 30)));
 
     let created = state
         .schematic
@@ -280,7 +274,7 @@ fn duplicate_honours_the_persisted_external_net_preference() {
         state.schematic.selection.select_only_component(41);
 
         assert!(
-            duplicate_schematic_selection_at(&mut state, Point::new(140, 30)),
+            state.duplicate_schematic_selection_at(Point::new(140, 30)),
             "{preference:?} still duplicates"
         );
         assert_eq!(state.schematic.components.len(), 3, "{preference:?}");
@@ -312,7 +306,7 @@ fn select_all_takes_every_class_the_filter_admits_including_annotations() {
     base.sync_active_schematic_to_workspace();
 
     let mut state = base.clone();
-    assert!(select_all_schematic_objects(&mut state));
+    assert!(state.select_all_schematic_objects());
     assert!(state.schematic.selection.has_component(1));
     assert!(state.schematic.selection.has_wire(2));
     assert!(state.schematic.selection.has_net_label(3));
@@ -336,7 +330,7 @@ fn select_all_takes_every_class_the_filter_admits_including_annotations() {
             annotations: class == "annotations",
         };
 
-        assert!(select_all_schematic_objects(&mut state), "{class}");
+        assert!(state.select_all_schematic_objects(), "{class}");
         assert_eq!(state.schematic.selection.count(), 1, "{class}");
         assert_eq!(last_console(&state), "Selected 1 object.", "{class}");
         assert!(
@@ -356,7 +350,7 @@ fn select_all_says_when_the_filter_admits_nothing() {
     state.schematic.wires.clear();
     state.sync_active_schematic_to_workspace();
 
-    assert!(!select_all_schematic_objects(&mut state));
+    assert!(!state.select_all_schematic_objects());
     assert_eq!(
         last_console(&state),
         "Nothing matches the selection filter."
@@ -371,9 +365,9 @@ fn a_read_only_schematic_refuses_every_mutating_command_without_touching_it() {
     state.sync_active_schematic_to_workspace();
 
     for command in [
-        delete_schematic_selection as fn(&mut AppState) -> bool,
-        cut_schematic_selection,
-        duplicate_schematic_selection,
+        AppState::delete_schematic_selection as fn(&mut AppState) -> bool,
+        AppState::cut_schematic_selection,
+        AppState::duplicate_schematic_selection,
     ] {
         assert!(!command(&mut state));
         assert_eq!(last_console(&state), "The schematic is read-only.");
@@ -381,7 +375,7 @@ fn a_read_only_schematic_refuses_every_mutating_command_without_touching_it() {
     assert_eq!(state.schematic.components.len(), 2);
     assert!(state.schematic.clipboard.is_empty());
     assert!(
-        select_all_schematic_objects(&mut state),
+        state.select_all_schematic_objects(),
         "reading a read-only schematic is not an edit"
     );
 }
@@ -391,9 +385,9 @@ fn an_empty_selection_refuses_with_one_plain_line() {
     let mut state = state_with_two_resistors();
 
     for command in [
-        delete_schematic_selection as fn(&mut AppState) -> bool,
-        cut_schematic_selection,
-        duplicate_schematic_selection,
+        AppState::delete_schematic_selection as fn(&mut AppState) -> bool,
+        AppState::cut_schematic_selection,
+        AppState::duplicate_schematic_selection,
     ] {
         assert!(!command(&mut state));
         assert_eq!(last_console(&state), "Select something first.");

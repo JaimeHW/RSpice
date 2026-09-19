@@ -19,30 +19,6 @@ use super::layout::LayoutSpec;
 use super::state::Workspace;
 use super::*;
 
-/// Put the application window into full screen, keeping the panels the reader
-/// has open.
-///
-/// Hiding the navigator and inspector is its own command — Focus mode — so it
-/// is not asked again here.
-pub(crate) fn enter_full_screen_presentation(app: &mut RSpiceApp) {
-    app.state.workbench.full_screen_presentation = true;
-    app.state.workbench.full_screen = true;
-    app.state.ui.request_full_screen(true);
-}
-
-pub(crate) fn exit_full_screen_presentation(app: &mut RSpiceApp) {
-    clear_full_screen_presentation(app, true);
-}
-
-fn clear_full_screen_presentation(app: &mut RSpiceApp, request_platform_exit: bool) {
-    let platform_full_screen = app.state.workbench.full_screen;
-    app.state.workbench.full_screen = false;
-    app.state.workbench.full_screen_presentation = false;
-    if request_platform_exit && platform_full_screen {
-        app.state.ui.request_full_screen(false);
-    }
-}
-
 /// Render one complete workbench frame.
 ///
 /// `root` is the frame `Ui` eframe hands to [`eframe::App::ui`]. Panels are
@@ -115,7 +91,7 @@ pub fn show(root: &mut egui::Ui, app: &mut RSpiceApp) {
         && !app.state.application_modal_open()
         && ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
     {
-        exit_full_screen_presentation(app);
+        app.state.exit_full_screen_presentation();
     }
     if app.state.workbench.full_screen_presentation {
         show_full_screen_presentation(root, app, layout);
@@ -329,7 +305,7 @@ fn show_full_screen_presentation(root: &mut egui::Ui, app: &mut RSpiceApp, layou
                 });
         });
     if exit_requested {
-        exit_full_screen_presentation(app);
+        app.state.exit_full_screen_presentation();
     }
 
     if let Some(keys) = app.state.ui.export_result_quantities_requested.take() {
@@ -653,7 +629,7 @@ fn reconcile_platform_full_screen(app: &mut RSpiceApp) {
             app.state.workbench.full_screen && !platform_full_screen;
         app.state.workbench.full_screen = platform_full_screen;
         if platform_exit_ended_presentation {
-            clear_full_screen_presentation(app, false);
+            app.state.clear_full_screen_presentation(false);
         }
     }
 }
@@ -671,19 +647,19 @@ fn apply_platform_full_screen_request(_ctx: &Context, app: &mut RSpiceApp) {
         return;
     };
     let Some(document) = web_sys::window().and_then(|window| window.document()) else {
-        clear_full_screen_presentation(app, false);
+        app.state.clear_full_screen_presentation(false);
         log::error!("Fullscreen request failed: browser document is unavailable");
         return;
     };
 
     if enabled {
         let Some(root) = document.document_element() else {
-            clear_full_screen_presentation(app, false);
+            app.state.clear_full_screen_presentation(false);
             log::error!("Fullscreen request failed: document root is unavailable");
             return;
         };
         if let Err(error) = root.request_fullscreen() {
-            clear_full_screen_presentation(app, false);
+            app.state.clear_full_screen_presentation(false);
             log::warn!("Browser rejected fullscreen request: {error:?}");
         }
     } else {
@@ -927,14 +903,14 @@ mod tests {
     #[test]
     fn application_full_screen_has_exactly_one_enter_and_exit_request() {
         let mut app = RSpiceApp::test_instance();
-        enter_full_screen_presentation(&mut app);
+        app.state.enter_full_screen_presentation();
 
         assert!(app.state.workbench.full_screen_presentation);
         assert!(app.state.workbench.full_screen);
         assert_eq!(app.state.ui.take_full_screen_request(), Some(true));
         assert_eq!(app.state.ui.take_full_screen_request(), None);
 
-        exit_full_screen_presentation(&mut app);
+        app.state.exit_full_screen_presentation();
         assert!(!app.state.workbench.full_screen_presentation);
         assert!(!app.state.workbench.full_screen);
         assert_eq!(app.state.ui.take_full_screen_request(), Some(false));
