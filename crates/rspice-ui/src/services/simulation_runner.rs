@@ -100,7 +100,9 @@ pub use pstb::{PstbRunConfig, run_pstb_analysis_from_pss_with_source_path_and_ab
 // through `simulation::engine_bridge`, dispatched from `AnalysisConfig`. This
 // module is the RF and advanced layer. Duplicates of all four once sat here
 // unreachable; adding a fifth would mean the same thing again.
-pub use soa::{SoaRunConfig, run_soa_analysis_with_config_and_source_path_and_abort};
+pub use soa::{
+    SoaObservationConfig, SoaRunConfig, run_soa_analysis_with_config_and_source_path_and_abort,
+};
 pub use sparameter::{
     SParameterPort, SParameterRunConfig, SParameterSweep,
     run_sparameter_analysis_with_source_path_and_abort,

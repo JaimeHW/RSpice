@@ -1,13 +1,10 @@
 //! Safe operating area checks.
 //!
-//! Compares simulated device stress against the limits the model declares,
+//! Compares simulated device stress against the configured limits,
 //! and reports every violation with the instance and the margin.
 
 use super::error::{ServiceRunError, ServiceRunResult, ensure_not_aborted, poll_periodically};
-use super::{
-    is_ground_like, normalize_voltage_signal_name, parse_runner_netlist_with_abort,
-    run_transient_analysis_with_source_path_and_abort,
-};
+use super::{is_ground_like, normalize_voltage_signal_name, parse_runner_netlist_with_abort};
 use crate::services::safety::{
     SoADefinition, SoAEvaluation, SoALimit, SoAManager, SoAParameter, SoAViolation,
 };
@@ -19,9 +16,13 @@ use rspice_core::netlist::{Element, ElementKind};
 use std::collections::HashMap;
 use std::path::Path;
 
+mod observation;
+pub use observation::SoaObservationConfig;
+
 /// Configuration for SOA analysis.
 #[derive(Debug, Clone)]
 pub struct SoaRunConfig {
+    pub observation: SoaObservationConfig,
     /// Transient stop time.
     pub stop_time: Value,
     /// Transient step time.
@@ -47,6 +48,7 @@ pub struct SoaRunConfig {
 impl Default for SoaRunConfig {
     fn default() -> Self {
         Self {
+            observation: SoaObservationConfig::default(),
             stop_time: 1e-6,
             step_time: 1e-9,
             check_vgs_max: true,
@@ -63,6 +65,7 @@ impl Default for SoaRunConfig {
 
 impl SoaRunConfig {
     pub(super) fn validate(&self) -> Result<(), String> {
+        self.observation.validate(self.stop_time)?;
         if !self.stop_time.is_finite() || self.stop_time <= 0.0 {
             return Err("SOA stop_time must be finite and > 0".to_string());
         }
@@ -153,7 +156,7 @@ pub fn run_soa_analysis_with_config_and_source_path_and_abort(
 ) -> ServiceRunResult<SoaData> {
     ensure_not_aborted(abort)?;
     config.validate().map_err(ServiceRunError::Failure)?;
-    let netlist = parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
+    let mut netlist = parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
     // The solver evaluates the expanded hierarchy. Register and observe those
     // same concrete instances, including devices inside PDK subcircuits.
     let flattened = rspice_core::netlist::flatten_netlist_with_models_with_abort(&netlist, abort)
@@ -166,14 +169,10 @@ pub fn run_soa_analysis_with_config_and_source_path_and_abort(
             ServiceRunError::Failure(format!("SOA hierarchy error: {error}"))
         }
     })?;
-    let transient = run_transient_analysis_with_source_path_and_abort(
-        netlist_text,
-        config.stop_time,
-        config.step_time,
-        source_path,
-        abort,
-    )?;
-
+    config
+        .observation
+        .validate_selection(&flattened.elements)
+        .map_err(ServiceRunError::Failure)?;
     let mut manager = SoAManager::new();
     let registered_rules =
         register_soa_limits_for_netlist(&mut manager, &flattened.elements, config, abort)?;
@@ -182,6 +181,60 @@ pub fn run_soa_analysis_with_config_and_source_path_and_abort(
             "SOA analysis found no semiconductor device with an applicable enabled rule"
                 .to_string(),
         ));
+    }
+
+    // Checking a device requires its terminal observations even if a separate
+    // output selection was authored for the visible transient analysis.
+    netlist.saves.signals = flattened
+        .elements
+        .iter()
+        .filter(|element| config.observation.includes(element))
+        .flat_map(|element| {
+            element
+                .nodes
+                .iter()
+                .cloned()
+                .map(rspice_core::netlist::SaveSignal::Voltage)
+        })
+        .collect();
+    let engine = rspice_core::engine::Engine::new(super::build_engine_config(&netlist, None));
+    let result = engine
+        .run_tran_with_startup_mode_and_abort(
+            &netlist,
+            config.stop_time,
+            config
+                .observation
+                .max_step
+                .map_or(config.step_time, |step| step.min(config.step_time)),
+            rspice_core::engine::TransientStartupMode::from_uic(
+                config.observation.use_initial_conditions,
+            ),
+            abort,
+        )
+        .map_err(|error| ServiceRunError::from_core("SOA transient error", error))?;
+    // Solver quality describes the full source solve, including startup.
+    let convergence = crate::state::TransientConvergenceEvidence::capture(
+        engine.convergence_quality(),
+        &result.time,
+        abort,
+    )
+    .map_err(ServiceRunError::from)?;
+    let names = result.node_names.clone();
+    let mut transient = super::TransientData::from_result_with_abort(result, &names, abort)?;
+    transient.convergence = Some(std::sync::Arc::new(convergence));
+    let first = transient
+        .time
+        .partition_point(|time| *time < config.observation.start_time);
+    if first == transient.time.len() {
+        return Err(ServiceRunError::Failure(
+            "SOA observation window contains no accepted samples".into(),
+        ));
+    }
+    transient.time.drain(..first);
+    for (_, values) in &mut transient.voltages {
+        if !values.is_empty() {
+            values.drain(..first);
+        }
     }
 
     let node_waveforms =
@@ -194,6 +247,9 @@ pub fn run_soa_analysis_with_config_and_source_path_and_abort(
 
         for (element_index, element) in flattened.elements.iter().enumerate() {
             poll_periodically(abort, element_index)?;
+            if !config.observation.includes(element) {
+                continue;
+            }
             match &element.kind {
                 ElementKind::Mosfet { .. }
                 | ElementKind::Jfet { .. }
@@ -313,6 +369,9 @@ fn register_soa_limits_for_netlist(
     let mut registered_rules = 0usize;
     for (element_index, element) in elements.iter().enumerate() {
         poll_periodically(abort, element_index)?;
+        if !config.observation.includes(element) {
+            continue;
+        }
         let mut def = SoADefinition::new();
         match &element.kind {
             ElementKind::Mosfet { .. } | ElementKind::Jfet { .. } | ElementKind::Mesfet { .. } => {
@@ -523,6 +582,132 @@ mod tests {
                 .iter()
                 .all(|rule| rule.sample_count == result.time.len() as u64)
         );
+    }
+
+    #[test]
+    fn soa_observation_window_excludes_startup_stress_and_honors_step_bound() {
+        let deck = "Window SOA\nVg g 0 PWL(0 3 0.4u 3 0.5u 1 1u 1)\nVd d 0 1\nM1 d g 0 0 NM\n.model NM NMOS LEVEL=1\n.save V(d)\n.end\n";
+        let config = SoaRunConfig {
+            stop_time: 1e-6,
+            step_time: 1e-7,
+            ..Default::default()
+        };
+        let full =
+            run_soa_analysis_with_config_and_source_path_and_abort(deck, &config, None, &NoAbort)
+                .unwrap();
+        assert!(
+            full.evaluations
+                .iter()
+                .any(|rule| rule.parameter == SoAParameter::Vgs && rule.worst_actual_value > 2.9)
+        );
+        let selected = run_soa_analysis_with_config_and_source_path_and_abort(
+            deck,
+            &SoaRunConfig {
+                observation: SoaObservationConfig {
+                    start_time: 0.75e-6,
+                    max_step: Some(1e-8),
+                    ..Default::default()
+                },
+                ..config
+            },
+            None,
+            &NoAbort,
+        )
+        .unwrap();
+        assert!(selected.time[0] >= 0.75e-6);
+        assert!(
+            selected
+                .time
+                .windows(2)
+                .all(|pair| pair[1] - pair[0] <= 1.00001e-8)
+        );
+        assert!(
+            selected
+                .evaluations
+                .iter()
+                .all(|rule| rule.worst_actual_value < 1.01)
+        );
+        assert_eq!(
+            selected
+                .convergence
+                .as_ref()
+                .unwrap()
+                .transient
+                .time_basis
+                .as_ref()
+                .unwrap()
+                .start_s,
+            0.0
+        );
+    }
+
+    #[test]
+    fn soa_device_and_model_filters_select_only_requested_rules_and_reject_typos() {
+        let deck = "Scoped SOA\nVg g 0 2.5\nVd d 0 1\nM1 d g 0 0 NM\nM2 d 0 0 0 OTHER\n.model NM NMOS LEVEL=1\n.model OTHER NMOS LEVEL=1\n.end\n";
+        for (devices, models) in [
+            (vec!["m2".into()], Vec::new()),
+            (Vec::new(), vec!["other".into()]),
+        ] {
+            let config = SoaRunConfig {
+                stop_time: 1e-8,
+                step_time: 1e-9,
+                observation: SoaObservationConfig {
+                    devices,
+                    models,
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+            let result = run_soa_analysis_with_config_and_source_path_and_abort(
+                deck, &config, None, &NoAbort,
+            )
+            .unwrap();
+            assert_eq!(result.evaluations.len(), 2);
+            assert!(
+                result
+                    .evaluations
+                    .iter()
+                    .all(|rule| rule.device_id.eq_ignore_ascii_case("M2"))
+            );
+        }
+        let config = SoaRunConfig {
+            observation: SoaObservationConfig {
+                devices: vec!["M1".into(), "M3".into()],
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert!(
+            run_soa_analysis_with_config_and_source_path_and_abort(deck, &config, None, &NoAbort)
+                .unwrap_err()
+                .to_string()
+                .contains("M3")
+        );
+    }
+
+    #[test]
+    fn soa_explicit_initial_conditions_reach_the_transient_startup() {
+        let deck = "SOA startup\nVd d 0 1\nR1 g 0 1Meg\nC1 g 0 1u IC=2.5\nM1 d g 0 0 NM\n.model NM NMOS LEVEL=1\n.end\n";
+        let gate = |uic| {
+            let config = SoaRunConfig {
+                stop_time: 1e-8,
+                step_time: 1e-9,
+                observation: SoaObservationConfig {
+                    use_initial_conditions: uic,
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+            run_soa_analysis_with_config_and_source_path_and_abort(deck, &config, None, &NoAbort)
+                .unwrap()
+                .evaluations
+                .into_iter()
+                .find(|rule| rule.parameter == SoAParameter::Vgs)
+                .unwrap()
+                .worst_actual_value
+        };
+        assert!(gate(false) < 1e-10);
+        assert!((gate(true) - 2.5).abs() < 1e-6);
     }
 
     #[test]

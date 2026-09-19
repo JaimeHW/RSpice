@@ -1160,6 +1160,7 @@ impl TryFrom<&AnalysisSpec> for WorkerAnalysisSpec {
                 min_step: *min_step,
             }),
             AnalysisSpec::Soa {
+                observation,
                 stop_time,
                 step_time,
                 check_vgs_max,
@@ -1171,6 +1172,7 @@ impl TryFrom<&AnalysisSpec> for WorkerAnalysisSpec {
                 check_vce_max,
                 max_vce,
             } => Ok(Self::Soa {
+                observation: observation.clone(),
                 stop_time: *stop_time,
                 step_time: *step_time,
                 check_vgs_max: *check_vgs_max,
@@ -1557,6 +1559,7 @@ impl From<WorkerAnalysisSpec> for AnalysisSpec {
                 min_step,
             },
             WorkerAnalysisSpec::Soa {
+                observation,
                 stop_time,
                 step_time,
                 check_vgs_max,
@@ -1568,6 +1571,7 @@ impl From<WorkerAnalysisSpec> for AnalysisSpec {
                 check_vce_max,
                 max_vce,
             } => Self::Soa {
+                observation,
                 stop_time,
                 step_time,
                 check_vgs_max,

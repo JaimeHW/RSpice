@@ -10,7 +10,8 @@ use crate::quantity::QuantityInputKind;
 use crate::simulation::dialog::SoaDialogState;
 
 use super::{
-    QuantityPresentationPolicy, UiNumberLocale, input_row_enabled, quantity_input_row, switch_row,
+    QuantityPresentationPolicy, UiNumberLocale, field_note, input_row, input_row_enabled,
+    quantity_input_row, switch_row,
 };
 
 /// Render the safe-operating-area fields.
@@ -35,6 +36,33 @@ pub(super) fn fields(
         QuantityInputKind::Time,
         policy,
         locale,
+    );
+    quantity_input_row(
+        ui,
+        "Start checks at",
+        &mut setup.start_time,
+        QuantityInputKind::Time,
+        policy,
+        locale,
+    );
+    quantity_input_row(
+        ui,
+        "Maximum step",
+        &mut setup.max_step,
+        QuantityInputKind::Time,
+        policy,
+        locale,
+    );
+    switch_row(
+        ui,
+        "Use initial conditions",
+        &mut setup.use_initial_conditions,
+    );
+    input_row(ui, "Devices", &mut setup.devices);
+    input_row(ui, "Models", &mut setup.models);
+    field_note(
+        ui,
+        "Optional exact names separated by spaces. Empty selects all.",
     );
     switch_row(ui, "Check Vgs", &mut setup.check_vgs_max);
     input_row_enabled(ui, "Max Vgs", &mut setup.max_vgs, setup.check_vgs_max);

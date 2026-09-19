@@ -3,10 +3,12 @@
 //! Defines transient-window SOA checks against per-device voltage limits.
 
 use super::options::parse_si_value;
+use crate::services::simulation_runner::SoaObservationConfig;
 
 /// Typed SOA analysis configuration.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SoaConfig {
+    pub observation: SoaObservationConfig,
     /// Transient stop time.
     pub stop_time: f64,
     /// Transient step time.
@@ -32,6 +34,7 @@ pub struct SoaConfig {
 impl Default for SoaConfig {
     fn default() -> Self {
         Self {
+            observation: SoaObservationConfig::default(),
             stop_time: 1e-6,
             step_time: 1e-9,
             check_vgs_max: true,
@@ -49,6 +52,7 @@ impl Default for SoaConfig {
 impl SoaConfig {
     /// Validate configuration.
     pub fn validate(&self) -> Result<(), String> {
+        self.observation.validate(self.stop_time)?;
         if self.stop_time <= 0.0 || !self.stop_time.is_finite() {
             return Err("SOA stop_time must be finite and > 0".to_string());
         }
@@ -79,8 +83,8 @@ impl SoaConfig {
 
     /// SPICE-like logging line.
     pub fn to_spice(&self) -> String {
-        format!(
-            ".soa stop={:.6e} step={:.6e} vgs={}({:.6e}) vds={}({:.6e}) vbe={}({:.6e}) vce={}({:.6e})",
+        let mut card = format!(
+            ".soa stop={} step={} vgs={}({}) vds={}({}) vbe={}({}) vce={}({})",
             self.stop_time,
             self.step_time,
             yes_no(self.check_vgs_max),
@@ -91,8 +95,26 @@ impl SoaConfig {
             self.max_vbe,
             yes_no(self.check_vce_max),
             self.max_vce
-        )
+        );
+        if self.observation != SoaObservationConfig::default() {
+            card.push_str(&format!(
+                " start={} maxstep={} uic={} devices=({}) models=({})",
+                self.observation.start_time,
+                self.observation
+                    .max_step
+                    .map(|value| value.to_string())
+                    .unwrap_or_else(|| "auto".into()),
+                yes_no(self.observation.use_initial_conditions),
+                self.observation.devices.join(" "),
+                self.observation.models.join(" ")
+            ));
+        }
+        card
     }
+}
+
+fn zero_time() -> String {
+    "0".into()
 }
 
 fn yes_no(v: bool) -> &'static str {
@@ -103,6 +125,16 @@ fn yes_no(v: bool) -> &'static str {
 #[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SoaDialogState {
+    #[serde(default = "zero_time")]
+    pub start_time: String,
+    #[serde(default)]
+    pub max_step: String,
+    #[serde(default)]
+    pub use_initial_conditions: bool,
+    #[serde(default)]
+    pub devices: String,
+    #[serde(default)]
+    pub models: String,
     /// Stop time input.
     pub stop_time: String,
     /// Step time input.
@@ -132,6 +164,15 @@ impl SoaDialogState {
     /// Build UI state from config.
     pub fn from_config(config: &SoaConfig) -> Self {
         Self {
+            start_time: config.observation.start_time.to_string(),
+            max_step: config
+                .observation
+                .max_step
+                .map(|value| value.to_string())
+                .unwrap_or_default(),
+            use_initial_conditions: config.observation.use_initial_conditions,
+            devices: config.observation.devices.join(" "),
+            models: config.observation.models.join(" "),
             stop_time: format_scalar(config.stop_time),
             step_time: format_scalar(config.step_time),
             check_vgs_max: config.check_vgs_max,
@@ -149,22 +190,57 @@ impl SoaDialogState {
     /// Convert state to config.
     pub fn to_config(&self) -> Result<SoaConfig, String> {
         let cfg = SoaConfig {
+            observation: SoaObservationConfig {
+                start_time: if self.start_time.trim().is_empty() {
+                    0.0
+                } else {
+                    parse_si_value(&self.start_time)
+                        .map_err(|error| format!("Invalid SOA start time: {error}"))?
+                },
+                max_step: if self.max_step.trim().is_empty() {
+                    None
+                } else {
+                    Some(
+                        parse_si_value(&self.max_step)
+                            .map_err(|error| format!("Invalid SOA maximum step: {error}"))?,
+                    )
+                },
+                use_initial_conditions: self.use_initial_conditions,
+                devices: self.devices.split_whitespace().map(str::to_owned).collect(),
+                models: self.models.split_whitespace().map(str::to_owned).collect(),
+            },
             stop_time: parse_si_value(&self.stop_time)
                 .map_err(|e| format!("Invalid SOA stop time: {}", e))?,
             step_time: parse_si_value(&self.step_time)
                 .map_err(|e| format!("Invalid SOA step time: {}", e))?,
             check_vgs_max: self.check_vgs_max,
-            max_vgs: parse_si_value(&self.max_vgs)
-                .map_err(|e| format!("Invalid max Vgs: {}", e))?,
+            max_vgs: parse_limit(
+                &self.max_vgs,
+                self.check_vgs_max,
+                SoaConfig::default().max_vgs,
+                "Vgs",
+            )?,
             check_vds_max: self.check_vds_max,
-            max_vds: parse_si_value(&self.max_vds)
-                .map_err(|e| format!("Invalid max Vds: {}", e))?,
+            max_vds: parse_limit(
+                &self.max_vds,
+                self.check_vds_max,
+                SoaConfig::default().max_vds,
+                "Vds",
+            )?,
             check_vbe_max: self.check_vbe_max,
-            max_vbe: parse_si_value(&self.max_vbe)
-                .map_err(|e| format!("Invalid max Vbe: {}", e))?,
+            max_vbe: parse_limit(
+                &self.max_vbe,
+                self.check_vbe_max,
+                SoaConfig::default().max_vbe,
+                "Vbe",
+            )?,
             check_vce_max: self.check_vce_max,
-            max_vce: parse_si_value(&self.max_vce)
-                .map_err(|e| format!("Invalid max Vce: {}", e))?,
+            max_vce: parse_limit(
+                &self.max_vce,
+                self.check_vce_max,
+                SoaConfig::default().max_vce,
+                "Vce",
+            )?,
         };
         cfg.validate()?;
         Ok(cfg)
@@ -173,15 +249,106 @@ impl SoaDialogState {
     /// One-time defaults.
     pub fn ensure_initialized(&mut self) {
         if !self.initialized {
-            *self = Self::from_config(&SoaConfig::default());
+            if self.stop_time.is_empty()
+                && self.step_time.is_empty()
+                && self.max_vgs.is_empty()
+                && self.max_vds.is_empty()
+                && self.max_vbe.is_empty()
+                && self.max_vce.is_empty()
+                && self.max_step.is_empty()
+                && self.devices.is_empty()
+                && self.models.is_empty()
+                && !self.use_initial_conditions
+                && (self.start_time.is_empty() || self.start_time == "0")
+            {
+                *self = Self::from_config(&SoaConfig::default());
+            }
+            self.initialized = true;
         }
     }
 }
 
-fn format_scalar(v: f64) -> String {
-    if v.abs() >= 1e4 || (v.abs() > 0.0 && v.abs() < 1e-3) {
-        format!("{:.6e}", v)
+fn parse_limit(text: &str, enabled: bool, fallback: f64, name: &str) -> Result<f64, String> {
+    let value = parse_si_value(text)
+        .map_err(|error| format!("Invalid maximum {name}: {error}"))
+        .and_then(|value| {
+            if value.is_finite() && value > 0.0 {
+                Ok(value)
+            } else {
+                Err(format!("Maximum {name} must be finite and positive"))
+            }
+        });
+    if enabled {
+        value
     } else {
-        format!("{:.6}", v)
+        Ok(value.unwrap_or(fallback))
+    }
+}
+
+fn format_scalar(v: f64) -> String {
+    v.to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn soa_disabled_limits_do_not_block_another_enabled_rule() {
+        let mut draft = SoaDialogState::from_config(&SoaConfig::default());
+        draft.check_vgs_max = false;
+        draft.max_vgs = "unfinished edit".into();
+        assert!(draft.to_config().is_ok());
+        draft.check_vgs_max = true;
+        assert!(draft.to_config().is_err());
+    }
+
+    #[test]
+    fn soa_authored_observation_settings_survive_restore_and_full_precision_cards() {
+        let config = SoaConfig {
+            stop_time: 1.23456789123e-6,
+            observation: SoaObservationConfig {
+                start_time: 1.23456789123e-7,
+                max_step: Some(1.23456789123e-10),
+                use_initial_conditions: true,
+                devices: vec!["X1:M1".into()],
+                models: vec!["NM".into()],
+            },
+            ..Default::default()
+        };
+        let draft = SoaDialogState::from_config(&config);
+        let mut json: SoaDialogState =
+            serde_json::from_str(&serde_json::to_string(&draft).unwrap()).unwrap();
+        let mut ron: SoaDialogState = ron::from_str(&ron::to_string(&draft).unwrap()).unwrap();
+        for restored in [&mut json, &mut ron] {
+            restored.ensure_initialized();
+            assert_eq!(restored.to_config().unwrap(), config);
+        }
+        let card = config.to_spice();
+        for value in [
+            config.stop_time,
+            config.observation.start_time,
+            config.observation.max_step.unwrap(),
+        ] {
+            assert!(card.contains(&value.to_string()));
+        }
+        assert!(card.contains("devices=(X1:M1) models=(NM)"));
+        let mut legacy = serde_json::to_value(&draft).unwrap();
+        for key in [
+            "start_time",
+            "max_step",
+            "use_initial_conditions",
+            "devices",
+            "models",
+        ] {
+            legacy.as_object_mut().unwrap().remove(key);
+        }
+        let mut restored: SoaDialogState = serde_json::from_value(legacy).unwrap();
+        restored.ensure_initialized();
+        assert_eq!(
+            restored.to_config().unwrap().observation,
+            SoaObservationConfig::default()
+        );
+        assert_eq!(restored.to_config().unwrap().stop_time, config.stop_time);
     }
 }

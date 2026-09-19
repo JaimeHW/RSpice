@@ -509,6 +509,8 @@ pub enum AnalysisSpec {
     },
     /// Safety / SOA analysis.
     Soa {
+        #[serde(default)]
+        observation: crate::services::simulation_runner::SoaObservationConfig,
         stop_time: f64,
         step_time: f64,
         check_vgs_max: bool,

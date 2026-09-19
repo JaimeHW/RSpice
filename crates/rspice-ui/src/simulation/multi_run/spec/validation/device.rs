@@ -121,6 +121,7 @@ pub(super) fn validate(spec: &AnalysisSpec) -> Result<(), String> {
             Ok(())
         }
         AnalysisSpec::Soa {
+            observation,
             stop_time,
             step_time,
             check_vgs_max,
@@ -132,6 +133,7 @@ pub(super) fn validate(spec: &AnalysisSpec) -> Result<(), String> {
             check_vce_max,
             max_vce,
         } => {
+            observation.validate(*stop_time)?;
             if !stop_time.is_finite() || *stop_time <= 0.0 {
                 return Err("SOA stop_time must be finite and > 0".to_string());
             }

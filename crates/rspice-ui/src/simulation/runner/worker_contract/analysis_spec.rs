@@ -191,6 +191,8 @@ pub(crate) enum WorkerAnalysisSpec {
         min_step: f64,
     },
     Soa {
+        #[serde(default)]
+        observation: crate::services::simulation_runner::SoaObservationConfig,
         stop_time: f64,
         step_time: f64,
         check_vgs_max: bool,

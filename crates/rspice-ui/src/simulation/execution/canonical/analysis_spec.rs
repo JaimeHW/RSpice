@@ -414,6 +414,7 @@ pub(super) fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &Analysis
             }
         }
         AnalysisSpec::Soa {
+            observation,
             stop_time,
             step_time,
             check_vgs_max,
@@ -435,6 +436,22 @@ pub(super) fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &Analysis
             writer.f64(*max_vbe);
             writer.bool(*check_vce_max);
             writer.f64(*max_vce);
+            if *observation != crate::services::simulation_runner::SoaObservationConfig::default() {
+                writer.string("soa-observation-v1");
+                writer.f64(observation.start_time);
+                writer.option(observation.max_step.as_ref(), |writer, value| {
+                    writer.f64(*value)
+                });
+                writer.bool(observation.use_initial_conditions);
+                writer.sequence(observation.devices.len());
+                for name in &observation.devices {
+                    writer.string(name);
+                }
+                writer.sequence(observation.models.len());
+                for name in &observation.models {
+                    writer.string(name);
+                }
+            }
         }
         AnalysisSpec::SParameter {
             start_freq,
