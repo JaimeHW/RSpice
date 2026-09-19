@@ -32,7 +32,7 @@ mod transient;
 // Each analysis re-exports the request types a caller must construct and the
 // entry point it calls. Result types are not re-exported: callers receive them
 // from the entry point and never name them here.
-pub use dcmatch::{DcMismatchData, run_dc_mismatch_analysis_with_source_path_and_abort};
+pub use dcmatch::run_dc_mismatch_analysis_with_source_path_and_abort;
 pub use disto::{
     DistoFrequencySweep, DistoRunConfig, run_disto_analysis_with_source_path_and_abort,
 };

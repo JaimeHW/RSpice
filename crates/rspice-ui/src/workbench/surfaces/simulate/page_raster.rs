@@ -177,6 +177,12 @@ fn print_studio_visual_fingerprints_for_review() {
 /// catalogue — every control the engine's `.PSS` card holds — and two of its
 /// fields change enablement with the autonomous switch, which is a thing to
 /// look at rather than to assert.
+///
+/// DC mismatch is here for the note under its switches. The form states a
+/// prerequisite the project has to satisfy elsewhere — the design's own
+/// Spectre statistics block — and full-width prose beside typed fields is
+/// exactly the kind of thing that reads well at one width and wraps badly at
+/// another.
 #[test]
 #[ignore = "writes PNGs for a human to look at; run with --ignored"]
 fn render_every_analysis_option_form() {
@@ -195,6 +201,7 @@ fn render_every_analysis_option_form() {
         AnalysisKind::DcSweep,
         AnalysisKind::HarmonicBalance,
         AnalysisKind::Pss,
+        AnalysisKind::DcMismatch,
     ] {
         let canvas = raster(SimulationPage::Analyses, page_width(), |app| {
             let Ok(plan) = app.state.sim_setup.stable_analysis_plan_mut() else {

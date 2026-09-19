@@ -2310,7 +2310,7 @@ fn a_dc_mismatch_result_exports_one_exact_row_per_contributor() {
     };
 
     let evidence = DcMismatchEvidence {
-        output: "V(OUT,IN)".to_owned(),
+        output: "V(OUT)".to_owned(),
         output_unit: "V".to_owned(),
         nominal_value: 0.5,
         sigma_multiplier: 3.0,
@@ -2377,4 +2377,25 @@ fn a_dc_mismatch_result_exports_one_exact_row_per_contributor() {
     assert_eq!(rows[2][7].parse::<f64>().unwrap(), -0.25);
     assert_eq!(rows[2][6].parse::<f64>().unwrap(), -1.0e-3);
     assert!((rows[2][8].parse::<f64>().unwrap() - 0.5).abs() < 1.0e-12);
+
+    // A differential probe carries a comma, which CSV has to quote or the
+    // row it sits in stops being one row. Asserted on the text rather than
+    // on split fields, because splitting is exactly what the quoting exists
+    // to survive.
+    let AnalysisResultPayload::DcMismatch { evidence } = analysis
+        .result_payload
+        .as_ref()
+        .expect("the fixture carries its payload")
+    else {
+        unreachable!("the fixture is a DC mismatch payload");
+    };
+    let mut differential = (**evidence).clone();
+    differential.output = "V(OUT,IN)".to_owned();
+    let analysis = AnalysisResult::new(2, AnalysisType::DcMismatch, "DCMATCH").with_result_payload(
+        AnalysisResultPayload::DcMismatch {
+            evidence: std::sync::Arc::new(differential),
+        },
+    );
+    let csv = prepare_typed_result_csv(&analysis).expect("a differential probe exports too");
+    assert!(csv.contents.contains("\"V(OUT,IN)\""), "{}", csv.contents);
 }

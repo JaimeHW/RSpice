@@ -109,8 +109,12 @@ pub(super) fn active_payload_is_valid(state: &AppState) -> bool {
 /// The walk is `O(contributors)` and a card that asked for every contributor
 /// on a real design lists thousands of them; it ran inside the scroll area,
 /// and again beside the panel table, on every frame.
+///
+/// Visible to `result_document` rather than to this sheet alone, because the
+/// memo table that holds it is the workspace's: [`super::super::view_plans`]
+/// names the type in the slot it keeps.
 #[derive(Debug, Clone, PartialEq)]
-pub(super) struct MismatchPlan {
+pub(in crate::workbench::documents::result_document) struct MismatchPlan {
     source: (RunHistoryRevision, u64),
     analysis: AnalysisPresentationKey,
     /// Running signed sum of the retained shares, in the engine's order.
@@ -916,5 +920,39 @@ mod tests {
         assert!(!serves_active_analysis(&state));
         assert!(super::super::active_payload_is_valid(&state));
         assert!(matches!(active_mismatch(&state), ActiveMismatch::Missing));
+    }
+
+    /// Write the sheet to PNGs so its layout can be reviewed.
+    ///
+    /// Two widths, because the bar column is the one that flexes and the
+    /// fixed columns are the ones that do not: what a narrow surface does to
+    /// a signed bar and a cumulative tick is a thing to look at rather than
+    /// to assert. Both report bases are rendered, since they draw different
+    /// bars from the same rows.
+    #[test]
+    #[ignore = "writes PNGs for a human to look at; run with --ignored"]
+    fn render_the_dc_mismatch_sheet() {
+        let directory = std::env::var("RSPICE_RASTER_DIR")
+            .map_or_else(|_| std::env::temp_dir(), std::path::PathBuf::from);
+        std::fs::create_dir_all(&directory).expect("raster output directory");
+        for width in [1000.0_f32, 1600.0] {
+            for normalized in [true, false] {
+                let mut evidence = evidence();
+                evidence.normalized_contributions = normalized;
+                let mut state = state_with(evidence);
+                let canvas =
+                    crate::ui::raster::render(egui::vec2(width, 420.0), |ui, background| {
+                        egui::CentralPanel::default()
+                            .frame(egui::Frame::NONE.fill(background))
+                            .show(ui, |ui| show(ui, &mut state));
+                    });
+                let basis = if normalized { "share" } else { "absolute" };
+                std::fs::write(
+                    directory.join(format!("dc-mismatch-sheet-{width}-{basis}.png")),
+                    canvas.png(420),
+                )
+                .expect("write sheet render");
+            }
+        }
     }
 }
