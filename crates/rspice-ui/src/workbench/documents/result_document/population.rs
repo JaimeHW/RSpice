@@ -11,7 +11,7 @@
 //! The one thing this module refuses to do is pair evidence that the result
 //! does not say is paired. Variable samples are indexed by *retained* trial
 //! and member measurements by the index the driver *requested*; a Monte Carlo
-//! that dropped a diverged trial has no correspondence between them, and
+//! that dropped a diverged trial needs explicit per-trial evidence to pair them, and
 //! plotting a variable against a measurement across that gap would draw a
 //! correlation nobody measured. See [`PopulationPlan::variables_paired`].
 
@@ -433,7 +433,14 @@ fn build(
             && trials
                 .iter()
                 .enumerate()
-                .all(|(row, trial)| trial.index == row));
+                .all(|(row, trial)| trial.index == row))
+        || (rows_are_members
+            && !variables.is_empty()
+            && variables.iter().all(|variable| {
+                member_measurements
+                    .iter()
+                    .all(|member| member.evidence_for(&variable.name).is_some())
+            }));
 
     let mut columns = Vec::with_capacity(variables.len() + 4);
     for variable in variables {
@@ -449,7 +456,17 @@ fn build(
                 .take(row_count)
                 .collect()
         } else {
-            vec![None; row_count]
+            // Named evidence is already tied to the original trial. It can
+            // populate a sample column even when failed trials left gaps.
+            member_measurements
+                .iter()
+                .map(|member| {
+                    member
+                        .evidence_for(&variable.name)
+                        .filter(|value| value.is_measured())
+                        .and_then(|value| value.value)
+                })
+                .collect()
         };
         columns.push(PopulationColumn {
             name: variable.name.clone(),

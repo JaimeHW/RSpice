@@ -15,6 +15,7 @@ use rspice_core::netlist::{AnalysisCommand, MonteCarloDistribution};
 use std::path::Path;
 
 mod confidence;
+mod trial_evidence;
 
 /// Monte Carlo variable summary statistics.
 #[derive(Debug, Clone)]
@@ -45,11 +46,8 @@ pub struct MonteCarloData {
     pub variables: Vec<MonteCarloVariableData>,
     /// What each retained trial measured, with the trial's own identity.
     ///
-    /// Empty for the parameter-tolerance driver, which varies an already-parsed
-    /// netlist inside the engine and never holds one trial's solved circuit as
-    /// a nameable thing. The deck-statistical driver re-materializes every
-    /// trial from its own seed, so there each trial is an identifiable,
-    /// reproducible event and its measurements are attributed to it.
+    /// Includes failed trials as explicit missing observations. Independent
+    /// deck draws and shared parameter streams retain distinct replay identities.
     pub trial_measurements: Vec<crate::state::FamilyMemberMeasurements>,
 }
 
@@ -174,6 +172,19 @@ pub(crate) fn run_monte_carlo_analysis_with_environment_and_source_path_and_abor
         )
         .map_err(|error| ServiceRunError::from_core("Monte Carlo confidence error", error))?;
 
+    let trial_indices = result.successful_trial_indices.as_deref().ok_or_else(|| {
+        ServiceRunError::Failure("Monte Carlo engine omitted original trial indices".into())
+    })?;
+    let sampling = result.sampling.ok_or_else(|| {
+        ServiceRunError::Failure("Monte Carlo engine omitted sampling provenance".into())
+    })?;
+    let trial_measurements = trial_evidence::parameter_population(
+        &result,
+        trial_indices,
+        sampling,
+        engine.config().resource_limits.max_result_values,
+        abort,
+    )?;
     let mut variables = Vec::with_capacity(result.variables.len());
     for (index, stats) in result.variables.into_values().enumerate() {
         poll_periodically(abort, index)?;
@@ -200,12 +211,7 @@ pub(crate) fn run_monte_carlo_analysis_with_environment_and_source_path_and_abor
         num_failures: result.num_failures,
         all_converged: result.all_converged,
         variables,
-        // The engine owns this driver's trial loop and returns the distribution
-        // rather than the trials, so there is no per-trial circuit here to
-        // attribute a measurement to. Reporting an empty carriage is the
-        // truthful answer; synthesizing trial identities from sample positions
-        // would name trials this driver never individuated.
-        trial_measurements: Vec::new(),
+        trial_measurements,
     };
     validate_monte_carlo_data(&data)?;
     Ok(data)
@@ -346,9 +352,15 @@ pub(crate) fn run_statistical_monte_carlo_with_environment_and_source_path_and_a
 
     // Constant observations are valid: an ideal source or feedback can keep
     // the output fixed even when hidden device parameters vary.
-    let trial_measurements = trial_measurements_from(&trials, &retained);
-
     let engine = Engine::new(build_engine_config(&netlist, None));
+    let trial_measurements = trial_evidence::include_deck_failures(
+        trial_measurements_from(&trials, &retained),
+        runs,
+        base_seed,
+        engine.config().resource_limits.max_result_values,
+        abort,
+    )?;
+
     let mut result = engine
         .monte_carlo_result_from_observed_trials(trials, runs)
         .map_err(|error| ServiceRunError::from_core("Monte Carlo analysis error", error))?;
@@ -456,6 +468,17 @@ fn validate_monte_carlo_data(data: &MonteCarloData) -> ServiceRunResult<()> {
             "Monte Carlo returned an inconsistent run summary".to_owned(),
         ));
     }
+    crate::state::FamilyMemberMeasurements::validate_monte_carlo_sequence(
+        &data.trial_measurements,
+        data.seed,
+        data.runs_requested,
+        data.runs_completed,
+        data.num_failures,
+        data.variables
+            .iter()
+            .map(|variable| (variable.name.as_str(), variable.samples.as_slice())),
+    )
+    .map_err(ServiceRunError::Failure)?;
     let mut names = std::collections::HashSet::with_capacity(data.variables.len());
     for variable in &data.variables {
         if let Some(confidence) = variable.mean_confidence {
@@ -829,6 +852,44 @@ R2 out 0 1k
     }
 
     #[test]
+    fn both_monte_carlo_drivers_retain_failed_trial_gaps() {
+        for (statistical, parameter) in [(false, "0.2"), (true, "aunif(0.2,0.2)")] {
+            let deck = format!(
+                "Partial MC\n.param offset={parameter}\nB1 out 0 V=V(out)^2+{{offset}}\nR1 out 0 1k\n.mc 16 uniform 1 seed 7\n.end\n"
+            );
+            let data = if statistical {
+                run_statistical(&deck)
+            } else {
+                run_monte_carlo_analysis_with_abort(&deck, &NoAbort)
+            }
+            .unwrap();
+            assert!(data.num_failures > 0);
+            assert!(data.runs_completed > 0);
+            assert_eq!(data.trial_measurements.len(), 16);
+            let samples = &data
+                .variables
+                .iter()
+                .find(|value| value.name == "V(OUT)")
+                .unwrap()
+                .samples;
+            let mut retained = 0;
+            for (index, member) in data.trial_measurements.iter().enumerate() {
+                assert_eq!(member.member.index(), index);
+                let observation = member.evidence_for("V(out)").unwrap();
+                if let Some(value) = observation.value {
+                    assert_eq!(value, samples[retained]);
+                    assert!(observation.passed);
+                    retained += 1;
+                } else {
+                    assert!(!observation.passed);
+                    assert!(observation.error.is_some());
+                }
+            }
+            assert_eq!(retained, data.runs_completed);
+        }
+    }
+
+    #[test]
     fn monte_carlo_retains_effective_seed_and_exact_samples() {
         let result = run_monte_carlo_analysis(RETENTION_DECK).expect("analysis succeeds");
 
@@ -1015,13 +1076,19 @@ R2 out 0 1k
         );
     }
 
-    /// The parameter-tolerance driver individuates no trial, and must say so
-    /// rather than invent identities from sample positions.
     #[test]
-    fn the_parameter_tolerance_driver_attributes_no_trial() {
-        let data = run_monte_carlo_analysis(RETENTION_DECK).expect("tolerance Monte Carlo runs");
-
-        assert!(data.trial_measurements.is_empty());
+    fn the_parameter_tolerance_driver_retains_authored_trial_identity() {
+        let data = run_monte_carlo_analysis(RETENTION_DECK).unwrap();
+        assert_eq!(data.trial_measurements.len(), data.runs_requested);
+        for (index, trial) in data.trial_measurements.iter().enumerate() {
+            assert!(
+                matches!(&trial.member, crate::state::FamilyMemberId::MonteCarloSequenceTrial { index: actual, seed, policy }
+                if *actual == index && *seed == data.seed && policy == "parameter-xoroshiro128plus-2018-v1")
+            );
+            let value = trial.evidence_for("V(OUT)").unwrap().value.unwrap();
+            let variable = data.variables.iter().find(|v| v.name == "V(OUT)").unwrap();
+            assert_eq!(value, variable.samples[index]);
+        }
     }
 
     /// Two dividers, one parameter each, so each node reports exactly one

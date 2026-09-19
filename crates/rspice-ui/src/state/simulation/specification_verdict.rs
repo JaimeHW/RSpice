@@ -795,6 +795,40 @@ mod tests {
     /// used to `return` as soon as the yield held, so a blocking specification
     /// whose corner run failed outright read as "not blocked".
     #[test]
+    fn monte_carlo_yield_counts_failed_solves_in_the_requested_population() {
+        let mut result =
+            monte_carlo_trials(AnalysisInstanceId::new(), &[(0, 12.0), (1, 0.0), (2, 11.0)]);
+        let Some(crate::state::AnalysisResultFamilyMetadata::MonteCarlo {
+            runs_completed,
+            failures,
+            all_converged,
+            member_measurements,
+            ..
+        }) = &mut result.family_metadata
+        else {
+            panic!("MC")
+        };
+        *runs_completed = 2;
+        *failures = 1;
+        *all_converged = false;
+        let failed = &mut member_measurements[1].measurements[0];
+        failed.value = None;
+        failed.passed = false;
+        failed.error = Some("did not converge".into());
+        let analyses = [result];
+        let specifications = governed_gain_at_least(10.0);
+        let verdicts = evaluate_specifications(&specifications, &analyses);
+        let policy = SpecificationPolicy {
+            monte_carlo: MonteCarloSpecificationGate::YieldAtLeast { percent: 90.0 },
+            ..Default::default()
+        };
+        assert!(
+            acceptance_is_blocked(&specifications, &policy, &verdicts, &analyses),
+            "two passing solves among three attempted trials are not 100% yield"
+        );
+    }
+
+    #[test]
     fn a_passing_yield_does_not_waive_the_non_monte_carlo_evidence() {
         let source_id = AnalysisInstanceId::new();
         let specifications = governed_gain_at_least(10.0);

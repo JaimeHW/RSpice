@@ -824,3 +824,45 @@ fn the_kernel_density_is_a_density() {
         "the density integrates to {area}"
     );
 }
+
+#[test]
+fn monte_carlo_population_uses_exact_trial_evidence_across_failed_gaps() {
+    let mut members = vec![trial(0, 40.0), trial(1, 0.0), trial(2, 42.0)];
+    members[1].measurements[0].value = None;
+    members[1].measurements[0].passed = false;
+    members[1].measurements[0].error = Some("did not converge".into());
+    let mut result = monte_carlo(members, vec![40.0, 42.0]);
+    let Some(AnalysisResultFamilyMetadata::MonteCarlo {
+        runs_completed,
+        failures,
+        all_converged,
+        variables,
+        ..
+    }) = &mut result.family_metadata
+    else {
+        panic!("MC")
+    };
+    *runs_completed = 2;
+    *failures = 1;
+    *all_converged = false;
+    variables[0].name = "gain_dc".into();
+    let plan = build(
+        &result,
+        key(),
+        (crate::state::RunHistory::default().revision(), 1),
+        &workspace_with_limit(Some(39.5), None),
+        None,
+    )
+    .unwrap();
+    assert!(plan.variables_paired);
+    assert_eq!(plan.columns[0].values, [Some(40.0), None, Some(42.0)]);
+    assert_eq!(
+        plan.status,
+        [
+            TrialStatus::Passing,
+            TrialStatus::Unmeasured,
+            TrialStatus::Passing
+        ]
+    );
+    assert_eq!(plan.trial_count(), 3);
+}
