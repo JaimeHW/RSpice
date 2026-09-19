@@ -10,8 +10,10 @@ mod pxf;
 mod shared;
 
 pub use pac::{
-    PacFrequencySweep, PacRunConfig, run_pac_analysis_from_pss_with_source_path_and_abort,
+    PacFrequencySweep, PacRunConfig, run_pac_analysis_from_hb_with_source_path_and_abort,
+    run_pac_analysis_from_pss_with_source_path_and_abort,
 };
 pub use pxf::{
-    PxfFrequencySweep, PxfRunConfig, run_pxf_analysis_from_pss_with_source_path_and_abort,
+    PxfFrequencySweep, PxfRunConfig, run_pxf_analysis_from_hb_with_source_path_and_abort,
+    run_pxf_analysis_from_pss_with_source_path_and_abort,
 };

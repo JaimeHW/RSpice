@@ -1505,6 +1505,84 @@ mod tests {
         );
     }
 
+    /// Giving the harmonic-balance carrier a route changes what a request can
+    /// *bind*, not what it digests.
+    ///
+    /// The carrier byte already distinguished the three positions, and a run
+    /// linearized about a shooting `.PSS` is the same run it was before the
+    /// other family became routable. If this moved, every saved plan carrying
+    /// a `FROM=PSS` request would be detached from its own results — and the
+    /// plumbing that chooses a producer, the prerequisite role, and the
+    /// service entry are all outside the digest for exactly that reason.
+    ///
+    /// Reconstructed from the writer primitives, in the order and at the
+    /// position the tail has always held, so a byte moved anywhere in the arm
+    /// fails here instead of being regenerated along with the defect. One arm
+    /// proves it for all three, because all three call the one
+    /// `encode_periodic_carrier_tail`, and the test above pins that function's
+    /// three positions.
+    #[test]
+    fn a_pss_carried_request_keeps_its_digest() {
+        use crate::services::simulation_runner::{PacRunConfig, PeriodicCarrier};
+
+        let config = PacRunConfig {
+            carrier: PeriodicCarrier::Pss,
+            ..PacRunConfig::default()
+        };
+        let digest = analysis_config_digest(
+            ".pac",
+            &AnalysisSpec::Pac,
+            None,
+            &SpecExecutionOptions {
+                pac: Some(config.clone()),
+                ..SpecExecutionOptions::default()
+            },
+            None,
+        );
+
+        let mut writer = CanonicalWriter::new("rspice.analysis-config/v4");
+        writer.domain("analysis-line");
+        writer.string(".pac");
+        encode_analysis_spec(&mut writer, &AnalysisSpec::Pac);
+        encode_analysis_config(&mut writer, None);
+        writer.domain("spec-execution-options");
+        for _ in 0..3 {
+            writer.option(None::<&()>, |_, _: &()| unreachable!());
+        }
+        writer.option(Some(&config), |writer, config| {
+            writer.f64(config.pss_fundamental_freq);
+            writer.usize(config.pss_num_harmonics);
+            writer.f64(config.pss_tolerance);
+            writer.f64(config.start_freq);
+            writer.f64(config.stop_freq);
+            writer.usize(config.points_per_unit);
+            writer.u8(pac_sweep_tag(config.sweep));
+            writer.i32(config.sideband_max);
+            writer.string(&config.input_source);
+            writer.string(&config.output_node);
+            writer.option(config.output_ref.as_ref(), |w, v| w.string(v));
+            writer.f64(config.pac_magnitude);
+            writer.bool(config.include_dc);
+            writer.f64(config.reltol);
+            writer.f64(config.abstol);
+            // The shooting position's one byte, last in the arm, where the
+            // symmetric sideband range adds nothing after it.
+            writer.u8(0);
+        });
+        writer.option(None::<&()>, |_, _: &()| unreachable!());
+        writer.bool(false);
+        for _ in 0..2 {
+            writer.option(None::<&()>, |_, _: &()| unreachable!());
+        }
+        encode_numeric_override(&mut writer, None);
+
+        assert_eq!(
+            digest,
+            writer.finish(),
+            "a FROM=PSS request digests the bytes it digested before the other family had a route"
+        );
+    }
+
     /// A symmetric sideband range digests exactly as the single bound it
     /// replaced, and an asymmetric one earns its own identity.
     ///

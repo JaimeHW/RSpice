@@ -5,7 +5,7 @@
 //! figure, where noise at every sideband folds onto the output.
 
 use super::error::{ensure_not_aborted, poll_periodically};
-use super::periodic_carrier::PeriodicCarrier;
+use super::periodic_carrier::{PeriodicCarrier, PeriodicCarrierState};
 use super::{
     ServiceRunError, ServiceRunResult, build_resolved_periodic_engine,
     generate_freq_points_with_abort, is_ground_like,
@@ -170,9 +170,9 @@ impl PnoiseRunConfig {
                 "PNOISE absolute tolerance must be non-negative".to_string(),
             ));
         }
-        if let Some(reason) = self.carrier.unroutable_reason(".PNOISE") {
-            return Err(PnoiseRunError::Validation(reason));
-        }
+        // The carrier itself is not a range check: it names a family, and
+        // whether the state this run was handed belongs to that family is
+        // `PeriodicCarrierState::accepted_by`, asked where both are in hand.
         Ok(())
     }
 }
@@ -228,7 +228,31 @@ pub fn run_pnoise_analysis_from_pss_with_source_path_and_abort(
         netlist_text,
         config,
         source_path,
-        Some(operating_point),
+        Some(PeriodicCarrierState::Shooting(operating_point)),
+        abort,
+    )
+}
+
+/// Run PNOISE from an exact retained harmonic-balance state.
+///
+/// Driven periodic noise about the other carrier the engine accepts, through
+/// `Engine::run_pnoise_from_hb_with_abort`. There is no oscillator arm here:
+/// a harmonic-balance orbit's period is its authored tone rather than a solver
+/// unknown, so it has no free phase to diffuse, and a phase-referred request
+/// is refused before this point by the plan's dependency contract and by the
+/// engine's own `check_pnoise_card_carrier`.
+pub fn run_pnoise_analysis_from_hb_with_source_path_and_abort(
+    netlist_text: &str,
+    config: &PnoiseRunConfig,
+    operating_point: &rspice_core::engine::HbOperatingPoint,
+    source_path: Option<&Path>,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<PnoiseData> {
+    run_pnoise_analysis_impl(
+        netlist_text,
+        config,
+        source_path,
+        Some(PeriodicCarrierState::HarmonicBalance(operating_point)),
         abort,
     )
 }
@@ -237,11 +261,16 @@ fn run_pnoise_analysis_impl(
     netlist_text: &str,
     config: &PnoiseRunConfig,
     source_path: Option<&Path>,
-    operating_point: Option<&rspice_core::engine::PssOperatingPoint>,
+    carrier: Option<PeriodicCarrierState<'_>>,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<PnoiseData> {
     ensure_not_aborted(abort)?;
     config.validate()?;
+    if let Some(carrier) = carrier {
+        carrier
+            .accepted_by(config.carrier, ".PNOISE")
+            .map_err(|reason| ServiceRunError::Failure(reason))?;
+    }
     ensure_not_aborted(abort)?;
 
     let netlist = parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
@@ -259,7 +288,9 @@ fn run_pnoise_analysis_impl(
 
     let engine = build_resolved_periodic_engine(
         &netlist,
-        config.pss_tolerance,
+        carrier.map_or(config.pss_tolerance, |carrier| {
+            carrier.engine_tolerance(config.pss_tolerance)
+        }),
         "PNOISE resolved producer configuration is invalid",
     )?;
 
@@ -271,13 +302,13 @@ fn run_pnoise_analysis_impl(
         abort,
     )?;
 
-    if let Some(operating_point) = operating_point {
+    if let Some(carrier) = carrier {
         return run_pnoise_from_retained_state(
             &engine,
             &netlist,
             config,
             frequencies,
-            operating_point,
+            carrier,
             abort,
         );
     }
@@ -299,7 +330,7 @@ fn run_pnoise_analysis_impl(
         &netlist,
         config,
         frequencies,
-        &pss_data.operating_point,
+        PeriodicCarrierState::Shooting(&pss_data.operating_point),
         abort,
     )
 }
@@ -309,7 +340,7 @@ fn run_pnoise_from_retained_state(
     netlist: &rspice_core::Netlist,
     config: &PnoiseRunConfig,
     frequencies: Vec<Value>,
-    operating_point: &rspice_core::engine::PssOperatingPoint,
+    carrier: PeriodicCarrierState<'_>,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<PnoiseData> {
     // Validates `max_sideband` before the exact solve; the stride itself is
@@ -322,6 +353,19 @@ fn run_pnoise_from_retained_state(
         .filter(|node| !node.is_empty() && !is_ground_like(node));
 
     if config.noise_ref == PnoiseReference::Phase {
+        // Only a shooting orbit holds its period as an unknown, so only a
+        // shooting orbit has a phase that diffuses. A harmonic-balance carrier
+        // is refused here in the engine's own terms rather than folded onto
+        // the driven arm, which would publish an output spectrum under a
+        // phase-noise heading.
+        let PeriodicCarrierState::Shooting(operating_point) = carrier else {
+            return Err(ServiceRunError::Failure(
+                "`.PNOISE NOISEREF=PHASE` needs an autonomous carrier: a harmonic-balance orbit is \
+                 driven by its authored tones and has no free phase to diffuse, so author `.PSS \
+                 AUTONOMOUS=YES` or ask for output-referred noise"
+                    .to_owned(),
+            ));
+        };
         let oscillator = engine
             .run_pnoise_oscillator_from_pss_with_abort(
                 netlist,
@@ -350,8 +394,8 @@ fn run_pnoise_from_retained_state(
     let input_source = (config.noise_ref == PnoiseReference::Input)
         .then(|| config.input_source.trim())
         .filter(|name| !name.is_empty());
-    let exact = engine
-        .run_pnoise_from_pss_with_abort(
+    let exact = match carrier {
+        PeriodicCarrierState::Shooting(operating_point) => engine.run_pnoise_from_pss_with_abort(
             netlist,
             &frequencies,
             config.output_node.trim(),
@@ -360,8 +404,20 @@ fn run_pnoise_from_retained_state(
             config.max_sideband,
             operating_point,
             abort,
-        )
-        .map_err(|error| ServiceRunError::from_core("exact retained-state PNOISE", error))?;
+        ),
+        PeriodicCarrierState::HarmonicBalance(operating_point) => engine
+            .run_pnoise_from_hb_with_abort(
+                netlist,
+                &frequencies,
+                config.output_node.trim(),
+                output_ref,
+                input_source,
+                config.max_sideband,
+                operating_point,
+                abort,
+            ),
+    }
+    .map_err(|error| ServiceRunError::from_core("exact retained-state PNOISE", error))?;
 
     let input_noise = match config.noise_ref {
         PnoiseReference::Input => Some(exact.input_noise.ok_or_else(|| {
@@ -553,6 +609,179 @@ mod tests {
 
         assert!(matches!(result, Err(ServiceRunError::Aborted)));
         assert!(abort.count() > 1);
+    }
+
+    /// Both carriers fold the same noise through the same network.
+    ///
+    /// The fixture is an RC low-pass driven by one tone. Its small-signal
+    /// linearization does not depend on the operating point, so the
+    /// cyclostationary fold degenerates: the periodically time-varying system
+    /// is time invariant, no sideband couples to any other, and the folded
+    /// spectrum is the network's stationary output noise. That number is a
+    /// property of the circuit, not of which solver froze the large-signal
+    /// state, so the two carriers must coincide.
+    ///
+    /// The closed form is stated too, not just the coincidence: a single noisy
+    /// resistor R feeding C has output PSD `4*k*T*R*|H(f)|^2`, and asserting
+    /// against it is what distinguishes "the two agree" from "the two share
+    /// one defect". The temperature is the deck's nominal 27 degrees C, and
+    /// the band around that value is wide (a factor of 1.05) because this
+    /// assertion is about the scale being the physical one — the sharp
+    /// statement is the agreement below it, at `1e-9` relative, which is a
+    /// round-off budget rather than either solver's convergence tolerance.
+    #[test]
+    fn pnoise_around_hb_and_pnoise_around_pss_agree_on_a_linear_circuit() {
+        use crate::services::simulation_runner::hb::{
+            HbRunConfig, HbToneRunConfig, run_hb_analysis_with_abort,
+        };
+
+        // R = 1 kOhm, C = 159.154943091895 pF, corner at 1 MHz.
+        const DECK: &str = "pnoise carrier agreement fixture\n\
+                            V1 in 0 SIN(0 0.001 1Meg)\n\
+                            R1 in out 1k\n\
+                            C1 out 0 159.154943091895p\n\
+                            .end\n";
+        const FUNDAMENTAL: Value = 1.0e6;
+        const RESISTANCE: Value = 1.0e3;
+        const CAPACITANCE: Value = 159.154_943_091_895e-12;
+        const HARMONICS: usize = 8;
+        const BOLTZMANN: Value = 1.380_649e-23;
+        const NOMINAL_KELVIN: Value = 300.15;
+        const BOUND: Value = 1.0e-9;
+        const SCALE_BAND: Value = 1.05;
+
+        let config = PnoiseRunConfig {
+            pss_fundamental_freq: FUNDAMENTAL,
+            pss_num_harmonics: HARMONICS,
+            pss_tolerance: 1.0e-9,
+            start_freq: 1.0e5,
+            stop_freq: 1.0e7,
+            points_per_unit: 2,
+            max_sideband: 1,
+            output_node: "out".to_owned(),
+            input_source: String::new(),
+            noise_summary: false,
+            ..PnoiseRunConfig::default()
+        };
+
+        let netlist =
+            parse_runner_netlist_with_abort(DECK, None, &NoAbort).expect("the deck parses");
+        let engine = build_resolved_periodic_engine(&netlist, config.pss_tolerance, "fixture")
+            .expect("the fixture engine resolves");
+        let shooting = engine
+            .run_pss_operating_point_with_abort(
+                &netlist,
+                rspice_core::analysis::PssConfig::new(FUNDAMENTAL)
+                    .with_harmonics(HARMONICS)
+                    .with_points_per_period(64)
+                    .with_tstab_periods(2)
+                    .with_tolerance(config.pss_tolerance),
+                &NoAbort,
+            )
+            .expect("the driven RC orbit converges");
+        let harmonic_balance = run_hb_analysis_with_abort(
+            DECK,
+            &HbRunConfig {
+                tones: vec![HbToneRunConfig::new(FUNDAMENTAL, HARMONICS)],
+                reltol: 1.0e-10,
+                ..HbRunConfig::default()
+            },
+            &NoAbort,
+        )
+        .expect("the harmonic-balance carrier converges")
+        .operating_point;
+
+        let from_pss = run_pnoise_analysis_from_pss_with_source_path_and_abort(
+            DECK, &config, &shooting, None, &NoAbort,
+        )
+        .expect("the shooting-carried run completes");
+        let from_hb = run_pnoise_analysis_from_hb_with_source_path_and_abort(
+            DECK,
+            &config,
+            harmonic_balance.as_ref(),
+            None,
+            &NoAbort,
+        )
+        .expect("the harmonic-balance-carried run completes");
+
+        assert_eq!(from_pss.frequencies, from_hb.frequencies);
+        assert!(!from_pss.frequencies.is_empty());
+        for (index, frequency) in from_pss.frequencies.iter().copied().enumerate() {
+            let transfer_power = 1.0
+                / (std::f64::consts::TAU * frequency * RESISTANCE * CAPACITANCE).mul_add(
+                    std::f64::consts::TAU * frequency * RESISTANCE * CAPACITANCE,
+                    1.0,
+                );
+            let thermal = 4.0 * BOLTZMANN * NOMINAL_KELVIN * RESISTANCE * transfer_power;
+            for (label, value) in [
+                ("shooting", from_pss.output_noise[index]),
+                ("harmonic balance", from_hb.output_noise[index]),
+            ] {
+                assert!(
+                    value > thermal / SCALE_BAND && value < thermal * SCALE_BAND,
+                    "the {label} carrier reports {value} V^2/Hz at {frequency} Hz, and the \
+                     resistor's own thermal spectrum through this network is {thermal}"
+                );
+            }
+            let between = (from_pss.output_noise[index] - from_hb.output_noise[index]).abs()
+                / thermal.max(Value::MIN_POSITIVE);
+            assert!(
+                between <= BOUND,
+                "the two carriers disagree by {between:e} at {frequency} Hz: {} versus {}",
+                from_pss.output_noise[index],
+                from_hb.output_noise[index]
+            );
+        }
+    }
+
+    /// A phase-referred request has no phase to read off a driven orbit,
+    /// whichever family froze it.
+    #[test]
+    fn a_phase_referred_pnoise_run_refuses_a_harmonic_balance_carrier() {
+        use crate::services::simulation_runner::hb::{
+            HbRunConfig, HbToneRunConfig, run_hb_analysis_with_abort,
+        };
+
+        const DECK: &str = "pnoise phase refusal fixture\n\
+                            V1 in 0 SIN(0 0.001 1Meg)\n\
+                            R1 in out 1k\n\
+                            C1 out 0 1n\n\
+                            .end\n";
+        let harmonic_balance = run_hb_analysis_with_abort(
+            DECK,
+            &HbRunConfig {
+                tones: vec![HbToneRunConfig::new(1.0e6, 8)],
+                ..HbRunConfig::default()
+            },
+            &NoAbort,
+        )
+        .expect("the harmonic-balance carrier converges")
+        .operating_point;
+
+        let error = run_pnoise_analysis_from_hb_with_source_path_and_abort(
+            DECK,
+            &PnoiseRunConfig {
+                pss_fundamental_freq: 1.0e6,
+                pss_num_harmonics: 8,
+                start_freq: 1.0e3,
+                stop_freq: 1.0e5,
+                points_per_unit: 2,
+                max_sideband: 1,
+                output_node: "out".to_owned(),
+                input_source: String::new(),
+                noise_ref: PnoiseReference::Phase,
+                ..PnoiseRunConfig::default()
+            },
+            harmonic_balance.as_ref(),
+            None,
+            &NoAbort,
+        )
+        .expect_err("a driven orbit has no free phase to diffuse");
+        let detail = error.to_string();
+        assert!(
+            detail.contains("NOISEREF=PHASE") && detail.contains("harmonic-balance"),
+            "the refusal must name the reference and the carrier: {detail}"
+        );
     }
 
     /// `integratedNoise` reaches the band total it asks for.

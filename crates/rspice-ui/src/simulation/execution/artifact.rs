@@ -13,7 +13,8 @@ use super::canonical::CanonicalWriter;
 use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
 use crate::simulation::dependency_contract::{
     FourierTransientRequirement, PeriodicStateCapability, TransientCapability,
-    validate_fourier_transient_contract, validate_periodic_state_contract,
+    validate_fourier_transient_contract, validate_harmonic_balance_carrier_contract,
+    validate_periodic_state_contract,
 };
 use crate::simulation::multi_run::AnalysisSpec;
 use crate::simulation::multi_run::PssMethod;
@@ -26,6 +27,80 @@ pub(in crate::simulation) enum ExecutionArtifactKind {
     PeriodicState,
     HbState,
     DcOperatingPointSeed,
+}
+
+impl ExecutionArtifactKind {
+    /// What a refusal calls the producer of this artifact.
+    pub(in crate::simulation) const fn producer_label(self) -> &'static str {
+        match self {
+            Self::TransientTrajectory => "Transient",
+            Self::PeriodicState => "shooting PSS",
+            Self::HbState => "Harmonic Balance",
+            Self::DcOperatingPointSeed => "operating point",
+        }
+    }
+}
+
+/// Which typed artifact kinds one prepared task may bind, in the order the
+/// plan prefers them. Empty for a task that binds none.
+///
+/// One table, asked by every stage that has an opinion about a task's
+/// dependencies — queue binding, snapshot preparation, resolution at dispatch.
+/// It used to be written out at each of them, which is how the periodic
+/// small-signal family came to be listed as a shooting-PSS consumer in four
+/// places while the engine had accepted either carrier all along.
+///
+/// The three carrier-bearing kinds read their family off the request: `FROM=`
+/// names one, and its absence names the nearest preceding periodic solve of
+/// either family, which is why that position lists both. Which of the two the
+/// task actually binds is settled by the plan, whose dependency edge names an
+/// exact instance.
+pub(in crate::simulation) fn required_artifact_kinds(
+    spec: &AnalysisSpec,
+    options: &SpecExecutionOptions,
+) -> &'static [ExecutionArtifactKind] {
+    use crate::services::simulation_runner::PeriodicCarrier;
+
+    const NONE: &[ExecutionArtifactKind] = &[];
+    const TRANSIENT: &[ExecutionArtifactKind] = &[ExecutionArtifactKind::TransientTrajectory];
+    const PERIODIC: &[ExecutionArtifactKind] = &[ExecutionArtifactKind::PeriodicState];
+    const HB: &[ExecutionArtifactKind] = &[ExecutionArtifactKind::HbState];
+    const DC_SEED: &[ExecutionArtifactKind] = &[ExecutionArtifactKind::DcOperatingPointSeed];
+    const EITHER_PERIODIC: &[ExecutionArtifactKind] = &[
+        ExecutionArtifactKind::PeriodicState,
+        ExecutionArtifactKind::HbState,
+    ];
+
+    fn for_carrier(carrier: Option<PeriodicCarrier>) -> &'static [ExecutionArtifactKind] {
+        match carrier {
+            // A request whose options were never built states no carrier, and
+            // the default position is the one that admits either family.
+            None | Some(PeriodicCarrier::Preceding) => EITHER_PERIODIC,
+            Some(PeriodicCarrier::Pss) => PERIODIC,
+            Some(PeriodicCarrier::Hb) => HB,
+        }
+    }
+
+    match spec {
+        // A recorded FFT reads the spectrum its transient already solved, so
+        // it binds the same trajectory a Fourier analysis does.
+        AnalysisSpec::Fourier { .. } | AnalysisSpec::Fft { .. } => TRANSIENT,
+        AnalysisSpec::Hbsp { .. } | AnalysisSpec::Hbnoise { .. } => HB,
+        AnalysisSpec::Pss {
+            method: PssMethod::Shooting,
+            ..
+        } => DC_SEED,
+        AnalysisSpec::Pac => for_carrier(options.pac.as_ref().map(|config| config.carrier)),
+        AnalysisSpec::Pxf => for_carrier(options.pxf.as_ref().map(|config| config.carrier)),
+        AnalysisSpec::Pnoise => for_carrier(options.pnoise.as_ref().map(|config| config.carrier)),
+        // `.PSTB` reads a monodromy matrix and only a shooting solve produces
+        // one, and the spectrum is a reading of the steady state its siblings
+        // consume. Neither has a carrier to choose.
+        AnalysisSpec::Pstb | AnalysisSpec::Psp { .. } | AnalysisSpec::PssSpectrum { .. } => {
+            PERIODIC
+        }
+        _ => NONE,
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -192,6 +267,25 @@ pub(in crate::simulation) fn validate_prepared_dependency_contract_with_options(
             && consumer_options.pnoise.as_ref().is_some_and(|config| {
                 config.noise_ref == crate::services::simulation_runner::PnoiseReference::Phase
             });
+        // The carrier family this request named. A harmonic-balance producer
+        // is admitted only where the request's `FROM=` admits it, so a sealed
+        // specification cannot be linearized about a solution other than the
+        // one it reported.
+        if matches!(producer, AnalysisSpec::HarmonicBalance { .. }) {
+            let accepts_hb = required_artifact_kinds(consumer, consumer_options)
+                .contains(&ExecutionArtifactKind::HbState);
+            if !accepts_hb {
+                return Err(ExecutionArtifactError::ContractMismatch(format!(
+                    "{} names a shooting-PSS carrier and cannot consume a harmonic-balance state",
+                    consumer.run_type().display_name()
+                )));
+            }
+            return validate_harmonic_balance_carrier_contract(
+                consumer.run_type().display_name(),
+                require_autonomous,
+            )
+            .map_err(ExecutionArtifactError::ContractMismatch);
+        }
         return match producer {
             AnalysisSpec::Pss {
                 method: PssMethod::Shooting,

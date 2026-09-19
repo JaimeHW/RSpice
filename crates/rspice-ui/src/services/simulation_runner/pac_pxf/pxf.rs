@@ -17,7 +17,7 @@ use rspice_core::Value;
 use rspice_core::abort_signal::AbortSignal;
 
 use super::super::error::{ensure_not_aborted, poll_periodically};
-use super::super::periodic_carrier::PeriodicCarrier;
+use super::super::periodic_carrier::{PeriodicCarrier, PeriodicCarrierState};
 use super::super::{
     ServiceRunError, ServiceRunResult, build_resolved_periodic_engine, build_voltage_output_expr,
     is_ground_like, parse_runner_netlist_with_abort,
@@ -146,9 +146,9 @@ impl PxfRunConfig {
         if !self.abstol.is_finite() || self.abstol <= 0.0 {
             return Err("PXF absolute tolerance must be positive".to_string());
         }
-        if let Some(reason) = self.carrier.unroutable_reason(".PXF") {
-            return Err(reason);
-        }
+        // The carrier itself is not a range check: it names a family, and
+        // whether the state this run was handed belongs to that family is
+        // `PeriodicCarrierState::accepted_by`, asked where both are in hand.
         Ok(())
     }
 
@@ -180,11 +180,17 @@ impl PxfRunConfig {
             max_sideband: self.max_sideband,
             reltol: self.reltol,
             abstol: self.abstol,
-            // The Studio only ever runs `.PXF` against a shooting carrier: its
-            // manual-deck reader refuses `FROM=HB` outright and its dialog
-            // offers no such control, so naming the selector is the honest
-            // record of which engine entry runs below.
-            source: rspice_core::netlist::PeriodicSourceSelector::Pss,
+            // The selector the request states, in the engine's own vocabulary.
+            // It records which family this run linearizes around; the entry
+            // that runs below is chosen from the state actually handed over,
+            // and the two are checked against each other once.
+            source: match self.carrier {
+                PeriodicCarrier::Preceding => {
+                    rspice_core::netlist::PeriodicSourceSelector::Preceding
+                }
+                PeriodicCarrier::Pss => rspice_core::netlist::PeriodicSourceSelector::Pss,
+                PeriodicCarrier::Hb => rspice_core::netlist::PeriodicSourceSelector::Hb,
+            },
         }
     }
 }
@@ -244,7 +250,28 @@ pub fn run_pxf_analysis_from_pss_with_source_path_and_abort(
     run_pxf_analysis_for_netlist_with_operating_point_abort(
         &netlist,
         config,
-        Some(operating_point),
+        Some(PeriodicCarrierState::Shooting(operating_point)),
+        abort,
+    )
+}
+
+/// Run PXF from an exact retained harmonic-balance state.
+///
+/// `Engine::run_pxf_card_from_hb_with_abort` reads the same path through the
+/// same conversion matrix its shooting sibling reads; the readout below is
+/// therefore the one readout, not a second one for this carrier.
+pub fn run_pxf_analysis_from_hb_with_source_path_and_abort(
+    netlist_text: &str,
+    config: &PxfRunConfig,
+    operating_point: &rspice_core::engine::HbOperatingPoint,
+    source_path: Option<&Path>,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<PxfData> {
+    let netlist = parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
+    run_pxf_analysis_for_netlist_with_operating_point_abort(
+        &netlist,
+        config,
+        Some(PeriodicCarrierState::HarmonicBalance(operating_point)),
         abort,
     )
 }
@@ -267,22 +294,29 @@ pub fn run_pxf_analysis_with_config_and_source_path_and_abort(
 fn run_pxf_analysis_for_netlist_with_operating_point_abort(
     netlist: &rspice_core::Netlist,
     config: &PxfRunConfig,
-    operating_point: Option<&rspice_core::engine::PssOperatingPoint>,
+    carrier: Option<PeriodicCarrierState<'_>>,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<PxfData> {
     ensure_not_aborted(abort)?;
     config.validate().map_err(ServiceRunError::Failure)?;
+    if let Some(carrier) = carrier {
+        carrier
+            .accepted_by(config.carrier, ".PXF")
+            .map_err(ServiceRunError::Failure)?;
+    }
 
     let engine = build_resolved_periodic_engine(
         netlist,
-        config.pss_tolerance,
+        carrier.map_or(config.pss_tolerance, |carrier| {
+            carrier.engine_tolerance(config.pss_tolerance)
+        }),
         "PXF resolved producer configuration is invalid",
     )?;
     let card = config.to_card();
 
     let owned_carrier;
-    let carrier = match operating_point {
-        Some(operating_point) => operating_point,
+    let carrier = match carrier {
+        Some(carrier) => carrier,
         None => {
             owned_carrier = engine
                 .run_pss_operating_point_with_abort(
@@ -293,13 +327,19 @@ fn run_pxf_analysis_for_netlist_with_operating_point_abort(
                     abort,
                 )
                 .map_err(|error| ServiceRunError::from_core("PXF prerequisite PSS", error))?;
-            &owned_carrier
+            PeriodicCarrierState::Shooting(&owned_carrier)
         }
     };
 
-    let result = engine
-        .run_pxf_card_from_pss_with_abort(netlist, &card, carrier, abort)
-        .map_err(|error| ServiceRunError::from_core("PXF error", error))?;
+    let result = match carrier {
+        PeriodicCarrierState::Shooting(operating_point) => {
+            engine.run_pxf_card_from_pss_with_abort(netlist, &card, operating_point, abort)
+        }
+        PeriodicCarrierState::HarmonicBalance(operating_point) => {
+            engine.run_pxf_card_from_hb_with_abort(netlist, &card, operating_point, abort)
+        }
+    }
+    .map_err(|error| ServiceRunError::from_core("PXF error", error))?;
 
     // Nothing below re-reads what the entry already established. It refuses an
     // empty transfer, a non-finite transfer value, and an offset grid that is
@@ -403,6 +443,95 @@ mod tests {
             &NoAbort,
         )
         .expect("the PXF run publishes a transfer")
+    }
+
+    /// Both carriers read the same path through the same conversion matrix.
+    ///
+    /// `.PXF` is one element of the matrix `.PAC` fills, so the argument is
+    /// the one made in `pac_around_hb_and_pac_around_pss_agree_on_a_linear_circuit`:
+    /// an RC network's small-signal linearization does not depend on the
+    /// operating point, the periodically time-varying system is therefore time
+    /// invariant, and its conversion matrix is diagonal. The diagonal element
+    /// this test reads is the network's own AC transfer at the **drive**
+    /// frequency `offset + input_sideband * f0`, which is the closed form both
+    /// runs are held to. The off-diagonal element at `INPUTSIDEBAND=0` with
+    /// `OUTSIDEBAND=1` must be zero for the same reason, and that is asserted
+    /// against the same budget.
+    ///
+    /// Bound: `1e-9` relative, a round-off budget rather than either solver's
+    /// convergence tolerance — see the `.PAC` test for why neither solver's
+    /// iteration enters a linear network's answer.
+    #[test]
+    fn pxf_around_hb_and_pxf_around_pss_agree_on_a_linear_circuit() {
+        use crate::services::simulation_runner::hb::{
+            HbRunConfig, HbToneRunConfig, run_hb_analysis_with_abort,
+        };
+
+        const RESISTANCE: Value = 1.0e3;
+        const CAPACITANCE: Value = 159.154_943_091_895e-12;
+        const BOUND: Value = 1.0e-9;
+
+        let harmonic_balance = run_hb_analysis_with_abort(
+            FIXTURE_DECK,
+            &HbRunConfig {
+                tones: vec![HbToneRunConfig::new(FIXTURE_FUNDAMENTAL, 8)],
+                reltol: 1.0e-10,
+                ..HbRunConfig::default()
+            },
+            &NoAbort,
+        )
+        .expect("the harmonic-balance carrier converges")
+        .operating_point;
+
+        for input_sideband in [0, 1] {
+            let from_pss = fixture_run(input_sideband);
+            let from_hb = run_pxf_analysis_from_hb_with_source_path_and_abort(
+                FIXTURE_DECK,
+                &fixture_config(input_sideband),
+                harmonic_balance.as_ref(),
+                None,
+                &NoAbort,
+            )
+            .expect("the harmonic-balance-carried run publishes a transfer");
+
+            assert_eq!(from_pss.offset_frequencies, from_hb.offset_frequencies);
+            assert_eq!(from_pss.output_frequencies, from_hb.output_frequencies);
+            assert_eq!(from_pss.input_sideband, from_hb.input_sideband);
+            assert_eq!(from_pss.output_sideband, from_hb.output_sideband);
+
+            for (index, offset) in from_pss.offset_frequencies.iter().copied().enumerate() {
+                // The diagonal element is the transfer at the frequency the
+                // drive is applied at; every other element of a time-invariant
+                // conversion matrix is zero.
+                let closed_form = if input_sideband == FIXTURE_OUTPUT_SIDEBAND {
+                    let drive = (input_sideband as Value).mul_add(FIXTURE_FUNDAMENTAL, offset);
+                    Complex64::new(1.0, 0.0)
+                        / Complex64::new(
+                            1.0,
+                            std::f64::consts::TAU * drive * RESISTANCE * CAPACITANCE,
+                        )
+                } else {
+                    Complex64::new(0.0, 0.0)
+                };
+                for (label, value) in [
+                    ("shooting", from_pss.transfer[index]),
+                    ("harmonic balance", from_hb.transfer[index]),
+                ] {
+                    assert!(
+                        (value - closed_form).norm() <= BOUND,
+                        "the {label} carrier reports {value} for sideband {input_sideband} -> \
+                         {FIXTURE_OUTPUT_SIDEBAND} at offset {offset} Hz, and the network's own \
+                         conversion matrix holds {closed_form}"
+                    );
+                }
+                assert!(
+                    (from_pss.transfer[index] - from_hb.transfer[index]).norm() <= BOUND,
+                    "the two carriers disagree at offset {offset} Hz: {} versus {}",
+                    from_pss.transfer[index],
+                    from_hb.transfer[index]
+                );
+            }
+        }
     }
 
     /// The old value, the new value, and why the new one is right.

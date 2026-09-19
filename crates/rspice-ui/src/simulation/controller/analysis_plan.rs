@@ -310,67 +310,70 @@ impl SimulationController {
                 })
                 .collect::<HashMap<_, _>>();
             for task in &mut queue {
-                let required_kind = match task.queued_analysis().spec {
-                    AnalysisSpec::Fourier { .. } | AnalysisSpec::Fft { .. } => Some(
-                        crate::simulation::execution::ExecutionArtifactKind::TransientTrajectory,
-                    ),
-                    AnalysisSpec::Pss {
-                        method: PssMethod::Shooting,
-                        ..
-                    } => Some(
-                        crate::simulation::execution::ExecutionArtifactKind::DcOperatingPointSeed,
-                    ),
-                    AnalysisSpec::Hbsp { .. } | AnalysisSpec::Hbnoise { .. } => {
-                        Some(crate::simulation::execution::ExecutionArtifactKind::HbState)
-                    }
-                    AnalysisSpec::Pac
-                    | AnalysisSpec::Pxf
-                    | AnalysisSpec::Pnoise
-                    | AnalysisSpec::Pstb
-                    | AnalysisSpec::Psp { .. }
-                    // The spectrum is a reading of a converged steady state,
-                    // so it binds the same artifact its small-signal siblings
-                    // do rather than re-solving the period.
-                    | AnalysisSpec::PssSpectrum { .. } => {
-                        Some(crate::simulation::execution::ExecutionArtifactKind::PeriodicState)
-                    }
-                    _ => None,
-                };
-                let Some(required_kind) = required_kind else {
+                use crate::simulation::execution::ExecutionArtifactKind;
+
+                // The kinds this task's request admits, in preference order.
+                // A periodic small-signal request whose carrier is the
+                // preceding periodic solve admits either family, and the one
+                // it binds is whichever family the plan's own edge points at.
+                let required_kinds = crate::simulation::execution::required_artifact_kinds(
+                    &task.queued_analysis().spec,
+                    &task.queued_analysis().spec_options,
+                );
+                if required_kinds.is_empty() {
                     continue;
-                };
+                }
                 let producers = task
                     .dependencies()
                     .iter()
                     .filter_map(|dependency| {
-                        producer_identities
-                            .get(dependency)
-                            .filter(|(_, _, transient, pss, hb, op)| match required_kind {
-                                crate::simulation::execution::ExecutionArtifactKind::TransientTrajectory => *transient,
-                                crate::simulation::execution::ExecutionArtifactKind::PeriodicState => *pss,
-                                crate::simulation::execution::ExecutionArtifactKind::HbState => *hb,
-                                crate::simulation::execution::ExecutionArtifactKind::DcOperatingPointSeed => *op,
-                            })
-                            .map(|(revision, config_digest, _, _, _, _)| {
-                                match required_kind {
-                                    crate::simulation::execution::ExecutionArtifactKind::TransientTrajectory => PreparedDependencyBinding::transient_trajectory(*dependency, *revision, *config_digest),
-                                    crate::simulation::execution::ExecutionArtifactKind::PeriodicState => PreparedDependencyBinding::periodic_state(*dependency, *revision, *config_digest),
-                                    crate::simulation::execution::ExecutionArtifactKind::HbState => PreparedDependencyBinding::hb_state(*dependency, *revision, *config_digest),
-                                    crate::simulation::execution::ExecutionArtifactKind::DcOperatingPointSeed => PreparedDependencyBinding::dc_operating_point_seed(*dependency, *revision, *config_digest),
-                                }
-                            })
+                        let (revision, config_digest, transient, pss, hb, op) =
+                            producer_identities.get(dependency)?;
+                        let kind = required_kinds.iter().copied().find(|kind| match kind {
+                            ExecutionArtifactKind::TransientTrajectory => *transient,
+                            ExecutionArtifactKind::PeriodicState => *pss,
+                            ExecutionArtifactKind::HbState => *hb,
+                            ExecutionArtifactKind::DcOperatingPointSeed => *op,
+                        })?;
+                        Some(match kind {
+                            ExecutionArtifactKind::TransientTrajectory => {
+                                PreparedDependencyBinding::transient_trajectory(
+                                    *dependency,
+                                    *revision,
+                                    *config_digest,
+                                )
+                            }
+                            ExecutionArtifactKind::PeriodicState => {
+                                PreparedDependencyBinding::periodic_state(
+                                    *dependency,
+                                    *revision,
+                                    *config_digest,
+                                )
+                            }
+                            ExecutionArtifactKind::HbState => PreparedDependencyBinding::hb_state(
+                                *dependency,
+                                *revision,
+                                *config_digest,
+                            ),
+                            ExecutionArtifactKind::DcOperatingPointSeed => {
+                                PreparedDependencyBinding::dc_operating_point_seed(
+                                    *dependency,
+                                    *revision,
+                                    *config_digest,
+                                )
+                            }
+                        })
                     })
                     .collect::<Vec<_>>();
                 if producers.len() != 1 {
                     errors.push(format!(
                         "{} must bind exactly one prepared {} task, found {}",
                         task.queued_analysis().spec.run_type().display_name(),
-                        match required_kind {
-                            crate::simulation::execution::ExecutionArtifactKind::TransientTrajectory => "Transient",
-                            crate::simulation::execution::ExecutionArtifactKind::PeriodicState => "shooting PSS",
-                            crate::simulation::execution::ExecutionArtifactKind::HbState => "Harmonic Balance",
-                            crate::simulation::execution::ExecutionArtifactKind::DcOperatingPointSeed => "operating point",
-                        },
+                        required_kinds
+                            .iter()
+                            .map(|kind| kind.producer_label())
+                            .collect::<Vec<_>>()
+                            .join(" or "),
                         producers.len()
                     ));
                 } else {

@@ -61,7 +61,7 @@ pub(super) fn run_spec_request_with_environment(
     ensure_not_aborted(abort_flag)?;
     validation.map_err(SimulationError::InvalidConfig)?;
     dependencies
-        .validate_for_spec(&spec)
+        .validate_for_spec(&spec, &options)
         .map_err(|error| SimulationError::InvalidConfig(error.to_string()))?;
 
     if let Some(config) = config::analysis_config_from_spec(&spec) {

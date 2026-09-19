@@ -12,7 +12,7 @@ mod snapshot;
 
 pub(in crate::simulation) use artifact::{
     ExecutionArtifactEnvelope, ExecutionArtifactKind, PreparedDependencyBinding,
-    ResolvedExecutionDependencies, TransientTrajectoryArtifact,
+    ResolvedExecutionDependencies, TransientTrajectoryArtifact, required_artifact_kinds,
 };
 #[cfg(any(target_arch = "wasm32", test))]
 pub(in crate::simulation) use canonical::f64_sequence_digest;

@@ -25,7 +25,8 @@ use crate::simulation::config::{
     PoleZeroConfig, PzAnalysisType, SensitivityConfig, TransientAnalysisConfig,
 };
 use crate::simulation::execution::{
-    ExecutionArtifactEnvelope, TouchstoneExportPolicy, canonical_analysis_kind,
+    ExecutionArtifactEnvelope, ExecutionArtifactKind, TouchstoneExportPolicy,
+    canonical_analysis_kind,
 };
 use crate::simulation::multi_run::{
     AnalysisSpec, FrequencySweep, HbToneSpec, OptimizationAlgorithm, OptimizationGoal,
@@ -1747,23 +1748,30 @@ impl SimulationController {
                                     && matches!(task.spec(), AnalysisSpec::Fft { .. })
                             })
                         });
-                    let periodic_artifact_required = self
-                        .current_provenance
-                        .as_ref()
-                        .map(|provenance| provenance.source_instance_id())
-                        .is_some_and(|producer| {
-                            self.pending_analyses.iter().any(|task| {
-                                task.dependencies().contains(&producer)
-                                    && matches!(
-                                        task.spec(),
-                                        AnalysisSpec::Pac
-                                            | AnalysisSpec::Pxf
-                                            | AnalysisSpec::Pnoise
-                                            | AnalysisSpec::Pstb
-                                            | AnalysisSpec::Psp { .. }
-                                    )
+                    // Which retained state a waiting consumer asked this
+                    // producer for, read off the same table the queue bound it
+                    // with rather than a second list of consumer kinds: the
+                    // periodic small-signal family chooses its carrier, so
+                    // "does anything need a PSS state from me" and "does
+                    // anything need an HB state from me" are the same question
+                    // asked of two answers.
+                    let artifact_consumers = |kind: ExecutionArtifactKind| {
+                        self.current_provenance
+                            .as_ref()
+                            .map(|provenance| provenance.source_instance_id())
+                            .is_some_and(|producer| {
+                                self.pending_analyses.iter().any(|task| {
+                                    task.dependencies().contains(&producer)
+                                        && crate::simulation::execution::required_artifact_kinds(
+                                            task.spec(),
+                                            task.spec_options(),
+                                        )
+                                        .contains(&kind)
+                                })
                             })
-                        });
+                    };
+                    let periodic_artifact_required =
+                        artifact_consumers(ExecutionArtifactKind::PeriodicState);
                     let dc_seed_artifact_required = self
                         .current_provenance
                         .as_ref()
@@ -1780,19 +1788,7 @@ impl SimulationController {
                                     )
                             })
                         });
-                    let hb_artifact_required = self
-                        .current_provenance
-                        .as_ref()
-                        .map(|provenance| provenance.source_instance_id())
-                        .is_some_and(|producer| {
-                            self.pending_analyses.iter().any(|task| {
-                                task.dependencies().contains(&producer)
-                                    && matches!(
-                                        task.spec(),
-                                        AnalysisSpec::Hbsp { .. } | AnalysisSpec::Hbnoise { .. }
-                                    )
-                            })
-                        });
+                    let hb_artifact_required = artifact_consumers(ExecutionArtifactKind::HbState);
                     let produced_artifact = match (
                         self.current_spec.as_ref(),
                         self.current_provenance.as_ref(),

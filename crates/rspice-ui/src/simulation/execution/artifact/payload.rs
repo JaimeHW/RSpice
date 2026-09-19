@@ -1314,26 +1314,10 @@ impl ResolvedExecutionDependencies {
     pub(in crate::simulation) fn validate_for_spec(
         &self,
         spec: &AnalysisSpec,
+        options: &SpecExecutionOptions,
     ) -> Result<(), ExecutionArtifactError> {
-        let expected_kind = match spec {
-            AnalysisSpec::Fourier { .. } | AnalysisSpec::Fft { .. } => {
-                Some(ExecutionArtifactKind::TransientTrajectory)
-            }
-            AnalysisSpec::Hbsp { .. } | AnalysisSpec::Hbnoise { .. } => {
-                Some(ExecutionArtifactKind::HbState)
-            }
-            AnalysisSpec::Pss {
-                method: PssMethod::Shooting,
-                ..
-            } => Some(ExecutionArtifactKind::DcOperatingPointSeed),
-            AnalysisSpec::Pac
-            | AnalysisSpec::Pxf
-            | AnalysisSpec::Pnoise
-            | AnalysisSpec::Pstb
-            | AnalysisSpec::Psp { .. } => Some(ExecutionArtifactKind::PeriodicState),
-            _ => None,
-        };
-        let expected_count = usize::from(expected_kind.is_some());
+        let expected_kinds = required_artifact_kinds(spec, options);
+        let expected_count = usize::from(!expected_kinds.is_empty());
         if self.bindings.len() != expected_count || self.artifacts.len() != expected_count {
             return Err(ExecutionArtifactError::ContractMismatch(format!(
                 "{} requires {expected_count} typed execution artifact(s), received {} binding(s) and {} artifact(s)",
@@ -1357,14 +1341,29 @@ impl ResolvedExecutionDependencies {
             )
         })?;
         let binding = &self.bindings[0];
-        if Some(binding.kind) != expected_kind {
+        if !expected_kinds.contains(&binding.kind) {
             return Err(ExecutionArtifactError::ContractMismatch(format!(
-                "{} requires a {:?} artifact",
+                "{} requires a {} artifact",
                 spec.run_type().display_name(),
-                expected_kind.expect("artifact-backed task has an expected kind")
+                expected_kinds
+                    .iter()
+                    .map(|kind| kind.producer_label())
+                    .collect::<Vec<_>>()
+                    .join(" or ")
             )));
         }
         self.artifacts[0].validate_against(snapshot_digest, binding)
+    }
+
+    /// Which typed artifact this task was resolved against, or `None` for a
+    /// task that binds none.
+    ///
+    /// The dispatch reads the carrier family off the artifact rather than off
+    /// the request, because the artifact is the thing that was actually
+    /// produced; the request's own `FROM=` is checked against it inside the
+    /// service, where a mismatch is one sentence naming both.
+    pub(in crate::simulation) fn artifact_kind(&self) -> Option<ExecutionArtifactKind> {
+        self.bindings.first().map(|binding| binding.kind)
     }
 
     pub(in crate::simulation) fn validate_for_config(&self) -> Result<(), ExecutionArtifactError> {
