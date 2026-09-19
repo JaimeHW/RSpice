@@ -33,6 +33,16 @@ pub(super) fn fields(ui: &mut Ui, setup: &mut DcMismatchDraft) {
         &mut setup.contributor_limit,
         "0 keeps all",
     );
+    // The second trimming control, and the one with no default of the form's
+    // own: left empty, every contributor the limit above allows is listed,
+    // because the card's own threshold is zero. The row says so where it is
+    // typed, since a blank field otherwise reads as unfilled.
+    hinted_input_row(
+        ui,
+        "Share threshold",
+        &mut setup.share_threshold,
+        "empty keeps all",
+    );
     switch_row(ui, "Process variation", &mut setup.include_process);
     switch_row(ui, "Local mismatch", &mut setup.include_mismatch);
     switch_row(

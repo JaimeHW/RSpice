@@ -535,6 +535,7 @@ mod tests {
                 include_process: false,
                 include_mismatch: true,
                 normalized_contributions: true,
+                contribution_threshold: None,
             },
             AnalysisSpec::Reliability {
                 target_years: vec![1.0, 10.0],
@@ -988,6 +989,7 @@ R2 out 0 1k\n\
             include_process: false,
             include_mismatch: true,
             normalized_contributions: true,
+            contribution_threshold: None,
         };
         let result = run_spec_request(
             &EngineBridge::new(),

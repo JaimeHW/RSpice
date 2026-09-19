@@ -161,6 +161,7 @@ pub(super) fn validate(spec: &AnalysisSpec) -> Result<(), String> {
             sigma_multiplier,
             include_process,
             include_mismatch,
+            contribution_threshold,
             ..
         } => {
             // No bound of its own on `contributor_limit`: zero is the card's
@@ -171,6 +172,11 @@ pub(super) fn validate(spec: &AnalysisSpec) -> Result<(), String> {
             }
             if !sigma_multiplier.is_finite() || *sigma_multiplier <= 0.0 {
                 return Err(dc_mismatch_sigma_out_of_range(*sigma_multiplier));
+            }
+            if let Some(threshold) = contribution_threshold
+                && (!threshold.is_finite() || !(0.0..=1.0).contains(threshold))
+            {
+                return Err(dc_mismatch_threshold_out_of_range(*threshold));
             }
             if !include_process && !include_mismatch {
                 return Err(dc_mismatch_no_scope());
@@ -207,6 +213,15 @@ fn dc_mismatch_sigma_out_of_range(value: f64) -> String {
         field: "SIGMA",
         value,
         expected: "a positive multiple of sigma",
+    })
+}
+
+/// The parser's `THRESHOLD` range, which is `[0, 1]`.
+fn dc_mismatch_threshold_out_of_range(value: f64) -> String {
+    card_refusal(rspice_core::netlist::AnalysisCardIssue::InvalidNumber {
+        field: "THRESHOLD",
+        value,
+        expected: "a variance share in [0, 1]",
     })
 }
 
@@ -263,6 +278,31 @@ mod tests {
             include_mismatch: scopes.0,
             include_process: scopes.1,
             normalized_contributions: true,
+            contribution_threshold: None,
+        }
+    }
+
+    fn with_threshold(threshold: Option<f64>) -> AnalysisSpec {
+        let AnalysisSpec::DcMismatch {
+            output_expression,
+            sigma_multiplier,
+            contributor_limit,
+            include_mismatch,
+            include_process,
+            normalized_contributions,
+            ..
+        } = dc_mismatch("V(out)", 1.0, (true, false))
+        else {
+            unreachable!("the fixture is a DC mismatch specification");
+        };
+        AnalysisSpec::DcMismatch {
+            output_expression,
+            sigma_multiplier,
+            contributor_limit,
+            include_mismatch,
+            include_process,
+            normalized_contributions,
+            contribution_threshold: threshold,
         }
     }
 
@@ -316,9 +356,16 @@ mod tests {
             .expect_err("a card with neither scope is refused")
             .to_string();
         tied_to_the_engine(&core, &refusal(&dc_mismatch("V(out)", 1.0, (false, false))));
+
+        // `THRESHOLD` is a variance share, so it has a closed range.
+        let core = rspice_core::netlist::Netlist::parse(&deck(".DCMATCH OUT=V(out) THRESHOLD=1.5"))
+            .expect_err("a share above one is refused")
+            .to_string();
+        tied_to_the_engine(&core, &refusal(&with_threshold(Some(1.5))));
     }
 
-    /// The limit the card calls "all" is not a refusal here either.
+    /// The limit the card calls "all" is not a refusal here either, and the
+    /// two share thresholds the card admits are both accepted.
     #[test]
     fn a_contributor_limit_of_zero_is_a_valid_specification() {
         let AnalysisSpec::DcMismatch {
@@ -327,6 +374,7 @@ mod tests {
             include_mismatch,
             include_process,
             normalized_contributions,
+            contribution_threshold,
             ..
         } = dc_mismatch("V(out)", 1.0, (true, false))
         else {
@@ -339,7 +387,10 @@ mod tests {
             include_mismatch,
             include_process,
             normalized_contributions,
+            contribution_threshold,
         };
         assert_eq!(validate(&spec), Ok(()));
+        assert_eq!(validate(&with_threshold(None)), Ok(()));
+        assert_eq!(validate(&with_threshold(Some(1.0))), Ok(()));
     }
 }

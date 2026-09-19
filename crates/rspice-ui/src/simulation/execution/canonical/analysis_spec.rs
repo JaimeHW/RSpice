@@ -602,6 +602,7 @@ pub(super) fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &Analysis
             include_process,
             include_mismatch,
             normalized_contributions,
+            contribution_threshold,
         } => {
             writer.string(output_expression);
             writer.f64(*sigma_multiplier);
@@ -609,6 +610,14 @@ pub(super) fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &Analysis
             writer.bool(*include_process);
             writer.bool(*include_mismatch);
             writer.bool(*normalized_contributions);
+            // Appended, and written only when authored, so an unauthored
+            // threshold digests to exactly the bytes this arm produced before
+            // the control existed. `writer.option` would tag the `None` and
+            // change the identity of every plan already saved — the same
+            // reason the transient-noise floor above appends conditionally.
+            if let Some(threshold) = contribution_threshold {
+                writer.f64(*threshold);
+            }
         }
     }
 }

@@ -204,6 +204,9 @@ impl SimulationController {
                 include_process: draft.include_process,
                 include_mismatch: draft.include_mismatch,
                 normalized_contributions: draft.normalized_contributions,
+                contribution_threshold: crate::simulation::plan::dc_mismatch_share_threshold(
+                    &draft.share_threshold,
+                )?,
             },
             AnalysisDraft::Reliability(draft) => {
                 let mut draft = draft.clone();

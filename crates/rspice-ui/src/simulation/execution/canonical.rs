@@ -1107,6 +1107,54 @@ mod tests {
         assert_ne!(authored.finish(), absent.finish());
     }
 
+    /// A DC mismatch plan with no authored share threshold digests to exactly
+    /// the bytes it digested to before the field existed.
+    ///
+    /// Same reasoning as the noise floor above, and the same shape of
+    /// reference: the six fields the arm wrote, nothing appended. `.DCMATCH`'s
+    /// own default threshold is zero, so a `writer.option` tag — or an
+    /// unconditional `writer.f64(0.0)` — would redefine the identity of every
+    /// DC mismatch plan already saved.
+    #[test]
+    fn an_unauthored_share_threshold_leaves_the_plan_digest_unchanged() {
+        let dc_mismatch = |contribution_threshold| AnalysisSpec::DcMismatch {
+            output_expression: "V(out)".to_owned(),
+            sigma_multiplier: 1.0,
+            contributor_limit: 10,
+            include_process: false,
+            include_mismatch: true,
+            normalized_contributions: true,
+            contribution_threshold,
+        };
+        let spec = dc_mismatch(None);
+        let mut encoded = CanonicalWriter::new("test");
+        encode_analysis_spec(&mut encoded, &spec);
+
+        let mut before_the_field = CanonicalWriter::new("test");
+        before_the_field.domain("analysis-spec");
+        before_the_field.u8(analysis_kind_tag(&spec));
+        before_the_field.string("V(out)");
+        before_the_field.f64(1.0);
+        before_the_field.usize(10);
+        before_the_field.bool(false);
+        before_the_field.bool(true);
+        before_the_field.bool(true);
+
+        assert_eq!(
+            encoded.finish(),
+            before_the_field.finish(),
+            "an unauthored share threshold must not move a saved plan's identity"
+        );
+
+        // And an authored one must move it, or two plans trimming their
+        // contributor lists differently would share one identity.
+        let mut authored = CanonicalWriter::new("test");
+        encode_analysis_spec(&mut authored, &dc_mismatch(Some(0.05)));
+        let mut absent = CanonicalWriter::new("test");
+        encode_analysis_spec(&mut absent, &spec);
+        assert_ne!(authored.finish(), absent.finish());
+    }
+
     /// A Monte Carlo plan that named no subset digests to exactly the bytes it
     /// digested to when the arm wrote nothing at all.
     ///

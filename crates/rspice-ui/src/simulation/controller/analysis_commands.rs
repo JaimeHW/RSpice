@@ -594,18 +594,23 @@ impl SimulationController {
             contributor_limit,
             include_process,
             include_mismatch,
+            contribution_threshold,
             ..
         } = spec
         else {
             return Err("failed to build DC mismatch command".to_string());
         };
-        Ok(format!(
+        let mut command = format!(
             ".dcmatch OUT={} MISMATCH={} PROCESS={} CONTRIBUTORS={contributor_limit} \
              SIGMA={sigma_multiplier}",
             output_expression.trim(),
             yes_or_no(*include_mismatch),
             yes_or_no(*include_process),
-        ))
+        );
+        if let Some(threshold) = contribution_threshold {
+            command.push_str(&format!(" THRESHOLD={threshold}"));
+        }
+        Ok(command)
     }
 
     /// Inject non-default UI simulation options before `.end`.
@@ -1311,11 +1316,11 @@ mod tests {
     /// every field is recovered from the `DcMatchCard` the parser built.
     #[test]
     fn a_dc_mismatch_spec_writes_the_card_the_engine_parses() {
-        for (expression, limit, mismatch, process, sigma) in [
-            (" V(out,in) ", 3_usize, false, true, 6.0),
-            ("V(out)", 10, true, false, 1.0),
-            ("I(V1)", 0, true, true, 3.0),
-            ("out", 0, true, false, 0.5),
+        for (expression, limit, mismatch, process, sigma, threshold) in [
+            (" V(out,in) ", 3_usize, false, true, 6.0, None),
+            ("V(out)", 10, true, false, 1.0, Some(0.25)),
+            ("I(V1)", 0, true, true, 3.0, None),
+            ("out", 0, true, false, 0.5, Some(1.0)),
         ] {
             let spec = AnalysisSpec::DcMismatch {
                 output_expression: expression.to_owned(),
@@ -1324,6 +1329,7 @@ mod tests {
                 include_process: process,
                 include_mismatch: mismatch,
                 normalized_contributions: true,
+                contribution_threshold: threshold,
             };
             let card = SimulationController::build_dc_mismatch_command(&spec)
                 .expect("a DC mismatch specification writes its own card");
@@ -1333,10 +1339,14 @@ mod tests {
                 assert_eq!(parsed.process, process, "{card}");
                 assert_eq!(parsed.contributor_limit, limit, "{card}");
                 assert_eq!(parsed.sigma_multiplier, sigma, "{card}");
-                // Unauthored on this specification, and the engine's own
-                // default is the value the card leaves unsaid.
-                assert_eq!(parsed.threshold, 0.0, "{card}");
-                assert!(!card.contains("THRESHOLD"), "{card}");
+                // An unauthored threshold is the card's own default of zero,
+                // and the line does not state it.
+                assert_eq!(parsed.threshold, threshold.unwrap_or(0.0), "{card}");
+                assert_eq!(
+                    card.contains("THRESHOLD"),
+                    threshold.is_some(),
+                    "{card} states THRESHOLD against a share of {threshold:?}"
+                );
             });
             // Pinned as well as read back, so a reader of this test sees the
             // spelling a colleague handed this deck would read.
@@ -1344,6 +1354,13 @@ mod tests {
                 assert_eq!(
                     card,
                     ".dcmatch OUT=V(out,in) MISMATCH=no PROCESS=yes CONTRIBUTORS=3 SIGMA=6"
+                );
+            }
+            if expression == "V(out)" {
+                assert_eq!(
+                    card,
+                    ".dcmatch OUT=V(out) MISMATCH=yes PROCESS=no CONTRIBUTORS=10 SIGMA=1 \
+                     THRESHOLD=0.25"
                 );
             }
         }
@@ -1360,6 +1377,7 @@ mod tests {
             include_process: false,
             include_mismatch: true,
             normalized_contributions: true,
+            contribution_threshold: None,
         };
         let card = SimulationController::build_dc_mismatch_command(&spec)
             .expect("a limit of zero is a card the engine reads");

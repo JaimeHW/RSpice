@@ -473,6 +473,54 @@ fn a_wire_request_written_before_the_noise_floor_field_restores_without_one() {
     assert_eq!(AnalysisSpec::from(decoded), authored);
 }
 
+/// A DC mismatch request written before the share threshold existed still
+/// decodes, and decodes as the untrimmed list it was running.
+///
+/// DC mismatch also crosses as `CanonicalSpec`, so the domain enum's serde
+/// attributes *are* the wire format. `None` rather than a number is the point:
+/// the run this request described listed every contributor its limit allowed,
+/// and decoding it as any particular share would drop rows the request asked
+/// to see.
+#[test]
+fn a_wire_request_written_before_the_share_threshold_field_restores_without_one() {
+    let fields = serde_json::json!({
+        "output_expression": "V(out)",
+        "sigma_multiplier": 1.0,
+        "contributor_limit": 10,
+        "include_process": false,
+        "include_mismatch": true,
+        "normalized_contributions": true
+    });
+    let analysis: AnalysisSpec = serde_json::from_value(serde_json::json!({
+        "DcMismatch": fields.clone()
+    }))
+    .expect("a DC mismatch spec written before the threshold deserializes");
+    let worker: WorkerAnalysisSpec = serde_json::from_value(serde_json::json!({
+        "CanonicalSpec": { "DcMismatch": fields }
+    }))
+    .expect("the same request deserializes as a worker payload");
+
+    let dc_mismatch = |contribution_threshold| AnalysisSpec::DcMismatch {
+        output_expression: "V(out)".to_owned(),
+        sigma_multiplier: 1.0,
+        contributor_limit: 10,
+        include_process: false,
+        include_mismatch: true,
+        normalized_contributions: true,
+        contribution_threshold,
+    };
+    let expected = dc_mismatch(None);
+    assert_eq!(analysis, expected);
+    assert_eq!(AnalysisSpec::from(worker), expected);
+
+    let authored = dc_mismatch(Some(0.05));
+    let carried = WorkerAnalysisSpec::try_from(&authored).expect("the request is transportable");
+    let encoded = serde_json::to_string(&carried).expect("the request serializes");
+    let decoded: WorkerAnalysisSpec =
+        serde_json::from_str(&encoded).expect("the request deserializes");
+    assert_eq!(AnalysisSpec::from(decoded), authored);
+}
+
 #[test]
 fn legacy_envelope_specs_migrate_identically_across_worker_transport() {
     let fields = serde_json::json!({
@@ -798,6 +846,7 @@ fn unavailable_manifest_spec_round_trips_without_losing_typed_fields() {
         include_process: false,
         include_mismatch: true,
         normalized_contributions: true,
+        contribution_threshold: Some(0.05),
     };
     let worker = WorkerAnalysisSpec::try_from(&spec).expect("worker spec converts");
     let encoded = serde_json::to_vec(&worker).expect("worker spec serializes");

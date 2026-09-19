@@ -652,10 +652,19 @@ pub enum AnalysisSpec {
     DcMismatch {
         output_expression: String,
         sigma_multiplier: f64,
+        /// Contributors retained in the report. Zero is the card's own
+        /// spelling of "every contributor".
         contributor_limit: usize,
         include_process: bool,
         include_mismatch: bool,
         normalized_contributions: bool,
+        /// Smallest variance share a contributor must carry to be listed.
+        /// `None` is the engine's own default of exactly zero, and is the
+        /// value a specification written before this control existed
+        /// carries — an authored zero canonicalizes to it, so one analysis
+        /// has one identity.
+        #[serde(default)]
+        contribution_threshold: Option<f64>,
     },
 }
 

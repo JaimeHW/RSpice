@@ -454,6 +454,12 @@ pub struct DcMismatchDraft {
     pub output_expression: String,
     pub sigma_multiplier: String,
     pub contributor_limit: String,
+    /// Smallest variance share a contributor must carry to be listed. Empty
+    /// is the card's own default of zero, which retains every contributor the
+    /// limit above allows, and is what a plan saved before this control
+    /// existed opens with.
+    #[serde(default)]
+    pub share_threshold: String,
     pub include_process: bool,
     pub include_mismatch: bool,
     pub normalized_contributions: bool,
@@ -472,6 +478,7 @@ impl Default for DcMismatchDraft {
             output_expression: "V(out)".to_owned(),
             sigma_multiplier: "1".to_owned(),
             contributor_limit: rspice_core::netlist::DcMatchCard::DEFAULT_CONTRIBUTORS.to_string(),
+            share_threshold: String::new(),
             include_process: false,
             include_mismatch: true,
             normalized_contributions: true,
@@ -1178,6 +1185,29 @@ fn periodic_state_requirement(dependent: &AnalysisDraft) -> Result<(&'static str
     }
 }
 
+/// Read an authored DC mismatch share threshold, or `None` for the card's own
+/// default.
+///
+/// Two spellings mean the same card and are canonicalized to one: an empty
+/// field, and a threshold authored as exactly zero. The engine's default IS
+/// zero (`DcMatchCard::threshold`), so `THRESHOLD=0` is the unauthored card —
+/// and if the two specifications differed, one analysis would have two plan
+/// digests and a saved plan would re-run as a different request.
+///
+/// Both the plan draft and the specification builder read a threshold through
+/// here so there is one account of that identity.
+pub(crate) fn dc_mismatch_share_threshold(text: &str) -> Result<Option<f64>, String> {
+    if text.trim().is_empty() {
+        return Ok(None);
+    }
+    let value = crate::simulation::dialog::options::parse_si_value(text)
+        .map_err(|error| format!("invalid share threshold: {error}"))?;
+    if value == 0.0 {
+        return Ok(None);
+    }
+    Ok(Some(value))
+}
+
 fn parse_positive(text: &str, field: &str) -> Result<f64, String> {
     let value = crate::simulation::dialog::options::parse_si_value(text)
         .map_err(|error| format!("invalid {field}: {error}"))?;
@@ -1461,6 +1491,7 @@ fn validate_dc_mismatch(draft: &DcMismatchDraft) -> Option<String> {
             .trim()
             .parse::<usize>()
             .map_err(|_| "contributor limit must be a non-negative integer".to_owned())?;
+        let contribution_threshold = dc_mismatch_share_threshold(&draft.share_threshold)?;
         crate::simulation::multi_run::AnalysisSpec::DcMismatch {
             output_expression: draft.output_expression.trim().to_owned(),
             sigma_multiplier,
@@ -1468,6 +1499,7 @@ fn validate_dc_mismatch(draft: &DcMismatchDraft) -> Option<String> {
             include_process: draft.include_process,
             include_mismatch: draft.include_mismatch,
             normalized_contributions: draft.normalized_contributions,
+            contribution_threshold,
         }
         .validate()
     })()
@@ -1949,6 +1981,63 @@ mod tests {
         let restored: AnalysisDraft =
             serde_json::from_str(&tagged).expect("the tagged draft deserializes");
         assert_eq!(restored.kind(), AnalysisKind::AcData);
+    }
+
+    /// A plan saved before the share threshold existed still opens, listing
+    /// the contributors it was listing.
+    ///
+    /// Same shim, same reason as the noise floor below: `deny_unknown_fields`
+    /// says nothing about an absent key, so `serde(default)` is what lets the
+    /// plan open at all, and this is the test that it is there. Empty rather
+    /// than `0` is the value that reopens: both mean the same card, and empty
+    /// is the spelling this form canonicalizes to.
+    #[test]
+    fn a_plan_saved_before_the_share_threshold_field_opens_without_one() {
+        let saved = serde_json::json!({
+            "output_expression": "V(out)",
+            "sigma_multiplier": "1",
+            "contributor_limit": "10",
+            "include_process": false,
+            "include_mismatch": true,
+            "normalized_contributions": true
+        });
+        let draft: DcMismatchDraft =
+            serde_json::from_value(saved).expect("a plan saved before the threshold still opens");
+        assert!(
+            draft.share_threshold.is_empty(),
+            "a saved plan must reopen on the untrimmed list it ran: {:?}",
+            draft.share_threshold
+        );
+        assert_eq!(draft.output_expression, "V(out)");
+        assert_eq!(draft.contributor_limit, "10");
+        assert!(validate_dc_mismatch(&draft).is_none());
+    }
+
+    /// An authored zero is the unauthored card, and reaches the run as one.
+    ///
+    /// The engine's own default threshold is exactly zero. Two
+    /// specifications that differ only in how that zero was spelled would
+    /// give one analysis two plan digests, so the two spellings are
+    /// canonicalized to one before the specification is built.
+    #[test]
+    fn a_share_threshold_of_zero_is_the_unauthored_card() {
+        assert_eq!(dc_mismatch_share_threshold(""), Ok(None));
+        assert_eq!(dc_mismatch_share_threshold("   "), Ok(None));
+        assert_eq!(dc_mismatch_share_threshold("0"), Ok(None));
+        assert_eq!(dc_mismatch_share_threshold("0.0"), Ok(None));
+        assert_eq!(dc_mismatch_share_threshold("0.05"), Ok(Some(0.05)));
+        assert_eq!(dc_mismatch_share_threshold("1"), Ok(Some(1.0)));
+        assert!(dc_mismatch_share_threshold("half").is_err());
+
+        // And the range belongs to the card, so an out-of-range share is
+        // refused by the specification rather than here.
+        let mut draft = DcMismatchDraft::default();
+        draft.share_threshold = "1.5".to_owned();
+        let refusal = validate_dc_mismatch(&draft).expect("a share above one is refused");
+        assert!(
+            refusal.contains("THRESHOLD must be a variance share in [0, 1]"),
+            "{refusal}"
+        );
     }
 
     /// A plan saved before the noise floor field existed still opens, running
