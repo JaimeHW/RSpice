@@ -428,6 +428,10 @@ fn cell_edit(
 }
 
 /// The slope into one point, as the engine's own ramp between two samples.
+///
+/// Spelled the way the strip above this table spells the steepest of them
+/// (`5 kV/s`): the two numbers are on one screen, and the same quantity
+/// written two ways there reads as two quantities.
 fn slope(parsed: Option<&PwlData>, index: usize, unit: &str) -> String {
     let Some(points) = parsed.map(PwlData::points) else {
         return "\u{2014}".to_owned();
@@ -442,9 +446,9 @@ fn slope(parsed: Option<&PwlData>, index: usize, unit: &str) -> String {
     if step <= 0.0 {
         return "step".to_owned();
     }
-    format!(
-        "{}{unit}/s",
-        format_engineering_display((point.value - previous.value) / step)
+    crate::ui::plot::tick_with_unit(
+        &format_engineering_display((point.value - previous.value) / step),
+        &format!("{unit}/s"),
     )
 }
 

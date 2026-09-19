@@ -219,38 +219,61 @@ fn lifecycle_chip(ui: &mut Ui, state: &AppState, stage: &Stage) {
     let messages = state.ui.messages();
     let tokens = Tokens::get(ui.ctx());
     let errors = stage.errors();
-    let (text, color) = if !stage.dirty {
+    // Each state's fact, then the same fact at the length a narrow band can
+    // give it. The short form is the lifecycle word alone, because the detail
+    // it drops — which revision, how many errors — is stated whole by the
+    // realization band and the audit strip under it, while the word is the one
+    // thing only this chip says.
+    let (spellings, color) = if !stage.dirty {
         (
-            messages.format(
-                MessageId::StimulusSavedRevision,
-                &[("revision", &stage.saved.revision().to_string())],
-            ),
+            vec![
+                messages.format(
+                    MessageId::StimulusSavedRevision,
+                    &[("revision", &stage.saved.revision().to_string())],
+                ),
+                messages.text(MessageId::StimulusSaved),
+            ],
             tokens.color.ok,
         )
     } else if errors > 0 {
         (
-            messages.format(
-                if errors == 1 {
-                    MessageId::StimulusDraftErrorSingular
-                } else {
-                    MessageId::StimulusDraftErrors
-                },
-                &[("count", &errors.to_string())],
-            ),
+            vec![
+                messages.format(
+                    if errors == 1 {
+                        MessageId::StimulusDraftErrorSingular
+                    } else {
+                        MessageId::StimulusDraftErrors
+                    },
+                    &[("count", &errors.to_string())],
+                ),
+                messages.text(MessageId::StimulusDraft),
+            ],
             tokens.color.err,
         )
     } else {
         (
-            messages.text(MessageId::StimulusDraftNotApplied),
+            vec![
+                messages.text(MessageId::StimulusDraftNotApplied),
+                messages.text(MessageId::StimulusDraft),
+            ],
             tokens.color.warn,
         )
     };
-    let response = chip(ui, &text, color);
-    // Undo is what takes a draft back, and a reader looking at the chip that
-    // says "not applied" is exactly the reader who wants to know that.
-    if stage.can_undo {
-        response.on_hover_text(messages.text(MessageId::StimulusUndoAvailable));
-    }
+    let Some(response) = chip(ui, &spellings, color) else {
+        return;
+    };
+    // The whole fact under the pointer whatever was painted, and — because a
+    // reader looking at "not applied" is exactly the reader who wants it —
+    // that undo will take the draft back.
+    let hover = match (spellings.first(), stage.can_undo) {
+        (Some(full), true) => format!(
+            "{full}\n{}",
+            messages.text(MessageId::StimulusUndoAvailable)
+        ),
+        (Some(full), false) => full.clone(),
+        (None, _) => return,
+    };
+    response.on_hover_text(hover);
 }
 
 /// Who is carrying a copy of this definition, and how far each has drifted.
@@ -360,10 +383,28 @@ fn delete_label(messages: &crate::workbench::MessageCatalog, stage: &Stage) -> S
 
 /// One status chip, painted rather than labelled so a press anywhere in the
 /// band reaches the control under it.
-fn chip(ui: &mut Ui, text: &str, color: Color32) -> egui::Response {
+///
+/// `spellings` are the same fact at decreasing length, longest first, and the
+/// first that fits its own frame whole is the one painted — the rule
+/// [`adopter_summary`] follows, for the same reason: this band ends where the
+/// verbs begin, and a lifecycle elided into them (`draft · 1 erro`) is a state
+/// a reader has to guess at. Whatever is painted, the whole spelling is what
+/// the chip announces and what it says under the pointer.
+///
+/// `None` when not even the shortest fits, which is the one case where a band
+/// this narrow has nothing to give.
+fn chip(ui: &mut Ui, spellings: &[String], color: Color32) -> Option<egui::Response> {
     let tokens = Tokens::get(ui.ctx());
     let font = theme::mono(tokens::FS_0, FontWeight::Regular);
-    let galley = ui.painter().layout_no_wrap(text.to_owned(), font, color);
+    let room = ui.available_width();
+    let galley = spellings
+        .iter()
+        .map(|text| {
+            ui.painter()
+                .layout_no_wrap(text.clone(), font.clone(), color)
+        })
+        .find(|galley| galley.size().x + 14.0 <= room)?;
+    let text = spellings.first()?.as_str();
     let (rect, response) =
         ui.allocate_exact_size(Vec2::new(galley.size().x + 14.0, 19.0), Sense::hover());
     ui.painter().rect(
@@ -380,7 +421,7 @@ fn chip(ui: &mut Ui, text: &str, color: Color32) -> egui::Response {
     );
     response
         .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), text));
-    response
+    Some(response)
 }
 
 /// The family's mark, from the one painter of it.
