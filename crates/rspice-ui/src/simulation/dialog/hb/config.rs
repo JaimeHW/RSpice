@@ -1,6 +1,5 @@
 //! Harmonic balance solver configuration.
 
-use super::format::format_freq;
 use serde::{Deserialize, Serialize};
 
 /// Solver type for Harmonic Balance
@@ -138,39 +137,42 @@ impl Default for HbConfig {
 }
 
 impl HbConfig {
-    /// The `.HB` directive this configuration writes into a deck.
-    ///
-    /// A `.HB` card names the fundamental tones and nothing else. That is the
-    /// whole of the directive in the one dialect that spells it — Xyce, whose
-    /// `.HB <f1> [<f2> ...]` takes frequencies and reads the harmonic order
-    /// from `.OPTIONS HBINT NUMFREQ` — and it is exactly what this engine's
-    /// parser accepts (`netlist::parser::commands`, the `".HB"` arm). ngspice
-    /// has no `.HB` at all, so there is no second spelling to honour.
-    ///
-    /// Everything else the dialog configures — harmonic counts, oversampling,
-    /// tolerances, the iteration budget, the solver choice — reaches the engine
-    /// on the typed channel instead, and the deck is not a second owner of it:
-    /// `build_harmonic_balance_spec` copies this config into
-    /// `AnalysisSpec::HarmonicBalance`, `runner::spec::periodic` copies that
-    /// into `svc_runner::HbRunConfig`, and `build_core_hb_config` copies that
-    /// into `rspice_core::analysis::HbConfig`. Writing those values here as
-    /// well would put two authorities in the same deck, and — because one
-    /// executable netlist carries every task's directive — a second HB instance
-    /// would silently overwrite the first.
+    /// Emit a self-contained RSpice HB card. Named controls belong to this
+    /// card, so distinct HB instances do not overwrite each other's options.
     pub fn to_spice(&self) -> String {
         let mut cmd = String::from(".hb");
         for frequency in std::iter::once(self.fundamental_freq)
             .chain(self.additional_tones.iter().map(|tone| tone.frequency))
         {
-            cmd.push(' ');
-            cmd.push_str(&format_freq(frequency));
+            cmd.push_str(&format!(" {frequency}"));
+        }
+        let harmonics = std::iter::once(self.num_harmonics)
+            .chain(self.additional_tones.iter().map(|tone| tone.harmonics))
+            .map(|count| count.to_string()).collect::<Vec<_>>().join(",");
+        cmd.push_str(&format!(" HARMS={harmonics}"));
+        for (index, source) in std::iter::once(self.fundamental_source.as_deref())
+            .chain(self.additional_tones.iter().map(|tone| tone.source.as_deref())).enumerate()
+        {
+            if let Some(source) = source {
+                cmd.push_str(&format!(" SOURCE{}={}", index + 1, source.trim()));
+            }
+        }
+        cmd.push_str(&format!(
+            " OVERSAMPLE={} MAXMIXING={} RELTOL={} ABSTOL={} MAXITER={} DAMPING={} MINDAMPING={} SOLVER={} GMRESRESTART={} SOURCESTEPPING={} EXACTJACOBIAN={} VERBOSE={}",
+            self.oversample, self.max_mixing_order, self.reltol, self.abstol, self.maxiter,
+            self.damping, self.min_damping,
+            if self.solver == HbSolverType::Krylov { "KRYLOV" } else { "AUTO" },
+            self.gmres_restart, self.source_stepping, self.use_exact_jacobian, self.verbose,
+        ));
+        if let Some(points) = self.collocation_points {
+            cmd.push_str(&format!(" POINTS={points}"));
         }
         cmd
     }
 
     /// Validate configuration
     pub fn validate(&self) -> Result<(), String> {
-        if self.fundamental_freq <= 0.0 {
+        if !self.fundamental_freq.is_finite() || self.fundamental_freq <= 0.0 {
             return Err("Fundamental frequency must be positive".to_string());
         }
 
@@ -186,14 +188,20 @@ impl HbConfig {
             return Err("Fundamental tone source cannot be empty".to_string());
         }
 
-        if self.oversample == 0 {
-            return Err("Oversample factor must be at least 1".to_string());
+        if self.oversample < 2 {
+            return Err("Oversample factor must be at least 2".to_string());
         }
 
-        if self.reltol <= 0.0 || self.reltol >= 1.0 {
+        if !self.reltol.is_finite() || self.reltol <= 0.0 || self.reltol >= 1.0 {
             return Err("Relative tolerance must be between 0 and 1".to_string());
         }
 
+        if !self.abstol.is_finite() || self.abstol <= 0.0 {
+            return Err("Absolute tolerance must be finite and positive".into());
+        }
+        if self.max_mixing_order == 0 || !(1..=64).contains(&self.gmres_restart) {
+            return Err("Mixing order must be positive and GMRES restart must be between 1 and 64".into());
+        }
         if self.maxiter == 0 {
             return Err("Maximum iterations must be at least 1".to_string());
         }
@@ -207,7 +215,7 @@ impl HbConfig {
             return Err("Damping factor must be between 0.1 and 1".to_string());
         }
 
-        if self.min_damping <= 0.0 || self.min_damping > self.damping {
+        if !self.min_damping.is_finite() || self.min_damping <= 0.0 || self.min_damping > self.damping {
             return Err(format!(
                 "Damping floor must be greater than 0 and no greater than the damping factor ({})",
                 self.damping
@@ -223,7 +231,7 @@ impl HbConfig {
 
         // Validate additional tones
         for (i, tone) in self.additional_tones.iter().enumerate() {
-            if tone.frequency <= 0.0 {
+            if !tone.frequency.is_finite() || tone.frequency <= 0.0 {
                 return Err(format!("Tone {} frequency must be positive", i + 2));
             }
             if tone.harmonics == 0 {
@@ -274,7 +282,7 @@ mod tests {
     #[test]
     fn the_default_directive_parses_to_its_own_fundamental() {
         let config = HbConfig::default();
-        assert_eq!(config.to_spice(), ".hb 1G");
+        assert!(config.to_spice().starts_with(".hb 1000000000 HARMS=9 "));
         assert_eq!(parsed_frequencies(&config), vec![config.fundamental_freq]);
     }
 
@@ -292,43 +300,51 @@ mod tests {
             ..HbConfig::default()
         };
 
-        assert_eq!(config.to_spice(), ".hb 2G 1.5Meg 900");
+        assert!(config.to_spice().starts_with(".hb 2000000000 1500000 900 HARMS=9,3,2 "));
         assert_eq!(parsed_frequencies(&config), vec![2.0e9, 1.5e6, 900.0]);
     }
 
     #[test]
-    fn solver_settings_stay_off_the_directive_and_travel_typed() {
-        // Harmonic counts, oversampling, tolerances and the solver choice reach
-        // the engine through `AnalysisSpec::HarmonicBalance` ->
-        // `svc_runner::HbRunConfig` -> `build_core_hb_config`. Restating them
-        // on the card would make the deck a second authority, and the parser
-        // would refuse the card outright.
+    fn authored_solver_settings_survive_the_executable_card() {
         let config = HbConfig {
+            fundamental_freq: 1234567.890123,
+            fundamental_source: Some("V1".into()),
             num_harmonics: 15,
             oversample: 8,
+            max_mixing_order: 7,
             reltol: 1.0e-9,
+            abstol: 2.0e-14,
             maxiter: 250,
+            damping: 0.5,
+            min_damping: 0.02,
+            collocation_points: Some(129),
             solver: HbSolverType::Krylov,
             gmres_restart: 64,
             source_stepping: true,
+            use_exact_jacobian: false,
+            verbose: true,
             ..HbConfig::default()
         };
-
-        let directive = config.to_spice();
-        for key in [
-            "harmonics",
-            "oversample",
-            "reltol",
-            "maxiter",
-            "solver",
-            "gmres_restart",
-            "sourcestepping",
-        ] {
-            assert!(
-                !directive.contains(key),
-                "the .HB card must not state {key}: {directive}"
-            );
-        }
-        parse_through_the_deck(&config);
+        let netlist = parse_through_the_deck(&config);
+        let rspice_core::netlist::AnalysisCommand::Hb(card) = &netlist.analyses[0] else {
+            panic!("expected HB card");
+        };
+        assert_eq!(card.sources, vec![Some("V1".to_owned())]);
+        let restored = rspice_core::analysis::HbConfig::from_hb_card(card, &netlist.options).unwrap();
+        assert_eq!(restored.fundamental_freq, config.fundamental_freq);
+        assert_eq!(restored.num_harmonics, 15);
+        assert_eq!(restored.oversample_factor, 8);
+        assert_eq!(restored.max_mixing_order, 7);
+        assert_eq!(restored.tolerance, config.reltol);
+        assert_eq!(restored.abstol, config.abstol);
+        assert_eq!(restored.max_iterations, 250);
+        assert_eq!(restored.damping, 0.5);
+        assert_eq!(restored.min_damping, 0.02);
+        assert_eq!(restored.collocation_points, Some(129));
+        assert!(restored.use_krylov);
+        assert_eq!(restored.gmres_restart, 64);
+        assert!(restored.source_stepping);
+        assert!(!restored.use_exact_jacobian);
+        assert!(restored.verbose);
     }
 }

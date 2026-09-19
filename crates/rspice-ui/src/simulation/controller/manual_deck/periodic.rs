@@ -1031,22 +1031,15 @@ fn periodic_source_selector(card: &ParsedCard, directive: &str) -> Result<Carrie
 fn harmonic_balance_carrier(netlist: &Netlist) -> Option<PeriodicCarrier> {
     use rspice_core::netlist::AnalysisCommand;
 
-    let frequencies = netlist.analyses.iter().find_map(|command| match command {
-        AnalysisCommand::Hb { frequencies } => Some(frequencies),
+    let card = netlist.analyses.iter().find_map(|command| match command {
+        AnalysisCommand::Hb(card) => Some(card),
         _ => None,
     })?;
-    let fundamental = frequencies.first().copied()?;
-    let defaults = rspice_core::analysis::HbConfig::new(fundamental);
-    let num_harmonics = netlist
-        .options
-        .hb_num_frequencies
-        .first()
-        .copied()
-        .unwrap_or(defaults.num_harmonics);
+    let config = rspice_core::analysis::HbConfig::from_hb_card(card, &netlist.options).ok()?;
     Some(PeriodicCarrier {
-        fundamental_freq: fundamental,
-        num_harmonics,
-        tolerance: defaults.tolerance,
+        fundamental_freq: config.fundamental_freq,
+        num_harmonics: config.num_harmonics,
+        tolerance: config.tolerance,
         // A harmonic-balance orbit's period is the authored tone, never a
         // solver unknown.
         autonomous: false,
