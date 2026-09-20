@@ -50,7 +50,9 @@ pub use noise_figure::{
 pub use pac::PacAnalysisResult;
 pub use pnoise::{PeriodicNoiseRequest, PeriodicNoiseSidebands, PnoiseAnalysisResult};
 pub use psp::{PreparedPsp, PspAnalysisResult, PspNoiseCorrelation};
-pub use quasi_periodic::{QpssConfig, QpssInitialState, QpssOperatingPoint, QpssSourceTone};
+pub use quasi_periodic::{
+    QpssConfig, QpssInitialState, QpssOperatingPoint, QpssOperatingPointMetadata, QpssSourceTone,
+};
 pub use state::{HbEnvelopeContinuationState, HbEnvelopeStateGuarantee};
 
 const HB_OPERATING_POINT_IDENTITY_VERSION: u32 = 41;

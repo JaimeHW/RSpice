@@ -9,7 +9,7 @@ use crate::analysis::quasi_periodic::{
     QuasiPeriodicError, QuasiPeriodicGrid, QuasiPeriodicGridConfig, QuasiPeriodicSolution,
     QuasiPeriodicSolveConfig,
 };
-pub use state::QpssOperatingPoint;
+pub use state::{QpssOperatingPoint, QpssOperatingPointMetadata};
 use std::sync::Arc;
 
 /// Explicit assignment of an AC-only source to an independent tone. A

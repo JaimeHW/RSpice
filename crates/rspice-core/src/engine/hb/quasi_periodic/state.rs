@@ -49,6 +49,48 @@ pub struct QpssOperatingPoint {
     retained_identity: String,
 }
 
+/// Opaque scalar metadata for a QPSS point whose spectral rows travel in
+/// separate numeric buffers. Rejoining always validates the complete payload.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct QpssOperatingPointMetadata {
+    version: u32,
+    producer: Producer,
+    config: QpssConfig,
+    node_names: Vec<String>,
+    branch_names: Vec<String>,
+    iterations: usize,
+    normalized_residual: Value,
+    retained_identity: String,
+}
+
+impl QpssOperatingPointMetadata {
+    /// Bound a transport's declared row layout before it copies any referenced
+    /// numeric buffer. Rejoining the rows still checks their complete identity.
+    pub fn validate_transfer_layout_with_abort(
+        &self,
+        row_lengths: &[usize],
+        limits: &crate::ResourceLimits,
+        abort: &dyn AbortSignal,
+    ) -> Result<(), SimulationError> {
+        check_abort(abort)?;
+        self.config.solver.validate().map_err(numerical_error)?;
+        let grid = QuasiPeriodicGrid::new_with_abort(self.config.grid.clone(), limits, abort)
+            .map_err(numerical_error)?;
+        crate::analysis::quasi_periodic::solve::check_workload(row_lengths.len(), &grid, limits)
+            .map_err(numerical_error)?;
+        if self.node_names.is_empty()
+            || self.node_names.len().checked_add(self.branch_names.len()) != Some(row_lengths.len())
+            || row_lengths.iter().any(|length| *length != grid.len())
+        {
+            return Err(invalid(
+                "retained transfer layout differs from its MNA tone lattice",
+            ));
+        }
+        Ok(())
+    }
+}
+
 impl QpssOperatingPoint {
     pub fn config(&self) -> &QpssConfig {
         &self.config
@@ -72,6 +114,67 @@ impl QpssOperatingPoint {
     }
     pub fn retained_identity(&self) -> &str {
         &self.retained_identity
+    }
+
+    /// Check a saved or transported numerical payload without asserting that
+    /// it belongs to a particular circuit. Dependent analyses must additionally
+    /// call the engine validator against the current resolved deck.
+    pub fn validate_retained_payload_with_abort(
+        &self,
+        limits: &crate::ResourceLimits,
+        abort: &dyn AbortSignal,
+    ) -> Result<Arc<QuasiPeriodicGrid>, SimulationError> {
+        check_abort(abort)?;
+        self.config.solver.validate().map_err(numerical_error)?;
+        let grid = Arc::new(
+            QuasiPeriodicGrid::new_with_abort(self.config.grid.clone(), limits, abort)
+                .map_err(numerical_error)?,
+        );
+        crate::analysis::quasi_periodic::solve::check_workload(self.spectra.len(), &grid, limits)
+            .map_err(numerical_error)?;
+        if !is_canonical_blake3_identity(&self.producer.semantic_netlist)
+            || !is_canonical_blake3_identity(&self.producer.resolved_simulation)
+            || !is_canonical_blake3_identity(&self.producer.analysis)
+        {
+            return Err(invalid("retained state has invalid producer identities"));
+        }
+        self.validate_payload(&grid, abort)?;
+        Ok(grid)
+    }
+
+    pub fn into_transfer_parts(self) -> (QpssOperatingPointMetadata, Vec<Vec<Complex64>>) {
+        let metadata = QpssOperatingPointMetadata {
+            version: self.version,
+            producer: self.producer,
+            config: self.config,
+            node_names: self.node_names,
+            branch_names: self.branch_names,
+            iterations: self.iterations,
+            normalized_residual: self.normalized_residual,
+            retained_identity: self.retained_identity,
+        };
+        (metadata, self.spectra)
+    }
+
+    pub fn from_transfer_parts_with_abort(
+        metadata: QpssOperatingPointMetadata,
+        spectra: Vec<Vec<Complex64>>,
+        limits: &crate::ResourceLimits,
+        abort: &dyn AbortSignal,
+    ) -> Result<Self, SimulationError> {
+        let point = Self {
+            version: metadata.version,
+            producer: metadata.producer,
+            config: metadata.config,
+            node_names: metadata.node_names,
+            branch_names: metadata.branch_names,
+            spectra,
+            iterations: metadata.iterations,
+            normalized_residual: metadata.normalized_residual,
+            retained_identity: metadata.retained_identity,
+        };
+        point.validate_retained_payload_with_abort(limits, abort)?;
+        Ok(point)
     }
 
     pub(super) fn bind(
@@ -195,21 +298,8 @@ impl Engine {
     ) -> Result<Arc<QuasiPeriodicGrid>, SimulationError> {
         check_abort(abort)?;
         let engine = self.resolved_for_netlist(netlist);
-        point.config.solver.validate().map_err(numerical_error)?;
-        let grid = Arc::new(
-            QuasiPeriodicGrid::new_with_abort(
-                point.config.grid.clone(),
-                &engine.config.resource_limits,
-                abort,
-            )
-            .map_err(numerical_error)?,
-        );
-        crate::analysis::quasi_periodic::solve::check_workload(
-            point.spectra.len(),
-            &grid,
-            &engine.config.resource_limits,
-        )
-        .map_err(numerical_error)?;
+        let grid =
+            point.validate_retained_payload_with_abort(&engine.config.resource_limits, abort)?;
         engine.ensure_matrix_unknowns(point.spectra.len().saturating_mul(grid.len()))?;
         engine.ensure_result_values(
             point
@@ -218,7 +308,6 @@ impl Engine {
                 .saturating_mul(grid.len())
                 .saturating_mul(2),
         )?;
-        point.validate_payload(&grid, abort)?;
         if point.producer != Producer::capture(netlist, &engine.config, &point.config)? {
             return Err(invalid(
                 "retained state belongs to different source, model, simulation or analysis settings",
