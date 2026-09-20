@@ -9,7 +9,9 @@ pub use objective::validate_optimization_expression;
 
 use super::error::{ServiceRunError, ServiceRunResult, ensure_not_aborted, poll_periodically};
 use super::{build_engine_config, is_ground_like, parse_runner_netlist_with_abort};
-use crate::simulation::optimizer::{DesignVar, OptimizerAlgo, OptimizerConfig, OptimizerEngine};
+use crate::simulation::optimizer::{
+    DesignVar, OptimizationScore, OptimizerAlgo, OptimizerConfig, OptimizerEngine,
+};
 use rspice_core::Value;
 use rspice_core::abort_signal::AbortSignal;
 use rspice_core::engine::Engine;
@@ -277,6 +279,7 @@ impl OptimizationRunConfig {
 pub(crate) struct OptimizationEvaluation {
     pub cost: Value,
     pub objectives: Vec<crate::simulation::optimizer::OptimizationObjectiveObservation>,
+    pub constraints: Vec<crate::simulation::optimizer::OptimizationConstraintObservation>,
 }
 
 /// Optimization output data.
@@ -284,6 +287,7 @@ pub(crate) struct OptimizationEvaluation {
 pub struct OptimizationData {
     /// Values and weighted contributions at the exact best candidate.
     pub best_objectives: Vec<crate::simulation::optimizer::OptimizationObjectiveObservation>,
+    pub best_constraints: Vec<crate::simulation::optimizer::OptimizationConstraintObservation>,
     /// Iteration axis points.
     pub iterations: Vec<Value>,
     /// Cost history.
@@ -400,6 +404,7 @@ where
                 .map(|cost| OptimizationEvaluation {
                     cost,
                     objectives: Vec::new(),
+                    constraints: Vec::new(),
                 })
         },
     )
@@ -486,13 +491,14 @@ where
     let mut costs = Vec::with_capacity(config.max_iterations + 1);
 
     let evaluated_objectives = RefCell::new(Vec::new());
+    let evaluated_constraints = RefCell::new(Vec::new());
     let eval_error: RefCell<Option<ServiceRunError>> = RefCell::new(None);
     let abort_seen = Cell::new(false);
     let fatal_error_seen = Cell::new(false);
     let mut evaluations = 0usize;
-    let mut cost_fn = |vars: &HashMap<String, Value>| -> Value {
+    let mut cost_fn = |vars: &HashMap<String, Value>| -> OptimizationScore {
         if abort_seen.get() || fatal_error_seen.get() {
-            return Value::INFINITY;
+            return Value::INFINITY.into();
         }
         let evaluation = if evaluations >= limits.max_batch_runs {
             Err(ServiceRunError::resource_limit(
@@ -504,8 +510,17 @@ where
             evaluations += 1;
             evaluate(&physical_vars(vars)).and_then(|evaluation| {
                 if evaluation.cost.is_finite() {
+                    let violation =
+                        crate::simulation::optimizer::validate_optimization_constraints(
+                            &evaluation.constraints,
+                        )
+                        .map_err(ServiceRunError::Failure)?;
                     *evaluated_objectives.borrow_mut() = evaluation.objectives;
-                    Ok(evaluation.cost)
+                    *evaluated_constraints.borrow_mut() = evaluation.constraints;
+                    Ok(OptimizationScore {
+                        cost: evaluation.cost,
+                        violation,
+                    })
                 } else {
                     Err(ServiceRunError::Failure(
                         "Optimization cost must be finite".into(),
@@ -517,12 +532,12 @@ where
             Ok(cost) => cost,
             Err(ServiceRunError::Aborted) => {
                 abort_seen.set(true);
-                Value::INFINITY
+                Value::INFINITY.into()
             }
             Err(error @ ServiceRunError::ResourceLimit(_)) => {
                 fatal_error_seen.set(true);
                 *eval_error.borrow_mut() = Some(error);
-                Value::INFINITY
+                Value::INFINITY.into()
             }
             Err(error @ ServiceRunError::Failure(_)) => {
                 if eval_error.borrow().is_none() {
@@ -530,7 +545,7 @@ where
                 }
                 // A failed circuit or expression must never outrank a valid
                 // finite objective, regardless of that objective's scale.
-                Value::INFINITY
+                Value::INFINITY.into()
             }
         }
     };
@@ -539,7 +554,7 @@ where
     let initial_cost = cost_fn(&initial_vars);
     propagate_optimization_fatal_error(&fatal_error_seen, &eval_error)?;
     ensure_optimization_not_aborted(abort, &abort_seen)?;
-    if !initial_cost.is_finite() {
+    if !initial_cost.is_valid() {
         return Err(eval_error.borrow_mut().take().unwrap_or_else(|| {
             ServiceRunError::Failure(
                 "Optimization requires a finite objective cost at the initial design".into(),
@@ -547,12 +562,13 @@ where
         }));
     }
     let mut best_objectives = evaluated_objectives.take();
-    let mut best_observed_cost = initial_cost;
+    let mut best_constraints = evaluated_constraints.take();
+    let mut best_observed_score = initial_cost;
     optimizer.observe_candidate(&initial_vars, initial_cost);
     record_optimization_state(
         0.0,
         &physical_vars(&initial_vars),
-        initial_cost,
+        initial_cost.cost,
         &mut iterations,
         &mut costs,
         &mut variable_traces,
@@ -560,7 +576,7 @@ where
     )?;
 
     while optimizer.current_iteration() < config.max_iterations
-        && !optimizer.is_converged(target_cost)
+        && !optimizer.search_finished(target_cost)
     {
         ensure_optimization_not_aborted(abort, &abort_seen)?;
         optimizer.step(&mut cost_fn);
@@ -572,15 +588,16 @@ where
         ensure_optimization_not_aborted(abort, &abort_seen)?;
         // The last evaluation is this accepted iterate, not a gradient probe
         // or rejected line-search point. Retain components with the same
-        // strict best-cost comparison as OptimizerEngine::observe_candidate.
-        if cost < best_observed_cost {
-            best_observed_cost = cost;
+        // feasibility-first comparison as OptimizerEngine::observe_candidate.
+        if cost.better_than(best_observed_score) {
+            best_observed_score = cost;
             best_objectives = evaluated_objectives.take();
+            best_constraints = evaluated_constraints.take();
         }
         record_optimization_state(
             optimizer.current_iteration() as Value,
             &physical_vars(&vars),
-            cost,
+            cost.cost,
             &mut iterations,
             &mut costs,
             &mut variable_traces,
@@ -592,6 +609,7 @@ where
     let (best_vars, best_cost) = optimizer.best_result();
     Ok(OptimizationData {
         best_objectives,
+        best_constraints,
         iterations,
         costs,
         variable_traces,
@@ -655,7 +673,7 @@ fn record_optimization_state(
     ensure_not_aborted(abort)
 }
 
-fn objective_to_cost(
+pub(crate) fn objective_to_cost(
     objective: Value,
     goal: OptimizationGoalMode,
     target: Option<Value>,

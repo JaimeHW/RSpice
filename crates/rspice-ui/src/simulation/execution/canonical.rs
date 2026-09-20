@@ -888,6 +888,17 @@ fn encode_spec_options(writer: &mut CanonicalWriter, options: &SpecExecutionOpti
             writer.string(measurement);
         }
         writer.usize(base.histogram_bins);
+        if !base.constraints.is_empty() {
+            writer.domain("optimization-constraints/v1");
+            writer.sequence(base.constraints.len());
+            for term in &base.constraints {
+                writer.string(&term.measurement);
+                writer.option(term.lower.as_ref(), |writer, value| writer.f64(*value));
+                writer.option(term.upper.as_ref(), |writer, value| writer.f64(*value));
+                writer.f64(term.tolerance);
+                writer.f64(term.scale);
+            }
+        }
         if !base.objective_terms.is_empty() {
             writer.domain("weighted-optimization-objectives/v1");
             writer.sequence(base.objective_terms.len());

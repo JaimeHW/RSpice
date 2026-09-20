@@ -112,6 +112,7 @@ pub(super) fn optimization_analysis() -> AnalysisResult {
     AnalysisResult::new(1, AnalysisType::Optimization, "Optimization")
         .with_family_metadata(AnalysisResultFamilyMetadata::Optimization {
             best_objectives: Vec::new(),
+            best_constraints: Vec::new(),
             iterations: vec![0.0, 1.0],
             best_cost: 0.25,
             best_variables: [("w".to_owned(), 1.5e-6)].into_iter().collect(),

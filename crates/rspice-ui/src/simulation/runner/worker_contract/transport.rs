@@ -1308,6 +1308,8 @@ pub(crate) enum WorkerSimulationResultTransport {
         best_variables: HashMap<String, f64>,
         #[serde(default)]
         best_objectives: Vec<crate::simulation::optimizer::OptimizationObjectiveObservation>,
+        #[serde(default)]
+        best_constraints: Vec<crate::simulation::optimizer::OptimizationConstraintObservation>,
         converged: bool,
     },
     Soa {

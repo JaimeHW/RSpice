@@ -321,6 +321,7 @@ fn run_optimization(
         best_cost: data.best_cost,
         best_variables: data.best_variables,
         best_objectives: data.best_objectives,
+        best_constraints: data.best_constraints,
         converged: data.converged,
     })
 }

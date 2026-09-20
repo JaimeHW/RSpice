@@ -86,6 +86,8 @@ pub enum AnalysisResultFamilyMetadata {
         best_variables: BTreeMap<String, f64>,
         #[serde(default)]
         best_objectives: Vec<crate::simulation::optimizer::OptimizationObjectiveObservation>,
+        #[serde(default)]
+        best_constraints: Vec<crate::simulation::optimizer::OptimizationConstraintObservation>,
         converged: bool,
     },
     Soa {
@@ -283,11 +285,16 @@ impl AnalysisResultFamilyMetadata {
                 best_cost,
                 best_variables,
                 best_objectives,
-                ..
+                best_constraints,
+                converged,
             } => {
                 crate::simulation::optimizer::validate_optimization_objectives(
                     best_objectives,
                     *best_cost,
+                )?;
+                crate::simulation::optimizer::validate_optimization_constraint_result(
+                    best_constraints,
+                    *converged,
                 )?;
                 require_finite_values(iterations, "optimization iterations")?;
                 if !best_cost.is_finite() {

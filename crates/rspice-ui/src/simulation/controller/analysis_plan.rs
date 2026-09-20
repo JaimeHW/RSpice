@@ -459,13 +459,14 @@ impl SimulationController {
         draft: &crate::simulation::plan::AnalysisDraft,
     ) -> Result<Option<crate::simulation::runner::study::StudyRunConfig>, String> {
         use crate::simulation::plan::AnalysisDraft;
-        let (id, measurements, histogram_bins, objective_terms) = match draft {
+        let (id, measurements, histogram_bins, objective_terms, constraints) = match draft {
             AnalysisDraft::MonteCarlo(draft) if draft.base_analysis.is_some() => {
                 let config = draft.to_config()?;
                 (
                     config.base_analysis.unwrap(),
                     config.measurements,
                     config.histogram_bins,
+                    Vec::new(),
                     Vec::new(),
                 )
             }
@@ -476,6 +477,7 @@ impl SimulationController {
                     config.measurement_names(),
                     20,
                     config.objective_terms,
+                    config.constraints,
                 )
             }
             _ => return Ok(None),
@@ -511,6 +513,7 @@ impl SimulationController {
             measurements,
             histogram_bins,
             objective_terms,
+            constraints,
         }))
     }
 
@@ -713,7 +716,8 @@ mod tests {
         };
         assert_eq!(config.stop_freq, 1000.0);
         assert!(base.numeric_options.to_ascii_uppercase().contains("RELTOL"));
-        for change in 0..5 {
+        assert_eq!(base.constraints[0].upper, Some(3.0));
+        for change in 0..10 {
             let mut queued = task.queued_analysis().clone();
             let base = queued.spec_options.study_base.as_mut().unwrap();
             match change {
@@ -769,6 +773,13 @@ mod tests {
             base_analysis: Some(ac),
             objective_measurement: "gain".into(),
             objective_terms: objectives.clone(),
+            constraints: vec![crate::simulation::optimizer::OptimizationConstraint {
+                measurement: "gain".into(),
+                lower: Some(1.0),
+                upper: Some(3.0),
+                tolerance: 0.01,
+                scale: 2.0,
+            }],
             ..Default::default()
         });
         // Inactive expression buffers survive switching back without blocking a measured objective.
@@ -790,6 +801,7 @@ mod tests {
             assert_eq!(config.objective_measurement, "gain");
             assert_eq!(setup.objective_expression, "unfinished{");
             assert_eq!(config.objective_terms, objectives);
+            assert_eq!(config.constraints[0].upper, Some(3.0));
             assert_eq!(setup.target_value, "inactive unfinished");
             assert!(config.to_spice().contains("weighted_objectives="));
         }
@@ -801,6 +813,7 @@ mod tests {
             };
             setup.objective_measurement = "changed".into();
             setup.objective_terms[0].weight = "9".into();
+            setup.constraints[0].upper = "99".into();
         })
         .unwrap();
         let sealed = state
@@ -820,7 +833,8 @@ mod tests {
         assert_eq!(base.instance_id, ac);
         assert_eq!(base.measurements, ["gain"]);
         assert_eq!(base.objective_terms, objectives);
-        for change in 0..5 {
+        assert_eq!(base.constraints[0].upper, Some(3.0));
+        for change in 0..10 {
             let mut queued = task.queued_analysis().clone();
             let term = &mut queued
                 .spec_options
@@ -833,7 +847,7 @@ mod tests {
                 1 => term.scale = 2.0,
                 2 => term.target = Some(7.0),
                 3 => term.goal = OptimizationObjectiveGoal::Maximize,
-                _ => {
+                4 => {
                     let AnalysisSpec::Optimization { search, .. } = &mut queued.spec else {
                         unreachable!()
                     };
@@ -841,6 +855,17 @@ mod tests {
                         "RLOAD".into(),
                         crate::simulation::optimizer::OptimizationVariableDomain::Logarithmic,
                     );
+                }
+                _ => {
+                    let constraint =
+                        &mut queued.spec_options.study_base.as_mut().unwrap().constraints[0];
+                    match change {
+                        5 => constraint.measurement = "other".into(),
+                        6 => constraint.lower = None,
+                        7 => constraint.upper = Some(4.0),
+                        8 => constraint.tolerance = 0.02,
+                        _ => constraint.scale = 3.0,
+                    }
                 }
             }
             let changed = PreparedTask::new(opt, task.source_revision(), vec![], "OPT", queued);

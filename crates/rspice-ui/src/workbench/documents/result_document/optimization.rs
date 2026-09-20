@@ -28,6 +28,7 @@ struct OptimizationView<'a> {
     variables: Vec<(&'a str, &'a WaveformData)>,
     best_cost: f64,
     best_objectives: &'a [crate::simulation::optimizer::OptimizationObjectiveObservation],
+    best_constraints: &'a [crate::simulation::optimizer::OptimizationConstraintObservation],
     best_index: usize,
     converged: bool,
 }
@@ -100,6 +101,7 @@ fn view_from<'a>(
         iterations,
         best_cost,
         best_objectives,
+        best_constraints,
         converged,
         ..
     } = analysis.family_metadata.as_ref()?
@@ -127,6 +129,7 @@ fn view_from<'a>(
         variables,
         best_cost: *best_cost,
         best_objectives,
+        best_constraints,
         best_index: located.best_index,
         converged: *converged,
     })
@@ -229,6 +232,29 @@ pub(crate) fn export_csv(analysis: &AnalysisResult) -> Option<super::ResultSheet
     contents.push_str(&format!("converged,{}\n", view.converged));
     contents.push_str(&format!("best_cost,{:.17e}\n", view.best_cost));
     contents.push_str(&format!("best_index,{}\n", view.best_index));
+    if !view.best_constraints.is_empty() {
+        contents.push_str(&format!(
+            "feasible,{}\n",
+            view.best_constraints.iter().all(|row| row.violation == 0.0)
+        ));
+        contents.push_str("\nconstraint,measurement,lower,upper,tolerance,scale,value,normalized_violation,satisfied\n");
+        for (index, observation) in view.best_constraints.iter().enumerate() {
+            let term = &observation.constraint;
+            contents.push_str(&format!(
+                "{},{},{},{},{:.17e},{:.17e},{:.17e},{:.17e},{}\n",
+                index + 1,
+                super::csv_field(&term.measurement),
+                term.lower.map(|v| format!("{v:.17e}")).unwrap_or_default(),
+                term.upper.map(|v| format!("{v:.17e}")).unwrap_or_default(),
+                term.tolerance,
+                term.scale,
+                observation.value,
+                observation.violation,
+                observation.violation == 0.0
+            ));
+        }
+        contents.push_str("\nfield,value\n");
+    }
     if !view.best_objectives.is_empty() {
         contents
             .push_str("\nobjective,measurement,goal,target,scale,weight,value,cost_contribution\n");
@@ -368,6 +394,30 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             .map(|(name, value)| (name.as_str(), value.clone(), false))
             .collect::<Vec<_>>();
         stat_table(ui, &rows);
+    }
+    if !view.best_constraints.is_empty() {
+        section_header(
+            ui,
+            if view.best_constraints.iter().all(|row| row.violation == 0.0) {
+                "Best candidate satisfies all constraints"
+            } else {
+                "Best candidate is infeasible"
+            },
+            None,
+        );
+        let rows = view.best_constraints.iter().enumerate().map(|(index, observation)| {
+            let term = &observation.constraint;
+            (format!("{}. {}", index + 1, term.measurement), format!("value {:.9e}; limits {} to {}; tolerance {:.6e}; scale {:.6e}; violation {:.9e}", observation.value,
+                term.lower.map(|v| format!("{v:.9e}")).unwrap_or_else(|| "unbounded".into()),
+                term.upper.map(|v| format!("{v:.9e}")).unwrap_or_else(|| "unbounded".into()), term.tolerance, term.scale, observation.violation))
+        }).collect::<Vec<_>>();
+        stat_table(
+            ui,
+            &rows
+                .iter()
+                .map(|(name, value)| (name.as_str(), value.clone(), false))
+                .collect::<Vec<_>>(),
+        );
     }
     let auto_x0 = view.iterations[0];
     let auto_x1 = *view.iterations.last().unwrap_or(&auto_x0);
@@ -618,6 +668,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         best_cost,
         best_variables,
         best_objectives: _,
+        best_constraints: _,
         converged,
     }) = analysis.family_metadata.as_ref()
     else {
@@ -781,6 +832,7 @@ mod tests {
         let analysis = AnalysisResult::new(1, AnalysisType::Optimization, "OPT")
             .with_family_metadata(AnalysisResultFamilyMetadata::Optimization {
                 best_objectives: Vec::new(),
+                best_constraints: Vec::new(),
                 iterations: axis.clone(),
                 best_cost,
                 best_variables: BTreeMap::from([("GAIN".to_owned(), best_gain)]),
@@ -943,6 +995,57 @@ mod tests {
             unreachable!()
         };
         best_objectives[0].value = 3.0;
+        assert!(export_csv(analysis).is_none());
+    }
+    #[test]
+    fn constraint_optimization_evidence_persists_exports_and_rejects_false_feasibility() {
+        use crate::simulation::optimizer::{
+            OptimizationConstraint, OptimizationConstraintObservation,
+        };
+        let mut state = optimization_state(4);
+        let analysis = &mut state.simulation.runs[0].analyses[0];
+        let AnalysisResultFamilyMetadata::Optimization {
+            best_constraints,
+            converged,
+            ..
+        } = analysis.family_metadata.as_mut().unwrap()
+        else {
+            unreachable!()
+        };
+        *converged = false;
+        best_constraints.push(OptimizationConstraintObservation {
+            constraint: OptimizationConstraint {
+                measurement: "limit".into(),
+                lower: Some(2.0),
+                upper: None,
+                tolerance: 0.1,
+                scale: 2.0,
+            },
+            value: 1.5,
+            violation: 0.2,
+        });
+        let saved = serde_json::to_string(&analysis.family_metadata).unwrap();
+        analysis.family_metadata = serde_json::from_str(&saved).unwrap();
+        let csv = export_csv(analysis).unwrap().contents;
+        assert!(csv.contains("feasible,false"));
+        assert!(csv.contains("constraint,measurement,lower,upper,tolerance,scale,value,normalized_violation,satisfied"));
+        let AnalysisResultFamilyMetadata::Optimization { converged, .. } =
+            analysis.family_metadata.as_mut().unwrap()
+        else {
+            unreachable!()
+        };
+        *converged = true;
+        assert!(export_csv(analysis).is_none());
+        let AnalysisResultFamilyMetadata::Optimization {
+            best_constraints,
+            converged,
+            ..
+        } = analysis.family_metadata.as_mut().unwrap()
+        else {
+            unreachable!()
+        };
+        *converged = false;
+        best_constraints[0].violation = 0.0;
         assert!(export_csv(analysis).is_none());
     }
 }

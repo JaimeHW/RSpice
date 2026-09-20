@@ -483,6 +483,7 @@ impl SimulationController {
                 best_cost,
                 best_variables,
                 best_objectives: _,
+                best_constraints: _,
                 converged,
             } => {
                 state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(

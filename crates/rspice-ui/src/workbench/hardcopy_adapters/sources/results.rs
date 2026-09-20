@@ -1651,6 +1651,7 @@ pub(super) fn semantic_result_summary(
                 best_cost,
                 best_variables,
                 best_objectives,
+                best_constraints,
                 converged,
                 ..
             }) = &analysis.family_metadata
@@ -1695,6 +1696,13 @@ pub(super) fn semantic_result_summary(
                     format!("Objective {} cost", index + 1),
                     exact_number(observation.contribution),
                 ]);
+            }
+            for (index, observation) in best_constraints.iter().enumerate() {
+                let term = &observation.constraint;
+                rows.push(vec![format!("Constraint {}: {}", index + 1, term.measurement), format!("{}; value {}; lower {}; upper {}; tolerance {}; scale {}; normalized violation {}",
+                    if observation.violation == 0.0 { "satisfied" } else { "violated" }, exact_number(observation.value),
+                    term.lower.map(exact_number).unwrap_or_else(|| "unbounded".into()), term.upper.map(exact_number).unwrap_or_else(|| "unbounded".into()),
+                    exact_number(term.tolerance), exact_number(term.scale), exact_number(observation.violation))]);
             }
             tables.push(SemanticTable {
                 title: "Optimizer outcome and best candidate".to_owned(),

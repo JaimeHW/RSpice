@@ -279,6 +279,7 @@ impl WorkerSimulationResultTransport {
                 best_cost,
                 best_variables,
                 best_objectives,
+                best_constraints,
                 converged,
             } => Self::Optimization {
                 iterations: WorkerF64Series::from_vec(iterations, buffers),
@@ -286,6 +287,7 @@ impl WorkerSimulationResultTransport {
                 best_cost,
                 best_variables,
                 best_objectives,
+                best_constraints,
                 converged,
             },
             WorkerSimulationResult::Soa {
@@ -645,11 +647,16 @@ impl WorkerSimulationResultTransport {
                 best_cost,
                 best_variables,
                 best_objectives,
+                best_constraints,
                 converged,
             } => {
                 crate::simulation::optimizer::validate_optimization_objectives(
                     &best_objectives,
                     best_cost,
+                )?;
+                crate::simulation::optimizer::validate_optimization_constraint_result(
+                    &best_constraints,
+                    converged,
                 )?;
                 Ok(WorkerSimulationResult::Optimization {
                     iterations: iterations.into_vec(buffers)?,
@@ -657,6 +664,7 @@ impl WorkerSimulationResultTransport {
                     best_cost,
                     best_variables,
                     best_objectives,
+                    best_constraints,
                     converged,
                 })
             }

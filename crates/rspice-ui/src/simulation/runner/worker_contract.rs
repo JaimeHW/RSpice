@@ -72,9 +72,9 @@ pub(crate) struct WorkerRequest {
     pub(in crate::simulation) stream_transient_samples: bool,
 }
 
-/// 15: optimization supports logarithmic, grid and discrete variable domains.
+/// 16: configured optimization carries hard measurement constraints.
 #[cfg(any(target_arch = "wasm32", test))]
-pub(crate) const WORKER_REQUEST_TRANSPORT_PROTOCOL: u8 = 15;
+pub(crate) const WORKER_REQUEST_TRANSPORT_PROTOCOL: u8 = 16;
 
 /// Browser-worker request split into compact metadata and transferable
 /// floating-point buffers. The embedded request deliberately carries empty
@@ -954,6 +954,8 @@ pub(crate) enum WorkerSimulationResult {
         best_variables: HashMap<String, f64>,
         #[serde(default)]
         best_objectives: Vec<crate::simulation::optimizer::OptimizationObjectiveObservation>,
+        #[serde(default)]
+        best_constraints: Vec<crate::simulation::optimizer::OptimizationConstraintObservation>,
         converged: bool,
     },
     Soa {
@@ -1614,9 +1616,11 @@ impl WorkerSimulationResult {
                 waveforms,
                 best_variables,
                 best_objectives,
+                best_constraints,
                 ..
             } => sum_payload_bytes([
                 f64_payload_bytes(best_objectives.len().saturating_mul(5)),
+                f64_payload_bytes(best_constraints.len().saturating_mul(6)),
                 f64_payload_bytes(iterations.len()),
                 waveforms_payload_bytes(waveforms),
                 f64_payload_bytes(best_variables.len()),
@@ -1657,7 +1661,8 @@ impl WorkerSimulationResult {
 /// Earlier workers silently omit numerical quality or current observations.
 /// 25: Monte Carlo retains complete parameter-stream trial identities and failed observations.
 /// 26: optimization retains each weighted objective at the best candidate.
-const WORKER_RESPONSE_TRANSPORT_PROTOCOL: u8 = 26;
+/// 27: optimization retains validated hard-constraint evidence and feasibility.
+const WORKER_RESPONSE_TRANSPORT_PROTOCOL: u8 = 27;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct WorkerResponseTransport {
@@ -2022,11 +2027,17 @@ impl TryFrom<SimulationResult> for WorkerSimulationResult {
                 best_cost,
                 best_variables,
                 best_objectives,
+                best_constraints,
                 converged,
             } => {
                 crate::simulation::optimizer::validate_optimization_objectives(
                     &best_objectives,
                     best_cost,
+                )
+                .map_err(SimulationError::InvalidConfig)?;
+                crate::simulation::optimizer::validate_optimization_constraint_result(
+                    &best_constraints,
+                    converged,
                 )
                 .map_err(SimulationError::InvalidConfig)?;
                 Ok(Self::Optimization {
@@ -2035,6 +2046,7 @@ impl TryFrom<SimulationResult> for WorkerSimulationResult {
                     best_cost,
                     best_variables,
                     best_objectives,
+                    best_constraints,
                     converged,
                 })
             }
@@ -2383,6 +2395,7 @@ impl From<WorkerSimulationResult> for SimulationResult {
                 best_cost,
                 best_variables,
                 best_objectives,
+                best_constraints,
                 converged,
             } => Self::Optimization {
                 iterations,
@@ -2390,6 +2403,7 @@ impl From<WorkerSimulationResult> for SimulationResult {
                 best_cost,
                 best_variables,
                 best_objectives,
+                best_constraints,
                 converged,
             },
             WorkerSimulationResult::Soa {

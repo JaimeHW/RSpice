@@ -118,6 +118,8 @@ pub(crate) struct WorkerStudyRunConfig {
     histogram_bins: usize,
     #[serde(default)]
     objective_terms: Vec<crate::simulation::optimizer::OptimizationObjectiveTerm>,
+    #[serde(default)]
+    constraints: Vec<crate::simulation::optimizer::OptimizationConstraint>,
 }
 
 impl From<&crate::simulation::runner::study::StudyRunConfig> for WorkerStudyRunConfig {
@@ -131,6 +133,7 @@ impl From<&crate::simulation::runner::study::StudyRunConfig> for WorkerStudyRunC
             measurements,
             histogram_bins,
             objective_terms,
+            constraints,
         } = value;
         Self {
             instance_id: *instance_id,
@@ -141,6 +144,7 @@ impl From<&crate::simulation::runner::study::StudyRunConfig> for WorkerStudyRunC
             measurements: measurements.clone(),
             histogram_bins: *histogram_bins,
             objective_terms: objective_terms.clone(),
+            constraints: constraints.clone(),
         }
     }
 }
@@ -156,6 +160,7 @@ impl From<WorkerStudyRunConfig> for crate::simulation::runner::study::StudyRunCo
             measurements,
             histogram_bins,
             objective_terms,
+            constraints,
         } = value;
         Self {
             instance_id,
@@ -166,6 +171,7 @@ impl From<WorkerStudyRunConfig> for crate::simulation::runner::study::StudyRunCo
             measurements,
             histogram_bins,
             objective_terms,
+            constraints,
         }
     }
 }

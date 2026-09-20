@@ -301,8 +301,8 @@ pub(super) fn nondefault_op_config() -> crate::simulation::dialog::OpConfig {
 
 #[test]
 fn browser_worker_transfer_protocol_matches_rust_transport() {
-    assert_eq!(WORKER_RESPONSE_TRANSPORT_PROTOCOL, 26);
-    assert_eq!(WORKER_REQUEST_TRANSPORT_PROTOCOL, 15);
+    assert_eq!(WORKER_RESPONSE_TRANSPORT_PROTOCOL, 27);
+    assert_eq!(WORKER_REQUEST_TRANSPORT_PROTOCOL, 16);
     let source = include_str!("../../../../web/simulation-worker.js");
     assert!(source.contains(&format!(
         "const WORKER_PROTOCOL_VERSION = {WORKER_RESPONSE_TRANSPORT_PROTOCOL};"
@@ -2073,6 +2073,7 @@ fn configured_study_worker_transfers_and_authenticates_nested_op_seed() {
     use crate::simulation::runner::study::StudyRunConfig;
     let options = SpecExecutionOptions {
         study_base: Some(StudyRunConfig {
+            constraints: Vec::new(),
             objective_terms: Vec::new(),
             instance_id: crate::product::AnalysisInstanceId::new(),
             source_revision: crate::product::ObjectRevision::INITIAL,
@@ -2127,6 +2128,19 @@ fn weighted_optimization_components_survive_transfer_and_reject_corruption() {
         best_cost: 0.25,
         best_variables: HashMap::from([("X".into(), 2.0)]),
         converged: true,
+        best_constraints: vec![
+            crate::simulation::optimizer::OptimizationConstraintObservation {
+                constraint: crate::simulation::optimizer::OptimizationConstraint {
+                    measurement: "gain".into(),
+                    lower: Some(1.0),
+                    upper: Some(2.0),
+                    tolerance: 0.0,
+                    scale: 1.0,
+                },
+                value: 2.0,
+                violation: 0.0,
+            },
+        ],
         best_objectives: vec![OptimizationObjectiveObservation {
             objective: OptimizationObjectiveTerm {
                 measurement: "gain".into(),
@@ -2152,6 +2166,16 @@ fn weighted_optimization_components_survive_transfer_and_reject_corruption() {
         ..transport
     };
     assert_eq!(transport.clone().into_response().unwrap(), response);
+    let corrupt_constraints = json.replace("\"violation\":0.0", "\"violation\":1.0");
+    assert_ne!(json, corrupt_constraints);
+    assert!(
+        WorkerResponseTransport {
+            response: serde_json::from_str(&corrupt_constraints).unwrap(),
+            ..transport.clone()
+        }
+        .into_response()
+        .is_err()
+    );
     let corrupt = json.replace("\"contribution\":0.25", "\"contribution\":0.5");
     assert_ne!(json, corrupt);
     let transport = WorkerResponseTransport {

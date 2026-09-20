@@ -1790,6 +1790,7 @@ fn encode_family_metadata(
             best_cost,
             best_variables,
             best_objectives,
+            best_constraints,
             converged,
         } => {
             writer.u8(4);
@@ -1801,6 +1802,26 @@ fn encode_family_metadata(
                 writer.f64(*value);
             }
             writer.bool(*converged);
+            if !best_constraints.is_empty() {
+                writer.string("optimization-constraints/v1");
+                writer.sequence(best_constraints.len());
+                for observation in best_constraints {
+                    let term = &observation.constraint;
+                    writer.string(&term.measurement);
+                    writer.bool(term.lower.is_some());
+                    if let Some(value) = term.lower {
+                        writer.f64(value);
+                    }
+                    writer.bool(term.upper.is_some());
+                    if let Some(value) = term.upper {
+                        writer.f64(value);
+                    }
+                    writer.f64(term.tolerance);
+                    writer.f64(term.scale);
+                    writer.f64(observation.value);
+                    writer.f64(observation.violation);
+                }
+            }
             if !best_objectives.is_empty() {
                 writer.string("weighted-optimization-objectives/v1");
                 writer.sequence(best_objectives.len());

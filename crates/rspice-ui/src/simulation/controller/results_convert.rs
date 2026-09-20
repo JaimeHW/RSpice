@@ -905,6 +905,7 @@ impl SimulationController {
                 best_cost,
                 best_variables,
                 best_objectives,
+                best_constraints,
                 converged,
             } => {
                 let retained_iterations = iterations.clone();
@@ -915,6 +916,7 @@ impl SimulationController {
                         best_cost,
                         best_variables: best_variables.into_iter().collect(),
                         best_objectives,
+                        best_constraints,
                         converged,
                     })
             }

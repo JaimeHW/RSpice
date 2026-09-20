@@ -11,10 +11,24 @@ pub(crate) fn run_optimization(
     abort: &dyn AbortSignal,
 ) -> Result<services::OptimizationData, SimulationError> {
     super::super::spec::ensure_not_aborted(abort)?;
-    if base.objective_terms.is_empty() && base.measurements.len() != 1 {
+    if base.objective_terms.is_empty() && base.measurements.is_empty() {
         return Err(SimulationError::InvalidConfig(
-            "Optimization requires exactly one selected objective measurement".into(),
+            "Optimization requires a selected objective measurement".into(),
         ));
+    }
+    for constraint in &base.constraints {
+        constraint
+            .validate()
+            .map_err(SimulationError::InvalidConfig)?;
+        if !base
+            .measurements
+            .iter()
+            .any(|name| name.eq_ignore_ascii_case(&constraint.measurement))
+        {
+            return Err(SimulationError::InvalidConfig(
+                "Constraint is absent from the study measurements".into(),
+            ));
+        }
     }
     for objective in &base.objective_terms {
         objective
@@ -65,7 +79,11 @@ pub(crate) fn run_optimization(
     let analysis = analysis_for_environment(base, environment.as_ref());
     let engine = rspice_core::Engine::default().resolved_for_netlist(&circuit);
     let mut limits = engine.config().resource_limits;
-    let retained_objectives = base.objective_terms.len().saturating_mul(5);
+    let retained_objectives = base
+        .objective_terms
+        .len()
+        .saturating_mul(5)
+        .saturating_add(base.constraints.len().saturating_mul(6));
     if retained_objectives > limits.max_result_values {
         return super::super::spec::run_abort_aware_service(abort, || {
             Err(services::ServiceRunError::resource_limit(
@@ -105,6 +123,27 @@ pub(crate) fn run_optimization(
                         services::ServiceRunError::Aborted
                     }
                 })?;
+        let mut constraints = Vec::with_capacity(base.constraints.len());
+        for constraint in &base.constraints {
+            let value = result
+                .study_measurement(&constraint.measurement)
+                .and_then(|observation| observation.value)
+                .ok_or_else(|| {
+                    services::ServiceRunError::Failure(format!(
+                        "Constraint measurement {:?} is unavailable or failed",
+                        constraint.measurement
+                    ))
+                })?;
+            constraints.push(
+                crate::simulation::optimizer::OptimizationConstraintObservation {
+                    constraint: constraint.clone(),
+                    value,
+                    violation: constraint
+                        .violation(value)
+                        .map_err(services::ServiceRunError::Failure)?,
+                },
+            );
+        }
         if !base.objective_terms.is_empty() {
             let mut total = 0.0;
             let mut observations = Vec::with_capacity(base.objective_terms.len());
@@ -135,42 +174,45 @@ pub(crate) fn run_optimization(
                     "Combined optimization cost is non-finite".into(),
                 ));
             }
-            return Ok((total, observations));
+            return Ok(services::OptimizationEvaluation {
+                cost: total,
+                objectives: observations,
+                constraints,
+            });
         }
-        result
+        let value = result
             .study_measurement(&base.measurements[0])
             .and_then(|observation| observation.value)
-            .map(|value| (value, Vec::new()))
             .ok_or_else(|| {
                 services::ServiceRunError::Failure(format!(
                     "Optimization measurement {:?} is unavailable or failed",
                     base.measurements[0]
                 ))
-            })
-    };
-    let response = if base.objective_terms.is_empty() {
-        services::run_optimization_with_evaluator(config, limits, &signal, |variables| {
-            evaluate(variables).map(|(value, _)| value)
+            })?;
+        let cost = services::optimization_objective_cost(value, config.goal, config.target)?;
+        Ok(services::OptimizationEvaluation {
+            cost,
+            objectives: Vec::new(),
+            constraints,
         })
+    };
+    let target_cost = if base.objective_terms.is_empty() {
+        (config.goal == services::OptimizationGoalMode::Target).then_some(0.0)
     } else {
-        let target_cost = base
-            .objective_terms
+        base.objective_terms
             .iter()
             .all(|term| {
                 term.goal == crate::simulation::optimizer::OptimizationObjectiveGoal::Target
             })
-            .then_some(0.0);
-        services::run_optimization_with_cost_evaluator(
-            config,
-            limits,
-            &signal,
-            target_cost,
-            |variables| {
-                evaluate(variables)
-                    .map(|(cost, objectives)| services::OptimizationEvaluation { cost, objectives })
-            },
-        )
+            .then_some(0.0)
     };
+    let response = services::run_optimization_with_cost_evaluator(
+        config,
+        limits,
+        &signal,
+        target_cost,
+        evaluate,
+    );
     if let Some(error) = fatal.into_inner().unwrap() {
         return Err(error);
     }
@@ -178,6 +220,11 @@ pub(crate) fn run_optimization(
     crate::simulation::optimizer::validate_optimization_objectives(
         &data.best_objectives,
         data.best_cost,
+    )
+    .map_err(SimulationError::InvalidConfig)?;
+    crate::simulation::optimizer::validate_optimization_constraint_result(
+        &data.best_constraints,
+        data.converged,
     )
     .map_err(SimulationError::InvalidConfig)?;
     Ok(data)
@@ -197,6 +244,7 @@ mod tests {
 
     fn base(analysis: AnalysisConfig, measurement: &str) -> StudyRunConfig {
         StudyRunConfig {
+            constraints: Vec::new(),
             objective_terms: Vec::new(),
             instance_id: AnalysisInstanceId::new(),
             source_revision: ObjectRevision::INITIAL,
@@ -453,6 +501,7 @@ mod tests {
                 best_variables,
                 best_cost,
                 best_objectives,
+                best_constraints,
                 converged,
                 ..
             } = crate::simulation::results::SimulationResult::from(restored)
@@ -464,6 +513,7 @@ mod tests {
                 (best_variables["X"] - expected).abs() < 1e-5,
                 "{weight}/{scale}: {best_variables:?}"
             );
+            assert!(best_constraints.is_empty());
             assert_eq!(best_objectives.len(), 2);
             assert_eq!(best_objectives[0].value, best_variables["X"]);
             assert_eq!(best_objectives[1].value, 2.0 * best_variables["X"]);
@@ -537,5 +587,219 @@ mod tests {
         assert!(
             matches!(run_optimization(&selected, &config, deck, None, None, &NoAbort), Err(SimulationError::InvalidConfig(ref message)) if message.contains("UNDECLARED"))
         );
+    }
+    #[test]
+    fn constrained_optimization_recovers_feasibility_and_preserves_physical_objectives() {
+        use crate::simulation::optimizer::{
+            OptimizationConstraint as Constraint, OptimizationObjectiveGoal as Goal,
+            OptimizationObjectiveTerm as Term, OptimizationVariableDomain as Domain,
+        };
+        use crate::simulation::runner::worker_contract::WorkerSimulationResult;
+        let deck = "Constrained design\n.param X=0.8\nV1 a 0 {X}\nV2 b 0 {2*X}\nR1 a 0 1k\nR2 b 0 1k\n.end\n";
+        for (algorithm, lower, upper, tolerance, expected, feasible, weighted) in [
+            (
+                OptimizationAlgorithm::PatternSearch,
+                None,
+                Some(0.8),
+                0.0,
+                0.4,
+                true,
+                true,
+            ),
+            (
+                OptimizationAlgorithm::GradientDescent,
+                None,
+                Some(0.8),
+                0.0,
+                0.4,
+                true,
+                true,
+            ),
+            (
+                OptimizationAlgorithm::SimulatedAnnealing,
+                None,
+                Some(0.8),
+                0.0,
+                0.4,
+                true,
+                true,
+            ),
+            (
+                OptimizationAlgorithm::PatternSearch,
+                Some(0.8),
+                Some(0.8),
+                0.02,
+                0.41,
+                true,
+                false,
+            ),
+            (
+                OptimizationAlgorithm::PatternSearch,
+                Some(3.0),
+                None,
+                0.0,
+                1.0,
+                false,
+                false,
+            ),
+        ] {
+            let mut selected = base(AnalysisConfig::dc_op(), "scalar:V(a)");
+            selected.measurements.push("scalar:V(b)".into());
+            selected.constraints.push(Constraint {
+                measurement: "scalar:V(b)".into(),
+                lower,
+                upper,
+                tolerance,
+                scale: 2.0,
+            });
+            if weighted {
+                selected.objective_terms.push(Term {
+                    measurement: "scalar:V(a)".into(),
+                    goal: Goal::Maximize,
+                    target: None,
+                    scale: 1.0,
+                    weight: 1e30,
+                });
+            }
+            let mut search = services::OptimizationSearchControls::default();
+            if algorithm == OptimizationAlgorithm::SimulatedAnnealing {
+                search
+                    .variable_domains
+                    .insert("X".into(), Domain::Quantized { step: 0.1 });
+            }
+            let request = SimulationRequest::Spec {
+                spec: Box::new(AnalysisSpec::Optimization {
+                    search,
+                    variables: vec![OptimizationVariable {
+                        name: "X".into(),
+                        min: 0.0,
+                        max: 1.0,
+                        initial: 0.8,
+                    }],
+                    objective_expression: None,
+                    objective_node: "a".into(),
+                    objective_ref: "0".into(),
+                    goal: OptimizationGoal::Maximize,
+                    target: None,
+                    algorithm,
+                    max_iterations: 100,
+                    cost_tolerance: 1e-12,
+                    fd_step: 1e-4,
+                    initial_step: 0.1,
+                    min_step: 1e-10,
+                }),
+                options: Box::new(SpecExecutionOptions {
+                    study_base: Some(selected),
+                    ..Default::default()
+                }),
+            };
+            let wire = WorkerSimulationRequest::try_from(&request).unwrap();
+            let wire: WorkerSimulationRequest =
+                serde_json::from_str(&serde_json::to_string(&wire).unwrap()).unwrap();
+            let SimulationRequest::Spec { spec, options } = SimulationRequest::from(wire) else {
+                unreachable!()
+            };
+            let result = super::super::super::spec::run_spec_request(
+                &EngineBridge::new(),
+                *spec,
+                *options,
+                deck,
+                None,
+                &crate::simulation::execution::ResolvedExecutionDependencies::default(),
+                &NoAbort,
+            )
+            .unwrap();
+            let wire = WorkerSimulationResult::try_from(result).unwrap();
+            let restored: WorkerSimulationResult =
+                serde_json::from_str(&serde_json::to_string(&wire).unwrap()).unwrap();
+            assert_eq!(wire, restored);
+            let crate::simulation::results::SimulationResult::Optimization {
+                best_variables,
+                best_cost,
+                best_constraints,
+                converged,
+                ..
+            } = crate::simulation::results::SimulationResult::from(restored)
+            else {
+                unreachable!()
+            };
+            assert!(
+                (best_variables["X"] - expected).abs() < 1e-5,
+                "{algorithm:?}, {lower:?}/{upper:?}: {best_variables:?}"
+            );
+            assert_eq!(
+                converged, feasible,
+                "{algorithm:?}: {best_variables:?}, {best_constraints:?}"
+            );
+            assert_eq!(best_constraints.len(), 1);
+            assert!((best_constraints[0].value - 2.0 * best_variables["X"]).abs() < 1e-12);
+            assert_eq!(best_constraints[0].violation == 0.0, feasible);
+            let expected_cost = -best_variables["X"] * if weighted { 1e30 } else { 1.0 };
+            assert!((best_cost - expected_cost).abs() < 1e-12 * expected_cost.abs().max(1.0));
+            crate::simulation::optimizer::validate_optimization_constraint_result(
+                &best_constraints,
+                converged,
+            )
+            .unwrap();
+        }
+        // A feasibility gradient at the old point cannot prove convergence
+        // after a coordinate fallback moves into the feasible region.
+        use crate::simulation::optimizer::{
+            DesignVar, OptimizationScore, OptimizerAlgo, OptimizerConfig, OptimizerEngine,
+        };
+        let mut optimizer = OptimizerEngine::with_config(OptimizerConfig {
+            algorithm: OptimizerAlgo::GradientDescent,
+            ..Default::default()
+        });
+        optimizer.add_var(DesignVar::new("X", 0.5, 0.0, 1.0));
+        let mut score = |vars: &std::collections::HashMap<String, f64>| OptimizationScore {
+            cost: (vars["X"] - 0.9).powi(2),
+            violation: if vars["X"] < 0.6 { 1.0 } else { 0.0 },
+        };
+        let initial = optimizer.current_vars();
+        optimizer.observe_candidate(&initial, score(&initial));
+        optimizer.step(&mut score);
+        assert_eq!(optimizer.best_score().violation, 0.0);
+        assert!(!optimizer.is_converged(None));
+        let tiny = Constraint {
+            measurement: "tiny".into(),
+            lower: Some(1e-300),
+            upper: None,
+            tolerance: 0.0,
+            scale: 1e300,
+        };
+        assert!(tiny.violation(0.0).unwrap() > 0.0);
+        for term in [
+            Constraint {
+                measurement: "x".into(),
+                lower: None,
+                upper: None,
+                tolerance: 0.0,
+                scale: 1.0,
+            },
+            Constraint {
+                measurement: "x".into(),
+                lower: Some(2.0),
+                upper: Some(1.0),
+                tolerance: 0.0,
+                scale: 1.0,
+            },
+            Constraint {
+                measurement: "x".into(),
+                lower: Some(0.0),
+                upper: None,
+                tolerance: -1.0,
+                scale: 1.0,
+            },
+            Constraint {
+                measurement: "x".into(),
+                lower: Some(0.0),
+                upper: None,
+                tolerance: 0.0,
+                scale: 0.0,
+            },
+        ] {
+            assert!(term.validate().is_err());
+        }
     }
 }

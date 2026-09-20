@@ -96,6 +96,7 @@ impl OptimizationVariableConfig {
 pub struct OptimizationConfig {
     pub base_analysis: Option<crate::product::AnalysisInstanceId>,
     pub objective_measurement: String,
+    pub constraints: Vec<crate::simulation::optimizer::OptimizationConstraint>,
     pub objective_terms: Vec<OptimizationObjectiveTerm>,
     pub search: OptimizationSearchControls,
     /// Variable set to optimize.
@@ -129,6 +130,7 @@ impl Default for OptimizationConfig {
         Self {
             base_analysis: None,
             objective_measurement: String::new(),
+            constraints: Vec::new(),
             objective_terms: Vec::new(),
             search: OptimizationSearchControls::default(),
             variables: vec![
@@ -168,10 +170,15 @@ impl OptimizationConfig {
             return Err("At least one optimization variable is required".to_string());
         }
         if self.base_analysis.is_some() {
+            for constraint in &self.constraints {
+                constraint.validate()?;
+            }
             for term in &self.objective_terms {
                 term.validate()?;
             }
             crate::simulation::runner::study::validate_measurements(&self.measurement_names())?;
+        } else if !self.constraints.is_empty() {
+            return Err("Measurement constraints require a configured base analysis".into());
         } else if let Some(expression) = &self.objective_expression {
             crate::services::simulation_runner::validate_optimization_expression(expression)?;
         } else {
@@ -240,16 +247,22 @@ impl OptimizationConfig {
     }
 
     pub fn measurement_names(&self) -> Vec<String> {
-        if self.objective_terms.is_empty() {
-            return vec![self.objective_measurement.clone()];
-        }
-        let mut names = Vec::<String>::new();
-        for term in &self.objective_terms {
+        let mut names = if self.objective_terms.is_empty() {
+            vec![self.objective_measurement.clone()]
+        } else {
+            Vec::new()
+        };
+        for measurement in self
+            .objective_terms
+            .iter()
+            .map(|term| &term.measurement)
+            .chain(self.constraints.iter().map(|term| &term.measurement))
+        {
             if !names
                 .iter()
-                .any(|name| name.eq_ignore_ascii_case(&term.measurement))
+                .any(|name| name.eq_ignore_ascii_case(measurement))
             {
-                names.push(term.measurement.clone());
+                names.push(measurement.clone());
             }
         }
         names
@@ -317,6 +330,9 @@ impl OptimizationConfig {
         if let Some(target) = self.target_value {
             line.push_str(&format!(" target={:.6e}", target));
         }
+        for constraint in &self.constraints {
+            line.push_str(&format!("\n* RSPICE OPT CONSTRAINT {constraint:?}"));
+        }
         for (name, domain) in &self.search.variable_domains {
             line.push_str(&format!("\n* RSPICE OPT DOMAIN {name} {domain:?}"));
         }
@@ -330,6 +346,8 @@ impl OptimizationConfig {
 pub struct OptimizationDialogState {
     #[serde(default)]
     pub weighted_objectives: bool,
+    #[serde(default)]
+    pub constraints: Vec<OptimizationConstraintDraft>,
     #[serde(default)]
     pub objective_terms: Vec<OptimizationObjectiveDraft>,
     #[serde(default)]
@@ -394,6 +412,11 @@ impl OptimizationDialogState {
             .join("\n");
 
         Self {
+            constraints: config
+                .constraints
+                .iter()
+                .map(OptimizationConstraintDraft::from_config)
+                .collect(),
             weighted_objectives: !config.objective_terms.is_empty(),
             objective_terms: config
                 .objective_terms
@@ -478,6 +501,14 @@ impl OptimizationDialogState {
         let config = OptimizationConfig {
             base_analysis: self.base_analysis,
             objective_measurement: self.objective_measurement.trim().to_owned(),
+            constraints: if self.base_analysis.is_some() {
+                self.constraints
+                    .iter()
+                    .map(OptimizationConstraintDraft::to_config)
+                    .collect::<Result<Vec<_>, _>>()?
+            } else {
+                Vec::new()
+            },
             objective_terms: if weighted {
                 self.objective_terms
                     .iter()
@@ -829,5 +860,59 @@ impl OptimizationVariableDomainDraft {
             },
             _ => return Err("Invalid variable domain".into()),
         })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OptimizationConstraintDraft {
+    pub measurement: String,
+    pub lower: String,
+    pub upper: String,
+    pub tolerance: String,
+    pub scale: String,
+}
+impl Default for OptimizationConstraintDraft {
+    fn default() -> Self {
+        Self {
+            measurement: String::new(),
+            lower: String::new(),
+            upper: String::new(),
+            tolerance: "0".into(),
+            scale: "1".into(),
+        }
+    }
+}
+impl OptimizationConstraintDraft {
+    fn from_config(term: &crate::simulation::optimizer::OptimizationConstraint) -> Self {
+        Self {
+            measurement: term.measurement.clone(),
+            lower: term.lower.map(|v| v.to_string()).unwrap_or_default(),
+            upper: term.upper.map(|v| v.to_string()).unwrap_or_default(),
+            tolerance: term.tolerance.to_string(),
+            scale: term.scale.to_string(),
+        }
+    }
+    fn to_config(&self) -> Result<crate::simulation::optimizer::OptimizationConstraint, String> {
+        let optional = |text: &str| {
+            if text.trim().is_empty() {
+                Ok(None)
+            } else {
+                parse_si_value(text).map(Some)
+            }
+        };
+        let term = crate::simulation::optimizer::OptimizationConstraint {
+            measurement: self.measurement.trim().into(),
+            lower: optional(&self.lower)
+                .map_err(|error| format!("Invalid lower constraint limit: {error}"))?,
+            upper: optional(&self.upper)
+                .map_err(|error| format!("Invalid upper constraint limit: {error}"))?,
+            tolerance: parse_si_value(&self.tolerance)
+                .map_err(|error| format!("Invalid constraint tolerance: {error}"))?,
+            scale: parse_si_value(&self.scale)
+                .map_err(|error| format!("Invalid constraint scale: {error}"))?,
+        };
+        term.validate()?;
+        Ok(term)
     }
 }
