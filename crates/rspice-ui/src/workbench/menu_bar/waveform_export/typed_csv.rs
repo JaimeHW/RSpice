@@ -14,6 +14,7 @@ use super::{PreparedTypedResultCsv, csv_text};
 mod qpac;
 mod qpnoise;
 mod qpxf;
+mod reliability;
 
 pub(super) fn prepare_typed_result_csv(
     analysis: &crate::state::AnalysisResult,
@@ -675,6 +676,7 @@ pub(super) fn prepare_typed_result_csv(
                 detail: format!("{rows} exact transfer-function values"),
             })
         }
+        AnalysisResultPayload::ReliabilityMission { response } => reliability::prepare(response),
         AnalysisResultPayload::Reliability { devices } => {
             let mut contents = String::from(
                 "device,lifetime_years,average_gate_stress_v,average_drain_stress_v,average_temperature_k,duration_s,threshold_voltage_shift_v,mobility_shift,drain_source_resistance_shift\n",

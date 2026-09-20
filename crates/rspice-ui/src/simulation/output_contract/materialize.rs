@@ -162,7 +162,7 @@ fn source_waveforms(analysis: &AnalysisResult) -> Result<Vec<WaveformData>, Stri
     if let Some(basis) = analysis
         .result_payload
         .as_ref()
-        .map(crate::state::AnalysisResultPayload::quasi_periodic_display)
+        .map(crate::state::AnalysisResultPayload::retained_display_basis)
         .transpose()?
         .flatten()
     {
@@ -287,7 +287,8 @@ pub(in crate::simulation) fn retain_plan_saved_outputs(
     if !matches!(
         analysis.result_payload,
         Some(
-            crate::state::AnalysisResultPayload::Qpss { .. }
+            crate::state::AnalysisResultPayload::ReliabilityMission { .. }
+                | crate::state::AnalysisResultPayload::Qpss { .. }
                 | crate::state::AnalysisResultPayload::Qpac { .. }
                 | crate::state::AnalysisResultPayload::Qpxf { .. }
                 | crate::state::AnalysisResultPayload::Qpnoise { .. }

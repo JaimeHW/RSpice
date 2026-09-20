@@ -1213,6 +1213,11 @@ fn payload_values_label(payload: &AnalysisResultPayload) -> String {
             format!("{} scalar values", values.len())
         }
         AnalysisResultPayload::TransferFunction { .. } => "transfer / impedance scalars".to_owned(),
+        AnalysisResultPayload::ReliabilityMission { response } => format!(
+            "{} mission phases / {} aged circuit points",
+            response.stress.phases.len(),
+            response.aged.len()
+        ),
         AnalysisResultPayload::Reliability { devices } => {
             format!("{} reliability devices", devices.len())
         }

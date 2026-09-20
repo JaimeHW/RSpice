@@ -255,6 +255,15 @@ impl WorkerSimulationResultTransport {
                 num_failures,
                 member_measurements,
             },
+            WorkerSimulationResult::ReliabilityMission {
+                years,
+                waveforms,
+                response,
+            } => Self::ReliabilityMission {
+                years: WorkerF64Series::from_vec(years, buffers),
+                waveforms: transport_waveforms(waveforms, buffers),
+                response: WorkerReliabilityMissionTransport::from_response(response, buffers)?,
+            },
             WorkerSimulationResult::Reliability {
                 years,
                 waveforms,
@@ -307,7 +316,8 @@ impl WorkerSimulationResultTransport {
             Self::Inline(result) => {
                 if matches!(
                     result,
-                    WorkerSimulationResult::Pstb { .. }
+                    WorkerSimulationResult::ReliabilityMission { .. }
+                        | WorkerSimulationResult::Pstb { .. }
                         | WorkerSimulationResult::Qpnoise { .. }
                         | WorkerSimulationResult::Transient { .. }
                         | WorkerSimulationResult::Ac { .. }
@@ -605,6 +615,19 @@ impl WorkerSimulationResultTransport {
                 num_failures,
                 member_measurements,
             }),
+            Self::ReliabilityMission {
+                years,
+                waveforms,
+                response,
+            } => {
+                let result = WorkerSimulationResult::ReliabilityMission {
+                    years: years.into_vec(buffers)?,
+                    waveforms: worker_waveforms_from_transport(waveforms, buffers)?,
+                    response: response.into_response(buffers)?,
+                };
+                validate_worker_reliability_result(&result)?;
+                Ok(result)
+            }
             Self::Reliability {
                 years,
                 waveforms,

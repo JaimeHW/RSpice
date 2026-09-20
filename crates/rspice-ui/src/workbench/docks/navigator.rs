@@ -3492,6 +3492,14 @@ fn retained_result_artifacts(
                 None,
                 ResultViewer::TransferFunction,
             ),
+            AnalysisResultPayload::ReliabilityMission { response } => (
+                "payload/reliability-mission",
+                "Reliability mission evidence",
+                ResultArtifactKind::Array,
+                response.aged.len(),
+                None,
+                ResultViewer::Reliability,
+            ),
             AnalysisResultPayload::Reliability { devices } => (
                 "payload/reliability",
                 "Reliability device evidence",

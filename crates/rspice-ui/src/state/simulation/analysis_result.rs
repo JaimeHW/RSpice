@@ -15,6 +15,7 @@ mod qpnoise;
 mod qpss;
 mod qpxf;
 mod quasi_periodic_display;
+mod reliability;
 
 pub use family_metadata::{AnalysisResultFamilyMetadata, MonteCarloVariableMetadata};
 
@@ -1134,6 +1135,9 @@ pub enum AnalysisResultPayload {
     Qpac {
         response: std::sync::Arc<rspice_core::engine::QpacAnalysisResult>,
     },
+    ReliabilityMission {
+        response: std::sync::Arc<rspice_core::engine::ReliabilityRunResult>,
+    },
     Qpnoise {
         response: std::sync::Arc<rspice_core::engine::QpnoiseAnalysisResult>,
     },
@@ -1927,6 +1931,17 @@ impl AnalysisResultPayload {
                     }
                 }
             }
+            Self::ReliabilityMission { response } => {
+                if analysis_type != AnalysisType::Reliability {
+                    return Err("Reliability mission belongs to a different analysis type".into());
+                }
+                response
+                    .validate_retained_payload_with_abort(
+                        &rspice_core::ResourceLimits::default(),
+                        &rspice_core::NoAbort,
+                    )
+                    .map_err(|e| e.to_string())?;
+            }
             Self::Reliability { devices } => {
                 if analysis_type != AnalysisType::Reliability {
                     return Err(format!(
@@ -2215,7 +2230,7 @@ impl AnalysisResultPayload {
     #[must_use]
     pub fn has_data(&self) -> bool {
         match self {
-            Self::Qpac { .. } | Self::Qpxf { .. } | Self::Qpnoise { .. } | Self::Qpss { .. } | Self::DcSweep { .. }
+            Self::ReliabilityMission { .. } | Self::Qpac { .. } | Self::Qpxf { .. } | Self::Qpnoise { .. } | Self::Qpss { .. } | Self::DcSweep { .. }
             | Self::OperatingPoint { .. }
             | Self::PoleZero { .. }
             | Self::PssFloquet { .. }

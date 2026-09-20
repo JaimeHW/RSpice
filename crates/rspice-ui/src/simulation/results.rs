@@ -20,6 +20,7 @@ mod qpnoise;
 mod qpss;
 mod qpxf;
 mod recorded_fft;
+mod reliability;
 mod waveform;
 
 pub use monte_carlo::MonteCarloVariableResult;
@@ -407,8 +408,7 @@ pub enum SimulationResult {
     },
 
     /// Historical reliability aging result retained so saved runs and worker
-    /// responses from earlier builds remain readable while execution is
-    /// blocked until imported aging models drive circuit stress and re-simulation.
+    /// responses from earlier builds remain readable in their original format.
     #[allow(dead_code)]
     Reliability {
         /// Lifetime checkpoints in years.
@@ -417,6 +417,13 @@ pub enum SimulationResult {
         waveforms: HashMap<String, WaveformData>,
         /// Structured per-device reliability outputs.
         device_results: Vec<ReliabilityResult>,
+    },
+
+    /// Complete calibrated mission, stress, model changes and electrical evidence.
+    ReliabilityMission {
+        years: Vec<f64>,
+        waveforms: HashMap<String, WaveformData>,
+        response: std::sync::Arc<rspice_core::engine::ReliabilityRunResult>,
     },
 
     /// Optimization analysis result.

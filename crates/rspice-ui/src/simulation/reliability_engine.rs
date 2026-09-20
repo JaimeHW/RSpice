@@ -1,8 +1,8 @@
 //! Reliability requests and persisted historical result types.
 //!
 //! Historical result types remain readable. New requests carry explicit model
-//! packs and mission profiles; circuit dispatch stays blocked until extraction
-//! and aged re-simulation are connected to the characterized core aging clocks.
+//! packs and mission profiles. New execution retains generic parameter changes
+//! and fresh/aged circuit evidence separately from historical three-field shifts.
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

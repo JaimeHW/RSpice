@@ -24,7 +24,9 @@ mod qpac;
 mod qpnoise;
 mod qpxf;
 use qpnoise::WorkerQpnoiseResultTransport;
+mod reliability;
 use qpxf::WorkerQpxfResultTransport;
+use reliability::WorkerReliabilityMissionTransport;
 mod response;
 mod result;
 use qpac::WorkerQpacResultTransport;
@@ -1288,6 +1290,11 @@ pub(crate) enum WorkerSimulationResultTransport {
         num_failures: usize,
         #[serde(default)]
         member_measurements: Vec<crate::state::FamilyMemberMeasurements>,
+    },
+    ReliabilityMission {
+        years: WorkerF64Series,
+        waveforms: Vec<WorkerWaveformTransport>,
+        response: WorkerReliabilityMissionTransport,
     },
     Reliability {
         years: WorkerF64Series,

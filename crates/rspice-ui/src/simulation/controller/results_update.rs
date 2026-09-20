@@ -457,6 +457,14 @@ impl SimulationController {
                 )));
             }
 
+            SimulationResult::ReliabilityMission { response, .. } => {
+                state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(
+                    "Reliability: {} lifetime points, {} mission phases, {} bound devices",
+                    response.stress.checkpoints.len(),
+                    response.stress.phases.len(),
+                    response.stress.request.study.bindings.len()
+                )));
+            }
             SimulationResult::Reliability {
                 years,
                 waveforms: _,

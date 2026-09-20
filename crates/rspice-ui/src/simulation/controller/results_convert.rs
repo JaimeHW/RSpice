@@ -800,6 +800,24 @@ impl SimulationController {
                     })
             }
 
+            SimulationResult::ReliabilityMission {
+                years,
+                waveforms,
+                response,
+            } => {
+                let result = AnalysisResult::new(1, analysis_type, label.to_string())
+                    .with_waveforms(
+                        self.build_waveforms_with_shared_x_owned(years.clone(), waveforms),
+                    )
+                    .with_family_metadata(AnalysisResultFamilyMetadata::Reliability { years })
+                    .with_result_payload(AnalysisResultPayload::ReliabilityMission { response });
+                match result.validate_retained_evidence() {
+                    Ok(()) => result,
+                    Err(error) => {
+                        AnalysisResult::failed(1, analysis_type, label.to_string(), error)
+                    }
+                }
+            }
             SimulationResult::Reliability {
                 years,
                 waveforms,

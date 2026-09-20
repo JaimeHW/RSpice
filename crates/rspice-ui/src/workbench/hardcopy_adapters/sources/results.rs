@@ -1537,40 +1537,113 @@ pub(super) fn semantic_result_summary(
             });
         }
         ResultViewer::Reliability => {
-            let Some(AnalysisResultPayload::Reliability { devices }) = &analysis.result_payload
-            else {
-                return Err(HardcopySourceError::MissingViewerEvidence("reliability"));
-            };
-            for device in devices {
+            if let Some(AnalysisResultPayload::ReliabilityMission { response }) =
+                &analysis.result_payload
+            {
                 tables.push(SemanticTable {
                     title: format!(
-                        "{} · {} K average, {} s stressed",
-                        device.device_id,
-                        exact_number(device.stress.average_temperature_k),
-                        exact_number(device.stress.duration_s)
+                        "Reliability mission · {} · {}",
+                        response.stress.request.study.model_pack.id,
+                        response.stress.request.study.model_pack.process
                     ),
-                    columns: vec![
-                        "Years".to_owned(),
-                        "ΔVth (V)".to_owned(),
-                        "Δmobility".to_owned(),
-                        "ΔRds".to_owned(),
-                    ],
-                    rows: device
-                        .checkpoints
+                    columns: [
+                        "Phase",
+                        "Years",
+                        "Device",
+                        "Model",
+                        "Parameter",
+                        "Mode",
+                        "Fresh",
+                        "Aged",
+                    ]
+                    .map(str::to_owned)
+                    .to_vec(),
+                    rows: response
+                        .aged
                         .iter()
-                        .map(|checkpoint| {
-                            vec![
-                                exact_number(checkpoint.years),
-                                exact_number(checkpoint.shift.threshold_voltage_shift_v),
-                                exact_number(checkpoint.shift.mobility_shift),
-                                exact_number(checkpoint.shift.drain_source_resistance_shift),
-                            ]
+                        .flat_map(|p| {
+                            p.parameters.iter().map(move |v| {
+                                vec![
+                                    (p.phase_index + 1).to_string(),
+                                    exact_number(p.years),
+                                    v.device.clone(),
+                                    v.compact_model.clone(),
+                                    v.parameter.clone(),
+                                    format!("{:?}", v.update),
+                                    exact_number(v.fresh_value),
+                                    exact_number(v.aged_value),
+                                ]
+                            })
                         })
                         .collect(),
                 });
-            }
-            if tables.is_empty() {
-                return Err(HardcopySourceError::MissingViewerEvidence("reliability"));
+                tables.push(SemanticTable {
+                    title: "Equivalent aging and electromigration lifetime".into(),
+                    columns: [
+                        "Years",
+                        "Device",
+                        "Aging model",
+                        "Equivalent seconds",
+                        "EM consumed lifetime",
+                    ]
+                    .map(str::to_owned)
+                    .to_vec(),
+                    rows: response
+                        .stress
+                        .checkpoints
+                        .iter()
+                        .flat_map(|p| {
+                            p.devices.iter().flat_map(move |d| {
+                                d.contributions.iter().map(move |c| {
+                                    vec![
+                                        exact_number(p.years),
+                                        d.device.clone(),
+                                        c.model_id.clone(),
+                                        exact_number(c.equivalent_seconds),
+                                        c.electromigration_lifetime_fraction
+                                            .map_or_else(String::new, exact_number),
+                                    ]
+                                })
+                            })
+                        })
+                        .collect(),
+                });
+            } else {
+                let Some(AnalysisResultPayload::Reliability { devices }) = &analysis.result_payload
+                else {
+                    return Err(HardcopySourceError::MissingViewerEvidence("reliability"));
+                };
+                for device in devices {
+                    tables.push(SemanticTable {
+                        title: format!(
+                            "{} · {} K average, {} s stressed",
+                            device.device_id,
+                            exact_number(device.stress.average_temperature_k),
+                            exact_number(device.stress.duration_s)
+                        ),
+                        columns: vec![
+                            "Years".to_owned(),
+                            "ΔVth (V)".to_owned(),
+                            "Δmobility".to_owned(),
+                            "ΔRds".to_owned(),
+                        ],
+                        rows: device
+                            .checkpoints
+                            .iter()
+                            .map(|checkpoint| {
+                                vec![
+                                    exact_number(checkpoint.years),
+                                    exact_number(checkpoint.shift.threshold_voltage_shift_v),
+                                    exact_number(checkpoint.shift.mobility_shift),
+                                    exact_number(checkpoint.shift.drain_source_resistance_shift),
+                                ]
+                            })
+                            .collect(),
+                    });
+                }
+                if tables.is_empty() {
+                    return Err(HardcopySourceError::MissingViewerEvidence("reliability"));
+                }
             }
         }
         ResultViewer::Optimization => {
@@ -1956,6 +2029,7 @@ fn periodic_result_tables(payload: &AnalysisResultPayload) -> Option<Vec<Semanti
         | AnalysisResultPayload::DcMismatch { .. }
         | AnalysisResultPayload::ScalarMeasurements { .. }
         | AnalysisResultPayload::TransferFunction { .. }
+        | AnalysisResultPayload::ReliabilityMission { .. }
         | AnalysisResultPayload::Reliability { .. }
         | AnalysisResultPayload::Soa { .. }
         | AnalysisResultPayload::TransientEvents { .. }

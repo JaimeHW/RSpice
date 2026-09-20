@@ -83,6 +83,7 @@ impl SimulationResult {
             }
             SimulationResult::Parametric { waveforms, .. }
             | SimulationResult::Corner { waveforms, .. }
+            | SimulationResult::ReliabilityMission { waveforms, .. }
             | SimulationResult::Reliability { waveforms, .. }
             | SimulationResult::Optimization { waveforms, .. }
             | SimulationResult::Soa { waveforms, .. } => {
@@ -224,6 +225,7 @@ impl SimulationResult {
             | SimulationResult::HarmonicBalance { waveforms, .. }
             | SimulationResult::Parametric { waveforms, .. }
             | SimulationResult::Corner { waveforms, .. }
+            | SimulationResult::ReliabilityMission { waveforms, .. }
             | SimulationResult::Reliability { waveforms, .. }
             | SimulationResult::Optimization { waveforms, .. }
             | SimulationResult::Soa { waveforms, .. } => waveforms

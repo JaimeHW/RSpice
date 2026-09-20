@@ -919,13 +919,13 @@ impl AnalysisResult {
     /// Historical analyses may legitimately lack a newer payload; when both
     /// fields exist they must describe one coherent execution.
     pub fn validate_retained_evidence(&self) -> Result<(), String> {
-        let quasi_periodic_basis = self
+        let retained_basis = self
             .result_payload
             .as_ref()
-            .map(AnalysisResultPayload::quasi_periodic_display)
+            .map(AnalysisResultPayload::retained_display_basis)
             .transpose()?
             .flatten();
-        self.validate_saved_output_receipts(quasi_periodic_basis.as_deref())?;
+        self.validate_saved_output_receipts(retained_basis.as_deref())?;
         if let Some(quality) = &self.convergence {
             quality.validate()?;
         }
@@ -1219,7 +1219,7 @@ impl AnalysisResult {
         if let Some(payload) = &self.result_payload {
             payload.validate_for(self.analysis_type)?;
         }
-        self.validate_quasi_periodic_display(quasi_periodic_basis.as_deref())?;
+        self.validate_retained_display_basis(retained_basis.as_deref())?;
         if let Some(AnalysisResultPayload::DcSweep { evidence }) = &self.result_payload {
             evidence.validate_retained_traces(self.waveforms.iter().map(|trace| {
                 super::super::DcTraceView {
@@ -1233,8 +1233,25 @@ impl AnalysisResult {
         }
 
         match (&self.family_metadata, &self.result_payload) {
-            (None, Some(AnalysisResultPayload::Reliability { .. })) => {
+            (
+                None,
+                Some(
+                    AnalysisResultPayload::Reliability { .. }
+                    | AnalysisResultPayload::ReliabilityMission { .. },
+                ),
+            ) => {
                 return Err("reliability payload is missing its retained lifetime axis".to_owned());
+            }
+            (
+                Some(AnalysisResultFamilyMetadata::Reliability { years }),
+                Some(AnalysisResultPayload::ReliabilityMission { response }),
+            ) => {
+                if *years != response.stress.request.target_years {
+                    return Err(
+                        "Reliability mission lifetime axis differs from the retained request"
+                            .into(),
+                    );
+                }
             }
             (None, Some(AnalysisResultPayload::Soa { .. })) => {
                 return Err("SOA payload is missing its retained time axis".to_owned());
@@ -1354,7 +1371,11 @@ impl AnalysisResult {
                 }
             }
             (Some(AnalysisResultFamilyMetadata::Reliability { .. }), Some(payload))
-                if !matches!(payload, AnalysisResultPayload::Reliability { .. }) =>
+                if !matches!(
+                    payload,
+                    AnalysisResultPayload::Reliability { .. }
+                        | AnalysisResultPayload::ReliabilityMission { .. }
+                ) =>
             {
                 return Err("reliability metadata has a mismatched retained payload".to_owned());
             }

@@ -30,6 +30,8 @@ mod qpxf;
 pub use qpac::run_qpac_analysis_from_qpss_with_source_path_and_abort;
 pub use qpnoise::run_qpnoise_analysis_from_qpss_with_source_path_and_abort;
 pub use qpxf::run_qpxf_analysis_from_qpss_with_source_path_and_abort;
+mod reliability;
+pub use reliability::run_reliability_analysis_with_source_path_and_abort;
 mod soa;
 mod sparameter;
 mod stb;

@@ -11,6 +11,8 @@ mod analysis_spec;
 mod conversions;
 mod qpac;
 mod qpnoise;
+mod reliability;
+use reliability::validate_worker_reliability_result;
 mod qpxf;
 use qpnoise::validate_worker_qpnoise_result;
 use qpxf::validate_worker_qpxf_result;
@@ -344,6 +346,8 @@ impl WorkerResponse {
                 validate_worker_qpss_result(&result).map_err(SimulationError::InvalidConfig)?;
                 validate_worker_qpac_result(&result).map_err(SimulationError::InvalidConfig)?;
                 validate_worker_qpxf_result(&result).map_err(SimulationError::InvalidConfig)?;
+                validate_worker_reliability_result(&result)
+                    .map_err(SimulationError::InvalidConfig)?;
                 validate_worker_qpnoise_result(&result).map_err(SimulationError::InvalidConfig)?;
                 if let WorkerSimulationResult::Transient { events, .. } = result.as_ref()
                     && let Some(history) = &events.current_impulses
@@ -915,6 +919,11 @@ pub(crate) enum WorkerSimulationResult {
         /// answers it with a distribution, and the two disagree about one run.
         #[serde(default)]
         member_measurements: Vec<crate::state::FamilyMemberMeasurements>,
+    },
+    ReliabilityMission {
+        years: Vec<f64>,
+        waveforms: Vec<WorkerWaveform>,
+        response: rspice_core::engine::ReliabilityRunResult,
     },
     Reliability {
         years: Vec<f64>,
@@ -1563,6 +1572,15 @@ impl WorkerSimulationResult {
                         total.saturating_add(bytes)
                     })
             }
+            WorkerSimulationResult::ReliabilityMission {
+                years,
+                waveforms,
+                response,
+            } => sum_payload_bytes([
+                f64_payload_bytes(years.len()),
+                waveforms_payload_bytes(waveforms),
+                crate::state::AnalysisResultPayload::reliability_response_bytes(response),
+            ]),
             WorkerSimulationResult::Reliability {
                 years,
                 waveforms,
@@ -1950,6 +1968,20 @@ impl TryFrom<SimulationResult> for WorkerSimulationResult {
                     .collect(),
                 member_measurements,
             }),
+            SimulationResult::ReliabilityMission {
+                years,
+                waveforms,
+                response,
+            } => {
+                let result = Self::ReliabilityMission {
+                    years,
+                    waveforms: worker_waveforms(waveforms),
+                    response: Arc::unwrap_or_clone(response),
+                };
+                validate_worker_reliability_result(&result)
+                    .map_err(SimulationError::InvalidConfig)?;
+                Ok(result)
+            }
             SimulationResult::Reliability {
                 years,
                 waveforms,
@@ -2292,6 +2324,15 @@ impl From<WorkerSimulationResult> for SimulationResult {
                     .map(MonteCarloVariableResult::from)
                     .collect(),
                 member_measurements,
+            },
+            WorkerSimulationResult::ReliabilityMission {
+                years,
+                waveforms,
+                response,
+            } => Self::ReliabilityMission {
+                years,
+                waveforms: waveform_map(waveforms),
+                response: Arc::new(response),
             },
             WorkerSimulationResult::Reliability {
                 years,

@@ -5,7 +5,10 @@ use super::*;
 use std::sync::Arc;
 
 impl AnalysisResultPayload {
-    pub(crate) fn quasi_periodic_display(&self) -> Result<Option<Vec<WaveformData>>, String> {
+    pub(crate) fn retained_display_basis(&self) -> Result<Option<Vec<WaveformData>>, String> {
+        if let Self::ReliabilityMission { response } = self {
+            return Self::reliability_display_traces(response).map(Some);
+        }
         let mut traces = match self {
             Self::Qpss { operating_point } => qpss::display_traces(operating_point)?,
             Self::Qpac { response } => Self::qpac_display_traces(response)?
@@ -61,7 +64,7 @@ impl AnalysisResultPayload {
     }
 }
 impl AnalysisResult {
-    pub(super) fn validate_quasi_periodic_display(
+    pub(super) fn validate_retained_display_basis(
         &self,
         expected: Option<&[WaveformData]>,
     ) -> Result<(), String> {
@@ -84,13 +87,13 @@ impl AnalysisResult {
                     || actual.complex != expected.complex
                 {
                     return Err(format!(
-                        "quasi-periodic trace '{}' differs from its retained numerical evidence",
+                        "retained trace '{}' differs from its retained numerical evidence",
                         actual.name
                     ));
                 }
             } else if !authored.contains(actual.name.as_str()) {
                 return Err(format!(
-                    "quasi-periodic trace '{}' is absent from the solved basis and saved-output receipts",
+                    "retained trace '{}' is absent from the solved basis and saved-output receipts",
                     actual.name
                 ));
             }
