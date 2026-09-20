@@ -14,6 +14,11 @@
 use std::collections::HashMap;
 
 mod algorithms;
+mod constraint;
+pub use constraint::{
+    OptimizationConstraint, OptimizationConstraintObservation, OptimizationScore,
+    validate_optimization_constraint_result, validate_optimization_constraints,
+};
 mod design_var;
 mod domain;
 pub use domain::OptimizationVariableDomain;
@@ -43,6 +48,7 @@ pub struct OptimizerEngine {
     iteration: usize,
     /// Best cost seen
     best_cost: f64,
+    best_violation: f64,
     /// Best variable values
     best_vars: HashMap<String, f64>,
     /// Gradient vector (for gradient-based methods)
@@ -52,7 +58,7 @@ pub struct OptimizerEngine {
     /// SA temperature (for simulated annealing)
     temperature: f64,
     /// Iteration history for convergence analysis
-    cost_history: Vec<f64>,
+    cost_history: Vec<OptimizationScore>,
     /// RNG state for stochastic algorithms
     rng_state: u64,
 }
