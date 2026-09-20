@@ -952,3 +952,39 @@ fn a_swept_sensitivity_card_carries_its_sweep() {
     assert_eq!(sweep.start_freq, 10.0);
     assert_eq!(sweep.stop_freq, 1.0e6);
 }
+
+#[test]
+fn qpss_card_studio_and_manual_deck_resolve_the_same_complete_configuration() {
+    use crate::simulation::plan::{AnalysisDraft, QpssDraft};
+    let draft = AnalysisDraft::Qpss(QpssDraft {
+        tones: "1k, 1414.213562373095".into(),
+        harmonics: "1, 2".into(),
+        max_iterations: "73".into(),
+        relative_tolerance: "2e-8".into(),
+        current_absolute_tolerance: "3e-13".into(),
+        voltage_absolute_tolerance: "4e-10".into(),
+        max_backtracks: "8".into(),
+        max_mixing_order: "2".into(),
+        collocation_points: "8, 16".into(),
+        source_tones: "vDrive=2; vDrive=1; iDrive=2".into(),
+        dc_initialization: true,
+        ..Default::default()
+    });
+    let state = engine_facing_state(&draft);
+    let controller = SimulationController::new();
+    let spec = controller.analysis_draft_spec(&state, &draft).unwrap();
+    let expected = spec.driven_qpss_config().unwrap();
+    let directive = controller.analysis_draft_directive(&state, &draft).unwrap();
+    let deck = format!(
+        "QPSS integration\nVDRIVE in 0 AC .1\nR1 in out 1k\nR2 out 0 1k\nIDRIVE 0 out AC 1u\n{directive}\n.end\n"
+    );
+    let queue = super::manual_deck::build_manual_deck_queue(&state, &deck).unwrap();
+    assert_eq!(queue.len(), 1);
+    assert_eq!(queue[0].spec.driven_qpss_config().unwrap(), expected);
+    assert_eq!(queue[0].analysis_line, directive);
+    assert!(
+        crate::state::CanonicalAnalysisKind::Qpss
+            .execution_blocker()
+            .is_none()
+    );
+}

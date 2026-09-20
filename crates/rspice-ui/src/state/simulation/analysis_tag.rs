@@ -260,9 +260,6 @@ impl CanonicalAnalysisKind {
     #[must_use]
     pub const fn execution_blocker(self) -> Option<&'static str> {
         match self {
-            Self::Qpss => {
-                Some("QPSS execution is not available in Simulation Studio yet")
-            }
             Self::Qpac => {
                 Some("QPAC conversion-matrix execution is not available in this engine build")
             }
@@ -408,6 +405,7 @@ mod tests {
             runnable,
             vec![
                 CanonicalAnalysisKind::Envelope,
+                CanonicalAnalysisKind::Qpss,
                 CanonicalAnalysisKind::Hbsp,
                 CanonicalAnalysisKind::Hbnoise,
                 CanonicalAnalysisKind::Psp,
@@ -424,7 +422,6 @@ mod tests {
             blocked,
             vec![
                 CanonicalAnalysisKind::Reliability,
-                CanonicalAnalysisKind::Qpss,
                 CanonicalAnalysisKind::Qpac,
                 CanonicalAnalysisKind::Qpnoise,
                 CanonicalAnalysisKind::Qpxf,

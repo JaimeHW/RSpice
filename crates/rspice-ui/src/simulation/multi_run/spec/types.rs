@@ -586,8 +586,8 @@ pub enum AnalysisSpec {
         #[serde(default)]
         normalize: bool,
     },
-    /// Quasi-periodic multi-tone steady state. Configuration is transportable,
-    /// but execution currently fails closed until the QPSS solver is present.
+    /// Driven quasi-periodic steady state on independent phase axes.
+    /// Autonomous frequency/phase-condition solving is not yet supported.
     Qpss {
         tones: Vec<HbToneSpec>,
         max_iterations: usize,

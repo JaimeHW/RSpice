@@ -48,10 +48,26 @@ fn qpss_controls_survive_draft_worker_and_real_engine_execution() {
     assert_eq!(config.source_tones[0].source, "V1");
     assert_eq!(config.source_tones[1].tone, 1);
     let netlist = "QPSS card controls\nV1 input 0 DC .1 AC .2 30\nR1 input out 1k\nR2 out 0 1k\nC1 out 0 1u\nI1 0 out DC 0 AC .001 -20\n.end\n";
-    let data = crate::services::simulation_runner::run_qpss_analysis_with_source_path_and_abort(
-        netlist,
-        config.clone(),
+    let directive = config.to_spice().unwrap();
+    let executable = netlist.replace(".end", &format!("{directive}\n.end"));
+    let result = run_spec_request(
+        &EngineBridge::new(),
+        restored,
+        SpecExecutionOptions::default(),
+        &executable,
         None,
+        &ResolvedExecutionDependencies::default(),
+        &rspice_core::NoAbort,
+    )
+    .unwrap();
+    let SimulationResult::Qpss {
+        operating_point, ..
+    } = result
+    else {
+        panic!("QPSS dispatch returned a different result family")
+    };
+    let data = crate::services::simulation_runner::qpss_data_from_operating_point_with_abort(
+        operating_point,
         &rspice_core::NoAbort,
     )
     .unwrap();

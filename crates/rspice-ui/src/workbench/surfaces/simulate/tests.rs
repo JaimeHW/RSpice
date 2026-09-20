@@ -1007,11 +1007,11 @@ fn analysis_catalog_uses_the_mockup_dialog_and_row_contracts() {
     );
     assert_eq!(
         analysis_catalog_readiness(AnalysisKind::Qpss),
-        Some("the QPSS spectral-lattice solver is not available in this engine build")
+        Some("Preview engine · non-sign-off")
     );
     assert_eq!(
         analysis_catalog_disposition(&[], AnalysisKind::Qpss),
-        "Unavailable"
+        "Add instance"
     );
 }
 
@@ -1019,7 +1019,6 @@ fn analysis_catalog_uses_the_mockup_dialog_and_row_contracts() {
 fn analysis_catalog_search_preserves_canonical_group_order() {
     let all = filtered_catalog_kinds("");
     let unavailable = [
-        AnalysisKind::Qpss,
         AnalysisKind::Qpac,
         AnalysisKind::Qpnoise,
         AnalysisKind::Qpxf,
@@ -1057,7 +1056,7 @@ fn unavailable_analysis_cannot_be_inserted_through_the_surface_action() {
         .len();
 
     assert_eq!(
-        insert_analysis_instance(&mut app, AnalysisKind::Qpss),
+        insert_analysis_instance(&mut app, AnalysisKind::Qpac),
         None,
         "a blocked kind names no instance, because it committed none"
     );

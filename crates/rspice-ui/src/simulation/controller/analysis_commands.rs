@@ -89,8 +89,11 @@ impl SimulationController {
             // The request *is* the card, so there is nothing to build: the one
             // writer of a `.fft` line is the request itself.
             AnalysisSpec::Fft { request } => Ok(request.to_card()),
-            AnalysisSpec::Qpss { .. }
-            | AnalysisSpec::Qpac { .. }
+            AnalysisSpec::Qpss { .. } => spec
+                .driven_qpss_config()?
+                .to_spice()
+                .map_err(|error| error.to_string()),
+            AnalysisSpec::Qpac { .. }
             | AnalysisSpec::Qpnoise { .. }
             | AnalysisSpec::Qpxf { .. }
             | AnalysisSpec::Reliability { .. } => Err(format!(

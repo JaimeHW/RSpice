@@ -19,6 +19,7 @@ use super::{
 
 /// Render the QPSS fields.
 pub(super) fn shooting_fields(ui: &mut Ui, setup: &mut QpssDraft) {
+    ui.small("Driven QPSS preview: circuit unknowns × retained lattice points must not exceed 512. Lower harmonic or mixing orders to reduce the size.");
     input_row(ui, "Tone frequencies", &mut setup.tones);
     input_row(ui, "Harmonic orders", &mut setup.harmonics);
     input_row(
@@ -58,7 +59,11 @@ pub(super) fn shooting_fields(ui: &mut Ui, setup: &mut QpssDraft) {
         &mut setup.voltage_absolute_tolerance,
     );
     input_row(ui, "Maximum backtracks", &mut setup.max_backtracks);
-    switch_row(ui, "Autonomous oscillator", &mut setup.autonomous);
+    switch_row(
+        ui,
+        "Autonomous oscillator (unavailable)",
+        &mut setup.autonomous,
+    );
     input_row_enabled(
         ui,
         "Oscillator node",

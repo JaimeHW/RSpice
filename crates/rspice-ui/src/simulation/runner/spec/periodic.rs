@@ -22,6 +22,22 @@ pub(super) fn run_periodic_spec(
 ) -> Result<SimulationResult, SimulationError> {
     super::ensure_not_aborted(abort)?;
     match spec {
+        spec @ AnalysisSpec::Qpss { .. } => {
+            let config = spec
+                .driven_qpss_config()
+                .map_err(SimulationError::InvalidConfig)?;
+            let data = super::run_abort_aware_service(abort, || {
+                svc_runner::run_qpss_analysis_with_source_path_and_abort(
+                    netlist,
+                    config,
+                    source_path,
+                    abort,
+                )
+            })?;
+            super::ensure_not_aborted(abort)?;
+            SimulationResult::from_qpss_operating_point(data.operating_point)
+                .map_err(SimulationError::InvalidConfig)
+        }
         AnalysisSpec::Pss {
             method,
             fundamental_freq,
