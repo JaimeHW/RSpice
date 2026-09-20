@@ -13,6 +13,7 @@ mod convergence_transport;
 #[cfg(any(target_arch = "wasm32", test))]
 pub(crate) use convergence_transport::ConvergenceTransport;
 mod measurements;
+pub(crate) use measurements::parse_study_bin;
 mod monte_carlo;
 mod operating_point;
 mod qpac;

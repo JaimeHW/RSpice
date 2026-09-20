@@ -37,13 +37,52 @@ impl SimulationResult {
                 error: measurement.error.clone(),
             });
         }
-        let value = if mode.eq_ignore_ascii_case("scalar") {
+        let value = if mode.eq_ignore_ascii_case("bin") {
+            let (index, quantity, signal) = parse_study_bin(key).ok()?;
+            let parts = match self {
+                Self::Fft { spectrum, .. }
+                    if spectrum.evidence.status.is_complete() && signal.is_none() =>
+                {
+                    Some((*spectrum.real.get(index)?, *spectrum.imaginary.get(index)?))
+                }
+                Self::Ac { waveforms, .. } | Self::HarmonicBalance { waveforms, .. } => {
+                    let waveform = if let Some(signal) = signal {
+                        named_value(waveforms, signal)?
+                    } else {
+                        let mut choices = waveforms.values().filter(|waveform| waveform.is_complex);
+                        let first = choices.next()?;
+                        if choices.next().is_some() {
+                            return None;
+                        }
+                        first
+                    };
+                    Some((
+                        *waveform.y_values.get(index)?,
+                        *waveform.y_imag.as_ref()?.get(index)?,
+                    ))
+                }
+                _ => None,
+            };
+            parts.map(
+                |(real, imaginary)| match quantity.to_ascii_lowercase().as_str() {
+                    "real" => real,
+                    "imag" => imaginary,
+                    "magnitude" => real.hypot(imaginary),
+                    "phase" => imaginary.atan2(real).to_degrees(),
+                    _ => unreachable!(),
+                },
+            )
+        } else if mode.eq_ignore_ascii_case("scalar") {
             match self {
                 Self::DcOp(_)
                 | Self::PoleZero { .. }
                 | Self::SensitivityStudy { .. }
                 | Self::TransferFunction { .. }
                 | Self::DcMismatch { .. } => self.measurement(key),
+                Self::Fft { .. } => self.measurement(key),
+                Self::Ac { waveforms, .. } => named_value(waveforms, key)
+                    .filter(|waveform| !waveform.is_complex && waveform.y_values.len() == 1)
+                    .and_then(|waveform| waveform.y_values.first().copied()),
                 _ => None,
             }
         } else if mode.eq_ignore_ascii_case("last") {
@@ -270,7 +309,28 @@ impl SimulationResult {
             SimulationResult::MeasurementsOnly { measurements } => measurements.get(key).copied(),
             // The figures a recorded spectrum reports are analysis-native
             // evidence on its payload, not measurements of a waveform.
-            SimulationResult::Fft { .. } => None,
+            SimulationResult::Fft { spectrum, .. } => {
+                if !spectrum.evidence.status.is_complete() {
+                    return None;
+                }
+                let key = key.to_ascii_lowercase();
+                if key == "fft.dc" {
+                    return spectrum.real.first().copied();
+                }
+                let metrics = spectrum.evidence.metrics.as_ref()?;
+                match key.as_str() {
+                    "fft.fundamental_magnitude" => Some(metrics.fundamental_magnitude),
+                    "fft.thd_ratio" => Some(metrics.thd_ratio),
+                    "fft.thd_db" => Some(metrics.thd_db),
+                    "fft.sndr_db" => Some(metrics.sndr_db),
+                    "fft.enob_bits" => Some(metrics.enob_bits),
+                    "fft.snr_db" => Some(metrics.snr_db),
+                    "fft.sfdr_db" => Some(metrics.sfdr_db),
+                    "fft.sfdr_spur_frequency_hz" => metrics.sfdr_spur_frequency_hz,
+                    _ => None,
+                }
+                .filter(|value| value.is_finite())
+            }
         }
     }
 
@@ -765,4 +825,26 @@ mod transfer_function_tests {
         assert_eq!(result.measurement("normalized:R1"), None);
         assert!(result.measurements().is_empty());
     }
+}
+
+/// Explicit zero-based retained spectral bin, with no implicit complex reduction.
+pub(crate) fn parse_study_bin(key: &str) -> Result<(usize, &str, Option<&str>), String> {
+    let mut parts = key.splitn(3, ':');
+    let index = parts
+        .next()
+        .unwrap_or_default()
+        .parse::<usize>()
+        .map_err(|_| "Spectral bin index must be a nonnegative integer")?;
+    let quantity = parts.next().unwrap_or_default();
+    if !["real", "imag", "magnitude", "phase"]
+        .iter()
+        .any(|name| quantity.eq_ignore_ascii_case(name))
+    {
+        return Err("Spectral quantity must be real, imag, magnitude, or phase (degrees)".into());
+    }
+    let signal = parts.next();
+    if signal.is_some_and(|name| name.trim().is_empty()) {
+        return Err("Spectral signal name is empty".into());
+    }
+    Ok((index, quantity, signal))
 }
