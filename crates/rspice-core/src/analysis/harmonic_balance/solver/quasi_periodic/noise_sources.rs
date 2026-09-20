@@ -172,6 +172,86 @@ impl HbSolver {
         abort_if_requested(abort)?;
         Ok(sources)
     }
+    /// Visit native physical probes on every independent phase. The callback
+    /// receives the remaining value budget after the live real-orbit workspace.
+    pub(crate) fn visit_quasi_periodic_native_bjt_samples_with_abort(
+        &mut self,
+        grid: Arc<QuasiPeriodicGrid>,
+        orbit: &[Vec<Complex64>],
+        limits: &ResourceLimits,
+        abort: &dyn AbortSignal,
+        mut visit: impl FnMut(
+            usize,
+            usize,
+            &[crate::device::Bjt],
+            &[Value],
+            &ResourceLimits,
+        ) -> Result<(), Error>,
+    ) -> Result<(), Error> {
+        abort_if_requested(abort)?;
+        if self.native_bjts.is_empty() {
+            return Ok(());
+        }
+        self.validate_quasi_periodic_circuit()?;
+        if orbit.len() != self.unknowns() {
+            return Err(noise_error(
+                "native noise orbit differs from complete MNA basis",
+            ));
+        }
+        ResourceLimitError::ensure(
+            ResourceKind::MatrixUnknowns,
+            self.unknowns().saturating_mul(grid.len()),
+            limits.max_matrix_unknowns,
+        )?;
+        ResourceLimitError::ensure(
+            ResourceKind::AnalysisPoints,
+            grid.sample_count().saturating_mul(self.native_bjts.len()),
+            limits.max_analysis_points,
+        )?;
+        let resident = self
+            .unknowns()
+            .saturating_mul(
+                grid.len()
+                    .saturating_mul(2)
+                    .saturating_add(grid.sample_count())
+                    .saturating_add(1),
+            )
+            .saturating_add(grid.sample_count().saturating_mul(8));
+        budget(resident, limits)?;
+        let mut remaining = limits.clone();
+        remaining.max_result_values = limits
+            .max_result_values
+            .min(32_000_000)
+            .saturating_sub(resident);
+        let mut transform = QuasiPeriodicTransform::new_with_abort(grid.clone(), abort)?;
+        let waves = orbit
+            .iter()
+            .map(|row| transform.to_real_samples_with_abort(row, abort))
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut solution = vec![0.0; self.unknowns()];
+        for phase in 0..grid.sample_count() {
+            abort_if_requested(abort)?;
+            for (i, (value, wave)) in solution.iter_mut().zip(&waves).enumerate() {
+                if i.is_multiple_of(256) {
+                    abort_if_requested(abort)?;
+                }
+                *value = wave[phase];
+            }
+            for bjt in &mut self.native_bjts {
+                abort_if_requested(abort)?;
+                bjt.update_mna_static_probe(&solution);
+            }
+            visit(
+                phase,
+                grid.sample_count(),
+                &self.native_bjts,
+                &solution,
+                &remaining,
+            )?;
+        }
+        abort_if_requested(abort)?;
+        Ok(())
+    }
 }
 
 fn normalized_intensity(
