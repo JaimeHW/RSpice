@@ -58,18 +58,14 @@ impl OptimizerEngine {
         // Exploratory moves: try each coordinate direction
         for i in 0..self.variables.len() {
             let var = &self.variables[i];
-            let range = var.max - var.min;
-            let delta = range * self.step_size;
+            let delta = var.displacement(self.step_size);
 
             // Get current best value for this variable (may have been updated by previous coord)
             let current_val = *best_vars.get(&var.name).unwrap_or(&var.value);
 
             // Try positive direction
             let mut trial_plus = best_vars.clone();
-            trial_plus.insert(
-                var.name.clone(),
-                (current_val + delta).clamp(var.min, var.max),
-            );
+            trial_plus.insert(var.name.clone(), var.proposal(current_val + delta));
             let cost_plus = cost_fn(&trial_plus);
 
             if cost_plus < best_cost {
@@ -81,10 +77,7 @@ impl OptimizerEngine {
 
             // Try negative direction
             let mut trial_minus = best_vars.clone();
-            trial_minus.insert(
-                var.name.clone(),
-                (current_val - delta).clamp(var.min, var.max),
-            );
+            trial_minus.insert(var.name.clone(), var.proposal(current_val - delta));
             let cost_minus = cost_fn(&trial_minus);
 
             if cost_minus < best_cost {
@@ -127,9 +120,13 @@ impl OptimizerEngine {
         // Generate random neighbor
         let mut neighbor_vars = self.current_vars();
         for (i, var) in self.variables.iter().enumerate() {
-            let range = var.max - var.min;
-            let perturbation = (perturbations[i] - 0.5) * 2.0 * range * self.step_size;
-            let new_val = (var.value + perturbation).clamp(var.min, var.max);
+            let perturbation = if var.quantum.is_some() {
+                (perturbations[i] - 0.5) * 2.0 * var.displacement(self.step_size)
+            } else {
+                // Preserve the continuous search's arithmetic and seeded sequence.
+                (perturbations[i] - 0.5) * 2.0 * (var.max - var.min) * self.step_size
+            };
+            let new_val = var.proposal(var.value + perturbation);
             neighbor_vars.insert(var.name.clone(), new_val);
         }
 

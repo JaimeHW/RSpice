@@ -15,6 +15,8 @@ use std::collections::HashMap;
 
 mod algorithms;
 mod design_var;
+mod domain;
+pub use domain::OptimizationVariableDomain;
 mod engine_core;
 mod lifecycle;
 mod objective;

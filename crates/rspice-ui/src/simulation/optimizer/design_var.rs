@@ -25,6 +25,8 @@ pub struct DesignVar {
     pub max: f64,
     /// Hard constraint? (cannot exceed)
     pub hard: bool,
+    #[serde(default)]
+    pub quantum: Option<f64>,
 }
 
 impl DesignVar {
@@ -36,11 +38,28 @@ impl DesignVar {
             min,
             max,
             hard: true,
+            quantum: None,
         }
+    }
+
+    pub fn with_quantum(mut self, quantum: Option<f64>) -> Self {
+        self.quantum = quantum;
+        self
+    }
+
+    pub(super) fn proposal(&self, value: f64) -> f64 {
+        let value = value.clamp(self.min, self.max);
+        self.quantum.map_or(value, |quantum| {
+            (self.min + ((value - self.min) / quantum).round() * quantum).clamp(self.min, self.max)
+        })
+    }
+
+    pub(super) fn displacement(&self, fraction: f64) -> f64 {
+        ((self.max - self.min) * fraction).max(self.quantum.unwrap_or(0.0))
     }
 
     /// Update value with clamping
     pub fn update(&mut self, new_val: f64) {
-        self.value = new_val.clamp(self.min, self.max);
+        self.value = self.proposal(new_val);
     }
 }
