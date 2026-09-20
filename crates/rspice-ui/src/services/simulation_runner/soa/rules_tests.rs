@@ -193,3 +193,57 @@ fn soa_checks_grounded_devices_without_retaining_unrelated_voltage_columns() {
         assert_eq!(evaluation.device_id, "M1");
     }
 }
+
+#[test]
+fn soa_directional_overrides_preserve_the_other_default_side_and_explicit_bounds() {
+    let netlist = rspice_core::netlist::parse_netlist(
+        "limits\nM1 d g 0 0 NM\nM2 d g 0 0 NM\n.model NM NMOS LEVEL=1\n.end\n",
+    )
+    .unwrap();
+    let mut cfg = SoaRunConfig {
+        check_vds_max: false,
+        check_vbe_max: false,
+        check_vce_max: false,
+        rules: vec![rule(SoAParameter::VgsNegative, 0.0, &["M1"], &[])],
+        ..Default::default()
+    };
+    let resolved = rules::resolve(&netlist.elements, &cfg, &NoAbort).unwrap();
+    let limits = |name: &str, rows: &Vec<(usize, SoADefinition)>| {
+        rows.iter()
+            .find(|(index, _)| netlist.elements[*index].name == name)
+            .unwrap()
+            .1
+            .limits
+            .iter()
+            .map(|l| (l.parameter, l.max_value))
+            .collect::<std::collections::BTreeMap<_, _>>()
+    };
+    assert_eq!(
+        limits("M1", &resolved),
+        std::collections::BTreeMap::from([
+            (SoAParameter::VgsPositive, 1.8),
+            (SoAParameter::VgsNegative, 0.0),
+        ])
+    );
+    assert_eq!(
+        limits("M2", &resolved),
+        std::collections::BTreeMap::from([(SoAParameter::Vgs, 1.8)])
+    );
+    cfg.rules.push(rule(SoAParameter::Vgs, 3.0, &["M1"], &[]));
+    let resolved = rules::resolve(&netlist.elements, &cfg, &NoAbort).unwrap();
+    assert_eq!(
+        limits("M1", &resolved),
+        std::collections::BTreeMap::from([
+            (SoAParameter::Vgs, 3.0),
+            (SoAParameter::VgsNegative, 0.0),
+        ])
+    );
+    cfg.rules
+        .push(rule(SoAParameter::VgsNegative, 2.0, &[], &["NM"]));
+    assert!(
+        rules::resolve(&netlist.elements, &cfg, &NoAbort)
+            .unwrap_err()
+            .to_string()
+            .contains("overlapping")
+    );
+}

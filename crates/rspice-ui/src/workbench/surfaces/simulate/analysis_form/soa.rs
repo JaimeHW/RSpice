@@ -75,7 +75,11 @@ pub(super) fn fields(
     sub_header(ui, "Scoped terminal rules");
     field_note(
         ui,
-        "Extra rules override the same default limit within their scope. Empty device and model lists select all applicable devices; overlapping extra rules are rejected.",
+        "Extra rules override matching defaults within their scope. Positive/negative limits use authored terminal order and replace only that side of a default magnitude limit. Empty scope selects all applicable devices; repeated explicit constraints are rejected.",
+    );
+    field_note(
+        ui,
+        "Vgs = V(g) − V(s), Vds = V(d) − V(s), Vgd = V(g) − V(d); BJT voltages follow the same named-terminal order. Id/Ic are positive into drain/collector, including accepted transient displacement current. Enter a nonnegative magnitude for directional limits; zero forbids that polarity.",
     );
     let mut remove = None;
     for (index, rule) in setup.rules.iter_mut().enumerate() {
@@ -84,15 +88,15 @@ pub(super) fn fields(
             choice_row(
                 ui,
                 "Parameter",
-                &["Vgs", "Vds", "Vgd", "Vbe", "Vce", "Vbc", "Id", "Ic"],
+                &crate::simulation::dialog::soa::SoaRuleDraft::PARAMETER_LABELS,
                 &mut rule.parameter,
             );
             input_row(
                 ui,
-                if rule.parameter >= 6 {
-                    "Maximum |I| (A)"
+                if rule.is_current() {
+                    "Limit magnitude (A)"
                 } else {
-                    "Maximum |V| (V)"
+                    "Limit magnitude (V)"
                 },
                 &mut rule.max_value,
             );

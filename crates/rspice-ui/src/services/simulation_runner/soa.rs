@@ -224,13 +224,13 @@ pub fn run_soa_analysis_with_config_and_source_path_and_abort(
     for (index, definition) in &resolved {
         for limit in &definition.limits {
             if let Some(parameter) = rules::current_parameter(limit.parameter) {
-                netlist
-                    .saves
-                    .signals
-                    .push(rspice_core::netlist::SaveSignal::DeviceParam {
-                        device: flattened.elements[*index].name.clone(),
-                        param: parameter.into(),
-                    });
+                let signal = rspice_core::netlist::SaveSignal::DeviceParam {
+                    device: flattened.elements[*index].name.clone(),
+                    param: parameter.into(),
+                };
+                if !netlist.saves.signals.contains(&signal) {
+                    netlist.saves.signals.push(signal);
+                }
             }
         }
     }
@@ -261,6 +261,9 @@ pub fn run_soa_analysis_with_config_and_source_path_and_abort(
         let element = &flattened.elements[*element_index];
         for limit in &definition.limits {
             if let Some(parameter) = rules::current_parameter(limit.parameter) {
+                if currents.contains_key(&(*element_index, limit.parameter.base_parameter())) {
+                    continue;
+                }
                 ensure_not_aborted(abort)?;
                 let samples = result.try_device_op_waveform_named(&element.name, parameter)
                     .ok_or_else(|| ServiceRunError::Failure(format!(
@@ -284,7 +287,7 @@ pub fn run_soa_analysis_with_config_and_source_path_and_abort(
                     }
                     values.push(sample);
                 }
-                currents.insert((*element_index, limit.parameter), values);
+                currents.insert((*element_index, limit.parameter.base_parameter()), values);
             }
         }
     }
@@ -332,7 +335,7 @@ pub fn run_soa_analysis_with_config_and_source_path_and_abort(
                             - sample_node_waveform(&node_waveforms, &element.nodes[reference], idx)?
                     } else {
                         currents
-                            .get(&(*element_index, limit.parameter))
+                            .get(&(*element_index, limit.parameter.base_parameter()))
                             .and_then(|trace| trace.get(idx + first))
                             .copied()
                             .ok_or_else(|| {
@@ -342,7 +345,14 @@ pub fn run_soa_analysis_with_config_and_source_path_and_abort(
                                 ))
                             })?
                     };
-                device_values.insert(limit.parameter, value.abs());
+                if !value.is_finite() {
+                    return Err(ServiceRunError::Failure(format!(
+                        "SOA {}({}) is non-finite",
+                        limit.parameter.stress_code(),
+                        element.name
+                    )));
+                }
+                device_values.insert(limit.parameter, limit.parameter.measured_stress(value));
             }
             values.insert(element.name.clone(), device_values);
         }

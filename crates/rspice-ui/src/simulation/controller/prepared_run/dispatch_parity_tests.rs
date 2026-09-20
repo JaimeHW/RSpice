@@ -664,3 +664,154 @@ fn reliability_mission_plan_prepares_and_dispatches_its_calibrated_request() {
     };
     assert_eq!(response, &expected);
 }
+
+#[test]
+fn soa_directional_limits_survive_studio_preparation_worker_requests_and_saved_results() {
+    use crate::services::{safety::SoAParameter, simulation_runner::SoaRuleConfig};
+    use crate::simulation::dialog::soa::{SoaConfig, SoaDialogState};
+    use crate::simulation::plan::AnalysisDraft;
+    use crate::simulation::runner::worker_contract::{WorkerAnalysisSpec, WorkerSoAParameter};
+    let mut config = SoaConfig {
+        stop_time: 1e-9,
+        step_time: 1e-10,
+        check_vgs_max: false,
+        check_vds_max: false,
+        check_vbe_max: false,
+        check_vce_max: false,
+        ..Default::default()
+    };
+    let parameters = [
+        SoAParameter::Vgs,
+        SoAParameter::Vds,
+        SoAParameter::Vgd,
+        SoAParameter::Vbe,
+        SoAParameter::Vce,
+        SoAParameter::Vbc,
+        SoAParameter::Id,
+        SoAParameter::Ic,
+    ];
+    for base in parameters {
+        let (positive, negative) = base.directional_pair().unwrap();
+        for parameter in [base, positive, negative] {
+            config.rules.push(SoaRuleConfig {
+                parameter,
+                max_value: if parameter.polarity().is_some() {
+                    0.0
+                } else {
+                    10.0
+                },
+                devices: vec![],
+                models: vec![],
+            });
+            let wire = WorkerSoAParameter::from(parameter);
+            let wire: WorkerSoAParameter =
+                serde_json::from_str(&serde_json::to_string(&wire).unwrap()).unwrap();
+            assert_eq!(SoAParameter::from(wire), parameter);
+        }
+    }
+    let draft = SoaDialogState::from_config(&config);
+    assert_eq!(draft.to_config().unwrap(), config);
+    let mut state = preflight_ready_state();
+    let id = only(&mut state, &[AnalysisKind::Soa])[0];
+    plan_mut(&mut state)
+        .edit(id, |body| {
+            *body = AnalysisDraft::Soa(draft);
+        })
+        .unwrap();
+    let queue = compiled_queue(&state).expect("directional Studio rules prepare");
+    let mut declaration = queue[0].queued_analysis().clone();
+    let wire = WorkerAnalysisSpec::try_from(&declaration.spec).unwrap();
+    let wire: WorkerAnalysisSpec =
+        serde_json::from_str(&serde_json::to_string(&wire).unwrap()).unwrap();
+    let restored = AnalysisSpec::from(wire);
+    assert_eq!(restored, declaration.spec);
+    declaration.spec = restored;
+    // Both transistor polarities are driven at known signed terminal voltages.
+    // Conduction flows into N-device drain/collector and out of P devices.
+    let deck = crate::services::simulation_runner::splice_before_terminal_end_card(
+        "directional limits\nVd d 0 1\nVg g 0 2\nVs s 0 2\nVpg pg 0 0\nVpd pd 0 1\nVc c 0 1.5\nVb b 0 0.65\nVpc pc 0 0.5\nVpb pb 0 1.35\nMN d g 0 0 NM W=10u L=1u\nMP pd pg s s PM W=10u L=1u\nQN c b 0 NPN\nQP pc pb s PNP\n.model NM NMOS LEVEL=1 VTO=1 KP=1m\n.model PM PMOS LEVEL=1 VTO=-1 KP=1m\n.model NPN NPN IS=1e-14 BF=100\n.model PNP PNP IS=1e-14 BF=100\n.end\n",
+        &declaration.analysis_line,
+    );
+    rspice_core::netlist::parse_netlist(&deck).expect("the plan statement remains parseable");
+    let run = crate::simulation::runner::pvt_point_evidence::run_declaration(
+        &deck,
+        "Directional SOA",
+        declaration,
+        27.0,
+        SavePolicy::RetainEngineProducedResults,
+        &[],
+    )
+    .unwrap();
+    let retained = &run.analyses[0];
+    assert!(retained.success, "{:?}", retained.error_message);
+    retained.validate_retained_evidence().unwrap();
+    let Some(crate::state::AnalysisResultPayload::Soa { evaluations, .. }) =
+        &retained.result_payload
+    else {
+        panic!("SOA evidence");
+    };
+    assert_eq!(evaluations.len(), 48);
+    let trace = |name: &str| {
+        &retained
+            .waveforms
+            .iter()
+            .find(|w| w.name == name)
+            .unwrap()
+            .y
+    };
+    for (device, bases) in [
+        ("MN", &parameters[..3]),
+        ("MP", &parameters[..3]),
+        ("QN", &parameters[3..6]),
+        ("QP", &parameters[3..6]),
+    ] {
+        for base in bases {
+            let magnitude = trace(&format!("SOA_{}({device})", base.stress_code()));
+            let positive = trace(&format!("SOA_{}_POS({device})", base.stress_code()));
+            let negative = trace(&format!("SOA_{}_NEG({device})", base.stress_code()));
+            for i in 0..magnitude.len() {
+                assert_eq!(positive[i] + negative[i], magnitude[i]);
+                assert!(positive[i] == 0.0 || negative[i] == 0.0);
+            }
+        }
+    }
+    for (device, code, sign) in [
+        ("MN", "ID", "POS"),
+        ("MP", "ID", "NEG"),
+        ("QN", "IC", "POS"),
+        ("QP", "IC", "NEG"),
+    ] {
+        let conducting = trace(&format!("SOA_{code}_{sign}({device})"));
+        assert!(
+            conducting.iter().all(|v| *v > 1e-5),
+            "{device}: {conducting:?}"
+        );
+        let opposite = if sign == "POS" { "NEG" } else { "POS" };
+        assert!(
+            trace(&format!("SOA_{code}_{opposite}({device})"))
+                .iter()
+                .all(|v| *v == 0.0)
+        );
+    }
+    for (name, expected) in [
+        ("SOA_VGS_POS(MN)", 2.0),
+        ("SOA_VGS_NEG(MP)", 2.0),
+        ("SOA_VBC_NEG(QN)", 0.85),
+        ("SOA_VBC_POS(QP)", 0.85),
+    ] {
+        assert!(trace(name).iter().all(|v| (*v - expected).abs() < 1e-12));
+    }
+    let mut simulation = crate::state::SimulationState::default();
+    simulation.runs.push(run.clone());
+    simulation.next_run_id = 2;
+    simulation.active_run_idx = Some(0);
+    simulation.active_analysis_idx = Some(0);
+    let saved = crate::io::project_io::ProjectSimulationResults::from_state(&simulation);
+    let decoded: crate::io::project_io::ProjectSimulationResults =
+        serde_json::from_str(&serde_json::to_string(&saved).unwrap()).unwrap();
+    let reloaded = decoded.into_simulation_state().unwrap();
+    assert_eq!(
+        reloaded.runs[0].analyses[0].result_payload,
+        retained.result_payload
+    );
+}

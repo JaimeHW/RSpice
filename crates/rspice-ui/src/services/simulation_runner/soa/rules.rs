@@ -17,7 +17,7 @@ pub struct SoaRuleConfig {
 impl SoaRuleConfig {
     pub fn validate(&self) -> Result<(), String> {
         if !matches!(
-            self.parameter,
+            self.parameter.base_parameter(),
             SoAParameter::Vgs
                 | SoAParameter::Vds
                 | SoAParameter::Vgd
@@ -28,11 +28,14 @@ impl SoaRuleConfig {
                 | SoAParameter::Ic
         ) {
             return Err(
-                "SOA terminal rules support Vgs, Vds, Vgd, Vbe, Vce, Vbc, Id and Ic".into(),
+                "SOA terminal rules support magnitudes and positive/negative limits for Vgs, Vds, Vgd, Vbe, Vce, Vbc, Id and Ic".into(),
             );
         }
-        if !self.max_value.is_finite() || self.max_value <= 0.0 {
-            return Err("SOA rule limit must be finite and positive".into());
+        if !self.max_value.is_finite()
+            || self.max_value < 0.0
+            || (self.max_value == 0.0 && self.parameter.polarity().is_none())
+        {
+            return Err("SOA rule limit must be finite and positive (zero is allowed for directional rules)".into());
         }
         self.scope().validate(1.0)
     }
@@ -62,6 +65,7 @@ impl SoaRuleConfig {
 }
 
 pub(super) fn applicable(element: &Element, parameter: SoAParameter) -> bool {
+    let parameter = parameter.base_parameter();
     match element.kind {
         ElementKind::Mosfet { .. } | ElementKind::Jfet { .. } | ElementKind::Mesfet { .. } => {
             matches!(
@@ -117,6 +121,24 @@ pub(super) fn resolve(
                 limits.insert(parameter, max_value);
             }
         }
+        // A directional override replaces that half of an inherited symmetric
+        // default; the other half retains its default protection. An explicit
+        // magnitude rule remains an independently authored constraint.
+        for rule in &config.rules {
+            let base = rule.parameter.base_parameter();
+            if rule.matches(element)
+                && rule.parameter.polarity().is_some()
+                && !config
+                    .rules
+                    .iter()
+                    .any(|r| r.matches(element) && r.parameter == base)
+                && let Some(maximum) = limits.remove(&base)
+                && let Some((positive, negative)) = base.directional_pair()
+            {
+                limits.insert(positive, maximum);
+                limits.insert(negative, maximum);
+            }
+        }
         let mut overridden = std::collections::HashSet::new();
         for rule in &config.rules {
             if rule.matches(element) {
@@ -136,15 +158,23 @@ pub(super) fn resolve(
                 definition.add_limit(SoALimit {
                     parameter,
                     max_value,
-                    unit: if matches!(parameter, SoAParameter::Id | SoAParameter::Ic) {
+                    unit: if matches!(
+                        parameter.base_parameter(),
+                        SoAParameter::Id | SoAParameter::Ic
+                    ) {
                         "A"
                     } else {
                         "V"
                     }
                     .into(),
                     description: format!(
-                        "Maximum {} magnitude at authored terminals",
-                        parameter.stress_code()
+                        "Maximum {} {} at authored terminals",
+                        parameter.base_parameter().stress_code(),
+                        match parameter.polarity() {
+                            Some(true) => "positive part",
+                            Some(false) => "negative part magnitude",
+                            None => "magnitude",
+                        }
                     ),
                 });
             }
@@ -156,7 +186,7 @@ pub(super) fn resolve(
 }
 
 pub(super) fn current_parameter(parameter: SoAParameter) -> Option<&'static str> {
-    match parameter {
+    match parameter.base_parameter() {
         SoAParameter::Id => Some("id"),
         SoAParameter::Ic => Some("ic"),
         _ => None,
@@ -164,7 +194,7 @@ pub(super) fn current_parameter(parameter: SoAParameter) -> Option<&'static str>
 }
 
 pub(super) fn terminal_pair(parameter: SoAParameter) -> Option<(usize, usize)> {
-    match parameter {
+    match parameter.base_parameter() {
         SoAParameter::Vgs | SoAParameter::Vbe => Some((1, 2)),
         SoAParameter::Vds | SoAParameter::Vce => Some((0, 2)),
         SoAParameter::Vgd | SoAParameter::Vbc => Some((1, 0)),

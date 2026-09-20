@@ -4,7 +4,7 @@ use super::*;
 use crate::services::safety::SoAParameter;
 use crate::services::simulation_runner::SoaRuleConfig;
 
-const PARAMETERS: [SoAParameter; 8] = [
+const PARAMETERS: [SoAParameter; 24] = [
     SoAParameter::Vgs,
     SoAParameter::Vds,
     SoAParameter::Vgd,
@@ -13,6 +13,22 @@ const PARAMETERS: [SoAParameter; 8] = [
     SoAParameter::Vbc,
     SoAParameter::Id,
     SoAParameter::Ic,
+    SoAParameter::VgsPositive,
+    SoAParameter::VgsNegative,
+    SoAParameter::VdsPositive,
+    SoAParameter::VdsNegative,
+    SoAParameter::VgdPositive,
+    SoAParameter::VgdNegative,
+    SoAParameter::VbePositive,
+    SoAParameter::VbeNegative,
+    SoAParameter::VcePositive,
+    SoAParameter::VceNegative,
+    SoAParameter::VbcPositive,
+    SoAParameter::VbcNegative,
+    SoAParameter::IdPositive,
+    SoAParameter::IdNegative,
+    SoAParameter::IcPositive,
+    SoAParameter::IcNegative,
 ];
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -36,6 +52,38 @@ impl Default for SoaRuleDraft {
 }
 
 impl SoaRuleDraft {
+    pub const PARAMETER_LABELS: [&'static str; 24] = [
+        "Vgs",
+        "Vds",
+        "Vgd",
+        "Vbe",
+        "Vce",
+        "Vbc",
+        "Id",
+        "Ic",
+        "Vgs positive",
+        "Vgs negative",
+        "Vds positive",
+        "Vds negative",
+        "Vgd positive",
+        "Vgd negative",
+        "Vbe positive",
+        "Vbe negative",
+        "Vce positive",
+        "Vce negative",
+        "Vbc positive",
+        "Vbc negative",
+        "Id positive",
+        "Id negative",
+        "Ic positive",
+        "Ic negative",
+    ];
+    pub fn is_current(&self) -> bool {
+        PARAMETERS
+            .get(self.parameter)
+            .is_some_and(|p| matches!(p.base_parameter(), SoAParameter::Id | SoAParameter::Ic))
+    }
+
     pub(super) fn from_config(config: &SoaRuleConfig) -> Self {
         Self {
             parameter: PARAMETERS
