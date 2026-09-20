@@ -599,7 +599,9 @@ impl Engine {
         self.ensure_analysis_points(sideband_count)?;
 
         let span = (max_sideband as usize).saturating_mul(2);
-        let op_harmonics = span.max(8);
+        // Eight harmonics is a default for a carrier solved here, not a
+        // minimum imposed on an explicitly configured retained carrier.
+        let op_harmonics = span.max(if operating_point.is_some() { 1 } else { 8 });
         if let Some(operating_point) = &operating_point
             && op_harmonics
                 > match operating_point {

@@ -81,7 +81,11 @@ impl Engine {
                 .max(i64::from(config.sideband_max).unsigned_abs()),
         )
         .unwrap_or(usize::MAX);
-        let op_harmonics = span.max(extreme).max(8);
+        // Eight harmonics is a default for a carrier solved here, not a
+        // minimum imposed on an explicitly configured retained carrier.
+        let op_harmonics = span
+            .max(extreme)
+            .max(if operating_point.is_some() { 1 } else { 8 });
         self.ensure_analysis_points(op_harmonics.saturating_add(1))?;
         if let Some(operating_point) = &operating_point
             && op_harmonics
