@@ -31,6 +31,7 @@ mod mutual_inductor;
 mod output_symbols;
 pub mod param_scope;
 mod parser;
+pub use parser::simulation_options_with_overrides;
 mod polynomial;
 mod qpac_card;
 mod qpnoise_card;

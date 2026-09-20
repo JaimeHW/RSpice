@@ -69,6 +69,56 @@ pub(crate) fn control_options(
     max_analysis_points: usize,
     abort: &dyn AbortSignal,
 ) -> Result<SimulationOptions, ParseWithAbortError> {
+    options_overlay(
+        arguments,
+        line,
+        params,
+        current,
+        max_analysis_points,
+        true,
+        abort,
+    )
+}
+
+/// Apply one `.OPTIONS` argument list to a materialized circuit's options.
+/// Expressions use the supplied parameter context; devices and statistical
+/// realizations are not reparsed. Unsupported or malformed assignments fail
+/// atomically. The argument list excludes the `.OPTIONS` keyword and newline.
+pub fn simulation_options_with_overrides(
+    arguments: &str,
+    params: &ParamContext,
+    current: &SimulationOptions,
+    max_analysis_points: usize,
+    abort: &dyn AbortSignal,
+) -> Result<SimulationOptions, ParseWithAbortError> {
+    ensure_parse_not_aborted(abort)?;
+    if arguments.contains(['\n', '\r']) {
+        return Err(ParseError::Syntax {
+            line: 1,
+            message: "An options override must contain one argument list".into(),
+        }
+        .into());
+    }
+    options_overlay(
+        arguments,
+        1,
+        params,
+        current,
+        max_analysis_points,
+        false,
+        abort,
+    )
+}
+
+fn options_overlay(
+    arguments: &str,
+    line: usize,
+    params: &ParamContext,
+    current: &SimulationOptions,
+    max_analysis_points: usize,
+    control_command: bool,
+    abort: &dyn AbortSignal,
+) -> Result<SimulationOptions, ParseWithAbortError> {
     ensure_parse_not_aborted(abort)?;
     let mut stream = TokenStream::new(tokenize(arguments).map_err(|error| ParseError::Syntax {
         line,
@@ -85,10 +135,10 @@ pub(crate) fn control_options(
         &mut HashSet::new(),
         &mut diagnostics,
         None,
-        true,
+        control_command,
     )?;
     ensure_parse_not_aborted(abort)?;
-    // A control command has no parser-diagnostic publication channel. Refuse
+    // An options overlay has no parser-diagnostic publication channel. Refuse
     // unsupported settings instead of silently discarding their diagnostics.
     if let Some(diagnostic) = diagnostics.first() {
         return Err(ParseError::Syntax {
