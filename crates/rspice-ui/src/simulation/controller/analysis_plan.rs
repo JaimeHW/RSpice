@@ -574,6 +574,9 @@ impl SimulationController {
                 Some(AnalysisKind::HarmonicBalance)
             }
             AnalysisSpec::Psp { .. } | AnalysisSpec::Pstb => Some(AnalysisKind::Pss),
+            AnalysisSpec::Qpac { .. }
+            | AnalysisSpec::Qpxf { .. }
+            | AnalysisSpec::Qpnoise { .. } => Some(AnalysisKind::Qpss),
             AnalysisSpec::Pac | AnalysisSpec::Pxf | AnalysisSpec::Pnoise => {
                 let carriers = base
                     .dependencies()
@@ -624,7 +627,10 @@ impl SimulationController {
             (
                 if matches!(producer_spec, AnalysisSpec::Pss { .. }) {
                     self.compile_study_pss(state, plan, producer, &producer_spec)?
-                } else if matches!(producer_spec, AnalysisSpec::HarmonicBalance { .. }) {
+                } else if matches!(
+                    producer_spec,
+                    AnalysisSpec::HarmonicBalance { .. } | AnalysisSpec::Qpss { .. }
+                ) {
                     crate::simulation::runner::study::StudyAnalysis::Native(producer_spec.clone())
                 } else {
                     self.analysis_spec_to_config(&producer_state, &producer_spec)?
@@ -645,7 +651,10 @@ impl SimulationController {
             )
         } else if matches!(spec, AnalysisSpec::Pss { .. }) {
             (self.compile_study_pss(state, plan, base, &spec)?, None)
-        } else if matches!(spec, AnalysisSpec::HarmonicBalance { .. }) {
+        } else if matches!(
+            spec,
+            AnalysisSpec::HarmonicBalance { .. } | AnalysisSpec::Qpss { .. }
+        ) {
             (
                 crate::simulation::runner::study::StudyAnalysis::Native(spec.clone()),
                 None,
@@ -802,6 +811,176 @@ fn invalid_saved_output_reports(
 mod tests {
     use super::*;
     use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
+
+    #[test]
+    fn qp_study_freezes_the_exact_producer_and_complete_consumer_controls() {
+        use crate::simulation::dialog::{McDialogState, mc::McConfig};
+        use crate::simulation::plan::{QpnoiseOutputDraft, QpssDraft};
+        use crate::simulation::runner::study::StudyAnalysis;
+        for kind in [
+            AnalysisKind::Qpss,
+            AnalysisKind::Qpac,
+            AnalysisKind::Qpxf,
+            AnalysisKind::Qpnoise,
+        ] {
+            let mut state = AppState::default();
+            let plan = state.sim_setup.analysis_plan.as_mut().unwrap();
+            let (op, _) = plan.insert(AnalysisKind::OperatingPoint).unwrap();
+            let (producer, _) = plan.insert(AnalysisKind::Qpss).unwrap();
+            plan.bind_dependency(producer, AnalysisKind::OperatingPoint, op)
+                .unwrap();
+            plan.edit(producer, |draft| {
+                *draft = AnalysisDraft::Qpss(QpssDraft {
+                    tones: "1k,1414.2135623730951".into(),
+                    harmonics: "1,1".into(),
+                    relative_tolerance: "1e-8".into(),
+                    max_backtracks: "7".into(),
+                    collocation_points: "8,8".into(),
+                    source_tones: "V1=1;I1=2".into(),
+                    dc_initialization: true,
+                    ..Default::default()
+                })
+            })
+            .unwrap();
+            let consumer = if kind == AnalysisKind::Qpss {
+                producer
+            } else {
+                let (id, _) = plan.insert(kind).unwrap();
+                plan.bind_dependency(id, AnalysisKind::Qpss, producer)
+                    .unwrap();
+                plan.edit(id, |draft| match draft {
+                    AnalysisDraft::Qpac(d) => {
+                        d.explicit_offsets = "100,300,700".into();
+                        d.magnitude = ".002".into();
+                        d.phase_degrees = "73".into();
+                        d.input_lattice = "1,-1".into();
+                        d.output_lattice = "1,-1".into();
+                    }
+                    AnalysisDraft::Qpxf(d) => {
+                        d.explicit_frequencies = "-100,0,117".into();
+                        d.group_delay = true;
+                        d.input_lattice = "1,-1".into();
+                        d.output_lattice = "1,-1".into();
+                    }
+                    AnalysisDraft::Qpnoise(d) => {
+                        d.explicit_frequencies = "100,300,700".into();
+                        d.band_start = "150".into();
+                        d.band_stop = "600".into();
+                        d.additional_outputs = vec![QpnoiseOutputDraft {
+                            current: true,
+                            branch: "V1".into(),
+                            ..Default::default()
+                        }];
+                    }
+                    _ => unreachable!(),
+                })
+                .unwrap();
+                id
+            };
+            let (mc, _) = plan.insert(AnalysisKind::MonteCarlo).unwrap();
+            plan.edit(mc, |draft| {
+                *draft = AnalysisDraft::MonteCarlo(McDialogState::from_config(&McConfig {
+                    base_analysis: Some(consumer),
+                    measurements: vec![
+                        if kind == AnalysisKind::Qpss {
+                            "tuple:1,0:magnitude:V(out)"
+                        } else {
+                            "bin:0:real:result"
+                        }
+                        .into(),
+                    ],
+                    ..Default::default()
+                }))
+            })
+            .unwrap();
+            let frozen = plan.freeze().unwrap();
+            plan.edit(producer, |draft| {
+                let AnalysisDraft::Qpss(d) = draft else {
+                    unreachable!()
+                };
+                d.relative_tolerance = ".001".into();
+            })
+            .unwrap();
+            let sealed = state
+                .model_library_manager
+                .seal_execution_sources()
+                .unwrap();
+            let queue = SimulationController::new()
+                .build_queue_from_plan(&state, &frozen, &sealed)
+                .unwrap();
+            let task = queue.iter().find(|task| task.instance_id() == mc).unwrap();
+            let base = task
+                .queued_analysis()
+                .spec_options
+                .study_base
+                .as_ref()
+                .unwrap();
+            let StudyAnalysis::Native(spec) = &base.analysis else {
+                panic!("native")
+            };
+            assert_eq!(
+                *spec,
+                queue
+                    .iter()
+                    .find(|task| task.instance_id() == producer)
+                    .unwrap()
+                    .queued_analysis()
+                    .spec
+            );
+            let AnalysisSpec::Qpss {
+                relative_tolerance,
+                controls,
+                ..
+            } = spec
+            else {
+                panic!("QPSS")
+            };
+            assert_eq!(*relative_tolerance, 1e-8);
+            assert_eq!(controls.max_backtracks, 7);
+            if kind == AnalysisKind::Qpss {
+                assert!(base.postprocess.is_none());
+            } else {
+                let post = base.postprocess.as_ref().unwrap();
+                assert_eq!(post.producer_instance_id, producer);
+                assert_eq!(post.producer_source_revision, frozen.revision());
+                assert_eq!(
+                    post.request,
+                    queue
+                        .iter()
+                        .find(|task| task.instance_id() == consumer)
+                        .unwrap()
+                        .queued_analysis()
+                        .spec
+                );
+            }
+            for change_producer in [true, false] {
+                let mut changed = task.queued_analysis().clone();
+                let base = changed.spec_options.study_base.as_mut().unwrap();
+                if change_producer || base.postprocess.is_none() {
+                    let StudyAnalysis::Native(AnalysisSpec::Qpss { controls, .. }) =
+                        &mut base.analysis
+                    else {
+                        unreachable!()
+                    };
+                    controls.max_backtracks += 1;
+                } else {
+                    match &mut base.postprocess.as_mut().unwrap().request {
+                        AnalysisSpec::Qpac { controls, .. } => controls.phase_degrees += 1.0,
+                        AnalysisSpec::Qpxf { group_delay, .. } => *group_delay = false,
+                        AnalysisSpec::Qpnoise { controls, .. } => {
+                            controls.integration_band = Some([200.0, 500.0])
+                        }
+                        _ => unreachable!(),
+                    }
+                }
+                assert_ne!(
+                    task.config_digest(),
+                    PreparedTask::new(mc, task.source_revision(), vec![], "MC", changed)
+                        .config_digest()
+                );
+            }
+        }
+    }
 
     #[test]
     fn periodic_rf_study_freezes_all_consumer_options_and_exact_pss_op_chain() {

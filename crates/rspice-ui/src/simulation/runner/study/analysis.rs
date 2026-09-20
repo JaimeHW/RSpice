@@ -26,6 +26,10 @@ impl StudyAnalysis {
             Self::Native(spec @ AnalysisSpec::HarmonicBalance { .. }) => {
                 spec.validate().map_err(|error| vec![error])
             }
+            Self::Native(spec @ AnalysisSpec::Qpss { .. }) => spec
+                .driven_qpss_config()
+                .map(|_| ())
+                .map_err(|error| vec![error]),
             Self::Pss(config) => config.validate().map_err(|error| vec![error]),
             Self::Native(_) => Err(vec!["Unsupported native study analysis".into()]),
         }

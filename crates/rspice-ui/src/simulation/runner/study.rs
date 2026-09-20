@@ -66,6 +66,10 @@ pub(crate) fn supports_kind(kind: AnalysisKind) -> bool {
             | AnalysisKind::Pnoise
             | AnalysisKind::Pstb
             | AnalysisKind::Psp
+            | AnalysisKind::Qpss
+            | AnalysisKind::Qpac
+            | AnalysisKind::Qpxf
+            | AnalysisKind::Qpnoise
     )
 }
 
@@ -78,16 +82,19 @@ pub(crate) fn validate_measurements(names: &[String]) -> Result<(), String> {
         let (mode, key) = name.split_once(':').unwrap_or(("meas", name));
         if key.trim().is_empty()
             || name.chars().any(char::is_control)
-            || !["meas", "scalar", "last", "bin"]
+            || !["meas", "scalar", "last", "bin", "tuple"]
                 .iter()
                 .any(|value| mode.eq_ignore_ascii_case(value))
         {
             return Err(format!(
-                "Invalid study measurement {name:?}; use a .MEAS name, scalar:name, last:signal, or bin:index:quantity[:signal]"
+                "Invalid study measurement {name:?}; use a .MEAS name, scalar:name, last:signal, bin:index:quantity[:signal], or tuple:k1,k2:quantity:signal"
             ));
         }
         if mode.eq_ignore_ascii_case("bin") {
             crate::simulation::results::parse_study_bin(key)?;
+        }
+        if mode.eq_ignore_ascii_case("tuple") {
+            crate::simulation::results::parse_study_tuple(key)?;
         }
         if !seen.insert(name.to_ascii_lowercase()) {
             return Err(format!("Repeated study measurement {name:?}"));
@@ -827,6 +834,12 @@ fn validate_base_measurements(
             .validate_measurements(&base.measurements)
             .map_err(SimulationError::InvalidConfig);
     }
+    if let StudyAnalysis::Native(spec @ crate::simulation::multi_run::AnalysisSpec::Qpss { .. }) =
+        &base.analysis
+    {
+        return validate_qpss_measurements(spec, &base.measurements)
+            .map_err(SimulationError::InvalidConfig);
+    }
     let Some(analysis) = base.analysis.as_basic() else {
         if base.measurements.iter().any(|request| {
             !request
@@ -848,6 +861,11 @@ fn validate_base_measurements(
     };
     for request in &base.measurements {
         let (mode, name) = request.split_once(':').unwrap_or(("meas", request));
+        if mode.eq_ignore_ascii_case("tuple") {
+            return Err(SimulationError::InvalidConfig(
+                "Lattice observations require a QPSS base".into(),
+            ));
+        }
         if mode.eq_ignore_ascii_case("meas")
             && !circuit.measurements.iter().any(|measurement| {
                 measurement.name.eq_ignore_ascii_case(name)
@@ -933,3 +951,40 @@ fn analysis_for_environment(
     }
     analysis
 }
+
+fn validate_qpss_measurements(
+    spec: &crate::simulation::multi_run::AnalysisSpec,
+    measurements: &[String],
+) -> Result<(), String> {
+    let config = spec.driven_qpss_config()?;
+    let grid = rspice_core::analysis::quasi_periodic::QuasiPeriodicGrid::new_with_abort(
+        config.grid,
+        &rspice_core::ResourceLimits::default(),
+        &rspice_core::NoAbort,
+    )
+    .map_err(|error| error.to_string())?;
+    for request in measurements {
+        let (mode, key) = request.split_once(':').unwrap_or(("meas", request));
+        if mode.eq_ignore_ascii_case("tuple") {
+            let (tuple, _, _) = crate::simulation::results::parse_study_tuple(key)?;
+            if grid.index_of(&tuple).is_none() {
+                return Err(format!("QPSS does not retain lattice tuple {tuple:?}"));
+            }
+        } else if mode.eq_ignore_ascii_case("scalar") {
+            if !["qpss.iterations", "qpss.normalized_residual"]
+                .iter()
+                .any(|name| key.eq_ignore_ascii_case(name))
+            {
+                return Err(
+                    "QPSS scalar must be qpss.iterations or qpss.normalized_residual".into(),
+                );
+            }
+        } else if !mode.eq_ignore_ascii_case("bin") && !mode.eq_ignore_ascii_case("last") {
+            return Err("QPSS studies require tuple:k1,k2:quantity:signal, bin:index:quantity:signal, last:signal or scalar:qpss.iterations/normalized_residual".into());
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod quasi_periodic_tests;

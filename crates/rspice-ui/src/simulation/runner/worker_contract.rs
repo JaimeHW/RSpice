@@ -72,9 +72,9 @@ pub(crate) struct WorkerRequest {
     pub(in crate::simulation) stream_transient_samples: bool,
 }
 
-/// 22: PSS studies carry their exact configured OP producer.
+/// 24: QPSS/QPAC/QPXF/QPNOISE studies and explicit lattice observations.
 #[cfg(any(target_arch = "wasm32", test))]
-pub(crate) const WORKER_REQUEST_TRANSPORT_PROTOCOL: u8 = 23;
+pub(crate) const WORKER_REQUEST_TRANSPORT_PROTOCOL: u8 = 24;
 
 /// Browser-worker request split into compact metadata and transferable
 /// floating-point buffers. The embedded request deliberately carries empty

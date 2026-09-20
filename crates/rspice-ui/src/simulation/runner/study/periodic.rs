@@ -42,7 +42,10 @@ impl StudyPostprocess {
                         | AnalysisSpec::Fourier { .. }
                         | AnalysisSpec::Fft { .. }
                         | AnalysisSpec::Hbsp { .. }
-                        | AnalysisSpec::Hbnoise { .. },
+                        | AnalysisSpec::Hbnoise { .. }
+                        | AnalysisSpec::Qpac { .. }
+                        | AnalysisSpec::Qpxf { .. }
+                        | AnalysisSpec::Qpnoise { .. },
                     None
                 )
         );
@@ -66,6 +69,9 @@ impl StudyPostprocess {
                 | AnalysisSpec::Pnoise
                 | AnalysisSpec::Pstb
                 | AnalysisSpec::Psp { .. }
+                | AnalysisSpec::Qpac { .. }
+                | AnalysisSpec::Qpxf { .. }
+                | AnalysisSpec::Qpnoise { .. }
         )
     }
 
@@ -82,7 +88,9 @@ impl StudyPostprocess {
             StudyAnalysis::Pss(pss) => {
                 pss.run_with_circuit(engine, circuit, &self.producer_numeric_options, abort)?
             }
-            StudyAnalysis::Native(producer @ AnalysisSpec::HarmonicBalance { .. }) => {
+            StudyAnalysis::Native(
+                producer @ (AnalysisSpec::HarmonicBalance { .. } | AnalysisSpec::Qpss { .. }),
+            ) => {
                 let physical = super::pss::circuit_with_options(
                     circuit,
                     &self.producer_numeric_options,
@@ -97,11 +105,22 @@ impl StudyPostprocess {
             }
             _ => {
                 return Err(SimulationError::InvalidConfig(
-                    "Periodic study requires its configured PSS or HB producer".into(),
+                    "Periodic study requires its configured PSS, HB or QPSS producer".into(),
                 ));
             }
         };
         let consumer = super::pss::circuit_with_options(&physical, numeric_options, abort)?;
+        if let SimulationResult::Qpss {
+            operating_point, ..
+        } = &result
+        {
+            return super::super::spec::run_qp_study_consumer(
+                self.request.clone(),
+                &consumer,
+                operating_point,
+                abort,
+            );
+        }
         let carrier = match &result {
             SimulationResult::Transient {
                 periodic_state: Some(point),

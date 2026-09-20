@@ -38,6 +38,9 @@ impl StudyPostprocess {
                 | AnalysisSpec::Pnoise
                 | AnalysisSpec::Pstb
                 | AnalysisSpec::Psp { .. }
+                | AnalysisSpec::Qpac { .. }
+                | AnalysisSpec::Qpxf { .. }
+                | AnalysisSpec::Qpnoise { .. }
         ) {
             return Err(SimulationError::InvalidConfig(
                 "Study requires a configured spectral or periodic consumer".into(),
@@ -54,11 +57,13 @@ impl StudyPostprocess {
                 max_timestep: config.max_timestep,
                 uic: config.uic,
             },
-            StudyAnalysis::Native(spec @ AnalysisSpec::HarmonicBalance { .. }) => spec.clone(),
+            StudyAnalysis::Native(
+                spec @ (AnalysisSpec::HarmonicBalance { .. } | AnalysisSpec::Qpss { .. }),
+            ) => spec.clone(),
             StudyAnalysis::Pss(pss) => pss.request.clone(),
             _ => {
                 return Err(SimulationError::InvalidConfig(
-                    "Study requires its configured transient, PSS or HB producer".into(),
+                    "Study requires its configured transient, PSS, HB or QPSS producer".into(),
                 ));
             }
         };
@@ -92,6 +97,9 @@ impl StudyPostprocess {
                             | AnalysisSpec::Pnoise
                             | AnalysisSpec::Pstb
                             | AnalysisSpec::Psp { .. }
+                            | AnalysisSpec::Qpac { .. }
+                            | AnalysisSpec::Qpxf { .. }
+                            | AnalysisSpec::Qpnoise { .. }
                     ));
             if !valid {
                 return Err(SimulationError::InvalidConfig(format!(

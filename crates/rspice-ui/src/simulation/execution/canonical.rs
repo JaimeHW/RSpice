@@ -956,6 +956,9 @@ fn encode_spec_options(writer: &mut CanonicalWriter, options: &SpecExecutionOpti
                         | AnalysisSpec::Pnoise
                         | AnalysisSpec::Pstb
                         | AnalysisSpec::Psp { .. }
+                        | AnalysisSpec::Qpac { .. }
+                        | AnalysisSpec::Qpxf { .. }
+                        | AnalysisSpec::Qpnoise { .. }
                 ) {
                     "study-periodic-consumer/v1"
                 } else {

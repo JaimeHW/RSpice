@@ -1762,6 +1762,17 @@ pub(in crate::simulation::runner) fn run_native_study_on_materialized(
     circuit: &rspice_core::Netlist,
     abort: &dyn AbortSignal,
 ) -> Result<SimulationResult, SimulationError> {
+    if matches!(spec, AnalysisSpec::Qpss { .. }) {
+        let config = spec
+            .driven_qpss_config()
+            .map_err(SimulationError::InvalidConfig)?;
+        let data = super::run_abort_aware_service(abort, || {
+            svc_runner::run_qpss_analysis_on_materialized_with_abort(circuit, config, abort)
+        })?;
+        super::ensure_not_aborted(abort)?;
+        return SimulationResult::from_qpss_operating_point(data.operating_point)
+            .map_err(SimulationError::InvalidConfig);
+    }
     let config = hb_run_config(spec, abort)?;
     let data = super::run_abort_aware_service(abort, || {
         svc_runner::run_hb_analysis_on_materialized_with_abort(circuit, &config, abort)
@@ -1980,4 +1991,53 @@ pub(super) fn run_psp_study_consumer(
             )
         },
     )
+}
+
+pub(in crate::simulation::runner) fn run_qp_study_consumer(
+    spec: AnalysisSpec,
+    circuit: &rspice_core::Netlist,
+    point: &rspice_core::engine::QpssOperatingPoint,
+    abort: &dyn AbortSignal,
+) -> Result<SimulationResult, SimulationError> {
+    super::ensure_not_aborted(abort)?;
+    match spec {
+        spec @ AnalysisSpec::Qpac { .. } => {
+            let card = spec.qpac_card().map_err(SimulationError::InvalidConfig)?;
+            let response = super::run_abort_aware_service(abort, || {
+                svc_runner::run_qpac_analysis_from_qpss_on_materialized_with_abort(
+                    circuit, &card, point, abort,
+                )
+            })?;
+            super::ensure_not_aborted(abort)?;
+            SimulationResult::from_qpac_response(std::sync::Arc::new(response))
+                .map_err(SimulationError::InvalidConfig)
+        }
+        spec @ AnalysisSpec::Qpxf { .. } => {
+            let card = spec.qpxf_card().map_err(SimulationError::InvalidConfig)?;
+            let response = super::run_abort_aware_service(abort, || {
+                svc_runner::run_qpxf_analysis_from_qpss_on_materialized_with_abort(
+                    circuit, &card, point, abort,
+                )
+            })?;
+            super::ensure_not_aborted(abort)?;
+            SimulationResult::from_qpxf_response(std::sync::Arc::new(response))
+                .map_err(SimulationError::InvalidConfig)
+        }
+        spec @ AnalysisSpec::Qpnoise { .. } => {
+            let card = spec
+                .qpnoise_card()
+                .map_err(SimulationError::InvalidConfig)?;
+            let response = super::run_abort_aware_service(abort, || {
+                svc_runner::run_qpnoise_analysis_from_qpss_on_materialized_with_abort(
+                    circuit, &card, point, abort,
+                )
+            })?;
+            super::ensure_not_aborted(abort)?;
+            SimulationResult::from_qpnoise_response(std::sync::Arc::new(response))
+                .map_err(SimulationError::InvalidConfig)
+        }
+        _ => Err(SimulationError::InvalidConfig(
+            "Expected QPAC, QPXF or QPNOISE study consumer".into(),
+        )),
+    }
 }
