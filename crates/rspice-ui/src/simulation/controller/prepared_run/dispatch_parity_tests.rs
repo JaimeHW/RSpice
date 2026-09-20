@@ -1581,6 +1581,13 @@ fn soa_derating_survives_studio_worker_thermal_transient_and_saved_results() {
         watts_per_kelvin: 0.001,
     };
     let config = SoaConfig {
+        observation: crate::services::simulation_runner::SoaObservationConfig {
+            thresholds: crate::services::safety::SoaThresholds {
+                warning_fraction: None,
+                critical_fraction: None,
+            },
+            ..Default::default()
+        },
         stop_time: 1e-9,
         step_time: 1e-10,
         check_vgs_max: false,
@@ -1647,6 +1654,12 @@ fn soa_derating_survives_studio_worker_thermal_transient_and_saved_results() {
     else {
         panic!("SOA evidence")
     };
+    assert_eq!(evaluations[0].thresholds, config.observation.thresholds);
+    assert!(
+        violations
+            .iter()
+            .all(|event| event.severity == crate::state::SoaViolationSeverityEvidence::Violation)
+    );
     assert_eq!(evaluations.len(), 1);
     assert_eq!(evaluations[0].derating.unwrap().curve, curve);
     assert_eq!(evaluations[0].limit_value, 0.0);
@@ -1804,4 +1817,128 @@ fn soa_vbic_model_ratings_survive_studio_worker_and_saved_results() {
         decoded.into_simulation_state().unwrap().runs[0].analyses[0].result_payload,
         retained.result_payload
     );
+}
+
+#[test]
+fn soa_thresholds_survive_studio_worker_execution_and_saved_results() {
+    use crate::services::safety::SoaThresholds;
+    use crate::simulation::dialog::soa::{SoaConfig, SoaDialogState};
+    use crate::simulation::plan::AnalysisDraft;
+    use crate::simulation::runner::worker_contract::WorkerAnalysisSpec;
+    use crate::state::{
+        SoaRuleVerdictEvidence as Verdict, SoaViolationSeverityEvidence as Severity,
+    };
+    for (warning, critical, verdict) in [
+        (Some(0.5), Some(2.0), Verdict::Violation),
+        (None, Some(1.4), Verdict::Critical),
+        (None, None, Verdict::Violation),
+    ] {
+        let thresholds = SoaThresholds {
+            warning_fraction: warning,
+            critical_fraction: critical,
+        };
+        let mut config = SoaConfig {
+            import_model_voltage_ratings: true,
+            stop_time: 1e-9,
+            step_time: 1e-10,
+            check_vgs_max: false,
+            check_vds_max: false,
+            check_vbe_max: false,
+            check_vce_max: false,
+            ..Default::default()
+        };
+        config.observation.thresholds = thresholds;
+        let mut draft = SoaDialogState::from_config(&config);
+        assert_eq!(draft.to_config().unwrap(), config);
+        draft.warning_percent = "101".into();
+        assert!(draft.to_config().is_err());
+        draft = SoaDialogState::from_config(&config);
+        draft.critical_percent = "99".into();
+        assert!(draft.to_config().is_err());
+        draft = SoaDialogState::from_config(&config);
+        let draft: SoaDialogState = ron::from_str(&ron::to_string(&draft).unwrap()).unwrap();
+        assert_eq!(draft.to_config().unwrap(), config);
+        let mut old = serde_json::to_value(&draft).unwrap();
+        for name in ["warning_percent", "critical_percent"] {
+            old.as_object_mut().unwrap().remove(name);
+        }
+        let old: SoaDialogState = serde_json::from_value(old).unwrap();
+        assert_eq!(
+            old.to_config().unwrap().observation.thresholds,
+            SoaThresholds::default()
+        );
+        let mut state = preflight_ready_state();
+        let id = only(&mut state, &[AnalysisKind::Soa])[0];
+        plan_mut(&mut state)
+            .edit(id, |body| *body = AnalysisDraft::Soa(draft))
+            .unwrap();
+        let queue = compiled_queue(&state).unwrap();
+        let mut declaration = queue[0].queued_analysis().clone();
+        let wire = WorkerAnalysisSpec::try_from(&declaration.spec).unwrap();
+        let wire: WorkerAnalysisSpec =
+            serde_json::from_str(&serde_json::to_string(&wire).unwrap()).unwrap();
+        assert_eq!(AnalysisSpec::from(wire.clone()), declaration.spec);
+        declaration.spec = AnalysisSpec::from(wire);
+        let deck = "SOA thresholds\nV1 a 0 PWL(0 .4 1n 1.5)\nD1 a 0 DM\n.model DM D IS=1e-30 FV_MAX=1\n.end\n";
+        let deck = crate::services::simulation_runner::splice_before_terminal_end_card(
+            deck,
+            &declaration.analysis_line,
+        );
+        let run = crate::simulation::runner::pvt_point_evidence::run_declaration(
+            &deck,
+            "SOA thresholds",
+            declaration,
+            27.0,
+            SavePolicy::RetainEngineProducedResults,
+            &[],
+        )
+        .unwrap();
+        let retained = &run.analyses[0];
+        assert!(retained.success, "{:?}", retained.error_message);
+        retained.validate_retained_evidence().unwrap();
+        let Some(crate::state::AnalysisResultPayload::Soa {
+            evaluations,
+            violations,
+        }) = &retained.result_payload
+        else {
+            panic!("SOA evidence")
+        };
+        assert_eq!(evaluations.len(), 1);
+        assert_eq!(evaluations[0].thresholds, thresholds);
+        assert_eq!(evaluations[0].verdict, verdict);
+        assert!((evaluations[0].worst_actual_value - 1.5).abs() < 1e-8);
+        assert_eq!(
+            violations
+                .iter()
+                .any(|event| event.severity == Severity::Warning),
+            warning.is_some()
+        );
+        assert_eq!(
+            violations
+                .iter()
+                .any(|event| event.severity == Severity::Critical),
+            verdict == Verdict::Critical
+        );
+        assert!(violations.iter().any(|event| event.actual_value > 1.0));
+        let mut altered = retained.clone();
+        let Some(crate::state::AnalysisResultPayload::Soa { evaluations, .. }) =
+            &mut altered.result_payload
+        else {
+            unreachable!()
+        };
+        evaluations[0].thresholds = SoaThresholds::default();
+        assert!(altered.validate_retained_evidence().is_err());
+        let mut simulation = crate::state::SimulationState::default();
+        simulation.runs.push(run.clone());
+        simulation.next_run_id = 2;
+        simulation.active_run_idx = Some(0);
+        simulation.active_analysis_idx = Some(0);
+        let saved = crate::io::project_io::ProjectSimulationResults::from_state(&simulation);
+        let decoded: crate::io::project_io::ProjectSimulationResults =
+            serde_json::from_str(&serde_json::to_string(&saved).unwrap()).unwrap();
+        assert_eq!(
+            decoded.into_simulation_state().unwrap().runs[0].analyses[0].result_payload,
+            retained.result_payload
+        );
+    }
 }

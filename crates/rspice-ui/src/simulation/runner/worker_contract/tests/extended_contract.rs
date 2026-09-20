@@ -467,6 +467,7 @@ fn analysis_spec_round_trips_supported_variants() {
                 models: vec![],
             }],
             observation: crate::services::simulation_runner::SoaObservationConfig {
+                thresholds: Default::default(),
                 start_time: 2e-6,
                 max_step: Some(1e-9),
                 use_initial_conditions: true,

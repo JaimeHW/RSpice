@@ -82,7 +82,9 @@ pub(super) fn validate(
         if compare_soa_stress(stress[i], limits[i], stress[worst], limits[worst]).is_gt() {
             worst = i;
         }
-        if stress[i] > limits[i] * 0.9 {
+        if evaluation.thresholds.verdict(stress[i], limits[i])
+            != crate::services::safety::SoARuleVerdict::Pass
+        {
             events += 1;
         }
     }

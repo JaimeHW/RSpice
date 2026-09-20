@@ -5,6 +5,11 @@ use rspice_core::netlist::{Element, ElementKind};
 #[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SoaObservationConfig {
+    #[serde(
+        default,
+        skip_serializing_if = "crate::services::safety::SoaThresholds::is_default"
+    )]
+    pub thresholds: crate::services::safety::SoaThresholds,
     /// Only samples at or after this time contribute to the checker.
     #[serde(default)]
     pub start_time: f64,
@@ -24,6 +29,7 @@ pub struct SoaObservationConfig {
 
 impl SoaObservationConfig {
     pub fn validate(&self, stop_time: f64) -> Result<(), String> {
+        self.thresholds.validate()?;
         if !self.start_time.is_finite() || self.start_time < 0.0 || self.start_time >= stop_time {
             return Err(
                 "SOA start time must be finite, nonnegative and before the stop time".into(),

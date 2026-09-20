@@ -609,6 +609,16 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
                 false,
             ),
             ("Violation events", event_count.to_string(), false),
+            (
+                "Warning above",
+                threshold_text(evaluation.thresholds.warning_fraction),
+                false,
+            ),
+            (
+                "Critical above",
+                threshold_text(evaluation.thresholds.critical_fraction),
+                false,
+            ),
         ],
     );
     panel_note(ui, &evaluation.description);
@@ -670,6 +680,12 @@ impl SoaRuleFilter {
             Self::All => true,
         }
     }
+}
+
+fn threshold_text(fraction: Option<f64>) -> String {
+    fraction
+        .map(|value| format!("{}% of limit", value * 100.0))
+        .unwrap_or_else(|| "Disabled".into())
 }
 
 fn derating_waveform<'a>(
@@ -763,7 +779,11 @@ fn worst_interval_text(
     let threshold = |index: usize| {
         let limit = limits.map_or(evaluation.limit_value, |limits| limits[index]);
         if evaluation.verdict == SoaRuleVerdictEvidence::Warning {
-            limit * 0.9
+            limit
+                * evaluation
+                    .thresholds
+                    .warning_fraction
+                    .expect("validated warning threshold")
         } else {
             limit
         }
@@ -1358,6 +1378,24 @@ mod tests {
         );
     }
 
+    #[test]
+    fn soa_thresholds_control_the_retained_warning_interval() {
+        let state = soa_state(1, 4, 3.0);
+        let analysis = &state.simulation.runs[0].analyses[0];
+        let Some(AnalysisResultPayload::Soa { evaluations, .. }) = &analysis.result_payload else {
+            unreachable!()
+        };
+        let mut evaluation = evaluations[0].clone();
+        evaluation.thresholds.warning_fraction = Some(0.5);
+        let text = worst_interval_text(Some(&analysis.waveforms[0]), None, &evaluation, false);
+        assert_eq!(
+            text,
+            format!("Warning band: {:.17e} s to {:.17e} s", 2e-12, 3e-12)
+        );
+        assert_eq!(threshold_text(None), "Disabled");
+        assert_eq!(threshold_text(Some(1.5)), "150% of limit");
+    }
+
     /// A retained SOA analysis with `rules` warning rules, each carrying its
     /// own verified stress history whose last sample is the worst.
     pub(super) fn soa_state(rules: usize, samples: usize, peak: f64) -> AppState {
@@ -1384,6 +1422,7 @@ mod tests {
                 "#00aaff",
             ));
             evaluations.push(SoaEvaluationEvidence {
+                thresholds: Default::default(),
                 derating: None,
                 device_id: device_id.clone(),
                 parameter: SoaParameterEvidence::DrainSourceVoltage,

@@ -197,7 +197,8 @@ pub fn run_soa_analysis_with_config_and_source_path_and_abort(
     let engine = rspice_core::engine::Engine::new(super::build_engine_config(&netlist, None));
     let (layouts, model_limits) =
         terminals::resolve(&netlist, &flattened.elements, config, &engine, abort)?;
-    let mut manager = SoAManager::new();
+    let mut manager = SoAManager::with_thresholds(config.observation.thresholds)
+        .map_err(ServiceRunError::Failure)?;
     let resolved = rules::resolve(&flattened.elements, config, &layouts, &model_limits, abort)?;
     let registered_rules: usize = resolved
         .iter()

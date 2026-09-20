@@ -64,6 +64,17 @@ pub(super) fn fields(
         ui,
         "Optional exact names separated by spaces. Empty selects all. Subcircuit devices use X1.M1 (or X1:M1); local models use CELL::NM.",
     );
+    sub_header(ui, "Severity thresholds");
+    input_row(ui, "Warning above (% of limit)", &mut setup.warning_percent);
+    input_row(
+        ui,
+        "Critical above (% of limit)",
+        &mut setup.critical_percent,
+    );
+    field_note(
+        ui,
+        "Leave blank to disable that severity band. Warning accepts 0–100%; critical accepts 100% or higher. Values above the actual limit always produce a violation. These thresholds apply to every rule, including imported and temperature-derated limits.",
+    );
     switch_row(
         ui,
         "Import model voltage ratings",

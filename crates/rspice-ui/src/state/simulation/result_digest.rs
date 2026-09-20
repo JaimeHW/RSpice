@@ -1066,6 +1066,23 @@ fn encode_result_payload(
                     });
                 }
             }
+            if evaluations
+                .iter()
+                .any(|evaluation| !evaluation.thresholds.is_default())
+            {
+                writer.string("soa-severity-thresholds-evidence-v1");
+                writer.sequence(evaluations.len());
+                for evaluation in evaluations {
+                    writer.option(
+                        evaluation.thresholds.warning_fraction.as_ref(),
+                        |writer, value| writer.f64(*value),
+                    );
+                    writer.option(
+                        evaluation.thresholds.critical_fraction.as_ref(),
+                        |writer, value| writer.f64(*value),
+                    );
+                }
+            }
         }
         // Tag 12: DC mismatch evidence holds 11. Appended, never reused: these
         // bytes identify every retained result already on disk, and two

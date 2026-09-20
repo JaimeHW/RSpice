@@ -719,11 +719,40 @@ pub(super) fn prepare_typed_result_csv(
             let dynamic = evaluations
                 .iter()
                 .any(|evaluation| evaluation.derating.is_some());
+            let custom_thresholds = evaluations
+                .iter()
+                .any(|evaluation| !evaluation.thresholds.is_default());
+            let thresholds = evaluations
+                .iter()
+                .map(|evaluation| {
+                    (
+                        (evaluation.device_id.as_str(), evaluation.parameter),
+                        evaluation.thresholds,
+                    )
+                })
+                .collect::<std::collections::BTreeMap<_, _>>();
+            let append_thresholds =
+                |contents: &mut String, thresholds: crate::services::safety::SoaThresholds| {
+                    if custom_thresholds {
+                        for fraction in [thresholds.warning_fraction, thresholds.critical_fraction]
+                        {
+                            contents.push(',');
+                            contents.push_str(
+                                &fraction
+                                    .map(|value| format!("{value:.17e}"))
+                                    .unwrap_or_else(|| "off".into()),
+                            );
+                        }
+                    }
+                };
             let mut contents = String::from(
                 "record,device,parameter,limit_value,actual_value,time_s,sample_count,unit,description,verdict",
             );
             if dynamic {
                 contents.push_str(",temperature_kelvin,rated_power_w,reference_temperature_kelvin,watts_per_kelvin");
+            }
+            if custom_thresholds {
+                contents.push_str(",warning_fraction,critical_fraction");
             }
             contents.push('\n');
             for evaluation in evaluations {
@@ -751,6 +780,7 @@ pub(super) fn prepare_typed_result_csv(
                         contents.push_str(",,,,");
                     }
                 }
+                append_thresholds(&mut contents, evaluation.thresholds);
                 contents.push('\n');
                 if let Some(derating) = evaluation.derating {
                     let find =
@@ -785,6 +815,7 @@ pub(super) fn prepare_typed_result_csv(
                             format!("{:.17e}", derating.curve.watts_per_kelvin),
                         ];
                         contents.push_str(&row.join(","));
+                        append_thresholds(&mut contents, evaluation.thresholds);
                         contents.push('\n');
                     }
                 }
@@ -802,6 +833,10 @@ pub(super) fn prepare_typed_result_csv(
                 if dynamic {
                     contents.push_str(",,,,");
                 }
+                append_thresholds(
+                    &mut contents,
+                    *thresholds.get(&(violation.device_id.as_str(), violation.parameter))?,
+                );
                 contents.push('\n');
             }
             Some(PreparedTypedResultCsv {

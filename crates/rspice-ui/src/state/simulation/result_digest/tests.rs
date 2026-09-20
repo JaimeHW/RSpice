@@ -847,6 +847,7 @@ fn reliability_and_soa_evidence_are_field_sensitive_v4_content_identity() {
     let soa = AnalysisResult::new(1, AnalysisType::Soa, "SOA").with_result_payload(
         AnalysisResultPayload::Soa {
             evaluations: vec![SoaEvaluationEvidence {
+                thresholds: Default::default(),
                 derating: None,
                 device_id: "M1".to_owned(),
                 parameter: SoaParameterEvidence::DrainSourceVoltage,
@@ -868,6 +869,23 @@ fn reliability_and_soa_evidence_are_field_sensitive_v4_content_identity() {
             }],
         },
     );
+    for (warning_fraction, critical_fraction) in [
+        (Some(0.8), Some(1.2)),
+        (None, Some(1.2)),
+        (Some(0.9), Some(1.5)),
+        (Some(0.9), None),
+    ] {
+        let mut changed = soa.clone();
+        let Some(AnalysisResultPayload::Soa { evaluations, .. }) = &mut changed.result_payload
+        else {
+            unreachable!()
+        };
+        evaluations[0].thresholds = crate::services::safety::SoaThresholds {
+            warning_fraction,
+            critical_fraction,
+        };
+        assert_ne!(soa.result_data_digest(), changed.result_data_digest());
+    }
     let mut changed_soa = soa.clone();
     let Some(AnalysisResultPayload::Soa { evaluations, .. }) = changed_soa.result_payload.as_mut()
     else {

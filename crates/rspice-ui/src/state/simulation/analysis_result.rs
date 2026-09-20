@@ -996,6 +996,11 @@ impl SoaRuleVerdictEvidence {
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SoaEvaluationEvidence {
+    #[serde(
+        default,
+        skip_serializing_if = "crate::services::safety::SoaThresholds::is_default"
+    )]
+    pub thresholds: crate::services::safety::SoaThresholds,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub derating: Option<crate::services::safety::SoaPowerDeratingEvidence>,
     pub device_id: String,
@@ -2179,8 +2184,18 @@ impl AnalysisResultPayload {
                     .filter(|evaluation| evaluation.derating.is_some())
                     .map(|evaluation| (evaluation.device_id.as_str(), evaluation.parameter))
                     .collect::<std::collections::BTreeSet<_>>();
+                let thresholds = evaluations
+                    .iter()
+                    .map(|evaluation| {
+                        (
+                            (evaluation.device_id.as_str(), evaluation.parameter),
+                            evaluation.thresholds,
+                        )
+                    })
+                    .collect::<std::collections::BTreeMap<_, _>>();
                 let mut previous_evaluation: Option<&SoaEvaluationEvidence> = None;
                 for evaluation in evaluations {
+                    evaluation.thresholds.validate()?;
                     require_non_empty(&evaluation.device_id, "SOA device identity")?;
                     require_non_empty(&evaluation.unit, "SOA rule unit")?;
                     require_non_empty(&evaluation.description, "SOA rule description")?;
@@ -2223,8 +2238,11 @@ impl AnalysisResultPayload {
                             evaluation.device_id
                         ));
                     }
-                    let expected_verdict =
-                        soa_rule_verdict(evaluation.worst_actual_value, evaluation.limit_value);
+                    let expected_verdict = soa_rule_verdict(
+                        evaluation.worst_actual_value,
+                        evaluation.limit_value,
+                        evaluation.thresholds,
+                    );
                     if evaluation.verdict != expected_verdict {
                         return Err(format!(
                             "SOA evaluation for '{}' has a verdict inconsistent with its worst value",
@@ -2273,14 +2291,19 @@ impl AnalysisResultPayload {
                             violation.device_id
                         ));
                     }
-                    let expected_severity =
-                        soa_violation_severity(violation.actual_value, violation.limit_value)
-                            .ok_or_else(|| {
-                                format!(
-                                    "SOA event for '{}' does not meet the warning threshold",
-                                    violation.device_id
-                                )
-                            })?;
+                    let expected_severity = soa_violation_severity(
+                        violation.actual_value,
+                        violation.limit_value,
+                        *thresholds
+                            .get(&(violation.device_id.as_str(), violation.parameter))
+                            .ok_or("SOA event has no matching evaluated rule")?,
+                    )
+                    .ok_or_else(|| {
+                        format!(
+                            "SOA event for '{}' does not meet the warning threshold",
+                            violation.device_id
+                        )
+                    })?;
                     if violation.severity != expected_severity {
                         return Err(format!(
                             "SOA event for '{}' has a severity inconsistent with its value",

@@ -124,6 +124,18 @@ impl SoaConfig {
                 self.observation.models.join(" ")
             ));
         }
+        if !self.observation.thresholds.is_default() {
+            let threshold = |value: Option<f64>| {
+                value
+                    .map(|value| value.to_string())
+                    .unwrap_or_else(|| "off".into())
+            };
+            card.push_str(&format!(
+                " warning_fraction={} critical_fraction={}",
+                threshold(self.observation.thresholds.warning_fraction),
+                threshold(self.observation.thresholds.critical_fraction)
+            ));
+        }
         if self.import_model_voltage_ratings {
             card.push_str(" model_voltage_ratings=on");
         }
@@ -153,6 +165,22 @@ impl SoaConfig {
     }
 }
 
+fn default_warning_percent() -> String {
+    "90".into()
+}
+fn default_critical_percent() -> String {
+    "120".into()
+}
+
+fn threshold_fraction(text: &str, label: &str) -> Result<Option<f64>, String> {
+    if text.trim().is_empty() {
+        return Ok(None);
+    }
+    parse_si_value(text)
+        .map(|value| Some(value / 100.0))
+        .map_err(|error| format!("Invalid SOA {label} threshold percentage: {error}"))
+}
+
 fn zero_time() -> String {
     "0".into()
 }
@@ -165,6 +193,10 @@ fn yes_no(v: bool) -> &'static str {
 #[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SoaDialogState {
+    #[serde(default = "default_warning_percent")]
+    pub warning_percent: String,
+    #[serde(default = "default_critical_percent")]
+    pub critical_percent: String,
     #[serde(default)]
     pub import_model_voltage_ratings: bool,
     #[serde(default)]
@@ -208,6 +240,18 @@ impl SoaDialogState {
     /// Build UI state from config.
     pub fn from_config(config: &SoaConfig) -> Self {
         Self {
+            warning_percent: config
+                .observation
+                .thresholds
+                .warning_fraction
+                .map(|value| (value * 100.0).to_string())
+                .unwrap_or_default(),
+            critical_percent: config
+                .observation
+                .thresholds
+                .critical_fraction
+                .map(|value| (value * 100.0).to_string())
+                .unwrap_or_default(),
             import_model_voltage_ratings: config.import_model_voltage_ratings,
             rules: config.rules.iter().map(SoaRuleDraft::from_config).collect(),
             start_time: config.observation.start_time.to_string(),
@@ -243,6 +287,10 @@ impl SoaDialogState {
                 .map(SoaRuleDraft::to_config)
                 .collect::<Result<_, _>>()?,
             observation: SoaObservationConfig {
+                thresholds: crate::services::safety::SoaThresholds {
+                    warning_fraction: threshold_fraction(&self.warning_percent, "warning")?,
+                    critical_fraction: threshold_fraction(&self.critical_percent, "critical")?,
+                },
                 start_time: if self.start_time.trim().is_empty() {
                     0.0
                 } else {
@@ -311,6 +359,8 @@ impl SoaDialogState {
                 && self.devices.is_empty()
                 && self.models.is_empty()
                 && self.rules.is_empty()
+                && (self.warning_percent.is_empty() || self.warning_percent == "90")
+                && (self.critical_percent.is_empty() || self.critical_percent == "120")
                 && !self.import_model_voltage_ratings
                 && !self.use_initial_conditions
                 && (self.start_time.is_empty() || self.start_time == "0")
@@ -370,6 +420,7 @@ mod tests {
             }],
             stop_time: 1.23456789123e-6,
             observation: SoaObservationConfig {
+                thresholds: Default::default(),
                 start_time: 1.23456789123e-7,
                 max_step: Some(1.23456789123e-10),
                 use_initial_conditions: true,

@@ -528,30 +528,29 @@ pub(super) fn validate_transfer_function_output(
     Ok(())
 }
 
-pub(super) fn soa_rule_verdict(actual: f64, limit: f64) -> SoaRuleVerdictEvidence {
-    if actual > limit * 1.2 {
-        SoaRuleVerdictEvidence::Critical
-    } else if actual > limit {
-        SoaRuleVerdictEvidence::Violation
-    } else if actual > limit * 0.9 {
-        SoaRuleVerdictEvidence::Warning
-    } else {
-        SoaRuleVerdictEvidence::Pass
+pub(super) fn soa_rule_verdict(
+    actual: f64,
+    limit: f64,
+    thresholds: crate::services::safety::SoaThresholds,
+) -> SoaRuleVerdictEvidence {
+    match thresholds.verdict(actual, limit) {
+        crate::services::safety::SoARuleVerdict::Pass => SoaRuleVerdictEvidence::Pass,
+        crate::services::safety::SoARuleVerdict::Warning => SoaRuleVerdictEvidence::Warning,
+        crate::services::safety::SoARuleVerdict::Violation => SoaRuleVerdictEvidence::Violation,
+        crate::services::safety::SoARuleVerdict::Critical => SoaRuleVerdictEvidence::Critical,
     }
 }
 
 pub(super) fn soa_violation_severity(
     actual: f64,
     limit: f64,
+    thresholds: crate::services::safety::SoaThresholds,
 ) -> Option<SoaViolationSeverityEvidence> {
-    if actual > limit * 1.2 {
-        Some(SoaViolationSeverityEvidence::Critical)
-    } else if actual > limit {
-        Some(SoaViolationSeverityEvidence::Violation)
-    } else if actual > limit * 0.9 {
-        Some(SoaViolationSeverityEvidence::Warning)
-    } else {
-        None
+    match soa_rule_verdict(actual, limit, thresholds) {
+        SoaRuleVerdictEvidence::Pass => None,
+        SoaRuleVerdictEvidence::Warning => Some(SoaViolationSeverityEvidence::Warning),
+        SoaRuleVerdictEvidence::Violation => Some(SoaViolationSeverityEvidence::Violation),
+        SoaRuleVerdictEvidence::Critical => Some(SoaViolationSeverityEvidence::Critical),
     }
 }
 

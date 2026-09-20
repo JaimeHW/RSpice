@@ -495,6 +495,8 @@ pub enum SoARuleVerdict {
 /// Worst observed point and coverage for one device/parameter rule.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SoAEvaluation {
+    #[serde(default, skip_serializing_if = "super::SoaThresholds::is_default")]
+    pub thresholds: super::SoaThresholds,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub derating: Option<SoaPowerDeratingEvidence>,
     pub device_id: String,
@@ -514,6 +516,7 @@ pub struct SoAEvaluation {
 
 /// Manager for tracking and checking Safe Operating Area limits
 pub struct SoAManager {
+    thresholds: super::SoaThresholds,
     /// Device instance ID -> SOA Definition
     device_defs: HashMap<String, SoADefinition>,
     /// Accumulated violations from most recent check
@@ -537,12 +540,21 @@ impl Default for SoAManager {
 impl SoAManager {
     pub fn new() -> Self {
         Self {
+            thresholds: Default::default(),
             device_defs: HashMap::new(),
             violations: Vec::new(),
             evaluations: HashMap::new(),
             stress_history: HashMap::new(),
             derating_history: HashMap::new(),
         }
+    }
+
+    pub fn with_thresholds(thresholds: super::SoaThresholds) -> Result<Self, String> {
+        thresholds.validate()?;
+        Ok(Self {
+            thresholds,
+            ..Self::new()
+        })
     }
 
     /// Register SOA limits for a device
@@ -640,7 +652,7 @@ impl SoAManager {
                             .map_or(limit.max_value, |(curve, temperature)| {
                                 curve.limit(limit.max_value, temperature)
                             });
-                        let verdict = rule_verdict(actual, maximum);
+                        let verdict = self.thresholds.verdict(actual, maximum);
                         let key = (device_id.clone(), limit.parameter);
                         if let Some(temperature) = temperature {
                             let history = self.derating_history.entry(key.clone()).or_default();
@@ -655,6 +667,7 @@ impl SoAManager {
                             self.evaluations
                                 .entry(key)
                                 .or_insert_with(|| SoAEvaluation {
+                                    thresholds: self.thresholds,
                                     derating: limit.power_derating.map(|curve| {
                                         SoaPowerDeratingEvidence {
                                             rated_power_w: limit.max_value,
@@ -742,18 +755,6 @@ impl SoAManager {
     }
 }
 
-fn rule_verdict(actual: f64, maximum: f64) -> SoARuleVerdict {
-    if actual > maximum * 1.2 {
-        SoARuleVerdict::Critical
-    } else if actual > maximum {
-        SoARuleVerdict::Violation
-    } else if actual > maximum * 0.9 {
-        SoARuleVerdict::Warning
-    } else {
-        SoARuleVerdict::Pass
-    }
-}
-
 // =============================================================================
 // Tests
 // =============================================================================
@@ -837,7 +838,11 @@ fn soa_derating_selects_highest_utilization_and_retains_zero_limit_events() {
         reference_temperature_kelvin: 300.0,
         watts_per_kelvin: 0.01,
     };
-    let mut manager = SoAManager::new();
+    let mut manager = SoAManager::with_thresholds(super::SoaThresholds {
+        warning_fraction: Some(0.95),
+        critical_fraction: Some(1.5),
+    })
+    .unwrap();
     manager
         .register_device(
             "Q1",

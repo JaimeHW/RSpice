@@ -993,6 +993,7 @@ fn csv_export_publishes_complete_soa_rules_and_exact_events() {
         .with_family_metadata(AnalysisResultFamilyMetadata::Soa { time: vec![1.0e-6] })
         .with_result_payload(AnalysisResultPayload::Soa {
             evaluations: vec![SoaEvaluationEvidence {
+                thresholds: Default::default(),
                 derating: None,
                 device_id: "M1".to_owned(),
                 parameter: SoaParameterEvidence::DrainSourceVoltage,
@@ -2488,6 +2489,7 @@ fn soa_derating_csv_preserves_each_sample_temperature_and_limit() {
         })
         .with_result_payload(AnalysisResultPayload::Soa {
             evaluations: vec![SoaEvaluationEvidence {
+                thresholds: Default::default(),
                 derating: Some(SoaPowerDeratingEvidence {
                     rated_power_w: 1.0,
                     curve: SoaPowerDerating {
@@ -2525,6 +2527,34 @@ fn soa_derating_csv_preserves_each_sample_temperature_and_limit() {
             ],
         });
     analysis.validate_retained_evidence().unwrap();
+    let mut custom = analysis.clone();
+    let Some(AnalysisResultPayload::Soa {
+        evaluations,
+        violations,
+    }) = custom.result_payload.as_mut()
+    else {
+        unreachable!()
+    };
+    evaluations[0].thresholds = crate::services::safety::SoaThresholds {
+        warning_fraction: None,
+        critical_fraction: None,
+    };
+    evaluations[0].verdict = SoaRuleVerdictEvidence::Violation;
+    violations.remove(0);
+    violations[0].severity = SoaViolationSeverityEvidence::Violation;
+    custom.validate_retained_evidence().unwrap();
+    let custom_csv = prepare_typed_result_csv(&custom).unwrap().contents;
+    assert!(
+        custom_csv
+            .lines()
+            .next()
+            .unwrap()
+            .ends_with(",warning_fraction,critical_fraction")
+    );
+    for row in custom_csv.lines().skip(1) {
+        assert_eq!(row.split(',').count(), 16);
+        assert!(row.ends_with(",off,off"));
+    }
     let mut state = state_with_typed_result(analysis);
     let io = MockExportWorkflowIo::default();
     action_export_csv_with_io(&mut state, &io);

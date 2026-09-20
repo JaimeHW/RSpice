@@ -1818,6 +1818,7 @@ mod tests {
             ])
             .with_result_payload(AnalysisResultPayload::Soa {
                 evaluations: vec![SoaEvaluationEvidence {
+                    thresholds: Default::default(),
                     derating: None,
                     device_id: "M1".to_owned(),
                     parameter: SoaParameterEvidence::DrainSourceVoltage,

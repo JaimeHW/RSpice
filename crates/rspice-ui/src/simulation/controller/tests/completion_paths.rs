@@ -439,6 +439,7 @@ fn advanced_result_conversion_retains_exact_family_metadata() {
             waveforms: empty_waveforms(),
             violations: Vec::new(),
             evaluations: vec![crate::services::safety::SoAEvaluation {
+                thresholds: Default::default(),
                 derating: None,
                 device_id: "M1".to_owned(),
                 parameter: crate::services::safety::SoAParameter::Vgs,

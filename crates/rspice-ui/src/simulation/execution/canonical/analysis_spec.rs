@@ -257,6 +257,22 @@ fn soa_legacy_identity_is_preserved_and_every_scoped_rule_field_is_authenticated
         legacy.f64(value);
     }
     assert_eq!(digest(&spec), legacy.finish());
+    for (warning_fraction, critical_fraction) in [
+        (Some(0.8), Some(1.2)),
+        (None, Some(1.2)),
+        (Some(0.9), Some(1.5)),
+        (Some(0.9), None),
+    ] {
+        let mut changed = spec.clone();
+        let AnalysisSpec::Soa { observation, .. } = &mut changed else {
+            unreachable!()
+        };
+        observation.thresholds = crate::services::safety::SoaThresholds {
+            warning_fraction,
+            critical_fraction,
+        };
+        assert_ne!(digest(&spec), digest(&changed));
+    }
     let mut imported = spec.clone();
     let AnalysisSpec::Soa {
         import_model_voltage_ratings,
@@ -793,6 +809,17 @@ pub(super) fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &Analysis
                             == crate::services::safety::SoaVoltageBasis::IntrinsicNodes,
                     );
                 }
+            }
+            if !observation.thresholds.is_default() {
+                writer.string("soa-severity-thresholds-v1");
+                writer.option(
+                    observation.thresholds.warning_fraction.as_ref(),
+                    |writer, value| writer.f64(*value),
+                );
+                writer.option(
+                    observation.thresholds.critical_fraction.as_ref(),
+                    |writer, value| writer.f64(*value),
+                );
             }
             if rules.iter().any(|rule| rule.power_derating.is_some()) {
                 writer.string("soa-power-derating-v1");
