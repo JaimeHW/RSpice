@@ -812,3 +812,49 @@ fn diode_temperature_observations_follow_native_dialect_and_instance_overrides()
         }
     }
 }
+
+#[test]
+fn intrinsic_voltage_observations_preserve_polarity_and_series_drops() {
+    let deck = "Intrinsic voltage observations\n\
+        Vd d 0 -2\nVg g 0 -1.2\nM1 d g 0 0 PM W=10u L=1u NRD=1 NRS=1\n\
+        .model PM PMOS LEVEL=54 VTH0=-0.4 TOXE=3n U0=0.02 RSH=100\n\
+        Vc c 0 2\nVb b 0 0.7\nQ1 c b 0 QM\n\
+        .model QM NPN IS=1e-14 BF=100 RC=100 RB=100 RE=10\n\
+        Va a 0 0.8\nD1 a 0 DM\n.model DM D IS=1e-12 RS=100\n.end\n";
+    let netlist = Netlist::parse(deck).unwrap();
+    let engine = Engine::new(SimulationConfig::default());
+    let circuit = engine.build_circuit(&netlist).unwrap();
+    let (_, report) = engine.run_dc_op_with_report(&netlist).unwrap();
+    let get = |device: &str, label: &str| {
+        report
+            .entries
+            .iter()
+            .find(|entry| entry.name == device)
+            .unwrap()
+            .params
+            .iter()
+            .find(|(name, _)| *name == label)
+            .unwrap()
+            .1
+    };
+    let vgs = get("M1", "vgs_intrinsic");
+    assert!(
+        vgs < -0.1 && vgs > -1.2,
+        "PMOS physical Vgs behind source resistance: {vgs}"
+    );
+    assert!((vgs - get("M1", "vds_intrinsic") - get("M1", "vgd_intrinsic")).abs() < 1e-14);
+    assert!((vgs - get("M1", "vbs_intrinsic") - get("M1", "vgb_intrinsic")).abs() < 1e-14);
+    let vbe = get("Q1", "vbe_intrinsic");
+    let expected_vbe = 0.7 - 100.0 * get("Q1", "ib") + 10.0 * get("Q1", "ie");
+    assert!((vbe - expected_vbe).abs() < 1e-8, "{vbe} vs {expected_vbe}");
+    assert!(vbe < 0.69 && vbe > 0.1);
+    assert!((get("Q1", "vce_intrinsic") - vbe + get("Q1", "vbc_intrinsic")).abs() < 1e-14);
+    let vak = get("D1", "vak_intrinsic");
+    assert!((vak + 100.0 * get("D1", "id") - 0.8).abs() < 1e-8);
+    for (device, labels) in circuit.intrinsic_voltage_catalog() {
+        for label in labels {
+            assert!(get(&device, label.as_str()).is_finite());
+            assert!(rspice_core::circuit::resolve_op_label(label.as_str()).is_some());
+        }
+    }
+}

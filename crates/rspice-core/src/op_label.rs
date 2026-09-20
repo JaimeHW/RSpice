@@ -33,6 +33,30 @@ impl OpLabel {
         self.0
     }
 
+    /// Whether a fixed native observation names a physical intrinsic voltage.
+    pub fn is_intrinsic_voltage_name(text: &str) -> bool {
+        matches!(
+            text,
+            "vgs_intrinsic"
+                | "vds_intrinsic"
+                | "vgd_intrinsic"
+                | "vbs_intrinsic"
+                | "vbd_intrinsic"
+                | "vgb_intrinsic"
+                | "ves_intrinsic"
+                | "ved_intrinsic"
+                | "vge_intrinsic"
+                | "vbody_backgate_intrinsic"
+                | "vbe_intrinsic"
+                | "vce_intrinsic"
+                | "vbc_intrinsic"
+                | "vcsub_intrinsic"
+                | "vbsub_intrinsic"
+                | "vesub_intrinsic"
+                | "vak_intrinsic"
+        )
+    }
+
     /// A label supplied by the compiled Verilog-A catalog.
     ///
     /// Restricted to this crate because the catalog is the only authority that
@@ -152,6 +176,24 @@ op_labels! {
     VBS = "vbs",
     VBE = "vbe",
     VCE = "vce",
+    // Physical, signed differences at intrinsic electrical nodes (no type folding).
+    INTRINSIC_VGS = "vgs_intrinsic",
+    INTRINSIC_VDS = "vds_intrinsic",
+    INTRINSIC_VGD = "vgd_intrinsic",
+    INTRINSIC_VBS = "vbs_intrinsic",
+    INTRINSIC_VBD = "vbd_intrinsic",
+    INTRINSIC_VGB = "vgb_intrinsic",
+    INTRINSIC_VES = "ves_intrinsic",
+    INTRINSIC_VED = "ved_intrinsic",
+    INTRINSIC_VGE = "vge_intrinsic",
+    INTRINSIC_VBODY_BACKGATE = "vbody_backgate_intrinsic",
+    INTRINSIC_VBE = "vbe_intrinsic",
+    INTRINSIC_VCE = "vce_intrinsic",
+    INTRINSIC_VBC = "vbc_intrinsic",
+    INTRINSIC_VCSUB = "vcsub_intrinsic",
+    INTRINSIC_VBSUB = "vbsub_intrinsic",
+    INTRINSIC_VESUB = "vesub_intrinsic",
+    INTRINSIC_VAK = "vak_intrinsic",
     VTH = "vth",
     VDSAT = "vdsat",
     OUTPUT_VDSAT = "output_vdsat",

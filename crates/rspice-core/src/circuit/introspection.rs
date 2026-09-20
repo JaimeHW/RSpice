@@ -7,6 +7,7 @@
 
 use super::*;
 
+mod intrinsic_voltages;
 mod power;
 
 /// One device's operating-point summary line.
@@ -833,6 +834,7 @@ impl CircuitData {
         self.replace_jfet_report_currents(&mut report, solution, None)?;
         self.replace_mosfet_report_currents(&mut report, solution, None)?;
         self.add_conductive_power_observations(&mut report, solution)?;
+        self.add_intrinsic_voltage_observations(&mut report, solution)?;
         Ok(report)
     }
 
@@ -948,6 +950,7 @@ impl CircuitData {
         }
         let mut report = self.device_op_report();
         self.add_conductive_power_observations(&mut report, solution)?;
+        self.add_intrinsic_voltage_observations(&mut report, solution)?;
         self.replace_mosfet_report_currents(
             &mut report,
             solution,
