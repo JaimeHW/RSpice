@@ -3276,6 +3276,19 @@ fn retained_result_artifacts(
     }
     if let Some(payload) = &analysis.result_payload {
         let (canonical, name, kind, count, value, viewer) = match payload {
+            AnalysisResultPayload::Qpss { operating_point } => (
+                "payload/qpss",
+                "QPSS signed spectral state",
+                ResultArtifactKind::Array,
+                operating_point.spectra().iter().map(Vec::len).sum(),
+                Some(format!(
+                    "{} independent tones · {} nodes · {} branch currents",
+                    operating_point.config().grid.frequencies_hz.len(),
+                    operating_point.node_names().len(),
+                    operating_point.branch_names().len()
+                )),
+                ResultViewer::HarmonicBalance,
+            ),
             AnalysisResultPayload::DcSweep { evidence } => (
                 "payload/dc-sweep",
                 "DC sweep curves",

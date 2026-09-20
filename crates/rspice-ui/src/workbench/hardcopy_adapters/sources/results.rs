@@ -1961,7 +1961,8 @@ fn periodic_result_tables(payload: &AnalysisResultPayload) -> Option<Vec<Semanti
         | AnalysisResultPayload::TransientEvents { .. }
         // A recorded spectrum exports through the ordinary complex waveform
         // path; its payload states the transform, not a table of its own.
-        | AnalysisResultPayload::FftSpectrum { .. } => None,
+        | AnalysisResultPayload::FftSpectrum { .. }
+        | AnalysisResultPayload::Qpss { .. } => None,
     }
 }
 

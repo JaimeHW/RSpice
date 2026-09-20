@@ -20,6 +20,8 @@
 use super::*;
 mod dc_sweep;
 mod monte_carlo;
+mod qpss;
+use qpss::WorkerQpssOperatingPointTransport;
 #[cfg(test)]
 mod tests;
 use super::recorded_fft::WorkerRecordedFftSpectrumTransport;
@@ -82,6 +84,7 @@ pub(super) fn validate_worker_response_before_transport(
         quality.validate()?;
     }
     if let WorkerOutcome::Success(result) = &response.outcome {
+        validate_worker_qpss_result(result)?;
         validate_transient_source_payload_size(result)?;
         if let WorkerSimulationResult::Transient { events, .. } = result.as_ref()
             && let Some(history) = &events.current_impulses
@@ -1242,6 +1245,12 @@ pub(crate) enum WorkerSimulationResultTransport {
         mode_indices: WorkerF64Series,
         waveforms: Vec<WorkerWaveformTransport>,
     },
+    Qpss {
+        frequencies: WorkerF64Series,
+        tuples: Vec<Vec<i32>>,
+        waveforms: Vec<WorkerWaveformTransport>,
+        operating_point: WorkerQpssOperatingPointTransport,
+    },
     Hb {
         frequencies: WorkerF64Series,
         waveforms: Vec<WorkerWaveformTransport>,
@@ -1472,6 +1481,20 @@ impl WorkerSimulationResultTransport {
                 iterations,
                 mode_indices: WorkerF64Series::from_vec(mode_indices, buffers),
                 waveforms: transport_waveforms(waveforms, buffers),
+            },
+            WorkerSimulationResult::Qpss {
+                frequencies,
+                tuples,
+                waveforms,
+                operating_point,
+            } => Self::Qpss {
+                frequencies: WorkerF64Series::from_vec(frequencies, buffers),
+                tuples,
+                waveforms: transport_waveforms(waveforms, buffers),
+                operating_point: WorkerQpssOperatingPointTransport::from_operating_point(
+                    operating_point,
+                    buffers,
+                ),
             },
             WorkerSimulationResult::Hb {
                 frequencies,
@@ -1771,6 +1794,17 @@ impl WorkerSimulationResultTransport {
                 validate_worker_pstb_result(&result)?;
                 Ok(result)
             }
+            Self::Qpss {
+                frequencies,
+                tuples,
+                waveforms,
+                operating_point,
+            } => Ok(WorkerSimulationResult::Qpss {
+                frequencies: frequencies.into_vec(buffers)?,
+                tuples,
+                waveforms: worker_waveforms_from_transport(waveforms, buffers)?,
+                operating_point: operating_point.into_operating_point(buffers)?,
+            }),
             Self::Hb {
                 frequencies,
                 waveforms,

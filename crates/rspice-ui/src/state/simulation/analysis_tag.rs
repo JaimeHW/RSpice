@@ -261,7 +261,7 @@ impl CanonicalAnalysisKind {
     pub const fn execution_blocker(self) -> Option<&'static str> {
         match self {
             Self::Qpss => {
-                Some("the QPSS spectral-lattice solver is not available in this engine build")
+                Some("QPSS execution is not available in Simulation Studio yet")
             }
             Self::Qpac => {
                 Some("QPAC conversion-matrix execution is not available in this engine build")

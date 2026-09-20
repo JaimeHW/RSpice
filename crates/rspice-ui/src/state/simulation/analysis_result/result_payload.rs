@@ -1213,6 +1213,9 @@ impl AnalysisResult {
         if let Some(payload) = &self.result_payload {
             payload.validate_for(self.analysis_type)?;
         }
+        if let Some(AnalysisResultPayload::Qpss { operating_point }) = &self.result_payload {
+            super::qpss::validate_display(operating_point, &self.waveforms)?;
+        }
         if let Some(AnalysisResultPayload::DcSweep { evidence }) = &self.result_payload {
             evidence.validate_retained_traces(self.waveforms.iter().map(|trace| {
                 super::super::DcTraceView {

@@ -37,8 +37,20 @@ pub fn run_qpss_analysis_with_source_path_and_abort(
     let point = engine
         .run_qpss_with_abort(&netlist, config, abort)
         .map_err(|error| ServiceRunError::from_core("QPSS", error))?;
-    let grid = engine
+    engine
         .validate_qpss_operating_point_with_abort(&netlist, &point, abort)
+        .map_err(|error| ServiceRunError::from_core("QPSS retained state", error))?;
+    qpss_data_from_operating_point_with_abort(Arc::new(point), abort)
+}
+
+/// Reconstruct a display projection from the exact retained state. The same
+/// projection is used after worker delivery and after loading a saved result.
+pub fn qpss_data_from_operating_point_with_abort(
+    point: Arc<QpssOperatingPoint>,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<QpssData> {
+    let grid = point
+        .validate_retained_payload_with_abort(&rspice_core::ResourceLimits::default(), abort)
         .map_err(|error| ServiceRunError::from_core("QPSS retained state", error))?;
     let mut indices: Vec<_> = grid
         .frequencies_hz()
@@ -69,7 +81,7 @@ pub fn run_qpss_analysis_with_source_path_and_abort(
         let mut values = Vec::with_capacity(indices.len());
         for &index in &indices {
             let value = coefficients[index] * if index == grid.dc_index() { 1.0 } else { 2.0 };
-            if !value.re.is_finite() || !value.im.is_finite() {
+            if !value.re.is_finite() || !value.im.is_finite() || !value.norm().is_finite() {
                 return Err(ServiceRunError::Failure(
                     "QPSS peak-amplitude display scaling overflowed".into(),
                 ));
@@ -83,6 +95,6 @@ pub fn run_qpss_analysis_with_source_path_and_abort(
         frequencies,
         tuples,
         spectra,
-        operating_point: Arc::new(point),
+        operating_point: point,
     })
 }

@@ -9,7 +9,9 @@
 mod analysis;
 mod analysis_spec;
 mod conversions;
+mod qpss;
 mod recorded_fft;
+use qpss::validate_worker_qpss_result;
 mod transport;
 
 pub(crate) use conversions::*;
@@ -333,6 +335,7 @@ impl WorkerResponse {
         match self.outcome {
             WorkerOutcome::Success(result) => {
                 validate_worker_pstb_result(&result).map_err(SimulationError::InvalidConfig)?;
+                validate_worker_qpss_result(&result).map_err(SimulationError::InvalidConfig)?;
                 if let WorkerSimulationResult::Transient { events, .. } = result.as_ref()
                     && let Some(history) = &events.current_impulses
                 {
@@ -797,6 +800,12 @@ pub(crate) enum WorkerSimulationResult {
         iterations: usize,
         mode_indices: Vec<f64>,
         waveforms: Vec<WorkerWaveform>,
+    },
+    Qpss {
+        frequencies: Vec<f64>,
+        tuples: Vec<Vec<i32>>,
+        waveforms: Vec<WorkerWaveform>,
+        operating_point: rspice_core::engine::QpssOperatingPoint,
     },
     Hb {
         frequencies: Vec<f64>,
@@ -1343,6 +1352,27 @@ impl WorkerSimulationResult {
                 waveforms_payload_bytes(waveforms),
                 f64_payload_bytes(5),
             ]),
+            WorkerSimulationResult::Qpss {
+                frequencies,
+                tuples,
+                waveforms,
+                operating_point,
+            } => sum_payload_bytes([
+                f64_payload_bytes(frequencies.len()),
+                waveforms_payload_bytes(waveforms),
+                tuples
+                    .iter()
+                    .map(|tuple| tuple.len().saturating_mul(4))
+                    .sum(),
+                f64_payload_bytes(
+                    operating_point
+                        .spectra()
+                        .iter()
+                        .map(Vec::len)
+                        .sum::<usize>()
+                        .saturating_mul(2),
+                ),
+            ]),
             WorkerSimulationResult::Hb {
                 frequencies,
                 waveforms,
@@ -1666,6 +1696,22 @@ impl TryFrom<SimulationResult> for WorkerSimulationResult {
                     waveforms: worker_waveforms(waveforms),
                 };
                 validate_worker_pstb_result(&result).map_err(SimulationError::InvalidConfig)?;
+                validate_worker_qpss_result(&result).map_err(SimulationError::InvalidConfig)?;
+                Ok(result)
+            }
+            SimulationResult::Qpss {
+                frequencies,
+                tuples,
+                waveforms,
+                operating_point,
+            } => {
+                let result = Self::Qpss {
+                    frequencies,
+                    tuples,
+                    waveforms: worker_waveforms(waveforms),
+                    operating_point: Arc::unwrap_or_clone(operating_point),
+                };
+                validate_worker_qpss_result(&result).map_err(SimulationError::InvalidConfig)?;
                 Ok(result)
             }
             SimulationResult::HarmonicBalance {
@@ -1972,6 +2018,17 @@ impl From<WorkerSimulationResult> for SimulationResult {
                 iterations,
                 mode_indices,
                 waveforms: waveform_map(waveforms),
+            },
+            WorkerSimulationResult::Qpss {
+                frequencies,
+                tuples,
+                waveforms,
+                operating_point,
+            } => Self::Qpss {
+                frequencies,
+                tuples,
+                waveforms: waveform_map(waveforms),
+                operating_point: Arc::new(operating_point),
             },
             WorkerSimulationResult::Hb {
                 frequencies,

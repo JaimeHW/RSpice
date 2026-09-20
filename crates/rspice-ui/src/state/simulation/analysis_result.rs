@@ -10,6 +10,7 @@ use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
 use std::collections::{BTreeMap, HashSet};
 
 mod family_metadata;
+mod qpss;
 
 pub use family_metadata::{AnalysisResultFamilyMetadata, MonteCarloVariableMetadata};
 
@@ -1123,6 +1124,12 @@ fn fft_metric(metrics: &super::FftMetricsEvidence, name: &str) -> Option<f64> {
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum AnalysisResultPayload {
+    /// Complete signed torus spectrum, including branch currents, producer
+    /// identity, solver settings and convergence evidence. Display bins can be
+    /// reconstructed exactly from the retained lattice.
+    Qpss {
+        operating_point: std::sync::Arc<rspice_core::engine::QpssOperatingPoint>,
+    },
     DcSweep {
         evidence: std::sync::Arc<super::DcSweepEvidence>,
     },
@@ -1528,6 +1535,18 @@ impl AnalysisResultPayload {
     /// Validate exact retained evidence against the analysis that owns it.
     pub fn validate_for(&self, analysis_type: AnalysisType) -> Result<(), String> {
         match self {
+            Self::Qpss { operating_point } => {
+                if analysis_type != AnalysisType::Qpss {
+                    return Err("QPSS payload belongs to a different analysis type".into());
+                }
+                operating_point
+                    .validate_retained_payload_with_abort(
+                        &rspice_core::ResourceLimits::default(),
+                        &rspice_core::NoAbort,
+                    )
+                    .map_err(|error| error.to_string())?;
+            }
+
             Self::DcSweep { evidence } => {
                 if analysis_type != AnalysisType::DcSweep {
                     return Err("DC sweep evidence belongs to a different analysis type".to_owned());
@@ -2150,7 +2169,7 @@ impl AnalysisResultPayload {
     #[must_use]
     pub fn has_data(&self) -> bool {
         match self {
-            Self::DcSweep { .. }
+            Self::Qpss { .. } | Self::DcSweep { .. }
             | Self::OperatingPoint { .. }
             | Self::PoleZero { .. }
             | Self::PssFloquet { .. }

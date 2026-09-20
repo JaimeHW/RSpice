@@ -15,6 +15,7 @@ pub(crate) use convergence_transport::ConvergenceTransport;
 mod measurements;
 mod monte_carlo;
 mod operating_point;
+mod qpss;
 mod recorded_fft;
 mod waveform;
 
@@ -246,6 +247,15 @@ pub enum SimulationResult {
         waveforms: HashMap<String, WaveformData>,
         measurements: Vec<rspice_core::MeasureResult>,
         operating_point: std::sync::Arc<rspice_core::engine::HbOperatingPoint>,
+    },
+
+    /// Independent-tone spectra with the signed tuple for every displayed bin
+    /// and the complete MNA operating point for persistence and consumers.
+    Qpss {
+        frequencies: Vec<f64>,
+        tuples: Vec<Vec<i32>>,
+        waveforms: HashMap<String, WaveformData>,
+        operating_point: std::sync::Arc<rspice_core::engine::QpssOperatingPoint>,
     },
 
     /// Noise analysis results

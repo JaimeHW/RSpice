@@ -22,6 +22,57 @@ pub(super) fn prepare_typed_result_csv(
 
     use crate::state::{AnalysisResultPayload, SensitivityResultMode};
     match payload {
+        AnalysisResultPayload::Qpss { operating_point } => {
+            let grid = operating_point
+                .validate_retained_payload_with_abort(
+                    &rspice_core::ResourceLimits::default(),
+                    &rspice_core::NoAbort,
+                )
+                .ok()?;
+            let mut contents = String::from(
+                "signal,unit,tone_tuple,frequency_hz,fourier_real,fourier_imaginary\n",
+            );
+            for (row, coefficients) in operating_point.spectra().iter().enumerate() {
+                let (signal, unit) = if row < operating_point.node_names().len() {
+                    (format!("V({})", operating_point.node_names()[row]), "V")
+                } else {
+                    (
+                        format!(
+                            "I({})",
+                            operating_point.branch_names()
+                                [row - operating_point.node_names().len()]
+                        ),
+                        "A",
+                    )
+                };
+                for (index, coefficient) in coefficients.iter().enumerate() {
+                    let tuple = grid.indices()[index]
+                        .iter()
+                        .map(i32::to_string)
+                        .collect::<Vec<_>>()
+                        .join(";");
+                    contents.push_str(&format!(
+                        "{},{},{},{:.17e},{:.17e},{:.17e}\n",
+                        csv_text(&signal),
+                        unit,
+                        csv_text(&tuple),
+                        grid.frequencies_hz()[index],
+                        coefficient.re,
+                        coefficient.im
+                    ));
+                }
+            }
+            Some(PreparedTypedResultCsv {
+                default_name: "qpss-spectrum.csv",
+                contents,
+                detail: format!(
+                    "{} MNA coordinates, {} signed tone tuples; complex Fourier coefficients",
+                    operating_point.spectra().len(),
+                    grid.len()
+                ),
+            })
+        }
+
         // DC exports its sampled curves through the ordinary waveform CSV path.
         AnalysisResultPayload::DcSweep { .. } => None,
         // One row per retained contributor, with the run's own facts repeated

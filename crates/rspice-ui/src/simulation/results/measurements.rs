@@ -37,6 +37,13 @@ impl SimulationResult {
                 ..
             } => measurement_result_by_name(measurements, key)
                 .or_else(|| waveform_last_value_by_name(waveforms, key)),
+            SimulationResult::Qpss {
+                operating_point, ..
+            } => match key {
+                "qpss.iterations" => Some(operating_point.iterations() as f64),
+                "qpss.normalized_residual" => Some(operating_point.normalized_residual()),
+                _ => None,
+            },
             SimulationResult::Pstb {
                 period,
                 fundamental_frequency,
@@ -220,6 +227,18 @@ impl SimulationResult {
                         .map(|value| (name.clone(), value))
                 })
                 .collect(),
+            SimulationResult::Qpss {
+                operating_point, ..
+            } => HashMap::from([
+                (
+                    "qpss.iterations".into(),
+                    operating_point.iterations() as f64,
+                ),
+                (
+                    "qpss.normalized_residual".into(),
+                    operating_point.normalized_residual(),
+                ),
+            ]),
             SimulationResult::Pstb {
                 period,
                 fundamental_frequency,

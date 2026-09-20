@@ -144,6 +144,20 @@ impl SimulationController {
                 )));
             }
 
+            SimulationResult::Qpss {
+                frequencies,
+                waveforms,
+                operating_point,
+                ..
+            } => {
+                self.populate_ac_post_views(state, frequencies, waveforms);
+                state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(
+                    "QPSS: {} independent tones, {} spectral components, {} waveforms; {} Newton iterations, normalized residual {:.3e}",
+                    operating_point.config().grid.frequencies_hz.len(), frequencies.len(), waveforms.len(),
+                    operating_point.iterations(), operating_point.normalized_residual(),
+                )));
+            }
+
             SimulationResult::HarmonicBalance {
                 frequencies,
                 waveforms,

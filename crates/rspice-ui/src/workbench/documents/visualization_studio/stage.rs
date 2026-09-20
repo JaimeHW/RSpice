@@ -501,7 +501,8 @@ pub(super) fn retained_pole_zero_payload(
         | AnalysisResultPayload::Reliability { .. }
         | AnalysisResultPayload::Soa { .. }
         | AnalysisResultPayload::TransientEvents { .. }
-        | AnalysisResultPayload::FftSpectrum { .. } => None,
+        | AnalysisResultPayload::FftSpectrum { .. }
+        | AnalysisResultPayload::Qpss { .. } => None,
     }
 }
 
@@ -599,7 +600,8 @@ pub(super) fn retained_sensitivity_payload(
         | AnalysisResultPayload::Reliability { .. }
         | AnalysisResultPayload::Soa { .. }
         | AnalysisResultPayload::TransientEvents { .. }
-        | AnalysisResultPayload::FftSpectrum { .. } => None,
+        | AnalysisResultPayload::FftSpectrum { .. }
+        | AnalysisResultPayload::Qpss { .. } => None,
     }
 }
 

@@ -43,6 +43,7 @@ struct HarmonicBalanceModel {
     /// Absent for HB, `.FOUR` and the PSS spectrum, which is what keeps their
     /// rendering exactly what it was.
     fft: Option<crate::state::FftSpectrumEvidence>,
+    qpss: Option<Arc<rspice_core::engine::QpssOperatingPoint>>,
     /// The smallest positive magnitude retained, for the decade ordinate.
     smallest_positive_magnitude: Option<f64>,
 }
@@ -71,7 +72,7 @@ pub(super) fn analysis_is_renderable(analysis: &AnalysisResult) -> bool {
     analysis.success
         && matches!(
             analysis.analysis_type,
-            AnalysisType::HarmonicBalance | AnalysisType::Fourier
+            AnalysisType::HarmonicBalance | AnalysisType::Fourier | AnalysisType::Qpss
         )
         && analysis.waveforms.iter().any(spectrum_trace_is_renderable)
 }
@@ -166,6 +167,12 @@ fn build_model(state: &AppState, tokens: &Tokens) -> Option<HarmonicBalanceModel
         magnitude_max,
         retained_frequency_count,
         fft: recorded_fft::evidence(analysis).cloned(),
+        qpss: match &analysis.result_payload {
+            Some(crate::state::AnalysisResultPayload::Qpss { operating_point }) => {
+                Some(Arc::clone(operating_point))
+            }
+            _ => None,
+        },
         smallest_positive_magnitude,
     })
 }
@@ -224,7 +231,7 @@ fn active_hb_failure(state: &AppState) -> Option<&str> {
     let analysis = state.simulation.active_analysis()?;
     (matches!(
         analysis.analysis_type,
-        AnalysisType::HarmonicBalance | AnalysisType::Fourier
+        AnalysisType::HarmonicBalance | AnalysisType::Fourier | AnalysisType::Qpss
     ) && !analysis.success)
         .then(|| {
             analysis
@@ -436,7 +443,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         } else {
             super::panel_note(
                 ui,
-                "Select a completed HB or Fourier result with retained complex coefficients.",
+                "Select a completed HB, QPSS or Fourier result with retained complex coefficients.",
             );
         }
         return;
@@ -467,6 +474,52 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     // "Not retained" rows below would be false of it.
     if let Some(spectrum) = &model.fft {
         super::stat_table(ui, &recorded_fft::inspector_rows(spectrum));
+    } else if let Some(point) = &model.qpss {
+        let config = point.config();
+        let rows = [
+            (
+                "Independent tones",
+                config
+                    .grid
+                    .frequencies_hz
+                    .iter()
+                    .map(|frequency| quantity_policy.format_frequency(*frequency, 6))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                true,
+            ),
+            (
+                "Harmonic orders",
+                config
+                    .grid
+                    .harmonics
+                    .iter()
+                    .map(usize::to_string)
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                false,
+            ),
+            (
+                "Mixing order",
+                config
+                    .grid
+                    .max_mixing_order
+                    .map_or_else(|| "Full lattice".into(), |order| order.to_string()),
+                false,
+            ),
+            ("Newton iterations", point.iterations().to_string(), false),
+            (
+                "Normalized residual",
+                format!("{:.6e}", point.normalized_residual()),
+                false,
+            ),
+            ("Amplitude", "Peak; signed DC unchanged".into(), false),
+        ];
+        super::stat_table(ui, &rows);
+        super::panel_note(
+            ui,
+            "Each component has a signed tone tuple. Export CSV for the complete signed Fourier coefficients and their tuples.",
+        );
     } else {
         let rows = [
             ("Tones / f₀", retained_samples, true),

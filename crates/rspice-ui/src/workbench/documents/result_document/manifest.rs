@@ -846,7 +846,11 @@ const fn domain_meta(analysis: AnalysisType) -> DomainMeta {
             axis: "tone family",
             precision: "complex128",
         },
-        A::Pss | A::Qpss => DomainMeta {
+        A::Qpss => DomainMeta {
+            axis: "signed tone lattice / frequency",
+            precision: "complex128",
+        },
+        A::Pss => DomainMeta {
             axis: "periodic phase",
             precision: "f64",
         },
@@ -1106,6 +1110,16 @@ fn format_frequency(value: f64) -> String {
 
 fn payload_values_label(payload: &AnalysisResultPayload) -> String {
     match payload {
+        AnalysisResultPayload::Qpss { operating_point } => format!(
+            "{} independent tones / {} MNA coordinates / {} signed spectral coefficients",
+            operating_point.config().grid.frequencies_hz.len(),
+            operating_point.spectra().len(),
+            operating_point
+                .spectra()
+                .iter()
+                .map(Vec::len)
+                .sum::<usize>(),
+        ),
         AnalysisResultPayload::DcSweep { evidence } => format!(
             "{} solved quantities / {} sweep members / {} primary traversal",
             evidence.quantities.len(),
