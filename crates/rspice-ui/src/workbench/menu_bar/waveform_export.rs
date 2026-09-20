@@ -1456,6 +1456,35 @@ fn prepare_single_analysis_dataset(
         } else {
             prepare_flat_waveform_dataset(waveforms, x_name, x_signal_type)?
         };
+    if !touchstone
+        && matches!(
+            analysis.analysis_type,
+            crate::state::AnalysisType::Psp | crate::state::AnalysisType::Hbsp
+        )
+    {
+        for measurement in &analysis.measurements {
+            if measurement.name.starts_with("periodic_noise_") {
+                let value = measurement
+                    .value
+                    .filter(|value| value.is_finite())
+                    .ok_or_else(|| "Periodic noise export context must be finite".to_owned())?;
+                let mut signal = crate::io::WaveformSignal::new(
+                    &measurement.name,
+                    crate::io::SignalType::Unknown,
+                );
+                signal.unit = if measurement.name.ends_with("_kelvin") {
+                    "K"
+                } else if measurement.name.ends_with("_hz") {
+                    "Hz"
+                } else {
+                    "1"
+                }
+                .into();
+                signal.data = vec![value; prepared.dataset.point_count()];
+                prepared.dataset.add_signal(signal);
+            }
+        }
+    }
     if let Some(crate::state::AnalysisResultFamilyMetadata::SParameter {
         reference_impedances_ohm,
         noise_reference_temperature_kelvin,

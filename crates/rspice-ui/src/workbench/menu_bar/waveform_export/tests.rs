@@ -7,6 +7,8 @@
 
 use super::*;
 
+mod periodic_noise;
+
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 

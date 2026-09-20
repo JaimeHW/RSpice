@@ -30,6 +30,14 @@ pub(super) fn noise_records_for_write(
     let mut components: [Option<&WaveformSignal>; 4] = [None; 4];
     for signal in &dataset.signals {
         let name = signal.name.trim().to_ascii_lowercase();
+        let base = name.trim_start_matches('|');
+        let base = ["re(", "im(", "phase(", "arg("]
+            .iter()
+            .find_map(|prefix| base.strip_prefix(prefix))
+            .unwrap_or(base);
+        if base.starts_with("pn_") || base.starts_with("cw") {
+            return Err("Touchstone cannot represent periodic cross-frequency noise correlations or conversion-channel noise parameters; export CSV or a result bundle to retain them".into());
+        }
         let slot = match name.as_str() {
             "fmin" => 0,
             "rn" => 1,
