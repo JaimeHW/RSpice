@@ -3,7 +3,7 @@
 //! The source is an ideal voltage generator followed by an explicitly named
 //! linear resistor. Its complete folded thermal contribution is normalized to
 //! the reference temperature; the circuit's other noise stays at its actual
-//! operating temperature. Signal gain is the existing sideband-zero transfer.
+//! operating temperature. Signal gain uses the selected input and output conversion channels.
 //! Thus image-band source noise remains in the numerator (SSB convention).
 
 use super::*;
@@ -54,6 +54,26 @@ impl Engine {
         &self,
         netlist: &Netlist,
         request: &HbNoiseFigureRequest,
+        operating_point: &HbOperatingPoint,
+        abort: &dyn AbortSignal,
+    ) -> Result<PeriodicNoiseFigureResult, SimulationError> {
+        self.run_hb_noise_figure_at_sidebands_with_abort(
+            netlist,
+            request,
+            PeriodicNoiseSidebands::default(),
+            operating_point,
+            abort,
+        )
+    }
+
+    /// Calculate SSB noise figure for explicitly selected signal channels.
+    /// All source image noise remains in the numerator regardless of which
+    /// input channel supplies the signal-gain reference.
+    pub fn run_hb_noise_figure_at_sidebands_with_abort(
+        &self,
+        netlist: &Netlist,
+        request: &HbNoiseFigureRequest,
+        sidebands: PeriodicNoiseSidebands,
         operating_point: &HbOperatingPoint,
         abort: &dyn AbortSignal,
     ) -> Result<PeriodicNoiseFigureResult, SimulationError> {
@@ -117,13 +137,16 @@ impl Engine {
                 "source resistor must have thermal noise enabled and no excess flicker noise",
             ));
         }
-        let noise = engine.run_pnoise_from_hb_with_abort(
+        let noise = engine.run_pnoise_from_hb_request_with_abort(
             netlist,
-            &request.frequencies,
-            &request.output_node,
-            request.output_ref.as_deref(),
-            Some(&request.input_source),
-            request.max_sideband,
+            &PeriodicNoiseRequest {
+                offsets: &request.frequencies,
+                output_node: &request.output_node,
+                output_ref: request.output_ref.as_deref(),
+                input_source: Some(&request.input_source),
+                max_sideband: request.max_sideband,
+                sidebands,
+            },
             operating_point,
             abort,
         )?;
@@ -387,6 +410,83 @@ mod tests {
     }
 
     #[test]
+    fn hb_noise_figure_selected_sidebands_follow_absolute_rc_frequency() {
+        let netlist = Netlist::parse(
+            "RC sidebands\nV1 in 0 0\nRs in out 1k\nRl out 0 1k\nC1 out 0 1n\n.end\n",
+        )
+        .unwrap();
+        let engine = Engine::default();
+        let hb = engine
+            .run_hb(&netlist, HbConfig::new(1e6).with_harmonics(8))
+            .unwrap();
+        let req = HbNoiseFigureRequest {
+            reference_temperature: 300.15,
+            ..request()
+        };
+        let boltzmann =
+            super::super::pnoise::pnoise_physical_constants(engine.config.spice_dialect).boltzmann;
+        for sideband in [-1, 0, 1] {
+            let result = engine
+                .run_hb_noise_figure_at_sidebands_with_abort(
+                    &netlist,
+                    &req,
+                    PeriodicNoiseSidebands {
+                        input: sideband,
+                        output: sideband,
+                    },
+                    &hb.operating_point,
+                    &NoAbort,
+                )
+                .unwrap();
+            for (index, offset) in req.frequencies.iter().enumerate() {
+                let frequency = offset + f64::from(sideband) * 1e6;
+                let expected = 4.0 * boltzmann * 300.15 * 500.0
+                    / (1.0 + (std::f64::consts::TAU * frequency * 500.0 * 1e-9).powi(2));
+                assert!((result.noise.output_noise[index] / expected - 1.0).abs() < 1e-9);
+                assert!((result.figure.decibels[index] - 10.0 * 2.0_f64.log10()).abs() < 1e-9);
+            }
+        }
+        for sidebands in [
+            PeriodicNoiseSidebands {
+                input: 2,
+                output: 0,
+            },
+            PeriodicNoiseSidebands {
+                input: 0,
+                output: -2,
+            },
+            PeriodicNoiseSidebands {
+                input: i32::MIN,
+                output: 0,
+            },
+        ] {
+            let error = engine
+                .run_hb_noise_figure_at_sidebands_with_abort(
+                    &netlist,
+                    &req,
+                    sidebands,
+                    &hb.operating_point,
+                    &NoAbort,
+                )
+                .unwrap_err();
+            assert!(error.to_string().contains("folding window"), "{error}");
+        }
+        let error = engine
+            .run_hb_noise_figure_at_sidebands_with_abort(
+                &netlist,
+                &req,
+                PeriodicNoiseSidebands {
+                    input: 0,
+                    output: 1,
+                },
+                &hb.operating_point,
+                &NoAbort,
+            )
+            .unwrap_err();
+        assert!(error.to_string().contains("zero input-transfer"), "{error}");
+    }
+
+    #[test]
     fn hb_noise_figure_keeps_folded_image_noise_in_the_ssb_numerator() {
         // For a memoryless periodically modulated divider, white source
         // noise uses mean(H(t)^2), while the signal uses mean(H(t))^2.
@@ -404,27 +504,37 @@ mod tests {
             max_sideband: 12,
             ..request()
         };
-        let result = engine
-            .run_hb_noise_figure_with_abort(&netlist, &req, &hb.operating_point, &NoAbort)
-            .unwrap();
-        let samples = 100_000;
-        let (mut signal, mut noise) = (0.0, 0.0);
-        for index in 0..samples {
-            let phase = std::f64::consts::TAU * (index as f64 + 0.5) / samples as f64;
-            let off_fraction = 0.5 * (1.0 - phase.sin().tanh());
-            let resistance =
-                (100.0_f64.ln() * (1.0 - off_fraction) + 10_000.0_f64.ln() * off_fraction).exp();
-            let transfer = 1000.0 / (2000.0 + resistance);
-            signal += transfer;
-            noise += (1.0 + resistance / 1000.0 * 300.15 / 290.0) * transfer.powi(2);
-        }
-        let expected = noise * samples as f64 / signal.powi(2);
-        for db in result.figure.decibels {
-            assert!(
-                (10.0_f64.powf(db / 10.0) - expected).abs() < 0.001 * expected,
-                "SSB noise figure: {db} dB, expected {} dB",
-                10.0 * expected.log10()
-            );
+        for (input, output) in [(0, 0), (1, 0), (-1, 0), (0, 1), (1, 1), (0, -1)] {
+            let result = engine
+                .run_hb_noise_figure_at_sidebands_with_abort(
+                    &netlist,
+                    &req,
+                    PeriodicNoiseSidebands { input, output },
+                    &hb.operating_point,
+                    &NoAbort,
+                )
+                .unwrap();
+            let samples = 100_000;
+            let (mut signal_re, mut signal_im, mut noise) = (0.0, 0.0, 0.0);
+            for index in 0..samples {
+                let phase = std::f64::consts::TAU * (index as f64 + 0.5) / samples as f64;
+                let off_fraction = 0.5 * (1.0 - phase.sin().tanh());
+                let resistance = (100.0_f64.ln() * (1.0 - off_fraction)
+                    + 10_000.0_f64.ln() * off_fraction)
+                    .exp();
+                let transfer = 1000.0 / (2000.0 + resistance);
+                signal_re += transfer * (f64::from(input - output) * phase).cos();
+                signal_im += transfer * (f64::from(input - output) * phase).sin();
+                noise += (1.0 + resistance / 1000.0 * 300.15 / 290.0) * transfer.powi(2);
+            }
+            let expected = noise * samples as f64 / (signal_re.powi(2) + signal_im.powi(2));
+            for db in result.figure.decibels {
+                assert!(
+                    (10.0_f64.powf(db / 10.0) - expected).abs() < 0.001 * expected,
+                    "SSB noise figure for {input} -> {output}: {db} dB, expected {} dB",
+                    10.0 * expected.log10()
+                );
+            }
         }
     }
 }

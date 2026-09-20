@@ -24,10 +24,29 @@ use crate::analysis::harmonic_balance::{
 #[cfg(test)]
 use crate::circuit::ResistorValues;
 
+/// Frequency channels measured around one periodic operating point.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PeriodicNoiseSidebands {
+    pub input: i32,
+    pub output: i32,
+}
+
+/// Frequency channels and observations around one periodic operating point.
+#[derive(Debug, Clone, Copy)]
+pub struct PeriodicNoiseRequest<'a> {
+    /// Nonnegative offset frequency; channel k is at offset + k * carrier.
+    pub offsets: &'a [Value],
+    pub output_node: &'a str,
+    pub output_ref: Option<&'a str>,
+    pub input_source: Option<&'a str>,
+    pub max_sideband: i32,
+    pub sidebands: PeriodicNoiseSidebands,
+}
+
 /// Result of periodic noise analysis.
 #[derive(Debug, Clone)]
 pub struct PnoiseAnalysisResult {
-    /// Offset frequencies (Hz), the output analysis frequencies.
+    /// Offset frequencies (Hz); the selected output channel is at offset + k*f0.
     pub frequencies: Vec<Value>,
     /// Total output noise voltage PSD at each offset (V^2/Hz).
     pub output_noise: Vec<Value>,
@@ -36,7 +55,7 @@ pub struct PnoiseAnalysisResult {
     pub contributors: Vec<(String, Vec<Value>)>,
     /// Input-referred noise (V^2/Hz): output noise divided by the squared
     /// magnitude of the conversion transfer from the input source (at its
-    /// own frequency, sideband 0) to the output. Present when an input
+    /// selected input sideband) to the selected output sideband. Present when an input
     /// source was named.
     pub input_noise: Option<Vec<Value>>,
     /// Large-signal fundamental (Hz).
@@ -384,11 +403,14 @@ impl Engine {
         engine.run_pnoise_impl(
             netlist,
             fundamental_freq,
-            offsets,
-            output_node,
-            output_ref,
-            input_source,
-            max_sideband,
+            &PeriodicNoiseRequest {
+                offsets,
+                output_node,
+                output_ref,
+                input_source,
+                max_sideband,
+                sidebands: PeriodicNoiseSidebands::default(),
+            },
             None,
             abort,
         )
@@ -421,11 +443,14 @@ impl Engine {
         engine.run_pnoise_impl(
             netlist,
             operating_point.analysis().result.frequency,
-            offsets,
-            output_node,
-            output_ref,
-            input_source,
-            max_sideband,
+            &PeriodicNoiseRequest {
+                offsets,
+                output_node,
+                output_ref,
+                input_source,
+                max_sideband,
+                sidebands: PeriodicNoiseSidebands::default(),
+            },
             Some(PnoiseOperatingPoint::Shooting(operating_point)),
             abort,
         )
@@ -453,29 +478,81 @@ impl Engine {
         engine.run_pnoise_impl(
             netlist,
             operating_point.config().fundamental_freq,
-            offsets,
-            output_node,
-            output_ref,
-            input_source,
-            max_sideband,
+            &PeriodicNoiseRequest {
+                offsets,
+                output_node,
+                output_ref,
+                input_source,
+                max_sideband,
+                sidebands: PeriodicNoiseSidebands::default(),
+            },
             Some(PnoiseOperatingPoint::HarmonicBalance(operating_point)),
             abort,
         )
     }
 
-    #[allow(clippy::too_many_arguments)]
+    /// Measure selected conversion channels from an authenticated retained HB state.
+    pub fn run_pnoise_from_hb_request_with_abort(
+        &self,
+        netlist: &Netlist,
+        request: &PeriodicNoiseRequest<'_>,
+        operating_point: &HbOperatingPoint,
+        abort: &dyn AbortSignal,
+    ) -> Result<PnoiseAnalysisResult, SimulationError> {
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
+        self.resolved_for_netlist(netlist).run_pnoise_impl(
+            netlist,
+            operating_point.config().fundamental_freq,
+            request,
+            Some(PnoiseOperatingPoint::HarmonicBalance(operating_point)),
+            abort,
+        )
+    }
+
+    /// Measure selected conversion channels from an authenticated driven PSS orbit.
+    pub fn run_pnoise_from_pss_request_with_abort(
+        &self,
+        netlist: &Netlist,
+        request: &PeriodicNoiseRequest<'_>,
+        operating_point: &super::super::PssOperatingPoint,
+        abort: &dyn AbortSignal,
+    ) -> Result<PnoiseAnalysisResult, SimulationError> {
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
+        if operating_point.config().is_autonomous() {
+            return Err(SimulationError::Circuit(
+                "driven pnoise cannot consume an autonomous PSS operating point; use oscillator pnoise".into(),
+            ));
+        }
+        self.resolved_for_netlist(netlist).run_pnoise_impl(
+            netlist,
+            operating_point.analysis().result.frequency,
+            request,
+            Some(PnoiseOperatingPoint::Shooting(operating_point)),
+            abort,
+        )
+    }
+
     fn run_pnoise_impl(
         &self,
         netlist: &Netlist,
         fundamental_freq: Value,
-        offsets: &[Value],
-        output_node: &str,
-        output_ref: Option<&str>,
-        input_source: Option<&str>,
-        max_sideband: i32,
+        request: &PeriodicNoiseRequest<'_>,
         operating_point: Option<PnoiseOperatingPoint<'_>>,
         abort: &dyn AbortSignal,
     ) -> Result<PnoiseAnalysisResult, SimulationError> {
+        let PeriodicNoiseRequest {
+            offsets,
+            output_node,
+            output_ref,
+            input_source,
+            max_sideband,
+            sidebands,
+        } = *request;
+        let (input_sideband, output_sideband) = (sidebands.input, sidebands.output);
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }
@@ -502,6 +579,13 @@ impl Engine {
         if max_sideband < 0 {
             return Err(SimulationError::Circuit(
                 "pnoise max_sideband must be non-negative".to_string(),
+            ));
+        }
+        if input_sideband.unsigned_abs() > max_sideband as u32
+            || output_sideband.unsigned_abs() > max_sideband as u32
+        {
+            return Err(SimulationError::Circuit(
+                "pnoise input and output sidebands must lie within the folding window".into(),
             ));
         }
         self.ensure_analysis_points(offsets.len())?;
@@ -998,13 +1082,13 @@ impl Engine {
         self.ensure_result_shape(offsets.len(), values_per_point)?;
 
         // Input transfer for input-referred noise: the conversion transfer
-        // from the named source (unit excitation at sideband 0) to the
-        // output at the analysis frequency.
+        // from the named source at its selected sideband to the selected
+        // output channel, using the same conversion window as the noise.
         let input_port = input_source
             .map(|name| Self::pac_input_port(&circuit, name, num_nodes))
             .transpose()?;
         let input_excitation = input_port.as_ref().map(|port| PeriodicAcExcitation {
-            sideband: 0,
+            sideband: input_sideband,
             injections: port.node_injections.clone(),
         });
         let input_branch_voltage = input_port
@@ -1081,15 +1165,15 @@ impl Engine {
                 return Err(SimulationError::Aborted);
             }
             let per_source = solver
-                .solve_periodic_noise(
+                .solve_periodic_noise_at_sideband(
                     &state,
                     PeriodicSidebandWindow {
                         offset_hz: offset,
                         sideband_min: -max_sideband,
                         sideband_max: max_sideband,
                     },
-                    out_idx,
-                    ref_idx,
+                    (out_idx, ref_idx),
+                    output_sideband,
                     &sources,
                 )
                 .map_err(|e| {
@@ -1124,7 +1208,14 @@ impl Engine {
                             "pnoise input transfer failed at offset {offset:.6e} Hz: {e}"
                         ))
                     })?;
-                let zero_idx = max_sideband as usize; // k = 0 with range -K..K
+                let selected_idx = usize::try_from(
+                    i64::from(max_sideband) + i64::from(output_sideband),
+                )
+                .map_err(|_| {
+                    SimulationError::Circuit(
+                        "pnoise output-sideband index exceeds this platform".into(),
+                    )
+                })?;
                 let response_for_excitation = response.first().ok_or_else(|| {
                     SimulationError::Circuit(format!(
                         "pnoise input transfer returned no excitation response at offset {offset:.6e} Hz"
@@ -1132,7 +1223,7 @@ impl Engine {
                 })?;
                 let mut h = response_for_excitation
                     .get(out_idx)
-                    .and_then(|sidebands| sidebands.get(zero_idx))
+                    .and_then(|sidebands| sidebands.get(selected_idx))
                     .copied()
                     .ok_or_else(|| {
                         SimulationError::Circuit(format!(
@@ -1142,7 +1233,7 @@ impl Engine {
                 if let Some(r) = ref_idx {
                     h -= response_for_excitation
                         .get(r)
-                        .and_then(|sidebands| sidebands.get(zero_idx))
+                        .and_then(|sidebands| sidebands.get(selected_idx))
                         .copied()
                         .ok_or_else(|| {
                             SimulationError::Circuit(format!(

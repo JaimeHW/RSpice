@@ -2409,6 +2409,7 @@ impl HbSolver {
     /// its terminals at sideband k and `S_d` the Fourier coefficients of its
     /// intensity (`S_{-d} = conj(S_d)`). Stationary sources reduce to the
     /// textbook folding `S0 * sum_k |A_k|^2`.
+    #[cfg(test)]
     pub(crate) fn solve_periodic_noise(
         &mut self,
         state: &HbSolverState,
@@ -2417,6 +2418,19 @@ impl HbSolver {
         output_ref: Option<usize>,
         sources: &[PeriodicNoiseSource],
     ) -> Result<Vec<Value>, HbError> {
+        self.solve_periodic_noise_at_sideband(state, window, (output_node, output_ref), 0, sources)
+    }
+
+    /// Observe a selected output channel of the same conversion matrix.
+    pub(crate) fn solve_periodic_noise_at_sideband(
+        &mut self,
+        state: &HbSolverState,
+        window: PeriodicSidebandWindow,
+        output: (usize, Option<usize>),
+        output_sideband: i32,
+        sources: &[PeriodicNoiseSource],
+    ) -> Result<Vec<Value>, HbError> {
+        let (output_node, output_ref) = output;
         let PeriodicSidebandWindow {
             offset_hz,
             sideband_min,
@@ -2440,9 +2454,9 @@ impl HbSolver {
                 "pnoise output reference node out of range".to_string(),
             ));
         }
-        if sideband_min > 0 || sideband_max < 0 {
+        if output_sideband < sideband_min || output_sideband > sideband_max {
             return Err(HbError::InvalidCircuit(
-                "pnoise sideband range must include 0 (the analysis frequency)".to_string(),
+                "pnoise sideband range must include the selected output sideband".to_string(),
             ));
         }
         for source in sources {
@@ -2547,9 +2561,12 @@ impl HbSolver {
         operator.validate("pnoise")?;
 
         // Adjoint solve with the plain (unconjugated) transpose.
-        let out_idx = usize::try_from(-i64::from(sideband_min)).map_err(|_| {
-            HbError::InvalidCircuit("pnoise sideband-zero index exceeds this platform".to_string())
-        })?;
+        let out_idx = usize::try_from(i64::from(output_sideband) - i64::from(sideband_min))
+            .map_err(|_| {
+                HbError::InvalidCircuit(
+                    "pnoise output-sideband index exceeds this platform".to_string(),
+                )
+            })?;
         let mut e = vec![Complex64::new(0.0, 0.0); size];
         e[output_node * s + out_idx] = Complex64::new(1.0, 0.0);
         if let Some(r) = output_ref {

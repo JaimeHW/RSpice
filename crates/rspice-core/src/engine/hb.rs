@@ -47,7 +47,7 @@ pub use noise_figure::{
     HbNoiseFigureRequest, PeriodicNoiseFigureResult, PeriodicNoiseFigureSpectrum,
 };
 pub use pac::PacAnalysisResult;
-pub use pnoise::PnoiseAnalysisResult;
+pub use pnoise::{PeriodicNoiseRequest, PeriodicNoiseSidebands, PnoiseAnalysisResult};
 pub use psp::{PreparedPsp, PspAnalysisResult};
 pub use state::{HbEnvelopeContinuationState, HbEnvelopeStateGuarantee};
 

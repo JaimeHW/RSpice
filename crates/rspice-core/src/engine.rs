@@ -135,8 +135,8 @@ pub use error::{
 pub use hb::{
     EnvelopeResult, HbAnalysisResult, HbEnvelopeContinuationState, HbEnvelopeStateGuarantee,
     HbNoiseFigureRequest, HbOperatingPoint, HbOperatingPointIdentity, PacAnalysisResult,
-    PeriodicNoiseFigureResult, PeriodicNoiseFigureSpectrum, PnoiseAnalysisResult, PreparedPsp,
-    PspAnalysisResult,
+    PeriodicNoiseFigureResult, PeriodicNoiseFigureSpectrum, PeriodicNoiseRequest,
+    PeriodicNoiseSidebands, PnoiseAnalysisResult, PreparedPsp, PspAnalysisResult,
 };
 pub use health::EngineHealthReport;
 pub use pss::{
