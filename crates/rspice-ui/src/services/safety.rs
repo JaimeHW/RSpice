@@ -9,6 +9,9 @@ pub use soa_manager::{
     SoaVoltageBasis, ViolationSeverity, soa_stress_waveform_name,
 };
 
+mod thresholds;
+pub use thresholds::SoaThresholds;
+
 mod power_derating;
 pub use power_derating::{
     SoaDeratingSamples, SoaPowerDerating, SoaPowerDeratingEvidence, compare_soa_stress,
