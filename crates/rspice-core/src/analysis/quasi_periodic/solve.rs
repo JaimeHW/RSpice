@@ -8,6 +8,7 @@
 mod coordinates;
 mod evaluation;
 mod newton;
+mod operator;
 #[cfg(test)]
 mod tests;
 

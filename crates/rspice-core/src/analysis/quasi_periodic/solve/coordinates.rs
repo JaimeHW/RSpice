@@ -69,9 +69,3 @@ pub(super) fn decode(real: &[Value], entries: usize) -> Vec<Vec<Complex64>> {
         })
         .collect()
 }
-
-pub(super) fn basis(entries: usize, coordinate: usize) -> Vec<Complex64> {
-    let mut real = vec![0.0; entries];
-    real[coordinate] = 1.0;
-    decode(&real, entries).pop().unwrap()
-}

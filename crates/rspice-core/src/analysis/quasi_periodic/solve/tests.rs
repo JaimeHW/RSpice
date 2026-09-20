@@ -143,3 +143,124 @@ fn quasi_periodic_certificate_keeps_dc_out_of_small_ac_tolerance() {
     );
     assert!(evaluation.merit > 1.0);
 }
+
+struct CoupledPolynomial;
+impl Circuit for CoupledPolynomial {
+    fn unknowns(&self) -> usize {
+        2
+    }
+    fn voltage_equation(&self, row: usize) -> bool {
+        row == 1
+    }
+    fn linear_entries(&self, frequency: Value) -> Result<Vec<LinearEntry>, Error> {
+        Ok(vec![
+            (0, 0, Complex64::new(0.7, 0.0)),
+            (0, 1, Complex64::new(1.0, 0.0)),
+            (1, 0, Complex64::new(-1.0, 0.0)),
+            (
+                1,
+                1,
+                Complex64::new(0.0, std::f64::consts::TAU * frequency * 0.01),
+            ),
+        ])
+    }
+    fn sample(&mut self, x: &[Value], jacobian: bool) -> Result<Sample, Error> {
+        Ok(Sample {
+            current: vec![(0, -x[0].powi(3) - 2.0 * x[1].powi(2)), (1, -x[0] * x[1])],
+            charge: vec![
+                (0, -0.5 * x[0].powi(2) - 0.3 * x[1].powi(3)),
+                (1, -x[0] * x[1]),
+            ],
+            conductance: if jacobian {
+                vec![
+                    (0, 0, 3.0 * x[0].powi(2)),
+                    (0, 1, 4.0 * x[1]),
+                    (1, 0, x[1]),
+                    (1, 1, x[0]),
+                ]
+            } else {
+                vec![]
+            },
+            capacitance: if jacobian {
+                vec![
+                    (0, 0, x[0]),
+                    (0, 1, 0.9 * x[1].powi(2)),
+                    (1, 0, x[1]),
+                    (1, 1, x[0]),
+                ]
+            } else {
+                vec![]
+            },
+        })
+    }
+}
+
+#[test]
+fn quasi_periodic_matrix_free_action_matches_coupled_physical_residual_derivatives() {
+    let config = QuasiPeriodicSolveConfig::default();
+    let mut work = workspace(&config);
+    work.unknowns = 2;
+    work.voltage_rows = vec![false, true];
+    work.linear = work
+        .grid
+        .frequencies_hz()
+        .iter()
+        .map(|f| CoupledPolynomial.linear_entries(*f).unwrap())
+        .collect();
+    let entries = work.grid.len();
+    let state = vec![0.2, 0.03, -0.02, 0.07, 0.01, -0.1, 0.02, 0.04, -0.08, 0.06];
+    let sources = vec![vec![Complex64::ZERO; entries]; 2];
+    let evaluation = work
+        .evaluate(
+            &mut CoupledPolynomial,
+            &coordinates::decode(&state, entries),
+            &sources,
+            true,
+            &NoAbort,
+        )
+        .unwrap();
+    // Dense directions exercise both MNA rows and both quadratures together;
+    // this oracle differentiates the physical residual, not assembled columns.
+    for direction in [
+        vec![1.0; state.len()],
+        vec![0.2, -0.6, 0.5, -0.3, 0.7, 0.1, 0.4, -0.9, 0.8, -0.2],
+    ] {
+        let actual = work
+            .jacobian_action(&evaluation, &direction, &NoAbort)
+            .unwrap();
+        let mut residuals = Vec::new();
+        for step in [1e-6, -1e-6] {
+            let trial: Vec<_> = state
+                .iter()
+                .zip(&direction)
+                .map(|(x, v)| x + step * v)
+                .collect();
+            let value = work
+                .evaluate(
+                    &mut CoupledPolynomial,
+                    &coordinates::decode(&trial, entries),
+                    &sources,
+                    false,
+                    &NoAbort,
+                )
+                .unwrap();
+            residuals.push(coordinates::encode(&value.residual));
+        }
+        for ((actual, plus), minus) in actual.iter().zip(&residuals[0]).zip(&residuals[1]) {
+            let expected = -(plus - minus) / 2e-6;
+            assert!(
+                (actual - expected).abs() < 2e-8 * (1.0 + expected.abs()),
+                "{actual:e} != {expected:e}"
+            );
+        }
+    }
+    let abort = crate::abort_signal::CountingAbort::new(4);
+    assert!(matches!(
+        work.jacobian_action(&evaluation, &state, &abort),
+        Err(Error::Aborted)
+    ));
+    assert!(
+        work.jacobian_action(&evaluation, &state[..9], &NoAbort)
+            .is_err()
+    );
+}
