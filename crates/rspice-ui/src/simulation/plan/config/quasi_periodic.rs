@@ -1,7 +1,9 @@
 //! QPSS authoring without dropping any driven-engine configuration field.
 use super::*;
 use crate::simulation::multi_run::{AnalysisSpec, HbToneSpec, QpssControls};
-use rspice_core::analysis::quasi_periodic::QuasiPeriodicSampling;
+use rspice_core::analysis::quasi_periodic::{
+    QuasiPeriodicLinearConfig, QuasiPeriodicLinearMethod, QuasiPeriodicSampling,
+};
 use rspice_core::engine::{QpssInitialState, QpssSourceTone};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -14,6 +16,10 @@ pub struct QpssDraft {
     pub current_absolute_tolerance: String,
     pub voltage_absolute_tolerance: String,
     pub max_backtracks: String,
+    pub linear_method: QuasiPeriodicLinearMethod,
+    pub krylov_restart: String,
+    pub krylov_cycles: String,
+    pub linear_tolerance: String,
     pub max_mixing_order: String,
     pub oversample: String,
     pub collocation_points: String,
@@ -33,6 +39,10 @@ impl Default for QpssDraft {
             current_absolute_tolerance: "1e-12".into(),
             voltage_absolute_tolerance: "1e-9".into(),
             max_backtracks: "20".into(),
+            linear_method: QuasiPeriodicLinearMethod::Auto,
+            krylov_restart: "32".into(),
+            krylov_cycles: "20".into(),
+            linear_tolerance: "1e-10".into(),
             max_mixing_order: String::new(),
             oversample: "2".into(),
             collocation_points: String::new(),
@@ -95,7 +105,29 @@ impl QpssDraft {
                 tone: parse_positive_usize(number.trim(), "QPSS source tone number")? - 1,
             });
         }
+        // Direct mode retains inactive editor buffers but does not parse or
+        // execute Krylov-only settings until the operator selects that mode.
+        let linear = if self.linear_method == QuasiPeriodicLinearMethod::Direct {
+            QuasiPeriodicLinearConfig {
+                method: self.linear_method,
+                ..Default::default()
+            }
+        } else {
+            QuasiPeriodicLinearConfig {
+                method: self.linear_method,
+                restart: parse_positive_usize(&self.krylov_restart, "QPSS Krylov restart")?,
+                max_cycles: parse_positive_usize(
+                    &self.krylov_cycles,
+                    "QPSS Krylov restart cycles",
+                )?,
+                relative_tolerance: parse_positive(
+                    &self.linear_tolerance,
+                    "QPSS linear tolerance",
+                )?,
+            }
+        };
         let controls = QpssControls {
+            linear,
             current_absolute_tolerance: parse_positive(
                 &self.current_absolute_tolerance,
                 "QPSS current tolerance",

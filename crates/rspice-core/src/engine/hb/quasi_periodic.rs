@@ -114,6 +114,7 @@ impl Engine {
         crate::analysis::quasi_periodic::solve::check_workload(
             required_unknowns,
             &grid,
+            &config.solver.linear,
             &engine.config.resource_limits,
         )
         .map_err(numerical_error)?;

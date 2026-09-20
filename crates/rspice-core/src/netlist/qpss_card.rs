@@ -16,6 +16,10 @@ pub struct QpssCard {
     pub voltage_absolute_tolerance: Option<Value>,
     pub max_iterations: Option<usize>,
     pub max_backtracks: Option<usize>,
+    pub linear_solver: Option<String>,
+    pub krylov_restart: Option<usize>,
+    pub krylov_cycles: Option<usize>,
+    pub linear_tolerance: Option<Value>,
     pub dc_initial_state: Option<bool>,
     /// Authored order of (source name, zero-based tone index) assignments.
     /// Several sources may drive one tone, or one source several tones.

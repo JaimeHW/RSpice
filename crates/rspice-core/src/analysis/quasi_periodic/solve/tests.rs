@@ -264,3 +264,53 @@ fn quasi_periodic_matrix_free_action_matches_coupled_physical_residual_derivativ
             .is_err()
     );
 }
+
+struct SingularVarying;
+impl Circuit for SingularVarying {
+    fn unknowns(&self) -> usize {
+        2
+    }
+    fn voltage_equation(&self, _: usize) -> bool {
+        false
+    }
+    fn linear_entries(&self, _: Value) -> Result<Vec<LinearEntry>, Error> {
+        Ok(vec![])
+    }
+    fn sample(&mut self, x: &[Value], jacobian: bool) -> Result<Sample, Error> {
+        Ok(Sample {
+            current: vec![(0, -x[0] * x[1]), (1, -x[0] * x[1])],
+            conductance: if jacobian {
+                vec![(0, 0, x[1]), (0, 1, x[0]), (1, 0, x[1]), (1, 1, x[0])]
+            } else {
+                vec![]
+            },
+            ..Default::default()
+        })
+    }
+}
+#[test]
+fn qpss_krylov_refuses_singular_zero_residual_and_observes_cancellation() {
+    let mut config = QuasiPeriodicSolveConfig::default();
+    config.linear.method = QuasiPeriodicLinearMethod::Krylov;
+    let mut work = workspace(&config);
+    work.unknowns = 2;
+    work.voltage_rows = vec![false; 2];
+    work.linear = vec![SingularVarying.linear_entries(0.0).unwrap(); work.grid.len()];
+    let mut seed = vec![vec![Complex64::ZERO; work.grid.len()]; 2];
+    let tone = work.grid.index_of(&[1, 0]).unwrap();
+    let conjugate = work.grid.len() - 1 - tone;
+    seed[0][tone] = Complex64::new(0.5, 0.0);
+    seed[0][conjugate] = Complex64::new(0.5, 0.0);
+    let sources = vec![vec![Complex64::ZERO; work.grid.len()]; 2];
+    let evaluation = work
+        .evaluate(&mut SingularVarying, &seed, &sources, true, &NoAbort)
+        .unwrap();
+    assert_eq!(evaluation.merit, 0.0);
+    assert!(work.iterative_correction(&evaluation, &NoAbort).is_err());
+    let abort = crate::abort_signal::CountingAbort::new(15);
+    assert!(matches!(
+        work.iterative_correction(&evaluation, &abort),
+        Err(Error::Aborted)
+    ));
+    assert_eq!(abort.polls_after_abort(), 0);
+}

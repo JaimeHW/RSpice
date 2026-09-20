@@ -1,12 +1,16 @@
 //! Real-coordinate Galerkin Newton solve on an independent-phase lattice.
 //!
-//! The initial backend is deliberately bounded: it assembles an analytic
-//! Jacobian and uses the shared certified matrix solver. Circuit adapters
-//! supply physical F/Q terms, never a fitted surrogate or a common-period HB
-//! orbit. Resource limits are checked before constructing the dense operator.
+//! Small systems use a direct Jacobian factorization; larger systems use
+//! matrix-free Krylov updates and a bounded-memory inverse certificate. Both
+//! evaluate the same physical F/Q model on independent phases. Workspace is
+//! checked before allocating the selected backend.
 
 mod coordinates;
 mod evaluation;
+mod iterative;
+mod linear_config;
+mod preconditioner;
+pub use linear_config::{QuasiPeriodicLinearConfig, QuasiPeriodicLinearMethod};
 mod newton;
 mod operator;
 #[cfg(test)]
@@ -28,6 +32,8 @@ pub struct QuasiPeriodicSolveConfig {
     pub voltage_absolute_tolerance: Value,
     pub max_iterations: usize,
     pub max_backtracks: usize,
+    #[serde(default, skip_serializing_if = "QuasiPeriodicLinearConfig::is_default")]
+    pub linear: QuasiPeriodicLinearConfig,
 }
 
 impl Default for QuasiPeriodicSolveConfig {
@@ -38,12 +44,14 @@ impl Default for QuasiPeriodicSolveConfig {
             voltage_absolute_tolerance: 1e-9,
             max_iterations: 100,
             max_backtracks: 20,
+            linear: QuasiPeriodicLinearConfig::default(),
         }
     }
 }
 
 impl QuasiPeriodicSolveConfig {
     pub(crate) fn validate(&self) -> Result<(), Error> {
+        self.linear.validate()?;
         if !self.relative_tolerance.is_finite()
             || self.relative_tolerance <= 0.0
             || self.relative_tolerance >= 1.0
@@ -140,6 +148,7 @@ impl Workspace<'_> {
 pub(crate) fn check_workload(
     unknowns: usize,
     grid: &QuasiPeriodicGrid,
+    linear: &QuasiPeriodicLinearConfig,
     limits: &ResourceLimits,
 ) -> Result<(usize, usize), Error> {
     if unknowns == 0 {
@@ -151,22 +160,34 @@ pub(crate) fn check_workload(
     ResourceLimitError::ensure(
         ResourceKind::MatrixUnknowns,
         size,
-        limits.max_matrix_unknowns.min(MAX_DENSE_UNKNOWNS),
+        if linear.uses_krylov(size) {
+            limits.max_matrix_unknowns
+        } else {
+            limits.max_matrix_unknowns.min(MAX_DENSE_UNKNOWNS)
+        },
     )?;
     ResourceLimitError::ensure(
         ResourceKind::AnalysisPoints,
         grid.sample_count(),
         limits.max_analysis_points,
     )?;
-    // Includes dense matrix/factorization and triplet storage, active and
-    // candidate spectra, phase fields, Fourier scratch and retained tuples.
-    let base_values = size
-        .saturating_mul(size)
-        .saturating_mul(16)
+    // The iterative backend stores circuit-sized frequency blocks and a
+    // bounded Arnoldi basis, never a full coupled Jacobian or inverse.
+    let linear_values = if linear.uses_krylov(size) {
+        grid.len()
+            .saturating_mul(unknowns.saturating_mul(unknowns))
+            .saturating_mul(64)
+            .saturating_add(
+                size.saturating_mul(linear.restart.saturating_mul(4).saturating_add(64)),
+            )
+    } else {
+        size.saturating_mul(size).saturating_mul(16)
+    };
+    let base_values = linear_values
         .saturating_add(size.saturating_mul(32))
         .saturating_add(
             grid.sample_count()
-                .saturating_mul(unknowns.saturating_mul(16).saturating_add(16)),
+                .saturating_mul(unknowns.saturating_mul(24).saturating_add(16)),
         )
         .saturating_add(
             grid.len()
@@ -192,7 +213,7 @@ pub(crate) fn solve_with_abort(
     super::check_abort(abort)?;
     config.validate()?;
     let unknowns = circuit.unknowns();
-    let (base_values, value_limit) = check_workload(unknowns, &grid, limits)?;
+    let (base_values, value_limit) = check_workload(unknowns, &grid, &config.linear, limits)?;
     coordinates::validate(sources, unknowns, &grid, "source", abort)?;
     if let Some(seed) = seed {
         coordinates::validate(seed, unknowns, &grid, "initial state", abort)?;

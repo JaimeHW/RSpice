@@ -1,7 +1,8 @@
 //! Field-complete driven QPSS settings shared by authoring and execution.
 use super::types::{AnalysisSpec, HbToneSpec};
 use rspice_core::analysis::quasi_periodic::{
-    QuasiPeriodicGridConfig, QuasiPeriodicSampling, QuasiPeriodicSolveConfig,
+    QuasiPeriodicGridConfig, QuasiPeriodicLinearConfig, QuasiPeriodicSampling,
+    QuasiPeriodicSolveConfig,
 };
 use rspice_core::engine::{QpssConfig, QpssInitialState, QpssSourceTone};
 use serde::{Deserialize, Serialize};
@@ -12,6 +13,8 @@ pub struct QpssControls {
     pub current_absolute_tolerance: f64,
     pub voltage_absolute_tolerance: f64,
     pub max_backtracks: usize,
+    #[serde(default, skip_serializing_if = "QuasiPeriodicLinearConfig::is_default")]
+    pub linear: QuasiPeriodicLinearConfig,
     pub max_mixing_order: Option<usize>,
     /// One count broadcasts to every tone; otherwise one count per tone.
     pub sampling: QuasiPeriodicSampling,
@@ -25,6 +28,7 @@ impl Default for QpssControls {
             current_absolute_tolerance: 1e-12,
             voltage_absolute_tolerance: 1e-9,
             max_backtracks: 20,
+            linear: QuasiPeriodicLinearConfig::default(),
             max_mixing_order: None,
             sampling: QuasiPeriodicSampling::Oversample(vec![2]),
             initial_state: QpssInitialState::Zero,
@@ -75,6 +79,7 @@ impl QpssControls {
                 voltage_absolute_tolerance: self.voltage_absolute_tolerance,
                 max_iterations,
                 max_backtracks: self.max_backtracks,
+                linear: self.linear.clone(),
             },
             source_tones,
             initial_state: self.initial_state,
@@ -105,6 +110,7 @@ impl AnalysisSpec {
                 current_absolute_tolerance: config.solver.current_absolute_tolerance,
                 voltage_absolute_tolerance: config.solver.voltage_absolute_tolerance,
                 max_backtracks: config.solver.max_backtracks,
+                linear: config.solver.linear,
                 max_mixing_order: config.grid.max_mixing_order,
                 sampling: config.grid.sampling,
                 initial_state: config.initial_state,

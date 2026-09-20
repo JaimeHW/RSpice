@@ -289,3 +289,73 @@ fn qpss_engine_checks_resources_cancellation_and_nonstationary_sources_before_pu
             .contains("absent")
     );
 }
+
+#[test]
+fn qpss_krylov_large_two_tone_rc_crosses_direct_limit_with_analytic_spectrum() {
+    use crate::analysis::quasi_periodic::QuasiPeriodicLinearMethod;
+    let deck = Netlist::parse("large QPSS\nV1 input 0 AC .2\nR1 input out 1k\nC1 out 0 1u\n.end\n")
+        .unwrap();
+    let engine = Engine::new(SimulationConfig::default());
+    let mut config = config(7);
+    config.source_tones = vec![
+        QpssSourceTone {
+            source: "V1".into(),
+            tone: 0,
+        },
+        QpssSourceTone {
+            source: "V1".into(),
+            tone: 1,
+        },
+    ];
+    let point = engine.run_qpss(&deck, config.clone()).unwrap();
+    assert_eq!(point.spectra().len() * point.spectra()[0].len(), 675);
+    for (tuple, f) in [
+        ([1, 0], config.grid.frequencies_hz[0]),
+        ([0, 1], config.grid.frequencies_hz[1]),
+    ] {
+        let expected =
+            Complex64::new(0.1, 0.0) / Complex64::new(1.0, std::f64::consts::TAU * f * 1e-3);
+        close(coefficient(&point, "out", &tuple), expected, 1e-10);
+    }
+    engine
+        .validate_qpss_operating_point_with_abort(&deck, &point, &NoAbort)
+        .unwrap();
+    config.solver.linear.method = QuasiPeriodicLinearMethod::Direct;
+    assert!(matches!(
+        engine.run_qpss(&deck, config.clone()),
+        Err(SimulationError::ResourceLimit(_))
+    ));
+    config.solver.linear.method = QuasiPeriodicLinearMethod::Krylov;
+    let mut limited = SimulationConfig::default();
+    limited.resource_limits.max_result_values = 10000;
+    assert!(matches!(
+        Engine::new(limited).run_qpss(&deck, config),
+        Err(SimulationError::ResourceLimit(_))
+    ));
+}
+
+#[test]
+fn qpss_krylov_nonlinear_bjt_agrees_with_direct_physical_solve() {
+    use crate::analysis::quasi_periodic::QuasiPeriodicLinearMethod;
+    let deck=Netlist::parse("QPSS nonlinear iterative\nVCC supply 0 DC 3\nVIN drive 0 SIN(.65 .002 1k)\nRIN drive base 1k\nIMOD 0 base AC 1u\nRB base 0 10k\nRC supply collector 1k\nQ1 collector base 0 QMOD\n.model QMOD NPN(IS=1e-15 BF=100 VAF=100)\n.end\n").unwrap();
+    let engine = Engine::new(SimulationConfig::default());
+    let mut config = config(1);
+    config.initial_state = QpssInitialState::DcOperatingPoint;
+    config.source_tones = vec![QpssSourceTone {
+        source: "IMOD".into(),
+        tone: 1,
+    }];
+    let direct = engine.run_qpss(&deck, config.clone()).unwrap();
+    config.solver.linear.method = QuasiPeriodicLinearMethod::Krylov;
+    config.solver.linear.relative_tolerance = 1e-12;
+    let iterative = engine.run_qpss(&deck, config).unwrap();
+    for (a, b) in direct
+        .spectra()
+        .iter()
+        .flatten()
+        .zip(iterative.spectra().iter().flatten())
+    {
+        close(*a, *b, 1e-8 * (1.0 + a.norm()));
+    }
+    assert!(iterative.normalized_residual() <= 1.0);
+}

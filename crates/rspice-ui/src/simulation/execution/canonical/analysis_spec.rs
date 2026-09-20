@@ -897,6 +897,17 @@ pub(super) fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &Analysis
                     writer.string(&binding.source);
                     writer.usize(binding.tone);
                 }
+                if !controls.linear.is_default() {
+                    writer.string("qpss-linear-controls-v1");
+                    writer.usize(match controls.linear.method {
+                        rspice_core::analysis::quasi_periodic::QuasiPeriodicLinearMethod::Auto=>0,
+                        rspice_core::analysis::quasi_periodic::QuasiPeriodicLinearMethod::Direct=>1,
+                        rspice_core::analysis::quasi_periodic::QuasiPeriodicLinearMethod::Krylov=>2,
+                    });
+                    writer.usize(controls.linear.restart);
+                    writer.usize(controls.linear.max_cycles);
+                    writer.f64(controls.linear.relative_tolerance);
+                }
             }
         }
         AnalysisSpec::Hbsp { .. } | AnalysisSpec::Psp { .. } => {

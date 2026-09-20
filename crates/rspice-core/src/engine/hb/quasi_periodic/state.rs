@@ -77,8 +77,13 @@ impl QpssOperatingPointMetadata {
         self.config.solver.validate().map_err(numerical_error)?;
         let grid = QuasiPeriodicGrid::new_with_abort(self.config.grid.clone(), limits, abort)
             .map_err(numerical_error)?;
-        crate::analysis::quasi_periodic::solve::check_workload(row_lengths.len(), &grid, limits)
-            .map_err(numerical_error)?;
+        crate::analysis::quasi_periodic::solve::check_workload(
+            row_lengths.len(),
+            &grid,
+            &self.config.solver.linear,
+            limits,
+        )
+        .map_err(numerical_error)?;
         if self.node_names.is_empty()
             || self.node_names.len().checked_add(self.branch_names.len()) != Some(row_lengths.len())
             || row_lengths.iter().any(|length| *length != grid.len())
@@ -130,8 +135,13 @@ impl QpssOperatingPoint {
             QuasiPeriodicGrid::new_with_abort(self.config.grid.clone(), limits, abort)
                 .map_err(numerical_error)?,
         );
-        crate::analysis::quasi_periodic::solve::check_workload(self.spectra.len(), &grid, limits)
-            .map_err(numerical_error)?;
+        crate::analysis::quasi_periodic::solve::check_workload(
+            self.spectra.len(),
+            &grid,
+            &self.config.solver.linear,
+            limits,
+        )
+        .map_err(numerical_error)?;
         if !is_canonical_blake3_identity(&self.producer.semantic_netlist)
             || !is_canonical_blake3_identity(&self.producer.resolved_simulation)
             || !is_canonical_blake3_identity(&self.producer.analysis)

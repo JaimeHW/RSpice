@@ -1,6 +1,6 @@
 //! One authored-card/configuration boundary for driven QPSS.
 use super::{QpssConfig, QpssInitialState, QpssSourceTone, invalid, numerical_error};
-use crate::analysis::quasi_periodic::QuasiPeriodicSampling;
+use crate::analysis::quasi_periodic::{QuasiPeriodicLinearMethod, QuasiPeriodicSampling};
 use crate::engine::SimulationError;
 use crate::netlist::QpssCard;
 
@@ -68,6 +68,23 @@ impl QpssConfig {
             (None, None) => (),
         }
         config.grid.max_mixing_order = card.max_mixing_order;
+        if let Some(method) = &card.linear_solver {
+            config.solver.linear.method = match method.to_ascii_uppercase().as_str() {
+                "AUTO" => QuasiPeriodicLinearMethod::Auto,
+                "DIRECT" => QuasiPeriodicLinearMethod::Direct,
+                "KRYLOV" => QuasiPeriodicLinearMethod::Krylov,
+                _ => return Err(invalid("SOLVER must be AUTO, DIRECT or KRYLOV")),
+            };
+        }
+        if let Some(v) = card.krylov_restart {
+            config.solver.linear.restart = v;
+        }
+        if let Some(v) = card.krylov_cycles {
+            config.solver.linear.max_cycles = v;
+        }
+        if let Some(v) = card.linear_tolerance {
+            config.solver.linear.relative_tolerance = v;
+        }
         if let Some(v) = card.relative_tolerance {
             config.solver.relative_tolerance = v;
         }
@@ -113,6 +130,17 @@ impl QpssConfig {
             fields.push(format!("MAXMIXING={v}"));
         }
         fields.extend([
+            format!(
+                "SOLVER={}",
+                match self.solver.linear.method {
+                    QuasiPeriodicLinearMethod::Auto => "AUTO",
+                    QuasiPeriodicLinearMethod::Direct => "DIRECT",
+                    QuasiPeriodicLinearMethod::Krylov => "KRYLOV",
+                }
+            ),
+            format!("KRYLOVRESTART={}", self.solver.linear.restart),
+            format!("KRYLOVCYCLES={}", self.solver.linear.max_cycles),
+            format!("LINEARTOL={}", self.solver.linear.relative_tolerance),
             format!("RELTOL={}", self.solver.relative_tolerance),
             format!("IABSTOL={}", self.solver.current_absolute_tolerance),
             format!("VABSTOL={}", self.solver.voltage_absolute_tolerance),
@@ -181,7 +209,7 @@ mod tests {
     fn qpss_card_round_trip_preserves_all_controls_and_ordered_assignments() {
         for sampling in ["POINTS=(8,12,9)", "OVERSAMPLE=(3,4,2)"] {
             let line = format!(
-                ".QPSS 1k 1.4142135623730951k 1.7320508075688772k HARMS=(2,3,1) {sampling} MAXMIXING=2 RELTOL=0.000001234567891234567 IABSTOL=2e-13 VABSTOL=4e-10 MAXITER=75 MAXBACKTRACKS=9 INIT=DC SOURCE2=vMix SOURCE1=vMix SOURCE2=iDrive"
+                ".QPSS 1k 1.4142135623730951k 1.7320508075688772k HARMS=(2,3,1) {sampling} MAXMIXING=2 RELTOL=0.000001234567891234567 IABSTOL=2e-13 VABSTOL=4e-10 MAXITER=75 MAXBACKTRACKS=9 SOLVER=KRYLOV KRYLOVRESTART=24 KRYLOVCYCLES=7 LINEARTOL=2e-11 INIT=DC SOURCE2=vMix SOURCE1=vMix SOURCE2=iDrive"
             );
             let config = parse(&line).unwrap();
             assert_eq!(config, parse(&config.to_spice().unwrap()).unwrap());
@@ -223,6 +251,10 @@ mod tests {
             "SOURCE1=V1 SOURCE1=v1",
             "ABSTOL=1e-12 IABSTOL=1e-12",
             "DAMPING=1",
+            "SOLVER=BAD",
+            "KRYLOVRESTART=65",
+            "KRYLOVCYCLES=0",
+            "LINEARTOL=1",
             "HARMS=1 HARMS=2",
         ] {
             assert!(
@@ -238,5 +270,13 @@ mod tests {
             tone: 0,
         });
         assert!(config.to_spice().is_err());
+    }
+    #[test]
+    fn qpss_card_default_linear_settings_preserve_legacy_config_bytes() {
+        let legacy = r#"{"relative_tolerance":1e-6,"current_absolute_tolerance":1e-12,"voltage_absolute_tolerance":1e-9,"max_iterations":100,"max_backtracks":20}"#;
+        let config: crate::analysis::quasi_periodic::QuasiPeriodicSolveConfig =
+            serde_json::from_str(legacy).unwrap();
+        assert!(config.linear.is_default());
+        assert_eq!(serde_json::to_string(&config).unwrap(), legacy);
     }
 }

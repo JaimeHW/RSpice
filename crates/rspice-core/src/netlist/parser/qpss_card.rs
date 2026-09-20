@@ -51,6 +51,34 @@ pub(super) fn parse(
             )
         })?;
         match keyword.as_str() {
+            "SOLVER" => bind_once(
+                &mut card.linear_solver,
+                card_name(stream, line, CARD, "SOLVER")?,
+                CARD,
+                line,
+                "SOLVER",
+            )?,
+            "KRYLOVRESTART" => bind_once(
+                &mut card.krylov_restart,
+                card_count(stream, line, params, CARD, "KRYLOVRESTART", 1)?,
+                CARD,
+                line,
+                "KRYLOVRESTART",
+            )?,
+            "KRYLOVCYCLES" => bind_once(
+                &mut card.krylov_cycles,
+                card_count(stream, line, params, CARD, "KRYLOVCYCLES", 1)?,
+                CARD,
+                line,
+                "KRYLOVCYCLES",
+            )?,
+            "LINEARTOL" => bind_once(
+                &mut card.linear_tolerance,
+                positive(stream, line, params, "LINEARTOL")?,
+                CARD,
+                line,
+                "LINEARTOL",
+            )?,
             "HARMS" => {
                 if !card.harmonics.is_empty() {
                     return Err(card_error(

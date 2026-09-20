@@ -10,6 +10,9 @@ impl Workspace<'_> {
         abort: &dyn AbortSignal,
     ) -> Result<Vec<Value>, Error> {
         let size = self.unknowns * self.grid.len();
+        if self.config.linear.uses_krylov(size) {
+            return self.iterative_correction(evaluation, abort);
+        }
         let mut triplets = Vec::new();
         for column in 0..size {
             let values = self.jacobian_column(evaluation, column, abort)?;

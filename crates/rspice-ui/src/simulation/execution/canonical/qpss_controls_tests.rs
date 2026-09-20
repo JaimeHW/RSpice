@@ -32,6 +32,13 @@ fn qpss_controls_change_request_identity() {
         |c| c.current_absolute_tolerance *= 2.0,
         |c| c.voltage_absolute_tolerance *= 2.0,
         |c| c.max_backtracks += 1,
+        |c| {
+            c.linear.method =
+                rspice_core::analysis::quasi_periodic::QuasiPeriodicLinearMethod::Krylov
+        },
+        |c| c.linear.restart += 1,
+        |c| c.linear.max_cycles += 1,
+        |c| c.linear.relative_tolerance *= 2.0,
         |c| c.max_mixing_order = None,
         |c| c.sampling = QuasiPeriodicSampling::Oversample(vec![3]),
         |c| c.initial_state = QpssInitialState::Zero,

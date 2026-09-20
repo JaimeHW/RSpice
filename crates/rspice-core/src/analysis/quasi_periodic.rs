@@ -11,7 +11,10 @@ pub(crate) mod solve;
 mod transform;
 
 pub use grid::{QuasiPeriodicGrid, QuasiPeriodicGridConfig, QuasiPeriodicSampling};
-pub use solve::{QuasiPeriodicSolution, QuasiPeriodicSolveConfig};
+pub use solve::{
+    QuasiPeriodicLinearConfig, QuasiPeriodicLinearMethod, QuasiPeriodicSolution,
+    QuasiPeriodicSolveConfig,
+};
 pub use transform::QuasiPeriodicTransform;
 
 use crate::abort_signal::AbortSignal;
