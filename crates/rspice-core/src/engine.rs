@@ -137,8 +137,8 @@ pub use hb::{
     HbNoiseFigureRequest, HbOperatingPoint, HbOperatingPointIdentity, PacAnalysisResult,
     PeriodicNoiseFigureResult, PeriodicNoiseFigureSpectrum, PeriodicNoiseRequest,
     PeriodicNoiseSidebands, PnoiseAnalysisResult, PreparedPsp, PspAnalysisResult,
-    PspNoiseCorrelation, QpssConfig, QpssInitialState, QpssOperatingPoint,
-    QpssOperatingPointMetadata, QpssSourceTone,
+    PspNoiseCorrelation, QpacAnalysisResult, QpacRequest, QpssConfig, QpssInitialState,
+    QpssOperatingPoint, QpssOperatingPointMetadata, QpssSourceTone,
 };
 pub use health::EngineHealthReport;
 pub use pss::{
