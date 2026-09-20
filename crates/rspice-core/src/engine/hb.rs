@@ -37,6 +37,7 @@ mod pac;
 mod periodic_ac;
 mod pnoise;
 mod psp;
+mod quasi_periodic;
 #[cfg(test)]
 mod retained_auth_tests;
 mod stamping;
@@ -49,6 +50,7 @@ pub use noise_figure::{
 pub use pac::PacAnalysisResult;
 pub use pnoise::{PeriodicNoiseRequest, PeriodicNoiseSidebands, PnoiseAnalysisResult};
 pub use psp::{PreparedPsp, PspAnalysisResult, PspNoiseCorrelation};
+pub use quasi_periodic::{QpssConfig, QpssInitialState, QpssOperatingPoint, QpssSourceTone};
 pub use state::{HbEnvelopeContinuationState, HbEnvelopeStateGuarantee};
 
 const HB_OPERATING_POINT_IDENTITY_VERSION: u32 = 41;
