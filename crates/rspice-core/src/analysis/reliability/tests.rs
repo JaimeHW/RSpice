@@ -247,3 +247,22 @@ fn reference_exposure_reaches_exact_calibration_boundary_and_late_abort_is_atomi
     clock.advance(100.0, stress(), &NoAbort).unwrap();
     assert_eq!(clock.evaluate().unwrap().equivalent_seconds, 100.0);
 }
+
+#[test]
+fn reliability_clock_retains_short_intervals_after_long_mission_exposure() {
+    let model = model();
+    let mut clock = AgingClock::new(&model).unwrap();
+    // Inactive elapsed time has no calibration exposure limit. A nanosecond
+    // still contributes active age after a long inactive mission phase.
+    clock
+        .advance_with_activity(1e9, stress(), false, &NoAbort)
+        .unwrap();
+    clock.advance(1e-9, stress(), &NoAbort).unwrap();
+    assert_eq!(clock.evaluate().unwrap().equivalent_seconds, 1e-9);
+    for _ in 0..1000 {
+        clock
+            .advance_with_activity(1e-9, stress(), false, &NoAbort)
+            .unwrap();
+    }
+    assert!(clock.evaluate().unwrap().elapsed_seconds > 1e9);
+}

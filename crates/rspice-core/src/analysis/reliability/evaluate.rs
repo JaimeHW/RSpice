@@ -42,6 +42,7 @@ pub struct AgingEvaluation {
 pub struct AgingClock<'a> {
     model: &'a AgingModel,
     elapsed_seconds: f64,
+    elapsed_compensation: f64,
     equivalent_seconds: f64,
     equivalent_compensation: f64,
 }
@@ -52,6 +53,7 @@ impl<'a> AgingClock<'a> {
         Ok(Self {
             model,
             elapsed_seconds: 0.0,
+            elapsed_compensation: 0.0,
             equivalent_seconds: 0.0,
             equivalent_compensation: 0.0,
         })
@@ -64,6 +66,19 @@ impl<'a> AgingClock<'a> {
         &mut self,
         duration_s: f64,
         stress: AgingStress,
+        abort: &dyn AbortSignal,
+    ) -> Result<(), AgingError> {
+        self.advance_with_activity(duration_s, stress, true, abort)
+    }
+
+    /// An explicit circuit-analysis stress threshold can suspend the clock
+    /// without fabricating zero terminal voltages or removing elapsed time.
+    /// Inactive stress still undergoes the full calibration-domain checks.
+    pub fn advance_with_activity(
+        &mut self,
+        duration_s: f64,
+        stress: AgingStress,
+        active: bool,
         abort: &dyn AbortSignal,
     ) -> Result<(), AgingError> {
         if abort.is_aborted() {
@@ -87,11 +102,12 @@ impl<'a> AgingClock<'a> {
         valid
             .current_density_a_per_m2
             .require(stress.current_density_a_per_m2, "current density (A/m²)")?;
-        let elapsed = self.elapsed_seconds + duration_s;
-        if !elapsed.is_finite() || (duration_s > 0.0 && elapsed == self.elapsed_seconds) {
+        let elapsed_increment = duration_s - self.elapsed_compensation;
+        let elapsed = self.elapsed_seconds + elapsed_increment;
+        if !elapsed.is_finite() {
             return Err(AgingError::Numeric("elapsed time".into()));
         }
-        let increment = if duration_s == 0.0 {
+        let increment = if duration_s == 0.0 || !active {
             0.0
         } else if let Some(log_acceleration) = self.log_acceleration(stress) {
             if log_acceleration == 0.0 {
@@ -127,6 +143,7 @@ impl<'a> AgingClock<'a> {
         }
         self.equivalent_compensation = (equivalent - self.equivalent_seconds) - corrected;
         self.equivalent_seconds = equivalent;
+        self.elapsed_compensation = (elapsed - self.elapsed_seconds) - elapsed_increment;
         self.elapsed_seconds = elapsed;
         Ok(())
     }
