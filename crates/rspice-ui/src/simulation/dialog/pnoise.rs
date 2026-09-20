@@ -197,24 +197,24 @@ impl PnoiseConfig {
 
     /// Validate configuration
     pub fn validate(&self) -> Result<(), String> {
-        if self.start_freq <= 0.0 {
-            return Err("Start frequency must be positive".to_string());
+        if !self.start_freq.is_finite() || self.start_freq <= 0.0 {
+            return Err("Start frequency must be finite and positive".to_string());
         }
 
-        if self.stop_freq <= 0.0 {
-            return Err("Stop frequency must be positive".to_string());
+        if !self.stop_freq.is_finite() || self.stop_freq <= 0.0 {
+            return Err("Stop frequency must be finite and positive".to_string());
         }
 
-        if self.start_freq >= self.stop_freq {
-            return Err("Start frequency must be less than stop frequency".to_string());
+        if self.start_freq > self.stop_freq {
+            return Err("Start frequency must be at or below stop frequency".to_string());
         }
 
         if self.num_points == 0 {
             return Err("Number of points must be at least 1".to_string());
         }
         if self.integrated_noise
-            && self.sweep_type == PnoiseSweepType::Linear
-            && self.num_points == 1
+            && (self.start_freq == self.stop_freq
+                || (self.sweep_type == PnoiseSweepType::Linear && self.num_points <= 2))
         {
             return Err("Integrated noise requires at least two distinct frequency points".into());
         }
@@ -231,7 +231,7 @@ impl PnoiseConfig {
             return Err("Conversion sidebands apply to driven noise; input sideband requires input-referred noise".into());
         }
 
-        if self.output_node.is_empty() {
+        if self.output_node.trim().is_empty() {
             return Err("Output node must be specified".to_string());
         }
         if self.noise_ref == NoiseReferenceType::Input && self.input_source.trim().is_empty() {
@@ -477,6 +477,81 @@ fn format_freq(freq: f64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pnoise_spot_frequency_round_trips_without_fabricating_a_band_total() {
+        for sweep in [
+            PnoiseSweepType::Linear,
+            PnoiseSweepType::Decade,
+            PnoiseSweepType::Octave,
+        ] {
+            let mut config = PnoiseConfig {
+                sweep_type: sweep,
+                start_freq: 1234.5,
+                stop_freq: 1234.5,
+                num_points: 8,
+                max_sideband: 0,
+                noise_ref: NoiseReferenceType::Output,
+                integrated_noise: false,
+                ..Default::default()
+            };
+            config.validate().unwrap();
+            let draft = PnoiseDialogState::from_config(&config);
+            let draft: PnoiseDialogState =
+                serde_json::from_str(&serde_json::to_string(&draft).unwrap()).unwrap();
+            let restored = draft.to_config().unwrap();
+            let deck = format!(
+                "spot noise\nV1 out 0 0\nR1 out 0 1k\n.HB 1Meg\n{}\n.end\n",
+                restored.to_spice()
+            );
+            let parsed = rspice_core::Netlist::parse(&deck).unwrap();
+            let rspice_core::netlist::AnalysisCommand::Pnoise(card) = &parsed.analyses[1] else {
+                panic!("PNOISE card");
+            };
+            assert_eq!(card.sweep.start_freq, 1234.5);
+            assert_eq!(card.sweep.stop_freq, 1234.5);
+            assert!(!card.integrated_noise);
+            assert_eq!(
+                rspice_core::analysis::ac::ac_sweep_frequencies(
+                    card.sweep.variation,
+                    card.sweep.points,
+                    card.sweep.start_freq,
+                    card.sweep.stop_freq
+                ),
+                vec![1234.5]
+            );
+            config.integrated_noise = true;
+            assert!(config.validate().is_err());
+        }
+        for invalid in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert!(
+                PnoiseConfig {
+                    start_freq: invalid,
+                    ..Default::default()
+                }
+                .validate()
+                .is_err()
+            );
+            assert!(
+                PnoiseConfig {
+                    stop_freq: invalid,
+                    ..Default::default()
+                }
+                .validate()
+                .is_err()
+            );
+        }
+        assert!(
+            PnoiseConfig {
+                sweep_type: PnoiseSweepType::Linear,
+                num_points: 2,
+                integrated_noise: true,
+                ..Default::default()
+            }
+            .validate()
+            .is_err()
+        );
+    }
 
     #[test]
     fn pnoise_sidebands_round_trip_and_inactive_controls_do_not_change_phase_noise() {

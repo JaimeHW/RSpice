@@ -170,7 +170,7 @@ impl PnoiseRunConfig {
         }
         if self.integrated_noise
             && (self.start_freq == self.stop_freq
-                || (self.sweep == PnoiseFrequencySweep::Linear && self.points_per_unit == 1))
+                || (self.sweep == PnoiseFrequencySweep::Linear && self.points_per_unit <= 2))
         {
             return Err(PnoiseRunError::Validation(
                 "PNOISE integrated noise requires at least two distinct frequency points".into(),

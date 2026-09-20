@@ -40,6 +40,7 @@ pub(super) fn fields(
         &mut setup.num_points,
     );
     choice_row(ui, "Sweep", SWEEP_KINDS, &mut setup.sweep_type_idx);
+    super::field_note(ui, "Equal start and stop requests a spot spectrum. Integrated noise requires a frequency band; SPICE-compatible linear sweeps need at least three requested points.");
     input_row(ui, "Output", &mut setup.output_node);
     input_row(ui, "Output ref", &mut setup.output_ref);
     ui.add_enabled_ui(setup.noise_ref_idx == 1, |ui| {
