@@ -23,6 +23,7 @@ mod pnoise;
 mod psp;
 mod pss;
 mod pstb;
+mod qpss;
 mod soa;
 mod sparameter;
 mod stb;
@@ -97,6 +98,7 @@ pub use pss::{
     run_pss_analysis_with_source_path_and_abort,
 };
 pub use pstb::{PstbRunConfig, run_pstb_analysis_from_pss_with_source_path_and_abort};
+pub use qpss::run_qpss_analysis_with_source_path_and_abort;
 // DC sweep, noise, pole-zero, and sensitivity have no entry here, and that is
 // the module boundary rather than an omission. The seven fundamental analyses
 // -- DC op, DC sweep, transient, AC, noise, pole-zero, sensitivity -- ship
