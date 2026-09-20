@@ -9,6 +9,8 @@ mod analysis_spec;
 mod qpac_controls_tests;
 #[cfg(test)]
 mod qpss_controls_tests;
+#[cfg(test)]
+mod qpxf_controls_tests;
 
 pub(in crate::simulation) use analysis_spec::analysis_kind_tag;
 use analysis_spec::{

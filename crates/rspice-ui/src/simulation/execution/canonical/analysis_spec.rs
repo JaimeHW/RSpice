@@ -1001,9 +1001,14 @@ pub(super) fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &Analysis
             writer.bool(*integrated_noise);
             writer.bool(*contributor_ranking);
         }
-        AnalysisSpec::Qpxf { group_delay, .. } => {
+        AnalysisSpec::Qpxf {
+            group_delay,
+            controls,
+            ..
+        } => {
             encode_quasi_periodic_transfer(writer, spec);
             writer.bool(*group_delay);
+            encode_qpxf_controls(writer, controls);
         }
         AnalysisSpec::TransientNoise {
             stop_time,
@@ -1201,11 +1206,39 @@ fn encode_quasi_periodic_transfer(writer: &mut CanonicalWriter, spec: &AnalysisS
     };
     // An explicit list makes generated-sweep editor buffers inactive.
     let (start_freq, stop_freq, points_per_unit, sweep) = if matches!(spec, AnalysisSpec::Qpac { controls, .. } if controls.explicit_offsets.is_some())
+        || matches!(spec, AnalysisSpec::Qpxf { controls, .. } if controls.explicit_frequencies.is_some())
     {
         (0.0, 0.0, 1, FrequencySweep::Linear)
     } else {
         (start_freq, stop_freq, points_per_unit, sweep)
     };
+    let (input_source, output_node, output_ref, input_lattice) =
+        if let AnalysisSpec::Qpxf { controls, .. } = spec {
+            (
+                if controls.input_sources.is_some() {
+                    ""
+                } else {
+                    input_source
+                },
+                if controls.branch_current.is_some() {
+                    ""
+                } else {
+                    output_node
+                },
+                if controls.branch_current.is_some() {
+                    ""
+                } else {
+                    output_ref
+                },
+                if controls.input_lattices.is_some() {
+                    &[][..]
+                } else {
+                    input_lattice
+                },
+            )
+        } else {
+            (input_source, output_node, output_ref, input_lattice)
+        };
     writer.f64(start_freq);
     writer.f64(stop_freq);
     writer.usize(points_per_unit);
@@ -1359,4 +1392,65 @@ pub(super) fn encode_periodic_carrier_tail(writer: &mut CanonicalWriter, carrier
         PeriodicCarrier::Pss => writer.u8(0),
         PeriodicCarrier::Hb => writer.u8(1),
     }
+}
+
+/// Conditional extension preserves the bytes of the original single-source,
+/// single-sideband voltage request while authenticating every new option.
+fn encode_qpxf_controls(
+    writer: &mut CanonicalWriter,
+    controls: &crate::simulation::multi_run::QpxfControls,
+) {
+    use rspice_core::analysis::quasi_periodic::QuasiPeriodicLinearMethod;
+    use rspice_core::engine::{QpxfFrequencyAxis, QpxfInputLattices, QpxfSources};
+    if controls == &crate::simulation::multi_run::QpxfControls::default() {
+        return;
+    }
+    writer.string("qpxf-controls-v1");
+    writer.u8(match controls.frequency_axis {
+        QpxfFrequencyAxis::Output => 0,
+        QpxfFrequencyAxis::Offset => 1,
+    });
+    writer.option(controls.explicit_frequencies.as_ref(), |w, v| {
+        encode_f64_slice(w, v)
+    });
+    writer.option(controls.input_sources.as_ref(), |w, s| match s {
+        QpxfSources::AllIndependent => w.u8(0),
+        QpxfSources::Named(names) => {
+            w.u8(1);
+            w.sequence(names.len());
+            for name in names {
+                w.string(name);
+            }
+        }
+    });
+    writer.option(controls.input_lattices.as_ref(), |w, s| match s {
+        QpxfInputLattices::AllRetained => w.u8(0),
+        QpxfInputLattices::Explicit(tuples) => {
+            w.u8(1);
+            w.sequence(tuples.len());
+            for tuple in tuples {
+                w.sequence(tuple.len());
+                for k in tuple {
+                    w.i32(*k);
+                }
+            }
+        }
+        QpxfInputLattices::MaxOrders(orders) => {
+            w.u8(2);
+            w.sequence(orders.len());
+            for n in orders {
+                w.usize(*n);
+            }
+        }
+    });
+    writer.option(controls.branch_current.as_ref(), |w, v| w.string(v));
+    writer.u8(match controls.solver.method {
+        QuasiPeriodicLinearMethod::Auto => 0,
+        QuasiPeriodicLinearMethod::Direct => 1,
+        QuasiPeriodicLinearMethod::Krylov => 2,
+    });
+    writer.usize(controls.solver.restart);
+    writer.usize(controls.solver.max_cycles);
+    writer.f64(controls.solver.relative_tolerance);
+    writer.f64(controls.group_delay_magnitude_floor);
 }

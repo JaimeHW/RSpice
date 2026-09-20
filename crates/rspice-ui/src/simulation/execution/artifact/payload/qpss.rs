@@ -294,6 +294,7 @@ mod tests {
                 input_lattice: vec![0, 0],
                 output_lattice: vec![1, -1],
                 group_delay: true,
+                controls: Default::default(),
             },
             AnalysisSpec::Qpnoise {
                 start_freq: 10.0,

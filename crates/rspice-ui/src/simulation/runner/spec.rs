@@ -299,6 +299,7 @@ mod tests {
     mod periodic_port_noise;
     mod qpac;
     mod qpss;
+    mod qpxf;
     use std::collections::HashMap;
     use std::fs;
     use std::path::PathBuf;
@@ -529,6 +530,7 @@ mod tests {
                 input_lattice: vec![0, 0],
                 output_lattice: vec![0, 0],
                 group_delay: true,
+                controls: Default::default(),
             },
             AnalysisSpec::Reliability {
                 target_years: vec![1.0, 10.0],

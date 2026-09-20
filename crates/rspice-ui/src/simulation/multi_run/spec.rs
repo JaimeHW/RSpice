@@ -5,6 +5,8 @@
 //! not execute.
 
 mod qpac;
+mod qpxf;
+pub use qpxf::QpxfControls;
 mod qpss;
 pub use qpac::QpacControls;
 mod run_type;

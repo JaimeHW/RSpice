@@ -402,27 +402,7 @@ pub(super) fn validate(spec: &AnalysisSpec) -> Result<(), String> {
             Ok(())
         }
         AnalysisSpec::Qpac { .. } => spec.qpac_card().map(|_| ()),
-        AnalysisSpec::Qpxf {
-            start_freq,
-            stop_freq,
-            points_per_unit,
-            input_source,
-            output_node,
-            input_lattice,
-            output_lattice,
-            ..
-        } => {
-            validate_frequency_sweep(*start_freq, *stop_freq, *points_per_unit)?;
-            if input_source.trim().is_empty() || output_node.trim().is_empty() {
-                return Err(
-                    "quasi-periodic transfer requires an input source and output node".to_owned(),
-                );
-            }
-            if input_lattice.len() < 2 || input_lattice.len() != output_lattice.len() {
-                return Err("QPXF input/output tuples need equal dimensions, at least two".into());
-            }
-            Ok(())
-        }
+        AnalysisSpec::Qpxf { .. } => spec.qpxf_card().map(|_| ()),
         AnalysisSpec::Qpnoise {
             start_freq,
             stop_freq,

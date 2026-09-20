@@ -683,6 +683,8 @@ pub enum AnalysisSpec {
         input_lattice: Vec<i32>,
         output_lattice: Vec<i32>,
         group_delay: bool,
+        #[serde(default)]
+        controls: super::qpxf::QpxfControls,
     },
     /// Stochastic transient device-noise simulation.
     TransientNoise {

@@ -28,6 +28,8 @@ use super::AnalysisKind;
 mod frequency_table;
 mod periodic_network;
 mod qpac;
+mod qpxf;
+pub use qpxf::{QpxfSidebandSelection, QpxfSourceSelection, QuasiPeriodicTransferDraft};
 mod quasi_periodic;
 pub use qpac::QuasiPeriodicAcDraft;
 pub use quasi_periodic::QpssDraft;
@@ -374,32 +376,6 @@ impl Default for QuasiPeriodicNoiseDraft {
             lattice_products: "-3:3, -3:3".to_owned(),
             integrated_noise: true,
             contributor_ranking: true,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct QuasiPeriodicTransferDraft {
-    pub sweep: FrequencySweepDraft,
-    pub input_source: String,
-    pub output_node: String,
-    pub output_ref: String,
-    pub input_lattice: String,
-    pub output_lattice: String,
-    pub group_delay: bool,
-}
-
-impl Default for QuasiPeriodicTransferDraft {
-    fn default() -> Self {
-        Self {
-            sweep: FrequencySweepDraft::default(),
-            input_source: "V1".to_owned(),
-            output_node: "out".to_owned(),
-            output_ref: "0".to_owned(),
-            input_lattice: "0, 0".to_owned(),
-            output_lattice: "0, 0".to_owned(),
-            group_delay: false,
         }
     }
 }
@@ -866,10 +842,7 @@ impl AnalysisDraft {
                 "{} · {}…{} · lattice {}",
                 draft.output_node, draft.sweep.start, draft.sweep.stop, draft.lattice_products
             )),
-            Self::Qpxf(draft) => Some(format!(
-                "{}→{} · {} to {}",
-                draft.input_source, draft.output_node, draft.input_lattice, draft.output_lattice
-            )),
+            Self::Qpxf(draft) => Some(draft.summary()),
             Self::TransientNoise(draft) => Some(format!(
                 "stop {} · step {} · seed {}",
                 draft.stop_time, draft.step_time, draft.seed
@@ -1461,19 +1434,7 @@ fn validate_qpnoise(draft: &QuasiPeriodicNoiseDraft) -> Option<String> {
 }
 
 fn validate_qpxf(draft: &QuasiPeriodicTransferDraft) -> Option<String> {
-    (|| {
-        validate_sweep(&draft.sweep)?;
-        if draft.input_source.trim().is_empty() || draft.output_node.trim().is_empty() {
-            return Err("QPXF requires an input source and output node".to_owned());
-        }
-        let input = parse_i32_tuple(&draft.input_lattice, "input lattice product")?;
-        let output = parse_i32_tuple(&draft.output_lattice, "output lattice product")?;
-        if input.len() != output.len() {
-            return Err("QPXF input and output tuples must have equal dimensions".into());
-        }
-        Ok(())
-    })()
-    .err()
+    draft.to_spec().err()
 }
 
 fn validate_transient_noise(draft: &TransientNoiseDraft) -> Option<String> {

@@ -108,25 +108,7 @@ impl SimulationController {
                     contributor_ranking: draft.contributor_ranking,
                 }
             }
-            AnalysisDraft::Qpxf(draft) => {
-                let (start_freq, stop_freq, points_per_unit, sweep) =
-                    parse_manifest_sweep(&draft.sweep)?;
-                AnalysisSpec::Qpxf {
-                    start_freq,
-                    stop_freq,
-                    points_per_unit,
-                    sweep,
-                    input_source: draft.input_source.trim().to_owned(),
-                    output_node: draft.output_node.trim().to_owned(),
-                    output_ref: draft.output_ref.trim().to_owned(),
-                    input_lattice: parse_lattice_tuple(&draft.input_lattice, "QPXF input lattice")?,
-                    output_lattice: parse_lattice_tuple(
-                        &draft.output_lattice,
-                        "QPXF output lattice",
-                    )?,
-                    group_delay: draft.group_delay,
-                }
-            }
+            AnalysisDraft::Qpxf(draft) => draft.to_spec()?,
             AnalysisDraft::TransientNoise(draft) => AnalysisSpec::TransientNoise {
                 stop_time: parse_si(&draft.stop_time, "TNOISE stop time")?,
                 step_time: parse_si(&draft.step_time, "TNOISE step time")?,
@@ -1043,18 +1025,6 @@ fn parse_manifest_ports(
             })
         })
         .collect()
-}
-
-fn parse_lattice_tuple(text: &str, field: &str) -> Result<Vec<i32>, String> {
-    let values = text
-        .split(',')
-        .map(|part| part.trim().parse::<i32>())
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|_| format!("{field} must contain comma-separated integers"))?;
-    if values.len() < 2 {
-        return Err(format!("{field} must contain at least two integers"));
-    }
-    Ok(values)
 }
 
 fn parse_lattice_ranges(text: &str) -> Result<([i32; 2], [i32; 2]), String> {

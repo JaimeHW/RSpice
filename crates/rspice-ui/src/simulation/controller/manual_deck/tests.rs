@@ -1146,3 +1146,53 @@ fn qpac_manual_deck_preserves_authored_grid_and_all_controls() {
     ));
     assert_eq!(reparsed, [spec.clone()]);
 }
+
+#[test]
+fn qpxf_manual_deck_preserves_native_sweep_and_complete_selections() {
+    let source = "QPXF import\nV1 in 0 DC 1\nR1 in out 1k\n.QPXF OCT 3 2 128 SOURCES=ALL OUT=I(L1) MAXORDERS=(2,1,3) OUTLATTICE=(-1,0,1) AXIS=OFFSET GROUPDELAY=YES GDFLOOR=3e-9 SOLVER=KRYLOV KRYLOVRESTART=16 KRYLOVCYCLES=12 LINEARTOL=2e-11\n.end\n";
+    let specs = specs_for(source);
+    let spec = &specs[0];
+    let AnalysisSpec::Qpxf {
+        start_freq,
+        stop_freq,
+        points_per_unit,
+        sweep,
+        output_lattice,
+        controls,
+        group_delay,
+        ..
+    } = spec
+    else {
+        panic!("wrong imported analysis")
+    };
+    assert_eq!(
+        (*start_freq, *stop_freq, *points_per_unit, *sweep),
+        (2.0, 128.0, 3, FrequencySweep::Octave)
+    );
+    assert_eq!(output_lattice, &[-1, 0, 1]);
+    assert!(*group_delay);
+    assert_eq!(
+        controls.input_sources,
+        Some(rspice_core::engine::QpxfSources::AllIndependent)
+    );
+    assert_eq!(
+        controls.input_lattices,
+        Some(rspice_core::engine::QpxfInputLattices::MaxOrders(vec![
+            2, 1, 3
+        ]))
+    );
+    assert_eq!(
+        controls.frequency_axis,
+        rspice_core::engine::QpxfFrequencyAxis::Offset
+    );
+    assert_eq!(controls.branch_current.as_deref(), Some("L1"));
+    assert_eq!(controls.group_delay_magnitude_floor, 3e-9);
+    assert_eq!(controls.solver.restart, 16);
+    assert_eq!(controls.solver.max_cycles, 12);
+    assert_eq!(controls.solver.relative_tolerance, 2e-11);
+    let reparsed = specs_for(&format!(
+        "QPXF rewrite\nV1 in 0 1\nR1 in out 1k\n{}\n.end\n",
+        spec.qpxf_card().unwrap().to_spice()
+    ));
+    assert_eq!(reparsed, [spec.clone()]);
+}

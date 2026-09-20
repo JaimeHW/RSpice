@@ -889,7 +889,17 @@ fn command_to_queue_item(
             spec_options,
             analysis_line: format!(".ac data={table_name}"),
         }),
-        AnalysisCommand::Qpxf(_) => Err("QPXF native cards require the complete QPXF Studio request/result integration; use Engine::run_qpxf_card_from_qpss_with_abort".into()),
+        AnalysisCommand::Qpxf(card) => {
+            let spec = AnalysisSpec::from_qpxf_card(card)?;
+            let analysis_line = spec.qpxf_card()?.to_spice();
+            Ok(QueuedAnalysis {
+                numeric_override: None,
+                spec,
+                config: None,
+                spec_options,
+                analysis_line,
+            })
+        }
         AnalysisCommand::Qpac(card) => {
             let spec = AnalysisSpec::from_qpac_card(card)?;
             let analysis_line = spec.qpac_card()?.to_spice();
