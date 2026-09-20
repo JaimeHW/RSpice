@@ -108,6 +108,7 @@ mod laplace_synthesis;
 mod line;
 mod periodic_cards;
 mod pspice_stim;
+mod qpac_card;
 mod qpss_card;
 mod scoping;
 mod source_specs;

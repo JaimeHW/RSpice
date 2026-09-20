@@ -126,6 +126,9 @@ pub(super) fn parse_command(
         ".LIN" => {
             parse_lin_command(stream, line_num, params, lin_analysis)?;
         }
+        ".QPAC" => {
+            analyses.push(qpac_card::parse(stream, line_num, params)?);
+        }
         ".QPSS" => {
             analyses.push(qpss_card::parse(stream, line_num, params)?);
         }

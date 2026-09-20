@@ -622,6 +622,7 @@ fn command_name(command: &AnalysisCommand) -> &'static str {
         AnalysisCommand::AcData { .. } => ".ac data",
         AnalysisCommand::Hb(_) => ".hb",
         AnalysisCommand::Qpss(_) => ".qpss",
+        AnalysisCommand::Qpac(_) => ".qpac",
         AnalysisCommand::Sp { .. } => ".sp",
         AnalysisCommand::Stb { .. } => ".stb",
         AnalysisCommand::Disto { .. } => ".disto",
@@ -887,6 +888,7 @@ fn command_to_queue_item(
             spec_options,
             analysis_line: format!(".ac data={table_name}"),
         }),
+        AnalysisCommand::Qpac(_) => Err("QPAC native card is recognized; its Studio request/result integration is not connected yet".into()),
         AnalysisCommand::Qpss(card) => {
             let config = rspice_core::engine::QpssConfig::from_qpss_card(card)
                 .map_err(|error| error.to_string())?;

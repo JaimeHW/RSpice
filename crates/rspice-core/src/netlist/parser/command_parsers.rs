@@ -2211,7 +2211,7 @@ fn parse_voltage_hint_target(
     }))
 }
 
-fn expect_node_with_authored_spelling(
+pub(super) fn expect_node_with_authored_spelling(
     stream: &mut TokenStream,
     line_num: usize,
 ) -> Result<(String, String), ParseError> {

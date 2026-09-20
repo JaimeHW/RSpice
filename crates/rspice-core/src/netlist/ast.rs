@@ -2236,6 +2236,9 @@ pub enum AnalysisCommand {
     /// Driven quasiperiodic steady state on independent phase axes.
     Qpss(Box<super::QpssCard>),
 
+    /// Complex small-signal conversion around an independent-phase QPSS orbit.
+    Qpac(Box<super::QpacCard>),
+
     /// S-parameter analysis:
     /// `.SP DEC|LIN|OCT np fstart fstop [donoise] [PORT<k>=(<n+>[,<n->[,<z0>]]) ...]`
     Sp {
@@ -2953,6 +2956,7 @@ pub enum AnalysisCard {
     Four,
     Hb,
     Qpss,
+    Qpac,
 }
 
 impl AnalysisCard {
@@ -2971,6 +2975,7 @@ impl AnalysisCard {
             Self::Four => ".FOUR",
             Self::Hb => ".HB",
             Self::Qpss => ".QPSS",
+            Self::Qpac => ".QPAC",
         }
     }
 }

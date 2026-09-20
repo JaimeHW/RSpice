@@ -407,6 +407,11 @@ pub(super) fn execute(
                 describe_analysis(analysis),
             ));
         }
+        AnalysisCommand::Qpac(_) => {
+            return Err(crate::errors::SimulationError::new_err(
+                "QPAC is available through Engine::run_qpac_from_qpss; this surface has no QPAC result-document projection yet",
+            ));
+        }
         AnalysisCommand::Qpss(_) => {
             return Err(crate::errors::SimulationError::new_err(
                 "QPSS is available through Simulation Studio and Engine::run_qpss; this surface has no QPSS result-document projection yet",

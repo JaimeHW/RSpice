@@ -32,6 +32,8 @@ mod output_symbols;
 pub mod param_scope;
 mod parser;
 mod polynomial;
+mod qpac_card;
+pub use qpac_card::{QpacCard, QpacSweep};
 mod qpss_card;
 pub use qpss_card::QpssCard;
 mod remove_unused;

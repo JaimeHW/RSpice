@@ -896,6 +896,14 @@ impl<'a> RunContext<'a> {
             } => frequency::run_ac(self, *variation, *points, *start_freq, *stop_freq)?,
             AnalysisCommand::AcData { table_name } => frequency::run_ac_data(self, table_name)?,
             AnalysisCommand::Hb(card) => advanced::run_hb_from_command(self, card)?,
+            AnalysisCommand::Qpac(_) => {
+                return Err(CliError::InvalidArgument {
+                    message: "The CLI has no QPAC result-document projection yet".into(),
+                    suggestion: Some(
+                        "Use Engine::run_qpac_from_qpss with an authenticated QPSS point".into(),
+                    ),
+                });
+            }
             AnalysisCommand::Qpss(_) => {
                 return Err(CliError::InvalidArgument {
                     message: "The CLI has no QPSS result-document projection yet".into(),

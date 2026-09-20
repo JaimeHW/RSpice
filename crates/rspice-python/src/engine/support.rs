@@ -268,6 +268,7 @@ pub(super) fn analysis_record_kind(analysis: &AnalysisCommand) -> &'static str {
         AnalysisCommand::AcData { .. } => "ac_data",
         AnalysisCommand::Hb(_) => "hb",
         AnalysisCommand::Qpss(_) => "qpss",
+        AnalysisCommand::Qpac(_) => "qpac",
         AnalysisCommand::Disto { .. } => "disto",
         AnalysisCommand::Sp { .. } => "sp",
         AnalysisCommand::Noise { .. } => "noise",
