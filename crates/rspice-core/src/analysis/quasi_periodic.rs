@@ -7,6 +7,11 @@
 //! equations and convergence evidence belong to the consuming solver.
 
 mod grid;
+mod noise;
+pub use noise::{
+    QuasiPeriodicNoiseCovariance, QuasiPeriodicNoiseProjector, QuasiPeriodicNoiseSource,
+    QuasiPeriodicNoiseSpectrum,
+};
 pub(crate) mod small_signal;
 pub(crate) mod solve;
 mod transform;
