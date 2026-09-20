@@ -72,9 +72,9 @@ pub(crate) struct WorkerRequest {
     pub(in crate::simulation) stream_transient_samples: bool,
 }
 
-/// 14: configured optimization carries normalized, weighted objective terms.
+/// 15: optimization supports logarithmic, grid and discrete variable domains.
 #[cfg(any(target_arch = "wasm32", test))]
-pub(crate) const WORKER_REQUEST_TRANSPORT_PROTOCOL: u8 = 14;
+pub(crate) const WORKER_REQUEST_TRANSPORT_PROTOCOL: u8 = 15;
 
 /// Browser-worker request split into compact metadata and transferable
 /// floating-point buffers. The embedded request deliberately carries empty

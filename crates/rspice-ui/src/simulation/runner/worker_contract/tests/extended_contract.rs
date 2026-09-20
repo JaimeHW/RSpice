@@ -438,6 +438,7 @@ fn analysis_spec_round_trips_supported_variants() {
                 sa_initial_temp: 42.0,
                 sa_cooling_rate: 0.81,
                 random_seed: 12345678901234567890,
+                variable_domains: Default::default(),
             },
             variables: vec![OptimizationVariable {
                 name: "RLOAD".to_string(),

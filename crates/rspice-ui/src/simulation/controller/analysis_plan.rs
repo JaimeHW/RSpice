@@ -820,7 +820,7 @@ mod tests {
         assert_eq!(base.instance_id, ac);
         assert_eq!(base.measurements, ["gain"]);
         assert_eq!(base.objective_terms, objectives);
-        for change in 0..4 {
+        for change in 0..5 {
             let mut queued = task.queued_analysis().clone();
             let term = &mut queued
                 .spec_options
@@ -832,7 +832,16 @@ mod tests {
                 0 => term.weight = 4.0,
                 1 => term.scale = 2.0,
                 2 => term.target = Some(7.0),
-                _ => term.goal = OptimizationObjectiveGoal::Maximize,
+                3 => term.goal = OptimizationObjectiveGoal::Maximize,
+                _ => {
+                    let AnalysisSpec::Optimization { search, .. } = &mut queued.spec else {
+                        unreachable!()
+                    };
+                    search.variable_domains.insert(
+                        "RLOAD".into(),
+                        crate::simulation::optimizer::OptimizationVariableDomain::Logarithmic,
+                    );
+                }
             }
             let changed = PreparedTask::new(opt, task.source_revision(), vec![], "OPT", queued);
             assert_ne!(task.config_digest(), changed.config_digest());

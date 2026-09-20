@@ -745,6 +745,29 @@ pub(super) fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &Analysis
                 writer.f64(search.sa_cooling_rate);
                 writer.u64(search.random_seed);
             }
+            if !search.variable_domains.is_empty() {
+                writer.string("optimization-variable-domains-v1");
+                writer.sequence(search.variable_domains.len());
+                for (name, domain) in &search.variable_domains {
+                    use crate::simulation::optimizer::OptimizationVariableDomain as Domain;
+                    writer.string(name);
+                    match domain {
+                        Domain::Linear => writer.u8(0),
+                        Domain::Logarithmic => writer.u8(1),
+                        Domain::Quantized { step } => {
+                            writer.u8(2);
+                            writer.f64(*step);
+                        }
+                        Domain::Discrete { values } => {
+                            writer.u8(3);
+                            writer.sequence(values.len());
+                            for value in values {
+                                writer.f64(*value);
+                            }
+                        }
+                    }
+                }
+            }
             if let Some(expression) = objective_expression {
                 writer.string("optimization-expression-v1");
                 writer.string(expression);

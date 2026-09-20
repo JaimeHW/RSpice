@@ -60,6 +60,10 @@ pub struct OptimizationSearchControls {
     pub sa_initial_temp: Value,
     pub sa_cooling_rate: Value,
     pub random_seed: u64,
+    pub variable_domains: std::collections::BTreeMap<
+        String,
+        crate::simulation::optimizer::OptimizationVariableDomain,
+    >,
 }
 
 impl Default for OptimizationSearchControls {
@@ -70,11 +74,37 @@ impl Default for OptimizationSearchControls {
             sa_initial_temp: defaults.sa_initial_temp,
             sa_cooling_rate: defaults.sa_cooling_rate,
             random_seed: defaults.random_seed,
+            variable_domains: Default::default(),
         }
     }
 }
 
 impl OptimizationSearchControls {
+    pub(crate) fn validate_domains<'a>(
+        &self,
+        variables: impl Iterator<Item = (&'a str, f64, f64, f64)>,
+        gradient: bool,
+    ) -> Result<(), String> {
+        let variables = variables.collect::<Vec<_>>();
+        let mut seen = HashSet::new();
+        for (name, domain) in &self.variable_domains {
+            if !seen.insert(name.to_ascii_lowercase()) {
+                return Err(format!("Repeated domain for variable {name:?}"));
+            }
+            let (_, min, max, initial) = variables
+                .iter()
+                .find(|(candidate, _, _, _)| candidate.eq_ignore_ascii_case(name))
+                .ok_or_else(|| format!("Variable domain {name:?} has no configured variable"))?;
+            domain
+                .coordinates(*min, *max, *initial)
+                .map_err(|error| format!("Variable {name:?}: {error}"))?;
+            if gradient && domain.is_discrete() {
+                return Err("Discrete variables require pattern search or annealing".into());
+            }
+        }
+        Ok(())
+    }
+
     pub(crate) fn validate(&self) -> Result<(), String> {
         if !self.var_tolerance.is_finite() || self.var_tolerance <= 0.0 {
             return Err("Optimization gradient tolerance must be finite and positive".into());
@@ -228,6 +258,17 @@ impl OptimizationRunConfig {
                 ));
             }
         }
+        self.search.validate_domains(
+            self.variables.iter().map(|variable| {
+                (
+                    variable.name.as_str(),
+                    variable.min,
+                    variable.max,
+                    variable.initial,
+                )
+            }),
+            self.algorithm == OptimizationAlgorithmMode::GradientDescent,
+        )?;
         Ok(())
     }
 }
@@ -407,15 +448,32 @@ where
     };
 
     let mut optimizer = OptimizerEngine::with_config(optimizer_config);
+    let mut coordinates = Vec::with_capacity(config.variables.len());
     for (variable_index, var) in config.variables.iter().enumerate() {
         poll_periodically(abort, variable_index)?;
-        optimizer.add_var(DesignVar::new(
-            var.name.clone(),
-            var.initial,
-            var.min,
-            var.max,
-        ));
+        let domain = config
+            .search
+            .variable_domains
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case(&var.name))
+            .map(|(_, domain)| domain)
+            .cloned()
+            .unwrap_or_default();
+        let mapping = domain
+            .coordinates(var.min, var.max, var.initial)
+            .map_err(ServiceRunError::Failure)?;
+        optimizer.add_var(
+            DesignVar::new(var.name.clone(), mapping.initial, mapping.min, mapping.max)
+                .with_quantum(mapping.quantum()),
+        );
+        coordinates.push((var.name.clone(), mapping));
     }
+    let physical_vars = |vars: &HashMap<String, Value>| -> HashMap<String, Value> {
+        coordinates
+            .iter()
+            .map(|(name, mapping)| (name.clone(), mapping.physical(vars[name])))
+            .collect()
+    };
     let mut variable_traces: HashMap<String, Vec<Value>> = HashMap::new();
     for (variable_index, var) in config.variables.iter().enumerate() {
         poll_periodically(abort, variable_index)?;
@@ -444,7 +502,7 @@ where
             ))
         } else {
             evaluations += 1;
-            evaluate(vars).and_then(|evaluation| {
+            evaluate(&physical_vars(vars)).and_then(|evaluation| {
                 if evaluation.cost.is_finite() {
                     *evaluated_objectives.borrow_mut() = evaluation.objectives;
                     Ok(evaluation.cost)
@@ -493,7 +551,7 @@ where
     optimizer.observe_candidate(&initial_vars, initial_cost);
     record_optimization_state(
         0.0,
-        &initial_vars,
+        &physical_vars(&initial_vars),
         initial_cost,
         &mut iterations,
         &mut costs,
@@ -521,7 +579,7 @@ where
         }
         record_optimization_state(
             optimizer.current_iteration() as Value,
-            &vars,
+            &physical_vars(&vars),
             cost,
             &mut iterations,
             &mut costs,
@@ -538,7 +596,7 @@ where
         costs,
         variable_traces,
         best_cost,
-        best_variables: best_vars.clone(),
+        best_variables: physical_vars(best_vars),
         converged: optimizer.is_converged(target_cost),
     })
 }
@@ -973,5 +1031,117 @@ mod configured_search_limits {
             matches!(error, ServiceRunError::ResourceLimit(error) if error.resource == rspice_core::ResourceKind::BatchRuns)
         );
         assert_eq!(calls.get(), 1);
+    }
+}
+
+#[cfg(test)]
+mod variable_domain_tests {
+    use super::*;
+    use crate::simulation::optimizer::OptimizationVariableDomain as Domain;
+    use rspice_core::NoAbort;
+
+    #[test]
+    fn optimization_variable_domains_drive_real_circuits_and_report_physical_values() {
+        let deck = "Variable domains\n.param X=1\nV1 out 0 {X}\nR1 out 0 1k\n.end\n";
+        for (domain, min, max, initial, target, scale, expected) in [
+            (Domain::Logarithmic, 1e-12, 1e6, 1.0, 1.0, 1e6, 1e-6),
+            (
+                Domain::Quantized { step: 2.0 },
+                0.0,
+                10.0,
+                0.0,
+                6.4,
+                1.0,
+                6.0,
+            ),
+            (
+                Domain::Discrete {
+                    values: vec![100.0, 470.0, 2200.0],
+                },
+                100.0,
+                2200.0,
+                100.0,
+                500.0,
+                1.0,
+                470.0,
+            ),
+        ] {
+            let mut config = OptimizationRunConfig {
+                variables: vec![OptimizationVariable {
+                    name: "X".into(),
+                    min,
+                    max,
+                    initial,
+                }],
+                objective_expression: Some(format!("{scale}*V(out)")),
+                target: Some(target),
+                cost_tolerance: 1e-10,
+                max_iterations: 90,
+                ..Default::default()
+            };
+            config
+                .search
+                .variable_domains
+                .insert("x".into(), domain.clone());
+            let data = run_optimization_analysis_with_config_and_source_path_and_abort(
+                deck, &config, None, &NoAbort,
+            )
+            .unwrap();
+            assert!(data.converged, "{domain:?}: {data:?}");
+            assert!(
+                (data.best_variables["X"] - expected).abs() <= expected.abs().max(1e-12) * 1e-5,
+                "{domain:?}: {:?}",
+                data.best_variables
+            );
+            for value in &data.variable_traces["X"] {
+                assert!(*value >= min && *value <= max);
+                match &domain {
+                    Domain::Quantized { step } => {
+                        assert_eq!((value - min) / step, ((value - min) / step).round())
+                    }
+                    Domain::Discrete { values } => assert!(values.contains(value)),
+                    _ => {}
+                }
+            }
+            let expected_cost = (scale * data.best_variables["X"] - target).powi(2);
+            assert!((data.best_cost - expected_cost).abs() < 1e-8 * expected_cost.abs().max(1.0));
+            config.algorithm = OptimizationAlgorithmMode::GradientDescent;
+            if domain.is_discrete() {
+                assert!(config.validate().unwrap_err().contains("pattern search"));
+            }
+        }
+        let mut config = OptimizationRunConfig::default();
+        config
+            .search
+            .variable_domains
+            .insert("missing".into(), Domain::Logarithmic);
+        assert!(
+            config
+                .validate()
+                .unwrap_err()
+                .contains("no configured variable")
+        );
+        assert!(Domain::Logarithmic.coordinates(0.0, 1.0, 0.5).is_err());
+        assert!(
+            Domain::Quantized { step: 2.0 }
+                .coordinates(0.0, 10.0, 3.0)
+                .is_err()
+        );
+        assert!(
+            Domain::Discrete {
+                values: vec![2.0, 1.0]
+            }
+            .coordinates(0.0, 3.0, 1.0)
+            .is_err()
+        );
+        assert!(
+            Domain::Quantized { step: 4.0 }
+                .coordinates(1e16, 1e16 + 16.0, 1e16 + 2.0)
+                .is_err()
+        );
+        let decimal = Domain::Quantized { step: 0.1 }
+            .coordinates(0.0, 0.3, 0.3)
+            .unwrap();
+        assert_eq!(decimal.physical(decimal.max), 0.3);
     }
 }

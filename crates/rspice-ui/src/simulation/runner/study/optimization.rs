@@ -236,7 +236,13 @@ mod tests {
             ),
         ] {
             let spec = AnalysisSpec::Optimization {
-                search: Default::default(),
+                search: services::OptimizationSearchControls {
+                    variable_domains: std::collections::BTreeMap::from([(
+                        "RLOAD".into(),
+                        crate::simulation::optimizer::OptimizationVariableDomain::Logarithmic,
+                    )]),
+                    ..Default::default()
+                },
                 variables: vec![OptimizationVariable {
                     name: "RLOAD".into(),
                     min: 500.0,

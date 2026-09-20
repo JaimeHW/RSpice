@@ -225,6 +225,17 @@ impl OptimizationConfig {
                 return Err(format!("Duplicate optimization variable '{}'", var.name));
             }
         }
+        self.search.validate_domains(
+            self.variables.iter().map(|variable| {
+                (
+                    variable.name.as_str(),
+                    variable.min,
+                    variable.max,
+                    variable.initial,
+                )
+            }),
+            self.algorithm == OptimizationAlgorithmMode::GradientDescent,
+        )?;
         Ok(())
     }
 
@@ -306,6 +317,9 @@ impl OptimizationConfig {
         if let Some(target) = self.target_value {
             line.push_str(&format!(" target={:.6e}", target));
         }
+        for (name, domain) in &self.search.variable_domains {
+            line.push_str(&format!("\n* RSPICE OPT DOMAIN {name} {domain:?}"));
+        }
         line
     }
 }
@@ -318,6 +332,8 @@ pub struct OptimizationDialogState {
     pub weighted_objectives: bool,
     #[serde(default)]
     pub objective_terms: Vec<OptimizationObjectiveDraft>,
+    #[serde(default)]
+    pub variable_domains: Vec<OptimizationVariableDomainDraft>,
     #[serde(default)]
     pub base_analysis: Option<crate::product::AnalysisInstanceId>,
     #[serde(default)]
@@ -383,6 +399,12 @@ impl OptimizationDialogState {
                 .objective_terms
                 .iter()
                 .map(OptimizationObjectiveDraft::from_config)
+                .collect(),
+            variable_domains: config
+                .search
+                .variable_domains
+                .iter()
+                .map(|(name, domain)| OptimizationVariableDomainDraft::from_config(name, domain))
                 .collect(),
             base_analysis: config.base_analysis,
             objective_measurement: config.objective_measurement.clone(),
@@ -465,6 +487,16 @@ impl OptimizationDialogState {
                 Vec::new()
             },
             search: OptimizationSearchControls {
+                variable_domains: {
+                    let mut domains = std::collections::BTreeMap::new();
+                    for row in &self.variable_domains {
+                        let name = row.name.trim().to_owned();
+                        if domains.insert(name.clone(), row.to_config()?).is_some() {
+                            return Err(format!("Repeated domain for variable {name:?}"));
+                        }
+                    }
+                    domains
+                },
                 var_tolerance: parse_si_value(&self.var_tolerance)
                     .map_err(|e| format!("Invalid gradient tolerance: {e}"))?,
                 sa_initial_temp: parse_si_value(&self.sa_initial_temp)
@@ -628,10 +660,25 @@ mod search_tests {
             sa_initial_temp: 12.25,
             sa_cooling_rate: 0.875,
             random_seed: u64::MAX,
+            variable_domains: std::collections::BTreeMap::from([
+                (
+                    "RLOAD".into(),
+                    crate::simulation::optimizer::OptimizationVariableDomain::Logarithmic,
+                ),
+                (
+                    "VDD".into(),
+                    crate::simulation::optimizer::OptimizationVariableDomain::Quantized {
+                        step: 0.1,
+                    },
+                ),
+            ]),
         };
         let draft = OptimizationDialogState::from_config(&config);
         let json = serde_json::to_string(&draft).unwrap();
         let restored: OptimizationDialogState = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.to_config().unwrap(), config);
+        let restored: OptimizationDialogState =
+            ron::from_str(&ron::to_string(&draft).unwrap()).unwrap();
         assert_eq!(restored.to_config().unwrap(), config);
         let mut old = serde_json::to_value(&draft).unwrap();
         for name in [
@@ -639,6 +686,7 @@ mod search_tests {
             "sa_initial_temp",
             "sa_cooling_rate",
             "random_seed",
+            "variable_domains",
         ] {
             old.as_object_mut().unwrap().remove(name);
         }
@@ -710,5 +758,76 @@ impl OptimizationObjectiveDraft {
         };
         term.validate()?;
         Ok(term)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OptimizationVariableDomainDraft {
+    pub name: String,
+    pub mode: usize,
+    pub step: String,
+    pub values: String,
+}
+impl Default for OptimizationVariableDomainDraft {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            mode: 0,
+            step: "1".into(),
+            values: String::new(),
+        }
+    }
+}
+impl OptimizationVariableDomainDraft {
+    fn from_config(
+        name: &str,
+        domain: &crate::simulation::optimizer::OptimizationVariableDomain,
+    ) -> Self {
+        use crate::simulation::optimizer::OptimizationVariableDomain as Domain;
+        let mut row = Self {
+            name: name.into(),
+            ..Default::default()
+        };
+        match domain {
+            Domain::Linear => {}
+            Domain::Logarithmic => row.mode = 1,
+            Domain::Quantized { step } => {
+                row.mode = 2;
+                row.step = step.to_string();
+            }
+            Domain::Discrete { values } => {
+                row.mode = 3;
+                row.values = values
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join(", ");
+            }
+        }
+        row
+    }
+    fn to_config(
+        &self,
+    ) -> Result<crate::simulation::optimizer::OptimizationVariableDomain, String> {
+        use crate::simulation::optimizer::OptimizationVariableDomain as Domain;
+        Ok(match self.mode {
+            0 => Domain::Linear,
+            1 => Domain::Logarithmic,
+            2 => Domain::Quantized {
+                step: parse_si_value(&self.step)
+                    .map_err(|error| format!("Invalid variable grid step: {error}"))?,
+            },
+            3 => Domain::Discrete {
+                values: self
+                    .values
+                    .split(|ch: char| ch.is_whitespace() || ch == ',' || ch == ';')
+                    .filter(|value| !value.is_empty())
+                    .map(parse_si_value)
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(|error| format!("Invalid allowed values: {error}"))?,
+            },
+            _ => return Err("Invalid variable domain".into()),
+        })
     }
 }
