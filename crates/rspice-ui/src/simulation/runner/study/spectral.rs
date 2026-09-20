@@ -61,6 +61,7 @@ impl StudyPostprocess {
                 spec @ (AnalysisSpec::HarmonicBalance { .. } | AnalysisSpec::Qpss { .. }),
             ) => spec.clone(),
             StudyAnalysis::Pss(pss) => pss.request.clone(),
+            StudyAnalysis::Qpss(qpss) => qpss.request.clone(),
             _ => {
                 return Err(SimulationError::InvalidConfig(
                     "Study requires its configured transient, PSS, HB or QPSS producer".into(),
@@ -126,16 +127,24 @@ impl StudyPostprocess {
 
 impl StudyRunConfig {
     pub(super) fn execution_source(&self, source: &str) -> Result<String, SimulationError> {
-        if let StudyAnalysis::Pss(pss) = &self.analysis {
-            pss.validate().map_err(SimulationError::InvalidConfig)?;
-            if pss.operating_point.instance_id == self.instance_id
-                || self.postprocess.as_ref().is_some_and(|post| {
-                    post.producer_instance_id == pss.operating_point.instance_id
-                })
-                || pss.operating_point.source_revision != self.source_revision
+        let operating_point = match &self.analysis {
+            StudyAnalysis::Pss(pss) => Some(&pss.operating_point),
+            StudyAnalysis::Qpss(qpss) => Some(&qpss.operating_point),
+            _ => None,
+        };
+        if let Some(operating_point) = operating_point {
+            self.analysis
+                .validate()
+                .map_err(|errors| SimulationError::InvalidConfig(errors.join("; ")))?;
+            if operating_point.instance_id == self.instance_id
+                || self
+                    .postprocess
+                    .as_ref()
+                    .is_some_and(|post| post.producer_instance_id == operating_point.instance_id)
+                || operating_point.source_revision != self.source_revision
             {
                 return Err(SimulationError::InvalidConfig(
-                    "PSS study requires a distinct OP producer from the same frozen plan revision"
+                    "Periodic study requires a distinct OP producer from the same frozen plan revision"
                         .into(),
                 ));
             }
@@ -186,6 +195,9 @@ impl StudyRunConfig {
                     EngineBridge::run_materialized_with_abort(engine, config, circuit, abort)
                 }
                 StudyAnalysis::Pss(pss) => pss.run(engine, circuit, &self.numeric_options, abort),
+                StudyAnalysis::Qpss(qpss) => qpss
+                    .run_with_circuit(engine, circuit, &self.numeric_options, abort)
+                    .map(|(_, result)| result),
                 StudyAnalysis::Native(spec) => {
                     super::super::spec::run_native_study_on_materialized(
                         spec.clone(),

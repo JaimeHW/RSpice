@@ -5,8 +5,10 @@ pub use analysis::StudyAnalysis;
 mod optimization;
 mod periodic;
 mod pss;
+mod qpss;
 pub use periodic::StudyPeriodicOptions;
 pub use pss::{StudyOperatingPoint, StudyPssConfig};
+pub use qpss::StudyQpssConfig;
 mod spectral;
 pub(crate) use optimization::run_optimization;
 pub use spectral::StudyPostprocess;
@@ -834,6 +836,10 @@ fn validate_base_measurements(
             .validate_measurements(&base.measurements)
             .map_err(SimulationError::InvalidConfig);
     }
+    if let StudyAnalysis::Qpss(config) = &base.analysis {
+        return validate_qpss_measurements(&config.request, &base.measurements)
+            .map_err(SimulationError::InvalidConfig);
+    }
     if let StudyAnalysis::Native(spec @ crate::simulation::multi_run::AnalysisSpec::Qpss { .. }) =
         &base.analysis
     {
@@ -910,9 +916,13 @@ fn analysis_for_environment(
     environment: Option<&MonteCarloEnvironment>,
 ) -> StudyAnalysis {
     let mut analysis = base.analysis.clone();
-    if let StudyAnalysis::Pss(pss) = &mut analysis {
+    let operating_point = match &mut analysis {
+        StudyAnalysis::Pss(pss) => Some(&mut pss.operating_point.config),
+        StudyAnalysis::Qpss(qpss) => Some(&mut qpss.operating_point.config),
+        _ => None,
+    };
+    if let Some(op) = operating_point {
         if let Some(environment) = environment {
-            let op = &mut pss.operating_point.config;
             if matches!(
                 op.temperature_mode,
                 crate::simulation::dialog::OpTemperatureMode::PvtRunSet

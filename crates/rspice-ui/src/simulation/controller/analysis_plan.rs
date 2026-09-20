@@ -452,7 +452,7 @@ impl SimulationController {
         )
     }
 
-    fn compile_study_pss(
+    fn compile_study_seeded_periodic(
         &self,
         state: &AppState,
         plan: &FrozenSimulationPlan,
@@ -470,7 +470,7 @@ impl SimulationController {
             })
             .collect::<Vec<_>>();
         let [producer] = producers.as_slice() else {
-            return Err("A PSS study requires exactly one explicitly bound, enabled operating-point producer".into());
+            return Err("A periodic study requires exactly one explicitly bound, enabled operating-point producer".into());
         };
         let mut producer_state = state.clone();
         producer_state.sim_setup = state
@@ -481,22 +481,31 @@ impl SimulationController {
         let AnalysisConfig::DcOp(config) =
             self.analysis_spec_to_config(&producer_state, &producer_spec)?
         else {
-            return Err("PSS study dependency is not an operating-point configuration".into());
+            return Err("Periodic study dependency is not an operating-point configuration".into());
         };
-        Ok(crate::simulation::runner::study::StudyAnalysis::Pss(
-            Box::new(crate::simulation::runner::study::StudyPssConfig {
+        use crate::simulation::runner::study::{
+            StudyAnalysis, StudyOperatingPoint, StudyPssConfig, StudyQpssConfig,
+        };
+        let operating_point = StudyOperatingPoint {
+            instance_id: producer.id(),
+            source_revision: plan.revision(),
+            config,
+            numeric_options: producer
+                .numeric_override()
+                .map(|options| options.to_spice_options())
+                .unwrap_or_default(),
+        };
+        if matches!(spec, AnalysisSpec::Qpss { .. }) {
+            Ok(StudyAnalysis::Qpss(Box::new(StudyQpssConfig {
                 request: spec.clone(),
-                operating_point: crate::simulation::runner::study::StudyOperatingPoint {
-                    instance_id: producer.id(),
-                    source_revision: plan.revision(),
-                    config,
-                    numeric_options: producer
-                        .numeric_override()
-                        .map(|options| options.to_spice_options())
-                        .unwrap_or_default(),
-                },
-            }),
-        ))
+                operating_point,
+            })))
+        } else {
+            Ok(StudyAnalysis::Pss(Box::new(StudyPssConfig {
+                request: spec.clone(),
+                operating_point,
+            })))
+        }
     }
 
     fn compile_study_base(
@@ -625,12 +634,12 @@ impl SimulationController {
             )
             .map_err(|error| error.to_string())?;
             (
-                if matches!(producer_spec, AnalysisSpec::Pss { .. }) {
-                    self.compile_study_pss(state, plan, producer, &producer_spec)?
-                } else if matches!(
+                if matches!(
                     producer_spec,
-                    AnalysisSpec::HarmonicBalance { .. } | AnalysisSpec::Qpss { .. }
+                    AnalysisSpec::Pss { .. } | AnalysisSpec::Qpss { .. }
                 ) {
+                    self.compile_study_seeded_periodic(state, plan, producer, &producer_spec)?
+                } else if matches!(producer_spec, AnalysisSpec::HarmonicBalance { .. }) {
                     crate::simulation::runner::study::StudyAnalysis::Native(producer_spec.clone())
                 } else {
                     self.analysis_spec_to_config(&producer_state, &producer_spec)?
@@ -649,12 +658,12 @@ impl SimulationController {
                     periodic_options,
                 }),
             )
-        } else if matches!(spec, AnalysisSpec::Pss { .. }) {
-            (self.compile_study_pss(state, plan, base, &spec)?, None)
-        } else if matches!(
-            spec,
-            AnalysisSpec::HarmonicBalance { .. } | AnalysisSpec::Qpss { .. }
-        ) {
+        } else if matches!(spec, AnalysisSpec::Pss { .. } | AnalysisSpec::Qpss { .. }) {
+            (
+                self.compile_study_seeded_periodic(state, plan, base, &spec)?,
+                None,
+            )
+        } else if matches!(spec, AnalysisSpec::HarmonicBalance { .. }) {
             (
                 crate::simulation::runner::study::StudyAnalysis::Native(spec.clone()),
                 None,
@@ -915,9 +924,12 @@ mod tests {
                 .study_base
                 .as_ref()
                 .unwrap();
-            let StudyAnalysis::Native(spec) = &base.analysis else {
-                panic!("native")
+            let StudyAnalysis::Qpss(config) = &base.analysis else {
+                panic!("configured QPSS")
             };
+            let spec = &config.request;
+            assert_eq!(config.operating_point.instance_id, op);
+            assert_eq!(config.operating_point.source_revision, frozen.revision());
             assert_eq!(
                 *spec,
                 queue
@@ -953,13 +965,30 @@ mod tests {
                         .spec
                 );
             }
-            for change_producer in [true, false] {
+            for change in 0..6 {
                 let mut changed = task.queued_analysis().clone();
                 let base = changed.spec_options.study_base.as_mut().unwrap();
-                if change_producer || base.postprocess.is_none() {
-                    let StudyAnalysis::Native(AnalysisSpec::Qpss { controls, .. }) =
-                        &mut base.analysis
-                    else {
+                if change >= 2 {
+                    let StudyAnalysis::Qpss(config) = &mut base.analysis else {
+                        unreachable!()
+                    };
+                    match change {
+                        2 => {
+                            config.operating_point.instance_id =
+                                crate::product::AnalysisInstanceId::new()
+                        }
+                        3 => config.operating_point.numeric_options = ".options GMIN=1e-5".into(),
+                        4 => config.operating_point.config.temperature_celsius += 10.0,
+                        _ => {
+                            config.operating_point.config.node_initialization =
+                                crate::simulation::dialog::OpNodeInitialization::IgnoreIcAndNodeset
+                        }
+                    }
+                } else if change == 0 || base.postprocess.is_none() {
+                    let StudyAnalysis::Qpss(config) = &mut base.analysis else {
+                        unreachable!()
+                    };
+                    let AnalysisSpec::Qpss { controls, .. } = &mut config.request else {
                         unreachable!()
                     };
                     controls.max_backtracks += 1;

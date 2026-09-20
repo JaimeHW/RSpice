@@ -95,14 +95,29 @@ fn base(kind: usize) -> StudyRunConfig {
     StudyRunConfig {
         instance_id: AnalysisInstanceId::new(),
         source_revision: ObjectRevision::INITIAL,
-        analysis: StudyAnalysis::Native(producer),
+        analysis: StudyAnalysis::Qpss(Box::new(StudyQpssConfig {
+            request: producer,
+            operating_point: StudyOperatingPoint {
+                instance_id: AnalysisInstanceId::new(),
+                source_revision: ObjectRevision::INITIAL,
+                config: crate::simulation::dialog::OpConfig {
+                    temperature_mode: crate::simulation::dialog::OpTemperatureMode::Explicit,
+                    temperature_celsius: 37.0,
+                    initial_guess: crate::simulation::dialog::OpInitialGuess::ZeroState,
+                    node_initialization:
+                        crate::simulation::dialog::OpNodeInitialization::IgnoreIcAndNodeset,
+                    ..Default::default()
+                },
+                numeric_options: ".options GMIN=1e-7 RELTOL=1e-8".into(),
+            },
+        })),
         analysis_line: if kind == 0 {
             line.clone()
         } else {
             "* configured QP consumer".into()
         },
         numeric_options: if kind == 0 {
-            ".options GMIN=0 TEMP=37".into()
+            ".options GMIN=0 TEMP=12".into()
         } else {
             String::new()
         },
@@ -110,7 +125,7 @@ fn base(kind: usize) -> StudyRunConfig {
             producer_instance_id: AnalysisInstanceId::new(),
             producer_source_revision: ObjectRevision::INITIAL,
             producer_analysis_line: line,
-            producer_numeric_options: ".options GMIN=0 TEMP=37".into(),
+            producer_numeric_options: ".options GMIN=0 TEMP=12".into(),
             request: consumer(kind),
             periodic_options: None,
         }),
@@ -157,7 +172,7 @@ fn dispatch(spec: AnalysisSpec, base: StudyRunConfig, deck: &str) -> SimulationR
         },
     );
     assert_eq!(editor.to_config().unwrap().measurements, base.measurements);
-    let StudyAnalysis::Native(expected_producer) = &base.analysis else {
+    let StudyAnalysis::Qpss(expected_producer) = &base.analysis else {
         unreachable!()
     };
     let expected_producer = expected_producer.clone();
@@ -171,7 +186,7 @@ fn dispatch(spec: AnalysisSpec, base: StudyRunConfig, deck: &str) -> SimulationR
             .unwrap();
     let options: SpecExecutionOptions = wire.into();
     let restored = options.study_base.as_ref().unwrap();
-    let StudyAnalysis::Native(actual) = &restored.analysis else {
+    let StudyAnalysis::Qpss(actual) = &restored.analysis else {
         panic!("native")
     };
     assert_eq!(*actual, expected_producer);
@@ -359,4 +374,126 @@ fn qp_study_optimization_reaches_an_explicit_lattice_target() {
         "{best_cost}, {best_variables:?}"
     );
     assert!((best_variables["R"] - 800.0).abs() < 0.1);
+}
+
+#[test]
+fn qp_study_uses_exact_dc_seed_and_preserves_zero_start_and_supply_environment() {
+    use rspice_core::engine::{PeriodicDcOperatingPointSeed, QpssConfig, QpssInitialState};
+    let circuit =
+        rspice_core::Netlist::parse("Seed basis\nV1 out 0 1\nR1 out 0 1k\n.options GMIN=0\n.end\n")
+            .unwrap();
+    let mut config = QpssConfig::new(vec![1000.0, 1414.2135623730951], vec![1, 1]);
+    config.initial_state = QpssInitialState::DcOperatingPoint;
+    let exact = PeriodicDcOperatingPointSeed::try_new(
+        vec!["OUT".into()],
+        vec!["V1".into()],
+        vec![1.0, -0.001],
+    )
+    .unwrap();
+    let engine = rspice_core::Engine::default();
+    let solved = engine
+        .run_qpss_with_dc_seed_and_abort(&circuit, config.clone(), &exact, &NoAbort)
+        .unwrap();
+    assert_eq!(
+        solved.iterations(),
+        0,
+        "exact full MNA seed already satisfies the DC-only circuit"
+    );
+    // Incorrect current alone needs a correction. An internal OP recompute
+    // would erase this input and report zero corrections instead.
+    let displaced = PeriodicDcOperatingPointSeed::try_new(
+        vec!["OUT".into()],
+        vec!["V1".into()],
+        vec![1.0, -0.002],
+    )
+    .unwrap();
+    let corrected = engine
+        .run_qpss_with_dc_seed_and_abort(&circuit, config.clone(), &displaced, &NoAbort)
+        .unwrap();
+    assert!(corrected.iterations() > 0);
+    let stale = PeriodicDcOperatingPointSeed::try_new(
+        vec!["other".into()],
+        vec!["V1".into()],
+        vec![1.0, -0.001],
+    )
+    .unwrap();
+    assert!(
+        engine
+            .run_qpss_with_dc_seed_and_abort(&circuit, config.clone(), &stale, &NoAbort)
+            .is_err()
+    );
+    assert!(matches!(
+        engine.run_qpss_with_dc_seed_and_abort(&circuit, config.clone(), &exact, &ImmediateAbort),
+        Err(rspice_core::SimulationError::Aborted)
+    ));
+    config.initial_state = QpssInitialState::Zero;
+    assert!(
+        engine
+            .run_qpss_with_dc_seed_and_abort(&circuit, config, &exact, &NoAbort)
+            .unwrap_err()
+            .to_string()
+            .contains("requires DC")
+    );
+
+    let mut base = base(0);
+    let StudyAnalysis::Qpss(qpss) = &mut base.analysis else {
+        unreachable!()
+    };
+    qpss.operating_point.config.run_point.supply_voltage = Some(2.0);
+    qpss.operating_point.config.run_point.nominal_supply_voltage = Some(1.0);
+    qpss.operating_point.config.run_point.supply_source_names = vec!["V1".into()];
+    let circuit = rspice_core::Netlist::parse(&format!("{CIRCUIT}.end\n")).unwrap();
+    for zero in [false, true] {
+        let AnalysisSpec::Qpss { controls, .. } = &mut qpss.request else {
+            unreachable!()
+        };
+        controls.initial_state = if zero {
+            QpssInitialState::Zero
+        } else {
+            QpssInitialState::DcOperatingPoint
+        };
+        // In zero mode even invalid OP-only numerical options must not be run.
+        qpss.operating_point.numeric_options = if zero {
+            ".options invalid_option=1"
+        } else {
+            ".options GMIN=1e-7"
+        }
+        .into();
+        let (_, result) = qpss
+            .run_with_circuit(&engine, &circuit, &base.numeric_options, &NoAbort)
+            .unwrap();
+        let actual = result
+            .study_measurement("tuple:0,0:real:V(out)")
+            .unwrap()
+            .value
+            .unwrap();
+        let expected = 0.4 * impedance(2200.0, 0.0).re / 2200.0;
+        assert!(
+            (actual - expected).abs() < 1e-9,
+            "supply must scale once; zero={zero}"
+        );
+    }
+    let environment = MonteCarloEnvironment {
+        temperature_celsius: 52.0,
+        supply_voltage: Some(3.0),
+        nominal_supply_voltage: Some(1.0),
+        supply_source_names: vec!["V1".into()],
+    };
+    let StudyAnalysis::Qpss(explicit) = analysis_for_environment(&base, Some(&environment)) else {
+        unreachable!()
+    };
+    assert_eq!(explicit.operating_point.config.temperature_celsius, 37.0);
+    assert_eq!(
+        explicit.operating_point.config.run_point.supply_voltage,
+        None
+    );
+    let StudyAnalysis::Qpss(qpss) = &mut base.analysis else {
+        unreachable!()
+    };
+    qpss.operating_point.config.temperature_mode =
+        crate::simulation::dialog::OpTemperatureMode::PvtRunSet;
+    let StudyAnalysis::Qpss(inherited) = analysis_for_environment(&base, Some(&environment)) else {
+        unreachable!()
+    };
+    assert_eq!(inherited.operating_point.config.temperature_celsius, 52.0);
 }

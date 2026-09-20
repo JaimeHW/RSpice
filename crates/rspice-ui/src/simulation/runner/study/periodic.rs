@@ -88,6 +88,9 @@ impl StudyPostprocess {
             StudyAnalysis::Pss(pss) => {
                 pss.run_with_circuit(engine, circuit, &self.producer_numeric_options, abort)?
             }
+            StudyAnalysis::Qpss(qpss) => {
+                qpss.run_with_circuit(engine, circuit, &self.producer_numeric_options, abort)?
+            }
             StudyAnalysis::Native(
                 producer @ (AnalysisSpec::HarmonicBalance { .. } | AnalysisSpec::Qpss { .. }),
             ) => {
