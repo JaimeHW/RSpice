@@ -1,6 +1,7 @@
 //! Netlist execution and retained independent-phase operating points.
 mod bindings;
 mod card;
+mod frequency_sweep;
 mod noise_sources;
 mod qpac;
 mod qpnoise;

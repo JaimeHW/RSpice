@@ -1,27 +1,9 @@
 //! Cheap native-card preflight, exact grid resolution and authenticated QPXF execution.
 use super::*;
-use crate::analysis::frequency_grid::{
-    FrequencyGridScale, frequency_point_count, generate_frequency_grid, validate_generated_sweep,
-};
+use crate::ResourceLimits;
 use crate::analysis::quasi_periodic::{QuasiPeriodicLinearConfig, QuasiPeriodicLinearMethod};
-use crate::netlist::{
-    FreqVariation, QpacSweep, QpxfCard, QpxfCardLattices, QpxfCardOutput, QpxfCardSources,
-};
-use crate::{ResourceKind, ResourceLimitError, ResourceLimits};
+use crate::netlist::{QpacSweep, QpxfCard, QpxfCardLattices, QpxfCardOutput, QpxfCardSources};
 
-fn grid_error(error: crate::analysis::FrequencyGridError) -> SimulationError {
-    match error {
-        crate::analysis::FrequencyGridError::Aborted => SimulationError::Aborted,
-        other => qpxf_error(format!("invalid frequency sweep: {other}")),
-    }
-}
-fn scale(variation: FreqVariation) -> FrequencyGridScale {
-    match variation {
-        FreqVariation::Lin => FrequencyGridScale::Linear,
-        FreqVariation::Dec => FrequencyGridScale::Decade,
-        FreqVariation::Oct => FrequencyGridScale::Octave,
-    }
-}
 fn request_fields(card: &QpxfCard) -> Result<QpxfRequest, SimulationError> {
     let frequency_axis = match card
         .frequency_axis
@@ -93,63 +75,9 @@ impl QpxfRequest {
         limits: &ResourceLimits,
     ) -> Result<usize, SimulationError> {
         request_fields(card)?;
-        let count = match &card.sweep {
-            QpacSweep::Explicit(values) => {
-                if values.is_empty()
-                    || values.iter().any(|v| !v.is_finite())
-                    || values.windows(2).any(|v| v[0] >= v[1])
-                {
-                    return Err(qpxf_error(
-                        "frequencies must be finite, nonempty and strictly increasing",
-                    ));
-                }
-                values.len()
-            }
-            QpacSweep::Generated(s) => {
-                if s.variation == FreqVariation::Lin {
-                    if !s.start_freq.is_finite()
-                        || !s.stop_freq.is_finite()
-                        || s.stop_freq < s.start_freq
-                        || s.points == 0
-                    {
-                        return Err(qpxf_error(
-                            "LIN requires finite increasing endpoints and a positive point count",
-                        ));
-                    }
-                } else {
-                    validate_generated_sweep(
-                        s.start_freq,
-                        s.stop_freq,
-                        s.points,
-                        scale(s.variation),
-                        true,
-                    )
-                    .map_err(grid_error)?;
-                }
-                let count = frequency_point_count(
-                    s.start_freq,
-                    s.stop_freq,
-                    s.points,
-                    scale(s.variation),
-                    1,
-                )
-                .map_err(grid_error)?;
-                if count > 1 && s.start_freq == s.stop_freq {
-                    return Err(qpxf_error(
-                        "multiple frequency points require distinct endpoints",
-                    ));
-                }
-                count
-            }
-        };
-        ResourceLimitError::ensure(
-            ResourceKind::AnalysisPoints,
-            count,
-            limits.max_analysis_points,
-        )?;
-        ResourceLimitError::ensure(ResourceKind::ResultValues, count, limits.max_result_values)?;
-        Ok(count)
+        super::super::frequency_sweep::validate(&card.sweep, limits)
     }
+
     pub fn from_qpxf_card(card: &QpxfCard) -> Result<Self, SimulationError> {
         Self::from_qpxf_card_with_abort(card, &ResourceLimits::default(), &NoAbort)
     }
@@ -160,48 +88,7 @@ impl QpxfRequest {
     ) -> Result<Self, SimulationError> {
         check_abort(abort)?;
         Self::validate_qpxf_card(card, limits)?;
-        let frequencies_hz = match &card.sweep {
-            QpacSweep::Explicit(values) => values.clone(),
-            QpacSweep::Generated(s) if s.variation == FreqVariation::Lin && s.start_freq < 0.0 => {
-                // Generate bounded fractions with the shared allocator/poller;
-                // convex interpolation avoids overflow in stop-start and keeps
-                // negative endpoints and zero crossings representable.
-                let mut values = generate_frequency_grid(
-                    0.0,
-                    1.0,
-                    s.points,
-                    FrequencyGridScale::Linear,
-                    true,
-                    1,
-                    abort,
-                )
-                .map_err(grid_error)?;
-                let last = values.len() - 1;
-                for (i, fraction) in values.iter_mut().enumerate() {
-                    if i % 256 == 0 {
-                        check_abort(abort)?;
-                    }
-                    *fraction = if i == 0 {
-                        s.start_freq
-                    } else if i == last {
-                        s.stop_freq
-                    } else {
-                        (1.0 - *fraction) * s.start_freq + *fraction * s.stop_freq
-                    };
-                }
-                values
-            }
-            QpacSweep::Generated(s) => generate_frequency_grid(
-                s.start_freq,
-                s.stop_freq,
-                s.points,
-                scale(s.variation),
-                true,
-                1,
-                abort,
-            )
-            .map_err(grid_error)?,
-        };
+        let frequencies_hz = super::super::frequency_sweep::resolve(&card.sweep, limits, abort)?;
         let mut request = request_fields(card)?;
         request.frequencies_hz = frequencies_hz;
         request.validate()?;
