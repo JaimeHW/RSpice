@@ -66,6 +66,18 @@ Other user-facing machinery, all verified in source:
   module, not in the application; production issuance is the platform
   backend's cold-key flow.
 
+## Harmonic balance current outputs
+
+HB results expose the engine's retained MNA branch currents as `I(device)`,
+including voltage sources and inductors, plus exact capacitor currents. These
+appear in the result signal chooser and can be selected in studies with, for
+example, `bin:1:magnitude:I(V1)` or `bin:0:real:I(L1)`. Current is positive from
+the device's positive terminal to its negative terminal, so a supplying voltage
+source can have negative real DC current. Voltage traces carry volts and current
+traces carry amps through worker transport and plotting. Inductor currents are
+published once even though they are present in both MNA and reactive state.
+Only currents actually retained with an exact DC component are exposed.
+
 ## Harmonic balance in configured studies
 
 Monte Carlo and optimization can select a harmonic balance instance as their base.
