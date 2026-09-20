@@ -77,38 +77,8 @@ impl Engine {
         Self::ensure_no_mixed_signal_analysis(&circuit, "QPXF")?;
         let mut solver = engine.qpss_circuit_solver(&circuit)?;
         let mut observation = vec![vec![Complex64::ZERO; grid.len()]; point.spectra().len()];
-        match &request.output {
-            QpxfOutput::Voltage { positive, negative } => {
-                let node = |name: &str| -> Result<Option<usize>, SimulationError> {
-                    if netlist.ground_policy().is_ground(name.trim()) {
-                        return Ok(None);
-                    }
-                    point
-                        .node_names()
-                        .iter()
-                        .position(|n| n.eq_ignore_ascii_case(name.trim()))
-                        .map(Some)
-                        .ok_or_else(|| {
-                            qpxf_error(format!("output node '{name}' is absent from the circuit"))
-                        })
-                };
-                let positive = node(positive)?;
-                let negative = node(negative)?;
-                if positive == negative {
-                    return Err(qpxf_error("output and reference must be distinct nodes"));
-                }
-                if let Some(row) = positive {
-                    observation[row][output_index] = Complex64::ONE;
-                }
-                if let Some(row) = negative {
-                    observation[row][output_index] = -Complex64::ONE;
-                }
-            }
-            QpxfOutput::BranchCurrent { branch } => {
-                let row = point.branch_names().iter().position(|n| n.eq_ignore_ascii_case(branch.trim()))
-                    .ok_or_else(|| qpxf_error(format!("output '{branch}' is not a retained MNA current; select a voltage-source/current-probe, inductor or another exact branch current")))?;
-                observation[point.node_names().len() + row][output_index] = Complex64::ONE;
-            }
+        for (row, value) in bindings::output(netlist, point, &request.output)? {
+            observation[row][output_index] = value;
         }
         let names = match &request.input_sources {
             QpxfSources::AllIndependent => {
@@ -146,34 +116,12 @@ impl Engine {
         let mut inputs = Vec::with_capacity(names.len());
         for name in names {
             check_abort(abort)?;
-            let source = Self::pac_input_port(&circuit, &name, point.node_names().len())?;
-            let (quantity, injections, name) = if let Some(index) = source.voltage_source_index {
-                let row = solver
-                    .periodic_voltage_source_branch(index)
-                    .ok_or_else(|| qpxf_error("input voltage source has no exact MNA branch"))?;
-                (
-                    QpxfQuantity::Voltage,
-                    vec![(point.node_names().len() + row, Complex64::ONE)],
-                    circuit.voltage_sources.names[index].clone(),
-                )
-            } else {
-                let canonical = circuit
-                    .current_sources
-                    .names
-                    .iter()
-                    .find(|n| n.eq_ignore_ascii_case(name.trim()))
-                    .expect("bound current source");
-                (
-                    QpxfQuantity::Current,
-                    source.node_injections,
-                    canonical.clone(),
-                )
-            };
-            inputs.push(QpxfInputSource {
-                name,
-                quantity,
-                injections,
-            });
+            inputs.push(bindings::input(
+                &circuit,
+                &solver,
+                &name,
+                point.node_names().len(),
+            )?);
         }
         let mut limits = engine.config.resource_limits.clone();
         limits.max_result_values = limits.max_result_values.saturating_sub(metadata_values);
