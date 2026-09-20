@@ -28,9 +28,10 @@ impl SoaRuleConfig {
                 | SoAParameter::Id
                 | SoAParameter::Ic
                 | SoAParameter::Temp
+                | SoAParameter::Pdiss
         ) {
             return Err(
-                "SOA terminal rules support magnitudes and positive/negative limits for Vgs, Vds, Vgd, Vbe, Vce, Vbc, Id and Ic, plus absolute operating temperature".into(),
+                "SOA rules support magnitudes and positive/negative limits for Vgs, Vds, Vgd, Vbe, Vce, Vbc, Id and Ic, plus conductive power and absolute operating temperature".into(),
             );
         }
         if !self.max_value.is_finite()
@@ -68,7 +69,7 @@ impl SoaRuleConfig {
 
 pub(super) fn applicable(element: &Element, parameter: SoAParameter) -> bool {
     let parameter = parameter.base_parameter();
-    if parameter == SoAParameter::Temp {
+    if matches!(parameter, SoAParameter::Temp | SoAParameter::Pdiss) {
         return matches!(
             element.kind,
             ElementKind::Mosfet { .. }
@@ -172,11 +173,14 @@ pub(super) fn resolve(
                     unit: match parameter.base_parameter() {
                         SoAParameter::Id | SoAParameter::Ic => "A",
                         SoAParameter::Temp => "K",
+                        SoAParameter::Pdiss => "W",
                         _ => "V",
                     }
                     .into(),
                     description: if parameter == SoAParameter::Temp {
                         "Maximum absolute operating temperature used by the device model".into()
+                    } else if parameter == SoAParameter::Pdiss {
+                        "Maximum positive conductive device power, including series losses; excludes stored-energy exchange".into()
                     } else {
                         format!(
                             "Maximum {} {} at authored terminals",
@@ -202,6 +206,7 @@ pub(super) fn device_parameter(parameter: SoAParameter) -> Option<&'static str> 
         SoAParameter::Id => Some("id"),
         SoAParameter::Ic => Some("ic"),
         SoAParameter::Temp => Some("temp"),
+        SoAParameter::Pdiss => Some("power"),
         _ => None,
     }
 }

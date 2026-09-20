@@ -709,6 +709,12 @@ fn soa_directional_limits_survive_studio_preparation_worker_requests_and_saved_r
             assert_eq!(SoAParameter::from(wire), parameter);
         }
     }
+    config.rules.push(SoaRuleConfig {
+        parameter: SoAParameter::Pdiss,
+        max_value: 0.001,
+        devices: vec![],
+        models: vec![],
+    });
     let draft = SoaDialogState::from_config(&config);
     assert_eq!(draft.to_config().unwrap(), config);
     let mut state = preflight_ready_state();
@@ -750,7 +756,7 @@ fn soa_directional_limits_survive_studio_preparation_worker_requests_and_saved_r
     else {
         panic!("SOA evidence");
     };
-    assert_eq!(evaluations.len(), 48);
+    assert_eq!(evaluations.len(), 52);
     let trace = |name: &str| {
         &retained
             .waveforms
@@ -800,6 +806,19 @@ fn soa_directional_limits_survive_studio_preparation_worker_requests_and_saved_r
         ("SOA_VBC_POS(QP)", 0.85),
     ] {
         assert!(trace(name).iter().all(|v| (*v - expected).abs() < 1e-12));
+    }
+    for (device, current, factor) in [
+        ("MN", "ID", 1.0),
+        ("MP", "ID", 1.0),
+        ("QN", "IC", 1.5065),
+        ("QP", "IC", 1.5065),
+    ] {
+        let power = trace(&format!("SOA_PDISS({device})"));
+        let magnitude = trace(&format!("SOA_{current}({device})"));
+        for (power, current) in power.iter().zip(magnitude.iter()) {
+            assert!((*power - factor * current).abs() < 1e-10 + current * 1e-6);
+            assert!(*power > 0.0);
+        }
     }
     let mut simulation = crate::state::SimulationState::default();
     simulation.runs.push(run.clone());

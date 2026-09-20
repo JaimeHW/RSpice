@@ -1,5 +1,5 @@
 //! The safe-operating-area form: the transient window the checks are run
-//! over, default voltage limits, and scoped voltage/current/temperature rules.
+//! over, default voltage limits, and scoped voltage/current/power/temperature rules.
 //!
 //! Each bound is greyed by the check that reads it, so a limit can never be
 //! typed into a check that is off.
@@ -85,6 +85,10 @@ pub(super) fn fields(
         ui,
         "Temperature limits are entered in °C; results use absolute kelvin. The check observes the temperature used by the model, including self-heating only where the model implements it.",
     );
+    field_note(
+        ui,
+        "Power checks use the model's positive conductive power, including series-resistor loss. Capacitor energy storage and release are excluded. The model determines which physical losses are represented.",
+    );
     let mut remove = None;
     for (index, rule) in setup.rules.iter_mut().enumerate() {
         ui.push_id(("soa-rule", index), |ui| {
@@ -97,7 +101,9 @@ pub(super) fn fields(
             );
             input_row(
                 ui,
-                if rule.is_temperature() {
+                if rule.is_power() {
+                    "Maximum power (W)"
+                } else if rule.is_temperature() {
                     "Maximum temperature (°C)"
                 } else if rule.is_current() {
                     "Limit magnitude (A)"

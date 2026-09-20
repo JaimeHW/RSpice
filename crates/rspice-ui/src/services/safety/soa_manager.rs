@@ -135,6 +135,12 @@ impl SoAParameter {
 
     /// Input must be finite; polarity follows authored terminal order, not model type.
     pub fn measured_stress(self, signed: f64) -> f64 {
+        // Only consumed conductive power contributes to a dissipation limit;
+        // a negative signed model contribution is not positive heat.
+        if self == Self::Pdiss {
+            return signed.max(0.0);
+        }
+
         match self.polarity() {
             Some(true) => signed.max(0.0),
             Some(false) => (-signed).max(0.0),

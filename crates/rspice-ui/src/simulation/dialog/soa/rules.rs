@@ -1,10 +1,10 @@
-//! Persisted authoring rows for scoped SOA voltage, current and temperature limits.
+//! Persisted authoring rows for scoped SOA voltage, current, power and temperature limits.
 
 use super::*;
 use crate::services::safety::SoAParameter;
 use crate::services::simulation_runner::SoaRuleConfig;
 
-const PARAMETERS: [SoAParameter; 25] = [
+const PARAMETERS: [SoAParameter; 26] = [
     SoAParameter::Vgs,
     SoAParameter::Vds,
     SoAParameter::Vgd,
@@ -30,6 +30,7 @@ const PARAMETERS: [SoAParameter; 25] = [
     SoAParameter::IcPositive,
     SoAParameter::IcNegative,
     SoAParameter::Temp,
+    SoAParameter::Pdiss,
 ];
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -53,7 +54,7 @@ impl Default for SoaRuleDraft {
 }
 
 impl SoaRuleDraft {
-    pub const PARAMETER_LABELS: [&'static str; 25] = [
+    pub const PARAMETER_LABELS: [&'static str; 26] = [
         "Vgs",
         "Vds",
         "Vgd",
@@ -79,7 +80,12 @@ impl SoaRuleDraft {
         "Ic positive",
         "Ic negative",
         "Operating temperature",
+        "Conductive power dissipation",
     ];
+    pub fn is_power(&self) -> bool {
+        PARAMETERS.get(self.parameter) == Some(&SoAParameter::Pdiss)
+    }
+
     pub fn is_temperature(&self) -> bool {
         PARAMETERS.get(self.parameter) == Some(&SoAParameter::Temp)
     }
