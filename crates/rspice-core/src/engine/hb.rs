@@ -51,8 +51,12 @@ pub use pac::PacAnalysisResult;
 pub use pnoise::{PeriodicNoiseRequest, PeriodicNoiseSidebands, PnoiseAnalysisResult};
 pub use psp::{PreparedPsp, PspAnalysisResult, PspNoiseCorrelation};
 pub use quasi_periodic::{
-    QpacAnalysisResult, QpacInputQuantity, QpacRequest, QpacResultMetadata, QpssConfig,
-    QpssInitialState, QpssOperatingPoint, QpssOperatingPointMetadata, QpssSourceTone,
+    QpacAnalysisResult, QpacInputQuantity, QpacRequest, QpacResultMetadata, QpnoiseAnalysisResult,
+    QpnoiseContributorRank, QpnoiseFrequencyAxis, QpnoiseInput, QpnoiseIntegrated,
+    QpnoiseIntegration, QpnoiseIntegrationMethod, QpnoiseLattices, QpnoiseNoiseFigure,
+    QpnoiseObservation, QpnoiseOutput, QpnoiseOutputSpectrum, QpnoiseQuantity, QpnoiseReference,
+    QpnoiseRequest, QpnoiseResultMetadata, QpnoiseSources, QpnoiseUnavailable, QpnoiseValue,
+    QpssConfig, QpssInitialState, QpssOperatingPoint, QpssOperatingPointMetadata, QpssSourceTone,
     QpxfAnalysisResult, QpxfFrequencyAxis, QpxfGroupDelay, QpxfInputLattices, QpxfInputSource,
     QpxfOutput, QpxfQuantity, QpxfRequest, QpxfResultMetadata, QpxfSources, QpxfTransfer,
 };

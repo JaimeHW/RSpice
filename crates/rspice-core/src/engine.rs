@@ -138,9 +138,14 @@ pub use hb::{
     PeriodicNoiseFigureResult, PeriodicNoiseFigureSpectrum, PeriodicNoiseRequest,
     PeriodicNoiseSidebands, PnoiseAnalysisResult, PreparedPsp, PspAnalysisResult,
     PspNoiseCorrelation, QpacAnalysisResult, QpacInputQuantity, QpacRequest, QpacResultMetadata,
-    QpssConfig, QpssInitialState, QpssOperatingPoint, QpssOperatingPointMetadata, QpssSourceTone,
-    QpxfAnalysisResult, QpxfFrequencyAxis, QpxfGroupDelay, QpxfInputLattices, QpxfInputSource,
-    QpxfOutput, QpxfQuantity, QpxfRequest, QpxfResultMetadata, QpxfSources, QpxfTransfer,
+    QpnoiseAnalysisResult, QpnoiseContributorRank, QpnoiseFrequencyAxis, QpnoiseInput,
+    QpnoiseIntegrated, QpnoiseIntegration, QpnoiseIntegrationMethod, QpnoiseLattices,
+    QpnoiseNoiseFigure, QpnoiseObservation, QpnoiseOutput, QpnoiseOutputSpectrum, QpnoiseQuantity,
+    QpnoiseReference, QpnoiseRequest, QpnoiseResultMetadata, QpnoiseSources, QpnoiseUnavailable,
+    QpnoiseValue, QpssConfig, QpssInitialState, QpssOperatingPoint, QpssOperatingPointMetadata,
+    QpssSourceTone, QpxfAnalysisResult, QpxfFrequencyAxis, QpxfGroupDelay, QpxfInputLattices,
+    QpxfInputSource, QpxfOutput, QpxfQuantity, QpxfRequest, QpxfResultMetadata, QpxfSources,
+    QpxfTransfer,
 };
 pub use health::EngineHealthReport;
 pub use pss::{

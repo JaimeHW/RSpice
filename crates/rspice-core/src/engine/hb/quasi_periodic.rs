@@ -3,6 +3,7 @@ mod bindings;
 mod card;
 mod noise_sources;
 mod qpac;
+mod qpnoise;
 mod qpxf;
 mod sources;
 mod state;
@@ -15,6 +16,13 @@ use crate::analysis::quasi_periodic::{
     QuasiPeriodicSolveConfig,
 };
 pub use qpac::{QpacAnalysisResult, QpacInputQuantity, QpacRequest, QpacResultMetadata};
+pub use qpnoise::{
+    QpnoiseAnalysisResult, QpnoiseContributorRank, QpnoiseFrequencyAxis, QpnoiseInput,
+    QpnoiseIntegrated, QpnoiseIntegration, QpnoiseIntegrationMethod, QpnoiseLattices,
+    QpnoiseNoiseFigure, QpnoiseObservation, QpnoiseOutput, QpnoiseOutputSpectrum, QpnoiseQuantity,
+    QpnoiseReference, QpnoiseRequest, QpnoiseResultMetadata, QpnoiseSources, QpnoiseUnavailable,
+    QpnoiseValue,
+};
 pub use qpxf::{
     QpxfAnalysisResult, QpxfFrequencyAxis, QpxfGroupDelay, QpxfInputLattices, QpxfInputSource,
     QpxfOutput, QpxfQuantity, QpxfRequest, QpxfResultMetadata, QpxfSources, QpxfTransfer,
