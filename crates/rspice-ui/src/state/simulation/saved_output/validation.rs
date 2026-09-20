@@ -10,6 +10,7 @@ use crate::state::{AnalysisResult, AnalysisResultPayload, AnalysisType, DcSweepF
 impl AnalysisResult {
     pub(in crate::state::simulation) fn validate_saved_output_receipts(
         &self,
+        quasi_periodic_basis: Option<&[crate::state::WaveformData]>,
     ) -> Result<(), String> {
         if self.saved_output_receipts.is_empty() {
             return Ok(());
@@ -42,7 +43,7 @@ impl AnalysisResult {
                 );
             }
             if let Some(bindings) = &receipt.source_bindings {
-                bindings.validate(receipt, self)?;
+                bindings.validate(receipt, self, quasi_periodic_basis)?;
             }
             if !identities.insert(receipt.output_id) {
                 return Err(format!(

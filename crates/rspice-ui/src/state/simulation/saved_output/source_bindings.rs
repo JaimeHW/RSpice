@@ -36,6 +36,7 @@ impl SavedOutputSourceBindings {
         &self,
         receipt: &SavedOutputReceipt,
         analysis: &crate::state::AnalysisResult,
+        basis: Option<&[crate::state::WaveformData]>,
     ) -> Result<(), String> {
         use crate::state::{AnalysisResultPayload, DcSweepFamily};
         let expected = saved_output_references(receipt.output_kind, &receipt.source_expression)?
@@ -54,7 +55,12 @@ impl SavedOutputSourceBindings {
         let deferred = receipt.status == SavedOutputMaterializationStatus::Deferred;
         let retained = |name: &str| {
             analysis.dc_op.as_ref().map_or_else(
-                || analysis.waveforms.iter().any(|wave| wave.name == name),
+                || {
+                    basis
+                        .unwrap_or(&analysis.waveforms)
+                        .iter()
+                        .any(|wave| wave.name == name)
+                },
                 |op| {
                     op.node_voltages
                         .iter()
@@ -76,7 +82,7 @@ impl SavedOutputSourceBindings {
                 if name.is_empty()
                     || family.is_some()
                     || analysis.dc_op.is_some()
-                    || deferred && !retained(name) =>
+                    || (deferred || basis.is_some()) && !retained(name) =>
             {
                 return Err("saved-output axis does not identify retained analysis data".to_owned());
             }
@@ -89,7 +95,9 @@ impl SavedOutputSourceBindings {
                     return Err("a current source cannot bind to the ground voltage".to_owned());
                 }
                 SavedOutputBoundSource::Waveform { name }
-                    if name.is_empty() || family.is_some() || deferred && !retained(name) =>
+                    if name.is_empty()
+                        || family.is_some()
+                        || (deferred || basis.is_some()) && !retained(name) =>
                 {
                     return Err(
                         "saved-output source does not identify retained analysis data".to_owned(),

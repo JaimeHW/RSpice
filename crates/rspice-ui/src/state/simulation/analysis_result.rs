@@ -13,6 +13,7 @@ mod family_metadata;
 mod qpac;
 mod qpss;
 mod qpxf;
+mod quasi_periodic_display;
 
 pub use family_metadata::{AnalysisResultFamilyMetadata, MonteCarloVariableMetadata};
 

@@ -158,19 +158,29 @@ fn destinations(analysis: &AnalysisResult) -> HashMap<String, usize> {
 /// Authored outputs are projections of this basis, never additional circuit
 /// nodes or branches. Reusing their labels here would let a previous output
 /// named `V(absent)` invent a physical node during deferred evaluation.
-fn source_waveforms(analysis: &AnalysisResult) -> Vec<WaveformData> {
+fn source_waveforms(analysis: &AnalysisResult) -> Result<Vec<WaveformData>, String> {
+    if let Some(basis) = analysis
+        .result_payload
+        .as_ref()
+        .map(crate::state::AnalysisResultPayload::quasi_periodic_display)
+        .transpose()?
+        .flatten()
+    {
+        return Ok(basis);
+    }
     let Some(op) = &analysis.dc_op else {
-        return analysis.waveforms.clone();
+        return Ok(analysis.waveforms.clone());
     };
     let axis = Arc::new(vec![0.0]);
-    op.node_voltages
+    Ok(op
+        .node_voltages
         .iter()
         .chain(&op.branch_currents)
         .map(|value| {
             WaveformData::new(&value.name, Arc::clone(&axis), vec![value.value], "#f5b700")
                 .with_unit(&value.unit)
         })
-        .collect()
+        .collect())
 }
 
 pub(in crate::simulation) fn materialize_saved_outputs(
@@ -195,7 +205,21 @@ fn materialize_with_engine_policy(
     if contracts.is_empty() {
         return;
     }
-    let source = source_waveforms(analysis);
+    let source = match source_waveforms(analysis) {
+        Ok(source) => source,
+        Err(reason) => {
+            for contract in contracts {
+                analysis.saved_output_receipts.push(receipt(
+                    contract,
+                    SavedOutputMaterializationStatus::Unavailable {
+                        reason: reason.clone(),
+                    },
+                    None,
+                ));
+            }
+            return;
+        }
+    };
     let family = Sources::new(analysis, &source);
     let mut destinations = destinations(analysis);
     for contract in contracts {
@@ -260,7 +284,14 @@ pub(in crate::simulation) fn retain_plan_saved_outputs(
         .flat_map(|receipt| receipt.status.materialized_waveforms())
         .map(|(name, _)| name.to_owned())
         .collect::<HashSet<_>>();
-    if contracts
+    if !matches!(
+        analysis.result_payload,
+        Some(
+            crate::state::AnalysisResultPayload::Qpss { .. }
+                | crate::state::AnalysisResultPayload::Qpac { .. }
+                | crate::state::AnalysisResultPayload::Qpxf { .. }
+        )
+    ) && contracts
         .iter()
         .any(|contract| contract.policy == SavedOutputPolicy::OnDemandFromRetainedState)
     {
@@ -298,7 +329,9 @@ pub(in crate::simulation) fn materialize_live_saved_outputs(
         return Vec::new();
     }
     let mut outputs = Vec::new();
-    let source = source_waveforms(source_analysis);
+    let Ok(source) = source_waveforms(source_analysis) else {
+        return Vec::new();
+    };
     let family = Sources::new(source_analysis, &source);
     for contract in live {
         let Ok(bindings) = bindings::capture(contract, source_analysis, &source, family.as_ref())
@@ -355,7 +388,7 @@ pub(crate) fn materialize_deferred_saved_output(
         candidates: None,
         digest: receipt.contract_digest,
     };
-    let source = source_waveforms(analysis);
+    let source = source_waveforms(analysis)?;
     let family = Sources::new(analysis, &source);
     let bindings = if receipt.source_bindings.is_some() {
         receipt.source_bindings

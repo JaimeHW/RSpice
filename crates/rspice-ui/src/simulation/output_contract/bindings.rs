@@ -13,6 +13,7 @@ use rspice_core::netlist::GroundPolicy;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum Candidate {
     Probe(String),
+    Trace(String),
     Ground,
 }
 
@@ -73,7 +74,7 @@ fn candidates(
     aliases: Option<&rspice_core::netlist::InterfaceNodeAliases>,
 ) -> Vec<Candidate> {
     let (current, node) = probe_identity(signal);
-    let mut result = Vec::new();
+    let mut result = vec![Candidate::Trace(signal.to_owned())];
     let mut add = |node: &str| {
         let candidate = if !current && ground.is_ground(node) {
             Candidate::Ground
@@ -141,6 +142,18 @@ pub(super) fn capture(
             let bound = candidates
                 .iter()
                 .find_map(|candidate| match candidate {
+                    Candidate::Trace(name) if family.is_none() => source
+                        .iter()
+                        .find(|w| {
+                            w.name.eq_ignore_ascii_case(name)
+                                || w.complex
+                                    .as_ref()
+                                    .is_some_and(|c| c.source_name.eq_ignore_ascii_case(name))
+                        })
+                        .map(|w| SavedOutputBoundSource::Waveform {
+                            name: w.name.clone(),
+                        }),
+                    Candidate::Trace(_) => None,
                     Candidate::Ground => Some(SavedOutputBoundSource::Ground),
                     Candidate::Probe(probe) => {
                         if let Some(family) = family {
@@ -148,7 +161,19 @@ pub(super) fn capture(
                                 .quantity(probe)
                                 .map(|quantity| SavedOutputBoundSource::DcQuantity { quantity })
                         } else {
-                            find_literal_waveform(source, probe).map(|waveform| {
+                            let requested =
+                                if let Some(crate::state::AnalysisResultPayload::Qpac {
+                                    response,
+                                }) = &analysis.result_payload
+                                {
+                                    format!(
+                                        "{probe} [k={:?}]",
+                                        response.metadata.request.output_lattice
+                                    )
+                                } else {
+                                    probe.clone()
+                                };
+                            find_literal_waveform(source, &requested).map(|waveform| {
                                 SavedOutputBoundSource::Waveform {
                                     name: waveform.name.clone(),
                                 }
@@ -262,7 +287,17 @@ pub(super) fn resolve(
             |signal| context.resolve(signal),
         ),
         SavedOutputKind::DerivedExpression => {
-            resolve_derived_with(&contract.source_expression, &contract.name, &context, axis)
+            let mut waveform =
+                resolve_derived_with(&contract.source_expression, &contract.name, &context, axis)?;
+            // A direct quoted trace keeps the producer's units. Composite
+            // calculator expressions retain their existing unstated-unit contract.
+            if let Ok(calculator::ast::CalculatorExpr::WaveformRef { signal, .. }) =
+                calculator::parser::Parser::new(&contract.source_expression).try_parse()
+                && let Ok(probe::Source::Waveform(source)) = context.resolve(&signal)
+            {
+                waveform.unit = source.unit.clone();
+            }
+            Ok(waveform)
         }
         _ => Err("source bindings require a voltage/current or derived output".to_owned()),
     }

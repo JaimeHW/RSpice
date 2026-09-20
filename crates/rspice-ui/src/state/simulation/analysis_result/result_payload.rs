@@ -919,7 +919,13 @@ impl AnalysisResult {
     /// Historical analyses may legitimately lack a newer payload; when both
     /// fields exist they must describe one coherent execution.
     pub fn validate_retained_evidence(&self) -> Result<(), String> {
-        self.validate_saved_output_receipts()?;
+        let quasi_periodic_basis = self
+            .result_payload
+            .as_ref()
+            .map(AnalysisResultPayload::quasi_periodic_display)
+            .transpose()?
+            .flatten();
+        self.validate_saved_output_receipts(quasi_periodic_basis.as_deref())?;
         if let Some(quality) = &self.convergence {
             quality.validate()?;
         }
@@ -1213,15 +1219,7 @@ impl AnalysisResult {
         if let Some(payload) = &self.result_payload {
             payload.validate_for(self.analysis_type)?;
         }
-        if let Some(AnalysisResultPayload::Qpxf { response }) = &self.result_payload {
-            super::qpxf::validate_display(response, &self.waveforms)?;
-        }
-        if let Some(AnalysisResultPayload::Qpac { response }) = &self.result_payload {
-            super::qpac::validate_display(response, &self.waveforms)?;
-        }
-        if let Some(AnalysisResultPayload::Qpss { operating_point }) = &self.result_payload {
-            super::qpss::validate_display(operating_point, &self.waveforms)?;
-        }
+        self.validate_quasi_periodic_display(quasi_periodic_basis.as_deref())?;
         if let Some(AnalysisResultPayload::DcSweep { evidence }) = &self.result_payload {
             evidence.validate_retained_traces(self.waveforms.iter().map(|trace| {
                 super::super::DcTraceView {

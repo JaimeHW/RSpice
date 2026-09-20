@@ -44,6 +44,8 @@ mod durable_binding_tests;
 mod fixtures;
 #[cfg(test)]
 mod probe_tests;
+#[cfg(test)]
+mod quasi_periodic_tests;
 
 /// Static validation result for a candidate output contract. `RuntimeBound`
 /// is not a placeholder: it records the precise evidence that cannot exist
@@ -409,6 +411,7 @@ pub(in crate::simulation) fn output_kind_supports_run_type(
     run_type: AnalysisRunType,
 ) -> bool {
     match kind {
+        SavedOutputKind::DerivedExpression if run_type == AnalysisRunType::Qpxf => true,
         SavedOutputKind::RawVoltageOrCurrent | SavedOutputKind::DerivedExpression => matches!(
             run_type,
             AnalysisRunType::DcOp
@@ -428,6 +431,7 @@ pub(in crate::simulation) fn output_kind_supports_run_type(
                 | AnalysisRunType::Pxf
                 | AnalysisRunType::Pss
                 | AnalysisRunType::Qpss
+                | AnalysisRunType::Qpac
                 | AnalysisRunType::HarmonicBalance
                 | AnalysisRunType::Envelope
                 | AnalysisRunType::Fourier

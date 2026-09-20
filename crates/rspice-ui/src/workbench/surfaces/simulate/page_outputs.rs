@@ -921,6 +921,10 @@ fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPay
                     None,
                 );
                 if output.kind == crate::state::SavedOutputKind::DerivedExpression {
+                    card_note(
+                        ui,
+                        "Quote a curve's full name to select a typed result such as a QPXF transfer or group-delay segment. Use mag(...), phase(...) or real(...) for projections. QPAC V(...) and I(...) probes use the analysis's selected output tuple.",
+                    );
                     field_pair(
                         ui,
                         ("Signal arithmetic", &mut |ui: &mut Ui, width: f32| {
