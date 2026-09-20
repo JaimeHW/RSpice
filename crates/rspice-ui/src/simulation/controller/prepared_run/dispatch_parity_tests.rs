@@ -368,7 +368,7 @@ fn a_kind_without_a_solver_is_still_refused_by_its_own_blocker() {
         blocked += 1;
     }
     assert_eq!(
-        blocked, 5,
+        blocked, 3,
         "the engine-blocked catalogue changed; re-read what the blockers now cover"
     );
 }

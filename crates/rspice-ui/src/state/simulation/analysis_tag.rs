@@ -260,9 +260,6 @@ impl CanonicalAnalysisKind {
     #[must_use]
     pub const fn execution_blocker(self) -> Option<&'static str> {
         match self {
-            Self::Qpac => {
-                Some("QPAC conversion-matrix execution is not available in this engine build")
-            }
             Self::Qpnoise => {
                 Some("quasi-periodic noise execution is not available in this engine build")
             }
@@ -409,6 +406,7 @@ mod tests {
                 CanonicalAnalysisKind::Hbsp,
                 CanonicalAnalysisKind::Hbnoise,
                 CanonicalAnalysisKind::Psp,
+                CanonicalAnalysisKind::Qpac,
                 CanonicalAnalysisKind::TransientNoise,
                 CanonicalAnalysisKind::DcMismatch,
             ]
@@ -422,7 +420,6 @@ mod tests {
             blocked,
             vec![
                 CanonicalAnalysisKind::Reliability,
-                CanonicalAnalysisKind::Qpac,
                 CanonicalAnalysisKind::Qpnoise,
                 CanonicalAnalysisKind::Qpxf,
             ]

@@ -115,6 +115,7 @@ pub(super) fn run_spec_request_with_environment(
         | AnalysisSpec::PssSpectrum { .. }
         | AnalysisSpec::HarmonicBalance { .. }
         | AnalysisSpec::Qpss { .. }
+        | AnalysisSpec::Qpac { .. }
         | AnalysisSpec::Envelope { .. }
         | AnalysisSpec::Fourier { .. }
         | AnalysisSpec::Disto { .. }
@@ -137,8 +138,7 @@ pub(super) fn run_spec_request_with_environment(
             dependencies,
             abort_flag,
         ),
-        blocked @ (AnalysisSpec::Qpac { .. }
-        | AnalysisSpec::Qpnoise { .. }
+        blocked @ (AnalysisSpec::Qpnoise { .. }
         | AnalysisSpec::Qpxf { .. }
         | AnalysisSpec::Reliability { .. }) => {
             let kind = crate::simulation::execution::canonical_analysis_kind(&blocked);
@@ -505,18 +505,6 @@ mod tests {
 
     fn blocked_preview_specs() -> Vec<AnalysisSpec> {
         vec![
-            AnalysisSpec::Qpac {
-                start_freq: 1.0e3,
-                stop_freq: 2.0e3,
-                points_per_unit: 2,
-                sweep: crate::simulation::multi_run::FrequencySweep::Linear,
-                input_source: "V1".to_owned(),
-                output_node: "out".to_owned(),
-                output_ref: "0".to_owned(),
-                input_lattice: vec![0, 0],
-                output_lattice: vec![0, 0],
-                controls: Default::default(),
-            },
             AnalysisSpec::Qpnoise {
                 start_freq: 1.0e3,
                 stop_freq: 2.0e3,
@@ -1347,7 +1335,6 @@ R2 out 0 1k\n\
         assert_eq!(
             seen,
             vec![
-                crate::state::CanonicalAnalysisKind::Qpac,
                 crate::state::CanonicalAnalysisKind::Qpnoise,
                 crate::state::CanonicalAnalysisKind::Qpxf,
                 crate::state::CanonicalAnalysisKind::Reliability,
