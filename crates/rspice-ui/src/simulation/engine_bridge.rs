@@ -287,7 +287,30 @@ impl EngineBridge {
                 }
             })?;
         }
-        self.dispatch_analysis(input.config, &netlist, abort_flag)
+        Self::run_materialized_with_abort(&self.engine, input.config, &netlist, abort_flag)
+    }
+
+    /// Execute an analysis on an already materialized study circuit. The worker
+    /// engine supplies the resource policy; the circuit supplies its exact trial
+    /// parameters, statistical coordinate, source bindings, and environment.
+    /// No source reparse or second supply scaling is performed at this boundary.
+    pub(crate) fn run_materialized_with_abort(
+        engine: &rspice_core::Engine,
+        config: &AnalysisConfig,
+        netlist: &rspice_core::Netlist,
+        abort: &dyn AbortSignal,
+    ) -> Result<SimulationResult, SimulationError> {
+        ensure_not_aborted(abort)?;
+        config.validate().map_err(|errors| {
+            SimulationError::InvalidConfig(format!(
+                "analysis configuration is invalid: {}",
+                errors.join("; "),
+            ))
+        })?;
+        Self {
+            engine: engine.resolved_for_netlist(netlist),
+        }
+        .dispatch_analysis(config, netlist, abort)
     }
 
     fn dispatch_analysis(
@@ -508,3 +531,6 @@ mod cancellation_tests {
         }
     }
 }
+
+#[cfg(test)]
+mod study_tests;
