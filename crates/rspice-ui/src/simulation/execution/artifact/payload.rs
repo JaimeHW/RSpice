@@ -1,6 +1,8 @@
 //! Serializable numerical payloads and exact digests for execution artifacts.
 
 use super::*;
+mod qpss;
+pub(in crate::simulation) use qpss::QpssStateArtifact;
 
 #[cfg(any(target_arch = "wasm32", test))]
 pub(in crate::simulation) type EncodedArtifactTransfer<'a> =
@@ -968,6 +970,7 @@ enum ExecutionArtifactPayload {
     TransientTrajectory(Arc<TransientTrajectoryArtifact>),
     PeriodicState(Arc<PeriodicStateArtifact>),
     HbState(Arc<HbStateArtifact>),
+    QpssState(Arc<QpssStateArtifact>),
     DcOperatingPointSeed(Arc<DcOperatingPointSeedArtifact>),
 }
 
@@ -1236,7 +1239,8 @@ impl ExecutionArtifactEnvelope {
     pub(in crate::simulation) fn trajectory(&self) -> Option<&TransientTrajectoryArtifact> {
         match &self.payload {
             ExecutionArtifactPayload::TransientTrajectory(trajectory) => Some(trajectory),
-            ExecutionArtifactPayload::PeriodicState(_)
+            ExecutionArtifactPayload::QpssState(_)
+            | ExecutionArtifactPayload::PeriodicState(_)
             | ExecutionArtifactPayload::HbState(_)
             | ExecutionArtifactPayload::DcOperatingPointSeed(_) => None,
         }
@@ -1245,7 +1249,8 @@ impl ExecutionArtifactEnvelope {
     pub(in crate::simulation) fn periodic_state(&self) -> Option<&PeriodicStateArtifact> {
         match &self.payload {
             ExecutionArtifactPayload::PeriodicState(state) => Some(state),
-            ExecutionArtifactPayload::TransientTrajectory(_)
+            ExecutionArtifactPayload::QpssState(_)
+            | ExecutionArtifactPayload::TransientTrajectory(_)
             | ExecutionArtifactPayload::HbState(_)
             | ExecutionArtifactPayload::DcOperatingPointSeed(_) => None,
         }
@@ -1254,7 +1259,8 @@ impl ExecutionArtifactEnvelope {
     pub(in crate::simulation) fn hb_state(&self) -> Option<&HbStateArtifact> {
         match &self.payload {
             ExecutionArtifactPayload::HbState(state) => Some(state),
-            ExecutionArtifactPayload::TransientTrajectory(_)
+            ExecutionArtifactPayload::QpssState(_)
+            | ExecutionArtifactPayload::TransientTrajectory(_)
             | ExecutionArtifactPayload::PeriodicState(_)
             | ExecutionArtifactPayload::DcOperatingPointSeed(_) => None,
         }
@@ -1265,7 +1271,8 @@ impl ExecutionArtifactEnvelope {
     ) -> Option<&DcOperatingPointSeedArtifact> {
         match &self.payload {
             ExecutionArtifactPayload::DcOperatingPointSeed(seed) => Some(seed),
-            ExecutionArtifactPayload::TransientTrajectory(_)
+            ExecutionArtifactPayload::QpssState(_)
+            | ExecutionArtifactPayload::TransientTrajectory(_)
             | ExecutionArtifactPayload::PeriodicState(_)
             | ExecutionArtifactPayload::HbState(_) => None,
         }
@@ -1311,6 +1318,15 @@ impl ExecutionArtifactEnvelope {
                 };
                 periodic_state.validate()?;
                 periodic_state.digest()
+            }
+            ExecutionArtifactKind::QpssState => {
+                let ExecutionArtifactPayload::QpssState(state) = &self.payload else {
+                    return Err(ExecutionArtifactError::InvalidPayload(
+                        "QPSS artifact carries the wrong payload variant".into(),
+                    ));
+                };
+                state.validate()?;
+                state.digest()
             }
             ExecutionArtifactKind::HbState => {
                 let ExecutionArtifactPayload::HbState(state) = &self.payload else {
@@ -1713,6 +1729,9 @@ impl ResolvedExecutionDependencies {
                             },
                         ))
                     }
+                    ExecutionArtifactPayload::QpssState(state) => {
+                        ExecutionArtifactPayloadTransferMetadata::QpssState(state.encode_transfer(&mut buffers))
+                    }
                     ExecutionArtifactPayload::HbState(state) => {
                         let spectra = state
                             .operating_point
@@ -2050,6 +2069,9 @@ impl ResolvedExecutionDependencies {
                         periodic.validate()?;
                         ExecutionArtifactPayload::PeriodicState(Arc::new(periodic))
                     }
+                    ExecutionArtifactPayloadTransferMetadata::QpssState(metadata) => {
+                        ExecutionArtifactPayload::QpssState(Arc::new(metadata.decode(&mut buffers)?))
+                    }
                     ExecutionArtifactPayloadTransferMetadata::HbState(metadata) => {
                         let mut node_names = Vec::with_capacity(metadata.spectra.len());
                         let mut spectral_state = Vec::with_capacity(metadata.spectra.len());
@@ -2324,6 +2346,7 @@ enum ExecutionArtifactPayloadTransferMetadata {
     TransientTrajectory(Box<TransientTrajectoryTransferMetadata>),
     PeriodicState(Box<PeriodicStateTransferMetadata>),
     HbState(HbStateTransferMetadata),
+    QpssState(qpss::QpssStateTransferMetadata),
     DcOperatingPointSeed(DcOperatingPointSeedTransferMetadata),
 }
 

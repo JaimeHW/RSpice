@@ -26,6 +26,7 @@ pub(in crate::simulation) enum ExecutionArtifactKind {
     TransientTrajectory,
     PeriodicState,
     HbState,
+    QpssState,
     DcOperatingPointSeed,
 }
 
@@ -36,6 +37,7 @@ impl ExecutionArtifactKind {
             Self::TransientTrajectory => "Transient",
             Self::PeriodicState => "shooting PSS",
             Self::HbState => "Harmonic Balance",
+            Self::QpssState => "QPSS",
             Self::DcOperatingPointSeed => "operating point",
         }
     }
@@ -65,6 +67,7 @@ pub(in crate::simulation) fn required_artifact_kinds(
     const TRANSIENT: &[ExecutionArtifactKind] = &[ExecutionArtifactKind::TransientTrajectory];
     const PERIODIC: &[ExecutionArtifactKind] = &[ExecutionArtifactKind::PeriodicState];
     const HB: &[ExecutionArtifactKind] = &[ExecutionArtifactKind::HbState];
+    const QPSS: &[ExecutionArtifactKind] = &[ExecutionArtifactKind::QpssState];
     const DC_SEED: &[ExecutionArtifactKind] = &[ExecutionArtifactKind::DcOperatingPointSeed];
     const EITHER_PERIODIC: &[ExecutionArtifactKind] = &[
         ExecutionArtifactKind::PeriodicState,
@@ -86,6 +89,9 @@ pub(in crate::simulation) fn required_artifact_kinds(
         // it binds the same trajectory a Fourier analysis does.
         AnalysisSpec::Fourier { .. } | AnalysisSpec::Fft { .. } => TRANSIENT,
         AnalysisSpec::Hbsp { .. } | AnalysisSpec::Hbnoise { .. } => HB,
+        AnalysisSpec::Qpac { .. } | AnalysisSpec::Qpnoise { .. } | AnalysisSpec::Qpxf { .. } => {
+            QPSS
+        }
         AnalysisSpec::Pss {
             method: PssMethod::Shooting,
             ..
@@ -164,6 +170,19 @@ impl PreparedDependencyBinding {
         }
     }
 
+    pub(in crate::simulation) const fn qpss_state(
+        producer_instance_id: AnalysisInstanceId,
+        producer_source_revision: ObjectRevision,
+        producer_config_digest: ContentDigest,
+    ) -> Self {
+        Self {
+            kind: ExecutionArtifactKind::QpssState,
+            producer_instance_id,
+            producer_source_revision,
+            producer_config_digest,
+        }
+    }
+
     pub(in crate::simulation) const fn kind(&self) -> ExecutionArtifactKind {
         self.kind
     }
@@ -197,6 +216,7 @@ impl PreparedDependencyBinding {
             ExecutionArtifactKind::PeriodicState => 1,
             ExecutionArtifactKind::DcOperatingPointSeed => 2,
             ExecutionArtifactKind::HbState => 3,
+            ExecutionArtifactKind::QpssState => 4,
         });
         writer.uuid(self.producer_instance_id.as_uuid());
         writer.u64(self.producer_source_revision.get());
@@ -221,6 +241,17 @@ pub(in crate::simulation) fn validate_prepared_dependency_contract_with_options(
     consumer_options: &SpecExecutionOptions,
     producer: &AnalysisSpec,
 ) -> Result<(), ExecutionArtifactError> {
+    if matches!(
+        consumer,
+        AnalysisSpec::Qpac { .. } | AnalysisSpec::Qpnoise { .. } | AnalysisSpec::Qpxf { .. }
+    ) {
+        return producer.driven_qpss_config().map(|_| ()).map_err(|error| {
+            ExecutionArtifactError::ContractMismatch(format!(
+                "{} requires a driven QPSS producer: {error}",
+                consumer.run_type().display_name()
+            ))
+        });
+    }
     if matches!(
         consumer,
         AnalysisSpec::Pss {

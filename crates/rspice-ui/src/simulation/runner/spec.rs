@@ -60,6 +60,14 @@ pub(super) fn run_spec_request_with_environment(
     let validation = spec.validate();
     ensure_not_aborted(abort_flag)?;
     validation.map_err(SimulationError::InvalidConfig)?;
+    if let Some(reason) =
+        crate::simulation::execution::canonical_analysis_kind(&spec).execution_blocker()
+    {
+        return Err(SimulationError::InvalidConfig(format!(
+            "{} execution is unavailable; the request was rejected before dispatch: {reason}",
+            spec.run_type().display_name(),
+        )));
+    }
     dependencies
         .validate_for_spec(&spec, &options)
         .map_err(|error| SimulationError::InvalidConfig(error.to_string()))?;

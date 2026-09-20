@@ -1311,6 +1311,13 @@ impl PreparedRunSnapshot {
                     ExecutionArtifactKind::PeriodicState => {
                         matches!(producer.task.spec, AnalysisSpec::Pss { .. })
                     }
+                    ExecutionArtifactKind::QpssState => matches!(
+                        producer.task.spec,
+                        AnalysisSpec::Qpss {
+                            autonomous: false,
+                            ..
+                        }
+                    ),
                     ExecutionArtifactKind::HbState => {
                         matches!(producer.task.spec, AnalysisSpec::HarmonicBalance { .. })
                     }

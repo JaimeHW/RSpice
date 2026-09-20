@@ -305,6 +305,13 @@ impl SimulationController {
                                 task.queued_analysis().spec,
                                 AnalysisSpec::LegacyDcOp | AnalysisSpec::DcOp { .. }
                             ),
+                            matches!(
+                                task.queued_analysis().spec,
+                                AnalysisSpec::Qpss {
+                                    autonomous: false,
+                                    ..
+                                }
+                            ),
                         ),
                     )
                 })
@@ -327,12 +334,13 @@ impl SimulationController {
                     .dependencies()
                     .iter()
                     .filter_map(|dependency| {
-                        let (revision, config_digest, transient, pss, hb, op) =
+                        let (revision, config_digest, transient, pss, hb, op, qpss) =
                             producer_identities.get(dependency)?;
                         let kind = required_kinds.iter().copied().find(|kind| match kind {
                             ExecutionArtifactKind::TransientTrajectory => *transient,
                             ExecutionArtifactKind::PeriodicState => *pss,
                             ExecutionArtifactKind::HbState => *hb,
+                            ExecutionArtifactKind::QpssState => *qpss,
                             ExecutionArtifactKind::DcOperatingPointSeed => *op,
                         })?;
                         Some(match kind {
@@ -345,6 +353,13 @@ impl SimulationController {
                             }
                             ExecutionArtifactKind::PeriodicState => {
                                 PreparedDependencyBinding::periodic_state(
+                                    *dependency,
+                                    *revision,
+                                    *config_digest,
+                                )
+                            }
+                            ExecutionArtifactKind::QpssState => {
+                                PreparedDependencyBinding::qpss_state(
                                     *dependency,
                                     *revision,
                                     *config_digest,

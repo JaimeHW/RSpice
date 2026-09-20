@@ -1789,6 +1789,8 @@ impl SimulationController {
                             })
                         });
                     let hb_artifact_required = artifact_consumers(ExecutionArtifactKind::HbState);
+                    let qpss_artifact_required =
+                        artifact_consumers(ExecutionArtifactKind::QpssState);
                     let produced_artifact = match (
                         self.current_spec.as_ref(),
                         self.current_provenance.as_ref(),
@@ -1835,6 +1837,13 @@ impl SimulationController {
                                 )
                             })
                         }
+                        (
+                            Some(qpss_spec @ AnalysisSpec::Qpss { .. }),
+                            Some(provenance), Some(config_digest),
+                        ) if qpss_artifact_required => ExecutionArtifactEnvelope::from_qpss_result(
+                            provenance.prepared_snapshot_digest(), provenance.source_instance_id(),
+                            provenance.source_revision(), config_digest, qpss_spec, &sim_result,
+                        ).map_err(|error| format!("QPSS result could not produce its independent-tone dependency artifact: {error}")),
                         (
                             Some(hb_spec @ AnalysisSpec::HarmonicBalance { .. }),
                             Some(provenance),

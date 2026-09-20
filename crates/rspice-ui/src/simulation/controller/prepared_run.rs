@@ -1621,6 +1621,25 @@ impl SimulationController {
                 )
             })
             .collect::<Vec<_>>();
+        let qpss_producers = prepared
+            .iter()
+            .filter(|task| {
+                matches!(
+                    &task.queued_analysis().spec,
+                    AnalysisSpec::Qpss {
+                        autonomous: false,
+                        ..
+                    }
+                )
+            })
+            .map(|task| {
+                (
+                    task.instance_id(),
+                    task.source_revision(),
+                    task.config_digest(),
+                )
+            })
+            .collect::<Vec<_>>();
         let harmonic_balance_producers = prepared
             .iter()
             .filter(|task| {
@@ -1712,6 +1731,9 @@ impl SimulationController {
                             &periodic_producers,
                             PreparedDependencyBinding::periodic_state,
                         ),
+                        ExecutionArtifactKind::QpssState => {
+                            (&qpss_producers, PreparedDependencyBinding::qpss_state)
+                        }
                         ExecutionArtifactKind::HbState => (
                             &harmonic_balance_producers,
                             PreparedDependencyBinding::hb_state,
