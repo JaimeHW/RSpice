@@ -119,6 +119,9 @@ pub(crate) trait Circuit {
     fn unknowns(&self) -> usize;
     fn voltage_equation(&self, row: usize) -> bool;
     fn linear_entries(&self, frequency_hz: Value) -> Result<Vec<LinearEntry>, Error>;
+    fn small_signal_entries(&self, frequency_hz: Value) -> Result<Vec<LinearEntry>, Error> {
+        self.linear_entries(frequency_hz)
+    }
     fn sample(&mut self, state: &[Value], jacobian: bool) -> Result<Sample, Error>;
 }
 

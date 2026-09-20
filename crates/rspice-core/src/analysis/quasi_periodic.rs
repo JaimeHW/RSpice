@@ -7,10 +7,12 @@
 //! equations and convergence evidence belong to the consuming solver.
 
 mod grid;
+pub(crate) mod small_signal;
 pub(crate) mod solve;
 mod transform;
 
 pub use grid::{QuasiPeriodicGrid, QuasiPeriodicGridConfig, QuasiPeriodicSampling};
+pub use small_signal::{QuasiPeriodicAcConfig, QuasiPeriodicAcSolution};
 pub use solve::{
     QuasiPeriodicLinearConfig, QuasiPeriodicLinearMethod, QuasiPeriodicSolution,
     QuasiPeriodicSolveConfig,

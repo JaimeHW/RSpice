@@ -43,6 +43,57 @@ fn config() -> QuasiPeriodicSolveConfig {
 }
 
 #[test]
+fn qpac_mna_matches_shifted_rlc_and_ac_resistance_overrides_beyond_dense_limit() {
+    for harmonics in [1, 7] {
+        let grid = grid(harmonics);
+        let mut solver = HbSolver::new(HbConfig::new(17.0).with_harmonics(1), 1);
+        solver.add_conductance_with_small_signal(0, 0, 1e-3, 0.02);
+        solver.add_capacitance(0, 0, 1e-6);
+        solver
+            .try_add_periodic_inductor_branch(1, 0, 2e-3, 1, "L1")
+            .unwrap();
+        solver
+            .try_add_periodic_resistor_branch(1, 0, 500.0, 75.0, 2, "Rbranch")
+            .unwrap();
+        let orbit = vec![vec![Complex64::ZERO; grid.len()]; 3];
+        let mut sources = orbit.clone();
+        for (k, value) in sources[0].iter_mut().enumerate() {
+            *value = Complex64::new(0.003, k as Value * 1e-5);
+        }
+        let settings = QuasiPeriodicAcConfig::default();
+        let results = solver
+            .solve_quasi_periodic_ac_with_abort(
+                grid.clone(),
+                &settings,
+                &orbit,
+                &[1e3],
+                &sources,
+                &ResourceLimits::default(),
+                &NoAbort,
+            )
+            .unwrap();
+        let result = &results[0];
+        for (k, &f) in grid.frequencies_hz().iter().enumerate() {
+            let frequency = 1e3 + f;
+            if frequency == 0.0 {
+                close(result.spectra[0][k], Complex64::ZERO, 1e-12);
+                close(result.spectra[1][k], sources[0][k], 1e-12);
+                close(result.spectra[2][k], Complex64::ZERO, 1e-12);
+            } else {
+                let omega = std::f64::consts::TAU * frequency;
+                let yl = Complex64::new(0.0, -1.0 / (omega * 2e-3));
+                let voltage =
+                    sources[0][k] / (Complex64::new(0.02 + 1.0 / 75.0, omega * 1e-6) + yl);
+                close(result.spectra[0][k], voltage, 1e-10);
+                close(result.spectra[1][k], voltage * yl, 1e-12);
+                close(result.spectra[2][k], voltage / 75.0, 1e-12);
+            }
+        }
+        assert!(result.normalized_residual <= 1.0);
+    }
+}
+
+#[test]
 fn quasi_periodic_rlc_uses_exact_dc_branches_and_signed_mixing_frequencies() {
     let grid = grid(1);
     // An unrelated HB basis deliberately cannot represent either QP tone.
@@ -87,6 +138,84 @@ fn quasi_periodic_rlc_uses_exact_dc_branches_and_signed_mixing_frequencies() {
             close(result.spectra()[2][k], voltage / 500.0, 1e-14);
         }
     }
+}
+
+#[test]
+fn qpac_native_diode_conversion_matches_independent_charge_quadrature() {
+    let grid = grid(2);
+    let mut solver = HbSolver::new(HbConfig::new(9.0), 1);
+    solver
+        .try_add_periodic_voltage_source_branch(1, 0, 0, 1, "Vdrive")
+        .unwrap();
+    let saturation = 2e-6;
+    let thermal = 0.025;
+    let transit = 8e-5;
+    solver.add_nonlinear_device(
+        NonlinearDeviceInstance::diode(0, 1, saturation, 1.0)
+            .with_thermal_voltage(thermal)
+            .with_junction_caps(DepletionCap::none(), DepletionCap::none(), transit),
+    );
+    let mut large = vec![vec![Complex64::ZERO; grid.len()]; 2];
+    large[1][grid.dc_index()] = Complex64::new(0.07, 0.0);
+    cosine(&grid, &mut large[1], &[1, 0], 0.016, 0.3);
+    cosine(&grid, &mut large[1], &[0, 1], 0.011, -0.8);
+    let point = solver
+        .solve_quasi_periodic_with_abort(
+            grid.clone(),
+            &config(),
+            &large,
+            None,
+            &ResourceLimits::default(),
+            &NoAbort,
+        )
+        .unwrap();
+    let mut probe = vec![vec![Complex64::ZERO; grid.len()]; 2];
+    let input = grid.index_of(&[2, 0]).unwrap();
+    let amplitude = Complex64::new(0.3, -0.7);
+    probe[1][input] = amplitude;
+    let results = solver
+        .solve_quasi_periodic_ac_with_abort(
+            grid.clone(),
+            &QuasiPeriodicAcConfig::default(),
+            point.spectra(),
+            &[137.0],
+            &probe,
+            &ResourceLimits::default(),
+            &NoAbort,
+        )
+        .unwrap();
+    for (k, tuple) in grid.indices().iter().enumerate() {
+        let mut derivative = Complex64::ZERO;
+        for a in 0..64 {
+            for b in 0..64 {
+                let p = std::f64::consts::TAU * a as Value / 64.0;
+                let q = std::f64::consts::TAU * b as Value / 64.0;
+                let voltage = 0.07 + 0.016 * (p + 0.3).cos() + 0.011 * (q - 0.8).cos();
+                let conductance = saturation / thermal * (voltage / thermal).exp();
+                derivative += Complex64::from_polar(
+                    conductance / 4096.0,
+                    -((tuple[0] - 2) as Value * p + tuple[1] as Value * q),
+                );
+            }
+        }
+        let omega = std::f64::consts::TAU * (137.0 + grid.frequencies_hz()[k]);
+        close(
+            results[0].spectra[0][k],
+            if k == input {
+                amplitude
+            } else {
+                Complex64::ZERO
+            },
+            1e-11,
+        );
+        close(
+            results[0].spectra[1][k],
+            -amplitude * Complex64::new(1.0, omega * transit) * derivative,
+            1e-12,
+        );
+    }
+    // This conversion uses G[-4,0], beyond the retained orbit's H=2.
+    assert!(results[0].spectra[1][grid.index_of(&[-2, 0]).unwrap()].norm() > 1e-7);
 }
 
 #[test]

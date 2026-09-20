@@ -2,8 +2,8 @@
 use super::*;
 use crate::ResourceLimits;
 use crate::analysis::quasi_periodic::{
-    QuasiPeriodicError as Error, QuasiPeriodicGrid, QuasiPeriodicSolution,
-    QuasiPeriodicSolveConfig,
+    QuasiPeriodicAcConfig, QuasiPeriodicAcSolution, QuasiPeriodicError as Error, QuasiPeriodicGrid,
+    QuasiPeriodicSolution, QuasiPeriodicSolveConfig,
     solve::{self, Circuit, LinearEntry, Sample},
 };
 use std::sync::Arc;
@@ -21,10 +21,10 @@ impl HbSolver {
     /// coefficients (a cosine of peak A has coefficients A/2). Existing HB
     /// harmonic source tables and the HB fundamental are not used.
     ///
-    /// Branch devices require the canonical exact-MNA registry. The current
-    /// analytic dense backend permits at most 512 real spectral unknowns;
-    /// caller resource limits can further restrict it. The result certifies
-    /// the retained Galerkin equations, not truncation or aliasing error.
+    /// Branch devices require the canonical exact-MNA registry. Auto selects
+    /// a bounded-memory Krylov backend above 512 real spectral unknowns;
+    /// caller resource limits can further restrict either backend. The result
+    /// certifies retained equations, not truncation or aliasing error.
     pub fn solve_quasi_periodic_with_abort(
         &mut self,
         grid: Arc<QuasiPeriodicGrid>,
@@ -39,6 +39,134 @@ impl HbSolver {
         }
         self.validate_quasi_periodic_circuit()?;
         solve::solve_with_abort(self, grid, config, sources, seed, limits, abort)
+    }
+
+    /// Linearize a real driven QP orbit once, then solve complex translated
+    /// phasors at each requested offset. The source rows are arbitrary complex
+    /// amplitudes on the full signed lattice, with no conjugate reflection.
+    pub fn solve_quasi_periodic_ac_with_abort(
+        &mut self,
+        grid: Arc<QuasiPeriodicGrid>,
+        config: &QuasiPeriodicAcConfig,
+        orbit: &[Vec<Complex64>],
+        offsets_hz: &[Value],
+        sources: &[Vec<Complex64>],
+        limits: &ResourceLimits,
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<QuasiPeriodicAcSolution>, Error> {
+        if abort.is_aborted() {
+            return Err(Error::Aborted);
+        }
+        if offsets_hz.is_empty() || offsets_hz.iter().any(|v| !v.is_finite()) {
+            return Err(Error::InvalidConfig(
+                "QPAC needs at least one finite probe offset".into(),
+            ));
+        }
+        crate::ResourceLimitError::ensure(
+            crate::ResourceKind::AnalysisPoints,
+            offsets_hz.len(),
+            limits.max_analysis_points,
+        )?;
+        let values = self
+            .unknowns()
+            .saturating_mul(grid.len())
+            .saturating_mul(offsets_hz.len())
+            .saturating_mul(2)
+            .saturating_add(offsets_hz.len().saturating_mul(2));
+        crate::ResourceLimitError::ensure(
+            crate::ResourceKind::ResultValues,
+            values,
+            limits.max_result_values,
+        )?;
+        // Charge the retained sweep alongside the numerical workspace.
+        let mut working_limits = limits.clone();
+        working_limits.max_result_values = limits.max_result_values.saturating_sub(values);
+        self.validate_quasi_periodic_circuit()?;
+        let mut work = crate::analysis::quasi_periodic::small_signal::Linearization::prepare(
+            self,
+            grid,
+            orbit,
+            config,
+            &working_limits,
+            abort,
+        )?;
+        offsets_hz
+            .iter()
+            .map(|&offset| work.solve(self, offset, sources, abort))
+            .collect()
+    }
+
+    fn quasi_periodic_linear_entries(
+        &self,
+        frequency_hz: Value,
+        small_signal: bool,
+    ) -> Result<Vec<LinearEntry>, Error> {
+        let omega = std::f64::consts::TAU * frequency_hz;
+        let mut entries = Vec::new();
+        let conductance = if small_signal {
+            &self.periodic_g_matrix
+        } else {
+            &self.g_matrix
+        };
+        for (matrix, reactive) in [(conductance, false), (&self.c_matrix, true)] {
+            for &(row, col, value) in matrix {
+                if row >= self.num_nodes || col >= self.num_nodes {
+                    return Err(Error::InvalidCircuit(
+                        "QPSS nodal stamp is outside the node table".into(),
+                    ));
+                }
+                let coefficient = if reactive {
+                    Complex64::new(0.0, omega * value)
+                } else {
+                    Complex64::new(value, 0.0)
+                };
+                entries.push((row, col, coefficient));
+            }
+        }
+        for (index, branch) in self.periodic_mna_branches.iter().enumerate() {
+            let row = self.num_nodes + index;
+            let (_, pos, neg) = branch.ordinal_and_terminals();
+            for (node, sign) in [(pos, 1.0), (neg, -1.0)] {
+                if node > 0 {
+                    entries.push((node - 1, row, Complex64::new(sign, 0.0)));
+                    if !matches!(branch, ExactMnaBranch::ConstitutivePort { .. }) {
+                        entries.push((row, node - 1, Complex64::new(sign, 0.0)));
+                    }
+                }
+            }
+            match branch {
+                ExactMnaBranch::Inductor { inductance, .. } => {
+                    entries.push((row, row, Complex64::new(0.0, -omega * inductance)));
+                }
+                ExactMnaBranch::Resistor {
+                    resistance,
+                    small_signal_resistance,
+                    ..
+                } => {
+                    let resistance = if small_signal {
+                        small_signal_resistance
+                    } else {
+                        resistance
+                    };
+                    entries.push((row, row, Complex64::new(-resistance, 0.0)));
+                }
+                _ => {}
+            }
+        }
+        for &(row, col, value) in &self.exact_mna_static_entries {
+            entries.push((row, col, Complex64::new(value, 0.0)));
+        }
+        for &(row, col, value) in &self.exact_mna_inductance_entries {
+            entries.push((row, col, Complex64::new(0.0, -omega * value)));
+        }
+        for network in &self.exact_periodic_networks {
+            network
+                .try_visit_direct_entries(omega, self.unknowns(), |row, col, value| {
+                    entries.push((row, col, value))
+                })
+                .map_err(device_error)?;
+        }
+        Ok(entries)
     }
 
     fn validate_quasi_periodic_circuit(&self) -> Result<(), Error> {
@@ -113,60 +241,11 @@ impl Circuit for HbSolver {
     }
 
     fn linear_entries(&self, frequency_hz: Value) -> Result<Vec<LinearEntry>, Error> {
-        let omega = std::f64::consts::TAU * frequency_hz;
-        let mut entries = Vec::new();
-        for (matrix, reactive) in [(&self.g_matrix, false), (&self.c_matrix, true)] {
-            for &(row, col, value) in matrix {
-                if row >= self.num_nodes || col >= self.num_nodes {
-                    return Err(Error::InvalidCircuit(
-                        "QPSS nodal stamp is outside the node table".into(),
-                    ));
-                }
-                let coefficient = if reactive {
-                    Complex64::new(0.0, omega * value)
-                } else {
-                    Complex64::new(value, 0.0)
-                };
-                entries.push((row, col, coefficient));
-            }
-        }
-        for (index, branch) in self.periodic_mna_branches.iter().enumerate() {
-            let row = self.num_nodes + index;
-            let (_, pos, neg) = branch.ordinal_and_terminals();
-            for (node, sign) in [(pos, 1.0), (neg, -1.0)] {
-                if node > 0 {
-                    entries.push((node - 1, row, Complex64::new(sign, 0.0)));
-                    if !matches!(branch, ExactMnaBranch::ConstitutivePort { .. }) {
-                        entries.push((row, node - 1, Complex64::new(sign, 0.0)));
-                    }
-                }
-            }
-            match branch {
-                ExactMnaBranch::Inductor { inductance, .. } => {
-                    entries.push((row, row, Complex64::new(0.0, -omega * inductance)));
-                }
-                ExactMnaBranch::Resistor { resistance, .. } => {
-                    // Large-signal equations use the physical DC resistance;
-                    // an authored AC= override belongs to linearized analyses.
-                    entries.push((row, row, Complex64::new(-resistance, 0.0)));
-                }
-                _ => {}
-            }
-        }
-        for &(row, col, value) in &self.exact_mna_static_entries {
-            entries.push((row, col, Complex64::new(value, 0.0)));
-        }
-        for &(row, col, value) in &self.exact_mna_inductance_entries {
-            entries.push((row, col, Complex64::new(0.0, -omega * value)));
-        }
-        for network in &self.exact_periodic_networks {
-            network
-                .try_visit_direct_entries(omega, self.unknowns(), |row, col, value| {
-                    entries.push((row, col, value))
-                })
-                .map_err(device_error)?;
-        }
-        Ok(entries)
+        self.quasi_periodic_linear_entries(frequency_hz, false)
+    }
+
+    fn small_signal_entries(&self, frequency_hz: Value) -> Result<Vec<LinearEntry>, Error> {
+        self.quasi_periodic_linear_entries(frequency_hz, true)
     }
 
     fn sample(&mut self, state: &[Value], jacobian: bool) -> Result<Sample, Error> {
