@@ -42,7 +42,7 @@ impl Default for QuasiPeriodicSolveConfig {
 }
 
 impl QuasiPeriodicSolveConfig {
-    fn validate(&self) -> Result<(), Error> {
+    pub(crate) fn validate(&self) -> Result<(), Error> {
         if !self.relative_tolerance.is_finite()
             || self.relative_tolerance <= 0.0
             || self.relative_tolerance >= 1.0
@@ -135,21 +135,12 @@ impl Workspace<'_> {
     }
 }
 
-/// Source spectra are the complete MNA right hand side, with full signed
-/// Fourier coefficients. Source projection and netlist identity belong to the
-/// engine. A missing seed means zero; an authored seed must match exactly.
-pub(crate) fn solve_with_abort(
-    circuit: &mut impl Circuit,
-    grid: Arc<QuasiPeriodicGrid>,
-    config: &QuasiPeriodicSolveConfig,
-    sources: &[Vec<Complex64>],
-    seed: Option<&[Vec<Complex64>]>,
+/// Shared preflight for engine projection/initialization and the solver itself.
+pub(crate) fn check_workload(
+    unknowns: usize,
+    grid: &QuasiPeriodicGrid,
     limits: &ResourceLimits,
-    abort: &dyn AbortSignal,
-) -> Result<QuasiPeriodicSolution, Error> {
-    super::check_abort(abort)?;
-    config.validate()?;
-    let unknowns = circuit.unknowns();
+) -> Result<(usize, usize), Error> {
     if unknowns == 0 {
         return Err(Error::InvalidCircuit(
             "circuit has no MNA coordinates".into(),
@@ -182,6 +173,25 @@ pub(crate) fn solve_with_abort(
         );
     let value_limit = limits.max_result_values.min(MAX_WORKSPACE_VALUES);
     ResourceLimitError::ensure(ResourceKind::ResultValues, base_values, value_limit)?;
+    Ok((base_values, value_limit))
+}
+
+/// Source spectra are the complete MNA right hand side, with full signed
+/// Fourier coefficients. Source projection and netlist identity belong to the
+/// engine. A missing seed means zero; an authored seed must match exactly.
+pub(crate) fn solve_with_abort(
+    circuit: &mut impl Circuit,
+    grid: Arc<QuasiPeriodicGrid>,
+    config: &QuasiPeriodicSolveConfig,
+    sources: &[Vec<Complex64>],
+    seed: Option<&[Vec<Complex64>]>,
+    limits: &ResourceLimits,
+    abort: &dyn AbortSignal,
+) -> Result<QuasiPeriodicSolution, Error> {
+    super::check_abort(abort)?;
+    config.validate()?;
+    let unknowns = circuit.unknowns();
+    let (base_values, value_limit) = check_workload(unknowns, &grid, limits)?;
     coordinates::validate(sources, unknowns, &grid, "source", abort)?;
     if let Some(seed) = seed {
         coordinates::validate(seed, unknowns, &grid, "initial state", abort)?;
