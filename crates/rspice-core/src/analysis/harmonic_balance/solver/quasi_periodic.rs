@@ -1,4 +1,6 @@
 //! Reuse registered physical devices and exact MNA for a driven QPSS solve.
+mod noise_sources;
+
 use super::*;
 use crate::ResourceLimits;
 use crate::analysis::quasi_periodic::{

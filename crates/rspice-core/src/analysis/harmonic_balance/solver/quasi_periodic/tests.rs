@@ -583,3 +583,93 @@ fn qpnoise_stream_propagates_consumer_errors_and_preflights_combined_workspaces(
     );
     assert!(matches!(result, Err(Error::ResourceLimit(_))));
 }
+
+#[test]
+fn qpnoise_compact_sources_follow_independent_phases_temperature_and_ground() {
+    use crate::analysis::{
+        noise::NoisePhysicalConstants, quasi_periodic::QuasiPeriodicNoiseSpectrum,
+    };
+    let grid = grid(1);
+    let mut solver = HbSolver::new(HbConfig::new(17.0).with_harmonics(1), 2);
+    solver.add_named_nonlinear_device_with_noise_temperature_offset(
+        "M1",
+        NonlinearDeviceInstance::nmos(0, 1, 2, 2, 0.7, 2e-5, 0.0)
+            .with_channel_noise_gamma(2.0 / 3.0),
+        50.0,
+    );
+    solver
+        .try_add_periodic_resistor_branch(1, 0, 10.0, 10.0, 1, "R1")
+        .unwrap();
+    let mut orbit = vec![vec![Complex64::ZERO; grid.len()]; 3];
+    orbit[0][grid.dc_index()] = Complex64::new(2.0, 0.0);
+    orbit[1][grid.dc_index()] = Complex64::new(2.0, 0.0);
+    orbit[2][grid.dc_index()] = Complex64::new(1e6, 0.0); // ground must not read this branch
+    cosine(&grid, &mut orbit[1], &[1, 0], 0.2, 0.0);
+    cosine(&grid, &mut orbit[1], &[0, 1], 0.08, 0.0);
+    let constants = NoisePhysicalConstants::XYCE_7_10;
+    let sources = solver
+        .quasi_periodic_device_noise_sources_with_abort(
+            grid.clone(),
+            &orbit,
+            300.0,
+            constants,
+            &ResourceLimits::default(),
+            &NoAbort,
+        )
+        .unwrap();
+    assert_eq!(sources.len(), 2);
+    assert_eq!(sources[1].name, "M1 drain-bulk shot");
+    assert_eq!(sources[1].injections, vec![(0, Complex64::ONE)]);
+    let QuasiPeriodicNoiseSpectrum::White {
+        density: shot,
+        binary_scale_exponent: shot_scale,
+    } = &sources[1].spectrum
+    else {
+        unreachable!()
+    };
+    for value in shot {
+        assert!(
+            (libm::scalbn(*value, *shot_scale) / (2.0 * constants.electron_charge * 1e-14) - 1.0)
+                .abs()
+                < 1e-13
+        );
+    }
+    assert_eq!(sources[0].name, "M1 channel thermal");
+    assert_eq!(sources[0].injections, vec![(0, Complex64::ONE)]);
+    let QuasiPeriodicNoiseSpectrum::White {
+        density,
+        binary_scale_exponent,
+    } = &sources[0].spectrum
+    else {
+        unreachable!()
+    };
+    for (i, q) in density.iter().enumerate() {
+        let phases = grid.phases(i).unwrap();
+        let gm = 2e-5 * (1.3 + 0.2 * phases[0].cos() + 0.08 * phases[1].cos());
+        let expected = 4.0 * constants.boltzmann * 350.0 * (2.0 / 3.0) * gm;
+        assert!((libm::scalbn(*q, *binary_scale_exponent) / expected - 1.0).abs() < 2e-13);
+    }
+    let abort = CountingAbort::new(10);
+    assert!(matches!(
+        solver.quasi_periodic_device_noise_sources_with_abort(
+            grid.clone(),
+            &orbit,
+            300.0,
+            constants,
+            &ResourceLimits::default(),
+            &abort
+        ),
+        Err(Error::Aborted)
+    ));
+    assert_eq!(abort.count(), 11);
+    let limits = ResourceLimits {
+        max_result_values: 1,
+        ..ResourceLimits::default()
+    };
+    assert!(matches!(
+        solver.quasi_periodic_device_noise_sources_with_abort(
+            grid, &orbit, 300.0, constants, &limits, &NoAbort
+        ),
+        Err(Error::ResourceLimit(_))
+    ));
+}
