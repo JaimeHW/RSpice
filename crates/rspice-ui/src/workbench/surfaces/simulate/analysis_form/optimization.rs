@@ -33,12 +33,19 @@ pub(super) fn fields(
         "Operating point expression",
     );
     let configured = setup.base_analysis.is_some();
+    if configured {
+        super::switch_row(ui, "Weighted objectives", &mut setup.weighted_objectives);
+    }
+    let weighted = configured && setup.weighted_objectives;
+    if weighted {
+        weighted_objectives(ui, setup);
+    }
     super::hinted_input_row_enabled(
         ui,
         "Measurement",
         &mut setup.objective_measurement,
         "gain, scalar:V(out), or last:signal",
-        configured,
+        configured && !weighted,
     );
     if configured {
         field_note(
@@ -63,8 +70,19 @@ pub(super) fn fields(
     let node_objective = !configured && setup.objective_expression.trim().is_empty();
     input_row_enabled(ui, "Objective", &mut setup.objective_node, node_objective);
     input_row_enabled(ui, "Obj ref", &mut setup.objective_ref, node_objective);
-    choice_row(ui, "Goal", &["min", "max", "target"], &mut setup.goal_mode);
-    input_row_enabled(ui, "Target", &mut setup.target_value, setup.goal_mode == 2);
+    super::choice_row_enabled(
+        ui,
+        "Goal",
+        &["min", "max", "target"],
+        &mut setup.goal_mode,
+        !weighted,
+    );
+    input_row_enabled(
+        ui,
+        "Target",
+        &mut setup.target_value,
+        !weighted && setup.goal_mode == 2,
+    );
     choice_row(
         ui,
         "Method",
@@ -116,4 +134,31 @@ pub(super) fn fields(
     )
     .on_hover_text("Repeatable random sequence. Seeds 0 and 1 select the same sequence.");
     clear_pending_cell(ui);
+}
+
+fn weighted_objectives(ui: &mut Ui, setup: &mut OptimizationDialogState) {
+    field_note(
+        ui,
+        "All objectives use the selected base analysis. Cost is the sum of weighted terms: minimize value/scale, maximize -value/scale, or target ((value-target)/scale)². Scale is in the measurement's units; weight sets relative importance. Tolerance applies to the combined cost.",
+    );
+    let mut remove = None;
+    for (index, term) in setup.objective_terms.iter_mut().enumerate() {
+        ui.push_id(("optimization-objective", index), |ui| {
+            sub_header(ui, &format!("Objective {}", index + 1));
+            input_row(ui, "Measurement", &mut term.measurement);
+            choice_row(ui, "Goal", &["min", "max", "target"], &mut term.goal);
+            input_row_enabled(ui, "Target", &mut term.target, term.goal == 2);
+            engineering_input_row(ui, "Scale", &mut term.scale);
+            engineering_input_row(ui, "Weight", &mut term.weight);
+            if super::action_line(ui, "Remove objective") {
+                remove = Some(index);
+            }
+        });
+    }
+    if let Some(index) = remove {
+        setup.objective_terms.remove(index);
+    }
+    if super::action_line(ui, "+ Add objective") {
+        setup.objective_terms.push(Default::default());
+    }
 }
