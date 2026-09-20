@@ -55,6 +55,7 @@ pub(super) fn fields(
     }
     input_row(ui, "Variables", &mut setup.variables_text)
         .on_hover_text("One per line or comma, spelled name:min:max[:initial].");
+    variable_domains(ui, setup);
     input_row_enabled(
         ui,
         "Expression",
@@ -160,5 +161,36 @@ fn weighted_objectives(ui: &mut Ui, setup: &mut OptimizationDialogState) {
     }
     if super::action_line(ui, "+ Add objective") {
         setup.objective_terms.push(Default::default());
+    }
+}
+
+fn variable_domains(ui: &mut Ui, setup: &mut OptimizationDialogState) {
+    sub_header(ui, "Variable domains");
+    field_note(
+        ui,
+        "Variables use continuous linear ranges by default. Add an override for a logarithmic range, a uniform grid anchored at the minimum, or an increasing list of allowed values. The initial value must be allowed. Grid/list variables require pattern search or annealing. All reported values remain in physical units.",
+    );
+    let mut remove = None;
+    for (index, row) in setup.variable_domains.iter_mut().enumerate() {
+        ui.push_id(("optimization-domain", index), |ui| {
+            input_row(ui, "Variable", &mut row.name);
+            choice_row(
+                ui,
+                "Domain",
+                &["linear", "log", "grid", "list"],
+                &mut row.mode,
+            );
+            input_row_enabled(ui, "Grid step", &mut row.step, row.mode == 2);
+            input_row_enabled(ui, "Allowed values", &mut row.values, row.mode == 3);
+            if super::action_line(ui, "Remove variable domain") {
+                remove = Some(index);
+            }
+        });
+    }
+    if let Some(index) = remove {
+        setup.variable_domains.remove(index);
+    }
+    if super::action_line(ui, "+ Add variable domain") {
+        setup.variable_domains.push(Default::default());
     }
 }
