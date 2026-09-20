@@ -15,6 +15,7 @@ pub(crate) use convergence_transport::ConvergenceTransport;
 mod measurements;
 mod monte_carlo;
 mod operating_point;
+mod qpac;
 mod qpss;
 mod recorded_fft;
 mod waveform;
@@ -247,6 +248,14 @@ pub enum SimulationResult {
         waveforms: HashMap<String, WaveformData>,
         measurements: Vec<rspice_core::MeasureResult>,
         operating_point: std::sync::Arc<rspice_core::engine::HbOperatingPoint>,
+    },
+
+    /// Complete quasi-periodic response, plus the selected tuple display.
+    Qpac {
+        /// Probe offsets, not the translated physical frequencies.
+        frequencies: Vec<f64>,
+        waveforms: HashMap<String, WaveformData>,
+        response: std::sync::Arc<rspice_core::engine::QpacAnalysisResult>,
     },
 
     /// Independent-tone spectra with the signed tuple for every displayed bin

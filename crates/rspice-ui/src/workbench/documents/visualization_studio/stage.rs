@@ -502,6 +502,7 @@ pub(super) fn retained_pole_zero_payload(
         | AnalysisResultPayload::Soa { .. }
         | AnalysisResultPayload::TransientEvents { .. }
         | AnalysisResultPayload::FftSpectrum { .. }
+        | AnalysisResultPayload::Qpac { .. }
         | AnalysisResultPayload::Qpss { .. } => None,
     }
 }
@@ -601,6 +602,7 @@ pub(super) fn retained_sensitivity_payload(
         | AnalysisResultPayload::Soa { .. }
         | AnalysisResultPayload::TransientEvents { .. }
         | AnalysisResultPayload::FftSpectrum { .. }
+        | AnalysisResultPayload::Qpac { .. }
         | AnalysisResultPayload::Qpss { .. } => None,
     }
 }

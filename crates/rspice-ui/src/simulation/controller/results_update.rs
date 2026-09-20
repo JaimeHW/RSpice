@@ -144,6 +144,18 @@ impl SimulationController {
                 )));
             }
 
+            SimulationResult::Qpac {
+                frequencies,
+                waveforms,
+                response,
+            } => {
+                self.populate_ac_post_views(state, frequencies, waveforms);
+                state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(
+                    "QPAC: {} probe offsets, {} signed tuples; source {} {:?}, input tuple {:?}, output tuple {:?}. Plot x is probe offset; translated input/output frequencies are retained in the result and export.",
+                    frequencies.len(), response.metadata.tuples.len(), response.metadata.request.input_source,
+                    response.metadata.input_quantity, response.metadata.request.input_lattice, response.metadata.request.output_lattice,
+                )));
+            }
             SimulationResult::Qpss {
                 frequencies,
                 waveforms,

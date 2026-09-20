@@ -20,46 +20,15 @@
 use super::*;
 mod dc_sweep;
 mod monte_carlo;
+mod qpac;
+mod response;
+use qpac::WorkerQpacResultTransport;
 mod qpss;
 use qpss::WorkerQpssOperatingPointTransport;
 #[cfg(test)]
 mod tests;
 use super::recorded_fft::WorkerRecordedFftSpectrumTransport;
 use dc_sweep::WorkerDcSweepEvidence;
-
-impl WorkerResponseTransport {
-    pub(super) fn from_response(response: WorkerResponse) -> Result<Self, String> {
-        validate_worker_response_before_transport(&response)?;
-        let mut buffers = Vec::new();
-        let response = WorkerResponseTransportMetadata {
-            id: response.id,
-            outcome: WorkerOutcomeTransport::from_outcome(response.outcome, &mut buffers),
-        };
-        validate_worker_transfer_buffers(&buffers)?;
-        Ok(Self {
-            protocol: WORKER_RESPONSE_TRANSPORT_PROTOCOL,
-            response,
-            buffers,
-        })
-    }
-
-    pub(super) fn into_response(self) -> Result<WorkerResponse, String> {
-        if self.protocol != WORKER_RESPONSE_TRANSPORT_PROTOCOL {
-            return Err(format!(
-                "unsupported worker response transport protocol {}",
-                self.protocol
-            ));
-        }
-        validate_worker_transfer_buffers(&self.buffers)?;
-
-        let response = WorkerResponse {
-            id: self.response.id,
-            outcome: self.response.outcome.into_outcome(&self.buffers)?,
-        };
-        validate_worker_response_before_transport(&response)?;
-        Ok(response)
-    }
-}
 
 pub(super) fn validate_worker_response_before_transport(
     response: &WorkerResponse,
@@ -85,6 +54,7 @@ pub(super) fn validate_worker_response_before_transport(
     }
     if let WorkerOutcome::Success(result) = &response.outcome {
         validate_worker_qpss_result(result)?;
+        validate_worker_qpac_result(result)?;
         validate_transient_source_payload_size(result)?;
         if let WorkerSimulationResult::Transient { events, .. } = result.as_ref()
             && let Some(history) = &events.current_impulses
@@ -1245,6 +1215,11 @@ pub(crate) enum WorkerSimulationResultTransport {
         mode_indices: WorkerF64Series,
         waveforms: Vec<WorkerWaveformTransport>,
     },
+    Qpac {
+        frequencies: WorkerF64Series,
+        waveforms: Vec<WorkerWaveformTransport>,
+        response: WorkerQpacResultTransport,
+    },
     Qpss {
         frequencies: WorkerF64Series,
         tuples: Vec<Vec<i32>>,
@@ -1481,6 +1456,15 @@ impl WorkerSimulationResultTransport {
                 iterations,
                 mode_indices: WorkerF64Series::from_vec(mode_indices, buffers),
                 waveforms: transport_waveforms(waveforms, buffers),
+            },
+            WorkerSimulationResult::Qpac {
+                frequencies,
+                waveforms,
+                response,
+            } => Self::Qpac {
+                frequencies: WorkerF64Series::from_vec(frequencies, buffers),
+                waveforms: transport_waveforms(waveforms, buffers),
+                response: WorkerQpacResultTransport::from_response(response, buffers),
             },
             WorkerSimulationResult::Qpss {
                 frequencies,
@@ -1793,6 +1777,19 @@ impl WorkerSimulationResultTransport {
                 };
                 validate_worker_pstb_result(&result)?;
                 Ok(result)
+            }
+            Self::Qpac {
+                frequencies,
+                waveforms,
+                response,
+            } => {
+                // Bound and validate the complete result before display copies.
+                let response = response.into_response(buffers)?;
+                Ok(WorkerSimulationResult::Qpac {
+                    frequencies: frequencies.into_vec(buffers)?,
+                    waveforms: worker_waveforms_from_transport(waveforms, buffers)?,
+                    response,
+                })
             }
             Self::Qpss {
                 frequencies,

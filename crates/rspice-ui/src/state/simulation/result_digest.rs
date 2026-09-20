@@ -1067,6 +1067,20 @@ fn encode_result_payload(
         // is: no build before this one could write a sensitivity study, so
         // there is no older encoding of one to replay. The frozen
         // `Sensitivity` arm keeps tag 1 and is untouched.
+        AnalysisResultPayload::Qpac { response } => {
+            // Appended tag: QPSS retains tag 14.
+            writer.u8(15);
+            writer.string(response.metadata.retained_identity());
+            writer.retained_bytes = writer.retained_bytes.saturating_add(
+                response
+                    .unit_solutions
+                    .iter()
+                    .flat_map(|s| &s.spectra)
+                    .map(|row| row.len() as u64 * 16)
+                    .sum::<u64>()
+                    + (response.output_transfer.len() + response.output_response.len()) as u64 * 16,
+            );
+        }
         AnalysisResultPayload::Qpss { operating_point } => {
             writer.u8(14);
             // This identity binds all config, producer metadata and signed

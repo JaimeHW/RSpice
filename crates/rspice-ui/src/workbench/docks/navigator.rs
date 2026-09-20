@@ -3276,6 +3276,25 @@ fn retained_result_artifacts(
     }
     if let Some(payload) = &analysis.result_payload {
         let (canonical, name, kind, count, value, viewer) = match payload {
+            AnalysisResultPayload::Qpac { response } => (
+                "payload/qpac",
+                "QPAC complete complex response",
+                ResultArtifactKind::Array,
+                response
+                    .unit_solutions
+                    .iter()
+                    .flat_map(|s| &s.spectra)
+                    .map(Vec::len)
+                    .sum(),
+                Some(format!(
+                    "{} offsets · {} signed tuples · input {:?} → output {:?}",
+                    response.unit_solutions.len(),
+                    response.metadata.tuples.len(),
+                    response.metadata.request.input_lattice,
+                    response.metadata.request.output_lattice
+                )),
+                ResultViewer::Table,
+            ),
             AnalysisResultPayload::Qpss { operating_point } => (
                 "payload/qpss",
                 "QPSS signed spectral state",

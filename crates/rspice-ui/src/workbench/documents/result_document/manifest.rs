@@ -1110,6 +1110,14 @@ fn format_frequency(value: f64) -> String {
 
 fn payload_values_label(payload: &AnalysisResultPayload) -> String {
     match payload {
+        AnalysisResultPayload::Qpac { response } => format!(
+            "{} probe offsets / {} signed tuples / {} MNA coordinates; input {:?}, output {:?}",
+            response.metadata.request.offsets_hz.len(),
+            response.metadata.tuples.len(),
+            response.metadata.node_names.len() + response.metadata.branch_names.len(),
+            response.metadata.request.input_lattice,
+            response.metadata.request.output_lattice,
+        ),
         AnalysisResultPayload::Qpss { operating_point } => format!(
             "{} independent tones / {} MNA coordinates / {} signed spectral coefficients",
             operating_point.config().grid.frequencies_hz.len(),

@@ -35,7 +35,8 @@ impl SimulationResult {
             SimulationResult::Pstb { waveforms, .. } => {
                 waveforms.keys().map(|s| s.as_str()).collect()
             }
-            SimulationResult::Qpss { waveforms, .. }
+            SimulationResult::Qpac { waveforms, .. }
+            | SimulationResult::Qpss { waveforms, .. }
             | SimulationResult::HarmonicBalance { waveforms, .. } => {
                 waveforms.keys().map(|s| s.as_str()).collect()
             }
@@ -69,7 +70,8 @@ impl SimulationResult {
             SimulationResult::Transient { waveforms, .. } => waveforms.get(name),
             SimulationResult::Ac { waveforms, .. } => waveforms.get(name),
             SimulationResult::Pstb { waveforms, .. } => waveforms.get(name),
-            SimulationResult::Qpss { waveforms, .. }
+            SimulationResult::Qpac { waveforms, .. }
+            | SimulationResult::Qpss { waveforms, .. }
             | SimulationResult::HarmonicBalance { waveforms, .. } => waveforms.get(name),
             SimulationResult::Parametric { waveforms, .. } => waveforms.get(name),
             SimulationResult::Corner { waveforms, .. } => waveforms.get(name),
@@ -135,7 +137,8 @@ impl SimulationResult {
                             && waveform.y_values.len() == mode_indices.len()
                     })
             }
-            SimulationResult::Qpss { frequencies, .. }
+            SimulationResult::Qpac { frequencies, .. }
+            | SimulationResult::Qpss { frequencies, .. }
             | SimulationResult::HarmonicBalance { frequencies, .. } => !frequencies.is_empty(),
             SimulationResult::Noise { frequencies, .. } => !frequencies.is_empty(),
             SimulationResult::PoleZero {
@@ -214,6 +217,7 @@ impl SimulationResult {
             SimulationResult::Ac { .. } => "AC Analysis",
             SimulationResult::Pstb { .. } => "Periodic Stability",
             SimulationResult::HarmonicBalance { .. } => "Harmonic Balance",
+            SimulationResult::Qpac { .. } => "QPAC",
             SimulationResult::Qpss { .. } => "QPSS",
             SimulationResult::Noise { .. } => "Noise Analysis",
             SimulationResult::PoleZero { .. } => "Pole-Zero",

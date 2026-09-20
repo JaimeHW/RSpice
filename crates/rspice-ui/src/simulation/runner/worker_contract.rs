@@ -9,8 +9,10 @@
 mod analysis;
 mod analysis_spec;
 mod conversions;
+mod qpac;
 mod qpss;
 mod recorded_fft;
+use qpac::validate_worker_qpac_result;
 use qpss::validate_worker_qpss_result;
 mod transport;
 
@@ -336,6 +338,7 @@ impl WorkerResponse {
             WorkerOutcome::Success(result) => {
                 validate_worker_pstb_result(&result).map_err(SimulationError::InvalidConfig)?;
                 validate_worker_qpss_result(&result).map_err(SimulationError::InvalidConfig)?;
+                validate_worker_qpac_result(&result).map_err(SimulationError::InvalidConfig)?;
                 if let WorkerSimulationResult::Transient { events, .. } = result.as_ref()
                     && let Some(history) = &events.current_impulses
                 {
@@ -800,6 +803,11 @@ pub(crate) enum WorkerSimulationResult {
         iterations: usize,
         mode_indices: Vec<f64>,
         waveforms: Vec<WorkerWaveform>,
+    },
+    Qpac {
+        frequencies: Vec<f64>,
+        waveforms: Vec<WorkerWaveform>,
+        response: rspice_core::engine::QpacAnalysisResult,
     },
     Qpss {
         frequencies: Vec<f64>,
@@ -1352,6 +1360,30 @@ impl WorkerSimulationResult {
                 waveforms_payload_bytes(waveforms),
                 f64_payload_bytes(5),
             ]),
+            WorkerSimulationResult::Qpac {
+                frequencies,
+                waveforms,
+                response,
+            } => sum_payload_bytes([
+                f64_payload_bytes(frequencies.len()),
+                waveforms_payload_bytes(waveforms),
+                f64_payload_bytes(
+                    response
+                        .unit_solutions
+                        .iter()
+                        .flat_map(|s| &s.spectra)
+                        .map(Vec::len)
+                        .sum::<usize>()
+                        .saturating_mul(2),
+                ),
+                f64_payload_bytes(frequencies.len().saturating_mul(8)),
+                response
+                    .metadata
+                    .tuples
+                    .iter()
+                    .map(|t| t.len().saturating_mul(4))
+                    .sum(),
+            ]),
             WorkerSimulationResult::Qpss {
                 frequencies,
                 tuples,
@@ -1697,6 +1729,20 @@ impl TryFrom<SimulationResult> for WorkerSimulationResult {
                 };
                 validate_worker_pstb_result(&result).map_err(SimulationError::InvalidConfig)?;
                 validate_worker_qpss_result(&result).map_err(SimulationError::InvalidConfig)?;
+                validate_worker_qpac_result(&result).map_err(SimulationError::InvalidConfig)?;
+                Ok(result)
+            }
+            SimulationResult::Qpac {
+                frequencies,
+                waveforms,
+                response,
+            } => {
+                let result = Self::Qpac {
+                    frequencies,
+                    waveforms: worker_waveforms(waveforms),
+                    response: Arc::unwrap_or_clone(response),
+                };
+                validate_worker_qpac_result(&result).map_err(SimulationError::InvalidConfig)?;
                 Ok(result)
             }
             SimulationResult::Qpss {
@@ -1712,6 +1758,7 @@ impl TryFrom<SimulationResult> for WorkerSimulationResult {
                     operating_point: Arc::unwrap_or_clone(operating_point),
                 };
                 validate_worker_qpss_result(&result).map_err(SimulationError::InvalidConfig)?;
+                validate_worker_qpac_result(&result).map_err(SimulationError::InvalidConfig)?;
                 Ok(result)
             }
             SimulationResult::HarmonicBalance {
@@ -2018,6 +2065,15 @@ impl From<WorkerSimulationResult> for SimulationResult {
                 iterations,
                 mode_indices,
                 waveforms: waveform_map(waveforms),
+            },
+            WorkerSimulationResult::Qpac {
+                frequencies,
+                waveforms,
+                response,
+            } => Self::Qpac {
+                frequencies,
+                waveforms: waveform_map(waveforms),
+                response: Arc::new(response),
             },
             WorkerSimulationResult::Qpss {
                 frequencies,

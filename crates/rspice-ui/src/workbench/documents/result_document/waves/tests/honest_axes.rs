@@ -10,6 +10,32 @@ use super::*;
 
 use crate::state::{ExecutedDeck, ExecutedDeckPoint};
 
+#[test]
+fn qpac_plot_keeps_signed_probe_offsets_on_a_named_linear_axis() {
+    let result = crate::simulation::SimulationResult::qpac_retained_test_fixture();
+    assert!(result.success);
+    assert!(crate::state::ac_bode_summary_for_analysis(&result, 0).is_none());
+    let mut state = AppState::default();
+    state.simulation.start_run().add_analysis(result);
+    state.ui.results.viewer = super::super::super::ResultViewer::Bode;
+    let presentation = state.ui.preferences.result_presentation_policy();
+    let models = cached_models(
+        &state.simulation,
+        &mut state.ui.results,
+        presentation.complex_number_display(),
+        &Tokens::default(),
+    );
+    assert_eq!(models.len(), 1);
+    assert_eq!(models[0].x_scale, XScale::Linear);
+    assert_eq!(models[0].x_label, "Probe offset");
+    assert_eq!(models[0].x_unit, "Hz");
+    assert_eq!(models[0].x_dimension_key, "qpac-probe-offset");
+    let (min, max) = models[0]
+        .x_range
+        .expect("signed offsets have a visible range");
+    assert!(min <= -37.0 && max >= 127.0);
+}
+
 /// A DC sweep of a current source, with the deck the run actually executed.
 fn swept_current_source() -> AppState {
     let mut state = AppState::default();

@@ -182,6 +182,12 @@ enum NoMargins {
 
 fn build_model(state: &mut AppState) -> Result<BodeModel, NoMargins> {
     let simulation = &state.simulation;
+    if simulation
+        .active_analysis()
+        .is_some_and(|a| a.analysis_type == crate::state::AnalysisType::Qpac)
+    {
+        return Err(NoMargins::NoResponse);
+    }
     let run = simulation.active_run().ok_or(NoMargins::NoResponse)?;
     // Which traces, not what they measure. Resolving the summary here — and
     // only then consulting the memo below — meant the memo saved nothing: the
@@ -388,6 +394,35 @@ fn build_noise_model(state: &AppState) -> Option<NoiseSpectrumModel> {
 }
 
 pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
+    if let Some(analysis) = state.simulation.active_analysis()
+        && analysis.analysis_type == crate::state::AnalysisType::Qpac
+    {
+        section_header(ui, "QPAC conversion response", None);
+        super::panel_note(
+            ui,
+            "The horizontal axis is the signed probe offset. Physical input and output frequencies equal offset plus their tone tuple dotted with the QPSS tones. Full signed-tuple responses are available in the result table and CSV export.",
+        );
+        if let Some(crate::state::AnalysisResultPayload::Qpac { response }) =
+            &analysis.result_payload
+        {
+            let m = &response.metadata;
+            super::panel_note(
+                ui,
+                &format!(
+                    "Source: {} ({:?}), magnitude {}, phase {}°. Input tuple {:?}; output tuple {:?}. Tones: {:?} Hz.",
+                    m.request.input_source,
+                    m.input_quantity,
+                    m.request.magnitude,
+                    m.request.phase_degrees,
+                    m.request.input_lattice,
+                    m.request.output_lattice,
+                    m.tone_frequencies_hz
+                ),
+            );
+        }
+        return;
+    }
+
     if state
         .simulation
         .active_analysis()

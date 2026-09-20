@@ -10,6 +10,7 @@ use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
 use std::collections::{BTreeMap, HashSet};
 
 mod family_metadata;
+mod qpac;
 mod qpss;
 
 pub use family_metadata::{AnalysisResultFamilyMetadata, MonteCarloVariableMetadata};
@@ -1127,6 +1128,9 @@ pub enum AnalysisResultPayload {
     /// Complete signed torus spectrum, including branch currents, producer
     /// identity, solver settings and convergence evidence. Display bins can be
     /// reconstructed exactly from the retained lattice.
+    Qpac {
+        response: std::sync::Arc<rspice_core::engine::QpacAnalysisResult>,
+    },
     Qpss {
         operating_point: std::sync::Arc<rspice_core::engine::QpssOperatingPoint>,
     },
@@ -1535,6 +1539,17 @@ impl AnalysisResultPayload {
     /// Validate exact retained evidence against the analysis that owns it.
     pub fn validate_for(&self, analysis_type: AnalysisType) -> Result<(), String> {
         match self {
+            Self::Qpac { response } => {
+                if analysis_type != AnalysisType::Qpac {
+                    return Err("QPAC payload belongs to a different analysis type".into());
+                }
+                response
+                    .validate_retained_payload_with_abort(
+                        &rspice_core::ResourceLimits::default(),
+                        &rspice_core::NoAbort,
+                    )
+                    .map_err(|e| e.to_string())?;
+            }
             Self::Qpss { operating_point } => {
                 if analysis_type != AnalysisType::Qpss {
                     return Err("QPSS payload belongs to a different analysis type".into());
@@ -2169,7 +2184,7 @@ impl AnalysisResultPayload {
     #[must_use]
     pub fn has_data(&self) -> bool {
         match self {
-            Self::Qpss { .. } | Self::DcSweep { .. }
+            Self::Qpac { .. } | Self::Qpss { .. } | Self::DcSweep { .. }
             | Self::OperatingPoint { .. }
             | Self::PoleZero { .. }
             | Self::PssFloquet { .. }
