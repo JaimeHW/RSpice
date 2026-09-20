@@ -452,7 +452,7 @@ fn parse_wrapped_identifier<'a>(key: &'a str, prefix: &str) -> Option<&'a str> {
     if key.len() <= prefix.len() + 2 {
         return None;
     }
-    if !key[..prefix.len()].eq_ignore_ascii_case(prefix) {
+    if !key.get(..prefix.len())?.eq_ignore_ascii_case(prefix) {
         return None;
     }
     if !key[prefix.len()..].starts_with('(') || !key.ends_with(')') {
@@ -461,22 +461,30 @@ fn parse_wrapped_identifier<'a>(key: &'a str, prefix: &str) -> Option<&'a str> {
     Some(&key[prefix.len() + 1..key.len() - 1])
 }
 
+/// SPICE signal identities are case insensitive; an exact stored spelling
+/// still takes precedence for result maps supplied by external readers.
+fn named_value<'a, T>(values: &'a HashMap<String, T>, key: &str) -> Option<&'a T> {
+    values.get(key).or_else(|| {
+        values
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case(key))
+            .map(|(_, value)| value)
+    })
+}
+
 fn measurement_from_dc_op(op: &DcOpResult, key: &str) -> Option<f64> {
-    if let Some(v) = op.node_voltages.get(key).copied() {
-        return Some(v);
-    }
-    if let Some(v) = op.branch_currents.get(key).copied() {
-        return Some(v);
+    if let Some(value) =
+        named_value(&op.node_voltages, key).or_else(|| named_value(&op.branch_currents, key))
+    {
+        return Some(*value);
     }
     if let Some(node) = parse_wrapped_identifier(key, "V") {
-        return op.node_voltages.get(node).copied();
+        return named_value(&op.node_voltages, node).copied();
     }
     if let Some(branch) = parse_wrapped_identifier(key, "I") {
-        return op
-            .branch_currents
-            .get(branch)
-            .copied()
-            .or_else(|| op.branch_currents.get(key).copied());
+        return named_value(&op.branch_currents, branch)
+            .or_else(|| named_value(&op.branch_currents, key))
+            .copied();
     }
     None
 }
@@ -485,34 +493,19 @@ fn waveform_last_value_by_name(
     waveforms: &HashMap<String, WaveformData>,
     key: &str,
 ) -> Option<f64> {
-    if let Some(v) = waveforms
-        .get(key)
-        .and_then(|wf| wf.y_values.last().copied())
-    {
-        return Some(v);
-    }
-
-    if let Some(inner) =
-        parse_wrapped_identifier(key, "V").or_else(|| parse_wrapped_identifier(key, "I"))
-        && let Some(v) = waveforms
-            .get(inner)
-            .and_then(|wf| wf.y_values.last().copied())
-    {
-        return Some(v);
-    }
-
-    let voltage_key = format!("V({})", key);
-    if let Some(v) = waveforms
-        .get(&voltage_key)
-        .and_then(|wf| wf.y_values.last().copied())
-    {
-        return Some(v);
-    }
-
-    let current_key = format!("I({})", key);
-    waveforms
-        .get(&current_key)
-        .and_then(|wf| wf.y_values.last().copied())
+    let last = |name: &str| {
+        named_value(waveforms, name)
+            .and_then(|waveform| waveform.y_values.last())
+            .copied()
+    };
+    last(key)
+        .or_else(|| {
+            parse_wrapped_identifier(key, "V")
+                .or_else(|| parse_wrapped_identifier(key, "I"))
+                .and_then(last)
+        })
+        .or_else(|| last(&format!("V({key})")))
+        .or_else(|| last(&format!("I({key})")))
 }
 
 #[cfg(test)]
