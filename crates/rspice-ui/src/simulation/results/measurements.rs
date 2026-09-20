@@ -5,6 +5,8 @@
 //! measurement can be added without re-running.
 
 use super::*;
+mod quasi_periodic;
+pub(crate) use quasi_periodic::parse_study_tuple;
 
 impl SimulationResult {
     /// Resolve a study request without falling back from a failed `.MEAS` to
@@ -37,7 +39,9 @@ impl SimulationResult {
                 error: measurement.error.clone(),
             });
         }
-        let value = if mode.eq_ignore_ascii_case("bin") {
+        let value = if mode.eq_ignore_ascii_case("tuple") {
+            self.qpss_tuple_measurement(key)
+        } else if mode.eq_ignore_ascii_case("bin") {
             let (index, quantity, signal) = parse_study_bin(key).ok()?;
             let parts = match self {
                 Self::Fft { spectrum, .. }
@@ -81,7 +85,11 @@ impl SimulationResult {
                 }
                 Self::Ac { waveforms, .. }
                 | Self::HarmonicBalance { waveforms, .. }
-                | Self::Pstb { waveforms, .. } => {
+                | Self::Pstb { waveforms, .. }
+                | Self::Qpss { waveforms, .. }
+                | Self::Qpac { waveforms, .. }
+                | Self::Qpxf { waveforms, .. }
+                | Self::Qpnoise { waveforms, .. } => {
                     let waveform = if let Some(signal) = signal {
                         named_value(waveforms, signal)?
                     } else {
@@ -125,7 +133,8 @@ impl SimulationResult {
                 | Self::TransferFunction { .. }
                 | Self::DcMismatch { .. }
                 | Self::Pstb { .. } => self.measurement(key),
-                Self::Fft { .. } => self.measurement(key),
+                Self::Fft { .. } | Self::Qpss { .. } => self.measurement(key),
+                Self::Qpnoise { .. } => self.qpnoise_study_scalar(key),
                 Self::Transient {
                     periodic_state: Some(point),
                     ..
@@ -164,7 +173,11 @@ impl SimulationResult {
                 | Self::Transient { waveforms, .. }
                 | Self::Ac { waveforms, .. }
                 | Self::HarmonicBalance { waveforms, .. }
-                | Self::Pstb { waveforms, .. } => waveform_last_value_by_name(waveforms, key),
+                | Self::Pstb { waveforms, .. }
+                | Self::Qpss { waveforms, .. }
+                | Self::Qpac { waveforms, .. }
+                | Self::Qpxf { waveforms, .. }
+                | Self::Qpnoise { waveforms, .. } => waveform_last_value_by_name(waveforms, key),
                 Self::Noise { .. } => self.noise_study_series(key)?.last().copied(),
                 _ => None,
             }
@@ -237,14 +250,15 @@ impl SimulationResult {
                 ..
             } => measurement_result_by_name(measurements, key)
                 .or_else(|| waveform_last_value_by_name(waveforms, key)),
-            SimulationResult::Qpac { waveforms, .. }
-            | SimulationResult::Qpxf { waveforms, .. }
-            | SimulationResult::Qpnoise { waveforms, .. } => {
+            SimulationResult::Qpnoise { waveforms, .. } => self
+                .qpnoise_study_scalar(key)
+                .or_else(|| waveform_last_value_by_name(waveforms, key)),
+            SimulationResult::Qpac { waveforms, .. } | SimulationResult::Qpxf { waveforms, .. } => {
                 waveform_last_value_by_name(waveforms, key)
             }
             SimulationResult::Qpss {
                 operating_point, ..
-            } => match key {
+            } => match key.to_ascii_lowercase().as_str() {
                 "qpss.iterations" => Some(operating_point.iterations() as f64),
                 "qpss.normalized_residual" => Some(operating_point.normalized_residual()),
                 _ => None,

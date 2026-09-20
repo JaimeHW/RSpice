@@ -518,12 +518,7 @@ impl McDialogState {
             params,
             base_analysis: self.base_analysis,
             measurements: if self.base_analysis.is_some() {
-                self.measurements
-                    .split([';', '\n'])
-                    .map(str::trim)
-                    .filter(|name| !name.is_empty())
-                    .map(str::to_owned)
-                    .collect()
+                parse_measurement_list(&self.measurements)?
             } else {
                 Vec::new()
             },
@@ -820,4 +815,41 @@ mod confidence_tests {
         state.confidence_method_idx = 2;
         assert!(state.to_config().is_err());
     }
+}
+
+/// Trace identities can contain semicolons inside lattice labels or cross spectra.
+fn parse_measurement_list(text: &str) -> Result<Vec<String>, String> {
+    let mut entries = Vec::new();
+    let mut closing = Vec::new();
+    let mut start = 0;
+    for (offset, ch) in text.char_indices() {
+        match ch {
+            '(' => closing.push(')'),
+            '[' => closing.push(']'),
+            '{' => closing.push('}'),
+            ')' | ']' | '}' => {
+                if closing.pop() != Some(ch) {
+                    return Err(
+                        "Study measurement contains mismatched parentheses or brackets".into(),
+                    );
+                }
+            }
+            ';' | '\n' if closing.is_empty() => {
+                let entry = text[start..offset].trim();
+                if !entry.is_empty() {
+                    entries.push(entry.to_owned());
+                }
+                start = offset + ch.len_utf8();
+            }
+            _ => {}
+        }
+    }
+    if !closing.is_empty() {
+        return Err("Study measurement contains an unclosed parenthesis or bracket".into());
+    }
+    let entry = text[start..].trim();
+    if !entry.is_empty() {
+        entries.push(entry.to_owned());
+    }
+    Ok(entries)
 }
