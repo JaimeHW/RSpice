@@ -58,6 +58,33 @@ pub enum SoAParameter {
     Ie,
     IePositive,
     IeNegative,
+    Vbs,
+    VbsPositive,
+    VbsNegative,
+    Vbd,
+    VbdPositive,
+    VbdNegative,
+    Vgb,
+    VgbPositive,
+    VgbNegative,
+    Ibulk,
+    IbulkPositive,
+    IbulkNegative,
+    Ves,
+    VesPositive,
+    VesNegative,
+    Ved,
+    VedPositive,
+    VedNegative,
+    Vge,
+    VgePositive,
+    VgeNegative,
+    Ibackgate,
+    IbackgatePositive,
+    IbackgateNegative,
+    VbodyBackgate,
+    VbodyBackgatePositive,
+    VbodyBackgateNegative,
 }
 
 impl SoAParameter {
@@ -103,6 +130,33 @@ impl SoAParameter {
             Self::Ie => "IE",
             Self::IePositive => "IE_POS",
             Self::IeNegative => "IE_NEG",
+            Self::Vbs => "VBS",
+            Self::VbsPositive => "VBS_POS",
+            Self::VbsNegative => "VBS_NEG",
+            Self::Vbd => "VBD",
+            Self::VbdPositive => "VBD_POS",
+            Self::VbdNegative => "VBD_NEG",
+            Self::Vgb => "VGB",
+            Self::VgbPositive => "VGB_POS",
+            Self::VgbNegative => "VGB_NEG",
+            Self::Ibulk => "IBULK",
+            Self::IbulkPositive => "IBULK_POS",
+            Self::IbulkNegative => "IBULK_NEG",
+            Self::Ves => "VES",
+            Self::VesPositive => "VES_POS",
+            Self::VesNegative => "VES_NEG",
+            Self::Ved => "VED",
+            Self::VedPositive => "VED_POS",
+            Self::VedNegative => "VED_NEG",
+            Self::Vge => "VGE",
+            Self::VgePositive => "VGE_POS",
+            Self::VgeNegative => "VGE_NEG",
+            Self::Ibackgate => "IBACKGATE",
+            Self::IbackgatePositive => "IBACKGATE_POS",
+            Self::IbackgateNegative => "IBACKGATE_NEG",
+            Self::VbodyBackgate => "VBODY_BACKGATE",
+            Self::VbodyBackgatePositive => "VBODY_BACKGATE_POS",
+            Self::VbodyBackgateNegative => "VBODY_BACKGATE_NEG",
         }
     }
     /// The unsigned terminal quantity underlying a directional constraint.
@@ -120,6 +174,15 @@ impl SoAParameter {
             Self::IsPositive | Self::IsNegative => Self::Is,
             Self::IbPositive | Self::IbNegative => Self::Ib,
             Self::IePositive | Self::IeNegative => Self::Ie,
+            Self::VbsPositive | Self::VbsNegative => Self::Vbs,
+            Self::VbdPositive | Self::VbdNegative => Self::Vbd,
+            Self::VgbPositive | Self::VgbNegative => Self::Vgb,
+            Self::IbulkPositive | Self::IbulkNegative => Self::Ibulk,
+            Self::VesPositive | Self::VesNegative => Self::Ves,
+            Self::VedPositive | Self::VedNegative => Self::Ved,
+            Self::VgePositive | Self::VgeNegative => Self::Vge,
+            Self::IbackgatePositive | Self::IbackgateNegative => Self::Ibackgate,
+            Self::VbodyBackgatePositive | Self::VbodyBackgateNegative => Self::VbodyBackgate,
             other => other,
         }
     }
@@ -138,7 +201,16 @@ impl SoAParameter {
             | Self::IgPositive
             | Self::IsPositive
             | Self::IbPositive
-            | Self::IePositive => Some(true),
+            | Self::IePositive
+            | Self::VbsPositive
+            | Self::VbdPositive
+            | Self::VgbPositive
+            | Self::IbulkPositive
+            | Self::VesPositive
+            | Self::VedPositive
+            | Self::VgePositive
+            | Self::IbackgatePositive
+            | Self::VbodyBackgatePositive => Some(true),
             Self::VgsNegative
             | Self::VdsNegative
             | Self::VgdNegative
@@ -150,7 +222,16 @@ impl SoAParameter {
             | Self::IgNegative
             | Self::IsNegative
             | Self::IbNegative
-            | Self::IeNegative => Some(false),
+            | Self::IeNegative
+            | Self::VbsNegative
+            | Self::VbdNegative
+            | Self::VgbNegative
+            | Self::IbulkNegative
+            | Self::VesNegative
+            | Self::VedNegative
+            | Self::VgeNegative
+            | Self::IbackgateNegative
+            | Self::VbodyBackgateNegative => Some(false),
             _ => None,
         }
     }
@@ -169,6 +250,15 @@ impl SoAParameter {
             Self::Is => Some((Self::IsPositive, Self::IsNegative)),
             Self::Ib => Some((Self::IbPositive, Self::IbNegative)),
             Self::Ie => Some((Self::IePositive, Self::IeNegative)),
+            Self::Vbs => Some((Self::VbsPositive, Self::VbsNegative)),
+            Self::Vbd => Some((Self::VbdPositive, Self::VbdNegative)),
+            Self::Vgb => Some((Self::VgbPositive, Self::VgbNegative)),
+            Self::Ibulk => Some((Self::IbulkPositive, Self::IbulkNegative)),
+            Self::Ves => Some((Self::VesPositive, Self::VesNegative)),
+            Self::Ved => Some((Self::VedPositive, Self::VedNegative)),
+            Self::Vge => Some((Self::VgePositive, Self::VgeNegative)),
+            Self::Ibackgate => Some((Self::IbackgatePositive, Self::IbackgateNegative)),
+            Self::VbodyBackgate => Some((Self::VbodyBackgatePositive, Self::VbodyBackgateNegative)),
 
             _ => None,
         }
@@ -178,7 +268,30 @@ impl SoAParameter {
     pub const fn is_current(self) -> bool {
         matches!(
             self.base_parameter(),
-            Self::Id | Self::Ic | Self::Ig | Self::Is | Self::Ib | Self::Ie
+            Self::Id
+                | Self::Ic
+                | Self::Ig
+                | Self::Is
+                | Self::Ib
+                | Self::Ie
+                | Self::Ibulk
+                | Self::Ibackgate
+        )
+    }
+
+    /// Body/back-gate rules need the selected model's external pin roles.
+    pub const fn requires_mos_layout(self) -> bool {
+        matches!(
+            self.base_parameter(),
+            Self::Vbs
+                | Self::Vbd
+                | Self::Vgb
+                | Self::Ibulk
+                | Self::Ves
+                | Self::Ved
+                | Self::Vge
+                | Self::Ibackgate
+                | Self::VbodyBackgate
         )
     }
 

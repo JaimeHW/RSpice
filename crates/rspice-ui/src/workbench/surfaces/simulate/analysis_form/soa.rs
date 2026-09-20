@@ -79,7 +79,7 @@ pub(super) fn fields(
     );
     field_note(
         ui,
-        "Vgs = V(g) − V(s), Vds = V(d) − V(s), Vgd = V(g) − V(d); BJT voltages follow the same named-terminal order. Id/Ig/Is and Ic/Ib/Ie are positive into drain/gate/source and collector/base/emitter, including accepted transient displacement current. Enter a nonnegative magnitude for directional limits; zero forbids that polarity.",
+        "Vgs = V(g) − V(s), Vds = V(d) − V(s), Vgd = V(g) − V(d); BJT voltages follow the same named-terminal order. Id/Ig/Is and Ic/Ib/Ie are positive into drain/gate/source and collector/base/emitter, including accepted transient displacement current. Vbs/Vbd/Vgb and bulk current use the external bulk/body contact. Ves/Ved/Vge and back-gate current use the SOI back gate/substrate electrode; floating internal body states are not external terminals. Enter a nonnegative magnitude for directional limits; zero forbids that polarity.",
     );
     field_note(
         ui,

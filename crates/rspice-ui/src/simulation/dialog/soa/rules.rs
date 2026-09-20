@@ -4,7 +4,7 @@ use super::*;
 use crate::services::safety::SoAParameter;
 use crate::services::simulation_runner::SoaRuleConfig;
 
-const PARAMETERS: [SoAParameter; 38] = [
+const PARAMETERS: [SoAParameter; 65] = [
     SoAParameter::Vgs,
     SoAParameter::Vds,
     SoAParameter::Vgd,
@@ -43,6 +43,33 @@ const PARAMETERS: [SoAParameter; 38] = [
     SoAParameter::Ie,
     SoAParameter::IePositive,
     SoAParameter::IeNegative,
+    SoAParameter::Vbs,
+    SoAParameter::VbsPositive,
+    SoAParameter::VbsNegative,
+    SoAParameter::Vbd,
+    SoAParameter::VbdPositive,
+    SoAParameter::VbdNegative,
+    SoAParameter::Vgb,
+    SoAParameter::VgbPositive,
+    SoAParameter::VgbNegative,
+    SoAParameter::Ibulk,
+    SoAParameter::IbulkPositive,
+    SoAParameter::IbulkNegative,
+    SoAParameter::Ves,
+    SoAParameter::VesPositive,
+    SoAParameter::VesNegative,
+    SoAParameter::Ved,
+    SoAParameter::VedPositive,
+    SoAParameter::VedNegative,
+    SoAParameter::Vge,
+    SoAParameter::VgePositive,
+    SoAParameter::VgeNegative,
+    SoAParameter::Ibackgate,
+    SoAParameter::IbackgatePositive,
+    SoAParameter::IbackgateNegative,
+    SoAParameter::VbodyBackgate,
+    SoAParameter::VbodyBackgatePositive,
+    SoAParameter::VbodyBackgateNegative,
 ];
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -66,7 +93,7 @@ impl Default for SoaRuleDraft {
 }
 
 impl SoaRuleDraft {
-    pub const PARAMETER_LABELS: [&'static str; 38] = [
+    pub const PARAMETER_LABELS: [&'static str; 65] = [
         "Vgs",
         "Vds",
         "Vgd",
@@ -105,6 +132,33 @@ impl SoaRuleDraft {
         "Ie",
         "Ie positive",
         "Ie negative",
+        "Vbs",
+        "Vbs positive",
+        "Vbs negative",
+        "Vbd",
+        "Vbd positive",
+        "Vbd negative",
+        "Vgb",
+        "Vgb positive",
+        "Vgb negative",
+        "Bulk / body-contact current",
+        "Bulk / body-contact current positive",
+        "Bulk / body-contact current negative",
+        "Ves (back gate to source)",
+        "Ves (back gate to source) positive",
+        "Ves (back gate to source) negative",
+        "Ved (back gate to drain)",
+        "Ved (back gate to drain) positive",
+        "Ved (back gate to drain) negative",
+        "Vge (gate to back gate)",
+        "Vge (gate to back gate) positive",
+        "Vge (gate to back gate) negative",
+        "Back-gate current",
+        "Back-gate current positive",
+        "Back-gate current negative",
+        "Body contact to back gate voltage",
+        "Body contact to back gate voltage positive",
+        "Body contact to back gate voltage negative",
     ];
     pub fn is_power(&self) -> bool {
         PARAMETERS.get(self.parameter) == Some(&SoAParameter::Pdiss)

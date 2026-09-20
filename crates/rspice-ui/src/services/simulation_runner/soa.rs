@@ -21,6 +21,7 @@ mod probes;
 mod rules;
 #[cfg(test)]
 mod rules_tests;
+mod terminals;
 pub use observation::SoaObservationConfig;
 pub use rules::SoaRuleConfig;
 
@@ -187,8 +188,10 @@ pub fn run_soa_analysis_with_config_and_source_path_and_abort(
         .observation
         .validate_selection(&flattened.elements)
         .map_err(ServiceRunError::Failure)?;
+    let engine = rspice_core::engine::Engine::new(super::build_engine_config(&netlist, None));
+    let layouts = terminals::resolve(&netlist, &flattened.elements, config, &engine, abort)?;
     let mut manager = SoAManager::new();
-    let resolved = rules::resolve(&flattened.elements, config, abort)?;
+    let resolved = rules::resolve(&flattened.elements, config, &layouts, abort)?;
     let registered_rules: usize = resolved
         .iter()
         .map(|(_, definition)| definition.limits.len())
@@ -235,8 +238,14 @@ pub fn run_soa_analysis_with_config_and_source_path_and_abort(
             }
         }
     }
-    let current_probes = probes::register(&mut netlist, &flattened.elements, &resolved, abort)?;
-    let engine = rspice_core::engine::Engine::new(super::build_engine_config(&netlist, None));
+    let current_probes = probes::register(
+        &mut netlist,
+        &flattened.elements,
+        &resolved,
+        &layouts,
+        abort,
+    )?;
+
     let result = engine
         .run_tran_with_startup_mode_and_abort(
             &netlist,
@@ -349,28 +358,29 @@ pub fn run_soa_analysis_with_config_and_source_path_and_abort(
             let element = &flattened.elements[*element_index];
             let mut device_values = HashMap::new();
             for limit in &definition.limits {
-                let value =
-                    if let Some((positive, reference)) = rules::terminal_pair(limit.parameter) {
-                        if element.nodes.len() <= positive.max(reference) {
-                            return Err(ServiceRunError::Failure(format!(
-                                "SOA device '{}' has an incomplete terminal basis",
+                let value = if let Some((positive, reference)) =
+                    rules::terminal_pair(limit.parameter, layouts.get(&element.name).copied())
+                {
+                    if element.nodes.len() <= positive.max(reference) {
+                        return Err(ServiceRunError::Failure(format!(
+                            "SOA device '{}' has an incomplete terminal basis",
+                            element.name
+                        )));
+                    }
+                    sample_node_waveform(&node_waveforms, &element.nodes[positive], idx)?
+                        - sample_node_waveform(&node_waveforms, &element.nodes[reference], idx)?
+                } else {
+                    observations
+                        .get(&(*element_index, limit.parameter.base_parameter()))
+                        .and_then(|trace| trace.get(idx + first))
+                        .copied()
+                        .ok_or_else(|| {
+                            ServiceRunError::Failure(format!(
+                                "SOA device rule for '{}' is missing an accepted sample",
                                 element.name
-                            )));
-                        }
-                        sample_node_waveform(&node_waveforms, &element.nodes[positive], idx)?
-                            - sample_node_waveform(&node_waveforms, &element.nodes[reference], idx)?
-                    } else {
-                        observations
-                            .get(&(*element_index, limit.parameter.base_parameter()))
-                            .and_then(|trace| trace.get(idx + first))
-                            .copied()
-                            .ok_or_else(|| {
-                                ServiceRunError::Failure(format!(
-                                    "SOA device rule for '{}' is missing an accepted sample",
-                                    element.name
-                                ))
-                            })?
-                    };
+                            ))
+                        })?
+                };
                 if !value.is_finite() {
                     return Err(ServiceRunError::Failure(format!(
                         "SOA {}({}) is non-finite",
@@ -779,7 +789,7 @@ mod tests {
             check_vce_max: true,
             ..SoaRunConfig::default()
         };
-        let count = rules::resolve(&netlist.elements, &bjt_only, &NoAbort)
+        let count = rules::resolve(&netlist.elements, &bjt_only, &Default::default(), &NoAbort)
             .expect("rule registration completes")
             .len();
 

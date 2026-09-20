@@ -845,6 +845,33 @@ pub enum SoaParameterEvidence {
     EmitterCurrent,
     EmitterCurrentPositive,
     EmitterCurrentNegative,
+    BodySourceVoltage,
+    BodySourceVoltagePositive,
+    BodySourceVoltageNegative,
+    BodyDrainVoltage,
+    BodyDrainVoltagePositive,
+    BodyDrainVoltageNegative,
+    GateBodyVoltage,
+    GateBodyVoltagePositive,
+    GateBodyVoltageNegative,
+    BulkCurrent,
+    BulkCurrentPositive,
+    BulkCurrentNegative,
+    BackgateSourceVoltage,
+    BackgateSourceVoltagePositive,
+    BackgateSourceVoltageNegative,
+    BackgateDrainVoltage,
+    BackgateDrainVoltagePositive,
+    BackgateDrainVoltageNegative,
+    GateBackgateVoltage,
+    GateBackgateVoltagePositive,
+    GateBackgateVoltageNegative,
+    BackgateCurrent,
+    BackgateCurrentPositive,
+    BackgateCurrentNegative,
+    BodyBackgateVoltage,
+    BodyBackgateVoltagePositive,
+    BodyBackgateVoltageNegative,
 }
 
 impl SoaParameterEvidence {
@@ -875,6 +902,24 @@ impl SoaParameterEvidence {
                 | Self::BaseCurrentNegative
                 | Self::EmitterCurrentPositive
                 | Self::EmitterCurrentNegative
+                | Self::BodySourceVoltagePositive
+                | Self::BodySourceVoltageNegative
+                | Self::BodyDrainVoltagePositive
+                | Self::BodyDrainVoltageNegative
+                | Self::GateBodyVoltagePositive
+                | Self::GateBodyVoltageNegative
+                | Self::BulkCurrentPositive
+                | Self::BulkCurrentNegative
+                | Self::BackgateSourceVoltagePositive
+                | Self::BackgateSourceVoltageNegative
+                | Self::BackgateDrainVoltagePositive
+                | Self::BackgateDrainVoltageNegative
+                | Self::GateBackgateVoltagePositive
+                | Self::GateBackgateVoltageNegative
+                | Self::BackgateCurrentPositive
+                | Self::BackgateCurrentNegative
+                | Self::BodyBackgateVoltagePositive
+                | Self::BodyBackgateVoltageNegative
         )
     }
 }

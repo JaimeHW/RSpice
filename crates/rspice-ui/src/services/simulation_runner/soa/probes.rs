@@ -8,6 +8,7 @@ pub(super) fn register(
     netlist: &mut Netlist,
     elements: &[Element],
     resolved: &[(usize, SoADefinition)],
+    layouts: &super::terminals::MosLayouts,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<HashMap<(usize, SoAParameter), String>> {
     let names = elements
@@ -25,7 +26,9 @@ pub(super) fn register(
         for limit in &definition.limits {
             ensure_not_aborted(abort)?;
             let parameter = limit.parameter.base_parameter();
-            let Some(terminal) = rules::current_terminal(parameter) else {
+            let Some(terminal) =
+                rules::current_terminal(parameter, layouts.get(&elements[*index].name).copied())
+            else {
                 continue;
             };
             if probes.contains_key(&(*index, parameter)) {

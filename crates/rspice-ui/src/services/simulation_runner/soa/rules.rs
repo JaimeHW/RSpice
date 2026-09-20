@@ -1,6 +1,8 @@
 //! Explicit, scoped terminal-stress rules and their resolved device bindings.
 
+use super::terminals::MosLayouts;
 use super::*;
+use rspice_core::circuit::MosTerminalLayout;
 
 /// An additional limit, or an override of a default voltage limit on its scope.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -33,9 +35,18 @@ impl SoaRuleConfig {
                 | SoAParameter::Ie
                 | SoAParameter::Temp
                 | SoAParameter::Pdiss
+                | SoAParameter::Vbs
+                | SoAParameter::Vbd
+                | SoAParameter::Vgb
+                | SoAParameter::Ibulk
+                | SoAParameter::Ves
+                | SoAParameter::Ved
+                | SoAParameter::Vge
+                | SoAParameter::Ibackgate
+                | SoAParameter::VbodyBackgate
         ) {
             return Err(
-                "SOA rules support magnitudes and positive/negative limits for Vgs, Vds, Vgd, Vbe, Vce, Vbc, Id, Ig, Is, Ic, Ib and Ie, plus conductive power and absolute operating temperature".into(),
+                "SOA rules support magnitudes and positive/negative limits for Vgs, Vds, Vgd, Vbe, Vce, Vbc, Id, Ig, Is, Ic, Ib and Ie, external body/back-gate voltage and current, plus conductive power and absolute operating temperature".into(),
             );
         }
         if !self.max_value.is_finite()
@@ -55,8 +66,8 @@ impl SoaRuleConfig {
         }
     }
 
-    fn matches(&self, element: &Element) -> bool {
-        applicable(element, self.parameter)
+    fn matches(&self, element: &Element, layouts: &MosLayouts) -> bool {
+        applicable(element, self.parameter, layouts.get(&element.name).copied())
             && (self.devices.is_empty()
                 || self
                     .devices
@@ -71,7 +82,16 @@ impl SoaRuleConfig {
     }
 }
 
-pub(super) fn applicable(element: &Element, parameter: SoAParameter) -> bool {
+pub(super) fn applicable(
+    element: &Element,
+    parameter: SoAParameter,
+    layout: Option<MosTerminalLayout>,
+) -> bool {
+    if parameter.requires_mos_layout() {
+        return matches!(element.kind, ElementKind::Mosfet { .. })
+            && (terminal_pair(parameter, layout).is_some()
+                || current_terminal(parameter, layout).is_some());
+    }
     let parameter = parameter.base_parameter();
     if matches!(parameter, SoAParameter::Temp | SoAParameter::Pdiss) {
         return matches!(
@@ -112,6 +132,7 @@ pub(super) fn applicable(element: &Element, parameter: SoAParameter) -> bool {
 pub(super) fn resolve(
     elements: &[Element],
     config: &SoaRunConfig,
+    layouts: &MosLayouts,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<Vec<(usize, SoADefinition)>> {
     for (index, rule) in config.rules.iter().enumerate() {
@@ -121,7 +142,7 @@ pub(super) fn resolve(
             .map_err(ServiceRunError::Failure)?;
         if !elements
             .iter()
-            .any(|element| config.observation.includes(element) && rule.matches(element))
+            .any(|element| config.observation.includes(element) && rule.matches(element, layouts))
         {
             return Err(ServiceRunError::Failure(format!(
                 "SOA rule {} ({}) matches no applicable device inside the observation selection",
@@ -143,7 +164,7 @@ pub(super) fn resolve(
             (config.check_vbe_max, SoAParameter::Vbe, config.max_vbe),
             (config.check_vce_max, SoAParameter::Vce, config.max_vce),
         ] {
-            if enabled && applicable(element, parameter) {
+            if enabled && applicable(element, parameter, layouts.get(&element.name).copied()) {
                 limits.insert(parameter, max_value);
             }
         }
@@ -152,12 +173,12 @@ pub(super) fn resolve(
         // magnitude rule remains an independently authored constraint.
         for rule in &config.rules {
             let base = rule.parameter.base_parameter();
-            if rule.matches(element)
+            if rule.matches(element, layouts)
                 && rule.parameter.polarity().is_some()
                 && !config
                     .rules
                     .iter()
-                    .any(|r| r.matches(element) && r.parameter == base)
+                    .any(|r| r.matches(element, layouts) && r.parameter == base)
                 && let Some(maximum) = limits.remove(&base)
                 && let Some((positive, negative)) = base.directional_pair()
             {
@@ -167,7 +188,7 @@ pub(super) fn resolve(
         }
         let mut overridden = std::collections::HashSet::new();
         for rule in &config.rules {
-            if rule.matches(element) {
+            if rule.matches(element, layouts) {
                 if !overridden.insert(rule.parameter) {
                     return Err(ServiceRunError::Failure(format!(
                         "SOA has overlapping explicit {} rules for '{}'",
@@ -223,21 +244,36 @@ pub(super) fn device_parameter(parameter: SoAParameter) -> Option<&'static str> 
     }
 }
 
-pub(super) fn terminal_pair(parameter: SoAParameter) -> Option<(usize, usize)> {
+pub(super) fn terminal_pair(
+    parameter: SoAParameter,
+    layout: Option<MosTerminalLayout>,
+) -> Option<(usize, usize)> {
     match parameter.base_parameter() {
         SoAParameter::Vgs | SoAParameter::Vbe => Some((1, 2)),
         SoAParameter::Vds | SoAParameter::Vce => Some((0, 2)),
         SoAParameter::Vgd | SoAParameter::Vbc => Some((1, 0)),
+        SoAParameter::Vbs => Some((layout?.body?, 2)),
+        SoAParameter::Vbd => Some((layout?.body?, 0)),
+        SoAParameter::Vgb => Some((1, layout?.body?)),
+        SoAParameter::Ves => Some((layout?.back_gate?, 2)),
+        SoAParameter::Ved => Some((layout?.back_gate?, 0)),
+        SoAParameter::Vge => Some((1, layout?.back_gate?)),
+        SoAParameter::VbodyBackgate => Some((layout?.body?, layout?.back_gate?)),
         _ => None,
     }
 }
 
 /// Authored terminal index, with current positive into the device.
-pub(super) fn current_terminal(parameter: SoAParameter) -> Option<usize> {
+pub(super) fn current_terminal(
+    parameter: SoAParameter,
+    layout: Option<MosTerminalLayout>,
+) -> Option<usize> {
     match parameter.base_parameter() {
         SoAParameter::Id | SoAParameter::Ic => Some(0),
         SoAParameter::Ig | SoAParameter::Ib => Some(1),
         SoAParameter::Is | SoAParameter::Ie => Some(2),
+        SoAParameter::Ibulk => layout?.body,
+        SoAParameter::Ibackgate => layout?.back_gate,
         _ => None,
     }
 }

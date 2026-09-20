@@ -207,7 +207,7 @@ fn soa_directional_overrides_preserve_the_other_default_side_and_explicit_bounds
         rules: vec![rule(SoAParameter::VgsNegative, 0.0, &["M1"], &[])],
         ..Default::default()
     };
-    let resolved = rules::resolve(&netlist.elements, &cfg, &NoAbort).unwrap();
+    let resolved = rules::resolve(&netlist.elements, &cfg, &Default::default(), &NoAbort).unwrap();
     let limits = |name: &str, rows: &Vec<(usize, SoADefinition)>| {
         rows.iter()
             .find(|(index, _)| netlist.elements[*index].name == name)
@@ -230,7 +230,7 @@ fn soa_directional_overrides_preserve_the_other_default_side_and_explicit_bounds
         std::collections::BTreeMap::from([(SoAParameter::Vgs, 1.8)])
     );
     cfg.rules.push(rule(SoAParameter::Vgs, 3.0, &["M1"], &[]));
-    let resolved = rules::resolve(&netlist.elements, &cfg, &NoAbort).unwrap();
+    let resolved = rules::resolve(&netlist.elements, &cfg, &Default::default(), &NoAbort).unwrap();
     assert_eq!(
         limits("M1", &resolved),
         std::collections::BTreeMap::from([
@@ -241,7 +241,7 @@ fn soa_directional_overrides_preserve_the_other_default_side_and_explicit_bounds
     cfg.rules
         .push(rule(SoAParameter::VgsNegative, 2.0, &[], &["NM"]));
     assert!(
-        rules::resolve(&netlist.elements, &cfg, &NoAbort)
+        rules::resolve(&netlist.elements, &cfg, &Default::default(), &NoAbort)
             .unwrap_err()
             .to_string()
             .contains("overlapping")
@@ -283,5 +283,55 @@ fn soa_terminal_current_probes_capture_advanced_mos_charging_current() {
             .find(|e| e.parameter == SoAParameter::IdPositive)
             .unwrap();
         assert!(opposite.worst_actual_value < 1e-7, "{model}: {opposite:?}");
+    }
+}
+
+#[test]
+fn soa_bulk_current_limits_measure_signed_body_junction_charging() {
+    for (kind, sign) in [("NMOS", -1.0), ("PMOS", 1.0)] {
+        let deck = format!(
+            "Body charging\nVb b 0 PWL(0 0 1n 0 6n {} 10n {})\nM1 0 0 0 b MM W=1u L=1u\n.model MM {kind} LEVEL=1 VTO={} KP=0 CBD=1p CBS=0 MJ=0 IS=1e-30\n.end\n",
+            sign * 0.5,
+            sign * 0.5,
+            -sign * 100.0
+        );
+        let direction = if sign < 0.0 {
+            SoAParameter::IbulkNegative
+        } else {
+            SoAParameter::IbulkPositive
+        };
+        let cfg = config(vec![rule(direction, 50e-6, &["M1"], &[])]);
+        let result =
+            run_soa_analysis_with_config_and_source_path_and_abort(&deck, &cfg, None, &NoAbort)
+                .unwrap();
+        let evaluation = &result.evaluations[0];
+        assert!(
+            evaluation.worst_actual_value > 90e-6 && evaluation.worst_actual_value < 110e-6,
+            "{kind}: {evaluation:?}"
+        );
+        assert_eq!(evaluation.unit, "A");
+        assert_eq!(evaluation.sample_count, result.time.len() as u64);
+        assert!(result.stress_history[0].values[0] < 1e-10);
+        assert!(result.stress_history[0].values.last().unwrap() < &1e-8);
+    }
+}
+
+#[test]
+fn soa_body_rules_do_not_invent_floating_or_compact_device_pins() {
+    for deck in [
+        "Floating body\nVd d 0 1\nVg g 0 1\nM1 d g 0 0 MM W=4u L=1u\n.model MM NMOS LEVEL=56 CAPMOD=2\n.end\n",
+        "Compact VDMOS\nVd d 0 1\nVg g 0 1\nM1 d g 0 MM\n.model MM VDMOS NCHAN VTO=2 KP=1\n.end\n",
+    ] {
+        let error = run_soa_analysis_with_config_and_source_path_and_abort(
+            deck,
+            &config(vec![rule(SoAParameter::Ibulk, 1.0, &["M1"], &[])]),
+            None,
+            &NoAbort,
+        )
+        .unwrap_err();
+        assert!(
+            error.to_string().contains("matches no applicable device"),
+            "{error}"
+        );
     }
 }

@@ -884,6 +884,45 @@ pub(super) fn soa_parameter_display(parameter: crate::state::SoaParameterEvidenc
         SoaParameterEvidence::EmitterCurrent => "Ie max",
         SoaParameterEvidence::EmitterCurrentPositive => "Ie + max",
         SoaParameterEvidence::EmitterCurrentNegative => "Ie − max",
+        SoaParameterEvidence::BodySourceVoltage => "Vbs max",
+        SoaParameterEvidence::BodySourceVoltagePositive => "Vbs positive max",
+        SoaParameterEvidence::BodySourceVoltageNegative => "Vbs negative max",
+        SoaParameterEvidence::BodyDrainVoltage => "Vbd max",
+        SoaParameterEvidence::BodyDrainVoltagePositive => "Vbd positive max",
+        SoaParameterEvidence::BodyDrainVoltageNegative => "Vbd negative max",
+        SoaParameterEvidence::GateBodyVoltage => "Vgb max",
+        SoaParameterEvidence::GateBodyVoltagePositive => "Vgb positive max",
+        SoaParameterEvidence::GateBodyVoltageNegative => "Vgb negative max",
+        SoaParameterEvidence::BulkCurrent => "Bulk / body-contact current max",
+        SoaParameterEvidence::BulkCurrentPositive => "Bulk / body-contact current positive max",
+        SoaParameterEvidence::BulkCurrentNegative => "Bulk / body-contact current negative max",
+        SoaParameterEvidence::BackgateSourceVoltage => "Ves (back gate to source) max",
+        SoaParameterEvidence::BackgateSourceVoltagePositive => {
+            "Ves (back gate to source) positive max"
+        }
+        SoaParameterEvidence::BackgateSourceVoltageNegative => {
+            "Ves (back gate to source) negative max"
+        }
+        SoaParameterEvidence::BackgateDrainVoltage => "Ved (back gate to drain) max",
+        SoaParameterEvidence::BackgateDrainVoltagePositive => {
+            "Ved (back gate to drain) positive max"
+        }
+        SoaParameterEvidence::BackgateDrainVoltageNegative => {
+            "Ved (back gate to drain) negative max"
+        }
+        SoaParameterEvidence::GateBackgateVoltage => "Vge (gate to back gate) max",
+        SoaParameterEvidence::GateBackgateVoltagePositive => "Vge (gate to back gate) positive max",
+        SoaParameterEvidence::GateBackgateVoltageNegative => "Vge (gate to back gate) negative max",
+        SoaParameterEvidence::BackgateCurrent => "Back-gate current max",
+        SoaParameterEvidence::BackgateCurrentPositive => "Back-gate current positive max",
+        SoaParameterEvidence::BackgateCurrentNegative => "Back-gate current negative max",
+        SoaParameterEvidence::BodyBackgateVoltage => "Body contact to back gate voltage max",
+        SoaParameterEvidence::BodyBackgateVoltagePositive => {
+            "Body contact to back gate voltage positive max"
+        }
+        SoaParameterEvidence::BodyBackgateVoltageNegative => {
+            "Body contact to back gate voltage negative max"
+        }
     }
 }
 
