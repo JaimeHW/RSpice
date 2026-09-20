@@ -30,6 +30,7 @@ use crate::resource::{ResourceKind, ResourceLimitError, ResourceLimits};
 use std::collections::{BTreeMap, HashMap};
 
 mod confidence;
+pub(crate) use confidence::validate_request as validate_mean_confidence_request;
 pub use confidence::{MeanConfidenceInterval, MeanConfidenceMethod, MonteCarloConfidence};
 
 #[derive(Default)]

@@ -713,3 +713,6 @@ fn monte_carlo_keeps_original_trial_indices_after_convergence_failures() {
         );
     }
 }
+
+#[path = "monte_carlo_engine/measurement_studies.rs"]
+mod measurement_studies;

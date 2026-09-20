@@ -8,6 +8,18 @@ use crate::netlist::{ElementKind, SourceSpec};
 use crate::{Netlist, Value};
 use std::collections::{HashMap, HashSet};
 
+mod measurements;
+pub use measurements::MonteCarloStudyConfig;
+
+/// Sampling inputs shared by voltage and named-measurement studies.
+struct TrialOptions<'a> {
+    num_runs: usize,
+    seed: u64,
+    distribution: Distribution,
+    parameter_filter: Option<&'a [String]>,
+    environment: Option<&'a MonteCarloEnvironment>,
+}
+
 /// Exact operating environment applied to every Monte Carlo trial after any
 /// parameter-driven source reparse.
 #[derive(Debug, Clone, PartialEq)]
@@ -197,6 +209,64 @@ impl Engine {
         environment: Option<MonteCarloEnvironment>,
         abort: &dyn AbortSignal,
     ) -> Result<MonteCarloResult, SimulationError> {
+        let options = TrialOptions {
+            num_runs,
+            seed,
+            distribution,
+            parameter_filter,
+            environment: environment.as_ref(),
+        };
+        let (run_outcomes, sampling) = self.run_monte_carlo_trials_with_abort(
+            netlist,
+            &options,
+            abort,
+            |engine, trial, _, abort| {
+                let result = engine.run_dc_op_with_abort(trial, abort)?;
+                let excluded = (1..result.node_names.len())
+                    .filter(|&node| result.event_only_node_kind(node).is_some())
+                    .collect();
+                Ok((result.node_voltages, result.node_names, excluded))
+            },
+        )?;
+        let successful_trial_indices = run_outcomes
+            .iter()
+            .enumerate()
+            .filter_map(|(index, outcome)| outcome.as_ref().map(|_| index))
+            .collect();
+        let mut result = self.monte_carlo_result_from_observed_trials(
+            run_outcomes.into_iter().flatten(),
+            num_runs,
+        )?;
+        result.successful_trial_indices = Some(successful_trial_indices);
+        result.sampling = Some(sampling);
+        result.compute_mean_confidence(
+            95.0,
+            MeanConfidenceMethod::StudentT,
+            self.config.resource_limits,
+            abort,
+        )?;
+        Ok(result)
+    }
+
+    /// Materialize each circuit once, then let its evaluator run the complete
+    /// analysis and prerequisite chain against that same statistical draw.
+    fn run_monte_carlo_trials_with_abort<T: Send, F>(
+        &self,
+        netlist: &Netlist,
+        options: &TrialOptions<'_>,
+        abort: &dyn AbortSignal,
+        evaluate: F,
+    ) -> Result<(Vec<Option<T>>, MonteCarloSampling), SimulationError>
+    where
+        F: Fn(&Engine, &Netlist, usize, &dyn AbortSignal) -> Result<T, SimulationError> + Sync,
+    {
+        let TrialOptions {
+            num_runs,
+            seed,
+            distribution,
+            parameter_filter,
+            environment,
+        } = *options;
         if abort.is_aborted() {
             return Err(SimulationError::from_abort(abort));
         }
@@ -380,29 +450,23 @@ impl Engine {
         // threads, each with its own engine. Index-addressed slots keep
         // results in run order, so statistics match a serial sweep exactly;
         // failed runs are skipped just as before.
-        // (node voltages, node names) of a converged run; None = failed run.
-        type RunResult = Option<(Vec<Value>, Vec<String>, Vec<usize>)>;
-        type RunOutcome = Result<RunResult, SimulationError>;
+        // None retains the identity of a failed solve or measurement.
+        type RunOutcome<T> = Result<Option<T>, SimulationError>;
 
         let workers = std::thread::available_parallelism()
             .map(|n| n.get())
             .unwrap_or(1)
             .min(self.config.resource_limits.max_parallel_workers)
             .min(num_runs.max(1));
-        let mut run_outcomes: Vec<RunOutcome> = Vec::new();
+        let mut run_outcomes: Vec<RunOutcome<T>> = Vec::new();
         if workers <= 1 {
             for run_index in 0..num_runs {
                 if abort.is_aborted() {
                     return Err(SimulationError::from_abort(abort));
                 }
                 let run_netlist = materialize_run(run_index)?;
-                let outcome = match self.run_dc_op_with_abort(&run_netlist, abort) {
-                    Ok(result) => {
-                        let excluded = (1..result.node_names.len())
-                            .filter(|&node| result.event_only_node_kind(node).is_some())
-                            .collect();
-                        Ok(Some((result.node_voltages, result.node_names, excluded)))
-                    }
+                let outcome = match evaluate(self, &run_netlist, run_index, abort) {
+                    Ok(result) => Ok(Some(result)),
                     Err(error @ SimulationError::Aborted)
                     | Err(error @ SimulationError::TimeLimitExceeded)
                     | Err(error @ SimulationError::ResourceLimit(_))
@@ -419,12 +483,12 @@ impl Engine {
 
             let next = AtomicUsize::new(0);
             let stopped = AtomicBool::new(false);
-            let slots: Vec<Mutex<Option<RunOutcome>>> =
+            let slots: Vec<Mutex<Option<RunOutcome<T>>>> =
                 (0..num_runs).map(|_| Mutex::new(None)).collect();
             let mut worker_config = self.config().clone();
             // Independent Monte Carlo runs already consume the complete
-            // worker budget. Keep each child engine serial so a future
-            // internally parallel DC path cannot multiply the thread count.
+            // worker budget. Keep each child engine serial so the selected
+            // analysis and its prerequisites cannot multiply the thread count.
             worker_config.resource_limits.max_parallel_workers = 1;
 
             std::thread::scope(|scope| {
@@ -447,13 +511,8 @@ impl Engine {
                                     break;
                                 }
                             };
-                            let outcome = match engine.run_dc_op_with_abort(&run_netlist, abort) {
-                                Ok(result) => {
-                                    let excluded = (1..result.node_names.len())
-                                        .filter(|&node| result.event_only_node_kind(node).is_some())
-                                        .collect();
-                                    Ok(Some((result.node_voltages, result.node_names, excluded)))
-                                }
+                            let outcome = match evaluate(&engine, &run_netlist, index, abort) {
+                                Ok(result) => Ok(Some(result)),
                                 Err(error @ SimulationError::Aborted)
                                 | Err(error @ SimulationError::TimeLimitExceeded)
                                 | Err(error @ SimulationError::ResourceLimit(_))
@@ -487,31 +546,17 @@ impl Engine {
             return Err(SimulationError::from_abort(abort));
         }
 
-        let successful_trial_indices = run_outcomes
-            .iter()
-            .enumerate()
-            .filter_map(|(index, outcome)| outcome.as_ref().map(|_| index))
-            .collect();
-        let mut result = self.monte_carlo_result_from_observed_trials(
-            run_outcomes.into_iter().flatten(),
-            num_runs,
-        )?;
-        result.successful_trial_indices = Some(successful_trial_indices);
-        result.sampling = Some(MonteCarloSampling {
-            seed,
-            policy: if has_spectre_statistics {
-                "spectre-coordinate-splitmix64-v1"
-            } else {
-                "parameter-xoroshiro128plus-2018-v1"
+        Ok((
+            run_outcomes,
+            MonteCarloSampling {
+                seed,
+                policy: if has_spectre_statistics {
+                    "spectre-coordinate-splitmix64-v1"
+                } else {
+                    "parameter-xoroshiro128plus-2018-v1"
+                },
             },
-        });
-        result.compute_mean_confidence(
-            95.0,
-            MeanConfidenceMethod::StudentT,
-            self.config.resource_limits,
-            abort,
-        )?;
-        Ok(result)
+        ))
     }
 
     fn apply_monte_carlo_environment(

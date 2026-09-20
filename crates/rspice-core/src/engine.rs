@@ -69,7 +69,9 @@ mod hb;
 mod health;
 mod matrix;
 mod monte_carlo;
-pub use monte_carlo::{MonteCarloEnvironment, apply_supply_voltage_scale_with_abort};
+pub use monte_carlo::{
+    MonteCarloEnvironment, MonteCarloStudyConfig, apply_supply_voltage_scale_with_abort,
+};
 mod node_resolver;
 pub use node_resolver::NodeResolver;
 mod noise;

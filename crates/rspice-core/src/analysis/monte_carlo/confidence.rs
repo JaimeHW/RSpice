@@ -65,7 +65,7 @@ pub struct MonteCarloConfidence {
     pub conditional_on_successful_trials: bool,
 }
 
-pub(super) fn validate_request(
+pub(crate) fn validate_request(
     level_pct: Value,
     method: MeanConfidenceMethod,
     samples: usize,
