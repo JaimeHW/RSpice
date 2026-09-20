@@ -10,6 +10,7 @@
 //! - Complete sampled-rule coverage and exact worst-point retention
 //! - Integration with Schematic and Waveform viewers for visual alerts
 
+use super::{SoaDeratingSamples, SoaPowerDerating, SoaPowerDeratingEvidence, compare_soa_stress};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -432,6 +433,8 @@ pub enum SoaVoltageBasis {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SoALimit {
     #[serde(default)]
+    pub power_derating: Option<SoaPowerDerating>,
+    #[serde(default)]
     pub voltage_basis: SoaVoltageBasis,
     pub parameter: SoAParameter,
     pub max_value: f64,
@@ -492,6 +495,8 @@ pub enum SoARuleVerdict {
 /// Worst observed point and coverage for one device/parameter rule.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SoAEvaluation {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub derating: Option<SoaPowerDeratingEvidence>,
     pub device_id: String,
     pub parameter: SoAParameter,
     pub limit_value: f64,
@@ -520,6 +525,7 @@ pub struct SoAManager {
     /// Kept beside `evaluations` and written in the same step, so a rule's
     /// history can never disagree with the worst point derived from it.
     stress_history: HashMap<(String, SoAParameter), Vec<f64>>,
+    derating_history: HashMap<(String, SoAParameter), SoaDeratingSamples>,
 }
 
 impl Default for SoAManager {
@@ -535,6 +541,7 @@ impl SoAManager {
             violations: Vec::new(),
             evaluations: HashMap::new(),
             stress_history: HashMap::new(),
+            derating_history: HashMap::new(),
         }
     }
 
@@ -568,6 +575,12 @@ impl SoAManager {
                     limit.parameter
                 ));
             }
+            if let Some(curve) = limit.power_derating {
+                curve.validate()?;
+                if limit.parameter != SoAParameter::Pdiss {
+                    return Err("SOA temperature derating applies only to conductive power".into());
+                }
+            }
             if limit.unit.trim().is_empty() || limit.description.trim().is_empty() {
                 return Err(format!(
                     "SOA device '{device_id}' has incomplete {:?} rule metadata",
@@ -587,6 +600,8 @@ impl SoAManager {
     pub fn clear_violations(&mut self) {
         self.violations.clear();
         self.evaluations.clear();
+        self.stress_history.clear();
+        self.derating_history.clear();
     }
 
     /// Check a single measurement point for all registered devices
@@ -608,8 +623,30 @@ impl SoAManager {
                                 limit.parameter
                             ));
                         }
-                        let verdict = rule_verdict(actual, limit.max_value);
+                        let temperature = if limit.power_derating.is_some() {
+                            let temperature = device_values.get(&SoAParameter::Temp).copied().ok_or_else(|| format!("SOA derating for '{device_id}' requires accepted device temperature"))?;
+                            if !temperature.is_finite() || temperature <= 0.0 {
+                                return Err(format!(
+                                    "SOA derating for '{device_id}' requires temperature above absolute zero"
+                                ));
+                            }
+                            Some(temperature)
+                        } else {
+                            None
+                        };
+                        let maximum = limit
+                            .power_derating
+                            .zip(temperature)
+                            .map_or(limit.max_value, |(curve, temperature)| {
+                                curve.limit(limit.max_value, temperature)
+                            });
+                        let verdict = rule_verdict(actual, maximum);
                         let key = (device_id.clone(), limit.parameter);
+                        if let Some(temperature) = temperature {
+                            let history = self.derating_history.entry(key.clone()).or_default();
+                            history.temperatures_kelvin.push(temperature);
+                            history.limits_w.push(maximum);
+                        }
                         self.stress_history
                             .entry(key.clone())
                             .or_default()
@@ -618,9 +655,15 @@ impl SoAManager {
                             self.evaluations
                                 .entry(key)
                                 .or_insert_with(|| SoAEvaluation {
+                                    derating: limit.power_derating.map(|curve| {
+                                        SoaPowerDeratingEvidence {
+                                            rated_power_w: limit.max_value,
+                                            curve,
+                                        }
+                                    }),
                                     device_id: device_id.clone(),
                                     parameter: limit.parameter,
-                                    limit_value: limit.max_value,
+                                    limit_value: maximum,
                                     worst_actual_value: actual,
                                     worst_time: time,
                                     sample_count: 0,
@@ -632,7 +675,15 @@ impl SoAManager {
                             evaluation.sample_count.checked_add(1).ok_or_else(|| {
                                 format!("SOA sample count overflow for device '{device_id}'")
                             })?;
-                        if actual > evaluation.worst_actual_value {
+                        if compare_soa_stress(
+                            actual,
+                            maximum,
+                            evaluation.worst_actual_value,
+                            evaluation.limit_value,
+                        )
+                        .is_gt()
+                        {
+                            evaluation.limit_value = maximum;
                             evaluation.worst_actual_value = actual;
                             evaluation.worst_time = time;
                             evaluation.verdict = verdict;
@@ -647,7 +698,7 @@ impl SoAManager {
                             self.violations.push(SoAViolation {
                                 device_id: device_id.clone(),
                                 parameter: limit.parameter,
-                                limit_value: limit.max_value,
+                                limit_value: maximum,
                                 actual_value: actual,
                                 time,
                                 severity,
@@ -669,6 +720,15 @@ impl SoAManager {
     /// transport these records must impose canonical ordering.
     pub fn evaluations(&self) -> impl Iterator<Item = &SoAEvaluation> {
         self.evaluations.values()
+    }
+
+    pub fn derating_history(
+        &self,
+        device_id: &str,
+        parameter: SoAParameter,
+    ) -> Option<&SoaDeratingSamples> {
+        self.derating_history
+            .get(&(device_id.to_owned(), parameter))
     }
 
     /// The sampled stress history for one evaluated rule, in sample order.
@@ -710,6 +770,7 @@ mod tests {
                 "M1",
                 SoADefinition {
                     limits: vec![SoALimit {
+                        power_derating: None,
                         voltage_basis: Default::default(),
                         parameter: SoAParameter::Vds,
                         max_value: 10.0,
@@ -725,6 +786,7 @@ mod tests {
                     "M1",
                     SoADefinition {
                         limits: vec![SoALimit {
+                            power_derating: None,
                             voltage_basis: Default::default(),
                             parameter: SoAParameter::Vds,
                             max_value: 1.0,
@@ -766,4 +828,76 @@ mod tests {
         assert!(manager.violations().is_empty());
         assert_eq!(manager.evaluations().count(), 0);
     }
+}
+
+#[cfg(test)]
+#[test]
+fn soa_derating_selects_highest_utilization_and_retains_zero_limit_events() {
+    let curve = SoaPowerDerating {
+        reference_temperature_kelvin: 300.0,
+        watts_per_kelvin: 0.01,
+    };
+    let mut manager = SoAManager::new();
+    manager
+        .register_device(
+            "Q1",
+            SoADefinition {
+                limits: vec![SoALimit {
+                    power_derating: Some(curve),
+                    voltage_basis: Default::default(),
+                    parameter: SoAParameter::Pdiss,
+                    max_value: 1.0,
+                    unit: "W".into(),
+                    description: "Rated power".into(),
+                }],
+            },
+        )
+        .unwrap();
+    let values = |power, temp| {
+        HashMap::from([(
+            "Q1".into(),
+            HashMap::from([(SoAParameter::Pdiss, power), (SoAParameter::Temp, temp)]),
+        )])
+    };
+    assert!(
+        manager
+            .check_point(
+                0.0,
+                &HashMap::from([("Q1".into(), HashMap::from([(SoAParameter::Pdiss, 0.8)]))])
+            )
+            .is_err()
+    );
+    for (time, power, temp) in [(0.0, 0.8, 290.0), (1.0, 0.5, 350.0), (2.0, 0.2, 400.0)] {
+        manager.check_point(time, &values(power, temp)).unwrap();
+    }
+    let result = manager.evaluations().next().unwrap();
+    assert_eq!(result.worst_actual_value, 0.2);
+    assert_eq!(result.worst_time, 2.0);
+    assert_eq!(result.limit_value, 0.0);
+    assert_eq!(result.verdict, SoARuleVerdict::Critical);
+    assert!(compare_soa_stress(f64::MAX, 1e-308, 1.0, 0.0).is_lt());
+    assert!(compare_soa_stress(f64::MAX, 1e-308, f64::MAX / 2.0, 1e-310).is_lt());
+    assert!(compare_soa_stress(1e-200, 1e308, 1e-300, 1e100).is_lt());
+    let wire =
+        crate::simulation::runner::worker_contract::WorkerSoAEvaluation::from(result.clone());
+    let wire = serde_json::from_str::<
+        crate::simulation::runner::worker_contract::WorkerSoAEvaluation,
+    >(&serde_json::to_string(&wire).unwrap())
+    .unwrap();
+    assert_eq!(SoAEvaluation::from(wire), *result);
+    assert_eq!(
+        manager
+            .derating_history("Q1", SoAParameter::Pdiss)
+            .unwrap()
+            .limits_w,
+        vec![1.0, 0.5, 0.0]
+    );
+    assert_eq!(manager.violations().len(), 2);
+    manager.clear_violations();
+    assert!(
+        manager
+            .derating_history("Q1", SoAParameter::Pdiss)
+            .is_none()
+    );
+    assert!(manager.stress_history("Q1", SoAParameter::Pdiss).is_none());
 }

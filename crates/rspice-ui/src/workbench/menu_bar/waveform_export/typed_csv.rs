@@ -716,12 +716,19 @@ pub(super) fn prepare_typed_result_csv(
             evaluations,
             violations,
         } => {
+            let dynamic = evaluations
+                .iter()
+                .any(|evaluation| evaluation.derating.is_some());
             let mut contents = String::from(
-                "record,device,parameter,limit_value,actual_value,time_s,sample_count,unit,description,verdict\n",
+                "record,device,parameter,limit_value,actual_value,time_s,sample_count,unit,description,verdict",
             );
+            if dynamic {
+                contents.push_str(",temperature_kelvin,rated_power_w,reference_temperature_kelvin,watts_per_kelvin");
+            }
+            contents.push('\n');
             for evaluation in evaluations {
                 contents.push_str(&format!(
-                    "evaluation,{},{},{:.17e},{:.17e},{:.17e},{},{},{},{}\n",
+                    "evaluation,{},{},{:.17e},{:.17e},{:.17e},{},{},{},{}",
                     csv_text(&evaluation.device_id),
                     soa_parameter_csv(evaluation.parameter),
                     evaluation.limit_value,
@@ -732,10 +739,59 @@ pub(super) fn prepare_typed_result_csv(
                     csv_text(&evaluation.description),
                     soa_verdict_csv(evaluation.verdict),
                 ));
+                if dynamic {
+                    if let Some(derating) = evaluation.derating {
+                        contents.push_str(&format!(
+                            ",,{:.17e},{:.17e},{:.17e}",
+                            derating.rated_power_w,
+                            derating.curve.reference_temperature_kelvin,
+                            derating.curve.watts_per_kelvin
+                        ));
+                    } else {
+                        contents.push_str(",,,,");
+                    }
+                }
+                contents.push('\n');
+                if let Some(derating) = evaluation.derating {
+                    let find =
+                        |name: String| analysis.waveforms.iter().find(|wave| wave.name == name);
+                    let limits = find(crate::services::safety::soa_power_limit_waveform_name(
+                        &evaluation.device_id,
+                    ))?;
+                    let temperatures = find(
+                        crate::services::safety::soa_derating_temperature_waveform_name(
+                            &evaluation.device_id,
+                        ),
+                    )?;
+                    let stress = find(crate::services::safety::soa_stress_waveform_name(
+                        &evaluation.device_id,
+                        crate::services::safety::SoAParameter::Pdiss,
+                    ))?;
+                    for i in 0..stress.x.len() {
+                        let row = [
+                            "sample".into(),
+                            csv_text(&evaluation.device_id),
+                            soa_parameter_csv(evaluation.parameter).into(),
+                            format!("{:.17e}", limits.y[i]),
+                            format!("{:.17e}", stress.y[i]),
+                            format!("{:.17e}", stress.x[i]),
+                            "1".into(),
+                            "W".into(),
+                            "Temperature-derated power".into(),
+                            String::new(),
+                            format!("{:.17e}", temperatures.y[i]),
+                            format!("{:.17e}", derating.rated_power_w),
+                            format!("{:.17e}", derating.curve.reference_temperature_kelvin),
+                            format!("{:.17e}", derating.curve.watts_per_kelvin),
+                        ];
+                        contents.push_str(&row.join(","));
+                        contents.push('\n');
+                    }
+                }
             }
             for violation in violations {
                 contents.push_str(&format!(
-                    "event,{},{},{:.17e},{:.17e},{:.17e},,,,{}\n",
+                    "event,{},{},{:.17e},{:.17e},{:.17e},,,,{}",
                     csv_text(&violation.device_id),
                     soa_parameter_csv(violation.parameter),
                     violation.limit_value,
@@ -743,6 +799,10 @@ pub(super) fn prepare_typed_result_csv(
                     violation.time_s,
                     soa_violation_severity_csv(violation.severity),
                 ));
+                if dynamic {
+                    contents.push_str(",,,,");
+                }
+                contents.push('\n');
             }
             Some(PreparedTypedResultCsv {
                 default_name: "soa-evidence.csv",

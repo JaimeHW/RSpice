@@ -4,6 +4,7 @@ use super::*;
 
 fn rule(parameter: SoAParameter, limit: f64, devices: &[&str], models: &[&str]) -> SoaRuleConfig {
     SoaRuleConfig {
+        power_derating: None,
         voltage_basis: Default::default(),
         parameter,
         max_value: limit,

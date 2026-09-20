@@ -73,6 +73,8 @@ pub(super) struct SoaRuleFacts {
     /// Index into the analysis' waveforms of this rule's verified stress
     /// history, when one is retained.
     stress_waveform: Option<usize>,
+    limit_waveform: Option<usize>,
+    temperature_waveform: Option<usize>,
     /// The worst-interval cell, as the table prints it.
     interval_compact: String,
     /// The same interval, as the inspector prints it.
@@ -129,19 +131,47 @@ fn build_soa_plan(
         .enumerate()
         .map(|(rule, evaluation)| {
             let stress = stress_waveform(analysis, evaluation);
+            let limits = derating_waveform(analysis, evaluation, false);
+            let temperature = derating_waveform(analysis, evaluation, true);
             SoaRuleFacts {
+                limit_waveform: limits.and_then(|found| {
+                    analysis
+                        .waveforms
+                        .iter()
+                        .position(|w| std::ptr::eq(w, found))
+                }),
+                temperature_waveform: temperature.and_then(|found| {
+                    analysis
+                        .waveforms
+                        .iter()
+                        .position(|w| std::ptr::eq(w, found))
+                }),
                 stress_waveform: stress.and_then(|found| {
                     analysis
                         .waveforms
                         .iter()
                         .position(|w| std::ptr::eq(w, found))
                 }),
-                interval_compact: worst_interval_text(stress, evaluation, true),
-                interval_full: worst_interval_text(stress, evaluation, false),
+                interval_compact: worst_interval_text(
+                    stress,
+                    limits.map(|w| w.y.as_slice()),
+                    evaluation,
+                    true,
+                ),
+                interval_full: worst_interval_text(
+                    stress,
+                    limits.map(|w| w.y.as_slice()),
+                    evaluation,
+                    false,
+                ),
                 stress_axes: stress.map(|waveform| {
                     let (x_min, x_max) = padded_range(waveform.x.iter().copied(), None);
                     let (y_min, y_max) = padded_range(
-                        waveform.y.iter().copied(),
+                        waveform
+                            .y
+                            .iter()
+                            .copied()
+                            .chain(limits.into_iter().flat_map(|wave| wave.y.iter().copied())),
                         Some([0.0, evaluation.limit_value, evaluation.worst_actual_value]),
                     );
                     ((x_min.max(0.0), x_max), (y_min.max(0.0), y_max))
@@ -319,7 +349,17 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                 .and_then(|index| analysis.waveforms.get(index))
                 .map(|waveform| (facts, waveform))
         }) {
-            stress_trace_card(ui, &mut state.ui.results, waveform, evaluation, facts);
+            stress_trace_card(
+                ui,
+                &mut state.ui.results,
+                waveform,
+                evaluation,
+                facts,
+                facts.limit_waveform.and_then(|i| analysis.waveforms.get(i)),
+                facts
+                    .temperature_waveform
+                    .and_then(|i| analysis.waveforms.get(i)),
+            );
         } else {
             legacy_stress_history_note(ui);
         }
@@ -558,7 +598,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
             (
                 "Worst interval",
                 facts.map_or_else(
-                    || worst_interval_text(None, evaluation, false),
+                    || worst_interval_text(None, None, evaluation, false),
                     |facts| facts.interval_full.clone(),
                 ),
                 false,
@@ -632,6 +672,25 @@ impl SoaRuleFilter {
     }
 }
 
+fn derating_waveform<'a>(
+    analysis: &'a AnalysisResult,
+    evaluation: &SoaEvaluationEvidence,
+    temperature: bool,
+) -> Option<&'a WaveformData> {
+    evaluation.derating?;
+    let name = if temperature {
+        crate::services::safety::soa_derating_temperature_waveform_name(&evaluation.device_id)
+    } else {
+        crate::services::safety::soa_power_limit_waveform_name(&evaluation.device_id)
+    };
+    let AnalysisResultFamilyMetadata::Soa { time } = analysis.family_metadata.as_ref()? else {
+        return None;
+    };
+    analysis.waveforms.iter().find(|wave| {
+        wave.name == name && wave.x.as_slice() == time.as_slice() && wave.y.len() == time.len()
+    })
+}
+
 fn stress_waveform<'a>(
     analysis: &'a AnalysisResult,
     evaluation: &SoaEvaluationEvidence,
@@ -648,6 +707,10 @@ fn stress_waveform<'a>(
         &evaluation.device_id,
         runtime_parameter(evaluation.parameter),
     );
+    let limits = derating_waveform(analysis, evaluation, false);
+    if evaluation.derating.is_some() && limits.is_none() {
+        return None;
+    }
     analysis.waveforms.iter().find(|waveform| {
         if waveform.name != name
             || waveform.x.as_slice() != time.as_slice()
@@ -664,15 +727,21 @@ fn stress_waveform<'a>(
             return false;
         };
         waveform.y[worst_index].to_bits() == evaluation.worst_actual_value.to_bits()
-            && waveform
-                .y
-                .iter()
-                .all(|value| *value <= evaluation.worst_actual_value)
+            && waveform.y.iter().enumerate().all(|(index, value)| {
+                crate::services::safety::compare_soa_stress(
+                    *value,
+                    limits.map_or(evaluation.limit_value, |wave| wave.y[index]),
+                    evaluation.worst_actual_value,
+                    evaluation.limit_value,
+                )
+                .is_le()
+            })
     })
 }
 
 fn worst_interval_text(
     stress: Option<&WaveformData>,
+    limits: Option<&[f64]>,
     evaluation: &SoaEvaluationEvidence,
     compact: bool,
 ) -> String {
@@ -691,12 +760,16 @@ fn worst_interval_text(
         };
     };
     let worst_index = nearest_sample_index(waveform.x.as_slice(), evaluation.worst_time_s);
-    let threshold = if evaluation.verdict == SoaRuleVerdictEvidence::Warning {
-        evaluation.limit_value * 0.9
-    } else {
-        evaluation.limit_value
+    let threshold = |index: usize| {
+        let limit = limits.map_or(evaluation.limit_value, |limits| limits[index]);
+        if evaluation.verdict == SoaRuleVerdictEvidence::Warning {
+            limit * 0.9
+        } else {
+            limit
+        }
     };
-    let Some((start, end)) = active_interval_indices(waveform.y.as_slice(), worst_index, threshold)
+    let Some((start, end)) =
+        dynamic_active_interval_indices(waveform.y.as_slice(), worst_index, threshold)
     else {
         return if compact {
             format!("worst {:.6e} s", evaluation.worst_time_s)
@@ -717,20 +790,29 @@ fn worst_interval_text(
     }
 }
 
+#[cfg(test)]
 fn active_interval_indices(
     values: &[f64],
     worst_index: usize,
     threshold: f64,
 ) -> Option<(usize, usize)> {
-    if worst_index >= values.len() || values[worst_index] <= threshold {
+    dynamic_active_interval_indices(values, worst_index, |_| threshold)
+}
+
+fn dynamic_active_interval_indices(
+    values: &[f64],
+    worst_index: usize,
+    threshold: impl Fn(usize) -> f64,
+) -> Option<(usize, usize)> {
+    if worst_index >= values.len() || values[worst_index] <= threshold(worst_index) {
         return None;
     }
     let mut start = worst_index;
-    while start > 0 && values[start - 1] > threshold {
+    while start > 0 && values[start - 1] > threshold(start - 1) {
         start -= 1;
     }
     let mut end = worst_index;
-    while end + 1 < values.len() && values[end + 1] > threshold {
+    while end + 1 < values.len() && values[end + 1] > threshold(end + 1) {
         end += 1;
     }
     Some((start, end))
@@ -909,6 +991,8 @@ fn stress_trace_card(
     waveform: &WaveformData,
     evaluation: &SoaEvaluationEvidence,
     facts: &SoaRuleFacts,
+    limits: Option<&WaveformData>,
+    temperatures: Option<&WaveformData>,
 ) {
     let t = Tokens::get(ui.ctx());
     egui::Frame::new()
@@ -953,7 +1037,7 @@ fn stress_trace_card(
                 parameter_label(evaluation.parameter)
             );
             let detail = format!(
-                "Exact retained stress samples with a limit of {:.17e} {} and worst point {:.17e} {} at {:.17e} seconds.",
+                "Exact retained stress samples; limit at the worst point is {:.17e} {}. Worst point {:.17e} {} at {:.17e} seconds. A derated rule uses its retained limit trace at each time.",
                 evaluation.limit_value,
                 evaluation.unit,
                 evaluation.worst_actual_value,
@@ -978,11 +1062,16 @@ fn stress_trace_card(
                 // sample on every frame the card is open.
                 .cache_key(facts.stress_cache_key),
             );
-            spec.limit_lines.push(LimitLine {
-                y: evaluation.limit_value,
-                color: t.color.err,
-                label: format!("LIMIT {:.6e} {}", evaluation.limit_value, evaluation.unit),
-            });
+            if let Some(limits) = limits {
+                spec.traces.push(Trace::new(limits.x.as_slice(), limits.y.as_slice(), t.color.err).cache_key(facts.stress_cache_key ^ 0x7BD3_815F_A904_260C));
+                mono(ui, "Red trace: temperature-derated power limit. Worst point: highest power / allowed-power ratio.");
+            } else {
+                spec.limit_lines.push(LimitLine {
+                    y: evaluation.limit_value,
+                    color: t.color.err,
+                    label: format!("LIMIT {:.6e} {}", evaluation.limit_value, evaluation.unit),
+                });
+            }
             spec.markers.push(Marker::point(
                 evaluation.worst_time_s,
                 evaluation.worst_actual_value,
@@ -991,7 +1080,7 @@ fn stress_trace_card(
             ));
             let readout = |hover_x: f64| {
                 let index = nearest_sample_index(waveform.x.as_slice(), hover_x);
-                vec![
+                let mut readout = vec![
                     ("t".to_owned(), format!("{:.17e} s", waveform.x[index])),
                     (
                         parameter_label(evaluation.parameter).to_owned(),
@@ -1001,11 +1090,16 @@ fn stress_trace_card(
                         "Margin".to_owned(),
                         format!(
                             "{:.17e} {}",
-                            evaluation.limit_value - waveform.y[index],
+                            limits.map_or(evaluation.limit_value, |wave| wave.y[index]) - waveform.y[index],
                             evaluation.unit
                         ),
                     ),
-                ]
+                ];
+                if let Some(temperatures) = temperatures {
+                    readout.push(("Device temperature".into(), format!("{:.17e} K", temperatures.y[index])));
+                    readout.push(("Allowed power".into(), format!("{:.17e} W", limits.expect("derated limit").y[index])));
+                }
+                readout
             };
             let response = ui
                 .allocate_ui(egui::vec2(ui.available_width(), 210.0), |ui| {
@@ -1252,6 +1346,16 @@ mod tests {
         assert_eq!(active_interval_indices(&values, 2, 1.0), Some((1, 2)));
         assert_eq!(active_interval_indices(&values, 4, 1.0), Some((4, 4)));
         assert_eq!(active_interval_indices(&values, 3, 1.0), None);
+        let stress = [0.8, 0.5, 0.2];
+        let limits = [1.0, 0.4, 0.0];
+        assert_eq!(
+            dynamic_active_interval_indices(&stress, 2, |i| limits[i]),
+            Some((1, 2))
+        );
+        assert_eq!(
+            dynamic_active_interval_indices(&stress, 0, |i| limits[i]),
+            None
+        );
     }
 
     /// A retained SOA analysis with `rules` warning rules, each carrying its
@@ -1280,6 +1384,7 @@ mod tests {
                 "#00aaff",
             ));
             evaluations.push(SoaEvaluationEvidence {
+                derating: None,
                 device_id: device_id.clone(),
                 parameter: SoaParameterEvidence::DrainSourceVoltage,
                 limit_value: 3.3,
@@ -1339,12 +1444,12 @@ mod tests {
             assert_eq!(facts.stress_waveform.is_some(), scanned.is_some(), "{rule}");
             assert_eq!(
                 facts.interval_compact,
-                worst_interval_text(scanned, evaluation, true),
+                worst_interval_text(scanned, None, evaluation, true),
                 "{rule}"
             );
             assert_eq!(
                 facts.interval_full,
-                worst_interval_text(scanned, evaluation, false),
+                worst_interval_text(scanned, None, evaluation, false),
                 "{rule}"
             );
             let expected_axes = scanned.map(|waveform| {

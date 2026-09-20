@@ -349,6 +349,8 @@ impl From<WorkerParamShift> for ParamShift {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct WorkerSoAEvaluation {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub derating: Option<crate::services::safety::SoaPowerDeratingEvidence>,
     pub device_id: String,
     pub parameter: WorkerSoAParameter,
     pub limit_value: f64,
@@ -363,13 +365,15 @@ pub(crate) struct WorkerSoAEvaluation {
 #[cfg(test)]
 impl WorkerSoAEvaluation {
     pub(super) fn estimated_numeric_payload_bytes(&self) -> usize {
-        f64_payload_bytes(3).saturating_add(std::mem::size_of::<u64>())
+        f64_payload_bytes(if self.derating.is_some() { 6 } else { 3 })
+            .saturating_add(std::mem::size_of::<u64>())
     }
 }
 
 impl From<SoAEvaluation> for WorkerSoAEvaluation {
     fn from(value: SoAEvaluation) -> Self {
         Self {
+            derating: value.derating,
             device_id: value.device_id,
             parameter: WorkerSoAParameter::from(value.parameter),
             limit_value: value.limit_value,
@@ -386,6 +390,7 @@ impl From<SoAEvaluation> for WorkerSoAEvaluation {
 impl From<WorkerSoAEvaluation> for SoAEvaluation {
     fn from(value: WorkerSoAEvaluation) -> Self {
         Self {
+            derating: value.derating,
             device_id: value.device_id,
             parameter: SoAParameter::from(value.parameter),
             limit_value: value.limit_value,

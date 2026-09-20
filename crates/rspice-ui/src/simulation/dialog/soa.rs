@@ -140,6 +140,14 @@ impl SoaConfig {
                 rule.devices.join(" "),
                 rule.models.join(" ")
             ));
+            if let Some(curve) = rule.power_derating {
+                card.push_str(&format!(
+                    " derating=({} reference_k={} watts_per_k={})",
+                    rule.parameter.stress_code(),
+                    curve.reference_temperature_kelvin,
+                    curve.watts_per_kelvin
+                ));
+            }
         }
         card
     }
@@ -353,6 +361,7 @@ mod tests {
     fn soa_authored_observation_settings_survive_restore_and_full_precision_cards() {
         let config = SoaConfig {
             rules: vec![SoaRuleConfig {
+                power_derating: None,
                 voltage_basis: Default::default(),
                 parameter: crate::services::safety::SoAParameter::Id,
                 max_value: 0.0123456789012345,

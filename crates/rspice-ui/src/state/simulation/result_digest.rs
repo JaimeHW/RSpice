@@ -1052,6 +1052,20 @@ fn encode_result_payload(
                 writer.f64(violation.time_s);
                 writer.u8(soa_violation_severity_tag(violation.severity));
             }
+            if evaluations
+                .iter()
+                .any(|evaluation| evaluation.derating.is_some())
+            {
+                writer.string("soa-power-derating-evidence-v1");
+                writer.sequence(evaluations.len());
+                for evaluation in evaluations {
+                    writer.option(evaluation.derating.as_ref(), |writer, derating| {
+                        writer.f64(derating.rated_power_w);
+                        writer.f64(derating.curve.reference_temperature_kelvin);
+                        writer.f64(derating.curve.watts_per_kelvin);
+                    });
+                }
+            }
         }
         // Tag 12: DC mismatch evidence holds 11. Appended, never reused: these
         // bytes identify every retained result already on disk, and two

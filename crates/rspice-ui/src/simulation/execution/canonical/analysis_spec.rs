@@ -272,6 +272,7 @@ fn soa_legacy_identity_is_preserved_and_every_scoped_rule_field_is_authenticated
         unreachable!()
     };
     rules.push(SoaRuleConfig {
+        power_derating: None,
         voltage_basis: Default::default(),
         parameter: SoAParameter::Vgs,
         max_value: 1e-3,
@@ -292,6 +293,29 @@ fn soa_legacy_identity_is_preserved_and_every_scoped_rule_field_is_authenticated
             _ => rules[0].voltage_basis = crate::services::safety::SoaVoltageBasis::IntrinsicNodes,
         }
         assert_ne!(digest(&changed), digest(&configured), "rule field {field}");
+    }
+
+    let mut derated = configured.clone();
+    let AnalysisSpec::Soa { rules, .. } = &mut derated else {
+        unreachable!()
+    };
+    rules[0].parameter = SoAParameter::Pdiss;
+    rules[0].power_derating = Some(crate::services::safety::SoaPowerDerating {
+        reference_temperature_kelvin: 300.0,
+        watts_per_kelvin: 0.001,
+    });
+    for reference in [true, false] {
+        let mut changed = derated.clone();
+        let AnalysisSpec::Soa { rules, .. } = &mut changed else {
+            unreachable!()
+        };
+        let curve = rules[0].power_derating.as_mut().unwrap();
+        if reference {
+            curve.reference_temperature_kelvin = 320.0;
+        } else {
+            curve.watts_per_kelvin = 0.002;
+        }
+        assert_ne!(digest(&changed), digest(&derated));
     }
 }
 
@@ -768,6 +792,16 @@ pub(super) fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &Analysis
                         rule.voltage_basis
                             == crate::services::safety::SoaVoltageBasis::IntrinsicNodes,
                     );
+                }
+            }
+            if rules.iter().any(|rule| rule.power_derating.is_some()) {
+                writer.string("soa-power-derating-v1");
+                writer.sequence(rules.len());
+                for rule in rules {
+                    writer.option(rule.power_derating.as_ref(), |writer, curve| {
+                        writer.f64(curve.reference_temperature_kelvin);
+                        writer.f64(curve.watts_per_kelvin);
+                    });
                 }
             }
         }

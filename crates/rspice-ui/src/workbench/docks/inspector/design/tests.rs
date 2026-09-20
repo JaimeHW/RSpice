@@ -475,6 +475,7 @@ fn sheet_check_rows_report_real_unconnected_and_floating_counts() {
 #[test]
 fn soa_display_reports_real_worst_margin_and_failures() {
     let pass = crate::state::SoaEvaluationEvidence {
+        derating: None,
         device_id: "M1".to_owned(),
         parameter: crate::state::SoaParameterEvidence::DrainSourceVoltage,
         limit_value: 5.0,
@@ -486,6 +487,7 @@ fn soa_display_reports_real_worst_margin_and_failures() {
         verdict: SoaRuleVerdictEvidence::Pass,
     };
     let warning = crate::state::SoaEvaluationEvidence {
+        derating: None,
         device_id: "M1".to_owned(),
         parameter: crate::state::SoaParameterEvidence::PowerDissipation,
         limit_value: 1.0,

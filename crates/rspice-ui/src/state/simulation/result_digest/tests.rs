@@ -847,6 +847,7 @@ fn reliability_and_soa_evidence_are_field_sensitive_v4_content_identity() {
     let soa = AnalysisResult::new(1, AnalysisType::Soa, "SOA").with_result_payload(
         AnalysisResultPayload::Soa {
             evaluations: vec![SoaEvaluationEvidence {
+                derating: None,
                 device_id: "M1".to_owned(),
                 parameter: SoaParameterEvidence::DrainSourceVoltage,
                 limit_value: 3.3,
@@ -875,6 +876,34 @@ fn reliability_and_soa_evidence_are_field_sensitive_v4_content_identity() {
     evaluations[0].sample_count = 1_002;
     assert_ne!(soa.result_data_digest(), changed_soa.result_data_digest());
     assert_eq!(soa.result_data_digest(), soa.clone().result_data_digest());
+    let mut derated = soa.clone();
+    let Some(AnalysisResultPayload::Soa { evaluations, .. }) = derated.result_payload.as_mut()
+    else {
+        unreachable!()
+    };
+    evaluations[0].parameter = SoaParameterEvidence::PowerDissipation;
+    evaluations[0].unit = "W".into();
+    evaluations[0].derating = Some(crate::services::safety::SoaPowerDeratingEvidence {
+        rated_power_w: 1.0,
+        curve: crate::services::safety::SoaPowerDerating {
+            reference_temperature_kelvin: 300.0,
+            watts_per_kelvin: 0.01,
+        },
+    });
+    for field in 0..3 {
+        let mut changed = derated.clone();
+        let Some(AnalysisResultPayload::Soa { evaluations, .. }) = changed.result_payload.as_mut()
+        else {
+            unreachable!()
+        };
+        let derating = evaluations[0].derating.as_mut().unwrap();
+        match field {
+            0 => derating.rated_power_w = 2.0,
+            1 => derating.curve.reference_temperature_kelvin = 310.0,
+            _ => derating.curve.watts_per_kelvin = 0.02,
+        }
+        assert_ne!(derated.result_data_digest(), changed.result_data_digest());
+    }
 }
 /// Two results whose event histories are identical, one of which says
 /// eight of the conductors are one word.

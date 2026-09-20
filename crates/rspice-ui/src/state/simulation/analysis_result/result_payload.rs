@@ -1,6 +1,7 @@
 //! Validation rules for retained analysis payloads and their numerical evidence.
 
 use super::*;
+mod soa_derating;
 
 pub(super) fn validate_pss_floquet_payload(
     period_s: Option<f64>,
@@ -1294,6 +1295,32 @@ impl AnalysisResult {
                     })
                     .collect::<std::collections::BTreeMap<_, _>>();
                 let mut exact_worst_events = std::collections::BTreeSet::new();
+                let mut derating_event_counts = std::collections::BTreeMap::<_, usize>::new();
+                let mut derating_traces = std::collections::BTreeMap::new();
+                for evaluation in evaluations.iter().filter(|e| e.derating.is_some()) {
+                    let events = soa_derating::validate(self, time, evaluation)?;
+                    let limits = soa_derating::trace(
+                        self,
+                        &crate::services::safety::soa_power_limit_waveform_name(
+                            &evaluation.device_id,
+                        ),
+                        time,
+                        "W",
+                    )?;
+                    let stress = soa_derating::trace(
+                        self,
+                        &crate::services::safety::soa_stress_waveform_name(
+                            &evaluation.device_id,
+                            crate::services::safety::SoAParameter::Pdiss,
+                        ),
+                        time,
+                        "W",
+                    )?;
+                    derating_traces.insert(
+                        (evaluation.device_id.as_str(), evaluation.parameter),
+                        (limits, stress, events),
+                    );
+                }
                 for violation in violations {
                     let key = (violation.device_id.as_str(), violation.parameter);
                     let evaluation = rules.get(&key).ok_or_else(|| {
@@ -1302,13 +1329,36 @@ impl AnalysisResult {
                             violation.device_id
                         )
                     })?;
-                    if !same_retained_float(violation.limit_value, evaluation.limit_value) {
+                    let expected_limit = if let Some((limits, stress, _)) =
+                        derating_traces.get(&key)
+                    {
+                        let index = time
+                            .binary_search_by(|t| t.total_cmp(&violation.time_s))
+                            .map_err(|_| "SOA derating event has no exact retained sample")?;
+                        if !same_retained_float(stress[index], violation.actual_value) {
+                            return Err(
+                                "SOA derating event contradicts its retained stress sample".into(),
+                            );
+                        }
+                        *derating_event_counts.entry(key).or_default() += 1;
+                        limits[index]
+                    } else {
+                        evaluation.limit_value
+                    };
+                    if !same_retained_float(violation.limit_value, expected_limit) {
                         return Err(format!(
                             "SOA event for '{}' contradicts its evaluated rule limit",
                             violation.device_id
                         ));
                     }
-                    if violation.actual_value > evaluation.worst_actual_value {
+                    if crate::services::safety::compare_soa_stress(
+                        violation.actual_value,
+                        violation.limit_value,
+                        evaluation.worst_actual_value,
+                        evaluation.limit_value,
+                    )
+                    .is_gt()
+                    {
                         return Err(format!(
                             "SOA event for '{}' exceeds its retained worst point",
                             violation.device_id
@@ -1343,6 +1393,14 @@ impl AnalysisResult {
                     }
                 }
                 for evaluation in evaluations {
+                    if evaluation.derating.is_some() {
+                        let key = (evaluation.device_id.as_str(), evaluation.parameter);
+                        let expected_events = derating_traces[&key].2;
+                        if derating_event_counts.get(&key).copied().unwrap_or(0) != expected_events
+                        {
+                            return Err("SOA derating events do not cover every retained warning/violation sample".into());
+                        }
+                    }
                     let retained_sample_count = u64::try_from(time.len())
                         .map_err(|_| "SOA time axis exceeds the retained count range".to_owned())?;
                     if evaluation.sample_count != retained_sample_count {

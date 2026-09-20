@@ -805,6 +805,7 @@ fn reliability_payload_requires_canonical_devices_and_exact_lifetime_coverage() 
 #[test]
 fn soa_payload_requires_complete_rule_coverage_consistent_events_and_axis() {
     let evaluation = SoaEvaluationEvidence {
+        derating: None,
         device_id: "M1".to_owned(),
         parameter: SoaParameterEvidence::DrainSourceVoltage,
         limit_value: 3.3,

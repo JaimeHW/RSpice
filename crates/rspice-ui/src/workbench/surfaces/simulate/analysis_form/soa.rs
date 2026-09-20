@@ -125,6 +125,14 @@ pub(super) fn fields(
                 },
                 &mut rule.max_value,
             );
+            if rule.is_power() {
+                switch_row(ui, "Derate power with temperature", &mut rule.derate_power);
+                if rule.derate_power {
+                    input_row(ui, "Reference temperature (°C)", &mut rule.derating_temperature_celsius);
+                    input_row(ui, "Power reduction (W/°C)", &mut rule.derating_watts_per_kelvin);
+                    field_note(ui, "Full rated power applies through the reference temperature. Above it, the allowed power decreases at this rate, down to zero. Uses the model's accepted device temperature, including supported self-heating.");
+                }
+            }
             input_row(ui, "Devices", &mut rule.devices);
             input_row(ui, "Models", &mut rule.models);
             if action_line(ui, "Remove rule") {

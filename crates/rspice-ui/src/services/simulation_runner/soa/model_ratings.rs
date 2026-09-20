@@ -72,6 +72,7 @@ impl Import<'_> {
             return;
         }
         let limit = SoALimit {
+            power_derating: None,
             parameter,
             max_value,
             voltage_basis: self.basis,
@@ -315,6 +316,7 @@ fn soa_model_voltage_override_preserves_opposite_direction_and_reports_missing_r
         check_vbe_max: false,
         check_vce_max: false,
         rules: vec![SoaRuleConfig {
+            power_derating: None,
             parameter: VgbPositive,
             voltage_basis: SoaVoltageBasis::IntrinsicNodes,
             max_value: 3.0,

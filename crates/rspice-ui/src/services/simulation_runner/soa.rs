@@ -118,6 +118,7 @@ impl SoaRunConfig {
 /// The complete sampled stress magnitude behind one evaluated rule.
 #[derive(Debug, Clone)]
 pub struct SoaStressTrace {
+    pub derating: Option<crate::services::safety::SoaDeratingSamples>,
     /// Device the rule constrains.
     pub device_id: String,
     /// Stressed parameter.
@@ -233,7 +234,13 @@ pub fn run_soa_analysis_with_config_and_source_path_and_abort(
         .collect();
     for (index, definition) in &resolved {
         for limit in &definition.limits {
-            if let Some(parameter) = rules::observation_parameter(limit) {
+            for parameter in [
+                rules::observation_parameter(limit),
+                limit.power_derating.map(|_| "temp"),
+            ]
+            .into_iter()
+            .flatten()
+            {
                 let signal = rspice_core::netlist::SaveSignal::DeviceParam {
                     device: flattened.elements[*index].name.clone(),
                     param: parameter.into(),
@@ -276,25 +283,42 @@ pub fn run_soa_analysis_with_config_and_source_path_and_abort(
     let mut observations = HashMap::new();
     for (element_index, definition) in &resolved {
         let element = &flattened.elements[*element_index];
-        for limit in &definition.limits {
-            let key = (
-                *element_index,
-                limit.parameter.base_parameter(),
-                limit.voltage_basis,
+        let requests = definition
+            .limits
+            .iter()
+            .map(|limit| {
+                (
+                    limit.parameter,
+                    limit.voltage_basis,
+                    rules::observation_parameter(limit),
+                )
+            })
+            .chain(
+                definition
+                    .limits
+                    .iter()
+                    .any(|limit| limit.power_derating.is_some())
+                    .then_some((
+                        SoAParameter::Temp,
+                        SoaVoltageBasis::ExternalTerminals,
+                        Some("temp"),
+                    )),
             );
+        for (parameter, basis, device_parameter) in requests {
+            let key = (*element_index, parameter.base_parameter(), basis);
             if observations.contains_key(&key) {
                 continue;
             }
             let samples = if let Some(source) =
-                current_probes.get(&(*element_index, limit.parameter.base_parameter()))
+                current_probes.get(&(*element_index, parameter.base_parameter()))
             {
                 Some(result.try_branch_current_waveform_named(source).ok_or_else(||
                     ServiceRunError::Failure(format!(
                         "SOA requires total terminal current {}({}); the solver returned no trace",
-                        limit.parameter.stress_code(), element.name
+                        parameter.stress_code(), element.name
                     ))
                 )?)
-            } else if let Some(parameter) = rules::observation_parameter(limit) {
+            } else if let Some(parameter) = device_parameter {
                 Some(result.try_device_op_waveform_named(&element.name, parameter)
                     .ok_or_else(|| ServiceRunError::Failure(format!(
                         "SOA requires accepted device observation {}({}); the device returned no trace",
@@ -320,7 +344,7 @@ pub fn run_soa_analysis_with_config_and_source_path_and_abort(
                             element.name
                         )));
                     }
-                    let sample = if limit.parameter == SoAParameter::Temp {
+                    let sample = if parameter == SoAParameter::Temp {
                         let kelvin = rspice_core::constants::celsius_to_kelvin(sample);
                         if !kelvin.is_finite() || kelvin <= 0.0 {
                             return Err(ServiceRunError::Failure(format!(
@@ -407,6 +431,27 @@ pub fn run_soa_analysis_with_config_and_source_path_and_abort(
                 }
                 device_values.insert(limit.parameter, limit.parameter.measured_stress(value));
             }
+            if definition
+                .limits
+                .iter()
+                .any(|limit| limit.power_derating.is_some())
+            {
+                let temperature = observations
+                    .get(&(
+                        *element_index,
+                        SoAParameter::Temp,
+                        SoaVoltageBasis::ExternalTerminals,
+                    ))
+                    .and_then(|trace| trace.get(idx + first))
+                    .copied()
+                    .ok_or_else(|| {
+                        ServiceRunError::Failure(format!(
+                            "SOA derating for '{}' is missing an accepted temperature",
+                            element.name
+                        ))
+                    })?;
+                device_values.insert(SoAParameter::Temp, temperature);
+            }
             values.insert(element.name.clone(), device_values);
         }
 
@@ -453,7 +498,19 @@ pub fn run_soa_analysis_with_config_and_source_path_and_abort(
                 values.len()
             )));
         }
+        let derating = manager
+            .derating_history(&evaluation.device_id, evaluation.parameter)
+            .cloned();
+        if derating.as_ref().is_some_and(|history| {
+            history.limits_w.len() != sample_count
+                || history.temperatures_kelvin.len() != sample_count
+        }) {
+            return Err(ServiceRunError::Failure(
+                "SOA derating history has incomplete sample coverage".into(),
+            ));
+        }
         stress_history.push(SoaStressTrace {
+            derating,
             device_id: evaluation.device_id.clone(),
             parameter: evaluation.parameter,
             values: values.to_vec(),

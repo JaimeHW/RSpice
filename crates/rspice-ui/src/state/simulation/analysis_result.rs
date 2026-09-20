@@ -996,6 +996,8 @@ impl SoaRuleVerdictEvidence {
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SoaEvaluationEvidence {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub derating: Option<crate::services::safety::SoaPowerDeratingEvidence>,
     pub device_id: String,
     pub parameter: SoaParameterEvidence,
     pub limit_value: f64,
@@ -2172,6 +2174,11 @@ impl AnalysisResultPayload {
                 if evaluations.is_empty() {
                     return Err("SOA payload contains no evaluated-rule evidence".to_owned());
                 }
+                let derated_rules = evaluations
+                    .iter()
+                    .filter(|evaluation| evaluation.derating.is_some())
+                    .map(|evaluation| (evaluation.device_id.as_str(), evaluation.parameter))
+                    .collect::<std::collections::BTreeSet<_>>();
                 let mut previous_evaluation: Option<&SoaEvaluationEvidence> = None;
                 for evaluation in evaluations {
                     require_non_empty(&evaluation.device_id, "SOA device identity")?;
@@ -2189,8 +2196,18 @@ impl AnalysisResultPayload {
                             ));
                         }
                     }
+                    if let Some(derating) = evaluation.derating {
+                        derating.validate()?;
+                        if evaluation.parameter != SoaParameterEvidence::PowerDissipation
+                            || evaluation.unit != "W"
+                        {
+                            return Err("SOA temperature derating requires a power-dissipation rule in watts".into());
+                        }
+                    }
                     if evaluation.limit_value < 0.0
-                        || (evaluation.limit_value == 0.0 && !evaluation.parameter.is_directional())
+                        || (evaluation.limit_value == 0.0
+                            && !evaluation.parameter.is_directional()
+                            && evaluation.derating.is_none())
                     {
                         return Err(format!(
                             "SOA evaluation for '{}' has an invalid limit",
@@ -2245,7 +2262,10 @@ impl AnalysisResultPayload {
                         ));
                     }
                     if violation.limit_value < 0.0
-                        || (violation.limit_value == 0.0 && !violation.parameter.is_directional())
+                        || (violation.limit_value == 0.0
+                            && !violation.parameter.is_directional()
+                            && !derated_rules
+                                .contains(&(violation.device_id.as_str(), violation.parameter)))
                         || violation.actual_value < 0.0
                     {
                         return Err(format!(

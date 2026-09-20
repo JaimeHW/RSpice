@@ -94,6 +94,12 @@ const PARAMETERS: [SoAParameter; 83] = [
 #[serde(deny_unknown_fields)]
 pub struct SoaRuleDraft {
     #[serde(default)]
+    pub derate_power: bool,
+    #[serde(default = "default_derating_temperature")]
+    pub derating_temperature_celsius: String,
+    #[serde(default = "default_derating_slope")]
+    pub derating_watts_per_kelvin: String,
+    #[serde(default)]
     pub intrinsic_voltage: bool,
     pub parameter: usize,
     pub max_value: String,
@@ -101,9 +107,19 @@ pub struct SoaRuleDraft {
     pub models: String,
 }
 
+fn default_derating_temperature() -> String {
+    "25".into()
+}
+fn default_derating_slope() -> String {
+    "1m".into()
+}
+
 impl Default for SoaRuleDraft {
     fn default() -> Self {
         Self {
+            derate_power: false,
+            derating_temperature_celsius: default_derating_temperature(),
+            derating_watts_per_kelvin: default_derating_slope(),
             intrinsic_voltage: false,
             parameter: 2,
             max_value: "1.8".into(),
@@ -221,6 +237,18 @@ impl SoaRuleDraft {
 
     pub(super) fn from_config(config: &SoaRuleConfig) -> Self {
         Self {
+            derate_power: config.power_derating.is_some(),
+            derating_temperature_celsius: config
+                .power_derating
+                .map(|curve| {
+                    rspice_core::constants::kelvin_to_celsius(curve.reference_temperature_kelvin)
+                        .to_string()
+                })
+                .unwrap_or_else(default_derating_temperature),
+            derating_watts_per_kelvin: config
+                .power_derating
+                .map(|curve| curve.watts_per_kelvin.to_string())
+                .unwrap_or_else(default_derating_slope),
             intrinsic_voltage: config.voltage_basis
                 == crate::services::safety::SoaVoltageBasis::IntrinsicNodes,
             parameter: PARAMETERS
@@ -254,6 +282,19 @@ impl SoaRuleDraft {
             authored
         };
         let config = SoaRuleConfig {
+            power_derating: if self.is_power() && self.derate_power {
+                Some(crate::services::safety::SoaPowerDerating {
+                    reference_temperature_kelvin: rspice_core::constants::celsius_to_kelvin(
+                        parse_si_value(&self.derating_temperature_celsius).map_err(|e| {
+                            format!("Invalid SOA derating reference temperature: {e}")
+                        })?,
+                    ),
+                    watts_per_kelvin: parse_si_value(&self.derating_watts_per_kelvin)
+                        .map_err(|e| format!("Invalid SOA derating slope: {e}"))?,
+                })
+            } else {
+                None
+            },
             voltage_basis: if self.is_voltage() && self.intrinsic_voltage {
                 crate::services::safety::SoaVoltageBasis::IntrinsicNodes
             } else {

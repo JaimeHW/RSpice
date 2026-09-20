@@ -345,6 +345,24 @@ fn run_soa(
     );
     for trace in &data.stress_history {
         super::ensure_not_aborted(abort)?;
+        if let Some(derating) = &trace.derating {
+            insert_scalar_waveform(
+                &mut waveforms,
+                crate::services::safety::soa_power_limit_waveform_name(&trace.device_id),
+                data.time.clone(),
+                derating.limits_w.clone(),
+                "W",
+                "s",
+            );
+            insert_scalar_waveform(
+                &mut waveforms,
+                crate::services::safety::soa_derating_temperature_waveform_name(&trace.device_id),
+                data.time.clone(),
+                derating.temperatures_kelvin.clone(),
+                "K",
+                "s",
+            );
+        }
         insert_scalar_waveform(
             &mut waveforms,
             crate::services::safety::soa_stress_waveform_name(&trace.device_id, trace.parameter),

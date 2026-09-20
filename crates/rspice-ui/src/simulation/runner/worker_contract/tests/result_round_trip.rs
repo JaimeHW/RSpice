@@ -325,6 +325,7 @@ fn worker_result_round_trip() {
             severity: crate::services::safety::ViolationSeverity::Critical,
         }],
         evaluations: vec![crate::services::safety::SoAEvaluation {
+            derating: None,
             device_id: "M1".to_string(),
             parameter: crate::services::safety::SoAParameter::Vgs,
             limit_value: 1.2,

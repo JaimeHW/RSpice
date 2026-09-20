@@ -993,6 +993,7 @@ fn csv_export_publishes_complete_soa_rules_and_exact_events() {
         .with_family_metadata(AnalysisResultFamilyMetadata::Soa { time: vec![1.0e-6] })
         .with_result_payload(AnalysisResultPayload::Soa {
             evaluations: vec![SoaEvaluationEvidence {
+                derating: None,
                 device_id: "M1".to_owned(),
                 parameter: SoaParameterEvidence::DrainSourceVoltage,
                 limit_value: 3.3,
@@ -2465,4 +2466,86 @@ fn a_dc_mismatch_result_exports_one_exact_row_per_contributor() {
     );
     let csv = prepare_typed_result_csv(&analysis).expect("a differential probe exports too");
     assert!(csv.contents.contains("\"V(OUT,IN)\""), "{}", csv.contents);
+}
+
+#[test]
+fn soa_derating_csv_preserves_each_sample_temperature_and_limit() {
+    use crate::services::safety::{SoaPowerDerating, SoaPowerDeratingEvidence};
+    let mut traces = Vec::new();
+    for (name, unit, values) in [
+        ("SOA_PDISS(Q1)", "W", vec![0.8, 0.5, 0.2]),
+        ("SOA_PDISS_LIMIT(Q1)", "W", vec![1.0, 0.5, 0.0]),
+        ("SOA_PDISS_TEMPERATURE(Q1)", "K", vec![290.0, 350.0, 400.0]),
+    ] {
+        let mut trace = waveform(name, vec![0.0, 1.0, 2.0], values);
+        trace.unit = Some(unit.into());
+        traces.push(trace);
+    }
+    let analysis = AnalysisResult::new(1, AnalysisType::Soa, "Derated SOA")
+        .with_waveforms(traces)
+        .with_family_metadata(AnalysisResultFamilyMetadata::Soa {
+            time: vec![0.0, 1.0, 2.0],
+        })
+        .with_result_payload(AnalysisResultPayload::Soa {
+            evaluations: vec![SoaEvaluationEvidence {
+                derating: Some(SoaPowerDeratingEvidence {
+                    rated_power_w: 1.0,
+                    curve: SoaPowerDerating {
+                        reference_temperature_kelvin: 300.0,
+                        watts_per_kelvin: 0.01,
+                    },
+                }),
+                device_id: "Q1".into(),
+                parameter: SoaParameterEvidence::PowerDissipation,
+                limit_value: 0.0,
+                worst_actual_value: 0.2,
+                worst_time_s: 2.0,
+                sample_count: 3,
+                unit: "W".into(),
+                description: "Derated power".into(),
+                verdict: SoaRuleVerdictEvidence::Critical,
+            }],
+            violations: vec![
+                SoaViolationEvidence {
+                    device_id: "Q1".into(),
+                    parameter: SoaParameterEvidence::PowerDissipation,
+                    limit_value: 0.5,
+                    actual_value: 0.5,
+                    time_s: 1.0,
+                    severity: SoaViolationSeverityEvidence::Warning,
+                },
+                SoaViolationEvidence {
+                    device_id: "Q1".into(),
+                    parameter: SoaParameterEvidence::PowerDissipation,
+                    limit_value: 0.0,
+                    actual_value: 0.2,
+                    time_s: 2.0,
+                    severity: SoaViolationSeverityEvidence::Critical,
+                },
+            ],
+        });
+    analysis.validate_retained_evidence().unwrap();
+    let mut state = state_with_typed_result(analysis);
+    let io = MockExportWorkflowIo::default();
+    action_export_csv_with_io(&mut state, &io);
+    let files = io.text_files.borrow();
+    assert_eq!(files.len(), 1);
+    let csv = &files[0].1;
+    assert!(csv.lines().next().unwrap().ends_with(
+        "temperature_kelvin,rated_power_w,reference_temperature_kelvin,watts_per_kelvin"
+    ));
+    let samples = csv
+        .lines()
+        .filter(|line| line.starts_with("sample,"))
+        .collect::<Vec<_>>();
+    assert_eq!(samples.len(), 3);
+    for (index, line) in samples.iter().enumerate() {
+        let fields = line.split(',').collect::<Vec<_>>();
+        assert_eq!(fields.len(), 14);
+        assert_eq!(fields[3].parse::<f64>().unwrap(), [1.0, 0.5, 0.0][index]);
+        assert_eq!(
+            fields[10].parse::<f64>().unwrap(),
+            [290.0, 350.0, 400.0][index]
+        );
+    }
 }

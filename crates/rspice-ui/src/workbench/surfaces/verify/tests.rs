@@ -1837,6 +1837,7 @@ fn soa_evidence_analysis() -> AnalysisResult {
             "#00aaff",
         ));
         evaluations.push(SoaEvaluationEvidence {
+            derating: None,
             device_id: device_id.clone(),
             parameter: SoaParameterEvidence::DrainSourceVoltage,
             limit_value: 3.3,
