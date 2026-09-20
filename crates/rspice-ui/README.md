@@ -108,6 +108,16 @@ retained state. Consumer frequency axes, explicit frequencies, lattices, drive
 magnitude/phase, source/output selections, group delay, noise filters, integration
 bands and solver controls survive worker transport and participate in result identity.
 
+A configured QP study captures the QPSS producer's exact bound operating-point
+instance, including its initialization policy, previous-state payload, convergence
+controls, numerical overrides and resolved temperature/supply point. DC initialization
+runs that OP on each varied candidate and seeds the full node-voltage/branch-current
+state. OP and QPSS numerical overrides stay separate. Zero initialization uses the
+same physical temperature and supply point without solving an OP or adding a DC seed.
+A study Run Set scales its explicitly selected supply sources once; OP temperature
+modes that follow the Run Set inherit its temperature, while an explicit OP temperature
+remains fixed. QPAC/QPXF/QPNOISE consume the orbit and physical circuit from that trial.
+
 For QPSS, `tuple:1,-1:magnitude:V(out)` selects the named lattice component;
 `real`, `imag` and `phase` (degrees) are also available. Negative tuples retain
 conjugate phase, and DC remains signed. Coordinates must belong to the configured
