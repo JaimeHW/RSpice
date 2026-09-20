@@ -290,6 +290,7 @@ pub(in crate::simulation) fn retain_plan_saved_outputs(
             crate::state::AnalysisResultPayload::Qpss { .. }
                 | crate::state::AnalysisResultPayload::Qpac { .. }
                 | crate::state::AnalysisResultPayload::Qpxf { .. }
+                | crate::state::AnalysisResultPayload::Qpnoise { .. }
         )
     ) && contracts
         .iter()

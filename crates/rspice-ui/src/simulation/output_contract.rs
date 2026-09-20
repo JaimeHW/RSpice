@@ -411,7 +411,11 @@ pub(in crate::simulation) fn output_kind_supports_run_type(
     run_type: AnalysisRunType,
 ) -> bool {
     match kind {
-        SavedOutputKind::DerivedExpression if run_type == AnalysisRunType::Qpxf => true,
+        SavedOutputKind::DerivedExpression
+            if matches!(run_type, AnalysisRunType::Qpxf | AnalysisRunType::Qpnoise) =>
+        {
+            true
+        }
         SavedOutputKind::RawVoltageOrCurrent | SavedOutputKind::DerivedExpression => matches!(
             run_type,
             AnalysisRunType::DcOp
@@ -884,6 +888,16 @@ fn resolve_contract_waveform(
             resolve_device_quantity(&contract.source_expression, analysis, &contract.name)
         }
         SavedOutputKind::NoiseContributor => {
+            // Typed noise names include output tuples and mechanism labels. A
+            // quoted reference preserves that complete identity and its units.
+            if let Ok(calculator::ast::CalculatorExpr::WaveformRef {
+                signal,
+                dataset: None,
+            }) = calculator::parser::try_parse(&contract.source_expression)
+                && contract.source_expression.trim_start().starts_with('"')
+            {
+                return clone_named_waveform(waveforms, &signal, &contract.name);
+            }
             let source = format!("noise({})", contract.source_expression.trim());
             clone_named_waveform(waveforms, &source, &contract.name).or_else(|_| {
                 clone_named_waveform(waveforms, &contract.source_expression, &contract.name)

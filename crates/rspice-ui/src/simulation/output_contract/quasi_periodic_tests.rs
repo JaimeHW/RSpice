@@ -223,3 +223,66 @@ fn quasi_periodic_saved_outputs_bind_qpxf_quoted_transfers_and_delay_after_reloa
     }
     assert!(retained.validate_retained_evidence().is_err());
 }
+
+#[test]
+fn qpnoise_result_saved_output_selection_and_deferred_reload_keep_complete_noise_evidence() {
+    let original = SimulationResult::qpnoise_retained_test_fixture();
+    let spec = crate::simulation::plan::QuasiPeriodicNoiseDraft::default()
+        .to_spec()
+        .unwrap();
+    let spectrum = original
+        .waveforms
+        .iter()
+        .find(|w| {
+            w.name.starts_with("PSD(")
+                && !w.name.contains("source")
+                && w.unit.as_deref() == Some("A²/Hz")
+        })
+        .unwrap();
+    let contributor = original
+        .waveforms
+        .iter()
+        .find(|w| w.name.starts_with("PSD(") && w.name.contains("source"))
+        .unwrap();
+    let selected = output(
+        SavedOutputKind::DerivedExpression,
+        "Selected noise",
+        &format!("{:?}", spectrum.name),
+    );
+    let mut deferred = output(
+        SavedOutputKind::NoiseContributor,
+        "Deferred mechanism",
+        &format!("{:?}", contributor.name),
+    );
+    deferred.save_policy = SavedOutputPolicy::OnDemandFromRetainedState;
+    let id = AnalysisInstanceId::new();
+    let contracts = [
+        prepared(&selected, &spec, id),
+        prepared(&deferred, &spec, id),
+    ];
+    let mut retained = original.clone();
+    apply_saved_output_policy(
+        &mut retained,
+        policy(OutputSelectionMode::ExplicitOnly),
+        &contracts,
+    );
+    assert_eq!(
+        retained.waveforms.len(),
+        1,
+        "{:?}",
+        retained.saved_output_receipts
+    );
+    let mut retained = reload(retained);
+    assert_eq!(retained.waveforms[0].y, spectrum.y);
+    assert_eq!(retained.waveforms[0].unit, spectrum.unit);
+    materialize_deferred_saved_output(&mut retained, 1).unwrap();
+    let saved = retained
+        .waveforms
+        .iter()
+        .find(|w| w.name == "Deferred mechanism")
+        .unwrap();
+    assert_eq!(saved.y, contributor.y);
+    assert_eq!(saved.x, contributor.x);
+    assert_eq!(retained.result_payload, original.result_payload);
+    retained.validate_retained_evidence().unwrap();
+}
