@@ -276,6 +276,9 @@ pub struct ResistorFlickerNoise {
 /// Resistor storage (SoA layout for cache efficiency)
 #[derive(Debug, Default, Clone)]
 pub struct Resistors {
+    /// Compact-device owner of a builder-lowered series resistor, if any.
+    /// Aligned with `names`; ordinary authored resistors have no owner.
+    pub(crate) device_owners: Vec<Option<String>>,
     /// Device names
     pub names: Vec<String>,
     /// Pre-computed stamp locations
@@ -321,6 +324,18 @@ impl Resistors {
         self.add_with_small_signal(name, node_pos, node_neg, resistance, resistance);
     }
 
+    pub(crate) fn add_device_series(
+        &mut self,
+        owner: &str,
+        name: String,
+        node_pos: NodeId,
+        node_neg: NodeId,
+        resistance: Value,
+    ) {
+        self.add(name, node_pos, node_neg, resistance);
+        *self.device_owners.last_mut().expect("just-added resistor") = Some(owner.to_owned());
+    }
+
     pub fn add_with_small_signal(
         &mut self,
         name: String,
@@ -356,6 +371,7 @@ impl Resistors {
             small_signal_resistance,
             reported_resistance,
         } = values;
+        self.device_owners.push(None);
         self.names.push(name);
         self.stamps.push(TwoTerminalStamp::new(node_pos, node_neg));
         self.conductances.push(1.0 / resistance);

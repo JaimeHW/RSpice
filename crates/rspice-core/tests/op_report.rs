@@ -621,3 +621,167 @@ fn native_transistor_temperature_reports_cover_all_families_and_soi_self_heating
         );
     }
 }
+
+#[test]
+fn conductive_power_observations_balance_native_devices_and_owned_series_losses() {
+    use rspice_core::netlist::ElementKind;
+    let engine = Engine::new(SimulationConfig::default());
+    for (family, deck) in family_decks()
+        .into_iter()
+        .filter(|(family, _)| !matches!(*family, "RESISTOR" | "CAPACITOR"))
+    {
+        let deck = deck
+            .replace(
+                "LEVEL=1 VTO=1 KP=100u",
+                "LEVEL=1 VTO=1 KP=100u RD=100 RS=50",
+            )
+            .replace("level=49", "level=49 RSH=100")
+            .replace(
+                "level=54 version=4.8",
+                "level=54 version=4.8 RSH=100 RGATEMOD=1 RSHG=10",
+            )
+            .replace("capmod=2", "capmod=2 RSH=100")
+            .replace("IS=1e-15 BF=100", "IS=1e-15 BF=100 RC=20 RB=50 RE=10")
+            .replace("VTO=-2 BETA=1e-4", "VTO=-2 BETA=1e-4 RD=20 RS=10")
+            .replace("D IS=1e-14 N=1.5", "D IS=1e-14 N=1.5 RS=20");
+        let netlist = Netlist::parse(&deck).unwrap();
+        let (op, report) = engine.run_dc_op_with_report(&netlist).unwrap();
+        let mut expected = 0.0;
+        for element in &netlist.elements {
+            let voltage = || {
+                op.try_voltage_named(&element.nodes[0]).unwrap()
+                    - op.try_voltage_named(&element.nodes[1]).unwrap()
+            };
+            match element.kind {
+                ElementKind::VoltageSource(_) => {
+                    expected -= voltage() * op.branch_current_named(&element.name).unwrap()
+                }
+                ElementKind::Resistor { value, .. } => expected -= voltage().powi(2) / value,
+                _ => (),
+            }
+        }
+        let entry = report
+            .entries
+            .iter()
+            .find(|entry| entry.device_kind == family)
+            .unwrap();
+        let power = entry
+            .params
+            .iter()
+            .find(|(label, _)| *label == "power")
+            .unwrap()
+            .1;
+        assert!(expected > 0.0);
+        assert!(
+            (power - expected).abs() < 1e-10 + expected.abs() * 1e-5,
+            "{family}: {power} vs {expected}"
+        );
+    }
+    // Thermal-node equations are measured in W/K rather than A/V and must
+    // never be included in the electrical power sum.
+    for level in [55, 56, 57] {
+        let deck = format!(
+            "SOI conductive power\nM1 d g 0 0 nm W=10u L=.35u\nVd d 0 1.5\nVg g 0 1.5\n.model nm NMOS LEVEL={level} SHMOD=1 RTH0=.01 CTH0=1e-6 CAPMOD=2 RSH=100\n.end\n"
+        );
+        let (op, report) = engine
+            .run_dc_op_with_report(&Netlist::parse(&deck).unwrap())
+            .unwrap();
+        let expected = -1.5
+            * (op.branch_current_named("Vd").unwrap() + op.branch_current_named("Vg").unwrap());
+        let actual = report
+            .entries
+            .iter()
+            .find(|entry| entry.name == "M1")
+            .unwrap()
+            .params
+            .iter()
+            .find(|(label, _)| *label == "power")
+            .unwrap()
+            .1;
+        assert!(
+            (actual - expected).abs() < 1e-10 + expected.abs() * 1e-5,
+            "SOI {level}: {actual} vs {expected}"
+        );
+    }
+    for level in [55, 56, 57] {
+        let deck = |ic: &str, sources: &str| {
+            format!(
+                "SOI IC power\nM1 d g 0 0 nm W=10u L=.35u {ic}\nRd d 0 1meg\nRg g 0 1meg\n{sources}\n.model nm NMOS LEVEL={level} CAPMOD=2\n.end\n"
+            )
+        };
+        let (_, constrained) = engine
+            .run_dc_op_with_report(&Netlist::parse(&deck("IC=.5,1", "")).unwrap())
+            .unwrap();
+        let (_, reference) = engine
+            .run_dc_op_with_report(&Netlist::parse(&deck("", "Vd d 0 .5\nVg g 0 1")).unwrap())
+            .unwrap();
+        let power = |report: &rspice_core::circuit::DeviceOpReport| {
+            report
+                .entries
+                .iter()
+                .find(|entry| entry.name == "M1")
+                .unwrap()
+                .params
+                .iter()
+                .find(|(label, _)| *label == "power")
+                .unwrap()
+                .1
+        };
+        let actual = power(&constrained);
+        let expected = power(&reference);
+        assert!(expected > 0.0);
+        assert!(
+            (actual - expected).abs() < 1e-10 + expected * 1e-5,
+            "IC {level}: {actual} vs {expected}"
+        );
+    }
+    let netlist = Netlist::parse("VBIC conductive power\nVc c 0 1.2\nVb b 0 .65\nVth th 0 30\nQ1 c b 0 th vm SW_ET=1\n.model vm NPN LEVEL=11 IS=1e-16 IBEI=1e-18 IBCI=1e-18 RCI=5 RBI=10 RTH=1000\n.end\n").unwrap();
+    let (op, report) = engine.run_dc_op_with_report(&netlist).unwrap();
+    let expected = -1.2 * op.branch_current_named("Vc").unwrap()
+        - 0.65 * op.branch_current_named("Vb").unwrap();
+    let actual = report
+        .entries
+        .iter()
+        .find(|entry| entry.name == "Q1")
+        .unwrap()
+        .params
+        .iter()
+        .find(|(label, _)| *label == "power")
+        .unwrap()
+        .1;
+    assert!(
+        (actual - expected).abs() < 1e-10 + expected.abs() * 1e-5,
+        "VBIC: {actual} vs {expected}"
+    );
+}
+
+#[test]
+fn conductive_power_excludes_capacitor_energy_but_keeps_switching_series_loss() {
+    let engine = Engine::new(SimulationConfig::default());
+    for (kind, sign) in [("NMOS", 1.0), ("PMOS", -1.0)] {
+        let netlist = Netlist::parse(&format!("Capacitive switching loss\nVd d 0 0\nVg g 0 PWL(0 0 2n 0 6n {sign} 10n 0)\nM1 d g 0 0 mm W=1 L=1\n.model mm {kind} LEVEL=1 VTO={} KP=0 IS=1e-30 RD=10 CGDO=1n\n.options GMIN=0\n.save V(g) @M1[power] I(Vd) I(Vg)\n.end\n",sign*100.0)).unwrap();
+        let result = engine.run_tran(&netlist, 12e-9, 0.2e-9).unwrap();
+        let power = result.try_device_op_waveform_named("M1", "power").unwrap();
+        let drain = result.try_branch_current_waveform_named("Vd").unwrap();
+        let gate = result.try_branch_current_waveform_named("Vg").unwrap();
+        let voltage = result.try_voltage_waveform_named("g").unwrap();
+        assert_eq!(power.len(), result.time.len());
+        let mut switched = false;
+        let mut released = false;
+        for i in 0..power.len() {
+            let expected = 10.0 * drain[i].powi(2);
+            assert!(
+                (power[i] - expected).abs() < 1e-10 + 1e-6 * expected,
+                "{kind} t={}: {} vs {expected}",
+                result.time[i],
+                power[i]
+            );
+            switched |= expected > 1e-4;
+            released |= -gate[i] * voltage[i] < -1e-4 && power[i] > 1e-5;
+        }
+        assert!(
+            switched && released,
+            "{kind}: must exercise charging and energy return"
+        );
+    }
+}

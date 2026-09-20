@@ -6489,7 +6489,13 @@ impl Engine {
                         let aint_name = format!("{}.__aint", element.name);
                         let aint = circuit.get_or_create_node(&aint_name);
                         let rs_name = format!("{}.__rs", element.name);
-                        circuit.resistors.add(rs_name, anode, aint, diode.rs);
+                        circuit.resistors.add_device_series(
+                            &element.name,
+                            rs_name,
+                            anode,
+                            aint,
+                            diode.rs,
+                        );
                         diode.node_anode = aint;
                         diode.rs = 0.0;
                         // dionoise.c heats the RS thermal source by the
@@ -6749,7 +6755,13 @@ impl Engine {
                             let cint_name = format!("{}.__cint", element.name);
                             let cint = circuit.get_or_create_node(&cint_name);
                             let rc_name = format!("{}.__rc", element.name);
-                            circuit.resistors.add(rc_name, collector, cint, bjt.rcx);
+                            circuit.resistors.add_device_series(
+                                &element.name,
+                                rc_name,
+                                collector,
+                                cint,
+                                bjt.rcx,
+                            );
                             bjt.externalize_legacy_collector_lead(cint, bjt.rcx);
                             bjt.clear_collector_series_resistance();
                             if bjt.noise_temperature_offset != 0.0 {
@@ -6762,7 +6774,13 @@ impl Engine {
                             let eint_name = format!("{}.__eint", element.name);
                             let eint = circuit.get_or_create_node(&eint_name);
                             let re_name = format!("{}.__re", element.name);
-                            circuit.resistors.add(re_name, emitter, eint, bjt.re);
+                            circuit.resistors.add_device_series(
+                                &element.name,
+                                re_name,
+                                emitter,
+                                eint,
+                                bjt.re,
+                            );
                             bjt.externalize_legacy_emitter_lead(eint, bjt.re);
                             bjt.clear_emitter_series_resistance();
                             if bjt.noise_temperature_offset != 0.0 {
@@ -6784,7 +6802,13 @@ impl Engine {
                             let bint_name = format!("{}.__bint", element.name);
                             let bint = circuit.get_or_create_node(&bint_name);
                             let rb_name = format!("{}.__rb", element.name);
-                            circuit.resistors.add(rb_name, base, bint, bjt.rbx);
+                            circuit.resistors.add_device_series(
+                                &element.name,
+                                rb_name,
+                                base,
+                                bint,
+                                bjt.rbx,
+                            );
                             bjt.externalize_legacy_base_lead(bint, bjt.rbx);
                             bjt.clear_base_constant_resistance();
                             if bjt.noise_temperature_offset != 0.0 {
@@ -7457,7 +7481,13 @@ impl Engine {
                         let dint_name = format!("{}.__dint", element.name);
                         let dint = circuit.get_or_create_node(&dint_name);
                         let rd_name = format!("{}.__rd", element.name);
-                        circuit.resistors.add(rd_name, drain, dint, drain_r);
+                        circuit.resistors.add_device_series(
+                            &element.name,
+                            rd_name,
+                            drain,
+                            dint,
+                            drain_r,
+                        );
                         mosfet.node_drain = dint;
                         circuit.mosfets.series_leads.push((
                             circuit.mosfets.len(),
@@ -7476,7 +7506,13 @@ impl Engine {
                         let sint_name = format!("{}.__sint", element.name);
                         let sint = circuit.get_or_create_node(&sint_name);
                         let rs_name = format!("{}.__rs", element.name);
-                        circuit.resistors.add(rs_name, source, sint, source_r);
+                        circuit.resistors.add_device_series(
+                            &element.name,
+                            rs_name,
+                            source,
+                            sint,
+                            source_r,
+                        );
                         mosfet.node_source = sint;
                         circuit.mosfets.series_leads.push((
                             circuit.mosfets.len(),
@@ -7634,7 +7670,13 @@ impl Engine {
                         let dint_name = format!("{}.__dint", element.name);
                         let dint = circuit.get_or_create_node(&dint_name);
                         let rd_name = format!("{}.__rd", element.name);
-                        circuit.resistors.add(rd_name, drain, dint, rd);
+                        circuit.resistors.add_device_series(
+                            &element.name,
+                            rd_name,
+                            drain,
+                            dint,
+                            rd,
+                        );
                         jfet.drain = dint;
                         jfet.params.rd = 0.0;
                         jfet.external_lead_conductances[0] = 1.0 / rd;
@@ -7648,7 +7690,13 @@ impl Engine {
                         let sint_name = format!("{}.__sint", element.name);
                         let sint = circuit.get_or_create_node(&sint_name);
                         let rs_name = format!("{}.__rs", element.name);
-                        circuit.resistors.add(rs_name, source, sint, rs);
+                        circuit.resistors.add_device_series(
+                            &element.name,
+                            rs_name,
+                            source,
+                            sint,
+                            rs,
+                        );
                         jfet.source = sint;
                         jfet.params.rs = 0.0;
                         jfet.external_lead_conductances[1] = 1.0 / rs;
@@ -7936,7 +7984,13 @@ impl Engine {
                         let dint_name = format!("{}.__dint", element.name);
                         let dint = circuit.get_or_create_node(&dint_name);
                         let rd_name = format!("{}.__rd", element.name);
-                        circuit.resistors.add(rd_name, drain, dint, rd);
+                        circuit.resistors.add_device_series(
+                            &element.name,
+                            rd_name,
+                            drain,
+                            dint,
+                            rd,
+                        );
                         jfet.drain = dint;
                         jfet.params.rd = 0.0;
                         jfet.external_lead_conductances[0] = 1.0 / rd;
@@ -7950,7 +8004,13 @@ impl Engine {
                         let sint_name = format!("{}.__sint", element.name);
                         let sint = circuit.get_or_create_node(&sint_name);
                         let rs_name = format!("{}.__rs", element.name);
-                        circuit.resistors.add(rs_name, source, sint, rs);
+                        circuit.resistors.add_device_series(
+                            &element.name,
+                            rs_name,
+                            source,
+                            sint,
+                            rs,
+                        );
                         jfet.source = sint;
                         jfet.params.rs = 0.0;
                         jfet.external_lead_conductances[1] = 1.0 / rs;

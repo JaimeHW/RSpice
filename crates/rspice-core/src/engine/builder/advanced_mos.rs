@@ -114,7 +114,8 @@ impl Engine {
                     ))
                 })?;
                 if sized.grgeltd.is_finite() && sized.grgeltd > 0.0 {
-                    circuit.resistors.add(
+                    circuit.resistors.add_device_series(
+                        &element.name,
                         format!("{}.__rg", element.name),
                         node_gate_external,
                         gate_prime,
@@ -130,7 +131,8 @@ impl Engine {
         let drain_resistance = model.sheet_resistance * geom.drain_squares;
         let node_drain = if drain_resistance.is_finite() && drain_resistance > 0.0 {
             let dint = circuit.get_or_create_node(&format!("{}.__dint", element.name));
-            circuit.resistors.add(
+            circuit.resistors.add_device_series(
+                &element.name,
                 format!("{}.__rd", element.name),
                 node_drain_external,
                 dint,
@@ -143,7 +145,8 @@ impl Engine {
         let source_resistance = model.sheet_resistance * geom.source_squares;
         let node_source = if source_resistance.is_finite() && source_resistance > 0.0 {
             let sint = circuit.get_or_create_node(&format!("{}.__sint", element.name));
-            circuit.resistors.add(
+            circuit.resistors.add_device_series(
+                &element.name,
                 format!("{}.__rs", element.name),
                 node_source_external,
                 sint,
@@ -285,7 +288,8 @@ impl Engine {
         let drain_resistance = model.sheet_resistance * geom.drain_squares;
         let node_drain = if drain_resistance.is_finite() && drain_resistance > 0.0 {
             let dint = circuit.get_or_create_node(&format!("{}.__dint", element.name));
-            circuit.resistors.add(
+            circuit.resistors.add_device_series(
+                &element.name,
                 format!("{}.__rd", element.name),
                 node_drain_external,
                 dint,
@@ -298,7 +302,8 @@ impl Engine {
         let source_resistance = model.sheet_resistance * geom.source_squares;
         let node_source = if source_resistance.is_finite() && source_resistance > 0.0 {
             let sint = circuit.get_or_create_node(&format!("{}.__sint", element.name));
-            circuit.resistors.add(
+            circuit.resistors.add_device_series(
+                &element.name,
                 format!("{}.__rs", element.name),
                 node_source_external,
                 sint,
@@ -454,7 +459,8 @@ impl Engine {
         let drain_resistance = model.sheet_resistance * geom.drain_squares;
         let node_drain = if drain_resistance.is_finite() && drain_resistance > 0.0 {
             let dint = circuit.get_or_create_node(&format!("{}.__dint", element.name));
-            circuit.resistors.add(
+            circuit.resistors.add_device_series(
+                &element.name,
                 format!("{}.__rd", element.name),
                 node_drain_external,
                 dint,
@@ -467,7 +473,8 @@ impl Engine {
         let source_resistance = model.sheet_resistance * geom.source_squares;
         let node_source = if source_resistance.is_finite() && source_resistance > 0.0 {
             let sint = circuit.get_or_create_node(&format!("{}.__sint", element.name));
-            circuit.resistors.add(
+            circuit.resistors.add_device_series(
+                &element.name,
                 format!("{}.__rs", element.name),
                 node_source_external,
                 sint,
@@ -775,7 +782,8 @@ impl Engine {
         // (drain_conductance = 1/(RSH*NRD) > 0, b3temp.c:811-851).
         let drain = if core.inst.drain_conductance > 0.0 {
             let dint = circuit.get_or_create_node(&format!("{}.__dint", element.name));
-            circuit.resistors.add(
+            circuit.resistors.add_device_series(
+                &element.name,
                 format!("{}.__rd", element.name),
                 drain_external,
                 dint,
@@ -787,7 +795,8 @@ impl Engine {
         };
         let source = if core.inst.source_conductance > 0.0 {
             let sint = circuit.get_or_create_node(&format!("{}.__sint", element.name));
-            circuit.resistors.add(
+            circuit.resistors.add_device_series(
+                &element.name,
                 format!("{}.__rs", element.name),
                 source_external,
                 sint,
@@ -1088,7 +1097,8 @@ impl Engine {
             circuit.get_or_create_node(&format!("{}.__dint", element.name))
         } else if core.inst.drain_conductance > 0.0 {
             let dint = circuit.get_or_create_node(&format!("{}.__dint", element.name));
-            circuit.resistors.add(
+            circuit.resistors.add_device_series(
+                &element.name,
                 format!("{}.__rd", element.name),
                 drain_external,
                 dint,
@@ -1102,7 +1112,8 @@ impl Engine {
             circuit.get_or_create_node(&format!("{}.__sint", element.name))
         } else if core.inst.source_conductance > 0.0 {
             let sint = circuit.get_or_create_node(&format!("{}.__sint", element.name));
-            circuit.resistors.add(
+            circuit.resistors.add_device_series(
+                &element.name,
                 format!("{}.__rs", element.name),
                 source_external,
                 sint,
@@ -1115,7 +1126,8 @@ impl Engine {
         let (gate_mid, gate) = match core.model.rgate_mod {
             1 => {
                 let gint = circuit.get_or_create_node(&format!("{}.__gint", element.name));
-                circuit.resistors.add(
+                circuit.resistors.add_device_series(
+                    &element.name,
                     format!("{}.__rg", element.name),
                     gate_external,
                     gint,
@@ -1130,7 +1142,8 @@ impl Engine {
             3 => {
                 let gmid = circuit.get_or_create_node(&format!("{}.__gmid", element.name));
                 let gint = circuit.get_or_create_node(&format!("{}.__gint", element.name));
-                circuit.resistors.add(
+                circuit.resistors.add_device_series(
+                    &element.name,
                     format!("{}.__rg", element.name),
                     gate_external,
                     gmid,
