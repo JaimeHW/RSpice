@@ -66,6 +66,29 @@ Other user-facing machinery, all verified in source:
   module, not in the application; production issuance is the platform
   backend's cold-key flow.
 
+## Monte Carlo parameter bounds and truncation
+
+Custom parameter distributions support optional absolute lower and upper bounds.
+Gaussian and lognormal variations also support a symmetric sigma cutoff; for
+lognormal this applies in log space around the nominal median. Both constraints
+are intersected when supplied together. Bounds apply after each process or
+mismatch draw; mismatch uses that instance's process-shifted nominal.
+
+The sampler rejects draws outside the bounds rather than clipping them to an
+endpoint. Correlated parameters are redrawn together, while independent variables
+retain separate keyed streams. Authored Pearson correlations describe the
+population before conditioning: truncation can change means, variances and
+correlations. Replay retains the same bounded draw for the same trial identity.
+
+Maximum sampling attempts is configurable from 1 to 1,000,000 (default 10,000).
+A correlated group uses the smallest limit of its bounded members. Empty support,
+incompatible singular correlations, or an exhausted attempt limit produce an
+explicit error. Extremely narrow or remote-tail bounds can need a larger limit;
+no partially accepted or clipped population is returned. Saved drafts, worker
+requests and task identity retain all limits. Older drafts remain unbounded.
+Linearized DCMATCH cannot currently compute truncated joint moments and explicitly
+refuses bounded statistics; sampled Monte Carlo executes them.
+
 ## Monte Carlo trial ranges and replay
 
 Simulation Studio's **First trial index** selects the beginning of a batch; **Samples** selects its length. Indices start at zero and match the trial identities retained in results. The default first index is zero, preserving existing studies.

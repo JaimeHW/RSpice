@@ -139,6 +139,12 @@ fn custom_statistics(ui: &mut Ui, setup: &mut McDialogState) {
             if row.distribution == 2 && row.percent {
                 field_note(ui, "This scales the log-space standard deviation by |nominal|/100. Disable it to enter the log-space standard deviation directly.");
             }
+            hinted_input_row_enabled(ui, "Lower bound", &mut row.lower, "unbounded", true);
+            hinted_input_row_enabled(ui, "Upper bound", &mut row.upper, "unbounded", true);
+            hinted_input_row_enabled(ui, "Truncate at sigma", &mut row.sigma_cutoff, "unbounded", row.distribution != 1);
+            let bounded = !row.lower.trim().is_empty() || !row.upper.trim().is_empty()
+                || (row.distribution != 1 && !row.sigma_cutoff.trim().is_empty());
+            input_row_enabled(ui, "Maximum sampling attempts", &mut row.max_attempts, bounded);
             if super::action_line(ui, "Remove variation") { remove = Some(index); }
         });
     }
@@ -148,6 +154,10 @@ fn custom_statistics(ui: &mut Ui, setup: &mut McDialogState) {
     if super::action_line(ui, "+ Add parameter variation") {
         setup.variations.push(Default::default());
     }
+    field_note(
+        ui,
+        "Bounds use absolute parameter values and apply after each scope's draw. Sigma truncation is symmetric around the nominal (in log space for lognormal). Out-of-range draws are rejected, with an explicit error if the attempt limit is reached. Correlated groups are redrawn together and use the smallest active attempt limit. Correlations below describe the population before truncation; bounds can change its mean, spread, and correlation.",
+    );
     super::sub_header(ui, "Parameter correlations");
     field_note(
         ui,
