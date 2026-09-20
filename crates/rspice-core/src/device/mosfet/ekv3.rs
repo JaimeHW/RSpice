@@ -640,6 +640,10 @@ impl Ekv3Device {
             .collect()
     }
 
+    pub(crate) fn operating_temperature_kelvin(&self) -> Value {
+        self.temperature_kelvin
+    }
+
     pub fn op_values(&self) -> Ekv3Op {
         let [vd, vg, vs, vb] = self.last_values;
         let op = ekv3_rf_eval(self.model_spec, self.last_values, self.temperature_kelvin);

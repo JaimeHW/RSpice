@@ -486,3 +486,138 @@ fn bjt_beta_report_retains_gain_at_tiny_multiplicity() {
         }
     }
 }
+
+#[test]
+fn transistor_temperature_observations_follow_instance_and_electrothermal_state() {
+    let engine = Engine::new(SimulationConfig::default());
+    // The selected temperatures deliberately differ from ambient and include
+    // a sub-zero value: a magnitude or ambient fallback would be incorrect.
+    let netlist = Netlist::parse(
+        r#"Temperature observations
+Vd d 0 1
+Vg g 0 1.5
+Vb b 0 0.5
+Vj j 0 -0.5
+M1 d g 0 0 mm TEMP=-40
+M2 d g 0 0 m3 DTEMP=35
+Q1 d b 0 qm TEMP=85
+J1 d j 0 jm DTEMP=20
+.model mm NMOS LEVEL=1 VTO=.7 KP=100u
+.model m3 NMOS LEVEL=3 VTO=.7 KP=100u
+.model qm NPN IS=1e-16 BF=100
+.model jm NJF VTO=-2 BETA=1m
+.temp 27
+.save @M1[temp] @M2[temp] @Q1[temp] @J1[temp]
+.end
+"#,
+    )
+    .unwrap();
+    let (_, report) = engine.run_dc_op_with_report(&netlist).unwrap();
+    let transient = engine.run_tran(&netlist, 1e-9, 1e-10).unwrap();
+    for (name, expected) in [("M1", -40.0), ("M2", 62.0), ("Q1", 85.0), ("J1", 47.0)] {
+        let entry = report
+            .entries
+            .iter()
+            .find(|entry| entry.name.eq_ignore_ascii_case(name))
+            .unwrap();
+        let actual = entry
+            .params
+            .iter()
+            .find(|(label, _)| *label == "temp")
+            .unwrap()
+            .1;
+        assert!(
+            (actual - expected).abs() < 1e-10,
+            "{name}: {actual} vs {expected}"
+        );
+        let values = transient
+            .try_device_op_waveform_named(name, "temp")
+            .unwrap();
+        assert_eq!(values.len(), transient.time.len());
+        assert!(values.iter().all(|value| (value - expected).abs() < 1e-10));
+    }
+    // VBIC uses its thermal node and smooth model temperature clipping, even
+    // when heat generation is disabled and the rise is externally prescribed.
+    let netlist = Netlist::parse(
+        r#"VBIC temperature report
+Vc c 0 1.2
+Vb b 0 .5
+Vth th 0 PWL(0 0 1n 74)
+Q1 c b 0 th vm SW_ET=0
+.model vm NPN LEVEL=11 IS=1e-16 IBEI=1e-18 IBCI=1e-18 RCI=0 RBI=0 RTH=1000 TMINCLIP=-50 TMAXCLIP=100
+.temp 27
+.save V(th) @Q1[temp]
+.end
+"#,
+    )
+    .unwrap();
+    let result = engine.run_tran(&netlist, 1e-9, 1e-10).unwrap();
+    let thermal = result.try_voltage_waveform_named("th").unwrap();
+    let temperatures = result.try_device_op_waveform_named("Q1", "temp").unwrap();
+    for (rise, actual) in thermal.iter().zip(temperatures) {
+        let raw = 27.0 + rise;
+        let expected = if raw > 99.0 {
+            100.0 - (99.0_f64 - raw).exp()
+        } else {
+            raw
+        };
+        assert!((actual - expected).abs() < 1e-7, "{actual} vs {expected}");
+    }
+    assert!(temperatures.last().unwrap() > &99.0);
+}
+
+#[test]
+fn native_transistor_temperature_reports_cover_all_families_and_soi_self_heating() {
+    let engine = Engine::new(SimulationConfig {
+        temperature: 350.15,
+        ..Default::default()
+    });
+    for (family, deck) in family_decks()
+        .into_iter()
+        .filter(|(family, _)| !matches!(*family, "DIODE" | "RESISTOR" | "CAPACITOR"))
+    {
+        let (_, report) = engine
+            .run_dc_op_with_report(&Netlist::parse(&deck).unwrap())
+            .unwrap();
+        let entry = report
+            .entries
+            .iter()
+            .find(|entry| entry.device_kind == family)
+            .unwrap();
+        let temperature = entry
+            .params
+            .iter()
+            .find(|(label, _)| *label == "temp")
+            .unwrap()
+            .1;
+        assert!(
+            (temperature - 77.0).abs() < 1e-10,
+            "{family}: {temperature}"
+        );
+    }
+    for level in [55, 56, 57] {
+        let deck = format!(
+            "SOI self-heating report\nM1 d g 0 0 nm W=10u L=.35u\nVd d 0 1.5\nVg g 0 1.5\n.model nm NMOS LEVEL={level} SHMOD=1 RTH0=.01 CTH0=1e-6 CAPMOD=2\n.end\n"
+        );
+        let (op, report) = engine
+            .run_dc_op_with_report(&Netlist::parse(&deck).unwrap())
+            .unwrap();
+        let rise = op.try_voltage_named("m1.__temp.internal").unwrap();
+        let entry = report
+            .entries
+            .iter()
+            .find(|entry| entry.name.eq_ignore_ascii_case("M1"))
+            .unwrap();
+        let temperature = entry
+            .params
+            .iter()
+            .find(|(label, _)| *label == "temp")
+            .unwrap()
+            .1;
+        assert!(rise > 0.0, "LEVEL={level}: {rise}");
+        assert!(
+            (temperature - (77.0 + rise)).abs() < 1e-5,
+            "LEVEL={level}: temperature={temperature}, rise={rise}"
+        );
+    }
+}

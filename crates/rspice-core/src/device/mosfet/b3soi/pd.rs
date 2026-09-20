@@ -693,6 +693,15 @@ impl B3SoiPd {
         charge.gce_t = (plus.qe - minus.qe) / denom;
     }
 
+    /// Absolute temperature used by the cached accepted electrical evaluation.
+    pub(crate) fn operating_temperature_kelvin(&self) -> Value {
+        if self.self_heating_active() {
+            self.base_temp_k + self.bias.del_temp
+        } else {
+            self.sized.temp
+        }
+    }
+
     /// Operating-point snapshot for the OP report: `(id, vgs, vds, vbs, vth,
     /// vdsat, gm, gds, gmbs, region)`, in device polarity.
     pub fn op_values(

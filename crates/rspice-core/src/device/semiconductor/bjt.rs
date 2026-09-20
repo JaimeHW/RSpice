@@ -2270,6 +2270,17 @@ impl Bjt {
         Some((self.initial_condition_vbe, self.initial_condition_vce))
     }
 
+    /// Temperature used by the accepted electrical state, including the solved
+    /// thermal rise and the same VBIC clipping as the constitutive equations.
+    pub(crate) fn operating_temperature_kelvin(&self) -> Value {
+        if self.thermal_model_enabled() {
+            self.mapped_temperature(self.requested_temperature() + self.vrth)
+                .0
+        } else {
+            self.temperature
+        }
+    }
+
     #[inline]
     fn requested_temperature(&self) -> Value {
         let raw = self

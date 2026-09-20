@@ -1432,6 +1432,13 @@ impl EkvMosfet {
         self.setup.xd_gmin
     }
 
+    pub(crate) fn operating_temperature_kelvin(&self) -> Value {
+        self.setup
+            .temp_c
+            .map(|temp| temp + CELSIUS0)
+            .unwrap_or(self.circuit_temp_k + self.setup.trise)
+    }
+
     pub fn op_values(&self) -> Ekv26Op {
         let [vd, vg, vs, vb] = self.last_values;
         let currents = self.terminal_currents_at(self.last_values);

@@ -340,6 +340,12 @@ impl CircuitData {
                     (OpLabel::GM, op.gm),
                     (OpLabel::GDS, op.gds),
                     (OpLabel::GMB, op.gmb),
+                    (
+                        OpLabel::TEMP,
+                        crate::constants::kelvin_to_celsius(
+                            mosfet.vt / crate::constants::thermal_voltage(1.0),
+                        ),
+                    ),
                 ],
             ));
         }
@@ -360,6 +366,10 @@ impl CircuitData {
                     (OpLabel::GM, gm),
                     (OpLabel::GDS, gds),
                     (OpLabel::GMB, gmbs),
+                    (
+                        OpLabel::TEMP,
+                        crate::constants::kelvin_to_celsius(dev.core.model_temp.temp),
+                    ),
                 ],
             ));
         }
@@ -382,6 +392,10 @@ impl CircuitData {
                     (OpLabel::GM, gm),
                     (OpLabel::GDS, gds),
                     (OpLabel::GMB, gmbs),
+                    (
+                        OpLabel::TEMP,
+                        crate::constants::kelvin_to_celsius(dev.core.model_temp.temp),
+                    ),
                 ],
             ));
         }
@@ -403,6 +417,10 @@ impl CircuitData {
                     (OpLabel::GM, gm),
                     (OpLabel::GDS, gds),
                     (OpLabel::GMB, gmbs),
+                    (
+                        OpLabel::TEMP,
+                        crate::constants::kelvin_to_celsius(dev.operating_temperature_kelvin()),
+                    ),
                 ],
             ));
         }
@@ -424,6 +442,10 @@ impl CircuitData {
                     (OpLabel::GM, gm),
                     (OpLabel::GDS, gds),
                     (OpLabel::GMB, gmbs),
+                    (
+                        OpLabel::TEMP,
+                        crate::constants::kelvin_to_celsius(dev.operating_temperature_kelvin()),
+                    ),
                 ],
             ));
         }
@@ -445,6 +467,10 @@ impl CircuitData {
                     (OpLabel::GM, gm),
                     (OpLabel::GDS, gds),
                     (OpLabel::GMB, gmbs),
+                    (
+                        OpLabel::TEMP,
+                        crate::constants::kelvin_to_celsius(dev.operating_temperature_kelvin()),
+                    ),
                 ],
             ));
         }
@@ -460,6 +486,10 @@ impl CircuitData {
                     (OpLabel::VGS, op.vgs),
                     (OpLabel::VDS, op.vds),
                     (OpLabel::VBS, op.vbs),
+                    (
+                        OpLabel::TEMP,
+                        crate::constants::kelvin_to_celsius(dev.operating_temperature_kelvin()),
+                    ),
                 ],
             ));
         }
@@ -476,6 +506,10 @@ impl CircuitData {
                     (OpLabel::VDS, op.vds),
                     (OpLabel::VBS, op.vbs),
                     (OpLabel::GM, op.gm),
+                    (
+                        OpLabel::TEMP,
+                        crate::constants::kelvin_to_celsius(dev.operating_temperature_kelvin()),
+                    ),
                 ],
             ));
         }
@@ -492,6 +526,10 @@ impl CircuitData {
                     (OpLabel::VDS, vds),
                     (OpLabel::IDIODE, diode_id),
                     (OpLabel::POWER, power),
+                    (
+                        OpLabel::TEMP,
+                        crate::constants::kelvin_to_celsius(vdmos.d1_temperature_kelvin),
+                    ),
                 ],
             ));
         }
@@ -515,6 +553,10 @@ impl CircuitData {
                     (OpLabel::VCE, vbe - vbc),
                     (OpLabel::BETA, beta),
                     (OpLabel::GM, gm),
+                    (
+                        OpLabel::TEMP,
+                        crate::constants::kelvin_to_celsius(bjt.operating_temperature_kelvin()),
+                    ),
                 ],
             ));
         }
@@ -581,6 +623,10 @@ impl CircuitData {
                     (OpLabel::GDS, gds),
                     (OpLabel::IGS, igs),
                     (OpLabel::IGD, igd),
+                    (
+                        OpLabel::TEMP,
+                        crate::constants::kelvin_to_celsius(jfet.resolved_instance_temperature()),
+                    ),
                 ],
             ));
         }
