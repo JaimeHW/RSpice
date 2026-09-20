@@ -37,6 +37,7 @@ mod extract;
 mod matrix;
 mod network;
 mod noise_params;
+mod periodic_noise;
 mod port_noise;
 mod ports;
 mod quality;
@@ -50,6 +51,9 @@ pub use network::{
     s_column_from_port_voltages, s_from_y, s_from_y_with_abort, y_from_s,
 };
 pub use noise_params::{TwoPortNoise, derive_two_port_noise};
+pub use periodic_noise::{
+    PeriodicPortNoiseParameters, PeriodicPortNoiseReference, derive_periodic_port_noise_with_abort,
+};
 pub use port_noise::PortNoiseAssembly;
 pub(crate) use port_noise::{PortNoiseAssemblyError, assemble_port_noise_with_abort};
 pub(crate) use ports::{MaterializedRfPort, RfPortOrigin, materialize_rf_ports};
