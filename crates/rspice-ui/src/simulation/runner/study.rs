@@ -520,9 +520,10 @@ mod tests {
             (McShape::Lognormal, McScope::Process, 1.0),
             (McShape::Gaussian, McScope::Mismatch, 1.0),
         ] {
-            let statistics = McStatisticsConfig {
+            let mut statistics = McStatisticsConfig {
                 variations: vec![
                     McParameterVariation {
+                        bounds: None,
                         parameter: "X".into(),
                         scope,
                         distribution: shape,
@@ -534,6 +535,7 @@ mod tests {
                         percent: shape != McShape::Lognormal,
                     },
                     McParameterVariation {
+                        bounds: None,
                         parameter: "Y".into(),
                         scope,
                         distribution: shape,
@@ -545,6 +547,7 @@ mod tests {
                         percent: shape != McShape::Lognormal,
                     },
                     McParameterVariation {
+                        bounds: None,
                         parameter: "Z".into(),
                         scope,
                         distribution: McShape::Gaussian,
@@ -558,6 +561,17 @@ mod tests {
                     coefficient: correlation,
                 }],
             };
+            for (index, row) in statistics.variations.iter_mut().enumerate() {
+                let (lower, upper) = [(0.98, 1.02), (1.96, 2.04), (-0.005, 0.005)][index];
+                row.bounds = Some(
+                    crate::simulation::dialog::mc::statistics::McParameterBounds {
+                        lower: Some(lower),
+                        upper: Some(upper),
+                        sigma_cutoff: (row.distribution != McShape::Uniform).then_some(0.75),
+                        max_attempts: 10_000,
+                    },
+                );
+            }
             let mut previous: Option<Vec<Vec<f64>>> = None;
             for configured in [false, true] {
                 let options = SpecExecutionOptions {
@@ -622,6 +636,17 @@ mod tests {
                     })
                     .collect::<Vec<_>>();
                 assert!(samples[0].windows(2).any(|pair| pair[0] != pair[1]));
+                for (samples, (lower, upper)) in
+                    samples
+                        .iter()
+                        .zip([(0.98, 1.02), (1.96, 2.04), (-0.005, 0.005)])
+                {
+                    assert!(
+                        samples
+                            .iter()
+                            .all(|value| *value >= lower && *value <= upper)
+                    );
+                }
                 assert!(
                     samples[2].iter().any(|value| value.abs() > 1e-5),
                     "absolute spread must vary a zero nominal"
@@ -678,6 +703,14 @@ mod tests {
                 let options = SpecExecutionOptions {
                     mc_statistics: (source == 2).then(|| McStatisticsConfig {
                         variations: vec![McParameterVariation {
+                            bounds: Some(
+                                crate::simulation::dialog::mc::statistics::McParameterBounds {
+                                    lower: Some(0.99),
+                                    upper: Some(1.01),
+                                    sigma_cutoff: Some(1.0),
+                                    max_attempts: 10_000,
+                                },
+                            ),
                             parameter: "X".into(),
                             scope: McScope::Mismatch,
                             distribution: McShape::Gaussian,

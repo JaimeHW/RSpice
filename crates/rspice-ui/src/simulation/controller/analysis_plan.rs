@@ -684,6 +684,14 @@ mod tests {
                 crate::simulation::dialog::mc::statistics::McStatisticsConfig {
                     variations: vec![
                         crate::simulation::dialog::mc::statistics::McParameterVariation {
+                            bounds: Some(
+                                crate::simulation::dialog::mc::statistics::McParameterBounds {
+                                    lower: Some(900.0),
+                                    upper: Some(1100.0),
+                                    sigma_cutoff: Some(3.0),
+                                    max_attempts: 10000,
+                                },
+                            ),
                             parameter: "rval".into(),
                             scope: crate::simulation::dialog::mc::statistics::McScope::Process,
                             distribution:
@@ -761,7 +769,7 @@ mod tests {
                 .spread,
             10.0
         );
-        for change in 0..10 {
+        for change in 0..15 {
             let mut queued = task.queued_analysis().clone();
             let base = queued.spec_options.study_base.as_mut().unwrap();
             match change {
@@ -788,7 +796,12 @@ mod tests {
                         6 => row.scope = McScope::Mismatch,
                         7 => row.distribution = McShape::Uniform,
                         8 => row.spread = 20.0,
-                        _ => row.percent = false,
+                        9 => row.percent = false,
+                        10 => row.bounds.as_mut().unwrap().lower = Some(800.0),
+                        11 => row.bounds.as_mut().unwrap().upper = Some(1200.0),
+                        12 => row.bounds.as_mut().unwrap().sigma_cutoff = Some(4.0),
+                        13 => row.bounds.as_mut().unwrap().max_attempts = 20000,
+                        _ => row.bounds = None,
                     }
                 }
             }

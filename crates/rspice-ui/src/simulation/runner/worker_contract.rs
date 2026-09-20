@@ -74,7 +74,7 @@ pub(crate) struct WorkerRequest {
 
 /// 17: Monte Carlo carries authored per-parameter native statistics.
 #[cfg(any(target_arch = "wasm32", test))]
-pub(crate) const WORKER_REQUEST_TRANSPORT_PROTOCOL: u8 = 17;
+pub(crate) const WORKER_REQUEST_TRANSPORT_PROTOCOL: u8 = 18;
 
 /// Browser-worker request split into compact metadata and transferable
 /// floating-point buffers. The embedded request deliberately carries empty

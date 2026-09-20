@@ -894,6 +894,20 @@ fn encode_spec_options(writer: &mut CanonicalWriter, options: &SpecExecutionOpti
             writer.f64(row.spread);
             writer.bool(row.percent);
         }
+        if statistics.variations.iter().any(|row| row.bounds.is_some()) {
+            writer.domain("monte-carlo-parameter-bounds/v1");
+            writer.sequence(statistics.variations.len());
+            for row in &statistics.variations {
+                writer.option(row.bounds.as_ref(), |writer, bounds| {
+                    writer.option(bounds.lower.as_ref(), |writer, value| writer.f64(*value));
+                    writer.option(bounds.upper.as_ref(), |writer, value| writer.f64(*value));
+                    writer.option(bounds.sigma_cutoff.as_ref(), |writer, value| {
+                        writer.f64(*value)
+                    });
+                    writer.u64(u64::from(bounds.max_attempts));
+                });
+            }
+        }
         writer.sequence(statistics.correlations.len());
         for row in &statistics.correlations {
             writer.u8(match row.scope {

@@ -37,7 +37,7 @@ fn run(seed: u64, source: &str) -> serde_json::Value {
         "MC worker boundary\n.param rval={resistance}\nV1 in 0 1\nR1 in out {{rval}}\nR2 out 0 1k\n.mc 4 seed {seed} DIST UNIFORM SPREAD .05\n.end ; done\n"
     );
     let request = serde_json::json!({
-        "protocolVersion": 17,
+        "protocolVersion": 18,
         "request": {
             "request": {
                 "id": 1,
@@ -103,7 +103,7 @@ fn deck_statistics_retain_full_width_trial_identities() {
 #[wasm_bindgen_test]
 fn transient_quality_survives_the_worker_and_structured_clone_before_output_cropping() {
     let request = serde_json::json!({
-        "protocolVersion": 17,
+        "protocolVersion": 18,
         "request": {
             "request": {
                 "id": 2,
@@ -159,7 +159,7 @@ fn transient_quality_survives_the_worker_and_structured_clone_before_output_crop
 #[wasm_bindgen_test]
 fn nested_dc_curves_and_exact_traversal_survive_the_worker_and_structured_clone() {
     let request = serde_json::json!({
-        "protocolVersion": 17,
+        "protocolVersion": 18,
         "request": {
             "request": {"id":3,"request":{"Spec":{"spec":{"DcSweep":{
                 "source_name":"V1","start":1.0,"stop":0.0,"step":-0.5,
@@ -235,7 +235,7 @@ fn nested_dc_curves_and_exact_traversal_survive_the_worker_and_structured_clone(
 #[wasm_bindgen_test]
 fn scoped_soa_current_rules_reach_the_solver_and_transfer_complete_evidence() {
     let request = serde_json::json!({
-        "protocolVersion": 17,
+        "protocolVersion": 18,
         "request": {
             "request": {
                 "id": 4,
@@ -297,7 +297,7 @@ fn scoped_soa_current_rules_reach_the_solver_and_transfer_complete_evidence() {
 #[wasm_bindgen_test]
 fn optimization_expression_reaches_a_current_target_through_the_worker() {
     let request = serde_json::json!({
-        "protocolVersion": 17,
+        "protocolVersion": 18,
         "request": {
             "request": {
                 "id": 6,
@@ -336,7 +336,7 @@ fn optimization_expression_reaches_a_current_target_through_the_worker() {
 fn envelope_initializer_settings_execute_and_pss_budget_survives_worker_transport() {
     let run = |method: &str, iterations: u32| {
         let request = serde_json::json!({
-            "protocolVersion": 17,
+            "protocolVersion": 18,
             "request": {
                 "request": {
                     "id": 7,
@@ -402,7 +402,7 @@ fn envelope_initializer_settings_execute_and_pss_budget_survives_worker_transpor
 fn optimization_rejects_failed_and_overflowed_costs_through_the_worker() {
     let run = |expression: &str, goal: &str, target: f64| {
         let request = serde_json::json!({
-            "protocolVersion": 17,
+            "protocolVersion": 18,
             "request": {
                 "request": {
                     "id": 8,
