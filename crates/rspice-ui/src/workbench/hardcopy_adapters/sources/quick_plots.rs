@@ -271,6 +271,10 @@ fn quick_noise_spectrum_plot(
     active: ActiveQuickResult<'_>,
     overlay: &RetainedQuickViewOverlay,
 ) -> Result<SemanticPlot, HardcopySourceError> {
+    if crate::workbench::documents::result_document::qpnoise_spectrum_is_renderable(active.analysis)
+    {
+        return quick_waveform_plot(active, ResultViewer::NoiseContrib, overlay);
+    }
     if !ordinary_noise_spectrum_is_renderable(active.analysis) {
         return Err(HardcopySourceError::MissingViewerEvidence(
             "ordinary noise spectrum",

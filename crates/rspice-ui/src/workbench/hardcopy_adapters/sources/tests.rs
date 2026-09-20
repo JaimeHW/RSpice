@@ -2471,3 +2471,22 @@ fn typed_pstb_table_summary_preserves_complete_modes_and_global_evidence() {
 
 mod app_resolution;
 mod contribution;
+
+#[test]
+fn qpnoise_result_noise_figure_export_preserves_signed_output_frequencies() {
+    let result = crate::simulation::SimulationResult::qpnoise_retained_test_fixture();
+    let expected = result.waveforms.len();
+    let state = quick_view_state(result, ResultViewer::NoiseContrib);
+    let resolved = resolve_quick_view(&state).unwrap();
+    let HardcopySemanticDocument::Plot(plot) = resolved.semantic_document() else {
+        panic!("expected noise spectrum figure");
+    };
+    assert_eq!(plot.viewer, ResultViewer::NoiseContrib);
+    assert_eq!(plot.traces.len(), expected);
+    assert!(
+        plot.traces
+            .iter()
+            .flat_map(|t| &t.source_samples)
+            .any(|p| f64::from_bits(p.0) < 0.0)
+    );
+}

@@ -138,7 +138,7 @@ pub(in crate::workbench::documents::result_document) fn cached_models(
         }
         ResultViewer::NoiseContrib => matches!(
             model.analysis_type,
-            AnalysisType::Noise | AnalysisType::Hbnoise
+            AnalysisType::Noise | AnalysisType::Hbnoise | AnalysisType::Qpnoise
         ),
         _ => true,
     });

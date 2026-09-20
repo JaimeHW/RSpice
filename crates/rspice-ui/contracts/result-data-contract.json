@@ -1100,8 +1100,9 @@
     "qpnoise": {
       "analysisId": "qpnoise",
       "availability": "preview",
-      "defaultViewerId": "viewer-phase-noise",
+      "defaultViewerId": "viewer-bode",
       "compatibleViewerIds": [
+        "viewer-bode",
         "viewer-phase-noise"
       ],
       "implementationJourney": "quasi-periodic noise folding and correlation across lattice products",
@@ -4185,7 +4186,8 @@
           "noise",
           "pac",
           "pstb",
-          "qpac"
+          "qpac",
+          "qpnoise"
         ],
         "quickModes": [
           {
@@ -4203,7 +4205,8 @@
             "icon": "waveform",
             "label": "Noise",
             "analysisIds": [
-              "noise"
+              "noise",
+              "qpnoise"
             ]
           },
           {
@@ -4269,7 +4272,8 @@
           "noise",
           "pac",
           "pstb",
-          "qpac"
+          "qpac",
+          "qpnoise"
         ],
         "externalCapabilityId": null
       },
@@ -7087,7 +7091,8 @@
       "icon": "waveform",
       "label": "Noise",
       "analysisIds": [
-        "noise"
+        "noise",
+        "qpnoise"
       ],
       "documentId": "viewer-bode",
       "projectionOnly": true,

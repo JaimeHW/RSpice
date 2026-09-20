@@ -850,7 +850,8 @@ pub(super) fn build_models(
         if analysis.waveforms.is_empty() {
             continue;
         }
-        let displays_cartesian_complex = (analysis.analysis_type.uses_complex_bode_projection()
+        let displays_cartesian_complex = (analysis.analysis_type == AnalysisType::Qpnoise
+            || analysis.analysis_type.uses_complex_bode_projection()
             || analysis.analysis_type.is_time_domain())
             && complex_display == ComplexNumberDisplay::RealImaginary
             && analysis
@@ -863,6 +864,12 @@ pub(super) fn build_models(
         let (mut x_scale, mut x_dimension_key, mut x_label, mut x_unit) =
             match analysis.analysis_type {
                 AnalysisType::Qpac => (XScale::Linear, "qpac-probe-offset", "Probe offset", "Hz"),
+                AnalysisType::Qpnoise => (
+                    XScale::Linear,
+                    "qpnoise-output-frequency",
+                    "Output frequency",
+                    "Hz",
+                ),
                 AnalysisType::Qpxf => (
                     XScale::Linear,
                     "qpxf-output-frequency",
@@ -991,7 +998,9 @@ pub(super) fn build_models(
                 // Noise figure is already in decibels and has its own unit
                 // pane; only power spectra receive the square-root mapping.
                 TraceKind::Value
-            } else if (analysis.analysis_type.uses_complex_bode_projection() && is_phase)
+            } else if ((analysis.analysis_type.uses_complex_bode_projection()
+                || analysis.analysis_type == AnalysisType::Qpnoise)
+                && is_phase)
                 || is_time_complex_phase
             {
                 match complex_display {

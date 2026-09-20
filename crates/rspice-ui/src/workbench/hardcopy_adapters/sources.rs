@@ -1229,7 +1229,12 @@ fn quick_result_availability(
                     Some(AnalysisResultPayload::OperatingPoint { .. })
                 )
         }
-        ResultViewer::NoiseContrib => ordinary_noise_spectrum_is_renderable(analysis),
+        ResultViewer::NoiseContrib => {
+            ordinary_noise_spectrum_is_renderable(analysis)
+                || crate::workbench::documents::result_document::qpnoise_spectrum_is_renderable(
+                    analysis,
+                )
+        }
         // Two families rank contributions to one number, and both have an
         // exact semantic table to print.
         ResultViewer::Contribution => matches!(

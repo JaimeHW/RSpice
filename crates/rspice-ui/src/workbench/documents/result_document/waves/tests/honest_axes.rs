@@ -325,3 +325,38 @@ fn the_cursor_table_publishes_what_it_paints() {
         "the spoken table named no columns: {spoken}"
     );
 }
+
+#[test]
+fn qpnoise_result_plot_preserves_physical_frequencies_and_separate_noise_units() {
+    let result = crate::simulation::SimulationResult::qpnoise_retained_test_fixture();
+    assert!(result.success);
+    let mut state = AppState::default();
+    state.simulation.start_run().add_analysis(result);
+    state.simulation.active_analysis_idx = Some(0);
+    state.ui.results.viewer = super::super::super::ResultViewer::NoiseContrib;
+    assert!(super::super::super::view_context::analysis_supports_viewer(
+        state.ui.results.viewer,
+        state.simulation.active_analysis().unwrap()
+    ));
+    assert!(super::super::super::viewer_is_available(
+        &state,
+        state.ui.results.viewer
+    ));
+    let presentation = state.ui.preferences.result_presentation_policy();
+    let models = cached_models(
+        &state.simulation,
+        &mut state.ui.results,
+        presentation.complex_number_display(),
+        &Tokens::default(),
+    );
+    assert_eq!(models.len(), 1);
+    assert_eq!(models[0].x_scale, XScale::Linear);
+    assert_eq!(models[0].x_label, "Output frequency");
+    assert_eq!(models[0].x_unit, "Hz");
+    let (min, max) = models[0].x_range.unwrap();
+    assert!(min < 0.0 && max >= 700.0);
+    let panes = models[0].unit_panes();
+    for unit in ["V²/Hz", "A²/Hz", "V/√Hz", "A/√Hz", "dB", "V·A/Hz"] {
+        assert!(panes.iter().any(|p| p.unit == unit), "missing {unit}");
+    }
+}

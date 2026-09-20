@@ -26,6 +26,7 @@ mod phase_noise;
 mod polar;
 mod population;
 mod pz;
+mod qpnoise;
 mod reliability;
 mod retained_memo;
 mod scatter;
@@ -131,12 +132,41 @@ pub(crate) fn ordinary_noise_spectrum_is_renderable(analysis: &AnalysisResult) -
     bode::ordinary_noise_spectrum_is_renderable(analysis)
 }
 
-/// The one noise analysis a run's ordinary-noise surfaces bind to.
+pub(crate) fn qpnoise_spectrum_is_renderable(analysis: &AnalysisResult) -> bool {
+    analysis.success
+        && qpnoise::is_renderable(analysis)
+        && analysis.validate_retained_evidence().is_ok()
+}
+
+/// The one noise analysis a run's noise surfaces bind to.
 pub(crate) fn selected_noise_analysis_index(
     globally_selected: Option<usize>,
     run: &SimulationRun,
 ) -> Option<usize> {
-    bode::selected_noise_analysis_index_in(globally_selected, run)
+    if let Some(index) = globally_selected
+        && let Some(analysis) = run.analyses.get(index)
+        && analysis.analysis_type == crate::state::AnalysisType::Qpnoise
+    {
+        return qpnoise_spectrum_is_renderable(analysis).then_some(index);
+    }
+    bode::selected_noise_analysis_index_in(globally_selected, run).or_else(|| {
+        // A failed explicitly selected noise analysis must remain selected.
+        if globally_selected
+            .and_then(|i| run.analyses.get(i))
+            .is_some_and(|a| {
+                matches!(
+                    a.analysis_type,
+                    crate::state::AnalysisType::Noise
+                        | crate::state::AnalysisType::Hbnoise
+                        | crate::state::AnalysisType::Pnoise
+                )
+            })
+        {
+            None
+        } else {
+            run.analyses.iter().position(qpnoise_spectrum_is_renderable)
+        }
+    })
 }
 
 pub(crate) fn phase_noise_waveform_is_renderable(waveform: &WaveformData) -> bool {
@@ -4722,7 +4752,10 @@ pub(crate) fn project_viewer_for_analysis(
         {
             ResultViewer::HarmonicBalance
         }
-        ResultViewer::Bode if bode::ordinary_noise_spectrum_is_renderable(analysis) => {
+        ResultViewer::Bode
+            if qpnoise::is_renderable(analysis)
+                || bode::ordinary_noise_spectrum_is_renderable(analysis) =>
+        {
             ResultViewer::NoiseContrib
         }
         _ => viewer,
@@ -6145,18 +6178,18 @@ fn viewer_availability(state: &AppState, viewer: ResultViewer) -> ViewerAvailabi
         ResultViewer::NoiseContrib => {
             if active_run.is_some_and(|run| {
                 run.analyses.iter().any(|analysis| {
-                    analysis_answers_structural_gate(
+                    view_context::analysis_supports_viewer_memoized(
                         state,
                         run.dataset_id,
+                        ResultViewer::NoiseContrib,
                         analysis,
-                        StructuralGate::OrdinaryNoiseSpectrum,
                     )
                 })
             }) {
-                ViewerAvailability::available("A retained ordinary-noise spectrum is available")
+                ViewerAvailability::available("A retained noise spectrum is available")
             } else {
                 ViewerAvailability::unavailable(
-                    "Requires a usable ordinary-noise spectrum in the active dataset",
+                    "Requires a usable noise spectrum in the active dataset",
                 )
             }
         }
@@ -6491,6 +6524,17 @@ fn ensure_derived(ui: &mut Ui, app: &mut RSpiceApp, viewer: ActiveViewer) -> boo
 
 /// Render the Results context right panel for the active viewer.
 pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
+    if let Ok(view) = view_context::resolve_displayed_result_view(state)
+        && let Some(analysis) = view.primary_analysis(state)
+        && let Some(crate::state::AnalysisResultPayload::Qpnoise { response }) =
+            &analysis.result_payload
+    {
+        qpnoise::summary(ui, response);
+        if view.viewer == ResultViewer::NoiseContrib {
+            waves::right_panel(ui, state);
+            return;
+        }
+    }
     match state.ui.results.viewer {
         ResultViewer::Waves | ResultViewer::DcSweep => waves::right_panel(ui, state),
         ResultViewer::Bode => bode::right_panel(ui, state),

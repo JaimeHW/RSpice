@@ -2,6 +2,7 @@
 
 mod hdf5;
 mod matlab;
+mod noise_stack;
 mod numpy;
 mod typed_csv;
 mod vcd;
@@ -437,6 +438,19 @@ fn prepare_active_sheet_csv(
     use crate::workbench::ResultViewer;
     use crate::workbench::documents::result_document;
 
+    if displayed.viewer == ResultViewer::NoiseContrib
+        && displayed.analyses(state).any(|analysis| {
+            matches!(
+                analysis.result_payload,
+                Some(crate::state::AnalysisResultPayload::Qpnoise { .. })
+            )
+        })
+    {
+        return Some(noise_stack::prepare(
+            displayed.run(state)?,
+            &displayed.analysis_indices,
+        ));
+    }
     let sheet = match displayed.viewer {
         ResultViewer::Manifest => Some(result_document::export_manifest_csv(displayed.run(state)?)),
         // The operating point is the one sheet whose refusal has to be

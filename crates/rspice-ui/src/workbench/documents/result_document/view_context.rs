@@ -320,7 +320,8 @@ fn viewer_can_render(
         }
         ResultViewer::Bode => structural(super::StructuralGate::BodeResponse, analysis),
         ResultViewer::NoiseContrib => {
-            structural(super::StructuralGate::OrdinaryNoiseSpectrum, analysis)
+            super::qpnoise::is_renderable(analysis)
+                || structural(super::StructuralGate::OrdinaryNoiseSpectrum, analysis)
         }
         ResultViewer::Fft | ResultViewer::Eye => {
             analysis.analysis_type.is_time_domain() && !analysis.waveforms.is_empty()
