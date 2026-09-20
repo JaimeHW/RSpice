@@ -863,6 +863,12 @@ pub(super) fn build_models(
         let (mut x_scale, mut x_dimension_key, mut x_label, mut x_unit) =
             match analysis.analysis_type {
                 AnalysisType::Qpac => (XScale::Linear, "qpac-probe-offset", "Probe offset", "Hz"),
+                AnalysisType::Qpxf => (
+                    XScale::Linear,
+                    "qpxf-output-frequency",
+                    "Output frequency",
+                    "Hz",
+                ),
                 kind if kind.is_bode_response() || kind.is_raw_frequency_curve() => {
                     (XScale::Log10, "frequency", "f", "Hz")
                 }

@@ -37,7 +37,9 @@ impl SimulationResult {
                 ..
             } => measurement_result_by_name(measurements, key)
                 .or_else(|| waveform_last_value_by_name(waveforms, key)),
-            SimulationResult::Qpac { waveforms, .. } => waveform_last_value_by_name(waveforms, key),
+            SimulationResult::Qpac { waveforms, .. } | SimulationResult::Qpxf { waveforms, .. } => {
+                waveform_last_value_by_name(waveforms, key)
+            }
             SimulationResult::Qpss {
                 operating_point, ..
             } => match key {
@@ -215,6 +217,7 @@ impl SimulationResult {
             | SimulationResult::Transient { waveforms, .. }
             | SimulationResult::Ac { waveforms, .. }
             | SimulationResult::Qpac { waveforms, .. }
+            | SimulationResult::Qpxf { waveforms, .. }
             | SimulationResult::HarmonicBalance { waveforms, .. }
             | SimulationResult::Parametric { waveforms, .. }
             | SimulationResult::Corner { waveforms, .. }

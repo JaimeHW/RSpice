@@ -527,6 +527,16 @@ impl SimulationController {
                 self.attach_validated_payload(result, analysis_type, label, payload)
             }
 
+            SimulationResult::Qpxf {
+                frequencies,
+                waveforms,
+                response,
+            } => {
+                let payload = AnalysisResultPayload::Qpxf { response };
+                let result = AnalysisResult::new(1, analysis_type, label.to_string())
+                    .with_waveforms(self.build_ac_waveforms_owned(frequencies, waveforms));
+                self.attach_validated_payload(result, analysis_type, label, payload)
+            }
             SimulationResult::Qpac {
                 frequencies,
                 waveforms,

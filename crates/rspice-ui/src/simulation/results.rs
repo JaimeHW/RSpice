@@ -17,6 +17,7 @@ mod monte_carlo;
 mod operating_point;
 mod qpac;
 mod qpss;
+mod qpxf;
 mod recorded_fft;
 mod waveform;
 
@@ -256,6 +257,14 @@ pub enum SimulationResult {
         frequencies: Vec<f64>,
         waveforms: HashMap<String, WaveformData>,
         response: std::sync::Arc<rspice_core::engine::QpacAnalysisResult>,
+    },
+
+    /// Complete unit transfers and sampled group delay into a selected QPSS output.
+    Qpxf {
+        /// Physical output frequencies, including negative values and zero.
+        frequencies: Vec<f64>,
+        waveforms: HashMap<String, WaveformData>,
+        response: std::sync::Arc<rspice_core::engine::QpxfAnalysisResult>,
     },
 
     /// Independent-tone spectra with the signed tuple for every displayed bin

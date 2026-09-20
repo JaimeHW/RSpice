@@ -798,7 +798,11 @@ const fn domain_meta(analysis: AnalysisType) -> DomainMeta {
         // Naming it after the translation instead named a different number --
         // `offset + n*f0`, which the run publishes as its own curve -- and it
         // also made .PXF contradict its own Studio caption.
-        A::Pac | A::Pxf | A::Qpac | A::Qpxf => DomainMeta {
+        A::Qpxf => DomainMeta {
+            axis: "output frequency",
+            precision: "complex128",
+        },
+        A::Pac | A::Pxf | A::Qpac => DomainMeta {
             axis: "offset frequency",
             precision: "complex128",
         },
@@ -1110,6 +1114,14 @@ fn format_frequency(value: f64) -> String {
 
 fn payload_values_label(payload: &AnalysisResultPayload) -> String {
     match payload {
+        AnalysisResultPayload::Qpxf { response } => format!(
+            "{} output frequencies / {} sources / {} input tuples; output {:?} at {:?}; full adjoint and unit transfers",
+            response.metadata.output_frequencies_hz.len(),
+            response.metadata.input_sources.len(),
+            response.metadata.input_lattices.len(),
+            response.metadata.request.output,
+            response.metadata.request.output_lattice,
+        ),
         AnalysisResultPayload::Qpac { response } => format!(
             "{} probe offsets / {} signed tuples / {} MNA coordinates; input {:?}, output {:?}",
             response.metadata.request.offsets_hz.len(),

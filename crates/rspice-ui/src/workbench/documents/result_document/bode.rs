@@ -182,10 +182,12 @@ enum NoMargins {
 
 fn build_model(state: &mut AppState) -> Result<BodeModel, NoMargins> {
     let simulation = &state.simulation;
-    if simulation
-        .active_analysis()
-        .is_some_and(|a| a.analysis_type == crate::state::AnalysisType::Qpac)
-    {
+    if simulation.active_analysis().is_some_and(|a| {
+        matches!(
+            a.analysis_type,
+            crate::state::AnalysisType::Qpac | crate::state::AnalysisType::Qpxf
+        )
+    }) {
         return Err(NoMargins::NoResponse);
     }
     let run = simulation.active_run().ok_or(NoMargins::NoResponse)?;
@@ -394,6 +396,50 @@ fn build_noise_model(state: &AppState) -> Option<NoiseSpectrumModel> {
 }
 
 pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
+    if let Some(analysis) = state.simulation.active_analysis()
+        && analysis.analysis_type == crate::state::AnalysisType::Qpxf
+    {
+        section_header(ui, "QPXF unit transfers", None);
+        super::panel_note(
+            ui,
+            "The horizontal axis is physical output frequency. Each curve is the output per unit excitation of its named input source and signed tone tuple. Finite sampled group delays are shown in seconds; undefined intervals are omitted from the curves and retained in the CSV table.",
+        );
+        if let Some(crate::state::AnalysisResultPayload::Qpxf { response }) =
+            &analysis.result_payload
+        {
+            let m = &response.metadata;
+            super::panel_note(
+                ui,
+                &format!(
+                    "{} sources × {} input tuples. Output {:?} at tuple {:?}. Authored axis: {:?}; tones {:?} Hz.",
+                    m.input_sources.len(),
+                    m.input_lattices.len(),
+                    m.request.output,
+                    m.request.output_lattice,
+                    m.request.frequency_axis,
+                    m.grid.frequencies_hz
+                ),
+            );
+            if m.request.group_delay {
+                let undefined = response
+                    .transfers
+                    .iter()
+                    .filter_map(|t| t.group_delay.as_ref())
+                    .flatten()
+                    .filter(|d| !matches!(d, rspice_core::engine::QpxfGroupDelay::Finite(_)))
+                    .count();
+                super::panel_note(
+                    ui,
+                    &format!(
+                        "Group-delay magnitude floor: {}. {} undefined delay samples. Delay uses sampled phase differences on the selected frequency grid.",
+                        m.request.group_delay_magnitude_floor, undefined
+                    ),
+                );
+            }
+        }
+        return;
+    }
+
     if let Some(analysis) = state.simulation.active_analysis()
         && analysis.analysis_type == crate::state::AnalysisType::Qpac
     {

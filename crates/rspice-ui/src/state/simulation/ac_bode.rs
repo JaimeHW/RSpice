@@ -216,7 +216,10 @@ pub fn ac_bode_summary_for_analysis(
 ) -> Option<AcBodeSummary> {
     // A translated multi-tone transfer is not a scalar feedback loop.
     // Its signed offset axis does not support ordinary AC bandwidth/margin claims.
-    if analysis.analysis_type == AnalysisType::Qpac {
+    if matches!(
+        analysis.analysis_type,
+        AnalysisType::Qpac | AnalysisType::Qpxf
+    ) {
         return None;
     }
     let AcBodeShape {

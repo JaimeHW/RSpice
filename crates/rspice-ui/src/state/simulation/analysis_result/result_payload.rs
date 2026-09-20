@@ -1213,6 +1213,9 @@ impl AnalysisResult {
         if let Some(payload) = &self.result_payload {
             payload.validate_for(self.analysis_type)?;
         }
+        if let Some(AnalysisResultPayload::Qpxf { response }) = &self.result_payload {
+            super::qpxf::validate_display(response, &self.waveforms)?;
+        }
         if let Some(AnalysisResultPayload::Qpac { response }) = &self.result_payload {
             super::qpac::validate_display(response, &self.waveforms)?;
         }

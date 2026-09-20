@@ -3276,6 +3276,30 @@ fn retained_result_artifacts(
     }
     if let Some(payload) = &analysis.result_payload {
         let (canonical, name, kind, count, value, viewer) = match payload {
+            AnalysisResultPayload::Qpxf { response } => (
+                "payload/qpxf",
+                "QPXF unit transfers and adjoints",
+                ResultArtifactKind::Array,
+                response
+                    .solutions
+                    .iter()
+                    .flat_map(|s| &s.sensitivities)
+                    .map(Vec::len)
+                    .sum::<usize>()
+                    + response
+                        .transfers
+                        .iter()
+                        .map(|t| t.values.len())
+                        .sum::<usize>(),
+                Some(format!(
+                    "{} output frequencies · {} sources × {} input tuples · output {:?}",
+                    response.solutions.len(),
+                    response.metadata.input_sources.len(),
+                    response.metadata.input_lattices.len(),
+                    response.metadata.request.output_lattice
+                )),
+                ResultViewer::Table,
+            ),
             AnalysisResultPayload::Qpac { response } => (
                 "payload/qpac",
                 "QPAC complete complex response",

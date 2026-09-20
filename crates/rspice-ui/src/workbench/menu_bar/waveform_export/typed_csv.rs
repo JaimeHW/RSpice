@@ -12,6 +12,7 @@
 
 use super::{PreparedTypedResultCsv, csv_text};
 mod qpac;
+mod qpxf;
 
 pub(super) fn prepare_typed_result_csv(
     analysis: &crate::state::AnalysisResult,
@@ -24,6 +25,7 @@ pub(super) fn prepare_typed_result_csv(
     use crate::state::{AnalysisResultPayload, SensitivityResultMode};
     match payload {
         AnalysisResultPayload::Qpac { response } => qpac::prepare(response),
+        AnalysisResultPayload::Qpxf { response } => qpxf::prepare(response),
         AnalysisResultPayload::Qpss { operating_point } => {
             let grid = operating_point
                 .validate_retained_payload_with_abort(

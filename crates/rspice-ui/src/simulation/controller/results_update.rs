@@ -144,6 +144,17 @@ impl SimulationController {
                 )));
             }
 
+            SimulationResult::Qpxf {
+                frequencies,
+                waveforms,
+                response,
+            } => {
+                self.populate_ac_post_views(state, frequencies, waveforms);
+                state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(
+                    "QPXF: {} physical output frequencies, {} sources × {} input sidebands; output {:?} at {:?}. Transfers are per unit input; sampled delay retains undefined statuses.",
+                    frequencies.len(), response.metadata.input_sources.len(), response.metadata.input_lattices.len(), response.metadata.request.output, response.metadata.request.output_lattice,
+                )));
+            }
             SimulationResult::Qpac {
                 frequencies,
                 waveforms,
