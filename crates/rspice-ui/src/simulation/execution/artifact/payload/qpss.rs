@@ -279,8 +279,9 @@ mod tests {
                 input_source: "V1".into(),
                 output_node: "out".into(),
                 output_ref: "0".into(),
-                input_lattice: [0, 0],
-                output_lattice: [1, -1],
+                input_lattice: vec![0, 0],
+                output_lattice: vec![1, -1],
+                controls: Default::default(),
             },
             AnalysisSpec::Qpxf {
                 start_freq: 10.0,
@@ -290,8 +291,8 @@ mod tests {
                 input_source: "V1".into(),
                 output_node: "out".into(),
                 output_ref: "0".into(),
-                input_lattice: [0, 0],
-                output_lattice: [1, -1],
+                input_lattice: vec![0, 0],
+                output_lattice: vec![1, -1],
                 group_delay: true,
             },
             AnalysisSpec::Qpnoise {

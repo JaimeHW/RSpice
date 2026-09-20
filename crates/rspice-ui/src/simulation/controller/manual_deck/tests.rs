@@ -1106,3 +1106,43 @@ fn a_bare_hand_written_sens_card_means_what_the_engine_means() {
 }
 
 mod dc_mismatch;
+
+#[test]
+fn qpac_manual_deck_preserves_authored_grid_and_all_controls() {
+    let source = "QPAC import\nV1 in 0 DC 1\nR1 in out 1k\n.QPSS 1k 1414.2135623730951 1732.0508075688772 HARMS=1\n.QPAC OCT 3 2 128 SOURCE=V1 OUT=V(out,0) INLATTICE=(0,1,-1) OUTLATTICE=(-1,0,1) MAG=.2 PHASE=73 SOLVER=KRYLOV KRYLOVRESTART=16 KRYLOVCYCLES=12 LINEARTOL=2e-11 IABSTOL=3e-13 VABSTOL=4e-10\n.end\n";
+    let specs = specs_for(source);
+    let spec = specs
+        .iter()
+        .find(|s| matches!(s, AnalysisSpec::Qpac { .. }))
+        .unwrap();
+    let AnalysisSpec::Qpac {
+        start_freq,
+        stop_freq,
+        points_per_unit,
+        sweep,
+        input_lattice,
+        output_lattice,
+        controls,
+        ..
+    } = spec
+    else {
+        unreachable!()
+    };
+    assert_eq!(
+        (*start_freq, *stop_freq, *points_per_unit, *sweep),
+        (2.0, 128.0, 3, FrequencySweep::Octave)
+    );
+    assert_eq!(input_lattice, &[0, 1, -1]);
+    assert_eq!(output_lattice, &[-1, 0, 1]);
+    assert_eq!(controls.magnitude, 0.2);
+    assert_eq!(controls.phase_degrees, 73.0);
+    assert_eq!(controls.solver.linear.restart, 16);
+    assert_eq!(controls.solver.linear.max_cycles, 12);
+    assert_eq!(controls.solver.linear.relative_tolerance, 2e-11);
+    let card = spec.qpac_card().unwrap();
+    let reparsed = specs_for(&format!(
+        "QPAC rewrite\nV1 in 0 1\nR1 in out 1k\n{}\n.end\n",
+        card.to_spice()
+    ));
+    assert_eq!(reparsed, [spec.clone()]);
+}

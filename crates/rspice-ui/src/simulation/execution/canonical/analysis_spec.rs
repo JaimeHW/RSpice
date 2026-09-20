@@ -951,8 +951,26 @@ pub(super) fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &Analysis
                 writer.i32(*output_sideband);
             }
         }
-        AnalysisSpec::Qpac { .. } => {
+        AnalysisSpec::Qpac { controls, .. } => {
             encode_quasi_periodic_transfer(writer, spec);
+            if controls != &crate::simulation::multi_run::QpacControls::default() {
+                writer.string("qpac-controls-v1");
+                writer.f64(controls.magnitude);
+                writer.f64(controls.phase_degrees);
+                writer.option(controls.explicit_offsets.as_ref(), |w, values| {
+                    encode_f64_slice(w, values)
+                });
+                writer.usize(match controls.solver.linear.method {
+                    rspice_core::analysis::quasi_periodic::QuasiPeriodicLinearMethod::Auto => 0,
+                    rspice_core::analysis::quasi_periodic::QuasiPeriodicLinearMethod::Direct => 1,
+                    rspice_core::analysis::quasi_periodic::QuasiPeriodicLinearMethod::Krylov => 2,
+                });
+                writer.usize(controls.solver.linear.restart);
+                writer.usize(controls.solver.linear.max_cycles);
+                writer.f64(controls.solver.linear.relative_tolerance);
+                writer.f64(controls.solver.current_absolute_tolerance);
+                writer.f64(controls.solver.voltage_absolute_tolerance);
+            }
         }
         AnalysisSpec::Qpnoise {
             start_freq,
@@ -1155,6 +1173,7 @@ fn encode_quasi_periodic_transfer(writer: &mut CanonicalWriter, spec: &AnalysisS
             output_ref,
             input_lattice,
             output_lattice,
+            ..
         }
         | AnalysisSpec::Qpxf {
             start_freq,
@@ -1175,10 +1194,17 @@ fn encode_quasi_periodic_transfer(writer: &mut CanonicalWriter, spec: &AnalysisS
             input_source.as_str(),
             output_node.as_str(),
             output_ref.as_str(),
-            *input_lattice,
-            *output_lattice,
+            input_lattice.as_slice(),
+            output_lattice.as_slice(),
         ),
         _ => unreachable!("quasi-periodic transfer encoder accepts only QPAC or QPXF"),
+    };
+    // An explicit list makes generated-sweep editor buffers inactive.
+    let (start_freq, stop_freq, points_per_unit, sweep) = if matches!(spec, AnalysisSpec::Qpac { controls, .. } if controls.explicit_offsets.is_some())
+    {
+        (0.0, 0.0, 1, FrequencySweep::Linear)
+    } else {
+        (start_freq, stop_freq, points_per_unit, sweep)
     };
     writer.f64(start_freq);
     writer.f64(stop_freq);
@@ -1187,11 +1213,16 @@ fn encode_quasi_periodic_transfer(writer: &mut CanonicalWriter, spec: &AnalysisS
     writer.string(input_source);
     writer.string(output_node);
     writer.string(output_ref);
+    if input_lattice.len() != 2 || output_lattice.len() != 2 {
+        writer.string("quasi-periodic-tuple-dimensions-v1");
+        writer.usize(input_lattice.len());
+        writer.usize(output_lattice.len());
+    }
     for value in input_lattice {
-        writer.i32(value);
+        writer.i32(*value);
     }
     for value in output_lattice {
-        writer.i32(value);
+        writer.i32(*value);
     }
 }
 

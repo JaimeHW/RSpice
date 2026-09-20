@@ -4,7 +4,9 @@
 //! type, and the validation that rejects a specification the engine could
 //! not execute.
 
+mod qpac;
 mod qpss;
+pub use qpac::QpacControls;
 mod run_type;
 mod types;
 pub use qpss::QpssControls;

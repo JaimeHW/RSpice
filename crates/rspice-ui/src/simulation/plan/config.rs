@@ -27,7 +27,9 @@ use super::AnalysisKind;
 
 mod frequency_table;
 mod periodic_network;
+mod qpac;
 mod quasi_periodic;
+pub use qpac::QuasiPeriodicAcDraft;
 pub use quasi_periodic::QpssDraft;
 use quasi_periodic::validate_qpss;
 
@@ -347,30 +349,6 @@ impl HbNoiseDraft {
         };
         reference.validate()?;
         Ok(Some(reference))
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct QuasiPeriodicAcDraft {
-    pub sweep: FrequencySweepDraft,
-    pub input_source: String,
-    pub output_node: String,
-    pub output_ref: String,
-    pub input_lattice: String,
-    pub output_lattice: String,
-}
-
-impl Default for QuasiPeriodicAcDraft {
-    fn default() -> Self {
-        Self {
-            sweep: FrequencySweepDraft::default(),
-            input_source: "V1".to_owned(),
-            output_node: "out".to_owned(),
-            output_ref: "0".to_owned(),
-            input_lattice: "0, 0".to_owned(),
-            output_lattice: "0, 0".to_owned(),
-        }
     }
 }
 
@@ -1391,15 +1369,16 @@ fn parse_positive_usize(text: &str, field: &str) -> Result<usize, String> {
     }
 }
 
-fn parse_i32_pair(text: &str, field: &str) -> Result<[i32; 2], String> {
+fn parse_i32_tuple(text: &str, field: &str) -> Result<Vec<i32>, String> {
     let values = text
         .split(',')
         .map(|part| part.trim().parse::<i32>())
         .collect::<Result<Vec<_>, _>>()
-        .map_err(|_| format!("{field} must contain two comma-separated integers"))?;
-    values
-        .try_into()
-        .map_err(|_| format!("{field} must contain exactly two integers"))
+        .map_err(|_| format!("{field} must contain comma-separated integers"))?;
+    if values.len() < 2 {
+        return Err(format!("{field} must contain at least two integers"));
+    }
+    Ok(values)
 }
 
 fn validate_sweep(draft: &FrequencySweepDraft) -> Result<(), String> {
@@ -1446,16 +1425,7 @@ fn validate_hbnoise(draft: &HbNoiseDraft) -> Option<String> {
 }
 
 fn validate_qpac(draft: &QuasiPeriodicAcDraft) -> Option<String> {
-    (|| {
-        validate_sweep(&draft.sweep)?;
-        if draft.input_source.trim().is_empty() || draft.output_node.trim().is_empty() {
-            return Err("QPAC requires an input source and output node".to_owned());
-        }
-        parse_i32_pair(&draft.input_lattice, "input lattice product")?;
-        parse_i32_pair(&draft.output_lattice, "output lattice product")?;
-        Ok(())
-    })()
-    .err()
+    draft.to_spec().err()
 }
 
 fn validate_qpnoise(draft: &QuasiPeriodicNoiseDraft) -> Option<String> {
@@ -1496,8 +1466,11 @@ fn validate_qpxf(draft: &QuasiPeriodicTransferDraft) -> Option<String> {
         if draft.input_source.trim().is_empty() || draft.output_node.trim().is_empty() {
             return Err("QPXF requires an input source and output node".to_owned());
         }
-        parse_i32_pair(&draft.input_lattice, "input lattice product")?;
-        parse_i32_pair(&draft.output_lattice, "output lattice product")?;
+        let input = parse_i32_tuple(&draft.input_lattice, "input lattice product")?;
+        let output = parse_i32_tuple(&draft.output_lattice, "output lattice product")?;
+        if input.len() != output.len() {
+            return Err("QPXF input and output tuples must have equal dimensions".into());
+        }
         Ok(())
     })()
     .err()

@@ -888,7 +888,17 @@ fn command_to_queue_item(
             spec_options,
             analysis_line: format!(".ac data={table_name}"),
         }),
-        AnalysisCommand::Qpac(_) => Err("QPAC native card is recognized; its Studio request/result integration is not connected yet".into()),
+        AnalysisCommand::Qpac(card) => {
+            let spec = AnalysisSpec::from_qpac_card(card)?;
+            let analysis_line = spec.qpac_card()?.to_spice();
+            Ok(QueuedAnalysis {
+                numeric_override: None,
+                spec,
+                config: None,
+                spec_options,
+                analysis_line,
+            })
+        }
         AnalysisCommand::Qpss(card) => {
             let config = rspice_core::engine::QpssConfig::from_qpss_card(card)
                 .map_err(|error| error.to_string())?;

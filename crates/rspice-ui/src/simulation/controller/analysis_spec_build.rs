@@ -89,24 +89,7 @@ impl SimulationController {
                     noise_reference: draft.noise_reference()?,
                 }
             }
-            AnalysisDraft::Qpac(draft) => {
-                let (start_freq, stop_freq, points_per_unit, sweep) =
-                    parse_manifest_sweep(&draft.sweep)?;
-                AnalysisSpec::Qpac {
-                    start_freq,
-                    stop_freq,
-                    points_per_unit,
-                    sweep,
-                    input_source: draft.input_source.trim().to_owned(),
-                    output_node: draft.output_node.trim().to_owned(),
-                    output_ref: draft.output_ref.trim().to_owned(),
-                    input_lattice: parse_lattice_pair(&draft.input_lattice, "QPAC input lattice")?,
-                    output_lattice: parse_lattice_pair(
-                        &draft.output_lattice,
-                        "QPAC output lattice",
-                    )?,
-                }
-            }
+            AnalysisDraft::Qpac(draft) => draft.to_spec()?,
             AnalysisDraft::Qpnoise(draft) => {
                 let (start_freq, stop_freq, points_per_unit, sweep) =
                     parse_manifest_sweep(&draft.sweep)?;
@@ -136,8 +119,8 @@ impl SimulationController {
                     input_source: draft.input_source.trim().to_owned(),
                     output_node: draft.output_node.trim().to_owned(),
                     output_ref: draft.output_ref.trim().to_owned(),
-                    input_lattice: parse_lattice_pair(&draft.input_lattice, "QPXF input lattice")?,
-                    output_lattice: parse_lattice_pair(
+                    input_lattice: parse_lattice_tuple(&draft.input_lattice, "QPXF input lattice")?,
+                    output_lattice: parse_lattice_tuple(
                         &draft.output_lattice,
                         "QPXF output lattice",
                     )?,
@@ -1062,15 +1045,16 @@ fn parse_manifest_ports(
         .collect()
 }
 
-fn parse_lattice_pair(text: &str, field: &str) -> Result<[i32; 2], String> {
+fn parse_lattice_tuple(text: &str, field: &str) -> Result<Vec<i32>, String> {
     let values = text
         .split(',')
-        .map(|value| value.trim().parse::<i32>())
+        .map(|part| part.trim().parse::<i32>())
         .collect::<Result<Vec<_>, _>>()
-        .map_err(|_| format!("{field} must contain two integers"))?;
-    values
-        .try_into()
-        .map_err(|_| format!("{field} must contain exactly two integers"))
+        .map_err(|_| format!("{field} must contain comma-separated integers"))?;
+    if values.len() < 2 {
+        return Err(format!("{field} must contain at least two integers"));
+    }
+    Ok(values)
 }
 
 fn parse_lattice_ranges(text: &str) -> Result<([i32; 2], [i32; 2]), String> {

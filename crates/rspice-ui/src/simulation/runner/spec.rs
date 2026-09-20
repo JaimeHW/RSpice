@@ -297,6 +297,7 @@ fn spec_variant_name(spec: &AnalysisSpec) -> &'static str {
 #[cfg(test)]
 mod tests {
     mod periodic_port_noise;
+    mod qpac;
     mod qpss;
     use std::collections::HashMap;
     use std::fs;
@@ -512,8 +513,9 @@ mod tests {
                 input_source: "V1".to_owned(),
                 output_node: "out".to_owned(),
                 output_ref: "0".to_owned(),
-                input_lattice: [0, 0],
-                output_lattice: [0, 0],
+                input_lattice: vec![0, 0],
+                output_lattice: vec![0, 0],
+                controls: Default::default(),
             },
             AnalysisSpec::Qpnoise {
                 start_freq: 1.0e3,
@@ -536,8 +538,8 @@ mod tests {
                 input_source: "V1".to_owned(),
                 output_node: "out".to_owned(),
                 output_ref: "0".to_owned(),
-                input_lattice: [0, 0],
-                output_lattice: [0, 0],
+                input_lattice: vec![0, 0],
+                output_lattice: vec![0, 0],
                 group_delay: true,
             },
             AnalysisSpec::Reliability {

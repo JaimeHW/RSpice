@@ -116,12 +116,68 @@ pub(super) fn ac_fields(
     policy: QuantityPresentationPolicy,
     locale: UiNumberLocale,
 ) {
-    frequency_sweep_fields(ui, &mut setup.sweep, policy, locale);
+    input_row(
+        ui,
+        "Explicit probe offsets (optional)",
+        &mut setup.explicit_offsets,
+    );
+    ui.add_enabled_ui(setup.explicit_offsets.trim().is_empty(), |ui| {
+        frequency_sweep_fields(ui, &mut setup.sweep, policy, locale);
+    });
+    ui.small("Offsets are in Hz. Enter an increasing list, or leave it blank to generate a sweep. A tuple k selects the physical frequency offset + k·tones.");
     input_row(ui, "Input source", &mut setup.input_source);
     input_row(ui, "Output", &mut setup.output_node);
     input_row(ui, "Output ref", &mut setup.output_ref);
     input_row(ui, "Input lattice", &mut setup.input_lattice);
     input_row(ui, "Output lattice", &mut setup.output_lattice);
+    ui.small("Enter one signed integer per QPSS tone. Both tuples must be retained by the selected QPSS analysis.");
+    input_row(ui, "Drive magnitude (V or A)", &mut setup.magnitude);
+    input_row(ui, "Drive phase (degrees)", &mut setup.phase_degrees);
+    use rspice_core::analysis::quasi_periodic::QuasiPeriodicLinearMethod as Method;
+    let mut method = match setup.linear_method {
+        Method::Auto => 0,
+        Method::Direct => 1,
+        Method::Krylov => 2,
+    };
+    choice_row(
+        ui,
+        "Linear solver",
+        &["Automatic", "Direct", "Krylov"],
+        &mut method,
+    );
+    setup.linear_method = match method {
+        1 => Method::Direct,
+        2 => Method::Krylov,
+        _ => Method::Auto,
+    };
+    input_row_enabled(
+        ui,
+        "Krylov restart vectors",
+        &mut setup.krylov_restart,
+        setup.linear_method != Method::Direct,
+    );
+    input_row_enabled(
+        ui,
+        "Krylov restart cycles",
+        &mut setup.krylov_cycles,
+        setup.linear_method != Method::Direct,
+    );
+    input_row(
+        ui,
+        "Relative equation tolerance",
+        &mut setup.linear_tolerance,
+    );
+    input_row(
+        ui,
+        "Absolute current tolerance (A)",
+        &mut setup.current_absolute_tolerance,
+    );
+    input_row(
+        ui,
+        "Absolute voltage tolerance (V)",
+        &mut setup.voltage_absolute_tolerance,
+    );
+    ui.small("Automatic mode uses Krylov above 512 coupled coordinates. Relative and absolute tolerances qualify the physical equations for either solver.");
 }
 
 /// Render the QP noise fields.

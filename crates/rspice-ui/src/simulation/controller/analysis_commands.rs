@@ -93,8 +93,8 @@ impl SimulationController {
                 .driven_qpss_config()?
                 .to_spice()
                 .map_err(|error| error.to_string()),
-            AnalysisSpec::Qpac { .. }
-            | AnalysisSpec::Qpnoise { .. }
+            AnalysisSpec::Qpac { .. } => Ok(spec.qpac_card()?.to_spice()),
+            AnalysisSpec::Qpnoise { .. }
             | AnalysisSpec::Qpxf { .. }
             | AnalysisSpec::Reliability { .. } => Err(format!(
                 "{} is configured but cannot produce an engine directive: {}",

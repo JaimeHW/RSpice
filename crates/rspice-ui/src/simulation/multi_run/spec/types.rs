@@ -652,8 +652,10 @@ pub enum AnalysisSpec {
         input_source: String,
         output_node: String,
         output_ref: String,
-        input_lattice: [i32; 2],
-        output_lattice: [i32; 2],
+        input_lattice: Vec<i32>,
+        output_lattice: Vec<i32>,
+        #[serde(default)]
+        controls: super::qpac::QpacControls,
     },
     /// Quasi-periodic noise folding and correlation.
     Qpnoise {
@@ -678,8 +680,8 @@ pub enum AnalysisSpec {
         input_source: String,
         output_node: String,
         output_ref: String,
-        input_lattice: [i32; 2],
-        output_lattice: [i32; 2],
+        input_lattice: Vec<i32>,
+        output_lattice: Vec<i32>,
         group_delay: bool,
     },
     /// Stochastic transient device-noise simulation.
