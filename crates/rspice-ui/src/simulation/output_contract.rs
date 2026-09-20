@@ -802,27 +802,20 @@ fn frequency_point_count(
     points_per_unit: usize,
     sweep: FrequencySweep,
 ) -> Option<usize> {
-    if !start.is_finite()
-        || !stop.is_finite()
-        || start <= 0.0
-        || stop < start
-        || points_per_unit == 0
-    {
-        return None;
-    }
-    match sweep {
-        FrequencySweep::Linear => Some(points_per_unit),
-        FrequencySweep::Decade | FrequencySweep::Octave => {
-            let units = if sweep == FrequencySweep::Decade {
-                (stop / start).log10()
-            } else {
-                (stop / start).log2()
-            };
-            let requested = points_per_unit as f64 * units;
-            (requested.is_finite() && requested <= usize::MAX as f64)
-                .then_some((requested.round() as usize).max(2))
-        }
-    }
+    let variation = match sweep {
+        FrequencySweep::Linear => rspice_core::netlist::FreqVariation::Lin,
+        FrequencySweep::Decade => rspice_core::netlist::FreqVariation::Dec,
+        FrequencySweep::Octave => rspice_core::netlist::FreqVariation::Oct,
+    };
+    rspice_core::analysis::ac::try_ac_sweep_point_count_bounded_with_abort(
+        variation,
+        points_per_unit,
+        start,
+        stop,
+        rspice_core::ResourceLimits::default().max_analysis_points,
+        &rspice_core::NoAbort,
+    )
+    .ok()
 }
 
 fn stores_complex_components(kind: SavedOutputKind, run_type: AnalysisRunType) -> bool {
@@ -1518,28 +1511,36 @@ mod tests {
     }
 
     #[test]
-    fn preflight_exactly_estimates_fixed_ac_storage() {
+    fn preflight_estimates_frequency_storage_from_runtime_grids() {
         let output = output(
             SavedOutputPolicy::EveryAcceptedPoint,
             SavedOutputPrecision::FullSourcePrecision,
         );
         let analysis_id = AnalysisInstanceId::new();
-        let spec = AnalysisSpec::Ac {
-            start_freq: 1.0,
-            stop_freq: 1_000.0,
-            points_per_unit: 10,
-            sweep: FrequencySweep::Decade,
-        };
-        let report = preflight_saved_output(&output, [(analysis_id, &spec)]);
-        assert_eq!(report.compatible_analysis_count(), 1);
-        assert_eq!(
-            report.storage_estimate(),
-            &SavedOutputStorageEstimate::ExactBytes(30 * 4 * 8)
-        );
-        assert!(matches!(
-            report.semantic_status(),
-            SavedOutputSemanticStatus::RuntimeBound { .. }
-        ));
+        for (start_freq, stop_freq, points_per_unit, sweep, expected_count) in [
+            (1.0, 1000.0, 10, FrequencySweep::Decade, 31),
+            (10.0, 80.0, 2, FrequencySweep::Octave, 7),
+            (0.0, 100.0, 3, FrequencySweep::Linear, 3),
+            (0.0, 100.0, 2, FrequencySweep::Linear, 1),
+            (100.0, 100.0, 10, FrequencySweep::Decade, 1),
+        ] {
+            let spec = AnalysisSpec::Ac {
+                start_freq,
+                stop_freq,
+                points_per_unit,
+                sweep,
+            };
+            let report = preflight_saved_output(&output, [(analysis_id, &spec)]);
+            assert_eq!(report.compatible_analysis_count(), 1);
+            assert_eq!(
+                report.storage_estimate(),
+                &SavedOutputStorageEstimate::ExactBytes(expected_count * 4 * 8)
+            );
+            assert!(matches!(
+                report.semantic_status(),
+                SavedOutputSemanticStatus::RuntimeBound { .. }
+            ));
+        }
     }
 
     #[test]

@@ -117,6 +117,22 @@ pub fn try_ac_sweep_frequencies_bounded_with_abort(
     Ok(frequencies)
 }
 
+/// Count the exact ngspice-compatible sweep without allocating frequency storage.
+/// The same bounded stepping as the solver accounts for endpoint tolerance,
+/// short LIN sweeps and floating-point progress, with cooperative cancellation.
+pub fn try_ac_sweep_point_count_bounded_with_abort(
+    variation: FreqVariation,
+    points: usize,
+    fstart: Value,
+    fstop: Value,
+    max_points: usize,
+    abort: &dyn AbortSignal,
+) -> Result<usize, FrequencyGridError> {
+    let (delta, sweep_limit) =
+        checked_ac_sweep_parameters(variation, points, fstart, fstop, abort)?;
+    bounded_ac_sweep_point_count(variation, fstart, sweep_limit, delta, max_points, abort)
+}
+
 fn checked_ac_sweep_parameters(
     variation: FreqVariation,
     points: usize,
@@ -490,6 +506,45 @@ mod tests {
 
     #[test]
     fn bounded_sweep_preflights_exact_small_grids_and_stops_at_the_ceiling() {
+        for (variation, points, start, stop, expected) in [
+            (FreqVariation::Dec, 10, 1.0, 1000.0, 31),
+            (FreqVariation::Dec, 2, 10.0, 800.0, 4),
+            (FreqVariation::Oct, 2, 8.0, 20.0, 3),
+            (FreqVariation::Lin, 2, 0.0, 100.0, 1),
+            (FreqVariation::Lin, 3, 0.0, 100.0, 3),
+            (FreqVariation::Dec, 10, 100.0, 100.0, 1),
+        ] {
+            assert_eq!(
+                try_ac_sweep_point_count_bounded_with_abort(
+                    variation, points, start, stop, expected, &NoAbort
+                )
+                .unwrap(),
+                expected
+            );
+            assert!(matches!(
+                try_ac_sweep_point_count_bounded_with_abort(
+                    variation,
+                    points,
+                    start,
+                    stop,
+                    expected - 1,
+                    &NoAbort
+                ),
+                Err(FrequencyGridError::LimitExceeded { .. })
+            ));
+        }
+        assert_eq!(
+            try_ac_sweep_point_count_bounded_with_abort(
+                FreqVariation::Dec,
+                10,
+                1.0,
+                1000.0,
+                31,
+                &crate::abort_signal::ImmediateAbort
+            ),
+            Err(FrequencyGridError::Aborted)
+        );
+
         assert_eq!(
             try_ac_sweep_frequencies_bounded_with_abort(
                 FreqVariation::Dec,
