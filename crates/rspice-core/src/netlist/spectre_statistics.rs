@@ -257,6 +257,16 @@ struct ResolvedVariation<'a> {
 }
 
 impl SpectreStatisticsPlan {
+    /// Lower a programmatically authored statistical plan for the parser's
+    /// whole-source prescan. This is a frontend carrier, not user card syntax.
+    pub fn to_parser_directive(&self) -> Result<String, SpectreStatisticsError> {
+        self.validate_structure()?;
+        Ok(format!(
+            "{SPECTRE_STATISTICS_DIRECTIVE} {}",
+            self.encode_internal()
+        ))
+    }
+
     pub(crate) fn validate_structure(&self) -> Result<(), SpectreStatisticsError> {
         let mut declarations = BTreeSet::new();
         for variation in &self.variations {
