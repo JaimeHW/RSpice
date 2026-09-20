@@ -56,7 +56,9 @@ pub(crate) use envelope_fourier::{
     split_fourier_output, validate_fourier_output_accessor,
 };
 pub use error::{ServiceRunError, ServiceRunResult};
-pub(crate) use hb::{HbData, build_core_hb_config, run_hb_analysis_on_materialized_with_abort};
+pub(crate) use hb::{
+    HbData, HbSpectrum, build_core_hb_config, run_hb_analysis_on_materialized_with_abort,
+};
 pub use hb::{HbRunConfig, HbToneRunConfig, run_hb_analysis_with_source_path_and_abort};
 pub(crate) use hbnoise::integrate_psd;
 pub use hbnoise::{

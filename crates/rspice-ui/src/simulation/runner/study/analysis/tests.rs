@@ -59,7 +59,7 @@ fn dispatch(spec: AnalysisSpec, base: StudyRunConfig, deck: &str) -> SimulationR
 const CIRCUIT: &str = "HB study\n.param AMP=1 ACTUAL={2*AMP}\nV1 out 0 SIN(0 {ACTUAL} 1k)\nR1 out 0 1k\nVDD vdd 0 1.2\nR2 vdd 0 1k\n";
 
 #[test]
-fn hb_study_monte_carlo_runs_each_materialized_circuit_and_run_set_point() {
+fn hb_current_study_monte_carlo_runs_each_materialized_circuit_and_run_set_point() {
     let deck = format!("{CIRCUIT}.mc 3 START=2 SEED=31 DIST UNIFORM SPREAD .2 PARAMS AMP\n.end\n");
     let nominal = rspice_core::Netlist::parse(&deck).unwrap();
     let mut oracle = MonteCarloStudyConfig::new(3, 31, vec!["amplitude".into()]);
@@ -76,6 +76,8 @@ fn hb_study_monte_carlo_runs_each_materialized_circuit_and_run_set_point() {
         .clone();
     let mut base = base();
     base.measurements.push("bin:0:real:V(vdd)".into());
+    base.measurements.push("bin:1:imag:I(V1)".into());
+    base.measurements.push("bin:0:real:I(VDD)".into());
     let options = SpecExecutionOptions {
         study_base: Some(base.clone()),
         ..Default::default()
@@ -107,10 +109,33 @@ fn hb_study_monte_carlo_runs_each_materialized_circuit_and_run_set_point() {
         .unwrap()
         .samples
         .iter()
-        .zip(expected)
+        .zip(&expected)
     {
         assert!((actual - expected).abs() < 1e-7, "{actual} != {expected}");
     }
+    for (actual, expected) in data
+        .variables
+        .iter()
+        .find(|variable| variable.name == "bin:1:imag:I(V1)")
+        .unwrap()
+        .samples
+        .iter()
+        .zip(&expected)
+    {
+        assert!(
+            (actual - expected / 1000.0).abs() < 1e-10,
+            "current {actual} != {expected}/1000"
+        );
+    }
+    assert!(
+        data.variables
+            .iter()
+            .find(|variable| variable.name == "bin:0:real:I(VDD)")
+            .unwrap()
+            .samples
+            .iter()
+            .all(|value| (value + 0.0024).abs() < 1e-12)
+    );
     assert!(
         data.variables
             .iter()
@@ -148,7 +173,7 @@ fn hb_study_monte_carlo_runs_each_materialized_circuit_and_run_set_point() {
 }
 
 #[test]
-fn hb_study_optimization_reaches_a_harmonic_target_and_retains_verbose() {
+fn hb_current_study_optimization_reaches_a_current_target_and_retains_verbose() {
     let spec = AnalysisSpec::Optimization {
         search: Default::default(),
         variables: vec![OptimizationVariable {
@@ -161,15 +186,16 @@ fn hb_study_optimization_reaches_a_harmonic_target_and_retains_verbose() {
         objective_node: "out".into(),
         objective_ref: "0".into(),
         goal: OptimizationGoal::Target,
-        target: Some(1.5),
+        target: Some(0.0015),
         algorithm: OptimizationAlgorithm::PatternSearch,
         max_iterations: 32,
-        cost_tolerance: 1e-10,
+        cost_tolerance: 1e-16,
         fd_step: 1e-4,
         initial_step: 0.25,
         min_step: 1e-8,
     };
     let mut base = base();
+    base.measurements = vec!["bin:1:magnitude:I(V1)".into()];
     let result = dispatch(spec.clone(), base.clone(), &format!("{CIRCUIT}.end\n"));
     let SimulationResult::Optimization {
         best_variables,
@@ -181,7 +207,7 @@ fn hb_study_optimization_reaches_a_harmonic_target_and_retains_verbose() {
         panic!("optimizer result")
     };
     assert!(
-        converged && best_cost <= 1e-10,
+        converged && best_cost <= 1e-16,
         "{best_cost}, {best_variables:?}"
     );
     assert!(

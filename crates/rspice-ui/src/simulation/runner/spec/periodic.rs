@@ -1383,31 +1383,38 @@ fn insert_scalar_waveform_checked(
 }
 
 fn spectra_to_complex_waveforms(
-    spectra: impl IntoIterator<Item = (String, Vec<(f64, f64, f64)>)>,
+    spectra: impl IntoIterator<Item = svc_runner::HbSpectrum>,
     abort: &dyn AbortSignal,
 ) -> Result<(Vec<f64>, HashMap<String, WaveformData>), SimulationError> {
     let mut waveforms = HashMap::new();
     let mut shared_frequencies: Option<Vec<f64>> = None;
-    for (spectrum_index, (name, spectrum)) in spectra.into_iter().enumerate() {
+    for (spectrum_index, spectrum) in spectra.into_iter().enumerate() {
         super::ensure_not_aborted(abort)?;
-        if name.trim().is_empty() || spectrum.is_empty() {
+        let svc_runner::HbSpectrum {
+            name,
+            unit,
+            frequencies,
+            coefficients,
+        } = spectrum;
+        if name.trim().is_empty()
+            || frequencies.is_empty()
+            || frequencies.len() != coefficients.len()
+        {
             return Err(SimulationError::SolverError(format!(
-                "periodic spectrum {} has an empty name or frequency grid",
+                "periodic spectrum {} has an invalid name or coefficient grid",
                 spectrum_index + 1
             )));
         }
-        let mut frequencies = Vec::with_capacity(spectrum.len());
-        let mut real = Vec::with_capacity(spectrum.len());
-        let mut imaginary = Vec::with_capacity(spectrum.len());
-        for (component_idx, (frequency, magnitude, phase_degrees)) in
-            spectrum.into_iter().enumerate()
+        let mut real = Vec::with_capacity(coefficients.len());
+        let mut imaginary = Vec::with_capacity(coefficients.len());
+        for (component_idx, (frequency, coefficient)) in
+            frequencies.iter().zip(coefficients).enumerate()
         {
             poll_periodically(abort, component_idx)?;
             if !frequency.is_finite()
-                || frequency < 0.0
-                || !magnitude.is_finite()
-                || magnitude < 0.0
-                || !phase_degrees.is_finite()
+                || *frequency < 0.0
+                || !coefficient.re.is_finite()
+                || !coefficient.im.is_finite()
             {
                 return Err(SimulationError::SolverError(format!(
                     "periodic spectrum '{}' contains invalid data at component {}",
@@ -1415,10 +1422,8 @@ fn spectra_to_complex_waveforms(
                     component_idx + 1
                 )));
             }
-            let phase = phase_degrees.to_radians();
-            frequencies.push(frequency);
-            real.push(magnitude * phase.cos());
-            imaginary.push(magnitude * phase.sin());
+            real.push(coefficient.re);
+            imaginary.push(coefficient.im);
         }
         if frequencies.windows(2).any(|pair| pair[1] <= pair[0]) {
             return Err(SimulationError::SolverError(format!(
@@ -1441,13 +1446,9 @@ fn spectra_to_complex_waveforms(
         } else {
             shared_frequencies = Some(frequencies.clone());
         }
-        if waveforms
-            .insert(
-                name.clone(),
-                WaveformData::new_complex(name, frequencies, real, imaginary),
-            )
-            .is_some()
-        {
+        let mut waveform = WaveformData::new_complex(name.clone(), frequencies, real, imaginary);
+        waveform.y_unit = unit.to_owned();
+        if waveforms.insert(name, waveform).is_some() {
             return Err(SimulationError::SolverError(
                 "periodic spectra contain duplicate signal names".to_owned(),
             ));

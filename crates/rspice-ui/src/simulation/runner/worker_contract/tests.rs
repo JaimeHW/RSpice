@@ -9,6 +9,7 @@
 use super::*;
 
 mod dc_sweep;
+mod hb_current;
 mod result_round_trip;
 
 #[test]

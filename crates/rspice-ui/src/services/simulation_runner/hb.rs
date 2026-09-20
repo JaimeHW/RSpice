@@ -6,7 +6,7 @@
 
 #![allow(clippy::type_complexity)]
 
-use super::error::{ensure_not_aborted, poll_periodically};
+use super::error::ensure_not_aborted;
 use super::{
     ServiceRunError, ServiceRunResult, build_multi_tone_hb_layout_with_abort,
     build_resolved_periodic_engine, parse_runner_netlist_with_abort,
@@ -17,13 +17,22 @@ use rspice_core::abort_signal::AbortSignal;
 use rspice_core::abort_signal::NoAbort;
 use std::collections::HashSet;
 use std::path::Path;
+/// One displayed spectrum in the core result's peak-amplitude convention.
+#[derive(Debug, Clone)]
+pub struct HbSpectrum {
+    pub name: String,
+    pub unit: &'static str,
+    pub frequencies: Vec<Value>,
+    pub coefficients: Vec<num_complex::Complex64>,
+}
+
 /// Harmonic Balance analysis data
 #[derive(Debug, Clone)]
 pub struct HbData {
     /// DC operating point voltages
     pub dc_voltages: Vec<(String, Value)>,
-    /// Harmonic spectra: (node_name, [(freq, magnitude, phase_deg)])
-    pub spectra: Vec<(String, Vec<(Value, Value, Value)>)>,
+    /// Node voltages and exact retained branch currents on the solved harmonic grid.
+    pub spectra: Vec<HbSpectrum>,
     /// Exact converged state retained for HB-dependent analyses.
     pub operating_point: std::sync::Arc<rspice_core::engine::HbOperatingPoint>,
 }
@@ -247,21 +256,42 @@ pub(crate) fn run_hb_analysis_on_materialized_with_abort(
         dc_voltages.push((sv.node_name.clone(), dc_val));
     }
 
-    // Build spectra from HB result's spectral voltages
     let mut spectra = Vec::new();
-    for sv in &hb_result.result.spectral_voltages {
+    for voltage in &hb_result.result.spectral_voltages {
         ensure_not_aborted(abort)?;
-        let mut spectrum = Vec::new();
-
-        // For each harmonic coefficient
-        for (h, (frequency, coeff)) in sv.frequencies.iter().zip(&sv.coefficients).enumerate() {
-            poll_periodically(abort, h)?;
-            let magnitude = coeff.norm();
-            let phase_deg = coeff.arg().to_degrees();
-            spectrum.push((*frequency, magnitude, phase_deg));
+        spectra.push(HbSpectrum {
+            name: format!("V({})", voltage.node_name),
+            unit: "V",
+            frequencies: voltage.frequencies.clone(),
+            coefficients: voltage.coefficients.clone(),
+        });
+    }
+    let mut current_names = HashSet::new();
+    for branch in &hb_result.result.mna_branch_currents {
+        ensure_not_aborted(abort)?;
+        current_names.insert(branch.device_name.to_ascii_lowercase());
+        spectra.push(HbSpectrum {
+            name: format!("I({})", branch.device_name),
+            unit: "A",
+            frequencies: branch.frequencies.clone(),
+            coefficients: branch.coefficients.clone(),
+        });
+    }
+    for reactive in &hb_result.result.reactive_spectra {
+        ensure_not_aborted(abort)?;
+        // An inductor's exact MNA current is already present. A legacy state
+        // without an exact DC current cannot supply a complete current trace.
+        if !reactive.dc_current_is_exact
+            || !current_names.insert(reactive.device_name.to_ascii_lowercase())
+        {
+            continue;
         }
-
-        spectra.push((format!("V({})", sv.node_name), spectrum));
+        spectra.push(HbSpectrum {
+            name: format!("I({})", reactive.device_name),
+            unit: "A",
+            frequencies: hb_result.result.harmonic_frequencies.clone(),
+            coefficients: reactive.current_coefficients.clone(),
+        });
     }
 
     ensure_not_aborted(abort)?;
