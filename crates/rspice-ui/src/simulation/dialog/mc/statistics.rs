@@ -68,6 +68,7 @@ impl McStatisticsConfig {
                 );
             }
             plan.variations.push(SpectreVariation {
+                bounds: None,
                 line: index + 1,
                 scope: row.scope.native(),
                 parameter: row.parameter.clone(),

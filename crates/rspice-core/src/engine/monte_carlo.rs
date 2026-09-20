@@ -974,6 +974,7 @@ mod tests {
     fn native_spectre_monte_carlo_is_seeded_and_parallel_order_independent() {
         let plan = crate::netlist::SpectreStatisticsPlan {
             variations: vec![crate::netlist::SpectreVariation {
+                bounds: None,
                 line: 3,
                 scope: crate::netlist::SpectreVariationScope::Process,
                 parameter: "rtop".to_owned(),

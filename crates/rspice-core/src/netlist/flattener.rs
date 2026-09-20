@@ -4797,6 +4797,7 @@ V1 inside b DC {1+img(next)} AC {1+img(next)}
         };
         let mut plan = SpectreStatisticsPlan {
             variations: vec![SpectreVariation {
+                bounds: None,
                 line: 3,
                 scope: SpectreVariationScope::Process,
                 parameter: "rv".into(),

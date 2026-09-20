@@ -22,6 +22,7 @@ fn variation(
     std: &str,
 ) -> SpectreVariation {
     SpectreVariation {
+        bounds: None,
         line,
         scope,
         parameter: parameter.to_owned(),

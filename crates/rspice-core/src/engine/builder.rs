@@ -10953,6 +10953,7 @@ mod tests {
     fn statistical_passive_initial_conditions_reach_the_physical_device() {
         let plan = crate::netlist::SpectreStatisticsPlan {
             variations: vec![crate::netlist::SpectreVariation {
+                bounds: None,
                 line: 3,
                 scope: crate::netlist::SpectreVariationScope::Process,
                 parameter: "rv".into(),
@@ -11006,6 +11007,7 @@ mod tests {
     fn native_spectre_process_sample_materializes_the_authored_element_expression() {
         let plan = crate::netlist::SpectreStatisticsPlan {
             variations: vec![crate::netlist::SpectreVariation {
+                bounds: None,
                 line: 3,
                 scope: crate::netlist::SpectreVariationScope::Process,
                 parameter: "rv".to_owned(),
@@ -11042,6 +11044,7 @@ mod tests {
     fn native_spectre_plan_is_nominal_until_a_monte_carlo_coordinate_activates_it() {
         let plan = crate::netlist::SpectreStatisticsPlan {
             variations: vec![crate::netlist::SpectreVariation {
+                bounds: None,
                 line: 3,
                 scope: crate::netlist::SpectreVariationScope::Process,
                 parameter: "rv".to_owned(),
@@ -11070,6 +11073,7 @@ mod tests {
     fn native_spectre_sample_reaches_a_deferred_compact_model_parameter() {
         let plan = crate::netlist::SpectreStatisticsPlan {
             variations: vec![crate::netlist::SpectreVariation {
+                bounds: None,
                 line: 3,
                 scope: crate::netlist::SpectreVariationScope::Process,
                 parameter: "factor".to_owned(),
@@ -11113,6 +11117,7 @@ mod tests {
     fn native_spectre_sample_materializes_a_deferred_independent_source() {
         let plan = crate::netlist::SpectreStatisticsPlan {
             variations: vec![crate::netlist::SpectreVariation {
+                bounds: None,
                 line: 3,
                 scope: crate::netlist::SpectreVariationScope::Process,
                 parameter: "bias".to_owned(),
@@ -11165,6 +11170,7 @@ mod tests {
     fn native_spectre_process_model_is_materialized_once_for_repeated_devices() {
         let plan = crate::netlist::SpectreStatisticsPlan {
             variations: vec![crate::netlist::SpectreVariation {
+                bounds: None,
                 line: 3,
                 scope: crate::netlist::SpectreVariationScope::Process,
                 parameter: "factor".to_owned(),
@@ -11219,6 +11225,7 @@ mod tests {
     fn native_spectre_mismatch_model_is_materialized_once_per_hierarchy_identity() {
         let plan = crate::netlist::SpectreStatisticsPlan {
             variations: vec![crate::netlist::SpectreVariation {
+                bounds: None,
                 line: 3,
                 scope: crate::netlist::SpectreVariationScope::Mismatch,
                 parameter: "factor".to_owned(),
@@ -11302,6 +11309,7 @@ mod tests {
     fn native_spectre_mismatch_is_shared_per_subcircuit_and_reaches_derived_locals() {
         let plan = crate::netlist::SpectreStatisticsPlan {
             variations: vec![crate::netlist::SpectreVariation {
+                bounds: None,
                 line: 3,
                 scope: crate::netlist::SpectreVariationScope::Mismatch,
                 parameter: "rv".to_owned(),

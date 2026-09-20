@@ -34,6 +34,10 @@ use std::collections::{BTreeMap, BTreeSet};
 pub(crate) const SPECTRE_STATISTICS_DIRECTIVE: &str = ".RSPICE_SPECTRE_STAT";
 
 const STATISTICS_ENCODING_VERSION: &str = "S1";
+
+mod bounds;
+pub use bounds::SpectreVariationBounds;
+use bounds::{ResolvedBounds, bounded_groups, retry_stream};
 const PSD_TOLERANCE: Value = 1.0e-10;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -71,6 +75,7 @@ pub struct SpectreVariation {
     pub distribution: SpectreDistribution,
     pub spread: SpectreSpread,
     pub percent: bool,
+    pub bounds: Option<SpectreVariationBounds>,
 }
 
 /// One statistical variable's nominal value and standard deviation,
@@ -235,18 +240,6 @@ impl SpectreCorrelationMatrix {
     pub fn values(&self) -> &[Vec<Value>] {
         &self.values
     }
-
-    fn correlate(&self, independent: &[Value]) -> Vec<Value> {
-        self.lower
-            .iter()
-            .map(|row| {
-                row.iter()
-                    .zip(independent)
-                    .map(|(coefficient, draw)| coefficient * draw)
-                    .sum()
-            })
-            .collect()
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -254,6 +247,7 @@ struct ResolvedVariation<'a> {
     source: &'a SpectreVariation,
     nominal: Value,
     spread: Value,
+    bounds: Option<ResolvedBounds>,
 }
 
 impl SpectreStatisticsPlan {
@@ -279,6 +273,9 @@ impl SpectreStatisticsPlan {
                         variation.scope, variation.parameter
                     ),
                 ));
+            }
+            if let Some(bounds) = &variation.bounds {
+                bounds.validate(variation)?;
             }
             match (&variation.distribution, &variation.spread) {
                 (SpectreDistribution::Uniform, SpectreSpread::HalfRange(_))
@@ -452,6 +449,9 @@ impl SpectreStatisticsPlan {
                     source: variation,
                     nominal,
                     spread,
+                    bounds: variation.bounds.as_ref()
+                        .map(|bounds| bounds.resolve(variation, nominal, spread, params))
+                        .transpose()?,
                 })
             })
             .collect::<Result<Vec<_>, SpectreStatisticsError>>()?;
@@ -486,6 +486,10 @@ impl SpectreStatisticsPlan {
         self.resolve_scope(scope, params, process)?
             .into_iter()
             .map(|variation| {
+                if variation.bounds.is_some() {
+                    return Err(invalid(variation.source.line,
+                        "DCMATCH linearized moments do not support truncated statistics; use sampled Monte Carlo for this population".into()));
+                }
                 let standard_deviation = match variation.source.distribution {
                     SpectreDistribution::Gaussian => variation.spread,
                     SpectreDistribution::Uniform => variation.spread / libm::sqrt(3.0),
@@ -575,14 +579,31 @@ impl SpectreStatisticsPlan {
             // without changing a single draw.
             let mut samples = BTreeMap::new();
             for variation in &variations {
-                let draw = keyed_standard_normal(
-                    stream,
-                    variation_identity(variation.source.parameter.as_str()),
-                );
-                samples.insert(
-                    variation.source.parameter.to_ascii_uppercase(),
-                    sample_resolved_variation(variation, draw)?,
-                );
+                let attempts = variation
+                    .bounds
+                    .as_ref()
+                    .map_or(1, |bounds| bounds.max_attempts);
+                let mut accepted = None;
+                for attempt in 0..attempts {
+                    let draw = keyed_standard_normal(
+                        retry_stream(stream, attempt),
+                        variation_identity(variation.source.parameter.as_str()),
+                    );
+                    let candidate = sample_resolved_variation(variation, draw);
+                    if variation.bounds.is_none() {
+                        accepted = Some(candidate?);
+                        break;
+                    }
+                    if let Ok(value) = candidate
+                        && variation.bounds.as_ref().unwrap().contains(value)
+                    {
+                        accepted = Some(value);
+                        break;
+                    }
+                }
+                let value =
+                    accepted.ok_or_else(|| bounds::exhausted(variation.source, attempts))?;
+                samples.insert(variation.source.parameter.to_ascii_uppercase(), value);
             }
             return Ok(samples);
         }
@@ -594,22 +615,77 @@ impl SpectreStatisticsPlan {
         let latent = latent_correlation_matrix(&variations, &target)?;
         let factor = SpectreCorrelationMatrix::new(latent)?;
 
-        let independent = variations
-            .iter()
-            .map(|variation| {
-                keyed_standard_normal(
-                    stream,
-                    variation_identity(variation.source.parameter.as_str()),
-                )
-            })
-            .collect::<Vec<_>>();
-        let latent = factor.correlate(&independent);
         let mut samples = BTreeMap::new();
-        for (variation, draw) in variations.iter().zip(latent) {
-            samples.insert(
-                variation.source.parameter.to_ascii_uppercase(),
-                sample_resolved_variation(variation, draw)?,
-            );
+        // Redraw connected correlated groups together. Independent parameters
+        // retain their keyed substreams when another variable is constrained.
+        let groups = if variations
+            .iter()
+            .all(|variation| variation.bounds.is_none())
+        {
+            // Preserve the original one-pass cost for unbounded populations.
+            vec![(0..variations.len()).collect::<Vec<_>>()]
+        } else {
+            bounded_groups(&target)
+        };
+        for group in groups {
+            let attempts = group
+                .iter()
+                .filter_map(|&index| variations[index].bounds.as_ref())
+                .map(|bounds| bounds.max_attempts)
+                .min()
+                .unwrap_or(1);
+            let bounded = group
+                .iter()
+                .any(|&index| variations[index].bounds.is_some());
+            let mut accepted = None;
+            for attempt in 0..attempts {
+                let independent = variations
+                    .iter()
+                    .map(|variation| {
+                        keyed_standard_normal(
+                            retry_stream(stream, attempt),
+                            variation_identity(&variation.source.parameter),
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                let mut candidate = Vec::with_capacity(group.len());
+                let mut valid = true;
+                for &index in &group {
+                    let draw = factor.lower[index]
+                        .iter()
+                        .zip(&independent)
+                        .map(|(coefficient, draw)| coefficient * draw)
+                        .sum();
+                    let value = sample_resolved_variation(&variations[index], draw);
+                    match value {
+                        Ok(value)
+                            if variations[index]
+                                .bounds
+                                .as_ref()
+                                .is_none_or(|bounds| bounds.contains(value)) =>
+                        {
+                            candidate.push(value)
+                        }
+                        Err(error) if !bounded => return Err(error),
+                        _ => {
+                            valid = false;
+                            break;
+                        }
+                    }
+                }
+                if valid {
+                    accepted = Some(candidate);
+                    break;
+                }
+            }
+            let values =
+                accepted.ok_or_else(|| bounds::exhausted(variations[group[0]].source, attempts))?;
+            for (&index, value) in group.iter().zip(values) {
+                samples.insert(
+                    variations[index].source.parameter.to_ascii_uppercase(),
+                    value,
+                );
+            }
         }
         Ok(samples)
     }
@@ -686,7 +762,12 @@ impl SpectreStatisticsPlan {
     /// adapter and the canonical parser.  It is versioned and decoded
     /// strictly so malformed or future payloads cannot become inert metadata.
     pub(crate) fn encode_internal(&self) -> String {
-        let mut records = vec![STATISTICS_ENCODING_VERSION.to_owned()];
+        let version = if self.variations.iter().any(|row| row.bounds.is_some()) {
+            "S2"
+        } else {
+            STATISTICS_ENCODING_VERSION
+        };
+        let mut records = vec![version.to_owned()];
         for variation in &self.variations {
             let (spread_kind, spread) = match &variation.spread {
                 SpectreSpread::StandardDeviation(value) => ("S", value),
@@ -702,6 +783,18 @@ impl SpectreStatisticsPlan {
                 spread_kind,
                 hex_encode(spread)
             ));
+            if let Some(bounds) = &variation.bounds {
+                records.push(format!(
+                    "B,{},{},{},{},{},{},{}",
+                    variation.line,
+                    scope_code(variation.scope),
+                    hex_encode(&variation.parameter),
+                    hex_encode(bounds.lower.as_deref().unwrap_or("")),
+                    hex_encode(bounds.upper.as_deref().unwrap_or("")),
+                    hex_encode(bounds.sigma_cutoff.as_deref().unwrap_or("")),
+                    bounds.max_attempts
+                ));
+            }
         }
         for correlation in &self.correlations {
             records.push(format!(
@@ -751,7 +844,8 @@ impl SpectreStatisticsPlan {
 
     fn decode_internal(payload: &str) -> Result<Self, SpectreStatisticsError> {
         let mut records = payload.split('~');
-        if records.next() != Some(STATISTICS_ENCODING_VERSION) {
+        let version = records.next();
+        if !matches!(version, Some("S1" | "S2")) {
             return Err(SpectreStatisticsError::InvalidEncoding(
                 "unsupported or missing version".to_owned(),
             ));
@@ -791,6 +885,41 @@ impl SpectreStatisticsPlan {
                         distribution,
                         spread,
                         percent,
+                        bounds: None,
+                    });
+                }
+                Some("B") if version == Some("S2") && fields.len() == 8 => {
+                    let scope = parse_scope(fields[2])?;
+                    let name = hex_decode(fields[3])?;
+                    let variation = plan
+                        .variations
+                        .iter_mut()
+                        .find(|row| row.scope == scope && row.parameter.eq_ignore_ascii_case(&name))
+                        .ok_or_else(|| {
+                            SpectreStatisticsError::InvalidEncoding(
+                                "bounds require a preceding variation".into(),
+                            )
+                        })?;
+                    if variation.bounds.is_some()
+                        || variation.line != parse_usize(fields[1], "bounds line")?
+                    {
+                        return Err(SpectreStatisticsError::InvalidEncoding(
+                            "duplicate or misattributed bounds".into(),
+                        ));
+                    }
+                    let optional = |field: &str| -> Result<Option<String>, SpectreStatisticsError> {
+                        let value = hex_decode(field)?;
+                        Ok((!value.is_empty()).then_some(value))
+                    };
+                    variation.bounds = Some(SpectreVariationBounds {
+                        lower: optional(fields[4])?,
+                        upper: optional(fields[5])?,
+                        sigma_cutoff: optional(fields[6])?,
+                        max_attempts: fields[7].parse().map_err(|_| {
+                            SpectreStatisticsError::InvalidEncoding(
+                                "invalid sampling attempt limit".into(),
+                            )
+                        })?,
                     });
                 }
                 Some("C") if fields.len() == 6 => {
@@ -1259,6 +1388,7 @@ mod tests {
                 _ => SpectreSpread::StandardDeviation(spread.to_string()),
             },
             percent: false,
+            bounds: None,
         }
     }
 
@@ -1311,6 +1441,7 @@ mod tests {
             let source = variation("x", distribution, 0.1);
             let left = ResolvedVariation {
                 source: &source,
+                bounds: None,
                 nominal: 1.0,
                 spread: 0.1,
             };
@@ -1328,6 +1459,7 @@ mod tests {
         for spread in [1e-8, 1e-100] {
             let left = ResolvedVariation {
                 source: &source,
+                bounds: None,
                 nominal: 1.0,
                 spread,
             };

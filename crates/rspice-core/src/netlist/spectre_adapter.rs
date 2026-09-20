@@ -893,6 +893,7 @@ fn lower_statistics(
             ));
         }
         plan.variations.push(super::SpectreVariation {
+            bounds: None,
             line: variation.line,
             scope: match variation.scope {
                 SpectreVariationScope::Process => super::SpectreVariationScope::Process,
