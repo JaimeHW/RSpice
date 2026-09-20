@@ -1,7 +1,7 @@
 //! Deterministic generation of the synthetic benchmark decks.
 //!
 //! The parametric RC-ladder and MOS-array decks are generated; the remaining
-//! decks in `benchmarks/circuits/` are hand-written and checked in directly.
+//! decks in `tools/rspice-bench/circuits/` are hand-written and checked in directly.
 //! The generator is byte-deterministic (fixed formatting, `\n` newlines, no
 //! timestamps) so `rspice-bench gen` always reproduces the checked-in files
 //! exactly, and reviewers can diff regenerated output against the repo.
@@ -16,7 +16,11 @@ use std::path::PathBuf;
 #[derive(Args, Debug)]
 pub struct GenArgs {
     /// Directory the generated decks are written into.
-    #[arg(long, default_value = "benchmarks/circuits", value_name = "DIR")]
+    #[arg(
+        long,
+        default_value = "tools/rspice-bench/circuits",
+        value_name = "DIR"
+    )]
     pub dir: PathBuf,
 }
 

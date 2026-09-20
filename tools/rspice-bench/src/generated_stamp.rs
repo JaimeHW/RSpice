@@ -3,7 +3,7 @@
 //! Complements `generated-rust`, which answers how much source rustc must
 //! ingest, with the runtime half of the same question: how long a generated
 //! device takes to evaluate and stamp inside the Newton loop. The measurement
-//! itself lives in `rspice-core`, next to the private device state it drives;
+//! itself lives in `rspice-conformance` and exercises the public device API;
 //! this is the command-line surface over it.
 
 use crate::error::BenchError;

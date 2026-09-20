@@ -30,7 +30,7 @@ manifest.
 Layer map - separate validation surfaces:
   tests/ngspice/  conformance against recorded ngspice-46 oracles (this tree)
   tests/xyce/     vendored Xyce Regression Suite runtime corpus
-  benchmarks/     performance rig decks + published scoreboards
+  tools/rspice-bench/  performance tools and reproducible decks
 
 The upstream ngspice README excerpt below is retained for provenance; its
 `configure`/`Makefile.am`/`make check` instructions apply to upstream ngspice,

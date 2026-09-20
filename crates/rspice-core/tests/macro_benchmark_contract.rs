@@ -6,8 +6,9 @@
 
 use rspice_core::{Engine, Netlist};
 
-const RC_LADDER_1K: &str = include_str!("../../../benchmarks/circuits/rc_ladder_1000.cir");
-const RC_LADDER_10K: &str = include_str!("../../../benchmarks/circuits/rc_ladder_10000.cir");
+const RC_LADDER_1K: &str = include_str!("../../../tools/rspice-bench/circuits/rc_ladder_1000.cir");
+const RC_LADDER_10K: &str =
+    include_str!("../../../tools/rspice-bench/circuits/rc_ladder_10000.cir");
 
 fn assert_linear_ladder_runs(source: &str) {
     let netlist = Netlist::parse(source).expect("checked-in benchmark deck parses");

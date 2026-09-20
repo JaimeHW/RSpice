@@ -879,7 +879,7 @@ oracle-capture binaries they drive. This crate declares no binaries at all, and
 `tools/ci/test_ci_configuration.py` asserts it holds no validation harness.
 
 For whole-process performance comparison against ngspice, see
-[rspice-bench](../rspice-bench/README.md).
+[rspice-bench](../../tools/rspice-bench/README.md).
 
 Licensed under the [RSpice Personal Use License](../../LICENSE).
 

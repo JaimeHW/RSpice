@@ -1,6 +1,6 @@
 [package]
 name = "rspice-bench"
-description = "Macro-benchmark rig comparing RSpice against reference simulators (M0.5)"
+description = "Developer benchmarks and performance qualification tools for RSpice"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
@@ -21,23 +21,8 @@ path = "src/main.rs"
 generated-stamp-base = ["dep:rspice-core", "dep:rspice-conformance"]
 generated-stamp = ["generated-stamp-base", "corpus-all"]
 
-# The same rig over five models instead of forty-two, for iterating.
-#
-# The model set used to be pinned in the `rspice-core` dependency entry below,
-# which meant every run of the stamp benchmark cost the full corpus build and
-# there was no way to ask for less. That is most of why the plan's headline
-# runtime gate went unmeasured for so long: measuring it was never a
-# ten-minute job, so it was never a routine one. Selecting the models through
-# a feature makes a signal available in about ninety seconds; keep
-# `generated-stamp` for any number that is quoted as the gate, because the
-# gate is a median over the whole corpus and a subset cannot produce one.
-#
-# The five are chosen to span the cost range rather than to be typical:
-# `vbic13` because it is the one model with a published ngspice C anchor to
-# compare against, `r2_cmc` as the cheapest in the corpus, `diode_cmc` and
-# `juncap200` for their parameter-processing prologues, and `epfl_hemt_10a`
-# because its complex-step evaluation overflows and has caught measurement
-# bugs before.
+# Five representative models for routine development measurements. Use
+# `generated-stamp` when a measurement must cover the complete corpus.
 generated-stamp-subset = ["generated-stamp-base", "corpus-five"]
 
 corpus-all = ["rspice-core/veriloga-builtins-models"]
@@ -55,13 +40,13 @@ clap.workspace = true
 # No `features` here on purpose: the model set is selected by `corpus-all` or
 # `corpus-five` above. Pinning it in the dependency entry made the full corpus
 # unconditional whenever this dependency was enabled at all.
-rspice-core = { path = "../rspice-core", version = "0.1.0", optional = true, default-features = false }
+rspice-core = { path = "../../crates/rspice-core", version = "0.1.0", optional = true, default-features = false }
 # The stamp bench and golden-fingerprint capture live with the Verilog-A suite
 # in rspice-conformance, not in the library they measure. This crate is a
 # benchmark rig rather than a shipping frontend, so depending on a conformance
 # crate is fine — `tools/ci/test_ci_configuration.py` enforces the ban only
 # against the crates that ship.
-rspice-conformance = { path = "../rspice-conformance", version = "0.1.0", optional = true, default-features = false, features = [
+rspice-conformance = { path = "../../crates/rspice-conformance", version = "0.1.0", optional = true, default-features = false, features = [
     "veriloga-builtins-base",
 ] }
 # The `klu` subcommand measures the solver kernels where they live, in
@@ -70,7 +55,7 @@ rspice-conformance = { path = "../rspice-conformance", version = "0.1.0", option
 # crate is lean (faer, log, num-complex, rustc-hash, thiserror), so `klu` stays
 # a seconds-to-build command.
 rspice-matrix.workspace = true
-rspice-veriloga = { path = "../rspice-veriloga", version = "0.1.0", features = ["native"] }
+rspice-veriloga = { path = "../../crates/rspice-veriloga", version = "0.1.0", features = ["native"] }
 serde.workspace = true
 serde_json.workspace = true
 tempfile = "3.20"

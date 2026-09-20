@@ -1,8 +1,8 @@
-//! `rspice-bench` — the WS0/M0.5 macro-benchmark rig.
+//! `rspice-bench` — developer benchmarks and performance qualification.
 //!
 //! This binary times *whole simulator processes* (RSpice vs. a locally
 //! installed ngspice) over the shared benchmark deck set in
-//! `benchmarks/circuits/` and emits a JSON scoreboard plus a human-readable
+//! `tools/rspice-bench/circuits/` and emits a JSON scoreboard plus a human-readable
 //! table. Its headline `run` measurement is deliberately a macro-benchmark: it
 //! times end-to-end wall-clock of `rspice run <deck> -q` and `ngspice -b
 //! <deck>`, including parsing and output. The in-process subcommands alongside
@@ -26,7 +26,7 @@
 //! that `generated-stamp` and `generated-stamp-subset` build on to select a
 //! corpus. Verilog-A golden-oracle ownership lives in `rspice-conformance`.
 //!
-//! See `benchmarks/README.md` for methodology and operating conventions.
+//! See `tools/rspice-bench/README.md` for methodology and operating conventions.
 
 mod error;
 mod generate;
@@ -77,7 +77,7 @@ pub(crate) fn workspace_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .and_then(Path::parent)
-        .expect("rspice-bench is a workspace crate under crates/")
+        .expect("rspice-bench is a workspace tool under tools/")
         .to_path_buf()
 }
 

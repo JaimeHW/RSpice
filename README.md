@@ -380,8 +380,8 @@ cargo test --release -p rspice-conformance --test xyce_regression     # Xyce cor
 
 Performance is tracked the same way. `rspice-bench` times whole simulator
 processes against a locally installed ngspice over the shared decks in
-[benchmarks/circuits/](benchmarks/circuits/); no optimization claim lands without
-a before/after scoreboard.
+[tools/rspice-bench/circuits/](tools/rspice-bench/circuits/). Keep before/after
+measurements in ignored `target/benchmarks/` or CI artifacts.
 
 ## Under the hood
 
@@ -405,12 +405,11 @@ AC-family analyses are [faer](https://crates.io/crates/faer).
 | `rspice-python` | Python bindings built with PyO3 |
 | `rspice-wasm` | WebAssembly bindings for the engine |
 | `rspice-conformance` | Corpus harnesses and oracle audits for the reference suites |
-| `rspice-bench` | Whole-process benchmark rig against local ngspice |
 
 [models/](models/) holds the bundled Verilog-A sources including the
 redistributable CMC packages, [tests/](tests/) the vendored simulator corpora
-with their manifests and notices, and [benchmarks/](benchmarks/) the
-macro-benchmark decks and published scoreboards.
+with their manifests and notices. [tools/rspice-bench/](tools/rspice-bench/)
+holds the developer benchmark executable and its reproducible workloads.
 
 ## Status
 

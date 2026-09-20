@@ -1,6 +1,6 @@
 //! The checked-in qualification baseline, regenerated and compared.
 //!
-//! `benchmarks/baselines/qualification/rspice-qualification-v1.json` is a
+//! `tests/testdata/qualification/rspice-qualification-v1.json` is a
 //! product artifact: it records what this build *is* — its toolchain, its
 //! feature set, the analysis/result matrix each non-UI surface supports, the
 //! oracle evidence checked in beside it — and what it *costs*, as counts. This
@@ -66,7 +66,8 @@ fn workspace_root() -> PathBuf {
 }
 
 fn baseline_path() -> PathBuf {
-    workspace_root().join("benchmarks/baselines/qualification/rspice-qualification-v1.json")
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/testdata/qualification/rspice-qualification-v1.json")
 }
 
 //=============================================================================

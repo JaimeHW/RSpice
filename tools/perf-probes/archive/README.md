@@ -53,4 +53,5 @@ rustc -O -o mono.exe mono.rs
 Re-running either probe requires recording toolchain, target CPU, host, raw
 samples, and source commit separately. A current production decision should be
 validated in the maintained benchmark or generated-model pipeline instead of
-promoting these numbers into `benchmarks/baselines/`.
+reusing these historical timings as current baselines. Keep new measurements
+in ignored `target/benchmarks/` or CI artifacts.

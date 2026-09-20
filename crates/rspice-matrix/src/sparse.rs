@@ -424,11 +424,9 @@ fn missing_matrix_position(method: &'static str, row: usize, col: usize) -> Miss
 
 /// Whether the KLU-class backend handles real solves for this process.
 ///
-/// Default ON: the full ngspice conformance run under the backend
-/// reproduces the faer baseline failure set exactly, and the benchmark
-/// scoreboard shows 14-15% end-to-end improvement on solver-bound decks
-/// (benchmarks/archive/legacy-results/2026-06-11-faer-vs-klu-*.json).
-/// `RSPICE_SOLVER=faer` opts out.
+/// Enabled by default; `RSPICE_SOLVER=faer` opts out. Conformance tests check
+/// solver behavior, and `rspice-bench klu` qualifies numerical accuracy, fill,
+/// and relative kernel cost on the current machine.
 pub(crate) fn klu_backend_enabled() -> bool {
     SolverOptions::from_env().real_backend != RealSolverBackend::Faer
 }

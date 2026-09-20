@@ -114,7 +114,7 @@ class EmbeddedFileTests(unittest.TestCase):
             write(
                 root,
                 "crates/core/tests/it.rs",
-                'const DECK: &str = include_str!("../../../benchmarks/deck.cir");\n',
+                'const DECK: &str = include_str!("../../../tools/rspice-bench/circuits/deck.cir");\n',
             )
 
             self.assertEqual(

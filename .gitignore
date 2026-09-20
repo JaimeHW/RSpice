@@ -1,6 +1,6 @@
 # Rust
 # Unanchored: the workspace root is not the only crate root. The reference
-# probes under benchmarks/, agent worktrees, and crates/rspice-core all grow
+# probes under tools/, agent worktrees, and crates/rspice-core all grow
 # their own target/ directory.
 target/
 # Local per-task build directories produced by Codex and ad-hoc qualification
@@ -13,12 +13,8 @@ target/
 # crates/rspice-veriloga/src/canonical_ir/schedule.rs.
 tools/perf-probes/*/*/Cargo.lock
 
-# Benchmark runs. benchmarks/README.md says nothing in results/ is committed;
-# without this rule that was a convention rather than a guarantee, and one
-# `git add benchmarks/` would have carried a machine's timings into the
-# repository. The directory itself is tracked through its .gitkeep.
-/benchmarks/results/*
-!/benchmarks/results/.gitkeep
+# Benchmark measurements and local timing baselines belong under
+# target/benchmarks/ (covered by target/ above) or in CI artifact storage.
 
 # IDE
 .idea/

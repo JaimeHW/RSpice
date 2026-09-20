@@ -53,17 +53,21 @@ pub struct RunArgs {
     #[arg(long, default_value_t = 5, value_parser = clap::value_parser!(u32).range(1..))]
     pub repeats: u32,
 
-    /// Path of the JSON scoreboard to write. The rig never date-stamps or
-    /// rotates this file itself; pass an explicit dated path to archive a run.
+    /// Path of the JSON scoreboard to write. Keep measurements in ignored
+    /// target/benchmarks or CI artifact storage; this file is overwritten.
     #[arg(
         long,
-        default_value = "benchmarks/scoreboards/scoreboard.json",
+        default_value = "target/benchmarks/scoreboard.json",
         value_name = "PATH"
     )]
     pub out: PathBuf,
 
     /// Directory scanned (non-recursively) for benchmark decks (*.cir).
-    #[arg(long, default_value = "benchmarks/circuits", value_name = "DIR")]
+    #[arg(
+        long,
+        default_value = "tools/rspice-bench/circuits",
+        value_name = "DIR"
+    )]
     pub circuits: PathBuf,
 
     /// Per-run wall-clock cap in seconds; a run that exceeds it is killed

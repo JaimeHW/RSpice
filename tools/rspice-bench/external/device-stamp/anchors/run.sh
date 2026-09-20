@@ -3,10 +3,11 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+root="$(cd "$here/../../../../.." && pwd)"
 ngspice="${RSPICE_BENCH_NGSPICE:-}"
 samples="${RSPICE_BENCH_SAMPLES:-7}"
 timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
-out="${1:-$here/../../../results/external-device-stamp-${timestamp}-$$.json}"
+out="${1:-$root/target/benchmarks/external-device-stamp-${timestamp}-$$.json}"
 
 if [[ -z "$ngspice" ]]; then
   echo "RSPICE_BENCH_NGSPICE is not set; select an ngspice release executable" >&2
