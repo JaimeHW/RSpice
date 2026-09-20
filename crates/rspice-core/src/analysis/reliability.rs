@@ -14,7 +14,12 @@
 use serde::{Deserialize, Serialize};
 
 mod evaluate;
+mod study;
 mod validation;
+pub use study::{
+    ReliabilityBinding, ReliabilityMissionPhase, ReliabilityRunRequest, ReliabilityStudy,
+    ReliabilityTransientWindow,
+};
 
 pub use evaluate::{AgingClock, AgingEvaluation, AgingParameterChange, AgingStress};
 
