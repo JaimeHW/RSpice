@@ -27,7 +27,7 @@ fn authored() -> QuasiPeriodicTransferDraft {
     }
 }
 #[test]
-fn qpxf_controls_survive_saved_draft_worker_card_and_authenticated_service() {
+fn qpxf_controls_survive_saved_draft_worker_card_and_dependency_dispatch() {
     let draft: QuasiPeriodicTransferDraft =
         ron::from_str(&ron::to_string(&authored()).unwrap()).unwrap();
     let spec = draft.to_spec().unwrap();
@@ -52,14 +52,53 @@ fn qpxf_controls_survive_saved_draft_worker_card_and_authenticated_service() {
     )
     .unwrap()
     .operating_point;
-    let result = svc_runner::run_qpxf_analysis_from_qpss_with_source_path_and_abort(
-        deck,
-        &card,
-        &point,
-        None,
-        &rspice_core::NoAbort,
+    use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
+    use crate::simulation::execution::{ExecutionArtifactEnvelope, PreparedDependencyBinding};
+    let snapshot = ContentDigest::from_bytes([31; 32]);
+    let binding = PreparedDependencyBinding::qpss_state(
+        AnalysisInstanceId::new(),
+        ObjectRevision::new(1).unwrap(),
+        ContentDigest::from_bytes([32; 32]),
+    );
+    let producer_spec = producer.to_spec().unwrap();
+    let artifact = ExecutionArtifactEnvelope::from_qpss_result(
+        snapshot,
+        binding.producer_instance_id(),
+        binding.producer_source_revision(),
+        binding.producer_config_digest(),
+        &producer_spec,
+        &SimulationResult::from_qpss_operating_point(point.clone()).unwrap(),
+    )
+    .unwrap()
+    .unwrap();
+    let dependencies = ResolvedExecutionDependencies::resolve(
+        snapshot,
+        vec![binding.clone()],
+        &std::collections::HashMap::from([(binding.producer_instance_id(), artifact)]),
     )
     .unwrap();
+    let (metadata, buffers) = dependencies.encode_transfer().unwrap();
+    let dependencies = ResolvedExecutionDependencies::decode_transfer(&metadata, buffers).unwrap();
+    let run = |deck: &str, dependencies: &ResolvedExecutionDependencies| {
+        run_spec_request(
+            &EngineBridge::new(),
+            spec.clone(),
+            SpecExecutionOptions::default(),
+            deck,
+            None,
+            dependencies,
+            &rspice_core::NoAbort,
+        )
+    };
+    assert!(run(deck, &ResolvedExecutionDependencies::default()).is_err());
+    assert!(run(&deck.replace("R1 in out 1k", "R1 in out 2k"), &dependencies).is_err());
+    let simulation = run(deck, &dependencies).unwrap();
+    let SimulationResult::Qpxf {
+        response: result, ..
+    } = simulation
+    else {
+        panic!("QPXF returned a different result family")
+    };
     let request = &result.metadata.request;
     assert_eq!(
         result.metadata.operating_point_identity,
@@ -110,16 +149,6 @@ fn qpxf_controls_survive_saved_draft_worker_card_and_authenticated_service() {
             assert!((*value - expected).norm() < 1e-9);
         }
     }
-    assert!(
-        svc_runner::run_qpxf_analysis_from_qpss_with_source_path_and_abort(
-            &deck.replace("R1 in out 1k", "R1 in out 2k"),
-            &card,
-            &point,
-            None,
-            &rspice_core::NoAbort
-        )
-        .is_err()
-    );
 }
 #[test]
 fn qpxf_controls_restore_legacy_defaults_and_only_parse_active_fields() {

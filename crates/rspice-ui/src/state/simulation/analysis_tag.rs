@@ -263,9 +263,6 @@ impl CanonicalAnalysisKind {
             Self::Qpnoise => {
                 Some("quasi-periodic noise execution is not available in this engine build")
             }
-            Self::Qpxf => Some(
-                "quasi-periodic translated-transfer execution is not available in this engine build",
-            ),
             Self::Reliability => Some(
                 "reliability execution requires PDK-qualified aging models; the former hard-coded demonstration equations have been removed",
             ),
@@ -407,6 +404,7 @@ mod tests {
                 CanonicalAnalysisKind::Hbnoise,
                 CanonicalAnalysisKind::Psp,
                 CanonicalAnalysisKind::Qpac,
+                CanonicalAnalysisKind::Qpxf,
                 CanonicalAnalysisKind::TransientNoise,
                 CanonicalAnalysisKind::DcMismatch,
             ]
@@ -421,7 +419,6 @@ mod tests {
             vec![
                 CanonicalAnalysisKind::Reliability,
                 CanonicalAnalysisKind::Qpnoise,
-                CanonicalAnalysisKind::Qpxf,
             ]
         );
         assert!(blocked.into_iter().all(|kind| {

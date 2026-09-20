@@ -260,7 +260,8 @@ impl AnalysisType {
             // is true of every card in the family. "Translated frequency" is
             // not: the translated frequency is `offset + n*f0`, one of the
             // other two numbers.
-            AnalysisType::Pac | AnalysisType::Pxf | AnalysisType::Qpac | AnalysisType::Qpxf => {
+            AnalysisType::Qpxf => ("Output Frequency", "Hz", "Unit transfer", ""),
+            AnalysisType::Pac | AnalysisType::Pxf | AnalysisType::Qpac => {
                 ("Offset Frequency", "Hz", "Magnitude", "V")
             }
             AnalysisType::Qpss | AnalysisType::Hbsp | AnalysisType::Psp => {
@@ -310,18 +311,17 @@ mod axis_tests {
     /// axis once moved that identifier and lost the coordinate's unit.
     #[test]
     fn every_periodic_small_signal_axis_is_named_the_offset_it_holds() {
-        for periodic in [
-            AnalysisType::Pac,
-            AnalysisType::Pxf,
-            AnalysisType::Qpac,
-            AnalysisType::Qpxf,
-        ] {
+        for periodic in [AnalysisType::Pac, AnalysisType::Pxf, AnalysisType::Qpac] {
             assert_eq!(
                 periodic.axis_info(),
                 ("Offset Frequency", "Hz", "Magnitude", "V"),
                 "{periodic:?}"
             );
         }
+        assert_eq!(
+            AnalysisType::Qpxf.axis_info(),
+            ("Output Frequency", "Hz", "Unit transfer", "")
+        );
         assert_eq!(
             AnalysisType::Ac.axis_info(),
             ("Frequency", "Hz", "Magnitude", "V"),

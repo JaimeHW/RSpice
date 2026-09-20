@@ -116,6 +116,7 @@ pub(super) fn run_spec_request_with_environment(
         | AnalysisSpec::HarmonicBalance { .. }
         | AnalysisSpec::Qpss { .. }
         | AnalysisSpec::Qpac { .. }
+        | AnalysisSpec::Qpxf { .. }
         | AnalysisSpec::Envelope { .. }
         | AnalysisSpec::Fourier { .. }
         | AnalysisSpec::Disto { .. }
@@ -138,9 +139,7 @@ pub(super) fn run_spec_request_with_environment(
             dependencies,
             abort_flag,
         ),
-        blocked @ (AnalysisSpec::Qpnoise { .. }
-        | AnalysisSpec::Qpxf { .. }
-        | AnalysisSpec::Reliability { .. }) => {
+        blocked @ (AnalysisSpec::Qpnoise { .. } | AnalysisSpec::Reliability { .. }) => {
             let kind = crate::simulation::execution::canonical_analysis_kind(&blocked);
             let reason = kind
                 .execution_blocker()
@@ -518,19 +517,6 @@ mod tests {
                 lattice_max: [1, 1],
                 integrated_noise: true,
                 contributor_ranking: true,
-            },
-            AnalysisSpec::Qpxf {
-                start_freq: 1.0e3,
-                stop_freq: 2.0e3,
-                points_per_unit: 2,
-                sweep: crate::simulation::multi_run::FrequencySweep::Linear,
-                input_source: "V1".to_owned(),
-                output_node: "out".to_owned(),
-                output_ref: "0".to_owned(),
-                input_lattice: vec![0, 0],
-                output_lattice: vec![0, 0],
-                group_delay: true,
-                controls: Default::default(),
             },
             AnalysisSpec::Reliability {
                 target_years: vec![1.0, 10.0],
@@ -1338,7 +1324,6 @@ R2 out 0 1k\n\
             seen,
             vec![
                 crate::state::CanonicalAnalysisKind::Qpnoise,
-                crate::state::CanonicalAnalysisKind::Qpxf,
                 crate::state::CanonicalAnalysisKind::Reliability,
             ]
         );
