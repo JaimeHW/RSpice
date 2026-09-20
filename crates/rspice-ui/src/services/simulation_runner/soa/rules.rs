@@ -8,6 +8,8 @@ use super::*;
 #[serde(deny_unknown_fields)]
 pub struct SoaRuleConfig {
     pub parameter: SoAParameter,
+    #[serde(default)]
+    pub voltage_basis: SoaVoltageBasis,
     /// Maximum stress in SI units; temperature is absolute kelvin.
     pub max_value: f64,
     #[serde(default)]
@@ -60,6 +62,11 @@ impl SoaRuleConfig {
         {
             return Err("SOA rule limit must be finite and positive (zero is allowed for directional rules)".into());
         }
+        if self.voltage_basis == SoaVoltageBasis::IntrinsicNodes
+            && self.parameter.intrinsic_voltage_parameter().is_none()
+        {
+            return Err("Intrinsic voltage basis applies only to voltage rules".into());
+        }
         self.scope().validate(1.0)
     }
 
@@ -71,13 +78,12 @@ impl SoaRuleConfig {
         }
     }
 
-    fn matches(&self, element: &Element, layouts: &TerminalLayouts) -> bool {
-        applicable(element, self.parameter, layouts.get(&element.name).copied())
-            && (self.devices.is_empty()
-                || self
-                    .devices
-                    .iter()
-                    .any(|name| observation::same_name(name, &element.name)))
+    fn scope_matches(&self, element: &Element) -> bool {
+        (self.devices.is_empty()
+            || self
+                .devices
+                .iter()
+                .any(|name| observation::same_name(name, &element.name)))
             && (self.models.is_empty()
                 || SoaObservationConfig::model(element).is_some_and(|model| {
                     self.models
@@ -85,6 +91,25 @@ impl SoaRuleConfig {
                         .any(|name| name.eq_ignore_ascii_case(model))
                 }))
     }
+
+    fn matches(&self, element: &Element, layouts: &TerminalLayouts) -> bool {
+        self.scope_matches(element)
+            && if self.voltage_basis == SoaVoltageBasis::IntrinsicNodes {
+                intrinsic_available(element, self.parameter, layouts)
+            } else {
+                applicable(element, self.parameter, layouts.get(&element.name).copied())
+            }
+    }
+}
+
+fn intrinsic_available(
+    element: &Element,
+    parameter: SoAParameter,
+    layouts: &TerminalLayouts,
+) -> bool {
+    layouts.get(&element.name).is_some_and(|layout| {
+        layout.intrinsic_voltages & (1u128 << parameter.base_parameter() as u32) != 0
+    })
 }
 
 pub(super) fn applicable(
@@ -150,6 +175,30 @@ pub(super) fn resolve(
         rule.scope()
             .validate_selection(elements)
             .map_err(ServiceRunError::Failure)?;
+        if rule.voltage_basis == SoaVoltageBasis::IntrinsicNodes {
+            for (element_index, element) in elements.iter().enumerate() {
+                poll_periodically(abort, element_index)?;
+                // A model's internal body exists independently of an authored
+                // bulk contact (for example a floating-body SOI instance).
+                let body_voltage = matches!(element.kind, ElementKind::Mosfet { .. })
+                    && matches!(
+                        rule.parameter.base_parameter(),
+                        SoAParameter::Vbs | SoAParameter::Vbd | SoAParameter::Vgb
+                    );
+                if config.observation.includes(element)
+                    && rule.scope_matches(element)
+                    && (body_voltage
+                        || applicable(element, rule.parameter, layouts.get(&element.name).copied()))
+                    && !intrinsic_available(element, rule.parameter, layouts)
+                {
+                    return Err(ServiceRunError::Failure(format!(
+                        "SOA device '{}' does not expose the requested intrinsic {} voltage",
+                        element.name,
+                        rule.parameter.stress_code()
+                    )));
+                }
+            }
+        }
         if !elements
             .iter()
             .any(|element| config.observation.includes(element) && rule.matches(element, layouts))
@@ -175,7 +224,7 @@ pub(super) fn resolve(
             (config.check_vce_max, SoAParameter::Vce, config.max_vce),
         ] {
             if enabled && applicable(element, parameter, layouts.get(&element.name).copied()) {
-                limits.insert(parameter, max_value);
+                limits.insert(parameter, (max_value, SoaVoltageBasis::ExternalTerminals));
             }
         }
         // A directional override replaces that half of an inherited symmetric
@@ -206,13 +255,14 @@ pub(super) fn resolve(
                         element.name
                     )));
                 }
-                limits.insert(rule.parameter, rule.max_value);
+                limits.insert(rule.parameter, (rule.max_value, rule.voltage_basis));
             }
         }
         if !limits.is_empty() {
             let mut definition = SoADefinition::new();
-            for (parameter, max_value) in limits {
+            for (parameter, (max_value, voltage_basis)) in limits {
                 definition.add_limit(SoALimit {
+                    voltage_basis,
                     parameter,
                     max_value,
                     unit: match parameter.base_parameter() {
@@ -228,12 +278,16 @@ pub(super) fn resolve(
                         "Maximum positive conductive device power, including series losses; excludes stored-energy exchange".into()
                     } else {
                         format!(
-                            "Maximum {} {} at authored terminals",
+                            "Maximum {} {} at {}",
                             parameter.base_parameter().stress_code(),
                             match parameter.polarity() {
                                 Some(true) => "positive part",
                                 Some(false) => "negative part magnitude",
                                 None => "magnitude",
+                            },
+                            match voltage_basis {
+                                SoaVoltageBasis::ExternalTerminals => "authored terminals",
+                                SoaVoltageBasis::IntrinsicNodes => "intrinsic electrical model nodes",
                             }
                         )
                     },
@@ -244,6 +298,13 @@ pub(super) fn resolve(
     }
     ensure_not_aborted(abort)?;
     Ok(resolved)
+}
+
+pub(super) fn observation_parameter(limit: &SoALimit) -> Option<&'static str> {
+    if limit.voltage_basis == SoaVoltageBasis::IntrinsicNodes {
+        return limit.parameter.intrinsic_voltage_parameter();
+    }
+    device_parameter(limit.parameter)
 }
 
 pub(super) fn device_parameter(parameter: SoAParameter) -> Option<&'static str> {

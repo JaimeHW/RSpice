@@ -93,6 +93,8 @@ const PARAMETERS: [SoAParameter; 83] = [
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SoaRuleDraft {
+    #[serde(default)]
+    pub intrinsic_voltage: bool,
     pub parameter: usize,
     pub max_value: String,
     pub devices: String,
@@ -102,6 +104,7 @@ pub struct SoaRuleDraft {
 impl Default for SoaRuleDraft {
     fn default() -> Self {
         Self {
+            intrinsic_voltage: false,
             parameter: 2,
             max_value: "1.8".into(),
             devices: String::new(),
@@ -196,6 +199,12 @@ impl SoaRuleDraft {
         "Diode anode current positive",
         "Diode anode current negative",
     ];
+    pub fn is_voltage(&self) -> bool {
+        PARAMETERS
+            .get(self.parameter)
+            .is_some_and(|p| p.intrinsic_voltage_parameter().is_some())
+    }
+
     pub fn is_power(&self) -> bool {
         PARAMETERS.get(self.parameter) == Some(&SoAParameter::Pdiss)
     }
@@ -212,6 +221,8 @@ impl SoaRuleDraft {
 
     pub(super) fn from_config(config: &SoaRuleConfig) -> Self {
         Self {
+            intrinsic_voltage: config.voltage_basis
+                == crate::services::safety::SoaVoltageBasis::IntrinsicNodes,
             parameter: PARAMETERS
                 .iter()
                 .position(|parameter| *parameter == config.parameter)
@@ -243,6 +254,11 @@ impl SoaRuleDraft {
             authored
         };
         let config = SoaRuleConfig {
+            voltage_basis: if self.is_voltage() && self.intrinsic_voltage {
+                crate::services::safety::SoaVoltageBasis::IntrinsicNodes
+            } else {
+                Default::default()
+            },
             parameter,
             max_value: maximum,
             devices: self.devices.split_whitespace().map(str::to_owned).collect(),

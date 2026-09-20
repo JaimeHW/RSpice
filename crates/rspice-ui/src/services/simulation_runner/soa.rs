@@ -6,7 +6,7 @@
 use super::error::{ServiceRunError, ServiceRunResult, ensure_not_aborted, poll_periodically};
 use super::{is_ground_like, normalize_voltage_signal_name, parse_runner_netlist_with_abort};
 use crate::services::safety::{
-    SoADefinition, SoAEvaluation, SoALimit, SoAManager, SoAParameter, SoAViolation,
+    SoADefinition, SoAEvaluation, SoALimit, SoAManager, SoAParameter, SoAViolation, SoaVoltageBasis,
 };
 use rspice_core::Value;
 use rspice_core::abort_signal::AbortSignal;
@@ -227,7 +227,7 @@ pub fn run_soa_analysis_with_config_and_source_path_and_abort(
         .collect();
     for (index, definition) in &resolved {
         for limit in &definition.limits {
-            if let Some(parameter) = rules::device_parameter(limit.parameter) {
+            if let Some(parameter) = rules::observation_parameter(limit) {
                 let signal = rspice_core::netlist::SaveSignal::DeviceParam {
                     device: flattened.elements[*index].name.clone(),
                     param: parameter.into(),
@@ -271,18 +271,24 @@ pub fn run_soa_analysis_with_config_and_source_path_and_abort(
     for (element_index, definition) in &resolved {
         let element = &flattened.elements[*element_index];
         for limit in &definition.limits {
-            let key = (*element_index, limit.parameter.base_parameter());
+            let key = (
+                *element_index,
+                limit.parameter.base_parameter(),
+                limit.voltage_basis,
+            );
             if observations.contains_key(&key) {
                 continue;
             }
-            let samples = if let Some(source) = current_probes.get(&key) {
+            let samples = if let Some(source) =
+                current_probes.get(&(*element_index, limit.parameter.base_parameter()))
+            {
                 Some(result.try_branch_current_waveform_named(source).ok_or_else(||
                     ServiceRunError::Failure(format!(
                         "SOA requires total terminal current {}({}); the solver returned no trace",
                         limit.parameter.stress_code(), element.name
                     ))
                 )?)
-            } else if let Some(parameter) = rules::device_parameter(limit.parameter) {
+            } else if let Some(parameter) = rules::observation_parameter(limit) {
                 Some(result.try_device_op_waveform_named(&element.name, parameter)
                     .ok_or_else(|| ServiceRunError::Failure(format!(
                         "SOA requires accepted device observation {}({}); the device returned no trace",
@@ -322,7 +328,7 @@ pub fn run_soa_analysis_with_config_and_source_path_and_abort(
                     };
                     values.push(sample);
                 }
-                observations.insert((*element_index, limit.parameter.base_parameter()), values);
+                observations.insert(key, values);
             }
         }
     }
@@ -358,8 +364,9 @@ pub fn run_soa_analysis_with_config_and_source_path_and_abort(
             let element = &flattened.elements[*element_index];
             let mut device_values = HashMap::new();
             for limit in &definition.limits {
-                let value = if let Some((positive, reference)) =
-                    rules::terminal_pair(limit.parameter, layouts.get(&element.name).copied())
+                let value = if limit.voltage_basis == SoaVoltageBasis::ExternalTerminals
+                    && let Some((positive, reference)) =
+                        rules::terminal_pair(limit.parameter, layouts.get(&element.name).copied())
                 {
                     if element.nodes.len() <= positive.max(reference) {
                         return Err(ServiceRunError::Failure(format!(
@@ -371,7 +378,11 @@ pub fn run_soa_analysis_with_config_and_source_path_and_abort(
                         - sample_node_waveform(&node_waveforms, &element.nodes[reference], idx)?
                 } else {
                     observations
-                        .get(&(*element_index, limit.parameter.base_parameter()))
+                        .get(&(
+                            *element_index,
+                            limit.parameter.base_parameter(),
+                            limit.voltage_basis,
+                        ))
                         .and_then(|trace| trace.get(idx + first))
                         .copied()
                         .ok_or_else(|| {

@@ -75,11 +75,11 @@ pub(super) fn fields(
     sub_header(ui, "Scoped device rules");
     field_note(
         ui,
-        "Extra rules override matching defaults within their scope. Positive/negative limits use authored terminal order and replace only that side of a default magnitude limit. Empty scope selects all applicable devices; repeated explicit constraints are rejected.",
+        "Extra rules override matching defaults within their scope. Positive/negative limits use the named terminal order and replace only that side of a default magnitude limit. Empty scope selects all applicable devices; repeated explicit constraints are rejected.",
     );
     field_note(
         ui,
-        "Vgs = V(g) − V(s), Vds = V(d) − V(s), Vgd = V(g) − V(d); BJT voltages follow the same named-terminal order. Id/Ig/Is and Ic/Ib/Ie are positive into drain/gate/source and collector/base/emitter, including accepted transient displacement current. Vbs/Vbd/Vgb and bulk current use the external bulk/body contact. Ves/Ved/Vge and back-gate current use the SOI back gate/substrate electrode; floating internal body states are not external terminals. BJT substrate rules use an explicit electrical substrate pin, never a thermal pin. Diode Vak = V(anode) − V(cathode); Ia is positive into the anode. Enter a nonnegative magnitude for directional limits; zero forbids that polarity.",
+        "Vgs = V(g) − V(s), Vds = V(d) − V(s), Vgd = V(g) − V(d); BJT voltages follow the same named-terminal order. Id/Ig/Is and Ic/Ib/Ie are positive into drain/gate/source and collector/base/emitter, including accepted transient displacement current. With intrinsic voltage off, Vbs/Vbd/Vgb use the external bulk/body contact. Bulk current always measures that external contact. Ves/Ved/Vge and back-gate current use the SOI back gate/substrate electrode; floating internal body states are not external terminals. BJT substrate rules use an explicit electrical substrate pin, never a thermal pin. Diode Vak = V(anode) − V(cathode); Ia is positive into the anode. Enter a nonnegative magnitude for directional limits; zero forbids that polarity.",
     );
     field_note(
         ui,
@@ -99,6 +99,10 @@ pub(super) fn fields(
                 &crate::simulation::dialog::soa::SoaRuleDraft::PARAMETER_LABELS,
                 &mut rule.parameter,
             );
+            if rule.is_voltage() {
+                switch_row(ui, "Observe intrinsic voltage", &mut rule.intrinsic_voltage);
+                field_note(ui, "Intrinsic voltages use the model's electrical nodes behind lead resistance, including floating bodies. Polarity follows the named node order. Default checks use external pins.");
+            }
             input_row(
                 ui,
                 if rule.is_power() {

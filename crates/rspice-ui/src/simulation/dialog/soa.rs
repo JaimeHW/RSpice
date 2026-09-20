@@ -122,9 +122,14 @@ impl SoaConfig {
         }
         for rule in &self.rules {
             card.push_str(&format!(
-                " rule=({} {} devices=({}) models=({}))",
+                " rule=({} {}{} devices=({}) models=({}))",
                 rule.parameter.stress_code(),
                 rule.max_value,
+                if rule.voltage_basis == crate::services::safety::SoaVoltageBasis::IntrinsicNodes {
+                    " basis=intrinsic"
+                } else {
+                    ""
+                },
                 rule.devices.join(" "),
                 rule.models.join(" ")
             ));
@@ -336,6 +341,7 @@ mod tests {
     fn soa_authored_observation_settings_survive_restore_and_full_precision_cards() {
         let config = SoaConfig {
             rules: vec![SoaRuleConfig {
+                voltage_basis: Default::default(),
                 parameter: crate::services::safety::SoAParameter::Id,
                 max_value: 0.0123456789012345,
                 devices: vec!["X1:M1".into()],

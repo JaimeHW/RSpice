@@ -195,6 +195,30 @@ impl SoAParameter {
             Self::IaNegative => "IA_NEG",
         }
     }
+    /// Signed physical observation at intrinsic electrical model nodes.
+    pub const fn intrinsic_voltage_parameter(self) -> Option<&'static str> {
+        match self.base_parameter() {
+            Self::Vgs => Some("vgs_intrinsic"),
+            Self::Vds => Some("vds_intrinsic"),
+            Self::Vgd => Some("vgd_intrinsic"),
+            Self::Vbs => Some("vbs_intrinsic"),
+            Self::Vbd => Some("vbd_intrinsic"),
+            Self::Vgb => Some("vgb_intrinsic"),
+            Self::Ves => Some("ves_intrinsic"),
+            Self::Ved => Some("ved_intrinsic"),
+            Self::Vge => Some("vge_intrinsic"),
+            Self::VbodyBackgate => Some("vbody_backgate_intrinsic"),
+            Self::Vbe => Some("vbe_intrinsic"),
+            Self::Vce => Some("vce_intrinsic"),
+            Self::Vbc => Some("vbc_intrinsic"),
+            Self::Vcsub => Some("vcsub_intrinsic"),
+            Self::Vbsub => Some("vbsub_intrinsic"),
+            Self::Vesub => Some("vesub_intrinsic"),
+            Self::Vak => Some("vak_intrinsic"),
+            _ => None,
+        }
+    }
+
     /// The unsigned terminal quantity underlying a directional constraint.
     pub const fn base_parameter(self) -> Self {
         match self {
@@ -396,9 +420,19 @@ pub fn soa_stress_waveform_name(device_id: &str, parameter: SoAParameter) -> Str
     format!("SOA_{}({device_id})", parameter.stress_code())
 }
 
+/// Where a voltage rule observes the device. Currents remain authored pin totals.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum SoaVoltageBasis {
+    #[default]
+    ExternalTerminals,
+    IntrinsicNodes,
+}
+
 /// A specific limit definition for a device type or model
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SoALimit {
+    #[serde(default)]
+    pub voltage_basis: SoaVoltageBasis,
     pub parameter: SoAParameter,
     pub max_value: f64,
     pub unit: String,
@@ -676,6 +710,7 @@ mod tests {
                 "M1",
                 SoADefinition {
                     limits: vec![SoALimit {
+                        voltage_basis: Default::default(),
                         parameter: SoAParameter::Vds,
                         max_value: 10.0,
                         unit: "V".to_owned(),
@@ -690,6 +725,7 @@ mod tests {
                     "M1",
                     SoADefinition {
                         limits: vec![SoALimit {
+                            voltage_basis: Default::default(),
                             parameter: SoAParameter::Vds,
                             max_value: 1.0,
                             unit: "V".to_owned(),

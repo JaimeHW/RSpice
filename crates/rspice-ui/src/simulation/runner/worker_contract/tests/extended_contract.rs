@@ -458,6 +458,7 @@ fn analysis_spec_round_trips_supported_variants() {
         },
         AnalysisSpec::Soa {
             rules: vec![crate::services::simulation_runner::SoaRuleConfig {
+                voltage_basis: Default::default(),
                 parameter: crate::services::safety::SoAParameter::Id,
                 max_value: 0.0123456789012345,
                 devices: vec!["X1:M1".into()],

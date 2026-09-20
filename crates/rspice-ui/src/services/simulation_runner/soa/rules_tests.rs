@@ -4,6 +4,7 @@ use super::*;
 
 fn rule(parameter: SoAParameter, limit: f64, devices: &[&str], models: &[&str]) -> SoaRuleConfig {
     SoaRuleConfig {
+        voltage_basis: Default::default(),
         parameter,
         max_value: limit,
         devices: devices.iter().map(|name| (*name).to_owned()).collect(),
@@ -389,4 +390,37 @@ fn soa_substrate_rules_reject_thermal_or_implicit_bjt_terminals() {
             "{error}"
         );
     }
+}
+
+#[test]
+fn soa_intrinsic_scope_requires_every_applicable_device_to_supply_observation() {
+    let netlist = rspice_core::Netlist::parse(
+        "Intrinsic scope\nM1 d g 0 0 NM\nM2 d g 0 0 NM\n.model NM NMOS\n.end\n",
+    )
+    .unwrap();
+    let elements = rspice_core::netlist::flatten_netlist_with_models(&netlist)
+        .unwrap()
+        .elements;
+    let mut voltage = rule(SoAParameter::Vgs, 1.0, &[], &[]);
+    voltage.voltage_basis = SoaVoltageBasis::IntrinsicNodes;
+    let mut invalid = voltage.clone();
+    invalid.parameter = SoAParameter::Id;
+    assert!(
+        invalid
+            .validate()
+            .unwrap_err()
+            .contains("only to voltage rules")
+    );
+    let layouts = HashMap::from([(
+        "M1".into(),
+        terminals::TerminalLayout {
+            intrinsic_voltages: 1u128 << SoAParameter::Vgs as u32,
+            ..Default::default()
+        },
+    )]);
+    let error = rules::resolve(&elements, &config(vec![voltage]), &layouts, &NoAbort).unwrap_err();
+    assert!(
+        error.to_string().contains("M2") && error.to_string().contains("intrinsic"),
+        "{error}"
+    );
 }

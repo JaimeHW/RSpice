@@ -261,13 +261,14 @@ fn soa_legacy_identity_is_preserved_and_every_scoped_rule_field_is_authenticated
         unreachable!()
     };
     rules.push(SoaRuleConfig {
-        parameter: SoAParameter::Id,
+        voltage_basis: Default::default(),
+        parameter: SoAParameter::Vgs,
         max_value: 1e-3,
         devices: vec!["M1".into()],
         models: vec!["NM".into()],
     });
     assert_ne!(digest(&spec), digest(&configured));
-    for field in 0..4 {
+    for field in 0..5 {
         let mut changed = configured.clone();
         let AnalysisSpec::Soa { rules, .. } = &mut changed else {
             unreachable!()
@@ -276,7 +277,8 @@ fn soa_legacy_identity_is_preserved_and_every_scoped_rule_field_is_authenticated
             0 => rules[0].parameter = SoAParameter::Vgd,
             1 => rules[0].max_value = 2e-3,
             2 => rules[0].devices = vec!["M2".into()],
-            _ => rules[0].models = vec!["PM".into()],
+            3 => rules[0].models = vec!["PM".into()],
+            _ => rules[0].voltage_basis = crate::services::safety::SoaVoltageBasis::IntrinsicNodes,
         }
         assert_ne!(digest(&changed), digest(&configured), "rule field {field}");
     }
@@ -738,6 +740,19 @@ pub(super) fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &Analysis
                     for name in &rule.models {
                         writer.string(name);
                     }
+                }
+            }
+            if rules
+                .iter()
+                .any(|rule| rule.voltage_basis != Default::default())
+            {
+                writer.string("soa-voltage-bases-v1");
+                writer.sequence(rules.len());
+                for rule in rules {
+                    writer.bool(
+                        rule.voltage_basis
+                            == crate::services::safety::SoaVoltageBasis::IntrinsicNodes,
+                    );
                 }
             }
         }

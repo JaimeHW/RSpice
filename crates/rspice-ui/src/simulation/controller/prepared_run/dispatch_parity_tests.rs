@@ -698,6 +698,7 @@ fn soa_directional_limits_survive_studio_preparation_worker_requests_and_saved_r
         let (positive, negative) = base.directional_pair().unwrap();
         for parameter in [base, positive, negative] {
             config.rules.push(SoaRuleConfig {
+                voltage_basis: Default::default(),
                 parameter,
                 max_value: if parameter.polarity().is_some() {
                     0.0
@@ -714,6 +715,7 @@ fn soa_directional_limits_survive_studio_preparation_worker_requests_and_saved_r
         }
     }
     config.rules.push(SoaRuleConfig {
+        voltage_basis: Default::default(),
         parameter: SoAParameter::Pdiss,
         max_value: 0.001,
         devices: vec![],
@@ -881,6 +883,7 @@ fn soa_temperature_limits_survive_studio_worker_execution_and_saved_results() {
         check_vbe_max: false,
         check_vce_max: false,
         rules: vec![SoaRuleConfig {
+            voltage_basis: Default::default(),
             parameter: SoAParameter::Temp,
             max_value: rspice_core::constants::celsius_to_kelvin(-30.0),
             devices: vec!["M1".into(), "Q1".into()],
@@ -986,6 +989,7 @@ fn soa_body_and_backgate_limits_follow_model_pins_through_studio_and_saved_resul
         let (positive, negative) = base.directional_pair().unwrap();
         for parameter in [base, positive, negative] {
             config.rules.push(SoaRuleConfig {
+                voltage_basis: Default::default(),
                 parameter,
                 max_value: 10.0,
                 devices: vec![],
@@ -1139,6 +1143,7 @@ fn soa_diode_and_bjt_substrate_limits_survive_studio_worker_and_saved_results() 
         let (positive, negative) = base.directional_pair().unwrap();
         for parameter in [base, positive, negative] {
             config.rules.push(SoaRuleConfig {
+                voltage_basis: Default::default(),
                 parameter,
                 max_value: 10.0,
                 devices: vec![],
@@ -1148,6 +1153,7 @@ fn soa_diode_and_bjt_substrate_limits_survive_studio_worker_and_saved_results() 
     }
     for (parameter, max_value) in [(SoAParameter::Pdiss, 0.1), (SoAParameter::Temp, 400.0)] {
         config.rules.push(SoaRuleConfig {
+            voltage_basis: Default::default(),
             parameter,
             max_value,
             devices: vec!["D1".into(), "X1:D2".into()],
@@ -1262,6 +1268,159 @@ fn soa_diode_and_bjt_substrate_limits_survive_studio_worker_and_saved_results() 
             );
         }
     }
+    let mut simulation = crate::state::SimulationState::default();
+    simulation.runs.push(run.clone());
+    simulation.next_run_id = 2;
+    simulation.active_run_idx = Some(0);
+    simulation.active_analysis_idx = Some(0);
+    let saved = crate::io::project_io::ProjectSimulationResults::from_state(&simulation);
+    let decoded: crate::io::project_io::ProjectSimulationResults =
+        serde_json::from_str(&serde_json::to_string(&saved).unwrap()).unwrap();
+    assert_eq!(
+        decoded.into_simulation_state().unwrap().runs[0].analyses[0].result_payload,
+        retained.result_payload
+    );
+}
+
+#[test]
+fn soa_intrinsic_voltage_rules_survive_studio_worker_and_saved_results() {
+    use crate::services::{
+        safety::{SoAParameter, SoaVoltageBasis},
+        simulation_runner::SoaRuleConfig,
+    };
+    use crate::simulation::dialog::soa::{SoaConfig, SoaDialogState};
+    use crate::simulation::plan::AnalysisDraft;
+    use crate::simulation::runner::worker_contract::WorkerAnalysisSpec;
+    let mut config = SoaConfig {
+        stop_time: 1e-9,
+        step_time: 1e-10,
+        check_vgs_max: false,
+        check_vds_max: false,
+        check_vbe_max: false,
+        check_vce_max: false,
+        ..Default::default()
+    };
+    for (device, parameter, voltage_basis) in [
+        ("M1", SoAParameter::Vgs, SoaVoltageBasis::ExternalTerminals),
+        (
+            "M1",
+            SoAParameter::VgsNegative,
+            SoaVoltageBasis::IntrinsicNodes,
+        ),
+        ("Q1", SoAParameter::Vbe, SoaVoltageBasis::ExternalTerminals),
+        (
+            "Q1",
+            SoAParameter::VbePositive,
+            SoaVoltageBasis::IntrinsicNodes,
+        ),
+        ("D1", SoAParameter::Vak, SoaVoltageBasis::ExternalTerminals),
+        (
+            "D1",
+            SoAParameter::VakPositive,
+            SoaVoltageBasis::IntrinsicNodes,
+        ),
+        ("MF", SoAParameter::Vbs, SoaVoltageBasis::IntrinsicNodes),
+    ] {
+        config.rules.push(SoaRuleConfig {
+            parameter,
+            voltage_basis,
+            max_value: 10.0,
+            devices: vec![device.into()],
+            models: vec![],
+        });
+    }
+    let draft = SoaDialogState::from_config(&config);
+    assert_eq!(draft.to_config().unwrap(), config);
+    assert!(config.to_spice().contains("basis=intrinsic"));
+    let mut old_rule = serde_json::to_value(&config.rules[0]).unwrap();
+    old_rule.as_object_mut().unwrap().remove("voltage_basis");
+    assert_eq!(
+        serde_json::from_value::<SoaRuleConfig>(old_rule)
+            .unwrap()
+            .voltage_basis,
+        SoaVoltageBasis::ExternalTerminals
+    );
+    let mut state = preflight_ready_state();
+    let id = only(&mut state, &[AnalysisKind::Soa])[0];
+    plan_mut(&mut state)
+        .edit(id, |body| *body = AnalysisDraft::Soa(draft))
+        .unwrap();
+    let queue = compiled_queue(&state).unwrap();
+    let mut declaration = queue[0].queued_analysis().clone();
+    let wire = WorkerAnalysisSpec::try_from(&declaration.spec).unwrap();
+    let wire: WorkerAnalysisSpec =
+        serde_json::from_str(&serde_json::to_string(&wire).unwrap()).unwrap();
+    let restored = AnalysisSpec::from(wire);
+    assert_eq!(restored, declaration.spec);
+    declaration.spec = restored;
+    let deck = "Intrinsic SOA\n\
+        Vd d 0 -2\nVg g 0 -1.2\nM1 d g 0 0 PM W=10u L=1u NRD=1 NRS=1\n\
+        .model PM PMOS LEVEL=54 VTH0=-0.4 TOXE=3n U0=0.02 RSH=100\n\
+        Vc c 0 2\nVb b 0 0.7\nQ1 c b 0 QM\n\
+        .model QM NPN IS=1e-14 BF=100 RC=100 RB=100 RE=10\n\
+        Va a 0 0.8\nD1 a 0 DM\n.model DM D IS=1e-12 RS=100\n\
+        Ve e 0 0.2\nVn n 0 1\nMF n n 0 e SOI W=10u L=1u\n\
+        .model SOI NMOS LEVEL=55 VTH0=0.4 U0=0.02 TOX=10n TSI=100n TBOX=300n\n.end\n";
+    let deck = crate::services::simulation_runner::splice_before_terminal_end_card(
+        deck,
+        &declaration.analysis_line,
+    );
+    let run = crate::simulation::runner::pvt_point_evidence::run_declaration(
+        &deck,
+        "Intrinsic SOA",
+        declaration,
+        27.0,
+        SavePolicy::RetainEngineProducedResults,
+        &[],
+    )
+    .unwrap();
+    let retained = &run.analyses[0];
+    assert!(retained.success, "{:?}", retained.error_message);
+    retained.validate_retained_evidence().unwrap();
+    let Some(crate::state::AnalysisResultPayload::Soa { evaluations, .. }) =
+        &retained.result_payload
+    else {
+        panic!("SOA evidence")
+    };
+    assert_eq!(evaluations.len(), 7);
+    assert_eq!(
+        evaluations
+            .iter()
+            .filter(|entry| entry
+                .description
+                .contains("intrinsic electrical model nodes"))
+            .count(),
+        4
+    );
+    let trace = |device: &str, parameter: SoAParameter| {
+        &retained
+            .waveforms
+            .iter()
+            .find(|wave| wave.name == format!("SOA_{}({device})", parameter.stress_code()))
+            .unwrap()
+            .y
+    };
+    for (device, external, intrinsic, applied) in [
+        ("M1", SoAParameter::Vgs, SoAParameter::VgsNegative, 1.2),
+        ("Q1", SoAParameter::Vbe, SoAParameter::VbePositive, 0.7),
+        ("D1", SoAParameter::Vak, SoAParameter::VakPositive, 0.8),
+    ] {
+        for (outside, inside) in trace(device, external)
+            .iter()
+            .zip(trace(device, intrinsic).iter())
+        {
+            assert!((outside - applied).abs() < 1e-8);
+            assert!(
+                *inside > 0.1 && *inside < applied - 1e-4,
+                "{device} intrinsic={inside} external={outside}"
+            );
+        }
+    }
+    assert!(
+        trace("MF", SoAParameter::Vbs)
+            .iter()
+            .all(|value| value.is_finite())
+    );
     let mut simulation = crate::state::SimulationState::default();
     simulation.runs.push(run.clone());
     simulation.next_run_id = 2;

@@ -6,5 +6,5 @@ pub(crate) mod soa_manager;
 
 pub use soa_manager::{
     SoADefinition, SoAEvaluation, SoALimit, SoAManager, SoAParameter, SoARuleVerdict, SoAViolation,
-    ViolationSeverity, soa_stress_waveform_name,
+    SoaVoltageBasis, ViolationSeverity, soa_stress_waveform_name,
 };
