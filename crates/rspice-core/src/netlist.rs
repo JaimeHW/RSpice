@@ -814,6 +814,27 @@ pub(crate) struct NetlistAstOverlay {
     /// Absolute compact-model values for specific flattened instances. Applied
     /// after hierarchy expansion so shared model cards remain unchanged.
     pub(crate) instance_models: BTreeMap<String, InstanceModelOverlay>,
+    /// Ideal current meters inserted at flattened authored device terminals.
+    pub(crate) terminal_current_probes: Vec<TerminalCurrentProbe>,
+}
+
+/// A zero-volt current meter at one authored terminal of a flattened device.
+///
+/// The measured branch current is positive into the device. The builder inserts
+/// the source after hierarchy expansion and topology reduction, retaining scoped
+/// models, startup directives, and mixed-signal bridge metadata. Names must be
+/// unique in the expanded circuit; the builder rejects collisions and missing
+/// terminals before solving. Probe additions obey the engine's resource limits.
+#[derive(Debug, Clone)]
+pub struct TerminalCurrentProbe {
+    /// Exact flattened element name (case-insensitive).
+    pub device: String,
+    /// Zero-based index in the element's authored node list.
+    pub terminal: usize,
+    /// Voltage-source name used by `SaveSignal::Current` and result lookup.
+    pub source_name: String,
+    /// Private electrical node between the meter and the device terminal.
+    pub node_name: String,
 }
 
 #[derive(Debug, Clone)]
@@ -1106,6 +1127,15 @@ pub struct Netlist {
 }
 
 impl Netlist {
+    /// Register a terminal current meter without rewriting authored hierarchy.
+    ///
+    /// The request survives parameter replay and contributes to checkpoint
+    /// identity. The engine validates its target and generated names at build
+    /// time. Retain the current with `SaveSignal::Current(probe.source_name)`.
+    pub fn add_terminal_current_probe(&mut self, probe: TerminalCurrentProbe) {
+        self.ast_overlay.terminal_current_probes.push(probe);
+    }
+
     /// Retained root input, including parameter values materialized by a study.
     pub(crate) fn retained_source_bytes(&self) -> usize {
         self.ast_overlay.parameters.iter().fold(

@@ -28,7 +28,7 @@ impl CircuitData {
             return;
         }
         for index in 0..self.num_nodes {
-            if !self.is_non_electrical_state_matrix_index(index) {
+            if self.has_global_shunt_at(index) {
                 matrix.add(index, index, self.global_shunt_conductance);
             }
         }
@@ -40,7 +40,7 @@ impl CircuitData {
             return;
         }
         for index in 0..self.num_nodes {
-            if !self.is_non_electrical_state_matrix_index(index) {
+            if self.has_global_shunt_at(index) {
                 matrix.push(index, index, self.global_shunt_conductance);
             }
         }

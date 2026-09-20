@@ -105,7 +105,7 @@ impl Engine {
                 if abort.is_aborted() {
                     return Err(SimulationError::Aborted);
                 }
-                if circuit.is_non_electrical_state_matrix_index(node_index) {
+                if !circuit.has_global_shunt_at(node_index) {
                     continue;
                 }
                 let node_name = node_names.get(node_index).ok_or_else(|| {

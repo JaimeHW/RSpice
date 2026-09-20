@@ -303,7 +303,12 @@ impl CircuitData {
         self.xyce_linear_f_operator.add_product(solution, f)?;
         for node_row in 0..self.num_nodes {
             if !self.is_non_electrical_state_matrix_index(node_row) {
-                f[node_row] += (self.global_shunt_conductance + nodal_gmin) * solution[node_row];
+                let shunt = if self.has_global_shunt_at(node_row) {
+                    self.global_shunt_conductance
+                } else {
+                    0.0
+                };
+                f[node_row] += (shunt + nodal_gmin) * solution[node_row];
             }
         }
 

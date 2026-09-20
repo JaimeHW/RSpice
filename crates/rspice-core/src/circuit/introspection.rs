@@ -214,6 +214,13 @@ impl CircuitData {
         self.global_shunt_conductance
     }
 
+    /// Whether this zero-based matrix row owns an authored RSHUNT resistor.
+    pub(crate) fn has_global_shunt_at(&self, index: usize) -> bool {
+        self.global_shunt_conductance != 0.0
+            && !self.is_non_electrical_state_matrix_index(index)
+            && !self.terminal_probe_nodes.contains(&(index + 1))
+    }
+
     /// Whether `.OPTIONS RSHUNT` installed a physical shunt on electrical nodes.
     pub fn has_global_shunt(&self) -> bool {
         self.global_shunt_conductance > 0.0

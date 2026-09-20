@@ -109,7 +109,9 @@ impl PssCurrentBasis {
         };
         if circuit.global_shunt_conductance != 0.0 {
             for node in 1..nodes {
-                join(node, 0);
+                if circuit.has_global_shunt_at(node - 1) {
+                    join(node, 0);
+                }
             }
         }
         // Currents internal to one component cancel when its KCL rows are

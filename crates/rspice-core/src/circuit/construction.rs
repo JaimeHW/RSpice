@@ -47,6 +47,7 @@ impl CircuitData {
             no_dc_path_nodes: Vec::new(),
             fatal_no_dc_path_nodes: Vec::new(),
             global_shunt_conductance: 0.0,
+            terminal_probe_nodes: HashSet::new(),
             dc_floating_component_by_node: Vec::new(),
             dc_floating_component_nodes: Vec::new(),
             dc_floating_component_is_certain: Vec::new(),

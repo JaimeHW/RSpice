@@ -48,17 +48,18 @@ impl PreparedEventCircuit<'_> {
         let nodes = self.circuit.num_nodes();
         // Match ordinary transient F exactly: authored RSHUNT and the
         // selected dialect's conditioning floor are distinct retained owners.
-        let shunt = sum([
-            (self.circuit.global_shunt_conductance(), 1.0),
-            (options.nodal_gmin, 1.0),
-        ]
-        .into_iter())?;
-        if shunt != 0.0 {
-            for index in 0..nodes {
-                if index.is_multiple_of(64) {
-                    check_abort(abort)?;
-                }
-                if !self.circuit.is_non_electrical_state_matrix_index(index) {
+        for index in 0..nodes {
+            if index.is_multiple_of(64) {
+                check_abort(abort)?;
+            }
+            if !self.circuit.is_non_electrical_state_matrix_index(index) {
+                let physical = if self.circuit.has_global_shunt_at(index) {
+                    self.circuit.global_shunt_conductance()
+                } else {
+                    0.0
+                };
+                let shunt = sum([(physical, 1.0), (options.nodal_gmin, 1.0)].into_iter())?;
+                if shunt != 0.0 {
                     branch(&mut sample.f, state, index + 1, 0, shunt);
                 }
             }

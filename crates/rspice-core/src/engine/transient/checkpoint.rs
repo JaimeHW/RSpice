@@ -1106,6 +1106,13 @@ fn semantic_netlist_identity(netlist: &Netlist, domain: &[u8]) -> String {
             &netlist.ast_overlay.instance_models,
         );
     }
+    if !netlist.ast_overlay.terminal_current_probes.is_empty() {
+        hash_field(
+            &mut hasher,
+            "terminal_current_probes",
+            &netlist.ast_overlay.terminal_current_probes,
+        );
+    }
     hash_field(&mut hasher, "analyses", &netlist.analyses);
     hash_field(&mut hasher, "fft_analyses", &netlist.fft_analyses);
     hash_field(&mut hasher, "data_tables", &netlist.data_tables);

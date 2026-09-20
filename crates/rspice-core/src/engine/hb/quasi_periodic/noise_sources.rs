@@ -175,7 +175,7 @@ impl Engine {
             let q = checked_scaled_positive_product(&[4.0, kb, ambient, shunt], "QPNOISE RSHUNT")?;
             for node in 0..nodes {
                 check_abort(abort)?;
-                if circuit.is_non_electrical_state_matrix_index(node) {
+                if !circuit.has_global_shunt_at(node) {
                     continue;
                 }
                 let name = point

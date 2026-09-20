@@ -44,6 +44,7 @@ use std::time::{Duration, Instant};
 
 mod model_resolution;
 mod reliability;
+mod terminal_probes;
 pub(in crate::engine) use model_resolution::resolved_element_value_expression;
 use model_resolution::*;
 pub use model_resolution::{
@@ -5428,7 +5429,7 @@ impl Engine {
                 }
             }
         }
-        let known_device_names = flat_elements
+        let mut known_device_names = flat_elements
             .iter()
             .map(|element| element.name.to_ascii_uppercase())
             .collect::<HashSet<_>>();
@@ -5444,6 +5445,17 @@ impl Engine {
                     .unwrap_or(XYCE_DEFAULT_ZERO_RESISTANCE_TOL),
             );
             flat_elements = reduction.elements;
+        }
+        terminal_probes::materialize(
+            netlist,
+            &mut flat_elements,
+            &mut known_device_names,
+            self.config.resource_limits.max_flattened_elements,
+            abort,
+        )?;
+        for probe in &netlist.ast_overlay.terminal_current_probes {
+            let node = circuit.get_or_create_node(&probe.node_name);
+            circuit.terminal_probe_nodes.insert(node);
         }
         validate_xyce_memristor_generated_namespaces(
             netlist,

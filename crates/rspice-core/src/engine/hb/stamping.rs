@@ -217,7 +217,7 @@ impl Engine {
         }
         if circuit.global_shunt_conductance != 0.0 {
             for node in 1..=circuit.num_nodes() {
-                if !circuit.is_non_electrical_state_matrix_index(node - 1) {
+                if circuit.has_global_shunt_at(node - 1) {
                     self.hb_stamp_admittance(
                         solver,
                         node,

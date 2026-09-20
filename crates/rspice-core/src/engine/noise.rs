@@ -2262,7 +2262,7 @@ impl Engine {
             }
             let node_names = circuit.node_names_sorted();
             for node_index in 0..circuit.num_nodes() {
-                if circuit.is_non_electrical_state_matrix_index(node_index) {
+                if !circuit.has_global_shunt_at(node_index) {
                     continue;
                 }
                 let node = node_index + 1;
