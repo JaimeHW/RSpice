@@ -109,6 +109,10 @@ fn qpac_card_rejects_dropped_options_invalid_grids_and_resource_overruns() {
         QpacRequest::from_qpac_card_with_abort(&card, &limits, &NoAbort),
         Err(SimulationError::ResourceLimit(_))
     ));
+    assert!(matches!(
+        QpacRequest::validate_qpac_card(&card, &limits),
+        Err(SimulationError::ResourceLimit(_))
+    ));
     let abort = CountingAbort::new(0);
     assert!(matches!(
         QpacRequest::from_qpac_card_with_abort(&card, &ResourceLimits::default(), &abort),

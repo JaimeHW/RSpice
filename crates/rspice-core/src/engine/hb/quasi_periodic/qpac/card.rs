@@ -14,37 +14,76 @@ fn grid_error(error: crate::analysis::FrequencyGridError) -> SimulationError {
     }
 }
 
-impl QpacRequest {
-    pub fn from_qpac_card(card: &QpacCard) -> Result<Self, SimulationError> {
-        Self::from_qpac_card_with_abort(card, &ResourceLimits::default(), &NoAbort)
+fn request_fields(card: &QpacCard) -> Result<QpacRequest, SimulationError> {
+    let mut solver = QuasiPeriodicAcConfig::default();
+    if let Some(method) = &card.linear_solver {
+        solver.linear.method = match method.to_ascii_uppercase().as_str() {
+            "AUTO" => QuasiPeriodicLinearMethod::Auto,
+            "DIRECT" => QuasiPeriodicLinearMethod::Direct,
+            "KRYLOV" => QuasiPeriodicLinearMethod::Krylov,
+            _ => return Err(qpac_error("SOLVER must be AUTO, DIRECT or KRYLOV")),
+        };
     }
+    if let Some(v) = card.krylov_restart {
+        solver.linear.restart = v;
+    }
+    if let Some(v) = card.krylov_cycles {
+        solver.linear.max_cycles = v;
+    }
+    if let Some(v) = card.linear_tolerance {
+        solver.linear.relative_tolerance = v;
+    }
+    if let Some(v) = card.current_absolute_tolerance {
+        solver.current_absolute_tolerance = v;
+    }
+    if let Some(v) = card.voltage_absolute_tolerance {
+        solver.voltage_absolute_tolerance = v;
+    }
+    let request = QpacRequest {
+        offsets_hz: vec![0.0],
+        input_source: card.input_source.clone(),
+        input_lattice: card.input_lattice.clone(),
+        output_node: card.output_node.clone(),
+        output_ref: card.output_ref.clone(),
+        output_lattice: card.output_lattice.clone(),
+        magnitude: card.magnitude.unwrap_or(1.0),
+        phase_degrees: card.phase_degrees.unwrap_or(0.0),
+        solver,
+    };
+    request.validate()?;
+    Ok(request)
+}
 
-    pub fn from_qpac_card_with_abort(
+fn scale(variation: FreqVariation) -> FrequencyGridScale {
+    match variation {
+        FreqVariation::Lin => FrequencyGridScale::Linear,
+        FreqVariation::Dec => FrequencyGridScale::Decade,
+        FreqVariation::Oct => FrequencyGridScale::Octave,
+    }
+}
+
+impl QpacRequest {
+    /// Validate authoring and bound the frequency count without allocating a
+    /// generated sweep. Suitable for interactive configuration editors.
+    pub fn validate_qpac_card(
         card: &QpacCard,
         limits: &ResourceLimits,
-        abort: &dyn AbortSignal,
-    ) -> Result<Self, SimulationError> {
-        check_abort(abort)?;
-        let offsets_hz = match &card.sweep {
+    ) -> Result<usize, SimulationError> {
+        request_fields(card)?;
+        let count = match &card.sweep {
             QpacSweep::Explicit(values) => {
-                ResourceLimitError::ensure(
-                    ResourceKind::AnalysisPoints,
-                    values.len(),
-                    limits.max_analysis_points,
-                )?;
-                ResourceLimitError::ensure(
-                    ResourceKind::ResultValues,
-                    values.len(),
-                    limits.max_result_values,
-                )?;
-                values.clone()
+                if values.is_empty()
+                    || values.iter().any(|f| !f.is_finite())
+                    || values.windows(2).any(|p| p[0] >= p[1])
+                {
+                    return Err(qpac_error(
+                        "probe offsets must be finite, nonempty and strictly increasing",
+                    ));
+                }
+                values.len()
             }
             QpacSweep::Generated(sweep) => {
-                let scale = match sweep.variation {
-                    FreqVariation::Lin => FrequencyGridScale::Linear,
-                    FreqVariation::Dec => FrequencyGridScale::Decade,
-                    FreqVariation::Oct => FrequencyGridScale::Octave,
-                };
+                let scale = scale(sweep.variation);
                 validate_generated_sweep(
                     sweep.start_freq,
                     sweep.stop_freq,
@@ -61,63 +100,49 @@ impl QpacRequest {
                     1,
                 )
                 .map_err(grid_error)?;
-                ResourceLimitError::ensure(
-                    ResourceKind::AnalysisPoints,
-                    count,
-                    limits.max_analysis_points,
-                )?;
-                ResourceLimitError::ensure(
-                    ResourceKind::ResultValues,
-                    count,
-                    limits.max_result_values,
-                )?;
-                generate_frequency_grid(
-                    sweep.start_freq,
-                    sweep.stop_freq,
-                    sweep.points,
-                    scale,
-                    true,
-                    1,
-                    abort,
-                )
-                .map_err(grid_error)?
+                if count > 1 && sweep.start_freq == sweep.stop_freq {
+                    return Err(qpac_error(
+                        "multiple offset points require distinct endpoints",
+                    ));
+                }
+                count
             }
         };
-        let mut solver = QuasiPeriodicAcConfig::default();
-        if let Some(method) = &card.linear_solver {
-            solver.linear.method = match method.to_ascii_uppercase().as_str() {
-                "AUTO" => QuasiPeriodicLinearMethod::Auto,
-                "DIRECT" => QuasiPeriodicLinearMethod::Direct,
-                "KRYLOV" => QuasiPeriodicLinearMethod::Krylov,
-                _ => return Err(qpac_error("SOLVER must be AUTO, DIRECT or KRYLOV")),
-            };
-        }
-        if let Some(v) = card.krylov_restart {
-            solver.linear.restart = v;
-        }
-        if let Some(v) = card.krylov_cycles {
-            solver.linear.max_cycles = v;
-        }
-        if let Some(v) = card.linear_tolerance {
-            solver.linear.relative_tolerance = v;
-        }
-        if let Some(v) = card.current_absolute_tolerance {
-            solver.current_absolute_tolerance = v;
-        }
-        if let Some(v) = card.voltage_absolute_tolerance {
-            solver.voltage_absolute_tolerance = v;
-        }
-        let request = Self {
-            offsets_hz,
-            input_source: card.input_source.clone(),
-            input_lattice: card.input_lattice.clone(),
-            output_node: card.output_node.clone(),
-            output_ref: card.output_ref.clone(),
-            output_lattice: card.output_lattice.clone(),
-            magnitude: card.magnitude.unwrap_or(1.0),
-            phase_degrees: card.phase_degrees.unwrap_or(0.0),
-            solver,
+        ResourceLimitError::ensure(
+            ResourceKind::AnalysisPoints,
+            count,
+            limits.max_analysis_points,
+        )?;
+        ResourceLimitError::ensure(ResourceKind::ResultValues, count, limits.max_result_values)?;
+        Ok(count)
+    }
+
+    pub fn from_qpac_card(card: &QpacCard) -> Result<Self, SimulationError> {
+        Self::from_qpac_card_with_abort(card, &ResourceLimits::default(), &NoAbort)
+    }
+
+    pub fn from_qpac_card_with_abort(
+        card: &QpacCard,
+        limits: &ResourceLimits,
+        abort: &dyn AbortSignal,
+    ) -> Result<Self, SimulationError> {
+        check_abort(abort)?;
+        Self::validate_qpac_card(card, limits)?;
+        let offsets_hz = match &card.sweep {
+            QpacSweep::Explicit(values) => values.clone(),
+            QpacSweep::Generated(sweep) => generate_frequency_grid(
+                sweep.start_freq,
+                sweep.stop_freq,
+                sweep.points,
+                scale(sweep.variation),
+                true,
+                1,
+                abort,
+            )
+            .map_err(grid_error)?,
         };
+        let mut request = request_fields(card)?;
+        request.offsets_hz = offsets_hz;
         request.validate()?;
         check_abort(abort)?;
         Ok(request)
