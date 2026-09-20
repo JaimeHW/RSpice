@@ -276,11 +276,55 @@ pub fn run_optimization_analysis_with_config_and_source_path_and_abort(
     source_path: Option<&Path>,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<OptimizationData> {
+    run_optimization_analysis_with_environment_and_source_path_and_abort(
+        netlist_text,
+        config,
+        source_path,
+        None,
+        abort,
+    )
+}
+
+/// Apply the Studio Run Set to every operating-point objective candidate.
+pub(crate) fn run_optimization_analysis_with_environment_and_source_path_and_abort(
+    netlist_text: &str,
+    config: &OptimizationRunConfig,
+    source_path: Option<&Path>,
+    environment: Option<&rspice_core::engine::MonteCarloEnvironment>,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<OptimizationData> {
+    ensure_not_aborted(abort)?;
     config.validate().map_err(ServiceRunError::Failure)?;
+    if let Some(point) = environment {
+        if !point.temperature_celsius.is_finite()
+            || point.temperature_celsius <= -273.15
+            || point.supply_voltage.is_some() != point.nominal_supply_voltage.is_some()
+        {
+            return Err(ServiceRunError::Failure(
+                "Optimization Run Set requires a physical temperature and a complete supply/nominal pair".into(),
+            ));
+        }
+    }
     let netlist = parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
-    let limits = build_engine_config(&netlist, None).resource_limits;
-    run_optimization_with_evaluator(config, limits, abort, |vars| {
-        evaluate_optimization_objective(netlist_text, vars, config, source_path, abort)
+    for variable in &config.variables {
+        if netlist.params.get(&variable.name).is_none() {
+            return Err(ServiceRunError::Failure(format!(
+                "Optimization parameter {:?} is not declared in this circuit",
+                variable.name,
+            )));
+        }
+    }
+    let engine = Engine::new(build_engine_config(&netlist, None));
+    run_optimization_with_evaluator(config, engine.config().resource_limits, abort, |vars| {
+        let candidate = materialize_optimization_candidate(
+            &engine,
+            &netlist,
+            &config.variables,
+            vars,
+            environment,
+            abort,
+        )?;
+        evaluate_optimization_objective(&candidate, config, abort)
     })
 }
 
@@ -525,24 +569,20 @@ fn optimizer_target_cost(goal: OptimizationGoalMode) -> Option<Value> {
 }
 
 fn evaluate_optimization_objective(
-    netlist_text: &str,
-    vars: &HashMap<String, Value>,
+    netlist: &rspice_core::Netlist,
     config: &OptimizationRunConfig,
-    source_path: Option<&Path>,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<Value> {
     ensure_not_aborted(abort)?;
-    let overridden = inject_param_overrides(netlist_text, vars, abort)?;
-    let netlist = parse_runner_netlist_with_abort(&overridden, source_path, abort)?;
-    let engine = Engine::new(build_engine_config(&netlist, None));
+    let engine = Engine::new(build_engine_config(netlist, None));
     let dc = engine
-        .run_dc_op_with_abort(&netlist, abort)
+        .run_dc_op_with_abort(netlist, abort)
         .map_err(|error| {
             ServiceRunError::from_core("DC operating point failed during optimization", error)
         })?;
 
     if let Some(expression) = &config.objective_expression {
-        return objective::evaluate(expression, &netlist, &dc, abort);
+        return objective::evaluate(expression, netlist, &dc, abort);
     }
     let node_idx =
         resolve_node_index_case_insensitive(&dc.node_names, &config.objective_node, abort)?
@@ -598,180 +638,65 @@ fn evaluate_optimization_objective(
     Ok(objective)
 }
 
-fn inject_param_overrides(
-    netlist_text: &str,
-    vars: &HashMap<String, Value>,
+/// Materialize one bounded coordinate, with all variable and temperature
+/// overrides applied before dependent parameters and models are evaluated.
+pub(crate) fn materialize_optimization_candidate(
+    engine: &Engine,
+    circuit: &rspice_core::Netlist,
+    configured: &[OptimizationVariable],
+    variables: &HashMap<String, Value>,
+    environment: Option<&rspice_core::engine::MonteCarloEnvironment>,
     abort: &dyn AbortSignal,
-) -> ServiceRunResult<String> {
+) -> ServiceRunResult<rspice_core::Netlist> {
+    use rspice_core::netlist::{StepCommand, StepSweep, StepTarget};
     ensure_not_aborted(abort)?;
-    if vars.is_empty() {
-        return Ok(netlist_text.to_string());
+    let mut steps = configured
+        .iter()
+        .map(|variable| StepCommand {
+            target: StepTarget::Param,
+            name: variable.name.clone(),
+            param_name: None,
+            sweep: StepSweep::List(vec![variables[&variable.name]]),
+        })
+        .collect::<Vec<_>>();
+    if let Some(point) = environment {
+        steps.push(StepCommand {
+            target: StepTarget::Temp,
+            name: "TEMP".into(),
+            param_name: None,
+            sweep: StepSweep::List(vec![point.temperature_celsius]),
+        });
     }
-
-    let mut entries = Vec::with_capacity(vars.len());
-    for (index, (name, value)) in vars.iter().enumerate() {
-        poll_periodically(abort, index)?;
-        if is_valid_param_identifier(name) {
-            entries.push((name.to_ascii_uppercase(), name.clone(), *value));
+    let plan = engine
+        .plan_step_commands_with_abort(
+            circuit,
+            &steps,
+            rspice_core::engine::StepPlanLimits::from_resource_limits(
+                engine.config().resource_limits,
+            ),
+            abort,
+        )
+        .map_err(|error| ServiceRunError::from_core("Optimization candidate planning", error))?;
+    let mut candidate = engine
+        .materialize_step_run_with_abort(&plan, 0, abort)
+        .map_err(|error| {
+            ServiceRunError::from_core("Optimization candidate materialization", error)
+        })?
+        .into_parts()
+        .1;
+    if let Some(point) = environment {
+        if let (Some(supply), Some(nominal)) = (point.supply_voltage, point.nominal_supply_voltage)
+        {
+            super::apply_voltage_corner(
+                &mut candidate,
+                supply,
+                nominal,
+                &point.supply_source_names,
+                abort,
+            )?;
         }
     }
-    ensure_not_aborted(abort)?;
-    entries.sort_by(|a, b| a.0.cmp(&b.0));
-    if entries.is_empty() {
-        return Ok(netlist_text.to_string());
-    }
-
-    let mut lines = Vec::new();
-    for (line_index, line) in netlist_text.lines().enumerate() {
-        poll_periodically(abort, line_index)?;
-        lines.push(line.to_string());
-    }
-    if lines.is_empty() {
-        let mut line = ".param".to_string();
-        for (entry_index, (_, name, value)) in entries.iter().enumerate() {
-            poll_periodically(abort, entry_index)?;
-            line.push(' ');
-            line.push_str(name);
-            line.push('=');
-            line.push_str(&format_param_override_value(*value));
-        }
-        ensure_not_aborted(abort)?;
-        return Ok(format!("{}\n", line));
-    }
-
-    let mut overrides_found: HashSet<String> = HashSet::new();
-
-    for (line_index, line) in lines.iter_mut().enumerate().skip(1) {
-        poll_periodically(abort, line_index)?;
-        if !is_param_directive_line(line) {
-            continue;
-        }
-
-        let assigned = collect_param_assignment_names(line);
-        let mut append_parts = Vec::new();
-        for (entry_index, (upper, name, value)) in entries.iter().enumerate() {
-            poll_periodically(abort, entry_index)?;
-            if assigned.contains(upper) {
-                overrides_found.insert(upper.clone());
-                append_parts.push(format!("{}={}", name, format_param_override_value(*value)));
-            }
-        }
-
-        if !append_parts.is_empty() {
-            let suffix = append_parts.join(" ");
-            if let Some(comment_idx) = line.find(';') {
-                let (head, comment) = line.split_at(comment_idx);
-                let mut rebuilt = head.trim_end().to_string();
-                rebuilt.push(' ');
-                rebuilt.push_str(&suffix);
-                rebuilt.push(' ');
-                rebuilt.push_str(comment.trim_start());
-                *line = rebuilt;
-            } else {
-                line.push(' ');
-                line.push_str(&suffix);
-            }
-        }
-    }
-
-    let mut missing = Vec::new();
-    for (entry_index, (upper, name, value)) in entries.iter().enumerate() {
-        poll_periodically(abort, entry_index)?;
-        if !overrides_found.contains(upper) {
-            missing.push((name.clone(), *value));
-        }
-    }
-
-    if !missing.is_empty() {
-        let mut line = ".param".to_string();
-        for (entry_index, (name, value)) in missing.iter().enumerate() {
-            poll_periodically(abort, entry_index)?;
-            line.push(' ');
-            line.push_str(name);
-            line.push('=');
-            line.push_str(&format_param_override_value(*value));
-        }
-        lines.insert(1, line);
-    }
-
-    let mut out = lines.join("\n");
-    if netlist_text.ends_with('\n') {
-        out.push('\n');
-    }
-    ensure_not_aborted(abort)?;
-    Ok(out)
-}
-
-fn format_param_override_value(value: Value) -> String {
-    let raw = format!("{:.16e}", value);
-    let Some(exp_pos) = raw.find('e') else {
-        return raw;
-    };
-    let mantissa = &raw[..exp_pos];
-    let exponent = &raw[exp_pos + 1..];
-    match exponent.parse::<i32>() {
-        Ok(exp) => format!("{}e{:+03}", mantissa, exp),
-        Err(_) => raw,
-    }
-}
-
-fn is_param_directive_line(line: &str) -> bool {
-    let trimmed = line.trim_start();
-    if !trimmed
-        .get(..6)
-        .is_some_and(|prefix| prefix.eq_ignore_ascii_case(".param"))
-    {
-        return false;
-    }
-    trimmed
-        .as_bytes()
-        .get(6)
-        .is_none_or(|ch| ch.is_ascii_whitespace())
-}
-
-fn collect_param_assignment_names(line: &str) -> HashSet<String> {
-    let mut names = HashSet::new();
-    let trimmed = line.trim_start();
-    if !trimmed
-        .get(..6)
-        .is_some_and(|prefix| prefix.eq_ignore_ascii_case(".param"))
-    {
-        return names;
-    }
-    let rest = trimmed[6..].split(';').next().unwrap_or("").trim();
-    let bytes = rest.as_bytes();
-    let len = bytes.len();
-    let mut i = 0usize;
-
-    while i < len {
-        while i < len && (bytes[i].is_ascii_whitespace() || bytes[i] == b',') {
-            i += 1;
-        }
-        if i >= len {
-            break;
-        }
-
-        let start = i;
-        let first = bytes[i];
-        if !(first.is_ascii_alphabetic() || first == b'_') {
-            i += 1;
-            continue;
-        }
-        i += 1;
-        while i < len && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
-            i += 1;
-        }
-        let name = &rest[start..i];
-
-        while i < len && bytes[i].is_ascii_whitespace() {
-            i += 1;
-        }
-        if i < len && bytes[i] == b'=' {
-            names.insert(name.to_ascii_uppercase());
-        }
-    }
-
-    names
+    Ok(candidate)
 }
 
 fn resolve_node_index_case_insensitive(

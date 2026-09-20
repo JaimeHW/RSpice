@@ -268,13 +268,28 @@ fn run_optimization(
             abort,
         )?
     } else {
-        super::run_abort_aware_service(abort, || {
-            svc_runner::run_optimization_analysis_with_config_and_source_path_and_abort(
+        let environment = environment.map(|point| rspice_core::engine::MonteCarloEnvironment {
+            temperature_celsius: point.temperature_celsius,
+            supply_voltage: point.supply_voltage,
+            nominal_supply_voltage: point.nominal_supply_voltage,
+            supply_source_names: point.supply_source_names,
+        });
+        super::run_abort_aware_service(abort, || match environment.as_ref() {
+            Some(point) => {
+                svc_runner::run_optimization_analysis_with_environment_and_source_path_and_abort(
+                    netlist,
+                    &cfg,
+                    source_path,
+                    Some(point),
+                    abort,
+                )
+            }
+            None => svc_runner::run_optimization_analysis_with_config_and_source_path_and_abort(
                 netlist,
                 &cfg,
                 source_path,
                 abort,
-            )
+            ),
         })?
     };
 

@@ -1,7 +1,6 @@
 //! Optimizer candidates use the same frozen analysis and scalar selection as MC.
 
 use super::*;
-use rspice_core::netlist::{StepCommand, StepSweep, StepTarget};
 
 pub(crate) fn run_optimization(
     base: &StudyRunConfig,
@@ -59,62 +58,14 @@ pub(crate) fn run_optimization(
     let fatal = Mutex::new(None);
     let response =
         services::run_optimization_with_evaluator(config, limits, &signal, |variables| {
-            // One typed coordinate updates all variables simultaneously, including
-            // expressions inside model cards and included sources. Reuse the core
-            // materializer rather than rewriting .param text or retaining nominal
-            // element values after mutating the parameter table.
-            let mut steps = config
-                .variables
-                .iter()
-                .map(|variable| StepCommand {
-                    target: StepTarget::Param,
-                    name: variable.name.clone(),
-                    param_name: None,
-                    sweep: StepSweep::List(vec![variables[&variable.name]]),
-                })
-                .collect::<Vec<_>>();
-            if let Some(point) = &environment {
-                steps.push(StepCommand {
-                    target: StepTarget::Temp,
-                    name: "TEMP".into(),
-                    param_name: None,
-                    sweep: StepSweep::List(vec![point.temperature_celsius]),
-                });
-            }
-            let plan = engine
-                .plan_step_commands_with_abort(
-                    &circuit,
-                    &steps,
-                    rspice_core::engine::StepPlanLimits::from_resource_limits(limits),
-                    &signal,
-                )
-                .map_err(|error| {
-                    services::ServiceRunError::from_core("Optimization candidate planning", error)
-                })?;
-            let mut candidate = engine
-                .materialize_step_run_with_abort(&plan, 0, &signal)
-                .map_err(|error| {
-                    services::ServiceRunError::from_core(
-                        "Optimization candidate materialization",
-                        error,
-                    )
-                })?
-                .into_parts()
-                .1;
-            if let Some(point) = &environment {
-                candidate.options.temp = Some(point.temperature_celsius);
-                if let (Some(supply), Some(nominal)) =
-                    (point.supply_voltage, point.nominal_supply_voltage)
-                {
-                    services::apply_voltage_corner(
-                        &mut candidate,
-                        supply,
-                        nominal,
-                        &point.supply_source_names,
-                        &signal,
-                    )?;
-                }
-            }
+            let candidate = services::materialize_optimization_candidate(
+                &engine,
+                &circuit,
+                &config.variables,
+                variables,
+                environment.as_ref(),
+                &signal,
+            )?;
             let result =
                 EngineBridge::run_materialized_with_abort(&engine, &analysis, &candidate, &signal)
                     .map_err(|error| match error {
@@ -264,6 +215,64 @@ mod tests {
             assert!(
                 (best_variables["RLOAD"] - 1000.0).abs() < 3.0,
                 "{name}: {best_variables:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn operating_point_optimization_applies_run_set_to_temperature_expressions_and_supply() {
+        let deck = "Temperature objective\n.param RLOAD=1400 RACTUAL={RLOAD*(1+0.01*(TEMP-25))}\nV1 in 0 1\nVAUX aux 0 0.5\nR1 in 0 {RACTUAL}\nR2 aux 0 1k\n.end\n";
+        let point = AnalysisExecutionEnvironment {
+            temperature_celsius: 75.0,
+            supply_voltage: Some(1.8),
+            nominal_supply_voltage: Some(1.0),
+            supply_source_names: vec!["V1".into()],
+        };
+        for (environment, expected) in [(None, 1000.0 / 1.02), (Some(point), 1200.0)] {
+            let result = super::super::super::spec::run_spec_request_with_environment(
+                &EngineBridge::new(),
+                AnalysisSpec::Optimization {
+                    search: Default::default(),
+                    variables: vec![OptimizationVariable {
+                        name: "RLOAD".into(),
+                        min: 500.0,
+                        max: 1800.0,
+                        initial: 1400.0,
+                    }],
+                    // Also observe the unrelated supply: it must remain unscaled.
+                    objective_expression: Some("I(V1)+I(VAUX)".into()),
+                    objective_node: String::new(),
+                    objective_ref: String::new(),
+                    goal: OptimizationGoal::Target,
+                    target: Some(-0.0015),
+                    algorithm: OptimizationAlgorithm::PatternSearch,
+                    max_iterations: 48,
+                    cost_tolerance: 1e-16,
+                    fd_step: 1e-4,
+                    initial_step: 0.1,
+                    min_step: 1e-8,
+                },
+                SpecExecutionOptions::default(),
+                deck,
+                None,
+                &crate::simulation::execution::ResolvedExecutionDependencies::default(),
+                environment,
+                &NoAbort,
+            )
+            .unwrap();
+            let crate::simulation::results::SimulationResult::Optimization {
+                best_variables,
+                best_cost,
+                converged,
+                ..
+            } = result
+            else {
+                panic!("optimization result")
+            };
+            assert!(converged, "cost={best_cost} vars={best_variables:?}");
+            assert!(
+                (best_variables["RLOAD"] - expected).abs() < 0.1,
+                "{best_variables:?}"
             );
         }
     }
