@@ -10568,6 +10568,7 @@ mod tests {
         current: crate::Complex64,
     ) -> crate::analysis::NoiseResult {
         crate::analysis::NoiseResult {
+            input_quantity: None,
             frequency,
             output_noise_density: 4.0,
             input_referred_density: 9.0,
@@ -10590,6 +10591,7 @@ mod tests {
         use crate::analysis::{NoiseSourceIdentity, NoiseSourceType};
 
         crate::analysis::NoiseResult {
+            input_quantity: None,
             frequency,
             output_noise_density: 10.0 * scale,
             input_referred_density: 2.5 * scale,

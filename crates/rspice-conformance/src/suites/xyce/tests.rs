@@ -2459,6 +2459,7 @@ fn noise_measurement_output_traces_preserve_live_occurrence_state() {
     let e = [0.0, 1.0, 0.0, 1.0];
     let results = (0..d.len())
         .map(|index| rspice_core::analysis::NoiseResult {
+            input_quantity: None,
             frequency: index as Value + 1.0,
             node_names: vec!["d".to_string(), "e".to_string()],
             branch_names: Vec::new(),

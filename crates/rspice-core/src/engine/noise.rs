@@ -3613,24 +3613,33 @@ impl Engine {
             temperature,
         )?;
 
-        let has_input_source = match input_source {
-            None => false,
+        let input_quantity = match input_source {
+            None => None,
             Some(source_name) => {
-                let matches_independent_source = circuit
+                use crate::analysis::noise::NoiseInputQuantity;
+                if circuit
                     .voltage_sources
                     .names
                     .iter()
-                    .chain(circuit.current_sources.names.iter())
-                    .any(|name| name.eq_ignore_ascii_case(source_name));
-                if !matches_independent_source {
+                    .any(|name| name.eq_ignore_ascii_case(source_name))
+                {
+                    Some(NoiseInputQuantity::Voltage)
+                } else if circuit
+                    .current_sources
+                    .names
+                    .iter()
+                    .any(|name| name.eq_ignore_ascii_case(source_name))
+                {
+                    Some(NoiseInputQuantity::Current)
+                } else {
                     return Err(SimulationError::Circuit(format!(
                         "Noise input source '{}' not found (expected independent V/I source)",
                         source_name
                     )));
                 }
-                true
             }
         };
+        let has_input_source = input_quantity.is_some();
 
         // Xyce NOISE retains the ordinary AC solution and uses its selected
         // output phasor for input-referred gain. This is the full deck AC
@@ -4019,6 +4028,7 @@ impl Engine {
             );
 
             Ok(NoiseResult {
+                input_quantity,
                 frequency: freq,
                 node_names: node_names.clone(),
                 branch_names: branch_names.clone(),

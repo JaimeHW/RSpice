@@ -46,6 +46,8 @@ pub struct PeriodicNoiseRequest<'a> {
 /// Result of periodic noise analysis.
 #[derive(Debug, Clone)]
 pub struct PnoiseAnalysisResult {
+    /// Selected source quantity, as resolved from the circuit excitation.
+    pub input_quantity: Option<crate::analysis::noise::NoiseInputQuantity>,
     /// Measured signal and output frequency channels.
     pub sidebands: PeriodicNoiseSidebands,
     /// Offset frequencies (Hz); the selected output channel is at offset + k*f0.
@@ -55,7 +57,7 @@ pub struct PnoiseAnalysisResult {
     /// Per-source contributions: `(label, psd per offset)`, summing to the
     /// total at every offset.
     pub contributors: Vec<(String, Vec<Value>)>,
-    /// Input-referred noise (V^2/Hz): output noise divided by the squared
+    /// Input-referred noise (V^2/Hz or A^2/Hz): output noise divided by the squared
     /// magnitude of the conversion transfer from the input source (at its
     /// selected input sideband) to the selected output sideband. Present when an input
     /// source was named.
@@ -68,7 +70,7 @@ pub struct PnoiseAnalysisResult {
     /// asked to integrate. `None` means integration was not requested or the
     /// sweep spans no band; an exactly noiseless band produces `Some(0.0)`.
     pub integrated_output_noise: Option<Value>,
-    /// Total input-referred noise over the swept band, in volts RMS, when the
+    /// Total input-referred noise over the swept band, in volts or amperes RMS, when the
     /// run was asked to integrate and named an input source.
     pub integrated_input_noise: Option<Value>,
 }
@@ -1262,6 +1264,14 @@ impl Engine {
         }
 
         Ok(PnoiseAnalysisResult {
+            input_quantity: input_port.as_ref().map(|port| {
+                use crate::analysis::noise::NoiseInputQuantity;
+                if port.voltage_source_index.is_some() {
+                    NoiseInputQuantity::Voltage
+                } else {
+                    NoiseInputQuantity::Current
+                }
+            }),
             sidebands,
             frequencies: result_frequencies,
             output_noise,

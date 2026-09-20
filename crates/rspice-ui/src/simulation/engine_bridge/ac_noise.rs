@@ -718,6 +718,7 @@ R3 n 0 3k
         let thermal = NoiseSourceIdentity::mechanism("M1", "thermal");
         let flicker = NoiseSourceIdentity::mechanism("M1", "flicker");
         let point = NoiseResult {
+            input_quantity: None,
             frequency: 1.0e3,
             node_names: Vec::new(),
             branch_names: Vec::new(),
@@ -774,6 +775,7 @@ R3 n 0 3k
     fn noise_result_catalog_drift_is_a_terminal_error() {
         let thermal = NoiseSourceIdentity::mechanism("M1", "thermal");
         let point = NoiseResult {
+            input_quantity: None,
             frequency: 1.0e3,
             node_names: Vec::new(),
             branch_names: Vec::new(),

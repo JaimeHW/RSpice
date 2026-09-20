@@ -255,6 +255,7 @@ fn noise_points() -> Vec<NoiseResult> {
     };
     vec![
         NoiseResult {
+            input_quantity: None,
             frequency: 1.0e3,
             node_names: vec!["out".to_owned()],
             branch_names: vec!["v1".to_owned()],
@@ -268,6 +269,7 @@ fn noise_points() -> Vec<NoiseResult> {
             contributions: vec![contribution(NoiseSourceIdentity::device("r1"), 4.0e-18)],
         },
         NoiseResult {
+            input_quantity: None,
             frequency: 1.0e4,
             node_names: vec!["out".to_owned()],
             branch_names: vec!["v1".to_owned()],
@@ -2883,3 +2885,5 @@ fn an_unspecified_unit_survives_the_wire_round_trip_distinct_from_dimensionless(
     assert_eq!(decoded.descriptor().unit(), &SignalUnit::Unspecified);
     assert_ne!(decoded.descriptor().unit(), &SignalUnit::Dimensionless);
 }
+
+mod noise_input_units;

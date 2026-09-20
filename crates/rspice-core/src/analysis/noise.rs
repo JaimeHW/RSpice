@@ -1055,9 +1055,36 @@ impl NoiseSource {
 // Noise Result
 //=============================================================================
 
+/// Physical input quantity used to normalize a voltage-noise spectrum.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum NoiseInputQuantity {
+    Voltage,
+    Current,
+}
+
+impl NoiseInputQuantity {
+    /// SI unit of the integrated input-referred RMS noise.
+    pub const fn rms_unit(self) -> &'static str {
+        match self {
+            Self::Voltage => "V rms",
+            Self::Current => "A rms",
+        }
+    }
+
+    /// SI power spectral-density unit of the input-referred spectrum.
+    pub const fn density_unit(self) -> &'static str {
+        match self {
+            Self::Voltage => "V²/Hz",
+            Self::Current => "A²/Hz",
+        }
+    }
+}
+
 /// Noise analysis result at a single frequency
 #[derive(Debug, Clone)]
 pub struct NoiseResult {
+    /// Selected independent source quantity; absent for output-only execution.
+    pub input_quantity: Option<NoiseInputQuantity>,
     /// Frequency (Hz)
     pub frequency: Value,
     /// Stable node names aligned with `voltages`.
@@ -1070,7 +1097,7 @@ pub struct NoiseResult {
     pub currents: Vec<Complex64>,
     /// Total output voltage noise spectral density (V²/Hz)
     pub output_noise_density: Value,
-    /// Input-referred noise spectral density (V²/Hz)
+    /// Input-referred noise spectral density (V²/Hz or A²/Hz, per `input_quantity`).
     pub input_referred_density: Value,
     /// Squared small-signal gain used to refer output noise to the input.
     /// The ngspice and Xyce compatibility dialects retain their shared
@@ -1102,7 +1129,7 @@ pub struct NoiseContribution {
     pub noise_type: NoiseSourceType,
     /// Contribution to output noise (V²/Hz)
     pub output_contribution: Value,
-    /// Contribution referred to the input (V²/Hz).
+    /// Contribution referred to the input (V²/Hz or A²/Hz, per result input quantity).
     pub input_contribution: Value,
     /// Percentage of total noise
     pub percentage: Value,
@@ -2208,6 +2235,7 @@ mod summary_tests {
         contributions: Vec<NoiseContribution>,
     ) -> NoiseResult {
         NoiseResult {
+            input_quantity: None,
             frequency,
             node_names: Vec::new(),
             branch_names: Vec::new(),
@@ -2227,6 +2255,7 @@ mod summary_tests {
 
     fn result_at(frequency: Value, r1: Value, d1: Value) -> NoiseResult {
         NoiseResult {
+            input_quantity: None,
             frequency,
             node_names: Vec::new(),
             branch_names: Vec::new(),
@@ -2360,6 +2389,7 @@ mod summary_tests {
     #[test]
     fn contribution_summary_preserves_distinct_same_type_mechanisms() {
         let make_result = |frequency| NoiseResult {
+            input_quantity: None,
             frequency,
             node_names: Vec::new(),
             branch_names: Vec::new(),

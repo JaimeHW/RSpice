@@ -426,6 +426,15 @@ fn ampere_squared_per_hertz() -> SignalUnit {
     SignalUnit::Custom("A^2/Hz".to_owned())
 }
 
+fn input_noise_density_unit(
+    quantity: Option<crate::analysis::noise::NoiseInputQuantity>,
+) -> SignalUnit {
+    match quantity {
+        Some(crate::analysis::noise::NoiseInputQuantity::Current) => ampere_squared_per_hertz(),
+        _ => volt_squared_per_hertz(),
+    }
+}
+
 fn percent() -> SignalUnit {
     SignalUnit::Custom("percent".to_owned())
 }
@@ -1293,6 +1302,15 @@ impl AnalysisResultDocument {
         let first = points
             .first()
             .ok_or_else(|| source_error(LOCATION, "a noise sweep needs at least one point"))?;
+        if points
+            .iter()
+            .any(|point| point.input_quantity != first.input_quantity)
+        {
+            return Err(source_error(
+                LOCATION,
+                "noise points disagree on the input quantity",
+            ));
+        }
         let point_count = points.len();
         let (axis, mut signals) = complex_frequency_sweep(
             LOCATION,
@@ -1322,13 +1340,18 @@ impl AnalysisResultDocument {
             (
                 "inoise_spectrum",
                 "INOISE",
-                volt_squared_per_hertz(),
+                input_noise_density_unit(first.input_quantity),
                 |point| point.input_referred_density,
             ),
             (
                 "input_gain_squared",
                 "GAIN^2",
-                SignalUnit::Dimensionless,
+                if first.input_quantity == Some(crate::analysis::noise::NoiseInputQuantity::Current)
+                {
+                    SignalUnit::Custom("ohm^2".into())
+                } else {
+                    SignalUnit::Dimensionless
+                },
                 |point| point.input_gain_squared,
             ),
         ];
@@ -3638,7 +3661,7 @@ impl AnalysisResultDocument {
                     LOCATION,
                     "input_referred_noise",
                     "Input-referred noise density",
-                    volt_squared_per_hertz(),
+                    input_noise_density_unit(result.input_quantity),
                     SignalValueType::Real,
                     point_count,
                 )?,
@@ -3718,7 +3741,13 @@ impl AnalysisResultDocument {
                 LOCATION,
                 "integrated_input_referred_noise",
                 "Integrated input-referred noise",
-                SignalUnit::Volt,
+                if result.input_quantity
+                    == Some(crate::analysis::noise::NoiseInputQuantity::Current)
+                {
+                    SignalUnit::Ampere
+                } else {
+                    SignalUnit::Volt
+                },
                 total,
             )?);
         }

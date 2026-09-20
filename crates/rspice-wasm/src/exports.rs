@@ -1066,6 +1066,7 @@ mod wasm_tests {
             (f64::from_bits(3), f64::from_bits(4), 0.25),
         ] {
             let left = NoiseResult {
+                input_quantity: None,
                 frequency: 0.0,
                 node_names: Vec::new(),
                 branch_names: Vec::new(),
