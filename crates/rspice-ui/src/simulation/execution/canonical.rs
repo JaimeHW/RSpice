@@ -876,6 +876,37 @@ fn encode_spec_options(writer: &mut CanonicalWriter, options: &SpecExecutionOpti
         writer.bool(config.detect_subharmonics);
         writer.f64(config.eigenvalue_tolerance);
     });
+    if let Some(statistics) = &options.mc_statistics {
+        writer.domain("monte-carlo-custom-statistics/v1");
+        writer.sequence(statistics.variations.len());
+        for row in &statistics.variations {
+            use crate::simulation::dialog::mc::statistics::{McScope, McShape};
+            writer.string(&row.parameter);
+            writer.u8(match row.scope {
+                McScope::Process => 0,
+                McScope::Mismatch => 1,
+            });
+            writer.u8(match row.distribution {
+                McShape::Gaussian => 0,
+                McShape::Uniform => 1,
+                McShape::Lognormal => 2,
+            });
+            writer.f64(row.spread);
+            writer.bool(row.percent);
+        }
+        writer.sequence(statistics.correlations.len());
+        for row in &statistics.correlations {
+            writer.u8(match row.scope {
+                crate::simulation::dialog::mc::statistics::McScope::Process => 0,
+                _ => 1,
+            });
+            writer.sequence(row.parameters.len());
+            for name in &row.parameters {
+                writer.string(name);
+            }
+            writer.f64(row.coefficient);
+        }
+    }
     if let Some(base) = &options.study_base {
         writer.domain("configured-study-base/v1");
         writer.string(&base.instance_id.to_string());

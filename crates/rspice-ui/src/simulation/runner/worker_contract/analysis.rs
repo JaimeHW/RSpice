@@ -49,6 +49,8 @@ impl From<WorkerSimulationRequest> for SimulationRequest {
 pub(crate) struct WorkerSpecExecutionOptions {
     #[serde(default)]
     pub study_base: Option<WorkerStudyRunConfig>,
+    #[serde(default)]
+    pub mc_statistics: Option<crate::simulation::dialog::mc::statistics::McStatisticsConfig>,
     pub temp: Option<WorkerTempRunConfig>,
     pub parametric_base: Option<WorkerCornerBaseMode>,
     pub corner: Option<WorkerCornerRunConfig>,
@@ -61,6 +63,7 @@ pub(crate) struct WorkerSpecExecutionOptions {
 impl From<&SpecExecutionOptions> for WorkerSpecExecutionOptions {
     fn from(value: &SpecExecutionOptions) -> Self {
         Self {
+            mc_statistics: value.mc_statistics.clone(),
             study_base: value.study_base.as_ref().map(WorkerStudyRunConfig::from),
             temp: value.temp.as_ref().map(WorkerTempRunConfig::from),
             parametric_base: value
@@ -79,6 +82,7 @@ impl From<&SpecExecutionOptions> for WorkerSpecExecutionOptions {
 impl From<WorkerSpecExecutionOptions> for SpecExecutionOptions {
     fn from(value: WorkerSpecExecutionOptions) -> Self {
         Self {
+            mc_statistics: value.mc_statistics,
             study_base: value
                 .study_base
                 .map(crate::simulation::runner::study::StudyRunConfig::from),

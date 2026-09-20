@@ -55,6 +55,7 @@ pub(crate) mod study;
 #[derive(Debug, Clone, Default)]
 pub struct SpecExecutionOptions {
     pub study_base: Option<study::StudyRunConfig>,
+    pub mc_statistics: Option<crate::simulation::dialog::mc::statistics::McStatisticsConfig>,
     pub temp: Option<crate::services::simulation_runner::TempRunConfig>,
     /// Base analysis paired with a design-parameter `.STEP`. `None` retains
     /// the classic operating-point behavior for older prepared requests.

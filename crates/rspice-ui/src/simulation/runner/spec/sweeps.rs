@@ -27,14 +27,32 @@ pub(super) fn run_sweep_spec(
         // is read for identity rather than re-applied here.
         AnalysisSpec::MonteCarlo {
             variation_source, ..
-        } => run_monte_carlo(
-            variation_source,
-            options.study_base.as_ref(),
-            netlist,
-            source_path,
-            environment,
-            abort,
-        ),
+        } => {
+            let augmented;
+            let netlist = if let Some(statistics) = &options.mc_statistics {
+                if variation_source != crate::simulation::dialog::McVariationSource::DeckStatistics
+                {
+                    return Err(SimulationError::InvalidConfig(
+                        "Custom statistics require the native statistics sampler".into(),
+                    ));
+                }
+                let directive = statistics
+                    .parser_directive()
+                    .map_err(SimulationError::InvalidConfig)?;
+                augmented = svc_runner::splice_before_terminal_end_card(netlist, &directive);
+                augmented.as_str()
+            } else {
+                netlist
+            };
+            run_monte_carlo(
+                variation_source,
+                options.study_base.as_ref(),
+                netlist,
+                source_path,
+                environment,
+                abort,
+            )
+        }
         AnalysisSpec::Parametric => run_parametric(netlist, options, source_path, abort),
         // A corner declaration is expanded into one task per declared point
         // before the run is authorized, and its plotting family is assembled

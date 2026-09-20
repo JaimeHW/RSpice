@@ -505,6 +505,163 @@ mod tests {
             "{error}"
         );
     }
+    #[test]
+    fn custom_monte_carlo_statistics_reach_native_trials_and_worker_transport() {
+        use crate::simulation::dialog::mc::statistics::{
+            McParameterCorrelation, McParameterVariation, McScope, McShape, McStatisticsConfig,
+        };
+        let deck = "Custom statistics\n.param X=1 Y=2 Z=0\nV1 a 0 {X}\nV2 b 0 {Y}\nV3 c 0 {Z}\nR1 a 0 1k\nR2 b 0 1k\nR3 c 0 1k\n.mc 24 seed 18446744073709551615\n.end\n";
+        for (shape, scope, correlation) in [
+            (McShape::Gaussian, McScope::Process, 1.0),
+            (McShape::Gaussian, McScope::Process, -1.0),
+            (McShape::Uniform, McScope::Process, 1.0),
+            (McShape::Uniform, McScope::Process, -1.0),
+            (McShape::Lognormal, McScope::Process, 1.0),
+            (McShape::Gaussian, McScope::Mismatch, 1.0),
+        ] {
+            let statistics = McStatisticsConfig {
+                variations: vec![
+                    McParameterVariation {
+                        parameter: "X".into(),
+                        scope,
+                        distribution: shape,
+                        spread: if shape == McShape::Lognormal {
+                            0.1
+                        } else {
+                            10.0
+                        },
+                        percent: shape != McShape::Lognormal,
+                    },
+                    McParameterVariation {
+                        parameter: "Y".into(),
+                        scope,
+                        distribution: shape,
+                        spread: if shape == McShape::Lognormal {
+                            0.1
+                        } else {
+                            10.0
+                        },
+                        percent: shape != McShape::Lognormal,
+                    },
+                    McParameterVariation {
+                        parameter: "Z".into(),
+                        scope,
+                        distribution: McShape::Gaussian,
+                        spread: 0.01,
+                        percent: false,
+                    },
+                ],
+                correlations: vec![McParameterCorrelation {
+                    scope,
+                    parameters: vec!["X".into(), "Y".into()],
+                    coefficient: correlation,
+                }],
+            };
+            let mut previous: Option<Vec<Vec<f64>>> = None;
+            for configured in [false, true] {
+                let options = SpecExecutionOptions {
+                    mc_statistics: Some(statistics.clone()),
+                    study_base: configured.then(|| {
+                        base(
+                            AnalysisConfig::dc_op(),
+                            &["scalar:V(a)", "scalar:V(b)", "scalar:V(c)"],
+                        )
+                    }),
+                    ..Default::default()
+                };
+                let wire = WorkerSpecExecutionOptions::from(&options);
+                let wire: WorkerSpecExecutionOptions =
+                    serde_json::from_str(&serde_json::to_string(&wire).unwrap()).unwrap();
+                let result = super::super::spec::run_spec_request(
+                    &EngineBridge::new(),
+                    spec(McVariationSource::DeckStatistics),
+                    wire.into(),
+                    deck,
+                    None,
+                    &crate::simulation::execution::ResolvedExecutionDependencies::default(),
+                    &NoAbort,
+                )
+                .unwrap();
+                let SimulationResult::MonteCarlo {
+                    variables,
+                    runs_completed,
+                    member_measurements,
+                    ..
+                } = result
+                else {
+                    unreachable!()
+                };
+                assert_eq!(runs_completed, 24, "{shape:?}/{scope:?}");
+                assert_eq!(member_measurements.len(), 24);
+                let samples = ["a", "b", "c"]
+                    .iter()
+                    .map(|node| {
+                        let suffix = format!("V({node})");
+                        variables
+                            .iter()
+                            .find(|value| {
+                                value
+                                    .name
+                                    .rsplit(':')
+                                    .next()
+                                    .unwrap_or(&value.name)
+                                    .eq_ignore_ascii_case(&suffix)
+                            })
+                            .unwrap_or_else(|| {
+                                panic!(
+                                    "missing {suffix}: {:?}",
+                                    variables
+                                        .iter()
+                                        .map(|value| &value.name)
+                                        .collect::<Vec<_>>()
+                                )
+                            })
+                            .samples
+                            .clone()
+                    })
+                    .collect::<Vec<_>>();
+                assert!(samples[0].windows(2).any(|pair| pair[0] != pair[1]));
+                assert!(
+                    samples[2].iter().any(|value| value.abs() > 1e-5),
+                    "absolute spread must vary a zero nominal"
+                );
+                if scope == McScope::Process {
+                    let expected = |a: f64| 2.0 + correlation * 2.0 * (a - 1.0);
+                    assert!(
+                        samples[0]
+                            .iter()
+                            .zip(&samples[1])
+                            .all(|(a, b)| (expected(*a) - b).abs() < 1e-11),
+                        "{shape:?}/{scope:?}, correlation={correlation}, configured={configured}: {:?}",
+                        samples[0]
+                            .iter()
+                            .zip(&samples[1])
+                            .find(|(a, b)| (expected(**a) - *b).abs() >= 1e-11)
+                    );
+                } else {
+                    assert!(
+                        samples[0]
+                            .iter()
+                            .zip(&samples[1])
+                            .any(|(a, b)| (2.0 * a - b).abs() > 1e-4),
+                        "mismatch scopes must draw independently for separate instances"
+                    );
+                }
+                if shape == McShape::Uniform {
+                    assert!(samples[0].iter().all(|value| (0.9..=1.1).contains(value)));
+                }
+                if shape == McShape::Lognormal {
+                    assert!(samples[0].iter().all(|value| *value > 0.0));
+                }
+                if let Some(previous) = previous {
+                    for (before, after) in previous.iter().zip(&samples) {
+                        assert!(before.iter().zip(after).all(|(a, b)| (a - b).abs() < 1e-12));
+                    }
+                }
+                previous = Some(samples);
+            }
+        }
+    }
 }
 
 fn validate_base_measurements(

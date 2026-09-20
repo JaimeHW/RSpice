@@ -6,6 +6,8 @@
 //! point population or an exact configured analysis selected from the plan.
 
 use serde::{Deserialize, Deserializer};
+pub mod statistics;
+use statistics::{McCorrelationDraft, McStatisticsConfig, McVariationDraft};
 
 /// Random distribution type
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -48,6 +50,7 @@ impl McVariationSource {
 /// Monte Carlo analysis configuration
 #[derive(Debug, Clone)]
 pub struct McConfig {
+    pub statistics: Option<McStatisticsConfig>,
     /// Two-sided uncertainty in the population mean, independent of yield.
     pub confidence_pct: f64,
     pub confidence_method: crate::state::MonteCarloMeanMethod,
@@ -79,6 +82,7 @@ pub struct McConfig {
 impl Default for McConfig {
     fn default() -> Self {
         Self {
+            statistics: None,
             num_runs: 100,
             confidence_pct: 95.0,
             confidence_method: crate::state::MonteCarloMeanMethod::StudentT,
@@ -96,6 +100,12 @@ impl Default for McConfig {
 
 impl McConfig {
     pub fn validate(&self) -> Result<(), String> {
+        if let Some(statistics) = &self.statistics {
+            if self.variation_source != McVariationSource::DeckStatistics {
+                return Err("Custom statistics require the native statistics sampler".into());
+            }
+            statistics.parser_directive()?;
+        }
         if !self.confidence_pct.is_finite()
             || self.confidence_pct <= 0.0
             || self.confidence_pct >= 100.0
@@ -174,6 +184,8 @@ fn parse_parameter_subset(text: &str) -> Result<Vec<String>, String> {
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct McDialogState {
+    pub variations: Vec<McVariationDraft>,
+    pub correlations: Vec<McCorrelationDraft>,
     pub confidence_pct: String,
     pub confidence_method_idx: usize,
     pub bootstrap_resamples: String,
@@ -196,6 +208,8 @@ pub struct McDialogState {
 impl Default for McDialogState {
     fn default() -> Self {
         Self {
+            variations: Vec::new(),
+            correlations: Vec::new(),
             num_runs: String::new(),
             seed: String::new(),
             variation_source_idx: 0,
@@ -218,6 +232,10 @@ impl Default for McDialogState {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PersistedMcDialogState {
+    #[serde(default)]
+    variations: Vec<McVariationDraft>,
+    #[serde(default)]
+    correlations: Vec<McCorrelationDraft>,
     #[serde(default = "default_confidence_pct")]
     confidence_pct: String,
     #[serde(default)]
@@ -308,6 +326,8 @@ impl<'de> Deserialize<'de> for McDialogState {
             None => persisted.seed,
         };
         Ok(Self {
+            variations: persisted.variations,
+            correlations: persisted.correlations,
             num_runs: persisted.num_runs,
             confidence_pct: persisted.confidence_pct,
             confidence_method_idx: persisted.confidence_method_idx,
@@ -329,6 +349,26 @@ impl<'de> Deserialize<'de> for McDialogState {
 impl McDialogState {
     pub fn from_config(config: &McConfig) -> Self {
         Self {
+            variations: config
+                .statistics
+                .as_ref()
+                .map(|s| {
+                    s.variations
+                        .iter()
+                        .map(McVariationDraft::from_config)
+                        .collect()
+                })
+                .unwrap_or_default(),
+            correlations: config
+                .statistics
+                .as_ref()
+                .map(|s| {
+                    s.correlations
+                        .iter()
+                        .map(McCorrelationDraft::from_config)
+                        .collect()
+                })
+                .unwrap_or_default(),
             num_runs: config.num_runs.to_string(),
             confidence_pct: config.confidence_pct.to_string(),
             confidence_method_idx: usize::from(matches!(
@@ -350,10 +390,14 @@ impl McDialogState {
             seed: config
                 .seed
                 .map_or_else(String::new, |seed| seed.to_string()),
-            variation_source_idx: McVariationSource::ALL
-                .iter()
-                .position(|source| *source == config.variation_source)
-                .unwrap_or(0),
+            variation_source_idx: if config.statistics.is_some() {
+                2
+            } else {
+                McVariationSource::ALL
+                    .iter()
+                    .position(|source| *source == config.variation_source)
+                    .unwrap_or(0)
+            },
             distribution_idx: match config.distribution {
                 McDistribution::Gaussian => 0,
                 McDistribution::Uniform => 1,
@@ -375,9 +419,13 @@ impl McDialogState {
         } else {
             Some(self.seed.trim().parse::<u64>().map_err(|_| "Seed must be an integer from 0 to 18446744073709551615, or blank for the default")?)
         };
-        let variation_source = *McVariationSource::ALL
-            .get(self.variation_source_idx)
-            .ok_or("Invalid variation source")?;
+        let variation_source = if self.variation_source_idx == 2 {
+            McVariationSource::DeckStatistics
+        } else {
+            *McVariationSource::ALL
+                .get(self.variation_source_idx)
+                .ok_or("Invalid variation source")?
+        };
         // Inactive buffers remain in the draft for switching back. They do
         // not contribute values to a run whose variation comes from the deck.
         let pct: f64 = if variation_source.uses_stated_spread() {
@@ -423,6 +471,22 @@ impl McDialogState {
             _ => return Err("Invalid mean-confidence estimator".into()),
         };
         let config = McConfig {
+            statistics: if self.variation_source_idx == 2 {
+                Some(McStatisticsConfig {
+                    variations: self
+                        .variations
+                        .iter()
+                        .map(McVariationDraft::to_config)
+                        .collect::<Result<_, _>>()?,
+                    correlations: self
+                        .correlations
+                        .iter()
+                        .map(McCorrelationDraft::to_config)
+                        .collect::<Result<_, _>>()?,
+                })
+            } else {
+                None
+            },
             confidence_pct,
             confidence_method,
             num_runs: runs,
@@ -493,6 +557,7 @@ mod tests {
         use crate::simulation::plan::AnalysisDraft;
         for seed in [None, Some(0), Some((1_u64 << 53) + 1), Some(u64::MAX)] {
             let config = McConfig {
+                statistics: None,
                 seed,
                 ..Default::default()
             };
@@ -667,6 +732,7 @@ mod confidence_tests {
     #[test]
     fn monte_carlo_confidence_draft_round_trips_and_migrates() {
         let config = McConfig {
+            statistics: None,
             confidence_pct: 90.12345678912345,
             confidence_method: MonteCarloMeanMethod::PercentileBootstrap {
                 resamples: 257,

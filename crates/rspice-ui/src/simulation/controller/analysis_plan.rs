@@ -524,6 +524,14 @@ impl SimulationController {
         sealed_model_sources: &crate::state::model_library::SealedModelExecutionSources,
     ) -> Result<SpecExecutionOptions, String> {
         match spec {
+            AnalysisSpec::MonteCarlo { .. } => {
+                let mut draft = state.sim_setup.mc.clone();
+                draft.ensure_initialized();
+                Ok(SpecExecutionOptions {
+                    mc_statistics: draft.to_config()?.statistics,
+                    ..Default::default()
+                })
+            }
             AnalysisSpec::Parametric => {
                 let mut temp_state = state.sim_setup.temp.clone();
                 temp_state.ensure_initialized();
@@ -531,6 +539,7 @@ impl SimulationController {
                     .to_config(&state.sim_setup.run_set, state.sim_setup.reference_pvt)
                     .map_err(|e| format!("invalid temperature sweep settings: {}", e))?;
                 Ok(SpecExecutionOptions {
+                    mc_statistics: None,
                     study_base: None,
                     temp: Some(Self::temp_run_config_from_dialog(state, &temp_cfg)?),
                     parametric_base: None,
@@ -548,6 +557,7 @@ impl SimulationController {
                     .to_config(&state.sim_setup.run_set, state.sim_setup.reference_pvt)
                     .map_err(|e| format!("invalid corner settings: {}", e))?;
                 Ok(SpecExecutionOptions {
+                    mc_statistics: None,
                     study_base: None,
                     temp: None,
                     parametric_base: None,
@@ -563,6 +573,7 @@ impl SimulationController {
                 })
             }
             AnalysisSpec::Pac => Ok(SpecExecutionOptions {
+                mc_statistics: None,
                 study_base: None,
                 temp: None,
                 parametric_base: None,
@@ -573,6 +584,7 @@ impl SimulationController {
                 pstb: None,
             }),
             AnalysisSpec::Pxf => Ok(SpecExecutionOptions {
+                mc_statistics: None,
                 study_base: None,
                 temp: None,
                 parametric_base: None,
@@ -584,6 +596,7 @@ impl SimulationController {
             }),
             AnalysisSpec::Tf { .. } => Ok(SpecExecutionOptions::default()),
             AnalysisSpec::Pnoise => Ok(SpecExecutionOptions {
+                mc_statistics: None,
                 study_base: None,
                 temp: None,
                 parametric_base: None,
@@ -594,6 +607,7 @@ impl SimulationController {
                 pstb: None,
             }),
             AnalysisSpec::Pstb => Ok(SpecExecutionOptions {
+                mc_statistics: None,
                 study_base: None,
                 temp: None,
                 parametric_base: None,
@@ -605,6 +619,7 @@ impl SimulationController {
             }),
             AnalysisSpec::Psp { .. } => Ok(SpecExecutionOptions::default()),
             _ => Ok(SpecExecutionOptions {
+                mc_statistics: None,
                 study_base: None,
                 temp: None,
                 parametric_base: None,
@@ -665,6 +680,22 @@ mod tests {
             .unwrap();
         plan.set_numeric_override(ac, Some(numerics)).unwrap();
         let draft = AnalysisDraft::MonteCarlo(McDialogState::from_config(&McConfig {
+            statistics: Some(
+                crate::simulation::dialog::mc::statistics::McStatisticsConfig {
+                    variations: vec![
+                        crate::simulation::dialog::mc::statistics::McParameterVariation {
+                            parameter: "rval".into(),
+                            scope: crate::simulation::dialog::mc::statistics::McScope::Process,
+                            distribution:
+                                crate::simulation::dialog::mc::statistics::McShape::Gaussian,
+                            spread: 10.0,
+                            percent: true,
+                        },
+                    ],
+                    correlations: Vec::new(),
+                },
+            ),
+            variation_source: crate::simulation::dialog::McVariationSource::DeckStatistics,
             base_analysis: Some(ac),
             measurements: vec!["gain".into(), "last:V(out)".into()],
             histogram_bins: 7,
@@ -683,6 +714,10 @@ mod tests {
             let config = restored.to_config().unwrap();
             assert_eq!(config.base_analysis, Some(ac));
             assert_eq!(config.histogram_bins, 7);
+            assert_eq!(
+                config.statistics.as_ref().unwrap().variations[0].spread,
+                10.0
+            );
             assert_eq!(config.measurements, ["gain", "last:V(out)"]);
         }
         plan.edit(mc, |target| *target = draft).unwrap();
@@ -716,7 +751,16 @@ mod tests {
         };
         assert_eq!(config.stop_freq, 1000.0);
         assert!(base.numeric_options.to_ascii_uppercase().contains("RELTOL"));
-        assert_eq!(base.constraints[0].upper, Some(3.0));
+        assert_eq!(
+            task.queued_analysis()
+                .spec_options
+                .mc_statistics
+                .as_ref()
+                .unwrap()
+                .variations[0]
+                .spread,
+            10.0
+        );
         for change in 0..10 {
             let mut queued = task.queued_analysis().clone();
             let base = queued.spec_options.study_base.as_mut().unwrap();
@@ -725,11 +769,27 @@ mod tests {
                 1 => base.histogram_bins += 1,
                 2 => base.measurements = vec!["last:V(out)".into()],
                 3 => base.numeric_options = ".OPTIONS RELTOL=0.02".into(),
-                _ => {
+                4 => {
                     let AnalysisConfig::Ac(config) = &mut base.analysis else {
                         unreachable!()
                     };
                     config.stop_freq = 2000.0;
+                }
+                _ => {
+                    use crate::simulation::dialog::mc::statistics::{McScope, McShape};
+                    let row = &mut queued
+                        .spec_options
+                        .mc_statistics
+                        .as_mut()
+                        .unwrap()
+                        .variations[0];
+                    match change {
+                        5 => row.parameter = "other".into(),
+                        6 => row.scope = McScope::Mismatch,
+                        7 => row.distribution = McShape::Uniform,
+                        8 => row.spread = 20.0,
+                        _ => row.percent = false,
+                    }
                 }
             }
             let changed = PreparedTask::new(mc, task.source_revision(), vec![], "MC", queued);
