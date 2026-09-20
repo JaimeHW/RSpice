@@ -2,7 +2,8 @@
 use super::*;
 use crate::ResourceLimits;
 use crate::analysis::quasi_periodic::{
-    QuasiPeriodicAcConfig, QuasiPeriodicAcSolution, QuasiPeriodicError as Error, QuasiPeriodicGrid,
+    QuasiPeriodicAcConfig, QuasiPeriodicAcSolution, QuasiPeriodicAdjointSolution,
+    QuasiPeriodicError as Error, QuasiPeriodicGrid, QuasiPeriodicLinearConfig,
     QuasiPeriodicSolution, QuasiPeriodicSolveConfig,
     solve::{self, Circuit, LinearEntry, Sample},
 };
@@ -93,6 +94,71 @@ impl HbSolver {
         offsets_hz
             .iter()
             .map(|&offset| work.solve(self, offset, sources, abort))
+            .collect()
+    }
+
+    /// Solve Aᴴ λ = c once per offset for the observation y = cᴴ x.
+    /// Every small-signal source/tuple transfer is then λᴴ b. Complete exact
+    /// MNA and all signed tuples participate, including frequency-dependent
+    /// linear networks and native F/Q derivatives.
+    pub fn solve_quasi_periodic_adjoint_with_abort(
+        &mut self,
+        grid: Arc<QuasiPeriodicGrid>,
+        linear: &QuasiPeriodicLinearConfig,
+        orbit: &[Vec<Complex64>],
+        offsets_hz: &[Value],
+        observation: &[Vec<Complex64>],
+        limits: &ResourceLimits,
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<QuasiPeriodicAdjointSolution>, Error> {
+        if abort.is_aborted() {
+            return Err(Error::Aborted);
+        }
+        if offsets_hz.is_empty()
+            || offsets_hz.iter().any(|v| !v.is_finite())
+            || observation.len() != self.unknowns()
+            || observation.iter().any(|row| {
+                row.len() != grid.len()
+                    || row.iter().any(|v| !v.re.is_finite() || !v.im.is_finite())
+            })
+            || !observation.iter().flatten().any(|v| *v != Complex64::ZERO)
+        {
+            return Err(Error::InvalidConfig(
+                "QPXF requires finite probe offsets and a nonzero finite complete MNA observation"
+                    .into(),
+            ));
+        }
+        crate::ResourceLimitError::ensure(
+            crate::ResourceKind::AnalysisPoints,
+            offsets_hz.len(),
+            limits.max_analysis_points,
+        )?;
+        let values = self
+            .unknowns()
+            .saturating_mul(grid.len())
+            .saturating_mul(offsets_hz.len())
+            .saturating_mul(2)
+            .saturating_add(offsets_hz.len().saturating_mul(2));
+        crate::ResourceLimitError::ensure(
+            crate::ResourceKind::ResultValues,
+            values,
+            limits.max_result_values,
+        )?;
+        let mut working_limits = limits.clone();
+        working_limits.max_result_values = limits.max_result_values.saturating_sub(values);
+        self.validate_quasi_periodic_circuit()?;
+        let mut work =
+            crate::analysis::quasi_periodic::small_signal::Linearization::prepare_adjoint(
+                self,
+                grid,
+                orbit,
+                linear,
+                &working_limits,
+                abort,
+            )?;
+        offsets_hz
+            .iter()
+            .map(|&offset| work.solve_adjoint(self, offset, observation, abort))
             .collect()
     }
 

@@ -1,4 +1,5 @@
 //! Complex translated F/Q linearization around a real independent-phase orbit.
+mod adjoint;
 mod linear;
 mod operator;
 #[cfg(test)]
@@ -60,12 +61,31 @@ pub struct QuasiPeriodicAcSolution {
     pub normalized_residual: Value,
 }
 
+/// Adjoint sensitivities solve Aᴴ λ = c for an output y = cᴴ x.
+/// A source direction b contributes λᴴ b, without assuming conjugate symmetry.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct QuasiPeriodicAdjointSolution {
+    pub offset_hz: Value,
+    pub sensitivities: Vec<Vec<Complex64>>,
+    /// Infinity-norm adjoint residual divided by the configured relative tolerance.
+    /// This is an algebraic adjoint certificate, not a KCL/KVL residual.
+    pub normalized_residual: Value,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Orientation {
+    Forward,
+    Adjoint,
+}
+
 struct Derivatives {
     conductance: Vec<JacobianEntry>,
     capacitance: Vec<JacobianEntry>,
 }
 
 pub(crate) struct Linearization {
+    orientation: Orientation,
     grid: Arc<QuasiPeriodicGrid>,
     config: QuasiPeriodicAcConfig,
     transform: QuasiPeriodicTransform,
@@ -130,6 +150,7 @@ impl Linearization {
             });
         }
         Ok(Self {
+            orientation: Orientation::Forward,
             config: config.clone(),
             grid,
             transform,
@@ -140,6 +161,43 @@ impl Linearization {
             voltage_rows: (0..unknowns)
                 .map(|row| circuit.voltage_equation(row))
                 .collect(),
+        })
+    }
+
+    pub(crate) fn prepare_adjoint(
+        circuit: &mut impl Circuit,
+        grid: Arc<QuasiPeriodicGrid>,
+        orbit: &[Vec<Complex64>],
+        linear: &QuasiPeriodicLinearConfig,
+        limits: &ResourceLimits,
+        abort: &dyn AbortSignal,
+    ) -> Result<Self, Error> {
+        let config = QuasiPeriodicAcConfig {
+            linear: linear.clone(),
+            ..Default::default()
+        };
+        let mut work = Self::prepare(circuit, grid, orbit, &config, limits, abort)?;
+        work.orientation = Orientation::Adjoint;
+        Ok(work)
+    }
+
+    pub(crate) fn solve_adjoint(
+        &mut self,
+        circuit: &impl Circuit,
+        offset_hz: Value,
+        observation: &[Vec<Complex64>],
+        abort: &dyn AbortSignal,
+    ) -> Result<QuasiPeriodicAdjointSolution, Error> {
+        if self.orientation != Orientation::Adjoint {
+            return Err(Error::InvalidConfig(
+                "an adjoint solve requires an adjoint linearization".into(),
+            ));
+        }
+        let result = self.solve(circuit, offset_hz, observation, abort)?;
+        Ok(QuasiPeriodicAdjointSolution {
+            offset_hz: result.offset_hz,
+            sensitivities: result.spectra,
+            normalized_residual: result.normalized_residual,
         })
     }
 
@@ -195,28 +253,53 @@ impl Linearization {
             self.direct(&frequencies, &linear, &rhs, abort)?
         };
         let applied = self.apply(&frequencies, &linear, &solution, abort)?;
-        let mut merit: Value = 0.0;
-        for (index, (actual, expected)) in applied.iter().zip(&rhs).enumerate() {
-            let absolute = if self.voltage_rows[index / self.grid.len()] {
-                config.voltage_absolute_tolerance
-            } else {
-                config.current_absolute_tolerance
-            };
-            let scale =
-                absolute + config.linear.relative_tolerance * actual.norm().max(expected.norm());
-            let residual = (*actual - *expected).norm() / scale;
-            if !residual.is_finite() || !scale.is_finite() {
+        let merit = if self.orientation == Orientation::Adjoint {
+            let norm =
+                |values: &[Complex64]| values.iter().map(|v| v.norm()).fold(0.0_f64, Value::max);
+            let scale = config.linear.relative_tolerance * norm(&rhs).max(norm(&applied));
+            let residual = applied
+                .iter()
+                .zip(&rhs)
+                .map(|(a, b)| (*a - *b).norm())
+                .fold(0.0_f64, Value::max);
+            if !scale.is_finite() || scale <= 0.0 || !residual.is_finite() {
                 return Err(Error::Numerical(
-                    "QPAC residual certificate overflowed".into(),
+                    "QPXF requires a nonzero finite output observation and finite adjoint residual"
+                        .into(),
                 ));
             }
-            merit = merit.max(residual);
-        }
-        if merit > 1.0 {
-            return Err(Error::Numerical(format!(
-                "QPAC physical equation residual exceeds tolerance ({merit:e})"
-            )));
-        }
+            let merit = residual / scale;
+            if !merit.is_finite() || merit > 1.0 {
+                return Err(Error::Numerical(format!(
+                    "QPXF adjoint equation residual exceeds tolerance ({merit:e})"
+                )));
+            }
+            merit
+        } else {
+            let mut merit: Value = 0.0;
+            for (index, (actual, expected)) in applied.iter().zip(&rhs).enumerate() {
+                let absolute = if self.voltage_rows[index / self.grid.len()] {
+                    config.voltage_absolute_tolerance
+                } else {
+                    config.current_absolute_tolerance
+                };
+                let scale = absolute
+                    + config.linear.relative_tolerance * actual.norm().max(expected.norm());
+                let residual = (*actual - *expected).norm() / scale;
+                if !residual.is_finite() || !scale.is_finite() {
+                    return Err(Error::Numerical(
+                        "QPAC residual certificate overflowed".into(),
+                    ));
+                }
+                merit = merit.max(residual);
+            }
+            if merit > 1.0 {
+                return Err(Error::Numerical(format!(
+                    "QPAC physical equation residual exceeds tolerance ({merit:e})"
+                )));
+            }
+            merit
+        };
         check_abort(abort)?;
         Ok(QuasiPeriodicAcSolution {
             offset_hz,

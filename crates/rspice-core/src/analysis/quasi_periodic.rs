@@ -12,7 +12,9 @@ pub(crate) mod solve;
 mod transform;
 
 pub use grid::{QuasiPeriodicGrid, QuasiPeriodicGridConfig, QuasiPeriodicSampling};
-pub use small_signal::{QuasiPeriodicAcConfig, QuasiPeriodicAcSolution};
+pub use small_signal::{
+    QuasiPeriodicAcConfig, QuasiPeriodicAcSolution, QuasiPeriodicAdjointSolution,
+};
 pub use solve::{
     QuasiPeriodicLinearConfig, QuasiPeriodicLinearMethod, QuasiPeriodicSolution,
     QuasiPeriodicSolveConfig,

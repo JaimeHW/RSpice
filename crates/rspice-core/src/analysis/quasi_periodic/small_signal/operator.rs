@@ -9,6 +9,19 @@ impl Linearization {
         direction: &[Complex64],
         abort: &dyn AbortSignal,
     ) -> Result<Vec<Complex64>, Error> {
+        match self.orientation {
+            Orientation::Forward => self.apply_forward(frequencies, linear, direction, abort),
+            Orientation::Adjoint => self.apply_adjoint(frequencies, linear, direction, abort),
+        }
+    }
+
+    fn apply_forward(
+        &mut self,
+        frequencies: &[Value],
+        linear: &[Vec<LinearEntry>],
+        direction: &[Complex64],
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<Complex64>, Error> {
         check_abort(abort)?;
         let entries = self.grid.len();
         let count = self.grid.sample_count();

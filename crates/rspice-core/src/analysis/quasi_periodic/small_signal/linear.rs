@@ -65,6 +65,12 @@ impl Blocks {
                 }
                 entries.push((r, c, value));
             }
+            if work.orientation == Orientation::Adjoint {
+                for (row, col, value) in &mut entries {
+                    std::mem::swap(row, col);
+                    *value = value.conj();
+                }
+            }
             let mut block = matrix(work.unknowns, &entries)?;
             match block.solve(&vec![Complex64::ZERO; work.unknowns]) {
                 Ok(_) => matrices.push(Some(block)),
