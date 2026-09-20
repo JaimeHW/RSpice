@@ -1142,7 +1142,7 @@ pub(super) fn form(
         }
         AnalysisDraft::Fourier(setup) => fourier::fields(ui, setup, policy, locale),
         AnalysisDraft::Reliability(setup) => reliability::fields(ui, setup),
-        AnalysisDraft::Optimization(setup) => optimization::fields(ui, setup),
+        AnalysisDraft::Optimization(setup) => optimization::fields(ui, setup, study_bases),
         AnalysisDraft::Soa(setup) => soa::fields(ui, setup, policy, locale),
         AnalysisDraft::Disto(setup) => disto::fields(ui, setup, policy, locale),
         AnalysisDraft::Qpss(setup) => quasi_periodic::shooting_fields(ui, setup),
@@ -1162,3 +1162,29 @@ pub(super) fn form(
 
 #[cfg(test)]
 mod tests;
+
+fn study_base_row(
+    ui: &mut Ui,
+    selected_base: &mut Option<crate::product::AnalysisInstanceId>,
+    bases: &[(crate::product::AnalysisInstanceId, String)],
+    default_label: &str,
+) {
+    let mut choices = vec![(None, default_label.to_owned())];
+    choices.extend(bases.iter().map(|(id, label)| (Some(*id), label.clone())));
+    if let Some(id) = *selected_base {
+        if !choices.iter().any(|(candidate, _)| *candidate == Some(id)) {
+            choices.push((Some(id), format!("Unavailable analysis ({id})")));
+        }
+    }
+    let mut selected = choices
+        .iter()
+        .position(|(id, _)| *id == *selected_base)
+        .unwrap_or(0);
+    let labels = choices
+        .iter()
+        .map(|(_, label)| label.as_str())
+        .collect::<Vec<_>>();
+    if choice_row(ui, "Base analysis", &labels, &mut selected) {
+        *selected_base = choices[selected].0;
+    }
+}

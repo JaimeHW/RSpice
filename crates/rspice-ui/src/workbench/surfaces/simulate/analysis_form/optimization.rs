@@ -21,15 +21,46 @@ use super::{
 };
 
 /// Render the optimization fields.
-pub(super) fn fields(ui: &mut Ui, setup: &mut OptimizationDialogState) {
+pub(super) fn fields(
+    ui: &mut Ui,
+    setup: &mut OptimizationDialogState,
+    bases: &[(crate::product::AnalysisInstanceId, String)],
+) {
+    super::study_base_row(
+        ui,
+        &mut setup.base_analysis,
+        bases,
+        "Operating point expression",
+    );
+    let configured = setup.base_analysis.is_some();
+    super::hinted_input_row_enabled(
+        ui,
+        "Measurement",
+        &mut setup.objective_measurement,
+        "gain, scalar:V(out), or last:signal",
+        configured,
+    );
+    if configured {
+        field_note(
+            ui,
+            "Each candidate runs the selected analysis at this study's Run Set point. Use a .MEAS name for a measured scalar, scalar:name for a native scalar, or last:signal for the final sample (AC real component).",
+        );
+    }
     input_row(ui, "Variables", &mut setup.variables_text)
         .on_hover_text("One per line or comma, spelled name:min:max[:initial].");
-    input_row(ui, "Expression", &mut setup.objective_expression);
-    field_note(
+    input_row_enabled(
         ui,
-        "Optional scalar expression, e.g. -V(supply)*I(VSUP) for supplied power. Empty uses the node voltage below.",
+        "Expression",
+        &mut setup.objective_expression,
+        !configured,
     );
-    let node_objective = setup.objective_expression.trim().is_empty();
+    if !configured {
+        field_note(
+            ui,
+            "Optional scalar expression, e.g. -V(supply)*I(VSUP) for supplied power. Empty uses the node voltage below.",
+        );
+    }
+    let node_objective = !configured && setup.objective_expression.trim().is_empty();
     input_row_enabled(ui, "Objective", &mut setup.objective_node, node_objective);
     input_row_enabled(ui, "Obj ref", &mut setup.objective_ref, node_objective);
     choice_row(ui, "Goal", &["min", "max", "target"], &mut setup.goal_mode);

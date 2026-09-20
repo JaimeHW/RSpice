@@ -2299,7 +2299,10 @@ fn analysis_form_body(
     // unmeasured.
     let tf_inference =
         matches!(draft, AnalysisDraft::TransferFunction(_)).then(|| tf_inference_catalog(ui, app));
-    let study_bases = if matches!(draft, AnalysisDraft::MonteCarlo(_)) {
+    let study_bases = if matches!(
+        draft,
+        AnalysisDraft::MonteCarlo(_) | AnalysisDraft::Optimization(_)
+    ) {
         app.state
             .sim_setup
             .analysis_plan

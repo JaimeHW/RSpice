@@ -24,24 +24,12 @@ pub(super) fn fields(
 ) {
     use crate::simulation::dialog::McVariationSource;
 
-    let mut choices = vec![(None, "Operating point: all node voltages".to_owned())];
-    choices.extend(bases.iter().map(|(id, label)| (Some(*id), label.clone())));
-    if let Some(id) = setup.base_analysis {
-        if !choices.iter().any(|(candidate, _)| *candidate == Some(id)) {
-            choices.push((Some(id), format!("Unavailable analysis ({id})")));
-        }
-    }
-    let mut selected = choices
-        .iter()
-        .position(|(id, _)| *id == setup.base_analysis)
-        .unwrap_or(0);
-    let labels = choices
-        .iter()
-        .map(|(_, label)| label.as_str())
-        .collect::<Vec<_>>();
-    if choice_row(ui, "Base analysis", &labels, &mut selected) {
-        setup.base_analysis = choices[selected].0;
-    }
+    super::study_base_row(
+        ui,
+        &mut setup.base_analysis,
+        bases,
+        "Operating point: all node voltages",
+    );
     let configured = setup.base_analysis.is_some();
     hinted_input_row_enabled(
         ui,
