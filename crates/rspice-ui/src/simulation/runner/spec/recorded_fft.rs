@@ -24,6 +24,15 @@ pub(super) fn run(
             "recorded FFT dependency artifact is unavailable: {error}"
         ))
     })?;
+    run_from_trajectory(request, trajectory, abort)
+}
+
+pub(super) fn run_from_trajectory(
+    request: &FftRequest,
+    trajectory: &crate::simulation::execution::TransientTrajectoryArtifact,
+    abort: &dyn AbortSignal,
+) -> Result<SimulationResult, SimulationError> {
+    super::ensure_not_aborted(abort)?;
     let key = request
         .engine_key()
         .map_err(SimulationError::InvalidConfig)?;

@@ -216,36 +216,11 @@ pub(super) fn run_periodic_spec(
             source_path,
             abort,
         ),
-        AnalysisSpec::Fourier {
-            fundamental_freq,
-            num_harmonics,
-            num_periods,
-            output_node,
-            output_ref,
-            additional_outputs,
-            start_time,
-            stop_time,
-            compute_thd,
-            normalize,
-        } => run_fourier(
-            fundamental_freq,
-            FourierRunRequest {
-                num_harmonics,
-
-                num_periods,
-                output_node,
-                output_ref,
-                additional_outputs,
-                start_time,
-                stop_time,
-                compute_thd,
-                normalize,
-            },
-            dependencies.transient_trajectory().map_err(|error| {
-                SimulationError::InvalidConfig(format!(
-                    "Fourier dependency artifact is unavailable: {error}"
-                ))
-            })?,
+        spec @ AnalysisSpec::Fourier { .. } => run_spectral_from_trajectory(
+            spec,
+            dependencies
+                .transient_trajectory()
+                .map_err(|error| SimulationError::InvalidConfig(error.to_string()))?,
             abort,
         ),
         AnalysisSpec::Disto {
@@ -1785,5 +1760,50 @@ mod tests {
                 .force_accepted_times_s,
             [10.0 / 64.0]
         );
+    }
+}
+
+/// Read an exclusively owned study trial's freshly solved trajectory.
+pub(in crate::simulation::runner) fn run_spectral_from_trajectory(
+    spec: AnalysisSpec,
+    trajectory: &TransientTrajectoryArtifact,
+    abort: &dyn AbortSignal,
+) -> Result<SimulationResult, SimulationError> {
+    super::ensure_not_aborted(abort)?;
+    match spec {
+        AnalysisSpec::Fourier {
+            fundamental_freq,
+            num_harmonics,
+            num_periods,
+            output_node,
+            output_ref,
+            additional_outputs,
+            start_time,
+            stop_time,
+            compute_thd,
+            normalize,
+        } => run_fourier(
+            fundamental_freq,
+            FourierRunRequest {
+                num_harmonics,
+
+                num_periods,
+                output_node,
+                output_ref,
+                additional_outputs,
+                start_time,
+                stop_time,
+                compute_thd,
+                normalize,
+            },
+            trajectory,
+            abort,
+        ),
+        AnalysisSpec::Fft { request } => {
+            super::recorded_fft::run_from_trajectory(&request, trajectory, abort)
+        }
+        _ => Err(SimulationError::InvalidConfig(
+            "A spectral study requires Fourier or FFT".into(),
+        )),
     }
 }

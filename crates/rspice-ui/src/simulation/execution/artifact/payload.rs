@@ -118,6 +118,101 @@ mod f64_bits_map {
 }
 
 impl TransientTrajectoryArtifact {
+    /// Project a fresh local solve through the same payload checks used for
+    /// authenticated task handoffs. This does not create a task identity.
+    pub(in crate::simulation) fn from_result(
+        result: &SimulationResult,
+        required_waveforms: &[String],
+        carry_spectra: bool,
+    ) -> Result<Option<Self>, ExecutionArtifactError> {
+        let SimulationResult::Transient {
+            time,
+            waveforms,
+            convergence,
+            spectra,
+            events,
+            ..
+        } = result
+        else {
+            return Ok(None);
+        };
+        // An FFT consumer reads no waveform, so a request that asks only for
+        // the recorded spectra is a complete request.
+        if required_waveforms.is_empty() && !carry_spectra {
+            return Err(ExecutionArtifactError::InvalidPayload(
+                "transient artifact request contains no required waveforms".to_owned(),
+            ));
+        }
+        let mut artifact_waveforms = BTreeMap::new();
+        for (name, waveform) in waveforms {
+            if !required_waveforms
+                .iter()
+                .any(|required| normalize_waveform_name(required) == normalize_waveform_name(name))
+            {
+                continue;
+            }
+            if waveform.is_complex || waveform.y_imag.is_some() {
+                return Err(ExecutionArtifactError::InvalidPayload(format!(
+                    "transient waveform '{name}' unexpectedly contains complex values"
+                )));
+            }
+            if waveform.x_values.len() != time.len()
+                || waveform
+                    .x_values
+                    .iter()
+                    .zip(time)
+                    .any(|(waveform_time, common_time)| {
+                        waveform_time.to_bits() != common_time.to_bits()
+                    })
+            {
+                return Err(ExecutionArtifactError::InvalidPayload(format!(
+                    "transient waveform '{name}' does not use the result's canonical time axis"
+                )));
+            }
+            if artifact_waveforms
+                .insert(name.clone(), waveform.y_values.clone())
+                .is_some()
+            {
+                return Err(ExecutionArtifactError::InvalidPayload(format!(
+                    "transient trajectory repeats waveform '{name}'"
+                )));
+            }
+        }
+        for required in required_waveforms {
+            if !artifact_waveforms
+                .keys()
+                .any(|name| normalize_waveform_name(name) == normalize_waveform_name(required))
+            {
+                return Err(ExecutionArtifactError::InvalidPayload(format!(
+                    "required transient waveform '{required}' is absent from the producer result"
+                )));
+            }
+        }
+        // Two FFT instances with identical requests put the same card in the
+        // deck twice, so the engine returns the same spectrum twice. They are
+        // equal numbers under one key, and one copy is what the artifact holds.
+        let mut carried: Vec<Arc<crate::simulation::results::RecordedFftSpectrum>> = Vec::new();
+        if carry_spectra {
+            for spectrum in spectra {
+                if !carried
+                    .iter()
+                    .any(|held| held.request_key == spectrum.request_key)
+                {
+                    carried.push(Arc::clone(spectrum));
+                }
+            }
+        }
+        let trajectory = TransientTrajectoryArtifact {
+            time: time.clone(),
+            current_impulses: events.current_impulses.clone(),
+            waveforms: artifact_waveforms,
+            convergence: convergence.clone(),
+            spectra: carried,
+        };
+        trajectory.validate()?;
+        Ok(Some(trajectory))
+    }
+
     pub(in crate::simulation) fn convergence(
         &self,
     ) -> Option<&Arc<crate::state::TransientConvergenceEvidence>> {
@@ -995,91 +1090,11 @@ impl ExecutionArtifactEnvelope {
         required_waveforms: &[String],
         carry_spectra: bool,
     ) -> Result<Option<Self>, ExecutionArtifactError> {
-        let SimulationResult::Transient {
-            time,
-            waveforms,
-            convergence,
-            spectra,
-            events,
-            ..
-        } = result
+        let Some(trajectory) =
+            TransientTrajectoryArtifact::from_result(result, required_waveforms, carry_spectra)?
         else {
             return Ok(None);
         };
-        // An FFT consumer reads no waveform, so a request that asks only for
-        // the recorded spectra is a complete request.
-        if required_waveforms.is_empty() && !carry_spectra {
-            return Err(ExecutionArtifactError::InvalidPayload(
-                "transient artifact request contains no required waveforms".to_owned(),
-            ));
-        }
-        let mut artifact_waveforms = BTreeMap::new();
-        for (name, waveform) in waveforms {
-            if !required_waveforms
-                .iter()
-                .any(|required| normalize_waveform_name(required) == normalize_waveform_name(name))
-            {
-                continue;
-            }
-            if waveform.is_complex || waveform.y_imag.is_some() {
-                return Err(ExecutionArtifactError::InvalidPayload(format!(
-                    "transient waveform '{name}' unexpectedly contains complex values"
-                )));
-            }
-            if waveform.x_values.len() != time.len()
-                || waveform
-                    .x_values
-                    .iter()
-                    .zip(time)
-                    .any(|(waveform_time, common_time)| {
-                        waveform_time.to_bits() != common_time.to_bits()
-                    })
-            {
-                return Err(ExecutionArtifactError::InvalidPayload(format!(
-                    "transient waveform '{name}' does not use the result's canonical time axis"
-                )));
-            }
-            if artifact_waveforms
-                .insert(name.clone(), waveform.y_values.clone())
-                .is_some()
-            {
-                return Err(ExecutionArtifactError::InvalidPayload(format!(
-                    "transient trajectory repeats waveform '{name}'"
-                )));
-            }
-        }
-        for required in required_waveforms {
-            if !artifact_waveforms
-                .keys()
-                .any(|name| normalize_waveform_name(name) == normalize_waveform_name(required))
-            {
-                return Err(ExecutionArtifactError::InvalidPayload(format!(
-                    "required transient waveform '{required}' is absent from the producer result"
-                )));
-            }
-        }
-        // Two FFT instances with identical requests put the same card in the
-        // deck twice, so the engine returns the same spectrum twice. They are
-        // equal numbers under one key, and one copy is what the artifact holds.
-        let mut carried: Vec<Arc<crate::simulation::results::RecordedFftSpectrum>> = Vec::new();
-        if carry_spectra {
-            for spectrum in spectra {
-                if !carried
-                    .iter()
-                    .any(|held| held.request_key == spectrum.request_key)
-                {
-                    carried.push(Arc::clone(spectrum));
-                }
-            }
-        }
-        let trajectory = TransientTrajectoryArtifact {
-            time: time.clone(),
-            current_impulses: events.current_impulses.clone(),
-            waveforms: artifact_waveforms,
-            convergence: convergence.clone(),
-            spectra: carried,
-        };
-        trajectory.validate()?;
         let payload_digest = trajectory.digest();
         Ok(Some(Self {
             snapshot_digest,
