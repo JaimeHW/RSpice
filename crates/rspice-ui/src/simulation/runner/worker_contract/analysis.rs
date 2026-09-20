@@ -47,6 +47,8 @@ impl From<WorkerSimulationRequest> for SimulationRequest {
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub(crate) struct WorkerSpecExecutionOptions {
+    #[serde(default)]
+    pub study_base: Option<WorkerStudyRunConfig>,
     pub temp: Option<WorkerTempRunConfig>,
     pub parametric_base: Option<WorkerCornerBaseMode>,
     pub corner: Option<WorkerCornerRunConfig>,
@@ -59,6 +61,7 @@ pub(crate) struct WorkerSpecExecutionOptions {
 impl From<&SpecExecutionOptions> for WorkerSpecExecutionOptions {
     fn from(value: &SpecExecutionOptions) -> Self {
         Self {
+            study_base: value.study_base.as_ref().map(WorkerStudyRunConfig::from),
             temp: value.temp.as_ref().map(WorkerTempRunConfig::from),
             parametric_base: value
                 .parametric_base
@@ -76,6 +79,9 @@ impl From<&SpecExecutionOptions> for WorkerSpecExecutionOptions {
 impl From<WorkerSpecExecutionOptions> for SpecExecutionOptions {
     fn from(value: WorkerSpecExecutionOptions) -> Self {
         Self {
+            study_base: value
+                .study_base
+                .map(crate::simulation::runner::study::StudyRunConfig::from),
             temp: value
                 .temp
                 .map(crate::services::simulation_runner::TempRunConfig::from),
@@ -97,6 +103,63 @@ impl From<WorkerSpecExecutionOptions> for SpecExecutionOptions {
             pstb: value
                 .pstb
                 .map(crate::services::simulation_runner::PstbRunConfig::from),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct WorkerStudyRunConfig {
+    instance_id: crate::product::AnalysisInstanceId,
+    source_revision: crate::product::ObjectRevision,
+    pub(super) analysis: WorkerAnalysisConfig,
+    analysis_line: String,
+    numeric_options: String,
+    measurements: Vec<String>,
+    histogram_bins: usize,
+}
+
+impl From<&crate::simulation::runner::study::StudyRunConfig> for WorkerStudyRunConfig {
+    fn from(value: &crate::simulation::runner::study::StudyRunConfig) -> Self {
+        let crate::simulation::runner::study::StudyRunConfig {
+            instance_id,
+            source_revision,
+            analysis,
+            analysis_line,
+            numeric_options,
+            measurements,
+            histogram_bins,
+        } = value;
+        Self {
+            instance_id: *instance_id,
+            source_revision: *source_revision,
+            analysis: WorkerAnalysisConfig::from(analysis),
+            analysis_line: analysis_line.clone(),
+            numeric_options: numeric_options.clone(),
+            measurements: measurements.clone(),
+            histogram_bins: *histogram_bins,
+        }
+    }
+}
+
+impl From<WorkerStudyRunConfig> for crate::simulation::runner::study::StudyRunConfig {
+    fn from(value: WorkerStudyRunConfig) -> Self {
+        let WorkerStudyRunConfig {
+            instance_id,
+            source_revision,
+            analysis,
+            analysis_line,
+            numeric_options,
+            measurements,
+            histogram_bins,
+        } = value;
+        Self {
+            instance_id,
+            source_revision,
+            analysis: AnalysisConfig::from(analysis),
+            analysis_line,
+            numeric_options,
+            measurements,
+            histogram_bins,
         }
     }
 }

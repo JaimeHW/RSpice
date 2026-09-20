@@ -73,6 +73,7 @@ use helpers::{
 };
 pub(crate) use helpers::{splice_before_terminal_end_card, terminal_end_card_offset};
 pub(crate) use monte_carlo::{
+    MonteCarloData, finish_monte_carlo_result,
     run_monte_carlo_analysis_with_environment_and_source_path_and_abort,
     run_statistical_monte_carlo_with_environment_and_source_path_and_abort,
 };

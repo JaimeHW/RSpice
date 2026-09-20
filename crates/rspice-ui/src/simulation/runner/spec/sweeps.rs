@@ -27,7 +27,14 @@ pub(super) fn run_sweep_spec(
         // is read for identity rather than re-applied here.
         AnalysisSpec::MonteCarlo {
             variation_source, ..
-        } => run_monte_carlo(variation_source, netlist, source_path, environment, abort),
+        } => run_monte_carlo(
+            variation_source,
+            options.study_base.as_ref(),
+            netlist,
+            source_path,
+            environment,
+            abort,
+        ),
         AnalysisSpec::Parametric => run_parametric(netlist, options, source_path, abort),
         // A corner declaration is expanded into one task per declared point
         // before the run is authorized, and its plotting family is assembled
@@ -39,6 +46,7 @@ pub(super) fn run_sweep_spec(
 
 fn run_monte_carlo(
     variation_source: crate::simulation::dialog::McVariationSource,
+    base: Option<&crate::simulation::runner::study::StudyRunConfig>,
     netlist: &str,
     source_path: Option<&Path>,
     environment: Option<AnalysisExecutionEnvironment>,
@@ -46,42 +54,54 @@ fn run_monte_carlo(
 ) -> Result<SimulationResult, SimulationError> {
     use crate::simulation::dialog::McVariationSource;
 
-    let (temperature, supply, nominal_supply, supply_source_names) = environment.map_or_else(
-        || (None, None, None, Vec::new()),
-        |environment| {
-            (
-                Some(environment.temperature_celsius),
-                environment.supply_voltage,
-                environment.nominal_supply_voltage,
-                environment.supply_source_names,
-            )
-        },
-    );
+    let data = if let Some(base) = base {
+        crate::simulation::runner::study::run_monte_carlo(
+            base,
+            variation_source,
+            netlist,
+            source_path,
+            environment,
+            abort,
+        )?
+    } else {
+        let (temperature, supply, nominal_supply, supply_source_names) = environment.map_or_else(
+            || (None, None, None, Vec::new()),
+            |environment| {
+                (
+                    Some(environment.temperature_celsius),
+                    environment.supply_voltage,
+                    environment.nominal_supply_voltage,
+                    environment.supply_source_names,
+                )
+            },
+        );
 
-    let data = super::run_abort_aware_service(abort, || match variation_source {
-        McVariationSource::ParameterTolerance => {
-            svc_runner::run_monte_carlo_analysis_with_environment_and_source_path_and_abort(
-                netlist,
-                source_path,
-                temperature,
-                supply,
-                nominal_supply,
-                &supply_source_names,
-                abort,
-            )
-        }
-        McVariationSource::DeckStatistics => {
-            svc_runner::run_statistical_monte_carlo_with_environment_and_source_path_and_abort(
-                netlist,
-                source_path,
-                temperature,
-                supply,
-                nominal_supply,
-                &supply_source_names,
-                abort,
-            )
-        }
-    })?;
+        let data = super::run_abort_aware_service(abort, || match variation_source {
+            McVariationSource::ParameterTolerance => {
+                svc_runner::run_monte_carlo_analysis_with_environment_and_source_path_and_abort(
+                    netlist,
+                    source_path,
+                    temperature,
+                    supply,
+                    nominal_supply,
+                    &supply_source_names,
+                    abort,
+                )
+            }
+            McVariationSource::DeckStatistics => {
+                svc_runner::run_statistical_monte_carlo_with_environment_and_source_path_and_abort(
+                    netlist,
+                    source_path,
+                    temperature,
+                    supply,
+                    nominal_supply,
+                    &supply_source_names,
+                    abort,
+                )
+            }
+        })?;
+        data
+    };
     let mut variables = Vec::with_capacity(data.variables.len());
     for variable in data.variables {
         super::ensure_not_aborted(abort)?;

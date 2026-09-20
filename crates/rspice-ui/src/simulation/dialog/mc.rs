@@ -2,11 +2,8 @@
 //!
 //! Configuration for Monte Carlo statistical analysis.
 //!
-//! Each trial perturbs the eligible netlist parameters and solves an
-//! operating point, and the result is the distribution of the node voltages
-//! across trials. That is the whole contract: there is no per-trial base
-//! analysis to choose, and no per-trial dataset to retain, so this
-//! configuration offers neither.
+//! Each trial varies one circuit and executes either the legacy operating
+//! point population or an exact configured analysis selected from the plan.
 
 use serde::{Deserialize, Deserializer};
 
@@ -74,6 +71,9 @@ pub struct McConfig {
     /// the engine refuses a generic filter alongside native Spectre statistics
     /// rather than pretending to narrow them.
     pub params: Vec<String>,
+    pub base_analysis: Option<crate::product::AnalysisInstanceId>,
+    pub measurements: Vec<String>,
+    pub histogram_bins: usize,
 }
 
 impl Default for McConfig {
@@ -87,6 +87,9 @@ impl Default for McConfig {
             distribution: McDistribution::Gaussian,
             variation_pct: 5.0,
             params: Vec::new(),
+            base_analysis: None,
+            measurements: Vec::new(),
+            histogram_bins: 20,
         }
     }
 }
@@ -107,6 +110,12 @@ impl McConfig {
         }
         if self.num_runs == 0 {
             return Err("Number of runs must be at least 1".into());
+        }
+        if self.base_analysis.is_some() {
+            crate::simulation::runner::study::validate_measurements(&self.measurements)?;
+            if self.histogram_bins == 0 {
+                return Err("Histogram bins must be at least one".into());
+            }
         }
         // The spread is only asked for by one variation source. Rejecting it
         // under the other would reject a value that never reaches a solve.
@@ -177,6 +186,9 @@ pub struct McDialogState {
     pub variation_pct: String,
     /// The "Vary only" field, as authored. Commas or spaces separate names.
     pub vary_only: String,
+    pub base_analysis: Option<crate::product::AnalysisInstanceId>,
+    pub measurements: String,
+    pub histogram_bins: String,
     #[serde(skip)]
     pub initialized: bool,
 }
@@ -190,6 +202,9 @@ impl Default for McDialogState {
             distribution_idx: 0,
             variation_pct: String::new(),
             vary_only: String::new(),
+            base_analysis: None,
+            measurements: String::new(),
+            histogram_bins: default_histogram_bins(),
             confidence_pct: default_confidence_pct(),
             confidence_method_idx: 0,
             bootstrap_resamples: default_bootstrap_resamples(),
@@ -229,8 +244,13 @@ struct PersistedMcDialogState {
     /// card's own "vary everything eligible".
     #[serde(default)]
     vary_only: String,
-    /// Retired. Every trial is an operating point; the choice named base
-    /// analyses that were never dispatched.
+    #[serde(default)]
+    base_analysis: Option<crate::product::AnalysisInstanceId>,
+    #[serde(default)]
+    measurements: String,
+    #[serde(default = "default_histogram_bins")]
+    histogram_bins: String,
+    /// Retired ordinal selector; it never identified a configured analysis.
     #[serde(default)]
     #[allow(dead_code)]
     base_idx: serde::de::IgnoredAny,
@@ -247,6 +267,10 @@ struct PersistedMcDialogState {
     #[serde(default)]
     #[allow(dead_code)]
     save_all_runs: serde::de::IgnoredAny,
+}
+
+fn default_histogram_bins() -> String {
+    "20".into()
 }
 
 fn default_confidence_pct() -> String {
@@ -294,6 +318,9 @@ impl<'de> Deserialize<'de> for McDialogState {
             distribution_idx: persisted.distribution_idx,
             variation_pct: persisted.variation_pct,
             vary_only: persisted.vary_only,
+            base_analysis: persisted.base_analysis,
+            measurements: persisted.measurements,
+            histogram_bins: persisted.histogram_bins,
             initialized: false,
         })
     }
@@ -334,6 +361,9 @@ impl McDialogState {
             },
             variation_pct: format!("{}", config.variation_pct),
             vary_only: config.params.join(", "),
+            base_analysis: config.base_analysis,
+            measurements: config.measurements.join("; "),
+            histogram_bins: config.histogram_bins.to_string(),
             initialized: true,
         }
     }
@@ -401,6 +431,25 @@ impl McDialogState {
             distribution: dist,
             variation_pct: pct,
             params,
+            base_analysis: self.base_analysis,
+            measurements: if self.base_analysis.is_some() {
+                self.measurements
+                    .split([';', '\n'])
+                    .map(str::trim)
+                    .filter(|name| !name.is_empty())
+                    .map(str::to_owned)
+                    .collect()
+            } else {
+                Vec::new()
+            },
+            histogram_bins: if self.base_analysis.is_some() {
+                self.histogram_bins
+                    .trim()
+                    .parse()
+                    .map_err(|_| "Histogram bins must be a positive integer")?
+            } else {
+                20
+            },
         };
         config.validate()?;
         Ok(config)

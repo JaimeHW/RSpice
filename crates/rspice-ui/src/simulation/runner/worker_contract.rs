@@ -72,10 +72,10 @@ pub(crate) struct WorkerRequest {
     pub(in crate::simulation) stream_transient_samples: bool,
 }
 
-/// 11: a transient-trajectory dependency carries the spectra its solve
-///     recorded, and `AnalysisSpec::Fft` is a request a worker can be given.
+/// 12: Monte Carlo can carry an exact configured study base and measurements;
+/// older workers must not silently execute the legacy operating-point study.
 #[cfg(any(target_arch = "wasm32", test))]
-pub(crate) const WORKER_REQUEST_TRANSPORT_PROTOCOL: u8 = 11;
+pub(crate) const WORKER_REQUEST_TRANSPORT_PROTOCOL: u8 = 12;
 
 /// Browser-worker request split into compact metadata and transferable
 /// floating-point buffers. The embedded request deliberately carries empty
@@ -188,8 +188,17 @@ fn worker_request_op_config_mut(
             WorkerAnalysisConfig::DcOp(config) => Some(config),
             _ => None,
         },
-        WorkerSimulationRequest::Spec { spec, .. } => match spec.as_mut() {
+        WorkerSimulationRequest::Spec { spec, options } => match spec.as_mut() {
             WorkerAnalysisSpec::DcOp(config) => Some(config),
+            WorkerAnalysisSpec::MonteCarlo { .. } => {
+                options
+                    .study_base
+                    .as_mut()
+                    .and_then(|base| match &mut base.analysis {
+                        WorkerAnalysisConfig::DcOp(config) => Some(config),
+                        _ => None,
+                    })
+            }
             _ => None,
         },
     }
@@ -204,8 +213,17 @@ fn worker_request_op_config(
             WorkerAnalysisConfig::DcOp(config) => Some(config),
             _ => None,
         },
-        WorkerSimulationRequest::Spec { spec, .. } => match spec.as_ref() {
+        WorkerSimulationRequest::Spec { spec, options } => match spec.as_ref() {
             WorkerAnalysisSpec::DcOp(config) => Some(config),
+            WorkerAnalysisSpec::MonteCarlo { .. } => {
+                options
+                    .study_base
+                    .as_ref()
+                    .and_then(|base| match &base.analysis {
+                        WorkerAnalysisConfig::DcOp(config) => Some(config),
+                        _ => None,
+                    })
+            }
             _ => None,
         },
     }

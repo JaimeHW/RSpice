@@ -57,6 +57,11 @@ pub(super) fn run_spec_request_with_environment(
 ) -> Result<SimulationResult, SimulationError> {
     ensure_not_aborted(abort_flag)?;
 
+    if options.study_base.is_some() && !matches!(spec, AnalysisSpec::MonteCarlo { .. }) {
+        return Err(SimulationError::InvalidConfig(
+            "A configured study base requires a Monte Carlo request".into(),
+        ));
+    }
     let validation = spec.validate();
     ensure_not_aborted(abort_flag)?;
     validation.map_err(SimulationError::InvalidConfig)?;

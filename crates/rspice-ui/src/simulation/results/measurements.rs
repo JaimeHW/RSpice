@@ -7,6 +7,84 @@
 use super::*;
 
 impl SimulationResult {
+    /// Resolve a study request without falling back from a failed `.MEAS` to
+    /// a same-named signal. Waveform reduction must be explicitly requested.
+    pub(crate) fn study_measurement(
+        &self,
+        request: &str,
+    ) -> Option<crate::state::FamilyMeasurementEvidence> {
+        let (mode, key) = request.split_once(':').unwrap_or(("meas", request));
+        if mode.eq_ignore_ascii_case("meas") {
+            let measurements = match self {
+                Self::DcSweep { measurements, .. }
+                | Self::Transient { measurements, .. }
+                | Self::Ac { measurements, .. }
+                | Self::Noise { measurements, .. }
+                | Self::HarmonicBalance { measurements, .. } => measurements,
+                _ => return None,
+            };
+            let measurement = measurements
+                .iter()
+                .find(|measurement| measurement.name.eq_ignore_ascii_case(key))?;
+            // A missed GOAL is still an observed sample. Discarding it would
+            // bias the distribution toward passing trials. Evaluation failures
+            // have no raw value, even when an output default is configured.
+            measurement.raw_value.filter(|value| value.is_finite())?;
+            return Some(crate::state::FamilyMeasurementEvidence {
+                name: request.to_owned(),
+                value: Some(measurement.value.filter(|value| value.is_finite())?),
+                passed: measurement.passed,
+                error: measurement.error.clone(),
+            });
+        }
+        let value = if mode.eq_ignore_ascii_case("scalar") {
+            match self {
+                Self::DcOp(_)
+                | Self::PoleZero { .. }
+                | Self::SensitivityStudy { .. }
+                | Self::TransferFunction { .. }
+                | Self::DcMismatch { .. } => self.measurement(key),
+                _ => None,
+            }
+        } else if mode.eq_ignore_ascii_case("last") {
+            match self {
+                Self::DcSweep { waveforms, .. }
+                | Self::Transient { waveforms, .. }
+                | Self::Ac { waveforms, .. }
+                | Self::HarmonicBalance { waveforms, .. } => {
+                    waveform_last_value_by_name(waveforms, key)
+                }
+                Self::Noise {
+                    output_noise,
+                    input_noise,
+                    contributors,
+                    ..
+                } => {
+                    if key.eq_ignore_ascii_case("output_noise") {
+                        output_noise.last().copied()
+                    } else if key.eq_ignore_ascii_case("input_noise") {
+                        input_noise
+                            .as_ref()
+                            .and_then(|values| values.last().copied())
+                    } else {
+                        named_value(contributors, key).and_then(|values| values.last().copied())
+                    }
+                }
+                _ => None,
+            }
+        } else {
+            None
+        };
+        value.filter(|value| value.is_finite()).map(|value| {
+            crate::state::FamilyMeasurementEvidence {
+                name: request.to_owned(),
+                value: Some(value),
+                passed: true,
+                error: None,
+            }
+        })
+    }
+
     /// Get a single scalar measurement by name without allocating a map.
     pub fn measurement(&self, name: &str) -> Option<f64> {
         let key = name.trim();

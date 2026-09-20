@@ -85,8 +85,17 @@ impl FamilyMemberMeasurements {
                     let Some(value) = measurement.value else {
                         return Err(invalid());
                     };
-                    if !measurement.passed
-                        || measurement.error.is_some()
+                    // A computed value that misses GOAL/TOL or FAILVALUE is
+                    // a valid population sample with a failing verdict.
+                    let verdict_valid = if measurement.passed {
+                        measurement.error.is_none()
+                    } else {
+                        measurement
+                            .error
+                            .as_ref()
+                            .is_some_and(|error| !error.trim().is_empty())
+                    };
+                    if !verdict_valid
                         || !value.is_finite()
                         || samples.get(successful).map(|sample| sample.to_bits())
                             != Some(value.to_bits())

@@ -302,7 +302,7 @@ pub(super) fn nondefault_op_config() -> crate::simulation::dialog::OpConfig {
 #[test]
 fn browser_worker_transfer_protocol_matches_rust_transport() {
     assert_eq!(WORKER_RESPONSE_TRANSPORT_PROTOCOL, 25);
-    assert_eq!(WORKER_REQUEST_TRANSPORT_PROTOCOL, 11);
+    assert_eq!(WORKER_REQUEST_TRANSPORT_PROTOCOL, 12);
     let source = include_str!("../../../../web/simulation-worker.js");
     assert!(source.contains(&format!(
         "const WORKER_PROTOCOL_VERSION = {WORKER_RESPONSE_TRANSPORT_PROTOCOL};"
@@ -2067,3 +2067,47 @@ fn worker_transport_validates_complex_waveform_shape() {
 mod extended_contract;
 
 use extended_contract::{assert_analysis_configs_match, round_trip_result};
+
+#[test]
+fn configured_study_worker_transfers_and_authenticates_nested_op_seed() {
+    use crate::simulation::runner::study::StudyRunConfig;
+    let options = SpecExecutionOptions {
+        study_base: Some(StudyRunConfig {
+            instance_id: crate::product::AnalysisInstanceId::new(),
+            source_revision: crate::product::ObjectRevision::INITIAL,
+            analysis: AnalysisConfig::DcOp(nondefault_op_config()),
+            analysis_line: ".OP".into(),
+            numeric_options: String::new(),
+            measurements: vec!["scalar:V(out)".into()],
+            histogram_bins: 7,
+        }),
+        ..Default::default()
+    };
+    let request = WorkerRequest {
+        id: 11,
+        request: WorkerSimulationRequest::Spec {
+            spec: Box::new(WorkerAnalysisSpec::MonteCarlo {
+                variation_source: Default::default(),
+                params: vec![],
+            }),
+            options: Box::new(WorkerSpecExecutionOptions::from(&options)),
+        },
+        netlist: "Trial\nV1 out 0 1\nR1 out 0 1k\n.mc 3 seed 7\n.end\n".into(),
+        source_path: None,
+        project_veriloga_runtimes: Default::default(),
+        dependencies: Default::default(),
+        environment: None,
+        stream_transient_samples: false,
+    };
+    let transport = WorkerRequestTransport::from_request(request.clone()).unwrap();
+    assert_eq!(transport.buffers, vec![vec![1.25, -1.0e-3]]);
+    assert_eq!(transport.clone().into_request().unwrap(), request);
+    let mut corrupted = transport;
+    corrupted.buffers[0][0] += 1.0;
+    assert!(
+        corrupted
+            .into_request()
+            .unwrap_err()
+            .contains("solution digest")
+    );
+}

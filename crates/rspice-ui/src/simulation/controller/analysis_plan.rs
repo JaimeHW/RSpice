@@ -145,7 +145,7 @@ impl SimulationController {
                     continue;
                 }
             };
-            let spec_options = match self.analysis_spec_execution_options(
+            let mut spec_options = match self.analysis_spec_execution_options(
                 &projected_state,
                 &spec,
                 sealed_model_sources,
@@ -156,6 +156,16 @@ impl SimulationController {
                     continue;
                 }
             };
+
+            if let crate::simulation::plan::AnalysisDraft::MonteCarlo(draft) = instance.draft() {
+                match self.compile_monte_carlo_base(state, plan, draft) {
+                    Ok(base) => spec_options.study_base = base,
+                    Err(error) => {
+                        errors.push(format!("{}: {error}", instance.display_name()));
+                        continue;
+                    }
+                }
+            }
 
             // A PSS request that asks to retain harmonics earns a second
             // prepared task for them. It is a task in its own right, with its
@@ -438,6 +448,49 @@ impl SimulationController {
         )
     }
 
+    fn compile_monte_carlo_base(
+        &self,
+        state: &AppState,
+        plan: &FrozenSimulationPlan,
+        draft: &crate::simulation::dialog::McDialogState,
+    ) -> Result<Option<crate::simulation::runner::study::StudyRunConfig>, String> {
+        let Some(id) = draft.base_analysis else {
+            return Ok(None);
+        };
+        let config = draft.to_config()?;
+        let base = plan
+            .instances()
+            .iter()
+            .find(|instance| instance.id() == id)
+            .ok_or_else(|| format!("Monte Carlo base analysis {id} is missing or disabled"))?;
+        if !crate::simulation::runner::study::supports_kind(base.kind()) {
+            return Err(format!(
+                "{} cannot yet be used as a Monte Carlo base",
+                base.display_name()
+            ));
+        }
+        let mut projected = state.clone();
+        projected.sim_setup = state
+            .sim_setup
+            .frozen_instance_projection(plan, base)
+            .map_err(|error| error.to_string())?;
+        let spec = self.analysis_draft_spec(&projected, base.draft())?;
+        let analysis = self.analysis_spec_to_config(&projected, &spec)?;
+        analysis.validate().map_err(|errors| errors.join("; "))?;
+        Ok(Some(crate::simulation::runner::study::StudyRunConfig {
+            instance_id: id,
+            source_revision: plan.revision(),
+            analysis,
+            analysis_line: self.analysis_spec_to_spice_line(&projected, &spec)?,
+            numeric_options: base
+                .numeric_override()
+                .map(|options| options.to_spice_options())
+                .unwrap_or_default(),
+            measurements: config.measurements,
+            histogram_bins: config.histogram_bins,
+        }))
+    }
+
     pub(super) fn analysis_spec_execution_options(
         &self,
         state: &AppState,
@@ -452,6 +505,7 @@ impl SimulationController {
                     .to_config(&state.sim_setup.run_set, state.sim_setup.reference_pvt)
                     .map_err(|e| format!("invalid temperature sweep settings: {}", e))?;
                 Ok(SpecExecutionOptions {
+                    study_base: None,
                     temp: Some(Self::temp_run_config_from_dialog(state, &temp_cfg)?),
                     parametric_base: None,
                     corner: None,
@@ -468,6 +522,7 @@ impl SimulationController {
                     .to_config(&state.sim_setup.run_set, state.sim_setup.reference_pvt)
                     .map_err(|e| format!("invalid corner settings: {}", e))?;
                 Ok(SpecExecutionOptions {
+                    study_base: None,
                     temp: None,
                     parametric_base: None,
                     corner: Some(Self::corner_run_config_from_dialog(
@@ -482,6 +537,7 @@ impl SimulationController {
                 })
             }
             AnalysisSpec::Pac => Ok(SpecExecutionOptions {
+                study_base: None,
                 temp: None,
                 parametric_base: None,
                 corner: None,
@@ -491,6 +547,7 @@ impl SimulationController {
                 pstb: None,
             }),
             AnalysisSpec::Pxf => Ok(SpecExecutionOptions {
+                study_base: None,
                 temp: None,
                 parametric_base: None,
                 corner: None,
@@ -501,6 +558,7 @@ impl SimulationController {
             }),
             AnalysisSpec::Tf { .. } => Ok(SpecExecutionOptions::default()),
             AnalysisSpec::Pnoise => Ok(SpecExecutionOptions {
+                study_base: None,
                 temp: None,
                 parametric_base: None,
                 corner: None,
@@ -510,6 +568,7 @@ impl SimulationController {
                 pstb: None,
             }),
             AnalysisSpec::Pstb => Ok(SpecExecutionOptions {
+                study_base: None,
                 temp: None,
                 parametric_base: None,
                 corner: None,
@@ -520,6 +579,7 @@ impl SimulationController {
             }),
             AnalysisSpec::Psp { .. } => Ok(SpecExecutionOptions::default()),
             _ => Ok(SpecExecutionOptions {
+                study_base: None,
                 temp: None,
                 parametric_base: None,
                 corner: None,
@@ -544,6 +604,123 @@ fn invalid_saved_output_reports(
 mod tests {
     use super::*;
     use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
+
+    #[test]
+    fn configured_study_freezes_exact_base_and_survives_persistence_and_identity() {
+        use crate::simulation::dialog::{McDialogState, mc::McConfig};
+        let mut state = AppState::default();
+        let plan = state.sim_setup.analysis_plan.as_mut().unwrap();
+        let (op, _) = plan.insert(AnalysisKind::OperatingPoint).unwrap();
+        let (ac, _) = plan.insert(AnalysisKind::Ac).unwrap();
+        let (other, _) = plan.insert(AnalysisKind::Ac).unwrap();
+        let (mc, _) = plan.insert(AnalysisKind::MonteCarlo).unwrap();
+        for (id, stop) in [(ac, "1000"), (other, "9000")] {
+            plan.bind_dependency(id, AnalysisKind::OperatingPoint, op)
+                .unwrap();
+            plan.edit(id, |draft| {
+                let AnalysisDraft::Ac(draft) = draft else {
+                    unreachable!()
+                };
+                draft.fstart = "1000".into();
+                draft.fstop = stop.into();
+                draft.sweep = 2;
+                draft.points = "1".into();
+            })
+            .unwrap();
+        }
+        let mut numerics = crate::simulation::plan::AnalysisNumericOverride::default();
+        numerics
+            .set_for_instance(
+                AnalysisKind::Ac,
+                Default::default(),
+                crate::simulation::plan::NumericOverrideOption::Reltol,
+                "1e-5",
+            )
+            .unwrap();
+        plan.set_numeric_override(ac, Some(numerics)).unwrap();
+        let draft = AnalysisDraft::MonteCarlo(McDialogState::from_config(&McConfig {
+            base_analysis: Some(ac),
+            measurements: vec!["gain".into(), "last:V(out)".into()],
+            histogram_bins: 7,
+            num_runs: 3,
+            ..Default::default()
+        }));
+        for mut restored in [
+            serde_json::from_str::<AnalysisDraft>(&serde_json::to_string(&draft).unwrap()).unwrap(),
+            ron::from_str::<AnalysisDraft>(&ron::to_string(&draft).unwrap()).unwrap(),
+        ] {
+            restored.prepare_after_restore();
+            let AnalysisDraft::MonteCarlo(mut restored) = restored else {
+                unreachable!()
+            };
+            restored.ensure_initialized();
+            let config = restored.to_config().unwrap();
+            assert_eq!(config.base_analysis, Some(ac));
+            assert_eq!(config.histogram_bins, 7);
+            assert_eq!(config.measurements, ["gain", "last:V(out)"]);
+        }
+        plan.edit(mc, |target| *target = draft).unwrap();
+        let frozen = plan.freeze().unwrap();
+        // Later live edits must not replace the base in this prepared plan.
+        plan.edit(ac, |draft| {
+            let AnalysisDraft::Ac(draft) = draft else {
+                unreachable!()
+            };
+            draft.fstop = "3000".into();
+        })
+        .unwrap();
+        let sealed = state
+            .model_library_manager
+            .seal_execution_sources()
+            .unwrap();
+        let controller = SimulationController::new();
+        let tasks = controller
+            .build_queue_from_plan(&state, &frozen, &sealed)
+            .unwrap();
+        let task = tasks.iter().find(|task| task.instance_id() == mc).unwrap();
+        let base = task
+            .queued_analysis()
+            .spec_options
+            .study_base
+            .as_ref()
+            .unwrap();
+        assert_eq!(base.instance_id, ac);
+        let AnalysisConfig::Ac(config) = &base.analysis else {
+            panic!("AC base")
+        };
+        assert_eq!(config.stop_freq, 1000.0);
+        assert!(base.numeric_options.to_ascii_uppercase().contains("RELTOL"));
+        for change in 0..5 {
+            let mut queued = task.queued_analysis().clone();
+            let base = queued.spec_options.study_base.as_mut().unwrap();
+            match change {
+                0 => base.instance_id = other,
+                1 => base.histogram_bins += 1,
+                2 => base.measurements = vec!["last:V(out)".into()],
+                3 => base.numeric_options = ".OPTIONS RELTOL=0.02".into(),
+                _ => {
+                    let AnalysisConfig::Ac(config) = &mut base.analysis else {
+                        unreachable!()
+                    };
+                    config.stop_freq = 2000.0;
+                }
+            }
+            let changed = PreparedTask::new(mc, task.source_revision(), vec![], "MC", queued);
+            assert_ne!(task.config_digest(), changed.config_digest());
+        }
+        let plan = state.sim_setup.analysis_plan.as_mut().unwrap();
+        plan.set_enabled(ac, false).unwrap();
+        let frozen = plan.freeze().unwrap();
+        let errors = controller
+            .build_queue_from_plan(&state, &frozen, &sealed)
+            .unwrap_err();
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.contains("missing or disabled")),
+            "{errors:?}"
+        );
+    }
 
     #[test]
     fn frozen_noise_task_keeps_exact_draft_and_reference_pvt() {

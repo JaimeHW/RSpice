@@ -14,7 +14,7 @@ impl EngineBridge {
     /// attribution wherever a solve gives up, and a later convergence aid may
     /// still rescue that solve, so the recorded attribution is used only when
     /// it says it belongs to the error actually being translated.
-    pub(super) fn translate_error(&self, err: rspice_core::SimulationError) -> SimulationError {
+    pub(crate) fn translate_error(&self, err: rspice_core::SimulationError) -> SimulationError {
         let attribution = self.attribution_for(&err);
         let translated = self.translate_unattributed(err);
         match attribution {

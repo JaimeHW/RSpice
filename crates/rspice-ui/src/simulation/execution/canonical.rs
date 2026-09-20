@@ -876,6 +876,19 @@ fn encode_spec_options(writer: &mut CanonicalWriter, options: &SpecExecutionOpti
         writer.bool(config.detect_subharmonics);
         writer.f64(config.eigenvalue_tolerance);
     });
+    if let Some(base) = &options.study_base {
+        writer.domain("configured-study-base/v1");
+        writer.string(&base.instance_id.to_string());
+        writer.u64(base.source_revision.get());
+        encode_analysis_config(writer, Some(&base.analysis));
+        writer.string(&base.analysis_line);
+        writer.string(&base.numeric_options);
+        writer.sequence(base.measurements.len());
+        for measurement in &base.measurements {
+            writer.string(measurement);
+        }
+        writer.usize(base.histogram_bins);
+    }
 }
 
 fn encode_dc_modes(writer: &mut CanonicalWriter, modes: &crate::simulation::config::DcSweepModes) {

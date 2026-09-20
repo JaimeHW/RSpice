@@ -49,9 +49,12 @@ mod wasm_worker;
 #[cfg(any(target_arch = "wasm32", test))]
 pub(crate) mod worker_contract;
 
+pub(crate) mod study;
+
 /// Optional execution overrides for spec-driven analyses.
 #[derive(Debug, Clone, Default)]
 pub struct SpecExecutionOptions {
+    pub study_base: Option<study::StudyRunConfig>,
     pub temp: Option<crate::services::simulation_runner::TempRunConfig>,
     /// Base analysis paired with a design-parameter `.STEP`. `None` retains
     /// the classic operating-point behavior for older prepared requests.

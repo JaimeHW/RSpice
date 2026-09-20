@@ -8,7 +8,7 @@ use super::{EngineBridge, ensure_not_aborted};
 use crate::simulation::runner::SimulationError;
 
 impl EngineBridge {
-    pub(super) fn parse_netlist_with_abort_and_source_path(
+    pub(crate) fn parse_netlist_with_abort_and_source_path(
         &self,
         netlist_str: &str,
         source_path: Option<&Path>,
