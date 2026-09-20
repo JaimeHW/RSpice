@@ -97,6 +97,28 @@ cosine-reference phase in degrees. The harmonic index cannot exceed the selected
 PSS retention count. `scalar:pss.frequency`, `scalar:pss.period` and
 `scalar:pss.iterations` expose the solved frequency, period and shooting corrections.
 
+## Periodic RF analyses in configured studies
+
+Monte Carlo and optimization can select PAC, PXF, PNOISE, PSTB or PSP. Each trial
+reruns the selected periodic producer on its varied circuit. Shooting chains
+first rerun the producer's bound OP configuration. PAC, PXF and PNOISE also
+accept an explicitly bound HB producer. The study retains the complete consumer
+configuration: sweep, sidebands, source and differential output, amplitude,
+solver tolerances, noise controls, stability controls, ports and mixed mode.
+
+Use explicit observations such as `bin:0:magnitude:V(out)[sb=+0]` for PAC,
+`bin:0:real:H(sb1->sb1, V(out))` for PXF, `bin:0:real:output_noise` or
+`scalar:noise.output_rms` for PNOISE, `scalar:pstb.max_multiplier_magnitude`
+for PSTB, and `bin:0:real:S11` for PSP. PNOISE's `meas:phase_rms_rad` and
+`meas:timing_jitter_rms_s` require the corresponding enabled oscillator noise
+outputs. A PSTB mode curve can be selected with `bin:index:real:signal`.
+Noise integration and contributor observations require those outputs to be enabled.
+
+Numerical overrides are applied at their own stage. A dependent run must remain
+compatible with its retained producer state; overrides that change the physical
+circuit or invalidate the resolved producer configuration are rejected by the
+same authentication checks used by ordinary dependent runs.
+
 ## HBSP and HBNOISE in configured studies
 
 Monte Carlo and optimization can select HBSP or HBNOISE as their base. The study
