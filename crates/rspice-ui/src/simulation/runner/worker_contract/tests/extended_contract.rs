@@ -510,7 +510,7 @@ fn worker_spec_request_preserves_monte_carlo() {
         options: Box::new(SpecExecutionOptions::default()),
     };
     let input = NetlistInput {
-        netlist: "MC worker\n.param rload=1k\nV1 in 0 1\nR1 in out {rload}\nR2 out 0 1k\n.mc 10 GAUSS 0.05 CONFIDENCE 90 CI BOOTSTRAP RESAMPLES 257 BOOTSEED 18446744073709551615 PARAMS RLOAD\n.end\n"
+        netlist: "MC worker\n.param rload=1k\nV1 in 0 1\nR1 in out {rload}\nR2 out 0 1k\n.mc 10 START 37 GAUSS 0.05 CONFIDENCE 90 CI BOOTSTRAP RESAMPLES 257 BOOTSEED 18446744073709551615 PARAMS RLOAD\n.end\n"
             .to_string(),
         source_path: None,
         project_veriloga_runtimes: Default::default(),
@@ -529,6 +529,7 @@ fn worker_spec_request_preserves_monte_carlo() {
     let rspice_core::netlist::AnalysisCommand::MonteCarlo(card) = &parsed.analyses[0] else {
         panic!("MC")
     };
+    assert_eq!(card.first_trial, 37);
     assert_eq!(card.confidence_pct, 90.0);
     assert_eq!(
         card.confidence_method,

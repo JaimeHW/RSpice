@@ -43,7 +43,12 @@ pub(super) fn fields(
             "Each trial runs this analysis at the study's Run Set point. Separate measurements with semicolons. A plain name reads a .MEAS result; scalar:V(out) reads an operating-point value; last:signal explicitly reads the final waveform sample. For AC, last:signal reads the real component; use .MEAS VM/VP/VDB for magnitude, phase, or decibels.",
         );
     }
+    input_row(ui, "First trial index", &mut setup.first_trial);
     input_row(ui, "Samples", &mut setup.num_runs);
+    field_note(
+        ui,
+        "Trial indices start at 0. Keep the seed, circuit, and settings unchanged to replay a range or continue with the next index. Only this batch contributes to its statistics; earlier circuits are not solved again.",
+    );
     input_row(ui, "Seed", &mut setup.seed)
         .on_hover_text("An integer from 0 to 18446744073709551615. Leave blank to use the repeatable default seed.");
     choice_row(

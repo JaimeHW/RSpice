@@ -114,6 +114,7 @@ pub(crate) fn run_monte_carlo(
         command.seed.unwrap_or(0x5EED_5EED),
         base.measurements.clone(),
     );
+    study.first_trial = command.first_trial;
     study.distribution = match command.distribution {
         MonteCarloDistribution::Gaussian => Distribution::Gaussian {
             sigma: command.relative_spread,
@@ -659,6 +660,99 @@ mod tests {
                     }
                 }
                 previous = Some(samples);
+            }
+        }
+    }
+    #[test]
+    fn monte_carlo_trial_ranges_replay_each_sampler_through_studio_dispatch() {
+        use crate::simulation::dialog::mc::statistics::{
+            McParameterVariation, McScope, McShape, McStatisticsConfig,
+        };
+        for source in 0..3 {
+            let expression = if source == 1 {
+                "{agauss(1, 0.1, 1)}"
+            } else {
+                "1"
+            };
+            for configured in [false, true] {
+                let options = SpecExecutionOptions {
+                    mc_statistics: (source == 2).then(|| McStatisticsConfig {
+                        variations: vec![McParameterVariation {
+                            parameter: "X".into(),
+                            scope: McScope::Mismatch,
+                            distribution: McShape::Gaussian,
+                            spread: 0.1,
+                            percent: false,
+                        }],
+                        correlations: vec![],
+                    }),
+                    study_base: configured
+                        .then(|| base(AnalysisConfig::dc_op(), &["scalar:V(out)"])),
+                    ..Default::default()
+                };
+                let run = |first, count| {
+                    let wire = WorkerSpecExecutionOptions::from(&options);
+                    let wire: WorkerSpecExecutionOptions =
+                        serde_json::from_str(&serde_json::to_string(&wire).unwrap()).unwrap();
+                    let deck = format!(
+                        "ranges\n.param X={expression}\nV1 out 0 {{X}}\nR1 out 0 1k\n.mc {count} START {first} SEED 18446744073709551615 DIST GAUSS SPREAD 0.1\n.end\n"
+                    );
+                    super::super::spec::run_spec_request(
+                        &EngineBridge::new(),
+                        spec(if source == 0 {
+                            McVariationSource::ParameterTolerance
+                        } else {
+                            McVariationSource::DeckStatistics
+                        }),
+                        wire.into(),
+                        &deck,
+                        None,
+                        &crate::simulation::execution::ResolvedExecutionDependencies::default(),
+                        &NoAbort,
+                    )
+                    .unwrap()
+                };
+                let full = run(0, 8);
+                let batch = run(3, 3);
+                let (
+                    SimulationResult::MonteCarlo {
+                        variables: full,
+                        member_measurements: full_members,
+                        ..
+                    },
+                    SimulationResult::MonteCarlo {
+                        variables: batch,
+                        member_measurements: members,
+                        runs_requested,
+                        runs_completed,
+                        ..
+                    },
+                ) = (full, batch)
+                else {
+                    panic!("MC");
+                };
+                assert_eq!((runs_requested, runs_completed), (3, 3));
+                assert_eq!(
+                    members
+                        .iter()
+                        .map(|member| member.member.index())
+                        .collect::<Vec<_>>(),
+                    [3, 4, 5]
+                );
+                for (index, member) in members.iter().enumerate() {
+                    assert_eq!(member, &full_members[index + 3]);
+                }
+                for variable in &batch {
+                    let reference = full
+                        .iter()
+                        .find(|candidate| candidate.name == variable.name)
+                        .unwrap();
+                    assert_eq!(
+                        variable.samples.as_slice(),
+                        &reference.samples[3..6],
+                        "source={source}, configured={configured}"
+                    );
+                }
             }
         }
     }

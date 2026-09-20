@@ -152,13 +152,18 @@ pub(crate) fn run_monte_carlo_analysis_with_environment_and_source_path_and_abor
             },
         );
     let mut result = engine
-        .run_monte_carlo_with_options_environment_and_abort(
+        .run_monte_carlo_voltages_with_abort(
             &netlist,
-            mc_cmd.runs,
-            seed,
-            distribution,
-            parameter_filter,
-            environment,
+            &rspice_core::engine::MonteCarloRunConfig {
+                first_trial: mc_cmd.first_trial,
+                num_runs: mc_cmd.runs,
+                seed,
+                distribution,
+                variation_source:
+                    rspice_core::engine::MonteCarloVariationSource::ParameterTolerance,
+                parameter_filter,
+                environment: environment.as_ref(),
+            },
             abort,
         )
         .map_err(|error| ServiceRunError::from_core("Monte Carlo analysis error", error))?;
@@ -305,11 +310,17 @@ pub(crate) fn run_statistical_monte_carlo_with_environment_and_source_path_and_a
     }
     let engine = Engine::new(config);
     let mut result = engine
-        .run_monte_carlo_deck_statistics_with_abort(
+        .run_monte_carlo_voltages_with_abort(
             &netlist,
-            command.runs,
-            command.seed.unwrap_or(DEFAULT_MONTE_CARLO_SEED),
-            environment.as_ref(),
+            &rspice_core::engine::MonteCarloRunConfig {
+                first_trial: command.first_trial,
+                num_runs: command.runs,
+                seed: command.seed.unwrap_or(DEFAULT_MONTE_CARLO_SEED),
+                distribution: Distribution::Uniform { tolerance: 0.0 },
+                variation_source: rspice_core::engine::MonteCarloVariationSource::DeckStatistics,
+                parameter_filter: None,
+                environment: environment.as_ref(),
+            },
             abort,
         )
         .map_err(|error| ServiceRunError::from_core("Monte Carlo analysis error", error))?;

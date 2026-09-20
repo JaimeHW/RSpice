@@ -16,7 +16,15 @@ pub(super) fn parameter_population(
     check_size(result.num_runs, names.len(), limit)?;
     let mut successful = 0;
     let mut members = Vec::with_capacity(result.num_runs);
-    for index in 0..result.num_runs {
+    let end = sampling
+        .first_trial
+        .checked_add(result.num_runs)
+        .ok_or_else(|| {
+            ServiceRunError::Failure(
+                "Monte Carlo trial range overflows the supported index range".into(),
+            )
+        })?;
+    for index in sampling.first_trial..end {
         poll_periodically(abort, index)?;
         let observed = indices.get(successful) == Some(&index);
         let measurements = names

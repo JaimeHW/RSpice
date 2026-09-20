@@ -111,6 +111,9 @@ impl SimulationController {
             .map_err(|e| format!("invalid Monte Carlo settings: {}", e))?;
 
         let mut cmd = format!(".mc {}", mc_cfg.num_runs);
+        if mc_cfg.first_trial != 0 {
+            cmd.push_str(&format!(" START {}", mc_cfg.first_trial));
+        }
         if mc_cfg.variation_source.uses_stated_spread() {
             let dist_keyword = match mc_cfg.distribution {
                 crate::simulation::dialog::mc::McDistribution::Gaussian => "GAUSS",
@@ -674,6 +677,38 @@ const fn yes_or_no(value: bool) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn monte_carlo_trial_range_persists_and_reaches_the_generated_card() {
+        use crate::simulation::dialog::mc::{McConfig, McDialogState};
+        let mut state = AppState::default();
+        state.sim_setup.mc = McDialogState::from_config(&McConfig {
+            first_trial: 37,
+            num_runs: 5,
+            ..Default::default()
+        });
+        for restored in [
+            serde_json::from_str::<McDialogState>(
+                &serde_json::to_string(&state.sim_setup.mc).unwrap(),
+            )
+            .unwrap(),
+            ron::from_str::<McDialogState>(&ron::to_string(&state.sim_setup.mc).unwrap()).unwrap(),
+        ] {
+            assert_eq!(restored.to_config().unwrap().first_trial, 37);
+        }
+        let command = SimulationController::new()
+            .build_monte_carlo_command(&state)
+            .unwrap();
+        let parsed = rspice_core::Netlist::parse(&format!("range\n{command}\n.end\n")).unwrap();
+        let rspice_core::netlist::AnalysisCommand::MonteCarlo(card) = &parsed.analyses[0] else {
+            panic!("MC");
+        };
+        assert_eq!((card.first_trial, card.runs), (37, 5));
+        let legacy: McDialogState = serde_json::from_str(r#"{"num_runs":"5"}"#).unwrap();
+        assert_eq!(legacy.first_trial, "0");
+        state.sim_setup.mc.first_trial = u32::MAX.to_string();
+        assert!(state.sim_setup.mc.to_config().is_err());
+    }
 
     #[test]
     fn monte_carlo_seed_draft_reaches_the_engine_at_full_width_including_zero() {

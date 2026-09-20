@@ -44,6 +44,10 @@ impl FamilyMemberMeasurements {
         if columns.is_empty() {
             return Err(invalid());
         }
+        let first_trial = members[0].member.index();
+        if first_trial.checked_add(requested).is_none() {
+            return Err(invalid());
+        }
         let mut successful = 0;
         let mut policy = None;
         for (position, member) in members.iter().enumerate() {
@@ -55,7 +59,7 @@ impl FamilyMemberMeasurements {
             else {
                 return Err(invalid());
             };
-            if *index != position
+            if *index != first_trial + position
                 || *recorded_seed != seed
                 || !matches!(
                     recorded_policy.as_str(),
@@ -161,6 +165,15 @@ mod tests {
     fn monte_carlo_sequence_validation_rejects_lost_or_reattributed_trials() {
         let original = population();
         validate(&original).unwrap();
+        let mut resumed = original.clone();
+        for member in &mut resumed {
+            if let FamilyMemberId::MonteCarloSequenceTrial { index, .. } = &mut member.member {
+                *index += 37;
+            }
+        }
+        validate(&resumed).unwrap();
+        resumed.swap(0, 1);
+        assert!(validate(&resumed).is_err());
         for mutation in 0..10 {
             let mut members = original.clone();
             match mutation {

@@ -50,6 +50,8 @@ impl McVariationSource {
 /// Monte Carlo analysis configuration
 #[derive(Debug, Clone)]
 pub struct McConfig {
+    /// Zero-based index in the original seeded trial population.
+    pub first_trial: u32,
     pub statistics: Option<McStatisticsConfig>,
     /// Two-sided uncertainty in the population mean, independent of yield.
     pub confidence_pct: f64,
@@ -83,6 +85,7 @@ impl Default for McConfig {
     fn default() -> Self {
         Self {
             statistics: None,
+            first_trial: 0,
             num_runs: 100,
             confidence_pct: 95.0,
             confidence_method: crate::state::MonteCarloMeanMethod::StudentT,
@@ -117,6 +120,9 @@ impl McConfig {
         if matches!(self.confidence_method, crate::state::MonteCarloMeanMethod::PercentileBootstrap { resamples, .. } if resamples < 2)
         {
             return Err("Bootstrap confidence requires at least two resamples".into());
+        }
+        if self.first_trial.checked_add(self.num_runs).is_none() {
+            return Err("Trial range exceeds the supported index range".into());
         }
         if self.num_runs == 0 {
             return Err("Number of runs must be at least 1".into());
@@ -184,6 +190,7 @@ fn parse_parameter_subset(text: &str) -> Result<Vec<String>, String> {
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct McDialogState {
+    pub first_trial: String,
     pub variations: Vec<McVariationDraft>,
     pub correlations: Vec<McCorrelationDraft>,
     pub confidence_pct: String,
@@ -210,6 +217,7 @@ impl Default for McDialogState {
         Self {
             variations: Vec::new(),
             correlations: Vec::new(),
+            first_trial: default_first_trial(),
             num_runs: String::new(),
             seed: String::new(),
             variation_source_idx: 0,
@@ -232,6 +240,8 @@ impl Default for McDialogState {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PersistedMcDialogState {
+    #[serde(default = "default_first_trial")]
+    first_trial: String,
     #[serde(default)]
     variations: Vec<McVariationDraft>,
     #[serde(default)]
@@ -287,6 +297,10 @@ struct PersistedMcDialogState {
     save_all_runs: serde::de::IgnoredAny,
 }
 
+fn default_first_trial() -> String {
+    "0".into()
+}
+
 fn default_histogram_bins() -> String {
     "20".into()
 }
@@ -328,6 +342,7 @@ impl<'de> Deserialize<'de> for McDialogState {
         Ok(Self {
             variations: persisted.variations,
             correlations: persisted.correlations,
+            first_trial: persisted.first_trial,
             num_runs: persisted.num_runs,
             confidence_pct: persisted.confidence_pct,
             confidence_method_idx: persisted.confidence_method_idx,
@@ -369,6 +384,7 @@ impl McDialogState {
                         .collect()
                 })
                 .unwrap_or_default(),
+            first_trial: config.first_trial.to_string(),
             num_runs: config.num_runs.to_string(),
             confidence_pct: config.confidence_pct.to_string(),
             confidence_method_idx: usize::from(matches!(
@@ -489,6 +505,11 @@ impl McDialogState {
             },
             confidence_pct,
             confidence_method,
+            first_trial: self
+                .first_trial
+                .trim()
+                .parse()
+                .map_err(|_| "First trial index must be a nonnegative integer")?,
             num_runs: runs,
             seed,
             variation_source,

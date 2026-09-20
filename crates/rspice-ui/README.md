@@ -66,6 +66,28 @@ Other user-facing machinery, all verified in source:
   module, not in the application; production issuance is the platform
   backend's cold-key flow.
 
+## Monte Carlo trial ranges and replay
+
+Simulation Studio's **First trial index** selects the beginning of a batch; **Samples** selects its length. Indices start at zero and match the trial identities retained in results. The default first index is zero, preserving existing studies.
+
+For example, first index 1000 and 100 samples run trials 1000 through 1099. To reproduce a particular trial, enter its retained index and use one sample. To continue after a previous batch, use the first index after that batch's final requested trial, including failed trials.
+
+Keep the seed, parameter/distribution settings, configured base analysis, measurements, circuit, models, and Run Set point unchanged to reproduce the same population. A blank Studio seed uses the existing repeatable default; an explicit seed makes the intended stream clear when moving between frontends.
+
+The equivalent authored card is:
+
+```spice
+.mc 100 START 1000 SEED 42 DIST GAUSS SPREAD 0.05 PARAMS RLOAD
+```
+
+`START=1000` is also accepted. `START` is a zero-based trial index; the first positional number remains the number of requested runs. Put `PARAMS` last, as it consumes the remainder of the card. Negative, fractional, repeated START options and overflowing ranges are rejected.
+
+Each batch publishes its own samples, statistics, mean-confidence intervals, and failure count. Failed trials retain their original identities and do not shift later indices. Statistics for a continuation batch describe that batch; previous batches are not automatically pooled. The result's recorded trial indices and sampling seed identify the original draws.
+
+Generic parameter tolerances replay the preceding random draws without solving their circuits, preserving the original shared random stream even when Gaussian sampling rejects an endpoint. Consequently, large starting indices still take time to advance that stream. Deck-expression and native process/mismatch statistics address the requested trial coordinates directly. All routes solve and retain only the requested batch, and changing worker count preserves sample order.
+
+The CLI and Python execution of authored `.MC` cards honor START. Core callers can use `MonteCarloRunConfig.first_trial` with `Engine::run_monte_carlo_voltages_with_abort`, or `MonteCarloStudyConfig.first_trial` for configured measurement studies. Existing convenience entry points retain their original first index of zero. Nonzero starting indices are also retained as the `first_trial` scalar in shared result documents.
+
 ## Module map
 
 | Module | Contents |
