@@ -553,8 +553,10 @@ pub struct CircuitData {
     /// electrical node to ground. This is part of the physical circuit and is
     /// kept separate from solver-controlled GMIN/conditioning diagonals.
     pub(crate) global_shunt_conductance: Value,
-    /// Ideal terminal meters must not add physical RSHUNT loading or noise.
-    pub(crate) terminal_probe_nodes: HashSet<NodeId>,
+    /// Private meter nodes map to their authored external terminal. They add no
+    /// physical shunts and must not become the implicit ground reference.
+    pub(crate) terminal_probe_nodes: HashMap<NodeId, NodeId>,
+    pub(crate) terminal_probe_source_names: HashSet<String>,
     /// Floating DC-conductive component index for each electrical node ID.
     /// Ground and nodes outside a floating component contain `None`.
     pub(crate) dc_floating_component_by_node: Vec<Option<usize>>,

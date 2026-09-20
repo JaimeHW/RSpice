@@ -5446,17 +5446,25 @@ impl Engine {
             );
             flat_elements = reduction.elements;
         }
-        terminal_probes::materialize(
+        let probe_connections = terminal_probes::materialize(
             netlist,
             &mut flat_elements,
             &mut known_device_names,
             self.config.resource_limits.max_flattened_elements,
             abort,
         )?;
-        for probe in &netlist.ast_overlay.terminal_current_probes {
-            let node = circuit.get_or_create_node(&probe.node_name);
-            circuit.terminal_probe_nodes.insert(node);
+        for (private, external) in probe_connections {
+            let private = circuit.get_or_create_node(&private);
+            let external = circuit.get_or_create_node(&external);
+            circuit.terminal_probe_nodes.insert(private, external);
         }
+        circuit.terminal_probe_source_names.extend(
+            netlist
+                .ast_overlay
+                .terminal_current_probes
+                .iter()
+                .map(|probe| probe.source_name.to_ascii_uppercase()),
+        );
         validate_xyce_memristor_generated_namespaces(
             netlist,
             &flat_elements,
@@ -9796,7 +9804,10 @@ impl Engine {
                 })
                 .filter_map(|name| {
                     let node = circuit.get_node_by_name(name)?;
-                    (node > 0 && !circuit.is_discrete_net(node)).then_some((node, name))
+                    (node > 0
+                        && !circuit.is_discrete_net(node)
+                        && !circuit.terminal_probe_nodes.contains_key(&node))
+                    .then_some((node, name))
                 })
                 .collect();
             shunted.sort_unstable();

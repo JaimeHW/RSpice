@@ -8,10 +8,10 @@ pub(super) fn materialize(
     known_device_names: &mut HashSet<String>,
     max_elements: usize,
     abort: &dyn AbortSignal,
-) -> Result<(), SimulationError> {
+) -> Result<Vec<(String, String)>, SimulationError> {
     let probes = &netlist.ast_overlay.terminal_current_probes;
     if probes.is_empty() {
-        return Ok(());
+        return Ok(Vec::new());
     }
     ResourceLimitError::ensure(
         ResourceKind::FlattenedElements,
@@ -68,6 +68,7 @@ pub(super) fn materialize(
         }
         targets.push(index);
     }
+    let mut connections = Vec::with_capacity(probes.len());
     for (probe, index) in probes.iter().zip(targets) {
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
@@ -76,6 +77,7 @@ pub(super) fn materialize(
             &mut elements[index].nodes[probe.terminal],
             probe.node_name.clone(),
         );
+        connections.push((probe.node_name.clone(), external.clone()));
         elements.push(Element {
             name: probe.source_name.clone(),
             kind: ElementKind::VoltageSource(SourceSpec::Dc(0.0)),
@@ -84,5 +86,5 @@ pub(super) fn materialize(
         });
     }
     *known_device_names = names;
-    Ok(())
+    Ok(connections)
 }

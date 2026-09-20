@@ -47,7 +47,8 @@ impl CircuitData {
             no_dc_path_nodes: Vec::new(),
             fatal_no_dc_path_nodes: Vec::new(),
             global_shunt_conductance: 0.0,
-            terminal_probe_nodes: HashSet::new(),
+            terminal_probe_nodes: HashMap::new(),
+            terminal_probe_source_names: HashSet::new(),
             dc_floating_component_by_node: Vec::new(),
             dc_floating_component_nodes: Vec::new(),
             dc_floating_component_is_certain: Vec::new(),
@@ -352,8 +353,17 @@ impl CircuitData {
 
         // No explicit ground - pick first voltage source's negative terminal
         // This matches standard behavior
-        if !self.voltage_sources.is_empty() {
-            let ref_node_id = self.voltage_sources.node_neg[0];
+        if let Some(index) = self.voltage_sources.names.iter().position(|name| {
+            !self
+                .terminal_probe_source_names
+                .contains(&name.to_ascii_uppercase())
+        }) {
+            let terminal = self.voltage_sources.node_neg[index];
+            let ref_node_id = self
+                .terminal_probe_nodes
+                .get(&terminal)
+                .copied()
+                .unwrap_or(terminal);
             if ref_node_id > 0 {
                 // Find the name of this node and remap it to 0
                 let mut ref_node_name = None;
@@ -549,6 +559,17 @@ impl CircuitData {
             .iter()
             .map(|&node| Self::remap_node_id(node, old_node_id))
             .filter(|node| *node > 0)
+            .collect();
+        self.terminal_probe_nodes = self
+            .terminal_probe_nodes
+            .iter()
+            .map(|(&private, &external)| {
+                (
+                    Self::remap_node_id(private, old_node_id),
+                    Self::remap_node_id(external, old_node_id),
+                )
+            })
+            .filter(|(private, _)| *private > 0)
             .collect();
 
         // Behavioral sources

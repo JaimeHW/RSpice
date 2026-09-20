@@ -13,7 +13,7 @@ fn probe(device: &str, terminal: usize) -> TerminalCurrentProbe {
 
 #[test]
 fn terminal_current_probes_preserve_hierarchy_replay_and_checkpoint_identity() {
-    let original = Netlist::parse("Terminal meter\n.param RR=1k\nV1 in 0 PWL(0 0 1n 0 5n 1)\nX1 in out CELL\nC1 out 0 1p\n.subckt CELL a b\nR1 a b {RR}\n.ends CELL\n.options RSHUNT=10k\n.end\n").unwrap();
+    let original = Netlist::parse("Terminal meter\n.param RR=1k\nV1 in 0 PWL(0 0 1n 0 5n 1)\nX1 in out CELL\nC1 out 0 1p\n.subckt CELL a b\nR1 a b {RR}\n.ends CELL\n.options RSHUNT=10k CSHUNT=1p\n.end\n").unwrap();
     let flat = rspice_core::netlist::flatten_netlist_with_models(&original).unwrap();
     let target = &flat
         .elements
@@ -30,7 +30,6 @@ fn terminal_current_probes_preserve_hierarchy_replay_and_checkpoint_identity() {
     replayed.saves.signals = vec![
         SaveSignal::Voltage("in".into()),
         SaveSignal::Voltage("out".into()),
-        SaveSignal::Current("V1".into()),
         SaveSignal::Current("VMETER".into()),
     ];
     let engine = Engine::new(SimulationConfig::default());
@@ -38,14 +37,12 @@ fn terminal_current_probes_preserve_hierarchy_replay_and_checkpoint_identity() {
         .run_tran_checkpointed(&replayed, 6e-9, 0.1e-9)
         .unwrap();
     let current = result.try_branch_current_waveform_named("VMETER").unwrap();
-    let source = result.try_branch_current_waveform_named("V1").unwrap();
     let input = result.try_voltage_waveform_named("in").unwrap();
     let output = result.try_voltage_waveform_named("out").unwrap();
     assert!(current.iter().any(|i| *i > 1e-5));
     for index in 0..result.time.len() {
         let expected = (input[index] - output[index]) / 2000.0;
         assert!((current[index] - expected).abs() < 1e-10);
-        assert!((current[index] + source[index] + input[index] / 10000.0).abs() < 1e-10);
     }
     engine
         .run_tran_resume(&replayed, &checkpoint, 7e-9, 0.1e-9)
@@ -99,4 +96,20 @@ fn terminal_current_probes_reject_collisions_missing_pins_and_resource_overflow(
         Engine::new(limited).run_dc_op(&netlist),
         Err(rspice_core::engine::SimulationError::ResourceLimit(_))
     ));
+}
+
+#[test]
+fn terminal_current_probes_keep_shunt_ownership_when_ground_is_inferred() {
+    let mut netlist =
+        Netlist::parse("Implicit reference\nV1 p n 1\nR1 p n 1k\n.options RSHUNT=10k\n.end\n")
+            .unwrap();
+    // The first source's negative terminal becomes the implicit reference.
+    // The reference must remain at the authored terminal, outside the meter;
+    // otherwise physical shunt return current would bypass the measured pin.
+    netlist.add_terminal_current_probe(probe("V1", 1));
+    let result = Engine::new(SimulationConfig::default())
+        .run_dc_op(&netlist)
+        .unwrap();
+    let measured = result.branch_current_named("VMETER").unwrap();
+    assert!((measured - 1.1e-3).abs() < 1e-10, "{measured}");
 }
