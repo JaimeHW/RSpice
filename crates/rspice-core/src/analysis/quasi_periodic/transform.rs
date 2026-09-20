@@ -1,4 +1,7 @@
 //! Separable multidimensional Fourier transforms on the independent phase grid.
+mod full_spectrum;
+pub use full_spectrum::QuasiPeriodicSampleSpectrum;
+
 use super::{QuasiPeriodicError as Error, QuasiPeriodicGrid, check_abort, finite, zero_buffer};
 use crate::abort_signal::AbortSignal;
 use crate::{Complex64, Value};

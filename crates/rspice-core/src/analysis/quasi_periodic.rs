@@ -24,7 +24,7 @@ pub use solve::{
     QuasiPeriodicLinearConfig, QuasiPeriodicLinearMethod, QuasiPeriodicSolution,
     QuasiPeriodicSolveConfig,
 };
-pub use transform::QuasiPeriodicTransform;
+pub use transform::{QuasiPeriodicSampleSpectrum, QuasiPeriodicTransform};
 
 use crate::abort_signal::AbortSignal;
 use crate::{Complex64, ResourceLimitError};
