@@ -111,9 +111,15 @@ pub(crate) fn visit_with_abort(
         check_abort(abort)?;
         let spectrum = match &source.spectrum {
             QuasiPeriodicNoiseSpectrum::White { density, .. } => density.len(),
-            QuasiPeriodicNoiseSpectrum::PowerLaw { modulation, .. } => {
-                modulation.len().saturating_mul(2)
-            }
+            QuasiPeriodicNoiseSpectrum::PowerLaw {
+                modulation,
+                modulation_lattices,
+                ..
+            } => modulation.len().saturating_mul(2).saturating_add(
+                modulation_lattices.as_ref().map_or(0, |tuples| {
+                    tuples.len().saturating_mul(grid.dimensions().len())
+                }),
+            ),
         };
         resident = resident
             .saturating_add(spectrum)
@@ -139,6 +145,14 @@ pub(crate) fn visit_with_abort(
     let mut workspace = projector.workspace_values(observations.len(), 0);
     for source in sources {
         if let QuasiPeriodicNoiseSpectrum::PowerLaw { modulation, .. } = &source.spectrum {
+            workspace = workspace.max(
+                projector.workspace_values(
+                    observations.len(),
+                    modulation
+                        .len()
+                        .saturating_mul(grid.dimensions().len() + 16),
+                ),
+            );
             let mut modes = 0usize;
             for (i, amplitude) in modulation.iter().enumerate() {
                 if i.is_multiple_of(256) {

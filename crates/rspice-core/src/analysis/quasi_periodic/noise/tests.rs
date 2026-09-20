@@ -198,6 +198,7 @@ fn qpnoise_colored_matches_noncyclic_convolution_including_outside_window() {
         coefficient: 0.7,
         exponent: 1.3,
         modulation,
+        modulation_lattices: None,
         binary_scale_exponent: 0,
     };
     let actual = projector(&grid, 1)
@@ -240,6 +241,7 @@ fn qpnoise_colored_preserves_signed_cancellation_and_authored_low_frequency() {
         coefficient: 1.0,
         exponent: 1.0,
         modulation,
+        modulation_lattices: None,
         binary_scale_exponent: 0,
     });
     let actual = projector(&grid, 1)
@@ -282,6 +284,7 @@ fn qpnoise_retains_representable_extremes_and_refuses_unrepresentable_results() 
                     coefficient: 1.0,
                     exponent: 0.0,
                     modulation,
+                    modulation_lattices: None,
                     binary_scale_exponent: -2 * power,
                 }
             } else {
@@ -327,6 +330,7 @@ fn qpnoise_rejects_invalid_evidence_and_bounds_work_and_cancellation() {
         coefficient: 1.0,
         exponent: 1.0,
         modulation,
+        modulation_lattices: None,
         binary_scale_exponent: 0,
     };
     assert!(
@@ -382,4 +386,43 @@ fn qpnoise_rejects_invalid_evidence_and_bounds_work_and_cancellation() {
         ));
         assert_eq!(abort.count(), polls + 1);
     }
+}
+
+#[test]
+fn qpnoise_colored_retains_noise_modulation_above_circuit_harmonics() {
+    let grid = grid(2);
+    let mut one = adjoint(&grid, 1);
+    one.sensitivities[0][grid.dc_index()] = Complex64::ONE;
+    let law = QuasiPeriodicNoiseSpectrum::PowerLaw {
+        coefficient: 2.0,
+        exponent: 1.0,
+        binary_scale_exponent: 0,
+        modulation: vec![Complex64::new(0.3, 0.4), Complex64::new(0.3, -0.4)],
+        modulation_lattices: Some(vec![vec![4, 3], vec![-4, -3]]),
+    };
+    let mut source = source(law);
+    let actual = projector(&grid, 1)
+        .source_covariance_with_abort(&[one.clone()], &source, &NoAbort)
+        .unwrap();
+    let shift = 8.0 + 3.0 * std::f64::consts::SQRT_2;
+    close(
+        actual.values[0],
+        Complex64::new(
+            0.5 * ((0.37 - shift).abs().recip() + (0.37 + shift).recip()),
+            0.0,
+        ),
+    );
+    let QuasiPeriodicNoiseSpectrum::PowerLaw {
+        modulation_lattices,
+        ..
+    } = &mut source.spectrum
+    else {
+        unreachable!()
+    };
+    *modulation_lattices = Some(vec![vec![4, 3], vec![4, 3]]);
+    assert!(
+        projector(&grid, 1)
+            .source_covariance_with_abort(&[one], &source, &NoAbort)
+            .is_err()
+    );
 }

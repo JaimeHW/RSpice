@@ -10,6 +10,7 @@ impl QuasiPeriodicNoiseProjector {
         coefficient: Value,
         exponent: Value,
         modulation: &[Complex64],
+        modulation_lattices: &[Vec<i32>],
         binary_scale: i32,
         abort: &dyn AbortSignal,
     ) -> Result<QuasiPeriodicNoiseCovariance, Error> {
@@ -31,16 +32,23 @@ impl QuasiPeriodicNoiseProjector {
             pairs.saturating_mul(self.grid.dimensions().len() + gains.len().saturating_mul(16)),
         )?;
         let mut support: BTreeMap<Vec<i32>, Vec<Option<i32>>> = BTreeMap::new();
-        self.visit_modulated_terms(gains, &modes, abort, |tuple, output, term| {
-            if term.is_zero() {
-                return Ok(());
-            }
-            let powers = support
-                .entry(tuple)
-                .or_insert_with(|| vec![None; gains.len()]);
-            powers[output] = Some(powers[output].map_or(term.exponent, |e| e.max(term.exponent)));
-            Ok(())
-        })?;
+        self.visit_modulated_terms(
+            gains,
+            &modes,
+            modulation_lattices,
+            abort,
+            |tuple, output, term| {
+                if term.is_zero() {
+                    return Ok(());
+                }
+                let powers = support
+                    .entry(tuple)
+                    .or_insert_with(|| vec![None; gains.len()]);
+                powers[output] =
+                    Some(powers[output].map_or(term.exponent, |e| e.max(term.exponent)));
+                Ok(())
+            },
+        )?;
         let mut sums: BTreeMap<_, _> = support
             .into_iter()
             .map(|(tuple, powers)| {
@@ -53,16 +61,22 @@ impl QuasiPeriodicNoiseProjector {
                 )
             })
             .collect();
-        self.visit_modulated_terms(gains, &modes, abort, |tuple, output, term| {
-            if !term.is_zero() {
-                sums.get_mut(&tuple).expect("visited support")[output]
-                    .as_mut()
-                    .expect("nonzero direction")
-                    .add(term)
-                    .map_err(numerical)?;
-            }
-            Ok(())
-        })?;
+        self.visit_modulated_terms(
+            gains,
+            &modes,
+            modulation_lattices,
+            abort,
+            |tuple, output, term| {
+                if !term.is_zero() {
+                    sums.get_mut(&tuple).expect("visited support")[output]
+                        .as_mut()
+                        .expect("nonzero direction")
+                        .add(term)
+                        .map_err(numerical)?;
+                }
+                Ok(())
+            },
+        )?;
         let mut folded = Vec::with_capacity(sums.len());
         for (tuple, sums) in sums {
             check_abort(abort)?;
@@ -125,6 +139,7 @@ impl QuasiPeriodicNoiseProjector {
         &self,
         gains: &[projection::Spectrum],
         modes: &[(usize, &Complex64)],
+        modulation_lattices: &[Vec<i32>],
         abort: &dyn AbortSignal,
         mut visit: impl FnMut(Vec<i32>, usize, ScaledComplex) -> Result<(), Error>,
     ) -> Result<(), Error> {
@@ -137,7 +152,7 @@ impl QuasiPeriodicNoiseProjector {
                 count += 1;
                 let tuple = self.grid.indices()[k]
                     .iter()
-                    .zip(&self.grid.indices()[m])
+                    .zip(&modulation_lattices[m])
                     .map(|(k, m)| {
                         k.checked_sub(*m).ok_or_else(|| {
                             invalid("colored stationary tuple exceeds signed coordinate range")

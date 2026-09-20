@@ -8,6 +8,7 @@
 //! Both are the multidimensional conversion/covariance formulation described
 //! at https://qucs.sourceforge.net/tech/node36.html. No common period is used.
 mod colored;
+mod modulation;
 mod projection;
 mod sweep;
 pub(crate) use sweep::visit_with_abort;
@@ -42,6 +43,10 @@ pub enum QuasiPeriodicNoiseSpectrum {
         coefficient: Value,
         exponent: Value,
         modulation: Vec<Complex64>,
+        /// None uses the circuit lattice. An explicit independent modulation
+        /// lattice retains noise-law harmonics above the circuit's truncation.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        modulation_lattices: Option<Vec<Vec<i32>>>,
         binary_scale_exponent: i32,
     },
 }
@@ -164,6 +169,7 @@ impl QuasiPeriodicNoiseProjector {
                 coefficient,
                 exponent,
                 modulation,
+                modulation_lattices,
                 binary_scale_exponent,
             } => self.colored(
                 &gains,
@@ -171,6 +177,9 @@ impl QuasiPeriodicNoiseProjector {
                 *coefficient,
                 *exponent,
                 modulation,
+                modulation_lattices
+                    .as_deref()
+                    .unwrap_or(self.grid.indices()),
                 *binary_scale_exponent,
                 abort,
             ),
@@ -247,36 +256,22 @@ impl QuasiPeriodicNoiseProjector {
                 coefficient,
                 exponent,
                 modulation,
+                modulation_lattices,
                 ..
             } => {
-                if !coefficient.is_finite()
-                    || *coefficient < 0.0
-                    || !exponent.is_finite()
-                    || modulation.len() != self.grid.len()
-                    || invalid_values(modulation, |a| !finite(*a), abort)?
-                {
+                if !coefficient.is_finite() || *coefficient < 0.0 || !exponent.is_finite() {
                     return Err(invalid(
-                        "colored noise requires finite coefficient, exponent and full modulation spectrum",
+                        "colored noise requires finite nonnegative coefficient and finite exponent",
                     ));
                 }
-                for (i, a) in modulation.iter().enumerate() {
-                    if i.is_multiple_of(256) {
-                        check_abort(abort)?;
-                    }
-                    let reflected = modulation[modulation.len() - 1 - i].conj();
-                    let scale =
-                        a.re.abs()
-                            .max(a.im.abs())
-                            .max(reflected.re.abs())
-                            .max(reflected.im.abs());
-                    if scale > 0.0
-                        && (*a / scale - reflected / scale).norm() > 128.0 * Value::EPSILON
-                    {
-                        return Err(invalid(
-                            "physical colored-noise modulation must be real on independent phases",
-                        ));
-                    }
-                }
+                self.validate_modulation(
+                    modulation,
+                    modulation_lattices
+                        .as_deref()
+                        .unwrap_or(self.grid.indices()),
+                    adjoints.len(),
+                    abort,
+                )?;
             }
         }
         Ok(())
