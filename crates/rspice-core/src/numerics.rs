@@ -10,6 +10,7 @@
 //! an assembled matrix rather than defining one.
 
 pub(crate) mod eigenspectrum;
+pub(crate) mod krylov;
 mod power_law;
 mod split_mix;
 pub(crate) use power_law::{power_product_binary_normalization, scaled_power_law};
