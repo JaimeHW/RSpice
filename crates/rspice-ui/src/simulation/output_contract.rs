@@ -731,27 +731,14 @@ fn deterministic_sample_count(
             sweep,
             ..
         }
-        | AnalysisSpec::Qpac {
-            start_freq,
-            stop_freq,
-            points_per_unit,
-            sweep,
-            ..
-        }
         | AnalysisSpec::Qpnoise {
             start_freq,
             stop_freq,
             points_per_unit,
             sweep,
             ..
-        }
-        | AnalysisSpec::Qpxf {
-            start_freq,
-            stop_freq,
-            points_per_unit,
-            sweep,
-            ..
         } => frequency_point_count(*start_freq, *stop_freq, *points_per_unit, *sweep),
+        AnalysisSpec::Qpac { .. } | AnalysisSpec::Qpxf { .. } => quasi_periodic_sample_count(spec),
         AnalysisSpec::AcData { frequencies, .. } => Some(frequencies.len()),
         AnalysisSpec::Noise {
             start_freq,
@@ -786,6 +773,21 @@ fn deterministic_sample_count(
                 spec.run_type().display_name()
             )
         })
+}
+
+/// Count the native effective axis independently of output compatibility. The
+/// request owns signed/explicit grids and logarithmic endpoint conventions.
+fn quasi_periodic_sample_count(spec: &AnalysisSpec) -> Option<usize> {
+    let limits = rspice_core::ResourceLimits::default();
+    match spec {
+        AnalysisSpec::Qpac { .. } => spec.qpac_card().ok().and_then(|card| {
+            rspice_core::engine::QpacRequest::validate_qpac_card(&card, &limits).ok()
+        }),
+        AnalysisSpec::Qpxf { .. } => spec.qpxf_card().ok().and_then(|card| {
+            rspice_core::engine::QpxfRequest::validate_qpxf_card(&card, &limits).ok()
+        }),
+        _ => None,
+    }
 }
 
 fn frequency_point_count(
@@ -1726,5 +1728,30 @@ mod tests {
             missing.saved_output_receipts[0].status,
             SavedOutputMaterializationStatus::Unavailable { .. }
         ));
+    }
+    #[test]
+    fn qp_transfer_counts_use_explicit_signed_and_logarithmic_native_grids() {
+        use crate::simulation::plan::{QuasiPeriodicAcDraft, QuasiPeriodicTransferDraft};
+        let mut ac = QuasiPeriodicAcDraft::default();
+        ac.explicit_offsets = "-1, 0, 1, 2".into();
+        let mut xf = QuasiPeriodicTransferDraft::default();
+        xf.explicit_frequencies = "-1, 0, 1".into();
+        assert_eq!(quasi_periodic_sample_count(&ac.to_spec().unwrap()), Some(4));
+        assert_eq!(quasi_periodic_sample_count(&xf.to_spec().unwrap()), Some(3));
+        xf.explicit_frequencies.clear();
+        xf.sweep.start = "-10".into();
+        xf.sweep.stop = "10".into();
+        xf.sweep.sweep = 2;
+        xf.sweep.points = "5".into();
+        assert_eq!(quasi_periodic_sample_count(&xf.to_spec().unwrap()), Some(5));
+        xf.sweep.start = "1".into();
+        xf.sweep.stop = "12".into();
+        xf.sweep.sweep = 0;
+        xf.sweep.points = "3".into();
+        assert_eq!(
+            quasi_periodic_sample_count(&xf.to_spec().unwrap()),
+            Some(4),
+            "native logarithmic grids use ceil(density*span)"
+        );
     }
 }
