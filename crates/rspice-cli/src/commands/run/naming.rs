@@ -28,6 +28,7 @@ pub(super) fn analysis_output_tag(analysis: &AnalysisCommand) -> Option<&'static
         AnalysisCommand::Qpss(_) => Some("qpss"),
         AnalysisCommand::Qpac(_) => Some("qpac"),
         AnalysisCommand::Qpxf(_) => Some("qpxf"),
+        AnalysisCommand::Qpnoise(_) => Some("qpnoise"),
         AnalysisCommand::MonteCarlo(_) => Some("mc"),
         AnalysisCommand::Pss(_) => Some("pss"),
         AnalysisCommand::Pac(_) => Some("pac"),

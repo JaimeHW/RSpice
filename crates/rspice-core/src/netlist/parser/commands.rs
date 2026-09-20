@@ -126,6 +126,9 @@ pub(super) fn parse_command(
         ".LIN" => {
             parse_lin_command(stream, line_num, params, lin_analysis)?;
         }
+        ".QPNOISE" => {
+            analyses.push(qpnoise_card::parse(stream, line_num, params)?);
+        }
         ".QPXF" => {
             analyses.push(qpxf_card::parse(stream, line_num, params)?);
         }

@@ -2240,6 +2240,8 @@ pub enum AnalysisCommand {
     Qpac(Box<super::QpacCard>),
     /// Quasi-periodic transfer functions from multiple source sidebands.
     Qpxf(Box<super::QpxfCard>),
+    /// Quasi-periodic multi-output noise with an authenticated QPSS producer.
+    Qpnoise(Box<super::QpnoiseCard>),
 
     /// S-parameter analysis:
     /// `.SP DEC|LIN|OCT np fstart fstop [donoise] [PORT<k>=(<n+>[,<n->[,<z0>]]) ...]`
@@ -2960,6 +2962,7 @@ pub enum AnalysisCard {
     Qpss,
     Qpac,
     Qpxf,
+    Qpnoise,
 }
 
 impl AnalysisCard {
@@ -2980,6 +2983,7 @@ impl AnalysisCard {
             Self::Qpss => ".QPSS",
             Self::Qpac => ".QPAC",
             Self::Qpxf => ".QPXF",
+            Self::Qpnoise => ".QPNOISE",
         }
     }
 }

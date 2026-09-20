@@ -270,6 +270,7 @@ pub(super) fn analysis_record_kind(analysis: &AnalysisCommand) -> &'static str {
         AnalysisCommand::Qpss(_) => "qpss",
         AnalysisCommand::Qpac(_) => "qpac",
         AnalysisCommand::Qpxf(_) => "qpxf",
+        AnalysisCommand::Qpnoise(_) => "qpnoise",
         AnalysisCommand::Disto { .. } => "disto",
         AnalysisCommand::Sp { .. } => "sp",
         AnalysisCommand::Noise { .. } => "noise",

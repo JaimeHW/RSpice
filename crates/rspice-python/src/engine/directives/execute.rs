@@ -407,6 +407,11 @@ pub(super) fn execute(
                 describe_analysis(analysis),
             ));
         }
+        AnalysisCommand::Qpnoise(_) => {
+            return Err(crate::errors::SimulationError::new_err(
+                "QPNOISE is available through Engine::run_qpnoise_from_qpss; this surface has no QPNOISE result-document projection yet",
+            ));
+        }
         AnalysisCommand::Qpxf(_) => {
             return Err(crate::errors::SimulationError::new_err(
                 "QPXF is available through Engine::run_qpxf_from_qpss; this surface has no QPXF result-document projection yet",

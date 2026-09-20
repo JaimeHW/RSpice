@@ -1,4 +1,5 @@
 //! Authenticated multi-output noise about an independent-tone operating point.
+mod card;
 mod derived;
 mod integration;
 mod request;

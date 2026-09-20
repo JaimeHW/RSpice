@@ -1557,6 +1557,7 @@ pub(super) fn analysis_kind(command: &crate::netlist::AnalysisCommand) -> Analys
         AnalysisCommand::Qpss(_) => AnalysisKind::Qpss,
         AnalysisCommand::Qpac(_) => AnalysisKind::Qpac,
         AnalysisCommand::Qpxf(_) => AnalysisKind::Qpxf,
+        AnalysisCommand::Qpnoise(_) => AnalysisKind::Qpnoise,
         AnalysisCommand::Disto { .. } => AnalysisKind::Distortion,
         AnalysisCommand::Sp { .. } => AnalysisKind::Sp,
         AnalysisCommand::Noise { .. } | AnalysisCommand::NoiseData { .. } => AnalysisKind::Noise,
