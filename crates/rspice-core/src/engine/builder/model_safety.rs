@@ -19,6 +19,12 @@ fn is_rating(name: &str) -> bool {
             | "VBE_MAX"
             | "VBC_MAX"
             | "VCE_MAX"
+            | "VSUB_MAX"
+            | "BVBE"
+            | "BVBC"
+            | "BVCE"
+            | "BVSUB"
+            | "VSUBFWD"
             | "FV_MAX"
             | "BV_MAX"
             | "ID_MAX"
@@ -95,6 +101,7 @@ pub(super) fn record(
                 model_name: model_name.into(),
                 model_type: model_type.into(),
                 generated: false,
+                bjt_family: None,
                 parameters,
             },
         );

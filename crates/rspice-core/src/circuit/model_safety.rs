@@ -12,6 +12,14 @@ pub enum ModelSafetyValue {
     Unresolved(String),
 }
 
+/// Native BJT implementation selected after normal model routing, including
+/// parameter-inferred VBIC cards without an explicit LEVEL.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BjtModelSafetyFamily {
+    GummelPoon,
+    Vbic,
+}
+
 /// Compact safety-related subset of a selected model card. Values retain the
 /// card's units and spelling-independent uppercase keys; these are metadata,
 /// not a claim that every device implementation supports every rating.
@@ -20,6 +28,7 @@ pub struct DeviceModelSafety {
     pub model_name: String,
     pub model_type: String,
     pub generated: bool,
+    pub bjt_family: Option<BjtModelSafetyFamily>,
     pub parameters: BTreeMap<String, ModelSafetyValue>,
 }
 

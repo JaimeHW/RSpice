@@ -6740,6 +6740,16 @@ impl Engine {
                         )));
                     }
 
+                    if let Some(ratings) = circuit
+                        .device_model_safety
+                        .get_mut(&element.name.to_ascii_uppercase())
+                    {
+                        ratings.bjt_family = Some(if bjt.uses_vbic_dynamic_charges() {
+                            crate::circuit::BjtModelSafetyFamily::Vbic
+                        } else {
+                            crate::circuit::BjtModelSafetyFamily::GummelPoon
+                        });
+                    }
                     validate_bjt_instance_controls(
                         &element.name,
                         bjt.uses_vbic_dynamic_charges(),

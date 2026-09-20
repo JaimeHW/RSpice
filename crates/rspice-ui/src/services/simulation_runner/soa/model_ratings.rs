@@ -1,7 +1,7 @@
-//! Voltage-rating conventions from ngspice b3/b4/vdmos/bjt/dio soachk.
+//! Voltage-rating conventions from ngspice b3/b4/vdmos/bjt/vbic/dio soachk.
 //! Only authored limits are imported; simulator infinity defaults are omitted.
 use super::*;
-use rspice_core::circuit::{DeviceModelSafety, ModelSafetyValue};
+use rspice_core::circuit::{BjtModelSafetyFamily, DeviceModelSafety, ModelSafetyValue};
 use std::collections::{BTreeMap, BTreeSet};
 
 pub(super) type ModelLimits = HashMap<String, BTreeMap<SoAParameter, SoALimit>>;
@@ -23,6 +23,12 @@ fn voltage_key(key: &str) -> bool {
             | "VBE_MAX"
             | "VBC_MAX"
             | "VCE_MAX"
+            | "VSUB_MAX"
+            | "BVBE"
+            | "BVBC"
+            | "BVCE"
+            | "BVSUB"
+            | "VSUBFWD"
             | "FV_MAX"
             | "BV_MAX"
     )
@@ -58,6 +64,24 @@ impl Import<'_> {
             ));
         }
         Ok(value.map(|value| (value, key)))
+    }
+
+    fn aliased_rating(
+        &mut self,
+        key: &'static str,
+        alias: &'static str,
+    ) -> Result<Option<(f64, &'static str)>, String> {
+        let canonical = self.rating(key)?;
+        let alternate = self.rating(alias)?;
+        if let (Some((value, _)), Some((alias_value, _))) = (canonical, alternate)
+            && value != alias_value
+        {
+            return Err(format!(
+                "model '{}' has conflicting voltage-rating aliases {key}={value} and {alias}={alias_value}; specify one value",
+                self.card.model_name
+            ));
+        }
+        Ok(canonical.or(alternate))
     }
 
     fn add(&mut self, parameter: SoAParameter, rating: Option<(f64, &'static str)>) {
@@ -214,7 +238,30 @@ fn import_card(card: &DeviceModelSafety) -> Result<BTreeMap<SoAParameter, SoALim
             importer.pair(Vbs, vbs.or(vbd), vbsr);
             importer.pair(Vbd, vbd, vbdr);
         }
-    } else if matches!(kind.as_str(), "NPN" | "PNP") && matches!(level, 0.0 | 1.0 | 2.0) {
+    } else if card.bjt_family == Some(BjtModelSafetyFamily::Vbic) {
+        importer.basis = SoaVoltageBasis::ExternalTerminals;
+        for (parameter, key, alias) in [
+            (Vbe, "VBE_MAX", "BVBE"),
+            (Vbc, "VBC_MAX", "BVBC"),
+            (Vce, "VCE_MAX", "BVCE"),
+            (Vcsub, "VSUB_MAX", "BVSUB"),
+        ] {
+            let rating = importer.aliased_rating(key, alias)?;
+            importer.add(parameter, rating);
+        }
+        // VBIC checks type * (Vsubstrate - Vcollector) against VSUBFWD.
+        // Vcsub is collector minus substrate, so forward NPN is negative.
+        let forward_substrate = importer.rating("VSUBFWD")?;
+        importer.add(
+            if kind == "PNP" {
+                VcsubPositive
+            } else {
+                VcsubNegative
+            },
+            forward_substrate,
+        );
+        // VBEFWD/VBCFWD classify the operating region, not a stress limit.
+    } else if card.bjt_family == Some(BjtModelSafetyFamily::GummelPoon) {
         for (parameter, key) in [(Vbe, "VBE_MAX"), (Vbc, "VBC_MAX"), (Vce, "VCE_MAX")] {
             let rating = importer.rating(key)?;
             importer.add(parameter, rating);
@@ -254,6 +301,7 @@ mod tests {
             model_name: "PM.1".into(),
             model_type: "PMOS".into(),
             generated: false,
+            bjt_family: None,
             parameters: [
                 ("LEVEL", 54.0),
                 ("VGS_MAX", 2.0),
@@ -411,4 +459,67 @@ fn soa_model_voltage_override_preserves_opposite_direction_and_reports_missing_r
             .to_string()
             .contains("no authored voltage ratings")
     );
+}
+
+#[cfg(test)]
+#[test]
+fn soa_vbic_model_ratings_validate_aliases_polarity_and_electrical_substrate() {
+    use SoAParameter::*;
+    let config = SoaRunConfig {
+        import_model_voltage_ratings: true,
+        check_vgs_max: false,
+        check_vds_max: false,
+        check_vbe_max: false,
+        check_vce_max: false,
+        ..Default::default()
+    };
+    let engine = rspice_core::engine::Engine::new(Default::default());
+    let netlist = rspice_core::Netlist::parse("Inferred VBIC\nQ1 c b 0 s PM\n.model PM PNP RCI=1 BVBE=2 VBE_MAX=2 BVBC=3 BVCE=4 BVSUB=5 VSUBFWD=0.4 VBEFWD=0.2 VBCFWD=0.3\n.end\n").unwrap();
+    let circuit = engine.build_circuit(&netlist).unwrap();
+    let mut card = circuit.device_model_safety("Q1").unwrap().clone();
+    let limits = import_card(&card).unwrap();
+    assert_eq!(limits.len(), 5);
+    for (parameter, value) in [
+        (Vbe, 2.0),
+        (Vbc, 3.0),
+        (Vce, 4.0),
+        (Vcsub, 5.0),
+        (VcsubPositive, 0.4),
+    ] {
+        assert_eq!(limits[&parameter].max_value, value);
+        assert_eq!(
+            limits[&parameter].voltage_basis,
+            SoaVoltageBasis::ExternalTerminals
+        );
+    }
+    assert!(limits[&Vbc].description.contains("BVBC"));
+    card.model_type = "NPN".into();
+    let limits = import_card(&card).unwrap();
+    assert_eq!(limits[&VcsubNegative].max_value, 0.4);
+    assert!(!limits.contains_key(&VcsubPositive));
+    card.parameters
+        .insert("BVBE".into(), ModelSafetyValue::Numeric(1.0));
+    assert!(
+        import_card(&card)
+            .unwrap_err()
+            .contains("conflicting voltage-rating aliases")
+    );
+    card.parameters.insert(
+        "BVBE".into(),
+        ModelSafetyValue::Unresolved("unbound".into()),
+    );
+    assert!(import_card(&card).unwrap_err().contains("BVBE"));
+    for nodes in ["c b 0 th", "c b 0"] {
+        let deck = format!(
+            "No substrate\nQ1 {nodes} VM\n.model VM NPN LEVEL=11 IS=1e-16 VSUB_MAX=1\n.end\n"
+        );
+        let netlist = rspice_core::Netlist::parse(&deck).unwrap();
+        let (layouts, ratings) =
+            super::terminals::resolve(&netlist, &netlist.elements, &config, &engine, &NoAbort)
+                .unwrap();
+        let error = rules::resolve(&netlist.elements, &config, &layouts, &ratings, &NoAbort)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("electrical substrate pin"), "{error}");
+    }
 }

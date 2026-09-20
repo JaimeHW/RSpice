@@ -1691,3 +1691,117 @@ fn soa_derating_survives_studio_worker_thermal_transient_and_saved_results() {
         retained.result_payload
     );
 }
+
+#[test]
+fn soa_vbic_model_ratings_survive_studio_worker_and_saved_results() {
+    use crate::simulation::dialog::soa::{SoaConfig, SoaDialogState};
+    use crate::simulation::plan::AnalysisDraft;
+    use crate::simulation::runner::worker_contract::WorkerAnalysisSpec;
+    use crate::state::SoaParameterEvidence as Parameter;
+    let config = SoaConfig {
+        import_model_voltage_ratings: true,
+        stop_time: 1e-9,
+        step_time: 1e-10,
+        check_vgs_max: false,
+        check_vds_max: false,
+        check_vbe_max: false,
+        check_vce_max: false,
+        ..Default::default()
+    };
+    let draft = SoaDialogState::from_config(&config);
+    assert_eq!(draft.to_config().unwrap(), config);
+    let mut state = preflight_ready_state();
+    let id = only(&mut state, &[AnalysisKind::Soa])[0];
+    plan_mut(&mut state)
+        .edit(id, |body| *body = AnalysisDraft::Soa(draft))
+        .unwrap();
+    let queue = compiled_queue(&state).unwrap();
+    let mut declaration = queue[0].queued_analysis().clone();
+    let wire = WorkerAnalysisSpec::try_from(&declaration.spec).unwrap();
+    let wire: WorkerAnalysisSpec =
+        serde_json::from_str(&serde_json::to_string(&wire).unwrap()).unwrap();
+    declaration.spec = AnalysisSpec::from(wire);
+    let mut deck = String::from(
+        "VBIC model ratings\nVcn cn 0 1.2\nVbn bn 0 .6\nVsn sn 0 1.4\nVcp cp 0 -1.2\nVbp bp 0 -.6\nVsp sp 0 -1.4\n",
+    );
+    for level in [4, 9, 11, 12, 13] {
+        for (polarity, kind) in [("N", "NPN"), ("P", "PNP")] {
+            let nodes = if polarity == "N" {
+                if level == 11 {
+                    "cn bn 0 0"
+                } else {
+                    "cn bn 0 sn"
+                }
+            } else if level == 11 {
+                "cp bp 0 0"
+            } else {
+                "cp bp 0 sp"
+            };
+            let substrate = if level == 11 {
+                ""
+            } else {
+                "BVSUB=0.15 VSUBFWD=0.1"
+            };
+            deck.push_str(&format!("Q{polarity}{level} {nodes} M{polarity}{level}\n.model M{polarity}{level} {kind} LEVEL={level} IS=1e-16 IBEI=1e-18 IBCI=1e-18 RCX=2 RCI=5 RBX=3 RBI=10 RE=1 BVBE=.5 BVBC=.4 BVCE=1.1 {substrate}\n"));
+        }
+    }
+    // Parameter inference must use the same external convention without LEVEL.
+    deck.push_str("QI cn bn 0 sn inferred\n.model inferred NPN IS=1e-16 RCI=5 VBE_MAX=.5 VBC_MAX=.4 VCE_MAX=1.1 VSUB_MAX=.15 VSUBFWD=.1\n.end\n");
+    let deck = crate::services::simulation_runner::splice_before_terminal_end_card(
+        &deck,
+        &declaration.analysis_line,
+    );
+    let run = crate::simulation::runner::pvt_point_evidence::run_declaration(
+        &deck,
+        "VBIC model SOA",
+        declaration,
+        27.0,
+        SavePolicy::RetainEngineProducedResults,
+        &[],
+    )
+    .unwrap();
+    let retained = &run.analyses[0];
+    assert!(retained.success, "{:?}", retained.error_message);
+    retained.validate_retained_evidence().unwrap();
+    let Some(crate::state::AnalysisResultPayload::Soa { evaluations, .. }) =
+        &retained.result_payload
+    else {
+        panic!("SOA evidence")
+    };
+    assert_eq!(evaluations.len(), 51);
+    for evaluation in evaluations {
+        assert!(evaluation.description.contains("authored terminals"));
+        let (limit, actual) = match evaluation.parameter {
+            Parameter::BaseEmitterVoltage => (0.5, 0.6),
+            Parameter::BaseCollectorVoltage => (0.4, 0.6),
+            Parameter::CollectorEmitterVoltage => (1.1, 1.2),
+            Parameter::CollectorSubstrateVoltage => (0.15, 0.2),
+            Parameter::CollectorSubstrateVoltagePositive => {
+                assert!(evaluation.device_id.starts_with("QP"));
+                (0.1, 0.2)
+            }
+            Parameter::CollectorSubstrateVoltageNegative => {
+                assert!(evaluation.device_id.starts_with("QN") || evaluation.device_id == "QI");
+                (0.1, 0.2)
+            }
+            other => panic!("unexpected {other:?}"),
+        };
+        assert_eq!(evaluation.limit_value, limit);
+        assert!(
+            (evaluation.worst_actual_value - actual).abs() < 1e-8,
+            "{evaluation:?}"
+        );
+    }
+    let mut simulation = crate::state::SimulationState::default();
+    simulation.runs.push(run.clone());
+    simulation.next_run_id = 2;
+    simulation.active_run_idx = Some(0);
+    simulation.active_analysis_idx = Some(0);
+    let saved = crate::io::project_io::ProjectSimulationResults::from_state(&simulation);
+    let decoded: crate::io::project_io::ProjectSimulationResults =
+        serde_json::from_str(&serde_json::to_string(&saved).unwrap()).unwrap();
+    assert_eq!(
+        decoded.into_simulation_state().unwrap().runs[0].analyses[0].result_payload,
+        retained.result_payload
+    );
+}

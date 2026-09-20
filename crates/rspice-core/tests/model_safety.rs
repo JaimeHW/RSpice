@@ -36,3 +36,42 @@ fn model_safety_follows_selected_bins_and_scoped_parameter_elaboration() {
     }
     assert!(circuit.device_model_safety("D0").is_none());
 }
+
+#[test]
+fn model_safety_retains_vbic_aliases_and_actual_native_bjt_family() {
+    use rspice_core::circuit::BjtModelSafetyFamily;
+    let deck = "BJT rating metadata\nQG c b 0 GP\nQI c b 0 s inferred\nQV c b 0 s VB\n\
+        .model GP LPNP VBE_MAX=1 RCX=2\n\
+        .model inferred NPN RCI=1 BVBE=2 BVBC=3 BVCE=4 BVSUB=5 VSUBFWD=0.4\n\
+        .model VB PNP LEVEL=12 VBE_MAX=6 VSUB_MAX=7\n.end\n";
+    // Pin the GP family even though RCX normally infers VBIC without LEVEL.
+    let deck = deck.replace("GP LPNP", "GP LPNP LEVEL=1");
+    let circuit = Engine::new(SimulationConfig::default())
+        .build_circuit(&Netlist::parse(&deck).unwrap())
+        .unwrap();
+    assert_eq!(
+        circuit.device_model_safety("QG").unwrap().bjt_family,
+        Some(BjtModelSafetyFamily::GummelPoon)
+    );
+    for device in ["QI", "QV"] {
+        assert_eq!(
+            circuit.device_model_safety(device).unwrap().bjt_family,
+            Some(BjtModelSafetyFamily::Vbic)
+        );
+    }
+    let inferred = circuit.device_model_safety("QI").unwrap();
+    assert!(!inferred.parameters.contains_key("LEVEL"));
+    assert!(!inferred.parameters.contains_key("RCI"));
+    for (key, value) in [
+        ("BVBE", 2.0),
+        ("BVBC", 3.0),
+        ("BVCE", 4.0),
+        ("BVSUB", 5.0),
+        ("VSUBFWD", 0.4),
+    ] {
+        assert_eq!(
+            inferred.parameters.get(key),
+            Some(&ModelSafetyValue::Numeric(value))
+        );
+    }
+}

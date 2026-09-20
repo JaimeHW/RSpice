@@ -347,6 +347,15 @@ pub(super) fn resolve(
                         parameter.stress_code()
                     )));
                 }
+                if limit.voltage_basis == SoaVoltageBasis::ExternalTerminals
+                    && !applicable(element, parameter, layouts.get(&element.name).copied())
+                {
+                    return Err(ServiceRunError::Failure(format!(
+                        "SOA device '{}' does not expose the requested external electrical {} terminals; substrate rules require an explicit electrical substrate pin, not a thermal pin",
+                        element.name,
+                        parameter.stress_code()
+                    )));
+                }
                 definition.add_limit(limit);
             }
             resolved.push((index, definition));
