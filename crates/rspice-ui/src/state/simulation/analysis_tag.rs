@@ -260,9 +260,6 @@ impl CanonicalAnalysisKind {
     #[must_use]
     pub const fn execution_blocker(self) -> Option<&'static str> {
         match self {
-            Self::Qpnoise => {
-                Some("quasi-periodic noise execution is not available in this engine build")
-            }
             Self::Reliability => Some(
                 "reliability execution requires PDK-qualified aging models; the former hard-coded demonstration equations have been removed",
             ),
@@ -404,6 +401,7 @@ mod tests {
                 CanonicalAnalysisKind::Hbnoise,
                 CanonicalAnalysisKind::Psp,
                 CanonicalAnalysisKind::Qpac,
+                CanonicalAnalysisKind::Qpnoise,
                 CanonicalAnalysisKind::Qpxf,
                 CanonicalAnalysisKind::TransientNoise,
                 CanonicalAnalysisKind::DcMismatch,
@@ -414,13 +412,7 @@ mod tests {
             .into_iter()
             .filter(|kind| kind.execution_blocker().is_some())
             .collect::<Vec<_>>();
-        assert_eq!(
-            blocked,
-            vec![
-                CanonicalAnalysisKind::Reliability,
-                CanonicalAnalysisKind::Qpnoise,
-            ]
-        );
+        assert_eq!(blocked, vec![CanonicalAnalysisKind::Reliability]);
         assert!(blocked.into_iter().all(|kind| {
             kind.availability() == AnalysisAvailability::Preview
                 && kind

@@ -22,6 +22,26 @@ pub(super) fn run_periodic_spec(
 ) -> Result<SimulationResult, SimulationError> {
     super::ensure_not_aborted(abort)?;
     match spec {
+        spec @ AnalysisSpec::Qpnoise { .. } => {
+            let card = spec
+                .qpnoise_card()
+                .map_err(SimulationError::InvalidConfig)?;
+            let state = dependencies
+                .qpss_state()
+                .map_err(|error| SimulationError::InvalidConfig(error.to_string()))?;
+            let response = super::run_abort_aware_service(abort, || {
+                svc_runner::run_qpnoise_analysis_from_qpss_with_source_path_and_abort(
+                    netlist,
+                    &card,
+                    state.operating_point(),
+                    source_path,
+                    abort,
+                )
+            })?;
+            super::ensure_not_aborted(abort)?;
+            SimulationResult::from_qpnoise_response(std::sync::Arc::new(response))
+                .map_err(SimulationError::InvalidConfig)
+        }
         spec @ AnalysisSpec::Qpxf { .. } => {
             let card = spec.qpxf_card().map_err(SimulationError::InvalidConfig)?;
             let state = dependencies

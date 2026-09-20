@@ -117,6 +117,7 @@ pub(super) fn run_spec_request_with_environment(
         | AnalysisSpec::Qpss { .. }
         | AnalysisSpec::Qpac { .. }
         | AnalysisSpec::Qpxf { .. }
+        | AnalysisSpec::Qpnoise { .. }
         | AnalysisSpec::Envelope { .. }
         | AnalysisSpec::Fourier { .. }
         | AnalysisSpec::Disto { .. }
@@ -139,7 +140,7 @@ pub(super) fn run_spec_request_with_environment(
             dependencies,
             abort_flag,
         ),
-        blocked @ (AnalysisSpec::Qpnoise { .. } | AnalysisSpec::Reliability { .. }) => {
+        blocked @ AnalysisSpec::Reliability { .. } => {
             let kind = crate::simulation::execution::canonical_analysis_kind(&blocked);
             let reason = kind
                 .execution_blocker()
@@ -297,6 +298,7 @@ fn spec_variant_name(spec: &AnalysisSpec) -> &'static str {
 mod tests {
     mod periodic_port_noise;
     mod qpac;
+    mod qpnoise;
     mod qpss;
     mod qpxf;
     use std::collections::HashMap;
@@ -504,29 +506,13 @@ mod tests {
     }
 
     fn blocked_preview_specs() -> Vec<AnalysisSpec> {
-        vec![
-            AnalysisSpec::Qpnoise {
-                start_freq: 1.0e3,
-                stop_freq: 2.0e3,
-                points_per_unit: 2,
-                sweep: crate::simulation::multi_run::FrequencySweep::Linear,
-                output_node: "out".to_owned(),
-                output_ref: "0".to_owned(),
-                input_source: "V1".to_owned(),
-                lattice_min: vec![-1, -1],
-                lattice_max: vec![1, 1],
-                integrated_noise: true,
-                contributor_ranking: true,
-                controls: Default::default(),
-            },
-            AnalysisSpec::Reliability {
-                target_years: vec![1.0, 10.0],
-                enable_hci: true,
-                enable_nbti: true,
-                enable_em: false,
-                min_stress_voltage: 0.1,
-            },
-        ]
+        vec![AnalysisSpec::Reliability {
+            target_years: vec![1.0, 10.0],
+            enable_hci: true,
+            enable_nbti: true,
+            enable_em: false,
+            min_stress_voltage: 0.1,
+        }]
     }
 
     struct AbortOnPoll {
@@ -1323,10 +1309,7 @@ R2 out 0 1k\n\
 
         assert_eq!(
             seen,
-            vec![
-                crate::state::CanonicalAnalysisKind::Qpnoise,
-                crate::state::CanonicalAnalysisKind::Reliability,
-            ]
+            vec![crate::state::CanonicalAnalysisKind::Reliability,]
         );
     }
 
