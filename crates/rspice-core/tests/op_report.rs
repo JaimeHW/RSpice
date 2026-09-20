@@ -785,3 +785,30 @@ fn conductive_power_excludes_capacitor_energy_but_keeps_switching_series_loss() 
         );
     }
 }
+
+#[test]
+fn diode_temperature_observations_follow_native_dialect_and_instance_overrides() {
+    use rspice_core::engine::SpiceDialect;
+    let netlist = Netlist::parse("Diode temperature\nV1 a 0 -1\nD1 a 0 DM TEMP=85\nD2 a 0 DM DTEMP=10\nD3 a 0 DM\n.model DM D IS=1e-14\n.end\n").unwrap();
+    for spice_dialect in [SpiceDialect::Ngspice, SpiceDialect::Xyce] {
+        let engine = Engine::new(SimulationConfig {
+            spice_dialect,
+            temperature: 313.15,
+            ..Default::default()
+        });
+        let (_, report) = engine.run_dc_op_with_report(&netlist).unwrap();
+        for (name, expected) in [("D1", 85.0), ("D2", 50.0), ("D3", 40.0)] {
+            let entry = report.entries.iter().find(|e| e.name == name).unwrap();
+            let actual = entry
+                .params
+                .iter()
+                .find(|(name, _)| *name == "temp")
+                .unwrap()
+                .1;
+            assert!(
+                (actual - expected).abs() < 1e-10,
+                "{spice_dialect:?}: {name} = {actual}"
+            );
+        }
+    }
+}

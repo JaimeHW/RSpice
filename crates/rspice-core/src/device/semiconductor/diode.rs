@@ -287,6 +287,8 @@ pub struct Diode {
     pub n: Value,
     /// Thermal voltage (Vt = kT/q, ~26mV at room temp)
     pub vt: Value,
+    /// The actual dialect-specific k/q used to form the thermal voltage.
+    thermal_voltage_per_kelvin: Value,
     /// Series resistance
     pub rs: Value,
     /// Reverse breakdown voltage. `None` disables the breakdown branch.
@@ -590,7 +592,8 @@ impl Diode {
             is: 2.52e-9,          // Saturation current
             n: 1.752,             // Emission coefficient
             vt: KOVERQ * REFTEMP, // Thermal voltage at 27C (ngspice REFTEMP)
-            rs: 0.568,            // Series resistance
+            thermal_voltage_per_kelvin: KOVERQ,
+            rs: 0.568, // Series resistance
             bv: None,
             ibv: 1e-6,
             forward_knee_current: 0.0,
@@ -1227,6 +1230,11 @@ impl Diode {
         self.set_temperature_with_k_over_q(temp_kelvin, default_tnom_kelvin, XYCE_7_KOVERQ);
     }
 
+    /// Operating junction temperature used by the native diode equations.
+    pub fn operating_temperature_kelvin(&self) -> Value {
+        self.vt / self.thermal_voltage_per_kelvin
+    }
+
     /// Select the native Xyce diode iteration limiter.
     ///
     /// Xyce 7.10's diode model calls the historical `DeviceSupport::pnjlim`
@@ -1330,6 +1338,7 @@ impl Diode {
         }
 
         let vt = k_over_q * temp;
+        self.thermal_voltage_per_kelvin = k_over_q;
         let vtnom = k_over_q * tnom;
         let delta_t = temp - tnom;
         let log_t_ratio = (temp / tnom).ln();

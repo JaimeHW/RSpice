@@ -581,6 +581,10 @@ impl CircuitData {
                     (OpLabel::ID, id),
                     (OpLabel::GD, gd),
                     (OpLabel::CD, cd),
+                    (
+                        OpLabel::TEMP,
+                        crate::constants::kelvin_to_celsius(diode.operating_temperature_kelvin()),
+                    ),
                 ],
             ));
         }
