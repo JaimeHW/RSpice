@@ -56,6 +56,9 @@ pub(super) fn fields(
     input_row(ui, "Variables", &mut setup.variables_text)
         .on_hover_text("One per line or comma, spelled name:min:max[:initial].");
     variable_domains(ui, setup);
+    if configured {
+        constraints(ui, setup);
+    }
     input_row_enabled(
         ui,
         "Expression",
@@ -192,5 +195,32 @@ fn variable_domains(ui: &mut Ui, setup: &mut OptimizationDialogState) {
     }
     if super::action_line(ui, "+ Add variable domain") {
         setup.variable_domains.push(Default::default());
+    }
+}
+
+fn constraints(ui: &mut Ui, setup: &mut OptimizationDialogState) {
+    sub_header(ui, "Measurement constraints");
+    field_note(
+        ui,
+        "Limits use the selected base analysis. Leave one bound blank for a one-sided limit; set equal bounds for equality. Tolerance is an absolute allowance in measurement units. Scale normalizes violations while searching for feasibility. A feasible design always outranks an infeasible design, regardless of objective cost.",
+    );
+    let mut remove = None;
+    for (index, row) in setup.constraints.iter_mut().enumerate() {
+        ui.push_id(("optimization-constraint", index), |ui| {
+            input_row(ui, "Measurement", &mut row.measurement);
+            input_row(ui, "Lower limit", &mut row.lower);
+            input_row(ui, "Upper limit", &mut row.upper);
+            input_row(ui, "Limit tolerance", &mut row.tolerance);
+            input_row(ui, "Violation scale", &mut row.scale);
+            if super::action_line(ui, "Remove constraint") {
+                remove = Some(index);
+            }
+        });
+    }
+    if let Some(index) = remove {
+        setup.constraints.remove(index);
+    }
+    if super::action_line(ui, "+ Add constraint") {
+        setup.constraints.push(Default::default());
     }
 }
