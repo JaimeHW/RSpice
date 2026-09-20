@@ -1091,6 +1091,7 @@ pub(super) fn form(
     tf_inference: Option<&Result<TfRunConfig, String>>,
     op_context: OpContextAvailability,
     run_space: &run_space::RunSpaceContext<'_>,
+    study_bases: &[(crate::product::AnalysisInstanceId, String)],
     route: &mut Option<crate::workbench::state::SimulationPage>,
 ) {
     clear_pending_cell(ui);
@@ -1103,7 +1104,7 @@ pub(super) fn form(
         AnalysisDraft::Noise(setup) => noise::fields(ui, setup, noise_domain, policy, locale),
         AnalysisDraft::PoleZero(setup) => pole_zero::fields(ui, setup),
         AnalysisDraft::Sensitivity(setup) => sensitivity::fields(ui, setup, policy, locale),
-        AnalysisDraft::MonteCarlo(setup) => monte_carlo::fields(ui, setup),
+        AnalysisDraft::MonteCarlo(setup) => monte_carlo::fields(ui, setup, study_bases),
         AnalysisDraft::Pss(setup) => {
             pss::fields(ui, setup, envelope_modulation_sources, policy, locale)
         }

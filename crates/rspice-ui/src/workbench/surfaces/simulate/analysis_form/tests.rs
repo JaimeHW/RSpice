@@ -165,6 +165,7 @@ fn render_analysis_form_into(
                         tf_inference,
                         OpContextAvailability::default(),
                         &run_space_fixture,
+                        &[],
                         &mut None,
                     );
                     height = ui.cursor().top() - top;
@@ -1234,6 +1235,7 @@ fn xf_form_frames(
                             Some(inference),
                             OpContextAvailability::default(),
                             &run_space_fixture,
+                            &[],
                             &mut None,
                         );
                     });

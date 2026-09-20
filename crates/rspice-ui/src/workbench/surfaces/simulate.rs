@@ -2299,6 +2299,25 @@ fn analysis_form_body(
     // unmeasured.
     let tf_inference =
         matches!(draft, AnalysisDraft::TransferFunction(_)).then(|| tf_inference_catalog(ui, app));
+    let study_bases = if matches!(draft, AnalysisDraft::MonteCarlo(_)) {
+        app.state
+            .sim_setup
+            .analysis_plan
+            .as_ref()
+            .map(|plan| {
+                plan.instances()
+                    .iter()
+                    .filter(|instance| {
+                        instance.enabled()
+                            && crate::simulation::runner::study::supports_kind(instance.kind())
+                    })
+                    .map(|instance| (instance.id(), instance.display_name().to_owned()))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
     let t = Tokens::get(ui.ctx());
     let content_width = (ui.available_width() - 16.0).max(1.0);
     egui::Frame::new()
@@ -2327,6 +2346,7 @@ fn analysis_form_body(
                 tf_inference.as_ref().map(|catalog| &catalog.inference),
                 op_context,
                 &run_space,
+                &study_bases,
                 route,
             );
             // Under the analysis's own parameters, because that is what they

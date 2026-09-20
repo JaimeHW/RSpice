@@ -17,9 +17,46 @@ use super::{
 };
 
 /// Render the Monte Carlo fields.
-pub(super) fn fields(ui: &mut Ui, setup: &mut McDialogState) {
+pub(super) fn fields(
+    ui: &mut Ui,
+    setup: &mut McDialogState,
+    bases: &[(crate::product::AnalysisInstanceId, String)],
+) {
     use crate::simulation::dialog::McVariationSource;
 
+    let mut choices = vec![(None, "Operating point: all node voltages".to_owned())];
+    choices.extend(bases.iter().map(|(id, label)| (Some(*id), label.clone())));
+    if let Some(id) = setup.base_analysis {
+        if !choices.iter().any(|(candidate, _)| *candidate == Some(id)) {
+            choices.push((Some(id), format!("Unavailable analysis ({id})")));
+        }
+    }
+    let mut selected = choices
+        .iter()
+        .position(|(id, _)| *id == setup.base_analysis)
+        .unwrap_or(0);
+    let labels = choices
+        .iter()
+        .map(|(_, label)| label.as_str())
+        .collect::<Vec<_>>();
+    if choice_row(ui, "Base analysis", &labels, &mut selected) {
+        setup.base_analysis = choices[selected].0;
+    }
+    let configured = setup.base_analysis.is_some();
+    hinted_input_row_enabled(
+        ui,
+        "Measurements",
+        &mut setup.measurements,
+        "gain; settling; last:V(out)",
+        configured,
+    );
+    input_row_enabled(ui, "Histogram bins", &mut setup.histogram_bins, configured);
+    if configured {
+        field_note(
+            ui,
+            "Each trial runs this analysis at the study's Run Set point. Separate measurements with semicolons. A plain name reads a .MEAS result; scalar:V(out) reads an operating-point value; last:signal explicitly reads the final waveform sample. For AC, last:signal reads the real component; use .MEAS VM/VP/VDB for magnitude, phase, or decibels.",
+        );
+    }
     input_row(ui, "Samples", &mut setup.num_runs);
     input_row(ui, "Seed", &mut setup.seed)
         .on_hover_text("An integer from 0 to 18446744073709551615. Leave blank to use the repeatable default seed.");
