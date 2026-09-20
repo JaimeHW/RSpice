@@ -924,14 +924,23 @@ fn latent_pair_correlation(
     let right_distribution = right.source.distribution;
     let latent = match (left_distribution, right_distribution) {
         (Gaussian, Gaussian) => target,
+        // Preserve singular endpoints exactly: rounding sin(pi/6) below 1/2
+        // would introduce an independent component after Cholesky factorization.
+        (Uniform, Uniform) if target.abs() == 1.0 => target,
         (Uniform, Uniform) => 2.0 * libm::sin(std::f64::consts::PI * target / 6.0),
         (Lognormal, Lognormal) => {
             let left_sigma = lognormal_sigma(left)?;
             let right_sigma = lognormal_sigma(right)?;
+            if target == 1.0 && left_sigma == right_sigma {
+                return Ok(1.0);
+            }
             let left_variance = left_sigma * left_sigma;
             let right_variance = right_sigma * right_sigma;
-            let scale = libm::sqrt(libm::expm1(left_variance) * libm::expm1(right_variance));
-            libm::log(target * scale + 1.0) / (left_sigma * right_sigma)
+            // Factor the square roots to avoid underflow in the product, and
+            // retain small spreads instead of rounding 1 + target*scale to 1.
+            let scale =
+                libm::sqrt(libm::expm1(left_variance)) * libm::sqrt(libm::expm1(right_variance));
+            libm::log1p(target * scale) / (left_sigma * right_sigma)
         }
         (Gaussian, Uniform) | (Uniform, Gaussian) => {
             target * libm::sqrt(std::f64::consts::PI / 3.0)
@@ -1294,6 +1303,48 @@ mod tests {
             SpectreCorrelationMatrix::new(vec![vec![1.0, 1.0], vec![1.0, 1.0]]).is_ok(),
             "positive semidefinite singular matrices are valid"
         );
+    }
+
+    #[test]
+    fn correlation_conversion_preserves_endpoints_and_small_lognormal_spreads() {
+        for distribution in [SpectreDistribution::Uniform, SpectreDistribution::Lognormal] {
+            let source = variation("x", distribution, 0.1);
+            let left = ResolvedVariation {
+                source: &source,
+                nominal: 1.0,
+                spread: 0.1,
+            };
+            let right = ResolvedVariation {
+                nominal: 2.0,
+                ..left.clone()
+            };
+            let factor = latent_pair_correlation(&left, &right, 1.0).unwrap();
+            assert_eq!(factor, 1.0, "perfect correlation must remain singular");
+            if distribution == SpectreDistribution::Uniform {
+                assert_eq!(latent_pair_correlation(&left, &right, -1.0).unwrap(), -1.0);
+            }
+        }
+        let source = variation("x", SpectreDistribution::Lognormal, 1e-8);
+        for spread in [1e-8, 1e-100] {
+            let left = ResolvedVariation {
+                source: &source,
+                nominal: 1.0,
+                spread,
+            };
+            let right = ResolvedVariation {
+                spread: 2.0 * spread,
+                ..left.clone()
+            };
+            // At vanishing log-space spreads, Pearson correlation approaches
+            // the underlying Gaussian correlation for unequal spreads too.
+            for target in [-0.5, 0.5] {
+                let latent = latent_pair_correlation(&left, &right, target).unwrap();
+                assert!(
+                    (latent - target).abs() < 1e-14,
+                    "spread={spread}, target={target}, latent={latent}"
+                );
+            }
+        }
     }
 
     #[test]
