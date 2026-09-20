@@ -139,6 +139,8 @@ pub use hb::{
     PeriodicNoiseSidebands, PnoiseAnalysisResult, PreparedPsp, PspAnalysisResult,
     PspNoiseCorrelation, QpacAnalysisResult, QpacInputQuantity, QpacRequest, QpacResultMetadata,
     QpssConfig, QpssInitialState, QpssOperatingPoint, QpssOperatingPointMetadata, QpssSourceTone,
+    QpxfAnalysisResult, QpxfFrequencyAxis, QpxfGroupDelay, QpxfInputLattices, QpxfInputSource,
+    QpxfOutput, QpxfQuantity, QpxfRequest, QpxfSources, QpxfTransfer,
 };
 pub use health::EngineHealthReport;
 pub use pss::{

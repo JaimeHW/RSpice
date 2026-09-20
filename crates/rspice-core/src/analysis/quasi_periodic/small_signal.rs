@@ -66,7 +66,8 @@ pub struct QuasiPeriodicAcSolution {
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct QuasiPeriodicAdjointSolution {
-    pub offset_hz: Value,
+    pub frequency_hz: Value,
+    pub frequency_lattice: Vec<i32>,
     pub sensitivities: Vec<Vec<Complex64>>,
     /// Infinity-norm adjoint residual divided by the configured relative tolerance.
     /// This is an algebraic adjoint certificate, not a KCL/KVL residual.
@@ -181,6 +182,7 @@ impl Linearization {
         Ok(work)
     }
 
+    #[cfg(test)]
     pub(crate) fn solve_adjoint(
         &mut self,
         circuit: &impl Circuit,
@@ -195,7 +197,45 @@ impl Linearization {
         }
         let result = self.solve(circuit, offset_hz, observation, abort)?;
         Ok(QuasiPeriodicAdjointSolution {
-            offset_hz: result.offset_hz,
+            frequency_hz: result.offset_hz,
+            frequency_lattice: vec![0; self.grid.dimensions().len()],
+            sensitivities: result.spectra,
+            normalized_residual: result.normalized_residual,
+        })
+    }
+
+    pub(crate) fn solve_adjoint_at_frequency(
+        &mut self,
+        circuit: &impl Circuit,
+        frequency_hz: Value,
+        anchor: &[i32],
+        observation: &[Vec<Complex64>],
+        abort: &dyn AbortSignal,
+    ) -> Result<QuasiPeriodicAdjointSolution, Error> {
+        if self.orientation != Orientation::Adjoint {
+            return Err(Error::InvalidConfig(
+                "an adjoint solve requires an adjoint linearization".into(),
+            ));
+        }
+        let frequencies = self
+            .grid
+            .indices()
+            .iter()
+            .map(|tuple| {
+                check_abort(abort)?;
+                self.grid.frequency_relative_to(frequency_hz, anchor, tuple)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let result = self.solve_impl(
+            circuit,
+            frequencies[self.grid.dc_index()],
+            observation,
+            Some(&frequencies),
+            abort,
+        )?;
+        Ok(QuasiPeriodicAdjointSolution {
+            frequency_hz,
+            frequency_lattice: anchor.to_vec(),
             sensitivities: result.spectra,
             normalized_residual: result.normalized_residual,
         })
@@ -206,6 +246,17 @@ impl Linearization {
         circuit: &impl Circuit,
         offset_hz: Value,
         sources: &[Vec<Complex64>],
+        abort: &dyn AbortSignal,
+    ) -> Result<QuasiPeriodicAcSolution, Error> {
+        self.solve_impl(circuit, offset_hz, sources, None, abort)
+    }
+
+    fn solve_impl(
+        &mut self,
+        circuit: &impl Circuit,
+        offset_hz: Value,
+        sources: &[Vec<Complex64>],
+        translated_frequencies: Option<&[Value]>,
         abort: &dyn AbortSignal,
     ) -> Result<QuasiPeriodicAcSolution, Error> {
         check_abort(abort)?;
@@ -224,9 +275,9 @@ impl Linearization {
         let mut linear = Vec::with_capacity(self.grid.len());
         let mut frequencies = Vec::with_capacity(self.grid.len());
         let mut retained = self.base_values;
-        for &frequency in self.grid.frequencies_hz() {
+        for (index, &frequency) in self.grid.frequencies_hz().iter().enumerate() {
             check_abort(abort)?;
-            let frequency = offset_hz + frequency;
+            let frequency = translated_frequencies.map_or(offset_hz + frequency, |f| f[index]);
             if !frequency.is_finite() || !(std::f64::consts::TAU * frequency).is_finite() {
                 return Err(Error::InvalidConfig(
                     "QPAC translated frequency overflowed".into(),

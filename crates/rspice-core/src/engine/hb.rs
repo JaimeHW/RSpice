@@ -53,6 +53,8 @@ pub use psp::{PreparedPsp, PspAnalysisResult, PspNoiseCorrelation};
 pub use quasi_periodic::{
     QpacAnalysisResult, QpacInputQuantity, QpacRequest, QpacResultMetadata, QpssConfig,
     QpssInitialState, QpssOperatingPoint, QpssOperatingPointMetadata, QpssSourceTone,
+    QpxfAnalysisResult, QpxfFrequencyAxis, QpxfGroupDelay, QpxfInputLattices, QpxfInputSource,
+    QpxfOutput, QpxfQuantity, QpxfRequest, QpxfSources, QpxfTransfer,
 };
 pub use state::{HbEnvelopeContinuationState, HbEnvelopeStateGuarantee};
 

@@ -1,6 +1,7 @@
 //! Netlist execution and retained independent-phase operating points.
 mod card;
 mod qpac;
+mod qpxf;
 mod sources;
 mod state;
 #[cfg(test)]
@@ -12,6 +13,10 @@ use crate::analysis::quasi_periodic::{
     QuasiPeriodicSolveConfig,
 };
 pub use qpac::{QpacAnalysisResult, QpacInputQuantity, QpacRequest, QpacResultMetadata};
+pub use qpxf::{
+    QpxfAnalysisResult, QpxfFrequencyAxis, QpxfGroupDelay, QpxfInputLattices, QpxfInputSource,
+    QpxfOutput, QpxfQuantity, QpxfRequest, QpxfSources, QpxfTransfer,
+};
 pub use state::{QpssOperatingPoint, QpssOperatingPointMetadata};
 use std::sync::Arc;
 

@@ -97,10 +97,7 @@ impl HbSolver {
             .collect()
     }
 
-    /// Solve Aᴴ λ = c once per offset for the observation y = cᴴ x.
-    /// Every small-signal source/tuple transfer is then λᴴ b. Complete exact
-    /// MNA and all signed tuples participate, including frequency-dependent
-    /// linear networks and native F/Q derivatives.
+    /// Adjoint sweep on the common offset axis (the zero tone tuple).
     pub fn solve_quasi_periodic_adjoint_with_abort(
         &mut self,
         grid: Arc<QuasiPeriodicGrid>,
@@ -111,11 +108,39 @@ impl HbSolver {
         limits: &ResourceLimits,
         abort: &dyn AbortSignal,
     ) -> Result<Vec<QuasiPeriodicAdjointSolution>, Error> {
+        let anchor = vec![0; grid.dimensions().len()];
+        self.solve_quasi_periodic_adjoint_at_frequency_with_abort(
+            grid,
+            linear,
+            orbit,
+            offsets_hz,
+            &anchor,
+            observation,
+            limits,
+            abort,
+        )
+    }
+
+    /// Solve Aᴴ λ = c once per offset for the observation y = cᴴ x.
+    /// Every small-signal source/tuple transfer is then λᴴ b. Complete exact
+    /// MNA and all signed tuples participate, including frequency-dependent
+    /// linear networks and native F/Q derivatives.
+    pub fn solve_quasi_periodic_adjoint_at_frequency_with_abort(
+        &mut self,
+        grid: Arc<QuasiPeriodicGrid>,
+        linear: &QuasiPeriodicLinearConfig,
+        orbit: &[Vec<Complex64>],
+        frequencies_hz: &[Value],
+        frequency_anchor: &[i32],
+        observation: &[Vec<Complex64>],
+        limits: &ResourceLimits,
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<QuasiPeriodicAdjointSolution>, Error> {
         if abort.is_aborted() {
             return Err(Error::Aborted);
         }
-        if offsets_hz.is_empty()
-            || offsets_hz.iter().any(|v| !v.is_finite())
+        if frequencies_hz.is_empty()
+            || frequencies_hz.iter().any(|v| !v.is_finite())
             || observation.len() != self.unknowns()
             || observation.iter().any(|row| {
                 row.len() != grid.len()
@@ -130,15 +155,15 @@ impl HbSolver {
         }
         crate::ResourceLimitError::ensure(
             crate::ResourceKind::AnalysisPoints,
-            offsets_hz.len(),
+            frequencies_hz.len(),
             limits.max_analysis_points,
         )?;
         let values = self
             .unknowns()
             .saturating_mul(grid.len())
-            .saturating_mul(offsets_hz.len())
+            .saturating_mul(frequencies_hz.len())
             .saturating_mul(2)
-            .saturating_add(offsets_hz.len().saturating_mul(2));
+            .saturating_add(frequencies_hz.len().saturating_mul(2));
         crate::ResourceLimitError::ensure(
             crate::ResourceKind::ResultValues,
             values,
@@ -156,9 +181,11 @@ impl HbSolver {
                 &working_limits,
                 abort,
             )?;
-        offsets_hz
+        frequencies_hz
             .iter()
-            .map(|&offset| work.solve_adjoint(self, offset, observation, abort))
+            .map(|&offset| {
+                work.solve_adjoint_at_frequency(self, offset, frequency_anchor, observation, abort)
+            })
             .collect()
     }
 

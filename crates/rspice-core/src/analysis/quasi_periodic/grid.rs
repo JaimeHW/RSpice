@@ -296,6 +296,39 @@ impl QuasiPeriodicGrid {
     pub fn indices(&self) -> &[Vec<i32>] {
         &self.indices
     }
+    /// Physical frequency at `tuple` when `anchor` is driven at `frequency_hz`.
+    /// Subtract integer coordinates before summing tones, so a low-frequency
+    /// output at a nonzero carrier tuple is not lost to floating-point cancellation.
+    pub fn frequency_relative_to(
+        &self,
+        frequency_hz: Value,
+        anchor: &[i32],
+        tuple: &[i32],
+    ) -> Result<Value, Error> {
+        if !frequency_hz.is_finite()
+            || anchor.len() != self.config.frequencies_hz.len()
+            || tuple.len() != anchor.len()
+        {
+            return Err(Error::InvalidConfig("a translated frequency requires finite frequency and one anchor/target coordinate per tone".into()));
+        }
+        let mut sum = frequency_hz;
+        let mut correction = 0.0;
+        for ((&a, &b), tone) in anchor.iter().zip(tuple).zip(&self.config.frequencies_hz) {
+            crate::numerics::compensated_add(
+                &mut sum,
+                &mut correction,
+                (i64::from(b) - i64::from(a)) as Value * tone,
+            );
+        }
+        let frequency = sum + correction;
+        if !frequency.is_finite() || !(std::f64::consts::TAU * frequency).is_finite() {
+            return Err(Error::InvalidConfig(
+                "a translated frequency or angular frequency exceeds the finite range".into(),
+            ));
+        }
+        Ok(frequency)
+    }
+
     pub fn frequencies_hz(&self) -> &[Value] {
         &self.frequencies
     }
