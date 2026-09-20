@@ -7,9 +7,11 @@
 //! equations and convergence evidence belong to the consuming solver.
 
 mod grid;
+pub(crate) mod solve;
 mod transform;
 
 pub use grid::{QuasiPeriodicGrid, QuasiPeriodicGridConfig, QuasiPeriodicSampling};
+pub use solve::{QuasiPeriodicSolution, QuasiPeriodicSolveConfig};
 pub use transform::QuasiPeriodicTransform;
 
 use crate::abort_signal::AbortSignal;
@@ -25,6 +27,14 @@ pub enum QuasiPeriodicError {
     ResourceLimit(#[from] ResourceLimitError),
     #[error("Quasi-periodic numerical failure: {0}")]
     Numerical(String),
+    #[error("Invalid quasi-periodic circuit: {0}")]
+    InvalidCircuit(String),
+    #[error("Quasi-periodic linear solve failed: {0}")]
+    LinearSolve(#[from] crate::solver::SolverError),
+    #[error(
+        "Quasi-periodic Newton solve failed after {iterations} updates (normalized residual {merit:e})"
+    )]
+    ConvergenceFailed { iterations: usize, merit: f64 },
 }
 
 fn check_abort(abort: &dyn AbortSignal) -> Result<(), QuasiPeriodicError> {
