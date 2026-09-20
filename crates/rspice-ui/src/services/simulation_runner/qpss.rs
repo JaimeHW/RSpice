@@ -29,6 +29,15 @@ pub fn run_qpss_analysis_with_source_path_and_abort(
 ) -> ServiceRunResult<QpssData> {
     ensure_not_aborted(abort)?;
     let netlist = parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
+    run_qpss_analysis_on_materialized_with_abort(&netlist, config, abort)
+}
+
+pub(crate) fn run_qpss_analysis_on_materialized_with_abort(
+    netlist: &rspice_core::Netlist,
+    config: QpssConfig,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<QpssData> {
+    ensure_not_aborted(abort)?;
     let engine = build_resolved_periodic_engine(
         &netlist,
         config.solver.relative_tolerance,

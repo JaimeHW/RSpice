@@ -18,6 +18,16 @@ pub fn run_qpac_analysis_from_qpss_with_source_path_and_abort(
 ) -> ServiceRunResult<QpacAnalysisResult> {
     ensure_not_aborted(abort)?;
     let netlist = parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
+    run_qpac_analysis_from_qpss_on_materialized_with_abort(&netlist, card, point, abort)
+}
+
+pub(crate) fn run_qpac_analysis_from_qpss_on_materialized_with_abort(
+    netlist: &rspice_core::Netlist,
+    card: &QpacCard,
+    point: &QpssOperatingPoint,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<QpacAnalysisResult> {
+    ensure_not_aborted(abort)?;
     // The producer's engine settings authenticate the orbit. QPAC's authored
     // equation tolerances configure its translated solve, not a new producer.
     let engine = build_resolved_periodic_engine(

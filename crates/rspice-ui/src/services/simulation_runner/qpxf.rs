@@ -18,6 +18,16 @@ pub fn run_qpxf_analysis_from_qpss_with_source_path_and_abort(
 ) -> ServiceRunResult<QpxfAnalysisResult> {
     ensure_not_aborted(abort)?;
     let netlist = parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
+    run_qpxf_analysis_from_qpss_on_materialized_with_abort(&netlist, card, point, abort)
+}
+
+pub(crate) fn run_qpxf_analysis_from_qpss_on_materialized_with_abort(
+    netlist: &rspice_core::Netlist,
+    card: &QpxfCard,
+    point: &QpssOperatingPoint,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<QpxfAnalysisResult> {
+    ensure_not_aborted(abort)?;
     // The producer's engine settings authenticate the orbit. QPXF's authored
     // adjoint tolerance configures its translated solve, not a new producer.
     let engine = build_resolved_periodic_engine(
