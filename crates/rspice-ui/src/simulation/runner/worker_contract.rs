@@ -72,9 +72,9 @@ pub(crate) struct WorkerRequest {
     pub(in crate::simulation) stream_transient_samples: bool,
 }
 
-/// 17: Monte Carlo carries authored per-parameter native statistics.
+/// 19: Configured studies carry frozen Fourier/FFT consumers and transient producers.
 #[cfg(any(target_arch = "wasm32", test))]
-pub(crate) const WORKER_REQUEST_TRANSPORT_PROTOCOL: u8 = 18;
+pub(crate) const WORKER_REQUEST_TRANSPORT_PROTOCOL: u8 = 19;
 
 /// Browser-worker request split into compact metadata and transferable
 /// floating-point buffers. The embedded request deliberately carries empty

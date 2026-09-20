@@ -8,7 +8,7 @@ use super::*;
 use std::collections::HashMap;
 
 use crate::simulation::execution::{PreparedDependencyBinding, PreparedTask, bound_cards};
-use crate::simulation::plan::FrozenSimulationPlan;
+use crate::simulation::plan::{AnalysisKind, FrozenSimulationPlan};
 
 impl SimulationController {
     /// Compile a candidate saved output through the same frozen-plan and
@@ -499,9 +499,58 @@ impl SimulationController {
             .frozen_instance_projection(plan, base)
             .map_err(|error| error.to_string())?;
         let spec = self.analysis_draft_spec(&projected, base.draft())?;
-        let analysis = self.analysis_spec_to_config(&projected, &spec)?;
+        let (analysis, postprocess) = if matches!(
+            spec,
+            AnalysisSpec::Fourier { .. } | AnalysisSpec::Fft { .. }
+        ) {
+            let producers = base
+                .dependencies()
+                .iter()
+                .filter(|edge| edge.prerequisite() == AnalysisKind::Transient)
+                .filter_map(|edge| {
+                    plan.instances()
+                        .iter()
+                        .find(|instance| instance.id() == edge.target())
+                })
+                .collect::<Vec<_>>();
+            let [producer] = producers.as_slice() else {
+                return Err(
+                    "A spectral study requires one explicitly bound, enabled transient producer"
+                        .into(),
+                );
+            };
+            let mut producer_state = state.clone();
+            producer_state.sim_setup = state
+                .sim_setup
+                .frozen_instance_projection(plan, producer)
+                .map_err(|error| error.to_string())?;
+            let producer_spec = self.analysis_draft_spec(&producer_state, producer.draft())?;
+            crate::simulation::execution::validate_prepared_dependency_contract_with_options(
+                &spec,
+                &Default::default(),
+                &producer_spec,
+            )
+            .map_err(|error| error.to_string())?;
+            (
+                self.analysis_spec_to_config(&producer_state, &producer_spec)?,
+                Some(crate::simulation::runner::study::StudyPostprocess {
+                    producer_instance_id: producer.id(),
+                    producer_source_revision: plan.revision(),
+                    producer_analysis_line: self
+                        .analysis_spec_to_spice_line(&producer_state, &producer_spec)?,
+                    producer_numeric_options: producer
+                        .numeric_override()
+                        .map(|options| options.to_spice_options())
+                        .unwrap_or_default(),
+                    request: spec.clone(),
+                }),
+            )
+        } else {
+            (self.analysis_spec_to_config(&projected, &spec)?, None)
+        };
         analysis.validate().map_err(|errors| errors.join("; "))?;
         Ok(Some(crate::simulation::runner::study::StudyRunConfig {
+            postprocess,
             instance_id: id,
             source_revision: plan.revision(),
             analysis,
@@ -645,6 +694,129 @@ fn invalid_saved_output_reports(
 mod tests {
     use super::*;
     use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
+
+    #[test]
+    fn spectral_study_freezes_the_bound_transient_and_all_postprocess_settings() {
+        use crate::simulation::dialog::{McDialogState, mc::McConfig};
+        for kind in [AnalysisKind::Fourier, AnalysisKind::Fft] {
+            let mut state = AppState::default();
+            let plan = state.sim_setup.analysis_plan.as_mut().unwrap();
+            let (first, _) = plan.insert(AnalysisKind::Transient).unwrap();
+            let (second, _) = plan.insert(AnalysisKind::Transient).unwrap();
+            for (id, stop) in [(first, "1m"), (second, "2m")] {
+                plan.edit(id, |draft| {
+                    let AnalysisDraft::Transient(draft) = draft else {
+                        unreachable!()
+                    };
+                    draft.stop = stop.into();
+                    draft.step = "2u".into();
+                    draft.max_step = "2u".into();
+                })
+                .unwrap();
+            }
+            let mut numerics = crate::simulation::plan::AnalysisNumericOverride::default();
+            numerics
+                .set_for_instance(
+                    AnalysisKind::Transient,
+                    Default::default(),
+                    crate::simulation::plan::NumericOverrideOption::Reltol,
+                    "1e-6",
+                )
+                .unwrap();
+            plan.set_numeric_override(first, Some(numerics)).unwrap();
+            let (spectrum, _) = plan.insert(kind).unwrap();
+            plan.edit(spectrum, |draft| match draft {
+                AnalysisDraft::Fourier(draft) => {
+                    *draft = crate::simulation::dialog::FourierDialogState::from_config(
+                        &crate::simulation::dialog::fourier::FourierConfig {
+                            fundamental_freq: 1000.0,
+                            num_harmonics: 5,
+                            num_periods: 1,
+                            output_node: "out".into(),
+                            output_ref: "0".into(),
+                            additional_outputs: vec![],
+                            start_time: 0.0,
+                            stop_time: 0.001,
+                            compute_thd: true,
+                            normalize: false,
+                        },
+                    )
+                }
+                AnalysisDraft::Fft(draft) => {
+                    draft.stop = "1m".into();
+                    draft.points = 64;
+                    draft.format = "UNORM".into();
+                }
+                _ => unreachable!(),
+            })
+            .unwrap();
+            plan.bind_dependency(spectrum, AnalysisKind::Transient, first)
+                .unwrap();
+            let (mc, _) = plan.insert(AnalysisKind::MonteCarlo).unwrap();
+            plan.edit(mc, |draft| {
+                *draft = AnalysisDraft::MonteCarlo(McDialogState::from_config(&McConfig {
+                    base_analysis: Some(spectrum),
+                    measurements: vec!["bin:1:magnitude".into()],
+                    ..Default::default()
+                }))
+            })
+            .unwrap();
+            let frozen = plan.freeze().unwrap();
+            plan.edit(first, |draft| {
+                let AnalysisDraft::Transient(draft) = draft else {
+                    unreachable!()
+                };
+                draft.stop = "3m".into();
+            })
+            .unwrap();
+            let sealed = state
+                .model_library_manager
+                .seal_execution_sources()
+                .unwrap();
+            let queue = SimulationController::new()
+                .build_queue_from_plan(&state, &frozen, &sealed)
+                .unwrap();
+            let task = queue.iter().find(|task| task.instance_id() == mc).unwrap();
+            let base = task
+                .queued_analysis()
+                .spec_options
+                .study_base
+                .as_ref()
+                .unwrap();
+            let AnalysisConfig::Transient(config) = &base.analysis else {
+                panic!("transient producer")
+            };
+            assert_eq!(config.stop_time, 0.001);
+            let post = base.postprocess.as_ref().unwrap();
+            assert_eq!(post.producer_instance_id, first);
+            assert_ne!(post.producer_instance_id, second);
+            assert_eq!(post.producer_source_revision, frozen.revision());
+            assert!(post.producer_numeric_options.contains("RELTOL"));
+            for change in 0..5 {
+                let mut queued = task.queued_analysis().clone();
+                let base = queued.spec_options.study_base.as_mut().unwrap();
+                let post = base.postprocess.as_mut().unwrap();
+                match change {
+                    0 => post.producer_instance_id = second,
+                    1 => post.producer_analysis_line.push_str(" UIC"),
+                    2 => post.producer_numeric_options = ".OPTIONS RELTOL=0.01".into(),
+                    3 => match &mut post.request {
+                        AnalysisSpec::Fft { request } => request.points = 128,
+                        AnalysisSpec::Fourier { normalize, .. } => *normalize = true,
+                        _ => unreachable!(),
+                    },
+                    _ => {
+                        let AnalysisConfig::Transient(config) = &mut base.analysis else {
+                            unreachable!()
+                        };
+                        config.max_timestep = Some(1e-6);
+                    }
+                }
+                let changed = PreparedTask::new(mc, task.source_revision(), vec![], "MC", queued);
+                assert_ne!(task.config_digest(), changed.config_digest());
+            }
+        }
+    }
 
     #[test]
     fn configured_study_freezes_exact_base_and_survives_persistence_and_identity() {

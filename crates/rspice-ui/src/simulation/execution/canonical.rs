@@ -926,6 +926,14 @@ fn encode_spec_options(writer: &mut CanonicalWriter, options: &SpecExecutionOpti
         writer.string(&base.instance_id.to_string());
         writer.u64(base.source_revision.get());
         encode_analysis_config(writer, Some(&base.analysis));
+        if let Some(postprocess) = &base.postprocess {
+            writer.domain("study-transient-postprocessor/v1");
+            writer.uuid(postprocess.producer_instance_id.as_uuid());
+            writer.u64(postprocess.producer_source_revision.get());
+            writer.string(&postprocess.producer_analysis_line);
+            writer.string(&postprocess.producer_numeric_options);
+            encode_analysis_spec(writer, &postprocess.request);
+        }
         writer.string(&base.analysis_line);
         writer.string(&base.numeric_options);
         writer.sequence(base.measurements.len());

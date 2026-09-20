@@ -1,7 +1,9 @@
 //! Frozen configured-analysis execution on each study circuit.
 
 mod optimization;
+mod spectral;
 pub(crate) use optimization::run_optimization;
+pub use spectral::StudyPostprocess;
 
 use super::{AnalysisExecutionEnvironment, SimulationError};
 use crate::product::{AnalysisInstanceId, ObjectRevision};
@@ -24,6 +26,8 @@ use std::sync::{
 /// Its Run Set point belongs to the study; its solver controls belong to the base.
 #[derive(Debug, Clone)]
 pub struct StudyRunConfig {
+    /// Optional spectral consumer of `analysis`, which is its exact transient producer.
+    pub postprocess: Option<StudyPostprocess>,
     pub constraints: Vec<crate::simulation::optimizer::OptimizationConstraint>,
     pub objective_terms: Vec<crate::simulation::optimizer::OptimizationObjectiveTerm>,
     pub instance_id: AnalysisInstanceId,
@@ -45,6 +49,8 @@ pub(crate) fn supports_kind(kind: AnalysisKind) -> bool {
             | AnalysisKind::Noise
             | AnalysisKind::PoleZero
             | AnalysisKind::Sensitivity
+            | AnalysisKind::Fourier
+            | AnalysisKind::Fft
     )
 }
 
@@ -57,13 +63,16 @@ pub(crate) fn validate_measurements(names: &[String]) -> Result<(), String> {
         let (mode, key) = name.split_once(':').unwrap_or(("meas", name));
         if key.trim().is_empty()
             || name.chars().any(char::is_control)
-            || !["meas", "scalar", "last"]
+            || !["meas", "scalar", "last", "bin"]
                 .iter()
                 .any(|value| mode.eq_ignore_ascii_case(value))
         {
             return Err(format!(
-                "Invalid study measurement {name:?}; use a .MEAS name, scalar:name, or last:signal"
+                "Invalid study measurement {name:?}; use a .MEAS name, scalar:name, last:signal, or bin:index:quantity[:signal]"
             ));
+        }
+        if mode.eq_ignore_ascii_case("bin") {
+            crate::simulation::results::parse_study_bin(key)?;
         }
         if !seen.insert(name.to_ascii_lowercase()) {
             return Err(format!("Repeated study measurement {name:?}"));
@@ -92,10 +101,7 @@ pub(crate) fn run_monte_carlo(
         .map_err(|errors| SimulationError::InvalidConfig(errors.join("; ")))?;
     // Preserve these cards in the parser's retained source, so expression and
     // native-statistics replay observes the same analysis and solver policy.
-    let source = services::splice_before_terminal_end_card(
-        source,
-        &format!("{}\n{}", base.analysis_line, base.numeric_options),
-    );
+    let source = base.execution_source(source)?;
     let bridge = EngineBridge::new();
     let circuit = bridge.parse_netlist_with_abort_and_source_path(&source, source_path, abort)?;
     let command = circuit
@@ -154,7 +160,8 @@ pub(crate) fn run_monte_carlo(
         &study,
         &signal,
         |engine, trial, trial_index, abort| {
-            let result = EngineBridge::run_materialized_with_abort(engine, &analysis, trial, abort)
+            let result = base
+                .run_trial(engine, &analysis, trial, abort)
                 .map_err(|error| match error {
                     SimulationError::SolverError(_)
                     | SimulationError::ConvergenceFailed { .. }
@@ -272,6 +279,7 @@ mod tests {
 
     fn base(analysis: AnalysisConfig, names: &[&str]) -> StudyRunConfig {
         StudyRunConfig {
+            postprocess: None,
             constraints: Vec::new(),
             objective_terms: Vec::new(),
             instance_id: AnalysisInstanceId::new(),
@@ -796,6 +804,9 @@ fn validate_base_measurements(
     circuit: &rspice_core::Netlist,
 ) -> Result<(), SimulationError> {
     validate_measurements(&base.measurements).map_err(SimulationError::InvalidConfig)?;
+    if let Some(postprocess) = &base.postprocess {
+        return postprocess.validate_measurements(base);
+    }
     let family = match base.analysis {
         AnalysisConfig::Ac(_) => "AC",
         AnalysisConfig::Transient(_) => "TRAN",
@@ -826,6 +837,11 @@ fn validate_base_measurements(
             return Err(SimulationError::InvalidConfig(format!(
                 "{request:?} requires a scalar analysis; use a .MEAS name or last:signal for a waveform"
             )));
+        }
+        if mode.eq_ignore_ascii_case("bin") && !matches!(base.analysis, AnalysisConfig::Ac(_)) {
+            return Err(SimulationError::InvalidConfig(
+                "Spectral bin measurements require AC, Fourier, or FFT".into(),
+            ));
         }
         if mode.eq_ignore_ascii_case("last") && family.is_empty() {
             return Err(SimulationError::InvalidConfig(format!(

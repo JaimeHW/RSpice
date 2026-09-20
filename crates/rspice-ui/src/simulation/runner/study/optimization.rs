@@ -47,10 +47,7 @@ pub(crate) fn run_optimization(
     base.analysis
         .validate()
         .map_err(|errors| SimulationError::InvalidConfig(errors.join("; ")))?;
-    let source = services::splice_before_terminal_end_card(
-        source,
-        &format!("{}\n{}", base.analysis_line, base.numeric_options),
-    );
+    let source = base.execution_source(source)?;
     let bridge = EngineBridge::new();
     let circuit = bridge.parse_netlist_with_abort_and_source_path(&source, source_path, abort)?;
     validate_base_measurements(base, &circuit)?;
@@ -108,21 +105,21 @@ pub(crate) fn run_optimization(
             environment.as_ref(),
             &signal,
         )?;
-        let result =
-            EngineBridge::run_materialized_with_abort(&engine, &analysis, &candidate, &signal)
-                .map_err(|error| match error {
-                    SimulationError::SolverError(_)
-                    | SimulationError::ConvergenceFailed { .. }
-                    | SimulationError::Attributed { .. }
-                    | SimulationError::CircuitError(_) => {
-                        services::ServiceRunError::Failure(error.to_string())
-                    }
-                    other => {
-                        *fatal.lock().unwrap() = Some(other);
-                        signal.failed.store(true, Ordering::Release);
-                        services::ServiceRunError::Aborted
-                    }
-                })?;
+        let result = base
+            .run_trial(&engine, &analysis, &candidate, &signal)
+            .map_err(|error| match error {
+                SimulationError::SolverError(_)
+                | SimulationError::ConvergenceFailed { .. }
+                | SimulationError::Attributed { .. }
+                | SimulationError::CircuitError(_) => {
+                    services::ServiceRunError::Failure(error.to_string())
+                }
+                other => {
+                    *fatal.lock().unwrap() = Some(other);
+                    signal.failed.store(true, Ordering::Release);
+                    services::ServiceRunError::Aborted
+                }
+            })?;
         let mut constraints = Vec::with_capacity(base.constraints.len());
         for constraint in &base.constraints {
             let value = result
@@ -244,6 +241,7 @@ mod tests {
 
     fn base(analysis: AnalysisConfig, measurement: &str) -> StudyRunConfig {
         StudyRunConfig {
+            postprocess: None,
             constraints: Vec::new(),
             objective_terms: Vec::new(),
             instance_id: AnalysisInstanceId::new(),

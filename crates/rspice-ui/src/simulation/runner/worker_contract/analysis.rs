@@ -113,6 +113,8 @@ impl From<WorkerSpecExecutionOptions> for SpecExecutionOptions {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct WorkerStudyRunConfig {
+    #[serde(default)]
+    postprocess: Option<crate::simulation::runner::study::StudyPostprocess>,
     instance_id: crate::product::AnalysisInstanceId,
     source_revision: crate::product::ObjectRevision,
     pub(super) analysis: WorkerAnalysisConfig,
@@ -129,6 +131,7 @@ pub(crate) struct WorkerStudyRunConfig {
 impl From<&crate::simulation::runner::study::StudyRunConfig> for WorkerStudyRunConfig {
     fn from(value: &crate::simulation::runner::study::StudyRunConfig) -> Self {
         let crate::simulation::runner::study::StudyRunConfig {
+            postprocess,
             instance_id,
             source_revision,
             analysis,
@@ -140,6 +143,7 @@ impl From<&crate::simulation::runner::study::StudyRunConfig> for WorkerStudyRunC
             constraints,
         } = value;
         Self {
+            postprocess: postprocess.clone(),
             instance_id: *instance_id,
             source_revision: *source_revision,
             analysis: WorkerAnalysisConfig::from(analysis),
@@ -156,6 +160,7 @@ impl From<&crate::simulation::runner::study::StudyRunConfig> for WorkerStudyRunC
 impl From<WorkerStudyRunConfig> for crate::simulation::runner::study::StudyRunConfig {
     fn from(value: WorkerStudyRunConfig) -> Self {
         let WorkerStudyRunConfig {
+            postprocess,
             instance_id,
             source_revision,
             analysis,
@@ -167,6 +172,7 @@ impl From<WorkerStudyRunConfig> for crate::simulation::runner::study::StudyRunCo
             constraints,
         } = value;
         Self {
+            postprocess,
             instance_id,
             source_revision,
             analysis: AnalysisConfig::from(analysis),
