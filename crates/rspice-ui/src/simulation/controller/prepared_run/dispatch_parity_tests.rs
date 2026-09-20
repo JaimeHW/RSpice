@@ -815,3 +815,92 @@ fn soa_directional_limits_survive_studio_preparation_worker_requests_and_saved_r
         retained.result_payload
     );
 }
+
+#[test]
+fn soa_temperature_limits_survive_studio_worker_execution_and_saved_results() {
+    use crate::services::{safety::SoAParameter, simulation_runner::SoaRuleConfig};
+    use crate::simulation::dialog::soa::{SoaConfig, SoaDialogState};
+    use crate::simulation::plan::AnalysisDraft;
+    use crate::simulation::runner::worker_contract::WorkerAnalysisSpec;
+    let config = SoaConfig {
+        stop_time: 1e-9,
+        step_time: 1e-10,
+        check_vgs_max: false,
+        check_vds_max: false,
+        check_vbe_max: false,
+        check_vce_max: false,
+        rules: vec![SoaRuleConfig {
+            parameter: SoAParameter::Temp,
+            max_value: rspice_core::constants::celsius_to_kelvin(-30.0),
+            devices: vec!["M1".into(), "Q1".into()],
+            models: vec![],
+        }],
+        ..Default::default()
+    };
+    let mut draft = SoaDialogState::from_config(&config);
+    assert_eq!(draft.rules[0].max_value, "-30");
+    assert!(draft.rules[0].is_temperature());
+    assert_eq!(draft.to_config().unwrap(), config);
+    draft.rules[0].max_value = "-273.15".into();
+    assert!(draft.to_config().unwrap_err().contains("-273.15"));
+    draft.rules[0].max_value = "-30".into();
+    let mut state = preflight_ready_state();
+    let id = only(&mut state, &[AnalysisKind::Soa])[0];
+    plan_mut(&mut state)
+        .edit(id, |body| *body = AnalysisDraft::Soa(draft))
+        .unwrap();
+    let queue = compiled_queue(&state).unwrap();
+    let mut declaration = queue[0].queued_analysis().clone();
+    let wire = WorkerAnalysisSpec::try_from(&declaration.spec).unwrap();
+    let decoded: WorkerAnalysisSpec =
+        serde_json::from_str(&serde_json::to_string(&wire).unwrap()).unwrap();
+    assert_eq!(AnalysisSpec::from(decoded.clone()), declaration.spec);
+    declaration.spec = AnalysisSpec::from(decoded);
+    let deck = crate::services::simulation_runner::splice_before_terminal_end_card(
+        "temperature limits\nVd d 0 1\nVg g 0 2\nVb b 0 .5\nM1 d g 0 0 mm TEMP=-40\nQ1 d b 0 qm TEMP=85\n.model mm NMOS LEVEL=1 VTO=1 KP=1m\n.model qm NPN IS=1e-16 BF=100\n.end\n",
+        &declaration.analysis_line,
+    );
+    let run = crate::simulation::runner::pvt_point_evidence::run_declaration(
+        &deck,
+        "Temperature SOA",
+        declaration,
+        27.0,
+        SavePolicy::RetainEngineProducedResults,
+        &[],
+    )
+    .unwrap();
+    let retained = &run.analyses[0];
+    assert!(retained.success, "{:?}", retained.error_message);
+    retained.validate_retained_evidence().unwrap();
+    let Some(crate::state::AnalysisResultPayload::Soa { evaluations, .. }) =
+        &retained.result_payload
+    else {
+        panic!("SOA evidence");
+    };
+    assert_eq!(evaluations.len(), 2);
+    for (device, kelvin) in [("M1", 233.15), ("Q1", 358.15)] {
+        let evaluation = evaluations.iter().find(|e| e.device_id == device).unwrap();
+        assert_eq!(evaluation.unit, "K");
+        assert_eq!(evaluation.limit_value, config.rules[0].max_value);
+        assert!((evaluation.worst_actual_value - kelvin).abs() < 1e-10);
+        let trace = retained
+            .waveforms
+            .iter()
+            .find(|w| w.name == format!("SOA_TEMP({device})"))
+            .unwrap();
+        assert!(trace.y.iter().all(|value| (value - kelvin).abs() < 1e-10));
+    }
+    let mut simulation = crate::state::SimulationState::default();
+    simulation.runs.push(run.clone());
+    simulation.next_run_id = 2;
+    simulation.active_run_idx = Some(0);
+    simulation.active_analysis_idx = Some(0);
+    let saved = crate::io::project_io::ProjectSimulationResults::from_state(&simulation);
+    let decoded: crate::io::project_io::ProjectSimulationResults =
+        serde_json::from_str(&serde_json::to_string(&saved).unwrap()).unwrap();
+    let reloaded = decoded.into_simulation_state().unwrap();
+    assert_eq!(
+        reloaded.runs[0].analyses[0].result_payload,
+        retained.result_payload
+    );
+}

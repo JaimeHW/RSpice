@@ -7,6 +7,7 @@ use super::*;
 #[serde(deny_unknown_fields)]
 pub struct SoaRuleConfig {
     pub parameter: SoAParameter,
+    /// Maximum stress in SI units; temperature is absolute kelvin.
     pub max_value: f64,
     #[serde(default)]
     pub devices: Vec<String>,
@@ -26,9 +27,10 @@ impl SoaRuleConfig {
                 | SoAParameter::Vbc
                 | SoAParameter::Id
                 | SoAParameter::Ic
+                | SoAParameter::Temp
         ) {
             return Err(
-                "SOA terminal rules support magnitudes and positive/negative limits for Vgs, Vds, Vgd, Vbe, Vce, Vbc, Id and Ic".into(),
+                "SOA terminal rules support magnitudes and positive/negative limits for Vgs, Vds, Vgd, Vbe, Vce, Vbc, Id and Ic, plus absolute operating temperature".into(),
             );
         }
         if !self.max_value.is_finite()
@@ -66,6 +68,15 @@ impl SoaRuleConfig {
 
 pub(super) fn applicable(element: &Element, parameter: SoAParameter) -> bool {
     let parameter = parameter.base_parameter();
+    if parameter == SoAParameter::Temp {
+        return matches!(
+            element.kind,
+            ElementKind::Mosfet { .. }
+                | ElementKind::Jfet { .. }
+                | ElementKind::Mesfet { .. }
+                | ElementKind::Bjt { .. }
+        );
+    }
     match element.kind {
         ElementKind::Mosfet { .. } | ElementKind::Jfet { .. } | ElementKind::Mesfet { .. } => {
             matches!(
@@ -158,24 +169,25 @@ pub(super) fn resolve(
                 definition.add_limit(SoALimit {
                     parameter,
                     max_value,
-                    unit: if matches!(
-                        parameter.base_parameter(),
-                        SoAParameter::Id | SoAParameter::Ic
-                    ) {
-                        "A"
-                    } else {
-                        "V"
+                    unit: match parameter.base_parameter() {
+                        SoAParameter::Id | SoAParameter::Ic => "A",
+                        SoAParameter::Temp => "K",
+                        _ => "V",
                     }
                     .into(),
-                    description: format!(
-                        "Maximum {} {} at authored terminals",
-                        parameter.base_parameter().stress_code(),
-                        match parameter.polarity() {
-                            Some(true) => "positive part",
-                            Some(false) => "negative part magnitude",
-                            None => "magnitude",
-                        }
-                    ),
+                    description: if parameter == SoAParameter::Temp {
+                        "Maximum absolute operating temperature used by the device model".into()
+                    } else {
+                        format!(
+                            "Maximum {} {} at authored terminals",
+                            parameter.base_parameter().stress_code(),
+                            match parameter.polarity() {
+                                Some(true) => "positive part",
+                                Some(false) => "negative part magnitude",
+                                None => "magnitude",
+                            }
+                        )
+                    },
                 });
             }
             resolved.push((index, definition));
@@ -185,10 +197,11 @@ pub(super) fn resolve(
     Ok(resolved)
 }
 
-pub(super) fn current_parameter(parameter: SoAParameter) -> Option<&'static str> {
+pub(super) fn device_parameter(parameter: SoAParameter) -> Option<&'static str> {
     match parameter.base_parameter() {
         SoAParameter::Id => Some("id"),
         SoAParameter::Ic => Some("ic"),
+        SoAParameter::Temp => Some("temp"),
         _ => None,
     }
 }

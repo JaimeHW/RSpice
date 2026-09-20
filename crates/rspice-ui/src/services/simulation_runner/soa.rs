@@ -223,7 +223,7 @@ pub fn run_soa_analysis_with_config_and_source_path_and_abort(
         .collect();
     for (index, definition) in &resolved {
         for limit in &definition.limits {
-            if let Some(parameter) = rules::current_parameter(limit.parameter) {
+            if let Some(parameter) = rules::device_parameter(limit.parameter) {
                 let signal = rspice_core::netlist::SaveSignal::DeviceParam {
                     device: flattened.elements[*index].name.clone(),
                     param: parameter.into(),
@@ -256,23 +256,23 @@ pub fn run_soa_analysis_with_config_and_source_path_and_abort(
         abort,
     )
     .map_err(ServiceRunError::from)?;
-    let mut currents = HashMap::new();
+    let mut observations = HashMap::new();
     for (element_index, definition) in &resolved {
         let element = &flattened.elements[*element_index];
         for limit in &definition.limits {
-            if let Some(parameter) = rules::current_parameter(limit.parameter) {
-                if currents.contains_key(&(*element_index, limit.parameter.base_parameter())) {
+            if let Some(parameter) = rules::device_parameter(limit.parameter) {
+                if observations.contains_key(&(*element_index, limit.parameter.base_parameter())) {
                     continue;
                 }
                 ensure_not_aborted(abort)?;
                 let samples = result.try_device_op_waveform_named(&element.name, parameter)
                     .ok_or_else(|| ServiceRunError::Failure(format!(
-                        "SOA requires accepted terminal current {}({}); the device returned no trace",
+                        "SOA requires accepted device observation {}({}); the device returned no trace",
                         parameter, element.name
                     )))?;
                 if samples.len() != result.time.len() {
                     return Err(ServiceRunError::Failure(format!(
-                        "SOA current trace for '{}' has incomplete sample coverage",
+                        "SOA device observation for '{}' has incomplete sample coverage",
                         element.name
                     )));
                 }
@@ -281,13 +281,25 @@ pub fn run_soa_analysis_with_config_and_source_path_and_abort(
                     poll_periodically(abort, index)?;
                     if !sample.is_finite() {
                         return Err(ServiceRunError::Failure(format!(
-                            "SOA current trace for '{}' contains a non-finite sample",
+                            "SOA device observation for '{}' contains a non-finite sample",
                             element.name
                         )));
                     }
+                    let sample = if limit.parameter == SoAParameter::Temp {
+                        let kelvin = rspice_core::constants::celsius_to_kelvin(sample);
+                        if !kelvin.is_finite() || kelvin <= 0.0 {
+                            return Err(ServiceRunError::Failure(format!(
+                                "SOA temperature for '{}' must be above absolute zero",
+                                element.name
+                            )));
+                        }
+                        kelvin
+                    } else {
+                        sample
+                    };
                     values.push(sample);
                 }
-                currents.insert((*element_index, limit.parameter.base_parameter()), values);
+                observations.insert((*element_index, limit.parameter.base_parameter()), values);
             }
         }
     }
@@ -334,13 +346,13 @@ pub fn run_soa_analysis_with_config_and_source_path_and_abort(
                         sample_node_waveform(&node_waveforms, &element.nodes[positive], idx)?
                             - sample_node_waveform(&node_waveforms, &element.nodes[reference], idx)?
                     } else {
-                        currents
+                        observations
                             .get(&(*element_index, limit.parameter.base_parameter()))
                             .and_then(|trace| trace.get(idx + first))
                             .copied()
                             .ok_or_else(|| {
                                 ServiceRunError::Failure(format!(
-                                    "SOA current rule for '{}' is missing an accepted sample",
+                                    "SOA device rule for '{}' is missing an accepted sample",
                                     element.name
                                 ))
                             })?

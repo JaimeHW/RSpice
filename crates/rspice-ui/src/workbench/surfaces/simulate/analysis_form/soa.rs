@@ -1,5 +1,5 @@
 //! The safe-operating-area form: the transient window the checks are run
-//! over, default voltage limits, and scoped voltage/current rules.
+//! over, default voltage limits, and scoped voltage/current/temperature rules.
 //!
 //! Each bound is greyed by the check that reads it, so a limit can never be
 //! typed into a check that is off.
@@ -72,7 +72,7 @@ pub(super) fn fields(
     input_row_enabled(ui, "Max Vbe", &mut setup.max_vbe, setup.check_vbe_max);
     switch_row(ui, "Check Vce", &mut setup.check_vce_max);
     input_row_enabled(ui, "Max Vce", &mut setup.max_vce, setup.check_vce_max);
-    sub_header(ui, "Scoped terminal rules");
+    sub_header(ui, "Scoped device rules");
     field_note(
         ui,
         "Extra rules override matching defaults within their scope. Positive/negative limits use authored terminal order and replace only that side of a default magnitude limit. Empty scope selects all applicable devices; repeated explicit constraints are rejected.",
@@ -80,6 +80,10 @@ pub(super) fn fields(
     field_note(
         ui,
         "Vgs = V(g) − V(s), Vds = V(d) − V(s), Vgd = V(g) − V(d); BJT voltages follow the same named-terminal order. Id/Ic are positive into drain/collector, including accepted transient displacement current. Enter a nonnegative magnitude for directional limits; zero forbids that polarity.",
+    );
+    field_note(
+        ui,
+        "Temperature limits are entered in °C; results use absolute kelvin. The check observes the temperature used by the model, including self-heating only where the model implements it.",
     );
     let mut remove = None;
     for (index, rule) in setup.rules.iter_mut().enumerate() {
@@ -93,7 +97,9 @@ pub(super) fn fields(
             );
             input_row(
                 ui,
-                if rule.is_current() {
+                if rule.is_temperature() {
+                    "Maximum temperature (°C)"
+                } else if rule.is_current() {
                     "Limit magnitude (A)"
                 } else {
                     "Limit magnitude (V)"
@@ -110,7 +116,7 @@ pub(super) fn fields(
     if let Some(index) = remove {
         setup.rules.remove(index);
     }
-    if action_line(ui, "+ Add terminal rule") {
+    if action_line(ui, "+ Add device rule") {
         setup.rules.push(Default::default());
     }
 }

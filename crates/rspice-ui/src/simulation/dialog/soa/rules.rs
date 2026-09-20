@@ -1,10 +1,10 @@
-//! Persisted authoring rows for scoped SOA voltage and current limits.
+//! Persisted authoring rows for scoped SOA voltage, current and temperature limits.
 
 use super::*;
 use crate::services::safety::SoAParameter;
 use crate::services::simulation_runner::SoaRuleConfig;
 
-const PARAMETERS: [SoAParameter; 24] = [
+const PARAMETERS: [SoAParameter; 25] = [
     SoAParameter::Vgs,
     SoAParameter::Vds,
     SoAParameter::Vgd,
@@ -29,6 +29,7 @@ const PARAMETERS: [SoAParameter; 24] = [
     SoAParameter::IdNegative,
     SoAParameter::IcPositive,
     SoAParameter::IcNegative,
+    SoAParameter::Temp,
 ];
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -52,7 +53,7 @@ impl Default for SoaRuleDraft {
 }
 
 impl SoaRuleDraft {
-    pub const PARAMETER_LABELS: [&'static str; 24] = [
+    pub const PARAMETER_LABELS: [&'static str; 25] = [
         "Vgs",
         "Vds",
         "Vgd",
@@ -77,7 +78,12 @@ impl SoaRuleDraft {
         "Id negative",
         "Ic positive",
         "Ic negative",
+        "Operating temperature",
     ];
+    pub fn is_temperature(&self) -> bool {
+        PARAMETERS.get(self.parameter) == Some(&SoAParameter::Temp)
+    }
+
     pub fn is_current(&self) -> bool {
         PARAMETERS
             .get(self.parameter)
@@ -90,7 +96,11 @@ impl SoaRuleDraft {
                 .iter()
                 .position(|parameter| *parameter == config.parameter)
                 .unwrap_or(usize::MAX),
-            max_value: config.max_value.to_string(),
+            max_value: if config.parameter == SoAParameter::Temp {
+                rspice_core::constants::kelvin_to_celsius(config.max_value).to_string()
+            } else {
+                config.max_value.to_string()
+            },
             devices: config.devices.join(" "),
             models: config.models.join(" "),
         }
@@ -101,10 +111,20 @@ impl SoaRuleDraft {
             .get(self.parameter)
             .copied()
             .ok_or("Unknown SOA rule parameter")?;
+        let authored = parse_si_value(&self.max_value)
+            .map_err(|error| format!("Invalid SOA rule limit: {error}"))?;
+        let maximum = if parameter == SoAParameter::Temp {
+            let kelvin = rspice_core::constants::celsius_to_kelvin(authored);
+            if !kelvin.is_finite() || kelvin <= 0.0 {
+                return Err("SOA maximum temperature must be above -273.15 °C".into());
+            }
+            kelvin
+        } else {
+            authored
+        };
         let config = SoaRuleConfig {
             parameter,
-            max_value: parse_si_value(&self.max_value)
-                .map_err(|error| format!("Invalid SOA rule limit: {error}"))?,
+            max_value: maximum,
             devices: self.devices.split_whitespace().map(str::to_owned).collect(),
             models: self.models.split_whitespace().map(str::to_owned).collect(),
         };
