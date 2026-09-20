@@ -96,11 +96,7 @@ impl SimulationController {
             AnalysisSpec::Qpac { .. } => Ok(spec.qpac_card()?.to_spice()),
             AnalysisSpec::Qpxf { .. } => Ok(spec.qpxf_card()?.to_spice()),
             AnalysisSpec::Qpnoise { .. } => Ok(spec.qpnoise_card()?.to_spice()),
-            AnalysisSpec::Reliability { .. } => Err(format!(
-                "{} is configured but cannot produce an engine directive: {}",
-                spec.run_type().display_name(),
-                manifest_spec_execution_blocker(spec)
-            )),
+            AnalysisSpec::Reliability { .. } => spec.reliability_plan_statement(),
             _ => self
                 .analysis_spec_to_config(state, spec)
                 .map(|cfg| cfg.to_spice()),
@@ -670,43 +666,9 @@ impl SimulationController {
     }
 }
 
-/// Why this specification cannot reach the engine.
-///
-/// Deliberately delegates to [`AnalysisKind::execution_blocker`] rather than
-/// restating the reason. The catalog row, the editor banner, the insert
-/// refusal and this dispatch refusal are four places a reader meets the same
-/// fact, and they were drifting: the same unavailable solver was described
-/// two different ways depending on which guard the reader hit first. Whoever
-/// unblocks a kind now edits exactly one string.
 /// How a keyword card spells a switch the engine reads with `card_bool`.
 const fn yes_or_no(value: bool) -> &'static str {
     if value { "yes" } else { "no" }
-}
-
-fn manifest_spec_execution_blocker(spec: &AnalysisSpec) -> &'static str {
-    const UNMAPPED: &str = "the selected engine capability is unavailable";
-    let Some(kind) = manifest_spec_kind(spec) else {
-        return UNMAPPED;
-    };
-    kind.execution_blocker().unwrap_or(UNMAPPED)
-}
-
-/// The catalog kind a manifest-only specification came from.
-///
-/// Only the kinds that can be blocked need an answer here; every other
-/// specification reaches the engine and never asks.
-const fn manifest_spec_kind(spec: &AnalysisSpec) -> Option<crate::simulation::plan::AnalysisKind> {
-    use crate::simulation::plan::AnalysisKind;
-    Some(match spec {
-        AnalysisSpec::Qpss { .. } => AnalysisKind::Qpss,
-        AnalysisSpec::Hbsp { .. } => AnalysisKind::Hbsp,
-        AnalysisSpec::Hbnoise { .. } => AnalysisKind::Hbnoise,
-        AnalysisSpec::Qpac { .. } => AnalysisKind::Qpac,
-        AnalysisSpec::Qpnoise { .. } => AnalysisKind::Qpnoise,
-        AnalysisSpec::Qpxf { .. } => AnalysisKind::Qpxf,
-        AnalysisSpec::Reliability { .. } => AnalysisKind::Reliability,
-        _ => return None,
-    })
 }
 
 #[cfg(test)]
@@ -920,55 +882,6 @@ mod tests {
             .build_pstb_command(&state)
             .expect("a placed probe reaches the deck");
         assert!(directive.contains("probe=VLOOP2"), "{directive}");
-    }
-
-    /// The reader meets this fact in four places — catalog disposition, the
-    /// editor banner, the insert refusal, and this dispatch refusal. They
-    /// must all be quoting the same sentence.
-    #[test]
-    fn dispatch_refusal_quotes_the_catalog_blocker_verbatim() {
-        use crate::simulation::plan::AnalysisKind;
-        for kind in AnalysisKind::ALL {
-            let Some(expected) = kind.execution_blocker() else {
-                continue;
-            };
-            let draft = crate::simulation::plan::AnalysisDraft::for_kind(kind);
-            let spec = SimulationController::new()
-                .build_manifest_preview_spec(&AppState::default(), &draft)
-                .expect("blocked kinds still build a transportable specification")
-                .expect("blocked kinds are manifest kinds and have a typed specification");
-
-            assert_eq!(
-                manifest_spec_execution_blocker(&spec),
-                expected,
-                "{} states its blocker differently at dispatch than in the catalog",
-                kind.label()
-            );
-        }
-    }
-
-    /// Every blocked kind must be reachable from its specification, or the
-    /// refusal quietly degrades to the generic sentence.
-    #[test]
-    fn every_blocked_kind_is_recoverable_from_its_specification() {
-        use crate::simulation::plan::AnalysisKind;
-        for kind in AnalysisKind::ALL {
-            if kind.execution_blocker().is_none() {
-                continue;
-            }
-            let draft = crate::simulation::plan::AnalysisDraft::for_kind(kind);
-            let spec = SimulationController::new()
-                .build_manifest_preview_spec(&AppState::default(), &draft)
-                .expect("specification builds")
-                .expect("blocked kinds have a typed specification");
-
-            assert_eq!(
-                manifest_spec_kind(&spec),
-                Some(kind),
-                "{} has no specification-to-kind mapping",
-                kind.label()
-            );
-        }
     }
 
     #[test]

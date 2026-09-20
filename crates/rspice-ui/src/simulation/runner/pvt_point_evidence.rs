@@ -18,7 +18,7 @@ use crate::simulation::execution::{
     ExecutionPermitIssuer, ExecutionTargetCapabilities, PreparedRunSnapshot, PreparedTask,
     RunSourceReceipt, SavePolicy, SnapshotParts, TouchstoneExportPolicy,
 };
-use crate::simulation::multi_run::{AnalysisRunType, AnalysisSpec};
+use crate::simulation::multi_run::AnalysisSpec;
 use crate::state::{
     AnalysisResult, AnalysisResultProvenance, AnalysisResultSourceDomain, AnalysisType,
     SimulationRun, SimulationRunIntent, SimulationRunProvenance,
@@ -266,12 +266,5 @@ pub(in crate::simulation) fn run_declaration(
 }
 
 fn analysis_type_for(spec: &AnalysisSpec) -> AnalysisType {
-    match spec.run_type() {
-        AnalysisRunType::DcSweep => AnalysisType::DcSweep,
-        AnalysisRunType::Transient => AnalysisType::Transient,
-        AnalysisRunType::Ac => AnalysisType::Ac,
-        AnalysisRunType::Corner => AnalysisType::Corner,
-        AnalysisRunType::Parametric => AnalysisType::Parametric,
-        _ => AnalysisType::DcOp,
-    }
+    crate::simulation::execution::canonical_analysis_kind(spec).result_analysis_type()
 }

@@ -259,12 +259,7 @@ impl CanonicalAnalysisKind {
     /// differently.
     #[must_use]
     pub const fn execution_blocker(self) -> Option<&'static str> {
-        match self {
-            Self::Reliability => Some(
-                "reliability circuit stress extraction and aged re-simulation are not yet connected to imported aging-model packs",
-            ),
-            _ => None,
-        }
+        None
     }
 
     /// The result family a task of this kind produces.
@@ -395,6 +390,7 @@ mod tests {
         assert_eq!(
             runnable,
             vec![
+                CanonicalAnalysisKind::Reliability,
                 CanonicalAnalysisKind::Envelope,
                 CanonicalAnalysisKind::Qpss,
                 CanonicalAnalysisKind::Hbsp,
@@ -412,7 +408,7 @@ mod tests {
             .into_iter()
             .filter(|kind| kind.execution_blocker().is_some())
             .collect::<Vec<_>>();
-        assert_eq!(blocked, vec![CanonicalAnalysisKind::Reliability]);
+        assert!(blocked.is_empty());
         assert!(blocked.into_iter().all(|kind| {
             kind.availability() == AnalysisAvailability::Preview
                 && kind

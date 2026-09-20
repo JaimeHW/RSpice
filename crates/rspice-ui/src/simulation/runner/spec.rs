@@ -106,7 +106,8 @@ pub(super) fn run_spec_request_with_environment(
             frequencies,
             abort_flag,
         ),
-        AnalysisSpec::Optimization { .. }
+        AnalysisSpec::Reliability { .. }
+        | AnalysisSpec::Optimization { .. }
         | AnalysisSpec::Soa { .. }
         | AnalysisSpec::DcMismatch { .. } => {
             device::run_device_spec(spec, netlist, source_path, abort_flag)
@@ -140,16 +141,6 @@ pub(super) fn run_spec_request_with_environment(
             dependencies,
             abort_flag,
         ),
-        blocked @ AnalysisSpec::Reliability { .. } => {
-            let kind = crate::simulation::execution::canonical_analysis_kind(&blocked);
-            let reason = kind
-                .execution_blocker()
-                .unwrap_or("the selected execution capability is unavailable in this engine build");
-            Err(SimulationError::InvalidConfig(format!(
-                "{} execution is unavailable; the request was rejected before dispatch: {reason}",
-                blocked.run_type().display_name()
-            )))
-        }
         AnalysisSpec::LegacyDcOp
         | AnalysisSpec::DcOp { .. }
         | AnalysisSpec::DcSweep { .. }
@@ -503,17 +494,6 @@ mod tests {
                 z0: Some(50.0),
             },
         ]
-    }
-
-    fn blocked_preview_specs() -> Vec<AnalysisSpec> {
-        vec![AnalysisSpec::Reliability {
-            study: None,
-            target_years: vec![1.0, 10.0],
-            enable_hci: true,
-            enable_nbti: true,
-            enable_em: false,
-            min_stress_voltage: 0.1,
-        }]
     }
 
     struct AbortOnPoll {
@@ -1240,78 +1220,6 @@ R2 out 0 1k\n\
         assert_eq!(frequencies.len(), 2);
         assert!(waveforms.contains_key("S11"));
         assert!(waveforms.contains_key("S21[k=+0,m=+0]"));
-    }
-
-    /// A kind with no solver in this build is refused before the engine is
-    /// asked, and refused by its own name.
-    ///
-    /// The fixture is taken from [`blocked_preview_specs`] rather than
-    /// spelled here. It used to be DC mismatch, which now runs; taking the
-    /// first still-blocked kind means this test keeps asking the question it
-    /// was written to ask instead of having to be rewritten each time a kind
-    /// gains a solver.
-    #[test]
-    fn unavailable_manifest_spec_is_rejected_before_engine_dispatch() {
-        let spec = blocked_preview_specs()
-            .into_iter()
-            .next()
-            .expect("this build still has a blocked preview kind");
-        let display_name = spec.run_type().display_name().to_owned();
-        let result = run_spec_request(
-            &EngineBridge::new(),
-            spec,
-            SpecExecutionOptions::default(),
-            "blocked preview\nV1 out 0 1\n.end\n",
-            None,
-            &ResolvedExecutionDependencies::default(),
-            &rspice_core::abort_signal::NoAbort,
-        );
-        match result {
-            Err(SimulationError::InvalidConfig(message)) => {
-                assert!(message.contains(&display_name), "{message}");
-                assert!(message.contains("unavailable"), "{message}");
-                assert!(message.contains("rejected before dispatch"), "{message}");
-            }
-            other => panic!("expected fail-closed capability rejection, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn every_blocked_preview_spec_fails_closed_with_its_canonical_reason() {
-        let mut seen = Vec::new();
-        for spec in blocked_preview_specs() {
-            let kind = crate::simulation::execution::canonical_analysis_kind(&spec);
-            let expected = kind
-                .execution_blocker()
-                .unwrap_or_else(|| panic!("{kind:?} must declare why it is blocked"));
-            assert!(
-                spec.validate().is_ok(),
-                "{kind:?} fixture must reach dispatch"
-            );
-
-            let result = run_spec_request(
-                &EngineBridge::new(),
-                spec,
-                SpecExecutionOptions::default(),
-                "blocked preview exact reason\nV1 out 0 1\n.end\n",
-                None,
-                &ResolvedExecutionDependencies::default(),
-                &rspice_core::abort_signal::NoAbort,
-            );
-            match result {
-                Err(SimulationError::InvalidConfig(message)) => {
-                    assert!(message.contains(expected), "{kind:?}: {message}");
-                    assert!(message.contains("rejected before dispatch"), "{message}");
-                }
-                other => panic!("{kind:?} must fail closed, got {other:?}"),
-            }
-            seen.push(kind);
-        }
-
-        assert_eq!(
-            seen,
-            vec![crate::state::CanonicalAnalysisKind::Reliability,]
-        );
     }
 
     /// A resistor divider run with device noise on, twice from the same seed
@@ -2283,12 +2191,6 @@ R2 out 0 {r2v}\n";
         assert_eq!(
             crate::state::CanonicalAnalysisKind::DcMismatch.execution_blocker(),
             None
-        );
-        assert!(
-            !blocked_preview_specs()
-                .iter()
-                .any(|spec| matches!(spec, AnalysisSpec::DcMismatch { .. })),
-            "a runnable kind cannot also be on the blocked list"
         );
         let error = run_dc_mismatch(
             "no statistics\nV1 in 0 1\nR1 in out 1k\nR2 out 0 2k\n.end\n",

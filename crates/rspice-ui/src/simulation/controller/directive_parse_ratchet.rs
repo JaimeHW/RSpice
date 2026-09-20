@@ -69,9 +69,11 @@ const KINDS_THAT_EMIT_A_DIRECTIVE: usize = 31;
 /// Each entry is `{label} — {the refusal the emitter returned}`, so the
 /// exemption is the emitter's own words rather than a second account of them.
 ///
-/// The envelope fixture now binds a real source, so every unblocked kind
-/// reaches a directive. Blocked kinds remain excluded by their catalogue policy.
-const KINDS_THAT_STATE_NO_DIRECTIVE: &[&str] = &[];
+/// The reliability default cannot invent calibration; an explicitly configured
+/// mission is covered by the prepared dispatch integration test.
+const KINDS_THAT_STATE_NO_DIRECTIVE: &[&str] = &[
+    "Reliability & aging — Reliability execution is unavailable without an imported calibrated model pack and explicit mission bindings; request rejected before dispatch",
+];
 
 /// The directive `kind` writes from its default draft, or why it writes none.
 ///
