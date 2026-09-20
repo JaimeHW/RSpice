@@ -833,6 +833,18 @@ pub enum SoaParameterEvidence {
     DrainCurrentNegative,
     CollectorCurrentPositive,
     CollectorCurrentNegative,
+    GateCurrent,
+    GateCurrentPositive,
+    GateCurrentNegative,
+    SourceCurrent,
+    SourceCurrentPositive,
+    SourceCurrentNegative,
+    BaseCurrent,
+    BaseCurrentPositive,
+    BaseCurrentNegative,
+    EmitterCurrent,
+    EmitterCurrentPositive,
+    EmitterCurrentNegative,
 }
 
 impl SoaParameterEvidence {
@@ -855,6 +867,14 @@ impl SoaParameterEvidence {
                 | Self::DrainCurrentNegative
                 | Self::CollectorCurrentPositive
                 | Self::CollectorCurrentNegative
+                | Self::GateCurrentPositive
+                | Self::GateCurrentNegative
+                | Self::SourceCurrentPositive
+                | Self::SourceCurrentNegative
+                | Self::BaseCurrentPositive
+                | Self::BaseCurrentNegative
+                | Self::EmitterCurrentPositive
+                | Self::EmitterCurrentNegative
         )
     }
 }

@@ -46,6 +46,18 @@ pub enum SoAParameter {
     IdNegative,
     IcPositive,
     IcNegative,
+    Ig,
+    IgPositive,
+    IgNegative,
+    Is,
+    IsPositive,
+    IsNegative,
+    Ib,
+    IbPositive,
+    IbNegative,
+    Ie,
+    IePositive,
+    IeNegative,
 }
 
 impl SoAParameter {
@@ -79,6 +91,18 @@ impl SoAParameter {
             Self::IdNegative => "ID_NEG",
             Self::IcPositive => "IC_POS",
             Self::IcNegative => "IC_NEG",
+            Self::Ig => "IG",
+            Self::IgPositive => "IG_POS",
+            Self::IgNegative => "IG_NEG",
+            Self::Is => "IS",
+            Self::IsPositive => "IS_POS",
+            Self::IsNegative => "IS_NEG",
+            Self::Ib => "IB",
+            Self::IbPositive => "IB_POS",
+            Self::IbNegative => "IB_NEG",
+            Self::Ie => "IE",
+            Self::IePositive => "IE_POS",
+            Self::IeNegative => "IE_NEG",
         }
     }
     /// The unsigned terminal quantity underlying a directional constraint.
@@ -92,6 +116,10 @@ impl SoAParameter {
             Self::VbcPositive | Self::VbcNegative => Self::Vbc,
             Self::IdPositive | Self::IdNegative => Self::Id,
             Self::IcPositive | Self::IcNegative => Self::Ic,
+            Self::IgPositive | Self::IgNegative => Self::Ig,
+            Self::IsPositive | Self::IsNegative => Self::Is,
+            Self::IbPositive | Self::IbNegative => Self::Ib,
+            Self::IePositive | Self::IeNegative => Self::Ie,
             other => other,
         }
     }
@@ -106,7 +134,11 @@ impl SoAParameter {
             | Self::VcePositive
             | Self::VbcPositive
             | Self::IdPositive
-            | Self::IcPositive => Some(true),
+            | Self::IcPositive
+            | Self::IgPositive
+            | Self::IsPositive
+            | Self::IbPositive
+            | Self::IePositive => Some(true),
             Self::VgsNegative
             | Self::VdsNegative
             | Self::VgdNegative
@@ -114,7 +146,11 @@ impl SoAParameter {
             | Self::VceNegative
             | Self::VbcNegative
             | Self::IdNegative
-            | Self::IcNegative => Some(false),
+            | Self::IcNegative
+            | Self::IgNegative
+            | Self::IsNegative
+            | Self::IbNegative
+            | Self::IeNegative => Some(false),
             _ => None,
         }
     }
@@ -129,8 +165,21 @@ impl SoAParameter {
             Self::Vbc => Some((Self::VbcPositive, Self::VbcNegative)),
             Self::Id => Some((Self::IdPositive, Self::IdNegative)),
             Self::Ic => Some((Self::IcPositive, Self::IcNegative)),
+            Self::Ig => Some((Self::IgPositive, Self::IgNegative)),
+            Self::Is => Some((Self::IsPositive, Self::IsNegative)),
+            Self::Ib => Some((Self::IbPositive, Self::IbNegative)),
+            Self::Ie => Some((Self::IePositive, Self::IeNegative)),
+
             _ => None,
         }
+    }
+
+    /// True for an authored electrical terminal current, in amperes.
+    pub const fn is_current(self) -> bool {
+        matches!(
+            self.base_parameter(),
+            Self::Id | Self::Ic | Self::Ig | Self::Is | Self::Ib | Self::Ie
+        )
     }
 
     /// Input must be finite; polarity follows authored terminal order, not model type.

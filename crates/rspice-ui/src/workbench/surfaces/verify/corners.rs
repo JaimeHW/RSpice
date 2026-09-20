@@ -872,6 +872,18 @@ pub(super) fn soa_parameter_display(parameter: crate::state::SoaParameterEvidenc
         SoaParameterEvidence::DrainCurrentNegative => "Id − max",
         SoaParameterEvidence::CollectorCurrentPositive => "Ic + max",
         SoaParameterEvidence::CollectorCurrentNegative => "Ic − max",
+        SoaParameterEvidence::GateCurrent => "Ig max",
+        SoaParameterEvidence::GateCurrentPositive => "Ig + max",
+        SoaParameterEvidence::GateCurrentNegative => "Ig − max",
+        SoaParameterEvidence::SourceCurrent => "Is max",
+        SoaParameterEvidence::SourceCurrentPositive => "Is + max",
+        SoaParameterEvidence::SourceCurrentNegative => "Is − max",
+        SoaParameterEvidence::BaseCurrent => "Ib max",
+        SoaParameterEvidence::BaseCurrentPositive => "Ib + max",
+        SoaParameterEvidence::BaseCurrentNegative => "Ib − max",
+        SoaParameterEvidence::EmitterCurrent => "Ie max",
+        SoaParameterEvidence::EmitterCurrentPositive => "Ie + max",
+        SoaParameterEvidence::EmitterCurrentNegative => "Ie − max",
     }
 }
 

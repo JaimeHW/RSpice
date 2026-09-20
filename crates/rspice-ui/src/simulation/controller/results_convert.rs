@@ -1568,6 +1568,35 @@ fn retain_soa_parameter(parameter: crate::services::safety::SoAParameter) -> Soa
         crate::services::safety::SoAParameter::Vbc => SoaParameterEvidence::BaseCollectorVoltage,
         crate::services::safety::SoAParameter::Id => SoaParameterEvidence::DrainCurrent,
         crate::services::safety::SoAParameter::Ic => SoaParameterEvidence::CollectorCurrent,
+        crate::services::safety::SoAParameter::Ig => SoaParameterEvidence::GateCurrent,
+        crate::services::safety::SoAParameter::IgPositive => {
+            SoaParameterEvidence::GateCurrentPositive
+        }
+        crate::services::safety::SoAParameter::IgNegative => {
+            SoaParameterEvidence::GateCurrentNegative
+        }
+        crate::services::safety::SoAParameter::Is => SoaParameterEvidence::SourceCurrent,
+        crate::services::safety::SoAParameter::IsPositive => {
+            SoaParameterEvidence::SourceCurrentPositive
+        }
+        crate::services::safety::SoAParameter::IsNegative => {
+            SoaParameterEvidence::SourceCurrentNegative
+        }
+        crate::services::safety::SoAParameter::Ib => SoaParameterEvidence::BaseCurrent,
+        crate::services::safety::SoAParameter::IbPositive => {
+            SoaParameterEvidence::BaseCurrentPositive
+        }
+        crate::services::safety::SoAParameter::IbNegative => {
+            SoaParameterEvidence::BaseCurrentNegative
+        }
+        crate::services::safety::SoAParameter::Ie => SoaParameterEvidence::EmitterCurrent,
+        crate::services::safety::SoAParameter::IePositive => {
+            SoaParameterEvidence::EmitterCurrentPositive
+        }
+        crate::services::safety::SoAParameter::IeNegative => {
+            SoaParameterEvidence::EmitterCurrentNegative
+        }
+
         crate::services::safety::SoAParameter::Pdiss => SoaParameterEvidence::PowerDissipation,
         crate::services::safety::SoAParameter::Temp => SoaParameterEvidence::Temperature,
         crate::services::safety::SoAParameter::VgsPositive => {

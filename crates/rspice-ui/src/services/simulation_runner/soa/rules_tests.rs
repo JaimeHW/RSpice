@@ -247,3 +247,41 @@ fn soa_directional_overrides_preserve_the_other_default_side_and_explicit_bounds
             .contains("overlapping")
     );
 }
+
+#[test]
+fn soa_terminal_current_probes_capture_advanced_mos_charging_current() {
+    for model in ["LEVEL=49", "LEVEL=54 VERSION=4.8"] {
+        let deck = format!(
+            "Advanced MOS charge stress\nVd d 0 0\nVg g 0 PWL(0 -1 1n -1 6n -0.5 10n -0.5)\nX1 d g CELL\n.subckt CELL d g\nM1 d g 0 0 NM W=1u L=1u\n.model NM NMOS {model} CGDO=1u CGSO=0\n.ends CELL\n.end\n"
+        );
+        let cfg = config(vec![
+            rule(SoAParameter::IdNegative, 50e-6, &["X1:M1"], &[]),
+            rule(SoAParameter::IdPositive, 50e-6, &["X1:M1"], &[]),
+            rule(SoAParameter::IgPositive, 50e-6, &["X1:M1"], &[]),
+            rule(SoAParameter::Is, 50e-6, &["X1:M1"], &[]),
+        ]);
+        let data =
+            run_soa_analysis_with_config_and_source_path_and_abort(&deck, &cfg, None, &NoAbort)
+                .unwrap();
+        for parameter in [SoAParameter::IdNegative, SoAParameter::IgPositive] {
+            let evidence = data
+                .evaluations
+                .iter()
+                .find(|e| e.parameter == parameter)
+                .unwrap();
+            assert!(
+                evidence.worst_actual_value > 90e-6 && evidence.worst_actual_value < 120e-6,
+                "{model}: {evidence:?}"
+            );
+            assert_eq!(evidence.sample_count, data.time.len() as u64);
+            assert_eq!(evidence.unit, "A");
+        }
+        // The off channel must not masquerade as the 100 uA overlap current.
+        let opposite = data
+            .evaluations
+            .iter()
+            .find(|e| e.parameter == SoAParameter::IdPositive)
+            .unwrap();
+        assert!(opposite.worst_actual_value < 1e-7, "{model}: {opposite:?}");
+    }
+}

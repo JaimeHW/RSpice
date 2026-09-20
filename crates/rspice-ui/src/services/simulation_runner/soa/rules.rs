@@ -27,11 +27,15 @@ impl SoaRuleConfig {
                 | SoAParameter::Vbc
                 | SoAParameter::Id
                 | SoAParameter::Ic
+                | SoAParameter::Ig
+                | SoAParameter::Is
+                | SoAParameter::Ib
+                | SoAParameter::Ie
                 | SoAParameter::Temp
                 | SoAParameter::Pdiss
         ) {
             return Err(
-                "SOA rules support magnitudes and positive/negative limits for Vgs, Vds, Vgd, Vbe, Vce, Vbc, Id and Ic, plus conductive power and absolute operating temperature".into(),
+                "SOA rules support magnitudes and positive/negative limits for Vgs, Vds, Vgd, Vbe, Vce, Vbc, Id, Ig, Is, Ic, Ib and Ie, plus conductive power and absolute operating temperature".into(),
             );
         }
         if !self.max_value.is_finite()
@@ -82,13 +86,23 @@ pub(super) fn applicable(element: &Element, parameter: SoAParameter) -> bool {
         ElementKind::Mosfet { .. } | ElementKind::Jfet { .. } | ElementKind::Mesfet { .. } => {
             matches!(
                 parameter,
-                SoAParameter::Vgs | SoAParameter::Vds | SoAParameter::Vgd | SoAParameter::Id
+                SoAParameter::Vgs
+                    | SoAParameter::Vds
+                    | SoAParameter::Vgd
+                    | SoAParameter::Id
+                    | SoAParameter::Ig
+                    | SoAParameter::Is
             )
         }
         ElementKind::Bjt { .. } => {
             matches!(
                 parameter,
-                SoAParameter::Vbe | SoAParameter::Vce | SoAParameter::Vbc | SoAParameter::Ic
+                SoAParameter::Vbe
+                    | SoAParameter::Vce
+                    | SoAParameter::Vbc
+                    | SoAParameter::Ic
+                    | SoAParameter::Ib
+                    | SoAParameter::Ie
             )
         }
         _ => false,
@@ -171,7 +185,7 @@ pub(super) fn resolve(
                     parameter,
                     max_value,
                     unit: match parameter.base_parameter() {
-                        SoAParameter::Id | SoAParameter::Ic => "A",
+                        p if p.is_current() => "A",
                         SoAParameter::Temp => "K",
                         SoAParameter::Pdiss => "W",
                         _ => "V",
@@ -203,8 +217,6 @@ pub(super) fn resolve(
 
 pub(super) fn device_parameter(parameter: SoAParameter) -> Option<&'static str> {
     match parameter.base_parameter() {
-        SoAParameter::Id => Some("id"),
-        SoAParameter::Ic => Some("ic"),
         SoAParameter::Temp => Some("temp"),
         SoAParameter::Pdiss => Some("power"),
         _ => None,
@@ -216,6 +228,16 @@ pub(super) fn terminal_pair(parameter: SoAParameter) -> Option<(usize, usize)> {
         SoAParameter::Vgs | SoAParameter::Vbe => Some((1, 2)),
         SoAParameter::Vds | SoAParameter::Vce => Some((0, 2)),
         SoAParameter::Vgd | SoAParameter::Vbc => Some((1, 0)),
+        _ => None,
+    }
+}
+
+/// Authored terminal index, with current positive into the device.
+pub(super) fn current_terminal(parameter: SoAParameter) -> Option<usize> {
+    match parameter.base_parameter() {
+        SoAParameter::Id | SoAParameter::Ic => Some(0),
+        SoAParameter::Ig | SoAParameter::Ib => Some(1),
+        SoAParameter::Is | SoAParameter::Ie => Some(2),
         _ => None,
     }
 }

@@ -1283,6 +1283,18 @@ const fn soa_parameter_tag(parameter: SoaParameterEvidence) -> u8 {
         SoaParameterEvidence::DrainCurrentNegative => 23,
         SoaParameterEvidence::CollectorCurrentPositive => 24,
         SoaParameterEvidence::CollectorCurrentNegative => 25,
+        SoaParameterEvidence::GateCurrent => 26,
+        SoaParameterEvidence::GateCurrentPositive => 27,
+        SoaParameterEvidence::GateCurrentNegative => 28,
+        SoaParameterEvidence::SourceCurrent => 29,
+        SoaParameterEvidence::SourceCurrentPositive => 30,
+        SoaParameterEvidence::SourceCurrentNegative => 31,
+        SoaParameterEvidence::BaseCurrent => 32,
+        SoaParameterEvidence::BaseCurrentPositive => 33,
+        SoaParameterEvidence::BaseCurrentNegative => 34,
+        SoaParameterEvidence::EmitterCurrent => 35,
+        SoaParameterEvidence::EmitterCurrentPositive => 36,
+        SoaParameterEvidence::EmitterCurrentNegative => 37,
     }
 }
 

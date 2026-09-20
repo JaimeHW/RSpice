@@ -79,7 +79,7 @@ pub(super) fn fields(
     );
     field_note(
         ui,
-        "Vgs = V(g) − V(s), Vds = V(d) − V(s), Vgd = V(g) − V(d); BJT voltages follow the same named-terminal order. Id/Ic are positive into drain/collector, including accepted transient displacement current. Enter a nonnegative magnitude for directional limits; zero forbids that polarity.",
+        "Vgs = V(g) − V(s), Vds = V(d) − V(s), Vgd = V(g) − V(d); BJT voltages follow the same named-terminal order. Id/Ig/Is and Ic/Ib/Ie are positive into drain/gate/source and collector/base/emitter, including accepted transient displacement current. Enter a nonnegative magnitude for directional limits; zero forbids that polarity.",
     );
     field_note(
         ui,

@@ -17,6 +17,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 mod observation;
+mod probes;
 mod rules;
 #[cfg(test)]
 mod rules_tests;
@@ -234,6 +235,7 @@ pub fn run_soa_analysis_with_config_and_source_path_and_abort(
             }
         }
     }
+    let current_probes = probes::register(&mut netlist, &flattened.elements, &resolved, abort)?;
     let engine = rspice_core::engine::Engine::new(super::build_engine_config(&netlist, None));
     let result = engine
         .run_tran_with_startup_mode_and_abort(
@@ -260,16 +262,28 @@ pub fn run_soa_analysis_with_config_and_source_path_and_abort(
     for (element_index, definition) in &resolved {
         let element = &flattened.elements[*element_index];
         for limit in &definition.limits {
-            if let Some(parameter) = rules::device_parameter(limit.parameter) {
-                if observations.contains_key(&(*element_index, limit.parameter.base_parameter())) {
-                    continue;
-                }
-                ensure_not_aborted(abort)?;
-                let samples = result.try_device_op_waveform_named(&element.name, parameter)
+            let key = (*element_index, limit.parameter.base_parameter());
+            if observations.contains_key(&key) {
+                continue;
+            }
+            let samples = if let Some(source) = current_probes.get(&key) {
+                Some(result.try_branch_current_waveform_named(source).ok_or_else(||
+                    ServiceRunError::Failure(format!(
+                        "SOA requires total terminal current {}({}); the solver returned no trace",
+                        limit.parameter.stress_code(), element.name
+                    ))
+                )?)
+            } else if let Some(parameter) = rules::device_parameter(limit.parameter) {
+                Some(result.try_device_op_waveform_named(&element.name, parameter)
                     .ok_or_else(|| ServiceRunError::Failure(format!(
                         "SOA requires accepted device observation {}({}); the device returned no trace",
                         parameter, element.name
-                    )))?;
+                    )))?)
+            } else {
+                None
+            };
+            if let Some(samples) = samples {
+                ensure_not_aborted(abort)?;
                 if samples.len() != result.time.len() {
                     return Err(ServiceRunError::Failure(format!(
                         "SOA device observation for '{}' has incomplete sample coverage",

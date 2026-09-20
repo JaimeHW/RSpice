@@ -1022,6 +1022,18 @@ fn soa_parameter_csv(parameter: crate::state::SoaParameterEvidence) -> &'static 
         SoaParameterEvidence::DrainCurrentNegative => "id_negative",
         SoaParameterEvidence::CollectorCurrentPositive => "ic_positive",
         SoaParameterEvidence::CollectorCurrentNegative => "ic_negative",
+        SoaParameterEvidence::GateCurrent => "ig",
+        SoaParameterEvidence::GateCurrentPositive => "ig_positive",
+        SoaParameterEvidence::GateCurrentNegative => "ig_negative",
+        SoaParameterEvidence::SourceCurrent => "is",
+        SoaParameterEvidence::SourceCurrentPositive => "is_positive",
+        SoaParameterEvidence::SourceCurrentNegative => "is_negative",
+        SoaParameterEvidence::BaseCurrent => "ib",
+        SoaParameterEvidence::BaseCurrentPositive => "ib_positive",
+        SoaParameterEvidence::BaseCurrentNegative => "ib_negative",
+        SoaParameterEvidence::EmitterCurrent => "ie",
+        SoaParameterEvidence::EmitterCurrentPositive => "ie_positive",
+        SoaParameterEvidence::EmitterCurrentNegative => "ie_negative",
     }
 }
 

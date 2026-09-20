@@ -500,6 +500,18 @@ pub(crate) enum WorkerSoAParameter {
     IdNegative,
     IcPositive,
     IcNegative,
+    Ig,
+    IgPositive,
+    IgNegative,
+    Is,
+    IsPositive,
+    IsNegative,
+    Ib,
+    IbPositive,
+    IbNegative,
+    Ie,
+    IePositive,
+    IeNegative,
 }
 
 impl From<SoAParameter> for WorkerSoAParameter {
@@ -531,6 +543,18 @@ impl From<SoAParameter> for WorkerSoAParameter {
             SoAParameter::IdNegative => Self::IdNegative,
             SoAParameter::IcPositive => Self::IcPositive,
             SoAParameter::IcNegative => Self::IcNegative,
+            SoAParameter::Ig => Self::Ig,
+            SoAParameter::IgPositive => Self::IgPositive,
+            SoAParameter::IgNegative => Self::IgNegative,
+            SoAParameter::Is => Self::Is,
+            SoAParameter::IsPositive => Self::IsPositive,
+            SoAParameter::IsNegative => Self::IsNegative,
+            SoAParameter::Ib => Self::Ib,
+            SoAParameter::IbPositive => Self::IbPositive,
+            SoAParameter::IbNegative => Self::IbNegative,
+            SoAParameter::Ie => Self::Ie,
+            SoAParameter::IePositive => Self::IePositive,
+            SoAParameter::IeNegative => Self::IeNegative,
         }
     }
 }
@@ -564,6 +588,18 @@ impl From<WorkerSoAParameter> for SoAParameter {
             WorkerSoAParameter::IdNegative => Self::IdNegative,
             WorkerSoAParameter::IcPositive => Self::IcPositive,
             WorkerSoAParameter::IcNegative => Self::IcNegative,
+            WorkerSoAParameter::Ig => Self::Ig,
+            WorkerSoAParameter::IgPositive => Self::IgPositive,
+            WorkerSoAParameter::IgNegative => Self::IgNegative,
+            WorkerSoAParameter::Is => Self::Is,
+            WorkerSoAParameter::IsPositive => Self::IsPositive,
+            WorkerSoAParameter::IsNegative => Self::IsNegative,
+            WorkerSoAParameter::Ib => Self::Ib,
+            WorkerSoAParameter::IbPositive => Self::IbPositive,
+            WorkerSoAParameter::IbNegative => Self::IbNegative,
+            WorkerSoAParameter::Ie => Self::Ie,
+            WorkerSoAParameter::IePositive => Self::IePositive,
+            WorkerSoAParameter::IeNegative => Self::IeNegative,
         }
     }
 }

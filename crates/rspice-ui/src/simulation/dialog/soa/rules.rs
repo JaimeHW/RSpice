@@ -4,7 +4,7 @@ use super::*;
 use crate::services::safety::SoAParameter;
 use crate::services::simulation_runner::SoaRuleConfig;
 
-const PARAMETERS: [SoAParameter; 26] = [
+const PARAMETERS: [SoAParameter; 38] = [
     SoAParameter::Vgs,
     SoAParameter::Vds,
     SoAParameter::Vgd,
@@ -31,6 +31,18 @@ const PARAMETERS: [SoAParameter; 26] = [
     SoAParameter::IcNegative,
     SoAParameter::Temp,
     SoAParameter::Pdiss,
+    SoAParameter::Ig,
+    SoAParameter::IgPositive,
+    SoAParameter::IgNegative,
+    SoAParameter::Is,
+    SoAParameter::IsPositive,
+    SoAParameter::IsNegative,
+    SoAParameter::Ib,
+    SoAParameter::IbPositive,
+    SoAParameter::IbNegative,
+    SoAParameter::Ie,
+    SoAParameter::IePositive,
+    SoAParameter::IeNegative,
 ];
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -54,7 +66,7 @@ impl Default for SoaRuleDraft {
 }
 
 impl SoaRuleDraft {
-    pub const PARAMETER_LABELS: [&'static str; 26] = [
+    pub const PARAMETER_LABELS: [&'static str; 38] = [
         "Vgs",
         "Vds",
         "Vgd",
@@ -81,6 +93,18 @@ impl SoaRuleDraft {
         "Ic negative",
         "Operating temperature",
         "Conductive power dissipation",
+        "Ig",
+        "Ig positive",
+        "Ig negative",
+        "Is",
+        "Is positive",
+        "Is negative",
+        "Ib",
+        "Ib positive",
+        "Ib negative",
+        "Ie",
+        "Ie positive",
+        "Ie negative",
     ];
     pub fn is_power(&self) -> bool {
         PARAMETERS.get(self.parameter) == Some(&SoAParameter::Pdiss)
@@ -93,7 +117,7 @@ impl SoaRuleDraft {
     pub fn is_current(&self) -> bool {
         PARAMETERS
             .get(self.parameter)
-            .is_some_and(|p| matches!(p.base_parameter(), SoAParameter::Id | SoAParameter::Ic))
+            .is_some_and(|p| p.is_current())
     }
 
     pub(super) fn from_config(config: &SoaRuleConfig) -> Self {

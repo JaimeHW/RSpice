@@ -689,6 +689,10 @@ fn soa_directional_limits_survive_studio_preparation_worker_requests_and_saved_r
         SoAParameter::Vbc,
         SoAParameter::Id,
         SoAParameter::Ic,
+        SoAParameter::Ig,
+        SoAParameter::Is,
+        SoAParameter::Ib,
+        SoAParameter::Ie,
     ];
     for base in parameters {
         let (positive, negative) = base.directional_pair().unwrap();
@@ -756,7 +760,7 @@ fn soa_directional_limits_survive_studio_preparation_worker_requests_and_saved_r
     else {
         panic!("SOA evidence");
     };
-    assert_eq!(evaluations.len(), 52);
+    assert_eq!(evaluations.len(), 76);
     let trace = |name: &str| {
         &retained
             .waveforms
@@ -798,6 +802,34 @@ fn soa_directional_limits_survive_studio_preparation_worker_requests_and_saved_r
                 .iter()
                 .all(|v| *v == 0.0)
         );
+    }
+    for (device, incoming, outgoing, polarity) in [
+        ("MN", "ID", "IS", "NEG"),
+        ("MP", "ID", "IS", "POS"),
+        ("QN", "IC", "IE", "NEG"),
+        ("QP", "IC", "IE", "POS"),
+    ] {
+        let primary = trace(&format!("SOA_{incoming}({device})"));
+        let returning = trace(&format!("SOA_{outgoing}_{polarity}({device})"));
+        let factor = if device.starts_with('Q') { 1.01 } else { 1.0 };
+        for (incoming, outgoing) in primary.iter().zip(returning.iter()) {
+            assert!((outgoing - factor * incoming).abs() < 1e-10 + incoming * 1e-6);
+        }
+        if device.starts_with('Q') {
+            let base = trace(&format!(
+                "SOA_IB_{}({device})",
+                if device == "QN" { "POS" } else { "NEG" }
+            ));
+            for (base, collector) in base.iter().zip(primary.iter()) {
+                assert!((base * 100.0 - collector).abs() < 1e-10 + collector * 1e-6);
+            }
+        } else {
+            assert!(
+                trace(&format!("SOA_IG({device})"))
+                    .iter()
+                    .all(|i| i.abs() < 1e-10)
+            );
+        }
     }
     for (name, expected) in [
         ("SOA_VGS_POS(MN)", 2.0),
