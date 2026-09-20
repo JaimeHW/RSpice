@@ -32,44 +32,6 @@ pub(crate) fn apply_voltage_corner(
     })
 }
 
-/// Apply the temperature and supply values of one authenticated Run Set point
-/// to a parsed deck.
-///
-/// Keeping this mutation in the service layer gives config-backed and
-/// spec-driven analyses one validation contract. In particular, Monte Carlo
-/// must apply the point before every trial is solved rather than merely label
-/// a nominal distribution with PVT metadata.
-pub(crate) fn apply_run_environment(
-    netlist: &mut rspice_core::Netlist,
-    temperature_celsius: Value,
-    supply_voltage: Option<Value>,
-    nominal_supply_voltage: Option<Value>,
-    supply_source_names: &[String],
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<()> {
-    ensure_not_aborted(abort)?;
-    if !temperature_celsius.is_finite()
-        || rspice_core::constants::celsius_to_kelvin(temperature_celsius) <= 0.0
-    {
-        return Err(ServiceRunError::Failure(
-            "Run Set temperature must be finite and above absolute zero".to_owned(),
-        ));
-    }
-    netlist.options.temp = Some(temperature_celsius);
-    match (supply_voltage, nominal_supply_voltage) {
-        (Some(supply), Some(nominal)) => {
-            apply_voltage_corner(netlist, supply, nominal, supply_source_names, abort)?
-        }
-        (None, None) => {}
-        _ => {
-            return Err(ServiceRunError::Failure(
-                "Run Set supply and nominal voltage must be provided together".to_owned(),
-            ));
-        }
-    }
-    ensure_not_aborted(abort)
-}
-
 pub(crate) fn infer_nominal_supply_voltage(
     netlist: &rspice_core::Netlist,
     supply_source_names: &[String],

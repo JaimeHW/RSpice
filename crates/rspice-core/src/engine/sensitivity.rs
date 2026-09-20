@@ -650,7 +650,7 @@ impl Engine {
         Ok(applied)
     }
 
-    fn reapply_ast_overlay_with_abort(
+    pub(super) fn reapply_ast_overlay_with_abort(
         netlist: &mut Netlist,
         overlay: &crate::netlist::NetlistAstOverlay,
         abort: &dyn AbortSignal,

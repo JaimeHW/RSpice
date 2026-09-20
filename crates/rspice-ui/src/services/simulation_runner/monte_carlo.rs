@@ -1,16 +1,16 @@
 //! Monte Carlo analysis runner.
 
 use super::error::{ServiceRunError, ServiceRunResult, ensure_not_aborted, poll_periodically};
-use super::{
-    DEFAULT_MONTE_CARLO_SEED, build_engine_config, parse_runner_netlist_with_abort,
-    parse_runner_netlist_with_statistical_sampling_and_abort,
-};
+#[cfg(test)]
+use super::parse_runner_netlist_with_statistical_sampling_and_abort;
+use super::{DEFAULT_MONTE_CARLO_SEED, build_engine_config, parse_runner_netlist_with_abort};
 use rspice_core::Value;
 use rspice_core::abort_signal::AbortSignal;
 #[cfg(test)]
 use rspice_core::abort_signal::NoAbort;
 use rspice_core::analysis::monte_carlo::Distribution;
 use rspice_core::engine::Engine;
+use rspice_core::engine::monte_carlo_deck_trial_seed as trial_seed;
 use rspice_core::netlist::{AnalysisCommand, MonteCarloDistribution};
 use std::path::Path;
 
@@ -172,6 +172,18 @@ pub(crate) fn run_monte_carlo_analysis_with_environment_and_source_path_and_abor
         )
         .map_err(|error| ServiceRunError::from_core("Monte Carlo confidence error", error))?;
 
+    finish_monte_carlo_result(
+        result,
+        engine.config().resource_limits.max_result_values,
+        abort,
+    )
+}
+
+pub(crate) fn finish_monte_carlo_result(
+    result: rspice_core::analysis::monte_carlo::MonteCarloResult,
+    result_value_limit: usize,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<MonteCarloData> {
     let trial_indices = result.successful_trial_indices.as_deref().ok_or_else(|| {
         ServiceRunError::Failure("Monte Carlo engine omitted original trial indices".into())
     })?;
@@ -182,7 +194,7 @@ pub(crate) fn run_monte_carlo_analysis_with_environment_and_source_path_and_abor
         &result,
         trial_indices,
         sampling,
-        engine.config().resource_limits.max_result_values,
+        result_value_limit,
         abort,
     )?;
     let mut variables = Vec::with_capacity(result.variables.len());
@@ -205,8 +217,8 @@ pub(crate) fn run_monte_carlo_analysis_with_environment_and_source_path_and_abor
     ensure_not_aborted(abort)?;
 
     let data = MonteCarloData {
-        seed,
-        runs_requested: mc_cmd.runs,
+        seed: sampling.seed,
+        runs_requested: result.num_runs,
         runs_completed: result.num_runs - result.num_failures,
         num_failures: result.num_failures,
         all_converged: result.all_converged,
@@ -258,203 +270,62 @@ pub(crate) fn run_statistical_monte_carlo_with_environment_and_source_path_and_a
     supply_source_names: &[String],
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<MonteCarloData> {
-    let mut netlist = parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
-    if let Some(temperature_celsius) = temperature_celsius {
-        super::apply_run_environment(
-            &mut netlist,
-            temperature_celsius,
-            supply_voltage,
-            nominal_supply_voltage,
-            supply_source_names,
-            abort,
-        )?;
-    } else if supply_voltage.is_some() || nominal_supply_voltage.is_some() {
+    let netlist = parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
+    if temperature_celsius.is_none()
+        && (supply_voltage.is_some() || nominal_supply_voltage.is_some())
+    {
         return Err(ServiceRunError::Failure(
-            "Run Set supply overrides require a temperature-scoped environment".to_owned(),
+            "Run Set supply overrides require a temperature-scoped environment".into(),
         ));
     }
-    ensure_not_aborted(abort)?;
-
-    let (runs, base_seed, confidence_pct, confidence_method) = netlist
+    let command = netlist
         .analyses
         .iter()
         .find_map(|analysis| match analysis {
-            AnalysisCommand::MonteCarlo(cmd) => Some((
-                cmd.runs,
-                cmd.seed.unwrap_or(DEFAULT_MONTE_CARLO_SEED),
-                cmd.confidence_pct,
-                cmd.confidence_method,
-            )),
+            AnalysisCommand::MonteCarlo(command) => Some(command),
             _ => None,
         })
         .ok_or_else(|| {
             ServiceRunError::Failure(
-                "Monte Carlo analysis requires a .MC command in the netlist".to_string(),
+                "Monte Carlo analysis requires a .MC command in the netlist".into(),
             )
         })?;
-    if runs == 0 {
-        return Err(ServiceRunError::Failure(
-            "Monte Carlo requires at least one trial".to_string(),
-        ));
-    }
-
-    let mut trials: Vec<(Vec<Value>, Vec<String>, Vec<usize>)> = Vec::new();
-    // The identity of every trial that converged, in the order `trials` holds
-    // them. A trial that failed to converge is dropped from the distribution,
-    // so the retained positions are not 0..runs and cannot be renumbered into
-    // that range: trial 47's evidence has to keep saying 47, or re-running the
-    // worst trial reproduces a different circuit than the one that failed.
-    let mut retained: Vec<(usize, u64)> = Vec::new();
-    for trial in 0..runs {
-        poll_periodically(abort, trial)?;
-        let seed = trial_seed(base_seed, trial);
-        let mut trial_netlist = parse_runner_netlist_with_statistical_sampling_and_abort(
-            netlist_text,
-            source_path,
-            seed,
-            abort,
-        )?;
-        if let Some(temperature_celsius) = temperature_celsius {
-            super::apply_run_environment(
-                &mut trial_netlist,
+    let environment =
+        temperature_celsius.map(
+            |temperature_celsius| rspice_core::engine::MonteCarloEnvironment {
                 temperature_celsius,
                 supply_voltage,
                 nominal_supply_voltage,
-                supply_source_names,
-                abort,
-            )?;
-        }
-        ensure_not_aborted(abort)?;
-        let engine = Engine::new(build_engine_config(&trial_netlist, None));
-        // A trial that fails to converge is dropped from the distribution and
-        // counted, exactly as the parameter-tolerance driver does; only a
-        // cancellation stops the analysis.
-        match engine.run_dc_op_with_abort(&trial_netlist, abort) {
-            Ok(result) => {
-                // Event-only MNA rows close the matrix but carry no voltage.
-                // Keep their original indices so analog numeric aliases stay exact.
-                let excluded = (1..result.node_names.len())
-                    .filter(|&node| result.event_only_node_kind(node).is_some())
-                    .collect();
-                trials.push((result.node_voltages, result.node_names, excluded));
-                retained.push((trial, seed));
-            }
-            Err(error @ rspice_core::SimulationError::Aborted)
-            | Err(error @ rspice_core::SimulationError::TimeLimitExceeded)
-            | Err(error @ rspice_core::SimulationError::ResourceLimit(_))
-            | Err(error @ rspice_core::SimulationError::Configuration(_)) => {
-                return Err(ServiceRunError::from_core("Monte Carlo trial error", error));
-            }
-            Err(_) => {}
-        }
+                supply_source_names: supply_source_names.to_vec(),
+            },
+        );
+    let mut config = build_engine_config(&netlist, None);
+    if let Some(temperature) = temperature_celsius {
+        config.temperature = rspice_core::constants::celsius_to_kelvin(temperature);
     }
-    ensure_not_aborted(abort)?;
-
-    // Constant observations are valid: an ideal source or feedback can keep
-    // the output fixed even when hidden device parameters vary.
-    let engine = Engine::new(build_engine_config(&netlist, None));
-    let trial_measurements = trial_evidence::include_deck_failures(
-        trial_measurements_from(&trials, &retained),
-        runs,
-        base_seed,
-        engine.config().resource_limits.max_result_values,
-        abort,
-    )?;
-
+    let engine = Engine::new(config);
     let mut result = engine
-        .monte_carlo_result_from_observed_trials(trials, runs)
+        .run_monte_carlo_deck_statistics_with_abort(
+            &netlist,
+            command.runs,
+            command.seed.unwrap_or(DEFAULT_MONTE_CARLO_SEED),
+            environment.as_ref(),
+            abort,
+        )
         .map_err(|error| ServiceRunError::from_core("Monte Carlo analysis error", error))?;
     result
         .compute_mean_confidence(
-            confidence_pct,
-            confidence_method.into(),
+            command.confidence_pct,
+            command.confidence_method.into(),
             engine.config().resource_limits,
             abort,
         )
         .map_err(|error| ServiceRunError::from_core("Monte Carlo confidence error", error))?;
-
-    let mut variables = Vec::with_capacity(result.variables.len());
-    for (index, stats) in result.variables.into_values().enumerate() {
-        poll_periodically(abort, index)?;
-        variables.push(MonteCarloVariableData {
-            mean_confidence: confidence::retain(result.confidence, stats.mean_confidence),
-            name: stats.name,
-            samples: stats.samples,
-            mean: stats.mean,
-            std_dev: stats.std_dev,
-            min: stats.min,
-            max: stats.max,
-            histogram: stats.histogram,
-            bin_edges: stats.bin_edges,
-        });
-    }
-    ensure_not_aborted(abort)?;
-    variables.sort_by(|a, b| a.name.cmp(&b.name));
-
-    let data = MonteCarloData {
-        seed: base_seed,
-        runs_requested: runs,
-        runs_completed: result.num_runs - result.num_failures,
-        num_failures: result.num_failures,
-        all_converged: result.all_converged,
-        variables,
-        trial_measurements,
-    };
-    validate_monte_carlo_data(&data)?;
-    Ok(data)
-}
-
-/// What each converged trial measured, attributed to the trial that measured it.
-///
-/// A trial of this driver solves one operating point, so what it measured is
-/// that circuit's node voltages — the same quantities the distribution
-/// statistics are computed from, kept per trial instead of collapsed into
-/// moments. That is what lets a limit be answered with "trial 47 was the worst
-/// and 96% of trials held", which a mean and a sigma cannot say.
-///
-/// Only nodes the deck named are retained. The aggregator also publishes each
-/// node under its numeric `V(<id>)` spelling, but a specification is authored
-/// against a name, and emitting both would double every trial's evidence to
-/// carry a spelling no limit binds.
-fn trial_measurements_from(
-    trials: &[(Vec<Value>, Vec<String>, Vec<usize>)],
-    retained: &[(usize, u64)],
-) -> Vec<crate::state::FamilyMemberMeasurements> {
-    use crate::state::{FamilyMeasurementEvidence, FamilyMemberId, FamilyMemberMeasurements};
-
-    trials
-        .iter()
-        .zip(retained)
-        .map(|((node_voltages, node_names, excluded), (index, seed))| {
-            // Index 0 is ground in every trial, and ground is not evidence.
-            let measurements = node_names
-                .iter()
-                .enumerate()
-                .skip(1)
-                .filter_map(|(node_id, node_name)| {
-                    let name = node_name.trim();
-                    if name.is_empty() || excluded.contains(&node_id) {
-                        return None;
-                    }
-                    let value = node_voltages.get(node_id).copied()?;
-                    Some(FamilyMeasurementEvidence {
-                        name: format!("V({name})"),
-                        value: value.is_finite().then_some(value),
-                        passed: value.is_finite(),
-                        error: (!value.is_finite())
-                            .then(|| "trial produced a non-finite node voltage".to_owned()),
-                    })
-                })
-                .collect();
-            FamilyMemberMeasurements::new(
-                FamilyMemberId::MonteCarloTrial {
-                    index: *index,
-                    seed: *seed,
-                },
-                measurements,
-            )
-        })
-        .collect()
+    finish_monte_carlo_result(
+        result,
+        engine.config().resource_limits.max_result_values,
+        abort,
+    )
 }
 
 fn validate_monte_carlo_data(data: &MonteCarloData) -> ServiceRunResult<()> {
@@ -513,16 +384,6 @@ fn validate_monte_carlo_data(data: &MonteCarloData) -> ServiceRunResult<()> {
 
 /// Expand one base seed into a well-separated per-trial seed.
 ///
-/// SplitMix64's finalizer, which is the standard way to turn a counter into
-/// seeds that do not share low-order structure. Two trials whose indices differ
-/// by one must not draw correlated streams.
-const fn trial_seed(base: u64, trial: usize) -> u64 {
-    let mut z = base.wrapping_add((trial as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15));
-    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-    z ^ (z >> 31)
-}
-
 #[cfg(test)]
 mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};

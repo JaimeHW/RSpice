@@ -10,12 +10,15 @@ use std::collections::{HashMap, HashSet};
 
 mod measurements;
 pub use measurements::MonteCarloStudyConfig;
+mod deck_statistics;
+pub use deck_statistics::{MonteCarloVariationSource, monte_carlo_deck_trial_seed};
 
 /// Sampling inputs shared by voltage and named-measurement studies.
 struct TrialOptions<'a> {
     num_runs: usize,
     seed: u64,
     distribution: Distribution,
+    variation_source: MonteCarloVariationSource,
     parameter_filter: Option<&'a [String]>,
     environment: Option<&'a MonteCarloEnvironment>,
 }
@@ -213,12 +216,47 @@ impl Engine {
             num_runs,
             seed,
             distribution,
+            variation_source: MonteCarloVariationSource::ParameterTolerance,
             parameter_filter,
             environment: environment.as_ref(),
         };
+        self.run_monte_carlo_voltages_with_abort(netlist, &options, abort)
+    }
+
+    /// Redraw the circuit's statistical expressions and native process/mismatch
+    /// declarations independently for each trial, then report DC voltages.
+    pub fn run_monte_carlo_deck_statistics_with_abort(
+        &self,
+        netlist: &Netlist,
+        num_runs: usize,
+        seed: u64,
+        environment: Option<&MonteCarloEnvironment>,
+        abort: &dyn AbortSignal,
+    ) -> Result<MonteCarloResult, SimulationError> {
+        self.run_monte_carlo_voltages_with_abort(
+            netlist,
+            &TrialOptions {
+                num_runs,
+                seed,
+                distribution: Distribution::Uniform { tolerance: 0.0 },
+                variation_source: MonteCarloVariationSource::DeckStatistics,
+                parameter_filter: None,
+                environment,
+            },
+            abort,
+        )
+    }
+
+    fn run_monte_carlo_voltages_with_abort(
+        &self,
+        netlist: &Netlist,
+        options: &TrialOptions<'_>,
+        abort: &dyn AbortSignal,
+    ) -> Result<MonteCarloResult, SimulationError> {
+        let num_runs = options.num_runs;
         let (run_outcomes, sampling) = self.run_monte_carlo_trials_with_abort(
             netlist,
-            &options,
+            options,
             abort,
             |engine, trial, _, abort| {
                 let result = engine.run_dc_op_with_abort(trial, abort)?;
@@ -264,6 +302,7 @@ impl Engine {
             num_runs,
             seed,
             distribution,
+            variation_source,
             parameter_filter,
             environment,
         } = *options;
@@ -277,7 +316,9 @@ impl Engine {
             ));
         }
         self.ensure_batch_runs(num_runs)?;
-        distribution.validate()?;
+        if variation_source == MonteCarloVariationSource::ParameterTolerance {
+            distribution.validate()?;
+        }
 
         let normalized_filter: Option<HashSet<String>> = parameter_filter.and_then(|params| {
             let normalized: HashSet<String> = params
@@ -291,6 +332,13 @@ impl Engine {
                 Some(normalized)
             }
         });
+        if variation_source == MonteCarloVariationSource::DeckStatistics
+            && normalized_filter.is_some()
+        {
+            return Err(SimulationError::Circuit(
+                "Deck-statistics Monte Carlo cannot apply a generic parameter filter".into(),
+            ));
+        }
         let has_spectre_statistics = !netlist.spectre_statistics.variations.is_empty();
         if has_spectre_statistics && normalized_filter.is_some() {
             return Err(SimulationError::Circuit(
@@ -299,7 +347,9 @@ impl Engine {
             ));
         }
 
-        let mut all_eligible_params: Vec<(String, Value)> = if has_spectre_statistics {
+        let mut all_eligible_params: Vec<(String, Value)> = if has_spectre_statistics
+            || variation_source == MonteCarloVariationSource::DeckStatistics
+        {
             Vec::new()
         } else {
             netlist
@@ -386,6 +436,31 @@ impl Engine {
             .unwrap_or_default();
         let materialize_run =
             |run_index: usize| -> Result<std::borrow::Cow<'_, Netlist>, SimulationError> {
+                if variation_source == MonteCarloVariationSource::DeckStatistics {
+                    let mut materialized = self.materialize_monte_carlo_deck_statistics(
+                        netlist,
+                        monte_carlo_deck_trial_seed(seed, run_index),
+                        abort,
+                    )?;
+                    if let Some(environment) = environment {
+                        Self::apply_monte_carlo_environment(&mut materialized, environment, abort)?;
+                    }
+                    if has_spectre_statistics {
+                        materialized.spectre_statistical_coordinate =
+                            Some(crate::netlist::SpectreStatisticalCoordinate {
+                                seed,
+                                monte_carlo_run: run_index as u64,
+                                temperature_celsius: environment
+                                    .map(|environment| environment.temperature_celsius)
+                                    .or(materialized.options.temp)
+                                    .unwrap_or_else(|| {
+                                        crate::constants::kelvin_to_celsius(self.config.temperature)
+                                    }),
+                                axes: inherited_statistical_axes.clone(),
+                            });
+                    }
+                    return Ok(std::borrow::Cow::Owned(materialized));
+                }
                 if monte_params.is_empty() {
                     if environment.is_none() && !has_spectre_statistics {
                         return Ok(std::borrow::Cow::Borrowed(netlist));
@@ -550,7 +625,13 @@ impl Engine {
             run_outcomes,
             MonteCarloSampling {
                 seed,
-                policy: if has_spectre_statistics {
+                policy: if variation_source == MonteCarloVariationSource::DeckStatistics {
+                    if has_spectre_statistics {
+                        "deck-expressions-and-spectre-coordinate-v1"
+                    } else {
+                        "deck-expressions-splitmix64-v1"
+                    }
+                } else if has_spectre_statistics {
                     "spectre-coordinate-splitmix64-v1"
                 } else {
                     "parameter-xoroshiro128plus-2018-v1"

@@ -59,7 +59,9 @@ impl FamilyMemberMeasurements {
                 || *recorded_seed != seed
                 || !matches!(
                     recorded_policy.as_str(),
-                    "parameter-xoroshiro128plus-2018-v1" | "spectre-coordinate-splitmix64-v1"
+                    "parameter-xoroshiro128plus-2018-v1"
+                        | "spectre-coordinate-splitmix64-v1"
+                        | "deck-expressions-and-spectre-coordinate-v1"
                 )
                 || policy.is_some_and(|value| value != recorded_policy.as_str())
             {

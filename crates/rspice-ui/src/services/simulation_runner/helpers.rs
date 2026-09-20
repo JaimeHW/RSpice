@@ -117,6 +117,7 @@ pub(crate) fn parse_runner_netlist_with_resource_limits_and_abort(
     )
 }
 
+#[cfg(test)]
 pub(crate) fn parse_runner_netlist_with_statistical_sampling_and_abort(
     netlist_text: &str,
     source_path: Option<&Path>,

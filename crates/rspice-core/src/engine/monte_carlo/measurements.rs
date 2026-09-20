@@ -1,6 +1,6 @@
 //! Named observations of arbitrary analyses on the engine's trial circuits.
 
-use super::{MonteCarloEnvironment, TrialOptions};
+use super::{MonteCarloEnvironment, MonteCarloVariationSource, TrialOptions};
 use crate::abort_signal::AbortSignal;
 use crate::analysis::monte_carlo::{
     Distribution, MeanConfidenceMethod, MonteCarloResult, VariableStatistics,
@@ -17,6 +17,7 @@ pub struct MonteCarloStudyConfig {
     pub num_runs: usize,
     pub seed: u64,
     pub distribution: Distribution,
+    pub variation_source: MonteCarloVariationSource,
     /// Empty selects every eligible generic parameter. Native Spectre
     /// statistics instead use the variations declared by the circuit.
     pub parameter_filter: Vec<String>,
@@ -35,6 +36,7 @@ impl MonteCarloStudyConfig {
             num_runs,
             seed,
             distribution: Distribution::Gaussian { sigma: 0.01 },
+            variation_source: MonteCarloVariationSource::ParameterTolerance,
             parameter_filter: Vec::new(),
             environment: None,
             measurements,
@@ -122,6 +124,7 @@ impl Engine {
             num_runs: study.num_runs,
             seed: study.seed,
             distribution: study.distribution,
+            variation_source: study.variation_source,
             parameter_filter: Some(&study.parameter_filter),
             environment: study.environment.as_ref(),
         };

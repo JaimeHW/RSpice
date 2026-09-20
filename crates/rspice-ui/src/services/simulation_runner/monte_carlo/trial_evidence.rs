@@ -29,10 +29,17 @@ pub(super) fn parameter_population(
             })
             .collect::<ServiceRunResult<Vec<_>>>()?;
         members.push(FamilyMemberMeasurements::new(
-            FamilyMemberId::MonteCarloSequenceTrial {
-                index,
-                seed: sampling.seed,
-                policy: sampling.policy.into(),
+            if sampling.policy == "deck-expressions-splitmix64-v1" {
+                FamilyMemberId::MonteCarloTrial {
+                    index,
+                    seed: trial_seed(sampling.seed, index),
+                }
+            } else {
+                FamilyMemberId::MonteCarloSequenceTrial {
+                    index,
+                    seed: sampling.seed,
+                    policy: sampling.policy.into(),
+                }
             },
             measurements,
         ));
@@ -41,7 +48,8 @@ pub(super) fn parameter_population(
     Ok(members)
 }
 
-pub(super) fn include_deck_failures(
+#[cfg(test)]
+fn include_deck_failures(
     successful: Vec<FamilyMemberMeasurements>,
     requested: usize,
     base_seed: u64,

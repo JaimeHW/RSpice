@@ -64,10 +64,12 @@ pub use hbnoise::{
     run_hbnoise_analysis_from_hb_with_source_path_and_abort,
 };
 pub(crate) use hbnoise::{validate_hbnoise_frequency_options, validate_noise_sidebands};
+#[cfg(test)]
+use helpers::parse_runner_netlist_with_statistical_sampling_and_abort;
 use helpers::{
     build_voltage_output_expr, generate_freq_points_with_abort, is_ground_like,
     netlist_has_independent_source_named_with_abort, normalize_voltage_signal_name,
-    parse_runner_netlist_with_abort, parse_runner_netlist_with_statistical_sampling_and_abort,
+    parse_runner_netlist_with_abort,
 };
 pub(crate) use helpers::{splice_before_terminal_end_card, terminal_end_card_offset};
 pub(crate) use monte_carlo::{
@@ -132,9 +134,9 @@ pub use sweeps::{
 };
 pub(crate) use sweeps::{
     REFERENCE_MODEL_BINDING_BEGIN, REFERENCE_MODEL_BINDING_END, SweepPointResult,
-    apply_run_environment, apply_voltage_corner, expand_corner_pvt_points,
-    expand_step_sweep_values, infer_nominal_supply_voltage, map_corner_results,
-    map_temperature_results, materialize_corner_process_source,
+    apply_voltage_corner, expand_corner_pvt_points, expand_step_sweep_values,
+    infer_nominal_supply_voltage, map_corner_results, map_temperature_results,
+    materialize_corner_process_source,
 };
 pub use tf::{
     TfAccuracy, TfNormalization, TfQuantity, TfRunConfig, infer_tf_run_config,
