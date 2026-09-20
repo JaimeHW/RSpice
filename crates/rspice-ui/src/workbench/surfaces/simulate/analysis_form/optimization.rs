@@ -50,7 +50,7 @@ pub(super) fn fields(
     if configured {
         field_note(
             ui,
-            "Each candidate runs the selected analysis at this study's Run Set point. Use a .MEAS name for a measured scalar, scalar:name for a native scalar, or last:signal for the final sample (AC real component).",
+            "Each candidate runs the selected analysis at this study's Run Set point. Use a .MEAS name for a measured scalar, scalar:name for a native scalar, or last:signal for the final sample (AC real component). For Fourier/FFT use bin:1:magnitude (or real, imag, phase in degrees), with :signal appended for multiple Fourier outputs; scalar:THD(%) and scalar:DC select Fourier scalars. The configured transient producer is rerun for every candidate.",
         );
     }
     input_row(ui, "Variables", &mut setup.variables_text)

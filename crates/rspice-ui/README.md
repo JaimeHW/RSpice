@@ -66,6 +66,28 @@ Other user-facing machinery, all verified in source:
   module, not in the application; production issuance is the platform
   backend's cold-key flow.
 
+## Fourier and FFT in configured studies
+
+Monte Carlo and optimization can select a Fourier or FFT instance as their base.
+The study freezes that instance's exact bound transient producer, including its
+start/stop times, step limits, initial-condition policy and numerical overrides.
+Every varied trial or candidate reruns that transient on its materialized circuit.
+The spectrum comes from that fresh result; no nominal retained trajectory is reused.
+
+The producer's numerical options are applied before the selected consumer's
+options, so an explicit Fourier override wins when both set the same option.
+An FFT has no independent solver options. Its complete request is carried by the
+trial transient, and unrelated FFT cards are excluded from that study solve.
+
+Use `bin:1:magnitude`, `bin:1:real`, `bin:1:imag`, or `bin:1:phase` (degrees) to
+select a zero-based retained spectral bin. Fourier with multiple outputs requires
+a signal suffix, for example `bin:1:magnitude:V(out) Spectrum`. `scalar:DC` and
+`scalar:THD(%)` select the Fourier scalars when requested. FFT exposes `scalar:fft.dc`
+and retained `fft.fundamental_magnitude`, `fft.thd_ratio`, `fft.thd_db`, `fft.sndr_db`,
+`fft.enob_bits`, `fft.snr_db`, `fft.sfdr_db`, `fft.sfdr_spur_frequency_hz` scalars;
+those metric values require the deck's `.OPTIONS FFT FFTOUT=1`. Missing, incomplete,
+ambiguous or non-finite observations are not replaced with zeros or nominal data.
+
 ## Monte Carlo parameter bounds and truncation
 
 Custom parameter distributions support optional absolute lower and upper bounds.

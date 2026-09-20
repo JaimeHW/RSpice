@@ -40,7 +40,7 @@ pub(super) fn fields(
     if configured {
         field_note(
             ui,
-            "Each trial runs this analysis at the study's Run Set point. Separate measurements with semicolons. A plain name reads a .MEAS result; scalar:V(out) reads an operating-point value; last:signal explicitly reads the final waveform sample. For AC, last:signal reads the real component; use .MEAS VM/VP/VDB for magnitude, phase, or decibels.",
+            "Each trial runs this analysis at the study's Run Set point. Separate measurements with semicolons. A plain name reads a .MEAS result; scalar:V(out) reads an operating-point value; last:signal explicitly reads the final waveform sample. For AC, last:signal reads the real component; use .MEAS VM/VP/VDB for magnitude, phase, or decibels. For Fourier/FFT, use bin:1:magnitude (or real, imag, phase in degrees); append :signal when Fourier has multiple outputs. Fourier scalars include scalar:THD(%) and scalar:DC. Each trial reruns the selected spectrum's own transient producer.",
         );
     }
     input_row(ui, "First trial index", &mut setup.first_trial);
