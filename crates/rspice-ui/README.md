@@ -66,6 +66,21 @@ Other user-facing machinery, all verified in source:
   module, not in the application; production issuance is the platform
   backend's cold-key flow.
 
+## Harmonic balance in configured studies
+
+Monte Carlo and optimization can select a harmonic balance instance as their base.
+Its full tone definitions, source routing, mixing order, collocation grid and solver
+controls are frozen with the study and passed to every varied circuit. Parameter
+expressions and Run Set temperature/supply changes remain materialized throughout
+the solve. The HB verbosity switch also controls the study's solver log.
+
+Use `bin:index:quantity:V(node)` for a retained harmonic phasor; `quantity`
+is `real`, `imag`, `magnitude` or `phase` in degrees. Bin indices follow the HB
+result's frequency grid (including the mixed-frequency grid for multiple tones).
+These use the displayed spectrum's peak-amplitude convention: a unit sine has
+magnitude 1 and cosine-reference phase -90 degrees at its fundamental. A signal suffix is required when
+more than one complex waveform is present.
+
 ## Fourier and FFT in configured studies
 
 Monte Carlo and optimization can select a Fourier or FFT instance as their base.
