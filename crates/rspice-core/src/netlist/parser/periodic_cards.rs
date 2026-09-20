@@ -628,13 +628,7 @@ pub(super) fn parse_pac_command(
                 line_num,
                 "OUT",
             )?,
-            // `.PAC MAXSIDEBAND=0` is admissible and `.PNOISE MAXSIDEBAND=0`
-            // is not, on purpose. A `.PAC` at zero sidebands is the ordinary
-            // small-signal response at the drive frequency itself — a
-            // meaningful, and the cheapest, periodic AC measurement. Periodic
-            // noise has no such degenerate case: folding zero sidebands means
-            // no aliased noise is folded at all, which is stationary noise
-            // (`.NOISE`) rather than a periodic-noise run.
+            // A zero span measures the central conversion channel.
             "MAXSIDEBAND" => bind_once(
                 &mut max_sideband,
                 card_signed(stream, line_num, params, CARD, "MAXSIDEBAND", 0)?,
@@ -1017,6 +1011,8 @@ pub(super) fn parse_pnoise_command(
     let mut output = None;
     let mut input_source = None;
     let mut max_sideband = None;
+    let mut input_sideband = None;
+    let mut output_sideband = None;
     let mut noise_reference = None;
     let mut integrated_noise = None;
     let mut noise_summary = None;
@@ -1051,14 +1047,26 @@ pub(super) fn parse_pnoise_command(
                 line_num,
                 "INPUT",
             )?,
-            // At least one folded sideband, unlike `.PAC`'s zero: see the note
-            // on the `.PAC MAXSIDEBAND` arm above.
             "MAXSIDEBAND" => bind_once(
                 &mut max_sideband,
-                card_signed(stream, line_num, params, CARD, "MAXSIDEBAND", 1)?,
+                card_signed(stream, line_num, params, CARD, "MAXSIDEBAND", 0)?,
                 CARD,
                 line_num,
                 "MAXSIDEBAND",
+            )?,
+            "INPUTSIDEBAND" => bind_once(
+                &mut input_sideband,
+                card_signed(stream, line_num, params, CARD, "INPUTSIDEBAND", i32::MIN)?,
+                CARD,
+                line_num,
+                "INPUTSIDEBAND",
+            )?,
+            "OUTSIDEBAND" => bind_once(
+                &mut output_sideband,
+                card_signed(stream, line_num, params, CARD, "OUTSIDEBAND", i32::MIN)?,
+                CARD,
+                line_num,
+                "OUTSIDEBAND",
             )?,
             "NOISEREF" => bind_once(
                 &mut noise_reference,
@@ -1133,12 +1141,52 @@ pub(super) fn parse_pnoise_command(
         (None, false) => PnoiseReference::default(),
     };
 
+    let max_sideband = max_sideband.unwrap_or(PNOISE_DEFAULT_MAX_SIDEBAND);
+    let input_sideband = input_sideband.unwrap_or(0);
+    let output_sideband = output_sideband.unwrap_or(0);
+    for (field, sideband) in [
+        ("INPUTSIDEBAND", input_sideband),
+        ("OUTSIDEBAND", output_sideband),
+    ] {
+        if sideband.unsigned_abs() > max_sideband as u32 {
+            return Err(card_error(
+                CARD,
+                line_num,
+                AnalysisCardIssue::ConflictingFields {
+                    first: field,
+                    second: "MAXSIDEBAND",
+                },
+            ));
+        }
+    }
+    if input_sideband != 0 && noise_reference != PnoiseReference::Input {
+        return Err(card_error(
+            CARD,
+            line_num,
+            AnalysisCardIssue::ConflictingFields {
+                first: "INPUTSIDEBAND",
+                second: "NOISEREF",
+            },
+        ));
+    }
+    if output_sideband != 0 && noise_reference == PnoiseReference::Phase {
+        return Err(card_error(
+            CARD,
+            line_num,
+            AnalysisCardIssue::ConflictingFields {
+                first: "OUTSIDEBAND",
+                second: "NOISEREF",
+            },
+        ));
+    }
     Ok(AnalysisCommand::Pnoise(Box::new(PnoiseCard {
+        input_sideband,
+        output_sideband,
         sweep,
         output_node: output_node.to_ascii_uppercase(),
         reference_node: reference_node.map(|node| node.to_ascii_uppercase()),
         input_source: input_source.map(|name| name.to_ascii_uppercase()),
-        max_sideband: max_sideband.unwrap_or(PNOISE_DEFAULT_MAX_SIDEBAND),
+        max_sideband,
         noise_reference,
         integrated_noise: integrated_noise.unwrap_or(PnoiseCard::DEFAULT_INTEGRATED_NOISE),
         noise_summary: noise_summary.unwrap_or(PnoiseCard::DEFAULT_NOISE_SUMMARY),
@@ -2199,7 +2247,7 @@ mod tests {
             AnalysisCardIssue::MissingField { field: "OUT" }
         ));
         assert!(matches!(
-            card_failure(".HB 1G\n.PNOISE DEC 10 1 1meg OUT=out MAXSIDEBAND=0").2,
+            card_failure(".HB 1G\n.PNOISE DEC 10 1 1meg OUT=out MAXSIDEBAND=-1").2,
             AnalysisCardIssue::InvalidNumber {
                 field: "MAXSIDEBAND",
                 ..
@@ -2213,6 +2261,41 @@ mod tests {
             card_failure(".HB 1G\n.PNOISE DEC 10 1 1meg OUT=out NOISETYPE=pm").2,
             AnalysisCardIssue::UnknownKeyword { ref keyword } if keyword == "NOISETYPE"
         ));
+    }
+
+    #[test]
+    fn pnoise_conversion_channels_validate_their_folding_window_and_reference() {
+        let central = pnoise(".HB 1Meg\n.PNOISE LIN 2 1k 10k OUT=out MAXSIDEBAND=0");
+        assert_eq!(
+            (
+                central.input_sideband,
+                central.output_sideband,
+                central.max_sideband
+            ),
+            (0, 0, 0)
+        );
+        let converted = pnoise(
+            ".HB 1Meg\n.PNOISE LIN 2 1k 10k OUT=out INPUT=VIN INPUTSIDEBAND=-1 OUTSIDEBAND=2 MAXSIDEBAND=2",
+        );
+        assert_eq!(
+            (converted.input_sideband, converted.output_sideband),
+            (-1, 2)
+        );
+        for fields in [
+            "OUTSIDEBAND=3 MAXSIDEBAND=2",
+            "INPUT=VIN INPUTSIDEBAND=-3 MAXSIDEBAND=2",
+            "INPUT=VIN INPUTSIDEBAND=-2147483648 MAXSIDEBAND=2147483647",
+            "INPUTSIDEBAND=1",
+            "NOISEREF=PHASE OUTSIDEBAND=1",
+        ] {
+            assert!(
+                matches!(
+                    card_failure(&format!(".HB 1Meg\n.PNOISE LIN 2 1k 10k OUT=out {fields}")).2,
+                    AnalysisCardIssue::ConflictingFields { .. }
+                ),
+                "{fields}"
+            );
+        }
     }
 
     //-------------------------------------------------------------------------

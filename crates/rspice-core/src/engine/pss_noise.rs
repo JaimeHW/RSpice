@@ -185,6 +185,11 @@ fn check_pnoise_card_carrier(
 ) -> Result<(), SimulationError> {
     use crate::netlist::PnoiseReference;
 
+    if (autonomous && (card.input_sideband != 0 || card.output_sideband != 0))
+        || (card.noise_reference != PnoiseReference::Input && card.input_sideband != 0)
+    {
+        return Err(SimulationError::Circuit("PNOISE conversion sidebands require driven noise; a nonzero input sideband also requires input-referred noise".into()));
+    }
     match (card.noise_reference, autonomous) {
         (PnoiseReference::Phase, false) => Err(SimulationError::Circuit(
             "`.PNOISE NOISEREF=PHASE` needs an autonomous carrier: a driven orbit has no free \
@@ -301,13 +306,19 @@ impl Engine {
             }
             return Ok(PeriodicNoiseResult::Oscillator { output, result });
         }
-        let mut result = self.run_pnoise_from_pss_with_abort(
+        let mut result = self.run_pnoise_from_pss_request_with_abort(
             netlist,
-            &offsets,
-            &card.output_node,
-            card.reference_node.as_deref(),
-            card.input_source.as_deref(),
-            card.max_sideband,
+            &super::PeriodicNoiseRequest {
+                offsets: &offsets,
+                output_node: &card.output_node,
+                output_ref: card.reference_node.as_deref(),
+                input_source: card.input_source.as_deref(),
+                max_sideband: card.max_sideband,
+                sidebands: super::PeriodicNoiseSidebands {
+                    input: card.input_sideband,
+                    output: card.output_sideband,
+                },
+            },
             operating_point,
             abort,
         )?;
@@ -328,13 +339,19 @@ impl Engine {
         // A harmonic-balance carrier is driven by construction: its tones are
         // the deck's own sources.
         check_pnoise_card_carrier(card, false)?;
-        let mut result = self.run_pnoise_from_hb_with_abort(
+        let mut result = self.run_pnoise_from_hb_request_with_abort(
             netlist,
-            &offsets,
-            &card.output_node,
-            card.reference_node.as_deref(),
-            card.input_source.as_deref(),
-            card.max_sideband,
+            &super::PeriodicNoiseRequest {
+                offsets: &offsets,
+                output_node: &card.output_node,
+                output_ref: card.reference_node.as_deref(),
+                input_source: card.input_source.as_deref(),
+                max_sideband: card.max_sideband,
+                sidebands: super::PeriodicNoiseSidebands {
+                    input: card.input_sideband,
+                    output: card.output_sideband,
+                },
+            },
             operating_point,
             abort,
         )?;

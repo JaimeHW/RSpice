@@ -3684,6 +3684,24 @@ impl AnalysisResultDocument {
             )?,
             boolean_scalar("converged", "Converged", result.converged)?,
         ];
+        if result.sidebands.input != 0 || result.sidebands.output != 0 {
+            for (name, label, value) in [
+                ("input_sideband", "Input sideband", result.sidebands.input),
+                (
+                    "output_sideband",
+                    "Output sideband",
+                    result.sidebands.output,
+                ),
+            ] {
+                scalars.push(real_scalar(
+                    LOCATION,
+                    name,
+                    label,
+                    SignalUnit::Dimensionless,
+                    f64::from(value),
+                )?);
+            }
+        }
         // Present only when the card asked to integrate; absent is "not
         // asked", never "zero".
         if let Some(total) = result.integrated_output_noise {

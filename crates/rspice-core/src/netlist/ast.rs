@@ -2713,11 +2713,15 @@ pub enum PnoiseReference {
 
 /// Authored `.PNOISE` card.
 ///
-/// There is no single core configuration struct for periodic noise: the
-/// runners take the offset grid, the output probe, an optional input source
-/// and the folded sideband bound directly, so the card carries exactly those.
+/// The card defines the offset grid, voltage probe, optional input source,
+/// measured conversion channels and folding window for a retained-state
+/// periodic-noise request.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PnoiseCard {
+    /// Signal channel at offset + k * fundamental (input-referred mode).
+    pub input_sideband: i32,
+    /// Observed noise channel at offset + k * fundamental.
+    pub output_sideband: i32,
     /// Offset-frequency sweep; generates the offsets the runners consume.
     pub sweep: PeriodicSweep,
     /// Output voltage probe node.

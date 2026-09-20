@@ -17,6 +17,42 @@ const K_B: f64 = 1.380649e-23;
 const T_REF: f64 = 300.15;
 
 #[test]
+fn pnoise_card_selected_channels_reach_the_retained_hb_solver() {
+    for sideband in [-1, 0, 1] {
+        let deck = format!(
+            "PNOISE card channels\nV1 in 0 0\nR1 in out 1k\nC1 out 0 1n\n.HB 1Meg\n.PNOISE LIN 2 1k 10k OUT=out INPUT=V1 INPUTSIDEBAND={sideband} OUTSIDEBAND={sideband} MAXSIDEBAND=1\n.end\n"
+        );
+        let netlist = Netlist::parse(&deck).unwrap();
+        let rspice_core::netlist::AnalysisCommand::Pnoise(card) = &netlist.analyses[1] else {
+            panic!("PNOISE card");
+        };
+        let engine = Engine::default();
+        let hb = engine
+            .run_hb(&netlist, HbConfig::new(1e6).with_harmonics(8))
+            .unwrap();
+        let result = engine
+            .run_pnoise_card_from_hb_with_abort(&netlist, card, &hb.operating_point, &NoAbort)
+            .unwrap();
+        let rspice_core::engine::PeriodicNoiseResult::Driven { result, .. } = result else {
+            panic!("Driven noise");
+        };
+        assert_eq!(result.sidebands.input, sideband);
+        assert_eq!(result.sidebands.output, sideband);
+        for (index, &offset) in result.frequencies.iter().enumerate() {
+            let frequency = offset + f64::from(sideband) * 1e6;
+            let expected = 4.0 * K_B * T_REF * 1000.0
+                / (1.0 + (std::f64::consts::TAU * frequency * 1e-6).powi(2));
+            assert!((result.output_noise[index] / expected - 1.0).abs() < 1e-9);
+            assert!(
+                (result.input_noise.as_ref().unwrap()[index] / (4.0 * K_B * T_REF * 1000.0) - 1.0)
+                    .abs()
+                    < 1e-9
+            );
+        }
+    }
+}
+
+#[test]
 fn direct_pnoise_resolves_deck_temperature() {
     let resistance = 2.0e3;
     let temperature = 400.0;

@@ -46,6 +46,8 @@ pub struct PeriodicNoiseRequest<'a> {
 /// Result of periodic noise analysis.
 #[derive(Debug, Clone)]
 pub struct PnoiseAnalysisResult {
+    /// Measured signal and output frequency channels.
+    pub sidebands: PeriodicNoiseSidebands,
     /// Offset frequencies (Hz); the selected output channel is at offset + k*f0.
     pub frequencies: Vec<Value>,
     /// Total output noise voltage PSD at each offset (V^2/Hz).
@@ -1260,6 +1262,7 @@ impl Engine {
         }
 
         Ok(PnoiseAnalysisResult {
+            sidebands,
             frequencies: result_frequencies,
             output_noise,
             contributors,
