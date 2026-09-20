@@ -3096,6 +3096,8 @@ pub enum MonteCarloMeanConfidenceMethod {
 /// Monte Carlo command configuration
 #[derive(Debug, Clone)]
 pub struct MonteCarloCommand {
+    /// First requested trial in the original zero-based sequence.
+    pub first_trial: usize,
     /// Two-sided confidence level in percent, strictly between zero and 100.
     pub confidence_pct: Value,
     pub confidence_method: MonteCarloMeanConfidenceMethod,
@@ -3118,6 +3120,7 @@ impl MonteCarloCommand {
     /// Gaussian 1% variation, no explicit parameter filter.
     pub fn new(runs: usize) -> Self {
         Self {
+            first_trial: 0,
             runs,
             confidence_pct: 95.0,
             confidence_method: MonteCarloMeanConfidenceMethod::StudentT,

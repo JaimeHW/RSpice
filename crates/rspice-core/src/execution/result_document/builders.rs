@@ -2669,6 +2669,23 @@ impl AnalysisResultDocument {
                 "convergence flag disagrees with failed run count",
             ));
         }
+        let first_trial = result.sampling.map_or(0, |sampling| sampling.first_trial);
+        let end_trial = first_trial.checked_add(result.num_runs).ok_or_else(|| {
+            source_error(LOCATION, "trial range overflows the supported index range")
+        })?;
+        if let Some(indices) = &result.successful_trial_indices {
+            if indices.len() != successful_runs
+                || indices
+                    .iter()
+                    .any(|&index| index < first_trial || index >= end_trial)
+                || indices.windows(2).any(|pair| pair[0] >= pair[1])
+            {
+                return Err(source_error(
+                    LOCATION,
+                    "trial identities disagree with the retained population",
+                ));
+            }
+        }
         let mut names = result.variables.keys().cloned().collect::<Vec<_>>();
         names.sort();
         let mut statistics = Vec::with_capacity(names.len());
@@ -2832,6 +2849,13 @@ impl AnalysisResultDocument {
         ];
         scalars.extend(confidence_scalars);
         if let Some(sampling) = result.sampling {
+            if sampling.first_trial != 0 {
+                scalars.push(count_scalar(
+                    "first_trial",
+                    "First trial index (zero based)",
+                    sampling.first_trial,
+                )?);
+            }
             scalars.push(ResultScalar::new(
                 "sampling_seed",
                 "Sampling seed",
@@ -2851,7 +2875,10 @@ impl AnalysisResultDocument {
         }
         Ok(Self::builder(
             analysis,
-            ResultPayload::MonteCarlo(MonteCarloPayload { statistics }),
+            ResultPayload::MonteCarlo(MonteCarloPayload {
+                successful_trial_indices: result.successful_trial_indices.clone(),
+                statistics,
+            }),
             0,
         )
         .scalars(scalars))

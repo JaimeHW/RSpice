@@ -2269,6 +2269,10 @@ pub struct FftHarmonicDocument {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct MonteCarloPayload {
+    /// Original zero-based trial indices aligned with every variable's samples.
+    /// Legacy externally aggregated populations may have no recorded identities.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub successful_trial_indices: Option<Vec<usize>>,
     /// Per-variable statistics, ordered by canonical variable name so the
     /// document is independent of the producing hash map's iteration order.
     pub statistics: Vec<MonteCarloVariableStatistics>,
@@ -2276,6 +2280,21 @@ pub struct MonteCarloPayload {
 
 impl MonteCarloPayload {
     fn validate(&self) -> Result<(), ResultDocumentError> {
+        if let Some(indices) = &self.successful_trial_indices {
+            if indices.windows(2).any(|pair| pair[0] >= pair[1])
+                || self
+                    .statistics
+                    .iter()
+                    .any(|variable| variable.samples.len() != indices.len())
+            {
+                return Err(ResultDocumentError::Malformed {
+                    location: "Monte Carlo trial indices",
+                    detail:
+                        "trial indices must be increasing and align with every variable's samples"
+                            .into(),
+                });
+            }
+        }
         for statistics in &self.statistics {
             super::require_name("Monte Carlo variable", &statistics.name)?;
             for sample in &statistics.samples {

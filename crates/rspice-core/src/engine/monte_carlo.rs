@@ -14,13 +14,16 @@ mod deck_statistics;
 pub use deck_statistics::{MonteCarloVariationSource, monte_carlo_deck_trial_seed};
 
 /// Sampling inputs shared by voltage and named-measurement studies.
-struct TrialOptions<'a> {
-    num_runs: usize,
-    seed: u64,
-    distribution: Distribution,
-    variation_source: MonteCarloVariationSource,
-    parameter_filter: Option<&'a [String]>,
-    environment: Option<&'a MonteCarloEnvironment>,
+/// Trial indices are zero based and retain their original seed/stream identity.
+#[derive(Debug, Clone)]
+pub struct MonteCarloRunConfig<'a> {
+    pub first_trial: usize,
+    pub num_runs: usize,
+    pub seed: u64,
+    pub distribution: Distribution,
+    pub variation_source: MonteCarloVariationSource,
+    pub parameter_filter: Option<&'a [String]>,
+    pub environment: Option<&'a MonteCarloEnvironment>,
 }
 
 /// Exact operating environment applied to every Monte Carlo trial after any
@@ -212,7 +215,8 @@ impl Engine {
         environment: Option<MonteCarloEnvironment>,
         abort: &dyn AbortSignal,
     ) -> Result<MonteCarloResult, SimulationError> {
-        let options = TrialOptions {
+        let options = MonteCarloRunConfig {
+            first_trial: 0,
             num_runs,
             seed,
             distribution,
@@ -235,7 +239,8 @@ impl Engine {
     ) -> Result<MonteCarloResult, SimulationError> {
         self.run_monte_carlo_voltages_with_abort(
             netlist,
-            &TrialOptions {
+            &MonteCarloRunConfig {
+                first_trial: 0,
                 num_runs,
                 seed,
                 distribution: Distribution::Uniform { tolerance: 0.0 },
@@ -247,10 +252,12 @@ impl Engine {
         )
     }
 
-    fn run_monte_carlo_voltages_with_abort(
+    /// Run a contiguous batch, preserving original sample identities.
+    /// Earlier parameter-stream draws are advanced without solving their circuits.
+    pub fn run_monte_carlo_voltages_with_abort(
         &self,
         netlist: &Netlist,
-        options: &TrialOptions<'_>,
+        options: &MonteCarloRunConfig<'_>,
         abort: &dyn AbortSignal,
     ) -> Result<MonteCarloResult, SimulationError> {
         let num_runs = options.num_runs;
@@ -269,7 +276,7 @@ impl Engine {
         let successful_trial_indices = run_outcomes
             .iter()
             .enumerate()
-            .filter_map(|(index, outcome)| outcome.as_ref().map(|_| index))
+            .filter_map(|(index, outcome)| outcome.as_ref().map(|_| options.first_trial + index))
             .collect();
         let mut result = self.monte_carlo_result_from_observed_trials(
             run_outcomes.into_iter().flatten(),
@@ -291,14 +298,15 @@ impl Engine {
     fn run_monte_carlo_trials_with_abort<T: Send, F>(
         &self,
         netlist: &Netlist,
-        options: &TrialOptions<'_>,
+        options: &MonteCarloRunConfig<'_>,
         abort: &dyn AbortSignal,
         evaluate: F,
     ) -> Result<(Vec<Option<T>>, MonteCarloSampling), SimulationError>
     where
         F: Fn(&Engine, &Netlist, usize, &dyn AbortSignal) -> Result<T, SimulationError> + Sync,
     {
-        let TrialOptions {
+        let MonteCarloRunConfig {
+            first_trial,
             num_runs,
             seed,
             distribution,
@@ -315,6 +323,11 @@ impl Engine {
                 "Monte Carlo requires at least one run".to_string(),
             ));
         }
+        first_trial.checked_add(num_runs).ok_or_else(|| {
+            SimulationError::Circuit(
+                "Monte Carlo trial range overflows the supported index range".into(),
+            )
+        })?;
         self.ensure_batch_runs(num_runs)?;
         if variation_source == MonteCarloVariationSource::ParameterTolerance {
             distribution.validate()?;
@@ -416,6 +429,17 @@ impl Engine {
         };
         if !monte_params.is_empty() {
             self.ensure_result_shape(num_runs, monte_params.len())?;
+            // Replaying a shared stream must include rejected Box-Muller draws.
+            // Advance precisely as the original batch did; retain and solve only
+            // the requested range. Cancellation/deadlines also cover this phase.
+            for _run in 0..first_trial {
+                for (_, nominal) in &monte_params {
+                    if abort.is_aborted() {
+                        return Err(SimulationError::from_abort(abort));
+                    }
+                    distribution.sample(&mut rng, *nominal);
+                }
+            }
             for _run in 0..num_runs {
                 if abort.is_aborted() {
                     return Err(SimulationError::from_abort(abort));
@@ -435,7 +459,8 @@ impl Engine {
             .map(|coordinate| coordinate.axes.clone())
             .unwrap_or_default();
         let materialize_run =
-            |run_index: usize| -> Result<std::borrow::Cow<'_, Netlist>, SimulationError> {
+            |offset: usize| -> Result<std::borrow::Cow<'_, Netlist>, SimulationError> {
+                let run_index = first_trial + offset;
                 if variation_source == MonteCarloVariationSource::DeckStatistics {
                     let mut materialized = self.materialize_monte_carlo_deck_statistics(
                         netlist,
@@ -489,7 +514,7 @@ impl Engine {
                 }
                 let overrides = monte_params
                     .iter()
-                    .zip(&run_variations[run_index])
+                    .zip(&run_variations[offset])
                     .map(|((name, _), value)| (name.clone(), *value))
                     .collect::<Vec<_>>();
                 let (mut perturbed, _) =
@@ -540,7 +565,7 @@ impl Engine {
                     return Err(SimulationError::from_abort(abort));
                 }
                 let run_netlist = materialize_run(run_index)?;
-                let outcome = match evaluate(self, &run_netlist, run_index, abort) {
+                let outcome = match evaluate(self, &run_netlist, first_trial + run_index, abort) {
                     Ok(result) => Ok(Some(result)),
                     Err(error @ SimulationError::Aborted)
                     | Err(error @ SimulationError::TimeLimitExceeded)
@@ -586,14 +611,15 @@ impl Engine {
                                     break;
                                 }
                             };
-                            let outcome = match evaluate(&engine, &run_netlist, index, abort) {
-                                Ok(result) => Ok(Some(result)),
-                                Err(error @ SimulationError::Aborted)
-                                | Err(error @ SimulationError::TimeLimitExceeded)
-                                | Err(error @ SimulationError::ResourceLimit(_))
-                                | Err(error @ SimulationError::Configuration(_)) => Err(error),
-                                Err(_) => Ok(None),
-                            };
+                            let outcome =
+                                match evaluate(&engine, &run_netlist, first_trial + index, abort) {
+                                    Ok(result) => Ok(Some(result)),
+                                    Err(error @ SimulationError::Aborted)
+                                    | Err(error @ SimulationError::TimeLimitExceeded)
+                                    | Err(error @ SimulationError::ResourceLimit(_))
+                                    | Err(error @ SimulationError::Configuration(_)) => Err(error),
+                                    Err(_) => Ok(None),
+                                };
                             let fatal = outcome.is_err();
                             *slots[index].lock().expect("mc slot") = Some(outcome);
                             if fatal {
@@ -624,6 +650,7 @@ impl Engine {
         Ok((
             run_outcomes,
             MonteCarloSampling {
+                first_trial,
                 seed,
                 policy: if variation_source == MonteCarloVariationSource::DeckStatistics {
                     if has_spectre_statistics {

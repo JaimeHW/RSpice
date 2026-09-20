@@ -389,6 +389,8 @@ impl VariableStatistics {
 /// Seed and versioned sampling policy needed to reproduce a batch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MonteCarloSampling {
+    /// First requested trial in the original zero-based sequence.
+    pub first_trial: usize,
     pub seed: u64,
     pub policy: &'static str,
 }
@@ -801,6 +803,7 @@ impl MonteCarloRunner {
             all_converged: num_failures == 0,
             num_failures,
             sampling: Some(MonteCarloSampling {
+                first_trial: 0,
                 seed,
                 policy: "component-xoroshiro128plus-2018-v2",
             }),

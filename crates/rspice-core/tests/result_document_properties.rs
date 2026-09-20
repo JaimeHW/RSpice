@@ -581,6 +581,7 @@ fn document(family: usize, shape: &Shape) -> AnalysisResultDocument {
             ResultAxisKind::TrialIndex,
             integer_axis.clone(),
             ResultPayload::MonteCarlo(MonteCarloPayload {
+                successful_trial_indices: None,
                 statistics: vec![MonteCarloVariableStatistics {
                     name: "v(out)".to_owned(),
                     samples: shape.reals(),

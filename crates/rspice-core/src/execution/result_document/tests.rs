@@ -429,7 +429,12 @@ fn monte_carlo_documents_validate_trial_accounting() {
 #[test]
 fn monte_carlo_documents_retain_exact_seed_and_sampling_policy() {
     let mut result = monte_carlo_result();
+    result.num_runs = 4;
+    result.num_failures = 1;
+    result.all_converged = false;
+    result.successful_trial_indices = Some(vec![37, 39, 40]);
     result.sampling = Some(MonteCarloSampling {
+        first_trial: 37,
         seed: u64::MAX,
         policy: "parameter-xoroshiro128plus-2018-v1",
     });
@@ -439,6 +444,22 @@ fn monte_carlo_documents_retain_exact_seed_and_sampling_policy() {
             .build()
             .unwrap();
     let restored = AnalysisResultDocument::from_json(&document.to_json().unwrap()).unwrap();
+    let ResultPayload::MonteCarlo(payload) = restored.payload() else {
+        panic!("MC");
+    };
+    assert_eq!(
+        payload.successful_trial_indices.as_deref(),
+        Some([37, 39, 40].as_slice())
+    );
+    result.successful_trial_indices.as_mut().unwrap()[2] = 41;
+    assert!(
+        AnalysisResultDocument::from_monte_carlo(instance(AnalysisKind::MonteCarlo), &result)
+            .is_err()
+    );
+    assert_eq!(
+        scalar_of(&restored, "first_trial").value(),
+        &ScalarValue::Count { value: 37 }
+    );
     assert_eq!(
         scalar_of(&restored, "sampling_seed").value(),
         &ScalarValue::Count { value: u64::MAX }

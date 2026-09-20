@@ -1,6 +1,6 @@
 //! Named observations of arbitrary analyses on the engine's trial circuits.
 
-use super::{MonteCarloEnvironment, MonteCarloVariationSource, TrialOptions};
+use super::{MonteCarloEnvironment, MonteCarloRunConfig, MonteCarloVariationSource};
 use crate::abort_signal::AbortSignal;
 use crate::analysis::monte_carlo::{
     Distribution, MeanConfidenceMethod, MonteCarloResult, VariableStatistics,
@@ -14,6 +14,7 @@ use std::collections::HashSet;
 /// The engine's resource limits apply to the batch and each analysis invocation.
 #[derive(Debug, Clone)]
 pub struct MonteCarloStudyConfig {
+    pub first_trial: usize,
     pub num_runs: usize,
     pub seed: u64,
     pub distribution: Distribution,
@@ -33,6 +34,7 @@ pub struct MonteCarloStudyConfig {
 impl MonteCarloStudyConfig {
     pub fn new(num_runs: usize, seed: u64, measurements: Vec<String>) -> Self {
         Self {
+            first_trial: 0,
             num_runs,
             seed,
             distribution: Distribution::Gaussian { sigma: 0.01 },
@@ -120,7 +122,8 @@ impl Engine {
             MeanConfidenceMethod::PercentileBootstrap { resamples, .. } => resamples,
         };
         self.ensure_result_values(retained.saturating_add(confidence_scratch))?;
-        let options = TrialOptions {
+        let options = MonteCarloRunConfig {
+            first_trial: study.first_trial,
             num_runs: study.num_runs,
             seed: study.seed,
             distribution: study.distribution,
@@ -148,7 +151,7 @@ impl Engine {
         let successful_trial_indices: Vec<_> = outcomes
             .iter()
             .enumerate()
-            .filter_map(|(index, result)| result.as_ref().map(|_| index))
+            .filter_map(|(index, result)| result.as_ref().map(|_| study.first_trial + index))
             .collect();
         let successes = successful_trial_indices.len();
         let mut result = MonteCarloResult {

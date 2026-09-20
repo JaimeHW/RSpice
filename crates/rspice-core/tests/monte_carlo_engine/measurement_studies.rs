@@ -325,3 +325,100 @@ fn native_statistics_coordinate_is_shared_by_every_analysis_in_a_trial() {
         }
     }
 }
+
+#[test]
+fn monte_carlo_ranges_replay_original_streams_without_solving_skipped_trials() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let netlist =
+        Netlist::parse("range\n.param X=1 Y=2\nV1 out 0 {X+Y}\nR1 out 0 1k\n.end\n").unwrap();
+    for distribution in [
+        Distribution::Gaussian { sigma: 0.1 },
+        Distribution::Uniform { tolerance: 0.1 },
+        Distribution::WorstCase { tolerance: 0.1 },
+    ] {
+        let mut study = MonteCarloStudyConfig::new(8, u64::MAX, vec!["bias".into()]);
+        study.distribution = distribution;
+        let run = |study: &MonteCarloStudyConfig, workers| {
+            let count = AtomicUsize::new(0);
+            let result = Engine::new(config(workers))
+                .run_monte_carlo_measurements_with_abort(
+                    &netlist,
+                    study,
+                    &NoAbort,
+                    |engine, trial, index, abort| {
+                        count.fetch_add(1, Ordering::Relaxed);
+                        assert!(
+                            (study.first_trial..study.first_trial + study.num_runs)
+                                .contains(&index)
+                        );
+                        if index == 3 {
+                            return Err(SimulationError::Circuit(
+                                "deliberate missing observation".into(),
+                            ));
+                        }
+                        let result = engine.run_dc_op_with_abort(trial, abort)?;
+                        let node = result
+                            .node_names
+                            .iter()
+                            .position(|name| name.eq_ignore_ascii_case("out"))
+                            .unwrap();
+                        Ok(vec![result.node_voltages[node]])
+                    },
+                )
+                .unwrap();
+            assert_eq!(count.load(Ordering::Relaxed), study.num_runs);
+            result
+        };
+        let full = run(&study, 1);
+        study.first_trial = 2;
+        study.num_runs = 4;
+        let batch = run(&study, 2);
+        assert_eq!(batch.sampling.unwrap().first_trial, 2);
+        assert_eq!(
+            batch.successful_trial_indices.as_deref(),
+            Some([2, 4, 5].as_slice())
+        );
+        assert_eq!((batch.num_runs, batch.num_failures), (4, 1));
+        let full_indices = full.successful_trial_indices.as_ref().unwrap();
+        for (sample, index) in batch.variables["bias"]
+            .samples
+            .iter()
+            .zip(batch.successful_trial_indices.as_ref().unwrap())
+        {
+            let position = full_indices
+                .iter()
+                .position(|candidate| candidate == index)
+                .unwrap();
+            assert_eq!(*sample, full.variables["bias"].samples[position]);
+        }
+        study.first_trial = usize::MAX;
+        assert!(
+            Engine::default()
+                .run_monte_carlo_measurements_with_abort(
+                    &netlist,
+                    &study,
+                    &NoAbort,
+                    |_, _, _, _| panic!("invalid range must not solve")
+                )
+                .is_err()
+        );
+    }
+    for spelling in ["START 37", "START=37"] {
+        let parsed = Netlist::parse(&format!("range\n.mc 3 {spelling} SEED 42\n.end\n")).unwrap();
+        let rspice_core::netlist::AnalysisCommand::MonteCarlo(command) = &parsed.analyses[0] else {
+            panic!("MC");
+        };
+        assert_eq!((command.first_trial, command.runs), (37, 3));
+    }
+    for card in [
+        ".mc 1 START -1",
+        ".mc 1 START 1.5",
+        ".mc 1 START 2 START 3",
+        ".mc 2 START 18446744073709551615",
+    ] {
+        assert!(
+            Netlist::parse(&format!("invalid range\n{card}\n.end\n")).is_err(),
+            "{card}"
+        );
+    }
+}

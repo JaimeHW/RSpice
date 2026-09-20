@@ -143,9 +143,17 @@ impl MonteCarloResult {
             .ok_or_else(|| {
                 SimulationError::Circuit("Monte Carlo failed runs exceed attempted runs".to_owned())
             })?;
+        let first_trial = self.sampling.map_or(0, |sampling| sampling.first_trial);
+        let end_trial = first_trial.checked_add(self.num_runs).ok_or_else(|| {
+            SimulationError::Circuit(
+                "Monte Carlo trial range overflows the supported index range".into(),
+            )
+        })?;
         if let Some(indices) = &self.successful_trial_indices {
             if indices.len() != samples
-                || indices.iter().any(|&index| index >= self.num_runs)
+                || indices
+                    .iter()
+                    .any(|&index| index < first_trial || index >= end_trial)
                 || indices.windows(2).any(|pair| pair[0] >= pair[1])
             {
                 return Err(SimulationError::Circuit(

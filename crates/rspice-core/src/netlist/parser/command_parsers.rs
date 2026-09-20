@@ -1653,7 +1653,7 @@ pub(super) fn parse_pz_command(
 }
 
 /// Parse .MC command:
-/// .MC runs [SEED n] [DIST GAUSS|UNIFORM|WORSTCASE] [SPREAD rel]
+/// .MC runs [START zero_based_index] [SEED n] [DIST GAUSS|UNIFORM|WORSTCASE] [SPREAD rel]
 /// [CONFIDENCE pct] [CI STUDENTT|BOOTSTRAP] [RESAMPLES n] [BOOTSEED n] [PARAMS p1 p2 ...]
 ///
 /// Supported shorthand:
@@ -1701,7 +1701,7 @@ pub(super) fn parse_mc_command(
         let keyword = expect_ident(stream, line_num)?;
         if matches!(
             keyword.as_str(),
-            "CONFIDENCE" | "CI" | "RESAMPLES" | "BOOTSEED"
+            "START" | "CONFIDENCE" | "CI" | "RESAMPLES" | "BOOTSEED"
         ) && !confidence_seen.insert(keyword.clone())
         {
             return Err(ParseError::Syntax {
@@ -1741,6 +1741,14 @@ pub(super) fn parse_mc_command(
             "BOOTSEED" => {
                 stream.consume(&TokenKind::Equals);
                 bootstrap_seed = Some(expect_u64_value(stream, line_num, params, ".MC BOOTSEED")?);
+            }
+            "START" => {
+                stream.consume(&TokenKind::Equals);
+                let first = expect_u64_value(stream, line_num, params, ".MC START")?;
+                command.first_trial = usize::try_from(first).map_err(|_| ParseError::Syntax {
+                    line: line_num,
+                    message: ".MC START exceeds this platform's supported index range".into(),
+                })?;
             }
             "SEED" => {
                 stream.consume(&TokenKind::Equals);
@@ -1819,12 +1827,19 @@ pub(super) fn parse_mc_command(
                 return Err(ParseError::Syntax {
                     line: line_num,
                     message: format!(
-                        "Invalid .MC keyword '{}': expected SEED, DIST, SPREAD, CONFIDENCE, CI, RESAMPLES, BOOTSEED, or PARAMS",
+                        "Invalid .MC keyword '{}': expected START, SEED, DIST, SPREAD, CONFIDENCE, CI, RESAMPLES, BOOTSEED, or PARAMS",
                         keyword
                     ),
                 });
             }
         }
+    }
+
+    if command.first_trial.checked_add(command.runs).is_none() {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: ".MC trial range overflows the supported index range".into(),
+        });
     }
 
     if !command.relative_spread.is_finite() || command.relative_spread < 0.0 {
