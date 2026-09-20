@@ -1135,13 +1135,13 @@ pub(super) fn semantic_result_summary(
                 columns: vec!["Quantity".to_owned(), "Value".to_owned()],
                 rows: vec![
                     vec![
-                        "Output referred RMS".to_owned(),
+                        "Output referred (V rms)".to_owned(),
                         summary
                             .total_rms
                             .map_or_else(|| "not retained".to_owned(), exact_number),
                     ],
                     vec![
-                        "Input referred RMS".to_owned(),
+                        format!("Input referred ({})", summary.input_rms_unit()),
                         summary
                             .input_rms
                             .map_or_else(|| "not retained".to_owned(), exact_number),

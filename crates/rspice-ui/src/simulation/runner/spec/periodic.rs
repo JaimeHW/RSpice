@@ -394,6 +394,7 @@ fn run_hbnoise(
         .validate(band)
         .map_err(SimulationError::SolverError)?;
     let summary = Some(crate::state::NoiseSummary {
+        input_quantity: data.input_quantity,
         conversion: Some(conversion),
         noise_figure: data.noise_figure,
         rows,

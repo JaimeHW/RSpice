@@ -208,6 +208,7 @@ impl PnoiseRunConfig {
 /// PNoise analysis data.
 #[derive(Debug, Clone)]
 pub struct PnoiseData {
+    pub input_quantity: Option<rspice_core::analysis::noise::NoiseInputQuantity>,
     pub conversion: Option<crate::state::PeriodicNoiseConversionEvidence>,
     /// Offset frequencies (Hz).
     pub frequencies: Vec<Value>,
@@ -215,7 +216,7 @@ pub struct PnoiseData {
     /// - Output/Input: V^2/Hz
     /// - Phase: dBc/Hz
     pub output_noise: Vec<Value>,
-    /// Optional input-referred noise vector (V^2/Hz), when available.
+    /// Optional input-referred noise vector (V²/Hz or A²/Hz, per `input_quantity`).
     pub input_noise: Option<Vec<Value>>,
     /// Device contributors (name, percentage) at the measured output port.
     pub contributors: Vec<(String, Value)>,
@@ -228,7 +229,7 @@ pub struct PnoiseData {
     /// its band total is an RMS phase error in radians, and the retained
     /// [`crate::state::NoiseSummary`] states volts.
     pub output_rms: Option<Value>,
-    /// Total input-referred noise over the swept band in volts RMS, on the
+    /// Total input-referred noise over the swept band in volts or amperes RMS, on the
     /// same terms.
     pub input_rms: Option<Value>,
     /// Integrated phase error in radians; distinct from the voltage totals.
@@ -446,6 +447,7 @@ fn run_pnoise_from_retained_state(
         };
         ensure_not_aborted(abort)?;
         return Ok(PnoiseData {
+            input_quantity: None,
             contributor_spectra: Vec::new(),
             conversion: None,
             frequencies,
@@ -531,6 +533,7 @@ fn run_pnoise_from_retained_state(
     };
     ensure_not_aborted(abort)?;
     Ok(PnoiseData {
+        input_quantity: exact.input_quantity,
         contributor_spectra: if config.noise_summary {
             exact.contributors
         } else {

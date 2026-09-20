@@ -1160,6 +1160,30 @@ fn noise_analyses_project_psd_into_an_nv_sqrt_hz_pane() {
 }
 
 #[test]
+fn noise_input_units_use_current_density_without_a_second_si_prefix() {
+    let mut simulation = SimulationState::default();
+    simulation.start_run().add_analysis(
+        AnalysisResult::new(1, AnalysisType::Noise, "NOISE").with_waveforms(vec![
+            WaveformData::new("inoise", vec![1.0, 10.0], vec![1e-18, 4e-18], "#fff")
+                .with_unit("A²/Hz"),
+        ]),
+    );
+    let mut derived = DerivedSeries::default();
+    let models = build_models(
+        &simulation,
+        &mut derived,
+        &Tokens::default(),
+        false,
+        ComplexNumberDisplay::MagnitudePhaseDegrees,
+        None,
+        &HashSet::new(),
+    );
+    assert_eq!(models[0].unit_panes()[0].unit, "nA/√Hz");
+    assert!((models[0].traces[0].y[1] - 2.0).abs() < 1e-12);
+    assert_eq!(fmt_in_unit(2000.0, "nA/√Hz", 4), "2000 nA/√Hz");
+}
+
+#[test]
 fn phase_panes_order_after_quantity_panes_regardless_of_waveform_order() {
     let mut simulation = SimulationState::default();
     simulation.start_run().add_analysis(

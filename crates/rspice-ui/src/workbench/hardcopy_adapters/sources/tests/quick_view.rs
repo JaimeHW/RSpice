@@ -128,7 +128,8 @@ fn noise_quick_view_prefers_input_reference_exactly_like_the_results_instrument(
             vec![100.0e-18, 400.0e-18],
             "#00ffff",
         ),
-        WaveformData::new("inoise", vec![1.0, 10.0], vec![1.0e-18, 4.0e-18], "#ff00ff"),
+        WaveformData::new("inoise", vec![1.0, 10.0], vec![1.0e-18, 4.0e-18], "#ff00ff")
+            .with_unit("A²/Hz"),
     ]);
     let state = quick_view_state(analysis, ResultViewer::NoiseContrib);
 
@@ -137,7 +138,7 @@ fn noise_quick_view_prefers_input_reference_exactly_like_the_results_instrument(
         panic!("expected semantic noise plot")
     };
     assert_eq!(plot.traces.len(), 1);
-    assert_eq!(plot.traces[0].label, "inoise");
+    assert_eq!(plot.traces[0].label, "inoise (nA/√Hz)");
     let density = f64::from_bits(plot.traces[0].source_samples[1].1);
     assert!((density - 2.0).abs() < 1.0e-12);
 }
@@ -165,7 +166,7 @@ fn noise_quick_view_falls_back_to_the_first_renderable_noise_analysis() {
     let HardcopySemanticDocument::Plot(plot) = resolved.semantic_document() else {
         panic!("expected semantic noise plot")
     };
-    assert_eq!(plot.traces[0].label, "onoise");
+    assert_eq!(plot.traces[0].label, "onoise (nV/√Hz)");
 }
 
 #[test]

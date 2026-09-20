@@ -993,6 +993,138 @@ R2 out 0 1k\n\
     }
 
     #[test]
+    fn noise_input_units_survive_execution_worker_transport_and_retention() {
+        use crate::simulation::runner::worker_contract::WorkerSimulationResult;
+        use rspice_core::analysis::noise::NoiseInputQuantity;
+        let netlist = "current-referred noise\nIref 0 out dc 0 ac 1\nR1 out 0 1k\n.end\n";
+        let dependencies = transferred_hb_dependencies(netlist);
+        let no_dependencies = ResolvedExecutionDependencies::default();
+        let ordinary = AnalysisSpec::Noise {
+            output_node: "out".into(),
+            reference_node: "0".into(),
+            input_source: "Iref".into(),
+            start_freq: 1e3,
+            stop_freq: 1e4,
+            points_per_decade: 3,
+            sweep: crate::simulation::config::NoiseSweepType::Linear,
+            explicit_frequencies: None,
+            data_table_name: None,
+            contribution_detail: crate::simulation::config::NoiseContributionDetail::Top50,
+            integration_mode: crate::simulation::config::NoiseIntegrationMode::Enabled,
+            temperature: 300.15,
+        };
+        let hbnoise = AnalysisSpec::Hbnoise {
+            input_sideband: 0,
+            output_sideband: 0,
+            noise_reference: None,
+            start_freq: 1e3,
+            stop_freq: 1e4,
+            points_per_unit: 3,
+            sweep: crate::simulation::multi_run::FrequencySweep::Linear,
+            output_node: "out".into(),
+            output_ref: "0".into(),
+            input_source: "Iref".into(),
+            max_sideband: 0,
+            integrated_noise: true,
+            noise_figure: false,
+            contributor_ranking: true,
+        };
+        let pnoise_options = SpecExecutionOptions {
+            pnoise: Some(svc_runner::PnoiseRunConfig {
+                output_node: "out".into(),
+                input_source: "Iref".into(),
+                noise_ref: svc_runner::PnoiseReference::Input,
+                start_freq: 1e3,
+                stop_freq: 1e4,
+                points_per_unit: 3,
+                sweep: svc_runner::PnoiseFrequencySweep::Linear,
+                pss_num_harmonics: 8,
+                max_sideband: 0,
+                integrated_noise: true,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        for (spec, options, kind) in [
+            (
+                ordinary,
+                SpecExecutionOptions::default(),
+                crate::state::AnalysisType::Noise,
+            ),
+            (
+                hbnoise,
+                SpecExecutionOptions::default(),
+                crate::state::AnalysisType::Hbnoise,
+            ),
+            (
+                AnalysisSpec::Pnoise,
+                pnoise_options,
+                crate::state::AnalysisType::Pnoise,
+            ),
+        ] {
+            let result = run_spec_request(
+                &EngineBridge::new(),
+                spec,
+                options,
+                netlist,
+                None,
+                if kind == crate::state::AnalysisType::Noise {
+                    &no_dependencies
+                } else {
+                    &dependencies
+                },
+                &rspice_core::abort_signal::NoAbort,
+            )
+            .unwrap();
+            let worker = WorkerSimulationResult::try_from(result).unwrap();
+            let json = serde_json::to_string(&worker).unwrap();
+            let result = SimulationResult::from(
+                serde_json::from_str::<WorkerSimulationResult>(&json).unwrap(),
+            );
+            let retained = crate::simulation::controller::SimulationController::new()
+                .convert_to_analysis_result_with_metadata_owned(
+                    result,
+                    kind,
+                    "current-referred noise",
+                );
+            let input = retained
+                .waveforms
+                .iter()
+                .find(|wave| wave.name == "inoise")
+                .unwrap();
+            assert_eq!(input.unit.as_deref(), Some("A²/Hz"));
+            let expected = 4.0 * rspice_core::constants::K_BOLTZMANN * 300.15 / 1e3;
+            for density in input.y.iter() {
+                assert!(
+                    (density / expected - 1.0).abs() < 1e-10,
+                    "{kind:?}: {density:e}"
+                );
+            }
+            let summary = retained.noise_summary.as_ref().unwrap();
+            assert_eq!(summary.input_quantity, Some(NoiseInputQuantity::Current));
+            assert_eq!(summary.input_rms_unit(), "A rms");
+            assert_eq!(
+                input.x.as_slice(),
+                &[1e3, 5.5e3, 1e4],
+                "{kind:?} frequency grid"
+            );
+            assert!(
+                (summary.input_rms.unwrap().powi(2) / (expected * 9e3) - 1.0).abs() < 1e-10,
+                "{kind:?}: RMS {:?}, expected {}, band {:?}",
+                summary.input_rms,
+                (expected * 9e3).sqrt(),
+                summary.band
+            );
+            assert_eq!(retained.validate_retained_evidence(), Ok(()));
+            let mut changed = retained.clone();
+            changed.noise_summary.as_mut().unwrap().input_quantity =
+                Some(NoiseInputQuantity::Voltage);
+            assert_ne!(changed.result_data_digest(), retained.result_data_digest());
+            assert!(changed.validate_retained_evidence().is_err());
+        }
+    }
+
+    #[test]
     fn pnoise_reported_contributors_keep_their_physical_spectra_and_band_powers() {
         let netlist = "PNOISE contributor spectrum\nV1 in 0 0\nR1 in out 1k\nR2 out 0 1k\nC1 out 0 1n\n.end\n";
         let dependencies = transferred_hb_dependencies(netlist);

@@ -1505,6 +1505,10 @@ fn encode_noise_summary(
         writer.f64(row.power);
         writer.f64(row.share_pct);
     }
+    if let Some(quantity) = summary.input_quantity {
+        writer.string("noise-input-quantity-v1");
+        writer.string(quantity.density_unit());
+    }
     if let Some(conversion) = &summary.conversion {
         writer.string("periodic-noise-conversion-v1");
         writer.string(&conversion.input_source);

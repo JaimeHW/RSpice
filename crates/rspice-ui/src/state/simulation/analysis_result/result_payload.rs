@@ -1052,6 +1052,15 @@ impl AnalysisResult {
             }
         }
         if let Some(noise) = &self.noise_summary {
+            if let Some(quantity) = noise.input_quantity {
+                if self.waveforms.iter().any(|wave| {
+                    wave.name == "inoise" && wave.unit.as_deref() != Some(quantity.density_unit())
+                }) || (noise.noise_figure.is_some()
+                    && quantity != rspice_core::analysis::noise::NoiseInputQuantity::Voltage)
+                {
+                    return Err("Noise input quantity disagrees with its retained evidence".into());
+                }
+            }
             if let Some(conversion) = &noise.conversion {
                 conversion.validate(noise.band)?;
                 if conversion.input_source.trim().is_empty()

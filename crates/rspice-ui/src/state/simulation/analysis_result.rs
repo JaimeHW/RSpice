@@ -328,6 +328,7 @@ pub struct NoiseContributorRow {
 /// first.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct NoiseSummary {
+    pub input_quantity: Option<rspice_core::analysis::noise::NoiseInputQuantity>,
     pub conversion: Option<super::PeriodicNoiseConversionEvidence>,
     pub noise_figure: Option<std::sync::Arc<super::NoiseFigureEvidence>>,
     /// Contributors, ranked by integrated power, descending.
@@ -335,11 +336,19 @@ pub struct NoiseSummary {
     /// Total integrated output noise over the band (V rms). `None` means the
     /// selected execution policy intentionally omitted this evidence.
     pub total_rms: Option<f64>,
-    /// Total integrated input-referred noise (V rms), retained only when the
+    /// Total integrated input-referred noise, in the resolved source quantity, retained when the
     /// named-source normalization was validated and the policy requested it.
     pub input_rms: Option<f64>,
     /// Analysis band, for the panel header (Hz).
     pub band: (f64, f64),
+}
+
+impl NoiseSummary {
+    /// Legacy results may lack the source quantity; do not invent a voltage unit for them.
+    pub fn input_rms_unit(&self) -> &'static str {
+        self.input_quantity
+            .map_or("RMS (unit not retained)", |quantity| quantity.rms_unit())
+    }
 }
 
 /// One exact complex value retained from an analysis result.

@@ -159,6 +159,7 @@ impl HbnoiseRunConfig {
 /// Exact HBNOISE spectra and band-integrated evidence.
 #[derive(Debug, Clone)]
 pub struct HbnoiseData {
+    pub input_quantity: Option<rspice_core::analysis::noise::NoiseInputQuantity>,
     pub noise_figure: Option<std::sync::Arc<crate::state::NoiseFigureEvidence>>,
     pub frequencies: Vec<Value>,
     pub output_noise: Vec<Value>,
@@ -304,6 +305,7 @@ pub fn run_hbnoise_analysis_from_hb_with_source_path_and_abort(
     };
     ensure_not_aborted(abort)?;
     Ok(HbnoiseData {
+        input_quantity: exact.input_quantity,
         noise_figure,
         frequencies,
         output_noise: exact.output_noise,

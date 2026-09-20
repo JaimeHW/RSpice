@@ -56,6 +56,8 @@ impl From<WorkerTransferFunctionScalar> for TransferFunctionScalar {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct WorkerNoiseSummary {
     #[serde(default)]
+    pub input_quantity: Option<rspice_core::analysis::noise::NoiseInputQuantity>,
+    #[serde(default)]
     pub conversion: Option<crate::state::PeriodicNoiseConversionEvidence>,
     #[serde(default)]
     pub noise_figure: Option<std::sync::Arc<crate::state::NoiseFigureEvidence>>,
@@ -93,6 +95,7 @@ impl WorkerNoiseSummary {
 impl From<NoiseSummary> for WorkerNoiseSummary {
     fn from(value: NoiseSummary) -> Self {
         Self {
+            input_quantity: value.input_quantity,
             conversion: value.conversion,
             noise_figure: value.noise_figure,
             rows: value
@@ -110,6 +113,7 @@ impl From<NoiseSummary> for WorkerNoiseSummary {
 impl From<WorkerNoiseSummary> for NoiseSummary {
     fn from(value: WorkerNoiseSummary) -> Self {
         Self {
+            input_quantity: value.input_quantity,
             conversion: value.conversion,
             noise_figure: value.noise_figure,
             rows: value

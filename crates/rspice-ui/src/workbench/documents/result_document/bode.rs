@@ -38,6 +38,7 @@ struct NoiseSpectrumModel {
     trace_count: usize,
     total_rms: Option<f64>,
     input_rms: Option<f64>,
+    input_rms_unit: &'static str,
     band: Option<(f64, f64)>,
 }
 
@@ -376,6 +377,12 @@ fn build_noise_model(state: &AppState) -> Option<NoiseSpectrumModel> {
         trace_count,
         total_rms,
         input_rms,
+        input_rms_unit: analysis
+            .noise_summary
+            .as_ref()
+            .map_or("RMS (unit not retained)", |summary| {
+                summary.input_rms_unit()
+            }),
         band,
     })
 }
@@ -536,16 +543,17 @@ pub(super) fn noise_spectrum_right_panel(ui: &mut Ui, state: &mut AppState) {
         ),
         (
             "Input referred",
-            model
-                .input_rms
-                .map_or_else(|| "—".to_owned(), |value| format!("{value:.6e} V rms")),
+            model.input_rms.map_or_else(
+                || "—".to_owned(),
+                |value| format!("{value:.6e} {}", model.input_rms_unit),
+            ),
             model.input_rms.is_some(),
         ),
     ];
     super::stat_table(ui, &rows);
     super::panel_note(
         ui,
-        "The retained source vectors are power spectral density (V²/Hz). The plot applies the exact square-root amplitude-density conversion and displays nV/√Hz without altering source samples.",
+        "The plot takes the square root of retained power spectral density and displays nV/√Hz for voltage or nA/√Hz for current, without altering source samples.",
     );
 }
 

@@ -329,7 +329,14 @@ fn quick_noise_spectrum_plot(
                 "{}:{}:{}:{}:noise-amplitude-density:{waveform_index}",
                 active.run.dataset_id, active.run.run_id, active.analysis.id, waveform.name
             ),
-            label: waveform.name.clone(),
+            label: format!(
+                "{} ({})",
+                waveform.name,
+                match waveform.unit.as_deref() {
+                    Some("A²/Hz" | "A^2/Hz") => "nA/√Hz",
+                    _ => "nV/√Hz",
+                }
+            ),
             points: waveform
                 .x
                 .iter()

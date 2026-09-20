@@ -997,8 +997,8 @@ pub(super) fn build_models(
                 analysis.analysis_type,
                 AnalysisType::Noise | AnalysisType::Hbnoise
             ) {
-                // Retained noise PSDs are V²/Hz; the pane reads nV/√Hz like
-                // the mockup's noise instrument.
+                // Voltage and current PSDs share the square-root projection;
+                // the retained unit selects nV/√Hz or nA/√Hz.
                 TraceKind::NoiseDensity
             } else {
                 TraceKind::Value
@@ -1373,8 +1373,8 @@ const NOISE_DENSITY_UNIT: &str = "nV/√Hz";
 /// A unit that already carries an SI prefix takes no second one: 1.79 µV/√Hz
 /// of output noise reads as `1786.13 nV/√Hz`, never as `1.78613 knV/√Hz`.
 fn fmt_in_unit(value: f64, unit: &str, significant_digits: usize) -> String {
-    if unit == NOISE_DENSITY_UNIT {
-        return fmt_significant(value, significant_digits, " nV/√Hz");
+    if matches!(unit, NOISE_DENSITY_UNIT | "nA/√Hz") {
+        return fmt_significant(value, significant_digits, &format!(" {unit}"));
     }
     fmt_si_significant(value, unit, significant_digits)
 }
@@ -1394,7 +1394,10 @@ fn signal_unit<'a>(
         TraceKind::MagnitudeDb => "dB",
         TraceKind::PhaseDeg => "°",
         TraceKind::PhaseRad => "rad",
-        TraceKind::NoiseDensity => NOISE_DENSITY_UNIT,
+        TraceKind::NoiseDensity => match retained_unit {
+            Some("A²/Hz" | "A^2/Hz") => "nA/√Hz",
+            _ => NOISE_DENSITY_UNIT,
+        },
         TraceKind::Value | TraceKind::Real | TraceKind::Imaginary => {
             quantity_unit(name, retained_unit, analysis_unit)
         }

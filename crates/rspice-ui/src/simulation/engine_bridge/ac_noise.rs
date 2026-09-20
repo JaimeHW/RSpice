@@ -231,6 +231,7 @@ impl EngineBridge {
             |(minimum, maximum), frequency| (minimum.min(frequency), maximum.max(frequency)),
         );
         ensure_not_aborted(abort)?;
+        let input_quantity = noise_results.first().and_then(|point| point.input_quantity);
         let mut integration_results = noise_results;
         integration_results.sort_by(|left, right| left.frequency.total_cmp(&right.frequency));
         let integrated = rspice_core::analysis::IntegratedNoise::new(integration_results);
@@ -255,6 +256,7 @@ impl EngineBridge {
             config.integration_mode,
         );
         let summary = crate::state::NoiseSummary {
+            input_quantity,
             conversion: None,
             noise_figure: None,
             rows,
@@ -448,7 +450,8 @@ fn validate_noise_results(results: &[NoiseResult]) -> Result<(), SimulationError
                 point_index + 1
             )));
         }
-        if result.node_names != first.node_names
+        if result.input_quantity != first.input_quantity
+            || result.node_names != first.node_names
             || result.branch_names != first.branch_names
             || result.voltages.len() != first.voltages.len()
             || result.currents.len() != first.currents.len()

@@ -604,6 +604,7 @@ fn pnoise_result(
             data.frequencies.last().copied().unwrap_or_default(),
         );
         crate::state::NoiseSummary {
+            input_quantity: data.input_quantity,
             conversion: data.conversion,
             noise_figure: None,
             rows,
@@ -639,6 +640,7 @@ fn pnoise_result(
 #[test]
 fn pnoise_phase_contributor_shares_are_measurements_not_density_curves() {
     let data = svc_runner::PnoiseData {
+        input_quantity: None,
         conversion: None,
         frequencies: vec![1e3, 1e4],
         output_noise: vec![-80.0, -100.0],

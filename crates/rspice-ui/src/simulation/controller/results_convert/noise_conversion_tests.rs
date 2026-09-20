@@ -15,6 +15,7 @@ fn hbnoise_retains_noise_figure_as_decibels_with_its_source_reference() {
         decibels: vec![2.0, 3.0],
     });
     let summary = crate::state::NoiseSummary {
+        input_quantity: None,
         conversion: Some(crate::state::PeriodicNoiseConversionEvidence {
             input_source: "V1".into(),
             carrier_hz: 1e6,

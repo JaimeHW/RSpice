@@ -318,6 +318,7 @@ fn project_load_authenticates_v11_noise_and_preserves_eligible_regression_baseli
     };
     let snapshot = ContentDigest::from_bytes([0xd1; 32]);
     let summary = NoiseSummary {
+        input_quantity: None,
         conversion: None,
         noise_figure: None,
         rows: vec![NoiseContributorRow {
@@ -1051,6 +1052,7 @@ fn project_results_preserve_core_noise_mechanism_labels() {
                 dc_op: None,
                 device_op: None,
                 noise_summary: Some(ProjectNoiseSummary {
+                    input_quantity: None,
                     conversion: None,
                     noise_figure: None,
                     rows: vec![

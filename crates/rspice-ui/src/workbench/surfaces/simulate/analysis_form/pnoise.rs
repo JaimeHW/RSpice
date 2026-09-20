@@ -63,7 +63,7 @@ pub(super) fn fields(
         &mut setup.noise_ref_idx,
     );
     ui.scope(|ui| { switch_row(ui, "Integrated noise", &mut setup.integrated_noise); }).response
-        .on_hover_text("Phase mode retains RMS phase error in radians and timing jitter in seconds in Measurements; driven modes retain voltage RMS.");
+        .on_hover_text("Phase mode retains RMS phase error in radians and timing jitter in seconds in Measurements; driven modes retain output voltage RMS and input voltage or current RMS according to the selected source.");
     switch_row(ui, "Noise summary", &mut setup.noise_summary);
     periodic_carrier_row(ui, &mut setup.carrier_idx);
 }

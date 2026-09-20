@@ -24,6 +24,7 @@ fn hbnoise_reference_results_survive_project_load_and_reject_tampering_and_old_s
             decibels: vec![2.0, 3.0],
         });
         let summary = NoiseSummary {
+            input_quantity: None,
             conversion: conversion.clone(),
             noise_figure: Some(figure.clone()),
             band: (1e3, 1e4),
@@ -131,5 +132,100 @@ fn hbnoise_reference_results_survive_project_load_and_reject_tampering_and_old_s
                     "before v32"
                 })
         );
+    }
+}
+
+#[test]
+fn noise_input_units_survive_projects_and_reject_unit_tampering() {
+    use rspice_core::analysis::noise::NoiseInputQuantity;
+    for quantity in [
+        None,
+        Some(NoiseInputQuantity::Voltage),
+        Some(NoiseInputQuantity::Current),
+    ] {
+        let summary = NoiseSummary {
+            input_quantity: quantity,
+            input_rms: Some(3e-9),
+            band: (1e3, 1e4),
+            ..Default::default()
+        };
+        let mut run = SimulationRun::new(1);
+        run.mark_running().unwrap();
+        run.finish_lifecycle(SimulationRunLifecycle::Completed)
+            .unwrap();
+        let mut wave =
+            crate::state::WaveformData::new("inoise", vec![1e3, 1e4], vec![1e-21, 1e-21], "#fff");
+        if let Some(quantity) = quantity {
+            wave = wave.with_unit(quantity.density_unit());
+        }
+        run.add_analysis(
+            AnalysisResult::new(1, AnalysisType::Noise, "NOISE")
+                .with_waveforms(vec![wave])
+                .with_noise_summary(summary.clone()),
+        );
+        seal_legacy_unattributed(&mut run);
+        let digest = run.analyses[0].result_data_digest();
+        let mut simulation = SimulationState::default();
+        simulation.runs = vec![run].into();
+        simulation.next_run_id = 1;
+        simulation.active_run_idx = Some(0);
+        simulation.active_analysis_idx = Some(0);
+        let mut libraries = LibraryManager::with_primitives();
+        let workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
+        let project = ProjectFile::new_with_simulation_results(
+            workspace,
+            libraries,
+            ProjectSimulationResults::from_state(&simulation),
+        );
+        let json = serialize_project_file(&project).unwrap();
+        let restored = load_project_text(&json, None)
+            .unwrap()
+            .simulation_results
+            .into_simulation_state()
+            .unwrap();
+        assert_eq!(
+            restored.active_analysis().unwrap().noise_summary.as_ref(),
+            Some(&summary)
+        );
+        assert_eq!(
+            restored.active_analysis().unwrap().result_data_digest(),
+            digest
+        );
+        let mut old: serde_json::Value = serde_json::from_str(&json).unwrap();
+        old["simulation_results"]["schema_version"] = 33.into();
+        let migrated = load_project_text(&old.to_string(), None).unwrap();
+        assert_eq!(
+            migrated.simulation_results.runs.is_empty(),
+            quantity.is_some()
+        );
+        if quantity.is_none() {
+            assert_eq!(
+                migrated
+                    .simulation_results
+                    .into_simulation_state()
+                    .unwrap()
+                    .active_analysis()
+                    .unwrap()
+                    .result_data_digest(),
+                digest
+            );
+        }
+        if quantity.is_some() {
+            let mut changed: serde_json::Value = serde_json::from_str(&json).unwrap();
+            changed["simulation_results"]["runs"][0]["analyses"][0]["noise_summary"]["input_quantity"] =
+                serde_json::to_value(if quantity == Some(NoiseInputQuantity::Current) {
+                    NoiseInputQuantity::Voltage
+                } else {
+                    NoiseInputQuantity::Current
+                })
+                .unwrap();
+            assert!(
+                load_project_text(&changed.to_string(), None)
+                    .unwrap()
+                    .simulation_results
+                    .runs
+                    .is_empty()
+            );
+        }
     }
 }

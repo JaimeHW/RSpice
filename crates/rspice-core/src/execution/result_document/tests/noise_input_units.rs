@@ -31,6 +31,13 @@ fn noise_input_units_follow_resolved_hierarchical_current_sources() {
         assert!((point.input_referred_density / expected_current - 1.0).abs() < 1e-10);
         assert!((point.output_noise_density / (expected_current * 1e6) - 1.0).abs() < 1e-10);
     }
+    let integrated =
+        crate::analysis::IntegratedNoise::new(ordinary.clone()).total_input_referred_noise();
+    assert!(
+        (integrated.powi(2) / (expected_current * 9e3) - 1.0).abs() < 1e-10,
+        "current RMS {integrated:e}, expected {}",
+        (expected_current * 9e3).sqrt()
+    );
     let document = AnalysisResultDocument::from_noise(
         AnalysisInstanceId::new(AnalysisKind::Noise, 0),
         &ordinary,

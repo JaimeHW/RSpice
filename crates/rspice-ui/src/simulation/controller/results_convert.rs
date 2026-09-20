@@ -335,8 +335,20 @@ impl SimulationController {
                         output_noise,
                         input_noise,
                         contributors,
+                        summary.as_ref().and_then(|summary| summary.input_quantity),
                     ))
                     .with_measurements(measurements);
+                if matches!(analysis_type, AnalysisType::Noise | AnalysisType::Hbnoise)
+                    || summary
+                        .as_ref()
+                        .is_some_and(|summary| summary.conversion.is_some())
+                {
+                    for wave in &mut result.waveforms {
+                        if wave.name == "onoise" || wave.name.starts_with("noise(") {
+                            wave.unit = Some("V²/Hz".into());
+                        }
+                    }
+                }
                 if let Some(summary) = summary {
                     if let Some(figure) = &summary.noise_figure {
                         result.waveforms.push(
@@ -1087,6 +1099,7 @@ impl SimulationController {
         output_noise: Vec<f64>,
         input_noise: Option<Vec<f64>>,
         contributors: HashMap<String, Vec<f64>>,
+        input_quantity: Option<rspice_core::analysis::noise::NoiseInputQuantity>,
     ) -> Vec<crate::state::WaveformData> {
         let (frequencies, output_noise, input_noise, contributors) =
             Self::order_noise_series_for_retention(
@@ -1116,12 +1129,16 @@ impl SimulationController {
         if let Some(inoise) = input_noise
             && Self::samples_match_shared_axis(&inoise, freq_len)
         {
-            results.push(crate::state::WaveformData::new(
+            let mut waveform = crate::state::WaveformData::new(
                 "inoise".to_string(),
                 Arc::clone(&shared_freqs),
                 inoise,
                 Self::color_for_index(results.len()),
-            ));
+            );
+            if let Some(quantity) = input_quantity {
+                waveform = waveform.with_unit(quantity.density_unit());
+            }
+            results.push(waveform);
         }
 
         let mut contributors: Vec<_> = contributors.into_iter().collect();

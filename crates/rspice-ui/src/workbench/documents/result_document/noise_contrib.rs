@@ -80,7 +80,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         .unwrap_or_else(|| "Not retained".to_owned());
     let input = summary
         .input_rms
-        .map(|value| fmt_si(value, "V rms", 3))
+        .map(|value| fmt_si(value, summary.input_rms_unit(), 3))
         .unwrap_or_else(|| "Not retained".to_owned());
     let count = summary.rows.len().to_string();
     measurement_table(
@@ -383,6 +383,7 @@ mod tests {
                     .with_unit("dB"),
                 ])
                 .with_noise_summary(NoiseSummary {
+                    input_quantity: None,
                     conversion: Some(crate::state::PeriodicNoiseConversionEvidence {
                         input_source: "V1".into(),
                         carrier_hz: 1e6,
@@ -408,7 +409,7 @@ mod tests {
             .map(|line| line.split(',').collect())
             .collect();
         assert_eq!(lines.len(), 7);
-        assert!(lines.iter().all(|row| row.len() == 28), "{:?}", lines);
+        assert!(lines.iter().all(|row| row.len() == 31), "{:?}", lines);
         let figure_rows: Vec<_> = lines
             .iter()
             .filter(|row| row[0] == "noise_figure")
@@ -458,6 +459,7 @@ mod tests {
             WaveformData::new("inoise", vec![1.0, 10.0], vec![1.0e-9, 2.0e-9], "#fff"),
         ]);
         first.noise_summary = Some(NoiseSummary {
+            input_quantity: None,
             conversion: None,
             noise_figure: None,
             band: (1.0, 10.0),
@@ -468,6 +470,7 @@ mod tests {
                 WaveformData::new("inoise", vec![1.0, 10.0], vec![3.0e-9, 4.0e-9], "#fff"),
             ]);
         second.noise_summary = Some(NoiseSummary {
+            input_quantity: None,
             conversion: None,
             noise_figure: None,
             band: (2.0, 20.0),
