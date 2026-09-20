@@ -168,6 +168,14 @@ impl PnoiseRunConfig {
                 "PNOISE points per unit must be greater than zero".to_string(),
             ));
         }
+        if self.integrated_noise
+            && (self.start_freq == self.stop_freq
+                || (self.sweep == PnoiseFrequencySweep::Linear && self.points_per_unit == 1))
+        {
+            return Err(PnoiseRunError::Validation(
+                "PNOISE integrated noise requires at least two distinct frequency points".into(),
+            ));
+        }
         if self.max_sideband < 0 {
             return Err(PnoiseRunError::Validation(
                 "PNOISE max sideband must be non-negative".to_string(),
@@ -211,6 +219,9 @@ pub struct PnoiseData {
     pub input_noise: Option<Vec<Value>>,
     /// Device contributors (name, percentage) at the measured output port.
     pub contributors: Vec<(String, Value)>,
+    /// Driven output-noise densities in V²/Hz. Phase-mode contributor shares
+    /// are scalar percentages, never voltage-density curves.
+    pub contributor_spectra: Vec<(String, Vec<Value>)>,
     /// Total output noise over the swept band in volts RMS, when the run was
     /// asked to integrate. `None` means the question was not asked — or that
     /// the reference has no answer in volts, which is the phase-noise case:
@@ -368,6 +379,11 @@ fn run_pnoise_from_retained_state(
     carrier: PeriodicCarrierState<'_>,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<PnoiseData> {
+    if config.integrated_noise && frequencies.len() < 2 {
+        return Err(ServiceRunError::Failure(
+            "PNOISE integrated noise requires at least two distinct frequency points".into(),
+        ));
+    }
     // Validates `max_sideband` before the exact solve; the stride itself is
     // applied inside the engine call below.
     validate_pnoise_sideband_count(config.max_sideband, abort)?;
@@ -430,6 +446,7 @@ fn run_pnoise_from_retained_state(
         };
         ensure_not_aborted(abort)?;
         return Ok(PnoiseData {
+            contributor_spectra: Vec::new(),
             conversion: None,
             frequencies,
             output_noise: oscillator.phase_noise_dbc,
@@ -514,6 +531,11 @@ fn run_pnoise_from_retained_state(
     };
     ensure_not_aborted(abort)?;
     Ok(PnoiseData {
+        contributor_spectra: if config.noise_summary {
+            exact.contributors
+        } else {
+            Vec::new()
+        },
         conversion: Some(crate::state::PeriodicNoiseConversionEvidence {
             input_source: input_source.unwrap_or_default().into(),
             carrier_hz: exact.fundamental_freq,
@@ -971,6 +993,7 @@ mod tests {
         );
         assert_eq!(reported.output_rms, None);
         assert_eq!(reported.input_rms, None);
+        assert!(reported.contributor_spectra.is_empty());
         config.integrated_noise = false;
         config.noise_summary = false;
         let plain = run_pnoise_from_retained_state(

@@ -212,6 +212,12 @@ impl PnoiseConfig {
         if self.num_points == 0 {
             return Err("Number of points must be at least 1".to_string());
         }
+        if self.integrated_noise
+            && self.sweep_type == PnoiseSweepType::Linear
+            && self.num_points == 1
+        {
+            return Err("Integrated noise requires at least two distinct frequency points".into());
+        }
 
         crate::services::simulation_runner::validate_noise_sidebands(
             self.input_sideband,
@@ -518,6 +524,16 @@ mod tests {
             }
             .validate()
             .is_ok()
+        );
+        assert!(
+            PnoiseConfig {
+                num_points: 1,
+                sweep_type: PnoiseSweepType::Linear,
+                integrated_noise: true,
+                ..Default::default()
+            }
+            .validate()
+            .is_err()
         );
     }
 

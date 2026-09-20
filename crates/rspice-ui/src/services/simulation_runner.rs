@@ -79,6 +79,7 @@ pub use pac_pxf::{
     run_pxf_analysis_from_pss_with_source_path_and_abort,
 };
 pub use periodic_carrier::PeriodicCarrier;
+pub(crate) use pnoise::PnoiseData;
 pub use pnoise::{
     PnoiseFrequencySweep, PnoiseReference, PnoiseRunConfig,
     run_pnoise_analysis_from_hb_with_source_path_and_abort,

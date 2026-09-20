@@ -993,6 +993,106 @@ R2 out 0 1k\n\
     }
 
     #[test]
+    fn pnoise_reported_contributors_keep_their_physical_spectra_and_band_powers() {
+        let netlist = "PNOISE contributor spectrum\nV1 in 0 0\nR1 in out 1k\nR2 out 0 1k\nC1 out 0 1n\n.end\n";
+        let dependencies = transferred_hb_dependencies(netlist);
+        let mut config = svc_runner::PnoiseRunConfig {
+            pss_num_harmonics: 8,
+            max_sideband: 1,
+            start_freq: 1e3,
+            stop_freq: 1e6,
+            points_per_unit: 3,
+            sweep: svc_runner::PnoiseFrequencySweep::Linear,
+            output_node: "out".into(),
+            integrated_noise: true,
+            noise_summary: true,
+            ..Default::default()
+        };
+        let execute = |config| {
+            run_spec_request(
+                &EngineBridge::new(),
+                AnalysisSpec::Pnoise,
+                SpecExecutionOptions {
+                    pnoise: Some(config),
+                    ..Default::default()
+                },
+                netlist,
+                None,
+                &dependencies,
+                &rspice_core::abort_signal::NoAbort,
+            )
+        };
+        let SimulationResult::Noise {
+            contributors,
+            frequencies,
+            output_noise,
+            summary: Some(summary),
+            measurements,
+            ..
+        } = execute(config.clone()).unwrap()
+        else {
+            panic!("noise");
+        };
+        assert_eq!(contributors.len(), 2);
+        assert_eq!(summary.rows.len(), 2);
+        for index in 0..frequencies.len() {
+            let sum: f64 = contributors.values().map(|values| values[index]).sum();
+            assert!((sum / output_noise[index] - 1.0).abs() < 1e-12);
+        }
+        assert!(
+            contributors
+                .values()
+                .all(|values| values[0] > 5.0 * values[2])
+        );
+        let power: f64 = summary.rows.iter().map(|row| row.power).sum();
+        assert!((power / summary.total_rms.unwrap().powi(2) - 1.0).abs() < 1e-12);
+        assert!(
+            summary
+                .rows
+                .iter()
+                .all(|row| (row.share_pct - 50.0).abs() < 1e-10)
+        );
+        assert_eq!(measurements.len(), 2);
+        assert!(
+            measurements
+                .iter()
+                .all(|measurement| (measurement.value.unwrap() - 50.0).abs() < 1e-10)
+        );
+        config.noise_summary = false;
+        let SimulationResult::Noise {
+            contributors,
+            summary: Some(summary),
+            measurements,
+            ..
+        } = execute(config.clone()).unwrap()
+        else {
+            panic!("noise");
+        };
+        assert!(contributors.is_empty() && summary.rows.is_empty() && measurements.is_empty());
+        config.noise_summary = true;
+        config.points_per_unit = 1;
+        assert!(
+            execute(config.clone())
+                .unwrap_err()
+                .to_string()
+                .contains("at least two distinct")
+        );
+        config.integrated_noise = false;
+        let SimulationResult::Noise {
+            contributors,
+            summary: Some(summary),
+            measurements,
+            ..
+        } = execute(config).unwrap()
+        else {
+            panic!("noise");
+        };
+        assert_eq!(contributors.len(), 2);
+        assert!(summary.rows.is_empty() && summary.total_rms.is_none());
+        assert_eq!(measurements.len(), 2);
+    }
+
+    #[test]
     fn runnable_preview_psp_dispatches_from_authenticated_worker_state() {
         let netlist = "preview PSP dispatch\n\
                        P1 p1 0 SIN(0 0 1Meg) PORT=1 Z0=50\n\

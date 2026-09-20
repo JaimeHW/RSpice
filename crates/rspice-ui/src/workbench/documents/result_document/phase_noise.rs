@@ -4,9 +4,9 @@
 //! Those quantities are not phase noise, even when their analysis kind is
 //! PNOISE.  This view therefore requires an explicitly phase-noise-labelled
 //! retained trace plus typed periodic-noise quantity metadata before it
-//! presents the data as `L(f)` in dBc/Hz. Integrated-jitter and spur values
-//! have no typed retained representation yet, so the inspector reports their
-//! absence rather than estimating them.
+//! presents the data as `L(f)` in dBc/Hz. Integrated phase error, timing jitter
+//! and device shares come from retained measurements, without estimating
+//! absent evidence from the displayed spectrum.
 
 use std::sync::Arc;
 
@@ -331,6 +331,13 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     };
 
     let offset_range = format_offset_range(finite_range(&model.offset_hz), &quantities);
+    let analysis = &state.simulation.active_run().unwrap().analyses[model.analysis_index];
+    let phase = retained_measurement(analysis, "phase_error_rms_rad")
+        .map(|value| format!("{value:.6e} rad RMS"))
+        .unwrap_or_else(|| "Not retained".into());
+    let jitter = retained_measurement(analysis, "timing_jitter_rms_s")
+        .map(|value| crate::ui::plot::fmt_si(value, "s RMS", 6))
+        .unwrap_or_else(|| "Not retained".into());
     let spot = exact_retained_value_at(&model.offset_hz, &model.level_dbc_per_hz, 1.0e6)
         .map_or_else(
             || "Unavailable — 1 MHz sample not retained".to_owned(),
@@ -344,11 +351,8 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
             false,
         ),
         ("Offset range", offset_range, true),
-        (
-            "Integrated jitter",
-            "Unavailable — jitter integration not retained".to_owned(),
-            false,
-        ),
+        ("Integrated phase error", phase, true),
+        ("Integrated timing jitter", jitter, true),
         ("Spot L(f) at 1 MHz", spot, true),
         (
             "Spurs",
@@ -357,15 +361,86 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         ),
     ];
     super::stat_table(ui, &rows);
+    ui.collapsing("Device noise shares", |ui| {
+        let shares: Vec<_> = analysis
+            .measurements
+            .iter()
+            .filter_map(|measurement| {
+                let name = measurement
+                    .name
+                    .strip_prefix("noise_share_percent(")?
+                    .strip_suffix(')')?;
+                let value = measurement.value?;
+                (measurement.passed
+                    && measurement.error.is_none()
+                    && value.is_finite()
+                    && value >= 0.0)
+                    .then_some((name, value))
+            })
+            .collect();
+        if shares.is_empty() {
+            super::panel_note(ui, "No per-device noise shares were retained.");
+        } else {
+            egui::ScrollArea::vertical().max_height(240.0).show_rows(
+                ui,
+                30.0,
+                shares.len(),
+                |ui, range| {
+                    for index in range {
+                        super::stat_table(
+                            ui,
+                            &[(shares[index].0, format!("{:.6} %", shares[index].1), false)],
+                        );
+                    }
+                },
+            );
+        }
+    });
     super::panel_note(
         ui,
         "Only an explicitly labelled retained phase-noise trace is rendered; ordinary periodic-noise traces are not reinterpreted as L(f).",
     );
 }
 
+fn retained_measurement(analysis: &AnalysisResult, name: &str) -> Option<f64> {
+    let mut matching = analysis
+        .measurements
+        .iter()
+        .filter(|measurement| measurement.name == name);
+    let measurement = matching.next()?;
+    let value = measurement.value?;
+    (matching.next().is_none()
+        && measurement.passed
+        && measurement.error.is_none()
+        && value.is_finite()
+        && value >= 0.0)
+        .then_some(value)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pnoise_inspector_uses_retained_jitter_and_never_a_failed_measurement() {
+        let mut analysis = phase_result(1, AnalysisType::Pnoise, "PNOISE");
+        analysis.measurements = vec![
+            rspice_core::MeasureResult::success("phase_error_rms_rad", 0.02),
+            rspice_core::MeasureResult::success("timing_jitter_rms_s", 3e-12),
+        ];
+        assert_eq!(
+            retained_measurement(&analysis, "phase_error_rms_rad"),
+            Some(0.02)
+        );
+        assert_eq!(
+            retained_measurement(&analysis, "timing_jitter_rms_s"),
+            Some(3e-12)
+        );
+        analysis.measurements[1].passed = false;
+        assert_eq!(retained_measurement(&analysis, "timing_jitter_rms_s"), None);
+        analysis.measurements.push(analysis.measurements[0].clone());
+        assert_eq!(retained_measurement(&analysis, "phase_error_rms_rad"), None);
+    }
 
     fn waveform(name: &str) -> WaveformData {
         WaveformData::new(

@@ -557,17 +557,47 @@ fn run_pnoise(
         })?
     };
 
-    let freq_len = data.frequencies.len().max(1);
-    let mut contributors = HashMap::with_capacity(data.contributors.len());
+    pnoise_result(data, abort)
+}
+
+fn pnoise_result(
+    data: svc_runner::PnoiseData,
+    abort: &dyn AbortSignal,
+) -> Result<SimulationResult, SimulationError> {
+    let mut measurements = Vec::with_capacity(data.contributors.len() + 2);
+    let mut shares = HashMap::with_capacity(data.contributors.len());
     for (name, percentage) in data.contributors {
         super::ensure_not_aborted(abort)?;
-        contributors.insert(name, vec![percentage; freq_len]);
+        measurements.push(rspice_core::MeasureResult::success(
+            &format!("noise_share_percent({name})"),
+            percentage,
+        ));
+        shares.insert(name, percentage);
     }
-
-    // `integratedNoise` asked for the band total, and this is where the run
-    // keeps one. The ranked rows stay empty: PNoise carries cyclostationary
-    // percentages, not band-integrated mechanism powers, and inventing a row
-    // from a percentage would publish a number nothing computed.
+    let mut contributors = HashMap::with_capacity(data.contributor_spectra.len());
+    let mut rows = Vec::new();
+    for (name, values) in data.contributor_spectra {
+        super::ensure_not_aborted(abort)?;
+        if data.frequencies.len() >= 2 {
+            let power = svc_runner::integrate_psd(&data.frequencies, &values, abort)
+                .map_err(|error| SimulationError::SolverError(error.to_string()))?;
+            let (device, mechanism) = super::periodic::split_noise_contributor_name(&name);
+            rows.push(crate::state::NoiseContributorRow {
+                device,
+                mechanism,
+                power,
+                share_pct: shares.get(&name).copied().unwrap_or_default(),
+            });
+        }
+        contributors.insert(name, values);
+    }
+    rows.sort_by(|left, right| {
+        right
+            .power
+            .total_cmp(&left.power)
+            .then_with(|| left.device.cmp(&right.device))
+            .then_with(|| left.mechanism.cmp(&right.mechanism))
+    });
     let summary = (data.output_rms.is_some() || data.conversion.is_some()).then(|| {
         let band = (
             data.frequencies.first().copied().unwrap_or_default(),
@@ -576,14 +606,13 @@ fn run_pnoise(
         crate::state::NoiseSummary {
             conversion: data.conversion,
             noise_figure: None,
-            rows: Vec::new(),
+            rows,
             total_rms: data.output_rms,
             input_rms: data.input_rms,
             band,
         }
     });
 
-    let mut measurements = Vec::new();
     if let Some(value) = data.phase_rms_rad {
         measurements.push(rspice_core::MeasureResult::success(
             "phase_error_rms_rad",
@@ -604,6 +633,51 @@ fn run_pnoise(
         summary,
         measurements,
     })
+}
+
+#[cfg(test)]
+#[test]
+fn pnoise_phase_contributor_shares_are_measurements_not_density_curves() {
+    let data = svc_runner::PnoiseData {
+        conversion: None,
+        frequencies: vec![1e3, 1e4],
+        output_noise: vec![-80.0, -100.0],
+        input_noise: None,
+        contributors: vec![("R1".into(), 80.0), ("M1".into(), 20.0)],
+        contributor_spectra: Vec::new(),
+        output_rms: None,
+        input_rms: None,
+        phase_rms_rad: Some(0.01),
+        timing_jitter_rms_s: Some(1e-9),
+    };
+    let SimulationResult::Noise {
+        contributors,
+        measurements,
+        output_noise,
+        summary,
+        ..
+    } = pnoise_result(data, &rspice_core::abort_signal::NoAbort).unwrap()
+    else {
+        panic!("noise");
+    };
+    assert!(contributors.is_empty());
+    assert!(summary.is_none());
+    assert_eq!(output_noise, vec![-80.0, -100.0]);
+    for (name, value) in [
+        ("noise_share_percent(R1)", 80.0),
+        ("noise_share_percent(M1)", 20.0),
+        ("phase_error_rms_rad", 0.01),
+        ("timing_jitter_rms_s", 1e-9),
+    ] {
+        assert_eq!(
+            measurements
+                .iter()
+                .find(|measurement| measurement.name == name)
+                .unwrap()
+                .value,
+            Some(value)
+        );
+    }
 }
 
 fn run_stb(

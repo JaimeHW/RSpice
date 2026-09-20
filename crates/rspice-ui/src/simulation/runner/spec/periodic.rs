@@ -411,7 +411,7 @@ fn run_hbnoise(
     })
 }
 
-fn split_noise_contributor_name(name: &str) -> (String, String) {
+pub(super) fn split_noise_contributor_name(name: &str) -> (String, String) {
     let trimmed = name.trim();
     match trimmed.rsplit_once(' ') {
         Some((device, mechanism)) if !device.trim().is_empty() && !mechanism.trim().is_empty() => {
