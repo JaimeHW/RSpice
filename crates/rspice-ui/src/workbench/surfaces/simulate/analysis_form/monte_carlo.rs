@@ -22,8 +22,6 @@ pub(super) fn fields(
     setup: &mut McDialogState,
     bases: &[(crate::product::AnalysisInstanceId, String)],
 ) {
-    use crate::simulation::dialog::McVariationSource;
-
     super::study_base_row(
         ui,
         &mut setup.base_analysis,
@@ -51,17 +49,16 @@ pub(super) fn fields(
     choice_row(
         ui,
         "From",
-        &["parameters", "deck"],
+        &["parameters", "deck", "custom"],
         &mut setup.variation_source_idx,
     );
     // The spread and its shape belong to the parameter-tolerance
     // source. Under deck statistics the deck states its own spread, so
     // these two rows would be read by nothing.
-    let states_spread = McVariationSource::ALL
-        .get(setup.variation_source_idx)
-        .copied()
-        .unwrap_or_default()
-        .uses_stated_spread();
+    let states_spread = setup.variation_source_idx == 0;
+    if setup.variation_source_idx == 2 {
+        custom_statistics(ui, setup);
+    }
     input_row_enabled(ui, "Spread %", &mut setup.variation_pct, states_spread);
     choice_row_with_disabled(
         ui,
@@ -118,4 +115,54 @@ fn confidence_fields(ui: &mut Ui, setup: &mut McDialogState) {
         ui,
         "Mean intervals assume independent trials. Student t is exact for normal observations; bootstrap accuracy depends on the sample size and resampling count.",
     );
+}
+
+fn custom_statistics(ui: &mut Ui, setup: &mut McDialogState) {
+    super::sub_header(ui, "Parameter distributions");
+    field_note(
+        ui,
+        "Nominal values come from circuit parameters. Process variation shares one draw across instances; mismatch draws independently per instance. Gaussian spread is standard deviation; uniform spread is half-width. Lognormal uses the nominal as median and spread as the standard deviation of ln(parameter). Existing deck statistics remain active.",
+    );
+    let mut remove = None;
+    for (index, row) in setup.variations.iter_mut().enumerate() {
+        ui.push_id(("mc-variation", index), |ui| {
+            input_row(ui, "Parameter", &mut row.parameter);
+            choice_row(ui, "Scope", &["process", "mismatch"], &mut row.scope);
+            choice_row(ui, "Distribution", &["Gaussian", "uniform", "lognormal"], &mut row.distribution);
+            input_row(ui, "Spread", &mut row.spread);
+            super::switch_row(ui, "Scale spread by nominal (%)", &mut row.percent);
+            if row.distribution == 2 && row.percent {
+                field_note(ui, "This scales the log-space standard deviation by |nominal|/100. Disable it to enter the log-space standard deviation directly.");
+            }
+            if super::action_line(ui, "Remove variation") { remove = Some(index); }
+        });
+    }
+    if let Some(index) = remove {
+        setup.variations.remove(index);
+    }
+    if super::action_line(ui, "+ Add parameter variation") {
+        setup.variations.push(Default::default());
+    }
+    super::sub_header(ui, "Parameter correlations");
+    field_note(
+        ui,
+        "Enter two or more varied parameters from the same scope and their Pearson correlation coefficient (-1 to 1). For a group, that coefficient applies to every pair. Use separate pairs for a general correlation matrix. The matrix must be valid and the chosen distributions must be able to attain the requested correlations.",
+    );
+    let mut remove = None;
+    for (index, row) in setup.correlations.iter_mut().enumerate() {
+        ui.push_id(("mc-correlation", index), |ui| {
+            choice_row(ui, "Scope", &["process", "mismatch"], &mut row.scope);
+            input_row(ui, "Parameters", &mut row.parameters);
+            input_row(ui, "Correlation", &mut row.coefficient);
+            if super::action_line(ui, "Remove correlation") {
+                remove = Some(index);
+            }
+        });
+    }
+    if let Some(index) = remove {
+        setup.correlations.remove(index);
+    }
+    if super::action_line(ui, "+ Add correlation") {
+        setup.correlations.push(Default::default());
+    }
 }
