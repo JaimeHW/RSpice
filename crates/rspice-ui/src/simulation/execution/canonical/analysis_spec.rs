@@ -228,6 +228,7 @@ fn optimization_expression_is_authenticated_without_changing_legacy_identity() {
 fn soa_legacy_identity_is_preserved_and_every_scoped_rule_field_is_authenticated() {
     use crate::services::{safety::SoAParameter, simulation_runner::SoaRuleConfig};
     let spec = AnalysisSpec::Soa {
+        import_model_voltage_ratings: false,
         observation: Default::default(),
         rules: vec![],
         stop_time: 1e-6,
@@ -256,6 +257,16 @@ fn soa_legacy_identity_is_preserved_and_every_scoped_rule_field_is_authenticated
         legacy.f64(value);
     }
     assert_eq!(digest(&spec), legacy.finish());
+    let mut imported = spec.clone();
+    let AnalysisSpec::Soa {
+        import_model_voltage_ratings,
+        ..
+    } = &mut imported
+    else {
+        unreachable!()
+    };
+    *import_model_voltage_ratings = true;
+    assert_ne!(digest(&spec), digest(&imported));
     let mut configured = spec.clone();
     let AnalysisSpec::Soa { rules, .. } = &mut configured else {
         unreachable!()
@@ -687,6 +698,7 @@ pub(super) fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &Analysis
             }
         }
         AnalysisSpec::Soa {
+            import_model_voltage_ratings,
             observation,
             rules,
             stop_time,
@@ -710,6 +722,9 @@ pub(super) fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &Analysis
             writer.f64(*max_vbe);
             writer.bool(*check_vce_max);
             writer.f64(*max_vce);
+            if *import_model_voltage_ratings {
+                writer.string("soa-model-voltage-ratings-v1");
+            }
             if *observation != crate::services::simulation_runner::SoaObservationConfig::default() {
                 writer.string("soa-observation-v1");
                 writer.f64(observation.start_time);

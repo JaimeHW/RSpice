@@ -64,6 +64,15 @@ pub(super) fn fields(
         ui,
         "Optional exact names separated by spaces. Empty selects all. Subcircuit devices use X1.M1 (or X1:M1); local models use CELL::NM.",
     );
+    switch_row(
+        ui,
+        "Import model voltage ratings",
+        &mut setup.import_model_voltage_ratings,
+    );
+    field_note(
+        ui,
+        "Uses authored voltage ratings from the selected native BSIM3/4, VDMOS, Gummel–Poon BJT or diode model. Imported ratings replace matching default checks; scoped rules can override them. Current, power and temperature ratings require separate rules. Devices without voltage ratings keep their enabled defaults; unsupported rated models report an error.",
+    );
     switch_row(ui, "Check Vgs", &mut setup.check_vgs_max);
     input_row_enabled(ui, "Max Vgs", &mut setup.max_vgs, setup.check_vgs_max);
     switch_row(ui, "Check Vds", &mut setup.check_vds_max);

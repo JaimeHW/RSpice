@@ -132,6 +132,7 @@ pub(super) fn validate(spec: &AnalysisSpec) -> Result<(), String> {
             Ok(())
         }
         AnalysisSpec::Soa {
+            import_model_voltage_ratings,
             observation,
             rules,
             stop_time,
@@ -158,7 +159,8 @@ pub(super) fn validate(spec: &AnalysisSpec) -> Result<(), String> {
             if step_time > stop_time {
                 return Err("SOA step_time must be <= stop_time".to_string());
             }
-            if rules.is_empty()
+            if !import_model_voltage_ratings
+                && rules.is_empty()
                 && !check_vgs_max
                 && !check_vds_max
                 && !check_vbe_max

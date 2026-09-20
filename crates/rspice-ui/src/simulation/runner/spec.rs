@@ -1622,6 +1622,7 @@ R2 out 0 1k\n\
             (
                 "device",
                 AnalysisSpec::Soa {
+                    import_model_voltage_ratings: false,
                     rules: Vec::new(),
                     observation: Default::default(),
                     stop_time: 1.0e-6,

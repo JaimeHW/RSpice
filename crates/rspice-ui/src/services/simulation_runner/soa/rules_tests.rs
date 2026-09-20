@@ -208,7 +208,14 @@ fn soa_directional_overrides_preserve_the_other_default_side_and_explicit_bounds
         rules: vec![rule(SoAParameter::VgsNegative, 0.0, &["M1"], &[])],
         ..Default::default()
     };
-    let resolved = rules::resolve(&netlist.elements, &cfg, &Default::default(), &NoAbort).unwrap();
+    let resolved = rules::resolve(
+        &netlist.elements,
+        &cfg,
+        &Default::default(),
+        &Default::default(),
+        &NoAbort,
+    )
+    .unwrap();
     let limits = |name: &str, rows: &Vec<(usize, SoADefinition)>| {
         rows.iter()
             .find(|(index, _)| netlist.elements[*index].name == name)
@@ -231,7 +238,14 @@ fn soa_directional_overrides_preserve_the_other_default_side_and_explicit_bounds
         std::collections::BTreeMap::from([(SoAParameter::Vgs, 1.8)])
     );
     cfg.rules.push(rule(SoAParameter::Vgs, 3.0, &["M1"], &[]));
-    let resolved = rules::resolve(&netlist.elements, &cfg, &Default::default(), &NoAbort).unwrap();
+    let resolved = rules::resolve(
+        &netlist.elements,
+        &cfg,
+        &Default::default(),
+        &Default::default(),
+        &NoAbort,
+    )
+    .unwrap();
     assert_eq!(
         limits("M1", &resolved),
         std::collections::BTreeMap::from([
@@ -242,10 +256,16 @@ fn soa_directional_overrides_preserve_the_other_default_side_and_explicit_bounds
     cfg.rules
         .push(rule(SoAParameter::VgsNegative, 2.0, &[], &["NM"]));
     assert!(
-        rules::resolve(&netlist.elements, &cfg, &Default::default(), &NoAbort)
-            .unwrap_err()
-            .to_string()
-            .contains("overlapping")
+        rules::resolve(
+            &netlist.elements,
+            &cfg,
+            &Default::default(),
+            &Default::default(),
+            &NoAbort
+        )
+        .unwrap_err()
+        .to_string()
+        .contains("overlapping")
     );
 }
 
@@ -418,7 +438,14 @@ fn soa_intrinsic_scope_requires_every_applicable_device_to_supply_observation() 
             ..Default::default()
         },
     )]);
-    let error = rules::resolve(&elements, &config(vec![voltage]), &layouts, &NoAbort).unwrap_err();
+    let error = rules::resolve(
+        &elements,
+        &config(vec![voltage]),
+        &layouts,
+        &Default::default(),
+        &NoAbort,
+    )
+    .unwrap_err();
     assert!(
         error.to_string().contains("M2") && error.to_string().contains("intrinsic"),
         "{error}"

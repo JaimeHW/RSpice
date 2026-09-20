@@ -818,6 +818,7 @@ impl SimulationController {
             .to_config()
             .map_err(|e| format!("invalid SOA settings: {}", e))?;
         Ok(AnalysisSpec::Soa {
+            import_model_voltage_ratings: cfg.import_model_voltage_ratings,
             observation: cfg.observation,
             rules: cfg.rules,
             stop_time: cfg.stop_time,

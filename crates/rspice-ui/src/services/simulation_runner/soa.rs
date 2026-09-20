@@ -16,6 +16,7 @@ use rspice_core::netlist::{Element, ElementKind};
 use std::collections::HashMap;
 use std::path::Path;
 
+mod model_ratings;
 mod observation;
 mod probes;
 mod rules;
@@ -28,6 +29,8 @@ pub use rules::SoaRuleConfig;
 /// Configuration for SOA analysis.
 #[derive(Debug, Clone)]
 pub struct SoaRunConfig {
+    /// Import authored native model voltage limits before applying scoped rules.
+    pub import_model_voltage_ratings: bool,
     pub observation: SoaObservationConfig,
     pub rules: Vec<SoaRuleConfig>,
     /// Transient stop time.
@@ -57,6 +60,7 @@ impl Default for SoaRunConfig {
         Self {
             observation: SoaObservationConfig::default(),
             rules: Vec::new(),
+            import_model_voltage_ratings: false,
             stop_time: 1e-6,
             step_time: 1e-9,
             check_vgs_max: true,
@@ -86,7 +90,8 @@ impl SoaRunConfig {
         if self.step_time > self.stop_time {
             return Err("SOA step_time must be <= stop_time".to_string());
         }
-        if self.rules.is_empty()
+        if !self.import_model_voltage_ratings
+            && self.rules.is_empty()
             && !self.check_vgs_max
             && !self.check_vds_max
             && !self.check_vbe_max
@@ -189,9 +194,10 @@ pub fn run_soa_analysis_with_config_and_source_path_and_abort(
         .validate_selection(&flattened.elements)
         .map_err(ServiceRunError::Failure)?;
     let engine = rspice_core::engine::Engine::new(super::build_engine_config(&netlist, None));
-    let layouts = terminals::resolve(&netlist, &flattened.elements, config, &engine, abort)?;
+    let (layouts, model_limits) =
+        terminals::resolve(&netlist, &flattened.elements, config, &engine, abort)?;
     let mut manager = SoAManager::new();
-    let resolved = rules::resolve(&flattened.elements, config, &layouts, abort)?;
+    let resolved = rules::resolve(&flattened.elements, config, &layouts, &model_limits, abort)?;
     let registered_rules: usize = resolved
         .iter()
         .map(|(_, definition)| definition.limits.len())
@@ -800,9 +806,15 @@ mod tests {
             check_vce_max: true,
             ..SoaRunConfig::default()
         };
-        let count = rules::resolve(&netlist.elements, &bjt_only, &Default::default(), &NoAbort)
-            .expect("rule registration completes")
-            .len();
+        let count = rules::resolve(
+            &netlist.elements,
+            &bjt_only,
+            &Default::default(),
+            &Default::default(),
+            &NoAbort,
+        )
+        .expect("rule registration completes")
+        .len();
 
         assert_eq!(count, 0);
     }

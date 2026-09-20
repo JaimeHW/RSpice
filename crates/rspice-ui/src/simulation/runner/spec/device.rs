@@ -67,6 +67,7 @@ pub(super) fn run_device_spec(
             abort,
         ),
         AnalysisSpec::Soa {
+            import_model_voltage_ratings,
             observation,
             rules,
             stop_time,
@@ -81,6 +82,7 @@ pub(super) fn run_device_spec(
             max_vce,
         } => run_soa(
             netlist,
+            import_model_voltage_ratings,
             observation,
             rules,
             stop_time,
@@ -292,6 +294,7 @@ fn run_optimization(
 
 fn run_soa(
     netlist: &str,
+    import_model_voltage_ratings: bool,
     observation: svc_runner::SoaObservationConfig,
     rules: Vec<svc_runner::SoaRuleConfig>,
     stop_time: f64,
@@ -308,6 +311,7 @@ fn run_soa(
     abort: &dyn AbortSignal,
 ) -> Result<SimulationResult, SimulationError> {
     let cfg = svc_runner::SoaRunConfig {
+        import_model_voltage_ratings,
         observation,
         rules,
         stop_time,

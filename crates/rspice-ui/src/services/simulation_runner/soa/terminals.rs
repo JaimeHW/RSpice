@@ -17,20 +17,23 @@ pub(super) fn resolve(
     config: &SoaRunConfig,
     engine: &Engine,
     abort: &dyn AbortSignal,
-) -> ServiceRunResult<TerminalLayouts> {
-    if !config.rules.iter().any(|rule| {
-        rule.parameter.requires_terminal_layout()
-            || rule.voltage_basis == SoaVoltageBasis::IntrinsicNodes
-    }) {
-        return Ok(HashMap::new());
+) -> ServiceRunResult<(TerminalLayouts, super::model_ratings::ModelLimits)> {
+    if !config.import_model_voltage_ratings
+        && !config.rules.iter().any(|rule| {
+            rule.parameter.requires_terminal_layout()
+                || rule.voltage_basis == SoaVoltageBasis::IntrinsicNodes
+        })
+    {
+        return Ok((HashMap::new(), HashMap::new()));
     }
     let circuit = engine
         .build_circuit_with_abort(netlist, abort)
         .map_err(|error| ServiceRunError::from_core("SOA terminal layout", error))?;
-    let intrinsic = if config
-        .rules
-        .iter()
-        .any(|r| r.voltage_basis == SoaVoltageBasis::IntrinsicNodes)
+    let intrinsic = if config.import_model_voltage_ratings
+        || config
+            .rules
+            .iter()
+            .any(|r| r.voltage_basis == SoaVoltageBasis::IntrinsicNodes)
     {
         circuit.intrinsic_voltage_catalog()
     } else {
@@ -88,5 +91,6 @@ pub(super) fn resolve(
             }
         }
     }
-    Ok(layouts)
+    let ratings = super::model_ratings::resolve(&circuit, elements, config, abort)?;
+    Ok((layouts, ratings))
 }

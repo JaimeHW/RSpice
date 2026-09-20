@@ -10,6 +10,8 @@ pub use rules::SoaRuleDraft;
 /// Typed SOA analysis configuration.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SoaConfig {
+    /// Import authored native model voltage limits before applying scoped rules.
+    pub import_model_voltage_ratings: bool,
     pub observation: SoaObservationConfig,
     pub rules: Vec<SoaRuleConfig>,
     /// Transient stop time.
@@ -39,6 +41,7 @@ impl Default for SoaConfig {
         Self {
             observation: SoaObservationConfig::default(),
             rules: Vec::new(),
+            import_model_voltage_ratings: false,
             stop_time: 1e-6,
             step_time: 1e-9,
             check_vgs_max: true,
@@ -69,7 +72,8 @@ impl SoaConfig {
         if self.step_time > self.stop_time {
             return Err("SOA step_time must be <= stop_time".to_string());
         }
-        if self.rules.is_empty()
+        if !self.import_model_voltage_ratings
+            && self.rules.is_empty()
             && !self.check_vgs_max
             && !self.check_vds_max
             && !self.check_vbe_max
@@ -120,6 +124,9 @@ impl SoaConfig {
                 self.observation.models.join(" ")
             ));
         }
+        if self.import_model_voltage_ratings {
+            card.push_str(" model_voltage_ratings=on");
+        }
         for rule in &self.rules {
             card.push_str(&format!(
                 " rule=({} {}{} devices=({}) models=({}))",
@@ -150,6 +157,8 @@ fn yes_no(v: bool) -> &'static str {
 #[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SoaDialogState {
+    #[serde(default)]
+    pub import_model_voltage_ratings: bool,
     #[serde(default)]
     pub rules: Vec<SoaRuleDraft>,
     #[serde(default = "zero_time")]
@@ -191,6 +200,7 @@ impl SoaDialogState {
     /// Build UI state from config.
     pub fn from_config(config: &SoaConfig) -> Self {
         Self {
+            import_model_voltage_ratings: config.import_model_voltage_ratings,
             rules: config.rules.iter().map(SoaRuleDraft::from_config).collect(),
             start_time: config.observation.start_time.to_string(),
             max_step: config
@@ -218,6 +228,7 @@ impl SoaDialogState {
     /// Convert state to config.
     pub fn to_config(&self) -> Result<SoaConfig, String> {
         let cfg = SoaConfig {
+            import_model_voltage_ratings: self.import_model_voltage_ratings,
             rules: self
                 .rules
                 .iter()
@@ -292,6 +303,7 @@ impl SoaDialogState {
                 && self.devices.is_empty()
                 && self.models.is_empty()
                 && self.rules.is_empty()
+                && !self.import_model_voltage_ratings
                 && !self.use_initial_conditions
                 && (self.start_time.is_empty() || self.start_time == "0")
             {

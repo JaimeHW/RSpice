@@ -196,6 +196,8 @@ pub(crate) enum WorkerAnalysisSpec {
     },
     Soa {
         #[serde(default)]
+        import_model_voltage_ratings: bool,
+        #[serde(default)]
         observation: crate::services::simulation_runner::SoaObservationConfig,
         #[serde(default)]
         rules: Vec<crate::services::simulation_runner::SoaRuleConfig>,

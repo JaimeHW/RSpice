@@ -168,6 +168,7 @@ pub(super) fn resolve(
     elements: &[Element],
     config: &SoaRunConfig,
     layouts: &TerminalLayouts,
+    model_limits: &super::model_ratings::ModelLimits,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<Vec<(usize, SoADefinition)>> {
     for (index, rule) in config.rules.iter().enumerate() {
@@ -224,8 +225,38 @@ pub(super) fn resolve(
             (config.check_vce_max, SoAParameter::Vce, config.max_vce),
         ] {
             if enabled && applicable(element, parameter, layouts.get(&element.name).copied()) {
-                limits.insert(parameter, (max_value, SoaVoltageBasis::ExternalTerminals));
+                limits.insert(
+                    parameter,
+                    explicit_limit(parameter, max_value, SoaVoltageBasis::ExternalTerminals),
+                );
             }
+        }
+        if let Some(imported) = model_limits.get(&element.name) {
+            for parameter in imported.keys() {
+                let base = parameter.base_parameter();
+                if let Some(default) = limits.remove(&base)
+                    && parameter.polarity().is_some()
+                    && !imported.contains_key(&base)
+                    && let Some((positive, negative)) = base.directional_pair()
+                {
+                    // A card that rates only one polarity must not disable
+                    // the user's configured default for the unrated side.
+                    for half in [positive, negative] {
+                        limits.insert(
+                            half,
+                            SoALimit {
+                                parameter: half,
+                                ..default.clone()
+                            },
+                        );
+                    }
+                }
+            }
+            limits.extend(
+                imported
+                    .iter()
+                    .map(|(parameter, limit)| (*parameter, limit.clone())),
+            );
         }
         // A directional override replaces that half of an inherited symmetric
         // default; the other half retains its default protection. An explicit
@@ -241,8 +272,23 @@ pub(super) fn resolve(
                 && let Some(maximum) = limits.remove(&base)
                 && let Some((positive, negative)) = base.directional_pair()
             {
-                limits.insert(positive, maximum);
-                limits.insert(negative, maximum);
+                for half in [positive, negative] {
+                    // A BSIM card can supply both a symmetric fallback and a
+                    // tighter directional limit. Splitting the fallback must
+                    // preserve that tighter protection on the untouched side.
+                    if limits
+                        .get(&half)
+                        .is_none_or(|old| maximum.max_value < old.max_value)
+                    {
+                        limits.insert(
+                            half,
+                            SoALimit {
+                                parameter: half,
+                                ..maximum.clone()
+                            },
+                        );
+                    }
+                }
             }
         }
         let mut overridden = std::collections::HashSet::new();
@@ -255,49 +301,85 @@ pub(super) fn resolve(
                         element.name
                     )));
                 }
-                limits.insert(rule.parameter, (rule.max_value, rule.voltage_basis));
+                // A magnitude override replaces inherited directional limits
+                // from an asymmetric model rating. Explicit directional rules
+                // remain independent regardless of their declaration order.
+                if rule.parameter.polarity().is_none()
+                    && let Some((positive, negative)) = rule.parameter.directional_pair()
+                {
+                    for half in [positive, negative] {
+                        if !config
+                            .rules
+                            .iter()
+                            .any(|r| r.matches(element, layouts) && r.parameter == half)
+                        {
+                            limits.remove(&half);
+                        }
+                    }
+                }
+                limits.insert(
+                    rule.parameter,
+                    explicit_limit(rule.parameter, rule.max_value, rule.voltage_basis),
+                );
             }
         }
         if !limits.is_empty() {
             let mut definition = SoADefinition::new();
-            for (parameter, (max_value, voltage_basis)) in limits {
-                definition.add_limit(SoALimit {
-                    voltage_basis,
-                    parameter,
-                    max_value,
-                    unit: match parameter.base_parameter() {
-                        p if p.is_current() => "A",
-                        SoAParameter::Temp => "K",
-                        SoAParameter::Pdiss => "W",
-                        _ => "V",
-                    }
-                    .into(),
-                    description: if parameter == SoAParameter::Temp {
-                        "Maximum absolute operating temperature used by the device model".into()
-                    } else if parameter == SoAParameter::Pdiss {
-                        "Maximum positive conductive device power, including series losses; excludes stored-energy exchange".into()
-                    } else {
-                        format!(
-                            "Maximum {} {} at {}",
-                            parameter.base_parameter().stress_code(),
-                            match parameter.polarity() {
-                                Some(true) => "positive part",
-                                Some(false) => "negative part magnitude",
-                                None => "magnitude",
-                            },
-                            match voltage_basis {
-                                SoaVoltageBasis::ExternalTerminals => "authored terminals",
-                                SoaVoltageBasis::IntrinsicNodes => "intrinsic electrical model nodes",
-                            }
-                        )
-                    },
-                });
+            for (parameter, limit) in limits {
+                if limit.voltage_basis == SoaVoltageBasis::IntrinsicNodes
+                    && !intrinsic_available(element, parameter, layouts)
+                {
+                    return Err(ServiceRunError::Failure(format!(
+                        "SOA device '{}' does not expose the requested intrinsic {} voltage",
+                        element.name,
+                        parameter.stress_code()
+                    )));
+                }
+                definition.add_limit(limit);
             }
             resolved.push((index, definition));
         }
     }
     ensure_not_aborted(abort)?;
     Ok(resolved)
+}
+
+fn explicit_limit(
+    parameter: SoAParameter,
+    max_value: f64,
+    voltage_basis: SoaVoltageBasis,
+) -> SoALimit {
+    SoALimit {
+        voltage_basis,
+        parameter,
+        max_value,
+        unit: match parameter.base_parameter() {
+            p if p.is_current() => "A",
+            SoAParameter::Temp => "K",
+            SoAParameter::Pdiss => "W",
+            _ => "V",
+        }
+        .into(),
+        description: if parameter == SoAParameter::Temp {
+            "Maximum absolute operating temperature used by the device model".into()
+        } else if parameter == SoAParameter::Pdiss {
+            "Maximum positive conductive device power, including series losses; excludes stored-energy exchange".into()
+        } else {
+            format!(
+                "Maximum {} {} at {}",
+                parameter.base_parameter().stress_code(),
+                match parameter.polarity() {
+                    Some(true) => "positive part",
+                    Some(false) => "negative part magnitude",
+                    None => "magnitude",
+                },
+                match voltage_basis {
+                    SoaVoltageBasis::ExternalTerminals => "authored terminals",
+                    SoaVoltageBasis::IntrinsicNodes => "intrinsic electrical model nodes",
+                }
+            )
+        },
+    }
 }
 
 pub(super) fn observation_parameter(limit: &SoALimit) -> Option<&'static str> {

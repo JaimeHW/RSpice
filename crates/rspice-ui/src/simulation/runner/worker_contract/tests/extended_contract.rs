@@ -457,6 +457,7 @@ fn analysis_spec_round_trips_supported_variants() {
             min_step: 1e-7,
         },
         AnalysisSpec::Soa {
+            import_model_voltage_ratings: false,
             rules: vec![crate::services::simulation_runner::SoaRuleConfig {
                 voltage_basis: Default::default(),
                 parameter: crate::services::safety::SoAParameter::Id,

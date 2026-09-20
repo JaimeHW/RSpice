@@ -1172,6 +1172,7 @@ impl TryFrom<&AnalysisSpec> for WorkerAnalysisSpec {
                 min_step: *min_step,
             }),
             AnalysisSpec::Soa {
+                import_model_voltage_ratings,
                 observation,
                 rules,
                 stop_time,
@@ -1185,6 +1186,7 @@ impl TryFrom<&AnalysisSpec> for WorkerAnalysisSpec {
                 check_vce_max,
                 max_vce,
             } => Ok(Self::Soa {
+                import_model_voltage_ratings: *import_model_voltage_ratings,
                 observation: observation.clone(),
                 rules: rules.clone(),
                 stop_time: *stop_time,
@@ -1579,6 +1581,7 @@ impl From<WorkerAnalysisSpec> for AnalysisSpec {
                 min_step,
             },
             WorkerAnalysisSpec::Soa {
+                import_model_voltage_ratings,
                 observation,
                 rules,
                 stop_time,
@@ -1592,6 +1595,7 @@ impl From<WorkerAnalysisSpec> for AnalysisSpec {
                 check_vce_max,
                 max_vce,
             } => Self::Soa {
+                import_model_voltage_ratings,
                 observation,
                 rules,
                 stop_time,

@@ -1434,3 +1434,127 @@ fn soa_intrinsic_voltage_rules_survive_studio_worker_and_saved_results() {
         retained.result_payload
     );
 }
+
+#[test]
+fn soa_model_voltage_ratings_survive_studio_worker_and_saved_results() {
+    use crate::services::{safety::SoAParameter, simulation_runner::SoaRuleConfig};
+    use crate::simulation::dialog::soa::{SoaConfig, SoaDialogState};
+    use crate::simulation::plan::AnalysisDraft;
+    use crate::simulation::runner::worker_contract::WorkerAnalysisSpec;
+    let config = SoaConfig {
+        import_model_voltage_ratings: true,
+        stop_time: 1e-9,
+        step_time: 1e-10,
+        check_vgs_max: true,
+        max_vgs: 0.1, // Imported asymmetric ratings replace this default.
+        check_vds_max: false,
+        check_vbe_max: false,
+        check_vce_max: false,
+        rules: vec![SoaRuleConfig {
+            parameter: SoAParameter::VgsPositive,
+            voltage_basis: Default::default(),
+            max_value: 0.75,
+            devices: vec!["X1.M1".into()],
+            models: vec![],
+        }],
+        ..Default::default()
+    };
+    let draft = SoaDialogState::from_config(&config);
+    assert_eq!(draft.to_config().unwrap(), config);
+    assert!(config.to_spice().contains("model_voltage_ratings=on"));
+    let mut old = serde_json::to_value(&draft).unwrap();
+    old.as_object_mut()
+        .unwrap()
+        .remove("import_model_voltage_ratings");
+    assert!(
+        !serde_json::from_value::<SoaDialogState>(old)
+            .unwrap()
+            .import_model_voltage_ratings
+    );
+    let mut state = preflight_ready_state();
+    let id = only(&mut state, &[AnalysisKind::Soa])[0];
+    plan_mut(&mut state)
+        .edit(id, |body| *body = AnalysisDraft::Soa(draft))
+        .unwrap();
+    let queue = compiled_queue(&state).unwrap();
+    let mut declaration = queue[0].queued_analysis().clone();
+    let wire = WorkerAnalysisSpec::try_from(&declaration.spec).unwrap();
+    let wire: WorkerAnalysisSpec =
+        serde_json::from_str(&serde_json::to_string(&wire).unwrap()).unwrap();
+    let restored = AnalysisSpec::from(wire);
+    assert_eq!(restored, declaration.spec);
+    declaration.spec = restored;
+    let deck = "Model rated SOA\nVd d 0 -2\nVg g 0 -1.2\n\
+        .model PM.1 PMOS LEVEL=54 LMIN=0.5u LMAX=2u VTH0=-0.4 TOXE=3n U0=0.02 RSH=100 VGS_MAX=1 VGSR_MAX=0.5\n\
+        .model PM.2 PMOS LEVEL=54 LMIN=2u LMAX=5u VTH0=-0.4 TOXE=3n U0=0.02 VGS_MAX=9\n\
+        .subckt CELL d g\nM1 d g 0 0 PM W=10u L=1u NRD=1 NRS=1\n.ends\nX1 d g CELL\n\
+        Va a 0 0.8\nD1 a 0 DM\n.model DM D IS=1e-12 RS=100 FV_MAX=0.7 BV_MAX=20\n\
+        Vc c 0 2\nVb b 0 0.7\nQ1 c b 0 QM\n.model QM NPN IS=1e-14 BF=100 RB=100 RE=10 VBE_MAX=0.65\n.end\n";
+    let deck = crate::services::simulation_runner::splice_before_terminal_end_card(
+        deck,
+        &declaration.analysis_line,
+    );
+    let run = crate::simulation::runner::pvt_point_evidence::run_declaration(
+        &deck,
+        "Rated SOA",
+        declaration,
+        27.0,
+        SavePolicy::RetainEngineProducedResults,
+        &[],
+    )
+    .unwrap();
+    let retained = &run.analyses[0];
+    assert!(retained.success, "{:?}", retained.error_message);
+    retained.validate_retained_evidence().unwrap();
+    let Some(crate::state::AnalysisResultPayload::Soa { evaluations, .. }) =
+        &retained.result_payload
+    else {
+        panic!("SOA evidence")
+    };
+    assert_eq!(evaluations.len(), 5);
+    let find = |device: &str, parameter| {
+        evaluations
+            .iter()
+            .find(|r| r.device_id == device && r.parameter == parameter)
+            .unwrap()
+    };
+    let pm = find(
+        "X1.M1",
+        crate::state::SoaParameterEvidence::GateSourceVoltageNegative,
+    );
+    assert_eq!(pm.limit_value, 1.0);
+    assert!(
+        pm.description.contains("PM.1")
+            && pm.description.contains("VGS_MAX")
+            && pm.description.contains("intrinsic")
+    );
+    assert!(pm.worst_actual_value > 1.0 && pm.worst_actual_value < 1.2);
+    let manual = find(
+        "X1.M1",
+        crate::state::SoaParameterEvidence::GateSourceVoltagePositive,
+    );
+    assert_eq!(manual.limit_value, 0.75);
+    assert!(!manual.description.contains("Model"));
+    let diode = find(
+        "D1",
+        crate::state::SoaParameterEvidence::AnodeCathodeVoltagePositive,
+    );
+    assert_eq!(diode.limit_value, 0.7);
+    assert!((diode.worst_actual_value - 0.8).abs() < 1e-8);
+    assert!(diode.description.contains("authored terminals"));
+    let bjt = find("Q1", crate::state::SoaParameterEvidence::BaseEmitterVoltage);
+    assert_eq!(bjt.limit_value, 0.65);
+    assert!(bjt.worst_actual_value < 0.7 - 1e-4);
+    let mut simulation = crate::state::SimulationState::default();
+    simulation.runs.push(run.clone());
+    simulation.next_run_id = 2;
+    simulation.active_run_idx = Some(0);
+    simulation.active_analysis_idx = Some(0);
+    let saved = crate::io::project_io::ProjectSimulationResults::from_state(&simulation);
+    let decoded: crate::io::project_io::ProjectSimulationResults =
+        serde_json::from_str(&serde_json::to_string(&saved).unwrap()).unwrap();
+    assert_eq!(
+        decoded.into_simulation_state().unwrap().runs[0].analyses[0].result_payload,
+        retained.result_payload
+    );
+}
