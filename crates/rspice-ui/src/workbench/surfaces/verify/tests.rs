@@ -1837,6 +1837,7 @@ fn soa_evidence_analysis() -> AnalysisResult {
             "#00aaff",
         ));
         evaluations.push(SoaEvaluationEvidence {
+            duration: None,
             thresholds: Default::default(),
             derating: None,
             device_id: device_id.clone(),

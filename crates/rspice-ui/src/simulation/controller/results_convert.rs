@@ -959,6 +959,7 @@ impl SimulationController {
                 let mut evaluations = evaluations
                     .into_iter()
                     .map(|evaluation| SoaEvaluationEvidence {
+                        duration: evaluation.duration,
                         thresholds: evaluation.thresholds,
                         derating: evaluation.derating,
                         device_id: evaluation.device_id,

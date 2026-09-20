@@ -719,15 +719,18 @@ pub(super) fn prepare_typed_result_csv(
             let dynamic = evaluations
                 .iter()
                 .any(|evaluation| evaluation.derating.is_some());
+            let has_duration = evaluations
+                .iter()
+                .any(|evaluation| evaluation.duration.is_some());
             let custom_thresholds = evaluations
                 .iter()
                 .any(|evaluation| !evaluation.thresholds.is_default());
-            let thresholds = evaluations
+            let policies = evaluations
                 .iter()
                 .map(|evaluation| {
                     (
                         (evaluation.device_id.as_str(), evaluation.parameter),
-                        evaluation.thresholds,
+                        (evaluation.thresholds, evaluation.duration),
                     )
                 })
                 .collect::<std::collections::BTreeMap<_, _>>();
@@ -745,6 +748,25 @@ pub(super) fn prepare_typed_result_csv(
                         }
                     }
                 };
+            let append_duration =
+                |contents: &mut String,
+                 duration: Option<crate::services::safety::SoaDurationEvidence>| {
+                    if has_duration {
+                        if let Some(duration) = duration {
+                            contents.push_str(&format!(
+                                ",{:.17e},{:.17e},{:.17e},{},{},{}",
+                                duration.minimum_duration_s,
+                                duration.total_exceedance_s,
+                                duration.longest_excursion_s,
+                                duration.qualified_excursions,
+                                duration.rejected_excursions,
+                                duration.clipped_excursions
+                            ));
+                        } else {
+                            contents.push_str(",,,,,,");
+                        }
+                    }
+                };
             let mut contents = String::from(
                 "record,device,parameter,limit_value,actual_value,time_s,sample_count,unit,description,verdict",
             );
@@ -753,6 +775,9 @@ pub(super) fn prepare_typed_result_csv(
             }
             if custom_thresholds {
                 contents.push_str(",warning_fraction,critical_fraction");
+            }
+            if has_duration {
+                contents.push_str(",minimum_duration_s,total_exceedance_s,longest_excursion_s,qualified_excursions,short_excursions,clipped_excursions");
             }
             contents.push('\n');
             for evaluation in evaluations {
@@ -781,41 +806,63 @@ pub(super) fn prepare_typed_result_csv(
                     }
                 }
                 append_thresholds(&mut contents, evaluation.thresholds);
+                append_duration(&mut contents, evaluation.duration);
                 contents.push('\n');
-                if let Some(derating) = evaluation.derating {
+                if evaluation.derating.is_some() || evaluation.duration.is_some() {
                     let find =
                         |name: String| analysis.waveforms.iter().find(|wave| wave.name == name);
-                    let limits = find(crate::services::safety::soa_power_limit_waveform_name(
-                        &evaluation.device_id,
-                    ))?;
-                    let temperatures = find(
-                        crate::services::safety::soa_derating_temperature_waveform_name(
-                            &evaluation.device_id,
-                        ),
-                    )?;
                     let stress = find(crate::services::safety::soa_stress_waveform_name(
                         &evaluation.device_id,
-                        crate::services::safety::SoAParameter::Pdiss,
+                        evaluation.parameter.runtime_parameter(),
                     ))?;
+                    let limits = evaluation.derating.and_then(|_| {
+                        find(crate::services::safety::soa_power_limit_waveform_name(
+                            &evaluation.device_id,
+                        ))
+                    });
+                    let temperatures = evaluation.derating.and_then(|_| {
+                        find(
+                            crate::services::safety::soa_derating_temperature_waveform_name(
+                                &evaluation.device_id,
+                            ),
+                        )
+                    });
                     for i in 0..stress.x.len() {
                         let row = [
                             "sample".into(),
                             csv_text(&evaluation.device_id),
                             soa_parameter_csv(evaluation.parameter).into(),
-                            format!("{:.17e}", limits.y[i]),
+                            format!(
+                                "{:.17e}",
+                                limits.map_or(evaluation.limit_value, |wave| wave.y[i])
+                            ),
                             format!("{:.17e}", stress.y[i]),
                             format!("{:.17e}", stress.x[i]),
                             "1".into(),
-                            "W".into(),
-                            "Temperature-derated power".into(),
+                            csv_text(&evaluation.unit),
+                            if evaluation.derating.is_some() {
+                                "Temperature-derated power".into()
+                            } else {
+                                "Duration-qualified stress".into()
+                            },
                             String::new(),
-                            format!("{:.17e}", temperatures.y[i]),
-                            format!("{:.17e}", derating.rated_power_w),
-                            format!("{:.17e}", derating.curve.reference_temperature_kelvin),
-                            format!("{:.17e}", derating.curve.watts_per_kelvin),
                         ];
                         contents.push_str(&row.join(","));
+                        if dynamic {
+                            if let Some(derating) = evaluation.derating {
+                                contents.push_str(&format!(
+                                    ",{:.17e},{:.17e},{:.17e},{:.17e}",
+                                    temperatures?.y[i],
+                                    derating.rated_power_w,
+                                    derating.curve.reference_temperature_kelvin,
+                                    derating.curve.watts_per_kelvin
+                                ));
+                            } else {
+                                contents.push_str(",,,,");
+                            }
+                        }
                         append_thresholds(&mut contents, evaluation.thresholds);
+                        append_duration(&mut contents, evaluation.duration);
                         contents.push('\n');
                     }
                 }
@@ -835,7 +882,15 @@ pub(super) fn prepare_typed_result_csv(
                 }
                 append_thresholds(
                     &mut contents,
-                    *thresholds.get(&(violation.device_id.as_str(), violation.parameter))?,
+                    policies
+                        .get(&(violation.device_id.as_str(), violation.parameter))?
+                        .0,
+                );
+                append_duration(
+                    &mut contents,
+                    policies
+                        .get(&(violation.device_id.as_str(), violation.parameter))?
+                        .1,
                 );
                 contents.push('\n');
             }

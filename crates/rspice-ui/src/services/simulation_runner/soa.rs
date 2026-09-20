@@ -462,6 +462,26 @@ pub fn run_soa_analysis_with_config_and_source_path_and_abort(
         violation_count.push(manager.violations().len() as Value);
     }
 
+    if manager
+        .finalize_durations(&transient.time, abort)
+        .map_err(|error| ServiceRunError::from_core("SOA duration qualification", error))?
+    {
+        violation_count.fill(0.0);
+        for (index, event) in manager.violations().iter().enumerate() {
+            poll_periodically(abort, index)?;
+            let sample = transient
+                .time
+                .binary_search_by(|value| value.total_cmp(&event.time))
+                .map_err(|_| {
+                    ServiceRunError::Failure("SOA event has no exact sampled time".into())
+                })?;
+            violation_count[sample] += 1.0;
+        }
+        for index in 1..violation_count.len() {
+            poll_periodically(abort, index)?;
+            violation_count[index] += violation_count[index - 1];
+        }
+    }
     let mut violations = Vec::with_capacity(manager.violations().len());
     for (violation_index, violation) in manager.violations().iter().enumerate() {
         poll_periodically(abort, violation_index)?;

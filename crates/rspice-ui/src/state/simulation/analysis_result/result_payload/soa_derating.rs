@@ -88,9 +88,10 @@ pub(super) fn validate(
             events += 1;
         }
     }
-    if !same_retained_float(evaluation.worst_time_s, time[worst])
-        || !same_retained_float(evaluation.worst_actual_value, stress[worst])
-        || !same_retained_float(evaluation.limit_value, limits[worst])
+    if evaluation.duration.is_none()
+        && (!same_retained_float(evaluation.worst_time_s, time[worst])
+            || !same_retained_float(evaluation.worst_actual_value, stress[worst])
+            || !same_retained_float(evaluation.limit_value, limits[worst]))
     {
         return Err(format!(
             "SOA derating for '{}' does not retain the exact point of highest utilization",

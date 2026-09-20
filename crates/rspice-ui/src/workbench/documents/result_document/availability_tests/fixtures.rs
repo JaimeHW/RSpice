@@ -39,6 +39,7 @@ pub(super) fn soa_analysis() -> AnalysisResult {
         ])
         .with_result_payload(AnalysisResultPayload::Soa {
             evaluations: vec![SoaEvaluationEvidence {
+                duration: None,
                 thresholds: Default::default(),
                 derating: None,
                 device_id: "M1".to_owned(),

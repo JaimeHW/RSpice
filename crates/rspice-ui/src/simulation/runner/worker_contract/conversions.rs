@@ -349,6 +349,8 @@ impl From<WorkerParamShift> for ParamShift {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct WorkerSoAEvaluation {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration: Option<crate::services::safety::SoaDurationEvidence>,
     #[serde(
         default,
         skip_serializing_if = "crate::services::safety::SoaThresholds::is_default"
@@ -371,6 +373,11 @@ pub(crate) struct WorkerSoAEvaluation {
 impl WorkerSoAEvaluation {
     pub(super) fn estimated_numeric_payload_bytes(&self) -> usize {
         f64_payload_bytes(if self.derating.is_some() { 6 } else { 3 })
+            .saturating_add(f64_payload_bytes(if self.duration.is_some() {
+                6
+            } else {
+                0
+            }))
             .saturating_add(f64_payload_bytes(if self.thresholds.is_default() {
                 0
             } else {
@@ -384,6 +391,7 @@ impl WorkerSoAEvaluation {
 impl From<SoAEvaluation> for WorkerSoAEvaluation {
     fn from(value: SoAEvaluation) -> Self {
         Self {
+            duration: value.duration,
             thresholds: value.thresholds,
             derating: value.derating,
             device_id: value.device_id,
@@ -402,6 +410,7 @@ impl From<SoAEvaluation> for WorkerSoAEvaluation {
 impl From<WorkerSoAEvaluation> for SoAEvaluation {
     fn from(value: WorkerSoAEvaluation) -> Self {
         Self {
+            duration: value.duration,
             thresholds: value.thresholds,
             derating: value.derating,
             device_id: value.device_id,

@@ -17,3 +17,8 @@ pub use power_derating::{
     SoaDeratingSamples, SoaPowerDerating, SoaPowerDeratingEvidence, compare_soa_stress,
     soa_derating_temperature_waveform_name, soa_power_limit_waveform_name,
 };
+
+mod duration;
+pub use duration::{
+    SoaDurationEvidence, SoaLimitTrace, qualify_soa_duration, soa_duration_verdict,
+};

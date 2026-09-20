@@ -847,6 +847,7 @@ fn reliability_and_soa_evidence_are_field_sensitive_v4_content_identity() {
     let soa = AnalysisResult::new(1, AnalysisType::Soa, "SOA").with_result_payload(
         AnalysisResultPayload::Soa {
             evaluations: vec![SoaEvaluationEvidence {
+                duration: None,
                 thresholds: Default::default(),
                 derating: None,
                 device_id: "M1".to_owned(),
@@ -885,6 +886,36 @@ fn reliability_and_soa_evidence_are_field_sensitive_v4_content_identity() {
             critical_fraction,
         };
         assert_ne!(soa.result_data_digest(), changed.result_data_digest());
+    }
+    let mut timed = soa.clone();
+    let Some(AnalysisResultPayload::Soa { evaluations, .. }) = &mut timed.result_payload else {
+        unreachable!()
+    };
+    evaluations[0].duration = Some(crate::services::safety::SoaDurationEvidence {
+        minimum_duration_s: 1e-9,
+        total_exceedance_s: 3e-9,
+        longest_excursion_s: 2e-9,
+        qualified_excursions: 1,
+        rejected_excursions: 1,
+        clipped_excursions: 0,
+    });
+    assert_ne!(soa.result_data_digest(), timed.result_data_digest());
+    for field in 0..6 {
+        let mut changed = timed.clone();
+        let Some(AnalysisResultPayload::Soa { evaluations, .. }) = &mut changed.result_payload
+        else {
+            unreachable!()
+        };
+        let duration = evaluations[0].duration.as_mut().unwrap();
+        match field {
+            0 => duration.minimum_duration_s *= 2.,
+            1 => duration.total_exceedance_s *= 2.,
+            2 => duration.longest_excursion_s *= 2.,
+            3 => duration.qualified_excursions += 1,
+            4 => duration.rejected_excursions += 1,
+            _ => duration.clipped_excursions += 1,
+        }
+        assert_ne!(timed.result_data_digest(), changed.result_data_digest());
     }
     let mut changed_soa = soa.clone();
     let Some(AnalysisResultPayload::Soa { evaluations, .. }) = changed_soa.result_payload.as_mut()

@@ -1,0 +1,100 @@
+//! Mapping retained SOA quantities to their exact runtime observation names.
+use super::SoaParameterEvidence;
+
+impl SoaParameterEvidence {
+    pub(crate) const fn runtime_parameter(self) -> crate::services::safety::SoAParameter {
+        use crate::services::safety::SoAParameter;
+        match self {
+            SoaParameterEvidence::GateSourceVoltage => SoAParameter::Vgs,
+            SoaParameterEvidence::DrainSourceVoltage => SoAParameter::Vds,
+            SoaParameterEvidence::GateDrainVoltage => SoAParameter::Vgd,
+            SoaParameterEvidence::BaseEmitterVoltage => SoAParameter::Vbe,
+            SoaParameterEvidence::CollectorEmitterVoltage => SoAParameter::Vce,
+            SoaParameterEvidence::BaseCollectorVoltage => SoAParameter::Vbc,
+            SoaParameterEvidence::DrainCurrent => SoAParameter::Id,
+            SoaParameterEvidence::CollectorCurrent => SoAParameter::Ic,
+            SoaParameterEvidence::CollectorSubstrateVoltage => SoAParameter::Vcsub,
+            SoaParameterEvidence::CollectorSubstrateVoltagePositive => SoAParameter::VcsubPositive,
+            SoaParameterEvidence::CollectorSubstrateVoltageNegative => SoAParameter::VcsubNegative,
+            SoaParameterEvidence::BaseSubstrateVoltage => SoAParameter::Vbsub,
+            SoaParameterEvidence::BaseSubstrateVoltagePositive => SoAParameter::VbsubPositive,
+            SoaParameterEvidence::BaseSubstrateVoltageNegative => SoAParameter::VbsubNegative,
+            SoaParameterEvidence::EmitterSubstrateVoltage => SoAParameter::Vesub,
+            SoaParameterEvidence::EmitterSubstrateVoltagePositive => SoAParameter::VesubPositive,
+            SoaParameterEvidence::EmitterSubstrateVoltageNegative => SoAParameter::VesubNegative,
+            SoaParameterEvidence::SubstrateCurrent => SoAParameter::Isub,
+            SoaParameterEvidence::SubstrateCurrentPositive => SoAParameter::IsubPositive,
+            SoaParameterEvidence::SubstrateCurrentNegative => SoAParameter::IsubNegative,
+            SoaParameterEvidence::AnodeCathodeVoltage => SoAParameter::Vak,
+            SoaParameterEvidence::AnodeCathodeVoltagePositive => SoAParameter::VakPositive,
+            SoaParameterEvidence::AnodeCathodeVoltageNegative => SoAParameter::VakNegative,
+            SoaParameterEvidence::AnodeCurrent => SoAParameter::Ia,
+            SoaParameterEvidence::AnodeCurrentPositive => SoAParameter::IaPositive,
+            SoaParameterEvidence::AnodeCurrentNegative => SoAParameter::IaNegative,
+
+            SoaParameterEvidence::BodySourceVoltage => SoAParameter::Vbs,
+            SoaParameterEvidence::BodySourceVoltagePositive => SoAParameter::VbsPositive,
+            SoaParameterEvidence::BodySourceVoltageNegative => SoAParameter::VbsNegative,
+            SoaParameterEvidence::BodyDrainVoltage => SoAParameter::Vbd,
+            SoaParameterEvidence::BodyDrainVoltagePositive => SoAParameter::VbdPositive,
+            SoaParameterEvidence::BodyDrainVoltageNegative => SoAParameter::VbdNegative,
+            SoaParameterEvidence::GateBodyVoltage => SoAParameter::Vgb,
+            SoaParameterEvidence::GateBodyVoltagePositive => SoAParameter::VgbPositive,
+            SoaParameterEvidence::GateBodyVoltageNegative => SoAParameter::VgbNegative,
+            SoaParameterEvidence::BulkCurrent => SoAParameter::Ibulk,
+            SoaParameterEvidence::BulkCurrentPositive => SoAParameter::IbulkPositive,
+            SoaParameterEvidence::BulkCurrentNegative => SoAParameter::IbulkNegative,
+            SoaParameterEvidence::BackgateSourceVoltage => SoAParameter::Ves,
+            SoaParameterEvidence::BackgateSourceVoltagePositive => SoAParameter::VesPositive,
+            SoaParameterEvidence::BackgateSourceVoltageNegative => SoAParameter::VesNegative,
+            SoaParameterEvidence::BackgateDrainVoltage => SoAParameter::Ved,
+            SoaParameterEvidence::BackgateDrainVoltagePositive => SoAParameter::VedPositive,
+            SoaParameterEvidence::BackgateDrainVoltageNegative => SoAParameter::VedNegative,
+            SoaParameterEvidence::GateBackgateVoltage => SoAParameter::Vge,
+            SoaParameterEvidence::GateBackgateVoltagePositive => SoAParameter::VgePositive,
+            SoaParameterEvidence::GateBackgateVoltageNegative => SoAParameter::VgeNegative,
+            SoaParameterEvidence::BackgateCurrent => SoAParameter::Ibackgate,
+            SoaParameterEvidence::BackgateCurrentPositive => SoAParameter::IbackgatePositive,
+            SoaParameterEvidence::BackgateCurrentNegative => SoAParameter::IbackgateNegative,
+            SoaParameterEvidence::BodyBackgateVoltage => SoAParameter::VbodyBackgate,
+            SoaParameterEvidence::BodyBackgateVoltagePositive => {
+                SoAParameter::VbodyBackgatePositive
+            }
+            SoaParameterEvidence::BodyBackgateVoltageNegative => {
+                SoAParameter::VbodyBackgateNegative
+            }
+
+            SoaParameterEvidence::GateCurrent => SoAParameter::Ig,
+            SoaParameterEvidence::GateCurrentPositive => SoAParameter::IgPositive,
+            SoaParameterEvidence::GateCurrentNegative => SoAParameter::IgNegative,
+            SoaParameterEvidence::SourceCurrent => SoAParameter::Is,
+            SoaParameterEvidence::SourceCurrentPositive => SoAParameter::IsPositive,
+            SoaParameterEvidence::SourceCurrentNegative => SoAParameter::IsNegative,
+            SoaParameterEvidence::BaseCurrent => SoAParameter::Ib,
+            SoaParameterEvidence::BaseCurrentPositive => SoAParameter::IbPositive,
+            SoaParameterEvidence::BaseCurrentNegative => SoAParameter::IbNegative,
+            SoaParameterEvidence::EmitterCurrent => SoAParameter::Ie,
+            SoaParameterEvidence::EmitterCurrentPositive => SoAParameter::IePositive,
+            SoaParameterEvidence::EmitterCurrentNegative => SoAParameter::IeNegative,
+
+            SoaParameterEvidence::PowerDissipation => SoAParameter::Pdiss,
+            SoaParameterEvidence::Temperature => SoAParameter::Temp,
+            SoaParameterEvidence::GateSourceVoltagePositive => SoAParameter::VgsPositive,
+            SoaParameterEvidence::GateSourceVoltageNegative => SoAParameter::VgsNegative,
+            SoaParameterEvidence::DrainSourceVoltagePositive => SoAParameter::VdsPositive,
+            SoaParameterEvidence::DrainSourceVoltageNegative => SoAParameter::VdsNegative,
+            SoaParameterEvidence::GateDrainVoltagePositive => SoAParameter::VgdPositive,
+            SoaParameterEvidence::GateDrainVoltageNegative => SoAParameter::VgdNegative,
+            SoaParameterEvidence::BaseEmitterVoltagePositive => SoAParameter::VbePositive,
+            SoaParameterEvidence::BaseEmitterVoltageNegative => SoAParameter::VbeNegative,
+            SoaParameterEvidence::CollectorEmitterVoltagePositive => SoAParameter::VcePositive,
+            SoaParameterEvidence::CollectorEmitterVoltageNegative => SoAParameter::VceNegative,
+            SoaParameterEvidence::BaseCollectorVoltagePositive => SoAParameter::VbcPositive,
+            SoaParameterEvidence::BaseCollectorVoltageNegative => SoAParameter::VbcNegative,
+            SoaParameterEvidence::DrainCurrentPositive => SoAParameter::IdPositive,
+            SoaParameterEvidence::DrainCurrentNegative => SoAParameter::IdNegative,
+            SoaParameterEvidence::CollectorCurrentPositive => SoAParameter::IcPositive,
+            SoaParameterEvidence::CollectorCurrentNegative => SoAParameter::IcNegative,
+        }
+    }
+}

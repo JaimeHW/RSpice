@@ -2,6 +2,7 @@
 
 use super::*;
 mod soa_derating;
+mod soa_duration;
 
 pub(super) fn validate_pss_floquet_payload(
     period_s: Option<f64>,
@@ -1296,28 +1297,43 @@ impl AnalysisResult {
                 let mut exact_worst_events = std::collections::BTreeSet::new();
                 let mut derating_event_counts = std::collections::BTreeMap::<_, usize>::new();
                 let mut derating_traces = std::collections::BTreeMap::new();
-                for evaluation in evaluations.iter().filter(|e| e.derating.is_some()) {
-                    let events = soa_derating::validate(self, time, evaluation)?;
-                    let limits = soa_derating::trace(
-                        self,
-                        &crate::services::safety::soa_power_limit_waveform_name(
-                            &evaluation.device_id,
-                        ),
-                        time,
-                        "W",
-                    )?;
+                for evaluation in evaluations
+                    .iter()
+                    .filter(|e| e.derating.is_some() || e.duration.is_some())
+                {
+                    let duration = evaluation
+                        .duration
+                        .map(|_| soa_duration::validate(self, time, evaluation))
+                        .transpose()?;
+                    let mut events = duration.as_ref().map_or(0, |duration| duration.events);
+                    let limits = if evaluation.derating.is_some() {
+                        let raw_events = soa_derating::validate(self, time, evaluation)?;
+                        if duration.is_none() {
+                            events = raw_events;
+                        }
+                        Some(soa_derating::trace(
+                            self,
+                            &crate::services::safety::soa_power_limit_waveform_name(
+                                &evaluation.device_id,
+                            ),
+                            time,
+                            "W",
+                        )?)
+                    } else {
+                        None
+                    };
                     let stress = soa_derating::trace(
                         self,
                         &crate::services::safety::soa_stress_waveform_name(
                             &evaluation.device_id,
-                            crate::services::safety::SoAParameter::Pdiss,
+                            evaluation.parameter.runtime_parameter(),
                         ),
                         time,
-                        "W",
+                        &evaluation.unit,
                     )?;
                     derating_traces.insert(
                         (evaluation.device_id.as_str(), evaluation.parameter),
-                        (limits, stress, events),
+                        (limits, stress, events, duration),
                     );
                 }
                 for violation in violations {
@@ -1328,7 +1344,7 @@ impl AnalysisResult {
                             violation.device_id
                         )
                     })?;
-                    let expected_limit = if let Some((limits, stress, _)) =
+                    let expected_limit = if let Some((limits, stress, _, duration)) =
                         derating_traces.get(&key)
                     {
                         let index = time
@@ -1339,8 +1355,17 @@ impl AnalysisResult {
                                 "SOA derating event contradicts its retained stress sample".into(),
                             );
                         }
+                        if duration.as_ref().is_some_and(|duration| {
+                            soa_duration::severity(duration.verdicts[index])
+                                != Some(violation.severity)
+                        }) {
+                            return Err(
+                                "SOA event contradicts its duration-qualified sample severity"
+                                    .into(),
+                            );
+                        }
                         *derating_event_counts.entry(key).or_default() += 1;
-                        limits[index]
+                        limits.map_or(evaluation.limit_value, |values| values[index])
                     } else {
                         evaluation.limit_value
                     };
@@ -1350,13 +1375,14 @@ impl AnalysisResult {
                             violation.device_id
                         ));
                     }
-                    if crate::services::safety::compare_soa_stress(
-                        violation.actual_value,
-                        violation.limit_value,
-                        evaluation.worst_actual_value,
-                        evaluation.limit_value,
-                    )
-                    .is_gt()
+                    if evaluation.duration.is_none()
+                        && crate::services::safety::compare_soa_stress(
+                            violation.actual_value,
+                            violation.limit_value,
+                            evaluation.worst_actual_value,
+                            evaluation.limit_value,
+                        )
+                        .is_gt()
                     {
                         return Err(format!(
                             "SOA event for '{}' exceeds its retained worst point",
@@ -1392,7 +1418,7 @@ impl AnalysisResult {
                     }
                 }
                 for evaluation in evaluations {
-                    if evaluation.derating.is_some() {
+                    if evaluation.derating.is_some() || evaluation.duration.is_some() {
                         let key = (evaluation.device_id.as_str(), evaluation.parameter);
                         let expected_events = derating_traces[&key].2;
                         if derating_event_counts.get(&key).copied().unwrap_or(0) != expected_events

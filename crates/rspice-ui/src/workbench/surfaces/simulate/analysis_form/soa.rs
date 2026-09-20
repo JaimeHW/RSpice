@@ -119,6 +119,8 @@ pub(super) fn fields(
                 &crate::simulation::dialog::soa::SoaRuleDraft::PARAMETER_LABELS,
                 &mut rule.parameter,
             );
+            quantity_input_row(ui, "Minimum excursion duration", &mut rule.minimum_duration, QuantityInputKind::Time, policy, locale);
+            field_note(ui, "Blank reports every exceedance. Otherwise only excursions at least this long become violations or critical events; shorter excursions remain warnings when warnings are enabled. Duration uses linearly interpolated stress/limit crossings within the checked time window. The complete excursion is classified after the run.");
             if rule.is_voltage() {
                 switch_row(ui, "Observe intrinsic voltage", &mut rule.intrinsic_voltage);
                 field_note(ui, "Intrinsic voltages use the model's electrical nodes behind lead resistance, including floating bodies. Polarity follows the named node order. Default checks use external pins.");

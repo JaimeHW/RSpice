@@ -621,6 +621,47 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
             ),
         ],
     );
+    if let Some(duration) = evaluation.duration {
+        stat_table(
+            ui,
+            &[
+                (
+                    "Minimum excursion",
+                    format!("{:.17e} s", duration.minimum_duration_s),
+                    false,
+                ),
+                (
+                    "Longest excursion",
+                    format!("{:.17e} s", duration.longest_excursion_s),
+                    true,
+                ),
+                (
+                    "Total time above limit",
+                    format!("{:.17e} s", duration.total_exceedance_s),
+                    false,
+                ),
+                (
+                    "Qualified excursions",
+                    duration.qualified_excursions.to_string(),
+                    true,
+                ),
+                (
+                    "Short excursions",
+                    duration.rejected_excursions.to_string(),
+                    false,
+                ),
+                (
+                    "Window-clipped excursions",
+                    duration.clipped_excursions.to_string(),
+                    false,
+                ),
+            ],
+        );
+        panel_note(
+            ui,
+            "The worst point is selected by reported severity, then utilization. Excursion widths use linear threshold crossings inside the checked window; the full stress history includes short excursions.",
+        );
+    }
     panel_note(ui, &evaluation.description);
 
     let trace_available = facts.is_some_and(|facts| facts.stress_waveform.is_some());
@@ -721,7 +762,7 @@ fn stress_waveform<'a>(
     };
     let name = crate::services::safety::soa_stress_waveform_name(
         &evaluation.device_id,
-        runtime_parameter(evaluation.parameter),
+        evaluation.parameter.runtime_parameter(),
     );
     let limits = derating_waveform(analysis, evaluation, false);
     if evaluation.derating.is_some() && limits.is_none() {
@@ -743,15 +784,16 @@ fn stress_waveform<'a>(
             return false;
         };
         waveform.y[worst_index].to_bits() == evaluation.worst_actual_value.to_bits()
-            && waveform.y.iter().enumerate().all(|(index, value)| {
-                crate::services::safety::compare_soa_stress(
-                    *value,
-                    limits.map_or(evaluation.limit_value, |wave| wave.y[index]),
-                    evaluation.worst_actual_value,
-                    evaluation.limit_value,
-                )
-                .is_le()
-            })
+            && (evaluation.duration.is_some()
+                || waveform.y.iter().enumerate().all(|(index, value)| {
+                    crate::services::safety::compare_soa_stress(
+                        *value,
+                        limits.map_or(evaluation.limit_value, |wave| wave.y[index]),
+                        evaluation.worst_actual_value,
+                        evaluation.limit_value,
+                    )
+                    .is_le()
+                }))
     })
 }
 
@@ -776,6 +818,37 @@ fn worst_interval_text(
         };
     };
     let worst_index = nearest_sample_index(waveform.x.as_slice(), evaluation.worst_time_s);
+    if let Some(duration) = evaluation.duration {
+        use crate::services::safety::{SoaLimitTrace, qualify_soa_duration};
+        let limit_trace = limits.map_or(
+            SoaLimitTrace::Constant(evaluation.limit_value),
+            SoaLimitTrace::Samples,
+        );
+        if let Ok(scan) = qualify_soa_duration(
+            waveform.x.as_slice(),
+            waveform.y.as_slice(),
+            limit_trace,
+            duration.minimum_duration_s,
+            &rspice_core::abort_signal::NoAbort,
+        ) && let Some(excursion) = scan.excursions.iter().find(|excursion| {
+            (excursion.first_sample..=excursion.last_sample).contains(&worst_index)
+        }) {
+            return if compact {
+                format!("{:.5e}…{:.5e} s", excursion.start_s, excursion.end_s)
+            } else {
+                format!(
+                    "{} excursion: {:.17e} s to {:.17e} s (linear threshold crossings)",
+                    if excursion.qualified {
+                        "Qualified"
+                    } else {
+                        "Short"
+                    },
+                    excursion.start_s,
+                    excursion.end_s
+                )
+            };
+        }
+    }
     let threshold = |index: usize| {
         let limit = limits.map_or(evaluation.limit_value, |limits| limits[index]);
         if evaluation.verdict == SoaRuleVerdictEvidence::Warning {
@@ -836,100 +909,6 @@ fn dynamic_active_interval_indices(
         end += 1;
     }
     Some((start, end))
-}
-
-const fn runtime_parameter(
-    parameter: SoaParameterEvidence,
-) -> crate::services::safety::SoAParameter {
-    use crate::services::safety::SoAParameter;
-    match parameter {
-        SoaParameterEvidence::GateSourceVoltage => SoAParameter::Vgs,
-        SoaParameterEvidence::DrainSourceVoltage => SoAParameter::Vds,
-        SoaParameterEvidence::GateDrainVoltage => SoAParameter::Vgd,
-        SoaParameterEvidence::BaseEmitterVoltage => SoAParameter::Vbe,
-        SoaParameterEvidence::CollectorEmitterVoltage => SoAParameter::Vce,
-        SoaParameterEvidence::BaseCollectorVoltage => SoAParameter::Vbc,
-        SoaParameterEvidence::DrainCurrent => SoAParameter::Id,
-        SoaParameterEvidence::CollectorCurrent => SoAParameter::Ic,
-        SoaParameterEvidence::CollectorSubstrateVoltage => SoAParameter::Vcsub,
-        SoaParameterEvidence::CollectorSubstrateVoltagePositive => SoAParameter::VcsubPositive,
-        SoaParameterEvidence::CollectorSubstrateVoltageNegative => SoAParameter::VcsubNegative,
-        SoaParameterEvidence::BaseSubstrateVoltage => SoAParameter::Vbsub,
-        SoaParameterEvidence::BaseSubstrateVoltagePositive => SoAParameter::VbsubPositive,
-        SoaParameterEvidence::BaseSubstrateVoltageNegative => SoAParameter::VbsubNegative,
-        SoaParameterEvidence::EmitterSubstrateVoltage => SoAParameter::Vesub,
-        SoaParameterEvidence::EmitterSubstrateVoltagePositive => SoAParameter::VesubPositive,
-        SoaParameterEvidence::EmitterSubstrateVoltageNegative => SoAParameter::VesubNegative,
-        SoaParameterEvidence::SubstrateCurrent => SoAParameter::Isub,
-        SoaParameterEvidence::SubstrateCurrentPositive => SoAParameter::IsubPositive,
-        SoaParameterEvidence::SubstrateCurrentNegative => SoAParameter::IsubNegative,
-        SoaParameterEvidence::AnodeCathodeVoltage => SoAParameter::Vak,
-        SoaParameterEvidence::AnodeCathodeVoltagePositive => SoAParameter::VakPositive,
-        SoaParameterEvidence::AnodeCathodeVoltageNegative => SoAParameter::VakNegative,
-        SoaParameterEvidence::AnodeCurrent => SoAParameter::Ia,
-        SoaParameterEvidence::AnodeCurrentPositive => SoAParameter::IaPositive,
-        SoaParameterEvidence::AnodeCurrentNegative => SoAParameter::IaNegative,
-
-        SoaParameterEvidence::BodySourceVoltage => SoAParameter::Vbs,
-        SoaParameterEvidence::BodySourceVoltagePositive => SoAParameter::VbsPositive,
-        SoaParameterEvidence::BodySourceVoltageNegative => SoAParameter::VbsNegative,
-        SoaParameterEvidence::BodyDrainVoltage => SoAParameter::Vbd,
-        SoaParameterEvidence::BodyDrainVoltagePositive => SoAParameter::VbdPositive,
-        SoaParameterEvidence::BodyDrainVoltageNegative => SoAParameter::VbdNegative,
-        SoaParameterEvidence::GateBodyVoltage => SoAParameter::Vgb,
-        SoaParameterEvidence::GateBodyVoltagePositive => SoAParameter::VgbPositive,
-        SoaParameterEvidence::GateBodyVoltageNegative => SoAParameter::VgbNegative,
-        SoaParameterEvidence::BulkCurrent => SoAParameter::Ibulk,
-        SoaParameterEvidence::BulkCurrentPositive => SoAParameter::IbulkPositive,
-        SoaParameterEvidence::BulkCurrentNegative => SoAParameter::IbulkNegative,
-        SoaParameterEvidence::BackgateSourceVoltage => SoAParameter::Ves,
-        SoaParameterEvidence::BackgateSourceVoltagePositive => SoAParameter::VesPositive,
-        SoaParameterEvidence::BackgateSourceVoltageNegative => SoAParameter::VesNegative,
-        SoaParameterEvidence::BackgateDrainVoltage => SoAParameter::Ved,
-        SoaParameterEvidence::BackgateDrainVoltagePositive => SoAParameter::VedPositive,
-        SoaParameterEvidence::BackgateDrainVoltageNegative => SoAParameter::VedNegative,
-        SoaParameterEvidence::GateBackgateVoltage => SoAParameter::Vge,
-        SoaParameterEvidence::GateBackgateVoltagePositive => SoAParameter::VgePositive,
-        SoaParameterEvidence::GateBackgateVoltageNegative => SoAParameter::VgeNegative,
-        SoaParameterEvidence::BackgateCurrent => SoAParameter::Ibackgate,
-        SoaParameterEvidence::BackgateCurrentPositive => SoAParameter::IbackgatePositive,
-        SoaParameterEvidence::BackgateCurrentNegative => SoAParameter::IbackgateNegative,
-        SoaParameterEvidence::BodyBackgateVoltage => SoAParameter::VbodyBackgate,
-        SoaParameterEvidence::BodyBackgateVoltagePositive => SoAParameter::VbodyBackgatePositive,
-        SoaParameterEvidence::BodyBackgateVoltageNegative => SoAParameter::VbodyBackgateNegative,
-
-        SoaParameterEvidence::GateCurrent => SoAParameter::Ig,
-        SoaParameterEvidence::GateCurrentPositive => SoAParameter::IgPositive,
-        SoaParameterEvidence::GateCurrentNegative => SoAParameter::IgNegative,
-        SoaParameterEvidence::SourceCurrent => SoAParameter::Is,
-        SoaParameterEvidence::SourceCurrentPositive => SoAParameter::IsPositive,
-        SoaParameterEvidence::SourceCurrentNegative => SoAParameter::IsNegative,
-        SoaParameterEvidence::BaseCurrent => SoAParameter::Ib,
-        SoaParameterEvidence::BaseCurrentPositive => SoAParameter::IbPositive,
-        SoaParameterEvidence::BaseCurrentNegative => SoAParameter::IbNegative,
-        SoaParameterEvidence::EmitterCurrent => SoAParameter::Ie,
-        SoaParameterEvidence::EmitterCurrentPositive => SoAParameter::IePositive,
-        SoaParameterEvidence::EmitterCurrentNegative => SoAParameter::IeNegative,
-
-        SoaParameterEvidence::PowerDissipation => SoAParameter::Pdiss,
-        SoaParameterEvidence::Temperature => SoAParameter::Temp,
-        SoaParameterEvidence::GateSourceVoltagePositive => SoAParameter::VgsPositive,
-        SoaParameterEvidence::GateSourceVoltageNegative => SoAParameter::VgsNegative,
-        SoaParameterEvidence::DrainSourceVoltagePositive => SoAParameter::VdsPositive,
-        SoaParameterEvidence::DrainSourceVoltageNegative => SoAParameter::VdsNegative,
-        SoaParameterEvidence::GateDrainVoltagePositive => SoAParameter::VgdPositive,
-        SoaParameterEvidence::GateDrainVoltageNegative => SoAParameter::VgdNegative,
-        SoaParameterEvidence::BaseEmitterVoltagePositive => SoAParameter::VbePositive,
-        SoaParameterEvidence::BaseEmitterVoltageNegative => SoAParameter::VbeNegative,
-        SoaParameterEvidence::CollectorEmitterVoltagePositive => SoAParameter::VcePositive,
-        SoaParameterEvidence::CollectorEmitterVoltageNegative => SoAParameter::VceNegative,
-        SoaParameterEvidence::BaseCollectorVoltagePositive => SoAParameter::VbcPositive,
-        SoaParameterEvidence::BaseCollectorVoltageNegative => SoAParameter::VbcNegative,
-        SoaParameterEvidence::DrainCurrentPositive => SoAParameter::IdPositive,
-        SoaParameterEvidence::DrainCurrentNegative => SoAParameter::IdNegative,
-        SoaParameterEvidence::CollectorCurrentPositive => SoAParameter::IcPositive,
-        SoaParameterEvidence::CollectorCurrentNegative => SoAParameter::IcNegative,
-    }
 }
 
 fn result_mapping_is_current(state: &AppState, analysis_key: AnalysisPresentationKey) -> bool {
@@ -1084,7 +1063,7 @@ fn stress_trace_card(
             );
             if let Some(limits) = limits {
                 spec.traces.push(Trace::new(limits.x.as_slice(), limits.y.as_slice(), t.color.err).cache_key(facts.stress_cache_key ^ 0x7BD3_815F_A904_260C));
-                mono(ui, "Red trace: temperature-derated power limit. Worst point: highest power / allowed-power ratio.");
+                mono(ui, if evaluation.duration.is_some() { "Red trace: temperature-derated power limit. Worst point follows duration-qualified severity, then utilization." } else { "Red trace: temperature-derated power limit. Worst point: highest power / allowed-power ratio." });
             } else {
                 spec.limit_lines.push(LimitLine {
                     y: evaluation.limit_value,
@@ -1344,7 +1323,7 @@ mod tests {
             assert_eq!(
                 crate::services::safety::soa_stress_waveform_name(
                     "M1",
-                    runtime_parameter(parameter)
+                    parameter.runtime_parameter()
                 ),
                 expected
             );
@@ -1422,6 +1401,7 @@ mod tests {
                 "#00aaff",
             ));
             evaluations.push(SoaEvaluationEvidence {
+                duration: None,
                 thresholds: Default::default(),
                 derating: None,
                 device_id: device_id.clone(),

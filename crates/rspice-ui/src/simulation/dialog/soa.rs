@@ -152,6 +152,13 @@ impl SoaConfig {
                 rule.devices.join(" "),
                 rule.models.join(" ")
             ));
+            if let Some(duration) = rule.minimum_duration_s {
+                card.push_str(&format!(
+                    " min_duration=({} {}s)",
+                    rule.parameter.stress_code(),
+                    duration
+                ));
+            }
             if let Some(curve) = rule.power_derating {
                 card.push_str(&format!(
                     " derating=({} reference_k={} watts_per_k={})",
@@ -411,6 +418,7 @@ mod tests {
     fn soa_authored_observation_settings_survive_restore_and_full_precision_cards() {
         let config = SoaConfig {
             rules: vec![SoaRuleConfig {
+                minimum_duration_s: None,
                 power_derating: None,
                 voltage_basis: Default::default(),
                 parameter: crate::services::safety::SoAParameter::Id,

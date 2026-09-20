@@ -432,6 +432,8 @@ pub enum SoaVoltageBasis {
 /// A specific limit definition for a device type or model
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SoALimit {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub minimum_duration_s: Option<f64>,
     #[serde(default)]
     pub power_derating: Option<SoaPowerDerating>,
     #[serde(default)]
@@ -495,6 +497,8 @@ pub enum SoARuleVerdict {
 /// Worst observed point and coverage for one device/parameter rule.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SoAEvaluation {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration: Option<crate::services::safety::SoaDurationEvidence>,
     #[serde(default, skip_serializing_if = "super::SoaThresholds::is_default")]
     pub thresholds: super::SoaThresholds,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -587,6 +591,12 @@ impl SoAManager {
                     limit.parameter
                 ));
             }
+            if limit
+                .minimum_duration_s
+                .is_some_and(|value| !value.is_finite() || value <= 0.0)
+            {
+                return Err("SOA minimum excursion duration must be finite and positive".into());
+            }
             if let Some(curve) = limit.power_derating {
                 curve.validate()?;
                 if limit.parameter != SoAParameter::Pdiss {
@@ -667,6 +677,7 @@ impl SoAManager {
                             self.evaluations
                                 .entry(key)
                                 .or_insert_with(|| SoAEvaluation {
+                                    duration: None,
                                     thresholds: self.thresholds,
                                     derating: limit.power_derating.map(|curve| {
                                         SoaPowerDeratingEvidence {
@@ -724,6 +735,113 @@ impl SoAManager {
         Ok(())
     }
 
+    /// Reclassify complete excursions once the checked observation window is known.
+    pub fn finalize_durations(
+        &mut self,
+        time: &[f64],
+        abort: &dyn rspice_core::abort_signal::AbortSignal,
+    ) -> Result<bool, rspice_core::SimulationError> {
+        use super::{SoaLimitTrace, qualify_soa_duration, soa_duration_verdict};
+        use rspice_core::SimulationError;
+        let policies: Vec<_> = self
+            .device_defs
+            .iter()
+            .flat_map(|(device, definition)| {
+                definition.limits.iter().filter_map(move |limit| {
+                    limit
+                        .minimum_duration_s
+                        .map(|minimum| (device.clone(), limit.parameter, limit.max_value, minimum))
+                })
+            })
+            .collect();
+        if policies.is_empty() {
+            return Ok(false);
+        }
+        let mut keys: HashMap<&str, std::collections::HashSet<SoAParameter>> = HashMap::new();
+        for (device, parameter, _, _) in &policies {
+            keys.entry(device.as_str()).or_default().insert(*parameter);
+        }
+        let mut retained = Vec::new();
+        for (index, event) in self.violations.drain(..).enumerate() {
+            if index % 256 == 0 && abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
+            if !keys
+                .get(event.device_id.as_str())
+                .is_some_and(|parameters| parameters.contains(&event.parameter))
+            {
+                retained.push(event);
+            }
+        }
+        self.violations = retained;
+        for (device, parameter, maximum, minimum) in policies {
+            let key = (device.clone(), parameter);
+            let stress = self.stress_history.get(&key).ok_or_else(|| {
+                SimulationError::Circuit("SOA duration is missing its stress history".into())
+            })?;
+            let limits = self
+                .derating_history
+                .get(&key)
+                .map_or(SoaLimitTrace::Constant(maximum), |history| {
+                    SoaLimitTrace::Samples(&history.limits_w)
+                });
+            let scan = qualify_soa_duration(time, stress, limits, minimum, abort)?;
+            let mut worst = 0;
+            let mut verdict = soa_duration_verdict(
+                self.thresholds,
+                stress[0],
+                limits.at(0),
+                scan.qualified_samples[0],
+            );
+            for i in 0..time.len() {
+                if i % 256 == 0 && abort.is_aborted() {
+                    return Err(SimulationError::Aborted);
+                }
+                let sample_verdict = soa_duration_verdict(
+                    self.thresholds,
+                    stress[i],
+                    limits.at(i),
+                    scan.qualified_samples[i],
+                );
+                if sample_verdict
+                    .cmp(&verdict)
+                    .then_with(|| {
+                        compare_soa_stress(stress[i], limits.at(i), stress[worst], limits.at(worst))
+                    })
+                    .is_gt()
+                {
+                    worst = i;
+                    verdict = sample_verdict;
+                }
+                let severity = match sample_verdict {
+                    SoARuleVerdict::Pass => None,
+                    SoARuleVerdict::Warning => Some(ViolationSeverity::Warning),
+                    SoARuleVerdict::Violation => Some(ViolationSeverity::Violation),
+                    SoARuleVerdict::Critical => Some(ViolationSeverity::Critical),
+                };
+                if let Some(severity) = severity {
+                    self.violations.push(SoAViolation {
+                        device_id: device.clone(),
+                        parameter,
+                        limit_value: limits.at(i),
+                        actual_value: stress[i],
+                        time: time[i],
+                        severity,
+                    });
+                }
+            }
+            let evaluation = self.evaluations.get_mut(&key).ok_or_else(|| {
+                SimulationError::Circuit("SOA duration is missing its evaluation".into())
+            })?;
+            evaluation.duration = Some(scan.evidence);
+            evaluation.verdict = verdict;
+            evaluation.worst_time = time[worst];
+            evaluation.worst_actual_value = stress[worst];
+            evaluation.limit_value = limits.at(worst);
+        }
+        Ok(true)
+    }
+
     /// Get all detected violations
     pub fn violations(&self) -> &[SoAViolation] {
         &self.violations
@@ -771,6 +889,7 @@ mod tests {
                 "M1",
                 SoADefinition {
                     limits: vec![SoALimit {
+                        minimum_duration_s: None,
                         power_derating: None,
                         voltage_basis: Default::default(),
                         parameter: SoAParameter::Vds,
@@ -787,6 +906,7 @@ mod tests {
                     "M1",
                     SoADefinition {
                         limits: vec![SoALimit {
+                            minimum_duration_s: None,
                             power_derating: None,
                             voltage_basis: Default::default(),
                             parameter: SoAParameter::Vds,
@@ -848,6 +968,7 @@ fn soa_derating_selects_highest_utilization_and_retains_zero_limit_events() {
             "Q1",
             SoADefinition {
                 limits: vec![SoALimit {
+                    minimum_duration_s: None,
                     power_derating: Some(curve),
                     voltage_basis: Default::default(),
                     parameter: SoAParameter::Pdiss,

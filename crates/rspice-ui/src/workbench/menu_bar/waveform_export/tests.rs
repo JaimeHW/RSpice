@@ -993,6 +993,7 @@ fn csv_export_publishes_complete_soa_rules_and_exact_events() {
         .with_family_metadata(AnalysisResultFamilyMetadata::Soa { time: vec![1.0e-6] })
         .with_result_payload(AnalysisResultPayload::Soa {
             evaluations: vec![SoaEvaluationEvidence {
+                duration: None,
                 thresholds: Default::default(),
                 derating: None,
                 device_id: "M1".to_owned(),
@@ -2489,6 +2490,7 @@ fn soa_derating_csv_preserves_each_sample_temperature_and_limit() {
         })
         .with_result_payload(AnalysisResultPayload::Soa {
             evaluations: vec![SoaEvaluationEvidence {
+                duration: None,
                 thresholds: Default::default(),
                 derating: Some(SoaPowerDeratingEvidence {
                     rated_power_w: 1.0,
@@ -2577,5 +2579,90 @@ fn soa_derating_csv_preserves_each_sample_temperature_and_limit() {
             fields[10].parse::<f64>().unwrap(),
             [290.0, 350.0, 400.0][index]
         );
+    }
+}
+
+#[test]
+fn soa_duration_csv_preserves_short_spikes_and_qualified_excursions() {
+    let mut stress = waveform(
+        "SOA_VDS(M1)",
+        vec![0., 1., 2., 3., 4., 5., 6.],
+        vec![0., 4., 0., 2., 2., 2., 0.],
+    );
+    stress.unit = Some("V".into());
+    let duration = crate::services::safety::SoaDurationEvidence {
+        minimum_duration_s: 2.,
+        total_exceedance_s: 4.5,
+        longest_excursion_s: 3.,
+        qualified_excursions: 1,
+        rejected_excursions: 1,
+        clipped_excursions: 0,
+    };
+    let mut events = vec![];
+    for (time_s, actual_value, severity) in [
+        (1., 4., SoaViolationSeverityEvidence::Warning),
+        (3., 2., SoaViolationSeverityEvidence::Critical),
+        (4., 2., SoaViolationSeverityEvidence::Critical),
+        (5., 2., SoaViolationSeverityEvidence::Critical),
+    ] {
+        events.push(SoaViolationEvidence {
+            device_id: "M1".into(),
+            parameter: SoaParameterEvidence::DrainSourceVoltage,
+            limit_value: 1.,
+            actual_value,
+            time_s,
+            severity,
+        });
+    }
+    let analysis = AnalysisResult::new(1, AnalysisType::Soa, "SOA duration")
+        .with_waveforms(vec![stress])
+        .with_family_metadata(AnalysisResultFamilyMetadata::Soa {
+            time: vec![0., 1., 2., 3., 4., 5., 6.],
+        })
+        .with_result_payload(AnalysisResultPayload::Soa {
+            evaluations: vec![SoaEvaluationEvidence {
+                duration: Some(duration),
+                thresholds: Default::default(),
+                derating: None,
+                device_id: "M1".into(),
+                parameter: SoaParameterEvidence::DrainSourceVoltage,
+                limit_value: 1.,
+                worst_actual_value: 2.,
+                worst_time_s: 3.,
+                sample_count: 7,
+                unit: "V".into(),
+                description: "Drain voltage".into(),
+                verdict: SoaRuleVerdictEvidence::Critical,
+            }],
+            violations: events,
+        });
+    analysis.validate_retained_evidence().unwrap();
+    let mut forged = analysis.clone();
+    let Some(AnalysisResultPayload::Soa { violations, .. }) = &mut forged.result_payload else {
+        unreachable!()
+    };
+    violations[0].severity = SoaViolationSeverityEvidence::Critical;
+    assert!(forged.validate_retained_evidence().is_err());
+    let mut state = state_with_typed_result(analysis);
+    let io = MockExportWorkflowIo::default();
+    action_export_csv_with_io(&mut state, &io);
+    let files = io.text_files.borrow();
+    let rows: Vec<_> = files[0]
+        .1
+        .lines()
+        .map(|line| line.split(',').collect::<Vec<_>>())
+        .collect();
+    assert_eq!(rows.len(), 13);
+    assert!(rows.iter().all(|row| row.len() == 16));
+    assert_eq!(rows[0][10], "minimum_duration_s");
+    assert_eq!(rows.iter().filter(|row| row[0] == "sample").count(), 7);
+    assert!(
+        rows.iter()
+            .any(|row| row[0] == "sample" && row[4].parse::<f64>().unwrap() == 4.)
+    );
+    for row in rows.iter().skip(1) {
+        assert_eq!(row[10].parse::<f64>().unwrap(), 2.);
+        assert_eq!(row[11].parse::<f64>().unwrap(), 4.5);
+        assert_eq!(row[12].parse::<f64>().unwrap(), 3.);
     }
 }

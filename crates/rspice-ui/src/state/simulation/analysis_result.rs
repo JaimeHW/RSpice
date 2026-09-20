@@ -5,6 +5,8 @@
 //! provenance does not match the current design is stale, not wrong, and the
 //! distinction is what lets the UI say so.
 
+mod soa_parameter;
+
 use super::*;
 use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
 use std::collections::{BTreeMap, HashSet};
@@ -996,6 +998,8 @@ impl SoaRuleVerdictEvidence {
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SoaEvaluationEvidence {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration: Option<crate::services::safety::SoaDurationEvidence>,
     #[serde(
         default,
         skip_serializing_if = "crate::services::safety::SoaThresholds::is_default"
@@ -2196,6 +2200,9 @@ impl AnalysisResultPayload {
                 let mut previous_evaluation: Option<&SoaEvaluationEvidence> = None;
                 for evaluation in evaluations {
                     evaluation.thresholds.validate()?;
+                    if let Some(duration) = evaluation.duration {
+                        duration.validate()?;
+                    }
                     require_non_empty(&evaluation.device_id, "SOA device identity")?;
                     require_non_empty(&evaluation.unit, "SOA rule unit")?;
                     require_non_empty(&evaluation.description, "SOA rule description")?;
@@ -2243,7 +2250,7 @@ impl AnalysisResultPayload {
                         evaluation.limit_value,
                         evaluation.thresholds,
                     );
-                    if evaluation.verdict != expected_verdict {
+                    if evaluation.duration.is_none() && evaluation.verdict != expected_verdict {
                         return Err(format!(
                             "SOA evaluation for '{}' has a verdict inconsistent with its worst value",
                             evaluation.device_id
@@ -2258,6 +2265,11 @@ impl AnalysisResultPayload {
                     }
                     previous_evaluation = Some(evaluation);
                 }
+                let duration_rules = evaluations
+                    .iter()
+                    .filter(|evaluation| evaluation.duration.is_some())
+                    .map(|evaluation| (evaluation.device_id.as_str(), evaluation.parameter))
+                    .collect::<std::collections::BTreeSet<_>>();
                 let mut previous: Option<&SoaViolationEvidence> = None;
                 for violation in violations {
                     require_non_empty(&violation.device_id, "SOA device identity")?;
@@ -2304,7 +2316,13 @@ impl AnalysisResultPayload {
                             violation.device_id
                         )
                     })?;
-                    if violation.severity != expected_severity {
+                    let duration_warning = duration_rules
+                        .contains(&(violation.device_id.as_str(), violation.parameter))
+                        && violation.severity == SoaViolationSeverityEvidence::Warning
+                        && thresholds[&(violation.device_id.as_str(), violation.parameter)]
+                            .warning_fraction
+                            .is_some();
+                    if violation.severity != expected_severity && !duration_warning {
                         return Err(format!(
                             "SOA event for '{}' has a severity inconsistent with its value",
                             violation.device_id

@@ -1083,6 +1083,23 @@ fn encode_result_payload(
                     );
                 }
             }
+            if evaluations
+                .iter()
+                .any(|evaluation| evaluation.duration.is_some())
+            {
+                writer.string("soa-excursion-duration-evidence-v1");
+                writer.sequence(evaluations.len());
+                for evaluation in evaluations {
+                    writer.option(evaluation.duration.as_ref(), |writer, duration| {
+                        writer.f64(duration.minimum_duration_s);
+                        writer.f64(duration.total_exceedance_s);
+                        writer.f64(duration.longest_excursion_s);
+                        writer.u64(duration.qualified_excursions);
+                        writer.u64(duration.rejected_excursions);
+                        writer.u64(duration.clipped_excursions);
+                    });
+                }
+            }
         }
         // Tag 12: DC mismatch evidence holds 11. Appended, never reused: these
         // bytes identify every retained result already on disk, and two

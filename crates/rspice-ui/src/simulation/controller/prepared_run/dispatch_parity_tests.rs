@@ -698,6 +698,7 @@ fn soa_directional_limits_survive_studio_preparation_worker_requests_and_saved_r
         let (positive, negative) = base.directional_pair().unwrap();
         for parameter in [base, positive, negative] {
             config.rules.push(SoaRuleConfig {
+                minimum_duration_s: None,
                 power_derating: None,
                 voltage_basis: Default::default(),
                 parameter,
@@ -716,6 +717,7 @@ fn soa_directional_limits_survive_studio_preparation_worker_requests_and_saved_r
         }
     }
     config.rules.push(SoaRuleConfig {
+        minimum_duration_s: None,
         power_derating: None,
         voltage_basis: Default::default(),
         parameter: SoAParameter::Pdiss,
@@ -885,6 +887,7 @@ fn soa_temperature_limits_survive_studio_worker_execution_and_saved_results() {
         check_vbe_max: false,
         check_vce_max: false,
         rules: vec![SoaRuleConfig {
+            minimum_duration_s: None,
             power_derating: None,
             voltage_basis: Default::default(),
             parameter: SoAParameter::Temp,
@@ -992,6 +995,7 @@ fn soa_body_and_backgate_limits_follow_model_pins_through_studio_and_saved_resul
         let (positive, negative) = base.directional_pair().unwrap();
         for parameter in [base, positive, negative] {
             config.rules.push(SoaRuleConfig {
+                minimum_duration_s: None,
                 power_derating: None,
                 voltage_basis: Default::default(),
                 parameter,
@@ -1147,6 +1151,7 @@ fn soa_diode_and_bjt_substrate_limits_survive_studio_worker_and_saved_results() 
         let (positive, negative) = base.directional_pair().unwrap();
         for parameter in [base, positive, negative] {
             config.rules.push(SoaRuleConfig {
+                minimum_duration_s: None,
                 power_derating: None,
                 voltage_basis: Default::default(),
                 parameter,
@@ -1158,6 +1163,7 @@ fn soa_diode_and_bjt_substrate_limits_survive_studio_worker_and_saved_results() 
     }
     for (parameter, max_value) in [(SoAParameter::Pdiss, 0.1), (SoAParameter::Temp, 400.0)] {
         config.rules.push(SoaRuleConfig {
+            minimum_duration_s: None,
             power_derating: None,
             voltage_basis: Default::default(),
             parameter,
@@ -1328,6 +1334,7 @@ fn soa_intrinsic_voltage_rules_survive_studio_worker_and_saved_results() {
         ("MF", SoAParameter::Vbs, SoaVoltageBasis::IntrinsicNodes),
     ] {
         config.rules.push(SoaRuleConfig {
+            minimum_duration_s: None,
             power_derating: None,
             parameter,
             voltage_basis,
@@ -1458,6 +1465,7 @@ fn soa_model_voltage_ratings_survive_studio_worker_and_saved_results() {
         check_vbe_max: false,
         check_vce_max: false,
         rules: vec![SoaRuleConfig {
+            minimum_duration_s: None,
             power_derating: None,
             parameter: SoAParameter::VgsPositive,
             voltage_basis: Default::default(),
@@ -1595,6 +1603,7 @@ fn soa_derating_survives_studio_worker_thermal_transient_and_saved_results() {
         check_vbe_max: false,
         check_vce_max: false,
         rules: vec![SoaRuleConfig {
+            minimum_duration_s: Some(1e-12),
             power_derating: Some(curve),
             voltage_basis: Default::default(),
             parameter: SoAParameter::Pdiss,
@@ -1941,4 +1950,125 @@ fn soa_thresholds_survive_studio_worker_execution_and_saved_results() {
             retained.result_payload
         );
     }
+}
+
+#[test]
+fn soa_duration_survives_studio_worker_execution_and_saved_results() {
+    use crate::services::{safety::SoAParameter, simulation_runner::SoaRuleConfig};
+    use crate::simulation::dialog::soa::{SoaConfig, SoaDialogState};
+    use crate::simulation::plan::AnalysisDraft;
+    use crate::simulation::runner::worker_contract::WorkerAnalysisSpec;
+    let config = SoaConfig {
+        stop_time: 6e-9,
+        step_time: 0.25e-9,
+        check_vgs_max: false,
+        check_vds_max: false,
+        check_vbe_max: false,
+        check_vce_max: false,
+        rules: vec![SoaRuleConfig {
+            minimum_duration_s: Some(2e-9),
+            power_derating: None,
+            voltage_basis: Default::default(),
+            parameter: SoAParameter::Vds,
+            max_value: 1.,
+            devices: vec!["M1".into()],
+            models: vec![],
+        }],
+        ..Default::default()
+    };
+    let mut draft = SoaDialogState::from_config(&config);
+    draft.rules[0].minimum_duration = "2n".into();
+    assert_eq!(draft.to_config().unwrap(), config);
+    assert!(config.to_spice().contains("min_duration=(VDS"));
+    draft.rules[0].minimum_duration = "0".into();
+    assert!(draft.to_config().is_err());
+    let draft = SoaDialogState::from_config(&config);
+    let draft: SoaDialogState = ron::from_str(&ron::to_string(&draft).unwrap()).unwrap();
+    let mut old = serde_json::to_value(&config.rules[0]).unwrap();
+    old.as_object_mut().unwrap().remove("minimum_duration_s");
+    assert!(
+        serde_json::from_value::<SoaRuleConfig>(old)
+            .unwrap()
+            .minimum_duration_s
+            .is_none()
+    );
+    let mut state = preflight_ready_state();
+    let id = only(&mut state, &[AnalysisKind::Soa])[0];
+    plan_mut(&mut state)
+        .edit(id, |body| *body = AnalysisDraft::Soa(draft))
+        .unwrap();
+    let queue = compiled_queue(&state).unwrap();
+    let mut declaration = queue[0].queued_analysis().clone();
+    let wire = WorkerAnalysisSpec::try_from(&declaration.spec).unwrap();
+    let wire: WorkerAnalysisSpec =
+        serde_json::from_str(&serde_json::to_string(&wire).unwrap()).unwrap();
+    assert_eq!(AnalysisSpec::from(wire.clone()), declaration.spec);
+    declaration.spec = AnalysisSpec::from(wire);
+    let deck = "SOA durations\nV1 d 0 PWL(0 0 1n 4 2n 0 3n 2 5n 2 6n 0)\nM1 d 0 0 0 NM\n.model NM NMOS LEVEL=1 VTO=1\n.end\n";
+    let deck = crate::services::simulation_runner::splice_before_terminal_end_card(
+        deck,
+        &declaration.analysis_line,
+    );
+    let run = crate::simulation::runner::pvt_point_evidence::run_declaration(
+        &deck,
+        "SOA durations",
+        declaration,
+        27.,
+        SavePolicy::RetainEngineProducedResults,
+        &[],
+    )
+    .unwrap();
+    let retained = &run.analyses[0];
+    assert!(retained.success, "{:?}", retained.error_message);
+    retained.validate_retained_evidence().unwrap();
+    let Some(crate::state::AnalysisResultPayload::Soa {
+        evaluations,
+        violations,
+    }) = &retained.result_payload
+    else {
+        panic!("SOA evidence")
+    };
+    let evaluation = &evaluations[0];
+    let duration = evaluation.duration.unwrap();
+    assert_eq!(duration.qualified_excursions, 1);
+    assert_eq!(duration.rejected_excursions, 1);
+    assert!((duration.total_exceedance_s - 4.5e-9).abs() < 1e-16);
+    assert!((duration.longest_excursion_s - 3e-9).abs() < 1e-16);
+    assert!((evaluation.worst_actual_value - 2.).abs() < 1e-8);
+    assert_eq!(
+        evaluation.verdict,
+        crate::state::SoaRuleVerdictEvidence::Critical
+    );
+    assert!(violations.iter().any(|event| event.actual_value > 3.9
+        && event.severity == crate::state::SoaViolationSeverityEvidence::Warning));
+    let count = retained
+        .waveforms
+        .iter()
+        .find(|wave| wave.name == "SOA_VIOLATION_COUNT")
+        .unwrap();
+    assert_eq!(count.y.last().copied(), Some(violations.len() as f64));
+    let mut tampered = retained.clone();
+    let Some(crate::state::AnalysisResultPayload::Soa { evaluations, .. }) =
+        &mut tampered.result_payload
+    else {
+        unreachable!()
+    };
+    evaluations[0]
+        .duration
+        .as_mut()
+        .unwrap()
+        .longest_excursion_s += 1e-9;
+    assert!(tampered.validate_retained_evidence().is_err());
+    let mut simulation = crate::state::SimulationState::default();
+    simulation.runs.push(run.clone());
+    simulation.next_run_id = 2;
+    simulation.active_run_idx = Some(0);
+    simulation.active_analysis_idx = Some(0);
+    let saved = crate::io::project_io::ProjectSimulationResults::from_state(&simulation);
+    let decoded: crate::io::project_io::ProjectSimulationResults =
+        serde_json::from_str(&serde_json::to_string(&saved).unwrap()).unwrap();
+    assert_eq!(
+        decoded.into_simulation_state().unwrap().runs[0].analyses[0].result_payload,
+        retained.result_payload
+    );
 }

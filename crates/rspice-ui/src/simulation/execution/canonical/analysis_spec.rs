@@ -288,6 +288,7 @@ fn soa_legacy_identity_is_preserved_and_every_scoped_rule_field_is_authenticated
         unreachable!()
     };
     rules.push(SoaRuleConfig {
+        minimum_duration_s: None,
         power_derating: None,
         voltage_basis: Default::default(),
         parameter: SoAParameter::Vgs,
@@ -311,6 +312,18 @@ fn soa_legacy_identity_is_preserved_and_every_scoped_rule_field_is_authenticated
         assert_ne!(digest(&changed), digest(&configured), "rule field {field}");
     }
 
+    let mut timed = configured.clone();
+    let AnalysisSpec::Soa { rules, .. } = &mut timed else {
+        unreachable!()
+    };
+    rules[0].minimum_duration_s = Some(1e-9);
+    assert_ne!(digest(&timed), digest(&configured));
+    let mut longer = timed.clone();
+    let AnalysisSpec::Soa { rules, .. } = &mut longer else {
+        unreachable!()
+    };
+    rules[0].minimum_duration_s = Some(2e-9);
+    assert_ne!(digest(&timed), digest(&longer));
     let mut derated = configured.clone();
     let AnalysisSpec::Soa { rules, .. } = &mut derated else {
         unreachable!()
@@ -820,6 +833,15 @@ pub(super) fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &Analysis
                     observation.thresholds.critical_fraction.as_ref(),
                     |writer, value| writer.f64(*value),
                 );
+            }
+            if rules.iter().any(|rule| rule.minimum_duration_s.is_some()) {
+                writer.string("soa-minimum-excursion-duration-v1");
+                writer.sequence(rules.len());
+                for rule in rules {
+                    writer.option(rule.minimum_duration_s.as_ref(), |writer, value| {
+                        writer.f64(*value)
+                    });
+                }
             }
             if rules.iter().any(|rule| rule.power_derating.is_some()) {
                 writer.string("soa-power-derating-v1");

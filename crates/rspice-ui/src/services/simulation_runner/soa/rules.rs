@@ -7,6 +7,8 @@ use super::*;
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SoaRuleConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub minimum_duration_s: Option<f64>,
     #[serde(default)]
     pub power_derating: Option<crate::services::safety::SoaPowerDerating>,
     pub parameter: SoAParameter,
@@ -68,6 +70,12 @@ impl SoaRuleConfig {
             && self.parameter.intrinsic_voltage_parameter().is_none()
         {
             return Err("Intrinsic voltage basis applies only to voltage rules".into());
+        }
+        if self
+            .minimum_duration_s
+            .is_some_and(|value| !value.is_finite() || value <= 0.0)
+        {
+            return Err("SOA minimum excursion duration must be finite and positive".into());
         }
         if let Some(curve) = self.power_derating {
             curve.validate()?;
@@ -253,6 +261,7 @@ pub(super) fn resolve(
                         limits.insert(
                             half,
                             SoALimit {
+                                minimum_duration_s: None,
                                 power_derating: None,
                                 parameter: half,
                                 ..default.clone()
@@ -292,6 +301,7 @@ pub(super) fn resolve(
                         limits.insert(
                             half,
                             SoALimit {
+                                minimum_duration_s: None,
                                 power_derating: None,
                                 parameter: half,
                                 ..maximum.clone()
@@ -328,6 +338,7 @@ pub(super) fn resolve(
                     }
                 }
                 let mut limit = explicit_limit(rule.parameter, rule.max_value, rule.voltage_basis);
+                limit.minimum_duration_s = rule.minimum_duration_s;
                 limit.power_derating = rule.power_derating;
                 if let Some(curve) = rule.power_derating {
                     limit.description.push_str(&format!("; rated {} W through {} K, derated by {} W/K above that temperature, clamped to zero", rule.max_value, curve.reference_temperature_kelvin, curve.watts_per_kelvin));
@@ -371,6 +382,7 @@ fn explicit_limit(
     voltage_basis: SoaVoltageBasis,
 ) -> SoALimit {
     SoALimit {
+        minimum_duration_s: None,
         power_derating: None,
         voltage_basis,
         parameter,

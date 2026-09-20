@@ -1,0 +1,341 @@
+//! Excursion-duration qualification on linearly interpolated accepted samples.
+use super::{SoARuleVerdict, SoaThresholds};
+use rspice_core::{SimulationError, abort_signal::AbortSignal};
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SoaDurationEvidence {
+    pub minimum_duration_s: f64,
+    pub total_exceedance_s: f64,
+    pub longest_excursion_s: f64,
+    pub qualified_excursions: u64,
+    pub rejected_excursions: u64,
+    pub clipped_excursions: u64,
+}
+impl SoaDurationEvidence {
+    pub fn validate(self) -> Result<(), String> {
+        if !self.minimum_duration_s.is_finite()
+            || self.minimum_duration_s <= 0.0
+            || !self.total_exceedance_s.is_finite()
+            || self.total_exceedance_s < 0.0
+            || !self.longest_excursion_s.is_finite()
+            || self.longest_excursion_s < 0.0
+            || self.longest_excursion_s > self.total_exceedance_s
+            || self
+                .qualified_excursions
+                .checked_add(self.rejected_excursions)
+                .is_none_or(|count| self.clipped_excursions > count)
+        {
+            return Err("SOA duration evidence is invalid".into());
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Copy)]
+pub enum SoaLimitTrace<'a> {
+    Constant(f64),
+    Samples(&'a [f64]),
+}
+impl SoaLimitTrace<'_> {
+    pub fn at(self, index: usize) -> f64 {
+        match self {
+            Self::Constant(value) => value,
+            Self::Samples(values) => values[index],
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct SoaExcursion {
+    pub start_s: f64,
+    pub end_s: f64,
+    pub first_sample: usize,
+    pub last_sample: usize,
+    pub qualified: bool,
+}
+
+pub struct SoaDurationScan {
+    pub evidence: SoaDurationEvidence,
+    pub qualified_samples: Vec<bool>,
+    pub excursions: Vec<SoaExcursion>,
+}
+
+/// Qualifications are retrospective: the complete excursion's width decides
+/// whether its above-limit samples are violations. Observation-window edges
+/// clip the width; no duration outside that window is inferred.
+pub fn qualify_soa_duration(
+    time: &[f64],
+    stress: &[f64],
+    limits: SoaLimitTrace<'_>,
+    minimum_duration_s: f64,
+    abort: &dyn AbortSignal,
+) -> Result<SoaDurationScan, SimulationError> {
+    let invalid = |message: &str| SimulationError::Circuit(message.into());
+    if !minimum_duration_s.is_finite() || minimum_duration_s <= 0.0 {
+        return Err(rspice_core::config::SimulationConfigError::InvalidValue {
+            field: "soa.minimum_duration_s",
+            value: minimum_duration_s,
+            requirement: "finite and positive",
+        }
+        .into());
+    }
+    if time.is_empty()
+        || time.len() != stress.len()
+        || matches!(limits, SoaLimitTrace::Samples(values) if values.len() != time.len())
+    {
+        return Err(invalid(
+            "SOA duration traces have incomplete sample coverage",
+        ));
+    }
+    for i in 0..time.len() {
+        if i % 256 == 0 && abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
+        if !time[i].is_finite()
+            || time[i] < 0.0
+            || (i > 0 && time[i] <= time[i - 1])
+            || !stress[i].is_finite()
+            || stress[i] < 0.0
+            || !limits.at(i).is_finite()
+            || limits.at(i) < 0.0
+        {
+            return Err(invalid(
+                "SOA duration requires increasing finite times and nonnegative finite stress/limits",
+            ));
+        }
+    }
+    // Stable root fraction for opposite-signed margins, even near f64::MAX.
+    let crossing = |i: usize| {
+        let a = (stress[i - 1] - limits.at(i - 1)).abs();
+        let b = (stress[i] - limits.at(i)).abs();
+        let scale = a.max(b);
+        let fraction = (a / scale) / (a / scale + b / scale);
+        time[i - 1] + (time[i] - time[i - 1]) * fraction
+    };
+    let mut excursions = Vec::new();
+    let mut open = (stress[0] > limits.at(0)).then_some((time[0], 0usize));
+    for i in 1..time.len() {
+        if i % 256 == 0 && abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
+        let before = stress[i - 1] > limits.at(i - 1);
+        let after = stress[i] > limits.at(i);
+        if !before && after {
+            open = Some((crossing(i), i));
+        }
+        if before && !after {
+            let (start_s, first_sample) = open.take().expect("open positive excursion");
+            let end_s = crossing(i);
+            excursions.push(SoaExcursion {
+                start_s,
+                end_s,
+                first_sample,
+                last_sample: i - 1,
+                qualified: end_s - start_s >= minimum_duration_s,
+            });
+        }
+    }
+    if let Some((start_s, first_sample)) = open {
+        let end_s = time[time.len() - 1];
+        excursions.push(SoaExcursion {
+            start_s,
+            end_s,
+            first_sample,
+            last_sample: time.len() - 1,
+            qualified: end_s - start_s >= minimum_duration_s,
+        });
+    }
+    let mut evidence = SoaDurationEvidence {
+        minimum_duration_s,
+        total_exceedance_s: 0.0,
+        longest_excursion_s: 0.0,
+        qualified_excursions: 0,
+        rejected_excursions: 0,
+        clipped_excursions: 0,
+    };
+    let mut qualified_samples = vec![false; time.len()];
+    let mut correction = 0.0;
+    for (index, excursion) in excursions.iter().enumerate() {
+        if index % 256 == 0 && abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
+        let duration = excursion.end_s - excursion.start_s;
+        let increment = duration - correction;
+        let total = evidence.total_exceedance_s + increment;
+        correction = (total - evidence.total_exceedance_s) - increment;
+        evidence.total_exceedance_s = total;
+        evidence.longest_excursion_s = evidence.longest_excursion_s.max(duration);
+        if excursion.qualified {
+            evidence.qualified_excursions += 1;
+        } else {
+            evidence.rejected_excursions += 1;
+        }
+        if excursion.first_sample == 0 || excursion.last_sample == time.len() - 1 {
+            evidence.clipped_excursions += 1;
+        }
+        if excursion.qualified {
+            for chunk in
+                qualified_samples[excursion.first_sample..=excursion.last_sample].chunks_mut(256)
+            {
+                if abort.is_aborted() {
+                    return Err(SimulationError::Aborted);
+                }
+                chunk.fill(true);
+            }
+        }
+    }
+    evidence.validate().map_err(SimulationError::Circuit)?;
+    Ok(SoaDurationScan {
+        evidence,
+        qualified_samples,
+        excursions,
+    })
+}
+
+pub fn soa_duration_verdict(
+    thresholds: SoaThresholds,
+    actual: f64,
+    limit: f64,
+    qualified: bool,
+) -> SoARuleVerdict {
+    let verdict = thresholds.verdict(actual, limit);
+    if !qualified
+        && matches!(
+            verdict,
+            SoARuleVerdict::Violation | SoARuleVerdict::Critical
+        )
+    {
+        if thresholds.warning_fraction.is_some() {
+            SoARuleVerdict::Warning
+        } else {
+            SoARuleVerdict::Pass
+        }
+    } else {
+        verdict
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn soa_duration_qualifies_interpolated_excursions_and_reclassifies_worst_point() {
+    use super::{SoADefinition, SoAEvaluation, SoALimit, SoAManager, SoAParameter};
+    use rspice_core::abort_signal::NoAbort;
+    let time = [0., 1., 2., 3., 4., 5., 6.];
+    let stress = [0., 4., 0., 2., 2., 2., 0.];
+    let scan =
+        qualify_soa_duration(&time, &stress, SoaLimitTrace::Constant(1.), 2., &NoAbort).unwrap();
+    assert_eq!(scan.evidence.total_exceedance_s, 4.5);
+    assert_eq!(scan.evidence.longest_excursion_s, 3.0);
+    assert_eq!(scan.evidence.qualified_excursions, 1);
+    assert_eq!(scan.evidence.rejected_excursions, 1);
+    assert_eq!(scan.evidence.clipped_excursions, 0);
+    assert_eq!(
+        scan.qualified_samples,
+        vec![false, false, false, true, true, true, false]
+    );
+    assert_eq!(
+        (scan.excursions[0].start_s, scan.excursions[0].end_s),
+        (0.25, 1.75)
+    );
+    assert_eq!(
+        (scan.excursions[1].start_s, scan.excursions[1].end_s),
+        (2.5, 5.5)
+    );
+    for warning in [Some(0.9), None] {
+        let mut manager = SoAManager::with_thresholds(SoaThresholds {
+            warning_fraction: warning,
+            ..Default::default()
+        })
+        .unwrap();
+        manager
+            .register_device(
+                "M1",
+                SoADefinition {
+                    limits: vec![SoALimit {
+                        minimum_duration_s: Some(2.),
+                        power_derating: None,
+                        voltage_basis: Default::default(),
+                        parameter: SoAParameter::Vds,
+                        max_value: 1.,
+                        unit: "V".into(),
+                        description: "Drain voltage".into(),
+                    }],
+                },
+            )
+            .unwrap();
+        for (t, actual) in time.into_iter().zip(stress) {
+            manager
+                .check_point(
+                    t,
+                    &std::collections::HashMap::from([(
+                        "M1".into(),
+                        std::collections::HashMap::from([(SoAParameter::Vds, actual)]),
+                    )]),
+                )
+                .unwrap();
+        }
+        assert_eq!(manager.evaluations().next().unwrap().worst_actual_value, 4.);
+        manager.finalize_durations(&time, &NoAbort).unwrap();
+        let evaluation = manager.evaluations().next().unwrap();
+        assert_eq!(evaluation.worst_actual_value, 2.);
+        assert_eq!(evaluation.worst_time, 3.);
+        assert_eq!(evaluation.verdict, SoARuleVerdict::Critical);
+        assert_eq!(evaluation.duration, Some(scan.evidence));
+        assert_eq!(
+            manager.violations().len(),
+            if warning.is_some() { 4 } else { 3 }
+        );
+        let wire = crate::simulation::runner::worker_contract::WorkerSoAEvaluation::from(
+            evaluation.clone(),
+        );
+        let wire: crate::simulation::runner::worker_contract::WorkerSoAEvaluation =
+            serde_json::from_str(&serde_json::to_string(&wire).unwrap()).unwrap();
+        assert_eq!(SoAEvaluation::from(wire), *evaluation);
+    }
+    let varying = qualify_soa_duration(
+        &[0., 1., 2., 3.],
+        &[0.5; 4],
+        SoaLimitTrace::Samples(&[1., 0., 0., 1.]),
+        2.,
+        &NoAbort,
+    )
+    .unwrap();
+    assert_eq!(varying.evidence.longest_excursion_s, 2.);
+    assert_eq!(varying.qualified_samples, vec![false, true, true, false]);
+    let extreme = qualify_soa_duration(
+        &[0., 1., 2.],
+        &[0., f64::MAX, 0.],
+        SoaLimitTrace::Samples(&[f64::MAX, 0., f64::MAX]),
+        1.,
+        &NoAbort,
+    )
+    .unwrap();
+    assert_eq!(
+        (extreme.excursions[0].start_s, extreme.excursions[0].end_s),
+        (0.5, 1.5)
+    );
+    let clipped = qualify_soa_duration(
+        &[0., 1., 2.],
+        &[2., 1., 2.],
+        SoaLimitTrace::Constant(1.),
+        1.5,
+        &NoAbort,
+    )
+    .unwrap();
+    assert_eq!(clipped.evidence.rejected_excursions, 2);
+    assert_eq!(clipped.evidence.clipped_excursions, 2);
+    assert_eq!(clipped.evidence.total_exceedance_s, 2.);
+    assert_eq!(clipped.evidence.longest_excursion_s, 1.);
+    struct Abort;
+    impl AbortSignal for Abort {
+        fn is_aborted(&self) -> bool {
+            true
+        }
+    }
+    assert!(matches!(
+        qualify_soa_duration(&time, &stress, SoaLimitTrace::Constant(1.), 2., &Abort),
+        Err(SimulationError::Aborted)
+    ));
+}
