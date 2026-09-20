@@ -1,4 +1,4 @@
-//! Authored MOS pin roles from the implementation selected by the builder.
+//! Authored transistor pin roles from the implementation selected by the builder.
 use super::*;
 
 /// Optional external MOS terminals beyond the standard drain/gate/source pins.
@@ -15,7 +15,27 @@ pub struct MosTerminalLayout {
     pub back_gate: Option<usize>,
 }
 
+/// Optional external BJT electrical terminal beyond collector/base/emitter.
+/// LEVEL=11 VBIC's optional fourth thermal pin is not a substrate terminal.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct BjtTerminalLayout {
+    /// Explicit electrical substrate pin in the authored flattened node list.
+    pub substrate: Option<usize>,
+}
+
 impl CircuitData {
+    /// External substrate role from the actual selected BJT implementation.
+    pub fn bjt_terminal_layout(&self, device: &str) -> Option<BjtTerminalLayout> {
+        self.bjt_terminal_layouts
+            .get(&device.to_ascii_uppercase())
+            .copied()
+    }
+
+    pub(crate) fn record_bjt_terminal_layout(&mut self, device: &str, layout: BjtTerminalLayout) {
+        self.bjt_terminal_layouts
+            .insert(device.to_ascii_uppercase(), layout);
+    }
+
     /// Pin roles emitted by the actual selected native/generated implementation.
     pub fn mos_terminal_layout(&self, device: &str) -> Option<MosTerminalLayout> {
         self.mos_terminal_layouts

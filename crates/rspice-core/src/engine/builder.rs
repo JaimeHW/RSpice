@@ -6760,6 +6760,13 @@ impl Engine {
                     } else {
                         fifth_terminal
                     };
+                    circuit.record_bjt_terminal_layout(
+                        &element.name,
+                        crate::circuit::BjtTerminalLayout {
+                            substrate: (!three_terminal_vbic && element.nodes.len() >= 4)
+                                .then_some(3),
+                        },
+                    );
                     bjt.set_substrate_node(substrate);
                     let thermal_pin_present =
                         element.nodes.len() >= if three_terminal_vbic { 4 } else { 5 };

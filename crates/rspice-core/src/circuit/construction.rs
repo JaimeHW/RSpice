@@ -50,6 +50,7 @@ impl CircuitData {
             terminal_probe_nodes: HashMap::new(),
             terminal_probe_source_names: HashSet::new(),
             mos_terminal_layouts: HashMap::new(),
+            bjt_terminal_layouts: HashMap::new(),
             dc_floating_component_by_node: Vec::new(),
             dc_floating_component_nodes: Vec::new(),
             dc_floating_component_is_certain: Vec::new(),

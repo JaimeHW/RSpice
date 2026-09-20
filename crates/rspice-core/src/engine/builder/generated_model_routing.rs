@@ -658,6 +658,31 @@ fn add_generated_instance(
             );
         }
     }
+    if matches!(element.kind, ElementKind::Bjt { .. }) {
+        let find = |names: &[&str]| {
+            device
+                .external_terminals()
+                .iter()
+                .take(element.nodes.len())
+                .position(|terminal| {
+                    terminal.discipline.eq_ignore_ascii_case("electrical")
+                        && names
+                            .iter()
+                            .any(|name| terminal.name.eq_ignore_ascii_case(name))
+                })
+        };
+        if find(&["c", "collector"]) == Some(0)
+            && find(&["b", "base"]) == Some(1)
+            && find(&["e", "emitter"]) == Some(2)
+        {
+            circuit.record_bjt_terminal_layout(
+                &element.name,
+                crate::circuit::BjtTerminalLayout {
+                    substrate: find(&["s", "sub", "substrate"]),
+                },
+            );
+        }
+    }
     device.set_temperature(keywords.temperature);
     device.set_initially_off(keywords.initial_off);
     circuit.add_generated_veriloga_device(device);
