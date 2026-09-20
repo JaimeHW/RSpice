@@ -2,11 +2,11 @@
 
 use super::*;
 use crate::ComplexValue;
-use crate::execution::SignalUnit;
 use crate::netlist::expr::{
     BinOpKind, Expr, ParseExpressionWithAbortError, UnaryOpKind, evaluate_complex,
     parse_control_expression_prefix_with_abort,
 };
+use crate::signal_unit::SignalUnit;
 
 /// A canonical vector identity. Dataset names remain stable for the session.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]

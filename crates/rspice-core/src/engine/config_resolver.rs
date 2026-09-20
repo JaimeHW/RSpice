@@ -644,7 +644,7 @@ mod tests {
         for (arguments, accepted) in [("eventfluxtol=5e-24", true), ("eventfluxtol=0", false)] {
             let result = circuit.execute(
                 &engine,
-                &crate::execution::control::ControlCommand {
+                &crate::control_protocol::ControlCommand {
                     line: 7,
                     name: "option".into(),
                     arguments: arguments.into(),

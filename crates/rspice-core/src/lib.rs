@@ -83,6 +83,8 @@ pub(crate) mod codemodels;
 /// or dialect flag is a downward reference rather than a reach into `engine`.
 pub mod config;
 pub mod constants;
+/// Shared vocabulary between the control-session machine and its engine host.
+mod control_protocol;
 pub mod device;
 pub mod diagnostics;
 pub mod engine;
@@ -105,6 +107,8 @@ pub mod numerics;
 /// the device families that emit one and the circuit store that assembles the
 /// report both read down into it.
 pub mod op_label;
+/// Physical units carried by result schemas and control-expression vectors.
+mod signal_unit;
 pub mod solver;
 mod spice_number;
 pub mod time_compat;

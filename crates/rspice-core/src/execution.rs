@@ -36,9 +36,11 @@ mod seed;
 mod sole_analysis;
 mod sweep_axis;
 mod topology;
-mod transient;
 
-pub use crate::identity::{AnalysisInstanceId, AnalysisKind, RunCoordinateId};
+pub use crate::{
+    analysis::transient::{TransientMaximumStepError, resolve_transient_maximum_step},
+    identity::{AnalysisInstanceId, AnalysisKind, RunCoordinateId},
+};
 pub use bounded_io::{BoundedAbortWriter, BoundedWriteFailure};
 pub use capability::{
     ANALYSIS_CAPABILITY_MATRIX, AnalysisResultCapability, AnalysisResultKind, MappingStatus,
@@ -86,8 +88,6 @@ pub use schema::{
     CoordinateSchema, SchemaUnion, SignalDescriptor, SignalKind, SignalOwner, SignalSchema,
     SignalSchemaError, SignalShape, SignalUnit, SignalValueType,
 };
-pub use seed::monte_carlo_seed_at_coordinate;
 pub use sole_analysis::{analysis_instance_identity, sole_analysis_identity};
-pub use sweep_axis::sweep_axis_unit;
 pub use topology::{TopologyComponent, TopologyFingerprint, TopologyFingerprintError};
-pub use transient::{TransientMaximumStepError, resolve_transient_maximum_step};
+pub use {seed::monte_carlo_seed_at_coordinate, sweep_axis::sweep_axis_unit};

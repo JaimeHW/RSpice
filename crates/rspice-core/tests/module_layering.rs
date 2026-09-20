@@ -80,6 +80,9 @@ const LAYERS: &[(&str, u32)] = &[
     // `xspice` registers against it, so both read down instead of the parser
     // reaching eight ranks up.
     ("codemodels", 0),
+    // Physical-unit vocabulary is data carried by both engine results and
+    // execution schemas, so neither producer owns it.
+    ("signal_unit", 0),
     // SPICE naming rules. Everything above depends on this, so it depends on
     // nothing.
     ("naming", 0),
@@ -142,6 +145,10 @@ const LAYERS: &[(&str, u32)] = &[
     // Deck text to AST. Phase 7 moves its circuit transforms (flattener,
     // add_resistors, remove_unused, topology) up into `elab`, leaving parsing.
     ("netlist", 6),
+    // Shared interface between the control-session state machine and its
+    // electrical host. It names ParamContext, so it sits immediately above
+    // netlist and below both participants.
+    ("control_protocol", 7),
     // `.lib` model-library and Verilog-A pack discovery. Above `netlist`
     // because resolving a library produces deck content.
     ("library", 7),

@@ -3,9 +3,8 @@
 use super::{Engine, SimulationConfigError, SimulationError, TransientStartupMode};
 use crate::analysis::AcResult;
 use crate::analysis::transient::TransientResult;
-use crate::execution::control::{
+use crate::control_protocol::{
     ControlCommand, ControlError, ControlErrorKind, ControlScalarEvaluator,
-    ParameterScalarEvaluator,
 };
 use crate::netlist::expr::{ParamContext, eval_expression};
 use crate::netlist::{AnalysisCommand, Netlist};
@@ -75,7 +74,7 @@ pub struct ControlCircuit {
     datasets: Vec<ControlNamedDataset>,
     ordinals: BTreeMap<&'static str, usize>,
     retained_values: usize,
-    vector_units: BTreeMap<ControlVectorId, crate::execution::SignalUnit>,
+    vector_units: BTreeMap<ControlVectorId, crate::signal_unit::SignalUnit>,
     settings: ControlSettings,
     runtime_options: crate::netlist::SimulationOptions,
 }
@@ -293,7 +292,7 @@ impl ControlCircuit {
                 max_step,
                 uic,
             } => {
-                let maximum_step = crate::execution::resolve_transient_maximum_step(
+                let maximum_step = crate::analysis::transient::resolve_transient_maximum_step(
                     *step, *stop, *start, *max_step,
                 )
                 .map_err(|error| command_error(line, error.to_string()))?;
@@ -442,7 +441,9 @@ impl ControlScalarEvaluator for ControlCircuit {
         variables: &ParamContext,
         line: usize,
     ) -> Result<Value, ControlError> {
-        ParameterScalarEvaluator.evaluate_scalar(expression, variables, line)
+        eval_expression(expression, variables).map_err(|error| {
+            ControlError::new(line, ControlErrorKind::Expression, error.to_string())
+        })
     }
 }
 

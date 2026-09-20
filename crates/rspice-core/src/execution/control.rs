@@ -6,42 +6,11 @@
 
 use crate::Value;
 use crate::abort_signal::AbortSignal;
+pub use crate::control_protocol::{
+    ControlCommand, ControlError, ControlErrorKind, ControlScalarEvaluator,
+};
 use crate::netlist::expr::{ParamContext, eval_expression};
 use std::collections::BTreeMap;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ControlErrorKind {
-    Syntax,
-    Expression,
-    ResourceLimit,
-    Aborted,
-    Host,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ControlError {
-    pub line: usize,
-    pub kind: ControlErrorKind,
-    pub message: String,
-}
-
-impl ControlError {
-    pub(crate) fn new(line: usize, kind: ControlErrorKind, message: impl Into<String>) -> Self {
-        Self {
-            line,
-            kind,
-            message: message.into(),
-        }
-    }
-}
-
-impl std::fmt::Display for ControlError {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(formatter, "control line {}: {}", self.line, self.message)
-    }
-}
-
-impl std::error::Error for ControlError {}
 
 #[derive(Debug, Clone, Copy)]
 pub struct ControlLimits {
@@ -66,27 +35,11 @@ impl Default for ControlLimits {
     }
 }
 
-/// One command for the analysis/output host, after variable substitution.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ControlCommand {
-    pub line: usize,
-    pub name: String,
-    pub arguments: String,
-}
-
-/// Hosts may extend scalar evaluation with values from completed datasets.
-pub trait ControlScalarEvaluator {
-    fn evaluate_scalar(
-        &mut self,
-        expression: &str,
-        variables: &ParamContext,
-        line: usize,
-    ) -> Result<Value, ControlError>;
-}
-
+#[cfg(test)]
 #[derive(Default)]
 pub(crate) struct ParameterScalarEvaluator;
 
+#[cfg(test)]
 impl ControlScalarEvaluator for ParameterScalarEvaluator {
     fn evaluate_scalar(
         &mut self,
