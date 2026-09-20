@@ -17,6 +17,11 @@ mod algorithms;
 mod design_var;
 mod engine_core;
 mod lifecycle;
+mod objective;
+pub use objective::{
+    OptimizationObjectiveGoal, OptimizationObjectiveObservation, OptimizationObjectiveTerm,
+    validate_optimization_objectives,
+};
 mod types;
 
 pub use design_var::DesignVar;

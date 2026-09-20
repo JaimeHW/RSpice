@@ -84,9 +84,9 @@ pub use optimization::{
     validate_optimization_expression,
 };
 pub(crate) use optimization::{
-    OptimizationData, materialize_optimization_candidate,
+    OptimizationData, OptimizationEvaluation, materialize_optimization_candidate,
     run_optimization_analysis_with_environment_and_source_path_and_abort,
-    run_optimization_with_evaluator,
+    run_optimization_with_cost_evaluator, run_optimization_with_evaluator,
 };
 pub use pac_pxf::{
     PacFrequencySweep, PacRunConfig, PxfFrequencySweep, PxfRunConfig,

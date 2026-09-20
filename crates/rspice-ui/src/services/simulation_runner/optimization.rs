@@ -232,9 +232,17 @@ impl OptimizationRunConfig {
     }
 }
 
+/// One evaluated cost and its optional per-objective evidence.
+pub(crate) struct OptimizationEvaluation {
+    pub cost: Value,
+    pub objectives: Vec<crate::simulation::optimizer::OptimizationObjectiveObservation>,
+}
+
 /// Optimization output data.
 #[derive(Debug, Clone)]
 pub struct OptimizationData {
+    /// Values and weighted contributions at the exact best candidate.
+    pub best_objectives: Vec<crate::simulation::optimizer::OptimizationObjectiveObservation>,
     /// Iteration axis points.
     pub iterations: Vec<Value>,
     /// Cost history.
@@ -340,6 +348,33 @@ where
     F: FnMut(&HashMap<String, Value>) -> ServiceRunResult<Value>,
 {
     ensure_not_aborted(abort)?;
+    run_optimization_with_cost_evaluator(
+        config,
+        limits,
+        abort,
+        optimizer_target_cost(config.goal),
+        |variables| {
+            evaluate(variables)
+                .and_then(|value| objective_to_cost(value, config.goal, config.target))
+                .map(|cost| OptimizationEvaluation {
+                    cost,
+                    objectives: Vec::new(),
+                })
+        },
+    )
+}
+
+/// Search an already combined cost without transforming or squaring it again.
+pub(crate) fn run_optimization_with_cost_evaluator<F>(
+    config: &OptimizationRunConfig,
+    limits: rspice_core::ResourceLimits,
+    abort: &dyn AbortSignal,
+    target_cost: Option<Value>,
+    mut evaluate: F,
+) -> ServiceRunResult<OptimizationData>
+where
+    F: FnMut(&HashMap<String, Value>) -> ServiceRunResult<OptimizationEvaluation>,
+{
     config.validate().map_err(ServiceRunError::Failure)?;
     ensure_not_aborted(abort)?;
 
@@ -392,6 +427,7 @@ where
     let mut iterations = Vec::with_capacity(config.max_iterations + 1);
     let mut costs = Vec::with_capacity(config.max_iterations + 1);
 
+    let evaluated_objectives = RefCell::new(Vec::new());
     let eval_error: RefCell<Option<ServiceRunError>> = RefCell::new(None);
     let abort_seen = Cell::new(false);
     let fatal_error_seen = Cell::new(false);
@@ -408,7 +444,16 @@ where
             ))
         } else {
             evaluations += 1;
-            evaluate(vars).and_then(|value| objective_to_cost(value, config.goal, config.target))
+            evaluate(vars).and_then(|evaluation| {
+                if evaluation.cost.is_finite() {
+                    *evaluated_objectives.borrow_mut() = evaluation.objectives;
+                    Ok(evaluation.cost)
+                } else {
+                    Err(ServiceRunError::Failure(
+                        "Optimization cost must be finite".into(),
+                    ))
+                }
+            })
         };
         match evaluation {
             Ok(cost) => cost,
@@ -443,6 +488,8 @@ where
             )
         }));
     }
+    let mut best_objectives = evaluated_objectives.take();
+    let mut best_observed_cost = initial_cost;
     optimizer.observe_candidate(&initial_vars, initial_cost);
     record_optimization_state(
         0.0,
@@ -455,7 +502,7 @@ where
     )?;
 
     while optimizer.current_iteration() < config.max_iterations
-        && !optimizer.is_converged(optimizer_target_cost(config.goal))
+        && !optimizer.is_converged(target_cost)
     {
         ensure_optimization_not_aborted(abort, &abort_seen)?;
         optimizer.step(&mut cost_fn);
@@ -465,6 +512,13 @@ where
         let cost = cost_fn(&vars);
         propagate_optimization_fatal_error(&fatal_error_seen, &eval_error)?;
         ensure_optimization_not_aborted(abort, &abort_seen)?;
+        // The last evaluation is this accepted iterate, not a gradient probe
+        // or rejected line-search point. Retain components with the same
+        // strict best-cost comparison as OptimizerEngine::observe_candidate.
+        if cost < best_observed_cost {
+            best_observed_cost = cost;
+            best_objectives = evaluated_objectives.take();
+        }
         record_optimization_state(
             optimizer.current_iteration() as Value,
             &vars,
@@ -479,12 +533,13 @@ where
     ensure_not_aborted(abort)?;
     let (best_vars, best_cost) = optimizer.best_result();
     Ok(OptimizationData {
+        best_objectives,
         iterations,
         costs,
         variable_traces,
         best_cost,
         best_variables: best_vars.clone(),
-        converged: optimizer.is_converged(optimizer_target_cost(config.goal)),
+        converged: optimizer.is_converged(target_cost),
     })
 }
 
