@@ -683,6 +683,12 @@ fn add_generated_instance(
             );
         }
     }
+    if let Some(safety) = circuit
+        .device_model_safety
+        .get_mut(&element.name.to_ascii_uppercase())
+    {
+        safety.generated = true;
+    }
     device.set_temperature(keywords.temperature);
     device.set_initially_off(keywords.initial_off);
     circuit.add_generated_veriloga_device(device);

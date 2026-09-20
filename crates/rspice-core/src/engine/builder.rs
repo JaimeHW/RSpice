@@ -43,6 +43,7 @@ use std::sync::RwLock;
 use std::time::{Duration, Instant};
 
 mod model_resolution;
+mod model_safety;
 mod reliability;
 mod terminal_probes;
 pub(in crate::engine) use model_resolution::resolved_element_value_expression;
@@ -6270,6 +6271,17 @@ impl Engine {
                     #[cfg(not(feature = "veriloga-builtins-base"))]
                     let _ = deferred_params;
 
+                    let selected_diode_model = find_model_def(netlist, model);
+                    model_safety::record(
+                        &mut circuit,
+                        &element.name,
+                        model,
+                        selected_diode_model,
+                        selected_diode_model
+                            .is_none()
+                            .then(|| foundation_model_card(model))
+                            .flatten(),
+                    );
                     #[cfg(feature = "veriloga-builtins-base")]
                     if try_route_generated_diode_model(
                         &mut circuit,
@@ -6314,7 +6326,7 @@ impl Engine {
                     // dimensions, all of which the instance scaling below
                     // still needs.
                     let model_params: HashMap<String, f64>;
-                    if let Some(device_model) = find_model_def(netlist, model) {
+                    if let Some(device_model) = selected_diode_model {
                         ensure_model_type(
                             "Diode",
                             &element.name,
@@ -6569,6 +6581,13 @@ impl Engine {
                             })
                         })
                         .flatten();
+                    model_safety::record(
+                        &mut circuit,
+                        &element.name,
+                        model,
+                        model_def,
+                        foundation_model,
+                    );
                     if !self.config.device_voltage_limiting
                         && let Some(device_model) = model_def
                     {
@@ -6892,6 +6911,13 @@ impl Engine {
                             })
                         })
                         .flatten();
+                    model_safety::record(
+                        &mut circuit,
+                        &element.name,
+                        model,
+                        model_def,
+                        foundation_model,
+                    );
                     #[cfg(feature = "veriloga-builtins-base")]
                     if try_route_generated_mos_model(
                         &mut circuit,
@@ -7590,6 +7616,13 @@ impl Engine {
                             })
                         })
                         .flatten();
+                    model_safety::record(
+                        &mut circuit,
+                        &element.name,
+                        model,
+                        model_def,
+                        foundation_model,
+                    );
                     let model_order = netlist
                         .models
                         .iter()
@@ -7872,6 +7905,13 @@ impl Engine {
                             })
                         })
                         .flatten();
+                    model_safety::record(
+                        &mut circuit,
+                        &element.name,
+                        model,
+                        model_def,
+                        foundation_model,
+                    );
                     let model_order = netlist
                         .models
                         .iter()

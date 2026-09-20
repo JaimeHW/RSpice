@@ -34,6 +34,8 @@ pub(crate) use storage::{
 };
 mod analog_tasks;
 mod construction;
+mod model_safety;
+pub use model_safety::{DeviceModelSafety, ModelSafetyValue};
 mod terminals;
 pub use terminals::{BjtTerminalLayout, MosTerminalLayout};
 pub(crate) mod dae;
@@ -561,6 +563,7 @@ pub struct CircuitData {
     pub(crate) terminal_probe_source_names: HashSet<String>,
     pub(crate) mos_terminal_layouts: HashMap<String, MosTerminalLayout>,
     pub(crate) bjt_terminal_layouts: HashMap<String, BjtTerminalLayout>,
+    pub(crate) device_model_safety: HashMap<String, DeviceModelSafety>,
     /// Floating DC-conductive component index for each electrical node ID.
     /// Ground and nodes outside a floating component contain `None`.
     pub(crate) dc_floating_component_by_node: Vec<Option<usize>>,
