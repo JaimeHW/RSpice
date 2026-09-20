@@ -111,7 +111,15 @@ pub(super) fn prepare(response: &QpxfAnalysisResult) -> Option<PreparedTypedResu
         for (point, value) in t.values.iter().enumerate() {
             write(
                 "transfer",
-                format!("H({output}/{input_unit}({}))", source.name),
+                format!(
+                    "H({output}/{}({}))",
+                    if source.quantity == QpxfQuantity::Voltage {
+                        "V"
+                    } else {
+                        "I"
+                    },
+                    source.name
+                ),
                 unit,
                 &source.name,
                 input_unit,
