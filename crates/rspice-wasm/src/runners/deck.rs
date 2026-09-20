@@ -544,12 +544,18 @@ fn execute_analysis(
                 coordinate,
             );
             let mut result = engine
-                .run_monte_carlo_with_options_and_abort(
+                .run_monte_carlo_voltages_with_abort(
                     netlist,
-                    request.runs,
-                    seed,
-                    distribution,
-                    filter,
+                    &rspice_core::engine::MonteCarloRunConfig {
+                        first_trial: request.first_trial,
+                        num_runs: request.runs,
+                        seed,
+                        distribution,
+                        variation_source:
+                            rspice_core::engine::MonteCarloVariationSource::ParameterTolerance,
+                        parameter_filter: filter,
+                        environment: None,
+                    },
                     abort,
                 )
                 .map_err(simulation_error)?;

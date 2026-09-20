@@ -531,21 +531,23 @@ pub(crate) fn run_directive(
                     tolerance: card.relative_spread,
                 },
             };
-            let mut result = engine.run_monte_carlo_with_options_and_abort(
+            // Preserve the existing deterministic stream at each Run Set coordinate.
+            let seed = rspice_core::execution::monte_carlo_seed_at_coordinate(
+                card.seed.unwrap_or(1),
+                coordinate,
+            );
+            let mut result = engine.run_monte_carlo_voltages_with_abort(
                 netlist,
-                card.runs,
-                // A deck that does not seed its own Monte Carlo is still
-                // required to reproduce byte for byte, so the seed is the
-                // documented constant rather than an entropy source. Inside a
-                // `.STEP` or `.TEMP` sweep the card runs once per coordinate,
-                // and the core derivation gives each coordinate its own
-                // reproducible stream instead of repeating one sample.
-                rspice_core::execution::monte_carlo_seed_at_coordinate(
-                    card.seed.unwrap_or(1),
-                    coordinate,
-                ),
-                distribution,
-                (!card.params.is_empty()).then_some(card.params.as_slice()),
+                &rspice_core::engine::MonteCarloRunConfig {
+                    first_trial: card.first_trial,
+                    num_runs: card.runs,
+                    seed,
+                    distribution,
+                    variation_source:
+                        rspice_core::engine::MonteCarloVariationSource::ParameterTolerance,
+                    parameter_filter: (!card.params.is_empty()).then_some(card.params.as_slice()),
+                    environment: None,
+                },
                 abort,
             )?;
             result.compute_mean_confidence(

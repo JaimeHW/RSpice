@@ -397,6 +397,16 @@ which is what makes a parametric Monte Carlo study a study rather than one
 sample repeated. A deck with no run axis has no coordinate and keeps its
 authored seed unchanged.
 
+Monte Carlo cards accept `START n` (or `START=n`) to run a batch beginning at
+original zero-based trial index `n`. For example, `.MC 100 START 1000 SEED 42`
+runs indices 1000 through 1099. Keep the deck, seed, distribution, and run-axis
+coordinate unchanged to replay the same samples. Only the requested batch is
+solved; its statistics are independent of previous batches. Generic parameter
+streams advance preceding random draws without solving preceding circuits.
+CSV and HDF5 use the original zero-based `trial_index` axis, retaining gaps for
+failed trials. Shared JSON includes `successfulTrialIndices` aligned with the
+samples and a `first_trial` scalar for a nonzero starting index.
+
 For a stepped transient, `--checkpoint state.chk` and `--resume state.chk`
 resolve one state file per coordinate and per authored transient, tagged with
 the same identities. Outer `.ALTER` and textual `.DATA` labels are composed

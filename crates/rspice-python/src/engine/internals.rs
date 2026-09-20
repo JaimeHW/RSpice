@@ -122,12 +122,18 @@ impl PyEngine {
         let params = (!command.params.is_empty()).then(|| command.params.clone());
         let engine = self.engine_for_netlist(&netlist.inner);
         let result = run_interruptible(py, &self.active_runs, |abort| {
-            let mut result = engine.run_monte_carlo_with_options_and_abort(
+            let mut result = engine.run_monte_carlo_voltages_with_abort(
                 &netlist.inner,
-                command.runs,
-                seed,
-                distribution,
-                params.as_deref(),
+                &rspice_core::engine::MonteCarloRunConfig {
+                    first_trial: command.first_trial,
+                    num_runs: command.runs,
+                    seed,
+                    distribution,
+                    variation_source:
+                        rspice_core::engine::MonteCarloVariationSource::ParameterTolerance,
+                    parameter_filter: params.as_deref(),
+                    environment: None,
+                },
                 abort,
             )?;
             result.compute_mean_confidence(

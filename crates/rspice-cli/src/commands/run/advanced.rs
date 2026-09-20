@@ -180,6 +180,7 @@ pub(super) fn export_step_sweep(
 pub(super) fn run_monte_carlo(
     ctx: &RunContext<'_>,
     num_runs: usize,
+    first_trial: usize,
     seed: u64,
     distribution: rspice_core::analysis::Distribution,
     parameter_filter: Option<&[String]>,
@@ -190,8 +191,8 @@ pub(super) fn run_monte_carlo(
 ) -> Result<(), CliError> {
     if !ctx.quiet {
         println!(
-            "Running Monte Carlo analysis: {} iterations (seed={})",
-            num_runs, seed
+            "Running Monte Carlo analysis: {} iterations starting at trial {} (seed={})",
+            num_runs, first_trial, seed
         );
     }
 
@@ -212,12 +213,17 @@ pub(super) fn run_monte_carlo(
         pb
     };
 
-    match ctx.engine.run_monte_carlo_with_options_and_abort(
+    match ctx.engine.run_monte_carlo_voltages_with_abort(
         ctx.netlist,
-        num_runs,
-        seed,
-        distribution,
-        parameter_filter,
+        &rspice_core::engine::MonteCarloRunConfig {
+            first_trial,
+            num_runs,
+            seed,
+            distribution,
+            variation_source: rspice_core::engine::MonteCarloVariationSource::ParameterTolerance,
+            parameter_filter,
+            environment: None,
+        },
         &crate::abort::ProcessAbort,
     ) {
         Ok(mut result) => {
@@ -305,7 +311,25 @@ fn export_monte_carlo(
         .map(|stats| stats.samples.len())
         .max()
         .unwrap_or(0);
-    let runs: Vec<f64> = (1..=num_samples).map(|i| i as f64).collect();
+    let indices =
+        result
+            .successful_trial_indices
+            .as_ref()
+            .ok_or_else(|| CliError::InternalError {
+                message: "Monte Carlo export requires the original trial identities".into(),
+            })?;
+    if indices.len() != num_samples
+        || indices
+            .iter()
+            .any(|&index| (index as u128) > (1_u128 << 53) - 1)
+    {
+        return Err(CliError::InternalError {
+            message:
+                "Monte Carlo trial identities cannot be represented exactly in the exported table"
+                    .into(),
+        });
+    }
+    let runs: Vec<f64> = indices.iter().map(|&index| index as f64).collect();
     let signals: Vec<crate::commands::run_signals::ScalarSignal> = variables
         .iter()
         .map(|stats| crate::commands::run_signals::ScalarSignal {
@@ -331,7 +355,7 @@ fn export_monte_carlo(
                 let mut data = crate::hdf5::Hdf5SimulationData::new();
                 data.title = "Monte Carlo Samples".to_string();
                 data.identity = Some(super::document::hdf5_identity(ctx, analysis_id)?);
-                let mut sweep = crate::hdf5::Hdf5WaveformSection::new("run", runs.clone());
+                let mut sweep = crate::hdf5::Hdf5WaveformSection::new("trial_index", runs.clone());
                 for signal in &signals {
                     sweep.add_typed_signal(
                         signal.display_name.clone(),
@@ -347,7 +371,7 @@ fn export_monte_carlo(
             format => super::export::scalar_table(
                 "monte_carlo",
                 "Monte Carlo Samples",
-                "run",
+                "trial_index",
                 "index",
                 runs.clone(),
                 &signals,
@@ -411,6 +435,7 @@ pub(super) fn run_monte_carlo_from_command(
     run_monte_carlo(
         ctx,
         mc_cmd.runs,
+        mc_cmd.first_trial,
         seed,
         distribution,
         parameter_filter,

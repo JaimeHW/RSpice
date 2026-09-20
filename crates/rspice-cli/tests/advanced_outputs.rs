@@ -765,3 +765,46 @@ fn authored_monte_carlo_confidence_survives_cli_export() {
         Some(u64::MAX)
     );
 }
+
+#[test]
+fn monte_carlo_ranges_export_original_trial_indices() {
+    let dir = test_dir("mc_range");
+    let deck = write_deck(
+        &dir,
+        "range.sp",
+        "MC range\n.param X=1\nV1 out 0 {X}\nR1 out 0 1k\n.mc 3 START=37 SEED 42 DIST GAUSS SPREAD 0.1\n.end\n",
+    );
+    for format in ["json", "csv"] {
+        let path = dir.join(format!("range.{format}"));
+        let output = run_rspice(&[
+            "--quiet",
+            "run",
+            deck.to_str().unwrap(),
+            "-o",
+            path.to_str().unwrap(),
+            "-f",
+            format,
+        ]);
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let text = std::fs::read_to_string(path).unwrap();
+        if format == "json" {
+            let document: serde_json::Value = serde_json::from_str(&text).unwrap();
+            assert_eq!(
+                document["payload"]["successfulTrialIndices"],
+                serde_json::json!([37, 38, 39])
+            );
+            assert_eq!(scalar_value(&document, "first_trial"), 37.0);
+        } else {
+            assert!(text.contains("trial_index"), "{text}");
+            let indices = text
+                .lines()
+                .filter_map(|line| line.split(',').next()?.trim().parse::<f64>().ok())
+                .collect::<Vec<_>>();
+            assert_eq!(indices, [37.0, 38.0, 39.0], "{text}");
+        }
+    }
+}

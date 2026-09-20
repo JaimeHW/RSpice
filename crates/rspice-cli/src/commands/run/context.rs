@@ -1302,6 +1302,7 @@ pub(super) fn run_requested_mode(
         advanced::run_monte_carlo(
             ctx,
             num_runs,
+            0,
             ctx.args.seed.unwrap_or(1),
             distribution,
             parameter_filter,
