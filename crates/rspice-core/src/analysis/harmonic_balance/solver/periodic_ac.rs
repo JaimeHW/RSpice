@@ -15,6 +15,9 @@ use super::*;
 use std::collections::BTreeMap;
 use std::f64::consts::PI;
 
+mod noise_correlation;
+pub(crate) use noise_correlation::PeriodicNoiseOutput;
+
 type PeriodicSpectrum = (usize, usize, Vec<Complex64>);
 
 #[inline]
@@ -396,13 +399,14 @@ fn materialize_scaled_complex_sum(
 
 fn visit_white_noise_terms(
     gains: &[Complex64],
+    other_gains: &[Complex64],
     psd: &[Complex64],
     binary_scale_exponent: i32,
     mut visit: impl FnMut(ScaledComplex) -> Result<(), &'static str>,
 ) -> Result<usize, &'static str> {
     let mut term_count = 0usize;
     for (k_idx, &gain_k) in gains.iter().enumerate() {
-        for (m_idx, &gain_m) in gains.iter().enumerate() {
+        for (m_idx, &gain_m) in other_gains.iter().enumerate() {
             let d = (k_idx as i32) - (m_idx as i32);
             let d_abs = d.unsigned_abs() as usize;
             if d_abs >= psd.len() {
@@ -576,20 +580,26 @@ fn scaled_flicker_term(
 /// must enter the compensated sum before any term is rounded to physical units.
 fn visit_periodic_noise_terms(
     gains: &[Complex64],
+    other_gains: &[Complex64],
     source: &PeriodicNoiseSource,
     sideband_min: i32,
     offset_hz: Value,
     fundamental_hz: Value,
     mut visit: impl FnMut(ScaledComplex) -> Result<(), &'static str>,
 ) -> Result<usize, HbError> {
-    let mut term_count =
-        visit_white_noise_terms(gains, &source.psd, source.binary_scale_exponent, &mut visit)
-            .map_err(|reason| {
-                HbError::InvalidCircuit(format!(
-                    "pnoise source '{}' white-noise term is invalid: {reason}",
-                    source.name
-                ))
-            })?;
+    let mut term_count = visit_white_noise_terms(
+        gains,
+        other_gains,
+        &source.psd,
+        source.binary_scale_exponent,
+        &mut visit,
+    )
+    .map_err(|reason| {
+        HbError::InvalidCircuit(format!(
+            "pnoise source '{}' white-noise term is invalid: {reason}",
+            source.name
+        ))
+    })?;
     if let Some(flicker) = &source.flicker
         && flicker.coefficient != 0.0
     {
@@ -622,16 +632,30 @@ fn visit_periodic_noise_terms(
                     source.name
                 )));
             }
-            scaled_flicker_term(
-                gain.mantissa,
-                gain.exponent,
-                flicker.coefficient,
-                source.binary_scale_exponent,
-                frequency,
-                flicker.exponent,
-            )
-            .and_then(&mut visit)
-            .map_err(|reason| {
+            let term = if std::ptr::eq(gains, other_gains) {
+                // Preserve the single-output power path, including its range
+                // certification, for diagonal covariance entries.
+                scaled_flicker_term(
+                    gain.mantissa,
+                    gain.exponent,
+                    flicker.coefficient,
+                    source.binary_scale_exponent,
+                    frequency,
+                    flicker.exponent,
+                )
+            } else {
+                modulated_noise_gain(other_gains, &flicker.modulation, m).and_then(|other| {
+                    noise_correlation::scaled_flicker_cross_term(
+                        gain,
+                        other,
+                        flicker.coefficient,
+                        source.binary_scale_exponent,
+                        frequency,
+                        flicker.exponent,
+                    )
+                })
+            };
+            term.and_then(&mut visit).map_err(|reason| {
                 HbError::InvalidCircuit(format!(
                     "pnoise source '{}' flicker-noise term is invalid at sideband {k}: {reason}",
                     source.name
@@ -2430,259 +2454,23 @@ impl HbSolver {
         output_sideband: i32,
         sources: &[PeriodicNoiseSource],
     ) -> Result<Vec<Value>, HbError> {
-        let (output_node, output_ref) = output;
-        let PeriodicSidebandWindow {
-            offset_hz,
-            sideband_min,
-            sideband_max,
-        } = window;
-        let n = self.num_nodes;
-        if !offset_hz.is_finite() || offset_hz < 0.0 {
-            return Err(HbError::InvalidCircuit(format!(
-                "pnoise offset frequency must be finite and non-negative, got {offset_hz}"
-            )));
-        }
-        if output_node >= n {
-            return Err(HbError::InvalidCircuit(
-                "pnoise output node out of range".to_string(),
-            ));
-        }
-        if let Some(r) = output_ref
-            && r >= n
-        {
-            return Err(HbError::InvalidCircuit(
-                "pnoise output reference node out of range".to_string(),
-            ));
-        }
-        if output_sideband < sideband_min || output_sideband > sideband_max {
-            return Err(HbError::InvalidCircuit(
-                "pnoise sideband range must include the selected output sideband".to_string(),
-            ));
-        }
-        for source in sources {
-            let normalized_pos = (source.node_pos < n).then_some(source.node_pos);
-            let normalized_neg = (source.node_neg < n).then_some(source.node_neg);
-            if normalized_pos == normalized_neg {
-                return Err(HbError::InvalidCircuit(format!(
-                    "pnoise source '{}' has identical terminals and no effective injection",
-                    source.name
-                )));
-            }
-            if source.psd.is_empty() {
-                return Err(HbError::InvalidCircuit(format!(
-                    "pnoise source '{}' has no periodic PSD coefficients",
-                    source.name
-                )));
-            }
-            if source
-                .psd
-                .iter()
-                .any(|coefficient| !coefficient.re.is_finite() || !coefficient.im.is_finite())
-            {
-                return Err(HbError::InvalidCircuit(format!(
-                    "pnoise source '{}' contains a non-finite periodic PSD coefficient",
-                    source.name
-                )));
-            }
-            let coefficient_scale = source
-                .psd
-                .iter()
-                .map(|coefficient| coefficient.norm())
-                .fold(0.0, Value::max);
-            let dc_tolerance =
-                coefficient_scale * Value::EPSILON * 32.0 * source.psd.len() as Value;
-            let dc = source.psd[0];
-            if !dc_tolerance.is_finite() || dc.re < -dc_tolerance || dc.im.abs() > dc_tolerance {
-                return Err(HbError::InvalidCircuit(format!(
-                    "pnoise source '{}' has an invalid DC PSD coefficient ({:+.6e}{:+.6e}j)",
-                    source.name, dc.re, dc.im
-                )));
-            }
-            if let Some(flicker) = &source.flicker {
-                if !flicker.coefficient.is_finite()
-                    || flicker.coefficient < 0.0
-                    || !flicker.exponent.is_finite()
-                {
-                    return Err(HbError::InvalidCircuit(format!(
-                        "pnoise source '{}' has invalid flicker parameters ({}, {})",
-                        source.name, flicker.coefficient, flicker.exponent
-                    )));
-                }
-                if flicker.modulation.is_empty()
-                    || flicker.modulation.len() > i32::MAX as usize
-                    || flicker.modulation.iter().any(|&v| !complex_is_finite(v))
-                    || flicker.modulation[0].im != 0.0
-                {
-                    return Err(HbError::InvalidCircuit(format!(
-                        "pnoise source '{}' has an invalid flicker modulation spectrum (requires finite coefficients and real DC)",
-                        source.name
-                    )));
-                }
-            }
-        }
-        let num_unknowns = n
-            .checked_add(self.periodic_mna_branches.len())
-            .ok_or_else(|| {
-                HbError::InvalidCircuit("pnoise node and branch count overflows usize".to_string())
-            })?;
-        let (s, size, span) =
-            periodic_sideband_geometry("pnoise", num_unknowns, sideband_min, sideband_max)?;
-        if size == 0 {
-            return Err(HbError::InvalidCircuit(
-                "pnoise requires at least one circuit unknown".to_string(),
-            ));
-        }
-
-        let try_krylov = self.config.use_krylov || size >= super::krylov::KRYLOV_AUTO_THRESHOLD;
-        let (spectra, cap_spectra) = if self.has_nonlinear_devices() {
-            (
-                self.conductance_spectra(state, span.max(self.num_harmonics))?,
-                self.capacitance_spectra(state, span.max(self.num_harmonics))?,
-            )
-        } else {
-            (Vec::new(), Vec::new())
-        };
-        let operator = PeriodicConversionOperator {
-            num_nodes: n,
-            num_sidebands: s,
-            sideband_min,
-            offset_hz,
-            fundamental_hz: self.config.fundamental_freq,
-            g_matrix: &self.periodic_g_matrix,
-            c_matrix: &self.c_matrix,
-            l_matrix: &self.l_matrix,
-            mna_branches: &self.periodic_mna_branches,
-            mna_static_entries: &self.exact_mna_static_entries,
-            mna_inductance_entries: &self.exact_mna_inductance_entries,
-            periodic_networks: &self.exact_periodic_networks,
-            g_spectra: &spectra,
-            c_spectra: &cap_spectra,
-        };
-        operator.validate("pnoise")?;
-
-        // Adjoint solve with the plain (unconjugated) transpose.
-        let out_idx = usize::try_from(i64::from(output_sideband) - i64::from(sideband_min))
-            .map_err(|_| {
-                HbError::InvalidCircuit(
-                    "pnoise output-sideband index exceeds this platform".to_string(),
-                )
-            })?;
-        let mut e = vec![Complex64::new(0.0, 0.0); size];
-        e[output_node * s + out_idx] = Complex64::new(1.0, 0.0);
-        if let Some(r) = output_ref {
-            e[r * s + out_idx] -= Complex64::new(1.0, 0.0);
-        }
-        let adjoint = if try_krylov {
-            let preconditioner = PeriodicPreconditioner::build(&operator, true)?;
-            let restart = super::krylov::bounded_gmres_restart(self.config.gmres_restart, size);
-            let outcome = super::krylov::gmres(
-                &|input| operator.apply_transpose(input),
-                &preconditioner,
-                &e,
-                restart,
-                6,
-            );
-            self.qualify_periodic_noise_adjoint(&operator, &e, outcome)?
-        } else {
-            let transpose = operator.to_dense_transpose();
-            self.solve_complex_linear_system(&transpose, &e)?
-        };
-
+        let outputs = [PeriodicNoiseOutput {
+            node_pos: Some(output.0),
+            node_neg: output.1,
+            sideband: output_sideband,
+        }];
         let mut contributions = Vec::with_capacity(sources.len());
-        for source in sources {
-            // Adjoint gain across the source terminals per sideband.
-            let mut gains = vec![Complex64::new(0.0, 0.0); s];
-            for (k_idx, gain) in gains.iter_mut().enumerate() {
-                let mut a = Complex64::new(0.0, 0.0);
-                if source.node_pos < n {
-                    a += adjoint[source.node_pos * s + k_idx];
-                }
-                if source.node_neg < n {
-                    a -= adjoint[source.node_neg * s + k_idx];
-                }
-                if !a.re.is_finite() || !a.im.is_finite() {
-                    return Err(HbError::InvalidCircuit(format!(
-                        "pnoise source '{}' has a non-finite adjoint gain at sideband {}",
-                        source.name,
-                        sideband_min + k_idx as i32
-                    )));
-                }
-                *gain = a;
-            }
-
-            // Pass one determines the common binary exponent without retaining
-            // O(sidebands^2) terms. Pass two streams the same deterministic
-            // products into the compensated accumulator.
-            let mut common_exponent = None;
-            let term_count = visit_periodic_noise_terms(
-                &gains,
-                source,
-                sideband_min,
-                offset_hz,
-                self.config.fundamental_freq,
-                |term| {
-                    validate_scaled_complex(term)?;
-                    if !term.is_zero() {
-                        common_exponent = Some(
-                            common_exponent
-                                .map_or(term.exponent, |current: i32| current.max(term.exponent)),
-                        );
-                    }
-                    Ok(())
-                },
-            )?;
-            let (contribution, absolute_sum) = if let Some(exponent) = common_exponent {
-                let mut accumulator = ScaledComplexAccumulator::new(exponent);
-                visit_periodic_noise_terms(
-                    &gains,
-                    source,
-                    sideband_min,
-                    offset_hz,
-                    self.config.fundamental_freq,
-                    |term| accumulator.add(term),
-                )?;
-                accumulator.finish().map_err(|reason| {
-                    HbError::InvalidCircuit(format!(
-                        "pnoise source '{}' noise accumulation is invalid: {reason}",
-                        source.name
-                    ))
-                })?
-            } else {
-                (Complex64::new(0.0, 0.0), 0.0)
-            };
-
-            // The double sum is Hermitian by construction; numerical
-            // round-off leaves a vanishing imaginary part and can place an
-            // exact zero a few ulps below zero. Do not let max(0) silently
-            // turn NaN or a materially non-physical PSD into a successful
-            // result.
-            let roundoff_tolerance =
-                absolute_sum * Value::EPSILON * 32.0 * (term_count.max(1) as Value);
-            if !roundoff_tolerance.is_finite() {
-                return Err(HbError::InvalidCircuit(format!(
-                    "pnoise source '{}' roundoff bound is non-finite",
-                    source.name
-                )));
-            }
-            if contribution.im.abs() > roundoff_tolerance {
-                return Err(HbError::InvalidCircuit(format!(
-                    "pnoise source '{}' produced a non-Hermitian density ({:+.6e}{:+.6e}j)",
-                    source.name, contribution.re, contribution.im
-                )));
-            }
-            if contribution.re < -roundoff_tolerance {
-                return Err(HbError::InvalidCircuit(format!(
-                    "pnoise source '{}' produced a negative output-noise density {:.6e}",
-                    source.name, contribution.re
-                )));
-            }
-            contributions.push(if contribution.re > 0.0 {
-                contribution.re
-            } else {
-                0.0
-            });
-        }
-
+        self.solve_periodic_noise_correlations_each(
+            state,
+            window,
+            &outputs,
+            sources,
+            &NoAbort,
+            |_, covariance| {
+                contributions.push(covariance[0].re);
+                Ok(())
+            },
+        )?;
         Ok(contributions)
     }
 }
@@ -3395,7 +3183,7 @@ mod matrix_free_tests {
                 -rotation * rotation,
             ];
             let mut white_terms = Vec::new();
-            visit_white_noise_terms(&gains, &intensity, 0, |term| {
+            visit_white_noise_terms(&gains, &gains, &intensity, 0, |term| {
                 white_terms.push(term);
                 Ok(())
             })
