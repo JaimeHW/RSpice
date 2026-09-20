@@ -225,3 +225,25 @@ fn pack_loading_refuses_unknown_units_missing_provenance_duplicate_names_and_wro
     bad.models[0].mechanism = AgingMechanism::Electromigration;
     assert!(bad.validate().is_err());
 }
+
+#[test]
+fn reference_exposure_reaches_exact_calibration_boundary_and_late_abort_is_atomic() {
+    let mut model = model();
+    model.validity.max_equivalent_seconds = 100.0;
+    if let AgingLaw::EquivalentTimePower {
+        clock_activation_energy_ev,
+        ..
+    } = &mut model.law
+    {
+        *clock_activation_energy_ev = f64::MAX;
+    }
+    let mut clock = AgingClock::new(&model).unwrap();
+    let abort = crate::abort_signal::CountingAbort::new(1);
+    assert_eq!(
+        clock.advance(100.0, stress(), &abort),
+        Err(AgingError::Aborted)
+    );
+    assert_eq!(clock.evaluate().unwrap().equivalent_seconds, 0.0);
+    clock.advance(100.0, stress(), &NoAbort).unwrap();
+    assert_eq!(clock.evaluate().unwrap().equivalent_seconds, 100.0);
+}

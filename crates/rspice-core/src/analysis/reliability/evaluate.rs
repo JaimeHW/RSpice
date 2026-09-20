@@ -94,10 +94,16 @@ impl<'a> AgingClock<'a> {
         let increment = if duration_s == 0.0 {
             0.0
         } else if let Some(log_acceleration) = self.log_acceleration(stress) {
-            checked_exp(
-                duration_s.ln() + log_acceleration,
-                "equivalent exposure increment",
-            )?
+            if log_acceleration == 0.0 {
+                // Preserve exact reference intervals, particularly the declared
+                // last calibrated second, without a round trip through exp/ln.
+                duration_s
+            } else {
+                checked_exp(
+                    duration_s.ln() + log_acceleration,
+                    "equivalent exposure increment",
+                )?
+            }
         } else {
             0.0
         };
@@ -249,7 +255,7 @@ impl<'a> AgingClock<'a> {
 }
 
 fn thermal_clock(energy_ev: f64, reference_k: f64, temperature_k: f64) -> f64 {
-    energy_ev / BOLTZMANN_EV_PER_K * (1.0 / reference_k - 1.0 / temperature_k)
+    energy_ev * (1.0 / reference_k - 1.0 / temperature_k) / BOLTZMANN_EV_PER_K
 }
 
 fn log_power(value: f64, reference: f64, exponent: f64) -> f64 {
