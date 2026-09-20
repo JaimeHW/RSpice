@@ -46,7 +46,7 @@ impl From<PnoiseRunError> for ServiceRunError {
 }
 
 /// Frequency sweep type for periodic-noise analysis.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum PnoiseFrequencySweep {
     Decade,
     Octave,
@@ -64,7 +64,7 @@ impl PnoiseFrequencySweep {
 }
 
 /// PNoise noise-reference mode.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum PnoiseReference {
     Output,
     Input,
@@ -72,7 +72,8 @@ pub enum PnoiseReference {
 }
 
 /// Explicit configuration for PNoise execution.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct PnoiseRunConfig {
     pub input_sideband: i32,
     pub output_sideband: i32,
@@ -311,6 +312,35 @@ fn run_pnoise_analysis_impl(
     ensure_not_aborted(abort)?;
 
     let netlist = parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
+    let owned;
+    let carrier = match carrier {
+        Some(carrier) => carrier,
+        None => {
+            owned = run_pss_analysis_with_source_path_and_abort(
+                netlist_text,
+                config.pss_fundamental_freq,
+                config.pss_num_harmonics,
+                config.pss_tolerance,
+                source_path,
+                abort,
+            )?;
+            PeriodicCarrierState::Shooting(&owned.operating_point)
+        }
+    };
+    run_pnoise_analysis_on_materialized_with_abort(&netlist, config, carrier, abort)
+}
+
+pub(crate) fn run_pnoise_analysis_on_materialized_with_abort(
+    netlist: &rspice_core::Netlist,
+    config: &PnoiseRunConfig,
+    carrier: PeriodicCarrierState<'_>,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<PnoiseData> {
+    ensure_not_aborted(abort)?;
+    config.validate()?;
+    carrier
+        .accepted_by(config.carrier, ".PNOISE")
+        .map_err(ServiceRunError::Failure)?;
     if config.noise_ref == PnoiseReference::Input {
         let source_name = config.input_source.trim();
         if !source_name.is_empty()
@@ -325,9 +355,7 @@ fn run_pnoise_analysis_impl(
 
     let engine = build_resolved_periodic_engine(
         &netlist,
-        carrier.map_or(config.pss_tolerance, |carrier| {
-            carrier.engine_tolerance(config.pss_tolerance)
-        }),
+        carrier.engine_tolerance(config.pss_tolerance),
         "PNOISE resolved producer configuration is invalid",
     )?;
 
@@ -339,37 +367,7 @@ fn run_pnoise_analysis_impl(
         abort,
     )?;
 
-    if let Some(carrier) = carrier {
-        return run_pnoise_from_retained_state(
-            &engine,
-            &netlist,
-            config,
-            frequencies,
-            carrier,
-            abort,
-        );
-    }
-
-    // Standalone callers solve PSS themselves. They still must publish only
-    // exact cyclostationary/PPV results; a stationary sideband fold is not an
-    // equivalent PNOISE analysis and is never an execution fallback.
-    let pss_data = run_pss_analysis_with_source_path_and_abort(
-        netlist_text,
-        config.pss_fundamental_freq,
-        config.pss_num_harmonics,
-        config.pss_tolerance,
-        source_path,
-        abort,
-    )?;
-
-    run_pnoise_from_retained_state(
-        &engine,
-        &netlist,
-        config,
-        frequencies,
-        PeriodicCarrierState::Shooting(&pss_data.operating_point),
-        abort,
-    )
+    run_pnoise_from_retained_state(&engine, netlist, config, frequencies, carrier, abort)
 }
 
 fn run_pnoise_from_retained_state(

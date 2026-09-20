@@ -28,7 +28,7 @@ use super::shared::normalize_pac_node_name;
 // =============================================================================
 
 /// Frequency sweep type for periodic transfer-function analysis.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum PxfFrequencySweep {
     Decade,
     Octave,
@@ -46,7 +46,8 @@ impl PxfFrequencySweep {
 }
 
 /// Explicit configuration for PXF execution.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct PxfRunConfig {
     pub pss_fundamental_freq: Value,
     pub pss_num_harmonics: usize,
@@ -247,7 +248,7 @@ pub fn run_pxf_analysis_from_pss_with_source_path_and_abort(
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<PxfData> {
     let netlist = parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
-    run_pxf_analysis_for_netlist_with_operating_point_abort(
+    run_pxf_analysis_on_materialized_with_abort(
         &netlist,
         config,
         Some(PeriodicCarrierState::Shooting(operating_point)),
@@ -268,7 +269,7 @@ pub fn run_pxf_analysis_from_hb_with_source_path_and_abort(
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<PxfData> {
     let netlist = parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
-    run_pxf_analysis_for_netlist_with_operating_point_abort(
+    run_pxf_analysis_on_materialized_with_abort(
         &netlist,
         config,
         Some(PeriodicCarrierState::HarmonicBalance(operating_point)),
@@ -288,10 +289,10 @@ pub fn run_pxf_analysis_with_config_and_source_path_and_abort(
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<PxfData> {
     let netlist = parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
-    run_pxf_analysis_for_netlist_with_operating_point_abort(&netlist, config, None, abort)
+    run_pxf_analysis_on_materialized_with_abort(&netlist, config, None, abort)
 }
 
-fn run_pxf_analysis_for_netlist_with_operating_point_abort(
+pub(crate) fn run_pxf_analysis_on_materialized_with_abort(
     netlist: &rspice_core::Netlist,
     config: &PxfRunConfig,
     carrier: Option<PeriodicCarrierState<'_>>,

@@ -8,6 +8,8 @@
 mod pac;
 mod pxf;
 mod shared;
+pub(crate) use pac::{PacData, run_pac_analysis_on_materialized_with_abort};
+pub(crate) use pxf::{PxfData, run_pxf_analysis_on_materialized_with_abort};
 
 pub use pac::{
     PacFrequencySweep, PacRunConfig, run_pac_analysis_from_hb_with_source_path_and_abort,

@@ -21,7 +21,7 @@
 //! only thing in the engine carrying a monodromy matrix.
 
 /// The periodic carrier a small-signal periodic run reads.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum PeriodicCarrier {
     /// The nearest preceding periodic solve of either family. Writes no
     /// `FROM=` keyword, which is exactly what the card means without one.

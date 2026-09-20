@@ -22,7 +22,7 @@ use super::shared::{normalize_pac_node_name, resolve_pac_output_node_with_abort}
 // =============================================================================
 
 /// Frequency sweep type for PAC analysis.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum PacFrequencySweep {
     Decade,
     Octave,
@@ -40,7 +40,8 @@ impl PacFrequencySweep {
 }
 
 /// Explicit configuration for PAC execution.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct PacRunConfig {
     pub pss_fundamental_freq: Value,
     pub pss_num_harmonics: usize,
@@ -550,7 +551,7 @@ fn run_pac_analysis_from_carrier_with_source_path_and_abort(
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<PacData> {
     let netlist = parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
-    run_pac_analysis_for_netlist_with_operating_point_abort(&netlist, config, Some(carrier), abort)
+    run_pac_analysis_on_materialized_with_abort(&netlist, config, Some(carrier), abort)
 }
 
 /// Run PAC analysis with source-path resolution and cooperative cancellation,
@@ -565,10 +566,10 @@ pub fn run_pac_analysis_with_source_path_and_abort(
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<PacData> {
     let netlist = parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
-    run_pac_analysis_for_netlist_with_operating_point_abort(&netlist, config, None, abort)
+    run_pac_analysis_on_materialized_with_abort(&netlist, config, None, abort)
 }
 
-fn run_pac_analysis_for_netlist_with_operating_point_abort(
+pub(crate) fn run_pac_analysis_on_materialized_with_abort(
     netlist: &rspice_core::Netlist,
     config: &PacRunConfig,
     carrier: Option<PeriodicCarrierState<'_>>,

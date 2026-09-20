@@ -22,7 +22,8 @@ use rspice_core::abort_signal::AbortSignal;
 use std::path::Path;
 
 /// Explicit configuration for PSTB execution.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct PstbRunConfig {
     pub pss_fundamental_freq: Value,
     pub pss_num_harmonics: usize,
@@ -290,6 +291,17 @@ fn run_pstb_analysis_impl(
     config.validate().map_err(ServiceRunError::Failure)?;
 
     let netlist = parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
+    run_pstb_analysis_on_materialized_with_abort(&netlist, config, operating_point, abort)
+}
+
+pub(crate) fn run_pstb_analysis_on_materialized_with_abort(
+    netlist: &rspice_core::Netlist,
+    config: &PstbRunConfig,
+    operating_point: Option<&rspice_core::engine::PssOperatingPoint>,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<PstbData> {
+    ensure_not_aborted(abort)?;
+    config.validate().map_err(ServiceRunError::Failure)?;
     let engine = build_resolved_periodic_engine(
         &netlist,
         config.pss_tolerance,
