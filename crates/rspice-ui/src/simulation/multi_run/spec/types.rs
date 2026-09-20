@@ -609,6 +609,10 @@ pub enum AnalysisSpec {
     /// Harmonic-balance noise.
     Hbnoise {
         #[serde(default)]
+        input_sideband: i32,
+        #[serde(default)]
+        output_sideband: i32,
+        #[serde(default)]
         noise_reference: Option<crate::services::simulation_runner::HbNoiseReference>,
         start_freq: f64,
         stop_freq: f64,

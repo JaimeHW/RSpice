@@ -56,6 +56,8 @@ impl From<WorkerTransferFunctionScalar> for TransferFunctionScalar {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct WorkerNoiseSummary {
     #[serde(default)]
+    pub conversion: Option<crate::state::PeriodicNoiseConversionEvidence>,
+    #[serde(default)]
     pub noise_figure: Option<std::sync::Arc<crate::state::NoiseFigureEvidence>>,
     pub rows: Vec<WorkerNoiseContributorRow>,
     #[serde(default)]
@@ -74,6 +76,9 @@ impl WorkerNoiseSummary {
                 .map(WorkerNoiseContributorRow::estimated_numeric_payload_bytes)
                 .fold(0usize, |total, bytes| total.saturating_add(bytes)),
             f64_payload_bytes(3),
+            self.conversion
+                .as_ref()
+                .map_or(0, |_| f64_payload_bytes(1).saturating_add(12)),
             self.noise_figure.as_ref().map_or(0, |figure| {
                 f64_payload_bytes(
                     3usize
@@ -88,6 +93,7 @@ impl WorkerNoiseSummary {
 impl From<NoiseSummary> for WorkerNoiseSummary {
     fn from(value: NoiseSummary) -> Self {
         Self {
+            conversion: value.conversion,
             noise_figure: value.noise_figure,
             rows: value
                 .rows
@@ -104,6 +110,7 @@ impl From<NoiseSummary> for WorkerNoiseSummary {
 impl From<WorkerNoiseSummary> for NoiseSummary {
     fn from(value: WorkerNoiseSummary) -> Self {
         Self {
+            conversion: value.conversion,
             noise_figure: value.noise_figure,
             rows: value
                 .rows

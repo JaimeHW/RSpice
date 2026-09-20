@@ -2216,6 +2216,7 @@ fn solved_noise_summary(deck: &str, output: &str, input: &str) -> crate::state::
             .expect("noise analysis runs");
     let integrated = rspice_core::analysis::IntegratedNoise::new(results);
     crate::state::NoiseSummary {
+        conversion: None,
         noise_figure: None,
         rows: integrated
             .contribution_summary()
@@ -2340,6 +2341,7 @@ fn a_noise_mechanism_outside_the_persistable_shape_is_still_refused() {
         "a".repeat(rspice_core::analysis::NOISE_MECHANISM_MAX_BYTES + 1),
     ] {
         let summary = crate::state::NoiseSummary {
+            conversion: None,
             noise_figure: None,
             rows: vec![crate::state::NoiseContributorRow {
                 device: "M1".to_owned(),

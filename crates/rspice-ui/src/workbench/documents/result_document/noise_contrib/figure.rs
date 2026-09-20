@@ -40,7 +40,7 @@ pub(super) fn show(ui: &mut Ui, figure: &Arc<NoiseFigureEvidence>, cache: &mut D
     );
     super::super::panel_note(
         ui,
-        "Signal is referred to input sideband zero. Folded source thermal noise is evaluated at the reference temperature; all other device noise retains its circuit temperature.",
+        "Signal uses the retained conversion channels (sideband zero for legacy results). Folded source thermal noise is evaluated at the reference temperature; all other device noise retains its circuit temperature.",
     );
     let first = figure.frequencies[0];
     let last = *figure.frequencies.last().unwrap();
@@ -76,7 +76,7 @@ pub(super) fn show(ui: &mut Ui, figure: &Arc<NoiseFigureEvidence>, cache: &mut D
             bounds
         });
         let mut spec = PlotSpec::new(
-            Axis::log_decades(first, last, "Hz"),
+            Axis::log_decades(first, last, "Offset Hz"),
             XScale::Log10,
             Axis::linear_with(bounds.0, bounds.1, "dB", 5),
         )
@@ -91,7 +91,7 @@ pub(super) fn show(ui: &mut Ui, figure: &Arc<NoiseFigureEvidence>, cache: &mut D
         );
         let readout = |frequency| {
             vec![
-                ("Frequency".into(), format!("{frequency:.6e} Hz")),
+                ("Offset frequency".into(), format!("{frequency:.6e} Hz")),
                 (
                     "Noise figure".into(),
                     format!(

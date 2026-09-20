@@ -426,6 +426,7 @@ fn retained_scalar_and_operating_point_evidence_is_finite_and_unambiguous() {
 #[test]
 fn summary_only_noise_retains_integrated_totals_without_contributor_rows() {
     let summary = NoiseSummary {
+        conversion: None,
         noise_figure: None,
         rows: Vec::new(),
         total_rms: Some(2.5e-6),

@@ -80,6 +80,8 @@ impl SimulationController {
                 let (start_freq, stop_freq, points_per_unit, sweep) =
                     parse_manifest_sweep(&draft.sweep)?;
                 AnalysisSpec::Hbnoise {
+                    input_sideband: draft.sidebands()?.0,
+                    output_sideband: draft.sidebands()?.1,
                     noise_reference: draft.noise_reference()?,
                     start_freq,
                     stop_freq,

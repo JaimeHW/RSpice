@@ -1505,6 +1505,14 @@ fn encode_noise_summary(
         writer.f64(row.power);
         writer.f64(row.share_pct);
     }
+    if let Some(conversion) = &summary.conversion {
+        writer.string("periodic-noise-conversion-v1");
+        writer.string(&conversion.input_source);
+        writer.f64(conversion.carrier_hz);
+        writer.i64(i64::from(conversion.input_sideband));
+        writer.i64(i64::from(conversion.output_sideband));
+        writer.i64(i64::from(conversion.max_sideband));
+    }
     if let Some(figure) = &summary.noise_figure {
         writer.string("source-referenced-ssb-noise-figure-v1");
         writer.string(&figure.input_source);

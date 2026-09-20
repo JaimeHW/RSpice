@@ -363,6 +363,13 @@ fn worker_result_round_trip() {
     }
 
     let noise_summary = crate::state::NoiseSummary {
+        conversion: Some(crate::state::PeriodicNoiseConversionEvidence {
+            input_source: "V1".into(),
+            carrier_hz: 1e6,
+            input_sideband: 2,
+            output_sideband: -1,
+            max_sideband: 3,
+        }),
         noise_figure: Some(std::sync::Arc::new(crate::state::NoiseFigureEvidence {
             input_source: "V1".into(),
             source_resistor: "Rs".into(),

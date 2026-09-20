@@ -328,6 +328,7 @@ pub struct NoiseContributorRow {
 /// first.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct NoiseSummary {
+    pub conversion: Option<super::PeriodicNoiseConversionEvidence>,
     pub noise_figure: Option<std::sync::Arc<super::NoiseFigureEvidence>>,
     /// Contributors, ranked by integrated power, descending.
     pub rows: Vec<NoiseContributorRow>,

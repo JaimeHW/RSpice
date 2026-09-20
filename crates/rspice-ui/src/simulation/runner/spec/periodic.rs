@@ -245,6 +245,8 @@ pub(super) fn run_periodic_spec(
             abort,
         ),
         AnalysisSpec::Hbnoise {
+            input_sideband,
+            output_sideband,
             noise_reference,
             start_freq,
             stop_freq,
@@ -260,6 +262,8 @@ pub(super) fn run_periodic_spec(
         } => run_hbnoise(
             netlist,
             HbnoiseRunRequest {
+                input_sideband,
+                output_sideband,
                 noise_reference,
                 start_freq,
                 stop_freq,
@@ -282,6 +286,8 @@ pub(super) fn run_periodic_spec(
 }
 
 struct HbnoiseRunRequest {
+    input_sideband: i32,
+    output_sideband: i32,
     noise_reference: Option<svc_runner::HbNoiseReference>,
     start_freq: f64,
     stop_freq: f64,
@@ -309,6 +315,8 @@ fn run_hbnoise(
         ))
     })?;
     let config = svc_runner::HbnoiseRunConfig {
+        input_sideband: request.input_sideband,
+        output_sideband: request.output_sideband,
         noise_reference: request.noise_reference,
         start_freq: request.start_freq,
         stop_freq: request.stop_freq,
@@ -375,14 +383,24 @@ fn run_hbnoise(
         SimulationError::SolverError("HBNOISE result has no frequency points".to_owned())
     })?;
     let band = (band_start, band_stop);
-    let summary = (config.integrated_noise || config.contributor_ranking || config.noise_figure)
-        .then_some(crate::state::NoiseSummary {
-            noise_figure: data.noise_figure,
-            rows,
-            total_rms: data.output_rms,
-            input_rms: data.input_rms,
-            band,
-        });
+    let conversion = crate::state::PeriodicNoiseConversionEvidence {
+        input_source: config.input_source.clone(),
+        carrier_hz: hb_state.operating_point().config().fundamental_freq,
+        input_sideband: config.input_sideband,
+        output_sideband: config.output_sideband,
+        max_sideband: config.max_sideband as i32,
+    };
+    conversion
+        .validate(band)
+        .map_err(SimulationError::SolverError)?;
+    let summary = Some(crate::state::NoiseSummary {
+        conversion: Some(conversion),
+        noise_figure: data.noise_figure,
+        rows,
+        total_rms: data.output_rms,
+        input_rms: data.input_rms,
+        band,
+    });
     Ok(SimulationResult::Noise {
         frequencies: data.frequencies,
         output_noise: data.output_noise,

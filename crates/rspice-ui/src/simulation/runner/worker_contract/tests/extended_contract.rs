@@ -1346,6 +1346,8 @@ fn dc_axis_modes_survive_both_worker_contracts() {
 #[test]
 fn hbnoise_source_reference_survives_the_worker_request() {
     let spec = AnalysisSpec::Hbnoise {
+        input_sideband: 3,
+        output_sideband: -2,
         noise_reference: Some(crate::services::simulation_runner::HbNoiseReference {
             source_resistor: "X1.Rs".into(),
             temperature_kelvin: 327.125,

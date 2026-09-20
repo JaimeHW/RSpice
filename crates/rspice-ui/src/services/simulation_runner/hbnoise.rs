@@ -61,6 +61,8 @@ impl HbNoiseReference {
 /// Exact retained-HB noise request.
 #[derive(Debug, Clone)]
 pub struct HbnoiseRunConfig {
+    pub input_sideband: i32,
+    pub output_sideband: i32,
     pub noise_reference: Option<HbNoiseReference>,
     pub start_freq: Value,
     pub stop_freq: Value,
@@ -99,6 +101,22 @@ pub(crate) fn validate_hbnoise_frequency_options(
     Ok(())
 }
 
+pub(crate) fn validate_noise_sidebands(
+    input: i32,
+    output: i32,
+    maximum: usize,
+) -> Result<(), String> {
+    if maximum > i32::MAX as usize
+        || input.unsigned_abs() as usize > maximum
+        || output.unsigned_abs() as usize > maximum
+    {
+        return Err(
+            "Input and output sidebands must lie within the configured folding window".into(),
+        );
+    }
+    Ok(())
+}
+
 impl HbnoiseRunConfig {
     fn validate(&self) -> Result<(), ServiceRunError> {
         validate_hbnoise_frequency_options(
@@ -110,6 +128,8 @@ impl HbnoiseRunConfig {
             self.integrated_noise || self.contributor_ranking,
         )
         .map_err(ServiceRunError::Failure)?;
+        validate_noise_sidebands(self.input_sideband, self.output_sideband, self.max_sideband)
+            .map_err(ServiceRunError::Failure)?;
         if self.output_node.trim().is_empty() {
             return Err(ServiceRunError::Failure(
                 "HBNOISE output node must be specified".to_owned(),
@@ -195,13 +215,17 @@ pub fn run_hbnoise_analysis_from_hb_with_source_path_and_abort(
         operating_point.config().tolerance,
         "HBNOISE resolved producer configuration is invalid",
     )?;
+    let sidebands = rspice_core::engine::PeriodicNoiseSidebands {
+        input: config.input_sideband,
+        output: config.output_sideband,
+    };
     let (exact, noise_figure) = if config.noise_figure {
         let reference = config
             .noise_reference
             .as_ref()
             .expect("validated noise reference");
         let result = engine
-            .run_hb_noise_figure_with_abort(
+            .run_hb_noise_figure_at_sidebands_with_abort(
                 &netlist,
                 &rspice_core::engine::HbNoiseFigureRequest {
                     frequencies: frequencies.clone(),
@@ -212,6 +236,7 @@ pub fn run_hbnoise_analysis_from_hb_with_source_path_and_abort(
                     source_resistor: reference.source_resistor.clone(),
                     reference_temperature: reference.temperature_kelvin,
                 },
+                sidebands,
                 operating_point,
                 abort,
             )
@@ -229,13 +254,16 @@ pub fn run_hbnoise_analysis_from_hb_with_source_path_and_abort(
         (result.noise, Some(std::sync::Arc::new(evidence)))
     } else {
         let exact = engine
-            .run_pnoise_from_hb_with_abort(
+            .run_pnoise_from_hb_request_with_abort(
                 &netlist,
-                &frequencies,
-                config.output_node.trim(),
-                output_ref,
-                Some(source_name),
-                config.max_sideband as i32,
+                &rspice_core::engine::PeriodicNoiseRequest {
+                    offsets: &frequencies,
+                    output_node: config.output_node.trim(),
+                    output_ref,
+                    input_source: Some(source_name),
+                    max_sideband: config.max_sideband as i32,
+                    sidebands,
+                },
                 operating_point,
                 abort,
             )
@@ -374,6 +402,8 @@ mod tests {
     fn hbnoise_returns_exact_psd_integration_and_ranked_contributors() {
         let deck = "* HBNOISE service fixture\nvin in 0 dc 0\nr1 in out 1k\nr2 out 0 1k\n.end\n";
         let config = HbnoiseRunConfig {
+            input_sideband: 0,
+            output_sideband: 0,
             noise_reference: None,
             start_freq: 1.0e3,
             stop_freq: 1.0e4,
@@ -430,6 +460,8 @@ mod tests {
     #[test]
     fn hbnoise_noise_figure_fails_closed_without_a_port_reference() {
         let config = HbnoiseRunConfig {
+            input_sideband: 0,
+            output_sideband: 0,
             noise_reference: None,
             start_freq: 1.0,
             stop_freq: 10.0,
@@ -464,6 +496,8 @@ mod tests {
             HbnoiseFrequencySweep::Octave,
         ] {
             let mut config = HbnoiseRunConfig {
+                input_sideband: 0,
+                output_sideband: 0,
                 noise_reference: Some(HbNoiseReference {
                     source_resistor: "Rs".into(),
                     temperature_kelvin: 300.15,
@@ -501,6 +535,71 @@ mod tests {
                         .to_string()
                         .contains("at least two distinct")
                 );
+            }
+        }
+    }
+
+    #[test]
+    fn hbnoise_selected_channels_change_the_rc_spectrum_with_or_without_noise_figure() {
+        let deck = "RC channel dispatch\nV1 in 0 0\nRs in out 1k\nRl out 0 1k\nC1 out 0 1n\n.end\n";
+        let state = retained_hb(deck);
+        let carrier = state.config().fundamental_freq;
+        let mut config = HbnoiseRunConfig {
+            input_sideband: 0,
+            output_sideband: 0,
+            noise_reference: Some(HbNoiseReference {
+                source_resistor: "Rs".into(),
+                temperature_kelvin: 300.15,
+            }),
+            start_freq: 1e3,
+            stop_freq: 1e4,
+            points_per_unit: 2,
+            sweep: HbnoiseFrequencySweep::Linear,
+            output_node: "out".into(),
+            output_ref: None,
+            input_source: "V1".into(),
+            max_sideband: 1,
+            integrated_noise: false,
+            noise_figure: false,
+            contributor_ranking: false,
+        };
+        let base = run_hbnoise_analysis_from_hb_with_source_path_and_abort(
+            deck, &config, &state, None, &NoAbort,
+        )
+        .unwrap();
+        for sideband in [-1, 1] {
+            config.input_sideband = sideband;
+            config.output_sideband = sideband;
+            for figure in [false, true] {
+                config.noise_figure = figure;
+                let result = run_hbnoise_analysis_from_hb_with_source_path_and_abort(
+                    deck, &config, &state, None, &NoAbort,
+                )
+                .unwrap();
+                for (index, &offset) in result.frequencies.iter().enumerate() {
+                    let response = |frequency: f64| {
+                        1.0 / (1.0 + (std::f64::consts::TAU * frequency * 500e-9).powi(2))
+                    };
+                    let expected_ratio =
+                        response(offset + f64::from(sideband) * carrier) / response(offset);
+                    assert!(
+                        (result.output_noise[index] / base.output_noise[index] - expected_ratio)
+                            .abs()
+                            < 1e-9
+                    );
+                }
+                if figure {
+                    assert!(
+                        result
+                            .noise_figure
+                            .unwrap()
+                            .decibels
+                            .iter()
+                            .all(|value| (value - 10.0 * 2.0_f64.log10()).abs() < 1e-9)
+                    );
+                } else {
+                    assert!(result.noise_figure.is_none());
+                }
             }
         }
     }

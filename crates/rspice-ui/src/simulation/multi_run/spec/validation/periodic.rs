@@ -346,6 +346,8 @@ pub(super) fn validate(spec: &AnalysisSpec) -> Result<(), String> {
             Ok(())
         }
         AnalysisSpec::Hbnoise {
+            input_sideband,
+            output_sideband,
             noise_reference,
             start_freq,
             stop_freq,
@@ -370,6 +372,11 @@ pub(super) fn validate(spec: &AnalysisSpec) -> Result<(), String> {
             if output_node.trim().is_empty() || input_source.trim().is_empty() {
                 return Err("HBNOISE requires an output node and input source".to_owned());
             }
+            crate::services::simulation_runner::validate_noise_sidebands(
+                *input_sideband,
+                *output_sideband,
+                *max_sideband,
+            )?;
             if *noise_figure {
                 noise_reference
                     .as_ref()

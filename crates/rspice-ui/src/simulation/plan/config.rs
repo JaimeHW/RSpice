@@ -308,6 +308,10 @@ impl Default for PeriodicNetworkDraft {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct HbNoiseDraft {
+    #[serde(default = "default_noise_sideband")]
+    pub input_sideband: String,
+    #[serde(default = "default_noise_sideband")]
+    pub output_sideband: String,
     #[serde(default)]
     pub source_resistor: String,
     #[serde(default = "default_noise_reference_temperature")]
@@ -325,6 +329,8 @@ pub struct HbNoiseDraft {
 impl Default for HbNoiseDraft {
     fn default() -> Self {
         Self {
+            input_sideband: default_noise_sideband(),
+            output_sideband: default_noise_sideband(),
             source_resistor: String::new(),
             reference_temperature: default_noise_reference_temperature(),
             sweep: FrequencySweepDraft::default(),
@@ -347,7 +353,30 @@ fn default_noise_reference_temperature() -> String {
     "290".into()
 }
 
+fn default_noise_sideband() -> String {
+    "0".into()
+}
+
 impl HbNoiseDraft {
+    pub(crate) fn sidebands(&self) -> Result<(i32, i32), String> {
+        let input = self
+            .input_sideband
+            .trim()
+            .parse::<i32>()
+            .map_err(|_| "Input sideband must be a signed integer")?;
+        let output = self
+            .output_sideband
+            .trim()
+            .parse::<i32>()
+            .map_err(|_| "Output sideband must be a signed integer")?;
+        let maximum = self
+            .max_sideband
+            .trim()
+            .parse::<usize>()
+            .map_err(|_| "Maximum sideband must be a nonnegative integer")?;
+        crate::services::simulation_runner::validate_noise_sidebands(input, output, maximum)?;
+        Ok((input, output))
+    }
     pub(crate) fn noise_reference(
         &self,
     ) -> Result<Option<crate::services::simulation_runner::HbNoiseReference>, String> {
@@ -1550,6 +1579,7 @@ fn validate_hbnoise(draft: &HbNoiseDraft) -> Option<String> {
         if draft.input_source.trim().is_empty() {
             return Err("HBNOISE requires an input source".to_owned());
         }
+        draft.sidebands()?;
         draft.noise_reference()?;
         Ok(())
     })()
@@ -2371,6 +2401,8 @@ mod tests {
     #[test]
     fn hbnoise_reference_drafts_round_trip_and_legacy_defaults_remain_disabled() {
         let mut draft = HbNoiseDraft::default();
+        draft.input_sideband = "-2".into();
+        draft.output_sideband = "1".into();
         draft.noise_figure = true;
         draft.source_resistor = "Rs".into();
         draft.reference_temperature = "325".into();
@@ -2378,6 +2410,7 @@ mod tests {
         let json = serde_json::to_string(&draft).unwrap();
         let ron = ron::to_string(&draft).unwrap();
         let from_json: HbNoiseDraft = serde_json::from_str(&json).unwrap();
+        assert_eq!(from_json.sidebands().unwrap(), (-2, 1));
         let from_ron: HbNoiseDraft = ron::from_str(&ron).unwrap();
         assert_eq!(from_json.noise_reference().unwrap(), expected);
         assert_eq!(from_ron.noise_reference().unwrap(), expected);
@@ -2387,7 +2420,10 @@ mod tests {
             .as_object_mut()
             .unwrap()
             .remove("reference_temperature");
+        legacy.as_object_mut().unwrap().remove("input_sideband");
+        legacy.as_object_mut().unwrap().remove("output_sideband");
         let restored: HbNoiseDraft = serde_json::from_value(legacy).unwrap();
+        assert_eq!(restored.sidebands().unwrap(), (0, 0));
         assert!(!restored.noise_figure);
         assert_eq!(restored.noise_reference().unwrap(), None);
         assert_eq!(restored.reference_temperature, "290");

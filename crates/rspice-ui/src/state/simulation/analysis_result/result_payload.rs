@@ -1052,6 +1052,34 @@ impl AnalysisResult {
             }
         }
         if let Some(noise) = &self.noise_summary {
+            if let Some(conversion) = &noise.conversion {
+                conversion.validate(noise.band)?;
+                if !matches!(
+                    self.analysis_type,
+                    AnalysisType::Hbnoise | AnalysisType::Pnoise
+                ) {
+                    return Err("Conversion channels require a periodic-noise result".into());
+                }
+                if noise
+                    .noise_figure
+                    .as_ref()
+                    .is_some_and(|figure| figure.input_source != conversion.input_source)
+                {
+                    return Err(
+                        "Noise figure and conversion channels have different input sources".into(),
+                    );
+                }
+                if self.waveforms.is_empty()
+                    || self.waveforms.iter().any(|wave| {
+                        wave.x.first().copied() != Some(noise.band.0)
+                            || wave.x.last().copied() != Some(noise.band.1)
+                    })
+                {
+                    return Err(
+                        "Periodic-noise curves must cover their retained offset band".into(),
+                    );
+                }
+            }
             if let Some(figure) = &noise.noise_figure {
                 figure.validate()?;
                 let mut curves = self

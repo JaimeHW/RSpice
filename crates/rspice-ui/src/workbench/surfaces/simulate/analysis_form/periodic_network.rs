@@ -62,6 +62,12 @@ pub(super) fn noise_fields(
     input_row(ui, "Output", &mut setup.output_node);
     input_row(ui, "Output ref", &mut setup.output_ref);
     input_row(ui, "Input source", &mut setup.input_source);
+    input_row(ui, "Input sideband", &mut setup.input_sideband);
+    input_row(ui, "Output sideband", &mut setup.output_sideband);
+    field_note(
+        ui,
+        "Frequencies are offsets. Each channel is offset + sideband × HB fundamental; negative frequencies represent the conjugate channel. Both sidebands must lie within the folding window.",
+    );
     input_row(ui, "Max sideband", &mut setup.max_sideband);
     field_note(
         ui,
@@ -78,7 +84,7 @@ pub(super) fn noise_fields(
         );
         field_note(
             ui,
-            "SSB noise figure uses the named series source resistor and sideband-zero signal gain. The resistor must already be in the HB circuit. Reference temperature rescales its thermal noise only.",
+            "SSB noise figure uses the named series source resistor and the selected input-to-output conversion gain. The resistor must already be in the HB circuit. Reference temperature rescales its thermal noise only.",
         );
     }
     switch_row(ui, "Contributor ranking", &mut setup.contributor_ranking);

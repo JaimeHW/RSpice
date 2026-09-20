@@ -162,6 +162,27 @@ impl ProjectSimulationResultsData {
 
     fn migrate_to_current_in_place(&mut self, project_id: ProjectId) -> Result<(), String> {
         let source_schema = self.schema_version;
+        if source_schema < NOISE_CONVERSION_RESULTS_SCHEMA_VERSION
+            && self
+                .runs
+                .iter()
+                .flat_map(|run| &run.analyses)
+                .any(|analysis| {
+                    analysis
+                        .noise_summary
+                        .as_ref()
+                        .is_some_and(|summary| summary.conversion.is_some())
+                })
+        {
+            return Err(
+                "result schemas before v33 cannot contain periodic-noise conversion evidence"
+                    .into(),
+            );
+        }
+        if source_schema == NOISE_FIGURE_RESULTS_SCHEMA_VERSION {
+            self.schema_version = PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION;
+            return self.validate();
+        }
         if source_schema < NOISE_FIGURE_RESULTS_SCHEMA_VERSION
             && self
                 .runs
@@ -2157,6 +2178,8 @@ impl From<&OperatingPointValue> for ProjectOperatingPointValue {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ProjectNoiseSummary {
     #[serde(default)]
+    pub conversion: Option<crate::state::PeriodicNoiseConversionEvidence>,
+    #[serde(default)]
     pub noise_figure: Option<std::sync::Arc<crate::state::NoiseFigureEvidence>>,
     #[serde(default)]
     pub rows: Vec<ProjectNoiseContributorRow>,
@@ -2170,6 +2193,7 @@ pub struct ProjectNoiseSummary {
 impl ProjectNoiseSummary {
     pub(super) fn into_noise_summary(self) -> NoiseSummary {
         NoiseSummary {
+            conversion: self.conversion,
             noise_figure: self.noise_figure,
             rows: self
                 .rows
@@ -2183,6 +2207,9 @@ impl ProjectNoiseSummary {
     }
 
     fn validate(&self, prefix: &str) -> Result<(), String> {
+        if let Some(conversion) = &self.conversion {
+            conversion.validate(self.band)?;
+        }
         if let Some(figure) = &self.noise_figure {
             figure.validate()?;
         }
@@ -2204,6 +2231,7 @@ impl ProjectNoiseSummary {
 impl From<&NoiseSummary> for ProjectNoiseSummary {
     fn from(summary: &NoiseSummary) -> Self {
         Self {
+            conversion: summary.conversion.clone(),
             noise_figure: summary.noise_figure.clone(),
             rows: summary
                 .rows

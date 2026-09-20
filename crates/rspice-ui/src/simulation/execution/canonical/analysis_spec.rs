@@ -24,6 +24,8 @@ use super::{CanonicalWriter, canonical_analysis_kind, encode_op_config, encode_o
 #[test]
 fn hbnoise_reference_changes_identity_and_absence_preserves_legacy_bytes() {
     let mut spec = AnalysisSpec::Hbnoise {
+        input_sideband: 0,
+        output_sideband: 0,
         noise_reference: None,
         start_freq: 1e3,
         stop_freq: 1e4,
@@ -58,6 +60,23 @@ fn hbnoise_reference_changes_identity_and_absence_preserves_legacy_bytes() {
     legacy.bool(false);
     assert_eq!(digest(&spec), legacy.finish());
     let baseline = digest(&spec);
+    for (input, output) in [(1, 0), (0, -1), (1, -1)] {
+        let mut shifted = spec.clone();
+        if let AnalysisSpec::Hbnoise {
+            input_sideband,
+            output_sideband,
+            ..
+        } = &mut shifted
+        {
+            *input_sideband = input;
+            *output_sideband = output;
+        }
+        shifted.validate().unwrap();
+        assert_ne!(digest(&shifted), baseline);
+        let json = serde_json::to_string(&shifted).unwrap();
+        let restored: AnalysisSpec = serde_json::from_str(&json).unwrap();
+        assert_eq!(digest(&shifted), digest(&restored));
+    }
     if let AnalysisSpec::Hbnoise {
         noise_reference,
         noise_figure,
@@ -75,6 +94,8 @@ fn hbnoise_reference_changes_identity_and_absence_preserves_legacy_bytes() {
     for (resistor, temperature) in [("Rs2", 290.0), ("Rs", 300.0)] {
         let mut changed = spec.clone();
         if let AnalysisSpec::Hbnoise {
+            input_sideband: 0,
+            output_sideband: 0,
             noise_reference: Some(reference),
             ..
         } = &mut changed
@@ -848,6 +869,8 @@ pub(super) fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &Analysis
             encode_manifest_network(writer, spec);
         }
         AnalysisSpec::Hbnoise {
+            input_sideband,
+            output_sideband,
             noise_reference,
             start_freq,
             stop_freq,
@@ -876,6 +899,11 @@ pub(super) fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &Analysis
                 writer.string("hbnoise-source-reference-v1");
                 writer.string(&reference.source_resistor);
                 writer.f64(reference.temperature_kelvin);
+            }
+            if *input_sideband != 0 || *output_sideband != 0 {
+                writer.string("hbnoise-conversion-sidebands-v1");
+                writer.i32(*input_sideband);
+                writer.i32(*output_sideband);
             }
         }
         AnalysisSpec::Qpac { .. } => {

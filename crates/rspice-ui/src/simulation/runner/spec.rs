@@ -889,6 +889,8 @@ R2 out 0 1k\n\
         assert!(waveforms.contains_key("S21[k=+0,m=+0]"));
 
         let hbnoise = AnalysisSpec::Hbnoise {
+            input_sideband: -1,
+            output_sideband: -1,
             noise_reference: Some(svc_runner::HbNoiseReference {
                 source_resistor: "RNOISE".into(),
                 temperature_kelvin: 290.0,
@@ -911,7 +913,7 @@ R2 out 0 1k\n\
         );
         let hbnoise_result = run_spec_request(
             &EngineBridge::new(),
-            hbnoise,
+            hbnoise.clone(),
             SpecExecutionOptions::default(),
             netlist,
             None,
@@ -940,6 +942,11 @@ R2 out 0 1k\n\
                 .iter()
                 .all(|value| value.is_finite())
         );
+        let conversion = summary.as_ref().unwrap().conversion.as_ref().unwrap();
+        assert_eq!(conversion.input_sideband, -1);
+        assert_eq!(conversion.output_sideband, -1);
+        assert_eq!(conversion.max_sideband, 1);
+        assert!(conversion.carrier_hz > 0.0);
         assert_eq!(output_noise.len(), frequencies.len());
         assert!(
             output_noise
@@ -947,6 +954,42 @@ R2 out 0 1k\n\
                 .all(|value| value.is_finite() && *value >= 0.0)
         );
         assert!(summary.is_some(), "integrated HBNOISE retains its evidence");
+        let mut spectrum_only = hbnoise;
+        if let AnalysisSpec::Hbnoise {
+            integrated_noise,
+            noise_figure,
+            contributor_ranking,
+            ..
+        } = &mut spectrum_only
+        {
+            *integrated_noise = false;
+            *noise_figure = false;
+            *contributor_ranking = false;
+        }
+        let spectrum_only = run_spec_request(
+            &EngineBridge::new(),
+            spectrum_only,
+            SpecExecutionOptions::default(),
+            netlist,
+            None,
+            &dependencies,
+            &rspice_core::abort_signal::NoAbort,
+        )
+        .unwrap();
+        let SimulationResult::Noise {
+            summary: Some(summary),
+            ..
+        } = spectrum_only
+        else {
+            panic!(
+                "Conversion channels must survive with optional band and figure evidence disabled"
+            );
+        };
+        assert_eq!(summary.conversion.as_ref().unwrap(), conversion);
+        assert!(summary.noise_figure.is_none());
+        assert!(summary.total_rms.is_none());
+        assert!(summary.input_rms.is_none());
+        assert!(summary.rows.is_empty());
     }
 
     #[test]

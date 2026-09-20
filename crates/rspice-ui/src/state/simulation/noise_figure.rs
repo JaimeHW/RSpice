@@ -1,6 +1,6 @@
 //! Retained single-sideband noise figure and its physical source reference.
 
-/// Sideband-zero signal gain with noise from the configured folding window.
+/// Selected-channel signal gain with noise from the configured folding window.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct NoiseFigureEvidence {
@@ -11,6 +11,79 @@ pub struct NoiseFigureEvidence {
     pub reference_temperature_kelvin: f64,
     pub frequencies: Vec<f64>,
     pub decibels: Vec<f64>,
+}
+
+/// Physical frequency channels for a spectrum whose stored axis is offset Hz.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PeriodicNoiseConversionEvidence {
+    pub input_source: String,
+    pub carrier_hz: f64,
+    pub input_sideband: i32,
+    pub output_sideband: i32,
+    pub max_sideband: i32,
+}
+
+impl PeriodicNoiseConversionEvidence {
+    pub fn validate(&self, band: (f64, f64)) -> Result<(), String> {
+        if self.input_source.trim().is_empty()
+            || !self.carrier_hz.is_finite()
+            || self.carrier_hz <= 0.0
+            || self.max_sideband < 0
+            || self.input_sideband.unsigned_abs() > self.max_sideband as u32
+            || self.output_sideband.unsigned_abs() > self.max_sideband as u32
+            || [band.0, band.1].into_iter().any(|offset| {
+                !offset.is_finite()
+                    || offset <= 0.0
+                    || !self.input_frequency(offset).is_finite()
+                    || !self.output_frequency(offset).is_finite()
+            })
+            || band.1 < band.0
+        {
+            return Err("Periodic noise has invalid conversion channels or offset band".into());
+        }
+        Ok(())
+    }
+
+    pub fn input_frequency(&self, offset: f64) -> f64 {
+        offset + f64::from(self.input_sideband) * self.carrier_hz
+    }
+
+    pub fn output_frequency(&self, offset: f64) -> f64 {
+        offset + f64::from(self.output_sideband) * self.carrier_hz
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn periodic_noise_conversion_rejects_invalid_channels_and_frequency_overflow() {
+        let valid = PeriodicNoiseConversionEvidence {
+            input_source: "V1".into(),
+            carrier_hz: 1e6,
+            input_sideband: 1,
+            output_sideband: -1,
+            max_sideband: 4,
+        };
+        valid.validate((1e3, 1e4)).unwrap();
+        assert_eq!(valid.input_frequency(1e3), 1_001_000.0);
+        assert_eq!(valid.output_frequency(1e3), -999_000.0);
+        for selector in [i32::MIN, -5, 5] {
+            let mut invalid = valid.clone();
+            invalid.input_sideband = selector;
+            assert!(invalid.validate((1e3, 1e4)).is_err());
+            invalid = valid.clone();
+            invalid.output_sideband = selector;
+            assert!(invalid.validate((1e3, 1e4)).is_err());
+        }
+        let mut invalid = valid.clone();
+        invalid.carrier_hz = f64::MAX;
+        invalid.input_sideband = 2;
+        assert!(invalid.validate((1e3, 1e4)).is_err());
+        assert!(valid.validate((1e4, 1e3)).is_err());
+    }
 }
 
 impl NoiseFigureEvidence {

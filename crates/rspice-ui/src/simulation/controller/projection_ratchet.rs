@@ -1093,7 +1093,13 @@ fn hbnoise_reference_fields_reach_the_execution_spec() {
     let ready = rebuild(&draft, body.clone()).unwrap();
     let baseline = projection(kind, &ready);
     assert!(!baseline.starts_with("spec-error"), "{baseline}");
-    for path in ["source_resistor", "reference_temperature", "noise_figure"] {
+    for path in [
+        "source_resistor",
+        "reference_temperature",
+        "noise_figure",
+        "input_sideband",
+        "output_sideband",
+    ] {
         assert!(
             matches!(judge(kind, &draft, &body, path), FieldOutcome::Moved),
             "{path}: {baseline}"

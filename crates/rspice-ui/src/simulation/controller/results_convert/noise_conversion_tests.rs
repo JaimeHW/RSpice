@@ -15,6 +15,13 @@ fn hbnoise_retains_noise_figure_as_decibels_with_its_source_reference() {
         decibels: vec![2.0, 3.0],
     });
     let summary = crate::state::NoiseSummary {
+        conversion: Some(crate::state::PeriodicNoiseConversionEvidence {
+            input_source: "V1".into(),
+            carrier_hz: 1e6,
+            input_sideband: -1,
+            output_sideband: 1,
+            max_sideband: 4,
+        }),
         noise_figure: Some(figure.clone()),
         band: (1e3, 1e4),
         ..Default::default()
@@ -45,6 +52,22 @@ fn hbnoise_retains_noise_figure_as_decibels_with_its_source_reference() {
         .iter()
         .position(|wave| wave.name == "Noise figure (SSB)")
         .unwrap();
+    let mut changed = result.clone();
+    changed.analysis_type = AnalysisType::Noise;
+    assert!(changed.validate_retained_evidence().is_err());
+    let mut changed = result.clone();
+    changed
+        .noise_summary
+        .as_mut()
+        .unwrap()
+        .conversion
+        .as_mut()
+        .unwrap()
+        .input_source = "V2".into();
+    assert!(changed.validate_retained_evidence().is_err());
+    let mut changed = result.clone();
+    changed.waveforms[0].x = vec![1.0, 2.0].into();
+    assert!(changed.validate_retained_evidence().is_err());
     let mut changed = result.clone();
     changed.waveforms[index].unit = Some("V²/Hz".into());
     assert!(changed.validate_retained_evidence().is_err());

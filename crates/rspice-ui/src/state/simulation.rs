@@ -26,7 +26,7 @@ mod executed_deck;
 mod family_measurements;
 mod noise_figure;
 mod result_digest;
-pub use noise_figure::NoiseFigureEvidence;
+pub use noise_figure::{NoiseFigureEvidence, PeriodicNoiseConversionEvidence};
 mod result_import;
 mod run;
 mod run_history;

@@ -255,6 +255,7 @@ impl EngineBridge {
             config.integration_mode,
         );
         let summary = crate::state::NoiseSummary {
+            conversion: None,
             noise_figure: None,
             rows,
             total_rms,

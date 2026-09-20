@@ -412,6 +412,8 @@ fn hb_state_transfer_round_trips_and_rejects_tamper() {
         .validate_for_spec(&hbsp, &SpecExecutionOptions::default())
         .unwrap();
     let hbnoise = AnalysisSpec::Hbnoise {
+        input_sideband: 0,
+        output_sideband: 0,
         noise_reference: None,
         start_freq: 1.0e3,
         stop_freq: 1.0e6,

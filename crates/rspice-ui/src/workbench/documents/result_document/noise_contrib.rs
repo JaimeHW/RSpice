@@ -51,100 +51,8 @@ fn contributor_absence_reason(state: &AppState) -> &'static str {
     }
 }
 
-/// Export both halves of the ordinary-noise sheet: every displayed spectrum
-/// and its band-integrated contributor evidence. Independent frequency grids
-/// remain lossless because the CSV is long-form rather than padded.
-pub(crate) fn export_csv(
-    run: &crate::state::SimulationRun,
-    analysis_indices: &[usize],
-) -> Option<super::ResultSheetCsv> {
-    let mut contents = String::from(
-        "record,analysis_sequence,analysis_label,trace,device,mechanism,sample_index,frequency_hz,spectral_density,power_v2,share_pct,total_rms_v,input_rms_v,band_start_hz,band_end_hz,noise_figure_db,source_generator,source_resistor,source_resistance_ohm,source_temperature_kelvin,reference_temperature_kelvin\n",
-    );
-    let mut rows = 0usize;
-    for &index in analysis_indices {
-        let analysis = run.analyses.get(index)?;
-        if let Some(summary) = analysis.noise_summary.as_ref() {
-            contents.push_str(&format!(
-                "summary,{},{},,,,,,,,,{},{},{:.17e},{:.17e},,,,,,\n",
-                analysis.id,
-                super::csv_field(&analysis.label),
-                summary
-                    .total_rms
-                    .map(|value| format!("{value:.17e}"))
-                    .unwrap_or_default(),
-                summary
-                    .input_rms
-                    .map(|value| format!("{value:.17e}"))
-                    .unwrap_or_default(),
-                summary.band.0,
-                summary.band.1,
-            ));
-            rows += 1;
-            if let Some(figure) = &summary.noise_figure {
-                for (sample_index, (&frequency, &decibels)) in
-                    figure.frequencies.iter().zip(&figure.decibels).enumerate()
-                {
-                    let mut fields = vec![String::new(); 21];
-                    fields[0] = "noise_figure".into();
-                    fields[1] = analysis.id.to_string();
-                    fields[2] = super::csv_field(&analysis.label);
-                    fields[3] = "Noise figure (SSB)".into();
-                    fields[6] = sample_index.to_string();
-                    fields[7] = format!("{frequency:.17e}");
-                    fields[15] = format!("{decibels:.17e}");
-                    fields[16] = super::csv_field(&figure.input_source);
-                    fields[17] = super::csv_field(&figure.source_resistor);
-                    fields[18] = format!("{:.17e}", figure.source_resistance_ohm);
-                    fields[19] = format!("{:.17e}", figure.source_temperature_kelvin);
-                    fields[20] = format!("{:.17e}", figure.reference_temperature_kelvin);
-                    contents.push_str(&fields.join(","));
-                    contents.push('\n');
-                    rows += 1;
-                }
-            }
-            for contributor in &summary.rows {
-                contents.push_str(&format!(
-                    "contributor,{},{},,{},{},,,,{:.17e},{:.17e},,,{:.17e},{:.17e},,,,,,\n",
-                    analysis.id,
-                    super::csv_field(&analysis.label),
-                    super::csv_field(&contributor.device),
-                    super::csv_field(&contributor.mechanism),
-                    contributor.power,
-                    contributor.share_pct,
-                    summary.band.0,
-                    summary.band.1,
-                ));
-                rows += 1;
-            }
-        }
-        for waveform in analysis
-            .waveforms
-            .iter()
-            .filter(|waveform| waveform.visible && waveform.name != "Noise figure (SSB)")
-        {
-            for (sample_index, (&frequency, &value)) in
-                waveform.x.iter().zip(waveform.y.iter()).enumerate()
-            {
-                contents.push_str(&format!(
-                    "spectrum,{},{},{},,,{},{:.17e},{:.17e},,,,,,,,,,,,\n",
-                    analysis.id,
-                    super::csv_field(&analysis.label),
-                    super::csv_field(&waveform.name),
-                    sample_index,
-                    frequency,
-                    value,
-                ));
-                rows += 1;
-            }
-        }
-    }
-    (rows != 0).then(|| super::ResultSheetCsv {
-        default_name: "rspice-noise-contributions.csv",
-        detail: format!("{rows} noise spectrum and contribution rows"),
-        contents,
-    })
-}
+mod csv;
+pub(crate) use csv::export_csv;
 
 /// Render spectrum provenance and the full contributor table for the exact
 /// analysis shown in the center instrument (the waves pane-stack).
@@ -186,6 +94,49 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         ],
     );
 
+    if let Some(conversion) = &summary.conversion {
+        section_header(ui, "Conversion channels", Some("offset axis"));
+        let rows = [
+            ("Input source", conversion.input_source.clone()),
+            ("HB fundamental", fmt_si(conversion.carrier_hz, "Hz", 6)),
+            ("Input sideband", conversion.input_sideband.to_string()),
+            ("Output sideband", conversion.output_sideband.to_string()),
+            (
+                "Folding window",
+                format!(
+                    "−{} … +{}",
+                    conversion.max_sideband, conversion.max_sideband
+                ),
+            ),
+            (
+                "Input frequency band",
+                format!(
+                    "{:.6e} … {:.6e} Hz",
+                    conversion.input_frequency(summary.band.0),
+                    conversion.input_frequency(summary.band.1)
+                ),
+            ),
+            (
+                "Output frequency band",
+                format!(
+                    "{:.6e} … {:.6e} Hz",
+                    conversion.output_frequency(summary.band.0),
+                    conversion.output_frequency(summary.band.1)
+                ),
+            ),
+        ];
+        measurement_table(
+            ui,
+            &rows
+                .iter()
+                .map(|(label, value)| (*label, value.as_str()))
+                .collect::<Vec<_>>(),
+        );
+        super::panel_note(
+            ui,
+            "The plot axis is offset Hz. Physical channel frequency = offset + sideband × fundamental. Negative frequencies denote conjugate channels.",
+        );
+    }
     if let Some(figure) = &summary.noise_figure {
         figure::show(ui, figure, &mut state.ui.results.cache);
     }
@@ -411,6 +362,13 @@ mod tests {
                     .with_unit("dB"),
                 ])
                 .with_noise_summary(NoiseSummary {
+                    conversion: Some(crate::state::PeriodicNoiseConversionEvidence {
+                        input_source: "V1".into(),
+                        carrier_hz: 1e6,
+                        input_sideband: 1,
+                        output_sideband: -1,
+                        max_sideband: 4,
+                    }),
                     noise_figure: Some(figure),
                     band: (1e3, 1e4),
                     rows: vec![crate::state::NoiseContributorRow {
@@ -429,7 +387,7 @@ mod tests {
             .map(|line| line.split(',').collect())
             .collect();
         assert_eq!(lines.len(), 7);
-        assert!(lines.iter().all(|row| row.len() == 21), "{:?}", lines);
+        assert!(lines.iter().all(|row| row.len() == 28), "{:?}", lines);
         let figure_rows: Vec<_> = lines
             .iter()
             .filter(|row| row[0] == "noise_figure")
@@ -444,6 +402,18 @@ mod tests {
             assert_eq!(row[18].parse::<f64>().unwrap(), 50.0);
             assert_eq!(row[19].parse::<f64>().unwrap(), 300.15);
             assert_eq!(row[20].parse::<f64>().unwrap(), 290.0);
+        }
+        for row in lines.iter().skip(1) {
+            assert_eq!(row[21], "offset_hz");
+            assert_eq!(row[22].parse::<f64>().unwrap(), 1e6);
+            assert_eq!(row[23], "1");
+            assert_eq!(row[24], "-1");
+            assert_eq!(row[25], "4");
+            if !row[7].is_empty() {
+                let offset = row[7].parse::<f64>().unwrap();
+                assert_eq!(row[26].parse::<f64>().unwrap(), offset + 1e6);
+                assert_eq!(row[27].parse::<f64>().unwrap(), offset - 1e6);
+            }
         }
         let densities: Vec<_> = lines.iter().filter(|row| row[0] == "spectrum").collect();
         assert_eq!(densities.len(), 2);
@@ -467,6 +437,7 @@ mod tests {
             WaveformData::new("inoise", vec![1.0, 10.0], vec![1.0e-9, 2.0e-9], "#fff"),
         ]);
         first.noise_summary = Some(NoiseSummary {
+            conversion: None,
             noise_figure: None,
             band: (1.0, 10.0),
             ..NoiseSummary::default()
@@ -476,6 +447,7 @@ mod tests {
                 WaveformData::new("inoise", vec![1.0, 10.0], vec![3.0e-9, 4.0e-9], "#fff"),
             ]);
         second.noise_summary = Some(NoiseSummary {
+            conversion: None,
             noise_figure: None,
             band: (2.0, 20.0),
             ..NoiseSummary::default()
