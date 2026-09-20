@@ -8,3 +8,9 @@ pub use soa_manager::{
     SoADefinition, SoAEvaluation, SoALimit, SoAManager, SoAParameter, SoARuleVerdict, SoAViolation,
     SoaVoltageBasis, ViolationSeverity, soa_stress_waveform_name,
 };
+
+mod power_derating;
+pub use power_derating::{
+    SoaDeratingSamples, SoaPowerDerating, SoaPowerDeratingEvidence, compare_soa_stress,
+    soa_derating_temperature_waveform_name, soa_power_limit_waveform_name,
+};
