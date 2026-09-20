@@ -284,3 +284,121 @@ fn qpnoise_loglog_integration_clips_power_laws_and_preserves_rms_range() {
         QpnoiseUnavailable::NegativeIntegrationFrequency
     );
 }
+
+#[test]
+fn qpnoise_packed_transport_preserves_colored_lattices_and_rejects_corruption() {
+    let engine = Engine::default();
+    let netlist=Netlist::parse("Packed QPNOISE\nV1 in 0 SIN(1 .1 1k)\nRs in out RM 1k\nRl out 0 2k\nC1 out 0 1n\n.model RM R(KF=1e-12 AF=2 EF=1)\n.options device zeroresistancetol=1500\n.end\n").unwrap();
+    let point = engine
+        .run_qpss(
+            &netlist,
+            QpssConfig::new(vec![1000.0, std::f64::consts::SQRT_2 * 1000.0], vec![1, 1]),
+        )
+        .unwrap();
+    let mut req = request();
+    req.noise_figure = None;
+    req.integration = None;
+    req.frequencies_hz = vec![100.0, 300.0, 700.0];
+    let mut result = engine.run_qpnoise_from_qpss(&netlist, req, &point).unwrap();
+    let grid = result
+        .validate_retained_payload_with_abort(&engine.config.resource_limits, &NoAbort)
+        .unwrap();
+    // The equivalent explicit lattice exercises numeric tuple packing as used
+    // by full compact-device modulation spectra, beyond their circuit basis.
+    let mut colored = false;
+    for source in &mut result.sources {
+        if let QuasiPeriodicNoiseSpectrum::PowerLaw {
+            modulation_lattices,
+            ..
+        } = &mut source.spectrum
+        {
+            assert!(modulation_lattices.is_none());
+            *modulation_lattices = Some(grid.indices().to_vec());
+            colored = true;
+        }
+    }
+    assert!(colored);
+    result.metadata.retained_identity = result.payload_identity(&NoAbort).unwrap();
+    let limits = &engine.config.resource_limits;
+    let (metadata, values) = result
+        .clone()
+        .into_transfer_parts_with_abort(limits, &NoAbort)
+        .unwrap();
+    let restored = QpnoiseAnalysisResult::from_transfer_parts_with_abort(
+        metadata.clone(),
+        values.clone(),
+        limits,
+        &NoAbort,
+    )
+    .unwrap();
+    assert_eq!(restored, result);
+    assert!(
+        metadata
+            .validate_transfer_layout_with_abort(values.len() - 1, limits, &NoAbort)
+            .is_err()
+    );
+    let mut altered = values.clone();
+    altered[0] *= 2.0;
+    assert!(
+        QpnoiseAnalysisResult::from_transfer_parts_with_abort(
+            metadata.clone(),
+            altered,
+            limits,
+            &NoAbort
+        )
+        .is_err()
+    );
+    let mut altered = values.clone();
+    altered[0] = Value::NAN;
+    assert!(
+        QpnoiseAnalysisResult::from_transfer_parts_with_abort(
+            metadata.clone(),
+            altered,
+            limits,
+            &NoAbort
+        )
+        .is_err()
+    );
+    let mut tuple_offset = 0;
+    for source in &metadata.sources {
+        match source.spectrum {
+            QpnoiseSpectrumLayout::White { density_count, .. } => tuple_offset += density_count,
+            QpnoiseSpectrumLayout::PowerLaw {
+                mode_count,
+                explicit_lattices,
+                ..
+            } => {
+                tuple_offset += 2 * mode_count;
+                if explicit_lattices {
+                    break;
+                }
+            }
+        }
+    }
+    let mut altered = values.clone();
+    altered[tuple_offset] = 0.5;
+    assert!(
+        QpnoiseAnalysisResult::from_transfer_parts_with_abort(
+            metadata.clone(),
+            altered,
+            limits,
+            &NoAbort
+        )
+        .is_err()
+    );
+    let mut bounded = limits.clone();
+    bounded.max_result_values = values.len();
+    assert!(matches!(
+        metadata.validate_transfer_layout_with_abort(values.len(), &bounded, &NoAbort),
+        Err(SimulationError::ResourceLimit(_))
+    ));
+    assert!(matches!(
+        QpnoiseAnalysisResult::from_transfer_parts_with_abort(
+            metadata,
+            values,
+            limits,
+            &CountingAbort::new(20)
+        ),
+        Err(SimulationError::Aborted)
+    ));
+}

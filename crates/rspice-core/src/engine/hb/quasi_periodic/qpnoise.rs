@@ -5,6 +5,7 @@ mod request;
 mod result;
 #[cfg(test)]
 mod tests;
+mod transport;
 mod validation;
 pub use super::qpxf::{QpxfOutput as QpnoiseObservation, QpxfQuantity as QpnoiseQuantity};
 use super::*;
@@ -15,6 +16,7 @@ use crate::analysis::quasi_periodic::{
 use crate::{ResourceKind, ResourceLimitError, ResourceLimits};
 pub use request::*;
 pub use result::*;
+pub use transport::{QpnoiseSourceLayout, QpnoiseSpectrumLayout, QpnoiseTransferMetadata};
 fn qpnoise_error(message: impl Into<String>) -> SimulationError {
     SimulationError::Circuit(format!("QPNOISE: {}", message.into()))
 }

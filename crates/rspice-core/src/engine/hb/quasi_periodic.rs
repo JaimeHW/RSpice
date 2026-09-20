@@ -20,8 +20,8 @@ pub use qpnoise::{
     QpnoiseAnalysisResult, QpnoiseContributorRank, QpnoiseFrequencyAxis, QpnoiseInput,
     QpnoiseIntegrated, QpnoiseIntegration, QpnoiseIntegrationMethod, QpnoiseLattices,
     QpnoiseNoiseFigure, QpnoiseObservation, QpnoiseOutput, QpnoiseOutputSpectrum, QpnoiseQuantity,
-    QpnoiseReference, QpnoiseRequest, QpnoiseResultMetadata, QpnoiseSources, QpnoiseUnavailable,
-    QpnoiseValue,
+    QpnoiseReference, QpnoiseRequest, QpnoiseResultMetadata, QpnoiseSourceLayout, QpnoiseSources,
+    QpnoiseSpectrumLayout, QpnoiseTransferMetadata, QpnoiseUnavailable, QpnoiseValue,
 };
 pub use qpxf::{
     QpxfAnalysisResult, QpxfFrequencyAxis, QpxfGroupDelay, QpxfInputLattices, QpxfInputSource,

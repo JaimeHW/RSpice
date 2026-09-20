@@ -141,11 +141,11 @@ pub use hb::{
     QpnoiseAnalysisResult, QpnoiseContributorRank, QpnoiseFrequencyAxis, QpnoiseInput,
     QpnoiseIntegrated, QpnoiseIntegration, QpnoiseIntegrationMethod, QpnoiseLattices,
     QpnoiseNoiseFigure, QpnoiseObservation, QpnoiseOutput, QpnoiseOutputSpectrum, QpnoiseQuantity,
-    QpnoiseReference, QpnoiseRequest, QpnoiseResultMetadata, QpnoiseSources, QpnoiseUnavailable,
-    QpnoiseValue, QpssConfig, QpssInitialState, QpssOperatingPoint, QpssOperatingPointMetadata,
-    QpssSourceTone, QpxfAnalysisResult, QpxfFrequencyAxis, QpxfGroupDelay, QpxfInputLattices,
-    QpxfInputSource, QpxfOutput, QpxfQuantity, QpxfRequest, QpxfResultMetadata, QpxfSources,
-    QpxfTransfer,
+    QpnoiseReference, QpnoiseRequest, QpnoiseResultMetadata, QpnoiseSourceLayout, QpnoiseSources,
+    QpnoiseSpectrumLayout, QpnoiseTransferMetadata, QpnoiseUnavailable, QpnoiseValue, QpssConfig,
+    QpssInitialState, QpssOperatingPoint, QpssOperatingPointMetadata, QpssSourceTone,
+    QpxfAnalysisResult, QpxfFrequencyAxis, QpxfGroupDelay, QpxfInputLattices, QpxfInputSource,
+    QpxfOutput, QpxfQuantity, QpxfRequest, QpxfResultMetadata, QpxfSources, QpxfTransfer,
 };
 pub use health::EngineHealthReport;
 pub use pss::{

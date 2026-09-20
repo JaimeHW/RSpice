@@ -83,7 +83,7 @@ impl QpnoiseAnalysisResult {
         serialized.map_err(|e| qpnoise_error(e.to_string()))?;
         Ok(sink.hash.finalize().to_hex().to_string())
     }
-    pub fn validate_retained_payload_with_abort(
+    pub(super) fn validate_primary_with_abort(
         &self,
         limits: &ResourceLimits,
         abort: &dyn AbortSignal,
@@ -104,8 +104,6 @@ impl QpnoiseAnalysisResult {
         if rows == 0
             || rows > 65_536
             || self.points.len() != count
-            || self.outputs.len() != outputs
-            || self.total_covariances.len() != count
             || m.observations.len() != outputs
             || m.version != 1
             || !is_canonical_blake3_identity(&m.retained_identity)
@@ -260,7 +258,22 @@ impl QpnoiseAnalysisResult {
                 "retained primary noise evidence is incompatible or altered",
             ));
         }
-        let (totals, outputs) = derived::reconstruct(m, &self.points, &grid, abort)?;
+        Ok(grid)
+    }
+    pub fn validate_retained_payload_with_abort(
+        &self,
+        limits: &ResourceLimits,
+        abort: &dyn AbortSignal,
+    ) -> Result<Arc<QuasiPeriodicGrid>, SimulationError> {
+        let grid = self.validate_primary_with_abort(limits, abort)?;
+        if self.outputs.len() != self.metadata.request.outputs.len()
+            || self.total_covariances.len() != self.points.len()
+        {
+            return Err(qpnoise_error(
+                "retained derived result dimensions are invalid",
+            ));
+        }
+        let (totals, outputs) = derived::reconstruct(&self.metadata, &self.points, &grid, abort)?;
         if totals != self.total_covariances || outputs != self.outputs {
             return Err(qpnoise_error(
                 "retained measurements differ from complete noise evidence",
