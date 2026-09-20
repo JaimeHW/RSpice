@@ -73,7 +73,7 @@ pub(super) fn fields(
     );
     field_note(
         ui,
-        "Leave blank to disable that severity band. Warning accepts 0–100%; critical accepts 100% or higher. Values above the actual limit always produce a violation. These thresholds apply to every rule, including imported and temperature-derated limits.",
+        "Leave blank to disable that severity band. Warning accepts 0–100%; critical accepts 100% or higher. Values above the actual limit produce a violation once any scoped minimum excursion duration is met. These thresholds apply to every rule, including imported and temperature-derated limits.",
     );
     switch_row(
         ui,
@@ -82,7 +82,7 @@ pub(super) fn fields(
     );
     field_note(
         ui,
-        "Uses authored voltage ratings from the selected native BSIM3/4, VDMOS, Gummel–Poon or VBIC BJT, or diode model. Imported ratings replace matching default checks; scoped rules can override them. Current, power and temperature ratings require separate rules. Devices without voltage ratings keep their enabled defaults; unsupported rated models report an error.",
+        "Uses authored voltage ratings from the selected native BSIM3/4 (including BSIM3 LEVEL=9), VDMOS, Gummel–Poon or VBIC BJT, or diode model. Imported ratings replace matching default checks; scoped rules can override them. Current, power and temperature ratings require separate rules. Devices without voltage ratings keep their enabled defaults; unsupported rated models report an error.",
     );
     switch_row(ui, "Check Vgs", &mut setup.check_vgs_max);
     input_row_enabled(ui, "Max Vgs", &mut setup.max_vgs, setup.check_vgs_max);

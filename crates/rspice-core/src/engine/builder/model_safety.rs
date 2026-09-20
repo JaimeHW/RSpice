@@ -102,8 +102,27 @@ pub(super) fn record(
                 model_type: model_type.into(),
                 generated: false,
                 bjt_family: None,
+                mos: None,
                 parameters,
             },
         );
+    }
+}
+
+/// Called only after a native device has been built successfully.
+pub(super) fn native_mos(
+    circuit: &mut CircuitData,
+    device: &str,
+    family: crate::circuit::MosModelSafetyFamily,
+    polarity: crate::netlist::MosType,
+) {
+    if let Some(card) = circuit
+        .device_model_safety
+        .get_mut(&device.to_ascii_uppercase())
+    {
+        card.mos = Some(crate::circuit::MosModelSafety {
+            family,
+            p_channel: polarity == crate::netlist::MosType::Pmos,
+        });
     }
 }

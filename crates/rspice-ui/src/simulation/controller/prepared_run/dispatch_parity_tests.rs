@@ -1505,7 +1505,13 @@ fn soa_model_voltage_ratings_survive_studio_worker_and_saved_results() {
         .model PM.2 PMOS LEVEL=54 LMIN=2u LMAX=5u VTH0=-0.4 TOXE=3n U0=0.02 VGS_MAX=9\n\
         .subckt CELL d g\nM1 d g 0 0 PM W=10u L=1u NRD=1 NRS=1\n.ends\nX1 d g CELL\n\
         Va a 0 0.8\nD1 a 0 DM\n.model DM D IS=1e-12 RS=100 FV_MAX=0.7 BV_MAX=20\n\
-        Vc c 0 2\nVb b 0 0.7\nQ1 c b 0 QM\n.model QM NPN IS=1e-14 BF=100 RB=100 RE=10 VBE_MAX=0.65\n.end\n";
+        Vc c 0 2\nVb b 0 0.7\nQ1 c b 0 QM\n.model QM NPN IS=1e-14 BF=100 RB=100 RE=10 VBE_MAX=0.65\n\
+        Vdn dn 0 2\nVgn gn 0 1.1\nVgp gp 0 -1.1\nM9N dn gn 0 0 N9 W=10u L=1u\nM9P d gp 0 0 P9 W=10u L=1u\n\
+        .model N9 NMOS LEVEL=9 DVT0=2.2 VTH0=0.4 VGS_MAX=1 VGSR_MAX=0.5\n\
+        .model P9 PMOS LEVEL=9 DVT0=2.2 VTH0=-0.4 VGS_MAX=1 VGSR_MAX=0.5\n\
+        MVN dn gn 0 NV\nMVP d gp 0 PV\n\
+        .model NV NMOS LEVEL=18 VTO=2 VGS_MAX=1 VGSR_MAX=0.5\n\
+        .model PV VDMOS PCHAN=1 VTO=-2 VGS_MAX=1 VGSR_MAX=0.5\n.end\n";
     let deck = crate::services::simulation_runner::splice_before_terminal_end_card(
         deck,
         &declaration.analysis_line,
@@ -1527,7 +1533,7 @@ fn soa_model_voltage_ratings_survive_studio_worker_and_saved_results() {
     else {
         panic!("SOA evidence")
     };
-    assert_eq!(evaluations.len(), 5);
+    assert_eq!(evaluations.len(), 13);
     let find = |device: &str, parameter| {
         evaluations
             .iter()
@@ -1561,6 +1567,40 @@ fn soa_model_voltage_ratings_survive_studio_worker_and_saved_results() {
     let bjt = find("Q1", crate::state::SoaParameterEvidence::BaseEmitterVoltage);
     assert_eq!(bjt.limit_value, 0.65);
     assert!(bjt.worst_actual_value < 0.7 - 1e-4);
+    for (device, p_channel, basis) in [
+        ("M9N", false, "intrinsic"),
+        ("M9P", true, "intrinsic"),
+        ("MVN", false, "authored terminals"),
+        ("MVP", true, "authored terminals"),
+    ] {
+        use crate::state::{SoaParameterEvidence::*, SoaRuleVerdictEvidence};
+        let forward = find(
+            device,
+            if p_channel {
+                GateSourceVoltageNegative
+            } else {
+                GateSourceVoltagePositive
+            },
+        );
+        let reverse = find(
+            device,
+            if p_channel {
+                GateSourceVoltagePositive
+            } else {
+                GateSourceVoltageNegative
+            },
+        );
+        assert_eq!(forward.limit_value, 1.0);
+        assert!(
+            (forward.worst_actual_value - 1.1).abs() < 1e-8,
+            "{device}: {forward:?}"
+        );
+        assert_eq!(forward.verdict, SoaRuleVerdictEvidence::Violation);
+        assert!(forward.description.contains(basis));
+        assert_eq!(reverse.limit_value, 0.5);
+        assert_eq!(reverse.worst_actual_value, 0.0);
+        assert_eq!(reverse.verdict, SoaRuleVerdictEvidence::Pass);
+    }
     let mut simulation = crate::state::SimulationState::default();
     simulation.runs.push(run.clone());
     simulation.next_run_id = 2;

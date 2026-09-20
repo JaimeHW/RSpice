@@ -7239,6 +7239,12 @@ impl Engine {
                             bsim3_equation_set,
                             &mut bsim3v3_models,
                         )?;
+                        model_safety::native_mos(
+                            &mut circuit,
+                            &element.name,
+                            crate::circuit::MosModelSafetyFamily::Bsim3,
+                            resolved_mos_type,
+                        );
                         continue;
                     }
 
@@ -7272,6 +7278,12 @@ impl Engine {
                             tnom_default_k,
                             &mut bsim4v8_models,
                         )?;
+                        model_safety::native_mos(
+                            &mut circuit,
+                            &element.name,
+                            crate::circuit::MosModelSafetyFamily::Bsim4,
+                            resolved_mos_type,
+                        );
                         continue;
                     }
 
@@ -7355,6 +7367,12 @@ impl Engine {
                                 netlist.options.tnom.unwrap_or(27.0),
                             ),
                         )?;
+                        model_safety::native_mos(
+                            &mut circuit,
+                            &element.name,
+                            crate::circuit::MosModelSafetyFamily::Vdmos,
+                            resolved_mos_type,
+                        );
                         continue;
                     }
 

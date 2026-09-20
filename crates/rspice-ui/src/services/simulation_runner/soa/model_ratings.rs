@@ -1,7 +1,9 @@
 //! Voltage-rating conventions from ngspice b3/b4/vdmos/bjt/vbic/dio soachk.
 //! Only authored limits are imported; simulator infinity defaults are omitted.
 use super::*;
-use rspice_core::circuit::{BjtModelSafetyFamily, DeviceModelSafety, ModelSafetyValue};
+use rspice_core::circuit::{
+    BjtModelSafetyFamily, DeviceModelSafety, ModelSafetyValue, MosModelSafetyFamily,
+};
 use std::collections::{BTreeMap, BTreeSet};
 
 pub(super) type ModelLimits = HashMap<String, BTreeMap<SoAParameter, SoALimit>>;
@@ -193,27 +195,24 @@ fn import_card(card: &DeviceModelSafety) -> Result<BTreeMap<SoAParameter, SoALim
     let mut importer = Import {
         card,
         basis: SoaVoltageBasis::IntrinsicNodes,
-        p_channel: card.model_type.eq_ignore_ascii_case("PMOS"),
+        p_channel: card.mos.is_some_and(|mos| mos.p_channel),
         used: BTreeSet::new(),
         limits: BTreeMap::new(),
     };
     let level = importer.number("LEVEL")?.unwrap_or(1.0);
     let kind = card.model_type.to_ascii_uppercase();
-    let bsim =
-        matches!(kind.as_str(), "NMOS" | "PMOS") && matches!(level, 8.0 | 49.0 | 14.0 | 54.0);
-    let vdmos = matches!(
-        kind.as_str(),
-        "VDMOS" | "NVDMOS" | "PVDMOS" | "VDMOSN" | "VDMOSP"
-    ) || (matches!(kind.as_str(), "NMOS" | "PMOS") && level == 18.0);
+    let bsim = card.mos.is_some_and(|mos| {
+        matches!(
+            mos.family,
+            MosModelSafetyFamily::Bsim3 | MosModelSafetyFamily::Bsim4
+        )
+    });
+    let vdmos = card
+        .mos
+        .is_some_and(|mos| mos.family == MosModelSafetyFamily::Vdmos);
     if bsim || vdmos {
         if vdmos {
             importer.basis = SoaVoltageBasis::ExternalTerminals;
-            importer.p_channel |= matches!(kind.as_str(), "PVDMOS" | "VDMOSP");
-            if kind == "VDMOS" {
-                for flag in ["PCHAN", "PCHANNEL", "PMOS"] {
-                    importer.p_channel |= importer.number(flag)?.is_some_and(|v| v != 0.0);
-                }
-            }
         }
         let vgs = importer.rating("VGS_MAX")?;
         let vgsr = importer.rating("VGSR_MAX")?;
@@ -303,6 +302,10 @@ mod tests {
             model_type: "PMOS".into(),
             generated: false,
             bjt_family: None,
+            mos: Some(rspice_core::circuit::MosModelSafety {
+                family: MosModelSafetyFamily::Bsim4,
+                p_channel: true,
+            }),
             parameters: [
                 ("LEVEL", 54.0),
                 ("VGS_MAX", 2.0),
@@ -342,7 +345,11 @@ mod tests {
         assert!(import_card(&card).unwrap_err().contains("generated"));
         card.generated = false;
         card.parameters
-            .insert("LEVEL".into(), ModelSafetyValue::Numeric(1.0));
+            .insert("LEVEL".into(), ModelSafetyValue::Numeric(9.0));
+        // Selected family/polarity remains authoritative over raw card metadata.
+        card.model_type = "NMOS".into();
+        assert_eq!(import_card(&card).unwrap()[&VbsNegative].max_value, 3.0);
+        card.mos = None;
         assert!(
             import_card(&card)
                 .unwrap_err()
@@ -452,6 +459,14 @@ fn soa_model_voltage_override_preserves_opposite_direction_and_reports_missing_r
         .unwrap();
     assert_eq!(model_reverse.max_value, 0.5);
     assert_eq!(model_reverse.voltage_basis, SoaVoltageBasis::IntrinsicNodes);
+    let mos9 = rspice_core::Netlist::parse("Berkeley MOS9\nM1 d g 0 0 NM W=10u L=1u\n.model NM NMOS LEVEL=9 VTO=0.4 KP=1m VGS_MAX=1\n.end\n").unwrap();
+    let circuit = engine.build_circuit(&mos9).unwrap();
+    assert!(
+        resolve(&circuit, &mos9.elements, &config, &NoAbort)
+            .unwrap_err()
+            .to_string()
+            .contains("no supported native voltage-rating convention")
+    );
     let plain =
         rspice_core::Netlist::parse("Unrated\nD1 a 0 DM\n.model DM D IS=1e-14\n.end\n").unwrap();
     let circuit = engine.build_circuit(&plain).unwrap();

@@ -75,3 +75,48 @@ fn model_safety_retains_vbic_aliases_and_actual_native_bjt_family() {
         );
     }
 }
+
+#[test]
+fn model_safety_follows_selected_native_mos_family_and_polarity() {
+    use rspice_core::{
+        circuit::{MosModelSafety, MosModelSafetyFamily::*},
+        engine::SpiceDialect::{BestAvailable, Ngspice, Xyce},
+    };
+    for (dialect, model, expected) in [
+        (BestAvailable, "NMOS LEVEL=9 DVT0=2.2", Some((Bsim3, false))),
+        (BestAvailable, "PMOS LEVEL=9 DVT0=2.2", Some((Bsim3, true))),
+        (BestAvailable, "NMOS LEVEL=9 VTO=0.4 KP=1m", None),
+        (Ngspice, "NMOS LEVEL=9 DVT0=2.2", None),
+        (Xyce, "NMOS LEVEL=9", Some((Bsim3, false))),
+        (BestAvailable, "NMOS LEVEL=8", Some((Bsim3, false))),
+        (BestAvailable, "PMOS LEVEL=49", Some((Bsim3, true))),
+        (BestAvailable, "NMOS LEVEL=14", Some((Bsim4, false))),
+        (BestAvailable, "PMOS LEVEL=54", Some((Bsim4, true))),
+        (BestAvailable, "NMOS LEVEL=18", Some((Vdmos, false))),
+        (BestAvailable, "PMOS LEVEL=18", Some((Vdmos, true))),
+        (BestAvailable, "VDMOS PCHAN=1", Some((Vdmos, true))),
+        (BestAvailable, "NVDMOS PCHAN=1", Some((Vdmos, false))),
+        (BestAvailable, "PVDMOS PCHAN=0", Some((Vdmos, true))),
+    ] {
+        let deck = format!(
+            "MOS rating routing\nM1 d g 0 0 MM W=10u L=1u\n.model MM {model} VGS_MAX=1 VGSR_MAX=0.5\n.end\n"
+        );
+        let circuit = Engine::new(SimulationConfig {
+            spice_dialect: dialect,
+            ..Default::default()
+        })
+        .build_circuit(&Netlist::parse(&deck).unwrap())
+        .unwrap_or_else(|error| panic!("{dialect:?}: {model}: {error}"));
+        let card = circuit.device_model_safety("M1").unwrap();
+        assert_eq!(
+            card.mos,
+            expected.map(|(family, p_channel)| MosModelSafety { family, p_channel }),
+            "{dialect:?}: {model}"
+        );
+        assert!(!card.generated);
+        assert_eq!(
+            card.parameters.get("VGS_MAX"),
+            Some(&ModelSafetyValue::Numeric(1.0))
+        );
+    }
+}

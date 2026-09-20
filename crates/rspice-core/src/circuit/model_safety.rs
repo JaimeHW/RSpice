@@ -20,6 +20,22 @@ pub enum BjtModelSafetyFamily {
     Vbic,
 }
 
+/// Native MOS families with qualified model-card voltage-rating conventions.
+/// Recorded at the selected construction route rather than inferred from LEVEL.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MosModelSafetyFamily {
+    Bsim3,
+    Bsim4,
+    Vdmos,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MosModelSafety {
+    pub family: MosModelSafetyFamily,
+    /// Polarity resolved by the engine, including VDMOS type aliases and flags.
+    pub p_channel: bool,
+}
+
 /// Compact safety-related subset of a selected model card. Values retain the
 /// card's units and spelling-independent uppercase keys; these are metadata,
 /// not a claim that every device implementation supports every rating.
@@ -29,6 +45,7 @@ pub struct DeviceModelSafety {
     pub model_type: String,
     pub generated: bool,
     pub bjt_family: Option<BjtModelSafetyFamily>,
+    pub mos: Option<MosModelSafety>,
     pub parameters: BTreeMap<String, ModelSafetyValue>,
 }
 

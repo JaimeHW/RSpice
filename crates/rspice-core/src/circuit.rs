@@ -35,7 +35,9 @@ pub(crate) use storage::{
 mod analog_tasks;
 mod construction;
 mod model_safety;
-pub use model_safety::{BjtModelSafetyFamily, DeviceModelSafety, ModelSafetyValue};
+pub use model_safety::{
+    BjtModelSafetyFamily, DeviceModelSafety, ModelSafetyValue, MosModelSafety, MosModelSafetyFamily,
+};
 mod terminals;
 pub use terminals::{BjtTerminalLayout, MosTerminalLayout};
 pub(crate) mod dae;
