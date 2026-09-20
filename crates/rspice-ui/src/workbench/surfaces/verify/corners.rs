@@ -653,7 +653,60 @@ pub(super) fn reliability(ui: &mut Ui, app: &mut RSpiceApp) {
                 _ => None,
             },
         );
-    if let Some((years, devices)) = reliability_payload {
+    if let Some(response) = latest_validated_analysis(app, crate::state::AnalysisType::Reliability)
+        .and_then(|a| match &a.result_payload {
+            Some(crate::state::AnalysisResultPayload::ReliabilityMission { response }) => {
+                Some(response)
+            }
+            _ => None,
+        })
+    {
+        let headers = vec![
+            ("Phase / years".to_owned(), 0.2),
+            ("Device / parameter".to_owned(), 0.3),
+            ("Fresh".to_owned(), 0.25),
+            ("Aged".to_owned(), 0.25),
+        ];
+        table_section_header(
+            ui,
+            "Aging projection",
+            Some("engineering preview · calibrated mission evidence"),
+            None,
+        );
+        let rows: Vec<_> = response
+            .aged
+            .iter()
+            .flat_map(|p| p.parameters.iter().map(move |v| (p, v)))
+            .collect();
+        let _ = render_virtual_data_table(
+            ui,
+            "verify-reliability-mission",
+            &headers,
+            rows.len(),
+            false,
+            |index| {
+                let (p, v) = rows[index];
+                vec![
+                    TableCell::text(format!("{} / {}", p.phase_index + 1, p.years)),
+                    TableCell::text(format!("{} / {}", v.device, v.parameter)),
+                    TableCell::mono(format_scalar(v.fresh_value)),
+                    TableCell::mono(format_scalar(v.aged_value)),
+                ]
+            },
+        );
+        for p in &response.stress.checkpoints {
+            for d in &p.devices {
+                for c in &d.contributions {
+                    if let Some(value) = c.electromigration_lifetime_fraction {
+                        ui.label(format!(
+                            "{} / {}: {} years, {} consumed EM lifetime",
+                            d.device, c.model_id, p.years, value
+                        ));
+                    }
+                }
+            }
+        }
+    } else if let Some((years, devices)) = reliability_payload {
         let mut headers = vec![
             ("Device / metric".to_owned(), 0.24),
             ("Run stress".to_owned(), 0.18),

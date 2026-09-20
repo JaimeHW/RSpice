@@ -1,6 +1,7 @@
 //! Reliability stress and lifetime checkpoint viewer.
 
 use egui::{RichText, Ui};
+mod mission;
 use egui_extras::{Column, TableBuilder};
 
 use crate::state::{
@@ -247,10 +248,15 @@ fn show_degradation_plot(
 }
 
 pub(super) fn active_payload_is_valid(state: &AppState) -> bool {
-    active_reliability(&state.simulation, active_evidence_is_valid(state)).is_some()
+    mission::is_active(state)
+        || active_reliability(&state.simulation, active_evidence_is_valid(state)).is_some()
 }
 
 pub fn show(ui: &mut Ui, state: &mut AppState) {
+    if mission::is_active(state) {
+        mission::show(ui, state);
+        return;
+    }
     let Some(run) = state.simulation.active_run() else {
         well_hint(ui, "Select a dataset with retained reliability evidence");
         return;
@@ -511,6 +517,10 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
 }
 
 pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
+    if mission::is_active(state) {
+        mission::details(ui, state);
+        return;
+    }
     let Some(selection) = state.ui.results.selected_reliability.clone() else {
         section_header(ui, "Reliability selection", None);
         panel_note(
