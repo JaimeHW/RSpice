@@ -14,6 +14,13 @@ pub(crate) struct PeriodicNoiseOutput {
     pub sideband: i32,
 }
 
+/// A complex linear combination of differential, possibly distinct-sideband
+/// voltages. Used to express port noise waves at arbitrary real references.
+#[derive(Debug, Clone)]
+pub(crate) struct PeriodicNoiseProjection {
+    pub terms: Vec<(PeriodicNoiseOutput, Complex64)>,
+}
+
 /// Colored covariance without materializing either source density or transfer
 /// product before their exponents cancel. The phase is left intact.
 pub(super) fn scaled_flicker_cross_term(
@@ -101,17 +108,32 @@ fn source_covariance(
     source: &PeriodicNoiseSource,
     window: PeriodicSidebandWindow,
     fundamental_hz: Value,
+    abort: &dyn AbortSignal,
 ) -> Result<(Complex64, Value), HbError> {
     let visit = |visitor: &mut dyn FnMut(ScaledComplex) -> Result<(), &'static str>| {
-        visit_periodic_noise_terms(
+        let mut count = 0_usize;
+        let mut cancelled = false;
+        let result = visit_periodic_noise_terms(
             left,
             right,
             source,
             window.sideband_min,
             window.offset_hz,
             fundamental_hz,
-            visitor,
-        )
+            |term| {
+                if count.is_multiple_of(256) && abort.is_aborted() {
+                    cancelled = true;
+                    return Err("periodic covariance accumulation cancelled");
+                }
+                count += 1;
+                visitor(term)
+            },
+        );
+        if cancelled {
+            Err(HbError::Aborted)
+        } else {
+            result
+        }
     };
     let mut common_exponent = None;
     let term_count = visit(&mut |term| {
@@ -172,6 +194,33 @@ impl HbSolver {
         outputs: &[PeriodicNoiseOutput],
         sources: &[PeriodicNoiseSource],
         abort: &dyn AbortSignal,
+        consume: impl FnMut(usize, &[Complex64]) -> Result<(), HbError>,
+    ) -> Result<(), HbError> {
+        let projections = outputs
+            .iter()
+            .copied()
+            .map(|output| PeriodicNoiseProjection {
+                terms: vec![(output, Complex64::new(1.0, 0.0))],
+            })
+            .collect::<Vec<_>>();
+        self.solve_periodic_noise_projected_correlations_each(
+            state,
+            window,
+            &projections,
+            sources,
+            abort,
+            consume,
+        )
+    }
+
+    /// Correlate complex linear observations of all retained noise sidebands.
+    pub(crate) fn solve_periodic_noise_projected_correlations_each(
+        &mut self,
+        state: &HbSolverState,
+        window: PeriodicSidebandWindow,
+        outputs: &[PeriodicNoiseProjection],
+        sources: &[PeriodicNoiseSource],
+        abort: &dyn AbortSignal,
         mut consume: impl FnMut(usize, &[Complex64]) -> Result<(), HbError>,
     ) -> Result<(), HbError> {
         if abort.is_aborted() {
@@ -194,21 +243,28 @@ impl HbSolver {
             ));
         }
         validate_periodic_state(state, n, "pnoise")?;
-        for output in outputs {
-            if output.node_pos.is_some_and(|node| node >= n) {
-                return Err(HbError::InvalidCircuit(
-                    "pnoise output node out of range".into(),
-                ));
-            }
-            if output.node_neg.is_some_and(|node| node >= n) {
-                return Err(HbError::InvalidCircuit(
-                    "pnoise output reference node out of range".into(),
-                ));
-            }
-            if output.sideband < sideband_min || output.sideband > sideband_max {
-                return Err(HbError::InvalidCircuit(
-                    "pnoise sideband range must include the selected output sideband".into(),
-                ));
+        for projection in outputs {
+            for (output, weight) in &projection.terms {
+                if !complex_is_finite(*weight) {
+                    return Err(HbError::InvalidCircuit(
+                        "pnoise projection has a non-finite weight".into(),
+                    ));
+                }
+                if output.node_pos.is_some_and(|node| node >= n) {
+                    return Err(HbError::InvalidCircuit(
+                        "pnoise output node out of range".into(),
+                    ));
+                }
+                if output.node_neg.is_some_and(|node| node >= n) {
+                    return Err(HbError::InvalidCircuit(
+                        "pnoise output reference node out of range".into(),
+                    ));
+                }
+                if output.sideband < sideband_min || output.sideband > sideband_max {
+                    return Err(HbError::InvalidCircuit(
+                        "pnoise sideband range must include the selected output sideband".into(),
+                    ));
+                }
             }
         }
         for source in sources {
@@ -335,18 +391,25 @@ impl HbSolver {
             if abort.is_aborted() {
                 return Err(HbError::Aborted);
             }
-            let band = usize::try_from(i64::from(output.sideband) - i64::from(sideband_min))
-                .map_err(|_| {
-                    HbError::InvalidCircuit(
-                        "pnoise output-sideband index exceeds this platform".into(),
-                    )
-                })?;
             let mut rhs = try_zeroed_complex_values(size, "pnoise adjoint RHS")?;
-            if let Some(node) = output.node_pos {
-                rhs[node * s + band] += Complex64::new(1.0, 0.0);
+            for (output, weight) in &output.terms {
+                let band = usize::try_from(i64::from(output.sideband) - i64::from(sideband_min))
+                    .map_err(|_| {
+                        HbError::InvalidCircuit(
+                            "pnoise output-sideband index exceeds this platform".into(),
+                        )
+                    })?;
+                if let Some(node) = output.node_pos {
+                    rhs[node * s + band] += *weight;
+                }
+                if let Some(node) = output.node_neg {
+                    rhs[node * s + band] -= *weight;
+                }
             }
-            if let Some(node) = output.node_neg {
-                rhs[node * s + band] -= Complex64::new(1.0, 0.0);
+            if rhs.iter().any(|value| !complex_is_finite(*value)) {
+                return Err(HbError::InvalidCircuit(
+                    "pnoise projected adjoint RHS overflowed".into(),
+                ));
             }
             let solution = if let Some(preconditioner) = &preconditioner {
                 let restart =
@@ -409,8 +472,14 @@ impl HbSolver {
                     gains[channel * s + band] = gain;
                 }
                 let row = &gains[channel * s..(channel + 1) * s];
-                let (density, roundoff) =
-                    source_covariance(row, row, source, window, self.config.fundamental_freq)?;
+                let (density, roundoff) = source_covariance(
+                    row,
+                    row,
+                    source,
+                    window,
+                    self.config.fundamental_freq,
+                    abort,
+                )?;
                 covariance[channel * channels + channel] = density;
                 diagonal_roundoff[channel] = roundoff;
             }
@@ -425,6 +494,7 @@ impl HbSolver {
                         source,
                         window,
                         self.config.fundamental_freq,
+                        abort,
                     )?;
                     // The pairwise PSD bound catches non-physical source
                     // spectra. Normalize before measuring the complex magnitude.

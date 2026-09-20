@@ -24,7 +24,9 @@ mod periodic_ac;
 mod result_builder;
 
 pub(crate) use devices::ScaledNonnegative;
-pub(crate) use periodic_ac::normalize_scaled_noise_waveform;
+pub(crate) use periodic_ac::{
+    PeriodicNoiseOutput, PeriodicNoiseProjection, normalize_scaled_noise_waveform,
+};
 
 pub use periodic_ac::{PeriodicAcExcitation, PeriodicFlickerNoise, PeriodicNoiseSource};
 

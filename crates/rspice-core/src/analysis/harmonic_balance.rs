@@ -53,5 +53,8 @@ pub use solver::{
     NonlinearDeviceInstance, NonlinearDeviceParams, NonlinearDeviceType, PeriodicAcExcitation,
     PeriodicFlickerNoise, PeriodicNoiseSource,
 };
-pub(crate) use solver::{ExactPeriodicNetwork, HbDcSeedPolicy, PeriodicSidebandWindow};
+pub(crate) use solver::{
+    ExactPeriodicNetwork, HbDcSeedPolicy, PeriodicNoiseOutput, PeriodicNoiseProjection,
+    PeriodicSidebandWindow,
+};
 pub(crate) use solver::{ScaledNonnegative, normalize_scaled_noise_waveform};

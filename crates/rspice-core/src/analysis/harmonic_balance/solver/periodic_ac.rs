@@ -16,7 +16,7 @@ use std::collections::BTreeMap;
 use std::f64::consts::PI;
 
 mod noise_correlation;
-pub(crate) use noise_correlation::PeriodicNoiseOutput;
+pub(crate) use noise_correlation::{PeriodicNoiseOutput, PeriodicNoiseProjection};
 
 type PeriodicSpectrum = (usize, usize, Vec<Complex64>);
 

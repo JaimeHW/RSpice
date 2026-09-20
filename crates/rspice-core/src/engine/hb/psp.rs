@@ -1,9 +1,15 @@
 //! Periodic port scattering from one authenticated circuit and linearization.
 
+mod noise;
+
+pub use noise::PspNoiseCorrelation;
+
 use super::periodic_ac::{PacOperatingPoint, PeriodicAcOutput, PreparedPeriodicAc};
 use super::*;
 use crate::analysis::HbError;
-use crate::analysis::harmonic_balance::{PeriodicAcExcitation, PeriodicSidebandWindow};
+use crate::analysis::harmonic_balance::{
+    PeriodicAcExcitation, PeriodicNoiseSource, PeriodicSidebandWindow,
+};
 use crate::analysis::pac::PacConfig;
 use crate::analysis::s_param::{
     NetworkError, PortRealization, SMatrix, SParameterPort, s_column_from_port_voltages,
@@ -25,6 +31,9 @@ pub struct PspAnalysisResult {
     /// `SMatrix`. Thus `(port_index * sideband_count + sideband_offset + 1)`
     /// identifies a wave channel; it does not identify an additional circuit port.
     pub data: Vec<SMatrix>,
+    /// Intrinsic device noise waves at the same authored references and
+    /// channel order as `data`. External port-termination noise is excluded.
+    pub noise: Option<Vec<PspNoiseCorrelation>>,
 }
 
 /// Authenticated periodic setup, ready to sweep all physical ports together.
@@ -40,6 +49,7 @@ pub struct PreparedPsp {
     frequencies: Vec<Value>,
     config: PacConfig,
     lifted_unknowns: usize,
+    noise_sources: Option<Vec<PeriodicNoiseSource>>,
 }
 
 impl Engine {
@@ -57,6 +67,7 @@ impl Engine {
             netlist,
             config,
             PacOperatingPoint::Shooting(point),
+            false,
             abort,
         )
     }
@@ -74,6 +85,43 @@ impl Engine {
             netlist,
             config,
             PacOperatingPoint::HarmonicBalance(point),
+            false,
+            abort,
+        )
+    }
+
+    /// Prepare shooting PSP with optional intrinsic correlated noise waves.
+    pub fn prepare_psp_from_pss_with_noise_and_abort(
+        &self,
+        netlist: &Netlist,
+        config: PacConfig,
+        point: &super::super::PssOperatingPoint,
+        noise: bool,
+        abort: &dyn AbortSignal,
+    ) -> Result<PreparedPsp, SimulationError> {
+        self.resolved_for_netlist(netlist).prepare_psp(
+            netlist,
+            config,
+            PacOperatingPoint::Shooting(point),
+            noise,
+            abort,
+        )
+    }
+
+    /// Prepare HBSP with optional intrinsic correlated noise waves.
+    pub fn prepare_psp_from_hb_with_noise_and_abort(
+        &self,
+        netlist: &Netlist,
+        config: PacConfig,
+        point: &HbOperatingPoint,
+        noise: bool,
+        abort: &dyn AbortSignal,
+    ) -> Result<PreparedPsp, SimulationError> {
+        self.resolved_for_netlist(netlist).prepare_psp(
+            netlist,
+            config,
+            PacOperatingPoint::HarmonicBalance(point),
+            noise,
             abort,
         )
     }
@@ -83,11 +131,12 @@ impl Engine {
         netlist: &Netlist,
         mut config: PacConfig,
         point: PacOperatingPoint<'_>,
+        noise: bool,
         abort: &dyn AbortSignal,
     ) -> Result<PreparedPsp, SimulationError> {
         let PreparedPeriodicAc {
             circuit,
-            solver,
+            mut solver,
             state,
             node_names,
             rf_ports,
@@ -120,6 +169,10 @@ impl Engine {
                     ))
                 })
         };
+        let excluded_resistors = rf_ports
+            .iter()
+            .map(|port| port.termination.clone())
+            .collect::<Vec<_>>();
         for materialized in rf_ports {
             if abort.is_aborted() {
                 return Err(SimulationError::Aborted);
@@ -158,6 +211,45 @@ impl Engine {
                         SimulationError::Circuit(format!("Invalid PSP frequency sweep: {error}"))
                     }
                 })?;
+        let noise_sources = if noise {
+            let channels = ports.len().checked_mul(sidebands).ok_or_else(|| {
+                SimulationError::Circuit(
+                    "PSP noise channel dimensions overflow this platform".into(),
+                )
+            })?;
+            // Account for scattering plus covariance (two complex sweeps),
+            // and bound the adjoints retained by the joint noise calculation.
+            self.ensure_result_values(
+                channels
+                    .checked_mul(channels)
+                    .and_then(|n| n.checked_mul(frequencies.len()))
+                    .and_then(|n| n.checked_mul(4))
+                    .ok_or_else(|| {
+                        SimulationError::Circuit(
+                            "PSP noise result dimensions overflow this platform".into(),
+                        )
+                    })?,
+            )?;
+            self.ensure_result_values(
+                channels
+                    .checked_mul(lifted_unknowns)
+                    .and_then(|n| n.checked_mul(2))
+                    .ok_or_else(|| {
+                        SimulationError::Circuit(
+                            "PSP noise adjoint dimensions overflow this platform".into(),
+                        )
+                    })?,
+            )?;
+            Some(self.prepare_periodic_noise_sources(
+                &circuit,
+                &mut solver,
+                &state,
+                &excluded_resistors,
+                abort,
+            )?)
+        } else {
+            None
+        };
         Ok(PreparedPsp {
             solver,
             state,
@@ -169,6 +261,7 @@ impl Engine {
             frequencies,
             config,
             lifted_unknowns,
+            noise_sources,
         })
     }
 }
@@ -208,6 +301,10 @@ impl PreparedPsp {
             }
         }
         let mut data = Vec::with_capacity(self.frequencies.len());
+        let mut noise = self
+            .noise_sources
+            .as_ref()
+            .map(|_| Vec::with_capacity(self.frequencies.len()));
         let mut voltages = Vec::with_capacity(channels);
         for frequency in self.frequencies {
             if abort.is_aborted() {
@@ -288,6 +385,19 @@ impl PreparedPsp {
                         SimulationError::Circuit(format!("PSP wave conversion failed: {error}"))
                     }
                 })?;
+            if let (Some(sources), Some(points)) = (&self.noise_sources, &mut noise) {
+                points.push(noise::solve_noise_waves(
+                    &mut self.solver,
+                    &self.state,
+                    &self.config,
+                    &matrix,
+                    &self.nodes,
+                    &self.physical_references,
+                    sources,
+                    abort,
+                    &self.authored_references,
+                )?);
+            }
             data.push(matrix);
         }
         if abort.is_aborted() {
@@ -299,6 +409,7 @@ impl PreparedPsp {
             sideband_min: self.config.sideband_min,
             sideband_max: self.config.sideband_max,
             data,
+            noise,
         })
     }
 }
