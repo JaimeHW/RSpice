@@ -276,10 +276,40 @@ pub fn run_optimization_analysis_with_config_and_source_path_and_abort(
     source_path: Option<&Path>,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<OptimizationData> {
+    config.validate().map_err(ServiceRunError::Failure)?;
+    let netlist = parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
+    let limits = build_engine_config(&netlist, None).resource_limits;
+    run_optimization_with_evaluator(config, limits, abort, |vars| {
+        evaluate_optimization_objective(netlist_text, vars, config, source_path, abort)
+    })
+}
+
+/// Search a caller-provided configured analysis while retaining the standard
+/// algorithms, histories, stopping rules and failure handling.
+pub(crate) fn run_optimization_with_evaluator<F>(
+    config: &OptimizationRunConfig,
+    limits: rspice_core::ResourceLimits,
+    abort: &dyn AbortSignal,
+    mut evaluate: F,
+) -> ServiceRunResult<OptimizationData>
+where
+    F: FnMut(&HashMap<String, Value>) -> ServiceRunResult<Value>,
+{
     ensure_not_aborted(abort)?;
     config.validate().map_err(ServiceRunError::Failure)?;
     ensure_not_aborted(abort)?;
 
+    let retained = config
+        .max_iterations
+        .saturating_add(1)
+        .saturating_mul(config.variables.len().saturating_add(2));
+    if retained > limits.max_result_values {
+        return Err(ServiceRunError::resource_limit(
+            rspice_core::ResourceKind::ResultValues,
+            retained,
+            limits.max_result_values,
+        ));
+    }
     let optimizer_config = OptimizerConfig {
         algorithm: match config.algorithm {
             OptimizationAlgorithmMode::GradientDescent => OptimizerAlgo::GradientDescent,
@@ -321,13 +351,21 @@ pub fn run_optimization_analysis_with_config_and_source_path_and_abort(
     let eval_error: RefCell<Option<ServiceRunError>> = RefCell::new(None);
     let abort_seen = Cell::new(false);
     let fatal_error_seen = Cell::new(false);
+    let mut evaluations = 0usize;
     let mut cost_fn = |vars: &HashMap<String, Value>| -> Value {
         if abort_seen.get() || fatal_error_seen.get() {
             return Value::INFINITY;
         }
-        let evaluation =
-            evaluate_optimization_objective(netlist_text, vars, config, source_path, abort)
-                .and_then(|value| objective_to_cost(value, config.goal, config.target));
+        let evaluation = if evaluations >= limits.max_batch_runs {
+            Err(ServiceRunError::resource_limit(
+                rspice_core::ResourceKind::BatchRuns,
+                evaluations.saturating_add(1),
+                limits.max_batch_runs,
+            ))
+        } else {
+            evaluations += 1;
+            evaluate(vars).and_then(|value| objective_to_cost(value, config.goal, config.target))
+        };
         match evaluation {
             Ok(cost) => cost,
             Err(ServiceRunError::Aborted) => {
@@ -917,5 +955,43 @@ R2 out 0 1k
         assert!(optimizer.best_result().0.is_empty());
         optimizer.observe_candidate(&initial, f64::MAX);
         assert_eq!(optimizer.best_result(), (&initial, f64::MAX));
+    }
+}
+
+#[cfg(test)]
+mod configured_search_limits {
+    use super::*;
+    use rspice_core::abort_signal::NoAbort;
+
+    #[test]
+    fn configured_optimization_bounds_history_and_candidate_evaluations() {
+        let mut limits = rspice_core::ResourceLimits::default();
+        limits.max_result_values = 256;
+        let config = OptimizationRunConfig {
+            max_iterations: usize::MAX,
+            ..Default::default()
+        };
+        let calls = Cell::new(0);
+        let error = run_optimization_with_evaluator(&config, limits, &NoAbort, |_| {
+            calls.set(calls.get() + 1);
+            Ok(1.0)
+        })
+        .unwrap_err();
+        assert!(matches!(error, ServiceRunError::ResourceLimit(_)));
+        assert_eq!(calls.get(), 0);
+        limits.max_batch_runs = 1;
+        let config = OptimizationRunConfig {
+            max_iterations: 10,
+            ..Default::default()
+        };
+        let error = run_optimization_with_evaluator(&config, limits, &NoAbort, |_| {
+            calls.set(calls.get() + 1);
+            Ok(1.0)
+        })
+        .unwrap_err();
+        assert!(
+            matches!(error, ServiceRunError::ResourceLimit(error) if error.resource == rspice_core::ResourceKind::BatchRuns)
+        );
+        assert_eq!(calls.get(), 1);
     }
 }

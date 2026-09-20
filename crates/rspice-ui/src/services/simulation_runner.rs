@@ -83,6 +83,7 @@ pub use optimization::{
     run_optimization_analysis_with_config_and_source_path_and_abort,
     validate_optimization_expression,
 };
+pub(crate) use optimization::{OptimizationData, run_optimization_with_evaluator};
 pub use pac_pxf::{
     PacFrequencySweep, PacRunConfig, PxfFrequencySweep, PxfRunConfig,
     run_pac_analysis_from_hb_with_source_path_and_abort,
