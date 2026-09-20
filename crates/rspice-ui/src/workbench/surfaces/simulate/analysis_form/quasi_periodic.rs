@@ -13,13 +13,13 @@ use crate::simulation::plan::{
 };
 
 use super::{
-    QuantityPresentationPolicy, UiNumberLocale, frequency_sweep_fields, input_row,
+    QuantityPresentationPolicy, UiNumberLocale, choice_row, frequency_sweep_fields, input_row,
     input_row_enabled, switch_row,
 };
 
 /// Render the QPSS fields.
 pub(super) fn shooting_fields(ui: &mut Ui, setup: &mut QpssDraft) {
-    ui.small("Driven QPSS preview: circuit unknowns × retained lattice points must not exceed 512. Lower harmonic or mixing orders to reduce the size.");
+    ui.small("Driven QPSS preview. Automatic mode uses the iterative solver above 512 coupled coordinates; the direct solver is limited to 512. Both enforce the configured memory limits.");
     input_row(ui, "Tone frequencies", &mut setup.tones);
     input_row(ui, "Harmonic orders", &mut setup.harmonics);
     input_row(
@@ -46,6 +46,43 @@ pub(super) fn shooting_fields(ui: &mut Ui, setup: &mut QpssDraft) {
         "Initialize from DC operating point",
         &mut setup.dc_initialization,
     );
+    use rspice_core::analysis::quasi_periodic::QuasiPeriodicLinearMethod as Method;
+    let mut method = match setup.linear_method {
+        Method::Auto => 0,
+        Method::Direct => 1,
+        Method::Krylov => 2,
+    };
+    choice_row(
+        ui,
+        "Linear solver",
+        &["Automatic", "Direct", "Krylov (matrix-free)"],
+        &mut method,
+    );
+    setup.linear_method = match method {
+        1 => Method::Direct,
+        2 => Method::Krylov,
+        _ => Method::Auto,
+    };
+    let iterative = setup.linear_method != Method::Direct;
+    input_row_enabled(
+        ui,
+        "Krylov restart vectors",
+        &mut setup.krylov_restart,
+        iterative,
+    );
+    input_row_enabled(
+        ui,
+        "Maximum restart cycles",
+        &mut setup.krylov_cycles,
+        iterative,
+    );
+    input_row_enabled(
+        ui,
+        "Linear relative tolerance",
+        &mut setup.linear_tolerance,
+        iterative,
+    );
+    ui.small("Each restart cycle uses up to the requested number of vectors (8–64).");
     input_row(ui, "Max iterations", &mut setup.max_iterations);
     input_row(ui, "Relative tolerance", &mut setup.relative_tolerance);
     input_row(

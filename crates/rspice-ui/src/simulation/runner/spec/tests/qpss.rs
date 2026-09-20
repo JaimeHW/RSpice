@@ -17,6 +17,10 @@ fn authored() -> QpssDraft {
         max_mixing_order: "1".into(),
         collocation_points: "8, 16".into(),
         source_tones: "V1=1; I1=2".into(),
+        linear_method: rspice_core::analysis::quasi_periodic::QuasiPeriodicLinearMethod::Krylov,
+        krylov_restart: "16".into(),
+        krylov_cycles: "12".into(),
+        linear_tolerance: "2e-11".into(),
         dc_initialization: true,
         ..Default::default()
     }
@@ -44,6 +48,13 @@ fn qpss_controls_survive_draft_worker_and_real_engine_execution() {
     assert_eq!(config.solver.current_absolute_tolerance, 2e-13);
     assert_eq!(config.solver.voltage_absolute_tolerance, 3e-10);
     assert_eq!(config.solver.max_backtracks, 7);
+    assert_eq!(
+        config.solver.linear.method,
+        rspice_core::analysis::quasi_periodic::QuasiPeriodicLinearMethod::Krylov
+    );
+    assert_eq!(config.solver.linear.restart, 16);
+    assert_eq!(config.solver.linear.max_cycles, 12);
+    assert_eq!(config.solver.linear.relative_tolerance, 2e-11);
     assert_eq!(config.initial_state, QpssInitialState::DcOperatingPoint);
     assert_eq!(config.source_tones[0].source, "V1");
     assert_eq!(config.source_tones[1].tone, 1);
@@ -142,4 +153,19 @@ fn qpss_controls_validate_inactive_and_legacy_fields() {
             .unwrap_err()
             .contains("autonomous")
     );
+}
+
+#[test]
+fn qpss_controls_direct_mode_retains_inactive_krylov_draft_buffers() {
+    use rspice_core::analysis::quasi_periodic::QuasiPeriodicLinearMethod as Method;
+    let mut draft = authored();
+    draft.linear_method = Method::Direct;
+    draft.krylov_restart = "unfinished".into();
+    draft.krylov_cycles = "unfinished".into();
+    draft.linear_tolerance = "unfinished".into();
+    let config = draft.to_spec().unwrap().driven_qpss_config().unwrap();
+    assert_eq!(config.solver.linear.method, Method::Direct);
+    assert_eq!(draft.krylov_restart, "unfinished");
+    draft.linear_method = Method::Krylov;
+    assert!(draft.to_spec().is_err());
 }

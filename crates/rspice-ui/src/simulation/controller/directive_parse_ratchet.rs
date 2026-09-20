@@ -967,6 +967,10 @@ fn qpss_card_studio_and_manual_deck_resolve_the_same_complete_configuration() {
         max_mixing_order: "2".into(),
         collocation_points: "8, 16".into(),
         source_tones: "vDrive=2; vDrive=1; iDrive=2".into(),
+        linear_method: rspice_core::analysis::quasi_periodic::QuasiPeriodicLinearMethod::Krylov,
+        krylov_restart: "16".into(),
+        krylov_cycles: "12".into(),
+        linear_tolerance: "2e-11".into(),
         dc_initialization: true,
         ..Default::default()
     });
