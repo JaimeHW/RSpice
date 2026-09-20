@@ -200,6 +200,12 @@ jobs:
       - name: Install Rust toolchain
         run: rustup toolchain install ${{ env.RUST_TOOLCHAIN }} --profile minimal --component rustfmt --component clippy
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
+      - name: Check runtime-only compiler targets
+        run: cargo check --locked -p rspice-veriloga --no-default-features --features native,wasm-jit --all-targets
+      - name: Test compiler without the Rust-source emitter
+        run: |
+          cargo test --locked -p rspice-veriloga --no-default-features --test rust_codegen_feature
+          cargo test --locked -p rspice-veriloga --no-default-features --features native,wasm-jit --test rust_codegen_feature
       - name: Test remaining workspace crates
         run: >-
           cargo test --locked --workspace --no-fail-fast

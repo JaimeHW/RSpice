@@ -2056,8 +2056,8 @@ pub fn differentiate(
     match differentiate_with_control(function, lanes, &NoPipelineControl) {
         Ok(function) => Ok(function),
         Err(DifferentiationError::Validation(error)) => Err(error),
-        Err(DifferentiationError::Cancelled(_)) => {
-            unreachable!("the no-op pipeline control cannot cancel")
+        Err(DifferentiationError::Cancelled(error)) => {
+            unreachable!("the no-op pipeline control cannot cancel: {error}")
         }
     }
 }
@@ -2080,6 +2080,7 @@ pub(crate) fn differentiate_with_control(
 /// extract. Other `ddx` readbacks (notably noise/reporting expressions) are
 /// still resolved by the packed first-order pass, but do not inflate the stamp
 /// with second derivatives no caller observes.
+#[cfg(feature = "rust-codegen")]
 pub(crate) fn differentiate_with_control_for_roots(
     function: &CfgFunction,
     lanes: &[AdSeed],

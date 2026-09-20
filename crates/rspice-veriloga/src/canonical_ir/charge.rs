@@ -23,6 +23,7 @@ use std::collections::HashMap;
 /// exactly the case this one exists to cover, and exactly the case a
 /// self-heating model is written in. A fourth copy for the block route would be
 /// a fourth set of shape rules to keep in step.
+#[cfg(any(feature = "rust-codegen", feature = "native", feature = "wasm-jit"))]
 pub(crate) fn stored_charges(
     function: &mut CfgFunction,
     residuals: &[ValueId],

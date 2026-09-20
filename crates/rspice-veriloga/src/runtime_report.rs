@@ -14,8 +14,10 @@ use thiserror::Error;
 use crate::canonical_ir::{CanonicalIrArtifact, CanonicalValueType, HirExprKind};
 use crate::codegen::CompiledModel;
 use crate::error::CompileError;
+use crate::generated_source::GeneratedRustDevice;
 use crate::metrics::PipelineMetrics;
-use crate::rust_backend::{GeneratedRustDevice, RustTranspileOptions, RustTranspiler};
+#[cfg(feature = "rust-codegen")]
+use crate::rust_backend::{RustTranspileOptions, RustTranspiler};
 use crate::source::Span;
 
 /// The complete, mutually consistent output of an in-memory runtime compile.
@@ -531,26 +533,7 @@ fn qualify_runtime_targets(
     options: RuntimeQualificationOptions,
 ) -> (RuntimeTargetQualifications, Option<GeneratedRustDevice>) {
     let (generated_qualification, generated_rust) = if options.generated_rust {
-        match RustTranspiler::new(RustTranspileOptions::default()).transpile(canonical_ir) {
-            Ok(device) => (
-                qualification(
-                    RuntimeTarget::GeneratedRust,
-                    RuntimeTargetReadiness::Available,
-                    RuntimeTargetMaturity::QualificationOnly,
-                    "qualified with the canonical CFG backend",
-                ),
-                Some(device),
-            ),
-            Err(error) => (
-                qualification(
-                    RuntimeTarget::GeneratedRust,
-                    RuntimeTargetReadiness::Rejected,
-                    RuntimeTargetMaturity::QualificationOnly,
-                    error.to_string(),
-                ),
-                None,
-            ),
-        }
+        qualify_generated_rust(canonical_ir)
     } else {
         (
             qualification(
@@ -588,6 +571,47 @@ fn qualify_runtime_targets(
     ];
 
     (RuntimeTargetQualifications::new(entries), generated_rust)
+}
+
+#[cfg(feature = "rust-codegen")]
+fn qualify_generated_rust(
+    canonical_ir: &CanonicalIrArtifact,
+) -> (RuntimeTargetQualification, Option<GeneratedRustDevice>) {
+    match RustTranspiler::new(RustTranspileOptions::default()).transpile(canonical_ir) {
+        Ok(device) => (
+            qualification(
+                RuntimeTarget::GeneratedRust,
+                RuntimeTargetReadiness::Available,
+                RuntimeTargetMaturity::QualificationOnly,
+                "qualified with the canonical CFG backend",
+            ),
+            Some(device),
+        ),
+        Err(error) => (
+            qualification(
+                RuntimeTarget::GeneratedRust,
+                RuntimeTargetReadiness::Rejected,
+                RuntimeTargetMaturity::QualificationOnly,
+                error.to_string(),
+            ),
+            None,
+        ),
+    }
+}
+
+#[cfg(not(feature = "rust-codegen"))]
+fn qualify_generated_rust(
+    _canonical_ir: &CanonicalIrArtifact,
+) -> (RuntimeTargetQualification, Option<GeneratedRustDevice>) {
+    (
+        qualification(
+            RuntimeTarget::GeneratedRust,
+            RuntimeTargetReadiness::Unavailable,
+            RuntimeTargetMaturity::QualificationOnly,
+            "generated Rust backend is disabled; enable the rust-codegen feature",
+        ),
+        None,
+    )
 }
 
 fn qualify_wasm_jit_if_requested(

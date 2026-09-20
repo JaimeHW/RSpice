@@ -26,6 +26,7 @@ use std::collections::HashSet;
 use super::census_models::shipped_census_models_matching;
 use super::mir_postfix::MirPoint;
 use crate::canonical_ir::cfg_lower::{CfgModel, CfgNoiseProcess};
+use crate::canonical_ir::charge::stored_charges;
 use crate::canonical_ir::{
     AdFunction, AdSeed, CanonicalNoiseSourceKind, CanonicalStateFamily, CanonicalStateLayout,
     CfgEvalInputs, CfgEvalSnapshot, CfgFunction, CfgScalar, CfgStateAllocation, ComplexStep,
@@ -41,7 +42,7 @@ use crate::native::abi::EvalContext;
 use crate::native::model::NativeRequiredStorage;
 use crate::native::runtime::ExecutableMemory;
 use crate::native::x64::codegen::compile_value_function_artifact_from_ssa;
-use crate::rust_backend::canonical::{noise_plan_decline, stored_charges};
+use crate::rust_backend::canonical::noise_plan_decline;
 
 /// Outputs lowered and compared per model.
 ///

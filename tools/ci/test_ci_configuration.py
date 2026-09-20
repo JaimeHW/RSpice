@@ -294,6 +294,20 @@ class CiConfigurationTests(unittest.TestCase):
             )
             self.assertFalse((ROOT / "crates" / name).exists())
 
+    def test_runtime_only_compiler_is_qualified_without_feature_unification(self) -> None:
+        workflow = read_text(".github/workflows/ci.yml")
+        for features in ("", " --features native,wasm-jit"):
+            self.assertIn(
+                "cargo test --locked -p rspice-veriloga --no-default-features"
+                + features + " --test rust_codegen_feature",
+                workflow,
+            )
+        self.assertIn(
+            "cargo check --locked -p rspice-veriloga --no-default-features"
+            " --features native,wasm-jit --all-targets",
+            workflow,
+        )
+
     def test_xyce_upstream_exclusion_manifest_is_byte_exact_and_reproducible(self) -> None:
         module, _, manifest, expected = xyce_exclusion_fixture()
         module.verify_manifest_bytes(manifest, expected)

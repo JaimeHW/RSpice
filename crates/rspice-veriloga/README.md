@@ -437,9 +437,16 @@ output. Models that rely on these missing task behaviors are not supported.
 
 | Feature | Default | Effect |
 | :--- | :--- | :--- |
+| `rust-codegen` | on | Offline Rust-source emitter and `rspice-veriloga-gen`. Disable default features for runtime-only compilation; serialized generated-source artifact types remain available in `generated_source` |
 | `native` | off | RSpice-owned native JIT for Verilog-A devices; requested native mode is full native JIT or typed construction error, with no bytecode fallback. Pulls in the platform APIs for executable memory (`windows-sys` / `libc`) |
 | `wasm-jit` | off | Browser JIT backend, adding `wasm-encoder` and `wasmparser`. Reached through `rspice-core/veriloga-wasm-jit` |
 | `native-bytecode-contract-tests` | off | Internal. Implies `native` and exposes `compile_native`, which JITs straight from the bytecode model without a canonical IR artifact. Backend contract tests only: production native users must supply canonical IR and must not enable it |
+
+`rspice-core` disables compiler defaults: simulation does not need Rust-source
+emission. Compiler tooling, the CLI, and the IDE retain it through their direct
+compiler dependency. A runtime-only build still reads the same report format;
+requesting generated Rust reports that the backend is unavailable, and requiring
+it returns a qualification error. Native and Wasm JITs do not need the emitter.
 
 `rspice-core` maps these as `veriloga` (interpreter) and `veriloga-native`
 (native JIT) and adds a blake3-keyed on-disk cache for compiled models on

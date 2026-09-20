@@ -47,6 +47,7 @@ use std::time::Instant;
 
 use super::census_models::shipped_census_models_matching;
 use crate::canonical_ir::cfg_lower::CfgModel;
+use crate::canonical_ir::charge::stored_charges;
 use crate::canonical_ir::{
     CfgFunction, CfgStateAllocation, ValueId, differentiate, prune_cfg_to_outputs,
 };
@@ -61,7 +62,6 @@ use crate::jit::plan_builder::{
     build_model_plan_with_canonical_ir, canonical_branch_unknown_runtime_map,
 };
 use crate::jit::ssa::RegisterAllocation;
-use crate::rust_backend::canonical::stored_charges;
 
 /// The highest spill slot AArch64 can address, plus one.
 ///

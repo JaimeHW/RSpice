@@ -72,22 +72,9 @@ use crate::metrics::{
     PipelinePhase, usize_to_u64,
 };
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct GeneratedRustFile {
-    pub relative_path: String,
-    pub contents: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct GeneratedRustDevice {
-    pub module_name: String,
-    pub public_model_name: String,
-    pub folder_name: String,
-    pub files: Vec<GeneratedRustFile>,
-    pub source_digest: String,
-    pub source_identity: String,
-    pub accepted_state_shape_identity: [u8; 32],
-}
+// Keep the existing tooling paths while reports can name these data-only
+// artifacts without compiling the source emitter.
+pub use crate::generated_source::{GeneratedRustDevice, GeneratedRustFile};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RustTranspileOptions {

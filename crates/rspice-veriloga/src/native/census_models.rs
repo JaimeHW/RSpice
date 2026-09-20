@@ -70,6 +70,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
+pub(crate) use super::census_filter::{shipped_model_filter, shipped_model_filter_allows};
 use crate::canonical_ir::CanonicalIrArtifact;
 use crate::codegen::CompiledModel;
 use crate::rust_backend::{discover_veriloga_sources, parse_generated_builtin_manifest};
@@ -132,27 +133,6 @@ pub(crate) fn shipped_census_models_matching(
 /// [`RSPICE_NATIVE_SHIPPED_MODEL_FILTER`]: shipped_model_filter
 pub(crate) fn shipped_census_models_for_env_filter() -> impl Iterator<Item = CensusModel> {
     shipped_census_models_admitting(shipped_model_filter_allows)
-}
-
-/// The value of `RSPICE_NATIVE_SHIPPED_MODEL_FILTER`, if it is set.
-///
-/// This is the shipped-model oracle's own variable — a comma-separated list of
-/// module names — shared rather than duplicated: a runner that must point one
-/// process at one model should not have to learn a second spelling for it, and
-/// a second parser could drift from the one the oracle honours.
-pub(crate) fn shipped_model_filter() -> Option<String> {
-    std::env::var("RSPICE_NATIVE_SHIPPED_MODEL_FILTER").ok()
-}
-
-/// Whether that filter admits `name`. An unset filter admits everything.
-pub(crate) fn shipped_model_filter_allows(name: &str) -> bool {
-    let Some(filter) = shipped_model_filter() else {
-        return true;
-    };
-    filter
-        .split(',')
-        .map(str::trim)
-        .any(|candidate| candidate.eq_ignore_ascii_case(name))
 }
 
 /// The shared provider, narrowed by whatever its caller admits.

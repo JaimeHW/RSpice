@@ -305,7 +305,7 @@ portable-atomic = { workspace = true, optional = true }
 wasm-bindgen = { version = "0.2", optional = true }
 
 # Verilog-A support (optional)
-rspice-veriloga = { path = "../rspice-veriloga", version = "0.1.0", optional = true }
+rspice-veriloga = { path = "../rspice-veriloga", version = "0.1.0", optional = true, default-features = false }
 
 # SIMD acceleration (optional)
 wide = { version = "1.5", optional = true }

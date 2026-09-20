@@ -12,7 +12,12 @@ pub(crate) mod calling_convention;
 pub(crate) mod codegen;
 pub(crate) mod encoder;
 pub(crate) mod image;
-#[cfg(all(test, feature = "native", target_arch = "x86_64"))]
+#[cfg(all(
+    test,
+    feature = "native",
+    feature = "rust-codegen",
+    target_arch = "x86_64"
+))]
 mod prelude_census;
 pub(crate) mod unwind;
 pub(crate) mod verifier;

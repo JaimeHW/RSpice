@@ -214,13 +214,13 @@ use super::ssa::{BlockId, BuilderTerminator, Program, ProgramBuilder, ValueType}
 use super::{JitError, JitResult};
 use crate::canonical_ir::cfg_lower::CfgModel;
 use crate::canonical_ir::cfg_lower::CfgNoiseProcess;
+use crate::canonical_ir::charge::stored_charges;
 use crate::canonical_ir::{
     AdSeed, CanonicalIrArtifact, CfgBlock, CfgFunction, CfgInstruction, CfgStateAllocation,
     CfgTerminator, CfgValueKind, MirModel, ValueId, differentiate, prune_cfg_to_outputs,
 };
 use crate::codegen::state_renumbering::StateSlotMapping;
 use crate::codegen::{ColumnAxis, CompiledModel};
-use crate::rust_backend::canonical::stored_charges;
 
 /// Why the CFG route cannot build a plan for a module.
 ///

@@ -104,6 +104,7 @@ use super::cfg_census::{OperatingPoint, deviation};
 use super::double_double::{DoubleDouble, lift_inputs};
 use super::mir_postfix::PlanWalk;
 use crate::canonical_ir::cfg_lower::CfgModel;
+use crate::canonical_ir::charge::stored_charges;
 use crate::canonical_ir::{CfgScalar, differentiate, evaluate_cfg, prune_cfg_to_outputs};
 use crate::jit::cfg_lanes::scalarize_lanes;
 use crate::jit::cfg_plan_builder::{
@@ -114,7 +115,6 @@ use crate::jit::plan_program::PlanProgram;
 use crate::native::aarch64::image::A64_SEGMENT_THRESHOLD_BYTES;
 use crate::native::abi::EvalContext;
 use crate::native::model::NativeModel;
-use crate::rust_backend::canonical::stored_charges;
 
 /// The three operating points, drawn once and used by both passes.
 ///

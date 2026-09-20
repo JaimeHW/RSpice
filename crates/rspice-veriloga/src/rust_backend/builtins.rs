@@ -75,6 +75,7 @@ const GENERATOR_SOURCE_DIGEST_INPUTS: &[&str] = &[
     "src/error.rs",
     "src/expr_converter.rs",
     "src/four_state.rs",
+    "src/generated_source.rs",
     "src/integer_runtime.rs",
     "src/ir",
     "src/ir.rs",

@@ -12,6 +12,11 @@ description = "Verilog-A/AMS compiler for RSpice circuit simulator"
 [lib]
 doctest = false
 
+[[bin]]
+name = "rspice-veriloga-gen"
+path = "src/bin/rspice-veriloga-gen.rs"
+required-features = ["rust-codegen"]
+
 [dependencies]
 # Core dependencies
 thiserror.workspace = true
@@ -52,7 +57,10 @@ cc = "1.2"
 wasmi = { version = "1.1.0", default-features = false, features = ["std", "extra-checks", "prefer-btree-collections"] }
 
 [features]
-default = []
+# Preserve the compiler/tooling API by default. Engine-only consumers disable
+# defaults to omit the offline emitter while retaining serialized report types.
+default = ["rust-codegen"]
+rust-codegen = []
 # Enable RSpice native JIT compilation. Native mode is full JIT or error.
 native = ["dep:windows-sys", "dep:libc"]
 # Compile deterministic standard WebAssembly modules from the canonical JIT
@@ -65,3 +73,82 @@ native-bytecode-contract-tests = ["native"]
 
 [lints]
 workspace = true
+
+# These suites exercise emitted Rust or the generator's corpus tooling.
+# Runtime-only builds retain the remaining frontend, VM, and JIT suites.
+
+[[test]]
+name = "canonical_device"
+required-features = ["rust-codegen"]
+
+[[test]]
+name = "canonical_ir"
+required-features = ["rust-codegen"]
+
+[[test]]
+name = "canonical_state_correspondence"
+required-features = ["rust-codegen"]
+
+[[test]]
+name = "cfg_derivatives"
+required-features = ["rust-codegen"]
+
+[[test]]
+name = "cfg_emission"
+required-features = ["rust-codegen"]
+
+[[test]]
+name = "cfg_lane_census"
+required-features = ["rust-codegen"]
+
+[[test]]
+name = "cfg_lowering"
+required-features = ["rust-codegen"]
+
+[[test]]
+name = "cfg_noise"
+required-features = ["rust-codegen"]
+
+[[test]]
+name = "cfg_runtime"
+required-features = ["rust-codegen"]
+
+[[test]]
+name = "cfg_scale"
+required-features = ["rust-codegen"]
+
+[[test]]
+name = "cfg_stamp_plan"
+required-features = ["rust-codegen"]
+
+[[test]]
+name = "digital_process_ir"
+required-features = ["rust-codegen"]
+
+[[test]]
+name = "frontend_determinism"
+required-features = ["rust-codegen"]
+
+[[test]]
+name = "frontend_profile"
+required-features = ["rust-codegen"]
+
+[[test]]
+name = "generated_output_audit"
+required-features = ["rust-codegen"]
+
+[[test]]
+name = "hierarchy_elaboration"
+required-features = ["rust-codegen"]
+
+[[test]]
+name = "module_timing"
+required-features = ["rust-codegen"]
+
+[[test]]
+name = "noise_processes"
+required-features = ["rust-codegen"]
+
+[[test]]
+name = "runtime_compile_report"
+required-features = ["rust-codegen"]

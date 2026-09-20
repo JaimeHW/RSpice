@@ -1315,7 +1315,7 @@ mod tests {
     use crate::jit::cfg_plan_builder::build_default_model_plan_reported;
     use crate::jit::plan_program::{BlockProgram, PlanProgram};
     use crate::native::EvalContext;
-    use crate::native::census_models::shipped_model_filter_allows;
+    use crate::native::census_filter::shipped_model_filter_allows;
     use crate::native::expr::{
         CanonicalDerivativeAxis, EntryKind, NativeLoweringLimits, NativeOp, NativeProgram,
         PriorCurrentProbe,

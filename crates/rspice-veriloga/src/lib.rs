@@ -24,8 +24,8 @@
 //!
 //! The backends are [`codegen`], emitting a bytecode [`CompiledModel`] run by
 //! [`vm`]; `native`, a JIT behind the `native` feature; `wasm_jit`, a
-//! WebAssembly JIT behind the `wasm-jit` feature; and [`rust_backend`], an
-//! offline emitter that turns canonical IR into Rust source compiled directly
+//! WebAssembly JIT behind the `wasm-jit` feature; and `rust_backend`, an
+//! offline emitter behind `rust-codegen` that turns canonical IR into Rust source compiled directly
 //! into `rspice-core`. The first three are driven in-process through
 //! [`device::VerilogADevice`]; the last runs ahead of the build.
 //!
@@ -98,6 +98,7 @@ pub mod disciplines;
 pub mod error;
 pub mod expr_converter;
 pub mod four_state;
+pub mod generated_source;
 mod integer_runtime;
 pub mod ir;
 pub mod json_float;
@@ -110,6 +111,7 @@ mod prepared_virtual_source;
 pub mod preprocessor;
 mod reaching_definition;
 pub mod runtime_report;
+#[cfg(feature = "rust-codegen")]
 pub mod rust_backend;
 pub mod semantic;
 pub mod source;

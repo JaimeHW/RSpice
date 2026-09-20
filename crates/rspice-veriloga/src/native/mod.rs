@@ -6,28 +6,85 @@
 pub(crate) mod aarch64;
 mod abi;
 pub mod bench;
-#[cfg(all(test, feature = "native", target_arch = "x86_64"))]
+#[cfg(all(
+    test,
+    feature = "native",
+    feature = "rust-codegen",
+    target_arch = "x86_64"
+))]
 mod branch_agreement;
 pub(crate) mod cache;
 #[cfg(all(test, feature = "native", target_arch = "x86_64"))]
+mod census_filter;
+#[cfg(all(
+    test,
+    feature = "native",
+    feature = "rust-codegen",
+    target_arch = "x86_64"
+))]
 pub(crate) mod census_models;
-#[cfg(all(test, feature = "native", target_arch = "x86_64"))]
+#[cfg(all(
+    test,
+    feature = "native",
+    feature = "rust-codegen",
+    target_arch = "x86_64"
+))]
 mod cfg_census;
-#[cfg(all(test, feature = "native", target_arch = "x86_64"))]
+#[cfg(all(
+    test,
+    feature = "native",
+    feature = "rust-codegen",
+    target_arch = "x86_64"
+))]
 mod cfg_cost_census;
-#[cfg(all(test, feature = "native", target_arch = "x86_64"))]
+#[cfg(all(
+    test,
+    feature = "native",
+    feature = "rust-codegen",
+    target_arch = "x86_64"
+))]
 mod cfg_mir_census;
-#[cfg(all(test, feature = "native", target_arch = "x86_64"))]
+#[cfg(all(
+    test,
+    feature = "native",
+    feature = "rust-codegen",
+    target_arch = "x86_64"
+))]
 mod cfg_noise_pins;
-#[cfg(all(test, feature = "native", target_arch = "x86_64"))]
+#[cfg(all(
+    test,
+    feature = "native",
+    feature = "rust-codegen",
+    target_arch = "x86_64"
+))]
 mod cfg_prelude_census;
-#[cfg(all(test, feature = "native", target_arch = "x86_64"))]
+#[cfg(all(
+    test,
+    feature = "native",
+    feature = "rust-codegen",
+    target_arch = "x86_64"
+))]
 mod cfg_prelude_round_trip;
-#[cfg(all(test, feature = "native", target_arch = "x86_64"))]
+#[cfg(all(
+    test,
+    feature = "native",
+    feature = "rust-codegen",
+    target_arch = "x86_64"
+))]
 mod cfg_size_census;
-#[cfg(all(test, feature = "native", target_arch = "x86_64"))]
+#[cfg(all(
+    test,
+    feature = "native",
+    feature = "rust-codegen",
+    target_arch = "x86_64"
+))]
 mod code_identity;
-#[cfg(all(test, feature = "native", target_arch = "x86_64"))]
+#[cfg(all(
+    test,
+    feature = "native",
+    feature = "rust-codegen",
+    target_arch = "x86_64"
+))]
 mod double_double;
 #[cfg(all(
     test,
@@ -35,7 +92,12 @@ mod double_double;
     any(target_arch = "x86_64", target_arch = "aarch64")
 ))]
 mod evaluation_state;
-#[cfg(all(test, feature = "native", target_arch = "x86_64"))]
+#[cfg(all(
+    test,
+    feature = "native",
+    feature = "rust-codegen",
+    target_arch = "x86_64"
+))]
 mod json_float_census;
 #[cfg(all(
     test,
@@ -43,11 +105,21 @@ mod json_float_census;
     any(target_arch = "x86_64", target_arch = "aarch64")
 ))]
 mod math_sharing;
-#[cfg(all(test, feature = "native", target_arch = "x86_64"))]
+#[cfg(all(
+    test,
+    feature = "native",
+    feature = "rust-codegen",
+    target_arch = "x86_64"
+))]
 mod mir_postfix;
 mod model;
 mod runtime;
-#[cfg(all(test, feature = "native", target_arch = "x86_64"))]
+#[cfg(all(
+    test,
+    feature = "native",
+    feature = "rust-codegen",
+    target_arch = "x86_64"
+))]
 mod state_pairing_census;
 mod target;
 /// A machine backend for another instruction set is dead code on this host:

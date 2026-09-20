@@ -187,6 +187,7 @@ impl PipelineControl for NoPipelineControl {
     }
 }
 
+#[cfg(any(test, feature = "rust-codegen"))]
 static NO_PIPELINE_CONTROL: NoPipelineControl = NoPipelineControl;
 
 impl PhaseTiming {
@@ -395,6 +396,7 @@ pub(crate) struct MetricsRecorder<'a> {
     control: &'a dyn PipelineControl,
 }
 
+#[cfg(any(test, feature = "rust-codegen"))]
 impl MetricsRecorder<'static> {
     pub(crate) fn new(input_bytes: usize, budget: PerformanceBudget) -> Self {
         Self::with_control(input_bytes, budget, &NO_PIPELINE_CONTROL)
@@ -452,6 +454,7 @@ impl<'a> MetricsRecorder<'a> {
         &mut self.metrics
     }
 
+    #[cfg(feature = "rust-codegen")]
     pub(crate) fn control(&self) -> &'a dyn PipelineControl {
         self.control
     }
