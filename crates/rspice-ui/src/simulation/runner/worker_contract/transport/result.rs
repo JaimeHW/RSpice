@@ -278,12 +278,14 @@ impl WorkerSimulationResultTransport {
                 waveforms,
                 best_cost,
                 best_variables,
+                best_objectives,
                 converged,
             } => Self::Optimization {
                 iterations: WorkerF64Series::from_vec(iterations, buffers),
                 waveforms: transport_waveforms(waveforms, buffers),
                 best_cost,
                 best_variables,
+                best_objectives,
                 converged,
             },
             WorkerSimulationResult::Soa {
@@ -642,14 +644,22 @@ impl WorkerSimulationResultTransport {
                 waveforms,
                 best_cost,
                 best_variables,
+                best_objectives,
                 converged,
-            } => Ok(WorkerSimulationResult::Optimization {
-                iterations: iterations.into_vec(buffers)?,
-                waveforms: worker_waveforms_from_transport(waveforms, buffers)?,
-                best_cost,
-                best_variables,
-                converged,
-            }),
+            } => {
+                crate::simulation::optimizer::validate_optimization_objectives(
+                    &best_objectives,
+                    best_cost,
+                )?;
+                Ok(WorkerSimulationResult::Optimization {
+                    iterations: iterations.into_vec(buffers)?,
+                    waveforms: worker_waveforms_from_transport(waveforms, buffers)?,
+                    best_cost,
+                    best_variables,
+                    best_objectives,
+                    converged,
+                })
+            }
             Self::Soa {
                 convergence,
                 time,

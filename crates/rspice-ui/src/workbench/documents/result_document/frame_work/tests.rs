@@ -408,6 +408,7 @@ fn optimization_analysis() -> AnalysisResult {
         .collect();
     AnalysisResult::new(5, AnalysisType::Optimization, "OPT")
         .with_family_metadata(AnalysisResultFamilyMetadata::Optimization {
+            best_objectives: Vec::new(),
             iterations: axis.clone(),
             best_cost: cost[OPTIMIZATION_ITERATIONS - 1],
             best_variables: std::collections::BTreeMap::from([(

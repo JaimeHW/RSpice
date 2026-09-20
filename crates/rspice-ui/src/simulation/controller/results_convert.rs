@@ -904,6 +904,7 @@ impl SimulationController {
                 waveforms,
                 best_cost,
                 best_variables,
+                best_objectives,
                 converged,
             } => {
                 let retained_iterations = iterations.clone();
@@ -913,6 +914,7 @@ impl SimulationController {
                         iterations: retained_iterations,
                         best_cost,
                         best_variables: best_variables.into_iter().collect(),
+                        best_objectives,
                         converged,
                     })
             }

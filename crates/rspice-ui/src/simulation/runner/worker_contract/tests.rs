@@ -301,8 +301,8 @@ pub(super) fn nondefault_op_config() -> crate::simulation::dialog::OpConfig {
 
 #[test]
 fn browser_worker_transfer_protocol_matches_rust_transport() {
-    assert_eq!(WORKER_RESPONSE_TRANSPORT_PROTOCOL, 25);
-    assert_eq!(WORKER_REQUEST_TRANSPORT_PROTOCOL, 13);
+    assert_eq!(WORKER_RESPONSE_TRANSPORT_PROTOCOL, 26);
+    assert_eq!(WORKER_REQUEST_TRANSPORT_PROTOCOL, 14);
     let source = include_str!("../../../../web/simulation-worker.js");
     assert!(source.contains(&format!(
         "const WORKER_PROTOCOL_VERSION = {WORKER_RESPONSE_TRANSPORT_PROTOCOL};"
@@ -2073,6 +2073,7 @@ fn configured_study_worker_transfers_and_authenticates_nested_op_seed() {
     use crate::simulation::runner::study::StudyRunConfig;
     let options = SpecExecutionOptions {
         study_base: Some(StudyRunConfig {
+            objective_terms: Vec::new(),
             instance_id: crate::product::AnalysisInstanceId::new(),
             source_revision: crate::product::ObjectRevision::INITIAL,
             analysis: AnalysisConfig::DcOp(nondefault_op_config()),
@@ -2110,4 +2111,52 @@ fn configured_study_worker_transfers_and_authenticates_nested_op_seed() {
             .unwrap_err()
             .contains("solution digest")
     );
+}
+
+#[test]
+fn weighted_optimization_components_survive_transfer_and_reject_corruption() {
+    use crate::simulation::optimizer::{
+        OptimizationObjectiveGoal, OptimizationObjectiveObservation, OptimizationObjectiveTerm,
+    };
+    let result = SimulationResult::Optimization {
+        iterations: vec![0.0],
+        waveforms: HashMap::from([(
+            "OPT_COST".into(),
+            WaveformData::new_time_domain("OPT_COST", vec![0.0], vec![0.25]),
+        )]),
+        best_cost: 0.25,
+        best_variables: HashMap::from([("X".into(), 2.0)]),
+        converged: true,
+        best_objectives: vec![OptimizationObjectiveObservation {
+            objective: OptimizationObjectiveTerm {
+                measurement: "gain".into(),
+                goal: OptimizationObjectiveGoal::Target,
+                target: Some(1.0),
+                scale: 2.0,
+                weight: 1.0,
+            },
+            value: 2.0,
+            contribution: 0.25,
+        }],
+    };
+    let response = WorkerResponse {
+        id: 37,
+        outcome: WorkerOutcome::Success(Box::new(
+            WorkerSimulationResult::try_from(result).unwrap(),
+        )),
+    };
+    let transport = WorkerResponseTransport::from_response(response.clone()).unwrap();
+    let json = serde_json::to_string(&transport.response).unwrap();
+    let transport = WorkerResponseTransport {
+        response: serde_json::from_str(&json).unwrap(),
+        ..transport
+    };
+    assert_eq!(transport.clone().into_response().unwrap(), response);
+    let corrupt = json.replace("\"contribution\":0.25", "\"contribution\":0.5");
+    assert_ne!(json, corrupt);
+    let transport = WorkerResponseTransport {
+        response: serde_json::from_str(&corrupt).unwrap(),
+        ..transport
+    };
+    assert!(transport.into_response().is_err());
 }

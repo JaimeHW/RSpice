@@ -1789,6 +1789,7 @@ fn encode_family_metadata(
             iterations,
             best_cost,
             best_variables,
+            best_objectives,
             converged,
         } => {
             writer.u8(4);
@@ -1800,6 +1801,27 @@ fn encode_family_metadata(
                 writer.f64(*value);
             }
             writer.bool(*converged);
+            if !best_objectives.is_empty() {
+                writer.string("weighted-optimization-objectives/v1");
+                writer.sequence(best_objectives.len());
+                for observation in best_objectives {
+                    let term = &observation.objective;
+                    writer.string(&term.measurement);
+                    writer.u8(match term.goal {
+                        crate::simulation::optimizer::OptimizationObjectiveGoal::Minimize => 0,
+                        crate::simulation::optimizer::OptimizationObjectiveGoal::Maximize => 1,
+                        crate::simulation::optimizer::OptimizationObjectiveGoal::Target => 2,
+                    });
+                    writer.bool(term.target.is_some());
+                    if let Some(target) = term.target {
+                        writer.f64(target);
+                    }
+                    writer.f64(term.scale);
+                    writer.f64(term.weight);
+                    writer.f64(observation.value);
+                    writer.f64(observation.contribution);
+                }
+            }
         }
         AnalysisResultFamilyMetadata::Soa { time } => {
             writer.u8(5);

@@ -27,6 +27,7 @@ struct OptimizationView<'a> {
     cost: &'a WaveformData,
     variables: Vec<(&'a str, &'a WaveformData)>,
     best_cost: f64,
+    best_objectives: &'a [crate::simulation::optimizer::OptimizationObjectiveObservation],
     best_index: usize,
     converged: bool,
 }
@@ -98,6 +99,7 @@ fn view_from<'a>(
     let AnalysisResultFamilyMetadata::Optimization {
         iterations,
         best_cost,
+        best_objectives,
         converged,
         ..
     } = analysis.family_metadata.as_ref()?
@@ -124,6 +126,7 @@ fn view_from<'a>(
         cost: analysis.waveforms.get(located.cost)?,
         variables,
         best_cost: *best_cost,
+        best_objectives,
         best_index: located.best_index,
         converged: *converged,
     })
@@ -226,6 +229,27 @@ pub(crate) fn export_csv(analysis: &AnalysisResult) -> Option<super::ResultSheet
     contents.push_str(&format!("converged,{}\n", view.converged));
     contents.push_str(&format!("best_cost,{:.17e}\n", view.best_cost));
     contents.push_str(&format!("best_index,{}\n", view.best_index));
+    if !view.best_objectives.is_empty() {
+        contents
+            .push_str("\nobjective,measurement,goal,target,scale,weight,value,cost_contribution\n");
+        for (index, observation) in view.best_objectives.iter().enumerate() {
+            let term = &observation.objective;
+            contents.push_str(&format!(
+                "{},{},{:?},{},{:.17e},{:.17e},{:.17e},{:.17e}\n",
+                index + 1,
+                super::csv_field(&term.measurement),
+                term.goal,
+                term.target
+                    .map(|value| format!("{value:.17e}"))
+                    .unwrap_or_default(),
+                term.scale,
+                term.weight,
+                observation.value,
+                observation.contribution
+            ));
+        }
+        contents.push_str("\nfield,value\n");
+    }
     contents.push_str(&format!(
         "best_iteration,{:.17e}\n\niteration,cost",
         view.iterations[view.best_index]
@@ -316,6 +340,35 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             .reset_plot_view(super::ResultViewer::Optimization, 0);
     }
 
+    if !view.best_objectives.is_empty() {
+        section_header(ui, "Objectives at best candidate", None);
+        let values = view
+            .best_objectives
+            .iter()
+            .enumerate()
+            .map(|(index, observation)| {
+                let term = &observation.objective;
+                (
+                    format!("{}. {} ({:?})", index + 1, term.measurement, term.goal),
+                    format!(
+                        "value {:.9e}; target {}; scale {:.6e}; weight {:.6e}; cost {:.9e}",
+                        observation.value,
+                        term.target
+                            .map(|value| format!("{value:.9e}"))
+                            .unwrap_or_else(|| "—".into()),
+                        term.scale,
+                        term.weight,
+                        observation.contribution
+                    ),
+                )
+            })
+            .collect::<Vec<_>>();
+        let rows = values
+            .iter()
+            .map(|(name, value)| (name.as_str(), value.clone(), false))
+            .collect::<Vec<_>>();
+        stat_table(ui, &rows);
+    }
     let auto_x0 = view.iterations[0];
     let auto_x1 = *view.iterations.last().unwrap_or(&auto_x0);
     let x_pad = if auto_x0 < auto_x1 {
@@ -564,6 +617,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         iterations,
         best_cost,
         best_variables,
+        best_objectives: _,
         converged,
     }) = analysis.family_metadata.as_ref()
     else {
@@ -726,6 +780,7 @@ mod tests {
         let best_gain = gain[iterations - 1];
         let analysis = AnalysisResult::new(1, AnalysisType::Optimization, "OPT")
             .with_family_metadata(AnalysisResultFamilyMetadata::Optimization {
+                best_objectives: Vec::new(),
                 iterations: axis.clone(),
                 best_cost,
                 best_variables: BTreeMap::from([("GAIN".to_owned(), best_gain)]),
@@ -847,5 +902,47 @@ mod tests {
             drawn < 200,
             "the sheet laid out {drawn} of 2000 retained candidates for a 1020 px viewport"
         );
+    }
+    #[test]
+    fn weighted_optimization_evidence_persists_exports_and_rejects_inconsistent_costs() {
+        use crate::simulation::optimizer::{
+            OptimizationObjectiveGoal, OptimizationObjectiveObservation, OptimizationObjectiveTerm,
+        };
+        let mut state = optimization_state(4);
+        let analysis = &mut state.simulation.runs[0].analyses[0];
+        let AnalysisResultFamilyMetadata::Optimization {
+            best_objectives, ..
+        } = analysis.family_metadata.as_mut().unwrap()
+        else {
+            unreachable!()
+        };
+        best_objectives.push(OptimizationObjectiveObservation {
+            objective: OptimizationObjectiveTerm {
+                measurement: "gain".into(),
+                goal: OptimizationObjectiveGoal::Target,
+                target: Some(1.0),
+                scale: 2.0,
+                weight: 1.0,
+            },
+            value: 2.0,
+            contribution: 0.25,
+        });
+        let saved = serde_json::to_string(&analysis.family_metadata).unwrap();
+        let restored = serde_json::from_str(&saved).unwrap();
+        assert_eq!(analysis.family_metadata, restored);
+        analysis.family_metadata = restored;
+        let csv = export_csv(analysis).unwrap().contents;
+        assert!(
+            csv.contains("objective,measurement,goal,target,scale,weight,value,cost_contribution")
+        );
+        assert!(csv.contains("1,gain,Target,"));
+        let AnalysisResultFamilyMetadata::Optimization {
+            best_objectives, ..
+        } = analysis.family_metadata.as_mut().unwrap()
+        else {
+            unreachable!()
+        };
+        best_objectives[0].value = 3.0;
+        assert!(export_csv(analysis).is_none());
     }
 }

@@ -4,6 +4,7 @@
 
 use super::options::parse_si_value;
 use crate::services::simulation_runner::OptimizationSearchControls;
+use crate::simulation::optimizer::{OptimizationObjectiveGoal, OptimizationObjectiveTerm};
 
 /// Optimization objective strategy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -95,6 +96,7 @@ impl OptimizationVariableConfig {
 pub struct OptimizationConfig {
     pub base_analysis: Option<crate::product::AnalysisInstanceId>,
     pub objective_measurement: String,
+    pub objective_terms: Vec<OptimizationObjectiveTerm>,
     pub search: OptimizationSearchControls,
     /// Variable set to optimize.
     pub variables: Vec<OptimizationVariableConfig>,
@@ -127,6 +129,7 @@ impl Default for OptimizationConfig {
         Self {
             base_analysis: None,
             objective_measurement: String::new(),
+            objective_terms: Vec::new(),
             search: OptimizationSearchControls::default(),
             variables: vec![
                 OptimizationVariableConfig {
@@ -165,9 +168,10 @@ impl OptimizationConfig {
             return Err("At least one optimization variable is required".to_string());
         }
         if self.base_analysis.is_some() {
-            crate::simulation::runner::study::validate_measurements(std::slice::from_ref(
-                &self.objective_measurement,
-            ))?;
+            for term in &self.objective_terms {
+                term.validate()?;
+            }
+            crate::simulation::runner::study::validate_measurements(&self.measurement_names())?;
         } else if let Some(expression) = &self.objective_expression {
             crate::services::simulation_runner::validate_optimization_expression(expression)?;
         } else {
@@ -224,6 +228,22 @@ impl OptimizationConfig {
         Ok(())
     }
 
+    pub fn measurement_names(&self) -> Vec<String> {
+        if self.objective_terms.is_empty() {
+            return vec![self.objective_measurement.clone()];
+        }
+        let mut names = Vec::<String>::new();
+        for term in &self.objective_terms {
+            if !names
+                .iter()
+                .any(|name| name.eq_ignore_ascii_case(&term.measurement))
+            {
+                names.push(term.measurement.clone());
+            }
+        }
+        names
+    }
+
     /// The record this optimization writes into the deck.
     ///
     /// A comment, not a directive. No SPICE dialect spells an optimization
@@ -243,7 +263,21 @@ impl OptimizationConfig {
             .collect::<Vec<_>>()
             .join(",");
         let objective = if let Some(id) = self.base_analysis {
-            format!("base={id} measurement={}", self.objective_measurement)
+            if self.objective_terms.is_empty() {
+                format!("base={id} measurement={}", self.objective_measurement)
+            } else {
+                format!(
+                    "base={id} weighted_objectives={}",
+                    self.objective_terms
+                        .iter()
+                        .map(|term| format!(
+                            "[{}:{:?}:target={:?}:scale={}:weight={}]",
+                            term.measurement, term.goal, term.target, term.scale, term.weight
+                        ))
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                )
+            }
         } else {
             format!("obj=V({},{})", self.objective_node, self.objective_ref)
         };
@@ -280,6 +314,10 @@ impl OptimizationConfig {
 #[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct OptimizationDialogState {
+    #[serde(default)]
+    pub weighted_objectives: bool,
+    #[serde(default)]
+    pub objective_terms: Vec<OptimizationObjectiveDraft>,
     #[serde(default)]
     pub base_analysis: Option<crate::product::AnalysisInstanceId>,
     #[serde(default)]
@@ -340,6 +378,12 @@ impl OptimizationDialogState {
             .join("\n");
 
         Self {
+            weighted_objectives: !config.objective_terms.is_empty(),
+            objective_terms: config
+                .objective_terms
+                .iter()
+                .map(OptimizationObjectiveDraft::from_config)
+                .collect(),
             base_analysis: config.base_analysis,
             objective_measurement: config.objective_measurement.clone(),
             var_tolerance: config.search.var_tolerance.to_string(),
@@ -372,7 +416,11 @@ impl OptimizationDialogState {
 
     /// Convert UI state into typed config.
     pub fn to_config(&self) -> Result<OptimizationConfig, String> {
-        let goal_mode = match self.goal_mode {
+        let weighted = self.base_analysis.is_some() && self.weighted_objectives;
+        if weighted && self.objective_terms.is_empty() {
+            return Err("Add at least one weighted objective".into());
+        }
+        let goal_mode = match if weighted { 0 } else { self.goal_mode } {
             0 => OptimizationGoalMode::Minimize,
             1 => OptimizationGoalMode::Maximize,
             _ => OptimizationGoalMode::Target,
@@ -383,7 +431,9 @@ impl OptimizationDialogState {
             _ => OptimizationAlgorithmMode::SimulatedAnnealing,
         };
 
-        let target_value = if goal_mode == OptimizationGoalMode::Target {
+        let target_value = if weighted {
+            None
+        } else if goal_mode == OptimizationGoalMode::Target {
             Some(
                 parse_si_value(&self.target_value)
                     .map_err(|e| format!("Invalid optimization target value: {}", e))?,
@@ -406,6 +456,14 @@ impl OptimizationDialogState {
         let config = OptimizationConfig {
             base_analysis: self.base_analysis,
             objective_measurement: self.objective_measurement.trim().to_owned(),
+            objective_terms: if weighted {
+                self.objective_terms
+                    .iter()
+                    .map(OptimizationObjectiveDraft::to_config)
+                    .collect::<Result<_, _>>()?
+            } else {
+                Vec::new()
+            },
             search: OptimizationSearchControls {
                 var_tolerance: parse_si_value(&self.var_tolerance)
                     .map_err(|e| format!("Invalid gradient tolerance: {e}"))?,
@@ -589,5 +647,68 @@ mod search_tests {
             legacy.to_config().unwrap().search,
             OptimizationSearchControls::default()
         );
+    }
+}
+
+/// Editable strings retain intermediate and inactive values across save/reopen.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OptimizationObjectiveDraft {
+    pub measurement: String,
+    pub goal: usize,
+    pub target: String,
+    pub scale: String,
+    pub weight: String,
+}
+impl Default for OptimizationObjectiveDraft {
+    fn default() -> Self {
+        Self {
+            measurement: String::new(),
+            goal: 2,
+            target: "0".into(),
+            scale: "1".into(),
+            weight: "1".into(),
+        }
+    }
+}
+impl OptimizationObjectiveDraft {
+    fn from_config(term: &OptimizationObjectiveTerm) -> Self {
+        Self {
+            measurement: term.measurement.clone(),
+            goal: match term.goal {
+                OptimizationObjectiveGoal::Minimize => 0,
+                OptimizationObjectiveGoal::Maximize => 1,
+                OptimizationObjectiveGoal::Target => 2,
+            },
+            target: term.target.map(format_scalar).unwrap_or_default(),
+            scale: format_scalar(term.scale),
+            weight: format_scalar(term.weight),
+        }
+    }
+    fn to_config(&self) -> Result<OptimizationObjectiveTerm, String> {
+        let goal = match self.goal {
+            0 => OptimizationObjectiveGoal::Minimize,
+            1 => OptimizationObjectiveGoal::Maximize,
+            2 => OptimizationObjectiveGoal::Target,
+            _ => return Err("Invalid weighted objective goal".into()),
+        };
+        let term = OptimizationObjectiveTerm {
+            measurement: self.measurement.trim().to_owned(),
+            goal,
+            target: if goal == OptimizationObjectiveGoal::Target {
+                Some(
+                    parse_si_value(&self.target)
+                        .map_err(|e| format!("Invalid objective target: {e}"))?,
+                )
+            } else {
+                None
+            },
+            scale: parse_si_value(&self.scale)
+                .map_err(|e| format!("Invalid objective scale: {e}"))?,
+            weight: parse_si_value(&self.weight)
+                .map_err(|e| format!("Invalid objective weight: {e}"))?,
+        };
+        term.validate()?;
+        Ok(term)
     }
 }

@@ -459,21 +459,23 @@ impl SimulationController {
         draft: &crate::simulation::plan::AnalysisDraft,
     ) -> Result<Option<crate::simulation::runner::study::StudyRunConfig>, String> {
         use crate::simulation::plan::AnalysisDraft;
-        let (id, measurements, histogram_bins) = match draft {
+        let (id, measurements, histogram_bins, objective_terms) = match draft {
             AnalysisDraft::MonteCarlo(draft) if draft.base_analysis.is_some() => {
                 let config = draft.to_config()?;
                 (
                     config.base_analysis.unwrap(),
                     config.measurements,
                     config.histogram_bins,
+                    Vec::new(),
                 )
             }
             AnalysisDraft::Optimization(draft) if draft.base_analysis.is_some() => {
                 let config = draft.to_config()?;
                 (
                     config.base_analysis.unwrap(),
-                    vec![config.objective_measurement],
+                    config.measurement_names(),
                     20,
+                    config.objective_terms,
                 )
             }
             _ => return Ok(None),
@@ -508,6 +510,7 @@ impl SimulationController {
                 .unwrap_or_default(),
             measurements,
             histogram_bins,
+            objective_terms,
         }))
     }
 
@@ -747,6 +750,14 @@ mod tests {
         use crate::simulation::dialog::optimization::{
             OptimizationConfig, OptimizationDialogState,
         };
+        use crate::simulation::optimizer::{OptimizationObjectiveGoal, OptimizationObjectiveTerm};
+        let objectives = vec![OptimizationObjectiveTerm {
+            measurement: "gain".into(),
+            goal: OptimizationObjectiveGoal::Target,
+            target: Some(2.5),
+            scale: 0.5,
+            weight: 3.0,
+        }];
         let mut state = AppState::default();
         let plan = state.sim_setup.analysis_plan.as_mut().unwrap();
         let (op, _) = plan.insert(AnalysisKind::OperatingPoint).unwrap();
@@ -757,11 +768,13 @@ mod tests {
         let mut setup = OptimizationDialogState::from_config(&OptimizationConfig {
             base_analysis: Some(ac),
             objective_measurement: "gain".into(),
+            objective_terms: objectives.clone(),
             ..Default::default()
         });
         // Inactive expression buffers survive switching back without blocking a measured objective.
         setup.objective_expression = "unfinished{".into();
         setup.objective_node.clear();
+        setup.target_value = "inactive unfinished".into();
         let draft = AnalysisDraft::Optimization(setup);
         for mut restored in [
             serde_json::from_str::<AnalysisDraft>(&serde_json::to_string(&draft).unwrap()).unwrap(),
@@ -776,7 +789,9 @@ mod tests {
             assert_eq!(config.base_analysis, Some(ac));
             assert_eq!(config.objective_measurement, "gain");
             assert_eq!(setup.objective_expression, "unfinished{");
-            assert!(config.to_spice().contains("measurement=gain"));
+            assert_eq!(config.objective_terms, objectives);
+            assert_eq!(setup.target_value, "inactive unfinished");
+            assert!(config.to_spice().contains("weighted_objectives="));
         }
         plan.edit(opt, |target| *target = draft).unwrap();
         let frozen = plan.freeze().unwrap();
@@ -785,6 +800,7 @@ mod tests {
                 unreachable!()
             };
             setup.objective_measurement = "changed".into();
+            setup.objective_terms[0].weight = "9".into();
         })
         .unwrap();
         let sealed = state
@@ -803,6 +819,24 @@ mod tests {
             .unwrap();
         assert_eq!(base.instance_id, ac);
         assert_eq!(base.measurements, ["gain"]);
+        assert_eq!(base.objective_terms, objectives);
+        for change in 0..4 {
+            let mut queued = task.queued_analysis().clone();
+            let term = &mut queued
+                .spec_options
+                .study_base
+                .as_mut()
+                .unwrap()
+                .objective_terms[0];
+            match change {
+                0 => term.weight = 4.0,
+                1 => term.scale = 2.0,
+                2 => term.target = Some(7.0),
+                _ => term.goal = OptimizationObjectiveGoal::Maximize,
+            }
+            let changed = PreparedTask::new(opt, task.source_revision(), vec![], "OPT", queued);
+            assert_ne!(task.config_digest(), changed.config_digest());
+        }
         assert!(matches!(base.analysis, AnalysisConfig::Ac(_)));
     }
 

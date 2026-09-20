@@ -11,10 +11,24 @@ pub(crate) fn run_optimization(
     abort: &dyn AbortSignal,
 ) -> Result<services::OptimizationData, SimulationError> {
     super::super::spec::ensure_not_aborted(abort)?;
-    if base.measurements.len() != 1 {
+    if base.objective_terms.is_empty() && base.measurements.len() != 1 {
         return Err(SimulationError::InvalidConfig(
             "Optimization requires exactly one selected objective measurement".into(),
         ));
+    }
+    for objective in &base.objective_terms {
+        objective
+            .validate()
+            .map_err(SimulationError::InvalidConfig)?;
+        if !base
+            .measurements
+            .iter()
+            .any(|name| name.eq_ignore_ascii_case(&objective.measurement))
+        {
+            return Err(SimulationError::InvalidConfig(
+                "Weighted objective is absent from the study measurements".into(),
+            ));
+        }
     }
     base.analysis
         .validate()
@@ -50,51 +64,123 @@ pub(crate) fn run_optimization(
     }
     let analysis = analysis_for_environment(base, environment.as_ref());
     let engine = rspice_core::Engine::default().resolved_for_netlist(&circuit);
-    let limits = engine.config().resource_limits;
+    let mut limits = engine.config().resource_limits;
+    let retained_objectives = base.objective_terms.len().saturating_mul(5);
+    if retained_objectives > limits.max_result_values {
+        return super::super::spec::run_abort_aware_service(abort, || {
+            Err(services::ServiceRunError::resource_limit(
+                rspice_core::ResourceKind::ResultValues,
+                retained_objectives,
+                limits.max_result_values,
+            ))
+        });
+    }
+    limits.max_result_values -= retained_objectives;
     let signal = StudyAbort {
         parent: abort,
         failed: AtomicBool::new(false),
     };
     let fatal = Mutex::new(None);
-    let response =
-        services::run_optimization_with_evaluator(config, limits, &signal, |variables| {
-            let candidate = services::materialize_optimization_candidate(
-                &engine,
-                &circuit,
-                &config.variables,
-                variables,
-                environment.as_ref(),
-                &signal,
-            )?;
-            let result =
-                EngineBridge::run_materialized_with_abort(&engine, &analysis, &candidate, &signal)
-                    .map_err(|error| match error {
-                        SimulationError::SolverError(_)
-                        | SimulationError::ConvergenceFailed { .. }
-                        | SimulationError::Attributed { .. }
-                        | SimulationError::CircuitError(_) => {
-                            services::ServiceRunError::Failure(error.to_string())
-                        }
-                        other => {
-                            *fatal.lock().unwrap() = Some(other);
-                            signal.failed.store(true, Ordering::Release);
-                            services::ServiceRunError::Aborted
-                        }
+    let evaluate = |variables: &std::collections::HashMap<String, f64>| {
+        let candidate = services::materialize_optimization_candidate(
+            &engine,
+            &circuit,
+            &config.variables,
+            variables,
+            environment.as_ref(),
+            &signal,
+        )?;
+        let result =
+            EngineBridge::run_materialized_with_abort(&engine, &analysis, &candidate, &signal)
+                .map_err(|error| match error {
+                    SimulationError::SolverError(_)
+                    | SimulationError::ConvergenceFailed { .. }
+                    | SimulationError::Attributed { .. }
+                    | SimulationError::CircuitError(_) => {
+                        services::ServiceRunError::Failure(error.to_string())
+                    }
+                    other => {
+                        *fatal.lock().unwrap() = Some(other);
+                        signal.failed.store(true, Ordering::Release);
+                        services::ServiceRunError::Aborted
+                    }
+                })?;
+        if !base.objective_terms.is_empty() {
+            let mut total = 0.0;
+            let mut observations = Vec::with_capacity(base.objective_terms.len());
+            for objective in &base.objective_terms {
+                let observation = result
+                    .study_measurement(&objective.measurement)
+                    .ok_or_else(|| {
+                        services::ServiceRunError::Failure(format!(
+                            "Optimization measurement {:?} is unavailable or failed",
+                            objective.measurement
+                        ))
                     })?;
-            result
-                .study_measurement(&base.measurements[0])
-                .and_then(|observation| observation.value)
-                .ok_or_else(|| {
-                    services::ServiceRunError::Failure(format!(
-                        "Optimization measurement {:?} is unavailable or failed",
-                        base.measurements[0]
-                    ))
-                })
-        });
+                let value = observation.value.expect("observed objective value");
+                let contribution = objective
+                    .contribution(value)
+                    .map_err(services::ServiceRunError::Failure)?;
+                total += contribution;
+                observations.push(
+                    crate::simulation::optimizer::OptimizationObjectiveObservation {
+                        objective: objective.clone(),
+                        value,
+                        contribution,
+                    },
+                );
+            }
+            if !total.is_finite() {
+                return Err(services::ServiceRunError::Failure(
+                    "Combined optimization cost is non-finite".into(),
+                ));
+            }
+            return Ok((total, observations));
+        }
+        result
+            .study_measurement(&base.measurements[0])
+            .and_then(|observation| observation.value)
+            .map(|value| (value, Vec::new()))
+            .ok_or_else(|| {
+                services::ServiceRunError::Failure(format!(
+                    "Optimization measurement {:?} is unavailable or failed",
+                    base.measurements[0]
+                ))
+            })
+    };
+    let response = if base.objective_terms.is_empty() {
+        services::run_optimization_with_evaluator(config, limits, &signal, |variables| {
+            evaluate(variables).map(|(value, _)| value)
+        })
+    } else {
+        let target_cost = base
+            .objective_terms
+            .iter()
+            .all(|term| {
+                term.goal == crate::simulation::optimizer::OptimizationObjectiveGoal::Target
+            })
+            .then_some(0.0);
+        services::run_optimization_with_cost_evaluator(
+            config,
+            limits,
+            &signal,
+            target_cost,
+            |variables| {
+                evaluate(variables)
+                    .map(|(cost, objectives)| services::OptimizationEvaluation { cost, objectives })
+            },
+        )
+    };
     if let Some(error) = fatal.into_inner().unwrap() {
         return Err(error);
     }
-    super::super::spec::run_abort_aware_service(abort, || response)
+    let data = super::super::spec::run_abort_aware_service(abort, || response)?;
+    crate::simulation::optimizer::validate_optimization_objectives(
+        &data.best_objectives,
+        data.best_cost,
+    )
+    .map_err(SimulationError::InvalidConfig)?;
+    Ok(data)
 }
 
 #[cfg(test)]
@@ -111,6 +197,7 @@ mod tests {
 
     fn base(analysis: AnalysisConfig, measurement: &str) -> StudyRunConfig {
         StudyRunConfig {
+            objective_terms: Vec::new(),
             instance_id: AnalysisInstanceId::new(),
             source_revision: ObjectRevision::INITIAL,
             analysis_line: analysis.to_spice(),
@@ -275,6 +362,140 @@ mod tests {
                 "{best_variables:?}"
             );
         }
+    }
+
+    #[test]
+    fn weighted_optimization_executes_scaled_goals_and_retains_best_components() {
+        use crate::simulation::optimizer::{
+            OptimizationObjectiveGoal as Goal, OptimizationObjectiveTerm as Term,
+        };
+        use crate::simulation::runner::worker_contract::WorkerSimulationResult;
+        let deck = "Weighted targets\n.param X=0.8\nV1 a 0 {X}\nV2 b 0 {2*X}\nR1 a 0 1k\nR2 b 0 1k\n.end\n";
+        for (weight, scale, expected, algorithm) in [
+            (3.0, 2.0, 0.25, OptimizationAlgorithm::PatternSearch),
+            (1.0, 2.0, 0.5, OptimizationAlgorithm::PatternSearch),
+            (3.0, 4.0, 4.0 / 7.0, OptimizationAlgorithm::PatternSearch),
+            (3.0, 2.0, 0.25, OptimizationAlgorithm::GradientDescent),
+        ] {
+            let mut selected = base(AnalysisConfig::dc_op(), "scalar:V(a)");
+            selected.measurements.push("scalar:V(b)".into());
+            selected.objective_terms = vec![
+                Term {
+                    measurement: "scalar:V(a)".into(),
+                    goal: Goal::Target,
+                    target: Some(1.0),
+                    scale: 1.0,
+                    weight: 1.0,
+                },
+                Term {
+                    measurement: "scalar:V(b)".into(),
+                    goal: Goal::Target,
+                    target: Some(0.0),
+                    scale,
+                    weight,
+                },
+            ];
+            let request = SimulationRequest::Spec {
+                spec: Box::new(AnalysisSpec::Optimization {
+                    search: Default::default(),
+                    variables: vec![OptimizationVariable {
+                        name: "X".into(),
+                        min: 0.0,
+                        max: 1.0,
+                        initial: 0.8,
+                    }],
+                    objective_expression: None,
+                    objective_node: "a".into(),
+                    objective_ref: "0".into(),
+                    goal: OptimizationGoal::Target,
+                    target: Some(123.0), // inactive single objective
+                    algorithm,
+                    max_iterations: 60,
+                    cost_tolerance: 1e-12,
+                    fd_step: 1e-4,
+                    initial_step: 0.1,
+                    min_step: 1e-9,
+                }),
+                options: Box::new(SpecExecutionOptions {
+                    study_base: Some(selected),
+                    ..Default::default()
+                }),
+            };
+            let wire = WorkerSimulationRequest::try_from(&request).unwrap();
+            let restored: WorkerSimulationRequest =
+                serde_json::from_str(&serde_json::to_string(&wire).unwrap()).unwrap();
+            assert_eq!(wire, restored);
+            let SimulationRequest::Spec { spec, options } = SimulationRequest::from(restored)
+            else {
+                unreachable!()
+            };
+            let result = super::super::super::spec::run_spec_request(
+                &EngineBridge::new(),
+                *spec,
+                *options,
+                deck,
+                None,
+                &crate::simulation::execution::ResolvedExecutionDependencies::default(),
+                &NoAbort,
+            )
+            .unwrap();
+            let wire = WorkerSimulationResult::try_from(result).unwrap();
+            let restored: WorkerSimulationResult =
+                serde_json::from_str(&serde_json::to_string(&wire).unwrap()).unwrap();
+            assert_eq!(wire, restored);
+            let crate::simulation::results::SimulationResult::Optimization {
+                best_variables,
+                best_cost,
+                best_objectives,
+                converged,
+                ..
+            } = crate::simulation::results::SimulationResult::from(restored)
+            else {
+                panic!("optimization result")
+            };
+            assert!(converged);
+            assert!(
+                (best_variables["X"] - expected).abs() < 1e-5,
+                "{weight}/{scale}: {best_variables:?}"
+            );
+            assert_eq!(best_objectives.len(), 2);
+            assert_eq!(best_objectives[0].value, best_variables["X"]);
+            assert_eq!(best_objectives[1].value, 2.0 * best_variables["X"]);
+            let expected_cost =
+                (expected - 1.0).powi(2) + weight * (2.0 * expected / scale).powi(2);
+            assert!(
+                (best_cost - expected_cost).abs() < 1e-10,
+                "{best_cost} vs {expected_cost}"
+            );
+            crate::simulation::optimizer::validate_optimization_objectives(
+                &best_objectives,
+                best_cost,
+            )
+            .unwrap();
+            let mut corrupted = best_objectives;
+            corrupted[0].contribution += 1.0;
+            assert!(
+                crate::simulation::optimizer::validate_optimization_objectives(
+                    &corrupted, best_cost
+                )
+                .is_err()
+            );
+        }
+        let mut term = Term {
+            measurement: "gain".into(),
+            goal: Goal::Minimize,
+            target: None,
+            scale: 2.0,
+            weight: 3.0,
+        };
+        assert_eq!(term.contribution(-4.0).unwrap(), -6.0);
+        term.goal = Goal::Maximize;
+        assert_eq!(term.contribution(-4.0).unwrap(), 6.0);
+        term.scale = 0.0;
+        assert!(term.validate().is_err());
+        term.scale = 1.0;
+        term.weight = f64::MAX;
+        assert!(term.contribution(10.0).is_err());
     }
 
     #[test]

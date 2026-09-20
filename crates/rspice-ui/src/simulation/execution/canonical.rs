@@ -888,6 +888,21 @@ fn encode_spec_options(writer: &mut CanonicalWriter, options: &SpecExecutionOpti
             writer.string(measurement);
         }
         writer.usize(base.histogram_bins);
+        if !base.objective_terms.is_empty() {
+            writer.domain("weighted-optimization-objectives/v1");
+            writer.sequence(base.objective_terms.len());
+            for term in &base.objective_terms {
+                writer.string(&term.measurement);
+                writer.u8(match term.goal {
+                    crate::simulation::optimizer::OptimizationObjectiveGoal::Minimize => 0,
+                    crate::simulation::optimizer::OptimizationObjectiveGoal::Maximize => 1,
+                    crate::simulation::optimizer::OptimizationObjectiveGoal::Target => 2,
+                });
+                writer.option(term.target.as_ref(), |writer, value| writer.f64(*value));
+                writer.f64(term.scale);
+                writer.f64(term.weight);
+            }
+        }
     }
 }
 

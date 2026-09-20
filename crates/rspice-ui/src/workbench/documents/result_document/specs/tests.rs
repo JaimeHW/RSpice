@@ -1158,6 +1158,7 @@ fn the_source_button_opens_the_viewer_the_shared_map_names() {
     run.add_analysis(
         AnalysisResult::new(2, AnalysisType::Optimization, "Optimize").with_family_metadata(
             AnalysisResultFamilyMetadata::Optimization {
+                best_objectives: Vec::new(),
                 iterations: vec![4.0, 2.0, 1.0],
                 best_cost: 1.0,
                 best_variables: std::collections::BTreeMap::new(),

@@ -436,6 +436,7 @@ pub enum SimulationResult {
         best_cost: f64,
         /// Best variable values.
         best_variables: HashMap<String, f64>,
+        best_objectives: Vec<crate::simulation::optimizer::OptimizationObjectiveObservation>,
         /// Whether convergence criterion was met.
         converged: bool,
     },

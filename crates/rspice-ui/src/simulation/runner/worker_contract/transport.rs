@@ -1306,6 +1306,8 @@ pub(crate) enum WorkerSimulationResultTransport {
         waveforms: Vec<WorkerWaveformTransport>,
         best_cost: f64,
         best_variables: HashMap<String, f64>,
+        #[serde(default)]
+        best_objectives: Vec<crate::simulation::optimizer::OptimizationObjectiveObservation>,
         converged: bool,
     },
     Soa {

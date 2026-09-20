@@ -72,9 +72,9 @@ pub(crate) struct WorkerRequest {
     pub(in crate::simulation) stream_transient_samples: bool,
 }
 
-/// 13: optimization candidates can execute a configured study base and measurement.
+/// 14: configured optimization carries normalized, weighted objective terms.
 #[cfg(any(target_arch = "wasm32", test))]
-pub(crate) const WORKER_REQUEST_TRANSPORT_PROTOCOL: u8 = 13;
+pub(crate) const WORKER_REQUEST_TRANSPORT_PROTOCOL: u8 = 14;
 
 /// Browser-worker request split into compact metadata and transferable
 /// floating-point buffers. The embedded request deliberately carries empty
@@ -952,6 +952,8 @@ pub(crate) enum WorkerSimulationResult {
         waveforms: Vec<WorkerWaveform>,
         best_cost: f64,
         best_variables: HashMap<String, f64>,
+        #[serde(default)]
+        best_objectives: Vec<crate::simulation::optimizer::OptimizationObjectiveObservation>,
         converged: bool,
     },
     Soa {
@@ -1611,8 +1613,10 @@ impl WorkerSimulationResult {
                 iterations,
                 waveforms,
                 best_variables,
+                best_objectives,
                 ..
             } => sum_payload_bytes([
+                f64_payload_bytes(best_objectives.len().saturating_mul(5)),
                 f64_payload_bytes(iterations.len()),
                 waveforms_payload_bytes(waveforms),
                 f64_payload_bytes(best_variables.len()),
@@ -1652,7 +1656,8 @@ impl WorkerSimulationResult {
 ///     of two maps read at a single point.
 /// Earlier workers silently omit numerical quality or current observations.
 /// 25: Monte Carlo retains complete parameter-stream trial identities and failed observations.
-const WORKER_RESPONSE_TRANSPORT_PROTOCOL: u8 = 25;
+/// 26: optimization retains each weighted objective at the best candidate.
+const WORKER_RESPONSE_TRANSPORT_PROTOCOL: u8 = 26;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct WorkerResponseTransport {
@@ -2016,14 +2021,23 @@ impl TryFrom<SimulationResult> for WorkerSimulationResult {
                 waveforms,
                 best_cost,
                 best_variables,
+                best_objectives,
                 converged,
-            } => Ok(Self::Optimization {
-                iterations,
-                waveforms: worker_waveforms(waveforms),
-                best_cost,
-                best_variables,
-                converged,
-            }),
+            } => {
+                crate::simulation::optimizer::validate_optimization_objectives(
+                    &best_objectives,
+                    best_cost,
+                )
+                .map_err(SimulationError::InvalidConfig)?;
+                Ok(Self::Optimization {
+                    iterations,
+                    waveforms: worker_waveforms(waveforms),
+                    best_cost,
+                    best_variables,
+                    best_objectives,
+                    converged,
+                })
+            }
             SimulationResult::Soa {
                 convergence,
                 time,
@@ -2368,12 +2382,14 @@ impl From<WorkerSimulationResult> for SimulationResult {
                 waveforms,
                 best_cost,
                 best_variables,
+                best_objectives,
                 converged,
             } => Self::Optimization {
                 iterations,
                 waveforms: waveform_map(waveforms),
                 best_cost,
                 best_variables,
+                best_objectives,
                 converged,
             },
             WorkerSimulationResult::Soa {

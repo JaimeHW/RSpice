@@ -24,6 +24,7 @@ use std::sync::{
 /// Its Run Set point belongs to the study; its solver controls belong to the base.
 #[derive(Debug, Clone)]
 pub struct StudyRunConfig {
+    pub objective_terms: Vec<crate::simulation::optimizer::OptimizationObjectiveTerm>,
     pub instance_id: AnalysisInstanceId,
     pub source_revision: ObjectRevision,
     pub analysis: AnalysisConfig,
@@ -79,6 +80,11 @@ pub(crate) fn run_monte_carlo(
     abort: &dyn AbortSignal,
 ) -> Result<services::MonteCarloData, SimulationError> {
     super::spec::ensure_not_aborted(abort)?;
+    if !base.objective_terms.is_empty() {
+        return Err(SimulationError::InvalidConfig(
+            "Weighted objectives apply only to optimization".into(),
+        ));
+    }
     validate_measurements(&base.measurements).map_err(SimulationError::InvalidConfig)?;
     base.analysis
         .validate()
@@ -264,6 +270,7 @@ mod tests {
 
     fn base(analysis: AnalysisConfig, names: &[&str]) -> StudyRunConfig {
         StudyRunConfig {
+            objective_terms: Vec::new(),
             instance_id: AnalysisInstanceId::new(),
             source_revision: ObjectRevision::INITIAL,
             analysis_line: analysis.to_spice(),

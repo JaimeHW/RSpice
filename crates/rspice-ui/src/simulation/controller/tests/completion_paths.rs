@@ -407,6 +407,7 @@ fn advanced_result_conversion_retains_exact_family_metadata() {
 
     let optimization = controller.convert_to_analysis_result_with_metadata_owned(
         crate::simulation::SimulationResult::Optimization {
+            best_objectives: Vec::new(),
             iterations: vec![0.0, 1.0, 2.0],
             waveforms: empty_waveforms(),
             best_cost: 0.125,
@@ -422,6 +423,7 @@ fn advanced_result_conversion_retains_exact_family_metadata() {
     assert_eq!(
         optimization.family_metadata,
         Some(AnalysisResultFamilyMetadata::Optimization {
+            best_objectives: Vec::new(),
             iterations: vec![0.0, 1.0, 2.0],
             best_cost: 0.125,
             best_variables: std::collections::BTreeMap::from([

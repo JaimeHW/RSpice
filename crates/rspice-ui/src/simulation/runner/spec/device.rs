@@ -320,6 +320,7 @@ fn run_optimization(
         waveforms,
         best_cost: data.best_cost,
         best_variables: data.best_variables,
+        best_objectives: data.best_objectives,
         converged: data.converged,
     })
 }

@@ -84,6 +84,8 @@ pub enum AnalysisResultFamilyMetadata {
         iterations: Vec<f64>,
         best_cost: f64,
         best_variables: BTreeMap<String, f64>,
+        #[serde(default)]
+        best_objectives: Vec<crate::simulation::optimizer::OptimizationObjectiveObservation>,
         converged: bool,
     },
     Soa {
@@ -280,8 +282,13 @@ impl AnalysisResultFamilyMetadata {
                 iterations,
                 best_cost,
                 best_variables,
+                best_objectives,
                 ..
             } => {
+                crate::simulation::optimizer::validate_optimization_objectives(
+                    best_objectives,
+                    *best_cost,
+                )?;
                 require_finite_values(iterations, "optimization iterations")?;
                 if !best_cost.is_finite() {
                     return Err("optimization best cost is non-finite".to_owned());

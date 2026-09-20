@@ -482,6 +482,7 @@ impl SimulationController {
                 waveforms: _,
                 best_cost,
                 best_variables,
+                best_objectives: _,
                 converged,
             } => {
                 state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(

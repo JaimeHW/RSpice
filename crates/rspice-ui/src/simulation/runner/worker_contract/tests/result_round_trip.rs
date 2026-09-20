@@ -282,6 +282,7 @@ fn worker_result_round_trip() {
     }
 
     let optimization = SimulationResult::Optimization {
+        best_objectives: Vec::new(),
         iterations: vec![0.0, 1.0, 2.0],
         waveforms: HashMap::from([(
             "OPT_COST".to_string(),
@@ -298,6 +299,7 @@ fn worker_result_round_trip() {
             waveforms,
             best_cost,
             best_variables,
+            best_objectives: _,
             converged,
         } => {
             assert_eq!(iterations, vec![0.0, 1.0, 2.0]);

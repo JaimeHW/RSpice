@@ -1650,6 +1650,7 @@ pub(super) fn semantic_result_summary(
             let Some(AnalysisResultFamilyMetadata::Optimization {
                 best_cost,
                 best_variables,
+                best_objectives,
                 converged,
                 ..
             }) = &analysis.family_metadata
@@ -1670,6 +1671,31 @@ pub(super) fn semantic_result_summary(
                     .iter()
                     .map(|(name, value)| vec![name.clone(), exact_number(*value)]),
             );
+            for (index, observation) in best_objectives.iter().enumerate() {
+                let term = &observation.objective;
+                rows.push(vec![
+                    format!(
+                        "Objective {}: {} ({:?})",
+                        index + 1,
+                        term.measurement,
+                        term.goal
+                    ),
+                    exact_number(observation.value),
+                ]);
+                rows.push(vec![
+                    format!("Objective {} configuration", index + 1),
+                    format!(
+                        "target {}; scale {}; weight {}",
+                        term.target.map(exact_number).unwrap_or_else(|| "—".into()),
+                        exact_number(term.scale),
+                        exact_number(term.weight)
+                    ),
+                ]);
+                rows.push(vec![
+                    format!("Objective {} cost", index + 1),
+                    exact_number(observation.contribution),
+                ]);
+            }
             tables.push(SemanticTable {
                 title: "Optimizer outcome and best candidate".to_owned(),
                 columns: vec!["Quantity".to_owned(), "Value".to_owned()],
