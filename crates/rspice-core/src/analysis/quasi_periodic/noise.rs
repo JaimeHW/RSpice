@@ -186,7 +186,7 @@ impl QuasiPeriodicNoiseProjector {
         }
     }
 
-    fn validate(
+    pub(crate) fn validate(
         &self,
         adjoints: &[QuasiPeriodicAdjointSolution],
         source: &QuasiPeriodicNoiseSource,

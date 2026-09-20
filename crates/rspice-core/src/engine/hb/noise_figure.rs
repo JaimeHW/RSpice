@@ -85,58 +85,15 @@ impl Engine {
         }
         let engine = self.resolved_for_netlist(netlist);
         engine.ensure_valid_configuration()?;
-        let source_name = engine.validate_noise_figure_source(netlist, request, abort)?;
+        let source_name = engine.validate_noise_figure_source(
+            netlist,
+            &request.input_source,
+            &request.source_resistor,
+            abort,
+        )?;
         let circuit = engine.build_circuit_with_abort(netlist, abort)?;
-        let (resistance, temperature, noisy, flicker) = if let Some(index) = circuit
-            .resistors
-            .names
-            .iter()
-            .position(|name| name.eq_ignore_ascii_case(&source_name))
-        {
-            if circuit.resistors.thermal[index].is_some() {
-                return Err(invalid(
-                    "a self-heating resistor cannot be the fixed noise reference",
-                ));
-            }
-            (
-                1.0 / circuit.resistors.small_signal_conductance(index),
-                circuit.resistor_noise_temperature(index, engine.config.temperature),
-                circuit.resistors.noisy[index],
-                circuit.resistors.flicker[index],
-            )
-        } else if let Some(index) = circuit
-            .resistor_branches
-            .names
-            .iter()
-            .position(|name| name.eq_ignore_ascii_case(&source_name))
-        {
-            (
-                circuit.resistor_branches.small_signal_resistances[index],
-                circuit
-                    .resistor_branches
-                    .noise_temperature(index, engine.config.temperature),
-                circuit.resistor_branches.noisy[index],
-                circuit.resistor_branches.flicker[index],
-            )
-        } else {
-            return Err(invalid(
-                "source resistor must elaborate to a fixed linear resistance",
-            ));
-        };
-        if !resistance.is_finite()
-            || resistance <= 0.0
-            || !temperature.is_finite()
-            || temperature <= 0.0
-        {
-            return Err(invalid(
-                "source resistance and temperature must be finite and positive",
-            ));
-        }
-        if !noisy || flicker.is_some_and(|noise| noise.coefficient != 0.0) {
-            return Err(invalid(
-                "source resistor must have thermal noise enabled and no excess flicker noise",
-            ));
-        }
+        let (resistance, temperature) =
+            resolve_noise_figure_resistor(&circuit, &source_name, engine.config.temperature)?;
         let noise = engine.run_pnoise_from_hb_request_with_abort(
             netlist,
             &PeriodicNoiseRequest {
@@ -218,10 +175,11 @@ impl Engine {
         })
     }
 
-    fn validate_noise_figure_source(
+    pub(super) fn validate_noise_figure_source(
         &self,
         netlist: &Netlist,
-        request: &HbNoiseFigureRequest,
+        input_source: &str,
+        source_resistor: &str,
         abort: &dyn AbortSignal,
     ) -> Result<String, SimulationError> {
         let flattened = crate::netlist::flatten_netlist_with_models_config_with_abort(
@@ -246,10 +204,10 @@ impl Engine {
                 .iter()
                 .find(|element| element.name.eq_ignore_ascii_case(name.trim()))
         };
-        let source = find(&request.input_source)
-            .ok_or_else(|| invalid("input voltage source was not found"))?;
-        let resistor = find(&request.source_resistor)
-            .ok_or_else(|| invalid("named source resistor was not found"))?;
+        let source =
+            find(input_source).ok_or_else(|| invalid("input voltage source was not found"))?;
+        let resistor =
+            find(source_resistor).ok_or_else(|| invalid("named source resistor was not found"))?;
         if !matches!(&source.kind, ElementKind::VoltageSource(spec) if spec.rf_port().is_none()) {
             return Err(invalid(
                 "input must be an ideal voltage source with an explicit series resistor",
@@ -292,6 +250,62 @@ impl Engine {
         }
         Ok(resistor.name.clone())
     }
+}
+
+pub(super) fn resolve_noise_figure_resistor(
+    circuit: &CircuitData,
+    source_name: &str,
+    ambient: Value,
+) -> Result<(Value, Value), SimulationError> {
+    let (resistance, temperature, noisy, flicker) = if let Some(index) = circuit
+        .resistors
+        .names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case(&source_name))
+    {
+        if circuit.resistors.thermal[index].is_some() {
+            return Err(invalid(
+                "a self-heating resistor cannot be the fixed noise reference",
+            ));
+        }
+        (
+            1.0 / circuit.resistors.small_signal_conductance(index),
+            circuit.resistor_noise_temperature(index, ambient),
+            circuit.resistors.noisy[index],
+            circuit.resistors.flicker[index],
+        )
+    } else if let Some(index) = circuit
+        .resistor_branches
+        .names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case(&source_name))
+    {
+        (
+            circuit.resistor_branches.small_signal_resistances[index],
+            circuit.resistor_branches.noise_temperature(index, ambient),
+            circuit.resistor_branches.noisy[index],
+            circuit.resistor_branches.flicker[index],
+        )
+    } else {
+        return Err(invalid(
+            "source resistor must elaborate to a fixed linear resistance",
+        ));
+    };
+    if !resistance.is_finite()
+        || resistance <= 0.0
+        || !temperature.is_finite()
+        || temperature <= 0.0
+    {
+        return Err(invalid(
+            "source resistance and temperature must be finite and positive",
+        ));
+    }
+    if !noisy || flicker.is_some_and(|noise| noise.coefficient != 0.0) {
+        return Err(invalid(
+            "source resistor must have thermal noise enabled and no excess flicker noise",
+        ));
+    }
+    Ok((resistance, temperature))
 }
 
 fn log_add(a: f64, b: f64) -> f64 {

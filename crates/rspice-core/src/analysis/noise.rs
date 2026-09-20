@@ -1495,7 +1495,12 @@ impl ScaledPositiveSum {
         }
     }
 
-    fn add_product(&mut self, left: Value, right: Value, multiplier: Value) {
+    /// Add a positive mantissa with its binary scale without materializing it.
+    pub(crate) fn add_binary(&mut self, mantissa: Value, exponent: i32) {
+        self.add_scaled(mantissa, exponent);
+    }
+
+    pub(crate) fn add_product(&mut self, left: Value, right: Value, multiplier: Value) {
         debug_assert!(left.is_finite() && left >= 0.0);
         debug_assert!(right.is_finite() && right >= 0.0);
         debug_assert!(multiplier.is_finite() && multiplier > 0.0);
@@ -1510,7 +1515,7 @@ impl ScaledPositiveSum {
         self.add_scaled(left_mantissa * right_mantissa * multiplier, exponent);
     }
 
-    fn parts(self) -> Option<(Value, i32)> {
+    pub(crate) fn parts(self) -> Option<(Value, i32)> {
         if !self.populated {
             return None;
         }
@@ -1520,7 +1525,7 @@ impl ScaledPositiveSum {
         ))
     }
 
-    fn value(self) -> Value {
+    pub(crate) fn value(self) -> Value {
         let Some((significand, exponent)) = self.parts() else {
             return 0.0;
         };
@@ -1555,7 +1560,7 @@ impl ScaledPositiveSum {
         Self::rounded_value(root_significand, root_exponent)
     }
 
-    fn compare_power(self, other: Self) -> std::cmp::Ordering {
+    pub(crate) fn compare_power(self, other: Self) -> std::cmp::Ordering {
         use std::cmp::Ordering;
         match (self.parts(), other.parts()) {
             (Some((left, left_exponent)), Some((right, right_exponent))) => left_exponent
