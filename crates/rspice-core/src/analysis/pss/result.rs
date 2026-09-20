@@ -613,32 +613,49 @@ impl PeriodicWaveform {
 
     /// Compute harmonic components by normalized trapezoidal quadrature.
     /// Invalid evidence, frequency, or allocation yields an empty spectrum.
-    pub(crate) fn compute_harmonics(
+    pub fn compute_harmonics(
         &self,
         time: &[Value],
         fundamental_freq: Value,
         max_harmonic: usize,
     ) -> Vec<HarmonicComponent> {
+        self.compute_harmonics_with_abort(time, fundamental_freq, max_harmonic, &NoAbort)
+            .unwrap_or_default()
+    }
+
+    /// Integrate the actual retained time grid with cooperative cancellation.
+    /// Returns signed DC and physical peak amplitudes with cosine-reference phase.
+    pub fn compute_harmonics_with_abort(
+        &self,
+        time: &[Value],
+        fundamental_freq: Value,
+        max_harmonic: usize,
+        abort: &dyn crate::abort_signal::AbortSignal,
+    ) -> Result<Vec<HarmonicComponent>, crate::analysis::fourier::FourierError> {
+        use crate::analysis::fourier::FourierError;
+        if abort.is_aborted() {
+            return Err(FourierError::Aborted);
+        }
         if !fundamental_freq.is_finite() || fundamental_freq <= 0.0 {
-            return Vec::new();
+            return Err(FourierError::InvalidFundamentalFrequency {
+                frequency: fundamental_freq,
+            });
         }
-        let Ok(quadrature) =
-            FourierQuadrature::new(time, &self.values, 1.0 / fundamental_freq, &NoAbort)
-        else {
-            return Vec::new();
-        };
-        let Some(count) = max_harmonic.checked_add(1) else {
-            return Vec::new();
-        };
+        let quadrature = FourierQuadrature::new(time, &self.values, 1.0 / fundamental_freq, abort)?;
+        let count = max_harmonic
+            .checked_add(1)
+            .ok_or(FourierError::HarmonicCapacity {
+                num_harmonics: max_harmonic,
+            })?;
         let mut harmonics = Vec::new();
-        if harmonics.try_reserve_exact(count).is_err() {
-            return harmonics;
-        }
+        harmonics
+            .try_reserve_exact(count)
+            .map_err(|_| FourierError::HarmonicCapacity {
+                num_harmonics: max_harmonic,
+            })?;
         for n in 0..=max_harmonic {
             let freq = n as f64 * fundamental_freq;
-            let Ok((magnitude, phase)) = quadrature.component(freq, n, &NoAbort) else {
-                return Vec::new();
-            };
+            let (magnitude, phase) = quadrature.component(freq, n, abort)?;
             harmonics.push(HarmonicComponent {
                 harmonic_number: n,
                 frequency: freq,
@@ -646,7 +663,6 @@ impl PeriodicWaveform {
                 phase,
             });
         }
-
-        harmonics
+        Ok(harmonics)
     }
 }

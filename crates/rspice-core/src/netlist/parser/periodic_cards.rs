@@ -305,7 +305,7 @@ pub(super) fn parse_pss_command(
             )?,
             "TSTABPERIODS" => bind_once(
                 &mut tstab_periods,
-                card_count(stream, line_num, params, CARD, "TSTABPERIODS", 1)?,
+                card_count(stream, line_num, params, CARD, "TSTABPERIODS", 0)?,
                 CARD,
                 line_num,
                 "TSTABPERIODS",
