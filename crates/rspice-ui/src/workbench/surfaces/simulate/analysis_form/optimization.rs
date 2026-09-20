@@ -50,7 +50,7 @@ pub(super) fn fields(
     if configured {
         field_note(
             ui,
-            "Each candidate runs the selected analysis at this study's Run Set point. Use a .MEAS name for a measured scalar, scalar:name for a native scalar, or last:signal for the final sample (AC real component). For HB/Fourier/FFT use bin:1:magnitude (or real, imag, phase in degrees), with :signal appended for multiple HB/Fourier outputs; scalar:THD(%) and scalar:DC select Fourier scalars. Fourier/FFT rerun their bound transient producer for each candidate; HB reruns its harmonic balance solve and reports peak-amplitude phasors.",
+            "Each candidate runs the selected analysis at this study's Run Set point. Use a .MEAS name for a measured scalar, scalar:name for a native scalar, or last:signal for the final sample (AC real component). For HB/Fourier/FFT use bin:1:magnitude (or real, imag, phase in degrees), with :signal appended for multiple HB/Fourier outputs; scalar:THD(%) and scalar:DC select Fourier scalars. Fourier/FFT rerun their bound transient producer for each candidate; HB reruns its harmonic balance solve and reports peak-amplitude phasors. HBSP/HBNOISE rerun their bound HB producer on each varied circuit. Use bin:0:real:S11 or bin:0:real:PN_NF for HBSP; bin:0:real:output_noise, bin:0:real:noise_figure_db and scalar:noise.output_rms for HBNOISE. Noise figure and integrated noise must be enabled to measure those results.",
         );
     }
     input_row(ui, "Variables", &mut setup.variables_text)

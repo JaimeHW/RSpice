@@ -78,6 +78,27 @@ traces carry amps through worker transport and plotting. Inductor currents are
 published once even though they are present in both MNA and reactive state.
 Only currents actually retained with an exact DC component are exposed.
 
+## HBSP and HBNOISE in configured studies
+
+Monte Carlo and optimization can select HBSP or HBNOISE as their base. The study
+freezes the selected consumer and its explicitly bound HB instance, including
+ports, impedances, sidebands, noise references and producer solver settings.
+Every trial or candidate solves HB afresh and executes its consumer on that same
+materialized circuit, preserving parameter expressions and Run Set changes.
+Producer numerical overrides are applied before the consumer's overrides.
+
+HBSP supports complex scattering observations such as `bin:0:real:S11` and
+`bin:1:magnitude:S21[k=+0,m=+0]`. Real noise-parameter traces use `real`, for
+example `bin:0:real:PN_NF`. HBNOISE supports `bin:0:real:output_noise`,
+`bin:0:real:input_noise`, `bin:0:real:noise_figure_db` and contributor names;
+`last:signal` explicitly selects the final frequency sample. Indices are zero
+based on the configured consumer sweep, not the HB carrier harmonics.
+`scalar:noise.output_rms` and `scalar:noise.input_rms` select integrated noise.
+Enable the corresponding noise figure, integration or contributor option to
+measure that result. Unavailable observations fail instead of supplying defaults.
+The PSD, noise-figure and integrated selectors are also available to basic Noise
+studies when their selected analysis produces those quantities.
+
 ## Harmonic balance in configured studies
 
 Monte Carlo and optimization can select a harmonic balance instance as their base.
