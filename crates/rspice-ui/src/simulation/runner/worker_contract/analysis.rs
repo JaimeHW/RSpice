@@ -1128,12 +1128,14 @@ impl TryFrom<&AnalysisSpec> for WorkerAnalysisSpec {
                 params: params.clone(),
             }),
             AnalysisSpec::Reliability {
+                study,
                 target_years,
                 enable_hci,
                 enable_nbti,
                 enable_em,
                 min_stress_voltage,
             } => Ok(Self::Reliability {
+                study: study.clone(),
                 target_years: target_years.clone(),
                 enable_hci: *enable_hci,
                 enable_nbti: *enable_nbti,
@@ -1533,12 +1535,14 @@ impl From<WorkerAnalysisSpec> for AnalysisSpec {
                 params,
             },
             WorkerAnalysisSpec::Reliability {
+                study,
                 target_years,
                 enable_hci,
                 enable_nbti,
                 enable_em,
                 min_stress_voltage,
             } => Self::Reliability {
+                study,
                 target_years,
                 enable_hci,
                 enable_nbti,

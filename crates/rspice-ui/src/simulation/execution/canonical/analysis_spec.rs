@@ -615,6 +615,7 @@ pub(super) fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &Analysis
             writer.bool(*compute_nyquist);
         }
         AnalysisSpec::Reliability {
+            study,
             target_years,
             enable_hci,
             enable_nbti,
@@ -626,6 +627,9 @@ pub(super) fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &Analysis
             writer.bool(*enable_nbti);
             writer.bool(*enable_em);
             writer.f64(*min_stress_voltage);
+            if let Some(study) = study {
+                super::reliability::encode(writer, study);
+            }
         }
         AnalysisSpec::Optimization {
             search,

@@ -1,11 +1,19 @@
-//! Persisted reliability-result types.
+//! Reliability requests and persisted historical result types.
 //!
-//! These types remain readable for historical projects. New reliability runs
-//! are blocked until execution is backed by explicit PDK aging models; this
-//! module deliberately contains no generic or hard-coded aging equations.
+//! Historical result types remain readable. New requests carry explicit model
+//! packs and mission profiles; circuit dispatch stays blocked until extraction
+//! and aged re-simulation are connected to the characterized core aging clocks.
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+
+mod study;
+pub use study::{
+    ReliabilityBinding, ReliabilityMissionPhase, ReliabilityStudy, ReliabilityTransientWindow,
+};
+
+#[cfg(test)]
+pub(crate) mod tests;
 
 /// Accumulated stress metrics for a device
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

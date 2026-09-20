@@ -485,6 +485,8 @@ pub enum AnalysisSpec {
     Corner,
     /// Reliability aging analysis
     Reliability {
+        #[serde(default)]
+        study: Option<crate::simulation::reliability_engine::ReliabilityStudy>,
         target_years: Vec<f64>,
         enable_hci: bool,
         enable_nbti: bool,

@@ -261,7 +261,7 @@ impl CanonicalAnalysisKind {
     pub const fn execution_blocker(self) -> Option<&'static str> {
         match self {
             Self::Reliability => Some(
-                "reliability execution requires PDK-qualified aging models; the former hard-coded demonstration equations have been removed",
+                "reliability circuit stress extraction and aged re-simulation are not yet connected to imported aging-model packs",
             ),
             _ => None,
         }

@@ -13,6 +13,7 @@ mod qpnoise_controls_tests;
 mod qpss_controls_tests;
 #[cfg(test)]
 mod qpxf_controls_tests;
+mod reliability;
 
 pub(in crate::simulation) use analysis_spec::analysis_kind_tag;
 use analysis_spec::{

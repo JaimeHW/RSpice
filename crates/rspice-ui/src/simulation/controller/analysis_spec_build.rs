@@ -148,6 +148,7 @@ impl SimulationController {
                     .to_config()
                     .map_err(|error| format!("invalid reliability settings: {error}"))?;
                 AnalysisSpec::Reliability {
+                    study: config.study,
                     target_years: config.target_years,
                     enable_hci: config.enable_hci,
                     enable_nbti: config.enable_nbti,
@@ -697,6 +698,7 @@ impl SimulationController {
             .to_config()
             .map_err(|e| format!("invalid reliability settings: {}", e))?;
         Ok(AnalysisSpec::Reliability {
+            study: reliability_cfg.study,
             target_years: reliability_cfg.target_years,
             enable_hci: reliability_cfg.enable_hci,
             enable_nbti: reliability_cfg.enable_nbti,

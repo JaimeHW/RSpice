@@ -408,7 +408,7 @@ pub enum SimulationResult {
 
     /// Historical reliability aging result retained so saved runs and worker
     /// responses from earlier builds remain readable while execution is
-    /// blocked until qualified PDK aging models exist.
+    /// blocked until imported aging models drive circuit stress and re-simulation.
     #[allow(dead_code)]
     Reliability {
         /// Lifetime checkpoints in years.

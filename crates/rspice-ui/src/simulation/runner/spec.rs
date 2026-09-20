@@ -507,6 +507,7 @@ mod tests {
 
     fn blocked_preview_specs() -> Vec<AnalysisSpec> {
         vec![AnalysisSpec::Reliability {
+            study: None,
             target_years: vec![1.0, 10.0],
             enable_hci: true,
             enable_nbti: true,
@@ -1530,6 +1531,7 @@ R2 out 0 1k\n\
         let result = run_spec_request(
             &EngineBridge::new(),
             AnalysisSpec::Reliability {
+                study: None,
                 target_years: vec![1.0, 10.0],
                 enable_hci: true,
                 enable_nbti: true,

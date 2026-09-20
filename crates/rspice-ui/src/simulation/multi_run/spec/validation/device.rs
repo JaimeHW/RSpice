@@ -10,6 +10,7 @@ use crate::simulation::multi_run::{AnalysisSpec, OptimizationGoal};
 pub(super) fn validate(spec: &AnalysisSpec) -> Result<(), String> {
     match spec {
         AnalysisSpec::Reliability {
+            study,
             target_years,
             enable_hci,
             enable_nbti,
@@ -30,6 +31,9 @@ pub(super) fn validate(spec: &AnalysisSpec) -> Result<(), String> {
             }
             if !min_stress_voltage.is_finite() || *min_stress_voltage < 0.0 {
                 return Err("Reliability min_stress_voltage must be finite and >= 0".to_string());
+            }
+            if let Some(study) = study {
+                study.validate(target_years, *enable_hci, *enable_nbti, *enable_em)?;
             }
             Ok(())
         }

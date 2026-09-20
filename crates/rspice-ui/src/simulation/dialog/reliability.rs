@@ -3,10 +3,14 @@
 //! Provides a typed configuration surface for long-term degradation analysis.
 
 use super::options::parse_si_value;
+use crate::simulation::reliability_engine::ReliabilityStudy;
+mod study;
+pub use study::{ReliabilityBindingDraft, ReliabilityMissionDraft, ReliabilityStudyDraft};
 
 /// Reliability analysis configuration.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ReliabilityConfig {
+    pub study: Option<ReliabilityStudy>,
     /// Target lifetime points in years.
     pub target_years: Vec<f64>,
     /// Enable Hot Carrier Injection contribution.
@@ -22,6 +26,7 @@ pub struct ReliabilityConfig {
 impl Default for ReliabilityConfig {
     fn default() -> Self {
         Self {
+            study: None,
             target_years: vec![1.0, 5.0, 10.0],
             enable_hci: true,
             enable_nbti: true,
@@ -50,6 +55,14 @@ impl ReliabilityConfig {
         if !self.min_stress_voltage.is_finite() || self.min_stress_voltage < 0.0 {
             return Err("Minimum stress voltage must be finite and >= 0".to_string());
         }
+        if let Some(study) = &self.study {
+            study.validate(
+                &self.target_years,
+                self.enable_hci,
+                self.enable_nbti,
+                self.enable_em,
+            )?;
+        }
         Ok(())
     }
 }
@@ -58,6 +71,8 @@ impl ReliabilityConfig {
 #[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ReliabilityDialogState {
+    #[serde(default)]
+    pub study: ReliabilityStudyDraft,
     /// Comma-separated lifetime points (years).
     pub years_csv: String,
     /// Enable Hot Carrier Injection.
@@ -83,6 +98,7 @@ impl ReliabilityDialogState {
             .collect::<Vec<_>>()
             .join(", ");
         Self {
+            study: ReliabilityStudyDraft::from_study(config.study.as_ref()),
             years_csv,
             enable_hci: config.enable_hci,
             enable_nbti: config.enable_nbti,
@@ -96,12 +112,13 @@ impl ReliabilityDialogState {
     pub fn to_config(&self) -> Result<ReliabilityConfig, String> {
         let mut years = parse_years_list(&self.years_csv)?;
         years.sort_by(|a, b| a.total_cmp(b));
-        years.dedup_by(|a, b| (*a - *b).abs() < 1e-12);
+        years.dedup_by(|a, b| a == b);
 
         let min_stress = parse_si_value(&self.min_stress_voltage)
             .map_err(|e| format!("Invalid minimum stress voltage: {}", e))?;
 
         let config = ReliabilityConfig {
+            study: self.study.to_study()?,
             target_years: years,
             enable_hci: self.enable_hci,
             enable_nbti: self.enable_nbti,
@@ -142,9 +159,5 @@ fn parse_years_list(input: &str) -> Result<Vec<f64>, String> {
 }
 
 fn format_year(v: f64) -> String {
-    if (v.fract()).abs() < 1e-12 {
-        format!("{:.0}", v)
-    } else {
-        format!("{:.4}", v)
-    }
+    v.to_string()
 }
