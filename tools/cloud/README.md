@@ -2,8 +2,10 @@
 
 Run `python tools/cloud/sync_vendored_client.py --source <clean-checkout>` to
 import the four crates and test fixtures from the authoritative RSpice-Cloud
-repository. The sync records the exact upstream commit and upstream file
-hashes, applies `vendor.patch`, and records the resulting file hashes and patch
+repository. Native licensing fixtures live beside their module in
+`crates/rspice-cloud-client/src/native_licensing/testdata/` and are included
+with the crate sources. The sync records the exact upstream commit and upstream
+file hashes, applies `vendor.patch`, and records the resulting file hashes and patch
 hash. `--check` verifies the materialized result. Re-sync after reviewing any
 patch change; do not update hashes to conceal unexplained drift.
 

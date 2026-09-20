@@ -47,14 +47,6 @@ VENDORED_CRATES = (
     "rspice-cloud-client",
 )
 
-# Repository-level fixtures the crates' in-source unit tests include by
-# relative path (../../../testdata/...). Test-only key material, not secrets.
-VENDORED_TESTDATA = (
-    "testdata/README.md",
-    "testdata/license-test-private-key.pem",
-    "testdata/license-test-public-jwks.json",
-)
-
 SOURCE_REPOSITORY = "JaimeHW/RSpice-Cloud"
 SOURCE_ORIGINS = frozenset(
     {
@@ -100,7 +92,7 @@ def strip_native_dev_dependencies(manifest_text: str) -> str:
 
 
 def crate_files(crate_root: Path) -> list[Path]:
-    """The files a vendored crate consists of: manifest, sources, README."""
+    """Vendored manifest, README, sources and their module-local test fixtures."""
     files = [crate_root / "Cargo.toml"]
     readme = crate_root / "README.md"
     if readme.is_file():
@@ -188,13 +180,6 @@ def sync(source: Path) -> int:
             target.write_bytes(payload)
             recorded[f"crates/{crate}/{relative.as_posix()}"] = sha256_bytes(payload)
 
-    for relative in VENDORED_TESTDATA:
-        payload = (source / relative).read_bytes().replace(b"\r\n", b"\n")
-        target = ROOT / relative
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(payload)
-        recorded[relative] = sha256_bytes(payload)
-
     if admit_source(source) != source_sha:
         raise SystemExit("source checkout changed during vendoring; discard the partial sync and retry")
 
@@ -239,7 +224,6 @@ def check() -> int:
         if sha256_bytes(path.read_bytes()) != digest:
             failures.append(f"modified: {relative}")
     vendored_roots = [ROOT / "crates" / crate for crate in manifest["crates"]]
-    vendored_roots.append(ROOT / "testdata")
     for vendored_root in vendored_roots:
         for path in sorted(p for p in vendored_root.rglob("*") if p.is_file()):
             relative = path.relative_to(ROOT).as_posix()

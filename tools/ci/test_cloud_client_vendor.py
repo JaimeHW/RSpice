@@ -133,7 +133,6 @@ class CloudClientVendorTests(unittest.TestCase):
     def test_vendored_trees_contain_no_unrecorded_files(self) -> None:
         recorded = set(self.manifest["files"])
         roots = [ROOT / "crates" / crate for crate in self.manifest["crates"]]
-        roots.append(ROOT / "testdata")
         for vendored_root in roots:
             for path in sorted(p for p in vendored_root.rglob("*") if p.is_file()):
                 relative = path.relative_to(ROOT).as_posix()

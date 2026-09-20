@@ -485,8 +485,10 @@ mod tests {
     const AUDIENCE: &str = "rspice-native";
     const PRODUCT: &str = "rspice";
     const KEY_ID: &str = "test-license-key";
-    const PRIVATE_KEY: &[u8] = include_bytes!("../../../testdata/license-test-private-key.pem");
-    const PUBLIC_JWKS: &str = include_str!("../../../testdata/license-test-public-jwks.json");
+    const PRIVATE_KEY: &[u8] =
+        include_bytes!("native_licensing/testdata/license-test-private-key.pem");
+    const PUBLIC_JWKS: &str =
+        include_str!("native_licensing/testdata/license-test-public-jwks.json");
 
     #[derive(Serialize)]
     struct TestClaims<'a> {
