@@ -84,6 +84,13 @@ target/release/rspice run rc_lowpass.sp -o rc.h5 --format hdf5
 
 `cargo install --path crates/rspice-cli` puts `rspice` on your `PATH`.
 
+At the workspace root, plain `cargo build`, `cargo check`, and `cargo test`
+select the CLI and UI (and their dependencies), not every model or development
+tool. Use `-p <package>` for bindings and tools, or `--workspace` for the complete
+workspace. CI continues to select its full platform and feature test matrix.
+The maintained conformance harness, benchmark rig, and offline sheet-signing
+utility live under `tools/`; their Cargo package names are unchanged.
+
 ## Analyses
 
 Every analysis below runs end to end on a real circuit. The second column is the

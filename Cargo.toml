@@ -1,5 +1,9 @@
 [workspace]
 resolver = "2"
+# Normal developer builds select the shipping applications and their dependency
+# closure. Tools, bindings, and all-model qualification remain explicit -p or
+# --workspace builds; selecting every generated model is not a useful default.
+default-members = ["crates/rspice-cli", "crates/rspice-ui"]
 members = [
     "crates/rspice-matrix",
     "crates/rspice-veriloga-runtime",

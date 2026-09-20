@@ -275,6 +275,25 @@ class BrowserJitGateTests(unittest.TestCase):
 
 
 class CiConfigurationTests(unittest.TestCase):
+    def test_workspace_defaults_select_applications_not_tools_or_all_models(self) -> None:
+        result = subprocess.run(
+            ["cargo", "metadata", "--locked", "--no-deps", "--format-version", "1"],
+            cwd=ROOT, capture_output=True, text=True, check=True,
+        )
+        metadata = json.loads(result.stdout)
+        defaults = set(metadata["workspace_default_members"])
+        self.assertEqual(
+            {package["name"] for package in metadata["packages"] if package["id"] in defaults},
+            {"rspice-cli", "rspice-ui"},
+        )
+        for name in ("rspice-conformance", "rspice-sheet-publisher"):
+            package = next(package for package in metadata["packages"] if package["name"] == name)
+            self.assertEqual(
+                Path(package["manifest_path"]).resolve(),
+                (ROOT / "tools" / name / "Cargo.toml").resolve(),
+            )
+            self.assertFalse((ROOT / "crates" / name).exists())
+
     def test_xyce_upstream_exclusion_manifest_is_byte_exact_and_reproducible(self) -> None:
         module, _, manifest, expected = xyce_exclusion_fixture()
         module.verify_manifest_bytes(manifest, expected)
