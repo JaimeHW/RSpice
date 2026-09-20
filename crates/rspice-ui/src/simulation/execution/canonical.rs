@@ -5,6 +5,8 @@
 //! separator; variable-length values carry a big-endian `u64` length.
 
 mod analysis_spec;
+#[cfg(test)]
+mod qpss_controls_tests;
 
 pub(in crate::simulation) use analysis_spec::analysis_kind_tag;
 use analysis_spec::{

@@ -4,8 +4,10 @@
 //! type, and the validation that rejects a specification the engine could
 //! not execute.
 
+mod qpss;
 mod run_type;
 mod types;
+pub use qpss::QpssControls;
 mod validation;
 
 pub use types::{

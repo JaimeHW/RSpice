@@ -21,8 +21,43 @@ use super::{
 pub(super) fn shooting_fields(ui: &mut Ui, setup: &mut QpssDraft) {
     input_row(ui, "Tone frequencies", &mut setup.tones);
     input_row(ui, "Harmonic orders", &mut setup.harmonics);
+    input_row(
+        ui,
+        "Mixing order (blank: full grid)",
+        &mut setup.max_mixing_order,
+    );
+    input_row(
+        ui,
+        "Exact phase points (optional)",
+        &mut setup.collocation_points,
+    );
+    input_row_enabled(
+        ui,
+        "Oversampling per tone",
+        &mut setup.oversample,
+        setup.collocation_points.trim().is_empty(),
+    );
+    ui.small("Use one sampling count for all tones, or comma-separated counts for each tone.");
+    input_row(ui, "AC-only source tones", &mut setup.source_tones);
+    ui.small("Assignments use V1=1, V2=2. SIN, PULSE and other waveforms use their authored frequencies.");
+    switch_row(
+        ui,
+        "Initialize from DC operating point",
+        &mut setup.dc_initialization,
+    );
     input_row(ui, "Max iterations", &mut setup.max_iterations);
     input_row(ui, "Relative tolerance", &mut setup.relative_tolerance);
+    input_row(
+        ui,
+        "Current tolerance (A)",
+        &mut setup.current_absolute_tolerance,
+    );
+    input_row(
+        ui,
+        "Voltage tolerance (V)",
+        &mut setup.voltage_absolute_tolerance,
+    );
+    input_row(ui, "Maximum backtracks", &mut setup.max_backtracks);
     switch_row(ui, "Autonomous oscillator", &mut setup.autonomous);
     input_row_enabled(
         ui,

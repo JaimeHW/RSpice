@@ -27,6 +27,9 @@ use super::AnalysisKind;
 
 mod frequency_table;
 mod periodic_network;
+mod quasi_periodic;
+pub use quasi_periodic::QpssDraft;
+use quasi_periodic::validate_qpss;
 
 pub use periodic_network::PeriodicNetworkDraft;
 use periodic_network::{validate_periodic_network, validate_psp_network};
@@ -253,30 +256,6 @@ impl Default for NetworkPortDraft {
             node_pos: "in".to_owned(),
             node_neg: "0".to_owned(),
             z0: "50".to_owned(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct QpssDraft {
-    pub tones: String,
-    pub harmonics: String,
-    pub max_iterations: String,
-    pub relative_tolerance: String,
-    pub autonomous: bool,
-    pub oscillator_node: String,
-}
-
-impl Default for QpssDraft {
-    fn default() -> Self {
-        Self {
-            tones: "1G, 1.001G".to_owned(),
-            harmonics: "7, 7".to_owned(),
-            max_iterations: "100".to_owned(),
-            relative_tolerance: "1e-6".to_owned(),
-            autonomous: false,
-            oscillator_node: String::new(),
         }
     }
 }
@@ -1434,43 +1413,6 @@ fn validate_sweep(draft: &FrequencySweepDraft) -> Result<(), String> {
         return Err("frequency sweep mode is outside the supported schema".to_owned());
     }
     Ok(())
-}
-
-fn validate_qpss(draft: &QpssDraft) -> Option<String> {
-    (|| {
-        let tones = draft
-            .tones
-            .split(',')
-            .map(str::trim)
-            .map(|value| parse_positive(value, "QPSS tone"))
-            .collect::<Result<Vec<_>, _>>()?;
-        if tones.len() < 2 {
-            return Err("QPSS requires at least two incommensurate tones".to_owned());
-        }
-        if tones
-            .iter()
-            .enumerate()
-            .any(|(index, tone)| tones[..index].contains(tone))
-        {
-            return Err("QPSS tone frequencies must be distinct".to_owned());
-        }
-        let harmonics = draft
-            .harmonics
-            .split(',')
-            .map(str::trim)
-            .map(|value| parse_positive_usize(value, "QPSS harmonic order"))
-            .collect::<Result<Vec<_>, _>>()?;
-        if harmonics.len() != tones.len() {
-            return Err("QPSS must declare one harmonic order per tone".to_owned());
-        }
-        parse_positive_usize(&draft.max_iterations, "maximum iteration count")?;
-        parse_positive(&draft.relative_tolerance, "relative tolerance")?;
-        if draft.autonomous && draft.oscillator_node.trim().is_empty() {
-            return Err("autonomous QPSS requires an oscillator node".to_owned());
-        }
-        Ok(())
-    })()
-    .err()
 }
 
 fn validate_hbnoise(draft: &HbNoiseDraft) -> Option<String> {

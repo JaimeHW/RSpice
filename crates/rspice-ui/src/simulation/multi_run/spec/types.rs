@@ -594,6 +594,8 @@ pub enum AnalysisSpec {
         relative_tolerance: f64,
         autonomous: bool,
         oscillator_node: Option<String>,
+        #[serde(default)]
+        controls: super::QpssControls,
     },
     /// Large-signal S-parameters around harmonic balance.
     Hbsp {

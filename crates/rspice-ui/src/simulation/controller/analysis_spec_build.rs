@@ -38,30 +38,7 @@ impl SimulationController {
                     temperature: config.temperature_kelvin,
                 }
             }
-            AnalysisDraft::Qpss(draft) => {
-                let frequencies = parse_csv_si(&draft.tones, "QPSS tones")?;
-                let harmonics = parse_csv_usize(&draft.harmonics, "QPSS harmonics")?;
-                let tones = frequencies
-                    .into_iter()
-                    .zip(harmonics)
-                    .enumerate()
-                    .map(|(index, (frequency, harmonics))| {
-                        HbToneSpec::new(frequency, harmonics)
-                            .with_name(format!("tone{}", index + 1))
-                    })
-                    .collect();
-                AnalysisSpec::Qpss {
-                    tones,
-                    max_iterations: parse_usize(&draft.max_iterations, "QPSS max iterations")?,
-                    relative_tolerance: parse_si(
-                        &draft.relative_tolerance,
-                        "QPSS relative tolerance",
-                    )?,
-                    autonomous: draft.autonomous,
-                    oscillator_node: (!draft.oscillator_node.trim().is_empty())
-                        .then(|| draft.oscillator_node.trim().to_owned()),
-                }
-            }
+            AnalysisDraft::Qpss(draft) => draft.to_spec()?,
             AnalysisDraft::Hbsp(draft) => {
                 let (start_freq, stop_freq, points_per_unit, sweep) =
                     parse_manifest_sweep(&draft.sweep)?;
@@ -1051,18 +1028,6 @@ fn parse_usize(text: &str, field: &str) -> Result<usize, String> {
     text.trim()
         .parse::<usize>()
         .map_err(|_| format!("{field} must be a positive integer"))
-}
-
-fn parse_csv_si(text: &str, field: &str) -> Result<Vec<f64>, String> {
-    text.split(',')
-        .map(|value| parse_si(value.trim(), field))
-        .collect()
-}
-
-fn parse_csv_usize(text: &str, field: &str) -> Result<Vec<usize>, String> {
-    text.split(',')
-        .map(|value| parse_usize(value.trim(), field))
-        .collect()
 }
 
 fn parse_manifest_sweep(

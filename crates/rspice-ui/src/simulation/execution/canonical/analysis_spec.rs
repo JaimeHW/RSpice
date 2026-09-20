@@ -852,6 +852,7 @@ pub(super) fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &Analysis
             relative_tolerance,
             autonomous,
             oscillator_node,
+            controls,
         } => {
             writer.sequence(tones.len());
             for tone in tones {
@@ -864,6 +865,39 @@ pub(super) fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &Analysis
             writer.f64(*relative_tolerance);
             writer.bool(*autonomous);
             writer.option(oscillator_node.as_ref(), |w, value| w.string(value));
+            // Preserve identities of old default requests; authored controls
+            // append a versioned tail rather than changing their prefix.
+            if controls != &crate::simulation::multi_run::QpssControls::default() {
+                writer.string("qpss-controls-v1");
+                writer.f64(controls.current_absolute_tolerance);
+                writer.f64(controls.voltage_absolute_tolerance);
+                writer.usize(controls.max_backtracks);
+                writer.option(controls.max_mixing_order.as_ref(), |w, value| {
+                    w.usize(*value)
+                });
+                let (mode, counts) = match &controls.sampling {
+                    rspice_core::analysis::quasi_periodic::QuasiPeriodicSampling::Oversample(
+                        counts,
+                    ) => (0, counts),
+                    rspice_core::analysis::quasi_periodic::QuasiPeriodicSampling::Exact(counts) => {
+                        (1, counts)
+                    }
+                };
+                writer.usize(mode);
+                writer.sequence(counts.len());
+                for count in counts {
+                    writer.usize(*count);
+                }
+                writer.bool(
+                    controls.initial_state
+                        == rspice_core::engine::QpssInitialState::DcOperatingPoint,
+                );
+                writer.sequence(controls.source_tones.len());
+                for binding in &controls.source_tones {
+                    writer.string(&binding.source);
+                    writer.usize(binding.tone);
+                }
+            }
         }
         AnalysisSpec::Hbsp { .. } | AnalysisSpec::Psp { .. } => {
             encode_manifest_network(writer, spec);

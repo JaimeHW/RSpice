@@ -282,13 +282,19 @@ pub(super) fn validate(spec: &AnalysisSpec) -> Result<(), String> {
             relative_tolerance,
             autonomous,
             oscillator_node,
-        } => validate_qpss(
-            tones,
-            *max_iterations,
-            *relative_tolerance,
-            *autonomous,
-            oscillator_node.as_deref(),
-        ),
+            controls,
+        } => {
+            validate_qpss(
+                tones,
+                *max_iterations,
+                *relative_tolerance,
+                *autonomous,
+                oscillator_node.as_deref(),
+            )?;
+            controls
+                .to_core_config(tones, *max_iterations, *relative_tolerance)
+                .map(|_| ())
+        }
         AnalysisSpec::Hbsp {
             start_freq,
             stop_freq,

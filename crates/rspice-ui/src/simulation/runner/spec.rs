@@ -289,6 +289,7 @@ fn spec_variant_name(spec: &AnalysisSpec) -> &'static str {
 #[cfg(test)]
 mod tests {
     mod periodic_port_noise;
+    mod qpss;
     use std::collections::HashMap;
     use std::fs;
     use std::path::PathBuf;
@@ -501,6 +502,7 @@ mod tests {
                 relative_tolerance: 1.0e-6,
                 autonomous: false,
                 oscillator_node: None,
+                controls: Default::default(),
             },
             AnalysisSpec::Qpac {
                 start_freq: 1.0e3,
