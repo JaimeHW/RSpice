@@ -702,18 +702,18 @@ impl BackwardError {
     }
 }
 
-/// Canonicalize unknowns that are mathematically fixed to zero by an exact
-/// homogeneous singleton equation in the selected operator.
+/// Set unknowns to exact zero when homogeneous equations prove they are zero.
 ///
-/// Sparse LU can leave a sub-ulp remnant in an auxiliary MNA coordinate whose
-/// equation is exactly `a*x = 0`. A componentwise certificate quite correctly
-/// assigns that remnant an error of one because its residual and denominator
-/// are both `|a*x|`. Setting `x` to positive zero is not a perturbation or a
-/// tolerance: it is the unique solution of the original equation. Rows with a
-/// nonzero right-hand side, zero coefficients, or more than one coefficient
-/// are deliberately ineligible, and callers must certify the complete system
-/// again after applying any projection.
-fn canonicalize_real_homogeneous_singletons(
+/// Sparse LU can leave a sub-ulp remnant in an MNA correction constrained by
+/// `a*x = 0`. Its componentwise error is one, however tiny that remnant is.
+/// Propagate the exact constraint through equations such as `b*x + c*y = 0`:
+/// once x is proven zero, y must also be zero. This covers chains of ideal
+/// voltage sources without inferring anything from a candidate's magnitude.
+///
+/// Only finite nonzero coefficients and exact-zero right-hand sides take part.
+/// Unseeded cycles and nonhomogeneous equations cannot prove a zero. Callers
+/// must still certify the complete original system after this projection.
+fn canonicalize_real_homogeneous_zero_constraints(
     csc: &SymbolicSparseColMat<usize>,
     values: &[Value],
     rhs: &[Value],
@@ -726,12 +726,17 @@ fn canonicalize_real_homogeneous_singletons(
         || values.len() != csc.row_idx().len()
         || rhs.len() != nrows
         || solution.len() != ncols
+        || values.iter().any(|value| !value.is_finite())
     {
         return false;
     }
 
-    let mut unique_unknown = vec![None; nrows];
-    let mut multiple = vec![false; nrows];
+    // Each coefficient is visited once when building the dependency graph
+    // and once when its unknown is proven zero. XOR retains the identity of
+    // the remaining unknown when an equation becomes a singleton.
+    let mut remaining = vec![0usize; nrows];
+    let mut unknown_xor = vec![0usize; nrows];
+    let mut dependent_equations = vec![Vec::new(); ncols];
     for col in 0..ncols {
         let span = csc.col_ptr()[col]..csc.col_ptr()[col + 1];
         for (&original_row, &value) in csc.row_idx()[span.clone()].iter().zip(&values[span]) {
@@ -742,24 +747,45 @@ fn canonicalize_real_homogeneous_singletons(
                 RealSolveOp::Normal => (original_row, col),
                 RealSolveOp::Transpose => (col, original_row),
             };
-            if unique_unknown[equation].replace(unknown).is_some() {
-                multiple[equation] = true;
+            if rhs[equation] == 0.0 {
+                remaining[equation] += 1;
+                unknown_xor[equation] ^= unknown;
+                dependent_equations[unknown].push(equation);
             }
         }
     }
 
+    let mut proven_zero = vec![false; ncols];
+    let mut pending = Vec::new();
+    for equation in 0..nrows {
+        if remaining[equation] == 1 {
+            let unknown = unknown_xor[equation];
+            if !proven_zero[unknown] {
+                proven_zero[unknown] = true;
+                pending.push(unknown);
+            }
+        }
+    }
     let positive_zero_bits = 0.0_f64.to_bits();
     let mut changed = false;
-    for equation in 0..nrows {
-        if rhs[equation] != 0.0 || multiple[equation] {
-            continue;
-        }
-        let Some(unknown) = unique_unknown[equation] else {
-            continue;
-        };
+    let mut cursor = 0;
+    while cursor < pending.len() {
+        let unknown = pending[cursor];
+        cursor += 1;
         if solution[unknown].to_bits() != positive_zero_bits {
             solution[unknown] = 0.0;
             changed = true;
+        }
+        for &equation in &dependent_equations[unknown] {
+            remaining[equation] -= 1;
+            unknown_xor[equation] ^= unknown;
+            if remaining[equation] == 1 {
+                let next = unknown_xor[equation];
+                if !proven_zero[next] {
+                    proven_zero[next] = true;
+                    pending.push(next);
+                }
+            }
         }
     }
     changed
@@ -2753,7 +2779,7 @@ impl StaticMatrix {
             if error.is_ok_and(BackwardError::accepted) {
                 continue;
             }
-            if canonicalize_real_homogeneous_singletons(
+            if canonicalize_real_homogeneous_zero_constraints(
                 csc,
                 values,
                 &rhs[begin..end],
@@ -3309,7 +3335,7 @@ impl StaticMatrix {
         // eligibility from the physical operator, then certify the complete
         // diagonally equivalent scaled system before unscaling. This preserves
         // the overflow protection that equilibration provides.
-        if canonicalize_real_homogeneous_singletons(csc, values, rhs, solution, operation) {
+        if canonicalize_real_homogeneous_zero_constraints(csc, values, rhs, solution, operation) {
             let canonical_error = componentwise_backward_error_with_layout_and_floors(
                 csc,
                 residual_layout,
@@ -3531,7 +3557,7 @@ impl StaticMatrix {
             }
             backward_error = refined_error;
         }
-        if canonicalize_real_homogeneous_singletons(csc, values, rhs, solution, operation) {
+        if canonicalize_real_homogeneous_zero_constraints(csc, values, rhs, solution, operation) {
             let canonical_error = match componentwise_backward_error_with_layout(
                 csc,
                 residual_layout,
@@ -3589,7 +3615,7 @@ impl StaticMatrix {
         if backward_error.accepted() {
             Ok(solution)
         } else {
-            if canonicalize_real_homogeneous_singletons(
+            if canonicalize_real_homogeneous_zero_constraints(
                 &self.csc,
                 &self.values,
                 rhs,
@@ -3730,7 +3756,7 @@ impl StaticMatrix {
         if backward_error.accepted() {
             Ok(solution)
         } else {
-            if canonicalize_real_homogeneous_singletons(
+            if canonicalize_real_homogeneous_zero_constraints(
                 &self.csc,
                 &self.values,
                 rhs,
@@ -6466,7 +6492,7 @@ mod tests {
 
         let normal_rhs = [0.0, 4.0];
         let mut normal = [tiny, 1.0];
-        assert!(canonicalize_real_homogeneous_singletons(
+        assert!(canonicalize_real_homogeneous_zero_constraints(
             &matrix.csc,
             &matrix.values,
             &normal_rhs,
@@ -6494,7 +6520,7 @@ mod tests {
 
         let transpose_rhs = [2.0, 0.0];
         let mut transposed = [1.0, tiny];
-        assert!(canonicalize_real_homogeneous_singletons(
+        assert!(canonicalize_real_homogeneous_zero_constraints(
             &matrix.csc,
             &matrix.values,
             &transpose_rhs,
@@ -6520,7 +6546,7 @@ mod tests {
         );
 
         let mut nonhomogeneous_singleton = [tiny, 1.0];
-        assert!(!canonicalize_real_homogeneous_singletons(
+        assert!(!canonicalize_real_homogeneous_zero_constraints(
             &matrix.csc,
             &matrix.values,
             &[Value::from_bits(1), 4.0],
@@ -6531,7 +6557,7 @@ mod tests {
 
         let zero_coefficient = StaticMatrix::from_triplets(1, 1, &[(0, 0, 0.0)]).unwrap();
         let mut unconstrained = [tiny];
-        assert!(!canonicalize_real_homogeneous_singletons(
+        assert!(!canonicalize_real_homogeneous_zero_constraints(
             &zero_coefficient.csc,
             &zero_coefficient.values,
             &[0.0],
@@ -6547,7 +6573,7 @@ mod tests {
         )
         .unwrap();
         let mut coupled = [tiny, 1.0];
-        assert!(!canonicalize_real_homogeneous_singletons(
+        assert!(!canonicalize_real_homogeneous_zero_constraints(
             &multi_entry.csc,
             &multi_entry.values,
             &[0.0, 1.0],
@@ -6557,7 +6583,7 @@ mod tests {
         assert_eq!(coupled, [tiny, 1.0]);
 
         let mut incomplete = [tiny, 2.0];
-        assert!(canonicalize_real_homogeneous_singletons(
+        assert!(canonicalize_real_homogeneous_zero_constraints(
             &matrix.csc,
             &matrix.values,
             &normal_rhs,
@@ -6582,6 +6608,58 @@ mod tests {
             .accepted(),
             "projection must not substitute for recertifying every original equation"
         );
+    }
+
+    #[test]
+    fn real_zero_constraint_canonicalization_propagates_only_proven_zeros() {
+        // Reverse row order, a branching dependency, and an unseeded cycle.
+        // A numerically zero coordinate in the cycle must not seed it.
+        let entries = [
+            (0, 1, 3.0),
+            (0, 2, -2.0),
+            (1, 0, 1.0),
+            (1, 1, -1.0),
+            (2, 0, 7.0),
+            (3, 1, 2.0),
+            (3, 3, 4.0),
+            (4, 4, 1.0),
+            (4, 5, -1.0),
+            (5, 4, -1.0),
+            (5, 5, 1.0),
+            (6, 2, 1.0),
+            (6, 6, 1.0),
+        ];
+        let tiny = 2.0_f64.powi(-150);
+        let rhs = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, Value::from_bits(1)];
+        for operation in [RealSolveOp::Normal, RealSolveOp::Transpose] {
+            let triplets = entries
+                .iter()
+                .map(|&(row, col, value)| match operation {
+                    RealSolveOp::Normal => (row, col, value),
+                    RealSolveOp::Transpose => (col, row, value),
+                })
+                .collect::<Vec<_>>();
+            let matrix = StaticMatrix::from_triplets(7, 7, &triplets).unwrap();
+            let mut candidate = [tiny, -tiny, tiny, -0.0, 0.0, tiny, tiny];
+            assert!(canonicalize_real_homogeneous_zero_constraints(
+                &matrix.csc,
+                &matrix.values,
+                &rhs,
+                &mut candidate,
+                operation,
+            ));
+            for value in &candidate[..4] {
+                assert_eq!(value.to_bits(), 0.0_f64.to_bits());
+            }
+            assert_eq!(&candidate[4..], &[0.0, tiny, tiny]);
+            assert!(!canonicalize_real_homogeneous_zero_constraints(
+                &matrix.csc,
+                &matrix.values,
+                &rhs,
+                &mut candidate,
+                operation,
+            ));
+        }
     }
 
     #[test]

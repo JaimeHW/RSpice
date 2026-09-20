@@ -113,3 +113,49 @@ fn terminal_current_probes_keep_shunt_ownership_when_ground_is_inferred() {
     let measured = result.branch_current_named("VMETER").unwrap();
     assert!((measured - 1.1e-3).abs() < 1e-10, "{measured}");
 }
+
+#[test]
+fn terminal_current_probes_preserve_vbic_substrate_bias_and_step_acceptance() {
+    let original = Netlist::parse(
+        "Substrate meters\nVc c 0 1.5\nVb b 0 0.65\nVs sub 0 -0.2\n\
+         QG c b 0 sub GP\nQV c b 0 sub VB\nQT c b 0 0 VT\nQ3 c b 0 GP\n\
+         .model GP NPN IS=1e-14 BF=100\n\
+         .model VB NPN LEVEL=12 IS=1e-16 BF=100\n\
+         .model VT NPN LEVEL=11 IS=1e-16 BF=100\n.end\n",
+    )
+    .unwrap();
+    let engine = Engine::new(SimulationConfig::default());
+    let reference = engine.run_tran(&original, 1e-9, 1e-10).unwrap();
+    let mut metered = original;
+    for device in ["QG", "QV"] {
+        metered.add_terminal_current_probe(TerminalCurrentProbe {
+            device: device.into(),
+            terminal: 3,
+            source_name: format!("VMETER_{device}"),
+            node_name: format!("meter_{device}"),
+        });
+    }
+    let result = engine.run_tran(&metered, 1e-9, 1e-10).unwrap();
+    assert_eq!(
+        result.time, reference.time,
+        "ideal meters must not trigger timestep recovery"
+    );
+    assert_eq!(engine.convergence_quality().timestep_reductions, 0);
+    for source in ["Vc", "Vb", "Vs"] {
+        let expected = reference.try_branch_current_waveform_named(source).unwrap();
+        let measured = result.try_branch_current_waveform_named(source).unwrap();
+        for (actual, expected) in measured.iter().zip(expected.iter()) {
+            assert!((actual - expected).abs() < 1e-12 + expected.abs() * 1e-7);
+        }
+    }
+    let substrate_source = result.try_branch_current_waveform_named("Vs").unwrap();
+    let gp = result
+        .try_branch_current_waveform_named("VMETER_QG")
+        .unwrap();
+    let vbic = result
+        .try_branch_current_waveform_named("VMETER_QV")
+        .unwrap();
+    for index in 0..result.time.len() {
+        assert!((substrate_source[index] + gp[index] + vbic[index]).abs() < 1e-12);
+    }
+}
