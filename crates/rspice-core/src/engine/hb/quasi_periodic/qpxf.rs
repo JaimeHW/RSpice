@@ -1,4 +1,5 @@
 //! Authenticated QPXF: multiple source/sideband transfers into one observation.
+mod card;
 mod delay;
 mod request;
 mod result;

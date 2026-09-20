@@ -981,6 +981,9 @@ fn transient_builders(
 /// surface would mean deciding its semantics a second time.
 fn unroutable_reason(command: &AnalysisCommand) -> Option<&'static str> {
     match command {
+        AnalysisCommand::Qpxf(_) => Some(
+            "QPXF is available through Engine::run_qpxf_from_qpss; this surface has no QPXF result-document projection yet",
+        ),
         AnalysisCommand::Qpac(_) => Some(
             "QPAC is available through Engine::run_qpac_from_qpss; this surface has no QPAC result-document projection yet",
         ),
@@ -1029,6 +1032,7 @@ fn card_spelling(command: &AnalysisCommand) -> &'static str {
         AnalysisCommand::Hb(_) => ".HB",
         AnalysisCommand::Qpss(_) => ".QPSS",
         AnalysisCommand::Qpac(_) => ".QPAC",
+        AnalysisCommand::Qpxf(_) => ".QPXF",
         AnalysisCommand::Sp { .. } => ".SP",
         AnalysisCommand::Stb { .. } => ".STB",
         AnalysisCommand::Disto { .. } => ".DISTO",

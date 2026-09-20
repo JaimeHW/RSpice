@@ -407,6 +407,11 @@ pub(super) fn execute(
                 describe_analysis(analysis),
             ));
         }
+        AnalysisCommand::Qpxf(_) => {
+            return Err(crate::errors::SimulationError::new_err(
+                "QPXF is available through Engine::run_qpxf_from_qpss; this surface has no QPXF result-document projection yet",
+            ));
+        }
         AnalysisCommand::Qpac(_) => {
             return Err(crate::errors::SimulationError::new_err(
                 "QPAC is available through Engine::run_qpac_from_qpss; this surface has no QPAC result-document projection yet",

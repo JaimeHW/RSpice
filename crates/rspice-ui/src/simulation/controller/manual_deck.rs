@@ -623,6 +623,7 @@ fn command_name(command: &AnalysisCommand) -> &'static str {
         AnalysisCommand::Hb(_) => ".hb",
         AnalysisCommand::Qpss(_) => ".qpss",
         AnalysisCommand::Qpac(_) => ".qpac",
+        AnalysisCommand::Qpxf(_) => ".qpxf",
         AnalysisCommand::Sp { .. } => ".sp",
         AnalysisCommand::Stb { .. } => ".stb",
         AnalysisCommand::Disto { .. } => ".disto",
@@ -888,6 +889,7 @@ fn command_to_queue_item(
             spec_options,
             analysis_line: format!(".ac data={table_name}"),
         }),
+        AnalysisCommand::Qpxf(_) => Err("QPXF native cards require the complete QPXF Studio request/result integration; use Engine::run_qpxf_card_from_qpss_with_abort".into()),
         AnalysisCommand::Qpac(card) => {
             let spec = AnalysisSpec::from_qpac_card(card)?;
             let analysis_line = spec.qpac_card()?.to_spice();

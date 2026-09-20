@@ -110,6 +110,7 @@ mod periodic_cards;
 mod pspice_stim;
 mod qpac_card;
 mod qpss_card;
+mod qpxf_card;
 mod scoping;
 mod source_specs;
 mod state;

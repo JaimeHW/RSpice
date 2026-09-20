@@ -2238,6 +2238,8 @@ pub enum AnalysisCommand {
 
     /// Complex small-signal conversion around an independent-phase QPSS orbit.
     Qpac(Box<super::QpacCard>),
+    /// Quasi-periodic transfer functions from multiple source sidebands.
+    Qpxf(Box<super::QpxfCard>),
 
     /// S-parameter analysis:
     /// `.SP DEC|LIN|OCT np fstart fstop [donoise] [PORT<k>=(<n+>[,<n->[,<z0>]]) ...]`
@@ -2957,6 +2959,7 @@ pub enum AnalysisCard {
     Hb,
     Qpss,
     Qpac,
+    Qpxf,
 }
 
 impl AnalysisCard {
@@ -2976,6 +2979,7 @@ impl AnalysisCard {
             Self::Hb => ".HB",
             Self::Qpss => ".QPSS",
             Self::Qpac => ".QPAC",
+            Self::Qpxf => ".QPXF",
         }
     }
 }
