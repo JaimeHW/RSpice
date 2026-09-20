@@ -64,6 +64,9 @@ fn stb_retained_result_value_count(
 fn map_stb_analysis_error(error: StbAnalysisError) -> SimulationError {
     match error {
         StbAnalysisError::Aborted => SimulationError::Aborted,
+        StbAnalysisError::FrequencyGrid(error) => {
+            SimulationError::Circuit(format!("STB frequency grid: {error}"))
+        }
         StbAnalysisError::InvalidConfiguration(error) => {
             SimulationError::Circuit(format!("Invalid STB config: {error}"))
         }

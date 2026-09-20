@@ -1,18 +1,8 @@
 //! Native card resolution with frequency-grid preflight and lossless request authoring.
 use super::*;
-use crate::analysis::frequency_grid::{
-    FrequencyGridScale, frequency_point_count, generate_frequency_grid, validate_generated_sweep,
-};
+use crate::ResourceLimits;
 use crate::analysis::quasi_periodic::QuasiPeriodicLinearMethod;
-use crate::netlist::{FreqVariation, QpacCard, QpacSweep};
-use crate::{ResourceKind, ResourceLimitError, ResourceLimits};
-
-fn grid_error(error: crate::analysis::FrequencyGridError) -> SimulationError {
-    match error {
-        crate::analysis::FrequencyGridError::Aborted => SimulationError::Aborted,
-        other => qpac_error(format!("invalid offset sweep: {other}")),
-    }
-}
+use crate::netlist::{QpacCard, QpacSweep};
 
 fn request_fields(card: &QpacCard) -> Result<QpacRequest, SimulationError> {
     let mut solver = QuasiPeriodicAcConfig::default();
@@ -54,14 +44,6 @@ fn request_fields(card: &QpacCard) -> Result<QpacRequest, SimulationError> {
     Ok(request)
 }
 
-fn scale(variation: FreqVariation) -> FrequencyGridScale {
-    match variation {
-        FreqVariation::Lin => FrequencyGridScale::Linear,
-        FreqVariation::Dec => FrequencyGridScale::Decade,
-        FreqVariation::Oct => FrequencyGridScale::Octave,
-    }
-}
-
 impl QpacRequest {
     /// Validate authoring and bound the frequency count without allocating a
     /// generated sweep. Suitable for interactive configuration editors.
@@ -70,51 +52,7 @@ impl QpacRequest {
         limits: &ResourceLimits,
     ) -> Result<usize, SimulationError> {
         request_fields(card)?;
-        let count = match &card.sweep {
-            QpacSweep::Explicit(values) => {
-                if values.is_empty()
-                    || values.iter().any(|f| !f.is_finite())
-                    || values.windows(2).any(|p| p[0] >= p[1])
-                {
-                    return Err(qpac_error(
-                        "probe offsets must be finite, nonempty and strictly increasing",
-                    ));
-                }
-                values.len()
-            }
-            QpacSweep::Generated(sweep) => {
-                let scale = scale(sweep.variation);
-                validate_generated_sweep(
-                    sweep.start_freq,
-                    sweep.stop_freq,
-                    sweep.points,
-                    scale,
-                    true,
-                )
-                .map_err(grid_error)?;
-                let count = frequency_point_count(
-                    sweep.start_freq,
-                    sweep.stop_freq,
-                    sweep.points,
-                    scale,
-                    1,
-                )
-                .map_err(grid_error)?;
-                if count > 1 && sweep.start_freq == sweep.stop_freq {
-                    return Err(qpac_error(
-                        "multiple offset points require distinct endpoints",
-                    ));
-                }
-                count
-            }
-        };
-        ResourceLimitError::ensure(
-            ResourceKind::AnalysisPoints,
-            count,
-            limits.max_analysis_points,
-        )?;
-        ResourceLimitError::ensure(ResourceKind::ResultValues, count, limits.max_result_values)?;
-        Ok(count)
+        super::super::frequency_sweep::validate(&card.sweep, limits)
     }
 
     pub fn from_qpac_card(card: &QpacCard) -> Result<Self, SimulationError> {
@@ -128,19 +66,7 @@ impl QpacRequest {
     ) -> Result<Self, SimulationError> {
         check_abort(abort)?;
         Self::validate_qpac_card(card, limits)?;
-        let offsets_hz = match &card.sweep {
-            QpacSweep::Explicit(values) => values.clone(),
-            QpacSweep::Generated(sweep) => generate_frequency_grid(
-                sweep.start_freq,
-                sweep.stop_freq,
-                sweep.points,
-                scale(sweep.variation),
-                true,
-                1,
-                abort,
-            )
-            .map_err(grid_error)?,
-        };
+        let offsets_hz = super::super::frequency_sweep::resolve(&card.sweep, limits, abort)?;
         let mut request = request_fields(card)?;
         request.offsets_hz = offsets_hz;
         request.validate()?;

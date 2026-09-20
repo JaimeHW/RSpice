@@ -488,7 +488,6 @@ impl AcTransferConfig {
             self.points_per_decade,
             self.grid_scale(),
             true,
-            1,
             abort,
         )
     }

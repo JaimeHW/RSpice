@@ -180,7 +180,6 @@ impl PxfConfig {
             self.num_points,
             self.grid_scale(),
             false,
-            1,
             abort,
         )
         .map_err(PxfError::FrequencyGrid)
@@ -194,7 +193,6 @@ impl PxfConfig {
             self.freq_stop,
             self.num_points,
             self.grid_scale(),
-            1,
         )
         .map_err(PxfError::FrequencyGrid)
     }

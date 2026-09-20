@@ -29,6 +29,9 @@
 
 use crate::Value;
 use crate::abort_signal::{AbortSignal, NoAbort};
+use crate::analysis::frequency_grid::{
+    FrequencyGridError, FrequencyGridScale, frequency_point_count, generate_frequency_grid,
+};
 use num_complex::Complex64;
 use std::f64::consts::PI;
 use std::fmt::Write as _;
@@ -216,62 +219,44 @@ impl StbConfig {
         abort: &dyn AbortSignal,
     ) -> Result<Vec<Value>, StbAnalysisError> {
         ensure_not_aborted(abort)?;
-        let point_count = self.frequency_point_count()?;
-        let mut frequencies = Vec::new();
-        try_reserve_exact(&mut frequencies, point_count, "STB frequency grid")?;
-
-        match self.sweep_type {
-            StbSweepType::Linear => {
-                if point_count == 1 {
-                    frequencies.push(self.freq_start);
-                } else {
-                    let step = (self.freq_stop - self.freq_start) / (point_count - 1) as Value;
-                    for index in 0..point_count {
-                        poll_abort(abort, index)?;
-                        frequencies.push(self.freq_start + index as Value * step);
-                    }
-                }
-            }
-            StbSweepType::Decade | StbSweepType::Octave => {
-                let (log_start, log_stop, base) = match self.sweep_type {
-                    StbSweepType::Decade => {
-                        (self.freq_start.log10(), self.freq_stop.log10(), 10.0_f64)
-                    }
-                    StbSweepType::Octave => {
-                        (self.freq_start.log2(), self.freq_stop.log2(), 2.0_f64)
-                    }
-                    StbSweepType::Linear => unreachable!("linear sweep handled above"),
-                };
-                let denominator = point_count.saturating_sub(1).max(1) as Value;
-                for index in 0..point_count {
-                    poll_abort(abort, index)?;
-                    let logarithm =
-                        log_start + (log_stop - log_start) * index as Value / denominator;
-                    frequencies.push(base.powf(logarithm));
-                }
-            }
-        }
-
-        ensure_not_aborted(abort)?;
-        Ok(frequencies)
+        self.frequency_point_count()?;
+        generate_frequency_grid(
+            self.freq_start,
+            self.freq_stop,
+            self.num_points,
+            self.grid_scale(),
+            false,
+            abort,
+        )
+        .map_err(|error| match error {
+            FrequencyGridError::Aborted => StbAnalysisError::Aborted,
+            FrequencyGridError::Allocation { requested } => StbAnalysisError::Allocation {
+                object: "STB frequency grid",
+                requested,
+            },
+            other => StbAnalysisError::FrequencyGrid(other),
+        })
     }
 
-    /// Number of sweep points that will be generated, without allocating the
-    /// frequency vector.
+    /// Number of generated points, before allocation, using the same density
+    /// and endpoint rule as the frequency vector passed to the solver.
     pub fn frequency_point_count(&self) -> Result<usize, StbConfigError> {
         self.validate()?;
-        let count = match self.sweep_type {
-            StbSweepType::Linear => self.num_points,
-            StbSweepType::Decade => checked_logarithmic_point_count(
-                self.freq_stop.log10() - self.freq_start.log10(),
-                self.num_points,
-            )?,
-            StbSweepType::Octave => checked_logarithmic_point_count(
-                self.freq_stop.log2() - self.freq_start.log2(),
-                self.num_points,
-            )?,
-        };
-        Ok(count.max(1))
+        frequency_point_count(
+            self.freq_start,
+            self.freq_stop,
+            self.num_points,
+            self.grid_scale(),
+        )
+        .map_err(|_| StbConfigError::PointCountOverflow)
+    }
+
+    fn grid_scale(&self) -> FrequencyGridScale {
+        match self.sweep_type {
+            StbSweepType::Linear => FrequencyGridScale::Linear,
+            StbSweepType::Decade => FrequencyGridScale::Decade,
+            StbSweepType::Octave => FrequencyGridScale::Octave,
+        }
     }
 
     /// Validate sweep configuration.
@@ -287,21 +272,6 @@ impl StbConfig {
         }
         Ok(())
     }
-}
-
-fn checked_logarithmic_point_count(
-    logarithmic_span: Value,
-    points_per_unit: usize,
-) -> Result<usize, StbConfigError> {
-    let raw_count = logarithmic_span * points_per_unit as Value;
-    let rounded_count = raw_count.ceil();
-    // `usize::MAX as f64` rounds upward on 64-bit platforms. Rejecting the
-    // equality boundary is deliberately conservative and prevents a
-    // float-to-integer cast from silently saturating to `usize::MAX`.
-    if !rounded_count.is_finite() || rounded_count >= usize::MAX as Value {
-        return Err(StbConfigError::PointCountOverflow);
-    }
-    Ok((rounded_count as usize).max(1))
 }
 
 //=============================================================================
@@ -567,6 +537,8 @@ pub struct StbAnalyzer {
 pub enum StbAnalysisError {
     /// The authored sweep or margin configuration is invalid.
     InvalidConfiguration(StbConfigError),
+    /// The requested frequencies cannot be represented as a finite grid.
+    FrequencyGrid(FrequencyGridError),
     /// A checked retained shape exceeded the platform address space.
     CapacityOverflow {
         /// Result or workspace whose shape overflowed.
@@ -589,6 +561,7 @@ impl std::fmt::Display for StbAnalysisError {
             Self::InvalidConfiguration(error) => {
                 write!(formatter, "invalid STB configuration: {error}")
             }
+            Self::FrequencyGrid(error) => write!(formatter, "invalid STB frequency grid: {error}"),
             Self::CapacityOverflow { object } => {
                 write!(formatter, "{object} exceeds addressable capacity")
             }

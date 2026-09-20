@@ -112,43 +112,73 @@ pub(crate) fn validate_generated_sweep(
 }
 
 /// Compute the exact retained point count without allocating the grid.
-///
-/// The caller must first apply [`validate_generated_sweep`] with the same
-/// endpoints, point parameter, and scale. `minimum_log_points` permits a
-/// logarithmic consumer to require two interpolated endpoints; use `1` for
-/// PAC/PXF-compatible single-point degenerate spans.
+/// The caller must first validate the same endpoints, point parameter and scale.
+/// Logarithmic grids use the authored density anchored at start; the stop is
+/// retained only when it falls on that grid. A sub-step span has one point.
 pub(crate) fn frequency_point_count(
     start: Value,
     stop: Value,
     point_parameter: usize,
     scale: FrequencyGridScale,
-    minimum_log_points: usize,
 ) -> Result<usize, FrequencyGridError> {
-    let logarithmic_span = match scale {
-        FrequencyGridScale::Linear => return Ok(point_parameter),
-        FrequencyGridScale::Decade => stop.log10() - start.log10(),
-        FrequencyGridScale::Octave => stop.log2() - start.log2(),
+    match scale {
+        FrequencyGridScale::Linear => Ok(point_parameter),
+        _ => logarithmic_layout(start, stop, point_parameter, scale).map(|layout| layout.count),
+    }
+}
+
+struct LogarithmicLayout {
+    count: usize,
+    span_steps: Value,
+    aligned_stop: bool,
+}
+
+fn logarithmic_layout(
+    start: Value,
+    stop: Value,
+    density: usize,
+    scale: FrequencyGridScale,
+) -> Result<LogarithmicLayout, FrequencyGridError> {
+    let base_log = match scale {
+        FrequencyGridScale::Decade => std::f64::consts::LN_10,
+        FrequencyGridScale::Octave => std::f64::consts::LN_2,
+        FrequencyGridScale::Linear => unreachable!("linear grid has no logarithmic layout"),
     };
-    let rounded_count = (logarithmic_span * point_parameter as Value).ceil();
-    // `usize::MAX as f64` can round upward. Reject the equality boundary so
-    // the subsequent float-to-integer cast cannot silently saturate.
-    if !rounded_count.is_finite() || rounded_count >= usize::MAX as Value {
+    let ratio = stop / start;
+    let span = if ratio.is_finite() {
+        ratio.ln()
+    } else {
+        stop.ln() - start.ln()
+    };
+    let span_steps = span / base_log * density as Value;
+    // Leave room for the starting point. usize::MAX may round upward as f64.
+    if !span_steps.is_finite() || span_steps >= (usize::MAX - 1) as Value {
         return Err(FrequencyGridError::PointCountOverflow);
     }
-    Ok((rounded_count as usize).max(minimum_log_points.max(1)))
+    let rounded = span_steps.round();
+    let aligned_stop =
+        (span_steps - rounded).abs() <= 8.0 * Value::EPSILON * span_steps.abs().max(1.0);
+    let intervals = if aligned_stop {
+        rounded
+    } else {
+        span_steps.floor()
+    } as usize;
+    Ok(LogarithmicLayout {
+        count: intervals + 1,
+        span_steps,
+        aligned_stop,
+    })
 }
 
 /// Construct a validated generated grid with fallible retention and cancellation.
-///
-/// This validates before computing the exact retained count, reserves all
-/// storage before writing values, and never returns a partial grid.
+/// LIN is a total point count; DEC/OCT are fixed densities per logarithmic unit.
+/// No off-grid stop is appended or used to stretch the authored density.
 pub(crate) fn generate_frequency_grid(
     start: Value,
     stop: Value,
     point_parameter: usize,
     scale: FrequencyGridScale,
     linear_start_may_be_zero: bool,
-    minimum_log_points: usize,
     abort: &dyn AbortSignal,
 ) -> Result<Vec<Value>, FrequencyGridError> {
     ensure_not_aborted(abort)?;
@@ -159,39 +189,37 @@ pub(crate) fn generate_frequency_grid(
         scale,
         linear_start_may_be_zero,
     )?;
-    let point_count =
-        frequency_point_count(start, stop, point_parameter, scale, minimum_log_points)?;
+    let layout = if scale == FrequencyGridScale::Linear {
+        None
+    } else {
+        Some(logarithmic_layout(start, stop, point_parameter, scale)?)
+    };
+    let count = layout
+        .as_ref()
+        .map_or(point_parameter, |layout| layout.count);
     let mut frequencies = Vec::new();
     frequencies
-        .try_reserve_exact(point_count)
-        .map_err(|_| FrequencyGridError::Allocation {
-            requested: point_count,
-        })?;
-
-    let (axis_start, axis_stop) = match scale {
-        FrequencyGridScale::Linear => (start, stop),
-        FrequencyGridScale::Decade => (start.log10(), stop.log10()),
-        FrequencyGridScale::Octave => (start.log2(), stop.log2()),
-    };
-    let denominator = point_count.saturating_sub(1).max(1) as Value;
-    for index in 0..point_count {
+        .try_reserve_exact(count)
+        .map_err(|_| FrequencyGridError::Allocation { requested: count })?;
+    let low = start.ln();
+    let high = stop.ln();
+    for index in 0..count {
         poll_abort(abort, index)?;
-        // Authored endpoints are exact. Reconstructing them from rounded
-        // logarithms can overflow even when the original value is finite.
         let value = if index == 0 {
             start
-        } else if index == point_count - 1 {
+        } else if let Some(layout) = &layout {
+            if layout.aligned_stop && index == count - 1 {
+                stop
+            } else {
+                // Convex interpolation in log space avoids both ratio overflow
+                // and the overflow of base^(index/density) for extreme spans.
+                let fraction = index as Value / layout.span_steps;
+                ((1.0 - fraction) * low + fraction * high).exp()
+            }
+        } else if index == count - 1 {
             stop
         } else {
-            match scale {
-                FrequencyGridScale::Linear => {
-                    start + index as Value * ((stop - start) / denominator)
-                }
-                FrequencyGridScale::Decade => 10.0_f64
-                    .powf(axis_start + (axis_stop - axis_start) * index as Value / denominator),
-                FrequencyGridScale::Octave => 2.0_f64
-                    .powf(axis_start + (axis_stop - axis_start) * index as Value / denominator),
-            }
+            start + index as Value * ((stop - start) / (count - 1) as Value)
         };
         if !value.is_finite()
             || value < start
@@ -205,7 +233,6 @@ pub(crate) fn generate_frequency_grid(
         }
         frequencies.push(value);
     }
-
     ensure_not_aborted(abort)?;
     Ok(frequencies)
 }
@@ -235,27 +262,101 @@ mod tests {
     use crate::abort_signal::{CountingAbort, ImmediateAbort, NoAbort};
 
     #[test]
-    fn generated_grid_preserves_endpoints_and_scale() {
-        assert_eq!(
-            generate_frequency_grid(
-                1.0,
-                1.0e3,
-                2,
-                FrequencyGridScale::Decade,
+    fn periodic_frequency_density_reaches_pac_pxf_stb_and_transfer_configs() {
+        use crate::analysis::{
+            pac::{PacConfig, PacSweepType},
+            pxf::{PxfConfig, PxfSweepType},
+            stb::{StbConfig, StbSweepType},
+            transfer::{AcSweepType, AcTransferConfig},
+        };
+        for (octave, start, stop, density, expected) in [
+            (
                 false,
-                1,
-                &NoAbort,
-            )
-            .expect("ordinary decade grid"),
-            vec![
-                1.0,
-                10.0_f64.powf(0.6),
-                10.0_f64.powf(1.2),
-                10.0_f64.powf(1.8),
-                10.0_f64.powf(2.4),
-                1.0e3
-            ]
-        );
+                10.0,
+                1000.0,
+                2,
+                vec![
+                    10.0,
+                    10.0 * 10_f64.sqrt(),
+                    100.0,
+                    100.0 * 10_f64.sqrt(),
+                    1000.0,
+                ],
+            ),
+            (
+                false,
+                10.0,
+                800.0,
+                2,
+                vec![10.0, 10.0 * 10_f64.sqrt(), 100.0, 100.0 * 10_f64.sqrt()],
+            ),
+            (true, 8.0, 20.0, 2, vec![8.0, 8.0 * 2_f64.sqrt(), 16.0]),
+            (
+                true,
+                8.0,
+                32.0,
+                2,
+                vec![8.0, 8.0 * 2_f64.sqrt(), 16.0, 16.0 * 2_f64.sqrt(), 32.0],
+            ),
+            (false, 100.0, 110.0, 10, vec![100.0]),
+            (true, 8.0, 8.0, 20, vec![8.0]),
+        ] {
+            let pac = PacConfig::new()
+                .with_sweep(start, stop, density)
+                .with_sweep_type(if octave {
+                    PacSweepType::Octave
+                } else {
+                    PacSweepType::Decade
+                });
+            let pxf = PxfConfig::new()
+                .with_sweep(start, stop, density)
+                .with_sweep_type(if octave {
+                    PxfSweepType::Octave
+                } else {
+                    PxfSweepType::Decade
+                });
+            let stb = StbConfig::new()
+                .with_sweep(start, stop, density)
+                .with_sweep_type(if octave {
+                    StbSweepType::Octave
+                } else {
+                    StbSweepType::Decade
+                });
+            let mut transfer = AcTransferConfig::decade("out", "V1", start, stop, density);
+            if octave {
+                transfer.sweep_type = AcSweepType::Octave;
+            }
+            for count in [
+                pac.frequency_point_count().unwrap(),
+                pxf.frequency_point_count().unwrap(),
+                stb.frequency_point_count().unwrap(),
+            ] {
+                assert_eq!(count, expected.len());
+            }
+            for grid in [
+                pac.frequency_points().unwrap(),
+                pxf.frequency_points().unwrap(),
+                stb.frequency_points().unwrap(),
+                transfer.frequency_points().unwrap(),
+            ] {
+                assert_eq!(grid.len(), expected.len());
+                for (&actual, &expected) in grid.iter().zip(&expected) {
+                    assert!((actual / expected - 1.0).abs() < 1e-14, "{grid:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn generated_grid_preserves_endpoints_and_scale() {
+        let logarithmic =
+            generate_frequency_grid(1.0, 1.0e3, 2, FrequencyGridScale::Decade, false, &NoAbort)
+                .unwrap();
+        assert_eq!(logarithmic.len(), 7);
+        for (index, frequency) in logarithmic.iter().enumerate() {
+            let expected = 10.0_f64.powf(index as f64 / 2.0);
+            assert!((frequency / expected - 1.0).abs() < 1e-14);
+        }
         assert_eq!(
             generate_frequency_grid(
                 0.0,
@@ -263,7 +364,6 @@ mod tests {
                 3,
                 FrequencyGridScale::Linear,
                 true,
-                1,
                 &NoAbort,
             )
             .expect("extreme finite linear grid"),
@@ -278,8 +378,13 @@ mod tests {
             FrequencyGridScale::Decade,
             FrequencyGridScale::Octave,
         ] {
-            let start = Value::MAX / 1024.0;
-            let grid = generate_frequency_grid(start, Value::MAX, 32, scale, false, 2, &NoAbort)
+            let start = Value::MAX
+                / if scale == FrequencyGridScale::Decade {
+                    1000.0
+                } else {
+                    1024.0
+                };
+            let grid = generate_frequency_grid(start, Value::MAX, 32, scale, false, &NoAbort)
                 .expect("representable extreme sweep");
             assert_eq!(grid.first(), Some(&start), "{scale:?}");
             assert_eq!(grid.last(), Some(&Value::MAX), "{scale:?}");
@@ -297,7 +402,6 @@ mod tests {
                 3,
                 FrequencyGridScale::Linear,
                 false,
-                1,
                 &NoAbort
             )
             .is_err()
@@ -313,7 +417,6 @@ mod tests {
                 usize::MAX,
                 FrequencyGridScale::Decade,
                 false,
-                1,
                 &NoAbort,
             ),
             Err(FrequencyGridError::PointCountOverflow)
@@ -329,7 +432,6 @@ mod tests {
                 usize::MAX,
                 FrequencyGridScale::Linear,
                 false,
-                1,
                 &NoAbort,
             ),
             Err(FrequencyGridError::Allocation {
@@ -347,14 +449,13 @@ mod tests {
                 2,
                 FrequencyGridScale::Linear,
                 false,
-                1,
                 &ImmediateAbort,
             ),
             Err(FrequencyGridError::Aborted)
         );
         let abort = CountingAbort::new(1);
         assert_eq!(
-            generate_frequency_grid(1.0, 2.0, 300, FrequencyGridScale::Linear, false, 1, &abort),
+            generate_frequency_grid(1.0, 2.0, 300, FrequencyGridScale::Linear, false, &abort),
             Err(FrequencyGridError::Aborted)
         );
     }

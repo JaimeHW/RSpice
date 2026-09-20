@@ -222,7 +222,6 @@ impl PacConfig {
             self.num_points,
             self.grid_scale(),
             false,
-            1,
             abort,
         )
     }
@@ -236,7 +235,6 @@ impl PacConfig {
             self.sweep_stop,
             self.num_points,
             self.grid_scale(),
-            1,
         )
     }
 

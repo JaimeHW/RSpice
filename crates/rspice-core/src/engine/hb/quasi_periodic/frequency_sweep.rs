@@ -1,7 +1,7 @@
 //! Shared bounded signed frequency grids for translated native analyses.
 use super::*;
 use crate::analysis::frequency_grid::{
-    FrequencyGridScale, generate_frequency_grid, validate_generated_sweep,
+    FrequencyGridScale, frequency_point_count, generate_frequency_grid, validate_generated_sweep,
 };
 use crate::netlist::{FreqVariation, QpacSweep};
 use crate::{ResourceKind, ResourceLimitError, ResourceLimits};
@@ -64,7 +64,8 @@ pub(super) fn validate(
             let count = if s.variation == FreqVariation::Lin {
                 s.points
             } else {
-                logarithmic_layout(s)?.0
+                frequency_point_count(s.start_freq, s.stop_freq, s.points, scale(s.variation))
+                    .map_err(grid_error)?
             };
             if count > 1 && s.start_freq == s.stop_freq {
                 return Err(error(
@@ -98,7 +99,6 @@ pub(super) fn resolve(
                 s.points,
                 FrequencyGridScale::Linear,
                 true,
-                1,
                 abort,
             )
             .map_err(grid_error)?;
@@ -117,48 +117,12 @@ pub(super) fn resolve(
             }
             values
         }
-        QpacSweep::Generated(s) if s.variation != FreqVariation::Lin => {
-            let (count, span_steps, aligned) = logarithmic_layout(s)?;
-            let mut values = Vec::new();
-            values
-                .try_reserve_exact(count)
-                .map_err(|_| error("cannot allocate frequency grid"))?;
-            let low = s.start_freq.ln();
-            let high = s.stop_freq.ln();
-            for index in 0..count {
-                if index.is_multiple_of(256) {
-                    check_abort(abort)?;
-                }
-                let value = if index == 0 {
-                    s.start_freq
-                } else if aligned && index == count - 1 {
-                    s.stop_freq
-                } else {
-                    // A fixed logarithmic density anchored at start. The
-                    // stop is included only if it lies on this grid.
-                    let fraction = index as f64 / span_steps;
-                    ((1.0 - fraction) * low + fraction * high).exp()
-                };
-                if !value.is_finite()
-                    || value < s.start_freq
-                    || value > s.stop_freq
-                    || values.last().is_some_and(|previous| value <= *previous)
-                {
-                    return Err(error(
-                        "logarithmic spacing cannot retain distinct finite frequencies",
-                    ));
-                }
-                values.push(value);
-            }
-            values
-        }
         QpacSweep::Generated(s) => generate_frequency_grid(
             s.start_freq,
             s.stop_freq,
             s.points,
             scale(s.variation),
             true,
-            1,
             abort,
         )
         .map_err(grid_error)?,
@@ -167,32 +131,6 @@ pub(super) fn resolve(
     Ok(values)
 }
 
-/// Constant-time count and endpoint decision for density-based logarithmic sweeps.
-fn logarithmic_layout(
-    s: &crate::netlist::PeriodicSweep,
-) -> Result<(usize, f64, bool), SimulationError> {
-    let base_log = if s.variation == FreqVariation::Dec {
-        std::f64::consts::LN_10
-    } else {
-        std::f64::consts::LN_2
-    };
-    let ratio = s.stop_freq / s.start_freq;
-    let span = if ratio.is_finite() {
-        ratio.ln()
-    } else {
-        s.stop_freq.ln() - s.start_freq.ln()
-    };
-    let steps = span / base_log * s.points as f64;
-    if !steps.is_finite() || steps >= (usize::MAX - 1) as f64 {
-        return Err(error(
-            "logarithmic frequency count exceeds addressable limits",
-        ));
-    }
-    let rounded = steps.round();
-    let aligned = (steps - rounded).abs() <= 8.0 * f64::EPSILON * steps.abs().max(1.0);
-    let intervals = if aligned { rounded } else { steps.floor() } as usize;
-    Ok((intervals.saturating_add(1), steps, aligned))
-}
 #[cfg(test)]
 mod tests {
     use super::*;
