@@ -97,6 +97,36 @@ cosine-reference phase in degrees. The harmonic index cannot exceed the selected
 PSS retention count. `scalar:pss.frequency`, `scalar:pss.period` and
 `scalar:pss.iterations` expose the solved frequency, period and shooting corrections.
 
+## Quasi-periodic analyses in configured studies
+
+Monte Carlo and optimization can select driven QPSS, QPAC, QPXF or QPNOISE.
+Each candidate uses its varied physical circuit and the complete selected QPSS
+configuration, including tone assignments, lattice retention, sampling, numerical
+solver and zero/DC initialization policy. A dependent study reruns its exact
+bound QPSS producer and then applies the complete consumer specification to that
+retained state. Consumer frequency axes, explicit frequencies, lattices, drive
+magnitude/phase, source/output selections, group delay, noise filters, integration
+bands and solver controls survive worker transport and participate in result identity.
+
+For QPSS, `tuple:1,-1:magnitude:V(out)` selects the named lattice component;
+`real`, `imag` and `phase` (degrees) are also available. Negative tuples retain
+conjugate phase, and DC remains signed. Coordinates must belong to the configured
+retained lattice. `bin:index:quantity:signal` selects the sorted nonnegative
+spectrum, while `scalar:qpss.iterations` and `scalar:qpss.normalized_residual`
+select native solve statistics.
+
+QPAC, QPXF and QPNOISE support explicit `bin:index:quantity:trace` and
+`last:trace` selections using their full result trace names, including lattice
+labels. Separate Monte Carlo observations with semicolons or newlines; semicolons
+inside trace parentheses or brackets remain part of that trace name.
+Real noise densities and group delay require `real`; cross spectra permit
+complex quantities. Native integrated noise selections use one-based output
+numbers: `scalar:qpnoise.output_rms(1)`, `scalar:qpnoise.input_rms(1)`,
+`scalar:qpnoise.contributor_rms(1,RS thermal)` and
+`scalar:qpnoise.contributor_share_percent(1,RS thermal)`. These require the
+corresponding integration, input referral or ranking output to be enabled.
+Unavailable referrals or integration results remain unavailable, rather than zero.
+
 ## Periodic RF analyses in configured studies
 
 Monte Carlo and optimization can select PAC, PXF, PNOISE, PSTB or PSP. Each trial
