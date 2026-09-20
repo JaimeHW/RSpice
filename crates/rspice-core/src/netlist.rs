@@ -810,7 +810,8 @@ pub(crate) struct NetlistAstOverlay {
 }
 
 /// Effective dialect-specific node-zero alias policy after parsing.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum GroundPolicy {
     /// Only the canonical node name `0` is ground.
     OnlyZero,

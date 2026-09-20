@@ -1,6 +1,7 @@
 //! Authenticated QPXF: multiple source/sideband transfers into one observation.
 mod delay;
 mod request;
+mod result;
 #[cfg(test)]
 mod tests;
 
@@ -9,42 +10,7 @@ use super::*;
 use crate::analysis::quasi_periodic::QuasiPeriodicAdjointSolution;
 pub use delay::QpxfGroupDelay;
 pub use request::{QpxfFrequencyAxis, QpxfInputLattices, QpxfOutput, QpxfRequest, QpxfSources};
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct QpxfInputSource {
-    pub name: String,
-    pub quantity: QpxfQuantity,
-    /// Complete unit excitation direction in canonical MNA coordinates.
-    pub injections: Vec<(usize, Complex64)>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct QpxfTransfer {
-    pub input_source: usize,
-    pub input_lattice: Vec<i32>,
-    pub input_frequencies_hz: Vec<Value>,
-    /// Output quantity per unit input quantity, with no AC source scaling.
-    pub values: Vec<Complex64>,
-    /// Phase differences on the authored output-frequency grid. Undefined
-    /// samples retain their reason and never masquerade as zero delay.
-    pub group_delay: Option<Vec<QpxfGroupDelay>>,
-}
-
-#[derive(Debug, Clone)]
-pub struct QpxfAnalysisResult {
-    pub request: QpxfRequest,
-    pub operating_point_identity: String,
-    pub grid: QuasiPeriodicGridConfig,
-    pub node_names: Vec<String>,
-    pub branch_names: Vec<String>,
-    pub probe_offsets_hz: Vec<Value>,
-    pub output_frequencies_hz: Vec<Value>,
-    pub input_sources: Vec<QpxfInputSource>,
-    pub input_lattices: Vec<Vec<i32>>,
-    pub solutions: Vec<QuasiPeriodicAdjointSolution>,
-    /// Source-major, then authored input-tuple order.
-    pub transfers: Vec<QpxfTransfer>,
-}
+pub use result::{QpxfAnalysisResult, QpxfInputSource, QpxfResultMetadata, QpxfTransfer};
 
 fn qpxf_error(message: impl Into<String>) -> SimulationError {
     SimulationError::Circuit(format!("QPXF: {}", message.into()))
@@ -288,18 +254,34 @@ impl Engine {
             return Err(qpxf_error("producer inputs changed during the analysis"));
         }
         check_abort(abort)?;
-        Ok(QpxfAnalysisResult {
-            request,
-            operating_point_identity: point.retained_identity().to_owned(),
-            grid: grid.config().clone(),
-            node_names: point.node_names().to_vec(),
-            branch_names: point.branch_names().to_vec(),
-            probe_offsets_hz: offsets,
-            output_frequencies_hz: output_frequencies,
-            input_sources: inputs,
-            input_lattices,
+        QpxfAnalysisResult::bind(
+            QpxfResultMetadata {
+                version: 1,
+                retained_identity: String::new(),
+                normalized_residuals: solutions.iter().map(|s| s.normalized_residual).collect(),
+                observation: observation
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(row, values)| {
+                        let value = values[output_index];
+                        (value != Complex64::ZERO).then_some((row, value))
+                    })
+                    .collect(),
+                ground_policy: netlist.ground_policy(),
+                request,
+                operating_point_identity: point.retained_identity().to_owned(),
+                grid: grid.config().clone(),
+                node_names: point.node_names().to_vec(),
+                branch_names: point.branch_names().to_vec(),
+                probe_offsets_hz: offsets,
+                output_frequencies_hz: output_frequencies,
+                input_sources: inputs,
+                input_lattices,
+            },
             solutions,
             transfers,
-        })
+            &engine.config.resource_limits,
+            abort,
+        )
     }
 }

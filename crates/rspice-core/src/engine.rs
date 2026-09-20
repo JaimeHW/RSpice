@@ -140,7 +140,7 @@ pub use hb::{
     PspNoiseCorrelation, QpacAnalysisResult, QpacInputQuantity, QpacRequest, QpacResultMetadata,
     QpssConfig, QpssInitialState, QpssOperatingPoint, QpssOperatingPointMetadata, QpssSourceTone,
     QpxfAnalysisResult, QpxfFrequencyAxis, QpxfGroupDelay, QpxfInputLattices, QpxfInputSource,
-    QpxfOutput, QpxfQuantity, QpxfRequest, QpxfSources, QpxfTransfer,
+    QpxfOutput, QpxfQuantity, QpxfRequest, QpxfResultMetadata, QpxfSources, QpxfTransfer,
 };
 pub use health::EngineHealthReport;
 pub use pss::{

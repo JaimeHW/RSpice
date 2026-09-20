@@ -15,7 +15,7 @@ use crate::analysis::quasi_periodic::{
 pub use qpac::{QpacAnalysisResult, QpacInputQuantity, QpacRequest, QpacResultMetadata};
 pub use qpxf::{
     QpxfAnalysisResult, QpxfFrequencyAxis, QpxfGroupDelay, QpxfInputLattices, QpxfInputSource,
-    QpxfOutput, QpxfQuantity, QpxfRequest, QpxfSources, QpxfTransfer,
+    QpxfOutput, QpxfQuantity, QpxfRequest, QpxfResultMetadata, QpxfSources, QpxfTransfer,
 };
 pub use state::{QpssOperatingPoint, QpssOperatingPointMetadata};
 use std::sync::Arc;

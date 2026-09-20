@@ -42,11 +42,11 @@ fn qpxf_engine_all_sources_and_current_output_match_rlc_above_dense_limit() {
     let result = engine
         .run_qpxf_from_qpss(&netlist, request(), &point)
         .unwrap();
-    assert_eq!(result.operating_point_identity, identity);
+    assert_eq!(result.metadata.operating_point_identity, identity);
     assert_eq!(result.solutions.len(), 3);
-    assert_eq!(result.input_sources.len(), 3);
+    assert_eq!(result.metadata.input_sources.len(), 3);
     assert_eq!(result.transfers.len(), 6);
-    assert_eq!(result.output_frequencies_hz, [-37.0, 0.0, 127.0]);
+    assert_eq!(result.metadata.output_frequencies_hz, [-37.0, 0.0, 127.0]);
     assert!(
         result
             .solutions
@@ -54,10 +54,13 @@ fn qpxf_engine_all_sources_and_current_output_match_rlc_above_dense_limit() {
             .all(|s| s.normalized_residual <= 1.0)
     );
     for transfer in &result.transfers {
-        let source = &result.input_sources[transfer.input_source];
+        let source = &result.metadata.input_sources[transfer.input_source];
         assert!(transfer.group_delay.is_none());
         for (i, value) in transfer.values.iter().enumerate() {
-            let jw = Complex64::new(0.0, std::f64::consts::TAU * result.output_frequencies_hz[i]);
+            let jw = Complex64::new(
+                0.0,
+                std::f64::consts::TAU * result.metadata.output_frequencies_hz[i],
+            );
             let z2 = Complex64::new(2000.0, 0.0) + jw * 0.001;
             let ymid = Complex64::new(0.001, 0.0) + jw * 1e-6 + Complex64::ONE / z2;
             let expected = if transfer.input_lattice != [0, 0, 0]
@@ -74,7 +77,7 @@ fn qpxf_engine_all_sources_and_current_output_match_rlc_above_dense_limit() {
                 "{} {:?} at {}: {value:?} != {expected:?}",
                 source.name,
                 transfer.input_lattice,
-                result.output_frequencies_hz[i]
+                result.metadata.output_frequencies_hz[i]
             );
         }
     }
@@ -90,7 +93,7 @@ fn qpxf_engine_all_sources_and_current_output_match_rlc_above_dense_limit() {
     let result = engine
         .run_qpxf_from_qpss(&netlist, voltage, &point)
         .unwrap();
-    assert_eq!(result.input_sources[0].name, "VPROBE");
+    assert_eq!(result.metadata.input_sources[0].name, "VPROBE");
     assert_eq!(result.transfers.len(), 1);
     assert!(
         result.transfers[0]
@@ -148,11 +151,11 @@ fn qpxf_engine_output_frequency_anchor_preserves_small_signal_and_full_input_lat
     let result = engine
         .run_qpxf_from_qpss(&netlist, req.clone(), &point)
         .unwrap();
-    assert_eq!(result.input_lattices.len(), 9);
+    assert_eq!(result.metadata.input_lattices.len(), 9);
     assert_eq!(result.transfers.len(), 18);
-    assert_eq!(result.output_frequencies_hz, req.frequencies_hz);
+    assert_eq!(result.metadata.output_frequencies_hz, req.frequencies_hz);
     for transfer in &result.transfers {
-        let source = &result.input_sources[transfer.input_source];
+        let source = &result.metadata.input_sources[transfer.input_source];
         for (i, value) in transfer.values.iter().enumerate() {
             let frequency = req.frequencies_hz[i];
             let expected = if transfer.input_lattice == req.output_lattice {

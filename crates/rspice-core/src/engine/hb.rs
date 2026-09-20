@@ -54,7 +54,7 @@ pub use quasi_periodic::{
     QpacAnalysisResult, QpacInputQuantity, QpacRequest, QpacResultMetadata, QpssConfig,
     QpssInitialState, QpssOperatingPoint, QpssOperatingPointMetadata, QpssSourceTone,
     QpxfAnalysisResult, QpxfFrequencyAxis, QpxfGroupDelay, QpxfInputLattices, QpxfInputSource,
-    QpxfOutput, QpxfQuantity, QpxfRequest, QpxfSources, QpxfTransfer,
+    QpxfOutput, QpxfQuantity, QpxfRequest, QpxfResultMetadata, QpxfSources, QpxfTransfer,
 };
 pub use state::{HbEnvelopeContinuationState, HbEnvelopeStateGuarantee};
 
