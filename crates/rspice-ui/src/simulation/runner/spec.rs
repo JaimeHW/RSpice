@@ -20,7 +20,7 @@ mod config;
 mod device;
 mod frequency;
 mod periodic;
-pub(super) use periodic::run_spectral_from_trajectory;
+pub(super) use periodic::{run_native_study_on_materialized, run_spectral_from_trajectory};
 mod recorded_fft;
 mod sweeps;
 

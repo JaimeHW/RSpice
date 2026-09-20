@@ -215,18 +215,27 @@ pub fn run_hb_analysis_with_source_path_and_abort(
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<HbData> {
     ensure_not_aborted(abort)?;
-    let hb_config = build_core_hb_config(config, abort)?;
-
+    config.validate_with_abort(abort)?;
     let netlist = parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
+    run_hb_analysis_on_materialized_with_abort(&netlist, config, abort)
+}
 
+/// Solve the already varied study circuit without replaying its nominal source.
+pub(crate) fn run_hb_analysis_on_materialized_with_abort(
+    netlist: &rspice_core::Netlist,
+    config: &HbRunConfig,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<HbData> {
+    ensure_not_aborted(abort)?;
+    let hb_config = build_core_hb_config(config, abort)?;
     let engine = build_resolved_periodic_engine(
-        &netlist,
+        netlist,
         config.reltol,
         "HB resolved engine configuration is invalid",
     )?;
     // Run actual HB analysis
     let hb_result = engine
-        .run_hb_with_abort(&netlist, hb_config, abort)
+        .run_hb_with_abort(netlist, hb_config, abort)
         .map_err(|error| ServiceRunError::from_core("HB error", error))?;
     validate_hb_solution(&hb_result)?;
 

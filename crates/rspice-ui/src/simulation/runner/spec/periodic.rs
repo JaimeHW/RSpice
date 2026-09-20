@@ -144,49 +144,9 @@ pub(super) fn run_periodic_spec(
         AnalysisSpec::PssSpectrum { num_harmonics } => {
             run_pss_spectrum(num_harmonics, dependencies, abort)
         }
-        AnalysisSpec::HarmonicBalance {
-            tones,
-            reltol,
-            abstol,
-            max_iterations,
-            damping,
-            min_damping,
-            oversample,
-            collocation_points,
-            max_mixing_order,
-            use_krylov,
-            gmres_restart,
-            source_stepping,
-            use_exact_jacobian,
-            verbose,
-        } => {
-            let mut hb_tones = Vec::with_capacity(tones.len());
-            for tone in tones {
-                super::ensure_not_aborted(abort)?;
-                hb_tones.push(svc_runner::HbToneRunConfig {
-                    frequency: tone.frequency,
-                    harmonics: tone.harmonics,
-                    source: tone.source,
-                    name: tone.name,
-                });
-            }
-            let hb_cfg = svc_runner::HbRunConfig {
-                tones: hb_tones,
-                reltol,
-                abstol,
-                max_iterations,
-                damping,
-                min_damping,
-                oversample,
-                collocation_points,
-                max_mixing_order,
-                use_krylov,
-                gmres_restart,
-                source_stepping,
-                use_exact_jacobian,
-                verbose,
-            };
-            run_harmonic_balance(netlist, &hb_cfg, true, source_path, abort)
+        spec @ AnalysisSpec::HarmonicBalance { .. } => {
+            let config = hb_run_config(spec, abort)?;
+            run_harmonic_balance(netlist, &config, true, source_path, abort)
         }
         AnalysisSpec::Envelope {
             initialization,
@@ -966,6 +926,14 @@ fn run_harmonic_balance(
         svc_runner::run_hb_analysis_with_source_path_and_abort(netlist, hb_cfg, source_path, abort)
     })?;
 
+    project_hb_data(data, retain_harmonics, abort)
+}
+
+fn project_hb_data(
+    data: svc_runner::HbData,
+    retain_harmonics: bool,
+    abort: &dyn AbortSignal,
+) -> Result<SimulationResult, SimulationError> {
     let (frequencies, waveforms) = if retain_harmonics {
         spectra_to_complex_waveforms(data.spectra, abort)?
     } else {
@@ -1806,4 +1774,70 @@ pub(in crate::simulation::runner) fn run_spectral_from_trajectory(
             "A spectral study requires Fourier or FFT".into(),
         )),
     }
+}
+
+fn hb_run_config(
+    spec: AnalysisSpec,
+    abort: &dyn AbortSignal,
+) -> Result<svc_runner::HbRunConfig, SimulationError> {
+    let AnalysisSpec::HarmonicBalance {
+        tones,
+        reltol,
+        abstol,
+        max_iterations,
+        damping,
+        min_damping,
+        oversample,
+        collocation_points,
+        max_mixing_order,
+        use_krylov,
+        gmres_restart,
+        source_stepping,
+        use_exact_jacobian,
+        verbose,
+    } = spec
+    else {
+        return Err(SimulationError::InvalidConfig(
+            "Expected harmonic balance study configuration".into(),
+        ));
+    };
+    let mut hb_tones = Vec::with_capacity(tones.len());
+    for tone in tones {
+        super::ensure_not_aborted(abort)?;
+        hb_tones.push(svc_runner::HbToneRunConfig {
+            frequency: tone.frequency,
+            harmonics: tone.harmonics,
+            source: tone.source,
+            name: tone.name,
+        });
+    }
+    let hb_cfg = svc_runner::HbRunConfig {
+        tones: hb_tones,
+        reltol,
+        abstol,
+        max_iterations,
+        damping,
+        min_damping,
+        oversample,
+        collocation_points,
+        max_mixing_order,
+        use_krylov,
+        gmres_restart,
+        source_stepping,
+        use_exact_jacobian,
+        verbose,
+    };
+    Ok(hb_cfg)
+}
+
+pub(in crate::simulation::runner) fn run_native_study_on_materialized(
+    spec: AnalysisSpec,
+    circuit: &rspice_core::Netlist,
+    abort: &dyn AbortSignal,
+) -> Result<SimulationResult, SimulationError> {
+    let config = hb_run_config(spec, abort)?;
+    let data = super::run_abort_aware_service(abort, || {
+        svc_runner::run_hb_analysis_on_materialized_with_abort(circuit, &config, abort)
+    })?;
+    project_hb_data(data, true, abort)
 }
