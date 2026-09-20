@@ -78,6 +78,25 @@ traces carry amps through worker transport and plotting. Inductor currents are
 published once even though they are present in both MNA and reactive state.
 Only currents actually retained with an exact DC component are exposed.
 
+## PSS in configured studies
+
+Monte Carlo and optimization can select shooting PSS as a base. The study freezes
+that PSS instance and its explicitly bound operating-point configuration. Each
+varied circuit first runs the configured OP startup, accuracy and homotopy policy,
+then initializes shooting from that fresh, complete MNA solution. OP and PSS
+numerical overrides apply separately; neither stage inherits the other's overrides.
+Run Set supply scaling occurs once before both solves, and Run Set OP temperature
+modes follow the current study point. Both stages use the bound OP's resolved
+temperature, including an explicitly authored OP temperature. Previous-state OP startup still requires an
+identity-compatible retained state; it never falls back to a different startup.
+
+Use `last:V(out)` for the final periodic sample, `bin:1:magnitude:V(out)` for a
+voltage harmonic, or `bin:1:imag:I(V1)` for a branch-current harmonic. Harmonics
+use the actual periodic time grid, retain signed DC, and use peak amplitudes and
+cosine-reference phase in degrees. The harmonic index cannot exceed the selected
+PSS retention count. `scalar:pss.frequency`, `scalar:pss.period` and
+`scalar:pss.iterations` expose the solved frequency, period and shooting corrections.
+
 ## HBSP and HBNOISE in configured studies
 
 Monte Carlo and optimization can select HBSP or HBNOISE as their base. The study
