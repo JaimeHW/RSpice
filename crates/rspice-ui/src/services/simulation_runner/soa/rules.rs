@@ -1,8 +1,7 @@
 //! Explicit, scoped terminal-stress rules and their resolved device bindings.
 
-use super::terminals::MosLayouts;
+use super::terminals::{TerminalLayout, TerminalLayouts};
 use super::*;
-use rspice_core::circuit::MosTerminalLayout;
 
 /// An additional limit, or an override of a default voltage limit on its scope.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -35,6 +34,12 @@ impl SoaRuleConfig {
                 | SoAParameter::Ie
                 | SoAParameter::Temp
                 | SoAParameter::Pdiss
+                | SoAParameter::Vcsub
+                | SoAParameter::Vbsub
+                | SoAParameter::Vesub
+                | SoAParameter::Isub
+                | SoAParameter::Vak
+                | SoAParameter::Ia
                 | SoAParameter::Vbs
                 | SoAParameter::Vbd
                 | SoAParameter::Vgb
@@ -46,7 +51,7 @@ impl SoaRuleConfig {
                 | SoAParameter::VbodyBackgate
         ) {
             return Err(
-                "SOA rules support magnitudes and positive/negative limits for Vgs, Vds, Vgd, Vbe, Vce, Vbc, Id, Ig, Is, Ic, Ib and Ie, external body/back-gate voltage and current, plus conductive power and absolute operating temperature".into(),
+                "SOA rules support magnitudes and positive/negative limits for Vgs, Vds, Vgd, Vbe, Vce, Vbc, Id, Ig, Is, Ic, Ib and Ie, external body/back-gate/substrate voltage and current, diode anode voltage/current, plus conductive power and absolute operating temperature".into(),
             );
         }
         if !self.max_value.is_finite()
@@ -66,7 +71,7 @@ impl SoaRuleConfig {
         }
     }
 
-    fn matches(&self, element: &Element, layouts: &MosLayouts) -> bool {
+    fn matches(&self, element: &Element, layouts: &TerminalLayouts) -> bool {
         applicable(element, self.parameter, layouts.get(&element.name).copied())
             && (self.devices.is_empty()
                 || self
@@ -85,10 +90,13 @@ impl SoaRuleConfig {
 pub(super) fn applicable(
     element: &Element,
     parameter: SoAParameter,
-    layout: Option<MosTerminalLayout>,
+    layout: Option<TerminalLayout>,
 ) -> bool {
-    if parameter.requires_mos_layout() {
-        return matches!(element.kind, ElementKind::Mosfet { .. })
+    if parameter.requires_terminal_layout() {
+        let eligible = (parameter.requires_mos_layout()
+            && matches!(element.kind, ElementKind::Mosfet { .. }))
+            || (parameter.requires_bjt_layout() && matches!(element.kind, ElementKind::Bjt { .. }));
+        return eligible
             && (terminal_pair(parameter, layout).is_some()
                 || current_terminal(parameter, layout).is_some());
     }
@@ -100,9 +108,11 @@ pub(super) fn applicable(
                 | ElementKind::Jfet { .. }
                 | ElementKind::Mesfet { .. }
                 | ElementKind::Bjt { .. }
+                | ElementKind::Diode { .. }
         );
     }
     match element.kind {
+        ElementKind::Diode { .. } => matches!(parameter, SoAParameter::Vak | SoAParameter::Ia),
         ElementKind::Mosfet { .. } | ElementKind::Jfet { .. } | ElementKind::Mesfet { .. } => {
             matches!(
                 parameter,
@@ -132,7 +142,7 @@ pub(super) fn applicable(
 pub(super) fn resolve(
     elements: &[Element],
     config: &SoaRunConfig,
-    layouts: &MosLayouts,
+    layouts: &TerminalLayouts,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<Vec<(usize, SoADefinition)>> {
     for (index, rule) in config.rules.iter().enumerate() {
@@ -246,7 +256,7 @@ pub(super) fn device_parameter(parameter: SoAParameter) -> Option<&'static str> 
 
 pub(super) fn terminal_pair(
     parameter: SoAParameter,
-    layout: Option<MosTerminalLayout>,
+    layout: Option<TerminalLayout>,
 ) -> Option<(usize, usize)> {
     match parameter.base_parameter() {
         SoAParameter::Vgs | SoAParameter::Vbe => Some((1, 2)),
@@ -259,6 +269,10 @@ pub(super) fn terminal_pair(
         SoAParameter::Ved => Some((layout?.back_gate?, 0)),
         SoAParameter::Vge => Some((1, layout?.back_gate?)),
         SoAParameter::VbodyBackgate => Some((layout?.body?, layout?.back_gate?)),
+        SoAParameter::Vcsub => Some((0, layout?.substrate?)),
+        SoAParameter::Vbsub => Some((1, layout?.substrate?)),
+        SoAParameter::Vesub => Some((2, layout?.substrate?)),
+        SoAParameter::Vak => Some((0, 1)),
         _ => None,
     }
 }
@@ -266,7 +280,7 @@ pub(super) fn terminal_pair(
 /// Authored terminal index, with current positive into the device.
 pub(super) fn current_terminal(
     parameter: SoAParameter,
-    layout: Option<MosTerminalLayout>,
+    layout: Option<TerminalLayout>,
 ) -> Option<usize> {
     match parameter.base_parameter() {
         SoAParameter::Id | SoAParameter::Ic => Some(0),
@@ -274,6 +288,8 @@ pub(super) fn current_terminal(
         SoAParameter::Is | SoAParameter::Ie => Some(2),
         SoAParameter::Ibulk => layout?.body,
         SoAParameter::Ibackgate => layout?.back_gate,
+        SoAParameter::Isub => layout?.substrate,
+        SoAParameter::Ia => Some(0),
         _ => None,
     }
 }

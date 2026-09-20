@@ -1568,6 +1568,53 @@ fn retain_soa_parameter(parameter: crate::services::safety::SoAParameter) -> Soa
         crate::services::safety::SoAParameter::Vbc => SoaParameterEvidence::BaseCollectorVoltage,
         crate::services::safety::SoAParameter::Id => SoaParameterEvidence::DrainCurrent,
         crate::services::safety::SoAParameter::Ic => SoaParameterEvidence::CollectorCurrent,
+        crate::services::safety::SoAParameter::Vcsub => {
+            SoaParameterEvidence::CollectorSubstrateVoltage
+        }
+        crate::services::safety::SoAParameter::VcsubPositive => {
+            SoaParameterEvidence::CollectorSubstrateVoltagePositive
+        }
+        crate::services::safety::SoAParameter::VcsubNegative => {
+            SoaParameterEvidence::CollectorSubstrateVoltageNegative
+        }
+        crate::services::safety::SoAParameter::Vbsub => SoaParameterEvidence::BaseSubstrateVoltage,
+        crate::services::safety::SoAParameter::VbsubPositive => {
+            SoaParameterEvidence::BaseSubstrateVoltagePositive
+        }
+        crate::services::safety::SoAParameter::VbsubNegative => {
+            SoaParameterEvidence::BaseSubstrateVoltageNegative
+        }
+        crate::services::safety::SoAParameter::Vesub => {
+            SoaParameterEvidence::EmitterSubstrateVoltage
+        }
+        crate::services::safety::SoAParameter::VesubPositive => {
+            SoaParameterEvidence::EmitterSubstrateVoltagePositive
+        }
+        crate::services::safety::SoAParameter::VesubNegative => {
+            SoaParameterEvidence::EmitterSubstrateVoltageNegative
+        }
+        crate::services::safety::SoAParameter::Isub => SoaParameterEvidence::SubstrateCurrent,
+        crate::services::safety::SoAParameter::IsubPositive => {
+            SoaParameterEvidence::SubstrateCurrentPositive
+        }
+        crate::services::safety::SoAParameter::IsubNegative => {
+            SoaParameterEvidence::SubstrateCurrentNegative
+        }
+        crate::services::safety::SoAParameter::Vak => SoaParameterEvidence::AnodeCathodeVoltage,
+        crate::services::safety::SoAParameter::VakPositive => {
+            SoaParameterEvidence::AnodeCathodeVoltagePositive
+        }
+        crate::services::safety::SoAParameter::VakNegative => {
+            SoaParameterEvidence::AnodeCathodeVoltageNegative
+        }
+        crate::services::safety::SoAParameter::Ia => SoaParameterEvidence::AnodeCurrent,
+        crate::services::safety::SoAParameter::IaPositive => {
+            SoaParameterEvidence::AnodeCurrentPositive
+        }
+        crate::services::safety::SoAParameter::IaNegative => {
+            SoaParameterEvidence::AnodeCurrentNegative
+        }
+
         crate::services::safety::SoAParameter::Vbs => SoaParameterEvidence::BodySourceVoltage,
         crate::services::safety::SoAParameter::VbsPositive => {
             SoaParameterEvidence::BodySourceVoltagePositive

@@ -8,7 +8,7 @@ pub(super) fn register(
     netlist: &mut Netlist,
     elements: &[Element],
     resolved: &[(usize, SoADefinition)],
-    layouts: &super::terminals::MosLayouts,
+    layouts: &super::terminals::TerminalLayouts,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<HashMap<(usize, SoAParameter), String>> {
     let names = elements

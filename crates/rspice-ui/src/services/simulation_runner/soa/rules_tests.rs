@@ -335,3 +335,58 @@ fn soa_body_rules_do_not_invent_floating_or_compact_device_pins() {
         );
     }
 }
+
+#[test]
+fn soa_diode_and_substrate_current_limits_capture_junction_charging() {
+    for (element, model, parameter) in [
+        (
+            "D1 n 0 DM",
+            ".model DM D IS=1e-30 CJO=1p M=0",
+            SoAParameter::IaNegative,
+        ),
+        (
+            "Q1 0 0 0 n QM",
+            ".model QM NPN IS=1e-30 CJS=1p MJS=0",
+            SoAParameter::IsubNegative,
+        ),
+    ] {
+        let deck = format!(
+            "Junction current\nV1 n 0 PWL(0 0 1n 0 6n -0.5 10n -0.5)\n{element}\n{model}\n.end\n"
+        );
+        let cfg = config(vec![rule(parameter, 50e-6, &[], &[])]);
+        let result =
+            run_soa_analysis_with_config_and_source_path_and_abort(&deck, &cfg, None, &NoAbort)
+                .unwrap();
+        let evaluation = &result.evaluations[0];
+        assert!(
+            evaluation.worst_actual_value > 90e-6 && evaluation.worst_actual_value < 110e-6,
+            "{element}: {evaluation:?}"
+        );
+        assert_eq!(evaluation.unit, "A");
+        assert_eq!(evaluation.sample_count, result.time.len() as u64);
+        assert!(result.stress_history[0].values[0] < 1e-10);
+        assert!(result.stress_history[0].values.last().unwrap() < &1e-8);
+    }
+}
+
+#[test]
+fn soa_substrate_rules_reject_thermal_or_implicit_bjt_terminals() {
+    for (element, model) in [
+        ("Q1 c b 0 0 QM", ".model QM NPN LEVEL=11 IS=1e-16 BF=100"),
+        ("Q1 c b 0 QM", ".model QM NPN IS=1e-14 BF=100"),
+    ] {
+        let deck =
+            format!("BJT terminal eligibility\nV1 c 0 1\nV2 b 0 0.6\n{element}\n{model}\n.end\n");
+        let error = run_soa_analysis_with_config_and_source_path_and_abort(
+            &deck,
+            &config(vec![rule(SoAParameter::Isub, 1.0, &["Q1"], &[])]),
+            None,
+            &NoAbort,
+        )
+        .unwrap_err();
+        assert!(
+            error.to_string().contains("matches no applicable device"),
+            "{error}"
+        );
+    }
+}

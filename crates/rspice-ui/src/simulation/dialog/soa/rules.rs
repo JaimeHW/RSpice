@@ -4,7 +4,7 @@ use super::*;
 use crate::services::safety::SoAParameter;
 use crate::services::simulation_runner::SoaRuleConfig;
 
-const PARAMETERS: [SoAParameter; 65] = [
+const PARAMETERS: [SoAParameter; 83] = [
     SoAParameter::Vgs,
     SoAParameter::Vds,
     SoAParameter::Vgd,
@@ -70,6 +70,24 @@ const PARAMETERS: [SoAParameter; 65] = [
     SoAParameter::VbodyBackgate,
     SoAParameter::VbodyBackgatePositive,
     SoAParameter::VbodyBackgateNegative,
+    SoAParameter::Vcsub,
+    SoAParameter::VcsubPositive,
+    SoAParameter::VcsubNegative,
+    SoAParameter::Vbsub,
+    SoAParameter::VbsubPositive,
+    SoAParameter::VbsubNegative,
+    SoAParameter::Vesub,
+    SoAParameter::VesubPositive,
+    SoAParameter::VesubNegative,
+    SoAParameter::Isub,
+    SoAParameter::IsubPositive,
+    SoAParameter::IsubNegative,
+    SoAParameter::Vak,
+    SoAParameter::VakPositive,
+    SoAParameter::VakNegative,
+    SoAParameter::Ia,
+    SoAParameter::IaPositive,
+    SoAParameter::IaNegative,
 ];
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -93,7 +111,7 @@ impl Default for SoaRuleDraft {
 }
 
 impl SoaRuleDraft {
-    pub const PARAMETER_LABELS: [&'static str; 65] = [
+    pub const PARAMETER_LABELS: [&'static str; 83] = [
         "Vgs",
         "Vds",
         "Vgd",
@@ -159,6 +177,24 @@ impl SoaRuleDraft {
         "Body contact to back gate voltage",
         "Body contact to back gate voltage positive",
         "Body contact to back gate voltage negative",
+        "Collector to substrate voltage",
+        "Collector to substrate voltage positive",
+        "Collector to substrate voltage negative",
+        "Base to substrate voltage",
+        "Base to substrate voltage positive",
+        "Base to substrate voltage negative",
+        "Emitter to substrate voltage",
+        "Emitter to substrate voltage positive",
+        "Emitter to substrate voltage negative",
+        "Substrate current",
+        "Substrate current positive",
+        "Substrate current negative",
+        "Diode anode to cathode voltage",
+        "Diode anode to cathode voltage positive",
+        "Diode anode to cathode voltage negative",
+        "Diode anode current",
+        "Diode anode current positive",
+        "Diode anode current negative",
     ];
     pub fn is_power(&self) -> bool {
         PARAMETERS.get(self.parameter) == Some(&SoAParameter::Pdiss)

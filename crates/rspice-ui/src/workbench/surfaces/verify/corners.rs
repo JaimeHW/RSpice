@@ -884,6 +884,41 @@ pub(super) fn soa_parameter_display(parameter: crate::state::SoaParameterEvidenc
         SoaParameterEvidence::EmitterCurrent => "Ie max",
         SoaParameterEvidence::EmitterCurrentPositive => "Ie + max",
         SoaParameterEvidence::EmitterCurrentNegative => "Ie − max",
+        SoaParameterEvidence::CollectorSubstrateVoltage => "Collector to substrate voltage max",
+        SoaParameterEvidence::CollectorSubstrateVoltagePositive => {
+            "Collector to substrate voltage positive max"
+        }
+        SoaParameterEvidence::CollectorSubstrateVoltageNegative => {
+            "Collector to substrate voltage negative max"
+        }
+        SoaParameterEvidence::BaseSubstrateVoltage => "Base to substrate voltage max",
+        SoaParameterEvidence::BaseSubstrateVoltagePositive => {
+            "Base to substrate voltage positive max"
+        }
+        SoaParameterEvidence::BaseSubstrateVoltageNegative => {
+            "Base to substrate voltage negative max"
+        }
+        SoaParameterEvidence::EmitterSubstrateVoltage => "Emitter to substrate voltage max",
+        SoaParameterEvidence::EmitterSubstrateVoltagePositive => {
+            "Emitter to substrate voltage positive max"
+        }
+        SoaParameterEvidence::EmitterSubstrateVoltageNegative => {
+            "Emitter to substrate voltage negative max"
+        }
+        SoaParameterEvidence::SubstrateCurrent => "Substrate current max",
+        SoaParameterEvidence::SubstrateCurrentPositive => "Substrate current positive max",
+        SoaParameterEvidence::SubstrateCurrentNegative => "Substrate current negative max",
+        SoaParameterEvidence::AnodeCathodeVoltage => "Diode anode to cathode voltage max",
+        SoaParameterEvidence::AnodeCathodeVoltagePositive => {
+            "Diode anode to cathode voltage positive max"
+        }
+        SoaParameterEvidence::AnodeCathodeVoltageNegative => {
+            "Diode anode to cathode voltage negative max"
+        }
+        SoaParameterEvidence::AnodeCurrent => "Diode anode current max",
+        SoaParameterEvidence::AnodeCurrentPositive => "Diode anode current positive max",
+        SoaParameterEvidence::AnodeCurrentNegative => "Diode anode current negative max",
+
         SoaParameterEvidence::BodySourceVoltage => "Vbs max",
         SoaParameterEvidence::BodySourceVoltagePositive => "Vbs positive max",
         SoaParameterEvidence::BodySourceVoltageNegative => "Vbs negative max",

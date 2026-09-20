@@ -86,7 +86,8 @@ impl SoaObservationConfig {
             ElementKind::Mosfet { model, .. }
             | ElementKind::Bjt { model, .. }
             | ElementKind::Jfet { model, .. }
-            | ElementKind::Mesfet { model, .. } => Some(model),
+            | ElementKind::Mesfet { model, .. }
+            | ElementKind::Diode { model, .. } => Some(model),
             _ => None,
         }
     }

@@ -85,6 +85,24 @@ pub enum SoAParameter {
     VbodyBackgate,
     VbodyBackgatePositive,
     VbodyBackgateNegative,
+    Vcsub,
+    VcsubPositive,
+    VcsubNegative,
+    Vbsub,
+    VbsubPositive,
+    VbsubNegative,
+    Vesub,
+    VesubPositive,
+    VesubNegative,
+    Isub,
+    IsubPositive,
+    IsubNegative,
+    Vak,
+    VakPositive,
+    VakNegative,
+    Ia,
+    IaPositive,
+    IaNegative,
 }
 
 impl SoAParameter {
@@ -157,6 +175,24 @@ impl SoAParameter {
             Self::VbodyBackgate => "VBODY_BACKGATE",
             Self::VbodyBackgatePositive => "VBODY_BACKGATE_POS",
             Self::VbodyBackgateNegative => "VBODY_BACKGATE_NEG",
+            Self::Vcsub => "VCSUB",
+            Self::VcsubPositive => "VCSUB_POS",
+            Self::VcsubNegative => "VCSUB_NEG",
+            Self::Vbsub => "VBSUB",
+            Self::VbsubPositive => "VBSUB_POS",
+            Self::VbsubNegative => "VBSUB_NEG",
+            Self::Vesub => "VESUB",
+            Self::VesubPositive => "VESUB_POS",
+            Self::VesubNegative => "VESUB_NEG",
+            Self::Isub => "ISUB",
+            Self::IsubPositive => "ISUB_POS",
+            Self::IsubNegative => "ISUB_NEG",
+            Self::Vak => "VAK",
+            Self::VakPositive => "VAK_POS",
+            Self::VakNegative => "VAK_NEG",
+            Self::Ia => "IA",
+            Self::IaPositive => "IA_POS",
+            Self::IaNegative => "IA_NEG",
         }
     }
     /// The unsigned terminal quantity underlying a directional constraint.
@@ -183,6 +219,12 @@ impl SoAParameter {
             Self::VgePositive | Self::VgeNegative => Self::Vge,
             Self::IbackgatePositive | Self::IbackgateNegative => Self::Ibackgate,
             Self::VbodyBackgatePositive | Self::VbodyBackgateNegative => Self::VbodyBackgate,
+            Self::VcsubPositive | Self::VcsubNegative => Self::Vcsub,
+            Self::VbsubPositive | Self::VbsubNegative => Self::Vbsub,
+            Self::VesubPositive | Self::VesubNegative => Self::Vesub,
+            Self::IsubPositive | Self::IsubNegative => Self::Isub,
+            Self::VakPositive | Self::VakNegative => Self::Vak,
+            Self::IaPositive | Self::IaNegative => Self::Ia,
             other => other,
         }
     }
@@ -210,7 +252,13 @@ impl SoAParameter {
             | Self::VedPositive
             | Self::VgePositive
             | Self::IbackgatePositive
-            | Self::VbodyBackgatePositive => Some(true),
+            | Self::VbodyBackgatePositive
+            | Self::VcsubPositive
+            | Self::VbsubPositive
+            | Self::VesubPositive
+            | Self::IsubPositive
+            | Self::VakPositive
+            | Self::IaPositive => Some(true),
             Self::VgsNegative
             | Self::VdsNegative
             | Self::VgdNegative
@@ -231,7 +279,13 @@ impl SoAParameter {
             | Self::VedNegative
             | Self::VgeNegative
             | Self::IbackgateNegative
-            | Self::VbodyBackgateNegative => Some(false),
+            | Self::VbodyBackgateNegative
+            | Self::VcsubNegative
+            | Self::VbsubNegative
+            | Self::VesubNegative
+            | Self::IsubNegative
+            | Self::VakNegative
+            | Self::IaNegative => Some(false),
             _ => None,
         }
     }
@@ -246,6 +300,13 @@ impl SoAParameter {
             Self::Vbc => Some((Self::VbcPositive, Self::VbcNegative)),
             Self::Id => Some((Self::IdPositive, Self::IdNegative)),
             Self::Ic => Some((Self::IcPositive, Self::IcNegative)),
+            Self::Vcsub => Some((Self::VcsubPositive, Self::VcsubNegative)),
+            Self::Vbsub => Some((Self::VbsubPositive, Self::VbsubNegative)),
+            Self::Vesub => Some((Self::VesubPositive, Self::VesubNegative)),
+            Self::Isub => Some((Self::IsubPositive, Self::IsubNegative)),
+            Self::Vak => Some((Self::VakPositive, Self::VakNegative)),
+            Self::Ia => Some((Self::IaPositive, Self::IaNegative)),
+
             Self::Ig => Some((Self::IgPositive, Self::IgNegative)),
             Self::Is => Some((Self::IsPositive, Self::IsNegative)),
             Self::Ib => Some((Self::IbPositive, Self::IbNegative)),
@@ -276,6 +337,8 @@ impl SoAParameter {
                 | Self::Ie
                 | Self::Ibulk
                 | Self::Ibackgate
+                | Self::Isub
+                | Self::Ia
         )
     }
 
@@ -293,6 +356,18 @@ impl SoAParameter {
                 | Self::Ibackgate
                 | Self::VbodyBackgate
         )
+    }
+
+    /// Substrate rules need an explicit electrical pin, not a thermal port.
+    pub const fn requires_bjt_layout(self) -> bool {
+        matches!(
+            self.base_parameter(),
+            Self::Vcsub | Self::Vbsub | Self::Vesub | Self::Isub
+        )
+    }
+
+    pub const fn requires_terminal_layout(self) -> bool {
+        self.requires_mos_layout() || self.requires_bjt_layout()
     }
 
     /// Input must be finite; polarity follows authored terminal order, not model type.

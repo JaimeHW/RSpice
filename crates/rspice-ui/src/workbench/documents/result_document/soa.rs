@@ -749,6 +749,25 @@ const fn runtime_parameter(
         SoaParameterEvidence::BaseCollectorVoltage => SoAParameter::Vbc,
         SoaParameterEvidence::DrainCurrent => SoAParameter::Id,
         SoaParameterEvidence::CollectorCurrent => SoAParameter::Ic,
+        SoaParameterEvidence::CollectorSubstrateVoltage => SoAParameter::Vcsub,
+        SoaParameterEvidence::CollectorSubstrateVoltagePositive => SoAParameter::VcsubPositive,
+        SoaParameterEvidence::CollectorSubstrateVoltageNegative => SoAParameter::VcsubNegative,
+        SoaParameterEvidence::BaseSubstrateVoltage => SoAParameter::Vbsub,
+        SoaParameterEvidence::BaseSubstrateVoltagePositive => SoAParameter::VbsubPositive,
+        SoaParameterEvidence::BaseSubstrateVoltageNegative => SoAParameter::VbsubNegative,
+        SoaParameterEvidence::EmitterSubstrateVoltage => SoAParameter::Vesub,
+        SoaParameterEvidence::EmitterSubstrateVoltagePositive => SoAParameter::VesubPositive,
+        SoaParameterEvidence::EmitterSubstrateVoltageNegative => SoAParameter::VesubNegative,
+        SoaParameterEvidence::SubstrateCurrent => SoAParameter::Isub,
+        SoaParameterEvidence::SubstrateCurrentPositive => SoAParameter::IsubPositive,
+        SoaParameterEvidence::SubstrateCurrentNegative => SoAParameter::IsubNegative,
+        SoaParameterEvidence::AnodeCathodeVoltage => SoAParameter::Vak,
+        SoaParameterEvidence::AnodeCathodeVoltagePositive => SoAParameter::VakPositive,
+        SoaParameterEvidence::AnodeCathodeVoltageNegative => SoAParameter::VakNegative,
+        SoaParameterEvidence::AnodeCurrent => SoAParameter::Ia,
+        SoaParameterEvidence::AnodeCurrentPositive => SoAParameter::IaPositive,
+        SoaParameterEvidence::AnodeCurrentNegative => SoAParameter::IaNegative,
+
         SoaParameterEvidence::BodySourceVoltage => SoAParameter::Vbs,
         SoaParameterEvidence::BodySourceVoltagePositive => SoAParameter::VbsPositive,
         SoaParameterEvidence::BodySourceVoltageNegative => SoAParameter::VbsNegative,
@@ -1081,6 +1100,37 @@ fn parameter_label(parameter: SoaParameterEvidence) -> &'static str {
         SoaParameterEvidence::EmitterCurrent => "Emitter current",
         SoaParameterEvidence::EmitterCurrentPositive => "Emitter current · positive",
         SoaParameterEvidence::EmitterCurrentNegative => "Emitter current · negative",
+        SoaParameterEvidence::CollectorSubstrateVoltage => "Collector to substrate voltage",
+        SoaParameterEvidence::CollectorSubstrateVoltagePositive => {
+            "Collector to substrate voltage positive"
+        }
+        SoaParameterEvidence::CollectorSubstrateVoltageNegative => {
+            "Collector to substrate voltage negative"
+        }
+        SoaParameterEvidence::BaseSubstrateVoltage => "Base to substrate voltage",
+        SoaParameterEvidence::BaseSubstrateVoltagePositive => "Base to substrate voltage positive",
+        SoaParameterEvidence::BaseSubstrateVoltageNegative => "Base to substrate voltage negative",
+        SoaParameterEvidence::EmitterSubstrateVoltage => "Emitter to substrate voltage",
+        SoaParameterEvidence::EmitterSubstrateVoltagePositive => {
+            "Emitter to substrate voltage positive"
+        }
+        SoaParameterEvidence::EmitterSubstrateVoltageNegative => {
+            "Emitter to substrate voltage negative"
+        }
+        SoaParameterEvidence::SubstrateCurrent => "Substrate current",
+        SoaParameterEvidence::SubstrateCurrentPositive => "Substrate current positive",
+        SoaParameterEvidence::SubstrateCurrentNegative => "Substrate current negative",
+        SoaParameterEvidence::AnodeCathodeVoltage => "Diode anode to cathode voltage",
+        SoaParameterEvidence::AnodeCathodeVoltagePositive => {
+            "Diode anode to cathode voltage positive"
+        }
+        SoaParameterEvidence::AnodeCathodeVoltageNegative => {
+            "Diode anode to cathode voltage negative"
+        }
+        SoaParameterEvidence::AnodeCurrent => "Diode anode current",
+        SoaParameterEvidence::AnodeCurrentPositive => "Diode anode current positive",
+        SoaParameterEvidence::AnodeCurrentNegative => "Diode anode current negative",
+
         SoaParameterEvidence::BodySourceVoltage => "Vbs",
         SoaParameterEvidence::BodySourceVoltagePositive => "Vbs positive",
         SoaParameterEvidence::BodySourceVoltageNegative => "Vbs negative",

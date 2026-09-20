@@ -872,6 +872,24 @@ pub enum SoaParameterEvidence {
     BodyBackgateVoltage,
     BodyBackgateVoltagePositive,
     BodyBackgateVoltageNegative,
+    CollectorSubstrateVoltage,
+    CollectorSubstrateVoltagePositive,
+    CollectorSubstrateVoltageNegative,
+    BaseSubstrateVoltage,
+    BaseSubstrateVoltagePositive,
+    BaseSubstrateVoltageNegative,
+    EmitterSubstrateVoltage,
+    EmitterSubstrateVoltagePositive,
+    EmitterSubstrateVoltageNegative,
+    SubstrateCurrent,
+    SubstrateCurrentPositive,
+    SubstrateCurrentNegative,
+    AnodeCathodeVoltage,
+    AnodeCathodeVoltagePositive,
+    AnodeCathodeVoltageNegative,
+    AnodeCurrent,
+    AnodeCurrentPositive,
+    AnodeCurrentNegative,
 }
 
 impl SoaParameterEvidence {
@@ -920,6 +938,18 @@ impl SoaParameterEvidence {
                 | Self::BackgateCurrentNegative
                 | Self::BodyBackgateVoltagePositive
                 | Self::BodyBackgateVoltageNegative
+                | Self::CollectorSubstrateVoltagePositive
+                | Self::CollectorSubstrateVoltageNegative
+                | Self::BaseSubstrateVoltagePositive
+                | Self::BaseSubstrateVoltageNegative
+                | Self::EmitterSubstrateVoltagePositive
+                | Self::EmitterSubstrateVoltageNegative
+                | Self::SubstrateCurrentPositive
+                | Self::SubstrateCurrentNegative
+                | Self::AnodeCathodeVoltagePositive
+                | Self::AnodeCathodeVoltageNegative
+                | Self::AnodeCurrentPositive
+                | Self::AnodeCurrentNegative
         )
     }
 }
