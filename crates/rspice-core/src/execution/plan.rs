@@ -1554,6 +1554,7 @@ pub(super) fn analysis_kind(command: &crate::netlist::AnalysisCommand) -> Analys
         AnalysisCommand::Tran { .. } => AnalysisKind::Tran,
         AnalysisCommand::Ac { .. } | AnalysisCommand::AcData { .. } => AnalysisKind::Ac,
         AnalysisCommand::Hb(_) => AnalysisKind::HarmonicBalance,
+        AnalysisCommand::Qpss(_) => AnalysisKind::Qpss,
         AnalysisCommand::Disto { .. } => AnalysisKind::Distortion,
         AnalysisCommand::Sp { .. } => AnalysisKind::Sp,
         AnalysisCommand::Noise { .. } | AnalysisCommand::NoiseData { .. } => AnalysisKind::Noise,

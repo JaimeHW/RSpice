@@ -65,7 +65,7 @@ pub(super) fn parse_hb_command(
                         AnalysisCardIssue::DuplicateKeyword { keyword: "HARMS" },
                     ));
                 }
-                card.harmonics = card_count_list(stream, line_num, params, "HARMS")?;
+                card.harmonics = card_count_list(stream, line_num, params, CARD, "HARMS")?;
                 if card.harmonics.len() != 1 && card.harmonics.len() != card.frequencies.len() {
                     return Err(card_error(
                         CARD,
@@ -316,49 +316,6 @@ fn bind_tone_source(
     }
     *slot = Some(name.to_ascii_uppercase());
     Ok(())
-}
-
-/// Read `n` or `n,n,...`, parenthesized or bare, each at least one.
-///
-/// A bare list only continues past a comma when a number follows it, so a
-/// deck that separates its keywords with commas — which SPICE treats as
-/// whitespace everywhere else — is read the way it was written.
-fn card_count_list(
-    stream: &mut TokenStream,
-    line: usize,
-    params: &ParamContext,
-    field: &'static str,
-) -> Result<Vec<usize>, ParseError> {
-    let mut counts = Vec::new();
-    if stream.consume(&TokenKind::LParen) {
-        loop {
-            counts.push(card_count(stream, line, params, CARD, field, 1)?);
-            if stream.consume(&TokenKind::RParen) {
-                break;
-            }
-            if !stream.consume(&TokenKind::Comma) {
-                return Err(card_error(
-                    CARD,
-                    line,
-                    AnalysisCardIssue::TrailingToken {
-                        token: stream.peek().lexeme.clone(),
-                    },
-                ));
-            }
-        }
-    } else {
-        counts.push(card_count(stream, line, params, CARD, field, 1)?);
-        while matches!(stream.peek().kind, TokenKind::Comma)
-            && matches!(
-                stream.peek_n(1).kind,
-                TokenKind::Number(_) | TokenKind::Expression(_)
-            )
-        {
-            stream.advance();
-            counts.push(card_count(stream, line, params, CARD, field, 1)?);
-        }
-    }
-    Ok(counts)
 }
 
 /// Read an odd collocation-grid size of at least three.

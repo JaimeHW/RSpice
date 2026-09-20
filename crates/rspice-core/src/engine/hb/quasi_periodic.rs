@@ -1,4 +1,5 @@
 //! Netlist execution and retained independent-phase operating points.
+mod card;
 mod sources;
 mod state;
 #[cfg(test)]
@@ -94,7 +95,7 @@ impl Engine {
     ) -> Result<QpssOperatingPoint, SimulationError> {
         check_abort(abort)?;
         let engine = self.resolved_for_netlist(netlist);
-        config.solver.validate().map_err(numerical_error)?;
+        config.validate_configuration()?;
         let grid = Arc::new(
             QuasiPeriodicGrid::new_with_abort(
                 config.grid.clone(),

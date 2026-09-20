@@ -40,39 +40,6 @@ impl QpssControls {
         max_iterations: usize,
         relative_tolerance: f64,
     ) -> Result<QpssConfig, String> {
-        if tones.len() < 2
-            || tones.iter().any(|tone| {
-                !tone.frequency.is_finite()
-                    || tone.frequency <= 0.0
-                    || tone.harmonics == 0
-                    || tone.harmonics > i32::MAX as usize
-            })
-        {
-            return Err(
-                "QPSS requires at least two finite positive clocks with positive harmonic orders"
-                    .into(),
-            );
-        }
-        if tones.iter().enumerate().any(|(index, tone)| {
-            tones[..index]
-                .iter()
-                .any(|other| other.frequency == tone.frequency)
-        }) {
-            return Err("QPSS tone frequencies must be distinct".into());
-        }
-        if !relative_tolerance.is_finite()
-            || relative_tolerance <= 0.0
-            || relative_tolerance >= 1.0
-            || !self.current_absolute_tolerance.is_finite()
-            || self.current_absolute_tolerance <= 0.0
-            || !self.voltage_absolute_tolerance.is_finite()
-            || self.voltage_absolute_tolerance <= 0.0
-            || max_iterations == 0
-            || self.max_backtracks > 60
-            || self.max_mixing_order == Some(0)
-        {
-            return Err("QPSS requires positive finite tolerances, relative tolerance below one, a positive iteration budget, at most 60 backtracks, and a positive optional mixing order".into());
-        }
         let (counts, exact) = match &self.sampling {
             QuasiPeriodicSampling::Oversample(counts) => (counts, false),
             QuasiPeriodicSampling::Exact(counts) => (counts, true),
@@ -82,17 +49,6 @@ impl QpssControls {
         } else {
             counts.clone()
         };
-        if counts.len() != tones.len() || counts.contains(&0) {
-            return Err("QPSS sampling needs one positive count or one count per tone".into());
-        }
-        if exact
-            && counts
-                .iter()
-                .zip(tones)
-                .any(|(count, tone)| *count < tone.harmonics.saturating_mul(2).saturating_add(1))
-        {
-            return Err("each QPSS phase grid needs at least 2H+1 points".into());
-        }
         let mut source_tones = self.source_tones.clone();
         for (tone, specification) in tones.iter().enumerate() {
             if let Some(source) = &specification.source {
@@ -102,17 +58,7 @@ impl QpssControls {
                 });
             }
         }
-        let mut seen = std::collections::HashSet::new();
-        for binding in &source_tones {
-            if binding.source.is_empty()
-                || binding.source.trim() != binding.source
-                || binding.tone >= tones.len()
-                || !seen.insert((binding.source.to_ascii_lowercase(), binding.tone))
-            {
-                return Err("QPSS source assignments need exact source names, valid tone numbers and no duplicate source/tone pairs".into());
-            }
-        }
-        Ok(QpssConfig {
+        let config = QpssConfig {
             grid: QuasiPeriodicGridConfig {
                 frequencies_hz: tones.iter().map(|tone| tone.frequency).collect(),
                 harmonics: tones.iter().map(|tone| tone.harmonics).collect(),
@@ -132,11 +78,41 @@ impl QpssControls {
             },
             source_tones,
             initial_state: self.initial_state,
-        })
+        };
+        config
+            .validate_configuration()
+            .map_err(|error| error.to_string())?;
+        Ok(config)
     }
 }
 
 impl AnalysisSpec {
+    pub(crate) fn from_driven_qpss_config(config: QpssConfig) -> Self {
+        let tones = config
+            .grid
+            .frequencies_hz
+            .iter()
+            .zip(&config.grid.harmonics)
+            .map(|(frequency, harmonics)| HbToneSpec::new(*frequency, *harmonics))
+            .collect();
+        Self::Qpss {
+            tones,
+            max_iterations: config.solver.max_iterations,
+            relative_tolerance: config.solver.relative_tolerance,
+            autonomous: false,
+            oscillator_node: None,
+            controls: QpssControls {
+                current_absolute_tolerance: config.solver.current_absolute_tolerance,
+                voltage_absolute_tolerance: config.solver.voltage_absolute_tolerance,
+                max_backtracks: config.solver.max_backtracks,
+                max_mixing_order: config.grid.max_mixing_order,
+                sampling: config.grid.sampling,
+                initial_state: config.initial_state,
+                source_tones: config.source_tones,
+            },
+        }
+    }
+
     pub fn driven_qpss_config(&self) -> Result<QpssConfig, String> {
         let Self::Qpss {
             tones,

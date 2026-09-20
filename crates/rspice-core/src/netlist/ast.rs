@@ -2233,6 +2233,9 @@ pub enum AnalysisCommand {
     /// optional keyword on the same card: see [`HbCard`].
     Hb(Box<HbCard>),
 
+    /// Driven quasiperiodic steady state on independent phase axes.
+    Qpss(Box<super::QpssCard>),
+
     /// S-parameter analysis:
     /// `.SP DEC|LIN|OCT np fstart fstop [donoise] [PORT<k>=(<n+>[,<n->[,<z0>]]) ...]`
     Sp {
@@ -2949,6 +2952,7 @@ pub enum AnalysisCard {
     Stb,
     Four,
     Hb,
+    Qpss,
 }
 
 impl AnalysisCard {
@@ -2966,6 +2970,7 @@ impl AnalysisCard {
             Self::Stb => ".STB",
             Self::Four => ".FOUR",
             Self::Hb => ".HB",
+            Self::Qpss => ".QPSS",
         }
     }
 }

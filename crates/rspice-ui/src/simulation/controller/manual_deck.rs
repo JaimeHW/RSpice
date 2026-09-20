@@ -621,6 +621,7 @@ fn command_name(command: &AnalysisCommand) -> &'static str {
         AnalysisCommand::Ac { .. } => ".ac",
         AnalysisCommand::AcData { .. } => ".ac data",
         AnalysisCommand::Hb(_) => ".hb",
+        AnalysisCommand::Qpss(_) => ".qpss",
         AnalysisCommand::Sp { .. } => ".sp",
         AnalysisCommand::Stb { .. } => ".stb",
         AnalysisCommand::Disto { .. } => ".disto",
@@ -886,6 +887,18 @@ fn command_to_queue_item(
             spec_options,
             analysis_line: format!(".ac data={table_name}"),
         }),
+        AnalysisCommand::Qpss(card) => {
+            let config = rspice_core::engine::QpssConfig::from_qpss_card(card)
+                .map_err(|error| error.to_string())?;
+            let analysis_line = config.to_spice().map_err(|error| error.to_string())?;
+            Ok(QueuedAnalysis {
+                numeric_override: None,
+                spec: AnalysisSpec::from_driven_qpss_config(config),
+                config: None,
+                spec_options,
+                analysis_line,
+            })
+        }
         AnalysisCommand::Hb(hb) => {
             let defaults = rspice_core::analysis::HbConfig::from_hb_card(hb, &netlist.options)
                 .map_err(|error| error.to_string())?;

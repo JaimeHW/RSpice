@@ -226,3 +226,47 @@ pub(super) fn card_output_probe(
         )
     })
 }
+
+/// Read `n` or `n,n,...`, parenthesized or bare, each at least one.
+///
+/// A bare list only continues past a comma when a number follows it, so a
+/// deck that separates its keywords with commas — which SPICE treats as
+/// whitespace everywhere else — is read the way it was written.
+pub(super) fn card_count_list(
+    stream: &mut TokenStream,
+    line: usize,
+    params: &ParamContext,
+    card: AnalysisCard,
+    field: &'static str,
+) -> Result<Vec<usize>, ParseError> {
+    let mut counts = Vec::new();
+    if stream.consume(&TokenKind::LParen) {
+        loop {
+            counts.push(card_count(stream, line, params, card, field, 1)?);
+            if stream.consume(&TokenKind::RParen) {
+                break;
+            }
+            if !stream.consume(&TokenKind::Comma) {
+                return Err(card_error(
+                    card,
+                    line,
+                    AnalysisCardIssue::TrailingToken {
+                        token: stream.peek().lexeme.clone(),
+                    },
+                ));
+            }
+        }
+    } else {
+        counts.push(card_count(stream, line, params, card, field, 1)?);
+        while matches!(stream.peek().kind, TokenKind::Comma)
+            && matches!(
+                stream.peek_n(1).kind,
+                TokenKind::Number(_) | TokenKind::Expression(_)
+            )
+        {
+            stream.advance();
+            counts.push(card_count(stream, line, params, card, field, 1)?);
+        }
+    }
+    Ok(counts)
+}

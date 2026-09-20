@@ -36,6 +36,51 @@ pub struct QuasiPeriodicGridConfig {
 }
 
 impl QuasiPeriodicGridConfig {
+    pub(crate) fn validate(&self) -> Result<(), Error> {
+        let invalid = |message: &str| Error::InvalidConfig(message.into());
+        let tones = self.frequencies_hz.len();
+        if tones < 2 || self.harmonics.len() != tones {
+            return Err(invalid(
+                "at least two tone frequencies and one harmonic count per tone are required",
+            ));
+        }
+        if self
+            .frequencies_hz
+            .iter()
+            .any(|f| !f.is_finite() || *f <= 0.0)
+        {
+            return Err(invalid("tone frequencies must be finite and positive"));
+        }
+        if self
+            .harmonics
+            .iter()
+            .any(|h| *h == 0 || *h > i32::MAX as usize)
+        {
+            return Err(invalid(
+                "tone harmonic counts must be positive signed-index integers",
+            ));
+        }
+        if self.max_mixing_order == Some(0) {
+            return Err(invalid("mixing order must be positive when specified"));
+        }
+        let (samples, exact) = match &self.sampling {
+            QuasiPeriodicSampling::Oversample(values) => (values, false),
+            QuasiPeriodicSampling::Exact(values) => (values, true),
+        };
+        if samples.len() != tones || samples.contains(&0) {
+            return Err(invalid("sampling requires one positive count per tone"));
+        }
+        if exact
+            && samples
+                .iter()
+                .zip(&self.harmonics)
+                .any(|(n, h)| *n < h.saturating_mul(2).saturating_add(1))
+        {
+            return Err(invalid("each phase grid must have at least 2H+1 points"));
+        }
+        Ok(())
+    }
+
     pub fn new(frequencies_hz: Vec<Value>, harmonics: Vec<usize>) -> Self {
         let tones = frequencies_hz.len();
         Self {
@@ -69,38 +114,12 @@ impl QuasiPeriodicGrid {
     ) -> Result<Self, Error> {
         check_abort(abort)?;
         let invalid = |message: &str| Error::InvalidConfig(message.into());
+        config.validate()?;
         let tones = config.frequencies_hz.len();
-        if tones < 2 || config.harmonics.len() != tones {
-            return Err(invalid(
-                "at least two tone frequencies and one harmonic count per tone are required",
-            ));
-        }
-        if config
-            .frequencies_hz
-            .iter()
-            .any(|f| !f.is_finite() || *f <= 0.0)
-        {
-            return Err(invalid("tone frequencies must be finite and positive"));
-        }
-        if config
-            .harmonics
-            .iter()
-            .any(|h| *h == 0 || *h > i32::MAX as usize)
-        {
-            return Err(invalid(
-                "tone harmonic counts must be positive signed-index integers",
-            ));
-        }
-        if config.max_mixing_order == Some(0) {
-            return Err(invalid("mixing order must be positive when specified"));
-        }
         let (samples, exact) = match &config.sampling {
             QuasiPeriodicSampling::Oversample(values) => (values, false),
             QuasiPeriodicSampling::Exact(values) => (values, true),
         };
-        if samples.len() != tones || samples.contains(&0) {
-            return Err(invalid("sampling requires one positive count per tone"));
-        }
         let minimal_grid = 3usize
             .checked_pow(u32::try_from(tones).unwrap_or(u32::MAX))
             .unwrap_or(usize::MAX);

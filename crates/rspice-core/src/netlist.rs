@@ -32,6 +32,8 @@ mod output_symbols;
 pub mod param_scope;
 mod parser;
 mod polynomial;
+mod qpss_card;
+pub use qpss_card::QpssCard;
 mod remove_unused;
 pub mod source_map;
 pub(crate) mod spectre_adapter;

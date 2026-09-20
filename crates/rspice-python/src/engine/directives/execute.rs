@@ -407,6 +407,11 @@ pub(super) fn execute(
                 describe_analysis(analysis),
             ));
         }
+        AnalysisCommand::Qpss(_) => {
+            return Err(crate::errors::SimulationError::new_err(
+                "QPSS is available through Simulation Studio and Engine::run_qpss; this surface has no QPSS result-document projection yet",
+            ));
+        }
         AnalysisCommand::Step(_) | AnalysisCommand::Temp { .. } => {
             return Err(crate::errors::SimulationError::new_err(
                 "run-axis directives must be executed through the canonical deck materializer",

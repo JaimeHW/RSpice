@@ -981,6 +981,9 @@ fn transient_builders(
 /// surface would mean deciding its semantics a second time.
 fn unroutable_reason(command: &AnalysisCommand) -> Option<&'static str> {
     match command {
+        AnalysisCommand::Qpss(_) => Some(
+            "QPSS is available through Simulation Studio and Engine::run_qpss; this surface has no QPSS result-document projection yet",
+        ),
         // Every authored analog card this build recognizes now has a core
         // entry point that takes the card and a shared document projection for
         // what it returns. This match is deliberately exhaustive: a new
@@ -1021,6 +1024,7 @@ fn card_spelling(command: &AnalysisCommand) -> &'static str {
         AnalysisCommand::Dc { .. } => ".DC",
         AnalysisCommand::Ac { .. } | AnalysisCommand::AcData { .. } => ".AC",
         AnalysisCommand::Hb(_) => ".HB",
+        AnalysisCommand::Qpss(_) => ".QPSS",
         AnalysisCommand::Sp { .. } => ".SP",
         AnalysisCommand::Stb { .. } => ".STB",
         AnalysisCommand::Disto { .. } => ".DISTO",

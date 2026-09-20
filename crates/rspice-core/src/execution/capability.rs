@@ -104,9 +104,9 @@ impl AnalysisResultKind {
 /// Port-noise is an optional second result of `SP`, so it has a registry row
 /// but no distinct `AnalysisKind`. Implicit and authored OP share one schema.
 ///
-/// `None` is the answer for a kind that is named and not yet bound to a
-/// directive. Nothing plans one, so nothing produces a result for one, and a
-/// registry row invented for it would claim a schema the engine cannot fill.
+/// `None` means that no shared result-document schema is bound to this kind.
+/// An engine or Studio entry point may exist without a CLI/Python/WASM document
+/// projection; a registry row must not claim that projection prematurely.
 pub const fn analysis_result_kind(kind: AnalysisKind) -> Option<AnalysisResultKind> {
     Some(match kind {
         AnalysisKind::ImplicitOp | AnalysisKind::Op => AnalysisResultKind::OperatingPoint,
@@ -131,7 +131,7 @@ pub const fn analysis_result_kind(kind: AnalysisKind) -> Option<AnalysisResultKi
         AnalysisKind::Fourier => AnalysisResultKind::Fourier,
         AnalysisKind::Fft => AnalysisResultKind::Fft,
         AnalysisKind::DcMatch => AnalysisResultKind::DcMatch,
-        // Named for the surfaces above, not yet runnable here.
+        // No shared result-document projection is implemented for these kinds.
         AnalysisKind::Soa
         | AnalysisKind::Optimize
         | AnalysisKind::Psp
