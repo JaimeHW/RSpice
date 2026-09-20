@@ -7,14 +7,26 @@ impl Engine {
         &self,
         circuit: &CircuitData,
     ) -> Result<(), SimulationError> {
+        self.validate_cyclostationary_noise_circuit(circuit, "pnoise")
+    }
+
+    pub(in crate::engine::hb) fn validate_cyclostationary_noise_circuit(
+        &self,
+        circuit: &CircuitData,
+        analysis: &str,
+    ) -> Result<(), SimulationError> {
         validate_resistor_noise_metadata(circuit)?;
         if let Some(summary) = periodic_capability::summarize(
             &periodic_capability::cyclostationary_noise_gaps(circuit),
         ) {
             return Err(SimulationError::unsupported_capability(
-                "analysis.pnoise.colored_noise",
+                if analysis == "qpnoise" {
+                    "analysis.qpnoise.colored_noise"
+                } else {
+                    "analysis.pnoise.colored_noise"
+                },
                 format!(
-                    "driven pnoise requires exact cyclostationary colored-noise folding, which is not implemented for {summary}; set the listed noise coefficient exactly to zero to disable that mechanism"
+                    "driven {analysis} requires exact cyclostationary colored-noise folding, which is not implemented for {summary}; set the listed noise coefficient exactly to zero to disable that mechanism"
                 ),
             ));
         }
@@ -22,7 +34,7 @@ impl Engine {
         let physical_constants = pnoise_physical_constants(self.config.spice_dialect);
         if !temperature.is_finite() || temperature <= 0.0 {
             return Err(SimulationError::Circuit(format!(
-                "pnoise absolute analysis temperature must be finite and positive, got {temperature} K"
+                "{analysis} absolute analysis temperature must be finite and positive, got {temperature} K"
             )));
         }
         if !physical_constants.boltzmann.is_finite()
@@ -31,7 +43,7 @@ impl Engine {
             || physical_constants.electron_charge <= 0.0
         {
             return Err(SimulationError::Circuit(format!(
-                "pnoise physical constants must be finite and positive, got k={}, q={}",
+                "{analysis} physical constants must be finite and positive, got k={}, q={}",
                 physical_constants.boltzmann, physical_constants.electron_charge
             )));
         }

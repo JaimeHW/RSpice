@@ -11,6 +11,7 @@
 //! bias current.
 
 mod bjt;
+pub(super) use bjt::NativeNoiseWaveforms;
 mod sources;
 
 use super::*;
@@ -165,7 +166,7 @@ fn validate_resistor_noise_metadata(circuit: &CircuitData) -> Result<(), Simulat
     Ok(())
 }
 
-fn checked_scaled_positive_product(
+pub(super) fn checked_scaled_positive_product(
     factors: &[Value],
     quantity: &str,
 ) -> Result<ScaledNonnegative, SimulationError> {
@@ -203,7 +204,7 @@ fn checked_scaled_positive_product(
     Ok(ScaledNonnegative { mantissa, exponent })
 }
 
-fn checked_scaled_positive_ratio(
+pub(super) fn checked_scaled_positive_ratio(
     factors: &[Value],
     divisor: Value,
     quantity: &str,

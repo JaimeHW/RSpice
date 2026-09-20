@@ -5,11 +5,11 @@ use crate::analysis::harmonic_balance::normalize_scaled_noise_waveform;
 use crate::analysis::noise::{NoiseSource, NoiseSourceIdentity, NoiseSourceType};
 use std::collections::HashMap;
 
-struct NativeNoiseWaveform {
-    name: String,
-    nodes: [usize; 2],
-    frequency_exponent: Option<Value>,
-    samples: Vec<ScaledNonnegative>,
+pub(in crate::engine::hb) struct NativeNoiseWaveform {
+    pub(in crate::engine::hb) name: String,
+    pub(in crate::engine::hb) nodes: [usize; 2],
+    pub(in crate::engine::hb) frequency_exponent: Option<Value>,
+    pub(in crate::engine::hb) samples: Vec<ScaledNonnegative>,
 }
 
 /// The native stationary source law at 1 Hz, without materializing a density
@@ -92,6 +92,122 @@ fn scaled_native_density(
     }
 }
 
+/// Physical native mechanisms independent of the orbit's sampling coordinates.
+pub(in crate::engine::hb) struct NativeNoiseWaveforms {
+    indices: HashMap<(NoiseSourceIdentity, usize, usize), usize>,
+    pub(in crate::engine::hb) waveforms: Vec<NativeNoiseWaveform>,
+    elementary: Vec<NoiseSource>,
+    temperatures: HashMap<NoiseSourceIdentity, Value>,
+    ambient: Value,
+    value_limit: usize,
+}
+impl NativeNoiseWaveforms {
+    pub(in crate::engine::hb) fn new(ambient: Value, value_limit: usize) -> Self {
+        Self {
+            indices: HashMap::new(),
+            waveforms: Vec::new(),
+            elementary: Vec::new(),
+            temperatures: HashMap::new(),
+            ambient,
+            value_limit,
+        }
+    }
+    pub(in crate::engine::hb) fn sample(
+        &mut self,
+        engine: &Engine,
+        time: usize,
+        count: usize,
+        bjts: &[crate::device::Bjt],
+        solution: &[Value],
+        abort: &dyn AbortSignal,
+    ) -> Result<(), SimulationError> {
+        self.elementary.clear();
+        self.temperatures.clear();
+        for bjt in bjts {
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
+            if Engine::append_bjt_noise_sources(
+                bjt,
+                solution,
+                None,
+                solution.len(),
+                &mut self.elementary,
+                &mut self.temperatures,
+            )? {
+                return Err(SimulationError::Circuit(format!(
+                    "BJT '{}' periodic noise requires unbound private coordinates",
+                    bjt.name
+                )));
+            }
+        }
+        Engine::configure_noise_physical_constants(
+            &mut self.elementary,
+            &mut [],
+            engine.config.spice_dialect,
+        );
+        for source in &self.elementary {
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
+            let name = Engine::noise_source_label(&source.identity);
+            let frequency_exponent =
+                (source.noise_type == NoiseSourceType::Flicker).then_some(source.ef);
+            let temperature = self
+                .temperatures
+                .get(&source.identity)
+                .copied()
+                .unwrap_or(self.ambient + source.temperature_offset);
+            let density = scaled_native_density(source, temperature, &name)?;
+            let key = (source.identity.clone(), source.node_pos, source.node_neg);
+            let index = if let Some(&index) = self.indices.get(&key) {
+                index
+            } else {
+                let values = self
+                    .waveforms
+                    .len()
+                    .checked_add(1)
+                    .and_then(|n| n.checked_mul(count))
+                    .ok_or_else(|| {
+                        SimulationError::Circuit("native BJT noise waveform size overflows".into())
+                    })?;
+                crate::ResourceLimitError::ensure(
+                    crate::ResourceKind::ResultValues,
+                    values.saturating_mul(2),
+                    self.value_limit,
+                )?;
+                let mut samples = Vec::new();
+                samples.try_reserve_exact(count).map_err(|error| {
+                    SimulationError::Circuit(format!(
+                        "pnoise source '{name}' waveform allocation failed: {error}"
+                    ))
+                })?;
+                samples.resize(count, ScaledNonnegative::ZERO);
+                let index = self.waveforms.len();
+                self.waveforms.push(NativeNoiseWaveform {
+                    name,
+                    nodes: [source.node_pos, source.node_neg],
+                    frequency_exponent,
+                    samples,
+                });
+                self.indices.insert(key, index);
+                index
+            };
+            let waveform = &mut self.waveforms[index];
+            if waveform.nodes != [source.node_pos, source.node_neg]
+                || waveform.frequency_exponent != frequency_exponent
+            {
+                return Err(SimulationError::Circuit(format!(
+                    "pnoise source '{}' changes its terminals or frequency law over the orbit",
+                    waveform.name
+                )));
+            }
+            waveform.samples[time] = density;
+        }
+        Ok(())
+    }
+}
+
 impl Engine {
     pub(in crate::engine::hb) fn native_bjt_periodic_noise_sources(
         &self,
@@ -100,95 +216,26 @@ impl Engine {
         ambient: Value,
         abort: &dyn AbortSignal,
     ) -> Result<Vec<PeriodicNoiseSource>, SimulationError> {
-        let mut indices: HashMap<(NoiseSourceIdentity, usize, usize), usize> = HashMap::new();
-        let mut waveforms: Vec<NativeNoiseWaveform> = Vec::new();
-        let mut elementary = Vec::new();
-        let mut temperatures = HashMap::new();
-        solver.visit_native_bjt_samples(state, abort, |time, count, bjts, solution| {
-            let mut sample = || -> Result<(), SimulationError> {
-                elementary.clear();
-                temperatures.clear();
-                for bjt in bjts {
-                    if Self::append_bjt_noise_sources(
-                        bjt,
-                        solution,
-                        None,
-                        solution.len(),
-                        &mut elementary,
-                        &mut temperatures,
-                    )? {
-                        return Err(SimulationError::Circuit(format!(
-                            "BJT '{}' periodic noise requires unbound private coordinates",
-                            bjt.name
-                        )));
-                    }
-                }
-                Self::configure_noise_physical_constants(
-                    &mut elementary,
-                    &mut [],
-                    self.config.spice_dialect,
-                );
-                for source in &elementary {
-                    let name = Self::noise_source_label(&source.identity);
-                    let frequency_exponent =
-                        (source.noise_type == NoiseSourceType::Flicker).then_some(source.ef);
-                    let temperature = temperatures
-                        .get(&source.identity)
-                        .copied()
-                        .unwrap_or(ambient + source.temperature_offset);
-                    let density = scaled_native_density(source, temperature, &name)?;
-                    let key = (source.identity.clone(), source.node_pos, source.node_neg);
-                    let index = if let Some(&index) = indices.get(&key) {
-                        index
-                    } else {
-                        let values = waveforms
-                            .len()
-                            .checked_add(1)
-                            .and_then(|n| n.checked_mul(count))
-                            .ok_or_else(|| {
-                                SimulationError::Circuit(
-                                    "native BJT noise waveform size overflows".into(),
-                                )
-                            })?;
-                        self.ensure_result_values(values)?;
-                        let mut samples = Vec::new();
-                        samples.try_reserve_exact(count).map_err(|error| {
-                            SimulationError::Circuit(format!(
-                                "pnoise source '{name}' waveform allocation failed: {error}"
-                            ))
-                        })?;
-                        samples.resize(count, ScaledNonnegative::ZERO);
-                        let index = waveforms.len();
-                        waveforms.push(NativeNoiseWaveform {
-                            name,
-                            nodes: [source.node_pos, source.node_neg],
-                            frequency_exponent,
-                            samples,
-                        });
-                        indices.insert(key, index);
-                        index
-                    };
-                    let waveform = &mut waveforms[index];
-                    if waveform.nodes != [source.node_pos, source.node_neg]
-                        || waveform.frequency_exponent != frequency_exponent
-                    {
-                        return Err(SimulationError::Circuit(format!(
-                            "pnoise source '{}' changes its terminals or frequency law over the orbit",
-                            waveform.name
-                        )));
-                    }
-                    waveform.samples[time] = density;
-                }
-                Ok(())
-            };
-            sample().map_err(|error| crate::analysis::HbError::InvalidCircuit(error.to_string()))
-        }).map_err(|error| match error {
-            crate::analysis::HbError::Aborted => SimulationError::Aborted,
-            error => SimulationError::Circuit(format!("native BJT periodic-noise sampling failed: {error}")),
-        })?;
+        let mut frames =
+            NativeNoiseWaveforms::new(ambient, self.config.resource_limits.max_result_values);
+        solver
+            .visit_native_bjt_samples(state, abort, |time, count, bjts, solution| {
+                frames
+                    .sample(self, time, count, bjts, solution, abort)
+                    .map_err(|error| match error {
+                        SimulationError::Aborted => crate::analysis::HbError::Aborted,
+                        error => crate::analysis::HbError::InvalidCircuit(error.to_string()),
+                    })
+            })
+            .map_err(|error| match error {
+                crate::analysis::HbError::Aborted => SimulationError::Aborted,
+                error => SimulationError::Circuit(format!(
+                    "native BJT periodic-noise sampling failed: {error}"
+                )),
+            })?;
 
         let mut sources = Vec::new();
-        for mut waveform in waveforms {
+        for mut waveform in frames.waveforms {
             if abort.is_aborted() {
                 return Err(SimulationError::Aborted);
             }
