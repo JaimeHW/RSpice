@@ -157,8 +157,12 @@ impl SimulationController {
                 }
             };
 
-            if let crate::simulation::plan::AnalysisDraft::MonteCarlo(draft) = instance.draft() {
-                match self.compile_monte_carlo_base(state, plan, draft) {
+            if matches!(
+                instance.draft(),
+                crate::simulation::plan::AnalysisDraft::MonteCarlo(_)
+                    | crate::simulation::plan::AnalysisDraft::Optimization(_)
+            ) {
+                match self.compile_study_base(state, plan, instance.draft()) {
                     Ok(base) => spec_options.study_base = base,
                     Err(error) => {
                         errors.push(format!("{}: {error}", instance.display_name()));
@@ -448,24 +452,40 @@ impl SimulationController {
         )
     }
 
-    fn compile_monte_carlo_base(
+    fn compile_study_base(
         &self,
         state: &AppState,
         plan: &FrozenSimulationPlan,
-        draft: &crate::simulation::dialog::McDialogState,
+        draft: &crate::simulation::plan::AnalysisDraft,
     ) -> Result<Option<crate::simulation::runner::study::StudyRunConfig>, String> {
-        let Some(id) = draft.base_analysis else {
-            return Ok(None);
+        use crate::simulation::plan::AnalysisDraft;
+        let (id, measurements, histogram_bins) = match draft {
+            AnalysisDraft::MonteCarlo(draft) if draft.base_analysis.is_some() => {
+                let config = draft.to_config()?;
+                (
+                    config.base_analysis.unwrap(),
+                    config.measurements,
+                    config.histogram_bins,
+                )
+            }
+            AnalysisDraft::Optimization(draft) if draft.base_analysis.is_some() => {
+                let config = draft.to_config()?;
+                (
+                    config.base_analysis.unwrap(),
+                    vec![config.objective_measurement],
+                    20,
+                )
+            }
+            _ => return Ok(None),
         };
-        let config = draft.to_config()?;
         let base = plan
             .instances()
             .iter()
             .find(|instance| instance.id() == id)
-            .ok_or_else(|| format!("Monte Carlo base analysis {id} is missing or disabled"))?;
+            .ok_or_else(|| format!("Study base analysis {id} is missing or disabled"))?;
         if !crate::simulation::runner::study::supports_kind(base.kind()) {
             return Err(format!(
-                "{} cannot yet be used as a Monte Carlo base",
+                "{} cannot yet be used as a study base",
                 base.display_name()
             ));
         }
@@ -486,8 +506,8 @@ impl SimulationController {
                 .numeric_override()
                 .map(|options| options.to_spice_options())
                 .unwrap_or_default(),
-            measurements: config.measurements,
-            histogram_bins: config.histogram_bins,
+            measurements,
+            histogram_bins,
         }))
     }
 
@@ -720,6 +740,70 @@ mod tests {
                 .any(|error| error.contains("missing or disabled")),
             "{errors:?}"
         );
+    }
+
+    #[test]
+    fn configured_optimization_base_persists_and_freezes_before_live_edits() {
+        use crate::simulation::dialog::optimization::{
+            OptimizationConfig, OptimizationDialogState,
+        };
+        let mut state = AppState::default();
+        let plan = state.sim_setup.analysis_plan.as_mut().unwrap();
+        let (op, _) = plan.insert(AnalysisKind::OperatingPoint).unwrap();
+        let (ac, _) = plan.insert(AnalysisKind::Ac).unwrap();
+        plan.bind_dependency(ac, AnalysisKind::OperatingPoint, op)
+            .unwrap();
+        let (opt, _) = plan.insert(AnalysisKind::Optimization).unwrap();
+        let mut setup = OptimizationDialogState::from_config(&OptimizationConfig {
+            base_analysis: Some(ac),
+            objective_measurement: "gain".into(),
+            ..Default::default()
+        });
+        // Inactive expression buffers survive switching back without blocking a measured objective.
+        setup.objective_expression = "unfinished{".into();
+        setup.objective_node.clear();
+        let draft = AnalysisDraft::Optimization(setup);
+        for mut restored in [
+            serde_json::from_str::<AnalysisDraft>(&serde_json::to_string(&draft).unwrap()).unwrap(),
+            ron::from_str::<AnalysisDraft>(&ron::to_string(&draft).unwrap()).unwrap(),
+        ] {
+            restored.prepare_after_restore();
+            let AnalysisDraft::Optimization(ref mut setup) = restored else {
+                unreachable!()
+            };
+            setup.ensure_initialized();
+            let config = setup.to_config().unwrap();
+            assert_eq!(config.base_analysis, Some(ac));
+            assert_eq!(config.objective_measurement, "gain");
+            assert_eq!(setup.objective_expression, "unfinished{");
+            assert!(config.to_spice().contains("measurement=gain"));
+        }
+        plan.edit(opt, |target| *target = draft).unwrap();
+        let frozen = plan.freeze().unwrap();
+        plan.edit(opt, |draft| {
+            let AnalysisDraft::Optimization(setup) = draft else {
+                unreachable!()
+            };
+            setup.objective_measurement = "changed".into();
+        })
+        .unwrap();
+        let sealed = state
+            .model_library_manager
+            .seal_execution_sources()
+            .unwrap();
+        let tasks = SimulationController::new()
+            .build_queue_from_plan(&state, &frozen, &sealed)
+            .unwrap();
+        let task = tasks.iter().find(|task| task.instance_id() == opt).unwrap();
+        let base = task
+            .queued_analysis()
+            .spec_options
+            .study_base
+            .as_ref()
+            .unwrap();
+        assert_eq!(base.instance_id, ac);
+        assert_eq!(base.measurements, ["gain"]);
+        assert!(matches!(base.analysis, AnalysisConfig::Ac(_)));
     }
 
     #[test]

@@ -14,6 +14,8 @@ pub(super) fn run_device_spec(
     spec: AnalysisSpec,
     netlist: &str,
     source_path: Option<&Path>,
+    study_base: Option<&crate::simulation::runner::study::StudyRunConfig>,
+    environment: Option<crate::simulation::runner::AnalysisExecutionEnvironment>,
     abort: &dyn AbortSignal,
 ) -> Result<SimulationResult, SimulationError> {
     super::ensure_not_aborted(abort)?;
@@ -64,6 +66,8 @@ pub(super) fn run_device_spec(
             initial_step,
             min_step,
             source_path,
+            study_base,
+            environment,
             abort,
         ),
         AnalysisSpec::Soa {
@@ -210,6 +214,8 @@ fn run_optimization(
     initial_step: f64,
     min_step: f64,
     source_path: Option<&Path>,
+    study_base: Option<&crate::simulation::runner::study::StudyRunConfig>,
+    environment: Option<crate::simulation::runner::AnalysisExecutionEnvironment>,
     abort: &dyn AbortSignal,
 ) -> Result<SimulationResult, SimulationError> {
     let mut configured_variables = Vec::with_capacity(variables.len());
@@ -252,14 +258,25 @@ fn run_optimization(
         min_step,
     };
 
-    let data = super::run_abort_aware_service(abort, || {
-        svc_runner::run_optimization_analysis_with_config_and_source_path_and_abort(
-            netlist,
+    let data = if let Some(base) = study_base {
+        crate::simulation::runner::study::run_optimization(
+            base,
             &cfg,
+            netlist,
             source_path,
+            environment,
             abort,
-        )
-    })?;
+        )?
+    } else {
+        super::run_abort_aware_service(abort, || {
+            svc_runner::run_optimization_analysis_with_config_and_source_path_and_abort(
+                netlist,
+                &cfg,
+                source_path,
+                abort,
+            )
+        })?
+    };
 
     let mut waveforms = HashMap::new();
     super::ensure_not_aborted(abort)?;

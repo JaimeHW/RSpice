@@ -57,9 +57,14 @@ pub(super) fn run_spec_request_with_environment(
 ) -> Result<SimulationResult, SimulationError> {
     ensure_not_aborted(abort_flag)?;
 
-    if options.study_base.is_some() && !matches!(spec, AnalysisSpec::MonteCarlo { .. }) {
+    if options.study_base.is_some()
+        && !matches!(
+            spec,
+            AnalysisSpec::MonteCarlo { .. } | AnalysisSpec::Optimization { .. }
+        )
+    {
         return Err(SimulationError::InvalidConfig(
-            "A configured study base requires a Monte Carlo request".into(),
+            "A configured study base requires a Monte Carlo or optimization request".into(),
         ));
     }
     let validation = spec.validate();
@@ -114,9 +119,14 @@ pub(super) fn run_spec_request_with_environment(
         AnalysisSpec::Reliability { .. }
         | AnalysisSpec::Optimization { .. }
         | AnalysisSpec::Soa { .. }
-        | AnalysisSpec::DcMismatch { .. } => {
-            device::run_device_spec(spec, netlist, source_path, abort_flag)
-        }
+        | AnalysisSpec::DcMismatch { .. } => device::run_device_spec(
+            spec,
+            netlist,
+            source_path,
+            options.study_base.as_ref(),
+            environment,
+            abort_flag,
+        ),
         AnalysisSpec::Pss { .. }
         | AnalysisSpec::PssSpectrum { .. }
         | AnalysisSpec::HarmonicBalance { .. }
@@ -1567,6 +1577,8 @@ R2 out 0 1k\n\
                 device::run_device_spec(
                     AnalysisSpec::dc_op(),
                     "",
+                    None,
+                    None,
                     None,
                     &rspice_core::abort_signal::NoAbort,
                 ),

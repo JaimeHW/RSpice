@@ -93,6 +93,8 @@ impl OptimizationVariableConfig {
 /// Typed optimization configuration.
 #[derive(Debug, Clone, PartialEq)]
 pub struct OptimizationConfig {
+    pub base_analysis: Option<crate::product::AnalysisInstanceId>,
+    pub objective_measurement: String,
     pub search: OptimizationSearchControls,
     /// Variable set to optimize.
     pub variables: Vec<OptimizationVariableConfig>,
@@ -123,6 +125,8 @@ pub struct OptimizationConfig {
 impl Default for OptimizationConfig {
     fn default() -> Self {
         Self {
+            base_analysis: None,
+            objective_measurement: String::new(),
             search: OptimizationSearchControls::default(),
             variables: vec![
                 OptimizationVariableConfig {
@@ -160,7 +164,11 @@ impl OptimizationConfig {
         if self.variables.is_empty() {
             return Err("At least one optimization variable is required".to_string());
         }
-        if let Some(expression) = &self.objective_expression {
+        if self.base_analysis.is_some() {
+            crate::simulation::runner::study::validate_measurements(std::slice::from_ref(
+                &self.objective_measurement,
+            ))?;
+        } else if let Some(expression) = &self.objective_expression {
             crate::services::simulation_runner::validate_optimization_expression(expression)?;
         } else {
             if self.objective_node.trim().is_empty() {
@@ -234,12 +242,16 @@ impl OptimizationConfig {
             .map(|v| format!("{}:{:.6e}:{:.6e}:{:.6e}", v.name, v.min, v.max, v.initial))
             .collect::<Vec<_>>()
             .join(",");
+        let objective = if let Some(id) = self.base_analysis {
+            format!("base={id} measurement={}", self.objective_measurement)
+        } else {
+            format!("obj=V({},{})", self.objective_node, self.objective_ref)
+        };
         let mut line = format!(
-            "* RSPICE OPT algo={} goal={} obj=V({},{}) maxiter={} ctol={:.6e} fd={:.6e} initstep={:.6e} minstep={:.6e} vars={}",
+            "* RSPICE OPT algo={} goal={} {} maxiter={} ctol={:.6e} fd={:.6e} initstep={:.6e} minstep={:.6e} vars={}",
             self.algorithm.as_str(),
             self.goal_mode.as_str(),
-            self.objective_node,
-            self.objective_ref,
+            objective,
             self.max_iterations,
             self.cost_tolerance,
             self.fd_step,
@@ -268,6 +280,10 @@ impl OptimizationConfig {
 #[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct OptimizationDialogState {
+    #[serde(default)]
+    pub base_analysis: Option<crate::product::AnalysisInstanceId>,
+    #[serde(default)]
+    pub objective_measurement: String,
     #[serde(default = "default_gradient_tolerance")]
     pub var_tolerance: String,
     #[serde(default = "default_annealing_temperature")]
@@ -324,6 +340,8 @@ impl OptimizationDialogState {
             .join("\n");
 
         Self {
+            base_analysis: config.base_analysis,
+            objective_measurement: config.objective_measurement.clone(),
             var_tolerance: config.search.var_tolerance.to_string(),
             sa_initial_temp: config.search.sa_initial_temp.to_string(),
             sa_cooling_rate: config.search.sa_cooling_rate.to_string(),
@@ -386,6 +404,8 @@ impl OptimizationDialogState {
             .map_err(|_| "Invalid max iterations".to_string())?;
         let variables = parse_variable_specs(&self.variables_text)?;
         let config = OptimizationConfig {
+            base_analysis: self.base_analysis,
+            objective_measurement: self.objective_measurement.trim().to_owned(),
             search: OptimizationSearchControls {
                 var_tolerance: parse_si_value(&self.var_tolerance)
                     .map_err(|e| format!("Invalid gradient tolerance: {e}"))?,
@@ -400,10 +420,21 @@ impl OptimizationDialogState {
                     .map_err(|_| "Seed must be an unsigned 64-bit integer")?,
             },
             variables,
-            objective_expression: (!self.objective_expression.trim().is_empty())
-                .then(|| self.objective_expression.trim().to_string()),
-            objective_node: self.objective_node.trim().to_string(),
-            objective_ref: self.objective_ref.trim().to_string(),
+            // Inactive legacy objective buffers remain in the saved draft;
+            // the bound measurement supplies the actual objective at execution.
+            objective_expression: (self.base_analysis.is_none()
+                && !self.objective_expression.trim().is_empty())
+            .then(|| self.objective_expression.trim().to_string()),
+            objective_node: if self.base_analysis.is_some() {
+                OptimizationConfig::default().objective_node
+            } else {
+                self.objective_node.trim().to_string()
+            },
+            objective_ref: if self.base_analysis.is_some() {
+                OptimizationConfig::default().objective_ref
+            } else {
+                self.objective_ref.trim().to_string()
+            },
             goal_mode,
             target_value,
             algorithm,

@@ -72,10 +72,9 @@ pub(crate) struct WorkerRequest {
     pub(in crate::simulation) stream_transient_samples: bool,
 }
 
-/// 12: Monte Carlo can carry an exact configured study base and measurements;
-/// older workers must not silently execute the legacy operating-point study.
+/// 13: optimization candidates can execute a configured study base and measurement.
 #[cfg(any(target_arch = "wasm32", test))]
-pub(crate) const WORKER_REQUEST_TRANSPORT_PROTOCOL: u8 = 12;
+pub(crate) const WORKER_REQUEST_TRANSPORT_PROTOCOL: u8 = 13;
 
 /// Browser-worker request split into compact metadata and transferable
 /// floating-point buffers. The embedded request deliberately carries empty
@@ -190,7 +189,7 @@ fn worker_request_op_config_mut(
         },
         WorkerSimulationRequest::Spec { spec, options } => match spec.as_mut() {
             WorkerAnalysisSpec::DcOp(config) => Some(config),
-            WorkerAnalysisSpec::MonteCarlo { .. } => {
+            WorkerAnalysisSpec::MonteCarlo { .. } | WorkerAnalysisSpec::Optimization { .. } => {
                 options
                     .study_base
                     .as_mut()
@@ -215,7 +214,7 @@ fn worker_request_op_config(
         },
         WorkerSimulationRequest::Spec { spec, options } => match spec.as_ref() {
             WorkerAnalysisSpec::DcOp(config) => Some(config),
-            WorkerAnalysisSpec::MonteCarlo { .. } => {
+            WorkerAnalysisSpec::MonteCarlo { .. } | WorkerAnalysisSpec::Optimization { .. } => {
                 options
                     .study_base
                     .as_ref()

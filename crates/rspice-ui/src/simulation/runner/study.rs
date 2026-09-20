@@ -1,4 +1,7 @@
-//! Frozen configured-analysis execution on each sampled circuit.
+//! Frozen configured-analysis execution on each study circuit.
+
+mod optimization;
+pub(crate) use optimization::run_optimization;
 
 use super::{AnalysisExecutionEnvironment, SimulationError};
 use crate::product::{AnalysisInstanceId, ObjectRevision};
@@ -51,6 +54,7 @@ pub(crate) fn validate_measurements(names: &[String]) -> Result<(), String> {
     for name in names {
         let (mode, key) = name.split_once(':').unwrap_or(("meas", name));
         if key.trim().is_empty()
+            || name.chars().any(char::is_control)
             || !["meas", "scalar", "last"]
                 .iter()
                 .any(|value| mode.eq_ignore_ascii_case(value))
@@ -97,43 +101,7 @@ pub(crate) fn run_monte_carlo(
         .ok_or_else(|| {
             SimulationError::InvalidConfig("Configured Monte Carlo requires a .MC command".into())
         })?;
-    let family = match base.analysis {
-        AnalysisConfig::Ac(_) => "AC",
-        AnalysisConfig::Transient(_) => "TRAN",
-        AnalysisConfig::DcSweep(_) => "DC",
-        AnalysisConfig::Noise(_) => "NOISE",
-        _ => "",
-    };
-    for request in &base.measurements {
-        let (mode, name) = request.split_once(':').unwrap_or(("meas", request));
-        if mode.eq_ignore_ascii_case("meas")
-            && !circuit.measurements.iter().any(|measurement| {
-                measurement.name.eq_ignore_ascii_case(name)
-                    && measurement.analysis.eq_ignore_ascii_case(family)
-            })
-        {
-            return Err(SimulationError::InvalidConfig(format!(
-                "Study measurement {name:?} has no .MEAS {family} declaration for the selected base"
-            )));
-        }
-        if mode.eq_ignore_ascii_case("scalar")
-            && !matches!(
-                base.analysis,
-                AnalysisConfig::DcOp(_)
-                    | AnalysisConfig::PoleZero(_)
-                    | AnalysisConfig::Sensitivity(_)
-            )
-        {
-            return Err(SimulationError::InvalidConfig(format!(
-                "{request:?} requires a scalar analysis; use a .MEAS name or last:signal for a waveform"
-            )));
-        }
-        if mode.eq_ignore_ascii_case("last") && family.is_empty() {
-            return Err(SimulationError::InvalidConfig(format!(
-                "{request:?} requires an analysis with waveforms"
-            )));
-        }
-    }
+    validate_base_measurements(base, &circuit)?;
     let mut study = MonteCarloStudyConfig::new(
         command.runs,
         command.seed.unwrap_or(0x5EED_5EED),
@@ -164,27 +132,7 @@ pub(crate) fn run_monte_carlo(
         nominal_supply_voltage: point.nominal_supply_voltage,
         supply_source_names: point.supply_source_names,
     });
-    let mut analysis = base.analysis.clone();
-    if let AnalysisConfig::DcOp(op) = &mut analysis {
-        // The study applies the supply exactly once, after statistical replay.
-        // Outside a Run Set retain the selected OP's explicit supply point.
-        if let Some(environment) = &study.environment {
-            if matches!(
-                op.temperature_mode,
-                crate::simulation::dialog::OpTemperatureMode::PvtRunSet
-                    | crate::simulation::dialog::OpTemperatureMode::ActiveRunSetAxis
-            ) {
-                op.temperature_celsius = environment.temperature_celsius;
-            }
-            op.run_point.supply_voltage = None;
-            op.run_point.nominal_supply_voltage = None;
-            op.run_point.supply_source_names = environment.supply_source_names.clone();
-        }
-    }
-    if let (AnalysisConfig::Noise(noise), Some(environment)) = (&mut analysis, &study.environment) {
-        noise.temperature_kelvin =
-            rspice_core::constants::celsius_to_kelvin(environment.temperature_celsius);
-    }
+    let analysis = analysis_for_environment(base, study.environment.as_ref());
     let engine = rspice_core::Engine::default().resolved_for_netlist(&circuit);
     let signal = StudyAbort {
         parent: abort,
@@ -548,4 +496,77 @@ mod tests {
             "{error}"
         );
     }
+}
+
+fn validate_base_measurements(
+    base: &StudyRunConfig,
+    circuit: &rspice_core::Netlist,
+) -> Result<(), SimulationError> {
+    validate_measurements(&base.measurements).map_err(SimulationError::InvalidConfig)?;
+    let family = match base.analysis {
+        AnalysisConfig::Ac(_) => "AC",
+        AnalysisConfig::Transient(_) => "TRAN",
+        AnalysisConfig::DcSweep(_) => "DC",
+        AnalysisConfig::Noise(_) => "NOISE",
+        _ => "",
+    };
+    for request in &base.measurements {
+        let (mode, name) = request.split_once(':').unwrap_or(("meas", request));
+        if mode.eq_ignore_ascii_case("meas")
+            && !circuit.measurements.iter().any(|measurement| {
+                measurement.name.eq_ignore_ascii_case(name)
+                    && measurement.analysis.eq_ignore_ascii_case(family)
+            })
+        {
+            return Err(SimulationError::InvalidConfig(format!(
+                "Study measurement {name:?} has no .MEAS {family} declaration for the selected base"
+            )));
+        }
+        if mode.eq_ignore_ascii_case("scalar")
+            && !matches!(
+                base.analysis,
+                AnalysisConfig::DcOp(_)
+                    | AnalysisConfig::PoleZero(_)
+                    | AnalysisConfig::Sensitivity(_)
+            )
+        {
+            return Err(SimulationError::InvalidConfig(format!(
+                "{request:?} requires a scalar analysis; use a .MEAS name or last:signal for a waveform"
+            )));
+        }
+        if mode.eq_ignore_ascii_case("last") && family.is_empty() {
+            return Err(SimulationError::InvalidConfig(format!(
+                "{request:?} requires an analysis with waveforms"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn analysis_for_environment(
+    base: &StudyRunConfig,
+    environment: Option<&MonteCarloEnvironment>,
+) -> AnalysisConfig {
+    let mut analysis = base.analysis.clone();
+    if let AnalysisConfig::DcOp(op) = &mut analysis {
+        // The study applies the supply exactly once, after statistical replay.
+        // Outside a Run Set retain the selected OP's explicit supply point.
+        if let Some(environment) = environment {
+            if matches!(
+                op.temperature_mode,
+                crate::simulation::dialog::OpTemperatureMode::PvtRunSet
+                    | crate::simulation::dialog::OpTemperatureMode::ActiveRunSetAxis
+            ) {
+                op.temperature_celsius = environment.temperature_celsius;
+            }
+            op.run_point.supply_voltage = None;
+            op.run_point.nominal_supply_voltage = None;
+            op.run_point.supply_source_names = environment.supply_source_names.clone();
+        }
+    }
+    if let (AnalysisConfig::Noise(noise), Some(environment)) = (&mut analysis, environment) {
+        noise.temperature_kelvin =
+            rspice_core::constants::celsius_to_kelvin(environment.temperature_celsius);
+    }
+    analysis
 }
