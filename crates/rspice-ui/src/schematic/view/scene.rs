@@ -998,6 +998,9 @@ struct OperatingPointCanvasAnnotation {
 }
 
 fn device_op_param_unit(name: &str) -> &'static str {
+    if rspice_core::op_label::OpLabel::is_intrinsic_voltage_name(name) {
+        return "V";
+    }
     match name {
         "id" | "ic" | "ib" => "A",
         "vgs" | "vds" | "vbs" | "vth" | "vbe" | "vce" | "vd" => "V",

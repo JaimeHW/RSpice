@@ -2160,6 +2160,9 @@ const fn pstb_classification_label(
 }
 
 fn operating_point_parameter_unit(family: &str, name: &str) -> &'static str {
+    if rspice_core::op_label::OpLabel::is_intrinsic_voltage_name(name) {
+        return "V";
+    }
     match (family, name) {
         ("MOSFET", "id") | ("BJT", "ic" | "ib") | ("DIODE", "id") => "A",
         ("MOSFET", "vgs" | "vds" | "vbs" | "vth") | ("BJT", "vbe" | "vce") | ("DIODE", "vd") => "V",
