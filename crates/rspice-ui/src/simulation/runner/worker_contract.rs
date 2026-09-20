@@ -72,9 +72,9 @@ pub(crate) struct WorkerRequest {
     pub(in crate::simulation) stream_transient_samples: bool,
 }
 
-/// 21: HBSP/HBNOISE studies carry their bound HB producer and full consumer specification.
+/// 22: PSS studies carry their exact configured OP producer.
 #[cfg(any(target_arch = "wasm32", test))]
-pub(crate) const WORKER_REQUEST_TRANSPORT_PROTOCOL: u8 = 21;
+pub(crate) const WORKER_REQUEST_TRANSPORT_PROTOCOL: u8 = 22;
 
 /// Browser-worker request split into compact metadata and transferable
 /// floating-point buffers. The embedded request deliberately carries empty
@@ -193,10 +193,7 @@ fn worker_request_op_config_mut(
                 options
                     .study_base
                     .as_mut()
-                    .and_then(|base| match base.analysis.as_basic_mut() {
-                        Some(WorkerAnalysisConfig::DcOp(config)) => Some(config),
-                        _ => None,
-                    })
+                    .and_then(|base| base.analysis.op_config_mut())
             }
             _ => None,
         },
@@ -218,10 +215,7 @@ fn worker_request_op_config(
                 options
                     .study_base
                     .as_ref()
-                    .and_then(|base| match base.analysis.as_basic() {
-                        Some(WorkerAnalysisConfig::DcOp(config)) => Some(config),
-                        _ => None,
-                    })
+                    .and_then(|base| base.analysis.op_config())
             }
             _ => None,
         },

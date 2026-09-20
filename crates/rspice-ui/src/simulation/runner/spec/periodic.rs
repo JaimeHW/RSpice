@@ -94,53 +94,13 @@ pub(super) fn run_periodic_spec(
             SimulationResult::from_qpss_operating_point(data.operating_point)
                 .map_err(SimulationError::InvalidConfig)
         }
-        AnalysisSpec::Pss {
-            method,
-            fundamental_freq,
-            tone_sources,
-            tstab_periods,
-            points_per_period,
-            tolerance,
-            oscillator_mode,
-            oscillator_node,
-            num_harmonics,
-            integration_method,
-            tstab,
-            max_iterations,
-            abstol,
-            damping,
-            max_period_change,
-            verbose,
-        } => match method {
-            PssMethod::Shooting => run_pss(
-                netlist,
-                svc_runner::PssRunConfig {
-                    fundamental_freq,
-                    tone_sources,
-                    tstab_periods,
-                    points_per_period,
-                    num_harmonics,
-                    tolerance,
-                    oscillator_mode,
-                    oscillator_node,
-                    // The service layer sits below the editors, so it takes
-                    // the engine's own method rather than the chooser's.
-                    integration_method: integration_method.map(IntegrationMethod::core),
-                    tstab,
-                    max_iterations,
-                    abstol,
-                    damping,
-                    max_period_change,
-                    verbose,
-                },
-                source_path,
-                dependencies,
-                abort,
-            ),
-            PssMethod::HarmonicBalance => Err(SimulationError::InvalidConfig(
-                "legacy HB-PSS mode is not executable; use a Harmonic Balance analysis".to_owned(),
-            )),
-        },
+        spec @ AnalysisSpec::Pss { .. } => run_pss(
+            netlist,
+            pss_run_config(spec)?,
+            source_path,
+            dependencies,
+            abort,
+        ),
         AnalysisSpec::PssSpectrum { num_harmonics } => {
             run_pss_spectrum(num_harmonics, dependencies, abort)
         }
@@ -709,6 +669,13 @@ fn run_pss(
         )
     })?;
 
+    project_pss_data(data, abort)
+}
+
+fn project_pss_data(
+    data: svc_runner::PssData,
+    abort: &dyn AbortSignal,
+) -> Result<SimulationResult, SimulationError> {
     let time = data.time;
     let periodic_state = data.operating_point;
     let mut waveforms = HashMap::with_capacity(data.waveforms.len());
@@ -793,13 +760,15 @@ fn run_pss_spectrum(
         if node_name == "0" || node_name.eq_ignore_ascii_case("gnd") {
             continue;
         }
-        let harmonics = svc_runner::compute_fft_harmonics_with_abort(
-            &waveform.values,
-            fundamental,
-            num_harmonics,
-            abort,
-        )
-        .map_err(|error| SimulationError::SolverError(error.to_string()))?;
+        let harmonics = waveform
+            .compute_harmonics_with_abort(&periodic.result.time, fundamental, num_harmonics, abort)
+            .map_err(|error| match error {
+                rspice_core::analysis::fourier::FourierError::Aborted => SimulationError::Aborted,
+                _ => SimulationError::SolverError(error.to_string()),
+            })?
+            .into_iter()
+            .map(|harmonic| (harmonic.frequency, harmonic.magnitude, harmonic.phase))
+            .collect::<Vec<_>>();
         if harmonics.is_empty() {
             return Err(SimulationError::SolverError(format!(
                 "PSS spectrum extraction returned no harmonics for node '{}'",
@@ -810,7 +779,7 @@ fn run_pss_spectrum(
             !frequency.is_finite()
                 || *frequency < 0.0
                 || !magnitude.is_finite()
-                || *magnitude < 0.0
+                || (*frequency > 0.0 && *magnitude < 0.0)
                 || !phase.is_finite()
         }) || harmonics.windows(2).any(|pair| pair[1].0 <= pair[0].0)
         {
@@ -1898,4 +1867,74 @@ pub(in crate::simulation::runner) fn run_hb_study_on_materialized(
         &data.operating_point,
         abort,
     )
+}
+
+pub(in crate::simulation::runner) fn run_pss_study_on_materialized(
+    spec: AnalysisSpec,
+    circuit: &rspice_core::Netlist,
+    seed: &rspice_core::engine::PssDcOperatingPointSeed,
+    temperature_kelvin: f64,
+    abort: &dyn AbortSignal,
+) -> Result<SimulationResult, SimulationError> {
+    let config = pss_run_config(spec)?;
+    let data = super::run_abort_aware_service(abort, || {
+        svc_runner::run_pss_analysis_on_materialized_with_abort(
+            circuit,
+            &config,
+            Some(seed),
+            Some(temperature_kelvin),
+            abort,
+        )
+    })?;
+    project_pss_data(data, abort)
+}
+
+fn pss_run_config(spec: AnalysisSpec) -> Result<svc_runner::PssRunConfig, SimulationError> {
+    let AnalysisSpec::Pss {
+        method,
+        fundamental_freq,
+        tone_sources,
+        tstab_periods,
+        points_per_period,
+        tolerance,
+        oscillator_mode,
+        oscillator_node,
+        num_harmonics,
+        integration_method,
+        tstab,
+        max_iterations,
+        abstol,
+        damping,
+        max_period_change,
+        verbose,
+    } = spec
+    else {
+        return Err(SimulationError::InvalidConfig(
+            "Expected a shooting PSS request".into(),
+        ));
+    };
+    if method != PssMethod::Shooting {
+        return Err(SimulationError::InvalidConfig(
+            "legacy HB-PSS mode is not executable; use a Harmonic Balance analysis".into(),
+        ));
+    }
+    Ok(svc_runner::PssRunConfig {
+        fundamental_freq,
+        tone_sources,
+        tstab_periods,
+        points_per_period,
+        num_harmonics,
+        tolerance,
+        oscillator_mode,
+        oscillator_node,
+        // The service layer sits below the editors, so it takes
+        // the engine's own method rather than the chooser's.
+        integration_method: integration_method.map(IntegrationMethod::core),
+        tstab,
+        max_iterations,
+        abstol,
+        damping,
+        max_period_change,
+        verbose,
+    })
 }

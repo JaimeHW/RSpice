@@ -553,6 +553,48 @@ impl SimulationController {
                     request: spec.clone(),
                 }),
             )
+        } else if matches!(spec, AnalysisSpec::Pss { .. }) {
+            let producers = base
+                .dependencies()
+                .iter()
+                .filter(|edge| edge.prerequisite() == AnalysisKind::OperatingPoint)
+                .filter_map(|edge| {
+                    plan.instances()
+                        .iter()
+                        .find(|instance| instance.id() == edge.target())
+                })
+                .collect::<Vec<_>>();
+            let [producer] = producers.as_slice() else {
+                return Err("A PSS study requires exactly one explicitly bound, enabled operating-point producer".into());
+            };
+            let mut producer_state = state.clone();
+            producer_state.sim_setup = state
+                .sim_setup
+                .frozen_instance_projection(plan, producer)
+                .map_err(|error| error.to_string())?;
+            let producer_spec = self.analysis_draft_spec(&producer_state, producer.draft())?;
+            let AnalysisConfig::DcOp(config) =
+                self.analysis_spec_to_config(&producer_state, &producer_spec)?
+            else {
+                return Err("PSS study dependency is not an operating-point configuration".into());
+            };
+            (
+                crate::simulation::runner::study::StudyAnalysis::Pss(Box::new(
+                    crate::simulation::runner::study::StudyPssConfig {
+                        request: spec.clone(),
+                        operating_point: crate::simulation::runner::study::StudyOperatingPoint {
+                            instance_id: producer.id(),
+                            source_revision: plan.revision(),
+                            config,
+                            numeric_options: producer
+                                .numeric_override()
+                                .map(|options| options.to_spice_options())
+                                .unwrap_or_default(),
+                        },
+                    },
+                )),
+                None,
+            )
         } else if matches!(spec, AnalysisSpec::HarmonicBalance { .. }) {
             (
                 crate::simulation::runner::study::StudyAnalysis::Native(spec.clone()),
@@ -710,6 +752,102 @@ fn invalid_saved_output_reports(
 mod tests {
     use super::*;
     use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
+
+    #[test]
+    fn pss_study_freezes_its_exact_op_producer_and_complete_shooting_configuration() {
+        use crate::simulation::dialog::{McDialogState, mc::McConfig};
+        use crate::simulation::runner::study::StudyAnalysis;
+        let mut state = AppState::default();
+        let plan = state.sim_setup.analysis_plan.as_mut().unwrap();
+        let (first, _) = plan.insert(AnalysisKind::OperatingPoint).unwrap();
+        let (second, _) = plan.insert(AnalysisKind::OperatingPoint).unwrap();
+        let (pss, _) = plan.insert(AnalysisKind::Pss).unwrap();
+        plan.bind_dependency(pss, AnalysisKind::OperatingPoint, first)
+            .unwrap();
+        plan.edit(pss, |draft| {
+            let AnalysisDraft::Pss(draft) = draft else {
+                unreachable!()
+            };
+            draft.fund_freq = "1k".into();
+            draft.tone_sources = "V1".into();
+        })
+        .unwrap();
+        let mut numerics = crate::simulation::plan::AnalysisNumericOverride::default();
+        numerics
+            .set_for_instance(
+                AnalysisKind::OperatingPoint,
+                Default::default(),
+                crate::simulation::plan::NumericOverrideOption::Reltol,
+                "1e-7",
+            )
+            .unwrap();
+        plan.set_numeric_override(first, Some(numerics)).unwrap();
+        let (mc, _) = plan.insert(AnalysisKind::MonteCarlo).unwrap();
+        plan.edit(mc, |draft| {
+            *draft = AnalysisDraft::MonteCarlo(McDialogState::from_config(&McConfig {
+                base_analysis: Some(pss),
+                measurements: vec!["bin:1:magnitude:V(out)".into()],
+                ..Default::default()
+            }))
+        })
+        .unwrap();
+        let frozen = plan.freeze().unwrap();
+        plan.bind_dependency(pss, AnalysisKind::OperatingPoint, second)
+            .unwrap();
+        plan.edit(pss, |draft| {
+            let AnalysisDraft::Pss(draft) = draft else {
+                unreachable!()
+            };
+            draft.fund_freq = "2k".into();
+        })
+        .unwrap();
+        let sealed = state
+            .model_library_manager
+            .seal_execution_sources()
+            .unwrap();
+        let queue = SimulationController::new()
+            .build_queue_from_plan(&state, &frozen, &sealed)
+            .unwrap();
+        let task = queue.iter().find(|task| task.instance_id() == mc).unwrap();
+        let base = task
+            .queued_analysis()
+            .spec_options
+            .study_base
+            .as_ref()
+            .unwrap();
+        let StudyAnalysis::Pss(config) = &base.analysis else {
+            panic!("PSS")
+        };
+        assert_eq!(config.operating_point.instance_id, first);
+        assert_eq!(config.operating_point.source_revision, frozen.revision());
+        assert!(config.operating_point.numeric_options.contains("RELTOL"));
+        assert_eq!(
+            config.request,
+            queue
+                .iter()
+                .find(|task| task.instance_id() == pss)
+                .unwrap()
+                .queued_analysis()
+                .spec
+        );
+        for change in 0..3 {
+            let mut queued = task.queued_analysis().clone();
+            let StudyAnalysis::Pss(config) =
+                &mut queued.spec_options.study_base.as_mut().unwrap().analysis
+            else {
+                unreachable!()
+            };
+            match change {
+                0 => config.operating_point.instance_id = second,
+                1 => config.operating_point.config.temperature_celsius = 85.0,
+                _ => config.operating_point.numeric_options = ".options RELTOL=.01".into(),
+            }
+            assert_ne!(
+                task.config_digest(),
+                PreparedTask::new(mc, task.source_revision(), vec![], "MC", queued).config_digest()
+            );
+        }
+    }
 
     #[test]
     fn hb_study_freezes_the_selected_instance_and_authenticates_its_native_settings() {

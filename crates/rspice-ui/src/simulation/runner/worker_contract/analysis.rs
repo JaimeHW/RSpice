@@ -116,20 +116,27 @@ impl From<WorkerSpecExecutionOptions> for SpecExecutionOptions {
 #[serde(untagged)]
 pub(crate) enum WorkerStudyAnalysis {
     Basic(WorkerAnalysisConfig),
-    Native { native_spec: AnalysisSpec },
+    Native {
+        native_spec: AnalysisSpec,
+    },
+    Pss {
+        pss: Box<crate::simulation::runner::study::StudyPssConfig>,
+    },
 }
 
 impl WorkerStudyAnalysis {
-    pub(super) fn as_basic(&self) -> Option<&WorkerAnalysisConfig> {
+    pub(super) fn op_config(&self) -> Option<&crate::simulation::dialog::OpConfig> {
         match self {
-            Self::Basic(config) => Some(config),
-            Self::Native { .. } => None,
+            Self::Basic(WorkerAnalysisConfig::DcOp(config)) => Some(config),
+            Self::Pss { pss } => Some(&pss.operating_point.config),
+            _ => None,
         }
     }
-    pub(super) fn as_basic_mut(&mut self) -> Option<&mut WorkerAnalysisConfig> {
+    pub(super) fn op_config_mut(&mut self) -> Option<&mut crate::simulation::dialog::OpConfig> {
         match self {
-            Self::Basic(config) => Some(config),
-            Self::Native { .. } => None,
+            Self::Basic(WorkerAnalysisConfig::DcOp(config)) => Some(config),
+            Self::Pss { pss } => Some(&mut pss.operating_point.config),
+            _ => None,
         }
     }
 }
@@ -139,6 +146,7 @@ impl From<&crate::simulation::runner::study::StudyAnalysis> for WorkerStudyAnaly
         use crate::simulation::runner::study::StudyAnalysis;
         match value {
             StudyAnalysis::Basic(config) => Self::Basic(WorkerAnalysisConfig::from(config)),
+            StudyAnalysis::Pss(pss) => Self::Pss { pss: pss.clone() },
             StudyAnalysis::Native(spec) => Self::Native {
                 native_spec: spec.clone(),
             },
@@ -151,6 +159,7 @@ impl From<WorkerStudyAnalysis> for crate::simulation::runner::study::StudyAnalys
         match value {
             WorkerStudyAnalysis::Basic(config) => Self::Basic(AnalysisConfig::from(config)),
             WorkerStudyAnalysis::Native { native_spec } => Self::Native(native_spec),
+            WorkerStudyAnalysis::Pss { pss } => Self::Pss(pss),
         }
     }
 }

@@ -569,17 +569,18 @@ pub(in crate::simulation::runner) fn request_asked_for_verbose(
             AnalysisSpec::Pss { verbose, .. } | AnalysisSpec::HarmonicBalance { verbose, .. } => {
                 *verbose
             }
-            AnalysisSpec::MonteCarlo { .. } | AnalysisSpec::Optimization { .. } => {
-                options.study_base.as_ref().is_some_and(|base| {
-                    matches!(
-                        &base.analysis,
-                        study::StudyAnalysis::Native(AnalysisSpec::HarmonicBalance {
-                            verbose: true,
-                            ..
-                        })
-                    )
-                })
-            }
+            AnalysisSpec::MonteCarlo { .. } | AnalysisSpec::Optimization { .. } => options
+                .study_base
+                .as_ref()
+                .is_some_and(|base| match &base.analysis {
+                    study::StudyAnalysis::Native(AnalysisSpec::HarmonicBalance {
+                        verbose, ..
+                    }) => *verbose,
+                    study::StudyAnalysis::Pss(pss) => {
+                        matches!(pss.request, AnalysisSpec::Pss { verbose: true, .. })
+                    }
+                    _ => false,
+                }),
             _ => false,
         },
     }

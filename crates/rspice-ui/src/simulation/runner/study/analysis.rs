@@ -7,6 +7,7 @@ use crate::simulation::multi_run::AnalysisSpec;
 pub enum StudyAnalysis {
     Basic(AnalysisConfig),
     Native(AnalysisSpec),
+    Pss(Box<super::StudyPssConfig>),
 }
 
 #[cfg(test)]
@@ -25,6 +26,7 @@ impl StudyAnalysis {
             Self::Native(spec @ AnalysisSpec::HarmonicBalance { .. }) => {
                 spec.validate().map_err(|error| vec![error])
             }
+            Self::Pss(config) => config.validate().map_err(|error| vec![error]),
             Self::Native(_) => Err(vec!["Unsupported native study analysis".into()]),
         }
     }
@@ -32,14 +34,14 @@ impl StudyAnalysis {
     pub(crate) fn as_basic(&self) -> Option<&AnalysisConfig> {
         match self {
             Self::Basic(config) => Some(config),
-            Self::Native(_) => None,
+            Self::Native(_) | Self::Pss(_) => None,
         }
     }
 
     pub(crate) fn as_basic_mut(&mut self) -> Option<&mut AnalysisConfig> {
         match self {
             Self::Basic(config) => Some(config),
-            Self::Native(_) => None,
+            Self::Native(_) | Self::Pss(_) => None,
         }
     }
 }

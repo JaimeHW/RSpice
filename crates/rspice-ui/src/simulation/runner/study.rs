@@ -3,6 +3,8 @@
 mod analysis;
 pub use analysis::StudyAnalysis;
 mod optimization;
+mod pss;
+pub use pss::{StudyOperatingPoint, StudyPssConfig};
 mod spectral;
 pub(crate) use optimization::run_optimization;
 pub use spectral::StudyPostprocess;
@@ -56,6 +58,7 @@ pub(crate) fn supports_kind(kind: AnalysisKind) -> bool {
             | AnalysisKind::HarmonicBalance
             | AnalysisKind::Hbsp
             | AnalysisKind::Hbnoise
+            | AnalysisKind::Pss
     )
 }
 
@@ -812,6 +815,11 @@ fn validate_base_measurements(
     if let Some(postprocess) = &base.postprocess {
         return postprocess.validate_measurements(base);
     }
+    if let StudyAnalysis::Pss(config) = &base.analysis {
+        return config
+            .validate_measurements(&base.measurements)
+            .map_err(SimulationError::InvalidConfig);
+    }
     let Some(analysis) = base.analysis.as_basic() else {
         if base.measurements.iter().any(|request| {
             !request
@@ -877,6 +885,22 @@ fn analysis_for_environment(
     environment: Option<&MonteCarloEnvironment>,
 ) -> StudyAnalysis {
     let mut analysis = base.analysis.clone();
+    if let StudyAnalysis::Pss(pss) = &mut analysis {
+        if let Some(environment) = environment {
+            let op = &mut pss.operating_point.config;
+            if matches!(
+                op.temperature_mode,
+                crate::simulation::dialog::OpTemperatureMode::PvtRunSet
+                    | crate::simulation::dialog::OpTemperatureMode::ActiveRunSetAxis
+            ) {
+                op.temperature_celsius = environment.temperature_celsius;
+            }
+            op.run_point.supply_voltage = None;
+            op.run_point.nominal_supply_voltage = None;
+            op.run_point.supply_source_names = environment.supply_source_names.clone();
+        }
+        return analysis;
+    }
     let Some(config) = analysis.as_basic_mut() else {
         return analysis;
     };

@@ -21,7 +21,8 @@ mod device;
 mod frequency;
 mod periodic;
 pub(super) use periodic::{
-    run_hb_study_on_materialized, run_native_study_on_materialized, run_spectral_from_trajectory,
+    run_hb_study_on_materialized, run_native_study_on_materialized, run_pss_study_on_materialized,
+    run_spectral_from_trajectory,
 };
 mod recorded_fft;
 mod sweeps;

@@ -45,6 +45,40 @@ impl SimulationResult {
                 {
                     Some((*spectrum.real.get(index)?, *spectrum.imaginary.get(index)?))
                 }
+                Self::Transient {
+                    periodic_state: Some(point),
+                    ..
+                } => {
+                    if index > point.config().num_harmonics {
+                        return None;
+                    }
+                    let result = &point.analysis().result;
+                    let signal = signal?;
+                    let (name, names, waves) =
+                        if let Some(name) = parse_wrapped_identifier(signal, "V") {
+                            (name, &result.node_names, &result.waveforms)
+                        } else {
+                            (
+                                parse_wrapped_identifier(signal, "I")?,
+                                &result.branch_names,
+                                &result.branch_waveforms,
+                            )
+                        };
+                    let waveform = &waves[names
+                        .iter()
+                        .position(|candidate| candidate.eq_ignore_ascii_case(name))?];
+                    let harmonics = waveform.compute_harmonics(
+                        &result.time,
+                        1.0 / point.analysis().period,
+                        index,
+                    );
+                    let harmonic = harmonics.get(index)?;
+                    let phase = harmonic.phase.to_radians();
+                    Some((
+                        harmonic.magnitude * phase.cos(),
+                        harmonic.magnitude * phase.sin(),
+                    ))
+                }
                 Self::Ac { waveforms, .. } | Self::HarmonicBalance { waveforms, .. } => {
                     let waveform = if let Some(signal) = signal {
                         named_value(waveforms, signal)?
@@ -89,6 +123,21 @@ impl SimulationResult {
                 | Self::TransferFunction { .. }
                 | Self::DcMismatch { .. } => self.measurement(key),
                 Self::Fft { .. } => self.measurement(key),
+                Self::Transient {
+                    periodic_state: Some(point),
+                    ..
+                } => {
+                    if key.eq_ignore_ascii_case("pss.period") {
+                        Some(point.analysis().period)
+                    } else if key.eq_ignore_ascii_case("pss.frequency") {
+                        Some(1.0 / point.analysis().period)
+                    } else if key.eq_ignore_ascii_case("pss.iterations") {
+                        Some(point.analysis().iterations as f64)
+                    } else {
+                        None
+                    }
+                }
+
                 Self::Noise {
                     summary: Some(summary),
                     ..

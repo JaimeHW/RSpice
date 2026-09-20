@@ -220,9 +220,31 @@ fn run_pss_analysis_internal(
         })
         .transpose()?;
 
-    let mut sim_config = build_engine_config(&netlist, None);
+    run_pss_analysis_on_materialized_with_abort(
+        &netlist,
+        config,
+        seed_environment
+            .as_ref()
+            .map(|environment| environment.dc_seed),
+        seeded_temperature_kelvin,
+        abort,
+    )
+}
+
+/// Execute on one already varied circuit and its freshly solved DC seed.
+/// Temperature/supply materialization belongs to the caller at this boundary.
+pub(crate) fn run_pss_analysis_on_materialized_with_abort(
+    netlist: &rspice_core::Netlist,
+    config: &PssRunConfig,
+    dc_seed: Option<&PssDcOperatingPointSeed>,
+    temperature_kelvin: Option<Value>,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<PssData> {
+    ensure_not_aborted(abort)?;
+    validate_pss_config(config).map_err(ServiceRunError::Failure)?;
+    let mut sim_config = build_engine_config(netlist, None);
     sim_config.tolerance = config.tolerance;
-    if let Some(temperature_kelvin) = seeded_temperature_kelvin {
+    if let Some(temperature_kelvin) = temperature_kelvin {
         sim_config.temperature = temperature_kelvin;
     }
     let engine = Engine::try_new_with_resolved_config(sim_config).map_err(|error| {
@@ -248,7 +270,7 @@ fn run_pss_analysis_internal(
     if !config.oscillator_mode {
         engine
             .validate_pss_source_contract_with_abort(
-                &netlist,
+                netlist,
                 &config.tone_sources,
                 &pss_config,
                 abort,
@@ -258,17 +280,12 @@ fn run_pss_analysis_internal(
             })?;
     }
 
-    let operating_point = match seed_environment {
-        Some(environment) => engine
-            .run_pss_operating_point_with_dc_seed_and_abort(
-                &netlist,
-                pss_config,
-                environment.dc_seed,
-                abort,
-            )
+    let operating_point = match dc_seed {
+        Some(seed) => engine
+            .run_pss_operating_point_with_dc_seed_and_abort(netlist, pss_config, seed, abort)
             .map_err(|error| ServiceRunError::from_core("PSS error", error))?,
         None => engine
-            .run_pss_operating_point_with_abort(&netlist, pss_config, abort)
+            .run_pss_operating_point_with_abort(netlist, pss_config, abort)
             .map_err(|error| ServiceRunError::from_core("PSS error", error))?,
     };
     let pss_result = operating_point.analysis();
@@ -451,70 +468,6 @@ fn validate_pss_config(config: &PssRunConfig) -> Result<(), String> {
     Ok(())
 }
 
-/// Harmonic content of one periodic waveform: `(frequency, magnitude,
-/// phase in degrees)` per retained harmonic.
-///
-/// The spectrum analysis derived from a converged PSS state reads this too,
-/// so it stays the one owner of the transform rather than each caller
-/// growing its own.
-pub fn compute_fft_harmonics_with_abort(
-    waveform: &[Value],
-    fundamental_freq: Value,
-    num_harmonics: usize,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<Vec<(Value, Value, Value)>> {
-    use std::f64::consts::PI;
-
-    ensure_not_aborted(abort)?;
-    let n = waveform.len();
-    if n == 0 {
-        return Ok(Vec::new());
-    }
-
-    let harmonic_count = num_harmonics.checked_add(1).ok_or_else(|| {
-        ServiceRunError::Failure("PSS harmonic count exceeds this platform".to_string())
-    })?;
-    let mut harmonics = Vec::new();
-    harmonics
-        .try_reserve_exact(harmonic_count)
-        .map_err(|error| {
-            ServiceRunError::Failure(format!(
-                "PSS harmonic allocation for {harmonic_count} components failed: {error}"
-            ))
-        })?;
-    let mut dc = 0.0;
-    for (sample_idx, sample) in waveform.iter().enumerate() {
-        poll_periodically(abort, sample_idx)?;
-        dc += *sample;
-    }
-    dc /= n as Value;
-    harmonics.push((0.0, dc, 0.0));
-
-    for harmonic in 1..=num_harmonics {
-        ensure_not_aborted(abort)?;
-        let freq = fundamental_freq * harmonic as Value;
-        let mut real = 0.0;
-        let mut imag = 0.0;
-
-        for (sample_idx, &sample) in waveform.iter().enumerate() {
-            poll_periodically(abort, sample_idx)?;
-            let phase = 2.0 * PI * harmonic as Value * sample_idx as Value / n as Value;
-            real += sample * phase.cos();
-            imag -= sample * phase.sin();
-        }
-
-        real *= 2.0 / n as Value;
-        imag *= 2.0 / n as Value;
-
-        let magnitude = (real * real + imag * imag).sqrt();
-        let phase_deg = imag.atan2(real).to_degrees();
-        harmonics.push((freq, magnitude, phase_deg));
-    }
-
-    ensure_not_aborted(abort)?;
-    Ok(harmonics)
-}
-
 #[cfg(test)]
 mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -533,16 +486,21 @@ mod tests {
     }
 
     #[test]
-    fn pss_fft_observes_abort_inside_nested_sample_loop() {
+    fn pss_harmonics_observes_abort_inside_nested_sample_loop() {
         let abort = AbortOnPoll {
             abort_on: 9,
             polls: AtomicUsize::new(0),
         };
-        let waveform = vec![1.0; 128];
-
-        let result = compute_fft_harmonics_with_abort(&waveform, 1.0e6, 20, &abort);
-
-        assert!(matches!(result, Err(ServiceRunError::Aborted)));
+        let mut waveform = rspice_core::analysis::pss::PeriodicWaveform::new(128);
+        waveform.values = vec![1.0; 128];
+        let time = (0..128)
+            .map(|index| index as f64 * 1e-6 / 127.0)
+            .collect::<Vec<_>>();
+        let result = waveform.compute_harmonics_with_abort(&time, 1.0e6, 20, &abort);
+        assert!(matches!(
+            result,
+            Err(rspice_core::analysis::fourier::FourierError::Aborted)
+        ));
     }
 
     #[test]

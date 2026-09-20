@@ -110,10 +110,9 @@ pub use psp::{
     PspRunConfig, PspSweep, run_hbsp_analysis_from_hb_with_source_path_and_abort,
     run_psp_analysis_from_pss_with_source_path_and_abort,
 };
-pub(crate) use pss::build_core_pss_config;
+pub(crate) use pss::{PssData, build_core_pss_config, run_pss_analysis_on_materialized_with_abort};
 pub use pss::{
-    PssRunConfig, compute_fft_harmonics_with_abort,
-    run_pss_analysis_with_dc_seed_and_source_path_and_abort,
+    PssRunConfig, run_pss_analysis_with_dc_seed_and_source_path_and_abort,
     run_pss_analysis_with_source_path_and_abort,
 };
 pub use pstb::{PstbRunConfig, run_pstb_analysis_from_pss_with_source_path_and_abort};

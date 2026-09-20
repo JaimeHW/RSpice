@@ -103,6 +103,23 @@ impl StudyPostprocess {
 
 impl StudyRunConfig {
     pub(super) fn execution_source(&self, source: &str) -> Result<String, SimulationError> {
+        if let StudyAnalysis::Pss(pss) = &self.analysis {
+            pss.validate().map_err(SimulationError::InvalidConfig)?;
+            if self.postprocess.is_some()
+                || pss.operating_point.instance_id == self.instance_id
+                || pss.operating_point.source_revision != self.source_revision
+            {
+                return Err(SimulationError::InvalidConfig(
+                    "PSS study requires a distinct OP producer from the same frozen plan revision"
+                        .into(),
+                ));
+            }
+            // Each stage overlays its own numerical controls after variation.
+            return Ok(services::splice_before_terminal_end_card(
+                source,
+                &self.analysis_line,
+            ));
+        }
         let mut block = String::new();
         if let Some(postprocess) = &self.postprocess {
             postprocess.validate(self)?;
@@ -129,6 +146,7 @@ impl StudyRunConfig {
                 StudyAnalysis::Basic(config) => {
                     EngineBridge::run_materialized_with_abort(engine, config, circuit, abort)
                 }
+                StudyAnalysis::Pss(pss) => pss.run(engine, circuit, &self.numeric_options, abort),
                 StudyAnalysis::Native(spec) => {
                     super::super::spec::run_native_study_on_materialized(
                         spec.clone(),
