@@ -9,6 +9,9 @@
 //! at https://qucs.sourceforge.net/tech/node36.html. No common period is used.
 mod colored;
 mod projection;
+mod sweep;
+pub(crate) use sweep::visit_with_abort;
+pub use sweep::{QuasiPeriodicNoiseConfig, QuasiPeriodicNoisePoint};
 #[cfg(test)]
 mod tests;
 
@@ -280,6 +283,16 @@ impl QuasiPeriodicNoiseProjector {
     }
 
     fn check_values(&self, outputs: usize, extra: usize) -> Result<(), Error> {
+        let values = self.workspace_values(outputs, extra);
+        ResourceLimitError::ensure(
+            ResourceKind::ResultValues,
+            values,
+            self.limits.max_result_values.min(32_000_000),
+        )?;
+        Ok(())
+    }
+
+    fn workspace_values(&self, outputs: usize, extra: usize) -> usize {
         let values = self
             .grid
             .sample_count()
@@ -287,12 +300,7 @@ impl QuasiPeriodicNoiseProjector {
             .saturating_add(outputs.saturating_mul(self.grid.len()).saturating_mul(12))
             .saturating_add(outputs.saturating_mul(outputs).saturating_mul(6))
             .saturating_add(extra);
-        ResourceLimitError::ensure(
-            ResourceKind::ResultValues,
-            values,
-            self.limits.max_result_values.min(32_000_000),
-        )?;
-        Ok(())
+        values
     }
 
     fn white(

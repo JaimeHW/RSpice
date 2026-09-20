@@ -4,6 +4,7 @@ use crate::ResourceLimits;
 use crate::analysis::quasi_periodic::{
     QuasiPeriodicAcConfig, QuasiPeriodicAcSolution, QuasiPeriodicAdjointSolution,
     QuasiPeriodicError as Error, QuasiPeriodicGrid, QuasiPeriodicLinearConfig,
+    QuasiPeriodicNoiseConfig, QuasiPeriodicNoisePoint, QuasiPeriodicNoiseSource,
     QuasiPeriodicSolution, QuasiPeriodicSolveConfig,
     solve::{self, Circuit, LinearEntry, Sample},
 };
@@ -187,6 +188,40 @@ impl HbSolver {
                 work.solve_adjoint_at_frequency(self, offset, frequency_anchor, observation, abort)
             })
             .collect()
+    }
+
+    /// Stream QPNOISE covariance and certified adjoints from a complete physical
+    /// orbit. Reuses one F/Q linearization for all frequencies and observations;
+    /// every callback point retains its independent source contributions.
+    /// Sources must be sampled on this exact grid and supplied by the engine's
+    /// physical noise catalog. This numerical entry point does not authenticate
+    /// netlists or construct device noise laws.
+    pub fn visit_quasi_periodic_noise_with_abort(
+        &mut self,
+        grid: Arc<QuasiPeriodicGrid>,
+        config: &QuasiPeriodicNoiseConfig,
+        orbit: &[Vec<Complex64>],
+        observations: &[Vec<Vec<Complex64>>],
+        sources: &[QuasiPeriodicNoiseSource],
+        limits: &ResourceLimits,
+        abort: &dyn AbortSignal,
+        consume: impl FnMut(usize, QuasiPeriodicNoisePoint) -> Result<(), Error>,
+    ) -> Result<(), Error> {
+        if abort.is_aborted() {
+            return Err(Error::Aborted);
+        }
+        self.validate_quasi_periodic_circuit()?;
+        crate::analysis::quasi_periodic::noise::visit_with_abort(
+            self,
+            grid,
+            config,
+            orbit,
+            observations,
+            sources,
+            limits,
+            abort,
+            consume,
+        )
     }
 
     fn quasi_periodic_linear_entries(

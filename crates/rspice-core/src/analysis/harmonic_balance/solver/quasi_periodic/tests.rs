@@ -407,3 +407,179 @@ fn quasi_periodic_solver_refuses_singular_malformed_unbounded_and_cancelled_work
         Err(Error::InvalidConfig(_))
     ));
 }
+
+#[test]
+fn qpnoise_mna_streams_correlated_voltage_branch_current_and_sideband_outputs() {
+    use crate::analysis::quasi_periodic::{QuasiPeriodicLinearMethod, QuasiPeriodicNoiseSpectrum};
+    let grid = grid(1);
+    for method in [
+        QuasiPeriodicLinearMethod::Direct,
+        QuasiPeriodicLinearMethod::Krylov,
+    ] {
+        let mut solver = HbSolver::new(HbConfig::new(17.0).with_harmonics(1), 1);
+        solver.add_conductance(0, 0, 0.001);
+        solver.add_capacitance(0, 0, 2e-6);
+        solver
+            .try_add_periodic_resistor_branch(1, 0, 1000.0, 500.0, 1, "R1")
+            .unwrap();
+        let orbit = vec![vec![Complex64::ZERO; grid.len()]; 2];
+        let mut observations = vec![orbit.clone(); 3];
+        observations[0][0][grid.dc_index()] = Complex64::ONE;
+        observations[1][1][grid.dc_index()] = Complex64::new(0.0, 1.0); // y=-j I(R1)
+        observations[2][0][grid.index_of(&[1, 0]).unwrap()] = Complex64::ONE;
+        let sources: Vec<_> = [(0, 2e-20), (1, 3e-18)]
+            .into_iter()
+            .map(|(row, q)| QuasiPeriodicNoiseSource {
+                name: format!("source{row}"),
+                injections: vec![(row, Complex64::ONE)],
+                spectrum: QuasiPeriodicNoiseSpectrum::White {
+                    density: vec![q],
+                    binary_scale_exponent: 0,
+                },
+            })
+            .collect();
+        let mut config = QuasiPeriodicNoiseConfig {
+            frequencies_hz: vec![100.0, 500.0],
+            frequency_lattice: vec![0, 0],
+            input_lattices: grid.indices().to_vec(),
+            linear: QuasiPeriodicLinearConfig {
+                method,
+                ..Default::default()
+            },
+        };
+        for dc_only in [false, true] {
+            if dc_only {
+                config.input_lattices = vec![vec![0, 0]];
+            }
+            let mut delivered = 0;
+            solver
+                .visit_quasi_periodic_noise_with_abort(
+                    grid.clone(),
+                    &config,
+                    &orbit,
+                    &observations,
+                    &sources,
+                    &ResourceLimits::default(),
+                    &NoAbort,
+                    |index, point| {
+                        assert_eq!(index, delivered);
+                        delivered += 1;
+                        assert_eq!(point.source_covariances.len(), 2);
+                        assert_eq!(point.adjoints.len(), 3);
+                        let f = config.frequencies_hz[index];
+                        for adjoint in &point.adjoints {
+                            assert!(adjoint.normalized_residual <= 1.0);
+                            assert_eq!(adjoint.frequency_hz, f);
+                        }
+                        for (source, q) in [2e-20, 3e-18].into_iter().enumerate() {
+                            let z = Complex64::ONE
+                                / Complex64::new(
+                                    0.001 + 1.0 / 500.0,
+                                    std::f64::consts::TAU * f * 2e-6,
+                                );
+                            let high_z = Complex64::ONE
+                                / Complex64::new(
+                                    0.001 + 1.0 / 500.0,
+                                    std::f64::consts::TAU * (f + 1000.0) * 2e-6,
+                                );
+                            let gains = if source == 0 {
+                                [z, Complex64::new(0.0, -1.0) * z / 500.0, high_z]
+                            } else {
+                                [
+                                    z / 500.0,
+                                    Complex64::new(0.0, -1.0) * (z / 500.0 - Complex64::ONE)
+                                        / 500.0,
+                                    high_z / 500.0,
+                                ]
+                            };
+                            let actual = &point.source_covariances[source];
+                            assert_eq!(actual.outputs, 3);
+                            for r in 0..3 {
+                                for c in 0..3 {
+                                    let expected = if (r == 2) != (c == 2) || (dc_only && r == 2) {
+                                        Complex64::ZERO
+                                    } else {
+                                        gains[r] * gains[c].conj() * q
+                                    };
+                                    close(
+                                        actual.values[r * 3 + c],
+                                        expected,
+                                        expected.norm() * 3e-9 + 1e-35,
+                                    );
+                                }
+                            }
+                        }
+                        Ok(())
+                    },
+                )
+                .unwrap();
+            assert_eq!(delivered, 2);
+        }
+    }
+}
+
+#[test]
+fn qpnoise_stream_propagates_consumer_errors_and_preflights_combined_workspaces() {
+    let grid = grid(1);
+    let mut solver = HbSolver::new(HbConfig::new(17.0).with_harmonics(1), 1);
+    solver.add_conductance(0, 0, 1.0);
+    let orbit = vec![vec![Complex64::ZERO; grid.len()]];
+    let mut observation = orbit.clone();
+    observation[0][grid.dc_index()] = Complex64::ONE;
+    let config = QuasiPeriodicNoiseConfig {
+        frequencies_hz: vec![1.0, 2.0],
+        frequency_lattice: vec![0, 0],
+        input_lattices: grid.indices().to_vec(),
+        linear: Default::default(),
+    };
+    let mut calls = 0;
+    let result = solver.visit_quasi_periodic_noise_with_abort(
+        grid.clone(),
+        &config,
+        &orbit,
+        &[observation.clone()],
+        &[],
+        &ResourceLimits::default(),
+        &NoAbort,
+        |index, point| {
+            calls += 1;
+            assert_eq!(index, 0);
+            assert!(point.source_covariances.is_empty());
+            Err(Error::InvalidConfig("consumer declined".into()))
+        },
+    );
+    assert!(
+        matches!(result,Err(Error::InvalidConfig(ref message)) if message=="consumer declined")
+    );
+    assert_eq!(calls, 1);
+    let abort = CountingAbort::new(5);
+    let result = solver.visit_quasi_periodic_noise_with_abort(
+        grid.clone(),
+        &config,
+        &orbit,
+        &[observation.clone()],
+        &[],
+        &ResourceLimits::default(),
+        &abort,
+        |_, _| panic!("must abort before delivery"),
+    );
+    assert!(matches!(result, Err(Error::Aborted)));
+    assert_eq!(abort.count(), 6);
+    // Enough room for the projector alone, but not its simultaneously retained
+    // adjoints and circuit linearization. Charge the complete live workspace.
+    let limits = ResourceLimits {
+        max_result_values: grid.sample_count() * 10 + 200,
+        ..ResourceLimits::default()
+    };
+    let result = solver.visit_quasi_periodic_noise_with_abort(
+        grid,
+        &config,
+        &orbit,
+        &[observation],
+        &[],
+        &limits,
+        &NoAbort,
+        |_, _| panic!("must refuse before delivery"),
+    );
+    assert!(matches!(result, Err(Error::ResourceLimit(_))));
+}
