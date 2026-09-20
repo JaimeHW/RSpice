@@ -42,19 +42,93 @@ fn qpac_engine_binds_three_tone_sources_differential_outputs_and_retained_identi
         let result = engine
             .run_qpac_from_qpss(&netlist, request.clone(), &point)
             .unwrap();
-        assert_eq!(result.operating_point_identity, identity);
-        assert_eq!(result.tuples.len(), 27);
-        assert!(result.tuples.iter().all(|tuple| tuple.len() == 3));
+        let limits = crate::ResourceLimits::default();
+        assert_eq!(
+            result.metadata.input_quantity,
+            if source == "Vprobe" {
+                QpacInputQuantity::Voltage
+            } else {
+                QpacInputQuantity::Current
+            }
+        );
+        let encoded = serde_json::to_string(&result).unwrap();
+        let decoded: QpacAnalysisResult = serde_json::from_str(&encoded).unwrap();
+        decoded
+            .validate_retained_payload_with_abort(&limits, &NoAbort)
+            .unwrap();
+        assert_eq!(decoded, result);
+        let (metadata, rows) = result.clone().into_transfer_parts();
+        assert_eq!(
+            QpacAnalysisResult::from_transfer_parts_with_abort(
+                metadata.clone(),
+                rows.clone(),
+                &limits,
+                &NoAbort
+            )
+            .unwrap(),
+            result
+        );
+        let mut short = rows.clone();
+        short[0].pop();
+        assert!(
+            QpacAnalysisResult::from_transfer_parts_with_abort(
+                metadata.clone(),
+                short,
+                &limits,
+                &NoAbort
+            )
+            .is_err()
+        );
+        let mut changed = result.clone();
+        changed.unit_solutions[0].spectra[0][0].re += 0.1;
+        assert!(
+            changed
+                .validate_retained_payload_with_abort(&limits, &NoAbort)
+                .is_err()
+        );
+        let mut changed = result.clone();
+        changed.metadata.output_frequencies_hz[0] += 1.0;
+        assert!(
+            changed
+                .validate_retained_payload_with_abort(&limits, &NoAbort)
+                .is_err()
+        );
+        let mut changed = result.clone();
+        changed.metadata.request.phase_degrees += 1.0;
+        assert!(
+            changed
+                .validate_retained_payload_with_abort(&limits, &NoAbort)
+                .is_err()
+        );
+        let mut limited = limits.clone();
+        limited.max_result_values = 1;
+        assert!(
+            metadata
+                .validate_transfer_layout_with_abort(
+                    &rows.iter().map(Vec::len).collect::<Vec<_>>(),
+                    &limited,
+                    &NoAbort
+                )
+                .is_err()
+        );
+        assert!(
+            result
+                .validate_retained_payload_with_abort(&limits, &CountingAbort::new(0))
+                .is_err()
+        );
+        assert_eq!(result.metadata.operating_point_identity, identity);
+        assert_eq!(result.metadata.tuples.len(), 27);
+        assert!(result.metadata.tuples.iter().all(|tuple| tuple.len() == 3));
         let drive = Complex64::from_polar(request.magnitude, request.phase_degrees.to_radians());
         for k in 0..request.offsets_hz.len() {
             let frequency = request.offsets_hz[k] + 1e3 - std::f64::consts::PI * 1e3;
             let admittance = Complex64::new(0.0015, std::f64::consts::TAU * frequency * 100e-9);
             let expected =
                 Complex64::new(if source == "Vprobe" { 0.001 } else { 1.0 }, 0.0) / admittance;
-            assert!((result.input_frequencies_hz[k] - frequency).abs() < 1e-12);
+            assert!((result.metadata.input_frequencies_hz[k] - frequency).abs() < 1e-12);
             assert_eq!(
-                result.input_frequencies_hz[k],
-                result.output_frequencies_hz[k]
+                result.metadata.input_frequencies_hz[k],
+                result.metadata.output_frequencies_hz[k]
             );
             assert!((result.output_transfer[k] - expected).norm() < 1e-9);
             assert!((result.output_response[k] - expected * drive).norm() < 1e-9);

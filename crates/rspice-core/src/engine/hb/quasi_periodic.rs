@@ -11,7 +11,7 @@ use crate::analysis::quasi_periodic::{
     QuasiPeriodicError, QuasiPeriodicGrid, QuasiPeriodicGridConfig, QuasiPeriodicSolution,
     QuasiPeriodicSolveConfig,
 };
-pub use qpac::{QpacAnalysisResult, QpacRequest};
+pub use qpac::{QpacAnalysisResult, QpacInputQuantity, QpacRequest, QpacResultMetadata};
 pub use state::{QpssOperatingPoint, QpssOperatingPointMetadata};
 use std::sync::Arc;
 

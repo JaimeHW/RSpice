@@ -54,14 +54,14 @@ fn qpac_controls_survive_draft_worker_native_card_and_service_execution() {
         &rspice_core::abort_signal::NoAbort,
     )
     .unwrap();
-    assert_eq!(result.request.input_lattice, [0, 1, -1]);
-    assert_eq!(result.request.solver.linear.method, Method::Krylov);
-    assert_eq!(result.request.solver.linear.restart, 16);
-    assert_eq!(result.request.solver.linear.max_cycles, 12);
-    assert_eq!(result.request.solver.linear.relative_tolerance, 2e-11);
-    assert_eq!(result.request.solver.current_absolute_tolerance, 3e-13);
-    assert_eq!(result.request.solver.voltage_absolute_tolerance, 4e-10);
-    for (i, &offset) in result.request.offsets_hz.iter().enumerate() {
+    assert_eq!(result.metadata.request.input_lattice, [0, 1, -1]);
+    assert_eq!(result.metadata.request.solver.linear.method, Method::Krylov);
+    assert_eq!(result.metadata.request.solver.linear.restart, 16);
+    assert_eq!(result.metadata.request.solver.linear.max_cycles, 12);
+    assert_eq!(result.metadata.request.solver.linear.relative_tolerance, 2e-11);
+    assert_eq!(result.metadata.request.solver.current_absolute_tolerance, 3e-13);
+    assert_eq!(result.metadata.request.solver.voltage_absolute_tolerance, 4e-10);
+    for (i, &offset) in result.metadata.request.offsets_hz.iter().enumerate() {
         let frequency = offset + 1414.2135623730951 - 1732.0508075688772;
         let expected = rspice_core::Complex64::new(1.0, 0.0)
             / rspice_core::Complex64::new(1.0, std::f64::consts::TAU * frequency * 1e-4);

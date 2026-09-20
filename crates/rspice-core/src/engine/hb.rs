@@ -51,8 +51,8 @@ pub use pac::PacAnalysisResult;
 pub use pnoise::{PeriodicNoiseRequest, PeriodicNoiseSidebands, PnoiseAnalysisResult};
 pub use psp::{PreparedPsp, PspAnalysisResult, PspNoiseCorrelation};
 pub use quasi_periodic::{
-    QpacAnalysisResult, QpacRequest, QpssConfig, QpssInitialState, QpssOperatingPoint,
-    QpssOperatingPointMetadata, QpssSourceTone,
+    QpacAnalysisResult, QpacInputQuantity, QpacRequest, QpacResultMetadata, QpssConfig,
+    QpssInitialState, QpssOperatingPoint, QpssOperatingPointMetadata, QpssSourceTone,
 };
 pub use state::{HbEnvelopeContinuationState, HbEnvelopeStateGuarantee};
 

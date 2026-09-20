@@ -51,7 +51,8 @@ impl QuasiPeriodicAcConfig {
 
 /// Complex phasors for one probe offset. Neither an implicit factor of two
 /// nor conjugate reflection is applied: every signed tuple is independent.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct QuasiPeriodicAcSolution {
     pub offset_hz: Value,
     /// MNA-coordinate order, then the operating point's signed tuple order.

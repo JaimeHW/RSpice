@@ -135,8 +135,8 @@ fn qpac_card_executes_against_the_decks_retained_qpss_state() {
     let result = engine
         .run_qpac_card_from_qpss_with_abort(&deck, qpac, &point, &NoAbort)
         .unwrap();
-    assert_eq!(result.request.offsets_hz, [0.0, 50.0, 100.0]);
-    for (k, &f) in result.request.offsets_hz.iter().enumerate() {
+    assert_eq!(result.metadata.request.offsets_hz, [0.0, 50.0, 100.0]);
+    for (k, &f) in result.metadata.request.offsets_hz.iter().enumerate() {
         let expected =
             Complex64::new(1.0, 0.0) / Complex64::new(1.0, std::f64::consts::TAU * f * 1e-4);
         assert!((result.output_transfer[k] - expected).norm() < 1e-10);

@@ -1,7 +1,9 @@
 //! Authenticated QPSS reuse and arbitrary-dimensional QPAC source/observation binding.
 mod card;
+mod result;
 use super::*;
 use crate::analysis::quasi_periodic::{QuasiPeriodicAcConfig, QuasiPeriodicAcSolution};
+pub use result::{QpacAnalysisResult, QpacInputQuantity, QpacResultMetadata};
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -50,25 +52,6 @@ impl QpacRequest {
         }
         Ok(())
     }
-}
-
-#[derive(Debug, Clone)]
-pub struct QpacAnalysisResult {
-    pub request: QpacRequest,
-    pub operating_point_identity: String,
-    pub tone_frequencies_hz: Vec<Value>,
-    pub tuples: Vec<Vec<i32>>,
-    pub node_names: Vec<String>,
-    pub branch_names: Vec<String>,
-    pub input_frequencies_hz: Vec<Value>,
-    pub output_frequencies_hz: Vec<Value>,
-    /// Full complex response per unit input in the source's own units.
-    /// The numerical residual certificate refers to this unit solve.
-    pub unit_solutions: Vec<QuasiPeriodicAcSolution>,
-    /// Differential output per unit input at the selected output tuple.
-    pub output_transfer: Vec<Complex64>,
-    /// Differential output with the authored magnitude and phase applied.
-    pub output_response: Vec<Complex64>,
 }
 
 fn qpac_error(message: impl Into<String>) -> SimulationError {
@@ -131,6 +114,11 @@ impl Engine {
         let mut solver = engine.qpss_circuit_solver(&circuit)?;
         let source =
             Self::pac_input_port(&circuit, &request.input_source, point.node_names().len())?;
+        let input_quantity = if source.voltage_source_index.is_some() {
+            QpacInputQuantity::Voltage
+        } else {
+            QpacInputQuantity::Current
+        };
         let mut sources = vec![vec![Complex64::ZERO; grid.len()]; point.spectra().len()];
         for (row, amplitude) in source.node_injections {
             sources[row][input_index] += amplitude;
@@ -191,19 +179,29 @@ impl Engine {
             return Err(qpac_error("producer inputs changed during the analysis"));
         }
         check_abort(abort)?;
-        Ok(QpacAnalysisResult {
-            request,
-            operating_point_identity: point.retained_identity().to_owned(),
-            tone_frequencies_hz: grid.config().frequencies_hz.clone(),
-            tuples: grid.indices().to_vec(),
-            node_names: point.node_names().to_vec(),
-            branch_names: point.branch_names().to_vec(),
-            input_frequencies_hz: input_frequencies,
-            output_frequencies_hz: output_frequencies,
-            unit_solutions: solutions,
-            output_transfer: transfer,
-            output_response: response,
-        })
+        QpacAnalysisResult::bind(
+            QpacResultMetadata {
+                version: 1,
+                grid: grid.config().clone(),
+                input_quantity,
+                output_rows: [positive, negative],
+                normalized_residuals: solutions.iter().map(|s| s.normalized_residual).collect(),
+                retained_identity: String::new(),
+                request,
+                operating_point_identity: point.retained_identity().to_owned(),
+                tone_frequencies_hz: grid.config().frequencies_hz.clone(),
+                tuples: grid.indices().to_vec(),
+                node_names: point.node_names().to_vec(),
+                branch_names: point.branch_names().to_vec(),
+                input_frequencies_hz: input_frequencies,
+                output_frequencies_hz: output_frequencies,
+            },
+            solutions,
+            transfer,
+            response,
+            &engine.config.resource_limits,
+            abort,
+        )
     }
 }
 
