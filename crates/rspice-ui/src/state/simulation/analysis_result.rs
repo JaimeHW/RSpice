@@ -817,6 +817,46 @@ pub enum SoaParameterEvidence {
     CollectorCurrent,
     PowerDissipation,
     Temperature,
+    GateSourceVoltagePositive,
+    GateSourceVoltageNegative,
+    DrainSourceVoltagePositive,
+    DrainSourceVoltageNegative,
+    GateDrainVoltagePositive,
+    GateDrainVoltageNegative,
+    BaseEmitterVoltagePositive,
+    BaseEmitterVoltageNegative,
+    CollectorEmitterVoltagePositive,
+    CollectorEmitterVoltageNegative,
+    BaseCollectorVoltagePositive,
+    BaseCollectorVoltageNegative,
+    DrainCurrentPositive,
+    DrainCurrentNegative,
+    CollectorCurrentPositive,
+    CollectorCurrentNegative,
+}
+
+impl SoaParameterEvidence {
+    pub const fn is_directional(self) -> bool {
+        matches!(
+            self,
+            Self::GateSourceVoltagePositive
+                | Self::GateSourceVoltageNegative
+                | Self::DrainSourceVoltagePositive
+                | Self::DrainSourceVoltageNegative
+                | Self::GateDrainVoltagePositive
+                | Self::GateDrainVoltageNegative
+                | Self::BaseEmitterVoltagePositive
+                | Self::BaseEmitterVoltageNegative
+                | Self::CollectorEmitterVoltagePositive
+                | Self::CollectorEmitterVoltageNegative
+                | Self::BaseCollectorVoltagePositive
+                | Self::BaseCollectorVoltageNegative
+                | Self::DrainCurrentPositive
+                | Self::DrainCurrentNegative
+                | Self::CollectorCurrentPositive
+                | Self::CollectorCurrentNegative
+        )
+    }
 }
 
 /// Severity assigned by the SOA rule evaluator.
@@ -2054,9 +2094,11 @@ impl AnalysisResultPayload {
                             ));
                         }
                     }
-                    if evaluation.limit_value <= 0.0 {
+                    if evaluation.limit_value < 0.0
+                        || (evaluation.limit_value == 0.0 && !evaluation.parameter.is_directional())
+                    {
                         return Err(format!(
-                            "SOA evaluation for '{}' has a non-positive limit",
+                            "SOA evaluation for '{}' has an invalid limit",
                             evaluation.device_id
                         ));
                     }
@@ -2107,7 +2149,10 @@ impl AnalysisResultPayload {
                             violation.device_id
                         ));
                     }
-                    if violation.limit_value <= 0.0 || violation.actual_value < 0.0 {
+                    if violation.limit_value < 0.0
+                        || (violation.limit_value == 0.0 && !violation.parameter.is_directional())
+                        || violation.actual_value < 0.0
+                    {
                         return Err(format!(
                             "SOA violation for '{}' has invalid magnitude evidence",
                             violation.device_id

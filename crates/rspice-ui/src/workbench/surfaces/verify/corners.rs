@@ -612,7 +612,14 @@ pub(super) fn reliability(ui: &mut Ui, app: &mut RSpiceApp) {
                         &evaluation.unit,
                     )),
                     TableCell::mono(format_value(evaluation.limit_value, &evaluation.unit)),
-                    TableCell::tone(format!("{:+.2}%", margin * 100.0), color),
+                    TableCell::tone(
+                        if evaluation.limit_value == 0.0 {
+                            "—".to_owned()
+                        } else {
+                            format!("{:+.2}%", margin * 100.0)
+                        },
+                        color,
+                    ),
                     TableCell::tone(format!("Open {}", evaluation.device_id), t.color.accent),
                 ]
             },
@@ -849,6 +856,22 @@ pub(super) fn soa_parameter_display(parameter: crate::state::SoaParameterEvidenc
         SoaParameterEvidence::CollectorCurrent => "IC max",
         SoaParameterEvidence::PowerDissipation => "Power max",
         SoaParameterEvidence::Temperature => "Temperature max",
+        SoaParameterEvidence::GateSourceVoltagePositive => "Vgs + max",
+        SoaParameterEvidence::GateSourceVoltageNegative => "Vgs − max",
+        SoaParameterEvidence::DrainSourceVoltagePositive => "Vds + max",
+        SoaParameterEvidence::DrainSourceVoltageNegative => "Vds − max",
+        SoaParameterEvidence::GateDrainVoltagePositive => "Vgd + max",
+        SoaParameterEvidence::GateDrainVoltageNegative => "Vgd − max",
+        SoaParameterEvidence::BaseEmitterVoltagePositive => "Vbe + max",
+        SoaParameterEvidence::BaseEmitterVoltageNegative => "Vbe − max",
+        SoaParameterEvidence::CollectorEmitterVoltagePositive => "Vce + max",
+        SoaParameterEvidence::CollectorEmitterVoltageNegative => "Vce − max",
+        SoaParameterEvidence::BaseCollectorVoltagePositive => "Vbc + max",
+        SoaParameterEvidence::BaseCollectorVoltageNegative => "Vbc − max",
+        SoaParameterEvidence::DrainCurrentPositive => "Id + max",
+        SoaParameterEvidence::DrainCurrentNegative => "Id − max",
+        SoaParameterEvidence::CollectorCurrentPositive => "Ic + max",
+        SoaParameterEvidence::CollectorCurrentNegative => "Ic − max",
     }
 }
 

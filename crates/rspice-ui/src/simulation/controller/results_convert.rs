@@ -1570,6 +1570,54 @@ fn retain_soa_parameter(parameter: crate::services::safety::SoAParameter) -> Soa
         crate::services::safety::SoAParameter::Ic => SoaParameterEvidence::CollectorCurrent,
         crate::services::safety::SoAParameter::Pdiss => SoaParameterEvidence::PowerDissipation,
         crate::services::safety::SoAParameter::Temp => SoaParameterEvidence::Temperature,
+        crate::services::safety::SoAParameter::VgsPositive => {
+            SoaParameterEvidence::GateSourceVoltagePositive
+        }
+        crate::services::safety::SoAParameter::VgsNegative => {
+            SoaParameterEvidence::GateSourceVoltageNegative
+        }
+        crate::services::safety::SoAParameter::VdsPositive => {
+            SoaParameterEvidence::DrainSourceVoltagePositive
+        }
+        crate::services::safety::SoAParameter::VdsNegative => {
+            SoaParameterEvidence::DrainSourceVoltageNegative
+        }
+        crate::services::safety::SoAParameter::VgdPositive => {
+            SoaParameterEvidence::GateDrainVoltagePositive
+        }
+        crate::services::safety::SoAParameter::VgdNegative => {
+            SoaParameterEvidence::GateDrainVoltageNegative
+        }
+        crate::services::safety::SoAParameter::VbePositive => {
+            SoaParameterEvidence::BaseEmitterVoltagePositive
+        }
+        crate::services::safety::SoAParameter::VbeNegative => {
+            SoaParameterEvidence::BaseEmitterVoltageNegative
+        }
+        crate::services::safety::SoAParameter::VcePositive => {
+            SoaParameterEvidence::CollectorEmitterVoltagePositive
+        }
+        crate::services::safety::SoAParameter::VceNegative => {
+            SoaParameterEvidence::CollectorEmitterVoltageNegative
+        }
+        crate::services::safety::SoAParameter::VbcPositive => {
+            SoaParameterEvidence::BaseCollectorVoltagePositive
+        }
+        crate::services::safety::SoAParameter::VbcNegative => {
+            SoaParameterEvidence::BaseCollectorVoltageNegative
+        }
+        crate::services::safety::SoAParameter::IdPositive => {
+            SoaParameterEvidence::DrainCurrentPositive
+        }
+        crate::services::safety::SoAParameter::IdNegative => {
+            SoaParameterEvidence::DrainCurrentNegative
+        }
+        crate::services::safety::SoAParameter::IcPositive => {
+            SoaParameterEvidence::CollectorCurrentPositive
+        }
+        crate::services::safety::SoAParameter::IcNegative => {
+            SoaParameterEvidence::CollectorCurrentNegative
+        }
     }
 }
 

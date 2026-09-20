@@ -1,7 +1,7 @@
 //! Safe Operating Area (SOA) Manager
 //!
 //! Provides commercial-grade safety checking for circuit devices.
-//! Monitors configured terminal-voltage magnitudes against device limits.
+//! Monitors configured terminal-voltage and current stress against device limits.
 //!
 //! # Features
 //!
@@ -30,6 +30,22 @@ pub enum SoAParameter {
     Ic,
     Pdiss,
     Temp,
+    VgsPositive,
+    VgsNegative,
+    VdsPositive,
+    VdsNegative,
+    VgdPositive,
+    VgdNegative,
+    VbePositive,
+    VbeNegative,
+    VcePositive,
+    VceNegative,
+    VbcPositive,
+    VbcNegative,
+    IdPositive,
+    IdNegative,
+    IcPositive,
+    IcNegative,
 }
 
 impl SoAParameter {
@@ -47,6 +63,82 @@ impl SoAParameter {
             Self::Ic => "IC",
             Self::Pdiss => "PDISS",
             Self::Temp => "TEMP",
+            Self::VgsPositive => "VGS_POS",
+            Self::VgsNegative => "VGS_NEG",
+            Self::VdsPositive => "VDS_POS",
+            Self::VdsNegative => "VDS_NEG",
+            Self::VgdPositive => "VGD_POS",
+            Self::VgdNegative => "VGD_NEG",
+            Self::VbePositive => "VBE_POS",
+            Self::VbeNegative => "VBE_NEG",
+            Self::VcePositive => "VCE_POS",
+            Self::VceNegative => "VCE_NEG",
+            Self::VbcPositive => "VBC_POS",
+            Self::VbcNegative => "VBC_NEG",
+            Self::IdPositive => "ID_POS",
+            Self::IdNegative => "ID_NEG",
+            Self::IcPositive => "IC_POS",
+            Self::IcNegative => "IC_NEG",
+        }
+    }
+    /// The unsigned terminal quantity underlying a directional constraint.
+    pub const fn base_parameter(self) -> Self {
+        match self {
+            Self::VgsPositive | Self::VgsNegative => Self::Vgs,
+            Self::VdsPositive | Self::VdsNegative => Self::Vds,
+            Self::VgdPositive | Self::VgdNegative => Self::Vgd,
+            Self::VbePositive | Self::VbeNegative => Self::Vbe,
+            Self::VcePositive | Self::VceNegative => Self::Vce,
+            Self::VbcPositive | Self::VbcNegative => Self::Vbc,
+            Self::IdPositive | Self::IdNegative => Self::Id,
+            Self::IcPositive | Self::IcNegative => Self::Ic,
+            other => other,
+        }
+    }
+
+    /// True for the positive part, false for the negative part; None is magnitude.
+    pub const fn polarity(self) -> Option<bool> {
+        match self {
+            Self::VgsPositive
+            | Self::VdsPositive
+            | Self::VgdPositive
+            | Self::VbePositive
+            | Self::VcePositive
+            | Self::VbcPositive
+            | Self::IdPositive
+            | Self::IcPositive => Some(true),
+            Self::VgsNegative
+            | Self::VdsNegative
+            | Self::VgdNegative
+            | Self::VbeNegative
+            | Self::VceNegative
+            | Self::VbcNegative
+            | Self::IdNegative
+            | Self::IcNegative => Some(false),
+            _ => None,
+        }
+    }
+
+    pub const fn directional_pair(self) -> Option<(Self, Self)> {
+        match self.base_parameter() {
+            Self::Vgs => Some((Self::VgsPositive, Self::VgsNegative)),
+            Self::Vds => Some((Self::VdsPositive, Self::VdsNegative)),
+            Self::Vgd => Some((Self::VgdPositive, Self::VgdNegative)),
+            Self::Vbe => Some((Self::VbePositive, Self::VbeNegative)),
+            Self::Vce => Some((Self::VcePositive, Self::VceNegative)),
+            Self::Vbc => Some((Self::VbcPositive, Self::VbcNegative)),
+            Self::Id => Some((Self::IdPositive, Self::IdNegative)),
+            Self::Ic => Some((Self::IcPositive, Self::IcNegative)),
+            _ => None,
+        }
+    }
+
+    /// Input must be finite; polarity follows authored terminal order, not model type.
+    pub fn measured_stress(self, signed: f64) -> f64 {
+        match self.polarity() {
+            Some(true) => signed.max(0.0),
+            Some(false) => (-signed).max(0.0),
+            None => signed.abs(),
         }
     }
 }
@@ -190,7 +282,10 @@ impl SoAManager {
                     limit.parameter
                 ));
             }
-            if !limit.max_value.is_finite() || limit.max_value <= 0.0 {
+            if !limit.max_value.is_finite()
+                || limit.max_value < 0.0
+                || (limit.max_value == 0.0 && limit.parameter.polarity().is_none())
+            {
                 return Err(format!(
                     "SOA device '{device_id}' has an invalid {:?} limit",
                     limit.parameter

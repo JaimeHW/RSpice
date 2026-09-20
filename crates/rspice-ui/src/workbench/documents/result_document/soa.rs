@@ -751,6 +751,22 @@ const fn runtime_parameter(
         SoaParameterEvidence::CollectorCurrent => SoAParameter::Ic,
         SoaParameterEvidence::PowerDissipation => SoAParameter::Pdiss,
         SoaParameterEvidence::Temperature => SoAParameter::Temp,
+        SoaParameterEvidence::GateSourceVoltagePositive => SoAParameter::VgsPositive,
+        SoaParameterEvidence::GateSourceVoltageNegative => SoAParameter::VgsNegative,
+        SoaParameterEvidence::DrainSourceVoltagePositive => SoAParameter::VdsPositive,
+        SoaParameterEvidence::DrainSourceVoltageNegative => SoAParameter::VdsNegative,
+        SoaParameterEvidence::GateDrainVoltagePositive => SoAParameter::VgdPositive,
+        SoaParameterEvidence::GateDrainVoltageNegative => SoAParameter::VgdNegative,
+        SoaParameterEvidence::BaseEmitterVoltagePositive => SoAParameter::VbePositive,
+        SoaParameterEvidence::BaseEmitterVoltageNegative => SoAParameter::VbeNegative,
+        SoaParameterEvidence::CollectorEmitterVoltagePositive => SoAParameter::VcePositive,
+        SoaParameterEvidence::CollectorEmitterVoltageNegative => SoAParameter::VceNegative,
+        SoaParameterEvidence::BaseCollectorVoltagePositive => SoAParameter::VbcPositive,
+        SoaParameterEvidence::BaseCollectorVoltageNegative => SoAParameter::VbcNegative,
+        SoaParameterEvidence::DrainCurrentPositive => SoAParameter::IdPositive,
+        SoaParameterEvidence::DrainCurrentNegative => SoAParameter::IdNegative,
+        SoaParameterEvidence::CollectorCurrentPositive => SoAParameter::IcPositive,
+        SoaParameterEvidence::CollectorCurrentNegative => SoAParameter::IcNegative,
     }
 }
 
@@ -992,6 +1008,26 @@ fn parameter_label(parameter: SoaParameterEvidence) -> &'static str {
         SoaParameterEvidence::CollectorCurrent => "Collector current",
         SoaParameterEvidence::PowerDissipation => "Power dissipation",
         SoaParameterEvidence::Temperature => "Temperature",
+        SoaParameterEvidence::GateSourceVoltagePositive => "Gate-source voltage · positive",
+        SoaParameterEvidence::GateSourceVoltageNegative => "Gate-source voltage · negative",
+        SoaParameterEvidence::DrainSourceVoltagePositive => "Drain-source voltage · positive",
+        SoaParameterEvidence::DrainSourceVoltageNegative => "Drain-source voltage · negative",
+        SoaParameterEvidence::GateDrainVoltagePositive => "Gate-drain voltage · positive",
+        SoaParameterEvidence::GateDrainVoltageNegative => "Gate-drain voltage · negative",
+        SoaParameterEvidence::BaseEmitterVoltagePositive => "Base-emitter voltage · positive",
+        SoaParameterEvidence::BaseEmitterVoltageNegative => "Base-emitter voltage · negative",
+        SoaParameterEvidence::CollectorEmitterVoltagePositive => {
+            "Collector-emitter voltage · positive"
+        }
+        SoaParameterEvidence::CollectorEmitterVoltageNegative => {
+            "Collector-emitter voltage · negative"
+        }
+        SoaParameterEvidence::BaseCollectorVoltagePositive => "Base-collector voltage · positive",
+        SoaParameterEvidence::BaseCollectorVoltageNegative => "Base-collector voltage · negative",
+        SoaParameterEvidence::DrainCurrentPositive => "Drain current · positive",
+        SoaParameterEvidence::DrainCurrentNegative => "Drain current · negative",
+        SoaParameterEvidence::CollectorCurrentPositive => "Collector current · positive",
+        SoaParameterEvidence::CollectorCurrentNegative => "Collector current · negative",
     }
 }
 

@@ -1267,6 +1267,22 @@ const fn soa_parameter_tag(parameter: SoaParameterEvidence) -> u8 {
         SoaParameterEvidence::CollectorCurrent => 7,
         SoaParameterEvidence::PowerDissipation => 8,
         SoaParameterEvidence::Temperature => 9,
+        SoaParameterEvidence::GateSourceVoltagePositive => 10,
+        SoaParameterEvidence::GateSourceVoltageNegative => 11,
+        SoaParameterEvidence::DrainSourceVoltagePositive => 12,
+        SoaParameterEvidence::DrainSourceVoltageNegative => 13,
+        SoaParameterEvidence::GateDrainVoltagePositive => 14,
+        SoaParameterEvidence::GateDrainVoltageNegative => 15,
+        SoaParameterEvidence::BaseEmitterVoltagePositive => 16,
+        SoaParameterEvidence::BaseEmitterVoltageNegative => 17,
+        SoaParameterEvidence::CollectorEmitterVoltagePositive => 18,
+        SoaParameterEvidence::CollectorEmitterVoltageNegative => 19,
+        SoaParameterEvidence::BaseCollectorVoltagePositive => 20,
+        SoaParameterEvidence::BaseCollectorVoltageNegative => 21,
+        SoaParameterEvidence::DrainCurrentPositive => 22,
+        SoaParameterEvidence::DrainCurrentNegative => 23,
+        SoaParameterEvidence::CollectorCurrentPositive => 24,
+        SoaParameterEvidence::CollectorCurrentNegative => 25,
     }
 }
 

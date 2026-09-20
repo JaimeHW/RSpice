@@ -1006,6 +1006,22 @@ fn soa_parameter_csv(parameter: crate::state::SoaParameterEvidence) -> &'static 
         SoaParameterEvidence::CollectorCurrent => "ic",
         SoaParameterEvidence::PowerDissipation => "pdiss",
         SoaParameterEvidence::Temperature => "temperature",
+        SoaParameterEvidence::GateSourceVoltagePositive => "vgs_positive",
+        SoaParameterEvidence::GateSourceVoltageNegative => "vgs_negative",
+        SoaParameterEvidence::DrainSourceVoltagePositive => "vds_positive",
+        SoaParameterEvidence::DrainSourceVoltageNegative => "vds_negative",
+        SoaParameterEvidence::GateDrainVoltagePositive => "vgd_positive",
+        SoaParameterEvidence::GateDrainVoltageNegative => "vgd_negative",
+        SoaParameterEvidence::BaseEmitterVoltagePositive => "vbe_positive",
+        SoaParameterEvidence::BaseEmitterVoltageNegative => "vbe_negative",
+        SoaParameterEvidence::CollectorEmitterVoltagePositive => "vce_positive",
+        SoaParameterEvidence::CollectorEmitterVoltageNegative => "vce_negative",
+        SoaParameterEvidence::BaseCollectorVoltagePositive => "vbc_positive",
+        SoaParameterEvidence::BaseCollectorVoltageNegative => "vbc_negative",
+        SoaParameterEvidence::DrainCurrentPositive => "id_positive",
+        SoaParameterEvidence::DrainCurrentNegative => "id_negative",
+        SoaParameterEvidence::CollectorCurrentPositive => "ic_positive",
+        SoaParameterEvidence::CollectorCurrentNegative => "ic_negative",
     }
 }
 
