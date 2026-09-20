@@ -13,6 +13,8 @@ pub struct StudyPostprocess {
     pub producer_analysis_line: String,
     pub producer_numeric_options: String,
     pub request: AnalysisSpec,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub periodic_options: Option<StudyPeriodicOptions>,
 }
 
 impl StudyPostprocess {
@@ -31,9 +33,14 @@ impl StudyPostprocess {
                 | AnalysisSpec::Fft { .. }
                 | AnalysisSpec::Hbsp { .. }
                 | AnalysisSpec::Hbnoise { .. }
+                | AnalysisSpec::Pac
+                | AnalysisSpec::Pxf
+                | AnalysisSpec::Pnoise
+                | AnalysisSpec::Pstb
+                | AnalysisSpec::Psp { .. }
         ) {
             return Err(SimulationError::InvalidConfig(
-                "Spectral study requires a Fourier, FFT, HBSP or HBNOISE consumer".into(),
+                "Study requires a configured spectral or periodic consumer".into(),
             ));
         }
         self.request
@@ -48,15 +55,16 @@ impl StudyPostprocess {
                 uic: config.uic,
             },
             StudyAnalysis::Native(spec @ AnalysisSpec::HarmonicBalance { .. }) => spec.clone(),
+            StudyAnalysis::Pss(pss) => pss.request.clone(),
             _ => {
                 return Err(SimulationError::InvalidConfig(
-                    "Spectral study requires its configured transient or HB producer".into(),
+                    "Study requires its configured transient, PSS or HB producer".into(),
                 ));
             }
         };
         crate::simulation::execution::validate_prepared_dependency_contract_with_options(
             &self.request,
-            &Default::default(),
+            &self.periodic_execution_options()?,
             &producer,
         )
         .map_err(|error| SimulationError::InvalidConfig(error.to_string()))
@@ -71,16 +79,23 @@ impl StudyPostprocess {
             let (mode, key) = request.split_once(':').unwrap_or(("meas", request));
             let valid = mode.eq_ignore_ascii_case("scalar")
                 || mode.eq_ignore_ascii_case("bin")
+                || (mode.eq_ignore_ascii_case("meas")
+                    && matches!(self.request, AnalysisSpec::Pnoise))
                 || (mode.eq_ignore_ascii_case("last")
                     && matches!(
                         self.request,
                         AnalysisSpec::Fourier { .. }
                             | AnalysisSpec::Hbsp { .. }
                             | AnalysisSpec::Hbnoise { .. }
+                            | AnalysisSpec::Pac
+                            | AnalysisSpec::Pxf
+                            | AnalysisSpec::Pnoise
+                            | AnalysisSpec::Pstb
+                            | AnalysisSpec::Psp { .. }
                     ));
             if !valid {
                 return Err(SimulationError::InvalidConfig(format!(
-                    "Spectral study measurement {request:?} requires scalar:name or bin:index:quantity[:signal]; Fourier, HBSP and HBNOISE also support last:signal"
+                    "Spectral study measurement {request:?} requires scalar:name or bin:index:quantity[:signal]; periodic and Fourier consumers also support last:signal, and PNOISE supports meas:name"
                 )));
             }
             if key.eq_ignore_ascii_case("THD(%)")
@@ -105,8 +120,10 @@ impl StudyRunConfig {
     pub(super) fn execution_source(&self, source: &str) -> Result<String, SimulationError> {
         if let StudyAnalysis::Pss(pss) = &self.analysis {
             pss.validate().map_err(SimulationError::InvalidConfig)?;
-            if self.postprocess.is_some()
-                || pss.operating_point.instance_id == self.instance_id
+            if pss.operating_point.instance_id == self.instance_id
+                || self.postprocess.as_ref().is_some_and(|post| {
+                    post.producer_instance_id == pss.operating_point.instance_id
+                })
                 || pss.operating_point.source_revision != self.source_revision
             {
                 return Err(SimulationError::InvalidConfig(
@@ -114,10 +131,24 @@ impl StudyRunConfig {
                         .into(),
                 ));
             }
+            if let Some(post) = &self.postprocess {
+                post.validate(self)?;
+                return Ok(services::splice_before_terminal_end_card(
+                    source,
+                    &format!("{}\n{}", post.producer_analysis_line, self.analysis_line),
+                ));
+            }
             // Each stage overlays its own numerical controls after variation.
             return Ok(services::splice_before_terminal_end_card(
                 source,
                 &self.analysis_line,
+            ));
+        }
+        if let Some(post) = self.postprocess.as_ref().filter(|post| post.is_periodic()) {
+            post.validate(self)?;
+            return Ok(services::splice_before_terminal_end_card(
+                source,
+                &format!("{}\n{}", post.producer_analysis_line, self.analysis_line),
             ));
         }
         let mut block = String::new();
@@ -157,6 +188,15 @@ impl StudyRunConfig {
             };
         };
         super::super::spec::ensure_not_aborted(abort)?;
+        if postprocess.is_periodic() {
+            return postprocess.run_periodic(
+                engine,
+                analysis,
+                circuit,
+                &self.numeric_options,
+                abort,
+            );
+        }
         if matches!(
             postprocess.request,
             AnalysisSpec::Hbsp { .. } | AnalysisSpec::Hbnoise { .. }

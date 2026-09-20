@@ -403,6 +403,13 @@ fn run_pac(
         })?
     };
 
+    project_pac(data, abort)
+}
+
+fn project_pac(
+    data: svc_runner::PacData,
+    abort: &dyn AbortSignal,
+) -> Result<SimulationResult, SimulationError> {
     let traces = data
         .traces
         .into_iter()
@@ -470,6 +477,13 @@ fn run_pxf(
         })?
     };
 
+    project_pxf(data, abort)
+}
+
+fn project_pxf(
+    data: svc_runner::PxfData,
+    abort: &dyn AbortSignal,
+) -> Result<SimulationResult, SimulationError> {
     let mut waveforms = HashMap::new();
     let transfer_name = format!(
         "H(sb{}->sb{}, {})",
@@ -831,6 +845,13 @@ fn run_pstb(
         )
     })?;
 
+    project_pstb(data, abort)
+}
+
+fn project_pstb(
+    data: svc_runner::PstbData,
+    abort: &dyn AbortSignal,
+) -> Result<SimulationResult, SimulationError> {
     let mut waveforms = HashMap::new();
     super::ensure_not_aborted(abort)?;
     insert_scalar_waveform(
@@ -1252,5 +1273,96 @@ R2 out 0 1k
             TransferFunctionScalar::NegativeInfinity
         );
         assert!(transfer_scalar(f64::NAN, "input resistance").is_err());
+    }
+}
+
+pub(super) fn run_periodic_study_consumer(
+    options: &crate::simulation::runner::study::StudyPeriodicOptions,
+    circuit: &rspice_core::Netlist,
+    carrier: svc_runner::PeriodicCarrierState<'_>,
+    abort: &dyn AbortSignal,
+) -> Result<SimulationResult, SimulationError> {
+    use crate::simulation::runner::study::StudyPeriodicOptions;
+    if let svc_runner::PeriodicCarrierState::Shooting(point) = carrier {
+        let (name, frequency, harmonics, tolerance, phase) = match options {
+            StudyPeriodicOptions::Pac(c) => (
+                "PAC",
+                c.pss_fundamental_freq,
+                c.pss_num_harmonics,
+                c.pss_tolerance,
+                false,
+            ),
+            StudyPeriodicOptions::Pxf(c) => (
+                "PXF",
+                c.pss_fundamental_freq,
+                c.pss_num_harmonics,
+                c.pss_tolerance,
+                false,
+            ),
+            StudyPeriodicOptions::Pnoise(c) => (
+                "PNOISE",
+                c.pss_fundamental_freq,
+                c.pss_num_harmonics,
+                c.pss_tolerance,
+                c.noise_ref == svc_runner::PnoiseReference::Phase,
+            ),
+            StudyPeriodicOptions::Pstb(c) => (
+                "PSTB",
+                c.pss_fundamental_freq,
+                c.pss_num_harmonics,
+                c.pss_tolerance,
+                false,
+            ),
+        };
+        crate::simulation::execution::PeriodicStateArtifact::validate_operating_point_consumer_basis(point, name, frequency, harmonics, tolerance, phase)
+            .map_err(|error| SimulationError::InvalidConfig(error.to_string()))?;
+    }
+    match options {
+        StudyPeriodicOptions::Pac(config) => {
+            let data = super::run_abort_aware_service(abort, || {
+                svc_runner::run_pac_analysis_on_materialized_with_abort(
+                    circuit,
+                    config,
+                    Some(carrier),
+                    abort,
+                )
+            })?;
+            project_pac(data, abort)
+        }
+        StudyPeriodicOptions::Pxf(config) => {
+            let data = super::run_abort_aware_service(abort, || {
+                svc_runner::run_pxf_analysis_on_materialized_with_abort(
+                    circuit,
+                    config,
+                    Some(carrier),
+                    abort,
+                )
+            })?;
+            project_pxf(data, abort)
+        }
+        StudyPeriodicOptions::Pnoise(config) => {
+            let data = super::run_abort_aware_service(abort, || {
+                svc_runner::run_pnoise_analysis_on_materialized_with_abort(
+                    circuit, config, carrier, abort,
+                )
+            })?;
+            pnoise_result(data, abort)
+        }
+        StudyPeriodicOptions::Pstb(config) => {
+            let svc_runner::PeriodicCarrierState::Shooting(point) = carrier else {
+                return Err(SimulationError::InvalidConfig(
+                    "PSTB requires a shooting PSS producer".into(),
+                ));
+            };
+            let data = super::run_abort_aware_service(abort, || {
+                svc_runner::run_pstb_analysis_on_materialized_with_abort(
+                    circuit,
+                    config,
+                    Some(point),
+                    abort,
+                )
+            })?;
+            project_pstb(data, abort)
+        }
     }
 }

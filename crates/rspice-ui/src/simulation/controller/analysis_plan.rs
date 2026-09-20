@@ -452,6 +452,53 @@ impl SimulationController {
         )
     }
 
+    fn compile_study_pss(
+        &self,
+        state: &AppState,
+        plan: &FrozenSimulationPlan,
+        base: &crate::simulation::plan::FrozenAnalysisInstance,
+        spec: &AnalysisSpec,
+    ) -> Result<crate::simulation::runner::study::StudyAnalysis, String> {
+        let producers = base
+            .dependencies()
+            .iter()
+            .filter(|edge| edge.prerequisite() == AnalysisKind::OperatingPoint)
+            .filter_map(|edge| {
+                plan.instances()
+                    .iter()
+                    .find(|instance| instance.id() == edge.target())
+            })
+            .collect::<Vec<_>>();
+        let [producer] = producers.as_slice() else {
+            return Err("A PSS study requires exactly one explicitly bound, enabled operating-point producer".into());
+        };
+        let mut producer_state = state.clone();
+        producer_state.sim_setup = state
+            .sim_setup
+            .frozen_instance_projection(plan, producer)
+            .map_err(|error| error.to_string())?;
+        let producer_spec = self.analysis_draft_spec(&producer_state, producer.draft())?;
+        let AnalysisConfig::DcOp(config) =
+            self.analysis_spec_to_config(&producer_state, &producer_spec)?
+        else {
+            return Err("PSS study dependency is not an operating-point configuration".into());
+        };
+        Ok(crate::simulation::runner::study::StudyAnalysis::Pss(
+            Box::new(crate::simulation::runner::study::StudyPssConfig {
+                request: spec.clone(),
+                operating_point: crate::simulation::runner::study::StudyOperatingPoint {
+                    instance_id: producer.id(),
+                    source_revision: plan.revision(),
+                    config,
+                    numeric_options: producer
+                        .numeric_override()
+                        .map(|options| options.to_spice_options())
+                        .unwrap_or_default(),
+                },
+            }),
+        ))
+    }
+
     fn compile_study_base(
         &self,
         state: &AppState,
@@ -499,12 +546,52 @@ impl SimulationController {
             .frozen_instance_projection(plan, base)
             .map_err(|error| error.to_string())?;
         let spec = self.analysis_draft_spec(&projected, base.draft())?;
+        use crate::simulation::runner::study::StudyPeriodicOptions;
+        let periodic_options = match &spec {
+            AnalysisSpec::Pac => Some(StudyPeriodicOptions::Pac(Self::pac_run_config_from_dialog(
+                &projected,
+            )?)),
+            AnalysisSpec::Pxf => Some(StudyPeriodicOptions::Pxf(Self::pxf_run_config_from_dialog(
+                &projected,
+            )?)),
+            AnalysisSpec::Pnoise => Some(StudyPeriodicOptions::Pnoise(
+                Self::pnoise_run_config_from_dialog(&projected)?,
+            )),
+            AnalysisSpec::Pstb => Some(StudyPeriodicOptions::Pstb(
+                Self::pstb_run_config_from_dialog(&projected)?,
+            )),
+            _ => None,
+        };
+        let execution_options = periodic_options
+            .as_ref()
+            .map(StudyPeriodicOptions::execution_options)
+            .unwrap_or_default();
         let producer_kind = match spec {
             AnalysisSpec::Fourier { .. } | AnalysisSpec::Fft { .. } => {
                 Some(AnalysisKind::Transient)
             }
             AnalysisSpec::Hbsp { .. } | AnalysisSpec::Hbnoise { .. } => {
                 Some(AnalysisKind::HarmonicBalance)
+            }
+            AnalysisSpec::Psp { .. } | AnalysisSpec::Pstb => Some(AnalysisKind::Pss),
+            AnalysisSpec::Pac | AnalysisSpec::Pxf | AnalysisSpec::Pnoise => {
+                let carriers = base
+                    .dependencies()
+                    .iter()
+                    .filter(|edge| {
+                        matches!(
+                            edge.prerequisite(),
+                            AnalysisKind::Pss | AnalysisKind::HarmonicBalance
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                let [carrier] = carriers.as_slice() else {
+                    return Err(
+                        "A periodic study requires exactly one explicitly bound PSS or HB producer"
+                            .into(),
+                    );
+                };
+                Some(carrier.prerequisite())
             }
             _ => None,
         };
@@ -530,12 +617,14 @@ impl SimulationController {
             let producer_spec = self.analysis_draft_spec(&producer_state, producer.draft())?;
             crate::simulation::execution::validate_prepared_dependency_contract_with_options(
                 &spec,
-                &Default::default(),
+                &execution_options,
                 &producer_spec,
             )
             .map_err(|error| error.to_string())?;
             (
-                if matches!(producer_spec, AnalysisSpec::HarmonicBalance { .. }) {
+                if matches!(producer_spec, AnalysisSpec::Pss { .. }) {
+                    self.compile_study_pss(state, plan, producer, &producer_spec)?
+                } else if matches!(producer_spec, AnalysisSpec::HarmonicBalance { .. }) {
                     crate::simulation::runner::study::StudyAnalysis::Native(producer_spec.clone())
                 } else {
                     self.analysis_spec_to_config(&producer_state, &producer_spec)?
@@ -551,50 +640,11 @@ impl SimulationController {
                         .map(|options| options.to_spice_options())
                         .unwrap_or_default(),
                     request: spec.clone(),
+                    periodic_options,
                 }),
             )
         } else if matches!(spec, AnalysisSpec::Pss { .. }) {
-            let producers = base
-                .dependencies()
-                .iter()
-                .filter(|edge| edge.prerequisite() == AnalysisKind::OperatingPoint)
-                .filter_map(|edge| {
-                    plan.instances()
-                        .iter()
-                        .find(|instance| instance.id() == edge.target())
-                })
-                .collect::<Vec<_>>();
-            let [producer] = producers.as_slice() else {
-                return Err("A PSS study requires exactly one explicitly bound, enabled operating-point producer".into());
-            };
-            let mut producer_state = state.clone();
-            producer_state.sim_setup = state
-                .sim_setup
-                .frozen_instance_projection(plan, producer)
-                .map_err(|error| error.to_string())?;
-            let producer_spec = self.analysis_draft_spec(&producer_state, producer.draft())?;
-            let AnalysisConfig::DcOp(config) =
-                self.analysis_spec_to_config(&producer_state, &producer_spec)?
-            else {
-                return Err("PSS study dependency is not an operating-point configuration".into());
-            };
-            (
-                crate::simulation::runner::study::StudyAnalysis::Pss(Box::new(
-                    crate::simulation::runner::study::StudyPssConfig {
-                        request: spec.clone(),
-                        operating_point: crate::simulation::runner::study::StudyOperatingPoint {
-                            instance_id: producer.id(),
-                            source_revision: plan.revision(),
-                            config,
-                            numeric_options: producer
-                                .numeric_override()
-                                .map(|options| options.to_spice_options())
-                                .unwrap_or_default(),
-                        },
-                    },
-                )),
-                None,
-            )
+            (self.compile_study_pss(state, plan, base, &spec)?, None)
         } else if matches!(spec, AnalysisSpec::HarmonicBalance { .. }) {
             (
                 crate::simulation::runner::study::StudyAnalysis::Native(spec.clone()),
@@ -752,6 +802,165 @@ fn invalid_saved_output_reports(
 mod tests {
     use super::*;
     use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
+
+    #[test]
+    fn periodic_rf_study_freezes_all_consumer_options_and_exact_pss_op_chain() {
+        use crate::simulation::dialog::{McDialogState, mc::McConfig};
+        use crate::simulation::runner::study::{StudyAnalysis, StudyPeriodicOptions};
+        for kind in [
+            AnalysisKind::Pac,
+            AnalysisKind::Pxf,
+            AnalysisKind::Pnoise,
+            AnalysisKind::Pstb,
+            AnalysisKind::Psp,
+        ] {
+            let mut state = AppState::default();
+            let plan = state.sim_setup.analysis_plan.as_mut().unwrap();
+            let (op, _) = plan.insert(AnalysisKind::OperatingPoint).unwrap();
+            let (pss, _) = plan.insert(AnalysisKind::Pss).unwrap();
+            plan.bind_dependency(pss, AnalysisKind::OperatingPoint, op)
+                .unwrap();
+            plan.edit(pss, |draft| {
+                let AnalysisDraft::Pss(draft) = draft else {
+                    unreachable!()
+                };
+                draft.tone_sources = "VIN".into();
+            })
+            .unwrap();
+            let (consumer, _) = plan.insert(kind).unwrap();
+            plan.bind_dependency(consumer, AnalysisKind::Pss, pss)
+                .unwrap();
+            plan.edit(consumer, |draft| match draft {
+                AnalysisDraft::Pac(d) => {
+                    d.pac_magnitude = "2.5".into();
+                    d.sideband_min = "-1".into();
+                    d.sideband_max = "0".into();
+                    d.reltol = "2e-7".into();
+                }
+                AnalysisDraft::Pxf(d) => {
+                    d.input_sideband = "-1".into();
+                    d.output_sideband = "1".into();
+                    d.max_sideband = "2".into();
+                }
+                AnalysisDraft::Pnoise(d) => {
+                    d.input_sideband = "-1".into();
+                    d.output_sideband = "1".into();
+                    d.max_sideband = "2".into();
+                    d.noise_summary = true;
+                }
+                AnalysisDraft::Pstb(d) => {
+                    d.stability_threshold = "1.01".into();
+                    d.detect_subharmonics = false;
+                }
+                AnalysisDraft::Psp(d) => {
+                    d.max_sideband = "2".into();
+                    d.mixed_mode = true;
+                }
+                _ => unreachable!(),
+            })
+            .unwrap();
+            let (mc, _) = plan.insert(AnalysisKind::MonteCarlo).unwrap();
+            plan.edit(mc, |draft| {
+                *draft = AnalysisDraft::MonteCarlo(McDialogState::from_config(&McConfig {
+                    base_analysis: Some(consumer),
+                    measurements: vec!["bin:0:real:result".into()],
+                    ..Default::default()
+                }))
+            })
+            .unwrap();
+            let frozen = plan.freeze().unwrap();
+            plan.edit(consumer, |draft| *draft = AnalysisDraft::for_kind(kind))
+                .unwrap();
+            let sealed = state
+                .model_library_manager
+                .seal_execution_sources()
+                .unwrap();
+            let queue = SimulationController::new()
+                .build_queue_from_plan(&state, &frozen, &sealed)
+                .unwrap();
+            let task = queue.iter().find(|task| task.instance_id() == mc).unwrap();
+            let consumer_task = queue
+                .iter()
+                .find(|task| task.instance_id() == consumer)
+                .unwrap();
+            let base = task
+                .queued_analysis()
+                .spec_options
+                .study_base
+                .as_ref()
+                .unwrap();
+            let StudyAnalysis::Pss(pss_config) = &base.analysis else {
+                panic!("PSS")
+            };
+            assert_eq!(pss_config.operating_point.instance_id, op);
+            let post = base.postprocess.as_ref().unwrap();
+            assert_eq!(post.producer_instance_id, pss);
+            assert_eq!(post.request, consumer_task.queued_analysis().spec);
+            match &post.periodic_options {
+                Some(StudyPeriodicOptions::Pac(c)) => {
+                    assert_eq!(
+                        Some(c),
+                        consumer_task.queued_analysis().spec_options.pac.as_ref()
+                    );
+                    assert_eq!(c.pac_magnitude, 2.5);
+                }
+                Some(StudyPeriodicOptions::Pxf(c)) => {
+                    assert_eq!(
+                        Some(c),
+                        consumer_task.queued_analysis().spec_options.pxf.as_ref()
+                    );
+                    assert_eq!(c.input_sideband, -1);
+                }
+                Some(StudyPeriodicOptions::Pnoise(c)) => {
+                    assert_eq!(
+                        Some(c),
+                        consumer_task.queued_analysis().spec_options.pnoise.as_ref()
+                    );
+                    assert_eq!(c.output_sideband, 1);
+                }
+                Some(StudyPeriodicOptions::Pstb(c)) => {
+                    assert_eq!(
+                        Some(c),
+                        consumer_task.queued_analysis().spec_options.pstb.as_ref()
+                    );
+                    assert_eq!(c.stability_threshold, 1.01);
+                }
+                None => assert!(matches!(
+                    post.request,
+                    AnalysisSpec::Psp {
+                        mixed_mode: true,
+                        ..
+                    }
+                )),
+            }
+            let mut changed = task.queued_analysis().clone();
+            let post = changed
+                .spec_options
+                .study_base
+                .as_mut()
+                .unwrap()
+                .postprocess
+                .as_mut()
+                .unwrap();
+            match &mut post.periodic_options {
+                Some(StudyPeriodicOptions::Pac(c)) => c.pac_magnitude = 3.0,
+                Some(StudyPeriodicOptions::Pxf(c)) => c.input_sideband = 0,
+                Some(StudyPeriodicOptions::Pnoise(c)) => c.output_sideband = 0,
+                Some(StudyPeriodicOptions::Pstb(c)) => c.detect_subharmonics = true,
+                None => {
+                    let AnalysisSpec::Psp { mixed_mode, .. } = &mut post.request else {
+                        unreachable!()
+                    };
+                    *mixed_mode = false;
+                }
+            }
+            assert_ne!(
+                task.config_digest(),
+                PreparedTask::new(mc, task.source_revision(), vec![], "MC", changed)
+                    .config_digest()
+            );
+        }
+    }
 
     #[test]
     fn pss_study_freezes_its_exact_op_producer_and_complete_shooting_configuration() {

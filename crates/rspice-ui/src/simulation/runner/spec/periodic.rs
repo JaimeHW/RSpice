@@ -1938,3 +1938,46 @@ fn pss_run_config(spec: AnalysisSpec) -> Result<svc_runner::PssRunConfig, Simula
         verbose,
     })
 }
+
+pub(super) fn run_psp_study_consumer(
+    spec: AnalysisSpec,
+    circuit: &rspice_core::Netlist,
+    point: &rspice_core::engine::PssOperatingPoint,
+    abort: &dyn AbortSignal,
+) -> Result<SimulationResult, SimulationError> {
+    let AnalysisSpec::Psp {
+        start_freq,
+        stop_freq,
+        points_per_unit,
+        sweep,
+        ports,
+        max_sideband,
+        mixed_mode,
+        noise_parameters,
+        noise_reference,
+    } = spec
+    else {
+        return Err(SimulationError::InvalidConfig(
+            "Expected PSP study consumer".into(),
+        ));
+    };
+    run_periodic_sparameters(
+        PspRunRequest {
+            start_freq,
+            stop_freq,
+            points_per_unit,
+            sweep,
+            ports,
+            max_sideband,
+            mixed_mode,
+            noise_parameters,
+            noise_reference,
+        },
+        abort,
+        |config| {
+            svc_runner::run_psp_analysis_from_pss_on_materialized_with_abort(
+                circuit, config, point, abort,
+            )
+        },
+    )
+}

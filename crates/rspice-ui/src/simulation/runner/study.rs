@@ -3,7 +3,9 @@
 mod analysis;
 pub use analysis::StudyAnalysis;
 mod optimization;
+mod periodic;
 mod pss;
+pub use periodic::StudyPeriodicOptions;
 pub use pss::{StudyOperatingPoint, StudyPssConfig};
 mod spectral;
 pub(crate) use optimization::run_optimization;
@@ -30,7 +32,7 @@ use std::sync::{
 /// Its Run Set point belongs to the study; its solver controls belong to the base.
 #[derive(Debug, Clone)]
 pub struct StudyRunConfig {
-    /// Optional consumer of `analysis`, which is its exact transient or HB producer.
+    /// Optional consumer of `analysis`, which is its exact transient, PSS or HB producer.
     pub postprocess: Option<StudyPostprocess>,
     pub constraints: Vec<crate::simulation::optimizer::OptimizationConstraint>,
     pub objective_terms: Vec<crate::simulation::optimizer::OptimizationObjectiveTerm>,
@@ -59,6 +61,11 @@ pub(crate) fn supports_kind(kind: AnalysisKind) -> bool {
             | AnalysisKind::Hbsp
             | AnalysisKind::Hbnoise
             | AnalysisKind::Pss
+            | AnalysisKind::Pac
+            | AnalysisKind::Pxf
+            | AnalysisKind::Pnoise
+            | AnalysisKind::Pstb
+            | AnalysisKind::Psp
     )
 }
 

@@ -61,6 +61,7 @@ fn base(noise: bool) -> StudyRunConfig {
             gmres_restart: 12, source_stepping: false, use_exact_jacobian: true, verbose: false,
         }),
         postprocess: Some(StudyPostprocess {
+            periodic_options: None,
             producer_instance_id: AnalysisInstanceId::new(), producer_source_revision: ObjectRevision::INITIAL,
             producer_analysis_line: ".hb 1meg HARMS=3 POINTS=9".into(),
             producer_numeric_options: ".options GMIN=0".into(), request,

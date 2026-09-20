@@ -79,7 +79,9 @@ impl SimulationResult {
                         harmonic.magnitude * phase.sin(),
                     ))
                 }
-                Self::Ac { waveforms, .. } | Self::HarmonicBalance { waveforms, .. } => {
+                Self::Ac { waveforms, .. }
+                | Self::HarmonicBalance { waveforms, .. }
+                | Self::Pstb { waveforms, .. } => {
                     let waveform = if let Some(signal) = signal {
                         named_value(waveforms, signal)?
                     } else {
@@ -121,7 +123,8 @@ impl SimulationResult {
                 | Self::PoleZero { .. }
                 | Self::SensitivityStudy { .. }
                 | Self::TransferFunction { .. }
-                | Self::DcMismatch { .. } => self.measurement(key),
+                | Self::DcMismatch { .. }
+                | Self::Pstb { .. } => self.measurement(key),
                 Self::Fft { .. } => self.measurement(key),
                 Self::Transient {
                     periodic_state: Some(point),
@@ -160,9 +163,8 @@ impl SimulationResult {
                 Self::DcSweep { waveforms, .. }
                 | Self::Transient { waveforms, .. }
                 | Self::Ac { waveforms, .. }
-                | Self::HarmonicBalance { waveforms, .. } => {
-                    waveform_last_value_by_name(waveforms, key)
-                }
+                | Self::HarmonicBalance { waveforms, .. }
+                | Self::Pstb { waveforms, .. } => waveform_last_value_by_name(waveforms, key),
                 Self::Noise { .. } => self.noise_study_series(key)?.last().copied(),
                 _ => None,
             }

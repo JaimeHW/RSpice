@@ -38,6 +38,7 @@ fn study(fft: bool) -> StudyRunConfig {
     };
     StudyRunConfig {
         postprocess: Some(StudyPostprocess {
+            periodic_options: None,
             producer_instance_id: AnalysisInstanceId::new(),
             producer_source_revision: ObjectRevision::INITIAL,
             producer_analysis_line: ".tran 2u 1m".into(),

@@ -614,7 +614,25 @@ impl PeriodicStateArtifact {
         tolerance: f64,
         require_autonomous: bool,
     ) -> Result<(), ExecutionArtifactError> {
-        let config = self.operating_point.config();
+        Self::validate_operating_point_consumer_basis(
+            &self.operating_point,
+            consumer,
+            fundamental_freq,
+            num_harmonics,
+            tolerance,
+            require_autonomous,
+        )
+    }
+
+    pub(in crate::simulation) fn validate_operating_point_consumer_basis(
+        point: &rspice_core::engine::PssOperatingPoint,
+        consumer: &str,
+        fundamental_freq: f64,
+        num_harmonics: usize,
+        tolerance: f64,
+        require_autonomous: bool,
+    ) -> Result<(), ExecutionArtifactError> {
+        let config = point.config();
         let producer_frequency = if config.is_autonomous() {
             1.0 / config.period_guess
         } else {

@@ -949,6 +949,15 @@ fn encode_spec_options(writer: &mut CanonicalWriter, options: &SpecExecutionOpti
                     AnalysisSpec::Hbsp { .. } | AnalysisSpec::Hbnoise { .. }
                 ) {
                     "study-hb-consumer/v1"
+                } else if matches!(
+                    postprocess.request,
+                    AnalysisSpec::Pac
+                        | AnalysisSpec::Pxf
+                        | AnalysisSpec::Pnoise
+                        | AnalysisSpec::Pstb
+                        | AnalysisSpec::Psp { .. }
+                ) {
+                    "study-periodic-consumer/v1"
                 } else {
                     "study-transient-postprocessor/v1"
                 },
@@ -958,6 +967,10 @@ fn encode_spec_options(writer: &mut CanonicalWriter, options: &SpecExecutionOpti
             writer.string(&postprocess.producer_analysis_line);
             writer.string(&postprocess.producer_numeric_options);
             encode_analysis_spec(writer, &postprocess.request);
+            if let Some(options) = &postprocess.periodic_options {
+                writer.domain("study-periodic-consumer-options/v1");
+                encode_spec_options(writer, &options.execution_options());
+            }
         }
         writer.string(&base.analysis_line);
         writer.string(&base.numeric_options);

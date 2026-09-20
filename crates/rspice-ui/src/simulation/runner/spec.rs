@@ -27,6 +27,29 @@ pub(super) use periodic::{
 mod recorded_fft;
 mod sweeps;
 
+pub(super) fn run_periodic_study_consumer(
+    spec: AnalysisSpec,
+    options: Option<&super::study::StudyPeriodicOptions>,
+    circuit: &rspice_core::Netlist,
+    carrier: svc_runner::PeriodicCarrierState<'_>,
+    abort: &dyn AbortSignal,
+) -> Result<SimulationResult, SimulationError> {
+    ensure_not_aborted(abort)?;
+    if matches!(spec, AnalysisSpec::Psp { .. }) {
+        let svc_runner::PeriodicCarrierState::Shooting(point) = carrier else {
+            return Err(SimulationError::InvalidConfig(
+                "PSP requires a shooting PSS producer".into(),
+            ));
+        };
+        periodic::run_psp_study_consumer(spec, circuit, point, abort)
+    } else {
+        let options = options.ok_or_else(|| {
+            SimulationError::InvalidConfig("Periodic study consumer settings are missing".into())
+        })?;
+        frequency::run_periodic_study_consumer(options, circuit, carrier, abort)
+    }
+}
+
 #[cfg(test)]
 pub(super) fn run_spec_request(
     bridge: &EngineBridge,

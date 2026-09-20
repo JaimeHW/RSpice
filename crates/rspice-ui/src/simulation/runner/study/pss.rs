@@ -75,6 +75,17 @@ impl StudyPssConfig {
         numeric_options: &str,
         abort: &dyn AbortSignal,
     ) -> Result<SimulationResult, SimulationError> {
+        self.run_with_circuit(engine, circuit, numeric_options, abort)
+            .map(|(_, result)| result)
+    }
+
+    pub(super) fn run_with_circuit(
+        &self,
+        engine: &rspice_core::Engine,
+        circuit: &rspice_core::Netlist,
+        numeric_options: &str,
+        abort: &dyn AbortSignal,
+    ) -> Result<(rspice_core::Netlist, SimulationResult), SimulationError> {
         super::super::spec::ensure_not_aborted(abort)?;
         let mut physical = circuit.clone();
         let mut op = self.operating_point.config.clone();
@@ -116,17 +127,18 @@ impl StudyPssConfig {
         )
         .map_err(|error| SimulationError::SolverError(error.to_string()))?;
         let pss_circuit = circuit_with_options(&physical, numeric_options, abort)?;
-        super::super::spec::run_pss_study_on_materialized(
+        let result = super::super::spec::run_pss_study_on_materialized(
             self.request.clone(),
             &pss_circuit,
             &seed,
             temperature_kelvin,
             abort,
-        )
+        )?;
+        Ok((pss_circuit, result))
     }
 }
 
-fn circuit_with_options(
+pub(super) fn circuit_with_options(
     circuit: &rspice_core::Netlist,
     commands: &str,
     abort: &dyn AbortSignal,
