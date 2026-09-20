@@ -36,7 +36,7 @@ impl StudyPostprocess {
         self.request
             .validate()
             .map_err(SimulationError::InvalidConfig)?;
-        let AnalysisConfig::Transient(config) = &base.analysis else {
+        let Some(AnalysisConfig::Transient(config)) = base.analysis.as_basic() else {
             return Err(SimulationError::InvalidConfig(
                 "Spectral study requires its configured transient producer".into(),
             ));
@@ -109,12 +109,23 @@ impl StudyRunConfig {
     pub(super) fn run_trial(
         &self,
         engine: &rspice_core::Engine,
-        analysis: &AnalysisConfig,
+        analysis: &StudyAnalysis,
         circuit: &rspice_core::Netlist,
         abort: &dyn AbortSignal,
     ) -> Result<SimulationResult, SimulationError> {
         let Some(postprocess) = &self.postprocess else {
-            return EngineBridge::run_materialized_with_abort(engine, analysis, circuit, abort);
+            return match analysis {
+                StudyAnalysis::Basic(config) => {
+                    EngineBridge::run_materialized_with_abort(engine, config, circuit, abort)
+                }
+                StudyAnalysis::Native(spec) => {
+                    super::super::spec::run_native_study_on_materialized(
+                        spec.clone(),
+                        circuit,
+                        abort,
+                    )
+                }
+            };
         };
         super::super::spec::ensure_not_aborted(abort)?;
         let mut trial = circuit.clone();
@@ -146,7 +157,10 @@ impl StudyRunConfig {
                 ));
             }
         }
-        let result = EngineBridge::run_materialized_with_abort(engine, analysis, &trial, abort)?;
+        let config = analysis.as_basic().ok_or_else(|| {
+            SimulationError::InvalidConfig("A spectral study requires a transient producer".into())
+        })?;
+        let result = EngineBridge::run_materialized_with_abort(engine, config, &trial, abort)?;
         super::super::spec::ensure_not_aborted(abort)?;
         let SimulationResult::Transient { waveforms, .. } = &result else {
             return Err(SimulationError::InvalidConfig(

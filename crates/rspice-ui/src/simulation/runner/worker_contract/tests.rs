@@ -302,7 +302,7 @@ pub(super) fn nondefault_op_config() -> crate::simulation::dialog::OpConfig {
 #[test]
 fn browser_worker_transfer_protocol_matches_rust_transport() {
     assert_eq!(WORKER_RESPONSE_TRANSPORT_PROTOCOL, 27);
-    assert_eq!(WORKER_REQUEST_TRANSPORT_PROTOCOL, 19);
+    assert_eq!(WORKER_REQUEST_TRANSPORT_PROTOCOL, 20);
     let source = include_str!("../../../../web/simulation-worker.js");
     assert!(source.contains(&format!(
         "const WORKER_PROTOCOL_VERSION = {WORKER_RESPONSE_TRANSPORT_PROTOCOL};"
@@ -2078,7 +2078,7 @@ fn configured_study_worker_transfers_and_authenticates_nested_op_seed() {
             objective_terms: Vec::new(),
             instance_id: crate::product::AnalysisInstanceId::new(),
             source_revision: crate::product::ObjectRevision::INITIAL,
-            analysis: AnalysisConfig::DcOp(nondefault_op_config()),
+            analysis: AnalysisConfig::DcOp(nondefault_op_config()).into(),
             analysis_line: ".OP".into(),
             numeric_options: String::new(),
             measurements: vec!["scalar:V(out)".into()],

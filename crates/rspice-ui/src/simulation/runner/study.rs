@@ -1,5 +1,7 @@
 //! Frozen configured-analysis execution on each study circuit.
 
+mod analysis;
+pub use analysis::StudyAnalysis;
 mod optimization;
 mod spectral;
 pub(crate) use optimization::run_optimization;
@@ -32,7 +34,7 @@ pub struct StudyRunConfig {
     pub objective_terms: Vec<crate::simulation::optimizer::OptimizationObjectiveTerm>,
     pub instance_id: AnalysisInstanceId,
     pub source_revision: ObjectRevision,
-    pub analysis: AnalysisConfig,
+    pub analysis: StudyAnalysis,
     pub analysis_line: String,
     pub numeric_options: String,
     pub measurements: Vec<String>,
@@ -51,6 +53,7 @@ pub(crate) fn supports_kind(kind: AnalysisKind) -> bool {
             | AnalysisKind::Sensitivity
             | AnalysisKind::Fourier
             | AnalysisKind::Fft
+            | AnalysisKind::HarmonicBalance
     )
 }
 
@@ -285,7 +288,7 @@ mod tests {
             instance_id: AnalysisInstanceId::new(),
             source_revision: ObjectRevision::INITIAL,
             analysis_line: analysis.to_spice(),
-            analysis,
+            analysis: analysis.into(),
             numeric_options: ".OPTIONS RELTOL=1e-5".into(),
             measurements: names.iter().map(|name| (*name).to_owned()).collect(),
             histogram_bins: 7,
@@ -807,7 +810,19 @@ fn validate_base_measurements(
     if let Some(postprocess) = &base.postprocess {
         return postprocess.validate_measurements(base);
     }
-    let family = match base.analysis {
+    let Some(analysis) = base.analysis.as_basic() else {
+        if base.measurements.iter().any(|request| {
+            !request
+                .split_once(':')
+                .is_some_and(|(mode, _)| mode.eq_ignore_ascii_case("bin"))
+        }) {
+            return Err(SimulationError::InvalidConfig(
+                "Harmonic balance studies require bin:index:quantity[:signal] measurements".into(),
+            ));
+        }
+        return Ok(());
+    };
+    let family = match analysis {
         AnalysisConfig::Ac(_) => "AC",
         AnalysisConfig::Transient(_) => "TRAN",
         AnalysisConfig::DcSweep(_) => "DC",
@@ -828,7 +843,7 @@ fn validate_base_measurements(
         }
         if mode.eq_ignore_ascii_case("scalar")
             && !matches!(
-                base.analysis,
+                analysis,
                 AnalysisConfig::DcOp(_)
                     | AnalysisConfig::PoleZero(_)
                     | AnalysisConfig::Sensitivity(_)
@@ -838,7 +853,7 @@ fn validate_base_measurements(
                 "{request:?} requires a scalar analysis; use a .MEAS name or last:signal for a waveform"
             )));
         }
-        if mode.eq_ignore_ascii_case("bin") && !matches!(base.analysis, AnalysisConfig::Ac(_)) {
+        if mode.eq_ignore_ascii_case("bin") && !matches!(analysis, AnalysisConfig::Ac(_)) {
             return Err(SimulationError::InvalidConfig(
                 "Spectral bin measurements require AC, Fourier, or FFT".into(),
             ));
@@ -855,9 +870,12 @@ fn validate_base_measurements(
 fn analysis_for_environment(
     base: &StudyRunConfig,
     environment: Option<&MonteCarloEnvironment>,
-) -> AnalysisConfig {
+) -> StudyAnalysis {
     let mut analysis = base.analysis.clone();
-    if let AnalysisConfig::DcOp(op) = &mut analysis {
+    let Some(config) = analysis.as_basic_mut() else {
+        return analysis;
+    };
+    if let AnalysisConfig::DcOp(op) = config {
         // The study applies the supply exactly once, after statistical replay.
         // Outside a Run Set retain the selected OP's explicit supply point.
         if let Some(environment) = environment {
@@ -873,7 +891,7 @@ fn analysis_for_environment(
             op.run_point.supply_source_names = environment.supply_source_names.clone();
         }
     }
-    if let (AnalysisConfig::Noise(noise), Some(environment)) = (&mut analysis, environment) {
+    if let (AnalysisConfig::Noise(noise), Some(environment)) = (config, environment) {
         noise.temperature_kelvin =
             rspice_core::constants::celsius_to_kelvin(environment.temperature_celsius);
     }

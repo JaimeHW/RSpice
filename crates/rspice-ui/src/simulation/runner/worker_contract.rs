@@ -72,9 +72,9 @@ pub(crate) struct WorkerRequest {
     pub(in crate::simulation) stream_transient_samples: bool,
 }
 
-/// 19: Configured studies carry frozen Fourier/FFT consumers and transient producers.
+/// 20: Configured studies also carry native harmonic balance specifications.
 #[cfg(any(target_arch = "wasm32", test))]
-pub(crate) const WORKER_REQUEST_TRANSPORT_PROTOCOL: u8 = 19;
+pub(crate) const WORKER_REQUEST_TRANSPORT_PROTOCOL: u8 = 20;
 
 /// Browser-worker request split into compact metadata and transferable
 /// floating-point buffers. The embedded request deliberately carries empty
@@ -193,8 +193,8 @@ fn worker_request_op_config_mut(
                 options
                     .study_base
                     .as_mut()
-                    .and_then(|base| match &mut base.analysis {
-                        WorkerAnalysisConfig::DcOp(config) => Some(config),
+                    .and_then(|base| match base.analysis.as_basic_mut() {
+                        Some(WorkerAnalysisConfig::DcOp(config)) => Some(config),
                         _ => None,
                     })
             }
@@ -218,8 +218,8 @@ fn worker_request_op_config(
                 options
                     .study_base
                     .as_ref()
-                    .and_then(|base| match &base.analysis {
-                        WorkerAnalysisConfig::DcOp(config) => Some(config),
+                    .and_then(|base| match base.analysis.as_basic() {
+                        Some(WorkerAnalysisConfig::DcOp(config)) => Some(config),
                         _ => None,
                     })
             }

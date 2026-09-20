@@ -925,7 +925,15 @@ fn encode_spec_options(writer: &mut CanonicalWriter, options: &SpecExecutionOpti
         writer.domain("configured-study-base/v1");
         writer.string(&base.instance_id.to_string());
         writer.u64(base.source_revision.get());
-        encode_analysis_config(writer, Some(&base.analysis));
+        match &base.analysis {
+            crate::simulation::runner::study::StudyAnalysis::Basic(config) => {
+                encode_analysis_config(writer, Some(config));
+            }
+            crate::simulation::runner::study::StudyAnalysis::Native(spec) => {
+                writer.domain("study-native-spec/v1");
+                encode_analysis_spec(writer, spec);
+            }
+        }
         if let Some(postprocess) = &base.postprocess {
             writer.domain("study-transient-postprocessor/v1");
             writer.uuid(postprocess.producer_instance_id.as_uuid());

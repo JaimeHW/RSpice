@@ -111,13 +111,57 @@ impl From<WorkerSpecExecutionOptions> for SpecExecutionOptions {
     }
 }
 
+/// Basic analyses retain their existing wire representation.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub(crate) enum WorkerStudyAnalysis {
+    Basic(WorkerAnalysisConfig),
+    Native { native_spec: AnalysisSpec },
+}
+
+impl WorkerStudyAnalysis {
+    pub(super) fn as_basic(&self) -> Option<&WorkerAnalysisConfig> {
+        match self {
+            Self::Basic(config) => Some(config),
+            Self::Native { .. } => None,
+        }
+    }
+    pub(super) fn as_basic_mut(&mut self) -> Option<&mut WorkerAnalysisConfig> {
+        match self {
+            Self::Basic(config) => Some(config),
+            Self::Native { .. } => None,
+        }
+    }
+}
+
+impl From<&crate::simulation::runner::study::StudyAnalysis> for WorkerStudyAnalysis {
+    fn from(value: &crate::simulation::runner::study::StudyAnalysis) -> Self {
+        use crate::simulation::runner::study::StudyAnalysis;
+        match value {
+            StudyAnalysis::Basic(config) => Self::Basic(WorkerAnalysisConfig::from(config)),
+            StudyAnalysis::Native(spec) => Self::Native {
+                native_spec: spec.clone(),
+            },
+        }
+    }
+}
+
+impl From<WorkerStudyAnalysis> for crate::simulation::runner::study::StudyAnalysis {
+    fn from(value: WorkerStudyAnalysis) -> Self {
+        match value {
+            WorkerStudyAnalysis::Basic(config) => Self::Basic(AnalysisConfig::from(config)),
+            WorkerStudyAnalysis::Native { native_spec } => Self::Native(native_spec),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct WorkerStudyRunConfig {
     #[serde(default)]
     postprocess: Option<crate::simulation::runner::study::StudyPostprocess>,
     instance_id: crate::product::AnalysisInstanceId,
     source_revision: crate::product::ObjectRevision,
-    pub(super) analysis: WorkerAnalysisConfig,
+    pub(super) analysis: WorkerStudyAnalysis,
     analysis_line: String,
     numeric_options: String,
     measurements: Vec<String>,
@@ -146,7 +190,7 @@ impl From<&crate::simulation::runner::study::StudyRunConfig> for WorkerStudyRunC
             postprocess: postprocess.clone(),
             instance_id: *instance_id,
             source_revision: *source_revision,
-            analysis: WorkerAnalysisConfig::from(analysis),
+            analysis: WorkerStudyAnalysis::from(analysis),
             analysis_line: analysis_line.clone(),
             numeric_options: numeric_options.clone(),
             measurements: measurements.clone(),
@@ -175,7 +219,7 @@ impl From<WorkerStudyRunConfig> for crate::simulation::runner::study::StudyRunCo
             postprocess,
             instance_id,
             source_revision,
-            analysis: AnalysisConfig::from(analysis),
+            analysis: analysis.into(),
             analysis_line,
             numeric_options,
             measurements,

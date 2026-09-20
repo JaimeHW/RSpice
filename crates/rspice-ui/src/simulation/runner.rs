@@ -558,16 +558,27 @@ impl SimulationRunner {
 /// Read off the request rather than threaded separately, because the request
 /// *is* where the switch lives: the HB and PSS forms author `verbose` into
 /// their specification, and a manual deck authors it into the same field
-/// through `VERBOSE=`. Everything else the studio can run has no such control,
-/// so its engine log is receipts alone.
+/// through `VERBOSE=`. A study inherits this switch from its frozen periodic
+/// base. Other requests publish receipts without enabling the solver trace.
 pub(in crate::simulation::runner) fn request_asked_for_verbose(
     request: &SimulationRequest,
 ) -> bool {
     match request {
         SimulationRequest::Config(_) => false,
-        SimulationRequest::Spec { spec, .. } => match spec.as_ref() {
+        SimulationRequest::Spec { spec, options } => match spec.as_ref() {
             AnalysisSpec::Pss { verbose, .. } | AnalysisSpec::HarmonicBalance { verbose, .. } => {
                 *verbose
+            }
+            AnalysisSpec::MonteCarlo { .. } | AnalysisSpec::Optimization { .. } => {
+                options.study_base.as_ref().is_some_and(|base| {
+                    matches!(
+                        &base.analysis,
+                        study::StudyAnalysis::Native(AnalysisSpec::HarmonicBalance {
+                            verbose: true,
+                            ..
+                        })
+                    )
+                })
             }
             _ => false,
         },

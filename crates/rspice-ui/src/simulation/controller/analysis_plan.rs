@@ -532,7 +532,8 @@ impl SimulationController {
             )
             .map_err(|error| error.to_string())?;
             (
-                self.analysis_spec_to_config(&producer_state, &producer_spec)?,
+                self.analysis_spec_to_config(&producer_state, &producer_spec)?
+                    .into(),
                 Some(crate::simulation::runner::study::StudyPostprocess {
                     producer_instance_id: producer.id(),
                     producer_source_revision: plan.revision(),
@@ -545,8 +546,16 @@ impl SimulationController {
                     request: spec.clone(),
                 }),
             )
+        } else if matches!(spec, AnalysisSpec::HarmonicBalance { .. }) {
+            (
+                crate::simulation::runner::study::StudyAnalysis::Native(spec.clone()),
+                None,
+            )
         } else {
-            (self.analysis_spec_to_config(&projected, &spec)?, None)
+            (
+                self.analysis_spec_to_config(&projected, &spec)?.into(),
+                None,
+            )
         };
         analysis.validate().map_err(|errors| errors.join("; "))?;
         Ok(Some(crate::simulation::runner::study::StudyRunConfig {
@@ -696,6 +705,101 @@ mod tests {
     use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
 
     #[test]
+    fn hb_study_freezes_the_selected_instance_and_authenticates_its_native_settings() {
+        use crate::simulation::dialog::{
+            HbDialogState, McDialogState,
+            hb::{HbConfig, HbSolverType, HbToneConfig},
+            mc::McConfig,
+        };
+        use crate::simulation::runner::study::StudyAnalysis;
+        let mut state = AppState::default();
+        let plan = state.sim_setup.analysis_plan.as_mut().unwrap();
+        let (op, _) = plan.insert(AnalysisKind::OperatingPoint).unwrap();
+        let (hb, _) = plan.insert(AnalysisKind::HarmonicBalance).unwrap();
+        plan.bind_dependency(hb, AnalysisKind::OperatingPoint, op)
+            .unwrap();
+        plan.edit(hb, |draft| {
+            *draft = AnalysisDraft::HarmonicBalance(HbDialogState::from_config(&HbConfig {
+                fundamental_freq: 1000.0,
+                fundamental_source: Some("V1".into()),
+                num_harmonics: 2,
+                additional_tones: vec![
+                    HbToneConfig::new(2000.0, 2)
+                        .with_source("V2")
+                        .with_name("second"),
+                ],
+                oversample: 3,
+                max_mixing_order: 2,
+                reltol: 2e-7,
+                abstol: 3e-12,
+                maxiter: 73,
+                damping: 0.8,
+                min_damping: 0.02,
+                collocation_points: Some(31),
+                solver: HbSolverType::Krylov,
+                gmres_restart: 17,
+                source_stepping: true,
+                use_exact_jacobian: false,
+                verbose: true,
+            }));
+        })
+        .unwrap();
+        let (mc, _) = plan.insert(AnalysisKind::MonteCarlo).unwrap();
+        plan.edit(mc, |draft| {
+            *draft = AnalysisDraft::MonteCarlo(McDialogState::from_config(&McConfig {
+                base_analysis: Some(hb),
+                measurements: vec!["bin:1:magnitude:V(out)".into()],
+                ..Default::default()
+            }));
+        })
+        .unwrap();
+        let frozen = plan.freeze().unwrap();
+        plan.edit(hb, |draft| {
+            let AnalysisDraft::HarmonicBalance(draft) = draft else {
+                unreachable!()
+            };
+            draft.fundamental = "3k".into();
+            draft.verbose = false;
+        })
+        .unwrap();
+        let sealed = state
+            .model_library_manager
+            .seal_execution_sources()
+            .unwrap();
+        let queue = SimulationController::new()
+            .build_queue_from_plan(&state, &frozen, &sealed)
+            .unwrap();
+        let task = queue.iter().find(|task| task.instance_id() == mc).unwrap();
+        let base = task
+            .queued_analysis()
+            .spec_options
+            .study_base
+            .as_ref()
+            .unwrap();
+        assert_eq!(base.instance_id, hb);
+        let StudyAnalysis::Native(spec) = &base.analysis else {
+            panic!("native base")
+        };
+        let selected = queue.iter().find(|task| task.instance_id() == hb).unwrap();
+        assert_eq!(spec, &selected.queued_analysis().spec);
+        assert!(
+            matches!(spec, AnalysisSpec::HarmonicBalance { tones, verbose: true, .. } if tones[0].frequency == 1000.0)
+        );
+        let mut changed = task.queued_analysis().clone();
+        let StudyAnalysis::Native(AnalysisSpec::HarmonicBalance {
+            collocation_points, ..
+        }) = &mut changed.spec_options.study_base.as_mut().unwrap().analysis
+        else {
+            unreachable!()
+        };
+        *collocation_points = Some(33);
+        assert_ne!(
+            task.config_digest(),
+            PreparedTask::new(mc, task.source_revision(), vec![], "MC", changed).config_digest()
+        );
+    }
+
+    #[test]
     fn spectral_study_freezes_the_bound_transient_and_all_postprocess_settings() {
         use crate::simulation::dialog::{McDialogState, mc::McConfig};
         for kind in [AnalysisKind::Fourier, AnalysisKind::Fft] {
@@ -783,7 +887,7 @@ mod tests {
                 .study_base
                 .as_ref()
                 .unwrap();
-            let AnalysisConfig::Transient(config) = &base.analysis else {
+            let Some(AnalysisConfig::Transient(config)) = base.analysis.as_basic() else {
                 panic!("transient producer")
             };
             assert_eq!(config.stop_time, 0.001);
@@ -806,7 +910,8 @@ mod tests {
                         _ => unreachable!(),
                     },
                     _ => {
-                        let AnalysisConfig::Transient(config) = &mut base.analysis else {
+                        let Some(AnalysisConfig::Transient(config)) = base.analysis.as_basic_mut()
+                        else {
                             unreachable!()
                         };
                         config.max_timestep = Some(1e-6);
@@ -926,7 +1031,7 @@ mod tests {
             .as_ref()
             .unwrap();
         assert_eq!(base.instance_id, ac);
-        let AnalysisConfig::Ac(config) = &base.analysis else {
+        let Some(AnalysisConfig::Ac(config)) = base.analysis.as_basic() else {
             panic!("AC base")
         };
         assert_eq!(config.stop_freq, 1000.0);
@@ -950,7 +1055,7 @@ mod tests {
                 2 => base.measurements = vec!["last:V(out)".into()],
                 3 => base.numeric_options = ".OPTIONS RELTOL=0.02".into(),
                 4 => {
-                    let AnalysisConfig::Ac(config) = &mut base.analysis else {
+                    let Some(AnalysisConfig::Ac(config)) = base.analysis.as_basic_mut() else {
                         unreachable!()
                     };
                     config.stop_freq = 2000.0;
@@ -1116,7 +1221,10 @@ mod tests {
             let changed = PreparedTask::new(opt, task.source_revision(), vec![], "OPT", queued);
             assert_ne!(task.config_digest(), changed.config_digest());
         }
-        assert!(matches!(base.analysis, AnalysisConfig::Ac(_)));
+        assert!(matches!(
+            base.analysis.as_basic(),
+            Some(AnalysisConfig::Ac(_))
+        ));
     }
 
     #[test]

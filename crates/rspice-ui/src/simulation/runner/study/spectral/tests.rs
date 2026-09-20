@@ -50,7 +50,8 @@ fn study(fft: bool) -> StudyRunConfig {
             start_time: 0.0,
             max_timestep: Some(2e-6),
             uic: false,
-        }),
+        })
+        .into(),
         analysis_line: line,
         numeric_options: String::new(),
         instance_id: AnalysisInstanceId::new(),

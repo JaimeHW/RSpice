@@ -247,7 +247,7 @@ mod tests {
             instance_id: AnalysisInstanceId::new(),
             source_revision: ObjectRevision::INITIAL,
             analysis_line: analysis.to_spice(),
-            analysis,
+            analysis: analysis.into(),
             numeric_options: ".OPTIONS RELTOL=1e-5".into(),
             measurements: vec![measurement.into()],
             histogram_bins: 20,
