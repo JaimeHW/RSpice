@@ -1,4 +1,5 @@
 //! Authenticated QPSS reuse and arbitrary-dimensional QPAC source/observation binding.
+mod card;
 use super::*;
 use crate::analysis::quasi_periodic::{QuasiPeriodicAcConfig, QuasiPeriodicAcSolution};
 
@@ -34,12 +35,12 @@ impl QpacRequest {
                 "input and output tuples need the same number of coordinates (at least two)",
             ));
         }
-        if self.input_source.trim().is_empty()
-            || self.output_node.trim().is_empty()
-            || self.output_ref.trim().is_empty()
+        if [&self.input_source, &self.output_node, &self.output_ref]
+            .iter()
+            .any(|name| name.trim().is_empty() || name.contains(['\r', '\n']))
         {
             return Err(qpac_error(
-                "input source, output node and reference are required",
+                "input source, output node and reference must be nonempty single-line names",
             ));
         }
         if !self.magnitude.is_finite() || self.magnitude <= 0.0 || !self.phase_degrees.is_finite() {
