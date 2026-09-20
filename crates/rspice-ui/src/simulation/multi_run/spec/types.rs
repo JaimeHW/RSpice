@@ -666,10 +666,12 @@ pub enum AnalysisSpec {
         output_node: String,
         output_ref: String,
         input_source: String,
-        lattice_min: [i32; 2],
-        lattice_max: [i32; 2],
+        lattice_min: Vec<i32>,
+        lattice_max: Vec<i32>,
         integrated_noise: bool,
         contributor_ranking: bool,
+        #[serde(default)]
+        controls: super::qpnoise::QpnoiseControls,
     },
     /// Quasi-periodic translated transfer.
     Qpxf {

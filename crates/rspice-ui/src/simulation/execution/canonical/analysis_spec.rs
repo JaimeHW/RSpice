@@ -984,22 +984,59 @@ pub(super) fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &Analysis
             lattice_max,
             integrated_noise,
             contributor_ranking,
+            controls,
         } => {
-            writer.f64(*start_freq);
-            writer.f64(*stop_freq);
-            writer.usize(*points_per_unit);
-            encode_frequency_sweep(writer, *sweep);
-            writer.string(output_node);
-            writer.string(output_ref);
-            writer.string(input_source);
-            for value in lattice_min {
-                writer.i32(*value);
-            }
-            for value in lattice_max {
-                writer.i32(*value);
+            let generated = controls.explicit_frequencies.is_none();
+            writer.f64(if generated { *start_freq } else { 0.0 });
+            writer.f64(if generated { *stop_freq } else { 0.0 });
+            writer.usize(if generated { *points_per_unit } else { 1 });
+            encode_frequency_sweep(
+                writer,
+                if generated {
+                    *sweep
+                } else {
+                    FrequencySweep::Linear
+                },
+            );
+            writer.string(if controls.branch_current.is_none() {
+                output_node
+            } else {
+                ""
+            });
+            writer.string(if controls.branch_current.is_none() {
+                output_ref
+            } else {
+                ""
+            });
+            writer.string(if controls.input_referral {
+                input_source
+            } else {
+                ""
+            });
+            let legacy_range = controls.noise_lattices.is_none();
+            // Preserve the original two-tone layout; wider tuples get a versioned extension.
+            for values in [lattice_min, lattice_max] {
+                if legacy_range && lattice_min.len() == 2 && lattice_max.len() == 2 {
+                    for value in values {
+                        writer.i32(*value);
+                    }
+                } else {
+                    writer.i32(0);
+                    writer.i32(0);
+                }
             }
             writer.bool(*integrated_noise);
             writer.bool(*contributor_ranking);
+            if legacy_range && (lattice_min.len() != 2 || lattice_max.len() != 2) {
+                writer.string("qpnoise-range-dimensions-v1");
+                for values in [lattice_min, lattice_max] {
+                    writer.sequence(values.len());
+                    for value in values {
+                        writer.i32(*value);
+                    }
+                }
+            }
+            encode_qpnoise_controls(writer, controls, *integrated_noise);
         }
         AnalysisSpec::Qpxf {
             group_delay,
@@ -1453,4 +1490,121 @@ fn encode_qpxf_controls(
     writer.usize(controls.solver.max_cycles);
     writer.f64(controls.solver.relative_tolerance);
     writer.f64(controls.group_delay_magnitude_floor);
+}
+
+/// Authenticate every selected measurement, source window and numerical setting.
+fn encode_qpnoise_controls(
+    w: &mut CanonicalWriter,
+    c: &crate::simulation::multi_run::QpnoiseControls,
+    integrated_noise: bool,
+) {
+    use rspice_core::analysis::quasi_periodic::QuasiPeriodicLinearMethod;
+    use rspice_core::engine::{
+        QpnoiseFrequencyAxis, QpnoiseIntegrationMethod, QpnoiseLattices, QpnoiseObservation,
+        QpnoiseSources,
+    };
+    fn tuple(w: &mut CanonicalWriter, t: &[i32]) {
+        w.sequence(t.len());
+        for k in t {
+            w.i32(*k);
+        }
+    }
+    let mut normalized = c.clone();
+    if !integrated_noise {
+        normalized.integration_band = None;
+        normalized.integration_method = QpnoiseIntegrationMethod::Linear;
+    }
+    if !normalized.input_referral {
+        normalized.input_lattice.clear();
+    }
+    let c = &normalized;
+    if c == &crate::simulation::multi_run::QpnoiseControls::default() {
+        return;
+    }
+    w.string("qpnoise-controls-v1");
+    w.u8(match c.frequency_axis {
+        QpnoiseFrequencyAxis::Output => 0,
+        QpnoiseFrequencyAxis::Offset => 1,
+    });
+    w.option(c.explicit_frequencies.as_ref(), |w, v| {
+        encode_f64_slice(w, v)
+    });
+    w.bool(c.input_referral);
+    tuple(w, &c.input_lattice);
+    tuple(w, &c.output_lattice);
+    w.option(c.branch_current.as_ref(), |w, b| w.string(b));
+    w.sequence(c.additional_outputs.len());
+    for output in &c.additional_outputs {
+        match &output.observation {
+            QpnoiseObservation::Voltage { positive, negative } => {
+                w.u8(0);
+                w.string(positive);
+                w.string(negative);
+            }
+            QpnoiseObservation::BranchCurrent { branch } => {
+                w.u8(1);
+                w.string(branch);
+            }
+        }
+        tuple(w, &output.lattice);
+    }
+    w.option(c.noise_lattices.as_ref(), |w, l| match l {
+        QpnoiseLattices::AllRetained => w.u8(0),
+        QpnoiseLattices::Explicit { tuples } => {
+            w.u8(1);
+            w.sequence(tuples.len());
+            for t in tuples {
+                tuple(w, t);
+            }
+        }
+        QpnoiseLattices::MaxOrders { orders } => {
+            w.u8(2);
+            w.sequence(orders.len());
+            for n in orders {
+                w.usize(*n);
+            }
+        }
+        QpnoiseLattices::Range { minimum, maximum } => {
+            w.u8(3);
+            tuple(w, minimum);
+            tuple(w, maximum);
+        }
+    });
+    match &c.sources {
+        QpnoiseSources::All => w.u8(0),
+        QpnoiseSources::Only(names) | QpnoiseSources::Except(names) => {
+            w.u8(if matches!(c.sources, QpnoiseSources::Only(_)) {
+                1
+            } else {
+                2
+            });
+            w.sequence(names.len());
+            for name in names {
+                w.string(name);
+            }
+        }
+    }
+    w.option(c.integration_band.as_ref(), |w, b| encode_f64_slice(w, b));
+    w.u8(match c.integration_method {
+        QpnoiseIntegrationMethod::Linear => 0,
+        QpnoiseIntegrationMethod::LogLog => 1,
+    });
+    w.option(c.noise_figure.as_ref(), |w, f| {
+        w.string(&f.source_resistor);
+        w.f64(f.reference_temperature);
+        w.option(f.reference_lattices.as_ref(), |w, ts| {
+            w.sequence(ts.len());
+            for t in ts {
+                tuple(w, t);
+            }
+        });
+    });
+    w.u8(match c.solver.method {
+        QuasiPeriodicLinearMethod::Auto => 0,
+        QuasiPeriodicLinearMethod::Direct => 1,
+        QuasiPeriodicLinearMethod::Krylov => 2,
+    });
+    w.usize(c.solver.restart);
+    w.usize(c.solver.max_cycles);
+    w.f64(c.solver.relative_tolerance);
 }

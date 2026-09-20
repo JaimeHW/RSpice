@@ -304,10 +304,11 @@ mod tests {
                 input_source: "V1".into(),
                 output_node: "out".into(),
                 output_ref: "0".into(),
-                lattice_min: [-1, -1],
-                lattice_max: [1, 1],
+                lattice_min: vec![-1, -1],
+                lattice_max: vec![1, 1],
                 integrated_noise: true,
                 contributor_ranking: true,
+                controls: Default::default(),
             },
         ]
     }

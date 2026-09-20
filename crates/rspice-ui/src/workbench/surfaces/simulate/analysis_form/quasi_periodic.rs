@@ -2,6 +2,8 @@
 //! its independent-phase orbit. Each analysis retains its own source,
 //! observation, sideband selection, frequency axis and numerical controls.
 
+mod noise;
+
 use egui::Ui;
 
 use crate::simulation::plan::{
@@ -183,13 +185,7 @@ pub(super) fn noise_fields(
     policy: QuantityPresentationPolicy,
     locale: UiNumberLocale,
 ) {
-    frequency_sweep_fields(ui, &mut setup.sweep, policy, locale);
-    input_row(ui, "Output", &mut setup.output_node);
-    input_row(ui, "Output ref", &mut setup.output_ref);
-    input_row(ui, "Input source", &mut setup.input_source);
-    input_row(ui, "Lattice ranges", &mut setup.lattice_products);
-    switch_row(ui, "Integrated noise", &mut setup.integrated_noise);
-    switch_row(ui, "Contributor ranking", &mut setup.contributor_ranking);
+    noise::fields(ui, setup, policy, locale);
 }
 
 /// Render all QPXF sweep, source, observation, lattice and numerical controls.

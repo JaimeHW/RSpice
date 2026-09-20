@@ -1038,7 +1038,7 @@ fn consumers_for(
                 }
             }
             AnalysisDraft::Qpnoise(qpnoise) => {
-                if names(&qpnoise.input_source, reference) {
+                if qpnoise.input_referral && names(&qpnoise.input_source, reference) {
                     record("quasi-periodic noise input");
                 }
             }

@@ -624,6 +624,7 @@ fn command_name(command: &AnalysisCommand) -> &'static str {
         AnalysisCommand::Qpss(_) => ".qpss",
         AnalysisCommand::Qpac(_) => ".qpac",
         AnalysisCommand::Qpxf(_) => ".qpxf",
+        AnalysisCommand::Qpnoise(_) => ".qpnoise",
         AnalysisCommand::Sp { .. } => ".sp",
         AnalysisCommand::Stb { .. } => ".stb",
         AnalysisCommand::Disto { .. } => ".disto",
@@ -889,6 +890,17 @@ fn command_to_queue_item(
             spec_options,
             analysis_line: format!(".ac data={table_name}"),
         }),
+        AnalysisCommand::Qpnoise(card) => {
+            let spec = AnalysisSpec::from_qpnoise_card(card)?;
+            let analysis_line = spec.qpnoise_card()?.to_spice();
+            Ok(QueuedAnalysis {
+                numeric_override: None,
+                spec,
+                config: None,
+                spec_options,
+                analysis_line,
+            })
+        }
         AnalysisCommand::Qpxf(card) => {
             let spec = AnalysisSpec::from_qpxf_card(card)?;
             let analysis_line = spec.qpxf_card()?.to_spice();

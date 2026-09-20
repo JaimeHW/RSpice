@@ -90,24 +90,7 @@ impl SimulationController {
                 }
             }
             AnalysisDraft::Qpac(draft) => draft.to_spec()?,
-            AnalysisDraft::Qpnoise(draft) => {
-                let (start_freq, stop_freq, points_per_unit, sweep) =
-                    parse_manifest_sweep(&draft.sweep)?;
-                let (lattice_min, lattice_max) = parse_lattice_ranges(&draft.lattice_products)?;
-                AnalysisSpec::Qpnoise {
-                    start_freq,
-                    stop_freq,
-                    points_per_unit,
-                    sweep,
-                    output_node: draft.output_node.trim().to_owned(),
-                    output_ref: draft.output_ref.trim().to_owned(),
-                    input_source: draft.input_source.trim().to_owned(),
-                    lattice_min,
-                    lattice_max,
-                    integrated_noise: draft.integrated_noise,
-                    contributor_ranking: draft.contributor_ranking,
-                }
-            }
+            AnalysisDraft::Qpnoise(draft) => draft.to_spec()?,
             AnalysisDraft::Qpxf(draft) => draft.to_spec()?,
             AnalysisDraft::TransientNoise(draft) => AnalysisSpec::TransientNoise {
                 stop_time: parse_si(&draft.stop_time, "TNOISE stop time")?,
@@ -1025,27 +1008,6 @@ fn parse_manifest_ports(
             })
         })
         .collect()
-}
-
-fn parse_lattice_ranges(text: &str) -> Result<([i32; 2], [i32; 2]), String> {
-    let ranges = text
-        .split(',')
-        .map(|range| {
-            let bounds = range
-                .split(':')
-                .map(|value| value.trim().parse::<i32>())
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(|_| "QPNOISE lattice ranges require integers".to_owned())?;
-            let [min, max]: [i32; 2] = bounds
-                .try_into()
-                .map_err(|_| "each QPNOISE lattice range requires min:max".to_owned())?;
-            Ok((min, max))
-        })
-        .collect::<Result<Vec<_>, String>>()?;
-    let [(min0, max0), (min1, max1)]: [(i32, i32); 2] = ranges
-        .try_into()
-        .map_err(|_| "QPNOISE requires exactly two lattice ranges".to_owned())?;
-    Ok(([min0, min1], [max0, max1]))
 }
 
 #[cfg(test)]

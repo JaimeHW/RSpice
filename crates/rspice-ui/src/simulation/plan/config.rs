@@ -28,7 +28,11 @@ use super::AnalysisKind;
 mod frequency_table;
 mod periodic_network;
 mod qpac;
+mod qpnoise;
 mod qpxf;
+pub use qpnoise::{
+    QpnoiseLatticeSelection, QpnoiseOutputDraft, QpnoiseSourceSelection, QuasiPeriodicNoiseDraft,
+};
 pub use qpxf::{QpxfSidebandSelection, QpxfSourceSelection, QuasiPeriodicTransferDraft};
 mod quasi_periodic;
 pub use qpac::QuasiPeriodicAcDraft;
@@ -351,32 +355,6 @@ impl HbNoiseDraft {
         };
         reference.validate()?;
         Ok(Some(reference))
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct QuasiPeriodicNoiseDraft {
-    pub sweep: FrequencySweepDraft,
-    pub output_node: String,
-    pub output_ref: String,
-    pub input_source: String,
-    pub lattice_products: String,
-    pub integrated_noise: bool,
-    pub contributor_ranking: bool,
-}
-
-impl Default for QuasiPeriodicNoiseDraft {
-    fn default() -> Self {
-        Self {
-            sweep: FrequencySweepDraft::default(),
-            output_node: "out".to_owned(),
-            output_ref: "0".to_owned(),
-            input_source: "V1".to_owned(),
-            lattice_products: "-3:3, -3:3".to_owned(),
-            integrated_noise: true,
-            contributor_ranking: true,
-        }
     }
 }
 
@@ -838,10 +816,7 @@ impl AnalysisDraft {
                 "{}→{} · {}…{}",
                 draft.input_source, draft.output_node, draft.sweep.start, draft.sweep.stop
             )),
-            Self::Qpnoise(draft) => Some(format!(
-                "{} · {}…{} · lattice {}",
-                draft.output_node, draft.sweep.start, draft.sweep.stop, draft.lattice_products
-            )),
+            Self::Qpnoise(draft) => Some(draft.summary()),
             Self::Qpxf(draft) => Some(draft.summary()),
             Self::TransientNoise(draft) => Some(format!(
                 "stop {} · step {} · seed {}",
@@ -1354,19 +1329,6 @@ fn parse_i32_tuple(text: &str, field: &str) -> Result<Vec<i32>, String> {
     Ok(values)
 }
 
-fn validate_sweep(draft: &FrequencySweepDraft) -> Result<(), String> {
-    let start = parse_positive(&draft.start, "start frequency")?;
-    let stop = parse_positive(&draft.stop, "stop frequency")?;
-    if stop <= start {
-        return Err("stop frequency must be greater than start frequency".to_owned());
-    }
-    parse_positive_usize(&draft.points, "sweep point count")?;
-    if draft.sweep > 2 {
-        return Err("frequency sweep mode is outside the supported schema".to_owned());
-    }
-    Ok(())
-}
-
 fn validate_hbnoise(draft: &HbNoiseDraft) -> Option<String> {
     (|| {
         if draft.sweep.sweep > 2 {
@@ -1402,35 +1364,7 @@ fn validate_qpac(draft: &QuasiPeriodicAcDraft) -> Option<String> {
 }
 
 fn validate_qpnoise(draft: &QuasiPeriodicNoiseDraft) -> Option<String> {
-    (|| {
-        validate_sweep(&draft.sweep)?;
-        if draft.output_node.trim().is_empty() || draft.input_source.trim().is_empty() {
-            return Err("QPNOISE requires an output node and input source".to_owned());
-        }
-        let ranges = draft
-            .lattice_products
-            .split(',')
-            .map(|range| {
-                let values = range
-                    .split(':')
-                    .map(|bound| bound.trim().parse::<i32>())
-                    .collect::<Result<Vec<_>, _>>()
-                    .map_err(|_| "lattice products must use integer min:max bounds".to_owned())?;
-                let [minimum, maximum]: [i32; 2] = values
-                    .try_into()
-                    .map_err(|_| "each lattice product must contain one min:max pair".to_owned())?;
-                if minimum > maximum {
-                    return Err("lattice product minimum must not exceed maximum".to_owned());
-                }
-                Ok([minimum, maximum])
-            })
-            .collect::<Result<Vec<_>, String>>()?;
-        if ranges.len() != 2 {
-            return Err("lattice products must contain exactly two ranges".to_owned());
-        }
-        Ok(())
-    })()
-    .err()
+    draft.to_spec().err()
 }
 
 fn validate_qpxf(draft: &QuasiPeriodicTransferDraft) -> Option<String> {

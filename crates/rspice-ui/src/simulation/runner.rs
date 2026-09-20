@@ -1076,14 +1076,26 @@ fn initial_status_for_spec(
             start_freq,
             stop_freq,
             ..
-        }
-        | AnalysisSpec::Qpnoise {
-            start_freq,
-            stop_freq,
-            ..
         } => SimulationStatus::NoiseAnalysis {
             freq: *start_freq,
             stop_freq: *stop_freq,
+        },
+        AnalysisSpec::Qpnoise {
+            start_freq,
+            stop_freq,
+            controls,
+            ..
+        } => SimulationStatus::NoiseAnalysis {
+            freq: controls
+                .explicit_frequencies
+                .as_ref()
+                .and_then(|v| v.first().copied())
+                .unwrap_or(*start_freq),
+            stop_freq: controls
+                .explicit_frequencies
+                .as_ref()
+                .and_then(|v| v.last().copied())
+                .unwrap_or(*stop_freq),
         },
         AnalysisSpec::TransientNoise { stop_time, .. } => SimulationStatus::Transient {
             time: 0.0,

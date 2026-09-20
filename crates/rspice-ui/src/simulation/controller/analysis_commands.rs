@@ -95,7 +95,8 @@ impl SimulationController {
                 .map_err(|error| error.to_string()),
             AnalysisSpec::Qpac { .. } => Ok(spec.qpac_card()?.to_spice()),
             AnalysisSpec::Qpxf { .. } => Ok(spec.qpxf_card()?.to_spice()),
-            AnalysisSpec::Qpnoise { .. } | AnalysisSpec::Reliability { .. } => Err(format!(
+            AnalysisSpec::Qpnoise { .. } => Ok(spec.qpnoise_card()?.to_spice()),
+            AnalysisSpec::Reliability { .. } => Err(format!(
                 "{} is configured but cannot produce an engine directive: {}",
                 spec.run_type().display_name(),
                 manifest_spec_execution_blocker(spec)

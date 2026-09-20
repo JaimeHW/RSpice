@@ -5,7 +5,9 @@
 //! not execute.
 
 mod qpac;
+mod qpnoise;
 mod qpxf;
+pub use qpnoise::QpnoiseControls;
 pub use qpxf::QpxfControls;
 mod qpss;
 pub use qpac::QpacControls;

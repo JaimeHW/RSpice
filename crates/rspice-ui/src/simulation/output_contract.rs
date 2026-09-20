@@ -734,15 +734,10 @@ fn deterministic_sample_count(
             points_per_unit,
             sweep,
             ..
-        }
-        | AnalysisSpec::Qpnoise {
-            start_freq,
-            stop_freq,
-            points_per_unit,
-            sweep,
-            ..
         } => frequency_point_count(*start_freq, *stop_freq, *points_per_unit, *sweep),
-        AnalysisSpec::Qpac { .. } | AnalysisSpec::Qpxf { .. } => quasi_periodic_sample_count(spec),
+        AnalysisSpec::Qpac { .. } | AnalysisSpec::Qpxf { .. } | AnalysisSpec::Qpnoise { .. } => {
+            quasi_periodic_sample_count(spec)
+        }
         AnalysisSpec::AcData { frequencies, .. } => Some(frequencies.len()),
         AnalysisSpec::Noise {
             start_freq,
@@ -786,6 +781,9 @@ fn quasi_periodic_sample_count(spec: &AnalysisSpec) -> Option<usize> {
     match spec {
         AnalysisSpec::Qpac { .. } => spec.qpac_card().ok().and_then(|card| {
             rspice_core::engine::QpacRequest::validate_qpac_card(&card, &limits).ok()
+        }),
+        AnalysisSpec::Qpnoise { .. } => spec.qpnoise_card().ok().and_then(|card| {
+            rspice_core::engine::QpnoiseRequest::validate_qpnoise_card(&card, &limits).ok()
         }),
         AnalysisSpec::Qpxf { .. } => spec.qpxf_card().ok().and_then(|card| {
             rspice_core::engine::QpxfRequest::validate_qpxf_card(&card, &limits).ok()

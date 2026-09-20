@@ -513,10 +513,11 @@ mod tests {
                 output_node: "out".to_owned(),
                 output_ref: "0".to_owned(),
                 input_source: "V1".to_owned(),
-                lattice_min: [-1, -1],
-                lattice_max: [1, 1],
+                lattice_min: vec![-1, -1],
+                lattice_max: vec![1, 1],
                 integrated_noise: true,
                 contributor_ranking: true,
+                controls: Default::default(),
             },
             AnalysisSpec::Reliability {
                 target_years: vec![1.0, 10.0],

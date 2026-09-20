@@ -403,41 +403,9 @@ pub(super) fn validate(spec: &AnalysisSpec) -> Result<(), String> {
         }
         AnalysisSpec::Qpac { .. } => spec.qpac_card().map(|_| ()),
         AnalysisSpec::Qpxf { .. } => spec.qpxf_card().map(|_| ()),
-        AnalysisSpec::Qpnoise {
-            start_freq,
-            stop_freq,
-            points_per_unit,
-            output_node,
-            input_source,
-            lattice_min,
-            lattice_max,
-            ..
-        } => {
-            validate_frequency_sweep(*start_freq, *stop_freq, *points_per_unit)?;
-            if output_node.trim().is_empty() || input_source.trim().is_empty() {
-                return Err("QPNOISE requires an output node and input source".to_owned());
-            }
-            if lattice_min
-                .iter()
-                .zip(lattice_max)
-                .any(|(min, max)| min > max)
-            {
-                return Err("QPNOISE lattice minima must not exceed maxima".to_owned());
-            }
-            Ok(())
-        }
+        AnalysisSpec::Qpnoise { .. } => spec.qpnoise_card().map(|_| ()),
         other => Err(super::misrouted_specification("periodic", other)),
     }
-}
-
-pub(super) fn validate_frequency_sweep(start: f64, stop: f64, points: usize) -> Result<(), String> {
-    if !start.is_finite() || start <= 0.0 || !stop.is_finite() || stop <= start {
-        return Err("frequency sweep requires finite 0 < start < stop".to_owned());
-    }
-    if points == 0 {
-        return Err("frequency sweep point count must be > 0".to_owned());
-    }
-    Ok(())
 }
 
 pub(super) fn validate_qpss(

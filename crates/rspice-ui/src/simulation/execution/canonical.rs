@@ -8,6 +8,8 @@ mod analysis_spec;
 #[cfg(test)]
 mod qpac_controls_tests;
 #[cfg(test)]
+mod qpnoise_controls_tests;
+#[cfg(test)]
 mod qpss_controls_tests;
 #[cfg(test)]
 mod qpxf_controls_tests;
