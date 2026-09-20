@@ -108,19 +108,6 @@ impl AcAnalysisConfig {
             Err(errors)
         }
     }
-
-    /// Generate array of frequency points based on sweep configuration
-    ///
-    /// Delegates to the core ngspice-exact generator so interactive runs
-    /// match what the exported .ac deck produces in the CLI or ngspice.
-    pub fn generate_frequencies(&self) -> Vec<f64> {
-        rspice_core::analysis::ac::ac_sweep_frequencies(
-            self.sweep_type.freq_variation(),
-            self.num_points,
-            self.start_freq,
-            self.stop_freq,
-        )
-    }
 }
 
 /// AC analysis over a frequency axis the author states point by point.

@@ -21,7 +21,25 @@ impl EngineBridge {
         abort: &dyn AbortSignal,
     ) -> Result<SimulationResult, SimulationError> {
         ensure_not_aborted(abort)?;
-        let frequencies = config.generate_frequencies();
+        let frequencies = rspice_core::analysis::ac::try_ac_sweep_frequencies_bounded_with_abort(
+            config.sweep_type.freq_variation(),
+            config.num_points,
+            config.start_freq,
+            config.stop_freq,
+            self.engine.config().resource_limits.max_analysis_points,
+            abort,
+        )
+        .map_err(|error| match error {
+            rspice_core::analysis::FrequencyGridError::Aborted => SimulationError::Aborted,
+            rspice_core::analysis::FrequencyGridError::LimitExceeded { requested, limit } => {
+                SimulationError::ResourceLimit {
+                    resource: "analysis_points".into(),
+                    requested,
+                    limit,
+                }
+            }
+            error => SimulationError::InvalidConfig(format!("AC frequency grid: {error}")),
+        })?;
         ensure_not_aborted(abort)?;
         self.run_ac_frequencies(netlist, frequencies, abort)
     }
