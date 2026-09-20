@@ -21,6 +21,7 @@ mod native_bjt;
 mod newton;
 mod nonlinear_api;
 mod periodic_ac;
+mod quasi_periodic;
 mod result_builder;
 
 pub(crate) use devices::ScaledNonnegative;

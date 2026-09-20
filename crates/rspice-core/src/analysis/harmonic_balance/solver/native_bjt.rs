@@ -169,6 +169,24 @@ impl HbSolver {
         Ok(f)
     }
 
+    /// The same native F/Q implementation, sampled at an independent-phase
+    /// state. No HB time grid or common fundamental enters this boundary.
+    pub(super) fn quasi_periodic_native_sample(
+        &mut self,
+        solution: &[Value],
+        jacobian: bool,
+    ) -> Result<crate::analysis::quasi_periodic::solve::Sample, HbError> {
+        let mut f = NativeStamp::new(solution.len());
+        let mut q = NativeStamp::new(solution.len());
+        self.sample_native_bjts(solution, &mut f, &mut q)?;
+        Ok(crate::analysis::quasi_periodic::solve::Sample {
+            current: f.contributions,
+            charge: q.contributions,
+            conductance: if jacobian { f.jacobian } else { Vec::new() },
+            capacitance: if jacobian { q.jacobian } else { Vec::new() },
+        })
+    }
+
     pub(super) fn add_native_dc_residual(
         &mut self,
         state: &mut HbSolverState,
