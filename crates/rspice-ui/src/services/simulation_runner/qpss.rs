@@ -37,15 +37,27 @@ pub(crate) fn run_qpss_analysis_on_materialized_with_abort(
     config: QpssConfig,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<QpssData> {
+    run_qpss_analysis_with_dc_seed_on_materialized_with_abort(netlist, config, None, abort)
+}
+
+/// The caller has applied the selected OP environment to this physical circuit.
+pub(crate) fn run_qpss_analysis_with_dc_seed_on_materialized_with_abort(
+    netlist: &rspice_core::Netlist,
+    config: QpssConfig,
+    dc_seed: Option<&rspice_core::engine::PeriodicDcOperatingPointSeed>,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<QpssData> {
     ensure_not_aborted(abort)?;
     let engine = build_resolved_periodic_engine(
         &netlist,
         config.solver.relative_tolerance,
         "QPSS resolved engine configuration is invalid",
     )?;
-    let point = engine
-        .run_qpss_with_abort(&netlist, config, abort)
-        .map_err(|error| ServiceRunError::from_core("QPSS", error))?;
+    let point = match dc_seed {
+        Some(seed) => engine.run_qpss_with_dc_seed_and_abort(netlist, config, seed, abort),
+        None => engine.run_qpss_with_abort(netlist, config, abort),
+    }
+    .map_err(|error| ServiceRunError::from_core("QPSS", error))?;
     engine
         .validate_qpss_operating_point_with_abort(&netlist, &point, abort)
         .map_err(|error| ServiceRunError::from_core("QPSS retained state", error))?;

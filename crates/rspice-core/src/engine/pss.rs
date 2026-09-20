@@ -844,6 +844,10 @@ pub struct PssDcOperatingPointSeed {
     solution: Vec<Value>,
 }
 
+/// Shared exact MNA seed for shooting and quasiperiodic steady-state solvers.
+/// The original shooting API name remains available for compatibility.
+pub type PeriodicDcOperatingPointSeed = PssDcOperatingPointSeed;
+
 impl PssDcOperatingPointSeed {
     /// Construct a structurally self-consistent PSS DC seed.
     ///
@@ -918,7 +922,10 @@ impl PssDcOperatingPointSeed {
         Ok(())
     }
 
-    fn validate_for_circuit(&self, circuit: &CircuitData) -> Result<(), SimulationError> {
+    pub(super) fn validate_for_circuit(
+        &self,
+        circuit: &CircuitData,
+    ) -> Result<(), SimulationError> {
         let expected_node_names = circuit.node_names_sorted();
         let expected_branch_names = circuit.branch_names_sorted();
         if self.node_names != expected_node_names {

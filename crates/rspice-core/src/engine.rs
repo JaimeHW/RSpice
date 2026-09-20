@@ -159,8 +159,8 @@ pub use hb::{
 };
 pub use health::EngineHealthReport;
 pub use pss::{
-    PssAnalysisResult, PssContinuationState, PssDcOperatingPointSeed, PssError, PssOperatingPoint,
-    PssOperatingPointIdentity,
+    PeriodicDcOperatingPointSeed, PssAnalysisResult, PssContinuationState, PssDcOperatingPointSeed,
+    PssError, PssOperatingPoint, PssOperatingPointIdentity,
 };
 pub use pss_noise::{OscPnoiseResult, PeriodicNoiseResult};
 /// The spelling two event names are compared under, shared with the routes

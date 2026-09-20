@@ -111,6 +111,35 @@ impl Engine {
         config: QpssConfig,
         abort: &dyn AbortSignal,
     ) -> Result<QpssOperatingPoint, SimulationError> {
+        self.run_qpss_with_optional_dc_seed_and_abort(netlist, config, None, abort)
+    }
+
+    /// Initialize QPSS from the caller's exact configured OP, without solving
+    /// another default OP. The caller must reproduce the OP's physical
+    /// temperature and supply environment in this netlist/engine.
+    pub fn run_qpss_with_dc_seed_and_abort(
+        &self,
+        netlist: &Netlist,
+        config: QpssConfig,
+        seed: &crate::engine::PeriodicDcOperatingPointSeed,
+        abort: &dyn AbortSignal,
+    ) -> Result<QpssOperatingPoint, SimulationError> {
+        check_abort(abort)?;
+        if config.initial_state != QpssInitialState::DcOperatingPoint {
+            return Err(invalid(
+                "an explicit DC seed requires DC operating-point initialization",
+            ));
+        }
+        self.run_qpss_with_optional_dc_seed_and_abort(netlist, config, Some(seed), abort)
+    }
+
+    fn run_qpss_with_optional_dc_seed_and_abort(
+        &self,
+        netlist: &Netlist,
+        config: QpssConfig,
+        dc_seed: Option<&crate::engine::PeriodicDcOperatingPointSeed>,
+        abort: &dyn AbortSignal,
+    ) -> Result<QpssOperatingPoint, SimulationError> {
         check_abort(abort)?;
         let engine = self.resolved_for_netlist(netlist);
         config.validate_configuration()?;
@@ -124,6 +153,9 @@ impl Engine {
         );
         let producer = state::Producer::capture(netlist, &engine.config, &config)?;
         let circuit = engine.build_circuit_with_abort(netlist, abort)?;
+        if let Some(seed) = dc_seed {
+            seed.validate_for_circuit(&circuit)?;
+        }
         Self::ensure_no_mixed_signal_analysis(&circuit, "quasiperiodic steady-state analysis")?;
         let required_unknowns = circuit
             .num_nodes()
@@ -153,6 +185,7 @@ impl Engine {
                 &node_names,
                 &branch_names,
                 circuit.num_branches(),
+                dc_seed,
                 abort,
             )?),
         };
@@ -206,13 +239,26 @@ impl Engine {
         nodes: &[String],
         branches: &[String],
         canonical_branches: usize,
+        dc_seed: Option<&crate::engine::PeriodicDcOperatingPointSeed>,
         abort: &dyn AbortSignal,
     ) -> Result<Vec<Vec<Complex64>>, SimulationError> {
-        let dc = self.run_dc_op_with_abort(netlist, abort)?;
+        let internal_dc;
+        let (dc_nodes, voltages, dc_branches, currents) = if let Some(seed) = dc_seed {
+            let (voltages, currents) = seed.solution().split_at(seed.node_names().len());
+            (seed.node_names(), voltages, seed.branch_names(), currents)
+        } else {
+            internal_dc = self.run_dc_op_with_abort(netlist, abort)?;
+            (
+                internal_dc.node_names.as_slice(),
+                internal_dc.node_voltages.as_slice(),
+                internal_dc.branch_names.as_slice(),
+                internal_dc.branch_currents.as_slice(),
+            )
+        };
         let mut seed = vec![vec![Complex64::ZERO; grid.len()]; nodes.len() + branches.len()];
         for (names, available, values, offset) in [
-            (nodes, &dc.node_names, &dc.node_voltages, 0),
-            (branches, &dc.branch_names, &dc.branch_currents, nodes.len()),
+            (nodes, dc_nodes, voltages, 0),
+            (branches, dc_branches, currents, nodes.len()),
         ] {
             for (row, name) in names.iter().enumerate() {
                 check_abort(abort)?;

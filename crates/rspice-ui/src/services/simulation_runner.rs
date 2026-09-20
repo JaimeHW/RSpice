@@ -31,7 +31,10 @@ pub(crate) use qpac::run_qpac_analysis_from_qpss_on_materialized_with_abort;
 pub use qpac::run_qpac_analysis_from_qpss_with_source_path_and_abort;
 pub(crate) use qpnoise::run_qpnoise_analysis_from_qpss_on_materialized_with_abort;
 pub use qpnoise::run_qpnoise_analysis_from_qpss_with_source_path_and_abort;
-pub(crate) use qpss::run_qpss_analysis_on_materialized_with_abort;
+pub(crate) use qpss::{
+    run_qpss_analysis_on_materialized_with_abort,
+    run_qpss_analysis_with_dc_seed_on_materialized_with_abort,
+};
 pub(crate) use qpxf::run_qpxf_analysis_from_qpss_on_materialized_with_abort;
 pub use qpxf::run_qpxf_analysis_from_qpss_with_source_path_and_abort;
 mod reliability;
