@@ -499,14 +499,20 @@ impl SimulationController {
             .frozen_instance_projection(plan, base)
             .map_err(|error| error.to_string())?;
         let spec = self.analysis_draft_spec(&projected, base.draft())?;
-        let (analysis, postprocess) = if matches!(
-            spec,
-            AnalysisSpec::Fourier { .. } | AnalysisSpec::Fft { .. }
-        ) {
+        let producer_kind = match spec {
+            AnalysisSpec::Fourier { .. } | AnalysisSpec::Fft { .. } => {
+                Some(AnalysisKind::Transient)
+            }
+            AnalysisSpec::Hbsp { .. } | AnalysisSpec::Hbnoise { .. } => {
+                Some(AnalysisKind::HarmonicBalance)
+            }
+            _ => None,
+        };
+        let (analysis, postprocess) = if let Some(producer_kind) = producer_kind {
             let producers = base
                 .dependencies()
                 .iter()
-                .filter(|edge| edge.prerequisite() == AnalysisKind::Transient)
+                .filter(|edge| edge.prerequisite() == producer_kind)
                 .filter_map(|edge| {
                     plan.instances()
                         .iter()
@@ -514,10 +520,7 @@ impl SimulationController {
                 })
                 .collect::<Vec<_>>();
             let [producer] = producers.as_slice() else {
-                return Err(
-                    "A spectral study requires one explicitly bound, enabled transient producer"
-                        .into(),
-                );
+                return Err("A spectral study requires exactly one explicitly bound, enabled producer of the required analysis kind".into());
             };
             let mut producer_state = state.clone();
             producer_state.sim_setup = state
@@ -532,8 +535,12 @@ impl SimulationController {
             )
             .map_err(|error| error.to_string())?;
             (
-                self.analysis_spec_to_config(&producer_state, &producer_spec)?
-                    .into(),
+                if matches!(producer_spec, AnalysisSpec::HarmonicBalance { .. }) {
+                    crate::simulation::runner::study::StudyAnalysis::Native(producer_spec.clone())
+                } else {
+                    self.analysis_spec_to_config(&producer_state, &producer_spec)?
+                        .into()
+                },
                 Some(crate::simulation::runner::study::StudyPostprocess {
                     producer_instance_id: producer.id(),
                     producer_source_revision: plan.revision(),
@@ -797,6 +804,169 @@ mod tests {
             task.config_digest(),
             PreparedTask::new(mc, task.source_revision(), vec![], "MC", changed).config_digest()
         );
+    }
+
+    #[test]
+    fn hb_rf_study_freezes_exact_producer_consumer_and_noise_references() {
+        use crate::simulation::dialog::{McDialogState, mc::McConfig};
+        use crate::simulation::runner::study::StudyAnalysis;
+        for kind in [AnalysisKind::Hbsp, AnalysisKind::Hbnoise] {
+            let mut state = AppState::default();
+            let plan = state.sim_setup.analysis_plan.as_mut().unwrap();
+            let (op, _) = plan.insert(AnalysisKind::OperatingPoint).unwrap();
+            let (first, _) = plan.insert(AnalysisKind::HarmonicBalance).unwrap();
+            let (second, _) = plan.insert(AnalysisKind::HarmonicBalance).unwrap();
+            for (id, frequency) in [(first, "1meg"), (second, "2meg")] {
+                plan.bind_dependency(id, AnalysisKind::OperatingPoint, op)
+                    .unwrap();
+                plan.edit(id, |draft| {
+                    let AnalysisDraft::HarmonicBalance(draft) = draft else {
+                        unreachable!()
+                    };
+                    draft.fundamental = frequency.into();
+                })
+                .unwrap();
+            }
+            let mut numerics = crate::simulation::plan::AnalysisNumericOverride::default();
+            numerics
+                .set_for_instance(
+                    AnalysisKind::HarmonicBalance,
+                    Default::default(),
+                    crate::simulation::plan::NumericOverrideOption::Reltol,
+                    "1e-6",
+                )
+                .unwrap();
+            plan.set_numeric_override(first, Some(numerics)).unwrap();
+            let (consumer, _) = plan.insert(kind).unwrap();
+            plan.bind_dependency(consumer, AnalysisKind::HarmonicBalance, first)
+                .unwrap();
+            plan.edit(consumer, |draft| match draft {
+                AnalysisDraft::Hbsp(draft) => {
+                    draft.max_sideband = "1".into();
+                    draft.noise_parameters = true;
+                    draft.noise.report_parameters = true;
+                    draft.noise.input_sideband = "-1".into();
+                    draft.noise.output_sideband = "1".into();
+                    draft.noise.reference_temperature = "310".into();
+                    draft.noise.termination_temperature = "295".into();
+                }
+                AnalysisDraft::Hbnoise(draft) => {
+                    draft.max_sideband = "1".into();
+                    draft.noise_figure = true;
+                    draft.source_resistor = "RSRC".into();
+                    draft.reference_temperature = "310".into();
+                    draft.input_sideband = "-1".into();
+                    draft.output_sideband = "1".into();
+                    draft.integrated_noise = false;
+                    draft.contributor_ranking = false;
+                }
+                _ => unreachable!(),
+            })
+            .unwrap();
+            let (mc, _) = plan.insert(AnalysisKind::MonteCarlo).unwrap();
+            plan.edit(mc, |draft| {
+                *draft = AnalysisDraft::MonteCarlo(McDialogState::from_config(&McConfig {
+                    base_analysis: Some(consumer),
+                    measurements: vec![
+                        if kind == AnalysisKind::Hbsp {
+                            "bin:0:real:PN_NF"
+                        } else {
+                            "bin:0:real:noise_figure_db"
+                        }
+                        .into(),
+                    ],
+                    ..Default::default()
+                }));
+            })
+            .unwrap();
+            let frozen = plan.freeze().unwrap();
+            plan.edit(first, |draft| {
+                let AnalysisDraft::HarmonicBalance(draft) = draft else {
+                    unreachable!()
+                };
+                draft.fundamental = "3meg".into();
+            })
+            .unwrap();
+            plan.edit(consumer, |draft| match draft {
+                AnalysisDraft::Hbsp(draft) => draft.noise.reference_temperature = "350".into(),
+                AnalysisDraft::Hbnoise(draft) => draft.reference_temperature = "350".into(),
+                _ => unreachable!(),
+            })
+            .unwrap();
+            let sealed = state
+                .model_library_manager
+                .seal_execution_sources()
+                .unwrap();
+            let queue = SimulationController::new()
+                .build_queue_from_plan(&state, &frozen, &sealed)
+                .unwrap();
+            let task = queue.iter().find(|task| task.instance_id() == mc).unwrap();
+            let base = task
+                .queued_analysis()
+                .spec_options
+                .study_base
+                .as_ref()
+                .unwrap();
+            let StudyAnalysis::Native(producer) = &base.analysis else {
+                panic!("HB producer")
+            };
+            let selected = queue
+                .iter()
+                .find(|task| task.instance_id() == first)
+                .unwrap();
+            assert_eq!(producer, &selected.queued_analysis().spec);
+            assert!(
+                matches!(producer, AnalysisSpec::HarmonicBalance { tones, .. } if tones[0].frequency == 1e6)
+            );
+            let post = base.postprocess.as_ref().unwrap();
+            assert_eq!(base.instance_id, consumer);
+            assert_eq!(post.producer_instance_id, first);
+            assert_ne!(post.producer_instance_id, second);
+            assert_eq!(post.producer_source_revision, frozen.revision());
+            assert!(post.producer_numeric_options.contains("RELTOL"));
+            assert_eq!(
+                &post.request,
+                &queue
+                    .iter()
+                    .find(|task| task.instance_id() == consumer)
+                    .unwrap()
+                    .queued_analysis()
+                    .spec
+            );
+            for change in 0..4 {
+                let mut queued = task.queued_analysis().clone();
+                let base = queued.spec_options.study_base.as_mut().unwrap();
+                let post = base.postprocess.as_mut().unwrap();
+                match change {
+                    0 => post.producer_instance_id = second,
+                    1 => post.producer_numeric_options = ".OPTIONS RELTOL=0.01".into(),
+                    2 => match &mut post.request {
+                        AnalysisSpec::Hbsp {
+                            noise_reference: Some(reference),
+                            ..
+                        } => reference.reference_temperature_kelvin = 350.0,
+                        AnalysisSpec::Hbnoise {
+                            noise_reference: Some(reference),
+                            ..
+                        } => reference.temperature_kelvin = 350.0,
+                        _ => unreachable!(),
+                    },
+                    _ => {
+                        let StudyAnalysis::Native(AnalysisSpec::HarmonicBalance { tones, .. }) =
+                            &mut base.analysis
+                        else {
+                            unreachable!()
+                        };
+                        tones[0].frequency = 4e6;
+                    }
+                }
+                assert_ne!(
+                    task.config_digest(),
+                    PreparedTask::new(mc, task.source_revision(), vec![], "MC", queued)
+                        .config_digest()
+                );
+            }
+        }
     }
 
     #[test]

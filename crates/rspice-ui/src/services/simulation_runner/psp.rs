@@ -166,6 +166,20 @@ pub fn run_hbsp_analysis_from_hb_with_source_path_and_abort(
     )
 }
 
+pub(crate) fn run_hbsp_analysis_from_hb_on_materialized_with_abort(
+    netlist: &rspice_core::Netlist,
+    config: &HbspRunConfig,
+    operating_point: &rspice_core::engine::HbOperatingPoint,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<PspData> {
+    run_periodic_sparameter_on_materialized(
+        netlist,
+        config,
+        PeriodicOperatingPoint::Hb(operating_point),
+        abort,
+    )
+}
+
 #[derive(Clone, Copy)]
 enum PeriodicOperatingPoint<'a> {
     Pss(&'a rspice_core::engine::PssOperatingPoint),
@@ -204,13 +218,27 @@ fn run_periodic_sparameter_analysis(
 ) -> ServiceRunResult<PspData> {
     ensure_not_aborted(abort)?;
     let analysis = operating_point.analysis_name();
-    let producer = operating_point.producer_name();
     config
         .validate_for(analysis)
         .map_err(ServiceRunError::Failure)?;
     let netlist = parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
+    run_periodic_sparameter_on_materialized(&netlist, config, operating_point, abort)
+}
+
+fn run_periodic_sparameter_on_materialized(
+    netlist: &rspice_core::Netlist,
+    config: &PspRunConfig,
+    operating_point: PeriodicOperatingPoint<'_>,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<PspData> {
+    ensure_not_aborted(abort)?;
+    let analysis = operating_point.analysis_name();
+    let producer = operating_point.producer_name();
+    config
+        .validate_for(analysis)
+        .map_err(ServiceRunError::Failure)?;
     let engine = build_resolved_periodic_engine(
-        &netlist,
+        netlist,
         operating_point.tolerance(),
         "periodic S-parameter configuration",
     )?;
@@ -232,14 +260,14 @@ fn run_periodic_sparameter_analysis(
     };
     let prepared = match operating_point {
         PeriodicOperatingPoint::Pss(point) => engine.prepare_psp_from_pss_with_noise_and_abort(
-            &netlist,
+            netlist,
             pac_config,
             point,
             config.noise_parameters,
             abort,
         ),
         PeriodicOperatingPoint::Hb(point) => engine.prepare_psp_from_hb_with_noise_and_abort(
-            &netlist,
+            netlist,
             pac_config,
             point,
             config.noise_parameters,

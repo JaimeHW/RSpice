@@ -60,11 +60,11 @@ pub(crate) use hb::{
     HbData, HbSpectrum, build_core_hb_config, run_hb_analysis_on_materialized_with_abort,
 };
 pub use hb::{HbRunConfig, HbToneRunConfig, run_hb_analysis_with_source_path_and_abort};
-pub(crate) use hbnoise::integrate_psd;
 pub use hbnoise::{
     HbNoiseReference, HbnoiseFrequencySweep, HbnoiseRunConfig,
     run_hbnoise_analysis_from_hb_with_source_path_and_abort,
 };
+pub(crate) use hbnoise::{integrate_psd, run_hbnoise_analysis_from_hb_on_materialized_with_abort};
 pub(crate) use hbnoise::{validate_hbnoise_frequency_options, validate_noise_sidebands};
 #[cfg(test)]
 use helpers::parse_runner_netlist_with_statistical_sampling_and_abort;
@@ -105,7 +105,7 @@ pub use pnoise::{
     run_pnoise_analysis_from_hb_with_source_path_and_abort,
     run_pnoise_analysis_from_pss_with_source_path_and_abort,
 };
-pub(crate) use psp::PspData;
+pub(crate) use psp::{PspData, run_hbsp_analysis_from_hb_on_materialized_with_abort};
 pub use psp::{
     PspRunConfig, PspSweep, run_hbsp_analysis_from_hb_with_source_path_and_abort,
     run_psp_analysis_from_pss_with_source_path_and_abort,

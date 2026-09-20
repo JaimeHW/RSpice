@@ -1,4 +1,4 @@
-//! A frozen spectral consumer and the exact transient producer it runs per trial.
+//! A frozen spectral consumer and the exact producer it runs per trial.
 
 use super::*;
 use crate::simulation::multi_run::AnalysisSpec;
@@ -27,26 +27,32 @@ impl StudyPostprocess {
         }
         if !matches!(
             self.request,
-            AnalysisSpec::Fourier { .. } | AnalysisSpec::Fft { .. }
+            AnalysisSpec::Fourier { .. }
+                | AnalysisSpec::Fft { .. }
+                | AnalysisSpec::Hbsp { .. }
+                | AnalysisSpec::Hbnoise { .. }
         ) {
             return Err(SimulationError::InvalidConfig(
-                "Spectral study requires a Fourier or FFT consumer".into(),
+                "Spectral study requires a Fourier, FFT, HBSP or HBNOISE consumer".into(),
             ));
         }
         self.request
             .validate()
             .map_err(SimulationError::InvalidConfig)?;
-        let Some(AnalysisConfig::Transient(config)) = base.analysis.as_basic() else {
-            return Err(SimulationError::InvalidConfig(
-                "Spectral study requires its configured transient producer".into(),
-            ));
-        };
-        let producer = AnalysisSpec::Transient {
-            stop_time: config.stop_time,
-            step_time: config.step_time,
-            start_time: config.start_time,
-            max_timestep: config.max_timestep,
-            uic: config.uic,
+        let producer = match &base.analysis {
+            StudyAnalysis::Basic(AnalysisConfig::Transient(config)) => AnalysisSpec::Transient {
+                stop_time: config.stop_time,
+                step_time: config.step_time,
+                start_time: config.start_time,
+                max_timestep: config.max_timestep,
+                uic: config.uic,
+            },
+            StudyAnalysis::Native(spec @ AnalysisSpec::HarmonicBalance { .. }) => spec.clone(),
+            _ => {
+                return Err(SimulationError::InvalidConfig(
+                    "Spectral study requires its configured transient or HB producer".into(),
+                ));
+            }
         };
         crate::simulation::execution::validate_prepared_dependency_contract_with_options(
             &self.request,
@@ -66,10 +72,15 @@ impl StudyPostprocess {
             let valid = mode.eq_ignore_ascii_case("scalar")
                 || mode.eq_ignore_ascii_case("bin")
                 || (mode.eq_ignore_ascii_case("last")
-                    && matches!(self.request, AnalysisSpec::Fourier { .. }));
+                    && matches!(
+                        self.request,
+                        AnalysisSpec::Fourier { .. }
+                            | AnalysisSpec::Hbsp { .. }
+                            | AnalysisSpec::Hbnoise { .. }
+                    ));
             if !valid {
                 return Err(SimulationError::InvalidConfig(format!(
-                    "Spectral study measurement {request:?} requires scalar:name or bin:index:quantity[:signal]; Fourier also supports last:signal"
+                    "Spectral study measurement {request:?} requires scalar:name or bin:index:quantity[:signal]; Fourier, HBSP and HBNOISE also support last:signal"
                 )));
             }
             if key.eq_ignore_ascii_case("THD(%)")
@@ -128,6 +139,23 @@ impl StudyRunConfig {
             };
         };
         super::super::spec::ensure_not_aborted(abort)?;
+        if matches!(
+            postprocess.request,
+            AnalysisSpec::Hbsp { .. } | AnalysisSpec::Hbnoise { .. }
+        ) {
+            let StudyAnalysis::Native(producer @ AnalysisSpec::HarmonicBalance { .. }) = analysis
+            else {
+                return Err(SimulationError::InvalidConfig(
+                    "HBSP/HBNOISE study requires its configured HB producer".into(),
+                ));
+            };
+            return super::super::spec::run_hb_study_on_materialized(
+                producer.clone(),
+                postprocess.request.clone(),
+                circuit,
+                abort,
+            );
+        }
         let mut trial = circuit.clone();
         // Unrelated FFT cards must not alter this producer's integration grid.
         // Retain only the request frozen into the selected consumer.
@@ -192,3 +220,6 @@ impl StudyRunConfig {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod hb_rf_tests;

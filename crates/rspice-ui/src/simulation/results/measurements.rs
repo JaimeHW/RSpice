@@ -58,8 +58,17 @@ impl SimulationResult {
                     };
                     Some((
                         *waveform.y_values.get(index)?,
-                        *waveform.y_imag.as_ref()?.get(index)?,
+                        if waveform.is_complex {
+                            *waveform.y_imag.as_ref()?.get(index)?
+                        } else if quantity.eq_ignore_ascii_case("real") {
+                            0.0
+                        } else {
+                            return None;
+                        },
                     ))
+                }
+                Self::Noise { .. } if quantity.eq_ignore_ascii_case("real") => {
+                    Some((*self.noise_study_series(signal?)?.get(index)?, 0.0))
                 }
                 _ => None,
             };
@@ -80,6 +89,18 @@ impl SimulationResult {
                 | Self::TransferFunction { .. }
                 | Self::DcMismatch { .. } => self.measurement(key),
                 Self::Fft { .. } => self.measurement(key),
+                Self::Noise {
+                    summary: Some(summary),
+                    ..
+                } => {
+                    if key.eq_ignore_ascii_case("noise.output_rms") {
+                        summary.total_rms
+                    } else if key.eq_ignore_ascii_case("noise.input_rms") {
+                        summary.input_rms
+                    } else {
+                        None
+                    }
+                }
                 Self::Ac { waveforms, .. } => named_value(waveforms, key)
                     .filter(|waveform| !waveform.is_complex && waveform.y_values.len() == 1)
                     .and_then(|waveform| waveform.y_values.first().copied()),
@@ -93,22 +114,7 @@ impl SimulationResult {
                 | Self::HarmonicBalance { waveforms, .. } => {
                     waveform_last_value_by_name(waveforms, key)
                 }
-                Self::Noise {
-                    output_noise,
-                    input_noise,
-                    contributors,
-                    ..
-                } => {
-                    if key.eq_ignore_ascii_case("output_noise") {
-                        output_noise.last().copied()
-                    } else if key.eq_ignore_ascii_case("input_noise") {
-                        input_noise
-                            .as_ref()
-                            .and_then(|values| values.last().copied())
-                    } else {
-                        named_value(contributors, key).and_then(|values| values.last().copied())
-                    }
-                }
+                Self::Noise { .. } => self.noise_study_series(key)?.last().copied(),
                 _ => None,
             }
         } else {
@@ -122,6 +128,32 @@ impl SimulationResult {
                 error: None,
             }
         })
+    }
+
+    fn noise_study_series(&self, name: &str) -> Option<&[f64]> {
+        let Self::Noise {
+            output_noise,
+            input_noise,
+            contributors,
+            summary,
+            ..
+        } = self
+        else {
+            return None;
+        };
+        if name.eq_ignore_ascii_case("output_noise") {
+            Some(output_noise)
+        } else if name.eq_ignore_ascii_case("input_noise") {
+            input_noise.as_deref()
+        } else if name.eq_ignore_ascii_case("noise_figure_db") {
+            summary
+                .as_ref()?
+                .noise_figure
+                .as_ref()
+                .map(|figure| figure.decibels.as_slice())
+        } else {
+            named_value(contributors, name).map(Vec::as_slice)
+        }
     }
 
     /// Get a single scalar measurement by name without allocating a map.

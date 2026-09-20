@@ -72,9 +72,9 @@ pub(crate) struct WorkerRequest {
     pub(in crate::simulation) stream_transient_samples: bool,
 }
 
-/// 20: Configured studies also carry native harmonic balance specifications.
+/// 21: HBSP/HBNOISE studies carry their bound HB producer and full consumer specification.
 #[cfg(any(target_arch = "wasm32", test))]
-pub(crate) const WORKER_REQUEST_TRANSPORT_PROTOCOL: u8 = 20;
+pub(crate) const WORKER_REQUEST_TRANSPORT_PROTOCOL: u8 = 21;
 
 /// Browser-worker request split into compact metadata and transferable
 /// floating-point buffers. The embedded request deliberately carries empty

@@ -28,7 +28,7 @@ use std::sync::{
 /// Its Run Set point belongs to the study; its solver controls belong to the base.
 #[derive(Debug, Clone)]
 pub struct StudyRunConfig {
-    /// Optional spectral consumer of `analysis`, which is its exact transient producer.
+    /// Optional consumer of `analysis`, which is its exact transient or HB producer.
     pub postprocess: Option<StudyPostprocess>,
     pub constraints: Vec<crate::simulation::optimizer::OptimizationConstraint>,
     pub objective_terms: Vec<crate::simulation::optimizer::OptimizationObjectiveTerm>,
@@ -54,6 +54,8 @@ pub(crate) fn supports_kind(kind: AnalysisKind) -> bool {
             | AnalysisKind::Fourier
             | AnalysisKind::Fft
             | AnalysisKind::HarmonicBalance
+            | AnalysisKind::Hbsp
+            | AnalysisKind::Hbnoise
     )
 }
 
@@ -847,15 +849,18 @@ fn validate_base_measurements(
                 AnalysisConfig::DcOp(_)
                     | AnalysisConfig::PoleZero(_)
                     | AnalysisConfig::Sensitivity(_)
+                    | AnalysisConfig::Noise(_)
             )
         {
             return Err(SimulationError::InvalidConfig(format!(
                 "{request:?} requires a scalar analysis; use a .MEAS name or last:signal for a waveform"
             )));
         }
-        if mode.eq_ignore_ascii_case("bin") && !matches!(analysis, AnalysisConfig::Ac(_)) {
+        if mode.eq_ignore_ascii_case("bin")
+            && !matches!(analysis, AnalysisConfig::Ac(_) | AnalysisConfig::Noise(_))
+        {
             return Err(SimulationError::InvalidConfig(
-                "Spectral bin measurements require AC, Fourier, or FFT".into(),
+                "Spectral bin measurements require a frequency-domain analysis".into(),
             ));
         }
         if mode.eq_ignore_ascii_case("last") && family.is_empty() {

@@ -935,7 +935,16 @@ fn encode_spec_options(writer: &mut CanonicalWriter, options: &SpecExecutionOpti
             }
         }
         if let Some(postprocess) = &base.postprocess {
-            writer.domain("study-transient-postprocessor/v1");
+            writer.domain(
+                if matches!(
+                    postprocess.request,
+                    AnalysisSpec::Hbsp { .. } | AnalysisSpec::Hbnoise { .. }
+                ) {
+                    "study-hb-consumer/v1"
+                } else {
+                    "study-transient-postprocessor/v1"
+                },
+            );
             writer.uuid(postprocess.producer_instance_id.as_uuid());
             writer.u64(postprocess.producer_source_revision.get());
             writer.string(&postprocess.producer_analysis_line);

@@ -180,8 +180,24 @@ pub fn run_hbnoise_analysis_from_hb_with_source_path_and_abort(
     ensure_not_aborted(abort)?;
     config.validate()?;
     let netlist = parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
+    run_hbnoise_analysis_from_hb_on_materialized_with_abort(
+        &netlist,
+        config,
+        operating_point,
+        abort,
+    )
+}
+
+pub(crate) fn run_hbnoise_analysis_from_hb_on_materialized_with_abort(
+    netlist: &rspice_core::Netlist,
+    config: &HbnoiseRunConfig,
+    operating_point: &HbOperatingPoint,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<HbnoiseData> {
+    ensure_not_aborted(abort)?;
+    config.validate()?;
     let source_name = config.input_source.trim();
-    if !netlist_has_independent_source_named_with_abort(&netlist, source_name, abort)? {
+    if !netlist_has_independent_source_named_with_abort(netlist, source_name, abort)? {
         return Err(ServiceRunError::Failure(format!(
             "HBNOISE input source '{source_name}' is not an independent voltage/current source in the netlist"
         )));
@@ -212,7 +228,7 @@ pub fn run_hbnoise_analysis_from_hb_with_source_path_and_abort(
     }
 
     let engine = build_resolved_periodic_engine(
-        &netlist,
+        netlist,
         operating_point.config().tolerance,
         "HBNOISE resolved producer configuration is invalid",
     )?;
@@ -227,7 +243,7 @@ pub fn run_hbnoise_analysis_from_hb_with_source_path_and_abort(
             .expect("validated noise reference");
         let result = engine
             .run_hb_noise_figure_at_sidebands_with_abort(
-                &netlist,
+                netlist,
                 &rspice_core::engine::HbNoiseFigureRequest {
                     frequencies: frequencies.clone(),
                     output_node: config.output_node.trim().into(),
@@ -256,7 +272,7 @@ pub fn run_hbnoise_analysis_from_hb_with_source_path_and_abort(
     } else {
         let exact = engine
             .run_pnoise_from_hb_request_with_abort(
-                &netlist,
+                netlist,
                 &rspice_core::engine::PeriodicNoiseRequest {
                     offsets: &frequencies,
                     output_node: config.output_node.trim(),
