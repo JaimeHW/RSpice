@@ -1050,6 +1050,7 @@ mod tests {
             max_sideband: 3,
             mixed_mode: false,
             noise_parameters: false,
+            noise_reference: None,
         }
     }
 
@@ -1063,6 +1064,7 @@ mod tests {
             max_sideband: 2,
             mixed_mode: true,
             noise_parameters: true,
+            noise_reference: None,
         }
     }
 

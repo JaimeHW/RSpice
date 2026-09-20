@@ -74,6 +74,7 @@ impl SimulationController {
                     max_sideband: parse_usize(&draft.max_sideband, "HBSP max sideband")?,
                     mixed_mode: draft.mixed_mode,
                     noise_parameters: draft.noise_parameters,
+                    noise_reference: draft.noise_reference()?,
                 }
             }
             AnalysisDraft::Hbnoise(draft) => {
@@ -108,6 +109,7 @@ impl SimulationController {
                     max_sideband: parse_usize(&draft.max_sideband, "PSP max sideband")?,
                     mixed_mode: draft.mixed_mode,
                     noise_parameters: draft.noise_parameters,
+                    noise_reference: draft.noise_reference()?,
                 }
             }
             AnalysisDraft::Qpac(draft) => {

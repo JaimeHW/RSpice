@@ -203,6 +203,7 @@ pub(super) fn run_periodic_spec(
             max_sideband,
             mixed_mode,
             noise_parameters,
+            noise_reference,
         } => run_psp(
             netlist,
             PspRunRequest {
@@ -214,6 +215,7 @@ pub(super) fn run_periodic_spec(
                 max_sideband,
                 mixed_mode,
                 noise_parameters,
+                noise_reference,
             },
             source_path,
             dependencies,
@@ -228,6 +230,7 @@ pub(super) fn run_periodic_spec(
             max_sideband,
             mixed_mode,
             noise_parameters,
+            noise_reference,
         } => run_hbsp(
             netlist,
             PspRunRequest {
@@ -239,6 +242,7 @@ pub(super) fn run_periodic_spec(
                 max_sideband,
                 mixed_mode,
                 noise_parameters,
+                noise_reference,
             },
             source_path,
             dependencies,
@@ -431,6 +435,7 @@ struct PspRunRequest {
     max_sideband: usize,
     mixed_mode: bool,
     noise_parameters: bool,
+    noise_reference: Option<rspice_core::analysis::s_param::PeriodicPortNoiseReference>,
 }
 
 fn run_psp(
@@ -493,6 +498,7 @@ fn run_periodic_sparameters(
         max_sideband,
         mixed_mode,
         noise_parameters,
+        noise_reference,
     } = request;
     let mut configured_ports = Vec::with_capacity(ports.len());
     for port in ports {
@@ -516,6 +522,7 @@ fn run_periodic_sparameters(
         max_sideband,
         mixed_mode,
         noise_parameters,
+        noise_reference,
         reltol: 1.0e-3,
         abstol: 1.0e-12,
     };
@@ -564,13 +571,137 @@ fn periodic_sparameter_result(
             ),
         );
     }
+    let mut measurements = Vec::new();
+    if let Some(noise) = data.noise {
+        measurements.push(rspice_core::MeasureResult::success(
+            "periodic_noise_carrier_hz",
+            noise.fundamental_hz,
+        ));
+        measurements.push(rspice_core::MeasureResult::success(
+            "periodic_noise_max_sideband",
+            config.max_sideband as f64,
+        ));
+        measurements.push(rspice_core::MeasureResult::success(
+            "periodic_noise_mixed_mode",
+            if config.mixed_mode { 1.0 } else { 0.0 },
+        ));
+        for path in noise.paths {
+            super::ensure_not_aborted(abort)?;
+            let name = format!(
+                "{}[k={:+},m={:+}]",
+                path.base_name, path.output_sideband, path.input_sideband
+            );
+            let mut real = Vec::with_capacity(path.values.len());
+            let mut imaginary = Vec::with_capacity(path.values.len());
+            for (index, value) in path.values.into_iter().enumerate() {
+                poll_periodically(abort, index)?;
+                real.push(value.re);
+                imaginary.push(value.im);
+            }
+            let mut waveform = WaveformData::new_complex(
+                name.clone(),
+                clone_values_with_abort(&data.frequencies, abort)?,
+                real,
+                imaginary,
+            );
+            waveform.y_unit = "W/Hz".into();
+            waveforms.insert(name, waveform);
+        }
+        if let Some(reference) = noise.reference {
+            for (name, value) in [
+                ("periodic_noise_input_port", reference.input_port as f64),
+                ("periodic_noise_output_port", reference.output_port as f64),
+                (
+                    "periodic_noise_input_sideband",
+                    f64::from(reference.input_sideband),
+                ),
+                (
+                    "periodic_noise_output_sideband",
+                    f64::from(reference.output_sideband),
+                ),
+                (
+                    "periodic_noise_reference_temperature_kelvin",
+                    reference.reference_temperature_kelvin,
+                ),
+                (
+                    "periodic_noise_termination_temperature_kelvin",
+                    reference.termination_temperature_kelvin,
+                ),
+            ] {
+                measurements.push(rspice_core::MeasureResult::success(name, value));
+            }
+            if let Some(image) = reference.image_sideband {
+                measurements.push(rspice_core::MeasureResult::success(
+                    "periodic_noise_image_sideband",
+                    f64::from(image),
+                ));
+            }
+        }
+        if let Some(parameters) = noise.parameters {
+            let mut series = vec![
+                ("PN_Rn", "Ω", Vec::new()),
+                ("PN_F", "1", Vec::new()),
+                ("PN_Fmin", "1", Vec::new()),
+                ("PN_NF", "dB", Vec::new()),
+                ("PN_NFmin", "dB", Vec::new()),
+                ("PN_Fdsb", "1", Vec::new()),
+                ("PN_NFdsb", "dB", Vec::new()),
+            ];
+            let mut optimum_real = Vec::with_capacity(parameters.len());
+            let mut optimum_imag = Vec::with_capacity(parameters.len());
+            for (index, parameter) in parameters.into_iter().enumerate() {
+                poll_periodically(abort, index)?;
+                let p = parameter.single_sideband;
+                for (slot, value) in [
+                    p.noise_resistance,
+                    p.noise_factor,
+                    p.minimum_noise_factor,
+                    10.0 * p.noise_factor.log10(),
+                    10.0 * p.minimum_noise_factor.log10(),
+                ]
+                .into_iter()
+                .enumerate()
+                {
+                    series[slot].2.push(value);
+                }
+                if let Some(dsb) = parameter.double_sideband_noise_factor {
+                    series[5].2.push(dsb);
+                    series[6].2.push(10.0 * dsb.log10());
+                }
+                optimum_real.push(p.optimum_source_reflection.re);
+                optimum_imag.push(p.optimum_source_reflection.im);
+            }
+            for (name, unit, values) in series {
+                if values.is_empty() {
+                    continue;
+                }
+                waveforms.insert(
+                    name.into(),
+                    WaveformData::new_time_domain_in_unit(
+                        name,
+                        clone_values_with_abort(&data.frequencies, abort)?,
+                        values,
+                        unit,
+                    ),
+                );
+            }
+            let mut optimum = WaveformData::new_complex(
+                "PN_Sopt",
+                clone_values_with_abort(&data.frequencies, abort)?,
+                optimum_real,
+                optimum_imag,
+            );
+            optimum.y_unit = "1".into();
+            waveforms.insert("PN_Sopt".into(), optimum);
+        }
+    }
     Ok(SimulationResult::Ac {
         convergence: None,
         noise_reference_temperature_kelvin: None,
         reference_impedances_ohm: data.reference_impedances_ohm,
         frequencies: data.frequencies,
         waveforms,
-        measurements: Vec::new(),
+        measurements,
     })
 }
 

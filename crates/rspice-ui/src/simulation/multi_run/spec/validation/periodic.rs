@@ -297,6 +297,7 @@ pub(super) fn validate(spec: &AnalysisSpec) -> Result<(), String> {
             max_sideband,
             mixed_mode,
             noise_parameters,
+            noise_reference,
             ..
         } => {
             validate_periodic_network(
@@ -309,11 +310,15 @@ pub(super) fn validate(spec: &AnalysisSpec) -> Result<(), String> {
             if *mixed_mode {
                 validate_periodic_mixed_mode_ports(ports)?;
             }
-            if *noise_parameters {
-                return Err(
-                    "HBSP noise parameters require a correlated periodic-noise solve and are not implemented"
-                        .to_owned(),
-                );
+            if let Some(reference) = noise_reference {
+                if !noise_parameters {
+                    return Err("noise reference requires port noise to be enabled".into());
+                }
+                reference.validate(
+                    (!ports.is_empty()).then_some(ports.len()),
+                    -(*max_sideband as i32),
+                    *max_sideband as i32,
+                )?;
             }
             Ok(())
         }
@@ -325,6 +330,7 @@ pub(super) fn validate(spec: &AnalysisSpec) -> Result<(), String> {
             max_sideband,
             mixed_mode,
             noise_parameters,
+            noise_reference,
             ..
         } => {
             validate_periodic_network(
@@ -337,11 +343,15 @@ pub(super) fn validate(spec: &AnalysisSpec) -> Result<(), String> {
             if *mixed_mode {
                 validate_periodic_mixed_mode_ports(ports)?;
             }
-            if *noise_parameters {
-                return Err(
-                    "PSP noise parameters require a correlated periodic-noise solve and are not implemented"
-                        .to_owned(),
-                );
+            if let Some(reference) = noise_reference {
+                if !noise_parameters {
+                    return Err("noise reference requires port noise to be enabled".into());
+                }
+                reference.validate(
+                    (!ports.is_empty()).then_some(ports.len()),
+                    -(*max_sideband as i32),
+                    *max_sideband as i32,
+                )?;
             }
             Ok(())
         }
@@ -480,7 +490,12 @@ pub(super) fn validate_periodic_network(
     ports: &[SpPort],
     max_sideband: usize,
 ) -> Result<(), String> {
-    validate_frequency_sweep(start, stop, points)?;
+    if !start.is_finite() || start <= 0.0 || !stop.is_finite() || stop < start {
+        return Err("periodic network sweep requires finite 0 < start <= stop".into());
+    }
+    if points == 0 {
+        return Err("frequency sweep point count must be > 0".into());
+    }
     if max_sideband > i32::MAX as usize {
         return Err("periodic network maximum sideband exceeds the engine index range".to_owned());
     }

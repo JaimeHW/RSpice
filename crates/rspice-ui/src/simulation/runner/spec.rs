@@ -288,6 +288,7 @@ fn spec_variant_name(spec: &AnalysisSpec) -> &'static str {
 
 #[cfg(test)]
 mod tests {
+    mod periodic_port_noise;
     use std::collections::HashMap;
     use std::fs;
     use std::path::PathBuf;
@@ -859,6 +860,7 @@ R2 out 0 1k\n\
             max_sideband: 1,
             mixed_mode: false,
             noise_parameters: false,
+            noise_reference: None,
         };
         assert_eq!(
             crate::simulation::execution::canonical_analysis_kind(&hbsp).execution_blocker(),
@@ -1242,6 +1244,7 @@ R2 out 0 1k\n\
             max_sideband: 1,
             mixed_mode: false,
             noise_parameters: false,
+            noise_reference: None,
         };
         assert_eq!(
             crate::simulation::execution::canonical_analysis_kind(&psp).execution_blocker(),

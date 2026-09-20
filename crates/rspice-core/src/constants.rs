@@ -236,7 +236,7 @@ impl NoisePhysicalConstants {
     };
 
     /// Constants used by ngspice 46's const.h and nevalsrc.c.
-    pub(crate) const NGSPICE_46: Self = Self {
+    pub const NGSPICE_46: Self = Self {
         boltzmann: NGSPICE_K_BOLTZMANN,
         electron_charge: NGSPICE_Q_ELECTRON,
     };

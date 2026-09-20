@@ -1025,6 +1025,7 @@ fn encode_manifest_network(writer: &mut CanonicalWriter, spec: &AnalysisSpec) {
         max_sideband,
         mixed_mode,
         noise_parameters,
+        noise_reference,
     ) = match spec {
         AnalysisSpec::Hbsp {
             start_freq,
@@ -1035,6 +1036,7 @@ fn encode_manifest_network(writer: &mut CanonicalWriter, spec: &AnalysisSpec) {
             max_sideband,
             mixed_mode,
             noise_parameters,
+            noise_reference,
         }
         | AnalysisSpec::Psp {
             start_freq,
@@ -1045,6 +1047,7 @@ fn encode_manifest_network(writer: &mut CanonicalWriter, spec: &AnalysisSpec) {
             max_sideband,
             mixed_mode,
             noise_parameters,
+            noise_reference,
         } => (
             *start_freq,
             *stop_freq,
@@ -1054,6 +1057,7 @@ fn encode_manifest_network(writer: &mut CanonicalWriter, spec: &AnalysisSpec) {
             *max_sideband,
             *mixed_mode,
             *noise_parameters,
+            noise_reference.as_ref(),
         ),
         _ => unreachable!("network encoder accepts only HBSP or PSP"),
     };
@@ -1070,6 +1074,18 @@ fn encode_manifest_network(writer: &mut CanonicalWriter, spec: &AnalysisSpec) {
     writer.usize(max_sideband);
     writer.bool(mixed_mode);
     writer.bool(noise_parameters);
+    if let Some(reference) = noise_reference {
+        writer.string("periodic-port-noise-reference-v1");
+        writer.usize(reference.input_port);
+        writer.usize(reference.output_port);
+        writer.i32(reference.input_sideband);
+        writer.i32(reference.output_sideband);
+        writer.f64(reference.reference_temperature_kelvin);
+        writer.f64(reference.termination_temperature_kelvin);
+        writer.option(reference.image_sideband.as_ref(), |w, sideband| {
+            w.i32(*sideband)
+        });
+    }
 }
 
 fn encode_quasi_periodic_transfer(writer: &mut CanonicalWriter, spec: &AnalysisSpec) {

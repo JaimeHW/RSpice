@@ -2190,4 +2190,82 @@ mod tests {
             })
         );
     }
+    #[test]
+    fn periodic_port_noise_options_have_distinct_execution_identities() {
+        use rspice_core::analysis::s_param::PeriodicPortNoiseReference;
+        let request = |hb: bool, reference| {
+            if hb {
+                AnalysisSpec::Hbsp {
+                    start_freq: 1e4,
+                    stop_freq: 1e4,
+                    points_per_unit: 1,
+                    sweep: crate::simulation::multi_run::FrequencySweep::Linear,
+                    ports: Vec::new(),
+                    max_sideband: 1,
+                    mixed_mode: false,
+                    noise_parameters: true,
+                    noise_reference: reference,
+                }
+            } else {
+                AnalysisSpec::Psp {
+                    start_freq: 1e4,
+                    stop_freq: 1e4,
+                    points_per_unit: 1,
+                    sweep: crate::simulation::multi_run::FrequencySweep::Linear,
+                    ports: Vec::new(),
+                    max_sideband: 1,
+                    mixed_mode: false,
+                    noise_parameters: true,
+                    noise_reference: reference,
+                }
+            }
+        };
+        let baseline = PeriodicPortNoiseReference::default();
+        let digest = |spec: &AnalysisSpec| {
+            analysis_config_digest(
+                "* periodic network",
+                spec,
+                None,
+                &SpecExecutionOptions::default(),
+                None,
+            )
+        };
+        for hb in [false, true] {
+            let spec = request(hb, Some(baseline.clone()));
+            assert!(spec.validate().is_ok());
+            let expected = digest(&spec);
+            let restored: AnalysisSpec =
+                serde_json::from_str(&serde_json::to_string(&spec).unwrap()).unwrap();
+            assert_eq!(expected, digest(&restored));
+            assert_ne!(expected, digest(&request(hb, None)));
+            let changes: [fn(&mut PeriodicPortNoiseReference); 7] = [
+                |r| r.input_port = 2,
+                |r| r.output_port = 1,
+                |r| r.input_sideband = -1,
+                |r| r.output_sideband = 1,
+                |r| r.reference_temperature_kelvin = 325.0,
+                |r| r.termination_temperature_kelvin = 0.0,
+                |r| r.image_sideband = Some(-1),
+            ];
+            for change in changes {
+                let mut reference = baseline.clone();
+                change(&mut reference);
+                assert_ne!(expected, digest(&request(hb, Some(reference))));
+            }
+            let mut invalid = baseline.clone();
+            invalid.input_sideband = 2;
+            assert!(request(hb, Some(invalid)).validate().is_err());
+            let mut disabled = spec;
+            match &mut disabled {
+                AnalysisSpec::Psp {
+                    noise_parameters, ..
+                }
+                | AnalysisSpec::Hbsp {
+                    noise_parameters, ..
+                } => *noise_parameters = false,
+                _ => unreachable!(),
+            }
+            assert!(disabled.validate().is_err());
+        }
+    }
 }

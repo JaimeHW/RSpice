@@ -24,9 +24,59 @@ pub(super) fn fields(
     locale: UiNumberLocale,
 ) {
     frequency_sweep_fields(ui, &mut setup.sweep, policy, locale);
+    field_note(
+        ui,
+        "Frequencies are offsets from the periodic carrier. Set start equal to stop for one spot frequency.",
+    );
     input_row(ui, "Max sideband", &mut setup.max_sideband);
     switch_row(ui, "Mixed-mode matrix", &mut setup.mixed_mode);
-    switch_row(ui, "Noise parameters", &mut setup.noise_parameters);
+    switch_row(ui, "Noise correlations", &mut setup.noise_parameters);
+    if setup.noise_parameters {
+        field_note(
+            ui,
+            "Intrinsic noise-wave covariance is reported in W/Hz. External port termination noise is excluded from this matrix.",
+        );
+        switch_row(ui, "Noise parameters", &mut setup.noise.report_parameters);
+        if setup.noise.report_parameters {
+            input_row(ui, "Noise input port", &mut setup.noise.input_port);
+            input_row(ui, "Noise output port", &mut setup.noise.output_port);
+            input_row(ui, "Noise input sideband", &mut setup.noise.input_sideband);
+            input_row(
+                ui,
+                "Noise output sideband",
+                &mut setup.noise.output_sideband,
+            );
+            input_row(
+                ui,
+                "Reference temperature (K)",
+                &mut setup.noise.reference_temperature,
+            );
+            input_row(
+                ui,
+                "Unused-channel temperature (K)",
+                &mut setup.noise.termination_temperature,
+            );
+            input_row(
+                ui,
+                "DSB image sideband (optional)",
+                &mut setup.noise.image_sideband,
+            );
+            field_note(
+                ui,
+                "PN_F, PN_Fmin, PN_Rn and PN_Sopt use the selected SSB input channel. Unused channels remain matched at their noise temperature; 0 K disables their noise. The selected output load contributes no noise. An image sideband adds DSB noise figure using both input power gains at the reference temperature.",
+            );
+            if setup.mixed_mode {
+                field_note(
+                    ui,
+                    "Mixed-mode wave ports are numbered 1=d1, 2=c1, 3=d2, 4=c2, and so on. Each pair uses adjacent equal-impedance physical ports.",
+                );
+            }
+            field_note(
+                ui,
+                "Channel frequency is offset + sideband × carrier. Select a conversion path with nonzero gain.",
+            );
+        }
+    }
     let port_count = setup.ports.len();
     let mut remove = None;
     for (index, port) in setup.ports.iter_mut().enumerate() {

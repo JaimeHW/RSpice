@@ -4,6 +4,9 @@
 //! all port/sideband inputs together and returns the scattering matrix at the
 //! authored wave references, independently of the realized terminations.
 
+mod noise;
+pub(crate) use noise::PspNoiseData;
+
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -38,6 +41,7 @@ pub struct PspRunConfig {
     pub max_sideband: usize,
     pub mixed_mode: bool,
     pub noise_parameters: bool,
+    pub noise_reference: Option<s_param::PeriodicPortNoiseReference>,
     pub reltol: Value,
     pub abstol: Value,
 }
@@ -71,10 +75,15 @@ impl PspRunConfig {
                 "{analysis} mixed-mode conversion requires an even number of ports paired in declaration order"
             ));
         }
-        if self.noise_parameters {
-            return Err(format!(
-                "{analysis} noise parameters require a correlated periodic-noise solve and are not implemented"
-            ));
+        if let Some(reference) = &self.noise_reference {
+            if !self.noise_parameters {
+                return Err("noise reference requires port noise to be enabled".into());
+            }
+            reference.validate(
+                (!self.ports.is_empty()).then_some(self.ports.len()),
+                -(self.max_sideband as i32),
+                self.max_sideband as i32,
+            )?;
         }
         if !self.reltol.is_finite() || self.reltol <= 0.0 {
             return Err(format!("{analysis} relative tolerance must be positive"));
@@ -111,6 +120,7 @@ pub(crate) struct PspPath {
 /// Periodic S-parameter output indexed by port pair and sideband pair.
 #[derive(Debug, Clone)]
 pub(crate) struct PspData {
+    pub noise: Option<PspNoiseData>,
     pub frequencies: Vec<Value>,
     pub paths: Vec<PspPath>,
     /// Authored physical-port references in port-number order. Adjacent equal
@@ -221,18 +231,31 @@ fn run_periodic_sparameter_analysis(
         ..Default::default()
     };
     let prepared = match operating_point {
-        PeriodicOperatingPoint::Pss(point) => {
-            engine.prepare_psp_from_pss_with_abort(&netlist, pac_config, point, abort)
-        }
-        PeriodicOperatingPoint::Hb(point) => {
-            engine.prepare_psp_from_hb_with_abort(&netlist, pac_config, point, abort)
-        }
+        PeriodicOperatingPoint::Pss(point) => engine.prepare_psp_from_pss_with_noise_and_abort(
+            &netlist,
+            pac_config,
+            point,
+            config.noise_parameters,
+            abort,
+        ),
+        PeriodicOperatingPoint::Hb(point) => engine.prepare_psp_from_hb_with_noise_and_abort(
+            &netlist,
+            pac_config,
+            point,
+            config.noise_parameters,
+            abort,
+        ),
     }
     .map_err(|error| ServiceRunError::from_core(analysis, error))?;
     let ports = prepared.ports();
     validate_declared_ports(config, ports, analysis, producer)?;
     if config.mixed_mode {
         validate_mixed_mode_port_pairs(ports, analysis)?;
+    }
+    if let Some(reference) = &config.noise_reference {
+        reference
+            .validate(Some(ports.len()), -max_sideband, max_sideband)
+            .map_err(ServiceRunError::Failure)?;
     }
 
     let sideband_count = config.max_sideband * 2 + 1;
@@ -245,7 +268,15 @@ fn run_periodic_sparameter_analysis(
     // The publisher retains x, real and imaginary values for each path and
     // the direct (k=m=0) aliases. Count the actual, endpoint-inclusive grid.
     let retained_values = path_count
-        .checked_add(ports.len().saturating_mul(ports.len()))
+        .checked_mul(if config.noise_parameters { 2 } else { 1 })
+        .and_then(|n| {
+            n.checked_add(if config.noise_reference.is_some() {
+                8
+            } else {
+                0
+            })
+        })
+        .and_then(|n| n.checked_add(ports.len().saturating_mul(ports.len())))
         .and_then(|n| n.checked_mul(prepared.frequencies().len()))
         .and_then(|n| n.checked_mul(3))
         .unwrap_or(usize::MAX);
@@ -266,6 +297,7 @@ fn run_periodic_sparameter_analysis(
     let result = prepared
         .run_with_abort(abort)
         .map_err(|error| ServiceRunError::from_core(analysis, error))?;
+    let noise = noise::collect_noise(&result, config, engine.config().spice_dialect, abort)?;
     let frequencies = result.data.iter().map(|matrix| matrix.frequency).collect();
     let mut paths = Vec::with_capacity(path_count);
     for input in 0..port_count {
@@ -302,6 +334,7 @@ fn run_periodic_sparameter_analysis(
     }
     ensure_not_aborted(abort)?;
     Ok(PspData {
+        noise,
         frequencies,
         paths,
         reference_impedances_ohm,
@@ -326,6 +359,11 @@ fn validate_mixed_mode_port_pairs(
         )));
     }
     for (pair_index, pair) in ports.chunks_exact(2).enumerate() {
+        if !(2.0 * pair[0].z0).is_finite() || 0.5 * pair[0].z0 <= 0.0 {
+            return Err(ServiceRunError::Failure(format!(
+                "{analysis} mixed-mode wave references exceed the finite positive range"
+            )));
+        }
         if pair[0].z0.to_bits() != pair[1].z0.to_bits() {
             return Err(ServiceRunError::Failure(format!(
                 "{analysis} mixed-mode pair {} has unequal reference impedances ({} and {} ohm)",
@@ -546,24 +584,29 @@ mod tests {
             max_sideband: 1,
             mixed_mode: false,
             noise_parameters: false,
+            noise_reference: None,
             reltol: 1.0e-3,
             abstol: 1.0e-12,
         }
     }
 
     #[test]
-    fn mixed_mode_is_validated_while_unimplemented_noise_parameters_fail_closed() {
+    fn mixed_mode_and_noise_reference_options_are_validated() {
         let mut request = config();
         request.mixed_mode = true;
         request
             .validate_for("PSP")
             .expect("an even port list supports mixed-mode conversion");
         request.noise_parameters = true;
+        request.validate_for("PSP").unwrap();
+        request.noise_reference = Some(s_param::PeriodicPortNoiseReference::default());
+        request.validate_for("PSP").unwrap();
+        request.noise_reference.as_mut().unwrap().input_sideband = 100;
         assert!(
             request
                 .validate_for("PSP")
                 .unwrap_err()
-                .contains("noise parameters")
+                .contains("sideband")
         );
     }
 
@@ -910,5 +953,39 @@ mod tests {
                 .iter()
                 .all(|value| (*value - Complex64::new(1.0 / 3.0, 0.0)).norm() < 1e-12)
         );
+    }
+    #[test]
+    fn periodic_port_noise_mixed_mode_preserves_balanced_thermal_network() {
+        let deck = "balanced thermal network\nP1 a 0 PORT=1 Z0=50\nP2 b 0 PORT=2 Z0=50\nP3 c 0 PORT=3 Z0=50\nP4 d 0 PORT=4 Z0=50\nR1 a c 50\nR2 b d 50\n.end\n";
+        let mut request = config();
+        request.start_freq = 1e4;
+        request.stop_freq = 1e4;
+        request.points_per_unit = 1;
+        request.sweep = PspSweep::Linear;
+        request.ports.clear();
+        request.mixed_mode = true;
+        request.noise_parameters = true;
+        request.noise_reference = Some(s_param::PeriodicPortNoiseReference {
+            input_port: 1,
+            output_port: 3,
+            reference_temperature_kelvin: 300.15,
+            ..Default::default()
+        });
+        let data = hbsp_fixture_request(deck, &request).unwrap();
+        let noise = data.noise.unwrap();
+        let parameters = noise.parameters.unwrap()[0].single_sideband;
+        assert!((parameters.noise_factor - 2.0).abs() < 1e-8);
+        assert!((parameters.noise_resistance - 100.0).abs() < 1e-6);
+        let covariance = |name: &str| {
+            noise
+                .paths
+                .iter()
+                .find(|p| p.base_name == name && p.input_sideband == 0 && p.output_sideband == 0)
+                .unwrap()
+                .values[0]
+        };
+        let thermal = rspice_core::constants::K_BOLTZMANN * 300.15;
+        assert!((covariance("Cwdd1_2").re / thermal + 4.0 / 9.0).abs() < 1e-8);
+        assert!(covariance("Cwdc1_2").norm() / thermal < 1e-10);
     }
 }

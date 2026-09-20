@@ -406,6 +406,7 @@ fn hb_state_transfer_round_trips_and_rejects_tamper() {
         max_sideband: 1,
         mixed_mode: false,
         noise_parameters: false,
+        noise_reference: None,
     };
     validate_prepared_dependency_contract(&hbsp, &hb_spec()).unwrap();
     resolved

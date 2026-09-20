@@ -605,6 +605,8 @@ pub enum AnalysisSpec {
         max_sideband: usize,
         mixed_mode: bool,
         noise_parameters: bool,
+        #[serde(default)]
+        noise_reference: Option<rspice_core::analysis::s_param::PeriodicPortNoiseReference>,
     },
     /// Harmonic-balance noise.
     Hbnoise {
@@ -636,6 +638,8 @@ pub enum AnalysisSpec {
         max_sideband: usize,
         mixed_mode: bool,
         noise_parameters: bool,
+        #[serde(default)]
+        noise_reference: Option<rspice_core::analysis::s_param::PeriodicPortNoiseReference>,
     },
     /// Quasi-periodic AC conversion matrix.
     Qpac {

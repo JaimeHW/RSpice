@@ -26,6 +26,10 @@ use crate::workbench::app_state::{AcSetup, DcSetup, TranSetup};
 use super::AnalysisKind;
 
 mod frequency_table;
+mod periodic_network;
+
+pub use periodic_network::PeriodicNetworkDraft;
+use periodic_network::{validate_periodic_network, validate_psp_network};
 mod recorded_fft;
 
 pub use frequency_table::AcDataDraft;
@@ -273,34 +277,6 @@ impl Default for QpssDraft {
             relative_tolerance: "1e-6".to_owned(),
             autonomous: false,
             oscillator_node: String::new(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct PeriodicNetworkDraft {
-    pub sweep: FrequencySweepDraft,
-    pub ports: Vec<NetworkPortDraft>,
-    pub max_sideband: String,
-    pub mixed_mode: bool,
-    pub noise_parameters: bool,
-}
-
-impl Default for PeriodicNetworkDraft {
-    fn default() -> Self {
-        let output_port = NetworkPortDraft {
-            node_pos: "out".to_owned(),
-            ..NetworkPortDraft::default()
-        };
-        Self {
-            sweep: FrequencySweepDraft::default(),
-            ports: vec![NetworkPortDraft::default(), output_port],
-            // A ±4 sideband span needs harmonic coupling through order 8,
-            // which fits the default nine-harmonic HB producer.
-            max_sideband: "4".to_owned(),
-            mixed_mode: false,
-            noise_parameters: false,
         }
     }
 }
@@ -1497,65 +1473,6 @@ fn validate_qpss(draft: &QpssDraft) -> Option<String> {
     .err()
 }
 
-fn validate_periodic_network(draft: &PeriodicNetworkDraft) -> Option<String> {
-    (|| {
-        validate_sweep(&draft.sweep)?;
-        if draft
-            .max_sideband
-            .trim()
-            .parse::<u32>()
-            .ok()
-            .is_none_or(|value| value > i32::MAX as u32)
-        {
-            return Err("maximum sideband must be an integer from 0 to 2147483647".to_owned());
-        }
-        for (index, port) in draft.ports.iter().enumerate() {
-            if port.node_pos.trim().is_empty() || port.node_neg.trim().is_empty() {
-                return Err(format!("port {} requires both nodes", index + 1));
-            }
-            parse_positive(&port.z0, &format!("port {} reference impedance", index + 1))?;
-        }
-        if draft.mixed_mode {
-            if !draft.ports.len().is_multiple_of(2) {
-                return Err(
-                    "periodic mixed-mode conversion requires an even number of physical ports paired in declaration order"
-                        .to_owned(),
-                );
-            }
-            for (pair_index, pair) in draft.ports.chunks_exact(2).enumerate() {
-                let positive_z0 = parse_positive(
-                    &pair[0].z0,
-                    &format!("mixed-mode pair {} positive reference impedance", pair_index + 1),
-                )?;
-                let negative_z0 = parse_positive(
-                    &pair[1].z0,
-                    &format!("mixed-mode pair {} negative reference impedance", pair_index + 1),
-                )?;
-                if positive_z0.to_bits() != negative_z0.to_bits() {
-                    return Err(format!(
-                        "periodic mixed-mode pair {} has unequal reference impedances ({} and {} ohm)",
-                        pair_index + 1,
-                        positive_z0,
-                        negative_z0
-                    ));
-                }
-            }
-        }
-        if draft.noise_parameters {
-            return Err(
-                "periodic network noise parameters require a correlated periodic-noise solve and are not implemented"
-                    .to_owned(),
-            );
-        }
-        Ok(())
-    })()
-    .err()
-}
-
-fn validate_psp_network(draft: &PeriodicNetworkDraft) -> Option<String> {
-    validate_periodic_network(draft)
-}
-
 fn validate_hbnoise(draft: &HbNoiseDraft) -> Option<String> {
     (|| {
         if draft.sweep.sweep > 2 {
@@ -2304,11 +2221,11 @@ mod tests {
             "an even equal-impedance port list supports mixed-mode conversion"
         );
         psp.noise_parameters = true;
-        assert!(validate_psp_network(&psp).is_some());
+        assert!(validate_psp_network(&psp).is_none());
 
         let mut hbsp = PeriodicNetworkDraft::default();
         hbsp.noise_parameters = true;
-        assert!(validate_periodic_network(&hbsp).is_some());
+        assert!(validate_periodic_network(&hbsp).is_none());
 
         let mut tnoise = TransientNoiseDraft::default();
         tnoise.seed = "0".to_owned();
