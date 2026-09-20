@@ -347,3 +347,77 @@ fn reliability_conductor_transient_retains_black_lifetime_without_inventing_resi
         );
     }
 }
+
+#[test]
+fn reliability_retained_results_and_worker_buffer_refuse_contradictions() {
+    let result = Engine::new(Default::default())
+        .run_reliability_with_abort(&Netlist::parse(DECK).unwrap(), &request(), &NoAbort)
+        .unwrap();
+    let limits = crate::ResourceLimits::default();
+    result
+        .validate_retained_payload_with_abort(&limits, &NoAbort)
+        .unwrap();
+    let identity = result
+        .retained_identity_with_abort(&limits, &NoAbort)
+        .unwrap();
+    let (metadata, values) = result
+        .clone()
+        .into_transfer_parts_with_abort(&limits, &NoAbort)
+        .unwrap();
+    let metadata = serde_json::from_str(&serde_json::to_string(&metadata).unwrap()).unwrap();
+    let restored =
+        ReliabilityRunResult::from_transfer_parts_with_abort(metadata, values, &limits, &NoAbort)
+            .unwrap();
+    assert_eq!(restored, result);
+    assert_eq!(
+        identity,
+        restored
+            .retained_identity_with_abort(&limits, &NoAbort)
+            .unwrap()
+    );
+    let mut altered = result.clone();
+    altered.stress.checkpoints[0].devices[0].contributions[0].parameters[0].shift *= 2.0;
+    assert!(
+        altered
+            .validate_retained_payload_with_abort(&limits, &NoAbort)
+            .is_err()
+    );
+    altered = result.clone();
+    altered.aged[0].parameters[0].aged_value -= 0.1;
+    assert!(
+        altered
+            .validate_retained_payload_with_abort(&limits, &NoAbort)
+            .is_err()
+    );
+    altered = result.clone();
+    altered.stress.phases[0].time_s[1] = f64::NAN;
+    assert!(
+        altered
+            .validate_retained_payload_with_abort(&limits, &NoAbort)
+            .is_err()
+    );
+    let (metadata, mut values) = result
+        .clone()
+        .into_transfer_parts_with_abort(&limits, &NoAbort)
+        .unwrap();
+    assert!(
+        metadata
+            .validate_transfer_layout_with_abort(values.len() - 1, &limits, &NoAbort)
+            .is_err()
+    );
+    values[0] = f64::INFINITY;
+    assert!(
+        ReliabilityRunResult::from_transfer_parts_with_abort(metadata, values, &limits, &NoAbort)
+            .is_err()
+    );
+    assert!(matches!(
+        result.validate_retained_payload_with_abort(&limits, &ImmediateAbort),
+        Err(SimulationError::Aborted)
+    ));
+    let mut small = limits;
+    small.max_result_values = 1;
+    assert!(matches!(
+        result.validate_retained_payload_with_abort(&small, &NoAbort),
+        Err(SimulationError::ResourceLimit(_))
+    ));
+}

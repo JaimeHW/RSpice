@@ -88,6 +88,7 @@ pub use reliability::{
     ReliabilityAgedPoint, ReliabilityAgingCheckpoint, ReliabilityAppliedParameter,
     ReliabilityDeviceAging, ReliabilityDeviceStress, ReliabilityOperatingPoint,
     ReliabilityPhaseStress, ReliabilityRunResult, ReliabilityStressResult,
+    ReliabilityTransferMetadata,
 };
 mod sensitivity;
 pub use sensitivity::SensitivityCardResult;

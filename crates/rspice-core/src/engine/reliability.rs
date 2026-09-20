@@ -8,10 +8,13 @@ use serde::{Deserialize, Serialize};
 
 mod aged;
 mod mission;
+mod retained;
+mod transfer;
 pub use aged::{
     ReliabilityAgedPoint, ReliabilityAppliedParameter, ReliabilityOperatingPoint,
     ReliabilityRunResult,
 };
+pub use transfer::ReliabilityTransferMetadata;
 #[cfg(test)]
 mod tests;
 
