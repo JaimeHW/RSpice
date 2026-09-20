@@ -46,7 +46,7 @@ rspice-core = { path = "../../crates/rspice-core", version = "0.1.0", optional =
 # benchmark rig rather than a shipping frontend, so depending on a conformance
 # crate is fine — `tools/ci/test_ci_configuration.py` enforces the ban only
 # against the crates that ship.
-rspice-conformance = { path = "../../crates/rspice-conformance", version = "0.1.0", optional = true, default-features = false, features = [
+rspice-conformance = { path = "../rspice-conformance", version = "0.1.0", optional = true, default-features = false, features = [
     "veriloga-builtins-base",
 ] }
 # The `klu` subcommand measures the solver kernels where they live, in

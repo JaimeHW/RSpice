@@ -109,7 +109,7 @@ fn report(stats: &DeviceStatistics, results: &[DeviceResult]) {
 /// The workspace `tests/` root, where corpora are vendored.
 fn tests_dir() -> PathBuf {
     PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set"))
-        .parent() // crates/
+        .parent() // tools/
         .and_then(|path| path.parent()) // workspace root
         .expect("workspace root")
         .join("tests")

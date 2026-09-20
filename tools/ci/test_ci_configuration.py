@@ -508,7 +508,7 @@ class CiConfigurationTests(unittest.TestCase):
         a conformance suite quietly skipping cases is the one outcome it
         must never have.
         """
-        manifest = read_text("crates/rspice-conformance/Cargo.toml")
+        manifest = read_text("tools/rspice-conformance/Cargo.toml")
         declared = set(re.findall(r"(?m)^([a-z0-9-]+) = \[", manifest))
 
         # Only real gates count. A bare `feature = "..."` also occurs in prose

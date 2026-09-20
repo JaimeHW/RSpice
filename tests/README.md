@@ -11,15 +11,15 @@ means.
 be asked whether its numbers are right:
 
 - `ngspice/` — the ngspice-46 regression corpus, with checked-in `.out`
-  tables. Run by `crates/rspice-conformance/tests/ngspice_regression.rs`.
+  tables. Run by `tools/rspice-conformance/tests/ngspice_regression.rs`.
 - `xyce/` — the Xyce Regression Suite runtime corpus, with `.prn` references.
-  Run by `crates/rspice-conformance/tests/xyce_regression.rs`.
+  Run by `tools/rspice-conformance/tests/xyce_regression.rs`.
 - `gf180mcu/` — GlobalFoundries' open 180nm PDK with per-case ngspice-46
   reference curves. The material is what is new here, not the oracle: BSIM4
   through the vendor's own subcircuit wrappers, process corner libraries, and
   characterisation sweeps from -40C to 175C. Apache-2.0, and the only vendored
   corpus RSpice may redistribute without qualification. Run by
-  `crates/rspice-conformance/tests/gf180mcu_devices.rs`.
+  `tools/rspice-conformance/tests/gf180mcu_devices.rs`.
 
 **Self-oracled corpora** arrive from upstream with no reference output, so
 RSpice captured its own with ngspice 47 and checked the tables in as
@@ -30,7 +30,7 @@ the oracle rather than receiving it. A deck without one is execution-only: the
 run answers whether it loads, builds, and either completes or refuses cleanly,
 which means RSpice survived the deck, not that it was right about it. Each
 corpus's vendoring note records the capture binary and its digest. Both are run
-by `crates/rspice-conformance/tests/execution_corpora.rs`:
+by `tools/rspice-conformance/tests/execution_corpora.rs`:
 
 - `iscas85/` — the ISCAS85 benchmarks as transistor-level SPICE. Bought for
   scale: up to ~89k netlist lines and thousands of devices, an order of
@@ -46,7 +46,7 @@ oracle is a program rather than a file:
   simulators that share no code with RSpice or with each other. RSpice-authored
   rather than vendored, and chosen for language coverage rather than scale: one
   case per wave-1 construct the digital front end has to implement. Run by
-  `crates/rspice-conformance/tests/verilog_oracles.rs`.
+  `tools/rspice-conformance/tests/verilog_oracles.rs`.
 
   The difference that matters is what a green run means when the oracles are
   absent, which today they always are — neither binary is on CI. The suite then

@@ -112,7 +112,7 @@ or replaced by a conflicting device registration.
 | `time_compat` | Wall-clock shim: real `std::time::Instant` natively, a no-op stub on `wasm32` (bare WASM has no clock) |
 
 Conformance harnesses are deliberately *not* here. They live in
-[`rspice-conformance`](../rspice-conformance), which can see only this crate's
+[`rspice-conformance`](../../tools/rspice-conformance), which can see only this crate's
 public API, so every assertion travels the path a user's deck takes.
 
 ## Device models
@@ -874,7 +874,7 @@ tests, and a determinism test.
 ### Conformance and benchmarking live elsewhere
 
 The ngspice, Xyce, GF180MCU, ISCAS85, Verilog-A, and digital-Verilog suites are
-[`rspice-conformance`](../rspice-conformance), along with the case-runner and
+[`rspice-conformance`](../../tools/rspice-conformance), along with the case-runner and
 oracle-capture binaries they drive. This crate declares no binaries at all, and
 `tools/ci/test_ci_configuration.py` asserts it holds no validation harness.
 

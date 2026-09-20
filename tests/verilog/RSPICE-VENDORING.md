@@ -1,7 +1,7 @@
 # RSpice Verilog Oracle Corpus — Provenance
 
 The digital Verilog cases compared against Icarus Verilog and Verilator by
-`crates/rspice-conformance/src/suites/verilog.rs`.
+`tools/rspice-conformance/src/suites/verilog.rs`.
 
 Named for the language rather than for the domain, and not arbitrarily:
 `tests/paranoia/digital/` already exists as a sub-corpus, and its manifest keys
@@ -79,7 +79,7 @@ testbench synthesised from the `.stim` file by the harness, so the printing
 format is owned by RSpice and is identical across simulators rather than being
 each simulator's idea of how to format a number. The format, the timing rules,
 and the trace grammar are specified in the module documentation of
-`crates/rspice-conformance/src/suites/verilog.rs`, which is the code that has to
+`tools/rspice-conformance/src/suites/verilog.rs`, which is the code that has to
 honour them.
 
 ## Oracle binaries

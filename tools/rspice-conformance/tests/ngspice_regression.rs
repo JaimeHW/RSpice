@@ -338,11 +338,11 @@ fn unique_case_result_path(cir_path: &Path) -> PathBuf {
 /// Get the path to the ngspice tests directory at the workspace root.
 /// Tests are located at workspace_root/tests/ngspice/, not crate/tests/.
 fn get_tests_dir() -> PathBuf {
-    // CARGO_MANIFEST_DIR points to crates/rspice-conformance/
+    // CARGO_MANIFEST_DIR points to tools/rspice-conformance/
     // We need to go up two levels to reach the workspace root
     let tests_dir =
         PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set"))
-            .parent() // crates/
+            .parent() // tools/
             .and_then(|p| p.parent()) // workspace root
             .expect("Could not find workspace root")
             .join("tests")

@@ -36,7 +36,7 @@ redistributing this corpus.
 
 This corpus is not executed by the ngspice regression adapter.
 That harness is scoped to `tests/ngspice/`. Xyce uses its own Rust-native
-adapter in `crates/rspice-conformance/tests/xyce_regression.rs` because its
+adapter in `tools/rspice-conformance/tests/xyce_regression.rs` because its
 `Netlists/` and `OutputData/` layout and `.prn`-style references differ from
 ngspice's checked-in `.out` convention.
 

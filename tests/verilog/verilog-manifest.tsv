@@ -21,7 +21,7 @@
 # Verilog-A front end and runs it on the native digital host. What each case
 # must produce — a trace, row by row, or a named refusal for a construct the
 # front end does not implement yet — is pinned in `EXPECTED` in
-# `crates/rspice-conformance/tests/verilog_oracles.rs`, beside the derivation of
+# `tools/rspice-conformance/tests/verilog_oracles.rs`, beside the derivation of
 # every number. That is a contract with far more in it than a column could hold,
 # and putting a weaker summary here as well would give a case two statements of
 # what it must do.

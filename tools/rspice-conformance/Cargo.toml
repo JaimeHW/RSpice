@@ -151,7 +151,7 @@ path = "tests/y_device_policy.rs"
 required-features = ["circuit-suites"]
 
 [dependencies]
-rspice-core = { path = "../rspice-core", version = "0.1.0" }
+rspice-core.workspace = true
 blake3 = "1.5"
 clap.workspace = true
 log.workspace = true

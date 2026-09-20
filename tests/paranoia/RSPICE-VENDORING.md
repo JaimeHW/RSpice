@@ -2,7 +2,7 @@
 
 This directory vendors the ngspice example decks assembled upstream for the
 `paranoia` Valgrind harness, used by
-`crates/rspice-conformance/src/suites/execution.rs`.
+`tools/rspice-conformance/src/suites/execution.rs`.
 
 ## Source
 
@@ -73,7 +73,7 @@ when redistributing.
 
 ## Harness status
 
-Run by `crates/rspice-conformance/tests/execution_corpora.rs` against
+Run by `tools/rspice-conformance/tests/execution_corpora.rs` against
 `execution-manifest.tsv` in this directory. Adjacent `.oracle.out` files are
 compact numerical tables captured with the official Windows console build of
 ngspice 47 (`ngspice_con.exe`, SHA-256

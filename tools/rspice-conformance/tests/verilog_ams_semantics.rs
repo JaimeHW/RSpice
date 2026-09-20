@@ -664,7 +664,7 @@ fn connect_module_signatures_still_match_the_shipped_library() {
 fn discipline_resolution_is_covered_where_this_suite_says_it_is() {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
-        .expect("the conformance crate sits under crates/")
+        .expect("the conformance crate sits under tools/")
         .join("rspice-veriloga")
         .join("src")
         .join("connect")

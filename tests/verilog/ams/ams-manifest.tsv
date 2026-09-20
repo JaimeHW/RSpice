@@ -17,12 +17,12 @@
 #
 # So these cases live in their own directory with their own manifest, and the
 # Icarus and Verilator arms never see them: `discover_designs` in
-# `crates/rspice-conformance/src/suites/verilog/corpus.rs` reads files rather
+# `tools/rspice-conformance/src/suites/verilog/corpus.rs` reads files rather
 # than recursing, so a subdirectory is invisible to the corpus beside it. The
 # same reason `scale/` is a subdirectory.
 #
 # What replaces the oracle is a reference model: for each case, an independent
-# computation of the expected trace in `crates/rspice-conformance/tests/
+# computation of the expected trace in `tools/rspice-conformance/tests/
 # verilog_ams.rs`, written from the clause rather than read off a run. That is
 # a weaker guarantee than two foreign simulators agreeing and it is stated as
 # one — but it is not weaker than nothing, because the model and the design are

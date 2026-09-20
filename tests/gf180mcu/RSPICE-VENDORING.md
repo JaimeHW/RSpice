@@ -3,7 +3,7 @@
 This directory vendors GlobalFoundries' open GF180MCU 180nm PDK model library
 together with a normalized device-characterisation corpus derived from the
 PDK's own `models/ngspice/testing` tree. Run by
-`crates/rspice-conformance/src/suites/gf180mcu.rs`.
+`tools/rspice-conformance/src/suites/gf180mcu.rs`.
 
 ## Source
 

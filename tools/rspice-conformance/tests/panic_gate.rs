@@ -18,7 +18,7 @@ fn tests_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .and_then(std::path::Path::parent)
-        .expect("rspice-conformance is a workspace crate under crates/")
+        .expect("rspice-conformance is a workspace crate under tools/")
         .join("tests")
 }
 

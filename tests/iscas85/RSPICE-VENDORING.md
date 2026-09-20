@@ -2,7 +2,7 @@
 
 This directory vendors the ISCAS85 combinational benchmark circuits as
 transistor-level SPICE, used by
-`crates/rspice-conformance/src/suites/execution.rs`.
+`tools/rspice-conformance/src/suites/execution.rs`.
 
 ## ⚠ Licensing is unresolved — read before shipping
 
@@ -64,7 +64,7 @@ variant and an `_ann` variant back-annotated with parasitics.
 
 ## Harness status
 
-Run by `crates/rspice-conformance/tests/execution_corpora.rs` against
+Run by `tools/rspice-conformance/tests/execution_corpora.rs` against
 `execution-manifest.tsv` in this directory. Upstream supplies no numerical
 references, so RSpice checks in compact `.oracle.out` tables beside 23 of the
 24 standalone decks. Normal tests consume those files and never launch

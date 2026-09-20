@@ -7,7 +7,7 @@ artifact against the exact package contract the importer uses.
 
 The GUI never accepts private publisher material. That is why this exists as a
 separate program rather than a menu item, and why its trusted computing base is
-[`rspice-design-model`](../rspice-design-model) plus `clap`, not the desktop
+[`rspice-design-model`](../../crates/rspice-design-model) plus `clap`, not the desktop
 application.
 
 ## Commands
