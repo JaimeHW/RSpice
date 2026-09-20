@@ -132,19 +132,24 @@ fn qpac_card_executes_against_the_decks_retained_qpss_state() {
     let point = engine
         .run_qpss(&deck, QpssConfig::from_qpss_card(qpss).unwrap())
         .unwrap();
-    let result = engine
-        .run_qpac_card_from_qpss_with_abort(&deck, qpac, &point, &NoAbort)
-        .unwrap();
-    assert_eq!(result.metadata.request.offsets_hz, [0.0, 50.0, 100.0]);
-    for (k, &f) in result.metadata.request.offsets_hz.iter().enumerate() {
-        let expected =
-            Complex64::new(1.0, 0.0) / Complex64::new(1.0, std::f64::consts::TAU * f * 1e-4);
-        assert!((result.output_transfer[k] - expected).norm() < 1e-10);
-        assert!(
-            (result.output_response[k]
-                - expected * Complex64::from_polar(0.3, 40.0_f64.to_radians()))
-            .norm()
-                < 1e-10
-        );
+    for (sweep, expected_offsets) in [
+        (qpac.as_ref().clone(), vec![0.0, 50.0, 100.0]),
+        (parse(".QPAC DEC 2 10 800 SOURCE=V1 OUT=V(out) INLATTICE=(0,0) OUTLATTICE=(0,0) MAG=.3 PHASE=40").unwrap(), vec![10.0, 10.0 * 10_f64.sqrt(), 100.0, 100.0 * 10_f64.sqrt()]),
+        (parse(".QPAC OCT 2 8 32 SOURCE=V1 OUT=V(out) INLATTICE=(0,0) OUTLATTICE=(0,0) MAG=.3 PHASE=40").unwrap(), vec![8.0, 8.0 * 2_f64.sqrt(), 16.0, 16.0 * 2_f64.sqrt(), 32.0]),
+        (parse(".QPAC LIN 3 -100 100 SOURCE=V1 OUT=V(out) INLATTICE=(0,0) OUTLATTICE=(0,0) MAG=.3 PHASE=40").unwrap(), vec![-100.0, 0.0, 100.0]),
+    ] {
+        let limits = ResourceLimits::default();
+        assert_eq!(QpacRequest::validate_qpac_card(&sweep, &limits).unwrap(), expected_offsets.len());
+        let mut limited = limits.clone();
+        limited.max_analysis_points = expected_offsets.len() - 1;
+        assert!(matches!(QpacRequest::validate_qpac_card(&sweep, &limited), Err(SimulationError::ResourceLimit(_))));
+        let result = engine.run_qpac_card_from_qpss_with_abort(&deck, &sweep, &point, &NoAbort).unwrap();
+        assert_eq!(result.metadata.request.offsets_hz.len(), expected_offsets.len());
+        for (k, &f) in expected_offsets.iter().enumerate() {
+            assert!((result.metadata.request.offsets_hz[k] - f).abs() <= 1e-12 * f.abs().max(1.0));
+            let expected = Complex64::new(1.0, 0.0) / Complex64::new(1.0, std::f64::consts::TAU * f * 1e-4);
+            assert!((result.output_transfer[k] - expected).norm() < 1e-10);
+            assert!((result.output_response[k] - expected * Complex64::from_polar(0.3, 40.0_f64.to_radians())).norm() < 1e-10);
+        }
     }
 }

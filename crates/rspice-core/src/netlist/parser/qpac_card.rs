@@ -80,13 +80,10 @@ pub(super) fn parse(
         let points = card_count(stream, line, params, CARD, "points", 1)?;
         let start_freq = number(stream, line, params, "start frequency")?;
         let stop_freq = number(stream, line, params, "stop frequency")?;
-        if start_freq < 0.0
-            || stop_freq < start_freq
-            || (variation != FreqVariation::Lin && start_freq == 0.0)
-        {
+        if stop_freq < start_freq || (variation != FreqVariation::Lin && start_freq <= 0.0) {
             return Err(error(
                 line,
-                "generated sweep needs 0 <= start <= stop (positive start for DEC/OCT)",
+                "generated sweep needs start <= stop (positive start for DEC/OCT)",
             ));
         }
         QpacSweep::Generated(PeriodicSweep {

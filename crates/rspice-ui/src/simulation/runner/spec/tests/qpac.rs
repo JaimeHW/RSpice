@@ -162,3 +162,42 @@ fn qpac_controls_preserve_legacy_defaults_and_ignore_inactive_editor_buffers() {
     draft.output_lattice = "0,1".into();
     assert!(draft.to_spec().is_err());
 }
+
+#[test]
+fn qpac_generated_sweep_controls_survive_worker_and_native_resolution() {
+    for (mode, start, stop, expected) in [
+        (
+            0,
+            "10",
+            "800",
+            vec![10.0, 10.0 * 10_f64.sqrt(), 100.0, 100.0 * 10_f64.sqrt()],
+        ),
+        (2, "-100", "100", vec![-100.0, 100.0]),
+    ] {
+        let mut draft = QuasiPeriodicAcDraft::default();
+        draft.sweep.sweep = mode;
+        draft.sweep.start = start.into();
+        draft.sweep.stop = stop.into();
+        draft.sweep.points = "2".into();
+        let spec = draft.to_spec().unwrap();
+        let worker = WorkerAnalysisSpec::try_from(&spec).unwrap();
+        let restored: AnalysisSpec =
+            serde_json::from_str::<WorkerAnalysisSpec>(&serde_json::to_string(&worker).unwrap())
+                .unwrap()
+                .into();
+        let card = restored.qpac_card().unwrap();
+        let resolved = rspice_core::engine::QpacRequest::from_qpac_card(&card).unwrap();
+        assert_eq!(resolved.offsets_hz.len(), expected.len());
+        assert_eq!(
+            rspice_core::engine::QpacRequest::validate_qpac_card(
+                &card,
+                &rspice_core::ResourceLimits::default()
+            )
+            .unwrap(),
+            expected.len()
+        );
+        for (actual, expected) in resolved.offsets_hz.iter().zip(expected) {
+            assert!((actual - expected).abs() < 1e-12 * expected.abs().max(1.0));
+        }
+    }
+}
