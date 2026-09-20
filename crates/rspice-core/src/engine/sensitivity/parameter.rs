@@ -259,6 +259,7 @@ impl Engine {
         if netlist.source_text.is_none()
             || !netlist.params.has_any_parameter_binding(parameter)
             || !netlist.ast_overlay.device_parameters.is_empty()
+            || !netlist.ast_overlay.instance_models.is_empty()
             || netlist.ast_overlay.control_options.is_some()
             || !netlist.spectre_statistics.variations.is_empty()
             || !netlist.elements.iter().all(|element| {

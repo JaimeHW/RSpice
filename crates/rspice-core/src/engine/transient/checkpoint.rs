@@ -1099,6 +1099,13 @@ fn semantic_netlist_identity(netlist: &Netlist, domain: &[u8]) -> String {
     hash_field(&mut hasher, "native_bjt_junction_area_law", 13_u8);
     hash_field(&mut hasher, "title", &netlist.title);
     hash_field(&mut hasher, "elements", &netlist.elements);
+    if !netlist.ast_overlay.instance_models.is_empty() {
+        hash_field(
+            &mut hasher,
+            "instance_model_overlays",
+            &netlist.ast_overlay.instance_models,
+        );
+    }
     hash_field(&mut hasher, "analyses", &netlist.analyses);
     hash_field(&mut hasher, "fft_analyses", &netlist.fft_analyses);
     hash_field(&mut hasher, "data_tables", &netlist.data_tables);
@@ -16212,5 +16219,36 @@ mod tests {
 
         std::fs::remove_file(&path).expect("remove checkpoint abort fixture");
         std::fs::remove_dir(&directory).expect("remove checkpoint abort directory");
+    }
+}
+
+#[cfg(test)]
+mod reliability_identity_tests {
+    use super::*;
+
+    #[test]
+    fn reliability_instance_model_values_participate_in_checkpoint_identity() {
+        let original = Netlist::parse("aging identity\nV1 n 0 1\nR1 n 0 1k\n.end\n").unwrap();
+        let mut aged = original.clone();
+        aged.ast_overlay.instance_models.insert(
+            "M1".into(),
+            crate::netlist::InstanceModelOverlay {
+                requested_model: "NM".into(),
+                selected_model: "NM".into(),
+                parameters: [("VTO".into(), 0.7)].into_iter().collect(),
+            },
+        );
+        assert_ne!(
+            netlist_checkpoint_identity(&original),
+            netlist_checkpoint_identity(&aged)
+        );
+        let first = netlist_checkpoint_identity(&aged);
+        aged.ast_overlay
+            .instance_models
+            .get_mut("M1")
+            .unwrap()
+            .parameters
+            .insert("VTO".into(), 0.8);
+        assert_ne!(first, netlist_checkpoint_identity(&aged));
     }
 }

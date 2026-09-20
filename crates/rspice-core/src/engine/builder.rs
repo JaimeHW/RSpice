@@ -43,6 +43,7 @@ use std::sync::RwLock;
 use std::time::{Duration, Instant};
 
 mod model_resolution;
+mod reliability;
 pub(in crate::engine) use model_resolution::resolved_element_value_expression;
 use model_resolution::*;
 pub use model_resolution::{
@@ -50,6 +51,7 @@ pub use model_resolution::{
     ModelBinInstanceInspection, ModelBinSelectionKind, ResolvedResistorParameters,
     XYCE_DEFAULT_CAPACITOR_AGE_DEGRADATION, validate_native_xyce_ltra_model_contract,
 };
+pub(in crate::engine) use reliability::reliability_model_parameters;
 mod behavioral;
 mod boundary_supply;
 mod builtin_models;
@@ -5372,6 +5374,19 @@ impl Engine {
                 )?;
             }
             &effective_model_netlist
+        };
+        let mut instance_model_netlist;
+        let netlist = if netlist.ast_overlay.instance_models.is_empty() {
+            netlist
+        } else {
+            instance_model_netlist = netlist.clone();
+            reliability::apply_instance_model_overlays(
+                &mut instance_model_netlist,
+                &mut flat_elements,
+                self.config.temperature,
+                abort,
+            )?;
+            &instance_model_netlist
         };
         if let Some(tstop) = transient_stop_time {
             super::transient::noise::expand_transient_noise(
