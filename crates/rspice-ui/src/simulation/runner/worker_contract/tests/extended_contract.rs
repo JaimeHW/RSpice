@@ -685,6 +685,8 @@ fn worker_spec_request_preserves_pac_pxf_execution_options() {
 #[test]
 fn worker_spec_request_preserves_pnoise_pstb_execution_options() {
     let pnoise = crate::services::simulation_runner::PnoiseRunConfig {
+        input_sideband: -2,
+        output_sideband: 1,
         pss_fundamental_freq: 3.0e6,
         pss_num_harmonics: 8,
         pss_tolerance: 6.0e-7,
@@ -696,7 +698,7 @@ fn worker_spec_request_preserves_pnoise_pstb_execution_options() {
         output_node: "vout".to_string(),
         output_ref: Some("vref".to_string()),
         input_source: "VIN".to_string(),
-        noise_ref: crate::services::simulation_runner::PnoiseReference::Phase,
+        noise_ref: crate::services::simulation_runner::PnoiseReference::Input,
         integrated_noise: true,
         noise_summary: false,
         reltol: 3.0e-5,
@@ -740,6 +742,8 @@ fn worker_spec_request_preserves_pnoise_pstb_execution_options() {
 
     let pnoise_worker =
         WorkerRequest::from_runner_parts(71, &pnoise_request, &input).expect("PNOISE converts");
+    let pnoise_worker: WorkerRequest =
+        serde_json::from_str(&serde_json::to_string(&pnoise_worker).unwrap()).unwrap();
     let (pnoise_round_tripped, _) = pnoise_worker.into_runner_parts();
     match pnoise_round_tripped {
         SimulationRequest::Spec { spec, options } => {
@@ -1174,6 +1178,8 @@ fn assert_pnoise_config_matches(
     actual: &crate::services::simulation_runner::PnoiseRunConfig,
     expected: &crate::services::simulation_runner::PnoiseRunConfig,
 ) {
+    assert_eq!(actual.input_sideband, expected.input_sideband);
+    assert_eq!(actual.output_sideband, expected.output_sideband);
     assert_eq!(actual.pss_fundamental_freq, expected.pss_fundamental_freq);
     assert_eq!(actual.pss_num_harmonics, expected.pss_num_harmonics);
     assert_eq!(actual.pss_tolerance, expected.pss_tolerance);

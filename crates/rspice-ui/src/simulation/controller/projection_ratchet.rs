@@ -1108,6 +1108,20 @@ fn hbnoise_reference_fields_reach_the_execution_spec() {
 }
 
 #[test]
+fn pnoise_conversion_channels_reach_the_execution_options() {
+    let kind = AnalysisKind::Pnoise;
+    let draft = fixture_draft(kind);
+    let mut body = draft_body(&draft).unwrap();
+    body.insert("noise_ref_idx".into(), Value::from(1));
+    for path in ["input_sideband", "output_sideband"] {
+        assert!(
+            matches!(judge(kind, &draft, &body, path), FieldOutcome::Moved),
+            "{path}"
+        );
+    }
+}
+
+#[test]
 fn hbnoise_spot_and_zero_sideband_authoring_reach_a_valid_spec() {
     for sweep in 0..=2 {
         let mut setup = crate::simulation::plan::HbNoiseDraft::default();

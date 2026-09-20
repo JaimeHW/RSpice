@@ -74,6 +74,8 @@ pub enum NoiseReferenceType {
 /// Commercial-grade configuration matching Cadence Spectre PNoise parameters.
 #[derive(Debug, Clone)]
 pub struct PnoiseConfig {
+    pub input_sideband: i32,
+    pub output_sideband: i32,
     /// Start frequency (Hz)
     pub start_freq: f64,
     /// Stop frequency (Hz)
@@ -103,6 +105,8 @@ pub struct PnoiseConfig {
 impl Default for PnoiseConfig {
     fn default() -> Self {
         Self {
+            input_sideband: 0,
+            output_sideband: 0,
             start_freq: 1.0, // 1 Hz (for phase noise)
             stop_freq: 1e6,  // 1 MHz
             num_points: 10,  // 10 per decade
@@ -131,7 +135,7 @@ impl PnoiseConfig {
     ///
     /// `rspice-core/src/netlist/parser/periodic_cards.rs::parse_pnoise_command`
     /// reads `.PNOISE DEC|LIN|OCT np fstart fstop KEY=VALUE ...` and refuses
-    /// any keyword outside `OUT`, `INPUT`, `MAXSIDEBAND`, `NOISEREF`,
+    /// any keyword outside `OUT`, `INPUT`, `MAXSIDEBAND`, `INPUTSIDEBAND`, `OUTSIDEBAND`, `NOISEREF`,
     /// `INTEGRATEDNOISE`, `NOISESUMMARY` and `FROM`. `OUT=` is the output
     /// probe, spelled `V(node)`, `V(node,ref)` or a bare node name.
     ///
@@ -167,6 +171,12 @@ impl PnoiseConfig {
         }
 
         cmd.push_str(&format!(" maxsideband={}", self.max_sideband));
+        if self.noise_ref == NoiseReferenceType::Input && self.input_sideband != 0 {
+            cmd.push_str(&format!(" inputsideband={}", self.input_sideband));
+        }
+        if self.noise_ref != NoiseReferenceType::Phase && self.output_sideband != 0 {
+            cmd.push_str(&format!(" outsideband={}", self.output_sideband));
+        }
 
         if self.integrated_noise != Self::CARD_DEFAULT_INTEGRATED_NOISE {
             cmd.push_str(" integratednoise=yes");
@@ -203,13 +213,16 @@ impl PnoiseConfig {
             return Err("Number of points must be at least 1".to_string());
         }
 
-        // The engine's own bound on the folded sideband count, taken here so
-        // the form refuses what the card cannot spell: `.PNOISE MAXSIDEBAND=`
-        // is a signed integer of at least one
-        // (`rspice-core/src/netlist/parser/periodic_cards.rs`, the `.PNOISE`
-        // `MAXSIDEBAND` arm). Folding no sidebands is not periodic noise.
-        if self.max_sideband < 1 {
-            return Err("Maximum sideband must be at least 1".to_string());
+        crate::services::simulation_runner::validate_noise_sidebands(
+            self.input_sideband,
+            self.output_sideband,
+            usize::try_from(self.max_sideband)
+                .map_err(|_| "Maximum sideband must be nonnegative")?,
+        )?;
+        if (self.noise_ref == NoiseReferenceType::Phase && self.output_sideband != 0)
+            || (self.noise_ref != NoiseReferenceType::Input && self.input_sideband != 0)
+        {
+            return Err("Conversion sidebands apply to driven noise; input sideband requires input-referred noise".into());
         }
 
         if self.output_node.is_empty() {
@@ -235,6 +248,8 @@ impl PnoiseConfig {
 /// Dialog state with string buffers
 #[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct PnoiseDialogState {
+    pub input_sideband: String,
+    pub output_sideband: String,
     /// Start frequency buffer
     pub start_freq: String,
     /// Stop frequency buffer
@@ -268,6 +283,10 @@ pub struct PnoiseDialogState {
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PersistedPnoiseDialogState {
+    #[serde(default = "default_sideband")]
+    input_sideband: String,
+    #[serde(default = "default_sideband")]
+    output_sideband: String,
     #[serde(default)]
     start_freq: String,
     #[serde(default)]
@@ -302,6 +321,10 @@ struct PersistedPnoiseDialogState {
     spot_noise: serde::de::IgnoredAny,
 }
 
+fn default_sideband() -> String {
+    "0".into()
+}
+
 impl<'de> serde::Deserialize<'de> for PnoiseDialogState {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -309,6 +332,8 @@ impl<'de> serde::Deserialize<'de> for PnoiseDialogState {
     {
         let persisted = PersistedPnoiseDialogState::deserialize(deserializer)?;
         Ok(Self {
+            input_sideband: persisted.input_sideband,
+            output_sideband: persisted.output_sideband,
             start_freq: persisted.start_freq,
             stop_freq: persisted.stop_freq,
             num_points: persisted.num_points,
@@ -330,6 +355,8 @@ impl PnoiseDialogState {
     /// Initialize from config
     pub fn from_config(config: &PnoiseConfig) -> Self {
         Self {
+            input_sideband: config.input_sideband.to_string(),
+            output_sideband: config.output_sideband.to_string(),
             start_freq: format_freq(config.start_freq),
             stop_freq: format_freq(config.stop_freq),
             num_points: config.num_points.to_string(),
@@ -379,6 +406,22 @@ impl PnoiseDialogState {
         };
 
         let config = PnoiseConfig {
+            input_sideband: if noise_ref == NoiseReferenceType::Input {
+                self.input_sideband
+                    .trim()
+                    .parse()
+                    .map_err(|_| "Input sideband must be a signed integer")?
+            } else {
+                0
+            },
+            output_sideband: if noise_ref != NoiseReferenceType::Phase {
+                self.output_sideband
+                    .trim()
+                    .parse()
+                    .map_err(|_| "Output sideband must be a signed integer")?
+            } else {
+                0
+            },
             start_freq: start,
             stop_freq: stop,
             num_points: points,
@@ -428,6 +471,55 @@ fn format_freq(freq: f64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pnoise_sidebands_round_trip_and_inactive_controls_do_not_change_phase_noise() {
+        let config = PnoiseConfig {
+            input_sideband: -1,
+            output_sideband: 2,
+            noise_ref: NoiseReferenceType::Input,
+            ..Default::default()
+        };
+        config.validate().unwrap();
+        let draft = PnoiseDialogState::from_config(&config);
+        let encoded = serde_json::to_string(&draft).unwrap();
+        let mut restored: PnoiseDialogState = serde_json::from_str(&encoded).unwrap();
+        let round_trip = restored.to_config().unwrap();
+        assert_eq!(
+            (round_trip.input_sideband, round_trip.output_sideband),
+            (-1, 2)
+        );
+        let deck = format!(
+            "PNOISE card\nV1 out 0 0\nR1 out 0 1k\n.HB 1Meg\n{}\n.end\n",
+            round_trip.to_spice()
+        );
+        let parsed = rspice_core::Netlist::parse(&deck).unwrap();
+        let rspice_core::netlist::AnalysisCommand::Pnoise(card) = &parsed.analyses[1] else {
+            panic!("PNOISE card");
+        };
+        assert_eq!((card.input_sideband, card.output_sideband), (-1, 2));
+        restored.input_sideband = "-2147483648".into();
+        assert!(restored.to_config().is_err());
+        restored.noise_ref_idx = 2;
+        let phase = restored.to_config().unwrap();
+        assert_eq!((phase.input_sideband, phase.output_sideband), (0, 0));
+        assert!(!phase.to_spice().contains("inputsideband"));
+        assert!(!phase.to_spice().contains("outsideband"));
+        let mut old: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+        old.as_object_mut().unwrap().remove("input_sideband");
+        old.as_object_mut().unwrap().remove("output_sideband");
+        let legacy: PnoiseDialogState = serde_json::from_value(old).unwrap();
+        let legacy = legacy.to_config().unwrap();
+        assert_eq!((legacy.input_sideband, legacy.output_sideband), (0, 0));
+        assert!(
+            PnoiseConfig {
+                max_sideband: 0,
+                ..Default::default()
+            }
+            .validate()
+            .is_ok()
+        );
+    }
 
     /// The exact card, in the engine's spelling.
     ///

@@ -568,16 +568,16 @@ fn run_pnoise(
     // keeps one. The ranked rows stay empty: PNoise carries cyclostationary
     // percentages, not band-integrated mechanism powers, and inventing a row
     // from a percentage would publish a number nothing computed.
-    let summary = data.output_rms.map(|total_rms| {
+    let summary = (data.output_rms.is_some() || data.conversion.is_some()).then(|| {
         let band = (
             data.frequencies.first().copied().unwrap_or_default(),
             data.frequencies.last().copied().unwrap_or_default(),
         );
         crate::state::NoiseSummary {
-            conversion: None,
+            conversion: data.conversion,
             noise_figure: None,
             rows: Vec::new(),
-            total_rms: Some(total_rms),
+            total_rms: data.output_rms,
             input_rms: data.input_rms,
             band,
         }

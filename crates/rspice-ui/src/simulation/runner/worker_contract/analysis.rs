@@ -583,6 +583,10 @@ impl From<WorkerPxfRunConfig> for crate::services::simulation_runner::PxfRunConf
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct WorkerPnoiseRunConfig {
+    #[serde(default)]
+    pub input_sideband: i32,
+    #[serde(default)]
+    pub output_sideband: i32,
     pub pss_fundamental_freq: f64,
     pub pss_num_harmonics: usize,
     pub pss_tolerance: f64,
@@ -606,6 +610,8 @@ pub(crate) struct WorkerPnoiseRunConfig {
 impl From<&crate::services::simulation_runner::PnoiseRunConfig> for WorkerPnoiseRunConfig {
     fn from(value: &crate::services::simulation_runner::PnoiseRunConfig) -> Self {
         Self {
+            input_sideband: value.input_sideband,
+            output_sideband: value.output_sideband,
             pss_fundamental_freq: value.pss_fundamental_freq,
             pss_num_harmonics: value.pss_num_harmonics,
             pss_tolerance: value.pss_tolerance,
@@ -630,6 +636,8 @@ impl From<&crate::services::simulation_runner::PnoiseRunConfig> for WorkerPnoise
 impl From<WorkerPnoiseRunConfig> for crate::services::simulation_runner::PnoiseRunConfig {
     fn from(value: WorkerPnoiseRunConfig) -> Self {
         Self {
+            input_sideband: value.input_sideband,
+            output_sideband: value.output_sideband,
             pss_fundamental_freq: value.pss_fundamental_freq,
             pss_num_harmonics: value.pss_num_harmonics,
             pss_tolerance: value.pss_tolerance,

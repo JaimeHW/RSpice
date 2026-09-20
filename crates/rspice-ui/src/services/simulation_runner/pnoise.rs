@@ -74,6 +74,8 @@ pub enum PnoiseReference {
 /// Explicit configuration for PNoise execution.
 #[derive(Debug, Clone)]
 pub struct PnoiseRunConfig {
+    pub input_sideband: i32,
+    pub output_sideband: i32,
     pub pss_fundamental_freq: Value,
     pub pss_num_harmonics: usize,
     pub pss_tolerance: Value,
@@ -97,6 +99,8 @@ pub struct PnoiseRunConfig {
 impl Default for PnoiseRunConfig {
     fn default() -> Self {
         Self {
+            input_sideband: 0,
+            output_sideband: 0,
             pss_fundamental_freq: 1e6,
             pss_num_harmonics: 10,
             pss_tolerance: 1e-3,
@@ -119,6 +123,20 @@ impl Default for PnoiseRunConfig {
 }
 
 impl PnoiseRunConfig {
+    pub(crate) fn validate_conversion_channels(&self) -> Result<(), String> {
+        super::validate_noise_sidebands(
+            self.input_sideband,
+            self.output_sideband,
+            usize::try_from(self.max_sideband)
+                .map_err(|_| "Maximum sideband must be nonnegative")?,
+        )?;
+        if (self.noise_ref == PnoiseReference::Phase && self.output_sideband != 0)
+            || (self.noise_ref != PnoiseReference::Input && self.input_sideband != 0)
+        {
+            return Err("Conversion sidebands apply to driven noise; input sideband requires input-referred noise".into());
+        }
+        Ok(())
+    }
     fn validate(&self) -> Result<(), PnoiseRunError> {
         if !self.pss_fundamental_freq.is_finite() || self.pss_fundamental_freq <= 0.0 {
             return Err(PnoiseRunError::Validation(
@@ -155,6 +173,8 @@ impl PnoiseRunConfig {
                 "PNOISE max sideband must be non-negative".to_string(),
             ));
         }
+        self.validate_conversion_channels()
+            .map_err(PnoiseRunError::Validation)?;
         if self.output_node.trim().is_empty() {
             return Err(PnoiseRunError::Validation(
                 "PNOISE output node must be specified".to_string(),
@@ -180,6 +200,7 @@ impl PnoiseRunConfig {
 /// PNoise analysis data.
 #[derive(Debug, Clone)]
 pub struct PnoiseData {
+    pub conversion: Option<crate::state::PeriodicNoiseConversionEvidence>,
     /// Offset frequencies (Hz).
     pub frequencies: Vec<Value>,
     /// Noise values. Units depend on `reference`:
@@ -409,6 +430,7 @@ fn run_pnoise_from_retained_state(
         };
         ensure_not_aborted(abort)?;
         return Ok(PnoiseData {
+            conversion: None,
             frequencies,
             output_noise: oscillator.phase_noise_dbc,
             input_noise: None,
@@ -423,30 +445,25 @@ fn run_pnoise_from_retained_state(
     let input_source = (config.noise_ref == PnoiseReference::Input)
         .then(|| config.input_source.trim())
         .filter(|name| !name.is_empty());
-    let exact = match carrier {
-        PeriodicCarrierState::Shooting(operating_point) => engine.run_pnoise_from_pss_with_abort(
-            netlist,
-            &frequencies,
-            config.output_node.trim(),
-            output_ref,
-            input_source,
-            config.max_sideband,
-            operating_point,
-            abort,
-        ),
-        PeriodicCarrierState::HarmonicBalance(operating_point) => engine
-            .run_pnoise_from_hb_with_abort(
-                netlist,
-                &frequencies,
-                config.output_node.trim(),
-                output_ref,
-                input_source,
-                config.max_sideband,
-                operating_point,
-                abort,
-            ),
-    }
-    .map_err(|error| ServiceRunError::from_core("exact retained-state PNOISE", error))?;
+    let request = rspice_core::engine::PeriodicNoiseRequest {
+        offsets: &frequencies,
+        output_node: config.output_node.trim(),
+        output_ref,
+        input_source,
+        max_sideband: config.max_sideband,
+        sidebands: rspice_core::engine::PeriodicNoiseSidebands {
+            input: config.input_sideband,
+            output: config.output_sideband,
+        },
+    };
+    let exact =
+        match carrier {
+            PeriodicCarrierState::Shooting(operating_point) => engine
+                .run_pnoise_from_pss_request_with_abort(netlist, &request, operating_point, abort),
+            PeriodicCarrierState::HarmonicBalance(operating_point) => engine
+                .run_pnoise_from_hb_request_with_abort(netlist, &request, operating_point, abort),
+        }
+        .map_err(|error| ServiceRunError::from_core("exact retained-state PNOISE", error))?;
 
     let input_noise = match config.noise_ref {
         PnoiseReference::Input => Some(exact.input_noise.ok_or_else(|| {
@@ -497,6 +514,13 @@ fn run_pnoise_from_retained_state(
     };
     ensure_not_aborted(abort)?;
     Ok(PnoiseData {
+        conversion: Some(crate::state::PeriodicNoiseConversionEvidence {
+            input_source: input_source.unwrap_or_default().into(),
+            carrier_hz: exact.fundamental_freq,
+            input_sideband: config.input_sideband,
+            output_sideband: config.output_sideband,
+            max_sideband: config.max_sideband,
+        }),
         frequencies,
         output_noise: exact.output_noise,
         input_noise,
@@ -722,46 +746,75 @@ mod tests {
         .expect("the harmonic-balance carrier converges")
         .operating_point;
 
-        let from_pss = run_pnoise_analysis_from_pss_with_source_path_and_abort(
-            DECK, &config, &shooting, None, &NoAbort,
-        )
-        .expect("the shooting-carried run completes");
-        let from_hb = run_pnoise_analysis_from_hb_with_source_path_and_abort(
-            DECK,
-            &config,
-            harmonic_balance.as_ref(),
-            None,
-            &NoAbort,
-        )
-        .expect("the harmonic-balance-carried run completes");
+        for (sideband, reference) in [
+            (0, PnoiseReference::Output),
+            (1, PnoiseReference::Output),
+            (-1, PnoiseReference::Input),
+        ] {
+            let mut config = config.clone();
+            config.output_sideband = sideband;
+            config.noise_ref = reference;
+            if reference == PnoiseReference::Input {
+                config.input_sideband = sideband;
+                config.input_source = "V1".into();
+            }
+            let from_pss = run_pnoise_analysis_from_pss_with_source_path_and_abort(
+                DECK, &config, &shooting, None, &NoAbort,
+            )
+            .expect("the shooting-carried run completes");
+            let from_hb = run_pnoise_analysis_from_hb_with_source_path_and_abort(
+                DECK,
+                &config,
+                harmonic_balance.as_ref(),
+                None,
+                &NoAbort,
+            )
+            .expect("the harmonic-balance-carried run completes");
 
-        assert_eq!(from_pss.frequencies, from_hb.frequencies);
-        assert!(!from_pss.frequencies.is_empty());
-        for (index, frequency) in from_pss.frequencies.iter().copied().enumerate() {
-            let transfer_power = 1.0
-                / (std::f64::consts::TAU * frequency * RESISTANCE * CAPACITANCE).mul_add(
-                    std::f64::consts::TAU * frequency * RESISTANCE * CAPACITANCE,
-                    1.0,
-                );
-            let thermal = 4.0 * BOLTZMANN * NOMINAL_KELVIN * RESISTANCE * transfer_power;
-            for (label, value) in [
-                ("shooting", from_pss.output_noise[index]),
-                ("harmonic balance", from_hb.output_noise[index]),
-            ] {
-                assert!(
-                    value > thermal / SCALE_BAND && value < thermal * SCALE_BAND,
-                    "the {label} carrier reports {value} V^2/Hz at {frequency} Hz, and the \
+            assert_eq!(from_pss.frequencies, from_hb.frequencies);
+            assert!(!from_pss.frequencies.is_empty());
+            for (index, frequency) in from_pss.frequencies.iter().copied().enumerate() {
+                let frequency = frequency + f64::from(sideband) * FUNDAMENTAL;
+                let transfer_power = 1.0
+                    / (std::f64::consts::TAU * frequency * RESISTANCE * CAPACITANCE).mul_add(
+                        std::f64::consts::TAU * frequency * RESISTANCE * CAPACITANCE,
+                        1.0,
+                    );
+                let thermal = 4.0 * BOLTZMANN * NOMINAL_KELVIN * RESISTANCE * transfer_power;
+                for (label, value) in [
+                    ("shooting", from_pss.output_noise[index]),
+                    ("harmonic balance", from_hb.output_noise[index]),
+                ] {
+                    assert!(
+                        value > thermal / SCALE_BAND && value < thermal * SCALE_BAND,
+                        "the {label} carrier reports {value} V^2/Hz at {frequency} Hz, and the \
                      resistor's own thermal spectrum through this network is {thermal}"
+                    );
+                }
+                let between = (from_pss.output_noise[index] - from_hb.output_noise[index]).abs()
+                    / thermal.max(Value::MIN_POSITIVE);
+                assert!(
+                    between <= BOUND,
+                    "the two carriers disagree by {between:e} at {frequency} Hz: {} versus {}",
+                    from_pss.output_noise[index],
+                    from_hb.output_noise[index]
                 );
             }
-            let between = (from_pss.output_noise[index] - from_hb.output_noise[index]).abs()
-                / thermal.max(Value::MIN_POSITIVE);
-            assert!(
-                between <= BOUND,
-                "the two carriers disagree by {between:e} at {frequency} Hz: {} versus {}",
-                from_pss.output_noise[index],
-                from_hb.output_noise[index]
-            );
+            assert_eq!(from_pss.conversion, from_hb.conversion);
+            let channels = from_hb.conversion.as_ref().unwrap();
+            assert_eq!(channels.output_sideband, sideband);
+            assert_eq!(channels.carrier_hz, FUNDAMENTAL);
+            if reference == PnoiseReference::Input {
+                let expected = 4.0 * BOLTZMANN * NOMINAL_KELVIN * RESISTANCE;
+                for density in from_hb
+                    .input_noise
+                    .unwrap()
+                    .into_iter()
+                    .chain(from_pss.input_noise.unwrap())
+                {
+                    assert!((density / expected - 1.0).abs() < BOUND);
+                }
+            }
         }
     }
 

@@ -1054,6 +1054,14 @@ impl AnalysisResult {
         if let Some(noise) = &self.noise_summary {
             if let Some(conversion) = &noise.conversion {
                 conversion.validate(noise.band)?;
+                if conversion.input_source.trim().is_empty()
+                    && (self.analysis_type == AnalysisType::Hbnoise
+                        || self.waveforms.iter().any(|wave| wave.name == "inoise"))
+                {
+                    return Err(
+                        "Input-referred periodic noise requires a retained input source".into(),
+                    );
+                }
                 if !matches!(
                     self.analysis_type,
                     AnalysisType::Hbnoise | AnalysisType::Pnoise

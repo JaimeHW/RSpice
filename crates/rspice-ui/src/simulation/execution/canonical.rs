@@ -850,6 +850,11 @@ fn encode_spec_options(writer: &mut CanonicalWriter, options: &SpecExecutionOpti
         writer.f64(config.reltol);
         writer.f64(config.abstol);
         encode_periodic_carrier_tail(writer, config.carrier);
+        if config.input_sideband != 0 || config.output_sideband != 0 {
+            writer.string("pnoise-conversion-sidebands-v1");
+            writer.i32(config.input_sideband);
+            writer.i32(config.output_sideband);
+        }
     });
     writer.option(options.pstb.as_ref(), |writer, config| {
         writer.f64(config.pss_fundamental_freq);

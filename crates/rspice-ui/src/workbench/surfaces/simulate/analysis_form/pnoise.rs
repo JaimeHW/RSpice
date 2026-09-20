@@ -42,7 +42,17 @@ pub(super) fn fields(
     choice_row(ui, "Sweep", SWEEP_KINDS, &mut setup.sweep_type_idx);
     input_row(ui, "Output", &mut setup.output_node);
     input_row(ui, "Output ref", &mut setup.output_ref);
-    input_row(ui, "Input src", &mut setup.input_source);
+    ui.add_enabled_ui(setup.noise_ref_idx == 1, |ui| {
+        input_row(ui, "Input src", &mut setup.input_source);
+        input_row(ui, "Input sideband", &mut setup.input_sideband);
+    });
+    ui.add_enabled_ui(setup.noise_ref_idx != 2, |ui| {
+        input_row(ui, "Output sideband", &mut setup.output_sideband);
+    });
+    super::field_note(
+        ui,
+        "Driven-noise frequencies are offsets: channel frequency = offset + sideband × carrier. Negative frequencies denote conjugate channels.",
+    );
     ui.add_enabled_ui(setup.noise_ref_idx != 2, |ui| {
         input_row(ui, "Max sideband", &mut setup.max_sideband);
     }).response.on_hover_text("Driven noise truncates frequency-conversion sidebands. Phase noise integrates the PPV over the retained autonomous PSS time grid; configure that grid on the carrier.");

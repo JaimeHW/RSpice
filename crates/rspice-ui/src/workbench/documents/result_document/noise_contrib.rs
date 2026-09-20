@@ -97,9 +97,26 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     if let Some(conversion) = &summary.conversion {
         section_header(ui, "Conversion channels", Some("offset axis"));
         let rows = [
-            ("Input source", conversion.input_source.clone()),
-            ("HB fundamental", fmt_si(conversion.carrier_hz, "Hz", 6)),
-            ("Input sideband", conversion.input_sideband.to_string()),
+            (
+                "Input source",
+                if conversion.input_source.is_empty() {
+                    "Not requested".into()
+                } else {
+                    conversion.input_source.clone()
+                },
+            ),
+            (
+                "Carrier fundamental",
+                fmt_si(conversion.carrier_hz, "Hz", 6),
+            ),
+            (
+                "Input sideband",
+                if conversion.input_source.is_empty() {
+                    "Not requested".into()
+                } else {
+                    conversion.input_sideband.to_string()
+                },
+            ),
             ("Output sideband", conversion.output_sideband.to_string()),
             (
                 "Folding window",
@@ -110,11 +127,15 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
             ),
             (
                 "Input frequency band",
-                format!(
-                    "{:.6e} … {:.6e} Hz",
-                    conversion.input_frequency(summary.band.0),
-                    conversion.input_frequency(summary.band.1)
-                ),
+                if conversion.input_source.is_empty() {
+                    "Not requested".into()
+                } else {
+                    format!(
+                        "{:.6e} … {:.6e} Hz",
+                        conversion.input_frequency(summary.band.0),
+                        conversion.input_frequency(summary.band.1)
+                    )
+                },
             ),
             (
                 "Output frequency band",

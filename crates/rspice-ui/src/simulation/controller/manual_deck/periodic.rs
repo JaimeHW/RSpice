@@ -660,6 +660,8 @@ fn parse_pnoise(
             "out",
             "input",
             "maxsideband",
+            "inputsideband",
+            "outsideband",
             "noiseref",
             "integratednoise",
             "noisesummary",
@@ -720,6 +722,8 @@ fn parse_pnoise(
         );
     }
     let config = PnoiseRunConfig {
+        input_sideband: optional_i32(card, "inputsideband", 0, params)?,
+        output_sideband: optional_i32(card, "outsideband", 0, params)?,
         pss_fundamental_freq: carrier.fundamental_freq,
         pss_num_harmonics: carrier.num_harmonics,
         pss_tolerance: carrier.tolerance,
@@ -744,9 +748,7 @@ fn parse_pnoise(
         abstol,
         carrier: periodic_source_selector(card, ".PNOISE")?,
     };
-    if config.max_sideband < 1 {
-        return Err(".PNOISE maxsideband must be at least 1".to_owned());
-    }
+    config.validate_conversion_channels()?;
     validate_frequency_contract(
         ".PNOISE",
         config.start_freq,
@@ -1551,7 +1553,7 @@ mod tests {
         let source = "periodic\n.param F0=1Meg NH=12 NPTS=20\nV1 in 0 SIN(0 1 {F0})\nR1 in out 1k\nC1 out 0 1n\n\
 .pss fund={F0} tstabperiods=8 points=128 tol=1e-6 harms={NH}\n\
 .pac dec {NPTS} 1k 100Meg maxsideband=7 input=V1 out=V(out,0)\n\
-.pnoise dec 10 1 1Meg out=out maxsideband=9\n+ input=V1 from=pss\n\
+.pnoise dec 10 1 1Meg out=out maxsideband=9\n+ input=V1 from=pss inputsideband=-2 outsideband=1\n\
 .pxf dec 15 1k 10Meg input=V1 out=out inputsideband=-1 outsideband=2 maxsideband=5\n\
 .pstb probe=LPROBE maxharm=8 nmults=6 stabilitythreshold=1.0001 detectsubharmonics=no eigentol=1e-9\n.end\n";
         let netlist = Netlist::parse(source).unwrap();
@@ -1584,6 +1586,7 @@ mod tests {
         assert_eq!(pac.output_ref.as_deref(), Some("0"));
         let pnoise = tasks[3].spec_options.pnoise.as_ref().unwrap();
         assert_eq!(pnoise.max_sideband, 9);
+        assert_eq!((pnoise.input_sideband, pnoise.output_sideband), (-2, 1));
         // `INPUT=` is the card's one noise-reference field, and naming a source
         // is what asks for input-referred noise.
         assert_eq!(pnoise.noise_ref, PnoiseReference::Input);

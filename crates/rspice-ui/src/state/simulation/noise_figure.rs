@@ -17,6 +17,7 @@ pub struct NoiseFigureEvidence {
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PeriodicNoiseConversionEvidence {
+    /// Empty when only output noise was requested, without input referral.
     pub input_source: String,
     pub carrier_hz: f64,
     pub input_sideband: i32,
@@ -26,7 +27,7 @@ pub struct PeriodicNoiseConversionEvidence {
 
 impl PeriodicNoiseConversionEvidence {
     pub fn validate(&self, band: (f64, f64)) -> Result<(), String> {
-        if self.input_source.trim().is_empty()
+        if (self.input_source.trim().is_empty() && self.input_sideband != 0)
             || !self.carrier_hz.is_finite()
             || self.carrier_hz <= 0.0
             || self.max_sideband < 0

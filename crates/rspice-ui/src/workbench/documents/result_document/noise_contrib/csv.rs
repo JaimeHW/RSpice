@@ -26,11 +26,15 @@ fn append(
     .into();
     if let Some(channel) = conversion {
         fields[22] = format!("{:.17e}", channel.carrier_hz);
-        fields[23] = channel.input_sideband.to_string();
+        if !channel.input_source.is_empty() {
+            fields[23] = channel.input_sideband.to_string();
+        }
         fields[24] = channel.output_sideband.to_string();
         fields[25] = channel.max_sideband.to_string();
         if let Some(offset) = offset {
-            fields[26] = format!("{:.17e}", channel.input_frequency(offset));
+            if !channel.input_source.is_empty() {
+                fields[26] = format!("{:.17e}", channel.input_frequency(offset));
+            }
             fields[27] = format!("{:.17e}", channel.output_frequency(offset));
         }
         fields[16] = csv_field(&channel.input_source);
