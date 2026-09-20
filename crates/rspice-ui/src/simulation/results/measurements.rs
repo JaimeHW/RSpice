@@ -37,7 +37,9 @@ impl SimulationResult {
                 ..
             } => measurement_result_by_name(measurements, key)
                 .or_else(|| waveform_last_value_by_name(waveforms, key)),
-            SimulationResult::Qpac { waveforms, .. } | SimulationResult::Qpxf { waveforms, .. } => {
+            SimulationResult::Qpac { waveforms, .. }
+            | SimulationResult::Qpxf { waveforms, .. }
+            | SimulationResult::Qpnoise { waveforms, .. } => {
                 waveform_last_value_by_name(waveforms, key)
             }
             SimulationResult::Qpss {
@@ -218,6 +220,7 @@ impl SimulationResult {
             | SimulationResult::Ac { waveforms, .. }
             | SimulationResult::Qpac { waveforms, .. }
             | SimulationResult::Qpxf { waveforms, .. }
+            | SimulationResult::Qpnoise { waveforms, .. }
             | SimulationResult::HarmonicBalance { waveforms, .. }
             | SimulationResult::Parametric { waveforms, .. }
             | SimulationResult::Corner { waveforms, .. }

@@ -798,7 +798,7 @@ const fn domain_meta(analysis: AnalysisType) -> DomainMeta {
         // Naming it after the translation instead named a different number --
         // `offset + n*f0`, which the run publishes as its own curve -- and it
         // also made .PXF contradict its own Studio caption.
-        A::Qpxf => DomainMeta {
+        A::Qpxf | A::Qpnoise => DomainMeta {
             axis: "output frequency",
             precision: "complex128",
         },
@@ -810,7 +810,7 @@ const fn domain_meta(analysis: AnalysisType) -> DomainMeta {
             axis: "Floquet mode index",
             precision: "complex128",
         },
-        A::Pnoise | A::Qpnoise | A::Hbnoise => DomainMeta {
+        A::Pnoise | A::Hbnoise => DomainMeta {
             axis: "offset frequency",
             precision: "f64",
         },
@@ -1114,6 +1114,12 @@ fn format_frequency(value: f64) -> String {
 
 fn payload_values_label(payload: &AnalysisResultPayload) -> String {
     match payload {
+        AnalysisResultPayload::Qpnoise { response } => format!(
+            "{} frequencies / {} outputs / {} physical mechanisms; full noise covariance and measurement statuses",
+            response.points.len(),
+            response.outputs.len(),
+            response.sources.len()
+        ),
         AnalysisResultPayload::Qpxf { response } => format!(
             "{} output frequencies / {} sources / {} input tuples; output {:?} at {:?}; full adjoint and unit transfers",
             response.metadata.output_frequencies_hz.len(),
@@ -1688,7 +1694,11 @@ mod tests {
         ] {
             assert_eq!(
                 domain_meta(periodic).axis,
-                "offset frequency",
+                if matches!(periodic, AnalysisType::Qpxf | AnalysisType::Qpnoise) {
+                    "output frequency"
+                } else {
+                    "offset frequency"
+                },
                 "{periodic:?}"
             );
             assert_eq!(

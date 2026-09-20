@@ -144,6 +144,16 @@ impl SimulationController {
                 )));
             }
 
+            SimulationResult::Qpnoise {
+                frequencies,
+                waveforms,
+                response,
+            } => {
+                self.populate_ac_post_views(state, frequencies, waveforms);
+                state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(
+                    "QPNOISE: {} frequencies, {} outputs, {} physical noise mechanisms. Plots use each output's physical frequency; full correlations and measurement statuses are retained.",
+                    response.points.len(),response.outputs.len(),response.sources.len())));
+            }
             SimulationResult::Qpxf {
                 frequencies,
                 waveforms,

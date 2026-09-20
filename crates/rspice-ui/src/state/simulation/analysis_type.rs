@@ -272,7 +272,8 @@ impl AnalysisType {
             // operating point; it is the periodic members of the family whose
             // abscissa is an offset from a carrier.
             AnalysisType::Noise => ("Frequency", "Hz", "Noise", "V^2/Hz"),
-            AnalysisType::Pnoise | AnalysisType::Hbnoise | AnalysisType::Qpnoise => {
+            AnalysisType::Qpnoise => ("Output Frequency", "Hz", "Noise", ""),
+            AnalysisType::Pnoise | AnalysisType::Hbnoise => {
                 ("Offset Frequency", "Hz", "Noise", "V^2/Hz")
             }
             AnalysisType::DcSweep => ("Voltage", "V", "Voltage", "V"),
@@ -347,11 +348,7 @@ mod axis_tests {
     /// an arm with the three that have one.
     #[test]
     fn periodic_noise_sweeps_an_offset_and_plain_noise_sweeps_an_absolute_frequency() {
-        for periodic in [
-            AnalysisType::Pnoise,
-            AnalysisType::Qpnoise,
-            AnalysisType::Hbnoise,
-        ] {
+        for periodic in [AnalysisType::Pnoise, AnalysisType::Hbnoise] {
             assert_eq!(
                 periodic.axis_info(),
                 ("Offset Frequency", "Hz", "Noise", "V^2/Hz"),

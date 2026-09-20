@@ -21,7 +21,9 @@ use super::*;
 mod dc_sweep;
 mod monte_carlo;
 mod qpac;
+mod qpnoise;
 mod qpxf;
+use qpnoise::WorkerQpnoiseResultTransport;
 use qpxf::WorkerQpxfResultTransport;
 mod response;
 mod result;
@@ -59,6 +61,7 @@ pub(super) fn validate_worker_response_before_transport(
         validate_worker_qpss_result(result)?;
         validate_worker_qpac_result(result)?;
         validate_worker_qpxf_result(result)?;
+        validate_worker_qpnoise_result(result)?;
         validate_transient_source_payload_size(result)?;
         if let WorkerSimulationResult::Transient { events, .. } = result.as_ref()
             && let Some(history) = &events.current_impulses
@@ -393,13 +396,16 @@ pub(crate) enum WorkerOutcomeTransport {
 }
 
 impl WorkerOutcomeTransport {
-    pub(super) fn from_outcome(outcome: WorkerOutcome, buffers: &mut Vec<Vec<f64>>) -> Self {
-        match outcome {
+    pub(super) fn from_outcome(
+        outcome: WorkerOutcome,
+        buffers: &mut Vec<Vec<f64>>,
+    ) -> Result<Self, String> {
+        Ok(match outcome {
             WorkerOutcome::Success(result) => Self::Success(
-                WorkerSimulationResultTransport::from_result(*result, buffers),
+                WorkerSimulationResultTransport::from_result(*result, buffers)?,
             ),
             WorkerOutcome::Failure(error) => Self::Failure(error),
-        }
+        })
     }
 
     pub(super) fn into_outcome(self, buffers: &[Vec<f64>]) -> Result<WorkerOutcome, String> {
@@ -1223,6 +1229,11 @@ pub(crate) enum WorkerSimulationResultTransport {
         frequencies: WorkerF64Series,
         waveforms: Vec<WorkerWaveformTransport>,
         response: WorkerQpacResultTransport,
+    },
+    Qpnoise {
+        frequencies: WorkerF64Series,
+        waveforms: Vec<WorkerWaveformTransport>,
+        response: WorkerQpnoiseResultTransport,
     },
     Qpxf {
         frequencies: WorkerF64Series,

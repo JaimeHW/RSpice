@@ -5,8 +5,8 @@ impl WorkerSimulationResultTransport {
     pub(in crate::simulation::runner::worker_contract) fn from_result(
         result: WorkerSimulationResult,
         buffers: &mut Vec<Vec<f64>>,
-    ) -> Self {
-        match result {
+    ) -> Result<Self, String> {
+        Ok(match result {
             WorkerSimulationResult::DcOp {
                 configuration,
                 validated_startup_directives,
@@ -128,6 +128,15 @@ impl WorkerSimulationResultTransport {
                 iterations,
                 mode_indices: WorkerF64Series::from_vec(mode_indices, buffers),
                 waveforms: transport_waveforms(waveforms, buffers),
+            },
+            WorkerSimulationResult::Qpnoise {
+                frequencies,
+                waveforms,
+                response,
+            } => Self::Qpnoise {
+                frequencies: WorkerF64Series::from_vec(frequencies, buffers),
+                waveforms: transport_waveforms(waveforms, buffers),
+                response: WorkerQpnoiseResultTransport::from_response(response, buffers)?,
             },
             WorkerSimulationResult::Qpxf {
                 frequencies,
@@ -287,7 +296,7 @@ impl WorkerSimulationResultTransport {
                 evaluations,
             },
             other => Self::Inline(other),
-        }
+        })
     }
 
     pub(in crate::simulation::runner::worker_contract) fn into_result(
@@ -299,6 +308,7 @@ impl WorkerSimulationResultTransport {
                 if matches!(
                     result,
                     WorkerSimulationResult::Pstb { .. }
+                        | WorkerSimulationResult::Qpnoise { .. }
                         | WorkerSimulationResult::Transient { .. }
                         | WorkerSimulationResult::Ac { .. }
                         | WorkerSimulationResult::Soa { .. }
@@ -458,6 +468,19 @@ impl WorkerSimulationResultTransport {
                 };
                 validate_worker_pstb_result(&result)?;
                 Ok(result)
+            }
+            Self::Qpnoise {
+                frequencies,
+                waveforms,
+                response,
+            } => {
+                // Bound and validate the complete result before display copies.
+                let response = response.into_response(buffers)?;
+                Ok(WorkerSimulationResult::Qpnoise {
+                    frequencies: frequencies.into_vec(buffers)?,
+                    waveforms: worker_waveforms_from_transport(waveforms, buffers)?,
+                    response,
+                })
             }
             Self::Qpxf {
                 frequencies,

@@ -22,6 +22,7 @@ impl AnalysisResultPayload {
                 })
                 .collect(),
             Self::Qpxf { response } => Self::qpxf_display_traces(response)?,
+            Self::Qpnoise { response } => Self::qpnoise_display_traces(response)?,
             _ => return Ok(None),
         };
         traces.sort_by(|a, b| a.name.cmp(&b.name));

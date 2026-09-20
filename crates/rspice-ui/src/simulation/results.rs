@@ -16,6 +16,7 @@ mod measurements;
 mod monte_carlo;
 mod operating_point;
 mod qpac;
+mod qpnoise;
 mod qpss;
 mod qpxf;
 mod recorded_fft;
@@ -259,7 +260,14 @@ pub enum SimulationResult {
         response: std::sync::Arc<rspice_core::engine::QpacAnalysisResult>,
     },
 
-    /// Complete unit transfers and sampled group delay into a selected QPSS output.
+    /// Complete physical noise evidence and all requested measurement outputs.
+    Qpnoise {
+        /// Physical output frequencies, including negative values and zero.
+        frequencies: Vec<f64>,
+        waveforms: HashMap<String, WaveformData>,
+        response: std::sync::Arc<rspice_core::engine::QpnoiseAnalysisResult>,
+    },
+
     Qpxf {
         /// Physical output frequencies, including negative values and zero.
         frequencies: Vec<f64>,

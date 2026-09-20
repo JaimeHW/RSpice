@@ -2304,8 +2304,8 @@ impl ResultsBrowserKind {
     /// The base electrical dimensions. The facet closes with one negation over
     /// this set, so "anything that is not a volt, an amp, a watt, or a noise
     /// density" stays askable without a second unit control beside this one.
-    const BASE_UNITS: [&'static str; 9] = [
-        "V", "A", "W", "nV/√Hz", "nA/√Hz", "V^2/Hz", "A^2/Hz", "V²/Hz", "A²/Hz",
+    const BASE_UNITS: [&'static str; 11] = [
+        "V", "A", "W", "nV/√Hz", "nA/√Hz", "V/√Hz", "A/√Hz", "V^2/Hz", "A^2/Hz", "V²/Hz", "A²/Hz",
     ];
 
     const fn label(self) -> &'static str {
@@ -2333,7 +2333,7 @@ impl ResultsBrowserKind {
             Self::Scalar | Self::Array | Self::EventStream | Self::Contribution => false,
             Self::NoiseDensity => matches!(
                 unit,
-                "nV/√Hz" | "nA/√Hz" | "V^2/Hz" | "A^2/Hz" | "V²/Hz" | "A²/Hz"
+                "nV/√Hz" | "nA/√Hz" | "V/√Hz" | "A/√Hz" | "V^2/Hz" | "A^2/Hz" | "V²/Hz" | "A²/Hz"
             ),
             Self::OtherUnits => !Self::BASE_UNITS.contains(&unit),
         }
@@ -3276,6 +3276,25 @@ fn retained_result_artifacts(
     }
     if let Some(payload) = &analysis.result_payload {
         let (canonical, name, kind, count, value, viewer) = match payload {
+            AnalysisResultPayload::Qpnoise { response } => (
+                "payload/qpnoise",
+                "QPNOISE spectra, covariance and measurements",
+                ResultArtifactKind::Array,
+                response
+                    .points
+                    .iter()
+                    .flat_map(|p| &p.adjoints)
+                    .flat_map(|a| &a.sensitivities)
+                    .map(Vec::len)
+                    .sum::<usize>(),
+                Some(format!(
+                    "{} frequencies · {} outputs · {} noise mechanisms",
+                    response.points.len(),
+                    response.outputs.len(),
+                    response.sources.len()
+                )),
+                ResultViewer::NoiseContrib,
+            ),
             AnalysisResultPayload::Qpxf { response } => (
                 "payload/qpxf",
                 "QPXF unit transfers and adjoints",

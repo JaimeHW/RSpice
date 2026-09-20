@@ -12,6 +12,7 @@
 
 use super::{PreparedTypedResultCsv, csv_text};
 mod qpac;
+mod qpnoise;
 mod qpxf;
 
 pub(super) fn prepare_typed_result_csv(
@@ -26,6 +27,7 @@ pub(super) fn prepare_typed_result_csv(
     match payload {
         AnalysisResultPayload::Qpac { response } => qpac::prepare(response),
         AnalysisResultPayload::Qpxf { response } => qpxf::prepare(response),
+        AnalysisResultPayload::Qpnoise { response } => qpnoise::prepare(response),
         AnalysisResultPayload::Qpss { operating_point } => {
             let grid = operating_point
                 .validate_retained_payload_with_abort(

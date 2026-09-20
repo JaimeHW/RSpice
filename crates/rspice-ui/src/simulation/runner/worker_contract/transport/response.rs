@@ -9,7 +9,7 @@ impl WorkerResponseTransport {
         let mut buffers = Vec::new();
         let response = WorkerResponseTransportMetadata {
             id: response.id,
-            outcome: WorkerOutcomeTransport::from_outcome(response.outcome, &mut buffers),
+            outcome: WorkerOutcomeTransport::from_outcome(response.outcome, &mut buffers)?,
         };
         validate_worker_transfer_buffers(&buffers)?;
         Ok(Self {

@@ -1067,6 +1067,13 @@ fn encode_result_payload(
         // is: no build before this one could write a sensitivity study, so
         // there is no older encoding of one to replay. The frozen
         // `Sensitivity` arm keeps tag 1 and is untouched.
+        AnalysisResultPayload::Qpnoise { response } => {
+            writer.u8(17);
+            writer.string(&response.metadata.retained_identity);
+            writer.retained_bytes = writer
+                .retained_bytes
+                .saturating_add(AnalysisResultPayload::qpnoise_response_bytes(response) as u64);
+        }
         AnalysisResultPayload::Qpxf { response } => {
             writer.u8(16);
             writer.string(response.metadata.retained_identity());

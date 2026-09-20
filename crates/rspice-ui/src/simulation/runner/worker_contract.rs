@@ -10,7 +10,9 @@ mod analysis;
 mod analysis_spec;
 mod conversions;
 mod qpac;
+mod qpnoise;
 mod qpxf;
+use qpnoise::validate_worker_qpnoise_result;
 use qpxf::validate_worker_qpxf_result;
 mod qpss;
 mod recorded_fft;
@@ -342,6 +344,7 @@ impl WorkerResponse {
                 validate_worker_qpss_result(&result).map_err(SimulationError::InvalidConfig)?;
                 validate_worker_qpac_result(&result).map_err(SimulationError::InvalidConfig)?;
                 validate_worker_qpxf_result(&result).map_err(SimulationError::InvalidConfig)?;
+                validate_worker_qpnoise_result(&result).map_err(SimulationError::InvalidConfig)?;
                 if let WorkerSimulationResult::Transient { events, .. } = result.as_ref()
                     && let Some(history) = &events.current_impulses
                 {
@@ -811,6 +814,11 @@ pub(crate) enum WorkerSimulationResult {
         frequencies: Vec<f64>,
         waveforms: Vec<WorkerWaveform>,
         response: rspice_core::engine::QpacAnalysisResult,
+    },
+    Qpnoise {
+        frequencies: Vec<f64>,
+        waveforms: Vec<WorkerWaveform>,
+        response: rspice_core::engine::QpnoiseAnalysisResult,
     },
     Qpxf {
         frequencies: Vec<f64>,
@@ -1368,6 +1376,15 @@ impl WorkerSimulationResult {
                 waveforms_payload_bytes(waveforms),
                 f64_payload_bytes(5),
             ]),
+            WorkerSimulationResult::Qpnoise {
+                frequencies,
+                waveforms,
+                response,
+            } => sum_payload_bytes([
+                f64_payload_bytes(frequencies.len()),
+                waveforms_payload_bytes(waveforms),
+                qpnoise::response_bytes(response),
+            ]),
             WorkerSimulationResult::Qpxf {
                 frequencies,
                 waveforms,
@@ -1750,6 +1767,19 @@ impl TryFrom<SimulationResult> for WorkerSimulationResult {
                 validate_worker_qpxf_result(&result).map_err(SimulationError::InvalidConfig)?;
                 Ok(result)
             }
+            SimulationResult::Qpnoise {
+                frequencies,
+                waveforms,
+                response,
+            } => {
+                let result = Self::Qpnoise {
+                    frequencies,
+                    waveforms: worker_waveforms(waveforms),
+                    response: Arc::unwrap_or_clone(response),
+                };
+                validate_worker_qpnoise_result(&result).map_err(SimulationError::InvalidConfig)?;
+                Ok(result)
+            }
             SimulationResult::Qpxf {
                 frequencies,
                 waveforms,
@@ -2098,6 +2128,15 @@ impl From<WorkerSimulationResult> for SimulationResult {
                 iterations,
                 mode_indices,
                 waveforms: waveform_map(waveforms),
+            },
+            WorkerSimulationResult::Qpnoise {
+                frequencies,
+                waveforms,
+                response,
+            } => Self::Qpnoise {
+                frequencies,
+                waveforms: waveform_map(waveforms),
+                response: Arc::new(response),
             },
             WorkerSimulationResult::Qpxf {
                 frequencies,

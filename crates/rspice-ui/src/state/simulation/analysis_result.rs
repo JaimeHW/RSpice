@@ -11,6 +11,7 @@ use std::collections::{BTreeMap, HashSet};
 
 mod family_metadata;
 mod qpac;
+mod qpnoise;
 mod qpss;
 mod qpxf;
 mod quasi_periodic_display;
@@ -1133,6 +1134,9 @@ pub enum AnalysisResultPayload {
     Qpac {
         response: std::sync::Arc<rspice_core::engine::QpacAnalysisResult>,
     },
+    Qpnoise {
+        response: std::sync::Arc<rspice_core::engine::QpnoiseAnalysisResult>,
+    },
     Qpxf {
         response: std::sync::Arc<rspice_core::engine::QpxfAnalysisResult>,
     },
@@ -1544,6 +1548,17 @@ impl AnalysisResultPayload {
     /// Validate exact retained evidence against the analysis that owns it.
     pub fn validate_for(&self, analysis_type: AnalysisType) -> Result<(), String> {
         match self {
+            Self::Qpnoise { response } => {
+                if analysis_type != AnalysisType::Qpnoise {
+                    return Err("QPNOISE payload belongs to a different analysis type".into());
+                }
+                response
+                    .validate_retained_payload_with_abort(
+                        &rspice_core::ResourceLimits::default(),
+                        &rspice_core::NoAbort,
+                    )
+                    .map_err(|e| e.to_string())?;
+            }
             Self::Qpxf { response } => {
                 if analysis_type != AnalysisType::Qpxf {
                     return Err("QPXF payload belongs to a different analysis type".into());
@@ -2200,7 +2215,7 @@ impl AnalysisResultPayload {
     #[must_use]
     pub fn has_data(&self) -> bool {
         match self {
-            Self::Qpac { .. } | Self::Qpxf { .. } | Self::Qpss { .. } | Self::DcSweep { .. }
+            Self::Qpac { .. } | Self::Qpxf { .. } | Self::Qpnoise { .. } | Self::Qpss { .. } | Self::DcSweep { .. }
             | Self::OperatingPoint { .. }
             | Self::PoleZero { .. }
             | Self::PssFloquet { .. }

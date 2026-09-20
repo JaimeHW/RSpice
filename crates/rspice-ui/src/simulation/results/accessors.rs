@@ -37,6 +37,7 @@ impl SimulationResult {
             }
             SimulationResult::Qpac { waveforms, .. }
             | SimulationResult::Qpxf { waveforms, .. }
+            | SimulationResult::Qpnoise { waveforms, .. }
             | SimulationResult::Qpss { waveforms, .. }
             | SimulationResult::HarmonicBalance { waveforms, .. } => {
                 waveforms.keys().map(|s| s.as_str()).collect()
@@ -73,6 +74,7 @@ impl SimulationResult {
             SimulationResult::Pstb { waveforms, .. } => waveforms.get(name),
             SimulationResult::Qpac { waveforms, .. }
             | SimulationResult::Qpxf { waveforms, .. }
+            | SimulationResult::Qpnoise { waveforms, .. }
             | SimulationResult::Qpss { waveforms, .. }
             | SimulationResult::HarmonicBalance { waveforms, .. } => waveforms.get(name),
             SimulationResult::Parametric { waveforms, .. } => waveforms.get(name),
@@ -141,6 +143,7 @@ impl SimulationResult {
             }
             SimulationResult::Qpac { frequencies, .. }
             | SimulationResult::Qpxf { frequencies, .. }
+            | SimulationResult::Qpnoise { frequencies, .. }
             | SimulationResult::Qpss { frequencies, .. }
             | SimulationResult::HarmonicBalance { frequencies, .. } => !frequencies.is_empty(),
             SimulationResult::Noise { frequencies, .. } => !frequencies.is_empty(),
@@ -222,6 +225,7 @@ impl SimulationResult {
             SimulationResult::HarmonicBalance { .. } => "Harmonic Balance",
             SimulationResult::Qpac { .. } => "QPAC",
             SimulationResult::Qpxf { .. } => "QPXF",
+            SimulationResult::Qpnoise { .. } => "QPNOISE",
             SimulationResult::Qpss { .. } => "QPSS",
             SimulationResult::Noise { .. } => "Noise Analysis",
             SimulationResult::PoleZero { .. } => "Pole-Zero",

@@ -1963,7 +1963,8 @@ fn periodic_result_tables(payload: &AnalysisResultPayload) -> Option<Vec<Semanti
         // path; its payload states the transform, not a table of its own.
         | AnalysisResultPayload::FftSpectrum { .. }
         | AnalysisResultPayload::Qpac { .. }
-        | AnalysisResultPayload::Qpxf { .. } | AnalysisResultPayload::Qpss { .. } => None,
+        | AnalysisResultPayload::Qpxf { .. }
+        | AnalysisResultPayload::Qpnoise { .. } | AnalysisResultPayload::Qpss { .. } => None,
     }
 }
 
