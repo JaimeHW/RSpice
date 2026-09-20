@@ -49,6 +49,7 @@ impl CircuitData {
             global_shunt_conductance: 0.0,
             terminal_probe_nodes: HashMap::new(),
             terminal_probe_source_names: HashSet::new(),
+            mos_terminal_layouts: HashMap::new(),
             dc_floating_component_by_node: Vec::new(),
             dc_floating_component_nodes: Vec::new(),
             dc_floating_component_is_certain: Vec::new(),

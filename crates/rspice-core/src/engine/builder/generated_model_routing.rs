@@ -628,6 +628,36 @@ fn add_generated_instance(
     device
         .set_terminal_current_aliases(generated_card_current_aliases(target, element))
         .map_err(SimulationError::Circuit)?;
+    if let ElementKind::Mosfet { compact_syntax, .. } = &element.kind {
+        let authored = if *compact_syntax {
+            3
+        } else {
+            element.nodes.len()
+        };
+        let terminals = device.external_terminals();
+        // Use declared electrical ports only. Missing/ground-padded thermal or
+        // internal ports cannot become a fabricated external body connection.
+        let find = |names: &[&str]| {
+            terminals.iter().take(authored).position(|terminal| {
+                terminal.discipline.eq_ignore_ascii_case("electrical")
+                    && names
+                        .iter()
+                        .any(|name| terminal.name.eq_ignore_ascii_case(name))
+            })
+        };
+        let canonical_fet = find(&["d", "drain"]) == Some(0)
+            && find(&["g", "gate", "fg"]) == Some(1)
+            && find(&["s", "source"]) == Some(2);
+        if canonical_fet {
+            circuit.record_mos_terminal_layout(
+                &element.name,
+                crate::circuit::MosTerminalLayout {
+                    body: find(&["b", "bulk", "body"]),
+                    back_gate: find(&["e", "bg", "backgate", "back_gate"]),
+                },
+            );
+        }
+    }
     device.set_temperature(keywords.temperature);
     device.set_initially_off(keywords.initial_off);
     circuit.add_generated_veriloga_device(device);

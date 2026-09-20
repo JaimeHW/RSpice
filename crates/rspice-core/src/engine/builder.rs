@@ -7007,6 +7007,18 @@ impl Engine {
                         )));
                     }
 
+                    circuit.record_mos_terminal_layout(
+                        &element.name,
+                        crate::circuit::MosTerminalLayout {
+                            body: if is_bsimsoi_level(level) {
+                                (element.nodes.len() > 4).then_some(4)
+                            } else {
+                                (!*compact_syntax && element.nodes.len() > 3).then_some(3)
+                            },
+                            back_gate: is_bsimsoi_level(level).then_some(3),
+                        },
+                    );
+
                     // BSIMSOI variants are distinct devices with their own SOI node
                     // topology and charge model. Route each native level to its port:
                     // 55 -> FD (fully depleted), 56 -> DD (dynamic depletion),
