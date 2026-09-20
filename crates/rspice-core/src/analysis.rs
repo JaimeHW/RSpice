@@ -45,6 +45,7 @@ pub mod post_processing;
 pub mod pss;
 pub mod pstb;
 pub mod pxf;
+pub mod quasi_periodic;
 pub mod s_param;
 pub mod sensitivity;
 pub mod signal_integrity;
