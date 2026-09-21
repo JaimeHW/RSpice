@@ -9,6 +9,35 @@ impl ExactPeriodicNetwork {
         &self,
         omega: Value,
         unknowns: usize,
+        visitor: impl FnMut(usize, usize, Complex64),
+    ) -> Result<(), HbError> {
+        self.try_visit_frequency_entries(omega, None, unknowns, visitor)
+    }
+
+    /// Visit (Y(omega + delta) - Y(omega)) / (j delta). Keeping the
+    /// increment separate preserves phase diffusion even below one ulp of
+    /// the carrier frequency. LTRA's DC row basis is different; this method
+    /// is for nonzero harmonics that do not cross DC.
+    pub(crate) fn try_visit_frequency_difference_entries(
+        &self,
+        omega: Value,
+        delta: Value,
+        unknowns: usize,
+        visitor: impl FnMut(usize, usize, Complex64),
+    ) -> Result<(), HbError> {
+        if !delta.is_finite() || delta == 0.0 || !(omega + delta).is_finite() {
+            return Err(HbError::InvalidCircuit(
+                "periodic network frequency increment must be finite and nonzero".into(),
+            ));
+        }
+        self.try_visit_frequency_entries(omega, Some(delta), unknowns, visitor)
+    }
+
+    fn try_visit_frequency_entries(
+        &self,
+        omega: Value,
+        difference: Option<Value>,
+        unknowns: usize,
         mut visitor: impl FnMut(usize, usize, Complex64),
     ) -> Result<(), HbError> {
         if !omega.is_finite() {
@@ -16,6 +45,8 @@ impl ExactPeriodicNetwork {
                 "periodic distributed-network frequency is non-finite".to_string(),
             ));
         }
+        // Frequency-independent coefficients disappear in a divided difference.
+        let constant = if difference.is_some() { 0.0 } else { 1.0 };
         let finite = |value: Complex64| value.re.is_finite() && value.im.is_finite();
         let visitor = RefCell::new(&mut visitor);
         let add = |row: usize, column: usize, value: Complex64| -> Result<(), HbError> {
@@ -64,16 +95,16 @@ impl ExactPeriodicNetwork {
                         "periodic scalar transmission line '{name}' is malformed or is not exactly lossless"
                     )));
                 }
-                let q = Complex64::from_polar(*attenuation, -omega * *delay);
-                let one = Complex64::new(1.0, 0.0);
+                let q = wave_coefficient(omega, *delay, difference) * *attenuation;
+                let one = Complex64::new(constant, 0.0);
                 let z = Complex64::new(*impedance, 0.0);
                 add_diff(*branch1, *node1_pos, *node1_neg, one)?;
                 add_diff(*branch1, *node2_pos, *node2_neg, -q)?;
-                add(*branch1, *branch1, -z)?;
+                add(*branch1, *branch1, -z * constant)?;
                 add(*branch1, *branch2, -q * z)?;
                 add_diff(*branch2, *node2_pos, *node2_neg, one)?;
                 add_diff(*branch2, *node1_pos, *node1_neg, -q)?;
-                add(*branch2, *branch2, -z)?;
+                add(*branch2, *branch2, -z * constant)?;
                 add(*branch2, *branch1, -q * z)?;
             }
             Self::ScalarLtra {
@@ -102,7 +133,16 @@ impl ExactPeriodicNetwork {
                         "periodic scalar LTRA line '{name}' is malformed"
                     )));
                 }
-                let one = Complex64::new(1.0, 0.0);
+                if difference.is_some_and(|delta| {
+                    omega == 0.0
+                        || omega.signum() != (omega + delta).signum()
+                        || omega + delta == 0.0
+                }) {
+                    return Err(HbError::InvalidCircuit(
+                        "periodic LTRA frequency difference cannot cross its DC row basis".into(),
+                    ));
+                }
+                let one = Complex64::new(constant, 0.0);
                 if omega == 0.0 {
                     add(*branch1, *branch1, one)?;
                     add(*branch1, *branch2, one)?;
@@ -110,20 +150,14 @@ impl ExactPeriodicNetwork {
                     add_diff(*branch2, *node2_pos, *node2_neg, -one)?;
                     add(*branch2, *branch1, Complex64::new(-*total_resistance, 0.0))?;
                 } else {
-                    let s_c = Complex64::new(0.0, omega * *total_capacitance);
-                    let z_series = Complex64::new(*total_resistance, omega * *total_inductance);
-                    let y0 = (s_c / z_series).sqrt();
-                    let mut propagation = (s_c * z_series).sqrt();
-                    // On a perfectly lossless line the radicand lies exactly
-                    // on the negative real axis, where the principal square
-                    // root loses the sign of frequency. Restore the physical
-                    // conjugate branch so negative PAC/PXF sidebands remain
-                    // the conjugates of their positive-frequency operators.
-                    if *total_resistance == 0.0 && omega < 0.0 {
-                        propagation = propagation.conj();
-                    }
-                    let q = (-propagation).exp();
-                    if !finite(y0) || !finite(q) {
+                    let (y0, q, yq) = ltra_coefficients(
+                        omega,
+                        *total_inductance,
+                        *total_capacitance,
+                        *total_resistance,
+                        difference,
+                    );
+                    if !finite(y0) || !finite(q) || !finite(yq) {
                         return Err(HbError::InvalidCircuit(format!(
                             "periodic scalar LTRA line '{name}' is non-representable at omega={omega}"
                         )));
@@ -139,7 +173,7 @@ impl ExactPeriodicNetwork {
                         ),
                     ] {
                         add_diff(row, sp, sn, y0)?;
-                        add_diff(row, fp, far_neg, -y0 * q)?;
+                        add_diff(row, fp, far_neg, -yq)?;
                         add(row, own_branch, -one)?;
                         add(row, far_branch, -q)?;
                     }
@@ -198,7 +232,7 @@ impl ExactPeriodicNetwork {
                             mode + 1
                         )));
                     }
-                    let q = Complex64::from_polar(1.0, -omega * delay);
+                    let q = wave_coefficient(omega, delay, difference);
                     for &(
                         row,
                         self_nodes,
@@ -239,10 +273,14 @@ impl ExactPeriodicNetwork {
                                 row,
                                 self_nodes[conductor],
                                 self_ref,
-                                Complex64::new(av, 0.0),
+                                Complex64::new(av * constant, 0.0),
                             )?;
                             add_diff(row, far_nodes[conductor], far_ref, -q * av)?;
-                            add(row, self_branches[conductor], Complex64::new(-z * bi, 0.0))?;
+                            add(
+                                row,
+                                self_branches[conductor],
+                                Complex64::new(-z * bi * constant, 0.0),
+                            )?;
                             add(row, far_branches[conductor], -q * z * bi)?;
                         }
                     }
@@ -251,6 +289,68 @@ impl ExactPeriodicNetwork {
         }
         Ok(())
     }
+}
+
+/// (exp(z) - 1) / z, including its removable singularity at zero.
+fn complex_exprel(z: Complex64) -> Complex64 {
+    if z.norm() < 1.0e-4 {
+        return Complex64::ONE
+            + z * (0.5 + z * (1.0 / 6.0 + z * (1.0 / 24.0 + z * (1.0 / 120.0 + z / 720.0))));
+    }
+    let expm1 = Complex64::new(
+        z.re.exp_m1() * z.im.cos() - 2.0 * (0.5 * z.im).sin().powi(2),
+        z.re.exp() * z.im.sin(),
+    );
+    expm1 / z
+}
+
+fn wave_coefficient(omega: Value, delay: Value, difference: Option<Value>) -> Complex64 {
+    let q = Complex64::from_polar(1.0, -omega * delay);
+    match difference {
+        None => q,
+        Some(delta) => -delay * q * complex_exprel(Complex64::new(0.0, -delta * delay)),
+    }
+}
+
+fn ltra_coefficients(
+    omega: Value,
+    inductance: Value,
+    capacitance: Value,
+    resistance: Value,
+    difference: Option<Value>,
+) -> (Complex64, Complex64, Complex64) {
+    let at = |omega: Value| {
+        let s_c = Complex64::new(0.0, omega * capacitance);
+        let z = Complex64::new(resistance, omega * inductance);
+        let y = (s_c / z).sqrt();
+        let mut gamma = (s_c * z).sqrt();
+        // Restore the conjugate physical root on the lossless negative axis.
+        if resistance == 0.0 && omega < 0.0 {
+            gamma = gamma.conj();
+        }
+        (z, y, gamma, (-gamma).exp())
+    };
+    let (z0, y0, gamma0, q0) = at(omega);
+    let Some(delta) = difference else {
+        return (y0, q0, y0 * q0);
+    };
+    let (z1, y1, gamma1, q1) = at(omega + delta);
+    // Rationalize both square-root differences before dividing by j*delta.
+    let d_gamma = capacitance
+        * (Complex64::new(resistance, 0.0)
+            + Complex64::new(0.0, inductance * (2.0 * omega + delta)))
+        / (gamma0 + gamma1);
+    let d_y = capacitance * resistance / (z0 * z1 * (y0 + y1));
+    let gamma_increment = Complex64::new(0.0, delta) * d_gamma;
+    // Anchor at the less attenuated endpoint to avoid an overflowing
+    // exponential multiplied by an underflowed propagation coefficient.
+    let d_q = -d_gamma
+        * if gamma_increment.re >= 0.0 {
+            q0 * complex_exprel(-gamma_increment)
+        } else {
+            q1 * complex_exprel(gamma_increment)
+        };
+    (d_y, d_q, y1 * d_q + q0 * d_y)
 }
 
 impl HbSolver {
@@ -1960,6 +2060,105 @@ impl HbSolver {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn periodic_network_frequency_difference_preserves_sub_ulp_offsets() {
+        let mut networks = vec![ExactPeriodicNetwork::ScalarWave {
+            name: "T1".into(),
+            node1_pos: 1,
+            node1_neg: 2,
+            node2_pos: 3,
+            node2_neg: 4,
+            branch1: 4,
+            branch2: 5,
+            impedance: 50.0,
+            delay: 137e-9,
+            attenuation: 1.0,
+        }];
+        for (inductance, resistance) in [(2.5e-6, 0.0), (2.5e-6, 10.0), (0.0, 10.0)] {
+            networks.push(ExactPeriodicNetwork::ScalarLtra {
+                name: "O1".into(),
+                node1_pos: 1,
+                node1_neg: 2,
+                node2_pos: 3,
+                node2_neg: 4,
+                branch1: 4,
+                branch2: 5,
+                total_inductance: inductance,
+                total_capacitance: 1e-9,
+                total_resistance: resistance,
+            });
+        }
+        networks.push(ExactPeriodicNetwork::LosslessCpl {
+            name: "P1".into(),
+            near_nodes: vec![1, 2],
+            far_nodes: vec![3, 4],
+            near_ref: 0,
+            far_ref: 0,
+            near_branches: vec![4, 5],
+            far_branches: vec![6, 7],
+            voltage_transform: vec![vec![0.7, 0.3], vec![-0.3, 0.7]],
+            current_transform: vec![vec![1.2, -0.4], vec![0.4, 1.2]],
+            modal_impedances: vec![50.0, 75.0],
+            modal_delays: vec![137e-9, 215e-9],
+        });
+        for network in networks {
+            let matrix = |omega, delta: Option<Value>| {
+                let mut entries = [Complex64::ZERO; 64];
+                let visitor = |row, column, value| entries[row * 8 + column] += value;
+                if let Some(delta) = delta {
+                    network
+                        .try_visit_frequency_difference_entries(omega, delta, 8, visitor)
+                        .unwrap();
+                } else {
+                    network.try_visit_direct_entries(omega, 8, visitor).unwrap();
+                }
+                entries
+            };
+            for omega in [-2.0e6, 2.0e6] {
+                let delta = 0.2 * omega;
+                let base = matrix(omega, None);
+                let shifted = matrix(omega + delta, None);
+                let difference = matrix(omega, Some(delta));
+                let h = omega * 1.0e-4;
+                let before = matrix(omega - h, None);
+                let after = matrix(omega + h, None);
+                let tiny = matrix(omega, Some(1.0e-20));
+                assert_eq!(
+                    omega + 1.0e-20,
+                    omega,
+                    "test increment must be below one ulp"
+                );
+                assert!(tiny.iter().any(|value| value.norm() > 1e-9));
+                for index in 0..64 {
+                    let expected = (shifted[index] - base[index]) / Complex64::new(0.0, delta);
+                    assert!(
+                        (difference[index] - expected).norm()
+                            < 1e-10 * expected.norm()
+                                + 64.0
+                                    * Value::EPSILON
+                                    * (shifted[index].norm() + base[index].norm())
+                                    / delta.abs()
+                                + Value::MIN_POSITIVE,
+                        "finite difference {network:?} {omega} entry {index}: {} vs {expected}",
+                        difference[index]
+                    );
+                    let derivative = (after[index] - before[index]) / Complex64::new(0.0, 2.0 * h);
+                    assert!(
+                        (tiny[index] - derivative).norm()
+                            < 1e-7 * derivative.norm()
+                                + 64.0
+                                    * Value::EPSILON
+                                    * (after[index].norm() + before[index].norm())
+                                    / h.abs()
+                                + Value::MIN_POSITIVE,
+                        "sub-ulp difference {network:?} {omega} entry {index}: {} vs {derivative}",
+                        tiny[index]
+                    );
+                }
+            }
+        }
+    }
 
     fn stamp_two_terminal_inductor(
         solver: &mut HbSolver,

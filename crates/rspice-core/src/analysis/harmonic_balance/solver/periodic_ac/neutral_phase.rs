@@ -92,11 +92,6 @@ impl<'a, 'stamps> NeutralPhaseOperator<'a, 'stamps> {
                     .into(),
             ));
         }
-        if !base.periodic_networks.is_empty() {
-            return Err(HbError::InvalidCircuit(
-                "autonomous sampled PNOISE is unavailable for distributed-network devices".into(),
-            ));
-        }
         let size = base.dimension();
         size.checked_add(1).ok_or_else(|| {
             HbError::InvalidCircuit(
@@ -270,6 +265,18 @@ fn phase_rate_column(
         if harmonic != 0 {
             let omega0 = 2.0 * PI * harmonic as Value * base.fundamental_hz;
             let omega1 = base.omega(band);
+            // The DC phase tangent is identically zero. Nonzero harmonic
+            // frequencies cannot cross DC inside the sampled Nyquist band.
+            for network in base.periodic_networks {
+                network.try_visit_frequency_difference_entries(
+                    omega0,
+                    2.0 * PI * base.offset_hz,
+                    tangent.len() / s,
+                    |row, column, value| {
+                        rate[row * s + band] += value * tangent[column * s + band];
+                    },
+                )?;
+            }
             for &(row, column, inductance) in base.l_matrix {
                 if row < base.num_nodes && column < base.num_nodes {
                     rate[row * s + band] +=

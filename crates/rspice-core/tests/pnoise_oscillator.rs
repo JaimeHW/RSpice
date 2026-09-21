@@ -229,3 +229,69 @@ fn autonomous_sampled_pnoise_preserves_phase_diffusion() {
         );
     }
 }
+
+#[test]
+fn autonomous_sampled_pnoise_retains_timing_through_memoryless_line_ports() {
+    use rspice_core::abort_signal::NoAbort;
+    use rspice_core::engine::{
+        PeriodicNoiseRequest, PeriodicNoiseSampling, PeriodicNoiseSidebands,
+    };
+    // A zero-length line has physical port-current unknowns but no delay
+    // history. It is supported by shooting PSS. An ideal buffer and quiet
+    // matched termination leave the tank's edge timing unchanged.
+    let netlist = Netlist::parse(
+        "Buffered oscillator timing\n\
+        l1 osc 0 1u\nc1 osc 0 1u\nr1 osc 0 1k\n\
+        gneg osc 0 osc 0 -0.051\nd1 osc 0 limiter\nd2 0 osc limiter\n\
+        .model limiter d(is=1p n=1)\ni1 0 osc pulse(0 1 10u 10n 10n 1u 1)\n\
+        ebuf drive 0 osc 0 1\nrs drive near 50 noisy=0\n\
+        o1 near 0 far 0 line\n.model line ltra r=0.05 c=20p len=0\n\
+        rl far 0 50 noisy=0\n\
+        .options temp=127\n.end\n",
+    )
+    .unwrap();
+    let engine = Engine::default().resolved_for_netlist(&netlist);
+    let pss = engine
+        .run_pss_operating_point_with_abort(
+            &netlist,
+            PssConfig::autonomous()
+                .with_period_guess(6.3e-6)
+                .with_tstab_periods(30)
+                .with_harmonics(128)
+                .with_tolerance(1e-6)
+                .with_max_iterations(60),
+            &NoAbort,
+        )
+        .unwrap();
+    let offsets = [1e-16, 1.0, 100.0];
+    let sampling = PeriodicNoiseSampling::Edge {
+        edge: Default::default(),
+    };
+    let run = |node| {
+        engine
+            .run_pnoise_from_pss_request_with_abort(
+                &netlist,
+                &PeriodicNoiseRequest {
+                    offsets: &offsets,
+                    output_node: node,
+                    output_ref: None,
+                    input_source: None,
+                    max_sideband: 24,
+                    sidebands: PeriodicNoiseSidebands::default(),
+                    sampling: Some(&sampling),
+                },
+                &pss,
+                &NoAbort,
+            )
+            .unwrap()
+    };
+    let tank = run("osc");
+    let delayed = run("far");
+    for (expected, actual) in tank.output_noise.iter().zip(delayed.output_noise) {
+        assert!(actual.is_finite() && actual > 0.0);
+        assert!(
+            (actual / expected - 1.0).abs() < 0.005,
+            "matched line changed edge timing density: {actual:e} vs {expected:e}"
+        );
+    }
+}
