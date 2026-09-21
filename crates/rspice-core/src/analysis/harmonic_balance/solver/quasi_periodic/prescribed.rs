@@ -91,6 +91,7 @@ impl HbSolver {
         grid: Arc<QuasiPeriodicGrid>,
         limits: &ResourceLimits,
         retained: bool,
+        sources: Option<&[Vec<Complex64>]>,
         abort: &dyn AbortSignal,
     ) -> Result<ResourceLimits, Error> {
         check_abort(abort)?;
@@ -116,9 +117,64 @@ impl HbSolver {
         let mut primitives: Vec<Option<Primitive>> = Vec::with_capacity(plans.len());
         let mut values = plans.len();
         let mut transform = None;
+        let mut forced: Vec<Option<Vec<Value>>> = Vec::new();
+        let mut forced_values = 0usize;
+        if !retained && plans.iter().any(|plan| plan.dependencies().is_none()) {
+            let sources = sources.ok_or_else(|| {
+                Error::InvalidConfig(
+                    "driven integral preparation requires complete source spectra".into(),
+                )
+            })?;
+            if sources.len() != self.unknowns() || sources.iter().any(|row| row.len() != grid.len())
+            {
+                return Err(Error::InvalidConfig(
+                    "driven integral source spectra differ from the MNA tone basis".into(),
+                ));
+            }
+            let topology = self
+                .num_nodes
+                .saturating_add(self.exact_mna_branches().len())
+                .saturating_add(1)
+                .saturating_mul(8);
+            budget(values.saturating_add(topology))?;
+            let tree = self
+                .forced_voltage_tree(false, abort)
+                .map_err(device_error)?;
+            forced_values = topology.saturating_add(tree.len().saturating_mul(grid.sample_count()));
+            budget(
+                values
+                    .saturating_add(forced_values)
+                    .saturating_add(grid.sample_count().saturating_mul(8)),
+            )?;
+            let projection =
+                transform.insert(QuasiPeriodicTransform::new_with_abort(grid.clone(), abort)?);
+            forced.resize(self.num_nodes, None);
+            for node in tree {
+                check_abort(abort)?;
+                let mut samples = projection
+                    .to_real_samples_with_abort(&sources[self.num_nodes + node.branch], abort)?;
+                for (i, value) in samples.iter_mut().enumerate() {
+                    if i.is_multiple_of(256) {
+                        check_abort(abort)?;
+                    }
+                    *value = node.sign * *value
+                        + node
+                            .parent
+                            .map_or(0.0, |p| forced[p].as_ref().expect("tree order")[i]);
+                    if !value.is_finite() {
+                        return Err(Error::Numerical(
+                            "driven node voltage overflowed during integral preparation".into(),
+                        ));
+                    }
+                }
+                forced[node.node] = Some(samples);
+            }
+        }
         for plan in plans {
             check_abort(abort)?;
-            let Some(dependencies) = plan.dependencies() else {
+            let Some(dependencies) =
+                plan.dependencies_with_coordinates(|i| forced.get(i).is_some_and(Option::is_some))
+            else {
                 primitives.push(None);
                 continue;
             };
@@ -141,7 +197,11 @@ impl HbSolver {
                 }));
                 continue;
             }
-            budget(values.saturating_add(grid.sample_count().saturating_mul(8)))?;
+            budget(
+                values
+                    .saturating_add(forced_values)
+                    .saturating_add(grid.sample_count().saturating_mul(8)),
+            )?;
             if transform.is_none() {
                 transform = Some(QuasiPeriodicTransform::new_with_abort(grid.clone(), abort)?);
             }
@@ -151,18 +211,26 @@ impl HbSolver {
                 check_abort(abort)?;
                 let phases = grid.phases(sample).expect("bounded phase sample");
                 let value = plan
-                    .sample_with_phases(0.0, &phases, |i| {
-                        primitives[i]
-                            .as_ref()
-                            .expect("qualified dependency")
-                            .samples[sample]
-                    })
+                    .sample_with_coordinates(
+                        0.0,
+                        &phases,
+                        |i| {
+                            primitives[i]
+                                .as_ref()
+                                .expect("qualified dependency")
+                                .samples[sample]
+                        },
+                        |i| forced[i].as_ref().expect("qualified coordinate")[sample],
+                    )
                     .map_err(Error::InvalidCircuit)?;
                 rate_scale = rate_scale.max(value.abs());
                 samples.push(value);
             }
             let mut projection_limits = limits.clone();
-            projection_limits.max_result_values = limits.max_result_values.saturating_sub(values);
+            projection_limits.max_result_values = limits
+                .max_result_values
+                .saturating_sub(values)
+                .saturating_sub(forced_values);
             let mut spectrum = transform
                 .as_mut()
                 .expect("allocated transform")
@@ -175,7 +243,11 @@ impl HbSolver {
                         .saturating_mul(2 + grid.dimensions().len()),
                 )
                 .saturating_add(grid.sample_count());
-            budget(values.saturating_add(grid.sample_count().saturating_mul(8)))?;
+            budget(
+                values
+                    .saturating_add(forced_values)
+                    .saturating_add(grid.sample_count().saturating_mul(8)),
+            )?;
             let dc = spectrum.coefficients.len() / 2;
             let roundoff = 64.0 * Value::EPSILON * (grid.sample_count() as Value).log2().max(1.0);
             if rate_scale > 0.0 && spectrum.coefficients[dc].norm() / rate_scale > roundoff {
@@ -281,12 +353,18 @@ mod tests {
             ..limits.clone()
         };
         assert!(matches!(
-            solver.prepare_quasi_periodic_integrals(grid.clone(), &limited, false, &NoAbort),
+            solver.prepare_quasi_periodic_integrals(grid.clone(), &limited, false, None, &NoAbort),
             Err(Error::ResourceLimit(_))
         ));
         assert!(solver.quasi_prescribed_integrals.is_none());
         assert!(matches!(
-            solver.prepare_quasi_periodic_integrals(grid, &limits, false, &CountingAbort::new(32)),
+            solver.prepare_quasi_periodic_integrals(
+                grid,
+                &limits,
+                false,
+                None,
+                &CountingAbort::new(32)
+            ),
             Err(Error::Aborted)
         ));
         assert!(solver.quasi_prescribed_integrals.is_none());

@@ -1705,9 +1705,9 @@ impl HbSolver {
         // and PAC, including constitutive rows for internal branch currents.
         for charge in [false, true] {
             let spectra = if charge {
-                self.capacitance_spectra(state, self.num_harmonics)?
+                self.capacitance_spectra(state, self.num_harmonics, false)?
             } else {
-                self.conductance_spectra(state, self.num_harmonics)?
+                self.conductance_spectra(state, self.num_harmonics, false)?
             };
             for (i, j, spectrum) in spectra {
                 for k in 0..h {
@@ -1819,12 +1819,12 @@ impl HbSolver {
                 )
             })?;
             let g_spectra = if self.has_nonlinear_devices() {
-                self.conductance_spectra(state, extended)?
+                self.conductance_spectra(state, extended, false)?
             } else {
                 Vec::new()
             };
             let c_spectra = if self.has_nonlinear_devices() {
-                self.capacitance_spectra(state, extended)?
+                self.capacitance_spectra(state, extended, false)?
             } else {
                 Vec::new()
             };
@@ -2133,8 +2133,8 @@ impl HbSolver {
                     "nonlinear HB coupling span exceeds this platform".to_string(),
                 )
             })?;
-            let g_spectra = self.conductance_spectra(state, extended)?;
-            let c_spectra = self.capacitance_spectra(state, extended)?;
+            let g_spectra = self.conductance_spectra(state, extended, false)?;
+            let c_spectra = self.capacitance_spectra(state, extended, false)?;
 
             let mut add_hankel = |i: usize, j: usize, k: usize, m: usize, hval: Complex64| {
                 let row_re = re_idx(i, k);

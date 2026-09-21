@@ -2,6 +2,7 @@
 
 use super::*;
 
+pub(super) mod forced;
 pub(super) mod prescribed;
 
 impl HbSolver {

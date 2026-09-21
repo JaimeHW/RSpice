@@ -300,6 +300,7 @@ impl HbSolver {
         behavioral_inputs: &[Value],
         f: &mut NativeStamp,
         q: &mut NativeStamp,
+        small_signal: bool,
     ) -> Result<(), HbError> {
         if solution.len() != self.num_nodes + self.exact_mna_branches().len() {
             return Err(HbError::InvalidCircuit(
@@ -328,15 +329,18 @@ impl HbSolver {
                 .iter()
                 .enumerate()
                 .map(|(index, spectrum)| {
-                    spectrum.as_ref().map(|spectrum| {
-                        (
-                            spectrum.value(
-                                time * self.config.fundamental_freq,
-                                solution[integral_start + index],
-                            ),
-                            self.config.fundamental_freq,
-                        )
-                    })
+                    spectrum
+                        .as_ref()
+                        .filter(|spectrum| !small_signal || !spectrum.is_circuit_driven())
+                        .map(|spectrum| {
+                            (
+                                spectrum.value(
+                                    time * self.config.fundamental_freq,
+                                    solution[integral_start + index],
+                                ),
+                                self.config.fundamental_freq,
+                            )
+                        })
                 })
                 .collect::<Vec<_>>()
         };
@@ -371,7 +375,7 @@ impl HbSolver {
             .collect();
         let mut f = NativeStamp::new(solution.len());
         let mut q = NativeStamp::new(solution.len());
-        self.sample_native_devices(&solution, 0.0, &solution, &mut f, &mut q)?;
+        self.sample_native_devices(&solution, 0.0, &solution, &mut f, &mut q, false)?;
         Ok(f)
     }
 
@@ -394,7 +398,7 @@ impl HbSolver {
         inputs.extend_from_slice(phases);
         let mut f = NativeStamp::new(solution.len());
         let mut q = NativeStamp::new(solution.len());
-        self.sample_native_devices(solution, 0.0, &inputs, &mut f, &mut q)?;
+        self.sample_native_devices(solution, 0.0, &inputs, &mut f, &mut q, false)?;
         Ok(crate::analysis::quasi_periodic::solve::Sample {
             current: f.contributions,
             charge: q.contributions,
@@ -511,7 +515,7 @@ impl HbSolver {
                 *value = wave[time];
             }
             let sample_time = time as Value / times as Value / self.config.fundamental_freq;
-            self.sample_native_devices(&solution, sample_time, &solution, &mut f, &mut q)?;
+            self.sample_native_devices(&solution, sample_time, &solution, &mut f, &mut q, false)?;
             record_native_terms(&mut f_time, &f.contributions, time, times)?;
             record_native_terms(&mut q_time, &q.contributions, time, times)?;
         }
@@ -563,6 +567,7 @@ impl HbSolver {
         state: &HbSolverState,
         harmonics: usize,
         charge: bool,
+        small_signal: bool,
     ) -> Result<Vec<(usize, usize, Vec<Complex64>)>, HbError> {
         if !self.has_native_periodic_devices() {
             return Ok(Vec::new());
@@ -578,7 +583,14 @@ impl HbSolver {
                 *value = wave[time];
             }
             let sample_time = time as Value / times as Value / self.config.fundamental_freq;
-            self.sample_native_devices(&solution, sample_time, &solution, &mut f, &mut q)?;
+            self.sample_native_devices(
+                &solution,
+                sample_time,
+                &solution,
+                &mut f,
+                &mut q,
+                small_signal,
+            )?;
             for &(row, col, value) in if charge { &q.jacobian } else { &f.jacobian } {
                 let sum = &mut entries
                     .entry((row, col))

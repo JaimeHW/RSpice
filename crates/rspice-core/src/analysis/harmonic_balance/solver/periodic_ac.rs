@@ -1265,6 +1265,7 @@ impl HbSolver {
         &mut self,
         state: &HbSolverState,
         harmonic_count: usize,
+        small_signal: bool,
     ) -> Result<Vec<(usize, usize, Vec<Complex64>)>, HbError> {
         let n = self.num_nodes;
         let n_time = self.fft.size();
@@ -1391,7 +1392,7 @@ impl HbSolver {
             )?;
             spectra.push((i, j, spectrum));
         }
-        spectra.extend(self.native_bjt_spectra(state, harmonic_count, false)?);
+        spectra.extend(self.native_bjt_spectra(state, harmonic_count, false, small_signal)?);
         Ok(spectra)
     }
 
@@ -1402,6 +1403,7 @@ impl HbSolver {
         &mut self,
         state: &HbSolverState,
         harmonic_count: usize,
+        small_signal: bool,
     ) -> Result<Vec<(usize, usize, Vec<Complex64>)>, HbError> {
         let n = self.num_nodes;
         if !self
@@ -1409,7 +1411,7 @@ impl HbSolver {
             .iter()
             .any(|d| d.has_charge_storage())
         {
-            return self.native_bjt_spectra(state, harmonic_count, true);
+            return self.native_bjt_spectra(state, harmonic_count, true, small_signal);
         }
         let n_time = self.fft.size();
         let v_time = self.periodic_state_waveforms(state, "periodic capacitance evaluation")?;
@@ -1463,7 +1465,7 @@ impl HbSolver {
             )?;
             spectra.push((i, j, spectrum));
         }
-        spectra.extend(self.native_bjt_spectra(state, harmonic_count, true)?);
+        spectra.extend(self.native_bjt_spectra(state, harmonic_count, true, small_signal)?);
         Ok(spectra)
     }
 
@@ -1659,8 +1661,8 @@ impl HbSolver {
 
         let (spectra, cap_spectra) = if try_krylov && self.has_nonlinear_devices() {
             (
-                self.conductance_spectra(state, span.max(self.num_harmonics))?,
-                self.capacitance_spectra(state, span.max(self.num_harmonics))?,
+                self.conductance_spectra(state, span.max(self.num_harmonics), true)?,
+                self.capacitance_spectra(state, span.max(self.num_harmonics), true)?,
             )
         } else {
             (Vec::new(), Vec::new())
@@ -1813,12 +1815,12 @@ impl HbSolver {
             ));
         }
         let spectra = if self.has_nonlinear_devices() {
-            self.conductance_spectra(state, span.max(self.num_harmonics))?
+            self.conductance_spectra(state, span.max(self.num_harmonics), true)?
         } else {
             Vec::new()
         };
         let cap_spectra = if self.has_nonlinear_devices() {
-            self.capacitance_spectra(state, span.max(self.num_harmonics))?
+            self.capacitance_spectra(state, span.max(self.num_harmonics), true)?
         } else {
             Vec::new()
         };
@@ -3594,7 +3596,7 @@ mod matrix_free_tests {
         state.x[0][0] = Complex64::new(0.5, 0.0);
         state.x[1][0] = Complex64::new(1.0, 0.0);
 
-        let conductance = solver.conductance_spectra(&state, 1).unwrap();
+        let conductance = solver.conductance_spectra(&state, 1, true).unwrap();
         let gm = conductance
             .iter()
             .find(|(row, column, _)| *row == 0 && *column == 1)
@@ -3602,7 +3604,7 @@ mod matrix_free_tests {
             .expect("the sub-1e-30 MOS transconductance remains in the spectrum");
         assert!(gm != 0.0 && gm.abs() < 1.0e-30, "gm={gm}");
 
-        let capacitance = solver.capacitance_spectra(&state, 1).unwrap();
+        let capacitance = solver.capacitance_spectra(&state, 1, true).unwrap();
         assert!(
             capacitance.iter().any(|(_, _, spectrum)| {
                 let dc = spectrum[0];
@@ -3647,7 +3649,7 @@ mod matrix_free_tests {
         let mut state = HbSolverState::new(2, 1);
         state.x[0][0] = Complex64::new(Value::NAN, 0.0);
         let error = solver
-            .conductance_spectra(&state, 1)
+            .conductance_spectra(&state, 1, true)
             .expect_err("non-finite periodic state must fail before device evaluation");
         assert!(
             error
@@ -3715,10 +3717,10 @@ mod matrix_free_tests {
 
         for error in [
             solver
-                .conductance_spectra(&state, 1)
+                .conductance_spectra(&state, 1, true)
                 .expect_err("PAC conductance sampling must validate direct solver devices"),
             solver
-                .capacitance_spectra(&state, 1)
+                .capacitance_spectra(&state, 1, true)
                 .expect_err("PAC/PNoise charge sampling must validate direct solver devices"),
         ] {
             assert!(

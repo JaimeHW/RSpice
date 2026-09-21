@@ -2,13 +2,16 @@
 //!
 //! These rates cannot respond to a circuit perturbation. Their primitives
 //! therefore supply constraints rather than an unanchored DC rate row.
-//! Rates reading circuit coordinates retain the ordinary continuous F/Q model.
+//! Driven node identities can also anchor the large-signal trajectory; retained
+//! consumers restore their original continuous F/Q response to perturbations.
 
 use super::*;
 
 #[derive(Debug)]
 pub(in crate::analysis::harmonic_balance::solver) enum PrescribedIntegral {
     Primitive(Vec<Complex64>),
+    /// Fixed by ideal source constraints only for the carrier solve.
+    Driven(Vec<Complex64>),
     /// The authenticated producer supplied the complete trajectory. Its
     /// constant must not be reset or its orbit re-solved by a linear consumer.
     Retained,
@@ -52,13 +55,16 @@ mod tests {
 }
 
 impl PrescribedIntegral {
+    pub(in crate::analysis::harmonic_balance::solver) fn is_circuit_driven(&self) -> bool {
+        matches!(self, Self::Driven(_))
+    }
     pub(in crate::analysis::harmonic_balance::solver) fn value(
         &self,
         cycles: Value,
         retained: Value,
     ) -> Value {
         match self {
-            Self::Primitive(spectrum) => primitive_value(spectrum, cycles),
+            Self::Primitive(spectrum) | Self::Driven(spectrum) => primitive_value(spectrum, cycles),
             Self::Retained => retained,
         }
     }
@@ -98,11 +104,73 @@ impl HbSolver {
         let samples = self.fft.size();
         let frequency = self.config.fundamental_freq;
         let mut retained_values = 0usize;
+        let mut forced: Vec<Option<Vec<Value>>> = Vec::new();
+        if !retained && plans.iter().any(|plan| plan.dependencies().is_none()) {
+            let topology = self
+                .num_nodes
+                .saturating_add(self.exact_mna_branches().len())
+                .saturating_add(1)
+                .saturating_mul(8);
+            let ensure = |values| {
+                if values > max_values {
+                    Err(HbError::InvalidCircuit(format!(
+                        "driven integral exceeds the {max_values}-value periodic allocation limit"
+                    )))
+                } else {
+                    Ok(())
+                }
+            };
+            ensure(topology)?;
+            let tree = self.forced_voltage_tree(true, abort)?;
+            retained_values = topology.saturating_add(tree.len().saturating_mul(samples));
+            ensure(
+                retained_values
+                    .saturating_add(2 * (self.num_harmonics + 1))
+                    .saturating_add(samples),
+            )?;
+            forced.resize(self.num_nodes, None);
+            for node in tree {
+                if abort.is_aborted() {
+                    return Err(HbError::Aborted);
+                }
+                let ExactMnaBranch::VoltageSource {
+                    source: Some(source),
+                    ..
+                } = &self.exact_mna_branches()[node.branch]
+                else {
+                    unreachable!("authored voltage tree");
+                };
+                let spectrum: Vec<_> = (0..=self.num_harmonics)
+                    .map(|k| Self::voltage_source_value_at_harmonic(source, k))
+                    .collect();
+                let mut values = Vec::with_capacity(samples);
+                for sample in 0..samples {
+                    if abort.is_aborted() {
+                        return Err(HbError::Aborted);
+                    }
+                    let parent = node
+                        .parent
+                        .map_or(0.0, |p| forced[p].as_ref().expect("tree order")[sample]);
+                    let value = parent
+                        + node.sign
+                            * primitive_value(&spectrum, sample as Value / samples as Value);
+                    if !value.is_finite() {
+                        return Err(HbError::InvalidCircuit(
+                            "driven node voltage overflowed during integral preparation".into(),
+                        ));
+                    }
+                    values.push(value);
+                }
+                forced[node.node] = Some(values);
+            }
+        }
         for plan in plans {
             if abort.is_aborted() {
                 return Err(HbError::Aborted);
             }
-            let Some(dependencies) = plan.dependencies() else {
+            let Some(dependencies) =
+                plan.dependencies_with_coordinates(|i| forced.get(i).is_some_and(Option::is_some))
+            else {
                 spectra.push(None);
                 continue;
             };
@@ -117,6 +185,12 @@ impl HbSolver {
                 spectra.push(Some(PrescribedIntegral::Retained));
                 continue;
             }
+            let circuit_driven = plan.dependencies().is_none()
+                || dependencies.iter().any(|&i| {
+                    spectra[i]
+                        .as_ref()
+                        .is_some_and(PrescribedIntegral::is_circuit_driven)
+                });
             retained_values = retained_values
                 .checked_add(2 * (self.num_harmonics + 1))
                 .ok_or_else(|| {
@@ -143,12 +217,17 @@ impl HbSolver {
                 }
                 let cycles = sample as Value / samples as Value;
                 let rate = plan
-                    .sample(cycles / frequency, |index| {
-                        spectra[index]
-                            .as_ref()
-                            .expect("dependency qualified above")
-                            .value(cycles, Value::NAN)
-                    })
+                    .sample_with_coordinates(
+                        cycles / frequency,
+                        &[],
+                        |index| {
+                            spectra[index]
+                                .as_ref()
+                                .expect("dependency qualified above")
+                                .value(cycles, Value::NAN)
+                        },
+                        |index| forced[index].as_ref().expect("qualified coordinate")[sample],
+                    )
                     .map_err(HbError::InvalidCircuit)?;
                 rates.push(rate);
             }
@@ -204,7 +283,11 @@ impl HbSolver {
                     plan.name
                 )));
             }
-            spectra.push(Some(PrescribedIntegral::Primitive(coefficients)));
+            spectra.push(Some(if circuit_driven {
+                PrescribedIntegral::Driven(coefficients)
+            } else {
+                PrescribedIntegral::Primitive(coefficients)
+            }));
         }
         Ok(spectra)
     }

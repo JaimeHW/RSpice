@@ -289,8 +289,8 @@ impl HbSolver {
 
         let (spectra, cap_spectra) = if self.has_nonlinear_devices() {
             (
-                self.conductance_spectra(state, span.max(self.num_harmonics))?,
-                self.capacitance_spectra(state, span.max(self.num_harmonics))?,
+                self.conductance_spectra(state, span.max(self.num_harmonics), true)?,
+                self.capacitance_spectra(state, span.max(self.num_harmonics), true)?,
             )
         } else {
             (Vec::new(), Vec::new())

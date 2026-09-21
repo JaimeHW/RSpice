@@ -3,6 +3,166 @@ use super::*;
 use crate::analysis::quasi_periodic::{QuasiPeriodicAcConfig, QuasiPeriodicLinearMethod};
 
 #[test]
+fn qpss_source_driven_integrals_preserve_constants_and_small_signal_rates() {
+    for (rate, method) in [
+        (1e3, QuasiPeriodicLinearMethod::Direct),
+        (1e9, QuasiPeriodicLinearMethod::Krylov),
+    ] {
+        let f2 = rate * std::f64::consts::SQRT_2;
+        let omega = std::f64::consts::TAU * rate;
+        let netlist = Netlist::parse(&format!(
+            "Driven torus
+Vnegative 0 middle SIN(0 .25 {rate})
+Vinput input middle SIN(0 1.25 {rate})
+Vcos cosine 0 SIN(0 1 {f2} 0 0 90)
+Rnoise n 0 1k
+BV out 0 V={omega}*sdt(v(input))+v(n)*(1+{omega}*sdt(v(input)))
+Rout out 0 1k
+BN nested 0 V={omega}*{omega}*2*sdt(sdt(v(cosine)))
+Rn nested 0 1k
+BI 0 sink I=.001*{omega}*sqrt(2)*sdt(v(cosine))
+Ri sink 0 1k
+.end
+"
+        ))
+        .unwrap();
+        let engine = Engine::default();
+        let mut config = QpssConfig::new(vec![rate, f2], vec![1, 1]);
+        config.solver.linear.method = method;
+        let point = engine.run_qpss(&netlist, config.clone()).unwrap();
+        let grid = engine
+            .validate_qpss_operating_point_with_abort(&netlist, &point, &NoAbort)
+            .unwrap();
+        let close = |a: Complex64, b: Complex64| {
+            assert!(
+                (a - b).norm() < 2e-7 * b.norm().max(1e-3),
+                "{a} != {b}, rate={rate}"
+            )
+        };
+        for (name, tuple, dc, coefficient) in [
+            ("out", vec![1, 0], 1.0, Complex64::new(-0.5, 0.0)),
+            ("nested", vec![0, 1], 1.0, Complex64::new(-0.5, 0.0)),
+            ("sink", vec![0, 1], 0.0, Complex64::new(0.0, -0.5)),
+        ] {
+            let index = point
+                .node_names()
+                .iter()
+                .position(|n| n.eq_ignore_ascii_case(name))
+                .unwrap();
+            close(
+                point.spectra()[index][grid.dc_index()],
+                Complex64::new(dc, 0.0),
+            );
+            close(
+                point.spectra()[index][grid.index_of(&tuple).unwrap()],
+                coefficient,
+            );
+        }
+        let (metadata, rows) = point.into_transfer_parts();
+        let point = QpssOperatingPoint::from_transfer_parts_with_abort(
+            metadata,
+            rows,
+            &crate::ResourceLimits::default(),
+            &NoAbort,
+        )
+        .unwrap();
+        let identity = point.retained_identity().to_owned();
+        for (name, input, gain, order) in [
+            ("out", "Vinput", omega, 1),
+            ("nested", "Vcos", omega * omega * 2.0, 2),
+            ("sink", "Vcos", omega * std::f64::consts::SQRT_2, 1),
+        ] {
+            let tuple = vec![-1, 1];
+            let frequency = rate * 0.13 + f2 - rate;
+            let jw = Complex64::new(0.0, std::f64::consts::TAU * frequency);
+            let expected = if order == 2 {
+                gain / (jw * jw)
+            } else {
+                gain / jw
+            };
+            let ac = engine
+                .run_qpac_from_qpss(
+                    &netlist,
+                    QpacRequest {
+                        offsets_hz: vec![rate * 0.13],
+                        input_source: input.into(),
+                        input_lattice: tuple.clone(),
+                        output_node: name.into(),
+                        output_ref: "0".into(),
+                        output_lattice: tuple.clone(),
+                        magnitude: 1.0,
+                        phase_degrees: 0.0,
+                        solver: QuasiPeriodicAcConfig {
+                            linear: config.solver.linear.clone(),
+                            ..Default::default()
+                        },
+                    },
+                    &point,
+                )
+                .unwrap();
+            close(ac.output_transfer[0], expected);
+            let xf = engine
+                .run_qpxf_from_qpss(
+                    &netlist,
+                    QpxfRequest {
+                        frequencies_hz: vec![frequency],
+                        frequency_axis: QpxfFrequencyAxis::Output,
+                        input_sources: QpxfSources::Named(vec![input.into()]),
+                        input_lattices: QpxfInputLattices::Explicit(vec![tuple.clone()]),
+                        output: QpxfOutput::Voltage {
+                            positive: name.into(),
+                            negative: "0".into(),
+                        },
+                        output_lattice: tuple,
+                        linear: config.solver.linear.clone(),
+                        group_delay: false,
+                        group_delay_magnitude_floor: 0.0,
+                    },
+                    &point,
+                )
+                .unwrap();
+            close(xf.transfers[0].values[0], expected);
+        }
+        let noise = engine
+            .run_qpnoise_from_qpss(
+                &netlist,
+                QpnoiseRequest {
+                    frequencies_hz: vec![rate * 0.13],
+                    frequency_axis: QpnoiseFrequencyAxis::Output,
+                    outputs: vec![QpnoiseOutput {
+                        observation: QpnoiseObservation::Voltage {
+                            positive: "out".into(),
+                            negative: "0".into(),
+                        },
+                        lattice: vec![0, 0],
+                    }],
+                    input: Some(QpnoiseInput {
+                        source: "Vinput".into(),
+                        lattice: vec![0, 0],
+                    }),
+                    input_lattices: QpnoiseLattices::AllRetained,
+                    sources: QpnoiseSources::Only(vec!["RNOISE thermal".into()]),
+                    integration: None,
+                    contributor_ranking: false,
+                    noise_figure: None,
+                    linear: config.solver.linear,
+                },
+                &point,
+            )
+            .unwrap();
+        let kb =
+            super::super::pnoise::pnoise_physical_constants(engine.config.spice_dialect).boltzmann;
+        let expected = 4.0 * kb * 300.15 * 1e3 * 4.5;
+        assert!((noise.total_covariances[0].values[0].re / expected - 1.0).abs() < 2e-7);
+        close(
+            noise.outputs[0].input_transfer.as_ref().unwrap()[0],
+            1.0 / Complex64::new(0.0, 0.13),
+        );
+        assert_eq!(point.retained_identity(), identity);
+    }
+}
+
+#[test]
 fn qpss_prescribed_integrals_anchor_nested_states_and_retained_conversion() {
     for (rate, method, mixing) in [
         (1e3, QuasiPeriodicLinearMethod::Direct, None),

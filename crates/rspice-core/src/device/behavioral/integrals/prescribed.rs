@@ -1,4 +1,4 @@
-//! Borrowed rate equations for integrals driven entirely by prescribed time.
+//! Borrowed integral rates with explicit circuit, integral, and phase bindings.
 
 use super::*;
 
@@ -7,37 +7,49 @@ pub(crate) struct PrescribedIntegralRate<'a> {
     equation: &'a Equation,
     environment: BehavioralEnvironment,
     source_start: usize,
+    node_bindings: &'a [Option<usize>],
+    branch_bindings: &'a [Option<usize>],
 }
 
 impl PrescribedIntegralRate<'_> {
-    /// None means that the rate reads a physical circuit coordinate.
+    /// None means that the rate reads a physical circuit coordinate other than ground.
     pub(crate) fn dependencies(&self) -> Option<Vec<usize>> {
+        self.dependencies_with_coordinates(|_| false)
+    }
+
+    /// Large-signal preparation can additionally know a coordinate through
+    /// exact independent-source constraints. Consumers must use dependencies()
+    /// so these physical inputs retain their small-signal rate derivatives.
+    pub(crate) fn dependencies_with_coordinates(
+        &self,
+        known: impl Fn(usize) -> bool,
+    ) -> Option<Vec<usize>> {
         self.equation
             .inputs
             .iter()
+            .copied()
             .try_fold(Vec::new(), |mut dependencies, input| match input {
                 Input::Integral(index) => {
                     dependencies.push(self.source_start + index);
                     Some(dependencies)
                 }
                 Input::Phase(_) => Some(dependencies),
+                Input::Node(index) if self.node_bindings[index].is_none_or(&known) => {
+                    Some(dependencies)
+                }
+                Input::Branch(index) if self.branch_bindings[index].is_some_and(&known) => {
+                    Some(dependencies)
+                }
                 _ => None,
             })
     }
 
-    pub(crate) fn sample(
-        &self,
-        time: Value,
-        integral: impl Fn(usize) -> Value,
-    ) -> Result<Value, String> {
-        self.sample_with_phases(time, &[], integral)
-    }
-
-    pub(crate) fn sample_with_phases(
+    pub(crate) fn sample_with_coordinates(
         &self,
         time: Value,
         phases: &[Value],
         integral: impl Fn(usize) -> Value,
+        coordinate: impl Fn(usize) -> Value,
     ) -> Result<Value, String> {
         let mut environment = self.environment;
         environment.time = time;
@@ -49,7 +61,14 @@ impl PrescribedIntegralRate<'_> {
                     Input::Phase(index) => {
                         (phases.get(index).copied().unwrap_or(Value::NAN), 0.0.into())
                     }
-                    _ => (Value::NAN, 0.0.into()),
+                    Input::Node(index) => (
+                        self.node_bindings[index].map_or(0.0, &coordinate),
+                        0.0.into(),
+                    ),
+                    Input::Branch(index) => (
+                        self.branch_bindings[index].map_or(Value::NAN, &coordinate),
+                        0.0.into(),
+                    ),
                 },
                 environment,
             )
@@ -90,6 +109,8 @@ impl BehavioralSources {
                     s.frequency,
                     s.gmin,
                     s.expression_dialect,
+                    &s.node_bindings,
+                    &s.branch_bindings,
                 )
             })
             .chain(self.current_sources.iter().map(|s| {
@@ -100,9 +121,21 @@ impl BehavioralSources {
                     s.frequency,
                     s.gmin,
                     s.expression_dialect,
+                    &s.node_bindings,
+                    &s.branch_bindings,
                 )
             }));
-        for (name, equations, temperature, frequency, gmin, expression_dialect) in sources {
+        for (
+            name,
+            equations,
+            temperature,
+            frequency,
+            gmin,
+            expression_dialect,
+            node_bindings,
+            branch_bindings,
+        ) in sources
+        {
             let Some(equations) = equations else {
                 continue;
             };
@@ -120,6 +153,8 @@ impl BehavioralSources {
                         logarithm_domain: LogarithmDomain::Ieee,
                     },
                     source_start,
+                    node_bindings,
+                    branch_bindings,
                 });
             }
         }

@@ -32,6 +32,112 @@ fn transfer(rate: f64, frequency: f64) -> Complex64 {
     rate / Complex64::new(rate, std::f64::consts::TAU * frequency)
 }
 
+#[test]
+fn hb_source_driven_integrals_preserve_constants_and_small_signal_rates() {
+    for rate in [1e3, 1e9] {
+        let omega = std::f64::consts::TAU * rate;
+        let netlist = Netlist::parse(&format!(
+            "Driven integrals
+Vnegative 0 middle SIN(0 .25 {rate})
+Vinput input middle SIN(0 1.25 {rate})
+Vcos cosine 0 SIN(0 1 {rate} 0 0 90)
+Rnoise n 0 1k
+BV out 0 V={omega}*sdt(v(input))+v(n)*(1+{omega}*sdt(v(input)))
+Rout out 0 1k
+BN nested 0 V={omega}*{omega}*sdt(sdt(v(cosine)))
+Rn nested 0 1k
+BI 0 sink I=.001*{omega}*sdt(v(cosine))
+Ri sink 0 1k
+.options hbint tahb=0
+.end
+"
+        ))
+        .unwrap();
+        let engine = Engine::default();
+        let hb = engine
+            .run_hb(&netlist, HbConfig::new(rate).with_harmonics(2))
+            .unwrap();
+        for (name, dc, ac) in [
+            ("out", 1.0, Complex64::new(-1.0, 0.0)),
+            ("nested", 1.0, Complex64::new(-1.0, 0.0)),
+            ("sink", 0.0, Complex64::new(0.0, -1.0)),
+        ] {
+            let row = hb
+                .result
+                .spectral_voltages
+                .iter()
+                .find(|r| r.node_name.eq_ignore_ascii_case(name))
+                .unwrap();
+            close(row.coefficients[0], Complex64::new(dc, 0.0));
+            close(row.coefficients[1], ac);
+        }
+        hb.operating_point.validate().unwrap();
+        for name in ["out", "nested", "sink"] {
+            let input = if name == "out" { "Vinput" } else { "Vcos" };
+            let config = PacConfig::new()
+                .with_fundamental(rate)
+                .with_sweep(rate * 0.13, rate * 0.13, 1)
+                .with_sweep_type(PacSweepType::Linear)
+                .with_sidebands(-1, 1)
+                .with_input_source(input)
+                .with_output_node(name);
+            let pac = engine
+                .run_pac_from_hb_with_abort(&netlist, config, &hb.operating_point, &NoAbort)
+                .unwrap();
+            for sideband in -1..=1 {
+                let frequency = rate * (0.13 + sideband as f64);
+                let h = omega / Complex64::new(0.0, std::f64::consts::TAU * frequency);
+                let expected = if name == "nested" { h * h } else { h };
+                close(
+                    pac.result
+                        .conversion_matrix
+                        .get(0, sideband, sideband)
+                        .unwrap(),
+                    expected,
+                );
+                let other = if sideband == 0 { 1 } else { 0 };
+                close(
+                    pac.result
+                        .conversion_matrix
+                        .get(0, other, sideband)
+                        .unwrap(),
+                    Complex64::ZERO,
+                );
+            }
+        }
+        let noise = engine
+            .run_pnoise_from_hb_with_abort(
+                &netlist,
+                &[rate * 0.13],
+                "out",
+                None,
+                Some("Vinput"),
+                1,
+                &hb.operating_point,
+                &NoAbort,
+            )
+            .unwrap();
+        let expected = 4.0 * K_BOLTZMANN * TEMP_REFERENCE * 1e3 * 4.5;
+        assert!((noise.output_noise[0] / expected - 1.0).abs() < 1e-7);
+    }
+    for expression in ["sdt(v(input))", "sdt(sdt(v(input)))"] {
+        let voltage = if expression == "sdt(v(input))" {
+            "DC 1"
+        } else {
+            "SIN(0 1 1k)"
+        };
+        let netlist = Netlist::parse(&format!(
+            "Drift\nVinput input 0 {voltage}\nB1 out 0 V={expression}\nR1 out 0 1k\n.end\n"
+        ))
+        .unwrap();
+        let error = Engine::default()
+            .run_hb(&netlist, HbConfig::new(1e3).with_harmonics(2))
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("nonzero mean input"), "{error}");
+    }
+}
+
 fn sweep(rate: f64) -> PacConfig {
     PacConfig::new()
         .with_fundamental(rate / 10.0)

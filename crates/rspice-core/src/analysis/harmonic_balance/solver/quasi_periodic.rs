@@ -45,7 +45,13 @@ impl HbSolver {
             return Err(Error::Aborted);
         }
         self.validate_quasi_periodic_circuit()?;
-        let limits = self.prepare_quasi_periodic_integrals(grid.clone(), limits, false, abort)?;
+        let limits = self.prepare_quasi_periodic_integrals(
+            grid.clone(),
+            limits,
+            false,
+            Some(sources),
+            abort,
+        )?;
         solve::solve_with_abort(self, grid, config, sources, seed, &limits, abort)
     }
 
@@ -90,8 +96,13 @@ impl HbSolver {
         let mut working_limits = limits.clone();
         working_limits.max_result_values = limits.max_result_values.saturating_sub(values);
         self.validate_quasi_periodic_circuit()?;
-        let working_limits =
-            self.prepare_quasi_periodic_integrals(grid.clone(), &working_limits, true, abort)?;
+        let working_limits = self.prepare_quasi_periodic_integrals(
+            grid.clone(),
+            &working_limits,
+            true,
+            None,
+            abort,
+        )?;
         let mut work = crate::analysis::quasi_periodic::small_signal::Linearization::prepare(
             self,
             grid,
@@ -181,8 +192,13 @@ impl HbSolver {
         let mut working_limits = limits.clone();
         working_limits.max_result_values = limits.max_result_values.saturating_sub(values);
         self.validate_quasi_periodic_circuit()?;
-        let working_limits =
-            self.prepare_quasi_periodic_integrals(grid.clone(), &working_limits, true, abort)?;
+        let working_limits = self.prepare_quasi_periodic_integrals(
+            grid.clone(),
+            &working_limits,
+            true,
+            None,
+            abort,
+        )?;
         let mut work =
             crate::analysis::quasi_periodic::small_signal::Linearization::prepare_adjoint(
                 self,
@@ -221,7 +237,8 @@ impl HbSolver {
             return Err(Error::Aborted);
         }
         self.validate_quasi_periodic_circuit()?;
-        let limits = self.prepare_quasi_periodic_integrals(grid.clone(), limits, true, abort)?;
+        let limits =
+            self.prepare_quasi_periodic_integrals(grid.clone(), limits, true, None, abort)?;
         crate::analysis::quasi_periodic::noise::visit_with_abort(
             self,
             grid,
