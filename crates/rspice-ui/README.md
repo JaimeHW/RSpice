@@ -106,6 +106,28 @@ traces carry amps through worker transport and plotting. Inductor currents are
 published once even though they are present in both MNA and reactive state.
 Only currents actually retained with an exact DC component are exposed.
 
+## Previous operating-point startup
+
+The OP initial-guess selector provides two previous-solution policies. **Previous
+converged solution** requires the same effective source and solver ordering.
+**Previous solution, compatible circuit** explicitly permits changed source,
+parameters, temperature, supply, and older project revisions. It takes the newest
+complete retained OP and maps its voltages and currents by case-insensitive node
+and branch names. Both identity sets must match completely; missing, added, or
+renamed coordinates are rejected, with no zero-filled fallback.
+
+Choose **Ignore IC and nodeset** or **Validate initialization only** with either
+policy. Each request performs a fresh operating-point solve; a saved result is
+only its starting guess. The compatible policy also reaches every Monte Carlo
+trial and optimization candidate whose configured OP, HB, PSS or QPSS producer
+runs an OP. Explicit zero periodic startup continues to skip that OP solve.
+
+The prepared request retains the original saved source, snapshot, result identity,
+and solution ordering. The new OP result, project file, result table and contract
+CSV retain those three parent identities alongside the selected startup policy.
+Older results without parent metadata still load; older results without a complete
+source-bound solver state cannot supply a previous guess.
+
 ## PSS in configured studies
 
 Monte Carlo and optimization can select shooting PSS as a base. The study freezes
@@ -115,8 +137,8 @@ then initializes shooting from that fresh, complete MNA solution. OP and PSS
 numerical overrides apply separately; neither stage inherits the other's overrides.
 Run Set supply scaling occurs once before both solves, and Run Set OP temperature
 modes follow the current study point. Both stages use the bound OP's resolved
-temperature, including an explicitly authored OP temperature. Previous-state OP startup still requires an
-identity-compatible retained state; it never falls back to a different startup.
+temperature, including an explicitly authored OP temperature. Previous-state OP startup follows the
+selected exact-source or compatible-circuit policy described above.
 
 Use `last:V(out)` for the final periodic sample, `bin:1:magnitude:V(out)` for a
 voltage harmonic, or `bin:1:imag:I(V1)` for a branch-current harmonic. Harmonics
