@@ -258,7 +258,7 @@ impl Engine {
                 BehavioralBasis::Periodic { autonomous: false },
             )?;
         }
-        let branch_names = solver.try_periodic_mna_branch_names().map_err(|error| {
+        let mut branch_names = solver.try_periodic_mna_branch_names().map_err(|error| {
             SimulationError::Circuit(format!(
                 "PAC branch-result metadata construction failed: {error}"
             ))
@@ -324,6 +324,9 @@ impl Engine {
             )));
         }
 
+        // Auxiliary integral coordinates participate in every solve, but have
+        // integrand-seconds units and must never be published as branch currents.
+        branch_names.truncate(solver.physical_branch_count());
         Ok(PreparedPeriodicAc {
             circuit,
             solver,

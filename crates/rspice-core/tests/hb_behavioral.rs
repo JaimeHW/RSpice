@@ -1,4 +1,4 @@
-//! Stateless behavioral expressions across the shared periodic MNA solver.
+//! Behavioral expressions across the shared periodic MNA solver.
 use num_complex::Complex64;
 use rspice_core::analysis::HbConfig;
 use rspice_core::analysis::pac::{PacConfig, PacSweepType};
@@ -89,10 +89,10 @@ fn behavioral_periodic_conversion_and_noise_use_the_modulated_expression_jacobia
 }
 
 #[test]
-fn behavioral_periodic_rejects_unrepresented_clocks_and_integrals() {
+fn behavioral_periodic_rejects_unrepresented_clocks_and_live_frequency() {
     for (expression, reason) in [
         ("sin(2*pi*1.5k*time)", "not certified periodic"),
-        ("sdt(v(out))", "accepted-step memory"),
+        ("sdt(sin(2*pi*1.5k*time)-v(out))", "not certified periodic"),
         ("frequency*v(out)", "frequency-dependent equations"),
     ] {
         let netlist = Netlist::parse(&format!(

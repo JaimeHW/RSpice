@@ -211,6 +211,12 @@ impl Engine {
         circuit: &CircuitData,
         grid: &QuasiPeriodicGrid,
     ) -> Result<HbSolver, SimulationError> {
+        if circuit.behavioral_sources.integral_count() != 0 {
+            return Err(SimulationError::unsupported_capability(
+                "analysis.qpss.behavioral_integral",
+                "QPSS behavioral integrals require independent-phase state lifting and retained integral spectra",
+            ));
+        }
         for gaps in [
             periodic_capability::periodic_residual_gaps(circuit),
             periodic_capability::periodic_descriptor_gaps(circuit),

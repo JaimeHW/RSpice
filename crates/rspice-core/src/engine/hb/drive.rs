@@ -95,8 +95,8 @@ impl Engine {
             .map(|source| {
                 (
                     source.name.as_str(),
-                    source.has_stateless_periodic_equation(),
-                    source.has_periodic_time_dependence(period, false),
+                    source.is_frequency_dependent(),
+                    source.has_periodic_shooting_equation(period, false),
                     source.max_authored_tone_cycles(period),
                     source.minimum_pss_interval(false),
                 )
@@ -109,20 +109,20 @@ impl Engine {
                     .map(|source| {
                         (
                             source.name.as_str(),
-                            source.has_stateless_periodic_equation(),
-                            source.has_periodic_time_dependence(period, false),
+                            source.is_frequency_dependent(),
+                            source.has_periodic_shooting_equation(period, false),
                             source.max_authored_tone_cycles(period),
                             source.minimum_pss_interval(false),
                         )
                     }),
             );
-        for (index, (name, stateless, periodic, cycles, interval)) in behavioral.enumerate() {
+        for (index, (name, live_frequency, periodic, cycles, interval)) in behavioral.enumerate() {
             if index.is_multiple_of(32) && abort.is_aborted() {
                 return Err(SimulationError::Aborted);
             }
-            if !stateless {
+            if live_frequency {
                 continue;
-            } // The device-capability gate names the missing state.
+            } // The device-capability gate names the frequency-dependent equation.
             if !periodic {
                 return Err(SimulationError::Circuit(format!(
                     "behavioral source '{name}' is not certified periodic over {period:e} s"
