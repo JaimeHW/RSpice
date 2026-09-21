@@ -1242,3 +1242,4 @@ fn failed_prerequisite_skips_dependent_prepared_task_with_exact_provenance() {
 }
 
 mod completion_paths;
+mod monte_carlo_checkpoint;

@@ -64,6 +64,7 @@ mod analysis_spec_build;
 mod directive_parse_ratchet;
 mod live_transient;
 mod manual_deck;
+mod monte_carlo_checkpoint;
 pub(crate) mod prepared_run;
 #[cfg(test)]
 mod projection_ratchet;
@@ -341,6 +342,7 @@ impl SimulationController {
         // Poll for completion
         self.publish_engine_log(state);
         self.publish_live_transient_samples(state);
+        self.publish_monte_carlo_checkpoint(state);
         self.poll_completion(state, export_io);
 
         // Apply/cancel background transient post-processing work after any
@@ -1130,6 +1132,21 @@ impl SimulationController {
         {
             errors.push(error);
         }
+        // A checkpoint can be the only retained evidence when no transient
+        // prefix exists, or when the full terminal result exceeded the budget.
+        // Seal it as interrupted instead of leaving a stale running marker.
+        for analysis in &mut run.analyses {
+            if analysis.is_live_partial() && analysis.monte_carlo_checkpoint.is_some() {
+                analysis.error_message = Some(
+                    if terminal == Some(SimulationRunLifecycle::Aborted) {
+                        "Simulation aborted by user"
+                    } else {
+                        "Monte Carlo ended before its result could be retained"
+                    }
+                    .into(),
+                );
+            }
+        }
         run.success = false;
         if let Some(terminal) = terminal
             && let Err(error) = run.finish_lifecycle(terminal)
@@ -1154,8 +1171,32 @@ impl SimulationController {
     fn retain_analysis_under_current_policy(
         &self,
         run: &mut crate::state::SimulationRun,
-        analysis: AnalysisResult,
+        mut analysis: AnalysisResult,
     ) -> Result<(), String> {
+        // Terminal conversion must keep the last admitted journal, including
+        // on abort/error. Match the complete prepared identity, not a label.
+        if analysis.monte_carlo_checkpoint.is_none()
+            && let Some(provenance) = analysis.provenance()
+            && let Some(live) =
+                run.find_analysis_by_source_instance(provenance.source_instance_id())
+            && live.is_live_partial()
+            && live.provenance() == Some(provenance)
+        {
+            analysis.monte_carlo_checkpoint = live.monte_carlo_checkpoint.clone();
+        }
+        if analysis.success
+            && analysis.analysis_type == AnalysisType::MonteCarlo
+            && self
+                .current_spec_options
+                .as_ref()
+                .is_some_and(|options| options.mc_checkpoint.is_some())
+            && analysis.monte_carlo_checkpoint.is_none()
+        {
+            return Err("Monte Carlo completed without its requested retained checkpoint".into());
+        }
+        if let Some(checkpoint) = &analysis.monte_carlo_checkpoint {
+            checkpoint.validate_for(&analysis)?;
+        }
         self.validate_analysis_retention(run, &analysis)?;
         run.replace_live_or_add_analysis(analysis);
         Ok(())
@@ -1669,6 +1710,10 @@ impl SimulationController {
 
         // Check for completion
         if let Some(result) = self.runner.poll_result() {
+            // Polling may observe completion after the frame's first stream
+            // drain. Adopt its final journal before taking provenance or
+            // dispatching the next task (which clears the runner queue).
+            self.publish_monte_carlo_checkpoint(state);
             match result {
                 Ok(sim_result) => {
                     log::info!(

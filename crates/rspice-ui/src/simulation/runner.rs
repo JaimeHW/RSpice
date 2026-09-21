@@ -332,6 +332,11 @@ impl SimulationRunner {
             .take()
     }
 
+    #[cfg(test)]
+    pub(in crate::simulation) fn store_checkpoint_for_test(&self, bytes: Arc<[u8]>) {
+        monte_carlo_checkpoint::replace_checkpoint(&self.monte_carlo_checkpoint, bytes);
+    }
+
     /// Abort and discard all runner-local completion/progress state.
     ///
     /// Native worker threads cannot be force-killed, but setting the shared
