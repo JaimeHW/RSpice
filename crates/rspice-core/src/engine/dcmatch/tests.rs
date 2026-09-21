@@ -945,3 +945,82 @@ fn a_displaced_operating_point_warm_starts_from_the_nominal_solution() {
     );
     assert!(warm < cold, "warm {warm} vs cold {cold}");
 }
+
+#[test]
+fn bounded_moments_reach_process_and_instance_mismatch_circuit_variances() {
+    let density = libm::exp(-0.5) / libm::sqrt(2.0 * std::f64::consts::PI);
+    let conditional_variance = 1.0 - 2.0 * density / libm::erf(1.0 / std::f64::consts::SQRT_2);
+    for scope in [
+        SpectreVariationScope::Process,
+        SpectreVariationScope::Mismatch,
+    ] {
+        let mut first = variation(1, scope, "da", "10");
+        first.bounds = Some(crate::netlist::SpectreVariationBounds {
+            lower: Some("-10".into()),
+            upper: Some("10".into()),
+            ..Default::default()
+        });
+        let statistics = SpectreStatisticsPlan {
+            variations: vec![first, variation(1, scope, "db", "20")],
+            correlations: vec![correlate(scope, &["da", "db"], "0.5")],
+        };
+        let circuit = deck(
+            &statistics,
+            ".param da=0 db=0\nI1 0 top 1m\nR1 top mid {1000+da+db}\nR2 mid 0 {1000+da+db}",
+        );
+        let card = DcMatchCard {
+            process: scope == SpectreVariationScope::Process,
+            mismatch: scope == SpectreVariationScope::Mismatch,
+            ..all_contributors(&DcMatchCard::voltage_probe("TOP"))
+        };
+        let result = engine().run_dc_match(&circuit, &card).unwrap();
+        // Each resistor has Var(da+db) = 300+400 Var(Z|-1<Z<1).
+        // Process variation shares draws between resistors; mismatch does not.
+        let multiplier = if card.process { 4e-6 } else { 2e-6 };
+        let expected = libm::sqrt(multiplier * (300.0 + 400.0 * conditional_variance));
+        assert!(
+            (result.sigma_total / expected - 1.0).abs() < 2e-3,
+            "{} vs {expected}",
+            result.sigma_total
+        );
+        assert!((result.nominal_value - 2.0).abs() < 1e-9);
+        assert!(
+            (result
+                .contributors
+                .iter()
+                .map(|entry| entry.share)
+                .sum::<Value>()
+                - 1.0)
+                .abs()
+                < 1e-10
+        );
+        assert_eq!(
+            result.applied_correlations_process,
+            usize::from(card.process)
+        );
+        assert_eq!(
+            result.applied_correlations_mismatch,
+            usize::from(card.mismatch)
+        );
+    }
+    // An affine circuit reports the physical lognormal variance, even when
+    // the logarithmic spread is too large for nominal*spread to be accurate.
+    let mut lognormal = variation(1, SpectreVariationScope::Process, "r", "0.2");
+    lognormal.distribution = SpectreDistribution::Lognormal;
+    let circuit = deck(
+        &plan(vec![lognormal]),
+        ".param r=1000\nI1 0 top 1m\nR1 top 0 {r}",
+    );
+    let result = engine()
+        .run_dc_match(
+            &circuit,
+            &DcMatchCard {
+                process: true,
+                mismatch: false,
+                ..DcMatchCard::voltage_probe("TOP")
+            },
+        )
+        .unwrap();
+    let expected = libm::exp(0.02) * libm::sqrt(libm::expm1(0.04));
+    assert!((result.sigma_total / expected - 1.0).abs() < 1e-9);
+}

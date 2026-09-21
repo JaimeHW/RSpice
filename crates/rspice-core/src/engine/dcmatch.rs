@@ -26,9 +26,10 @@
 //! the two scopes, and it is why the same declared spread produces a different
 //! total.
 //!
-//! `R` is the **target** (linear, Pearson) correlation matrix the sampler
-//! means, read from the statistics plan itself
-//! ([`SpectreStatisticsPlan::scope_target_correlation`]) and validated by the
+//! `R` is the population Pearson correlation matrix. Without bounds it is
+//! the sampler target; with bounds it is the conditional correlation computed
+//! jointly with the conditional standard deviations from the statistics plan
+//! ([`SpectreStatisticsPlan::scope_moments_with_abort`]) and validated by the
 //! call Monte Carlo makes, not the Gaussian-copula latent matrix the sampler
 //! factorizes to produce a draw: a variance is a second-moment statement about
 //! the variables themselves, not about the normal scores behind them. For a
@@ -66,14 +67,13 @@
 //!
 //! Every standard deviation comes from the deck's own Spectre `statistics`
 //! block, resolved through the sampler's own expression path
-//! ([`SpectreStatisticsPlan::scope_standard_deviations`]) so a spread cannot
+//! ([`SpectreStatisticsPlan::scope_moments_with_abort`]) so a spread cannot
 //! mean one thing to a Monte Carlo trial and another here. A design that
 //! declares no statistics is refused by name: there is no default spread to
 //! fall back on, and inventing one would answer a question the deck did not
 //! ask.
 //!
-//! [`SpectreStatisticsPlan::scope_standard_deviations`]: crate::netlist::SpectreStatisticsPlan::scope_standard_deviations
-//! [`SpectreStatisticsPlan::scope_target_correlation`]: crate::netlist::SpectreStatisticsPlan::scope_target_correlation
+//! [`SpectreStatisticsPlan::scope_moments_with_abort`]: crate::netlist::SpectreStatisticsPlan::scope_moments_with_abort
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -84,7 +84,8 @@ use crate::analysis::dcmatch::{DcMatchContributor, DcMatchResult, DcMatchScope};
 use crate::analysis::sensitivity::AcSensitivityOutput;
 use crate::netlist::{
     DcMatchCard, FlattenerConfig, SpectreCorrelationMatrix, SpectreMismatchOverride,
-    SpectreVariationScope, flatten_netlist_with_parameter_direction,
+    SpectreScopeMoments, SpectreVariationScope, StatisticalMomentOptions,
+    flatten_netlist_with_parameter_direction,
 };
 use crate::{Netlist, Value};
 
@@ -116,6 +117,24 @@ impl Engine {
         card: &DcMatchCard,
         abort: &dyn AbortSignal,
     ) -> Result<DcMatchResult, SimulationError> {
+        self.run_dc_match_with_moment_options_and_abort(
+            netlist,
+            card,
+            StatisticalMomentOptions::default(),
+            abort,
+        )
+    }
+
+    /// DC mismatch with an explicit integration policy for bounded statistics.
+    /// The derivatives remain at the nominal operating point. Conditional
+    /// covariance is integrated separately, without Monte Carlo circuit solves.
+    pub fn run_dc_match_with_moment_options_and_abort(
+        &self,
+        netlist: &Netlist,
+        card: &DcMatchCard,
+        moments: StatisticalMomentOptions,
+        abort: &dyn AbortSignal,
+    ) -> Result<DcMatchResult, SimulationError> {
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }
@@ -136,40 +155,49 @@ impl Engine {
         base.spectre_mismatch_override = None;
 
         let nominal_process = BTreeMap::new();
-        let mismatch_sigmas = if card.mismatch {
+        let compute_moments = |scope| {
             base.spectre_statistics
-                .scope_standard_deviations(
-                    SpectreVariationScope::Mismatch,
+                .scope_moments_with_abort(
+                    scope,
                     &base.params,
                     &nominal_process,
+                    moments,
+                    self.config.resource_limits,
+                    abort,
                 )
-                .map_err(|error| SimulationError::Circuit(error.to_string()))?
-        } else {
-            Vec::new()
+                .map_err(|error| match error {
+                    crate::netlist::SpectreStatisticsError::Aborted => SimulationError::Aborted,
+                    error => SimulationError::Circuit(error.to_string()),
+                })
         };
-        let process_sigmas = if card.process {
-            base.spectre_statistics
-                .scope_standard_deviations(
-                    SpectreVariationScope::Process,
-                    &base.params,
-                    &nominal_process,
-                )
-                .map_err(|error| SimulationError::Circuit(error.to_string()))?
+        let mismatch = if card.mismatch {
+            compute_moments(SpectreVariationScope::Mismatch)?
         } else {
-            Vec::new()
+            SpectreScopeMoments::default()
         };
-        if mismatch_sigmas.is_empty() && process_sigmas.is_empty() {
+        let process = if card.process {
+            compute_moments(SpectreVariationScope::Process)?
+        } else {
+            SpectreScopeMoments::default()
+        };
+        if mismatch.sigmas.is_empty() && process.sigmas.is_empty() {
             return Err(SimulationError::Circuit(format!(
                 ".DCMATCH has nothing to vary: the card selects {}, and this design's \
                  `statistics` block declares no variation there",
                 requested_scopes(card)
             )));
         }
-
-        // Before any operating point is solved: a `correlate` statement naming
-        // a variable the scope does not vary, a coefficient outside [-1, 1] and
-        // a matrix that is not a correlation matrix are statements about the
-        // deck, and the deck is all it takes to refuse them.
+        if mismatch.evaluated_points + process.evaluated_points > 0 {
+            log::info!(
+                ".DCMATCH conditional moments: {} integration points, maximum relative error estimate {:.3e}",
+                mismatch.evaluated_points + process.evaluated_points,
+                mismatch
+                    .relative_error_estimate
+                    .max(process.relative_error_estimate)
+            );
+        }
+        let mismatch_sigmas = mismatch.sigmas;
+        let process_sigmas = process.sigmas;
         let correlations = ScopeCorrelations {
             mismatch: scope_correlation(
                 &base,
@@ -178,7 +206,7 @@ impl Engine {
                     .iter()
                     .map(|sigma| sigma.parameter.clone())
                     .collect(),
-                &nominal_process,
+                mismatch.correlation,
             )?,
             process: scope_correlation(
                 &base,
@@ -187,7 +215,7 @@ impl Engine {
                     .iter()
                     .map(|sigma| sigma.parameter.clone())
                     .collect(),
-                &nominal_process,
+                process.correlation,
             )?,
         };
 
@@ -482,7 +510,7 @@ struct ScopeCorrelation {
     /// How many `correlate` statements of this scope the result applied.
     statements: usize,
     /// Canonical (upper-case) parameter names in the matrix's own row order —
-    /// the order [`crate::netlist::SpectreStatisticsPlan::scope_standard_deviations`]
+    /// the order [`crate::netlist::SpectreStatisticsPlan::scope_moments_with_abort`]
     /// reports, which is the identity the sampler keys its draws by.
     order: Vec<String>,
     matrix: SpectreCorrelationMatrix,
@@ -547,16 +575,12 @@ fn scope_correlation(
     netlist: &Netlist,
     scope: SpectreVariationScope,
     order: Vec<String>,
-    nominal_process: &BTreeMap<String, Value>,
+    matrix: Option<SpectreCorrelationMatrix>,
 ) -> Result<Option<ScopeCorrelation>, SimulationError> {
     if order.is_empty() {
         return Ok(None);
     }
-    let Some(matrix) = netlist
-        .spectre_statistics
-        .scope_target_correlation(scope, &netlist.params, nominal_process)
-        .map_err(|error| SimulationError::Circuit(error.to_string()))?
-    else {
+    let Some(matrix) = matrix else {
         return Ok(None);
     };
     if matrix.values().len() != order.len() {

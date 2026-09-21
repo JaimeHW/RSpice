@@ -36,8 +36,11 @@ pub(crate) const SPECTRE_STATISTICS_DIRECTIVE: &str = ".RSPICE_SPECTRE_STAT";
 const STATISTICS_ENCODING_VERSION: &str = "S1";
 
 mod bounds;
+mod moments;
 pub use bounds::SpectreVariationBounds;
 use bounds::{ResolvedBounds, bounded_groups, retry_stream};
+pub(crate) use moments::SpectreScopeMoments;
+pub use moments::StatisticalMomentOptions;
 const PSD_TOLERANCE: Value = 1.0e-10;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -152,6 +155,8 @@ pub struct SpectreStatisticalCoordinate {
 
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum SpectreStatisticsError {
+    #[error("statistical moment integration cancelled")]
+    Aborted,
     #[error("line {line}: {message}")]
     InvalidDeclaration { line: usize, message: String },
     #[error("invalid internal Spectre statistics encoding: {0}")]
@@ -462,95 +467,6 @@ impl SpectreStatisticsPlan {
                 .cmp(&right.source.parameter.to_ascii_uppercase())
         });
         Ok(variations)
-    }
-
-    /// Standard deviation of every variation of one scope.
-    ///
-    /// `.DCMATCH` linearizes rather than sampling, so it needs the second
-    /// moment the sampler's draw would have had. Each distribution's spread
-    /// is converted once, here, beside the draw it belongs to:
-    ///
-    /// * Gaussian — the authored `std` *is* the standard deviation.
-    /// * Uniform — the authored `N` is a half range, so the standard
-    ///   deviation of the uniform draw on `nominal ± N` is `N / sqrt(3)`.
-    /// * Lognormal — `std` is the standard deviation of `log(x)`, and the
-    ///   parameter's own spread is only defined by a linearization at the
-    ///   nominal: `sigma_p ~= nominal * std`. That approximation is exact to
-    ///   first order and is the same order as the sensitivity it multiplies.
-    pub(crate) fn scope_standard_deviations(
-        &self,
-        scope: SpectreVariationScope,
-        params: &ParamContext,
-        process: &BTreeMap<String, Value>,
-    ) -> Result<Vec<SpectreVariationSigma>, SpectreStatisticsError> {
-        self.resolve_scope(scope, params, process)?
-            .into_iter()
-            .map(|variation| {
-                if variation.bounds.is_some() {
-                    return Err(invalid(variation.source.line,
-                        "DCMATCH linearized moments do not support truncated statistics; use sampled Monte Carlo for this population".into()));
-                }
-                let standard_deviation = match variation.source.distribution {
-                    SpectreDistribution::Gaussian => variation.spread,
-                    SpectreDistribution::Uniform => variation.spread / libm::sqrt(3.0),
-                    SpectreDistribution::Lognormal => variation.nominal * variation.spread,
-                };
-                if !standard_deviation.is_finite() {
-                    return Err(invalid(
-                        variation.source.line,
-                        format!(
-                            "Spectre variation '{}' has no finite standard deviation",
-                            variation.source.parameter
-                        ),
-                    ));
-                }
-                Ok(SpectreVariationSigma {
-                    parameter: variation.source.parameter.to_ascii_uppercase(),
-                    nominal: variation.nominal,
-                    standard_deviation,
-                })
-            })
-            .collect()
-    }
-
-    /// The correlation one scope's `correlate` statements declare, validated,
-    /// in the order [`Self::scope_standard_deviations`] reports its variables.
-    ///
-    /// `None` when the scope has no `correlate` statement and no matrix is
-    /// built: independent variables are the overwhelmingly common case, and a
-    /// caller that has a linear path for them must keep it rather than
-    /// multiply by an identity.
-    ///
-    /// This is the **target** correlation — the linear (Pearson) correlation
-    /// the `correlate` statements state about the variables themselves. It is
-    /// deliberately not the Gaussian-copula latent matrix
-    /// [`Self::sample_scope`] factorizes: the latent matrix exists only so a
-    /// non-Gaussian draw reproduces this one, and a second-moment statement
-    /// about the variables — a linearized variance, for instance — is about
-    /// the variables, not about the normal scores behind them.
-    ///
-    /// Validated by [`SpectreCorrelationMatrix::new`], the same call
-    /// [`Self::sample_scope`] makes, so an asymmetric or indefinite matrix is
-    /// refused in one vocabulary whatever consumes the statistics block.
-    pub(crate) fn scope_target_correlation(
-        &self,
-        scope: SpectreVariationScope,
-        params: &ParamContext,
-        process: &BTreeMap<String, Value>,
-    ) -> Result<Option<SpectreCorrelationMatrix>, SpectreStatisticsError> {
-        if !self
-            .correlations
-            .iter()
-            .any(|correlation| correlation.scope == scope)
-        {
-            return Ok(None);
-        }
-        let variations = self.resolve_scope(scope, params, process)?;
-        if variations.is_empty() {
-            return Ok(None);
-        }
-        let target = self.target_correlation_matrix(scope, &variations, params)?;
-        Ok(Some(SpectreCorrelationMatrix::new(target)?))
     }
 
     fn sample_scope(

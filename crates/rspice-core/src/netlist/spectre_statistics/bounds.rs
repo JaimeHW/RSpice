@@ -26,8 +26,8 @@ impl Default for SpectreVariationBounds {
 }
 #[derive(Debug, Clone)]
 pub(super) struct ResolvedBounds {
-    lower: Value,
-    upper: Value,
+    pub(super) lower: Value,
+    pub(super) upper: Value,
     pub max_attempts: u32,
 }
 impl ResolvedBounds {
@@ -301,10 +301,13 @@ mod tests {
                 .contains("exhausted 8")
         );
         assert!(
-            plan.scope_standard_deviations(
+            plan.scope_moments_with_abort(
                 SpectreVariationScope::Process,
                 &params,
-                &BTreeMap::new()
+                &BTreeMap::new(),
+                StatisticalMomentOptions::default(),
+                crate::ResourceLimits::default(),
+                &crate::abort_signal::NoAbort,
             )
             .is_err()
         );

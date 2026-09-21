@@ -10,8 +10,9 @@
 //! scope the analysis takes the derivative of the output with respect to that
 //! variable and multiplies it by the variable's standard deviation; the
 //! variance of the output is the quadratic form `c^T R c` over those signed
-//! products, where `R` is the correlation the design's own `correlate`
-//! statements declare between variables that are drawn together. Mismatch
+//! products, where `R` is the population correlation between variables drawn
+//! together. With bounds, the conditional covariance includes changes in both
+//! spread and correlation, including unbounded partners in the same group. Mismatch
 //! variables of different instances are independent by construction and a
 //! process variable is one variable the whole design shares, so a design that
 //! correlates nothing gets the plain sum of squares. Each contributor's share
