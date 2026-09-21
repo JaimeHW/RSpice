@@ -85,6 +85,7 @@ impl VoltageBasis {
                     )));
                 }
                 Ok(FamilyMeasurementEvidence {
+                    unit: Some(rspice_core::analysis::MeasurementUnit::Known("V".into())),
                     name: name.clone(),
                     value: Some(value),
                     passed: true,

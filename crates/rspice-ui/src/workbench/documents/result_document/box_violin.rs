@@ -1032,12 +1032,14 @@ mod tests {
                     },
                     vec![
                         FamilyMeasurementEvidence {
+                            unit: None,
                             name: "gain_dc".to_owned(),
                             value: Some(40.0 + 2.0 * position),
                             passed: true,
                             error: None,
                         },
                         FamilyMeasurementEvidence {
+                            unit: None,
                             name: "vos".to_owned(),
                             value: Some(60.0 * position),
                             passed: true,

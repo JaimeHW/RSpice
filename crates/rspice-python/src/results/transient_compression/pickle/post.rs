@@ -21,7 +21,7 @@ pub(crate) type CompressedFourierPersistenceState = (
     Vec<(usize, f64, f64, f64)>,
 );
 /// One transient `.MEASURE` result, field for field.
-pub(crate) type CompressedMeasurementPersistenceState = (
+type LegacyMeasurementPersistenceState = (
     String,
     Option<f64>,
     Option<f64>,
@@ -33,6 +33,17 @@ pub(crate) type CompressedMeasurementPersistenceState = (
     bool,
     Option<f64>,
 );
+
+/// Unit metadata is an optional triple; each absent symbol means explicitly
+/// unknown, whereas an absent triple is a historical/untyped measurement.
+type MeasurementUnitsState = Option<(Option<String>, Option<String>, Option<String>)>;
+#[derive(Debug, Clone, pyo3::FromPyObject, pyo3::IntoPyObject)]
+pub(crate) enum CompressedMeasurementPersistenceState {
+    #[pyo3(transparent)]
+    WithUnits((LegacyMeasurementPersistenceState, MeasurementUnitsState)),
+    #[pyo3(transparent)]
+    Legacy(LegacyMeasurementPersistenceState),
+}
 
 pub(crate) fn fourier_persistence_state(
     result: &rspice_core::engine::TransientFourierResult,
@@ -114,7 +125,7 @@ pub(crate) fn rebuild_fourier(
 pub(crate) fn measurement_persistence_state(
     result: &rspice_core::MeasureResult,
 ) -> CompressedMeasurementPersistenceState {
-    (
+    let legacy = (
         result.name.clone(),
         result.value,
         result.raw_value,
@@ -125,12 +136,46 @@ pub(crate) fn measurement_persistence_state(
         result.failure_limit,
         result.failure_limit_exceeded,
         result.event_axis,
-    )
+    );
+    let symbol = |unit: &rspice_core::analysis::MeasurementUnit| unit.symbol().map(str::to_owned);
+    match &result.units {
+        Some(units) => CompressedMeasurementPersistenceState::WithUnits((
+            legacy,
+            Some((
+                symbol(&units.value),
+                symbol(&units.raw_value),
+                symbol(&units.axis),
+            )),
+        )),
+        None => CompressedMeasurementPersistenceState::Legacy(legacy),
+    }
 }
 
 pub(crate) fn rebuild_measurement(
     state: CompressedMeasurementPersistenceState,
-) -> rspice_core::MeasureResult {
+) -> PyResult<rspice_core::MeasureResult> {
+    let (legacy, units) = match state {
+        CompressedMeasurementPersistenceState::Legacy(legacy) => (legacy, None),
+        CompressedMeasurementPersistenceState::WithUnits((legacy, units)) => (legacy, units),
+    };
+    let unit = |symbol: Option<String>| -> PyResult<rspice_core::analysis::MeasurementUnit> {
+        symbol.map_or(
+            Ok(rspice_core::analysis::MeasurementUnit::Unknown),
+            |symbol| {
+                rspice_core::analysis::MeasurementUnit::known(&symbol)
+                    .map_err(crate::errors::value_error)
+            },
+        )
+    };
+    let units = units
+        .map(|(value, raw_value, axis)| -> PyResult<_> {
+            Ok(rspice_core::analysis::MeasurementUnits {
+                value: unit(value)?,
+                raw_value: unit(raw_value)?,
+                axis: unit(axis)?,
+            })
+        })
+        .transpose()?;
     let (
         name,
         value,
@@ -142,8 +187,8 @@ pub(crate) fn rebuild_measurement(
         failure_limit,
         failure_limit_exceeded,
         event_axis,
-    ) = state;
-    rspice_core::MeasureResult {
+    ) = legacy;
+    Ok(rspice_core::MeasureResult {
         name,
         value,
         raw_value,
@@ -154,5 +199,40 @@ pub(crate) fn rebuild_measurement(
         failure_limit,
         failure_limit_exceeded,
         event_axis,
+        units,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rspice_core::analysis::{MeasurementUnit, MeasurementUnits};
+
+    #[test]
+    fn measurement_units_preserve_python_tuple_shapes_and_physical_metadata() {
+        Python::initialize();
+        Python::attach(|py| {
+            let mut result = rspice_core::MeasureResult::success("peak_at", 2.0);
+            result.raw_value = Some(0.25);
+            for typed in [false, true] {
+                if typed {
+                    result.units = Some(MeasurementUnits {
+                        value: MeasurementUnit::Known("s".into()),
+                        raw_value: MeasurementUnit::Known("V".into()),
+                        axis: MeasurementUnit::Known("s".into()),
+                    });
+                }
+                let object = measurement_persistence_state(&result)
+                    .into_pyobject(py)
+                    .unwrap();
+                assert_eq!(object.len().unwrap(), if typed { 2 } else { 10 });
+                let decoded = object
+                    .extract::<CompressedMeasurementPersistenceState>()
+                    .unwrap();
+                assert_eq!(rebuild_measurement(decoded).unwrap(), result);
+            }
+            result.units.as_mut().unwrap().value = MeasurementUnit::Known("bogus".into());
+            assert!(rebuild_measurement(measurement_persistence_state(&result)).is_err());
+        });
     }
 }

@@ -125,7 +125,7 @@ impl PopulationLimit {
 pub(super) struct PopulationColumn {
     pub(super) name: String,
     pub(super) kind: ColumnKind,
-    /// The producer's unit, when a requirement stated one. Empty is
+    /// Display unit from the requirement or the producer. Empty is
     /// "unstated", never "dimensionless".
     pub(super) unit: String,
     /// One entry per trial row. `None` is a trial whose measurement ran and
@@ -503,22 +503,35 @@ fn build(
         let spec = resolved
             .iter()
             .find(|spec| spec.entry().measurement.eq_ignore_ascii_case(&name));
+        let mut unit = spec
+            .map(|spec| spec.entry().unit.clone())
+            .unwrap_or_default();
+        if unit.trim().is_empty() {
+            let units = member_measurements
+                .iter()
+                .filter_map(|member| member.evidence_for(&name))
+                .map(|evidence| evidence.unit.as_ref().and_then(|unit| unit.symbol()))
+                .collect::<Vec<_>>();
+            if let Some(Some(first)) = units.first()
+                && units.iter().all(|unit| *unit == Some(*first))
+            {
+                unit = (*first).to_owned();
+            }
+        }
         let values = member_measurements
             .iter()
             .map(|member| {
                 member
                     .evidence_for(&name)
                     .filter(|evidence| evidence.is_measured())
-                    .and_then(|evidence| evidence.value)
+                    .and_then(|evidence| evidence.value_in_unit(&unit).ok().flatten())
                     .filter(|value| value.is_finite())
             })
             .collect::<Vec<_>>();
         columns.push(PopulationColumn {
             name,
             kind: ColumnKind::Measurement,
-            unit: spec
-                .map(|spec| spec.entry().unit.clone())
-                .unwrap_or_default(),
+            unit,
             limit: spec.and_then(population_limit),
             values,
         });

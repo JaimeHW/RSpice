@@ -13,7 +13,7 @@ use sha2::{Digest as _, Sha256};
 use std::collections::{BTreeMap, HashSet};
 
 const MAGIC: &[u8] = b"RSPICE-STUDIO-MC\0";
-const VERSION: u32 = 1;
+const VERSION: u32 = 2;
 pub(super) type Observations = BTreeMap<usize, Vec<FamilyMeasurementEvidence>>;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -59,6 +59,7 @@ pub(super) fn failed_observations(names: &[String], error: &str) -> Vec<FamilyMe
     names
         .iter()
         .map(|name| FamilyMeasurementEvidence {
+            unit: None,
             name: name.clone(),
             value: None,
             passed: false,
@@ -153,6 +154,7 @@ impl StudyMonteCarloCheckpoint {
                         actual.value.map(f64::to_bits) != expected.value.map(f64::to_bits)
                             || actual.passed != expected.passed
                             || actual.error != expected.error
+                            || actual.unit != expected.unit
                     })
                 })
             {
@@ -260,6 +262,14 @@ impl StudyMonteCarloCheckpoint {
             bytes = bytes.saturating_add(17);
             for (column, observation) in row.iter().enumerate() {
                 poll(abort)?;
+                if let Some(unit) = &observation.unit {
+                    unit.validate().map_err(|error| invalid(&error))?;
+                    bytes = bytes
+                        .saturating_add(9)
+                        .saturating_add(unit.symbol().map_or(0, str::len));
+                } else {
+                    bytes = bytes.saturating_add(1);
+                }
                 let expected = numerical.map(|values| values[column].to_bits());
                 if observation.name != self.measurements[column]
                     || observation.value.map(f64::to_bits) != expected
@@ -318,6 +328,7 @@ impl StudyMonteCarloCheckpoint {
                         || a.value.map(f64::to_bits) != b.value.map(f64::to_bits)
                         || a.passed != b.passed
                         || a.error != b.error
+                        || a.unit != b.unit
                 })
             }) {
                 return Err(invalid(
@@ -370,7 +381,17 @@ impl StudyMonteCarloCheckpoint {
             .map_err(core_error)?;
         let mut bytes = Vec::new();
         bytes.extend_from_slice(MAGIC);
-        bytes.extend_from_slice(&VERSION.to_le_bytes());
+        let version = if self
+            .observations
+            .values()
+            .flatten()
+            .any(|observation| observation.unit.is_some())
+        {
+            VERSION
+        } else {
+            1
+        };
+        bytes.extend_from_slice(&version.to_le_bytes());
         write_size(&mut bytes, numerical.len());
         bytes.extend_from_slice(&numerical);
         write_size(&mut bytes, self.measurements.len());
@@ -386,6 +407,17 @@ impl StudyMonteCarloCheckpoint {
                 bytes.push(u8::from(observation.passed));
                 if let Some(error) = &observation.error {
                     write_text(&mut bytes, error);
+                }
+                if version >= 2 {
+                    use rspice_core::analysis::MeasurementUnit;
+                    match &observation.unit {
+                        None => bytes.push(0),
+                        Some(MeasurementUnit::Unknown) => bytes.push(1),
+                        Some(MeasurementUnit::Known(symbol)) => {
+                            bytes.push(2);
+                            write_text(&mut bytes, symbol);
+                        }
+                    }
                 }
             }
         }
@@ -418,7 +450,16 @@ impl StudyMonteCarloCheckpoint {
             return Err(invalid("envelope checksum mismatch"));
         }
         let mut reader = Reader { remaining: body };
-        if reader.take(MAGIC.len())? != MAGIC || reader.take(4)? != VERSION.to_le_bytes() {
+        if reader.take(MAGIC.len())? != MAGIC {
+            return Err(invalid("unsupported envelope magic"));
+        }
+        let version = u32::from_le_bytes(
+            reader
+                .take(4)?
+                .try_into()
+                .map_err(|_| invalid("truncated version"))?,
+        );
+        if version != 1 && version != VERSION {
             return Err(invalid("unsupported envelope version"));
         }
         let size = reader.size()?;
@@ -465,7 +506,22 @@ impl StudyMonteCarloCheckpoint {
                     1 => (true, None),
                     _ => return Err(invalid("invalid verdict tag")),
                 };
+                let unit = if version == 1 {
+                    None
+                } else {
+                    use rspice_core::analysis::MeasurementUnit;
+                    match reader.take(1)?[0] {
+                        0 => None,
+                        1 => Some(MeasurementUnit::Unknown),
+                        2 => Some(
+                            MeasurementUnit::known(&reader.text()?)
+                                .map_err(|error| invalid(&error))?,
+                        ),
+                        _ => return Err(invalid("invalid measurement unit tag")),
+                    }
+                };
                 row.push(FamilyMeasurementEvidence {
+                    unit,
                     name: name.clone(),
                     value: values.map(|values| values[column]),
                     passed,

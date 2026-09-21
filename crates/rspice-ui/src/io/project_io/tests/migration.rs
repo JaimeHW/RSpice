@@ -205,6 +205,7 @@ fn current_projected_failvalue_results() -> ProjectSimulationResults {
         failure_limit: Some(4.0),
         failure_limit_exceeded: false,
         event_axis: Some(20.0),
+        units: None,
     };
     let mut run = SimulationRun::new(19);
     run.mark_running().expect("fixture run starts");
@@ -2032,4 +2033,50 @@ fn a_result_schema_before_v27_cannot_carry_dc_mismatch_evidence() {
         error.contains("contains DC mismatch evidence, which no build before schema v27 wrote"),
         "{error}"
     );
+}
+
+#[test]
+fn measurement_units_are_persisted_authenticated_and_absent_in_legacy_history() {
+    use rspice_core::analysis::{MeasurementUnit, MeasurementUnits};
+    let legacy = current_projected_failvalue_results();
+    let mut old_label = legacy.clone();
+    old_label.schema_version = IMPORTED_MONTE_CARLO_CHECKPOINTS_SCHEMA_VERSION;
+    old_label.migrate_to_current(ProjectId::new()).unwrap();
+    let mut state = old_label.into_simulation_state().unwrap();
+    assert!(state.runs[0].analyses[0].measurements[0].units.is_none());
+    state.runs[0].analyses[0].measurements[0].units = Some(MeasurementUnits {
+        value: MeasurementUnit::Known("s".into()),
+        raw_value: MeasurementUnit::Known("V".into()),
+        axis: MeasurementUnit::Known("s".into()),
+    });
+    let measurements = state.runs[0].analyses[0].measurements.clone();
+    let mut run = SimulationRun::new(20);
+    run.mark_running().unwrap();
+    run.add_analysis(
+        AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_measurements(measurements),
+    );
+    run.finish_lifecycle(SimulationRunLifecycle::Completed)
+        .unwrap();
+    seal_legacy_unattributed(&mut run);
+    state.runs = vec![run].into();
+    state.next_run_id = 20;
+    let current = ProjectSimulationResults::from_state(&state);
+    current.validate().unwrap();
+    let json = serde_json::to_string(&current).unwrap();
+    let decoded: ProjectSimulationResults = serde_json::from_str(&json).unwrap();
+    let restored = decoded.into_simulation_state().unwrap();
+    assert_eq!(
+        restored.runs[0].analyses[0].measurements[0].units,
+        state.runs[0].analyses[0].measurements[0].units
+    );
+    let mut tampered = current.clone();
+    tampered.runs[0].analyses[0].measurements[0]
+        .units
+        .as_mut()
+        .unwrap()
+        .value = MeasurementUnit::Known("ms".into());
+    assert!(tampered.validate().is_err());
+    let mut downgraded = current;
+    downgraded.schema_version = IMPORTED_MONTE_CARLO_CHECKPOINTS_SCHEMA_VERSION;
+    assert!(downgraded.migrate_to_current(ProjectId::new()).is_err());
 }

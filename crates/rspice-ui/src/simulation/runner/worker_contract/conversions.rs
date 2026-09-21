@@ -1018,6 +1018,8 @@ pub(crate) struct WorkerMeasurement {
     #[serde(default)]
     pub failure_limit_exceeded: bool,
     pub event_axis: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub units: Option<rspice_core::analysis::MeasurementUnits>,
 }
 
 #[cfg(test)]
@@ -1036,6 +1038,11 @@ impl WorkerMeasurement {
 
 impl WorkerMeasurement {
     pub(super) fn validate_current_evidence(&self, prefix: &str) -> Result<(), String> {
+        if let Some(units) = &self.units {
+            units
+                .validate()
+                .map_err(|error| format!("{prefix}.units: {error}"))?;
+        }
         if self.name.trim().is_empty() || self.name.chars().any(char::is_control) {
             return Err(format!("{prefix} has an invalid measurement name"));
         }
@@ -1097,6 +1104,7 @@ impl From<rspice_core::MeasureResult> for WorkerMeasurement {
             failure_limit: value.failure_limit,
             failure_limit_exceeded: value.failure_limit_exceeded,
             event_axis: value.event_axis,
+            units: value.units,
         }
     }
 }
@@ -1114,6 +1122,7 @@ impl From<WorkerMeasurement> for rspice_core::MeasureResult {
             failure_limit: value.failure_limit,
             failure_limit_exceeded: value.failure_limit_exceeded,
             event_axis: value.event_axis,
+            units: value.units,
         }
     }
 }

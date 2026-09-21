@@ -1489,6 +1489,7 @@ fn a_measurement_the_engine_could_not_complete_outranks_every_margin() {
                 failure_limit: None,
                 failure_limit_exceeded: false,
                 event_axis: None,
+                units: None,
             },
         ]),
     ));
@@ -1562,6 +1563,7 @@ fn coverage_counts_only_attributed_finite_measurements() {
                 failure_limit: None,
                 failure_limit_exceeded: false,
                 event_axis: None,
+                units: None,
             },
         ]),
     ));
@@ -1597,6 +1599,7 @@ fn output_specifications_reject_unattributed_and_non_finite_but_retain_failed_an
                 failure_limit: None,
                 failure_limit_exceeded: false,
                 event_axis: None,
+                units: None,
             },
         ]),
     ));
@@ -1627,6 +1630,7 @@ fn output_specifications_retain_finite_measurement_contract_failures() {
                 failure_limit: None,
                 failure_limit_exceeded: false,
                 event_axis: None,
+                units: None,
             },
         ]),
     ));

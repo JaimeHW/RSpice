@@ -5638,6 +5638,13 @@ pub fn evaluate_noise_measurements_with_abort(
         Err(_) => evaluate_statements(&statements, series.axis(), &signals, &netlist.params, false),
     };
     overlay_continuous_equation_results(&statements, &mut results, equation_traces, "NOISE");
+    super::measure_units::annotate_native(
+        netlist,
+        "NOISE",
+        &mut results,
+        signals.keys(),
+        sweep.first().and_then(|point| point.input_quantity),
+    );
     if abort.is_aborted() {
         Err(SimulationError::Aborted)
     } else {
@@ -6659,6 +6666,7 @@ fn evaluate_tran_measurements_with_signals_and_abort(
             *result = replacement;
         }
     }
+    super::measure_units::annotate_native(netlist, "TRAN", &mut results, signals.keys(), None);
     if abort.is_aborted() {
         Err(SimulationError::Aborted)
     } else {
@@ -7028,6 +7036,7 @@ pub fn evaluate_dc_measurements_with_parameter_contexts_and_abort(
         ),
     };
     overlay_continuous_equation_results(&statements, &mut results, equation_traces, "DC");
+    super::measure_units::annotate_native(netlist, "DC", &mut results, signals.keys(), None);
     for measurement in &mut results {
         let refusal = measurement
             .error
@@ -7275,6 +7284,7 @@ pub fn evaluate_ac_measurements_with_abort(
         Err(_) => evaluate_statements(&statements, series.axis(), &signals, &netlist.params, false),
     };
     overlay_continuous_equation_results(&statements, &mut results, equation_traces, "AC");
+    super::measure_units::annotate_native(netlist, "AC", &mut results, signals.keys(), None);
     if abort.is_aborted() {
         Err(SimulationError::Aborted)
     } else {
@@ -10560,6 +10570,51 @@ mod tests {
         assert_eq!(result("crossing").value, Some(2.5));
         assert_eq!(result("found").value, Some(0.1));
         assert!(results.iter().all(|result| result.passed));
+    }
+
+    #[test]
+    fn measurement_units_native_producers_type_dc_axes_and_noise_inputs() {
+        for (source, expected) in [("V1", "1"), ("I1", "ohm")] {
+            let netlist = Netlist::parse(&format!("Unit sweep\n{source} out 0 0\nR1 out 0 1k\n.dc {source} 0 2 1\n.meas dc slope DERIV V(out) AT=1\n.end\n")).unwrap();
+            let points = crate::Engine::default()
+                .run_dc_sweep(&netlist, source, 0.0, 2.0, 1.0)
+                .unwrap();
+            let measured = evaluate_dc_measurements(&netlist, &points);
+            assert!(measured[0].passed, "{:?}", measured[0]);
+            let units = measured[0].units.as_ref().unwrap();
+            assert_eq!(units.value.convert_value(1.0, expected).unwrap(), 1.0);
+        }
+        let netlist = Netlist::parse("Noise units\nV1 out 0 AC 1\nR1 out 0 1k\n.meas noise output FIND ONOISE AT=1\n.meas noise input FIND INOISE AT=1\n.meas noise level EQN {sqrt(INOISE)}\n.end\n").unwrap();
+        for (quantity, symbol) in [
+            (crate::analysis::noise::NoiseInputQuantity::Voltage, "V"),
+            (crate::analysis::noise::NoiseInputQuantity::Current, "A"),
+        ] {
+            let mut point = noise_point(
+                1.0,
+                crate::Complex64::new(1.0, 0.0),
+                crate::Complex64::new(0.0, 0.0),
+            );
+            point.input_quantity = Some(quantity);
+            let measured = evaluate_noise_measurements(&netlist, &[point]);
+            assert!(measured.iter().all(|result| result.passed), "{measured:?}");
+            for (result, expected) in measured.iter().zip([
+                "V^2/Hz".to_owned(),
+                format!("{symbol}^2/Hz"),
+                format!("{symbol}/sqrt(Hz)"),
+            ]) {
+                assert_eq!(
+                    result
+                        .units
+                        .as_ref()
+                        .unwrap()
+                        .value
+                        .convert_value(1.0, &expected)
+                        .unwrap(),
+                    1.0,
+                    "{result:?}"
+                );
+            }
+        }
     }
 
     fn noise_point(

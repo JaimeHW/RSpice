@@ -1187,17 +1187,23 @@ fn publication_measurement(
     spec: Option<&SpecEntry>,
     analysis_id: u64,
 ) -> Result<Measurement, PublicationBuildError> {
-    let display = match measure.value {
-        Some(value) => {
-            let formatted = format_engineering_value(value);
+    let converted = measure.value_in_unit(spec.map_or("", |entry| entry.unit.as_str()));
+    let display = match converted.as_ref() {
+        Ok(Some(value)) => {
+            let formatted = format_engineering_value(*value);
             match spec {
                 Some(entry) if !entry.unit.trim().is_empty() => {
                     format!("{formatted} {}", entry.unit.trim())
                 }
-                _ => formatted,
+                _ => measure
+                    .units
+                    .as_ref()
+                    .and_then(|units| units.value.symbol())
+                    .map_or_else(|| formatted.clone(), |unit| format!("{formatted} {unit}")),
             }
         }
-        None => "not computed".to_string(),
+        Ok(None) => "not computed".to_string(),
+        Err(error) => error.clone(),
     };
     let spec_display = publication_contract_display(measure, spec);
     let has_contract =
@@ -1205,7 +1211,7 @@ fn publication_measurement(
     let passed = has_contract.then(|| {
         let value_available = measure.value.is_some();
         let raw_value_available = measure.failure_limit.is_none() || measure.raw_value.is_some();
-        let project_passed = match (spec, measure.value) {
+        let project_passed = match (spec, converted.as_ref().ok().copied().flatten()) {
             (Some(entry), Some(value)) => entry.passes(value),
             (Some(_), None) => false,
             (None, _) => true,
@@ -1318,12 +1324,25 @@ fn publication_contract_display(
                 )
             },
         );
+        let text = measure
+            .units
+            .as_ref()
+            .and_then(|units| units.value.symbol())
+            .map_or_else(|| text.clone(), |unit| format!("{text} {unit}"));
         contracts.push(("GOAL", text));
     }
     if let Some(limit) = measure.failure_limit {
         contracts.push((
             "FAILVALUE",
-            format!("|raw| < {}", format_engineering_value(limit)),
+            format!(
+                "|raw| < {}{}",
+                format_engineering_value(limit),
+                measure
+                    .units
+                    .as_ref()
+                    .and_then(|units| units.raw_value.symbol())
+                    .map_or(String::new(), |unit| format!(" {unit}"))
+            ),
         ));
     }
 
@@ -1606,6 +1625,7 @@ mod tests {
             failure_limit: None,
             failure_limit_exceeded: false,
             event_axis: None,
+            units: None,
         };
         let spec = SpecEntry {
             measurement: "rise_time".to_string(),
@@ -1645,6 +1665,7 @@ mod tests {
             failure_limit: Some(4.0),
             failure_limit_exceeded: false,
             event_axis: Some(20.0),
+            units: None,
         };
         let published =
             publication_measurement(&passing, None, 1).expect("FAILVALUE evidence publishes");
@@ -1711,6 +1732,7 @@ mod tests {
             failure_limit: Some(5.0),
             failure_limit_exceeded: false,
             event_axis: None,
+            units: None,
         };
         let published =
             publication_measurement(&passing, Some(&spec), 1).expect("combined contracts publish");
@@ -2086,6 +2108,7 @@ mod tests {
                 failure_limit: Some(1.0),
                 failure_limit_exceeded: false,
                 event_axis: Some(2.0),
+                units: None,
             });
             result
         });
@@ -2126,5 +2149,31 @@ mod tests {
         let reparsed = PublicationSnapshot::from_canonical_bytes(&canonical)
             .expect("published evidence reparses");
         assert_eq!(snapshot, reparsed);
+    }
+    #[test]
+    fn measurement_units_publish_converted_display_without_restating_native_evidence() {
+        use rspice_core::analysis::{MeasurementUnit, MeasurementUnits};
+        let mut measured = rspice_core::MeasureResult::success("level", 0.25);
+        measured.units = Some(MeasurementUnits {
+            value: MeasurementUnit::Known("V".into()),
+            raw_value: MeasurementUnit::Known("V".into()),
+            axis: MeasurementUnit::Known("s".into()),
+        });
+        let mut spec = SpecEntry {
+            measurement: "level".into(),
+            expression: String::new(),
+            min: Some(200.0),
+            max: Some(300.0),
+            unit: "mV".into(),
+            scope: crate::state::SpecPointScope::AllPoints,
+        };
+        let publication = publication_measurement(&measured, Some(&spec), 1).unwrap();
+        assert_eq!(publication.passed, Some(true));
+        assert_eq!(publication.display, "250 mV");
+        assert_eq!(publication.value_bits, Some(0.25_f64.to_bits()));
+        spec.unit = "mA".into();
+        let publication = publication_measurement(&measured, Some(&spec), 1).unwrap();
+        assert_eq!(publication.passed, Some(false));
+        assert!(publication.display.contains("incompatible"));
     }
 }

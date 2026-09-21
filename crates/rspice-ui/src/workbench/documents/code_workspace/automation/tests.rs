@@ -425,3 +425,37 @@ fn baseline_digest_changes_when_retained_evidence_changes() {
     let changed = simulation_run_digest(&baseline).expect("changed digest");
     assert_ne!(original, changed);
 }
+
+#[test]
+fn measurement_units_convert_automation_limits_and_bind_the_evidence_digest() {
+    use rspice_core::analysis::{MeasurementUnit, MeasurementUnits};
+    let mut measurement = rspice_core::MeasureResult::success("gain", 0.25);
+    measurement.units = Some(MeasurementUnits {
+        value: MeasurementUnit::Known("V".into()),
+        raw_value: MeasurementUnit::Known("V".into()),
+        axis: MeasurementUnit::Known("s".into()),
+    });
+    let mut run = SimulationRun::new(1);
+    run.add_analysis(result(AnalysisInstanceId::new(), Some(measurement)));
+    let mut requirement = spec("gain");
+    requirement.min = Some(200.0);
+    requirement.max = Some(300.0);
+    requirement.unit = "mV".into();
+    assert_eq!(
+        build_spec_evidence(&[requirement.clone()], &run).unwrap()[0].outcome(),
+        CheckOutcome::Passed
+    );
+    requirement.unit = "mA".into();
+    assert_ne!(
+        build_spec_evidence(&[requirement], &run).unwrap()[0].outcome(),
+        CheckOutcome::Passed
+    );
+    let mut prepared = prepared_run(
+        SimulationPlanId::new(),
+        ObjectRevision::INITIAL,
+        ObjectRevision::INITIAL,
+    );
+    let before = simulation_run_digest(&prepared).unwrap();
+    prepared.analyses[0].measurements[0].units = run.analyses[0].measurements[0].units.clone();
+    assert_ne!(before, simulation_run_digest(&prepared).unwrap());
+}

@@ -251,7 +251,10 @@ pub(crate) fn rebuild_compressed_transient(
                 .into_iter()
                 .map(rebuild_fourier)
                 .collect::<PyResult<Vec<_>>>()?,
-            measurements: measurements.into_iter().map(rebuild_measurement).collect(),
+            measurements: measurements
+                .into_iter()
+                .map(rebuild_measurement)
+                .collect::<PyResult<Vec<_>>>()?,
         },
         identity: rebuild_identity(identity)?,
         compression_ratio,

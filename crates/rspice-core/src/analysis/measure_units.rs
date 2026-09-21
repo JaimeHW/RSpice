@@ -3,9 +3,25 @@
 use serde::{Deserialize, Serialize};
 
 mod infer;
+mod native;
 mod parse;
+pub(super) use native::annotate_native;
 
 pub use infer::measurement_units;
+
+pub(super) fn annotate(
+    statements: &[&crate::netlist::measure::MeasureStatement],
+    results: &mut [super::MeasureResult],
+    axis: Option<&MeasurementUnit>,
+    signals: &std::collections::HashMap<String, MeasurementUnit>,
+) {
+    for (result, units) in results
+        .iter_mut()
+        .zip(measurement_units(statements, axis, signals))
+    {
+        result.units = Some(units);
+    }
+}
 
 /// Missing historical metadata is represented by the enclosing `Option`.
 /// `Unknown` explicitly records that a current producer cannot infer a unit.
@@ -71,7 +87,17 @@ impl MeasurementUnit {
                 self.symbol().unwrap_or("unknown")
             ));
         }
-        let converted = (value.mul_add(source.scale, source.bias) - target.bias) / target.scale;
+        // Form the conversion once: dividing each sample by an approximate
+        // SI prefix needlessly moves values such as 0.35 V below 350 mV.
+        let scale = source.scale / target.scale;
+        let bias = (source.bias - target.bias) / target.scale;
+        let converted = if scale.is_finite() && scale > 0.0 && bias.is_finite() {
+            value.mul_add(scale, bias)
+        } else {
+            // Extreme compound scales can have an unrepresentable ratio even
+            // when applying the source and target scales in stages is finite.
+            (value.mul_add(source.scale, source.bias) - target.bias) / target.scale
+        };
         if !value.is_finite() || !converted.is_finite() {
             return Err("measurement unit conversion is non-finite".to_owned());
         }
@@ -81,6 +107,14 @@ impl MeasurementUnit {
     fn parsed(&self) -> Option<parse::Unit> {
         self.symbol()
             .and_then(|symbol| parse::Unit::parse(symbol).ok())
+    }
+
+    fn interval(&self) -> Self {
+        if self.parsed().is_some_and(|unit| unit.bias != 0.0) {
+            Self::Known("K".into())
+        } else {
+            self.clone()
+        }
     }
 
     fn product(&self, rhs: &Self, divide: bool) -> Self {

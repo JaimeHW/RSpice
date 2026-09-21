@@ -106,6 +106,7 @@ fn include_deck_failures(
 
 fn observation(name: String, value: Option<f64>) -> FamilyMeasurementEvidence {
     FamilyMeasurementEvidence {
+        unit: None,
         name,
         value,
         passed: value.is_some(),

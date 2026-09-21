@@ -1478,6 +1478,7 @@ fn monte_carlo_sequence_trial_digest_seals_stream_policy_seed_and_original_index
                 policy: "parameter-xoroshiro128plus-2018-v1".into(),
             },
             vec![FamilyMeasurementEvidence {
+                unit: None,
                 name: "V(out)".into(),
                 value: Some(1.0),
                 passed: true,

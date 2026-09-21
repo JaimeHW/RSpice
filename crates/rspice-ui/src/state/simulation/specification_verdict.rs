@@ -261,23 +261,41 @@ fn candidates_for(
         })
         .flat_map(|(analysis, source_instance_id)| {
             let is_monte_carlo = analysis.analysis_type == AnalysisType::MonteCarlo;
-            let make =
-                move |value: Option<f64>, measured: bool, member: Option<super::FamilyMemberId>| {
-                    let value = value.filter(|value| value.is_finite());
-                    Candidate {
-                        value,
-                        measurement_passed: analysis.success && value.is_some() && measured,
-                        signed_margin: value.and_then(|value| specification.signed_margin(value)),
-                        source_instance_id,
-                        is_monte_carlo,
-                        member,
-                    }
+            let make = move |value: Option<f64>,
+                             unit: Option<&rspice_core::analysis::MeasurementUnit>,
+                             measured: bool,
+                             member: Option<super::FamilyMemberId>| {
+                let value = if !spec.unit.trim().is_empty() {
+                    value.and_then(|value| {
+                        unit.map_or(Ok(value), |unit| unit.convert_value(value, &spec.unit))
+                            .ok()
+                    })
+                } else {
+                    value
                 };
+                let value = value.filter(|value| value.is_finite());
+                Candidate {
+                    value,
+                    measurement_passed: analysis.success && value.is_some() && measured,
+                    signed_margin: value.and_then(|value| specification.signed_margin(value)),
+                    source_instance_id,
+                    is_monte_carlo,
+                    member,
+                }
+            };
 
-            let analysis_level = analysis
-                .scalar_evidence(&spec.measurement)
-                .into_iter()
-                .map(move |evidence| make(evidence.value, evidence.passed, None));
+            let analysis_level =
+                analysis
+                    .scalar_evidence(&spec.measurement)
+                    .into_iter()
+                    .map(move |evidence| {
+                        make(
+                            evidence.value,
+                            evidence.unit.as_ref(),
+                            evidence.passed,
+                            None,
+                        )
+                    });
 
             // A family that measured its own members answers the limit over all
             // of them. This is what makes a Monte Carlo trial set or an
@@ -292,6 +310,7 @@ fn candidates_for(
                     let evidence = member.evidence_for(&spec.measurement)?;
                     Some(make(
                         evidence.value,
+                        evidence.unit.as_ref(),
                         evidence.passed,
                         Some(member.member.clone()),
                     ))
@@ -641,6 +660,7 @@ mod tests {
                         seed: 4_000 + *index as u64,
                     },
                     vec![FamilyMeasurementEvidence {
+                        unit: None,
                         name: "gain".to_owned(),
                         value: Some(*value),
                         passed: true,
@@ -886,6 +906,7 @@ mod tests {
                         value: coordinate,
                     },
                     vec![FamilyMeasurementEvidence {
+                        unit: None,
                         name: "gain".to_owned(),
                         value: Some(value),
                         passed: true,
@@ -990,6 +1011,60 @@ mod tests {
             verdicts[0].worst_member(),
             None,
             "an analysis-level measurement is not attributed to a member"
+        );
+    }
+    #[test]
+    fn measurement_units_drive_guard_bands_family_limits_and_legacy_verdicts() {
+        use rspice_core::analysis::{MeasurementUnit, MeasurementUnits};
+        let source = AnalysisInstanceId::new();
+        let entry = SpecEntry {
+            measurement: "gain".into(),
+            expression: String::new(),
+            min: Some(200.0),
+            max: Some(300.0),
+            unit: "mV".into(),
+            scope: SpecPointScope::AllPoints,
+        };
+        let mut definition =
+            SpecificationDefinition::from_legacy(SimulationPlanId::new(), 0, &entry);
+        definition.guard_band = Some(5.0);
+        let specs = vec![PreparedSpecification::from_definition(definition).unwrap()];
+        let mut analysis = result(1, source, 0.25);
+        analysis.measurements[0].units = Some(MeasurementUnits {
+            value: MeasurementUnit::Known("V".into()),
+            raw_value: MeasurementUnit::Known("V".into()),
+            axis: MeasurementUnit::Known("Hz".into()),
+        });
+        let verdict = evaluate_specifications(&specs, &[analysis.clone()]).remove(0);
+        assert_eq!(verdict.status(), SpecificationVerdictStatus::Pass);
+        assert_eq!(verdict.worst_value(), Some(250.0));
+        assert_eq!(verdict.signed_margin(), Some(45.0));
+        let mut family = monte_carlo_trials(source, &[(0, 0.25), (1, 0.299)]);
+        let Some(crate::state::AnalysisResultFamilyMetadata::MonteCarlo {
+            member_measurements,
+            ..
+        }) = &mut family.family_metadata
+        else {
+            panic!("MC");
+        };
+        for member in member_measurements {
+            member.measurements[0].unit = Some(MeasurementUnit::Known("V".into()));
+        }
+        let verdict = evaluate_specifications(&specs, &[family]).remove(0);
+        assert_eq!(verdict.status(), SpecificationVerdictStatus::BoundFailure);
+        assert_eq!(verdict.worst_value(), Some(299.0));
+        assert_eq!(verdict.signed_margin(), Some(-4.0));
+        analysis.measurements[0].units.as_mut().unwrap().value = MeasurementUnit::Unknown;
+        assert_eq!(
+            evaluate_specifications(&specs, &[analysis.clone()])[0].status(),
+            SpecificationVerdictStatus::MeasurementFailure
+        );
+        analysis.measurements[0].units = None;
+        let verdict = evaluate_specifications(&specs, &[analysis]).remove(0);
+        assert_eq!(
+            verdict.worst_value(),
+            Some(0.25),
+            "historical numeric interpretation is retained"
         );
     }
 }

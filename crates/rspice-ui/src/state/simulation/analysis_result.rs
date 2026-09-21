@@ -1629,6 +1629,7 @@ impl AnalysisResultPayload {
         }
 
         Some(ScalarEvidenceCandidate {
+            unit: None,
             value: Some(value),
             passed: true,
         })

@@ -640,10 +640,22 @@ fn contains_retained_coordinate(sorted: &[f64], target: f64) -> bool {
 ///
 /// This represents one analysis within a simulation run, containing
 /// all the data needed to display results in the appropriate viewer.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ScalarEvidenceCandidate {
+    pub unit: Option<rspice_core::analysis::MeasurementUnit>,
     pub value: Option<f64>,
     pub passed: bool,
+}
+
+impl ScalarEvidenceCandidate {
+    pub(crate) fn value_in_unit(&self, requested: &str) -> Result<Option<f64>, String> {
+        match (&self.unit, self.value) {
+            (Some(unit), Some(value)) if !requested.trim().is_empty() => {
+                unit.convert_value(value, requested).map(Some)
+            }
+            _ => Ok(self.value),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -756,6 +768,7 @@ impl AnalysisResult {
             .iter()
             .filter(|measurement| measurement.name.eq_ignore_ascii_case(name))
             .map(|measurement| ScalarEvidenceCandidate {
+                unit: measurement.units.as_ref().map(|units| units.value.clone()),
                 value: measurement.value.filter(|value| value.is_finite()),
                 passed: measurement.passed && measurement.error.is_none(),
             })
@@ -1188,6 +1201,9 @@ impl AnalysisResult {
         }
         let mut measurement_names = HashSet::with_capacity(self.measurements.len());
         for measurement in &self.measurements {
+            if let Some(units) = &measurement.units {
+                units.validate()?;
+            }
             if !valid_text(&measurement.name)
                 || !measurement_names.insert(measurement.name.as_str())
             {

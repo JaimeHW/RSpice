@@ -210,6 +210,7 @@ fn project_file_round_trips_exact_result_family_metadata_and_migrates_v6_absence
                         policy: "parameter-xoroshiro128plus-2018-v1".into(),
                     },
                     vec![crate::state::FamilyMeasurementEvidence {
+                        unit: None,
                         name: "V(out)".into(),
                         value,
                         passed: value.is_some(),

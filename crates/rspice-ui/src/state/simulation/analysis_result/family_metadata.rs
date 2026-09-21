@@ -419,6 +419,9 @@ fn validate_member_measurements(metadata: &AnalysisResultFamilyMetadata) -> Resu
         }
         let mut names = HashSet::with_capacity(member.measurements.len());
         for measurement in &member.measurements {
+            if let Some(unit) = &measurement.unit {
+                unit.validate()?;
+            }
             require_non_empty(&measurement.name, "family member measurement name")?;
             if !names.insert(measurement.name.to_ascii_lowercase()) {
                 return Err(format!(
@@ -446,6 +449,7 @@ mod member_measurement_tests {
 
     fn evidence(name: &str, value: f64) -> FamilyMeasurementEvidence {
         FamilyMeasurementEvidence {
+            unit: None,
             name: name.to_owned(),
             value: Some(value),
             passed: true,

@@ -1679,7 +1679,8 @@ impl WorkerSimulationResult {
 /// 26: optimization retains each weighted objective at the best candidate.
 /// 27: optimization retains validated hard-constraint evidence and feasibility.
 /// 28: OP configurations retain compatible-circuit previous-state policy.
-const WORKER_RESPONSE_TRANSPORT_PROTOCOL: u8 = 28;
+/// 29: scalar measurements preserve physical units.
+const WORKER_RESPONSE_TRANSPORT_PROTOCOL: u8 = 29;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct WorkerResponseTransport {

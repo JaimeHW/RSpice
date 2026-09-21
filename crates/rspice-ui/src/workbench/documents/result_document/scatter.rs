@@ -955,6 +955,7 @@ mod tests {
                         seed: 0x73a4 + index as u64,
                     },
                     vec![FamilyMeasurementEvidence {
+                        unit: None,
                         name: "gain_dc".to_owned(),
                         value: Some(40.0 + 2.0 * sample),
                         passed: true,

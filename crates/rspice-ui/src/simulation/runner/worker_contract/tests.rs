@@ -374,7 +374,7 @@ pub(super) fn nondefault_op_config() -> crate::simulation::dialog::OpConfig {
 
 #[test]
 fn browser_worker_transfer_protocol_matches_rust_transport() {
-    assert_eq!(WORKER_RESPONSE_TRANSPORT_PROTOCOL, 28);
+    assert_eq!(WORKER_RESPONSE_TRANSPORT_PROTOCOL, 29);
     assert_eq!(WORKER_REQUEST_TRANSPORT_PROTOCOL, 34);
     let source = include_str!("../../../../web/simulation-worker.js");
     assert!(source.contains(&format!(
@@ -1190,6 +1190,7 @@ fn transient_worker_result_round_trips_through_json() {
             failure_limit: Some(2e-9),
             failure_limit_exceeded: false,
             event_axis: Some(1e-9),
+            units: None,
         }],
         events: WorkerEventHistory {
             current_impulses: None,
@@ -1236,6 +1237,7 @@ fn projected_worker_measurement() -> WorkerMeasurement {
         failure_limit: Some(4.0),
         failure_limit_exceeded: false,
         event_axis: Some(20.0),
+        units: None,
     }
 }
 
@@ -2272,4 +2274,34 @@ fn weighted_optimization_components_survive_transfer_and_reject_corruption() {
         ..transport
     };
     assert!(transport.into_response().is_err());
+}
+
+#[test]
+fn measurement_units_survive_worker_and_study_projection() {
+    use rspice_core::analysis::{MeasurementUnit, MeasurementUnits};
+    let units = MeasurementUnits {
+        value: MeasurementUnit::Known("s".into()),
+        raw_value: MeasurementUnit::Known("V".into()),
+        axis: MeasurementUnit::Known("s".into()),
+    };
+    let mut measurement = projected_worker_measurement();
+    measurement.units = Some(units.clone());
+    let response = response_with_measurement(measurement);
+    let mut transport = WorkerResponseTransport::from_response(response).unwrap();
+    let metadata = serde_json::to_string(&transport.response).unwrap();
+    transport.response = serde_json::from_str(&metadata).unwrap();
+    let result = transport.into_response().unwrap().into_result().unwrap();
+    let evidence = result.study_measurement("meas:peak_at").unwrap();
+    assert_eq!(evidence.unit, Some(units.value.clone()));
+    let SimulationResult::Transient { measurements, .. } = result else {
+        panic!("transient");
+    };
+    assert_eq!(measurements[0].units, Some(units));
+    let mut invalid = projected_worker_measurement();
+    invalid.units = Some(MeasurementUnits {
+        value: MeasurementUnit::Known("bogus".into()),
+        raw_value: MeasurementUnit::Unknown,
+        axis: MeasurementUnit::Unknown,
+    });
+    assert!(WorkerResponseTransport::from_response(response_with_measurement(invalid)).is_err());
 }

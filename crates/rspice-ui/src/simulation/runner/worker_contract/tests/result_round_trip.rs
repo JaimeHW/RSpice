@@ -879,6 +879,7 @@ fn monte_carlo_mean_confidence_survives_worker_transport_and_rejects_wrong_popul
                     policy: "parameter-xoroshiro128plus-2018-v1".into(),
                 },
                 vec![crate::state::FamilyMeasurementEvidence {
+                    unit: None,
                     name: "V(out)".into(),
                     value,
                     passed: value.is_some(),

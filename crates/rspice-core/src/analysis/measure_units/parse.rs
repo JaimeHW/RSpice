@@ -18,6 +18,8 @@ impl Unit {
             .replace(['µ', 'μ'], "u")
             .replace('Ω', "ohm")
             .replace('°', "deg")
+            .replace('²', "^2")
+            .replace('³', "^3")
             .replace(['·', '⋅'], "*");
         let mut parser = Parser {
             text: normalized.as_bytes(),

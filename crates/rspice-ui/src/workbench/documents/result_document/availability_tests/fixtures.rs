@@ -442,12 +442,14 @@ pub(super) fn monte_carlo_population_analysis() -> AnalysisResult {
                 },
                 vec![
                     FamilyMeasurementEvidence {
+                        unit: None,
                         name: "gain_dc".to_owned(),
                         value: Some(40.0 + 2.0 * sample),
                         passed: true,
                         error: None,
                     },
                     FamilyMeasurementEvidence {
+                        unit: None,
                         name: "vos".to_owned(),
                         value: Some(60.0e-6 * sample),
                         passed: true,

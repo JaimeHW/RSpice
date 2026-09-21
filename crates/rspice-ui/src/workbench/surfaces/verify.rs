@@ -1206,7 +1206,9 @@ fn run_margin_matrix(
         .iter()
         .map(|row| {
             let margin = run
-                .and_then(|run| measurement_in_run(run, &row.spec.measurement))
+                .and_then(|run| {
+                    measurement_in_run_with_unit(run, &row.spec.measurement, &row.spec.unit)
+                })
                 .and_then(|value| normalized_margin(&row.spec, value));
             vec![
                 TableCell::text(format!(
@@ -1811,16 +1813,20 @@ fn worst_measurement_in_run(run: &crate::state::SimulationRun, spec: &SpecEntry)
                 .iter()
                 .filter(|measurement| measurement.name.eq_ignore_ascii_case(&spec.measurement))
                 .filter(|measurement| measurement.passed && measurement.error.is_none())
-                .filter_map(|measurement| measurement.value);
+                .map(|measurement| measurement.value_in_unit(&spec.unit));
             let member_level = analysis
                 .family_metadata
                 .iter()
                 .flat_map(|metadata| metadata.member_measurements())
                 .filter_map(|member| member.evidence_for(&spec.measurement))
                 .filter(|evidence| evidence.is_measured())
-                .filter_map(|evidence| evidence.value);
+                .map(|evidence| evidence.value_in_unit(&spec.unit));
             analysis_level.chain(member_level)
         })
+        .collect::<Result<Vec<_>, _>>()
+        .ok()?
+        .into_iter()
+        .flatten()
         .filter(|value| value.is_finite())
         // `total_cmp` on a set already filtered finite, so a tie cannot panic.
         .min_by(|left, right| {
@@ -1840,6 +1846,14 @@ fn verification_margin(spec: &SpecEntry, value: f64) -> f64 {
 }
 
 fn measurement_in_run(run: &crate::state::SimulationRun, name: &str) -> Option<f64> {
+    measurement_in_run_with_unit(run, name, "")
+}
+
+fn measurement_in_run_with_unit(
+    run: &crate::state::SimulationRun,
+    name: &str,
+    unit: &str,
+) -> Option<f64> {
     run.analyses.iter().find_map(|analysis| {
         if !verified_analysis(analysis) {
             return None;
@@ -1849,7 +1863,7 @@ fn measurement_in_run(run: &crate::state::SimulationRun, name: &str) -> Option<f
             .iter()
             .find(|measurement| measurement.name.eq_ignore_ascii_case(name))
             .filter(|measurement| measurement.passed && measurement.error.is_none())
-            .and_then(|measurement| measurement.value)
+            .and_then(|measurement| measurement.value_in_unit(unit).ok().flatten())
             .filter(|value| value.is_finite())
     })
 }

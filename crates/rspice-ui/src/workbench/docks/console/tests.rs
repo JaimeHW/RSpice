@@ -313,6 +313,7 @@ fn measurement_table_presents_failvalue_against_the_raw_value() {
         failure_limit: Some(4.0),
         failure_limit_exceeded: false,
         event_axis: Some(20.0),
+        units: None,
     };
     let row = measurement_table_row(&passing, "TRAN", None);
     assert_eq!(row.status, "PASS");
@@ -363,6 +364,7 @@ fn measurement_table_combines_every_contract_and_reports_the_limiting_margin() {
         failure_limit: Some(5.0),
         failure_limit_exceeded: false,
         event_axis: None,
+        units: None,
     };
     let row = measurement_table_row(&passing, "AC", Some(&spec));
     assert_eq!(row.status, "PASS");
@@ -625,4 +627,47 @@ fn an_unmatched_producer_says_why_the_console_looks_empty() {
         !rendered.contains("not yet"),
         "the empty state states a present limitation, never a future promise:\n{rendered}"
     );
+}
+
+#[test]
+fn measurement_units_keep_console_project_and_authored_contracts_distinct() {
+    use rspice_core::analysis::{MeasurementUnit, MeasurementUnits};
+    let mut measured = rspice_core::MeasureResult::success("level", 0.25);
+    measured.units = Some(MeasurementUnits {
+        value: MeasurementUnit::Known("V".into()),
+        raw_value: MeasurementUnit::Known("V".into()),
+        axis: MeasurementUnit::Known("s".into()),
+    });
+    measured.expected = Some(0.25);
+    measured.tolerance = Some(0.01);
+    measured.failure_limit = Some(0.5);
+    let mut spec = crate::state::SpecEntry {
+        measurement: "level".into(),
+        expression: String::new(),
+        min: Some(200.0),
+        max: Some(300.0),
+        unit: "mV".into(),
+        scope: crate::state::SpecPointScope::AllPoints,
+    };
+    let row = measurement_table_row(&measured, "TRAN", Some(&spec));
+    assert_eq!(row.status, "PASS");
+    assert!(
+        row.value.starts_with("250") && row.value.ends_with(" mV"),
+        "{}",
+        row.value
+    );
+    assert!(
+        row.margin.contains("PROJECT +50") && row.margin.contains("mV"),
+        "{}",
+        row.margin
+    );
+    assert!(
+        row.margin.contains("GOAL") && row.margin.contains(" V"),
+        "{}",
+        row.margin
+    );
+    spec.unit = "mA".into();
+    let row = measurement_table_row(&measured, "TRAN", Some(&spec));
+    assert_eq!(row.status, "ERROR");
+    assert!(row.margin.contains("incompatible"));
 }

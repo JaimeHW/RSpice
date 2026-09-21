@@ -116,6 +116,9 @@ impl FamilyMemberId {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FamilyMeasurementEvidence {
+    /// Physical unit of the recorded value; absent on historical evidence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unit: Option<rspice_core::analysis::MeasurementUnit>,
     pub name: String,
     /// The measured value, when the member produced a finite one.
     ///
@@ -129,6 +132,15 @@ pub struct FamilyMeasurementEvidence {
 }
 
 impl FamilyMeasurementEvidence {
+    pub(crate) fn value_in_unit(&self, requested: &str) -> Result<Option<f64>, String> {
+        match (&self.unit, self.value) {
+            (Some(unit), Some(value)) if !requested.trim().is_empty() => {
+                unit.convert_value(value, requested).map(Some)
+            }
+            _ => Ok(self.value),
+        }
+    }
+
     /// Whether this evidence can answer a limit at all.
     #[must_use]
     pub const fn is_measured(&self) -> bool {
@@ -169,6 +181,7 @@ mod tests {
 
     fn evidence(name: &str, value: Option<f64>, passed: bool) -> FamilyMeasurementEvidence {
         FamilyMeasurementEvidence {
+            unit: None,
             name: name.to_owned(),
             value,
             passed,

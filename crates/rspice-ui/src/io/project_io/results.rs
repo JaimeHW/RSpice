@@ -171,6 +171,33 @@ impl ProjectSimulationResultsData {
 
     fn migrate_to_current_in_place(&mut self, project_id: ProjectId) -> Result<(), String> {
         let source_schema = self.schema_version;
+        if source_schema < MEASUREMENT_UNIT_RESULTS_SCHEMA_VERSION
+            && self
+                .runs
+                .iter()
+                .flat_map(|run| &run.analyses)
+                .any(|analysis| {
+                    analysis
+                        .measurements
+                        .iter()
+                        .any(|measurement| measurement.units.is_some())
+                        || analysis.family_metadata.as_ref().is_some_and(|metadata| {
+                            metadata.member_measurements().iter().any(|member| {
+                                member
+                                    .measurements
+                                    .iter()
+                                    .any(|measurement| measurement.unit.is_some())
+                            })
+                        })
+                })
+        {
+            return Err("result schemas before v37 cannot contain measurement units".into());
+        }
+        if source_schema == IMPORTED_MONTE_CARLO_CHECKPOINTS_SCHEMA_VERSION {
+            self.schema_version = PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION;
+            return self.validate();
+        }
+
         if source_schema < IMPORTED_MONTE_CARLO_CHECKPOINTS_SCHEMA_VERSION
             && !self.imported_monte_carlo_checkpoints.is_empty()
         {
@@ -2487,6 +2514,8 @@ pub struct ProjectMeasurement {
     pub failure_limit_exceeded: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub event_axis: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub units: Option<rspice_core::analysis::MeasurementUnits>,
 }
 
 impl ProjectMeasurement {
@@ -2502,10 +2531,16 @@ impl ProjectMeasurement {
             failure_limit: self.failure_limit,
             failure_limit_exceeded: self.failure_limit_exceeded,
             event_axis: self.event_axis,
+            units: self.units,
         }
     }
 
     fn validate(&self, prefix: &str) -> Result<(), String> {
+        if let Some(units) = &self.units {
+            units
+                .validate()
+                .map_err(|error| format!("{prefix}.units: {error}"))?;
+        }
         require_optional_finite(self.value, &format!("{prefix}.value"))?;
         require_optional_finite(self.raw_value, &format!("{prefix}.raw_value"))?;
         if self.value.is_some() != self.raw_value.is_some() {
@@ -2548,6 +2583,7 @@ impl From<&rspice_core::MeasureResult> for ProjectMeasurement {
             failure_limit: measurement.failure_limit,
             failure_limit_exceeded: measurement.failure_limit_exceeded,
             event_axis: measurement.event_axis,
+            units: measurement.units.clone(),
         }
     }
 }

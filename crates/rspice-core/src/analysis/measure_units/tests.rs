@@ -37,6 +37,7 @@ fn measurement_unit_conversions_keep_dimensions_prefixes_and_offsets() {
         );
     }
     assert!(unit("V").convert_value(1.0, "A").is_err());
+    assert_eq!(unit("V").convert_value(0.35, "mV").unwrap(), 350.0);
     assert!(unit("dB").convert_value(1.0, "1").is_err());
     assert!(MeasurementUnit::Unknown.convert_value(1.0, "1").is_err());
     assert!(unit("V").convert_value(f64::INFINITY, "V").is_err());
@@ -103,6 +104,13 @@ fn measurement_units_follow_reductions_expressions_and_axis_projection() {
     ]);
     let results = engine.evaluate(&[0.0, 1.0, 2.0], &signals);
     assert_eq!(
+        results
+            .iter()
+            .map(|result| result.units.as_ref().unwrap())
+            .collect::<Vec<_>>(),
+        units[..7].iter().collect::<Vec<_>>()
+    );
+    assert_eq!(
         units[0]
             .value
             .convert_value(results[0].value.unwrap(), "mV")
@@ -152,6 +160,12 @@ fn measurement_units_use_producer_axis_and_noise_quantity() {
     assert_eq!(
         measurement_units(&refs, None, &HashMap::new())[0].value,
         MeasurementUnit::Unknown
+    );
+    let temperature = measurement_units(&refs, Some(&unit("degC")), &HashMap::new());
+    assert_eq!(temperature[1].value.convert_value(1.0, "V/K").unwrap(), 1.0);
+    assert_eq!(
+        temperature[2].value.convert_value(0.0, "K").unwrap(),
+        273.15
     );
 
     let cards = statements(

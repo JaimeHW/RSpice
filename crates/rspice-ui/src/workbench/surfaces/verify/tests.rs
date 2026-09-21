@@ -1734,6 +1734,7 @@ fn verify_and_the_studio_report_the_same_worst_value_for_one_limit() {
                     value: coordinate,
                 },
                 vec![FamilyMeasurementEvidence {
+                    unit: None,
                     name: "gain".to_owned(),
                     value: Some(value),
                     passed: true,

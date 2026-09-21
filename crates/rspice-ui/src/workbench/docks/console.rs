@@ -1437,6 +1437,7 @@ fn active_measurement_rows(
                 failure_limit: None,
                 failure_limit_exceeded: false,
                 event_axis,
+                units: None,
             };
             rows.push(measurement_table_row(&derived, label, spec));
         }
@@ -1449,7 +1450,16 @@ fn measurement_table_row(
     analysis_label: &str,
     specification: Option<&crate::state::SpecEntry>,
 ) -> MeasurementTableRow {
-    let value = measurement.value;
+    let requested_unit = specification.map_or("", |spec| spec.unit.as_str());
+    let value = measurement.value_in_unit(requested_unit).ok().flatten();
+    let display_unit = if !requested_unit.trim().is_empty() {
+        Some(requested_unit.trim())
+    } else {
+        measurement
+            .units
+            .as_ref()
+            .and_then(|units| units.value.symbol())
+    };
     let specification_text = measurement_contract_text(measurement, specification);
     let (status, tone, margin) = if let Some(error) = measurement
         .error
@@ -1473,7 +1483,15 @@ fn measurement_table_row(
         name: measurement.name.clone(),
         expression: "—".to_owned(),
         value: value
-            .map(format_measure_value)
+            .map(|value| {
+                let formatted = format_measure_value(value);
+                if measurement.units.is_some() {
+                    display_unit
+                        .map_or_else(|| formatted.clone(), |unit| format!("{formatted} {unit}"))
+                } else {
+                    formatted
+                }
+            })
             .unwrap_or_else(|| "—".to_owned()),
         specification: specification_text,
         margin,
@@ -1496,7 +1514,12 @@ fn measurement_contract_text(
 ) -> String {
     let mut contracts = Vec::with_capacity(3);
     if let Some(specification) = specification {
-        contracts.push(("PROJECT", specification_text(specification)));
+        let mut text = specification_text(specification);
+        if measurement.units.is_some() && !specification.unit.trim().is_empty() {
+            text.push(' ');
+            text.push_str(specification.unit.trim());
+        }
+        contracts.push(("PROJECT", text));
     }
     if let Some(expected) = measurement.expected {
         let text = measurement.tolerance.map_or_else(
@@ -1509,12 +1532,25 @@ fn measurement_contract_text(
                 )
             },
         );
+        let text = measurement
+            .units
+            .as_ref()
+            .and_then(|units| units.value.symbol())
+            .map_or_else(|| text.clone(), |unit| format!("{text} {unit}"));
         contracts.push(("GOAL", text));
     }
     if let Some(limit) = measurement.failure_limit {
         contracts.push((
             "FAILVALUE",
-            format!("|raw| < {}", format_measure_value(limit)),
+            format!(
+                "|raw| < {}{}",
+                format_measure_value(limit),
+                measurement
+                    .units
+                    .as_ref()
+                    .and_then(|units| units.raw_value.symbol())
+                    .map_or(String::new(), |unit| format!(" {unit}"))
+            ),
         ));
     }
 
@@ -1541,6 +1577,76 @@ fn measurement_contract_verdict(
             "NO DATA",
             SemanticTone::Warning,
             "raw value unavailable".to_owned(),
+        );
+    }
+
+    if let Some(units) = &measurement.units {
+        let project_value =
+            match measurement.value_in_unit(specification.map_or("", |spec| spec.unit.as_str())) {
+                Ok(Some(value)) => value,
+                Ok(None) => return ("NO DATA", SemanticTone::Warning, "value unavailable".into()),
+                Err(error) => return ("ERROR", SemanticTone::Error, error),
+            };
+        let passed =
+            measurement.passed && specification.is_none_or(|spec| spec.passes(project_value));
+        let mut margins = Vec::new();
+        let show = |label: &str, margin: f64, unit: Option<&str>| {
+            let value = format_signed_measure_value(margin);
+            format!(
+                "{label} {value}{}",
+                unit.map_or(String::new(), |unit| format!(" {unit}"))
+            )
+        };
+        if let Some(spec) = specification {
+            let margin = spec
+                .min
+                .map(|min| project_value - min)
+                .into_iter()
+                .chain(spec.max.map(|max| max - project_value))
+                .reduce(f64::min);
+            if let Some(margin) = margin {
+                let unit = if spec.unit.trim().is_empty() {
+                    units.value.symbol()
+                } else {
+                    Some(spec.unit.trim())
+                };
+                margins.push(show("PROJECT", margin, unit));
+            }
+        }
+        if let Some((expected, tolerance)) = measurement.expected.zip(measurement.tolerance) {
+            margins.push(show(
+                "GOAL",
+                tolerance - (value - expected).abs(),
+                units.value.symbol(),
+            ));
+        }
+        if let Some((raw, limit)) = measurement.raw_value.zip(measurement.failure_limit) {
+            let margin = limit - raw.abs();
+            margins.push(show(
+                "FAILVALUE",
+                if measurement.failure_limit_exceeded && margin == 0.0 {
+                    -0.0
+                } else {
+                    margin
+                },
+                units.raw_value.symbol(),
+            ));
+        }
+        if !passed && let Some(error) = &measurement.error {
+            margins.push(error.clone());
+        }
+        return (
+            if passed { "PASS" } else { "FAIL" },
+            if passed {
+                SemanticTone::Success
+            } else {
+                SemanticTone::Error
+            },
+            if margins.is_empty() {
+                "unbounded".into()
+            } else {
+                margins.join("; ")
+            },
         );
     }
 

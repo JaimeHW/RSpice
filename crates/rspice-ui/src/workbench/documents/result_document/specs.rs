@@ -90,8 +90,10 @@ struct SpecResultRow {
     detail: String,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 struct MeasurementCandidate<'a> {
+    unit_error: Option<String>,
+    native_unit: Option<String>,
     analysis_index: usize,
     analysis: &'a crate::state::AnalysisResult,
     value: Option<f64>,
@@ -359,7 +361,11 @@ fn exact_corner_label(analysis: &crate::state::AnalysisResult) -> Option<String>
     }
 }
 
-fn measurement_candidates<'a>(run: &'a SimulationRun, name: &str) -> Vec<MeasurementCandidate<'a>> {
+fn measurement_candidates<'a>(
+    run: &'a SimulationRun,
+    name: &str,
+    unit: &str,
+) -> Vec<MeasurementCandidate<'a>> {
     run.analyses
         .iter()
         .enumerate()
@@ -367,10 +373,19 @@ fn measurement_candidates<'a>(run: &'a SimulationRun, name: &str) -> Vec<Measure
             analysis
                 .scalar_evidence(name)
                 .into_iter()
-                .map(move |evidence| MeasurementCandidate {
-                    analysis_index,
-                    analysis,
-                    value: evidence.value,
+                .map(move |evidence| {
+                    let converted = evidence.value_in_unit(unit);
+                    MeasurementCandidate {
+                        analysis_index,
+                        analysis,
+                        native_unit: evidence
+                            .unit
+                            .as_ref()
+                            .and_then(|unit| unit.symbol())
+                            .map(str::to_owned),
+                        unit_error: converted.as_ref().err().cloned(),
+                        value: converted.ok().flatten(),
+                    }
                 })
         })
         .collect()
@@ -409,15 +424,47 @@ fn candidates_share_source_lineage(candidates: &[MeasurementCandidate<'_>]) -> b
 }
 
 fn result_row(run: &SimulationRun, measurement: String, spec: Option<&SpecEntry>) -> SpecResultRow {
-    let candidates = measurement_candidates(run, &measurement);
+    let candidates = measurement_candidates(
+        run,
+        &measurement,
+        spec.map_or("", |entry| entry.unit.as_str()),
+    );
     // The one spelling of a bound. This table formatted its own with a
     // plot-axis formatter, so a megahertz limit read "≥ 1.000 M Hz" here and
     // "≥ 1M Hz" on the studio page that authored it — a number a reader has to
     // translate before holding it against a datasheet.
     let limit = spec.map_or_else(|| "\u{2014}".to_owned(), SpecEntry::limit_text);
-    let unit = spec.map_or_else(String::new, |entry| entry.unit.clone());
+    let mut unit = spec.map_or_else(String::new, |entry| entry.unit.clone());
+    if unit.trim().is_empty()
+        && let Some(native) = candidates
+            .first()
+            .and_then(|candidate| candidate.native_unit.as_ref())
+        && candidates
+            .iter()
+            .all(|candidate| candidate.native_unit.as_ref() == Some(native))
+    {
+        unit = native.clone();
+    }
     let expression = spec.map_or_else(String::new, |entry| entry.expression.clone());
     let is_bounded = spec.is_some_and(|entry| entry.min.is_some() || entry.max.is_some());
+    if let Some(candidate) = candidates
+        .iter()
+        .find(|candidate| candidate.unit_error.is_some())
+    {
+        return SpecResultRow {
+            measurement,
+            expression,
+            value: None,
+            limit,
+            margin: None,
+            unit,
+            is_bounded,
+            source_analysis_index: Some(candidate.analysis_index),
+            worst_corner: exact_corner_label(candidate.analysis),
+            status: SpecResultStatus::Invalid,
+            detail: candidate.unit_error.clone().unwrap_or_default(),
+        };
+    }
     if candidates.is_empty() {
         return SpecResultRow {
             measurement,
@@ -453,7 +500,7 @@ fn result_row(run: &SimulationRun, measurement: String, spec: Option<&SpecEntry>
                 ),
             };
         }
-        let candidate = candidates[0];
+        let candidate = &candidates[0];
         return SpecResultRow {
             measurement,
             expression,
@@ -541,7 +588,7 @@ fn result_row(run: &SimulationRun, measurement: String, spec: Option<&SpecEntry>
             .and_then(|value| signed_margin(spec, value))
             .is_some_and(|margin| margin.total_cmp(&worst_margin).is_eq())
     });
-    let candidate = *worst.next().expect("minimum came from one candidate");
+    let candidate = worst.next().expect("minimum came from one candidate");
     let source_is_unique = worst.next().is_none();
     let value = candidate.value;
     SpecResultRow {
@@ -731,6 +778,44 @@ fn result_rows(run: &SimulationRun, specs: &[SpecEntry]) -> Vec<SpecResultRow> {
                 },
                 passing_population,
             );
+            if verdict.status() == SpecificationVerdictStatus::MeasurementFailure
+                && !row.unit.trim().is_empty()
+            {
+                let unit_error = run
+                    .analyses
+                    .iter()
+                    .filter(|analysis| {
+                        analysis.provenance().is_some_and(|provenance| {
+                            Some(provenance.authored_source_instance_id())
+                                == verdict.source_instance_id()
+                        })
+                    })
+                    .find_map(|analysis| {
+                        if let Some(worst) = verdict.worst_member() {
+                            let evidence = analysis
+                                .family_metadata
+                                .as_ref()?
+                                .member_measurements()
+                                .iter()
+                                .find(|member| &member.member == worst)?
+                                .evidence_for(verdict.measurement())?;
+                            evidence
+                                .unit
+                                .as_ref()?
+                                .convert_value(evidence.value?, &row.unit)
+                                .err()
+                        } else {
+                            analysis
+                                .scalar_evidence(verdict.measurement())
+                                .iter()
+                                .find_map(|evidence| evidence.value_in_unit(&row.unit).err())
+                        }
+                    });
+                if let Some(error) = unit_error {
+                    row.detail.push(' ');
+                    row.detail.push_str(&error);
+                }
+            }
         }
     }
     rows
@@ -1783,7 +1868,11 @@ fn show_editor(ui: &mut Ui, state: &mut AppState) {
                     field(ui, &mut draft.primary_limit, 110.0, primary_hint);
                     field(ui, &mut draft.secondary_limit, 110.0, secondary_hint);
                     field(ui, &mut draft.guard_band, 100.0, "guard band");
-                    field(ui, &mut draft.unit, 80.0, "unit");
+                    ui.add(egui::TextEdit::singleline(&mut draft.unit)
+                        .desired_width(80.0)
+                        .font(theme::mono(tokens::FS_1, FontWeight::Regular))
+                        .hint_text("unit"))
+                        .on_hover_text("Unit for the limit and guard band, such as mV, ns, dB, or V^2/Hz. Leave blank to use the measurement's native unit.");
                     egui::ComboBox::from_id_salt(("spec-role", idx))
                         .selected_text(match draft.role {
                             SpecificationRole::Blocking => "Blocking",

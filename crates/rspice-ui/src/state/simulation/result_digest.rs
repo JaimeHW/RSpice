@@ -465,7 +465,53 @@ impl AnalysisResult {
                 .saturating_add(checkpoint.bytes().len() as u64);
         }
 
+        let members = self
+            .family_metadata
+            .as_ref()
+            .map_or(&[][..], |metadata| metadata.member_measurements());
+        if version >= RESULT_DIGEST_ENCODING_VERSION_V16
+            && (self
+                .measurements
+                .iter()
+                .any(|measurement| measurement.units.is_some())
+                || members.iter().any(|member| {
+                    member
+                        .measurements
+                        .iter()
+                        .any(|measurement| measurement.unit.is_some())
+                }))
+        {
+            writer.string("measurement-units/v1");
+            writer.sequence(self.measurements.len());
+            for measurement in &self.measurements {
+                writer.option(measurement.units.as_ref(), |writer, units| {
+                    encode_measurement_unit(writer, &units.value);
+                    encode_measurement_unit(writer, &units.raw_value);
+                    encode_measurement_unit(writer, &units.axis);
+                });
+            }
+            writer.sequence(members.len());
+            for member in members {
+                writer.sequence(member.measurements.len());
+                for measurement in &member.measurements {
+                    writer.option(measurement.unit.as_ref(), encode_measurement_unit);
+                }
+            }
+        }
         writer
+    }
+}
+
+fn encode_measurement_unit(
+    writer: &mut ResultDigestWriter,
+    unit: &rspice_core::analysis::MeasurementUnit,
+) {
+    match unit {
+        rspice_core::analysis::MeasurementUnit::Unknown => writer.u8(0),
+        rspice_core::analysis::MeasurementUnit::Known(symbol) => {
+            writer.u8(1);
+            writer.string(symbol);
+        }
     }
 }
 

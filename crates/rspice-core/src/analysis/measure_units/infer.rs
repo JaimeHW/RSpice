@@ -69,23 +69,25 @@ impl Inference<'_> {
             }
         });
         let raw_value = match &statement.measure_type {
+            MeasureType::When { .. } => axis.clone(),
             MeasureType::Delay { .. }
-            | MeasureType::When { .. }
             | MeasureType::RiseTime { .. }
-            | MeasureType::FallTime { .. } => axis.clone(),
+            | MeasureType::FallTime { .. } => axis.interval(),
             MeasureType::Min { signal, .. }
             | MeasureType::Max { signal, .. }
             | MeasureType::Avg { signal, .. }
             | MeasureType::Rms { signal, .. }
-            | MeasureType::PeakToPeak { signal, .. }
-            | MeasureType::Find { signal, .. }
-            | MeasureType::FileError { signal, .. } => self.signal(signal, depth + 1, &axis),
-            MeasureType::Integ { signal, .. } => {
-                self.signal(signal, depth + 1, &axis).product(&axis, false)
+            | MeasureType::Find { signal, .. } => self.signal(signal, depth + 1, &axis),
+            MeasureType::PeakToPeak { signal, .. } | MeasureType::FileError { signal, .. } => {
+                self.signal(signal, depth + 1, &axis).interval()
             }
-            MeasureType::Derivative { signal, .. } => {
-                self.signal(signal, depth + 1, &axis).product(&axis, true)
-            }
+            MeasureType::Integ { signal, .. } => self
+                .signal(signal, depth + 1, &axis)
+                .product(&axis.interval(), false),
+            MeasureType::Derivative { signal, .. } => self
+                .signal(signal, depth + 1, &axis)
+                .interval()
+                .product(&axis.interval(), true),
             MeasureType::Param { expression } | MeasureType::Equation { expression, .. } => {
                 self.signal(&expression.text, depth + 1, &axis)
             }

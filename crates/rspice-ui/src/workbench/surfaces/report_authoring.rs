@@ -1563,7 +1563,10 @@ impl ReportSummaryMetrics {
                         .find(|measurement| {
                             measurement.name.eq_ignore_ascii_case(&spec.measurement)
                         })
-                        .and_then(|measurement| measurement.value)
+                        .filter(|measurement| measurement.passed && measurement.error.is_none())
+                        .and_then(|measurement| {
+                            measurement.value_in_unit(&spec.unit).ok().flatten()
+                        })
                         .filter(|value| value.is_finite())
                 })
                 .is_some_and(|value| spec.passes(value))

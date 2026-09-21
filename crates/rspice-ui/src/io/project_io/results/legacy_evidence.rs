@@ -145,6 +145,24 @@ pub(in crate::io::project_io) fn validate_result_fields_for_source_schema(
 ) -> Result<(), String> {
     validate_legacy_noise_summary_shape(run, source_schema)?;
     reject_legacy_waveform_units(run, source_schema)?;
+    if source_schema < MEASUREMENT_UNIT_RESULTS_SCHEMA_VERSION
+        && run.analyses.iter().any(|analysis| {
+            analysis
+                .measurements
+                .iter()
+                .any(|measurement| measurement.units.is_some())
+                || analysis.family_metadata.as_ref().is_some_and(|metadata| {
+                    metadata.member_measurements().iter().any(|member| {
+                        member
+                            .measurements
+                            .iter()
+                            .any(|measurement| measurement.unit.is_some())
+                    })
+                })
+        })
+    {
+        return Err("result schemas before v37 cannot contain measurement units".into());
+    }
     for analysis in &run.analyses {
         if source_schema < FAMILY_METADATA_RESULTS_SCHEMA_VERSION
             && analysis.family_metadata.is_some()

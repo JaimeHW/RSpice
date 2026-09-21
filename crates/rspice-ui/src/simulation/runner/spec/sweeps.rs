@@ -223,6 +223,7 @@ fn point_measurements(
                 .filter_map(|(name, series)| {
                     let measured = series.get(index).copied()?;
                     Some(FamilyMeasurementEvidence {
+                        unit: Some(rspice_core::analysis::MeasurementUnit::Known("V".into())),
                         name: name.clone(),
                         value: measured.is_finite().then_some(measured),
                         passed: measured.is_finite(),

@@ -30,6 +30,7 @@ fn trial(index: usize, gain: f64) -> FamilyMemberMeasurements {
             seed: 0x73a4 + index as u64,
         },
         vec![FamilyMeasurementEvidence {
+            unit: None,
             name: "gain_dc".to_owned(),
             value: Some(gain),
             passed: true,
@@ -865,4 +866,39 @@ fn monte_carlo_population_uses_exact_trial_evidence_across_failed_gaps() {
         ]
     );
     assert_eq!(plan.trial_count(), 3);
+}
+
+#[test]
+fn measurement_units_scale_distribution_values_limits_and_failure_counts_together() {
+    use rspice_core::analysis::MeasurementUnit;
+    let mut members = vec![trial(0, 0.25), trial(1, 0.35), trial(2, 0.20)];
+    for member in &mut members {
+        member.measurements[0].unit = Some(MeasurementUnit::Known("V".into()));
+    }
+    let analysis = monte_carlo(members, vec![1.0, 2.0, 3.0]);
+    let mut workspace = workspace_with_limit(Some(200.0), Some(300.0));
+    workspace.specs[0].unit = "mV".into();
+    let plan = build(
+        &analysis,
+        key(),
+        (crate::state::RunHistory::default().revision(), 1),
+        &workspace,
+        None,
+    )
+    .unwrap();
+    let column = &plan.columns[plan.column_index("gain_dc").unwrap()];
+    assert_eq!(column.values, vec![Some(250.0), Some(350.0), Some(200.0)]);
+    assert_eq!(column.unit, "mV");
+    assert_eq!(plan.failing_count(), 1);
+    workspace.specs[0].unit = "mA".into();
+    let plan = build(
+        &analysis,
+        key(),
+        (crate::state::RunHistory::default().revision(), 1),
+        &workspace,
+        None,
+    )
+    .unwrap();
+    let column = &plan.columns[plan.column_index("gain_dc").unwrap()];
+    assert!(column.values.iter().all(Option::is_none));
 }

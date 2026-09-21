@@ -14,6 +14,7 @@ fn projected_failvalue_measurement() -> rspice_core::MeasureResult {
         failure_limit: Some(4.0),
         failure_limit_exceeded: false,
         event_axis: Some(20.0),
+        units: None,
     }
 }
 

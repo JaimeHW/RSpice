@@ -42,7 +42,13 @@ pub(super) fn build_spec_evidence(
                     ),
                 ),
                 [measurement] => {
-                    let value = measurement.value.filter(|value| value.is_finite());
+                    let converted = measurement.value_in_unit(&spec.unit);
+                    let value = converted
+                        .as_ref()
+                        .ok()
+                        .copied()
+                        .flatten()
+                        .filter(|value| value.is_finite());
                     let passed = analysis.success
                         && measurement.passed
                         && measurement.error.is_none()
@@ -54,9 +60,11 @@ pub(super) fn build_spec_evidence(
                                 task_index + 1,
                                 provenance.source_instance_id(),
                                 spec.measurement,
-                                measurement
-                                    .error
-                                    .as_deref()
+                                converted
+                                    .as_ref()
+                                    .err()
+                                    .map(String::as_str)
+                                    .or(measurement.error.as_deref())
                                     .unwrap_or("measurement result was incomplete")
                             )
                         },
@@ -186,6 +194,13 @@ pub(super) fn simulation_run_digest(run: &SimulationRun) -> Result<ContentDigest
             digest.update([u8::from(measurement.passed)]);
             hash_optional_f64(&mut digest, measurement.expected);
             hash_optional_f64(&mut digest, measurement.tolerance);
+            if let Some(units) = &measurement.units {
+                units.validate()?;
+                hash_text(&mut digest, "measurement-units/v1");
+                for unit in [&units.value, &units.raw_value, &units.axis] {
+                    hash_optional_text(&mut digest, unit.symbol());
+                }
+            }
         }
         hash_u64(&mut digest, analysis.waveforms.len() as u64);
         for waveform in &analysis.waveforms {

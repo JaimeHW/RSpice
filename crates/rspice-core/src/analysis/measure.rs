@@ -134,9 +134,24 @@ pub struct MeasureResult {
     /// `MAX` measurements. Keeping it typed prevents output adapters and
     /// regression oracles from reverse-engineering the event from a value.
     pub event_axis: Option<Value>,
+    /// Physical units from the producer. Absent on historical/untyped results.
+    pub units: Option<super::MeasurementUnits>,
 }
 
 impl MeasureResult {
+    /// Convert only the published value; authored GOAL/TOL and FAILVALUE
+    /// contracts remain in their original units. Historical metadata absence
+    /// retains its numeric interpretation; an explicit unknown unit refuses
+    /// a requested conversion.
+    pub fn value_in_unit(&self, requested: &str) -> Result<Option<Value>, String> {
+        match (&self.units, self.value) {
+            (Some(units), Some(value)) if !requested.trim().is_empty() => {
+                units.value.convert_value(value, requested).map(Some)
+            }
+            _ => Ok(self.value),
+        }
+    }
+
     pub fn success(name: &str, value: Value) -> Self {
         Self {
             name: name.to_string(),
@@ -149,6 +164,7 @@ impl MeasureResult {
             failure_limit: None,
             failure_limit_exceeded: false,
             event_axis: None,
+            units: None,
         }
     }
 
@@ -164,6 +180,7 @@ impl MeasureResult {
             failure_limit: None,
             failure_limit_exceeded: false,
             event_axis: None,
+            units: None,
         }
     }
 
@@ -1121,6 +1138,8 @@ impl MeasureEngine {
                     .check_contract(m);
             }
         }
+        let statements = self.measurements.iter().collect::<Vec<_>>();
+        super::measure_units::annotate(&statements, &mut results, None, &HashMap::new());
         results
     }
 

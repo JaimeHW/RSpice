@@ -142,6 +142,7 @@ mod tests {
                         policy: "parameter-xoroshiro128plus-2018-v1".into(),
                     },
                     vec![FamilyMeasurementEvidence {
+                        unit: None,
                         name: "V(out)".into(),
                         value,
                         passed: value.is_some(),

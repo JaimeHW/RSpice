@@ -38,6 +38,7 @@ fn fixture() -> StudyMonteCarloCheckpoint {
                     .iter()
                     .enumerate()
                     .map(|(column, name)| FamilyMeasurementEvidence {
+                        unit: None,
                         name: name.clone(),
                         value: Some(values[column]),
                         passed: column == 0,
@@ -136,4 +137,32 @@ fn studio_monte_carlo_checkpoint_envelope_rejects_missing_verdicts_corruption_an
     tiny.max_result_values = 1;
     assert!(merged.merge_with_limits(&original, tiny, &NoAbort).is_err());
     assert_eq!(merged, original);
+}
+
+#[test]
+fn measurement_units_survive_checkpoint_resume_and_conflicting_units_refuse_merge() {
+    use rspice_core::analysis::MeasurementUnit;
+    let limits = ResourceLimits::default();
+    let mut original = fixture();
+    let old_bytes = original.to_bytes_with_limits(limits, &NoAbort).unwrap();
+    assert_eq!(old_bytes[MAGIC.len()], 1);
+    assert_eq!(
+        StudyMonteCarloCheckpoint::from_bytes_with_limits(&old_bytes, limits, &NoAbort).unwrap(),
+        original
+    );
+    original.observations.get_mut(&0).unwrap()[0].unit = Some(MeasurementUnit::Known("V".into()));
+    original.observations.get_mut(&0).unwrap()[1].unit = Some(MeasurementUnit::Unknown);
+    let bytes = original.to_bytes_with_limits(limits, &NoAbort).unwrap();
+    assert_eq!(bytes[MAGIC.len()], 2);
+    let decoded =
+        StudyMonteCarloCheckpoint::from_bytes_with_limits(&bytes, limits, &NoAbort).unwrap();
+    assert_eq!(decoded, original);
+    let mut conflicting = decoded.clone();
+    conflicting.observations.get_mut(&0).unwrap()[0].unit =
+        Some(MeasurementUnit::Known("A".into()));
+    assert!(
+        original
+            .merge_with_limits(&conflicting, limits, &NoAbort)
+            .is_err()
+    );
 }

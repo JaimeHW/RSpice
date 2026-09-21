@@ -1066,10 +1066,10 @@ fn tuning_specification_contract(
     let rows = specs
         .iter()
         .map(|spec| {
-            let baseline_value =
-                baseline_run.and_then(|run| measurement_in_run(run, &spec.measurement));
-            let candidate_value =
-                candidate_run.and_then(|run| measurement_in_run(run, &spec.measurement));
+            let baseline_value = baseline_run
+                .and_then(|run| measurement_in_run_with_unit(run, &spec.measurement, &spec.unit));
+            let candidate_value = candidate_run
+                .and_then(|run| measurement_in_run_with_unit(run, &spec.measurement, &spec.unit));
             let baseline = baseline_value
                 .map_or_else(|| "—".to_owned(), |value| format_value(value, &spec.unit));
             let passed = candidate_value.is_some_and(|value| spec.passes(value));

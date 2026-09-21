@@ -1181,3 +1181,38 @@ fn the_source_button_opens_the_viewer_the_shared_map_names() {
         "the retained optimizer history is what the shared map answers with"
     );
 }
+
+#[test]
+fn measurement_units_convert_displayed_values_and_limits_together() {
+    use rspice_core::analysis::{MeasurementUnit, MeasurementUnits};
+    let mut measurement = rspice_core::MeasureResult::success("level", 0.25);
+    measurement.units = Some(MeasurementUnits {
+        value: MeasurementUnit::Known("V".into()),
+        raw_value: MeasurementUnit::Known("V".into()),
+        axis: MeasurementUnit::Known("s".into()),
+    });
+    let mut run = SimulationRun::new(1);
+    run.add_analysis(
+        AnalysisResult::new(1, AnalysisType::Transient, "TRAN")
+            .with_measurements(vec![measurement]),
+    );
+    let mut specification = SpecEntry {
+        measurement: "level".into(),
+        expression: String::new(),
+        min: Some(200.0),
+        max: Some(300.0),
+        unit: "mV".into(),
+        scope: crate::state::SpecPointScope::AllPoints,
+    };
+    let row = result_row(&run, "level".into(), Some(&specification));
+    assert_eq!(row.value, Some(250.0));
+    assert_eq!(row.margin, Some(50.0));
+    assert_eq!(row.status, SpecResultStatus::Pass);
+    let native = result_row(&run, "level".into(), None);
+    assert_eq!(native.value, Some(0.25));
+    assert_eq!(native.unit, "V");
+    specification.unit = "mA".into();
+    let row = result_row(&run, "level".into(), Some(&specification));
+    assert_eq!(row.status, SpecResultStatus::Invalid);
+    assert!(row.detail.contains("incompatible"));
+}

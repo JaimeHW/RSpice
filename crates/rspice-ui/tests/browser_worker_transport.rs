@@ -56,7 +56,7 @@ fn run(seed: u64, source: &str) -> serde_json::Value {
         .expect("worker must return valid Monte Carlo results");
     let response = structured_clone(&response);
     let response: serde_json::Value = serde_wasm_bindgen::from_value(response).unwrap();
-    assert_eq!(response["protocolVersion"], 28);
+    assert_eq!(response["protocolVersion"], 29);
     assert_eq!(response["response"]["id"].as_u64(), Some(1));
     let result = response["response"]["outcome"]["Success"]["Inline"]["MonteCarlo"].clone();
     assert_eq!(result["seed"].as_u64(), Some(seed), "{response}");
