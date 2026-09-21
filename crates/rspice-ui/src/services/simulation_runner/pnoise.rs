@@ -442,15 +442,10 @@ fn run_pnoise_from_retained_state(
             ));
         }
         let contributors = if config.noise_summary {
-            let total = oscillator
-                .phase_noise_dbc
-                .iter()
-                .map(|value| 2.0 * 10.0_f64.powf(*value / 10.0))
-                .collect::<Vec<_>>();
             contributor_percentages_with_abort(
                 &frequencies,
                 &oscillator.phase_noise_contributors,
-                &total,
+                &oscillator.phase_error_psd,
                 abort,
             )?
         } else {
@@ -982,7 +977,9 @@ mod tests {
             output_node: "osc".into(),
             ..Default::default()
         };
-        let offsets = vec![1e3, 1e4, 1e5];
+        // Inside the voltage-noise linewidth, the unwrapped phase continues
+        // to diffuse. Jitter must not be integrated from the flattened L(f).
+        let offsets = vec![1e-16, 1e-15, 1e-14];
         let reported = run_pnoise_from_retained_state(
             &engine,
             &netlist,
@@ -995,6 +992,22 @@ mod tests {
         let phase = reported.phase_rms_rad.unwrap();
         let jitter = reported.timing_jitter_rms_s.unwrap();
         assert!(phase > 0.0 && jitter > 0.0);
+        let voltage_equivalent = integrate_psd_power_with_abort(
+            &offsets,
+            &reported
+                .output_noise
+                .iter()
+                .map(|value| 2.0 * 10.0_f64.powf(*value / 10.0))
+                .collect::<Vec<_>>(),
+            "bounded voltage spectrum",
+            &NoAbort,
+        )
+        .unwrap()
+        .sqrt();
+        assert!(
+            phase > 100.0 * voltage_equivalent,
+            "{phase} vs voltage-equivalent {voltage_equivalent}"
+        );
         assert!(
             (jitter / (phase * pss.analysis().result.period / std::f64::consts::TAU) - 1.0).abs()
                 < 1e-12
