@@ -7,6 +7,7 @@
 //! - Cooperative abort for responsive cancellation
 
 mod fft;
+mod integral_trace;
 mod post_results;
 use super::result::canonical_event_name;
 use super::{
@@ -15,6 +16,7 @@ use super::{
 };
 use crate::abort_signal::{AbortSignal, DigitalEventCode, NoAbort, TransientDigitalBus};
 use crate::analysis::transient::EventOnlyNetKind;
+use integral_trace::TransientIntegralTrace;
 // Only the unit tests below construct these records directly; the
 // production paths in this module receive them already built.
 use crate::circuit::SolutionDependentCompanionStep;
@@ -894,6 +896,7 @@ struct TransientCaptureRequest<'a> {
     record_device_op_traces: bool,
     capture: &'a TransientCapturePlan,
     trajectory_point_count: usize,
+    integral_trace: Option<&'a std::cell::RefCell<TransientIntegralTrace>>,
 }
 
 /// The run-lifetime buffers an accepted point's event state is taken into.
@@ -1005,6 +1008,7 @@ struct TransientRunWindow<'a> {
     max_step: Value,
     startup_mode: TransientStartupMode,
     dc_seed: Option<&'a super::PeriodicDcOperatingPointSeed>,
+    integral_trace: Option<&'a std::cell::RefCell<TransientIntegralTrace>>,
 }
 
 /// How a resumed run picks up: the checkpoint to resume from, how strictly it
@@ -2328,6 +2332,7 @@ impl Engine {
             record_device_op_traces,
             capture,
             trajectory_point_count,
+            integral_trace,
         } = request;
         let TransientSampleSources {
             mosfet_history,
@@ -2342,6 +2347,8 @@ impl Engine {
             time,
             step_size,
         } = sample;
+        let integral_count =
+            integral_trace.map_or(0, |_| circuit.behavioral_sources.integral_count());
         let next_point_count = result.time.len().saturating_add(1);
         self.ensure_analysis_points(trajectory_point_count)?;
         self.ensure_result_shape(
@@ -2349,9 +2356,13 @@ impl Engine {
             capture
                 .analog_values_per_sample()
                 .saturating_add(result.store_traces.len())
+                .saturating_add(integral_count)
                 .saturating_add(1),
         )?;
         let mut added_values = 1usize;
+        if let Some(trace) = integral_trace {
+            added_values = added_values.saturating_add(trace.borrow_mut().record(circuit)?);
+        }
         result.time.push(time);
         result.step_sizes.push(step_size);
         for (i, (voltages, &retain)) in result
@@ -2937,42 +2948,6 @@ impl Engine {
         engine.run_tran_with_abort_resolved(netlist, tstop, max_step, startup_mode, abort)
     }
 
-    /// Integrate from an exact bound DC state without another startup solve.
-    /// Periodic transient-assisted initialization owns this path; ordinary
-    /// transient and checkpoint APIs retain their existing startup contracts.
-    pub(super) fn run_tran_with_dc_seed_and_abort(
-        &self,
-        netlist: &Netlist,
-        tstop: Value,
-        max_step: Value,
-        dc_seed: &super::PeriodicDcOperatingPointSeed,
-        abort: &dyn AbortSignal,
-    ) -> Result<TransientResult, SimulationError> {
-        validate_transient_window(tstop, max_step)?;
-        self.reset_convergence_quality();
-        let engine = self.resolved_for_netlist(netlist);
-        engine.ensure_transient_request_floor(tstop, max_step)?;
-        engine
-            .run_tran_resolved_with_resume(
-                netlist,
-                netlist,
-                TransientRunWindow {
-                    tstop,
-                    max_step,
-                    startup_mode: TransientStartupMode::OperatingPoint,
-                    dc_seed: Some(dc_seed),
-                },
-                abort,
-                TransientResumePlan {
-                    resume: None,
-                    resume_validation: ResumeValidation::ExactNetlist,
-                    final_checkpoint_retention: FinalCheckpointRetention::Discarded,
-                    scheduled_checkpoint_times: &[],
-                },
-            )
-            .map(|(result, _, _)| result)
-    }
-
     fn inferred_transient_startup_mode(
         netlist: &Netlist,
     ) -> Result<TransientStartupMode, SimulationError> {
@@ -3092,6 +3067,7 @@ impl Engine {
                     max_step,
                     startup_mode,
                     dc_seed: None,
+                    integral_trace: None,
                 },
                 abort,
                 TransientResumePlan {
@@ -3218,6 +3194,7 @@ impl Engine {
                     max_step,
                     startup_mode,
                     dc_seed: None,
+                    integral_trace: None,
                 },
                 abort,
                 TransientResumePlan {
@@ -3352,6 +3329,7 @@ impl Engine {
                     max_step,
                     startup_mode,
                     dc_seed: None,
+                    integral_trace: None,
                 },
                 abort,
                 TransientResumePlan {
@@ -3497,6 +3475,7 @@ impl Engine {
                 max_step,
                 startup_mode,
                 dc_seed: None,
+                integral_trace: None,
             },
             abort,
             TransientResumePlan {
@@ -4125,6 +4104,7 @@ impl Engine {
             max_step,
             startup_mode,
             dc_seed,
+            integral_trace,
         } = window;
         let requested_stop = tstop;
         let TransientResumePlan {
@@ -5336,6 +5316,12 @@ impl Engine {
             );
         }
         let mut retained_result_values = Self::transient_result_value_count(&result);
+        if let Some(trace) = integral_trace {
+            let mut trace = trace.borrow_mut();
+            trace.initialize(&circuit);
+            self.ensure_result_values(retained_result_values.saturating_add(trace.names.len()))?;
+            retained_result_values = retained_result_values.saturating_add(trace.record(&circuit)?);
+        }
         self.ensure_transient_result_limits(&result, retained_result_values)?;
         if !circuit
             .bjts
@@ -10469,6 +10455,7 @@ impl Engine {
                                 record_device_op_traces,
                                 capture: &capture_plan,
                                 trajectory_point_count,
+                                integral_trace,
                             },
                         )?,
                     );
@@ -11040,6 +11027,7 @@ impl Engine {
                         record_device_op_traces,
                         capture: &capture_plan,
                         trajectory_point_count,
+                        integral_trace,
                     },
                 )?);
             retained_result_values = self.commit_accepted_transient_point(
@@ -11542,6 +11530,9 @@ impl Engine {
         retained_result_values = Self::transient_result_value_count(&result);
         self.ensure_result_values(
             retained_result_values
+                .saturating_add(
+                    integral_trace.map_or(0, |trace| trace.borrow().retained_value_count()),
+                )
                 .saturating_add(retained_scheduled_checkpoint_values)
                 .saturating_add(
                     final_checkpoint

@@ -42,7 +42,8 @@ fn hb_bound_op_seed_reaches_dc_spectrum_and_transient_assisted_startup() {
     // Deliberately charge the capacitor below equilibrium: recomputing an OP
     // would replace 0.25 V with 1 V and erase this initial-condition response.
     let transient = engine
-        .run_tran_with_dc_seed_and_abort(&netlist, 2e-4, 1e-6, &seed, &NoAbort)
+        .run_tran_for_periodic_seed(&netlist, 2e-4, 1e-6, Some(&seed), &NoAbort)
+        .map(|(result, _)| result)
         .unwrap();
     let out = transient
         .node_names

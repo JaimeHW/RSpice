@@ -147,6 +147,68 @@ mod tests {
     use super::*;
 
     #[test]
+    fn tahb_projects_accepted_integral_history_into_the_separate_tail() {
+        for rate in [1.0e3, 1.0e9] {
+            let engine = Engine::default();
+            let netlist = Netlist::parse(&format!(
+                "Integral transient seed\nvin in 0 1\nrin in 0 1k\n\
+                 bfirst out 0 v={rate}*sdt(v(in))\nrout out 0 1k\n\
+                 bnested nested 0 v={rate}*{rate}*sdt(sdt(-1000*i(vin)))\nrnested nested 0 1k\n\
+                 bcur sink 0 i={rate}*.001*sdt(v(in))\nrsink sink 0 1k\n.save v(out)\n.end\n"
+            ))
+            .unwrap();
+            let circuit = engine.build_circuit(&netlist).unwrap();
+            let nodes = engine.hb_build_node_names(&circuit, circuit.num_nodes());
+            let mut branches = circuit.branch_names_sorted();
+            let physical = branches.len();
+            branches.extend(circuit.behavioral_sources.integral_names());
+            let config = HbConfig::new(rate)
+                .with_harmonics(3)
+                .with_collocation_points(17);
+            let mut state = HbSolverState::new(nodes.len(), config.num_harmonics);
+            state
+                .try_prepare_mna_branches(branches.len(), config.num_harmonics)
+                .unwrap();
+            engine
+                .hb_seed_transient_assisted(
+                    &netlist, &config, &mut state, &nodes, &branches, &NoAbort,
+                )
+                .unwrap();
+            let n = config.checked_fft_size().unwrap() as Value;
+            for row in [0, 1, 3] {
+                assert!(
+                    (rate * state.mna_branch_currents[physical + row][0].re
+                        - (n - 1.0) / (2.0 * n))
+                        .abs()
+                        < 1.0e-10
+                );
+            }
+            let quadratic_mean = (n - 1.0) * (2.0 * n - 1.0) / (12.0 * n * n);
+            assert!(
+                (rate * rate * state.mna_branch_currents[physical + 2][0].re - quadratic_mean)
+                    .abs()
+                    < 3.0e-5
+            );
+            for (node, row, scale) in [
+                ("out", 0, rate),
+                ("nested", 2, rate * rate),
+                ("sink", 3, -rate),
+            ] {
+                let voltage = &state.x[nodes
+                    .iter()
+                    .position(|name| name.eq_ignore_ascii_case(node))
+                    .unwrap()];
+                for (physical, integral) in voltage
+                    .iter()
+                    .zip(&state.mna_branch_currents[physical + row])
+                {
+                    assert!((*physical - scale * integral).norm() < 1.0e-10);
+                }
+            }
+        }
+    }
+
+    #[test]
     fn retained_pss_projection_preserves_solved_integral_constants_and_spectra() {
         for rate in [1.0e3, 1.0e9] {
             let engine = Engine::default();

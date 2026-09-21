@@ -18,7 +18,7 @@
 //!    - Nonlinear part: FFT ↔ time-domain evaluation ↔ IFFT
 //! 4. **Result construction**: Build HbResult with spectral voltages and harmonics
 
-use super::{Engine, SimulationError, TransientStartupMode};
+use super::{Engine, SimulationError};
 use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::analysis::harmonic_balance::{ExactPeriodicNetwork, HbDcSeedPolicy, HbFft};
 use crate::analysis::{HbConfig, HbResult, HbSolver, HbSolverState};
@@ -1671,28 +1671,27 @@ impl Engine {
             )
             .into());
         }
-        let transient = match dc_seed {
-            Some(seed) => self.run_tran_with_dc_seed_and_abort(
-                netlist,
-                transient_period,
-                max_step,
-                seed,
-                abort,
-            ),
-            None => self.run_tran_with_startup_mode_and_abort(
-                netlist,
-                transient_period,
-                max_step,
-                TransientStartupMode::OperatingPoint,
-                abort,
-            ),
+        let (transient, integrals) = self
+            .run_tran_for_periodic_seed(netlist, transient_period, max_step, dc_seed, abort)
+            .map_err(|error| match error {
+                SimulationError::Aborted => SimulationError::Aborted,
+                other => SimulationError::Circuit(format!(
+                    "TAHB=1 first-tone transient initial-state construction failed: {other}"
+                )),
+            })?;
+        let physical_count = branch_names
+            .len()
+            .checked_sub(integrals.names.len())
+            .ok_or_else(|| {
+                SimulationError::Circuit(
+                    "TAHB=1 integral coordinates are missing from the HB basis".into(),
+                )
+            })?;
+        if branch_names[physical_count..] != integrals.names {
+            return Err(SimulationError::Circuit(
+                "TAHB=1 integral basis does not match the transient".into(),
+            ));
         }
-        .map_err(|error| match error {
-            SimulationError::Aborted => SimulationError::Aborted,
-            other => SimulationError::Circuit(format!(
-                "TAHB=1 first-tone transient initial-state construction failed: {other}"
-            )),
-        })?;
         let hb_period = config.fundamental_freq.recip();
         let sample_times = (0..collocation_points)
             .map(|sample| {
@@ -1731,7 +1730,7 @@ impl Engine {
                 .collect::<Result<Vec<_>, _>>()?;
             state.x[node_index] = fft.to_frequency_domain(&samples);
         }
-        for (branch_index, branch_name) in branch_names.iter().enumerate() {
+        for (branch_index, branch_name) in branch_names[..physical_count].iter().enumerate() {
             let source_index = transient
                 .branch_names
                 .iter()
@@ -1758,6 +1757,20 @@ impl Engine {
                 })
                 .collect::<Result<Vec<_>, _>>()?;
             state.mna_branch_currents[branch_index] = fft.to_frequency_domain(&samples);
+        }
+        for (index, (name, values)) in integrals.names.iter().zip(&integrals.values).enumerate() {
+            let samples = sample_times
+                .iter()
+                .map(|time| {
+                    Self::hb_interpolate_transient_value(
+                        &transient.time,
+                        values,
+                        *time,
+                        &format!("TAHB=1 integral '{name}'"),
+                    )
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            state.mna_branch_currents[physical_count + index] = fft.to_frequency_domain(&samples);
         }
         Ok(())
     }
@@ -1817,6 +1830,7 @@ impl Engine {
         let periodic_branches = circuit
             .num_branches()
             .checked_add(Self::hb_periodic_extra_branch_count(&circuit)?)
+            .and_then(|count| count.checked_add(circuit.behavioral_sources.integral_count()))
             .ok_or_else(|| {
                 SimulationError::Circuit(
                     "HB canonical and distributed-network branch count overflows this platform"
@@ -1950,7 +1964,7 @@ impl Engine {
                 dc_seed.expect("the matched branch has a seed"),
                 &mut state,
                 &node_names,
-                &periodic_branch_names,
+                &periodic_branch_names[..solver.physical_branch_count()],
                 circuit.num_branches(),
                 abort,
             )?,
@@ -1958,7 +1972,7 @@ impl Engine {
                 netlist,
                 &mut state,
                 &node_names,
-                &periodic_branch_names,
+                &periodic_branch_names[..solver.physical_branch_count()],
                 abort,
             )?,
             HbInitialStateStrategy::DefaultDcSeed if has_supported_nonlinear => {
