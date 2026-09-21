@@ -110,6 +110,70 @@ fn oracle(
 }
 
 #[test]
+fn qpxf_adjoint_equilibrates_integral_units_without_changing_transfer() {
+    struct Integral {
+        rate: Value,
+    }
+    impl Circuit for Integral {
+        fn unknowns(&self) -> usize {
+            2
+        }
+        fn voltage_equation(&self, row: usize) -> bool {
+            row == 0
+        }
+        fn linear_entries(&self, _: Value) -> Result<Vec<LinearEntry>, Error> {
+            Ok(vec![(0, 0, Complex64::ONE)])
+        }
+        fn sample(&mut self, _: &[Value], _: bool) -> Result<Sample, Error> {
+            // v = rate*z; dz/dt = source-v, so v/source = rate/(rate+jw).
+            Ok(Sample {
+                conductance: vec![(0, 1, -self.rate), (1, 0, 1.0)],
+                capacitance: vec![(1, 1, 1.0)],
+                ..Default::default()
+            })
+        }
+    }
+    let (grid, _) = fixture();
+    let orbit = vec![vec![Complex64::ZERO; grid.len()]; 2];
+    let mut observation = orbit.clone();
+    observation[0][grid.dc_index()] = Complex64::ONE;
+    for (rate, method) in [
+        (1e3, QuasiPeriodicLinearMethod::Direct),
+        (1e9, QuasiPeriodicLinearMethod::Krylov),
+    ] {
+        let mut circuit = Integral { rate };
+        let config = QuasiPeriodicLinearConfig {
+            method,
+            ..Default::default()
+        };
+        let mut work = Linearization::prepare_adjoint(
+            &mut circuit,
+            grid.clone(),
+            &orbit,
+            &config,
+            &ResourceLimits::default(),
+            &NoAbort,
+        )
+        .unwrap();
+        let offset = 0.13 * rate;
+        let result = work
+            .solve_adjoint(&circuit, offset, &observation, &NoAbort)
+            .unwrap();
+        let expected = rate / Complex64::new(rate, -std::f64::consts::TAU * offset);
+        assert!(result.normalized_residual <= 1.0);
+        for k in 0..grid.len() {
+            let (a, b) = if k == grid.dc_index() {
+                (1.0 - expected, expected)
+            } else {
+                (Complex64::ZERO, Complex64::ZERO)
+            };
+            assert!((result.sensitivities[0][k] - a).norm() < 1e-10);
+            assert!((result.sensitivities[1][k] - b).norm() < 1e-10);
+        }
+    }
+}
+
+#[test]
 fn qpxf_adjoint_matches_independent_nonsymmetric_complex_convolution_and_duality() {
     let (grid, orbit) = fixture();
     let n = 2 * grid.len();

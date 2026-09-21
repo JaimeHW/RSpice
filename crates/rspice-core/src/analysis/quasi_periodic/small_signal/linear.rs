@@ -90,6 +90,7 @@ impl Blocks {
     fn apply(
         &mut self,
         direction: &[Complex64],
+        divisors: &[Value],
         abort: &dyn AbortSignal,
     ) -> Result<Vec<Complex64>, Error> {
         let entries = self.matrices.len();
@@ -98,7 +99,7 @@ impl Blocks {
         for (k, matrix) in self.matrices.iter_mut().enumerate() {
             check_abort(abort)?;
             for row in 0..self.unknowns {
-                rhs[row] = direction[row * entries + k];
+                rhs[row] = direction[row * entries + k] * divisors[row];
             }
             let solved = match matrix {
                 Some(matrix) => matrix.solve(&rhs)?,
@@ -154,14 +155,15 @@ impl Linearization {
         &mut self,
         frequencies: &[Value],
         linear: &[Vec<LinearEntry>],
+        divisors: &[Value],
         rhs: &[Complex64],
         blocks: &mut Blocks,
         config: &QuasiPeriodicAcConfig,
         abort: &dyn AbortSignal,
     ) -> Result<Vec<Complex64>, Error> {
         let outcome = try_gmres_with_abort(
-            &mut |v| self.apply(frequencies, linear, v, abort),
-            &mut |v| blocks.apply(v, abort),
+            &mut |v| self.apply_equilibrated(frequencies, linear, divisors, v, abort),
+            &mut |v| blocks.apply(v, divisors, abort),
             rhs,
             config.linear.restart,
             config.linear.max_cycles,
@@ -186,13 +188,14 @@ impl Linearization {
         &mut self,
         frequencies: &[Value],
         linear: &[Vec<LinearEntry>],
+        divisors: &[Value],
         rhs: &[Complex64],
         config: &QuasiPeriodicAcConfig,
         abort: &dyn AbortSignal,
     ) -> Result<Vec<Complex64>, Error> {
         let mut blocks = Blocks::build(self, frequencies, linear, abort)?;
         // A compatible RHS, including zero, does not prove the operator is
-        // invertible. Require ||A B - I||_infinity < 1/2 using inverse columns
+        // invertible. Require ||D A B D^-1 - I||_infinity < 1/2 using inverse columns
         // retained one at a time. No regularized factor is a certificate.
         if !blocks.exact {
             let mut certified = false;
@@ -204,11 +207,20 @@ impl Linearization {
                     check_abort(abort)?;
                     unit[column] = Complex64::ONE;
                     let inverse = if use_krylov {
-                        self.krylov(frequencies, linear, &unit, &mut blocks, config, abort)?
+                        self.krylov(
+                            frequencies,
+                            linear,
+                            divisors,
+                            &unit,
+                            &mut blocks,
+                            config,
+                            abort,
+                        )?
                     } else {
-                        blocks.apply(&unit, abort)?
+                        blocks.apply(&unit, divisors, abort)?
                     };
-                    let applied = self.apply(frequencies, linear, &inverse, abort)?;
+                    let applied =
+                        self.apply_equilibrated(frequencies, linear, divisors, &inverse, abort)?;
                     unit[column] = Complex64::ZERO;
                     for (row, (bound, value)) in row_bounds.iter_mut().zip(applied).enumerate() {
                         let target = if row == column {
@@ -237,6 +249,19 @@ impl Linearization {
                 ));
             }
         }
-        self.krylov(frequencies, linear, rhs, &mut blocks, config, abort)
+        let rhs: Vec<_> = rhs
+            .iter()
+            .enumerate()
+            .map(|(i, value)| *value / divisors[i / self.grid.len()])
+            .collect();
+        self.krylov(
+            frequencies,
+            linear,
+            divisors,
+            &rhs,
+            &mut blocks,
+            config,
+            abort,
+        )
     }
 }

@@ -69,7 +69,7 @@ pub struct QuasiPeriodicAdjointSolution {
     pub frequency_hz: Value,
     pub frequency_lattice: Vec<i32>,
     pub sensitivities: Vec<Vec<Complex64>>,
-    /// Infinity-norm adjoint residual divided by the configured relative tolerance.
+    /// Infinity-norm equilibrated adjoint residual divided by the relative tolerance.
     /// This is an algebraic adjoint certificate, not a KCL/KVL residual.
     pub normalized_residual: Value,
 }
@@ -299,20 +299,27 @@ impl Linearization {
             frequencies.push(frequency);
         }
         let rhs: Vec<_> = sources.iter().flatten().copied().collect();
+        let divisors = self.equation_divisors(&frequencies, &linear, abort)?;
         let solution = if config.linear.uses_krylov(rhs.len()) {
-            self.iterative(&frequencies, &linear, &rhs, &config, abort)?
+            self.iterative(&frequencies, &linear, &divisors, &rhs, &config, abort)?
         } else {
             self.direct(&frequencies, &linear, &rhs, abort)?
         };
         let applied = self.apply(&frequencies, &linear, &solution, abort)?;
         let merit = if self.orientation == Orientation::Adjoint {
-            let norm =
-                |values: &[Complex64]| values.iter().map(|v| v.norm()).fold(0.0_f64, Value::max);
+            let norm = |values: &[Complex64]| {
+                values
+                    .iter()
+                    .enumerate()
+                    .map(|(i, v)| v.norm() / divisors[i / self.grid.len()])
+                    .fold(0.0_f64, Value::max)
+            };
             let scale = config.linear.relative_tolerance * norm(&rhs).max(norm(&applied));
             let residual = applied
                 .iter()
                 .zip(&rhs)
-                .map(|(a, b)| (*a - *b).norm())
+                .enumerate()
+                .map(|(i, (a, b))| (*a - *b).norm() / divisors[i / self.grid.len()])
                 .fold(0.0_f64, Value::max);
             if !scale.is_finite() || scale <= 0.0 || !residual.is_finite() {
                 return Err(Error::Numerical(

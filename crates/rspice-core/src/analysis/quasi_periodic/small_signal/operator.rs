@@ -2,6 +2,63 @@
 use super::*;
 
 impl Linearization {
+    /// Adjoint equations inherit the units of the forward unknowns. Explicit
+    /// integral coordinates can make a column many orders larger than a node
+    /// column. Equilibrate those rows before measuring an algebraic residual;
+    /// otherwise a change of time units alone can prevent convergence.
+    pub(super) fn equation_divisors(
+        &self,
+        frequencies: &[Value],
+        linear: &[Vec<LinearEntry>],
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<Value>, Error> {
+        let mut divisors = vec![1.0_f64; self.unknowns];
+        if self.orientation == Orientation::Adjoint {
+            let omega =
+                frequencies.iter().map(|f| f.abs()).fold(0.0, Value::max) * std::f64::consts::TAU;
+            for sample in &self.derivatives {
+                check_abort(abort)?;
+                for (terms, weight) in [(&sample.conductance, 1.0), (&sample.capacitance, omega)] {
+                    for &(_, col, value) in terms {
+                        let magnitude = value.abs() * weight;
+                        if !magnitude.is_finite() {
+                            return Err(Error::Numerical("QPXF equation scale overflowed".into()));
+                        }
+                        divisors[col] = divisors[col].max(magnitude);
+                    }
+                }
+            }
+            for entries in linear {
+                check_abort(abort)?;
+                for &(_, col, value) in entries {
+                    let magnitude = value.norm();
+                    if !magnitude.is_finite() {
+                        return Err(Error::Numerical("QPXF equation scale overflowed".into()));
+                    }
+                    divisors[col] = divisors[col].max(magnitude);
+                }
+            }
+        }
+        Ok(divisors)
+    }
+
+    pub(super) fn apply_equilibrated(
+        &mut self,
+        frequencies: &[Value],
+        linear: &[Vec<LinearEntry>],
+        divisors: &[Value],
+        direction: &[Complex64],
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<Complex64>, Error> {
+        let mut values = self.apply(frequencies, linear, direction, abort)?;
+        for (row, values) in values.chunks_exact_mut(self.grid.len()).enumerate() {
+            for value in values {
+                *value /= divisors[row];
+            }
+        }
+        Ok(values)
+    }
+
     pub(super) fn apply(
         &mut self,
         frequencies: &[Value],
