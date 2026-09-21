@@ -125,6 +125,12 @@ cosine-reference phase in degrees. The harmonic index cannot exceed the selected
 PSS retention count. `scalar:pss.frequency`, `scalar:pss.period` and
 `scalar:pss.iterations` expose the solved frequency, period and shooting corrections.
 
+Driven shooting PSS also supports circuits without independent charge or flux
+storage, such as resistive networks and memoryless diode circuits. It solves the
+periodic node voltages and branch currents, retains the waveform for dependent
+analyses, and reports no dynamic Floquet modes. Autonomous PSS still requires an
+independent dynamic state; PSTB requires an available dynamic-state probe.
+
 ## Periodic operating-point handoff
 
 Shooting PSS uses its bound OP temperature and supply settings throughout the solve.
