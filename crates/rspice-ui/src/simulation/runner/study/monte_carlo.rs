@@ -268,9 +268,13 @@ pub(crate) fn run_monte_carlo_with_continuation(
         let checkpoint = capture(numerical)?;
         // Update the caller-owned journal before returning a terminal error.
         // Do not retry a failed publication behind the consumer's back.
+        // A fully cached run still needs to deliver its retained journal to
+        // this run's result; no newly evaluated trial means no cadence callback.
         *continuation.checkpoint = Some(checkpoint);
         if !publication_failed.load(Ordering::Acquire)
-            && numerical.completed_trials() > last_published.load(Ordering::Relaxed)
+            && numerical.completed_trials() > 0
+            && (numerical.completed_trials() > last_published.load(Ordering::Relaxed)
+                || last_published.load(Ordering::Relaxed) == initial)
         {
             if let Err(error) =
                 (continuation.publish)(continuation.checkpoint.as_ref().expect("captured"))

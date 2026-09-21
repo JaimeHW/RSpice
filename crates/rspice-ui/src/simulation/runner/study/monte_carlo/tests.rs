@@ -177,10 +177,19 @@ fn studio_monte_carlo_checkpoint_survives_cancellation_and_publication_failure()
         )
         .unwrap(),
     );
-    let result = run(&base, &mut checkpoint, 3..4, &NoAbort, &|_| {
-        panic!("restored trial was evaluated again")
+    let publications = AtomicUsize::new(0);
+    let retained = checkpoint.clone();
+    let result = run(&base, &mut checkpoint, 3..4, &NoAbort, &|snapshot| {
+        publications.fetch_add(1, Ordering::Relaxed);
+        assert_eq!(Some(snapshot), retained.as_ref());
+        Ok(())
     })
     .unwrap();
+    assert_eq!(
+        publications.load(Ordering::Relaxed),
+        1,
+        "cached trials must be retained on the new run"
+    );
     assert_eq!(result.runs_completed, 1);
     assert!(
         !result.trial_measurements[0]
