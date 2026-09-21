@@ -49,59 +49,20 @@ pub(crate) fn run_monte_carlo_with_continuation(
     abort: &dyn AbortSignal,
     continuation: Option<MonteCarloContinuation<'_>>,
 ) -> Result<services::MonteCarloData, SimulationError> {
-    spec::ensure_not_aborted(abort)?;
-    if !base.objective_terms.is_empty() || !base.constraints.is_empty() {
-        return Err(SimulationError::InvalidConfig(
-            "Objectives and constraints apply only to optimization".into(),
-        ));
-    }
-    validate_measurements(&base.measurements).map_err(SimulationError::InvalidConfig)?;
-    base.analysis
-        .validate()
-        .map_err(|errors| SimulationError::InvalidConfig(errors.join("; ")))?;
-    // Preserve these cards in the parser's retained source, so expression and
-    // native-statistics replay observes the same analysis and solver policy.
-    let (analysis, environment) = resolved_study_environment(base, environment);
-    let source = study_source_at_environment(base, source, environment.as_ref(), abort)?;
+    let PreparedStudy {
+        analysis,
+        circuit,
+        mut study,
+        engine,
+    } = prepare_study(
+        base,
+        variation_source,
+        source,
+        source_path,
+        environment,
+        abort,
+    )?;
     let bridge = EngineBridge::new();
-    let circuit = bridge.parse_netlist_with_abort_and_source_path(&source, source_path, abort)?;
-    let command = circuit
-        .analyses
-        .iter()
-        .find_map(|analysis| match analysis {
-            AnalysisCommand::MonteCarlo(command) => Some(command),
-            _ => None,
-        })
-        .ok_or_else(|| {
-            SimulationError::InvalidConfig("Configured Monte Carlo requires a .MC command".into())
-        })?;
-    validate_base_measurements(base, &circuit)?;
-    let mut study = MonteCarloStudyConfig::new(
-        command.runs,
-        command.seed.unwrap_or(0x5EED_5EED),
-        base.measurements.clone(),
-    );
-    study.first_trial = command.first_trial;
-    study.distribution = match command.distribution {
-        MonteCarloDistribution::Gaussian => Distribution::Gaussian {
-            sigma: command.relative_spread,
-        },
-        MonteCarloDistribution::Uniform => Distribution::Uniform {
-            tolerance: command.relative_spread,
-        },
-        MonteCarloDistribution::WorstCase => Distribution::WorstCase {
-            tolerance: command.relative_spread,
-        },
-    };
-    study.variation_source = match variation_source {
-        McVariationSource::ParameterTolerance => MonteCarloVariationSource::ParameterTolerance,
-        McVariationSource::DeckStatistics => MonteCarloVariationSource::DeckStatistics,
-    };
-    study.parameter_filter = command.params.clone();
-    study.histogram_bins = base.histogram_bins;
-    study.confidence_pct = command.confidence_pct;
-    study.confidence_method = command.confidence_method.into();
-    study.environment = environment;
     if let Some(range) = continuation
         .as_ref()
         .and_then(|value| value.trial_range.as_ref())
@@ -114,7 +75,6 @@ pub(crate) fn run_monte_carlo_with_continuation(
         study.first_trial = range.start;
         study.num_runs = range.end - range.start;
     }
-    let engine = rspice_core::Engine::default().resolved_for_netlist(&circuit);
     let signal = StudyAbort {
         parent: abort,
         failed: AtomicBool::new(false),
@@ -328,3 +288,130 @@ pub(crate) fn run_monte_carlo_with_continuation(
 
 #[cfg(test)]
 mod tests;
+
+struct PreparedStudy {
+    analysis: StudyAnalysis,
+    circuit: rspice_core::Netlist,
+    study: MonteCarloStudyConfig,
+    engine: rspice_core::Engine,
+}
+
+fn prepare_study(
+    base: &StudyRunConfig,
+    variation_source: McVariationSource,
+    source: &str,
+    source_path: Option<&Path>,
+    environment: Option<AnalysisExecutionEnvironment>,
+    abort: &dyn AbortSignal,
+) -> Result<PreparedStudy, SimulationError> {
+    spec::ensure_not_aborted(abort)?;
+    if !base.objective_terms.is_empty() || !base.constraints.is_empty() {
+        return Err(SimulationError::InvalidConfig(
+            "Objectives and constraints apply only to optimization".into(),
+        ));
+    }
+    validate_measurements(&base.measurements).map_err(SimulationError::InvalidConfig)?;
+    base.analysis
+        .validate()
+        .map_err(|errors| SimulationError::InvalidConfig(errors.join("; ")))?;
+    // Preserve these cards in the parser's retained source, so expression and
+    // native-statistics replay observes the same analysis and solver policy.
+    let (analysis, environment) = resolved_study_environment(base, environment);
+    let source = study_source_at_environment(base, source, environment.as_ref(), abort)?;
+    let bridge = EngineBridge::new();
+    let circuit = bridge.parse_netlist_with_abort_and_source_path(&source, source_path, abort)?;
+    let command = circuit
+        .analyses
+        .iter()
+        .find_map(|analysis| match analysis {
+            AnalysisCommand::MonteCarlo(command) => Some(command),
+            _ => None,
+        })
+        .ok_or_else(|| {
+            SimulationError::InvalidConfig("Configured Monte Carlo requires a .MC command".into())
+        })?;
+    validate_base_measurements(base, &circuit)?;
+    let mut study = MonteCarloStudyConfig::new(
+        command.runs,
+        command.seed.unwrap_or(0x5EED_5EED),
+        base.measurements.clone(),
+    );
+    study.first_trial = command.first_trial;
+    study.distribution = match command.distribution {
+        MonteCarloDistribution::Gaussian => Distribution::Gaussian {
+            sigma: command.relative_spread,
+        },
+        MonteCarloDistribution::Uniform => Distribution::Uniform {
+            tolerance: command.relative_spread,
+        },
+        MonteCarloDistribution::WorstCase => Distribution::WorstCase {
+            tolerance: command.relative_spread,
+        },
+    };
+    study.variation_source = match variation_source {
+        McVariationSource::ParameterTolerance => MonteCarloVariationSource::ParameterTolerance,
+        McVariationSource::DeckStatistics => MonteCarloVariationSource::DeckStatistics,
+    };
+    study.parameter_filter = command.params.clone();
+    study.histogram_bins = base.histogram_bins;
+    study.confidence_pct = command.confidence_pct;
+    study.confidence_method = command.confidence_method.into();
+    study.environment = environment;
+    let engine = rspice_core::Engine::default().resolved_for_netlist(&circuit);
+    Ok(PreparedStudy {
+        analysis,
+        circuit,
+        study,
+        engine,
+    })
+}
+
+/// The same population contract the runner checks, without executing a trial.
+/// Prepared decks already seal include contents and therefore have no source path.
+pub(crate) fn prepared_population_identity(
+    base: &StudyRunConfig,
+    variation_source: McVariationSource,
+    statistics: Option<&crate::simulation::dialog::mc::statistics::McStatisticsConfig>,
+    source: &str,
+    environment: Option<AnalysisExecutionEnvironment>,
+) -> Result<[u8; 32], SimulationError> {
+    let source = source_with_statistics(source, variation_source, statistics)?;
+    let prepared = prepare_study(
+        base,
+        variation_source,
+        &source,
+        None,
+        environment,
+        &rspice_core::NoAbort,
+    )?;
+    let evaluation = *crate::simulation::execution::monte_carlo_evaluator_digest(base).as_bytes();
+    prepared
+        .engine
+        .new_monte_carlo_checkpoint(
+            &prepared.circuit,
+            &prepared.study,
+            evaluation,
+            &rspice_core::NoAbort,
+        )
+        .map(|checkpoint| checkpoint.population_identity())
+        .map_err(|error| EngineBridge::new().translate_error(error))
+}
+
+pub(crate) fn source_with_statistics<'a>(
+    source: &'a str,
+    variation_source: McVariationSource,
+    statistics: Option<&crate::simulation::dialog::mc::statistics::McStatisticsConfig>,
+) -> Result<std::borrow::Cow<'a, str>, SimulationError> {
+    let Some(statistics) = statistics else {
+        return Ok(source.into());
+    };
+    if variation_source != McVariationSource::DeckStatistics {
+        return Err(SimulationError::InvalidConfig(
+            "Custom statistics require the native statistics sampler".into(),
+        ));
+    }
+    let directive = statistics
+        .parser_directive()
+        .map_err(SimulationError::InvalidConfig)?;
+    Ok(services::splice_before_terminal_end_card(source, &directive).into())
+}

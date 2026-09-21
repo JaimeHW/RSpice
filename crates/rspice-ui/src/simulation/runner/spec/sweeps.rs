@@ -29,22 +29,12 @@ pub(super) fn run_sweep_spec(
         AnalysisSpec::MonteCarlo {
             variation_source, ..
         } => {
-            let augmented;
-            let netlist = if let Some(statistics) = &options.mc_statistics {
-                if variation_source != crate::simulation::dialog::McVariationSource::DeckStatistics
-                {
-                    return Err(SimulationError::InvalidConfig(
-                        "Custom statistics require the native statistics sampler".into(),
-                    ));
-                }
-                let directive = statistics
-                    .parser_directive()
-                    .map_err(SimulationError::InvalidConfig)?;
-                augmented = svc_runner::splice_before_terminal_end_card(netlist, &directive);
-                augmented.as_str()
-            } else {
-                netlist
-            };
+            let augmented = crate::simulation::runner::study::monte_carlo::source_with_statistics(
+                netlist,
+                variation_source,
+                options.mc_statistics.as_ref(),
+            )?;
+            let netlist = augmented.as_ref();
             run_monte_carlo(
                 variation_source,
                 options.study_base.as_ref(),
