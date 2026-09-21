@@ -17,7 +17,10 @@ Monte Carlo checkpoint envelope v2. Checkpoints without units keep their v1
 encoding. An optional result-digest extension authenticates units without changing
 historical identities. Missing historical metadata keeps the original numeric
 interpretation; it is distinct from a newly inferred unknown unit. Source schemas
-before 37 reject attached unit metadata.
+before 37 reject attached unit metadata. New Monte Carlo populations bind the
+unit-aware evaluator (configured v3, all-node OP v2). Historical checkpoints remain
+readable, but cannot be resumed into a population with different unit semantics;
+resume admission also checks for valued observations missing units.
 
 Explicit study selectors retain units too. `last:`, `bin:`, and `tuple:` read
 the selected trace's unit, with degrees for phase and the FFT producer's
@@ -36,3 +39,11 @@ projections, and dimensionally compatible expressions. Undeclared parameter
 units and unsupported expressions remain unknown. Raw sensitivity parameter
 dimensions, PZ transfer-gain dimensions, continuous event streams, and native
 scalar payloads outside study selections still require producer-specific coverage.
+
+Generated STB margins retain dB, degrees, Hz, counts and dimensionless flags,
+including the intended unit of an unavailable margin. Its Nyquist contour and
+PSP/HBSP conversion paths retain dimensionless power-wave ratios. Periodic port
+noise metadata carries carrier frequency, counts and Kelvin temperatures. PSS
+node spectra and HB DC-only traces state volts at the producer boundary. These
+units use existing measurement and waveform transport/persistence; historical
+records without this metadata retain their original interpretation.

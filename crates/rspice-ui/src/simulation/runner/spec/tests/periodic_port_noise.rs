@@ -79,6 +79,29 @@ fn periodic_port_noise_survives_execution_worker_and_project_round_trip() {
         assert!((waveforms["PN_Rn"].y_values[0] - 50.0).abs() < 1e-5);
         assert!((waveforms["PN_Fdsb"].y_values[0] - 2.0).abs() < 1e-7);
         assert_eq!(waveforms["Cw1_2[k=-1,m=-1]"].y_unit, "W/Hz");
+        for signal in ["S21", "S21[k=-1,m=-1]"] {
+            assert_eq!(waveforms[signal].y_unit, "1");
+            let converted = result
+                .study_measurement(&format!("last:{signal}"))
+                .unwrap()
+                .value_in_unit("%")
+                .unwrap()
+                .unwrap();
+            assert!((converted - waveforms[signal].y_values[0] * 100.0).abs() < 1e-12);
+        }
+        for (name, target, expected) in [
+            ("periodic_noise_carrier_hz", "MHz", 1.0),
+            ("periodic_noise_reference_temperature_kelvin", "degC", 27.0),
+        ] {
+            let value = result
+                .study_measurement(name)
+                .unwrap()
+                .value_in_unit(target)
+                .unwrap()
+                .unwrap();
+            assert!((value - expected).abs() < 1e-10);
+        }
+
         assert_eq!(
             measurements
                 .iter()
@@ -147,5 +170,8 @@ fn periodic_port_noise_survives_execution_worker_and_project_round_trip() {
         let result = &restored.runs[0].analyses[0];
         assert_eq!(result.validate_retained_evidence(), Ok(()));
         assert_eq!(result.result_data_digest(), original_digest);
+        let temperature = result.scalar_evidence("periodic_noise_reference_temperature_kelvin");
+        assert!((temperature[0].value_in_unit("degC").unwrap().unwrap() - 27.0).abs() < 1e-10);
+        assert!(temperature[0].value_in_unit("V").is_err());
     }
 }

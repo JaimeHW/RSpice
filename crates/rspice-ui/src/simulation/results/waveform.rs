@@ -61,11 +61,22 @@ impl WaveformData {
         real: Vec<f64>,
         imag: Vec<f64>,
     ) -> Self {
+        Self::new_complex_in_unit(name, freq, real, imag, "")
+    }
+
+    /// Create a complex frequency-domain waveform with its producer's unit.
+    pub fn new_complex_in_unit(
+        name: impl Into<String>,
+        freq: Vec<f64>,
+        real: Vec<f64>,
+        imag: Vec<f64>,
+        unit: impl Into<String>,
+    ) -> Self {
         Self {
             name: name.into(),
             x_values: freq,
             y_values: real,
-            y_unit: "".to_string(),
+            y_unit: unit.into(),
             is_complex: true,
             y_imag: Some(imag),
         }

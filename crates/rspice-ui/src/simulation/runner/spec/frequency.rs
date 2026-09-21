@@ -588,14 +588,22 @@ fn run_pnoise(
     pnoise_result(data, pnoise_cfg.noise_ref, abort)
 }
 
-fn noise_measurement(name: &str, value: f64, symbol: &str) -> rspice_core::MeasureResult {
+fn frequency_measurement_units(symbol: &str) -> rspice_core::analysis::MeasurementUnits {
     use rspice_core::analysis::{MeasurementUnit, MeasurementUnits};
-    let mut result = rspice_core::MeasureResult::success(name, value);
-    result.units = Some(MeasurementUnits {
+    MeasurementUnits {
         value: MeasurementUnit::Known(symbol.into()),
         raw_value: MeasurementUnit::Known(symbol.into()),
         axis: MeasurementUnit::Known("Hz".into()),
-    });
+    }
+}
+
+pub(super) fn frequency_measurement(
+    name: &str,
+    value: f64,
+    symbol: &str,
+) -> rspice_core::MeasureResult {
+    let mut result = rspice_core::MeasureResult::success(name, value);
+    result.units = Some(frequency_measurement_units(symbol));
     result
 }
 
@@ -608,7 +616,7 @@ fn pnoise_result(
     let mut shares = HashMap::with_capacity(data.contributors.len());
     for (name, percentage) in data.contributors {
         super::ensure_not_aborted(abort)?;
-        measurements.push(noise_measurement(
+        measurements.push(frequency_measurement(
             &format!("noise_share_percent({name})"),
             percentage,
             "%",
@@ -656,10 +664,10 @@ fn pnoise_result(
     });
 
     if let Some(value) = data.phase_rms_rad {
-        measurements.push(noise_measurement("phase_error_rms_rad", value, "rad"));
+        measurements.push(frequency_measurement("phase_error_rms_rad", value, "rad"));
     }
     if let Some(value) = data.timing_jitter_rms_s {
-        measurements.push(noise_measurement("timing_jitter_rms_s", value, "s"));
+        measurements.push(frequency_measurement("timing_jitter_rms_s", value, "s"));
     }
     Ok(SimulationResult::Noise {
         output_unit: Some(rspice_core::analysis::MeasurementUnit::Known(
@@ -796,11 +804,12 @@ fn run_stb(
         super::ensure_not_aborted(abort)?;
         waveforms.insert(
             crate::simulation::results::STB_NYQUIST_CONTOUR_WAVEFORM.to_string(),
-            WaveformData::new_complex(
+            WaveformData::new_complex_in_unit(
                 crate::simulation::results::STB_NYQUIST_CONTOUR_WAVEFORM.to_string(),
                 contour.frequencies,
                 contour.real,
                 contour.imaginary,
+                "1",
             ),
         );
     }
@@ -826,32 +835,39 @@ fn run_stb(
 fn stb_margin_measurements(
     margins: &rspice_core::analysis::stb::StabilityMargins,
 ) -> Vec<rspice_core::MeasureResult> {
-    fn scalar(name: &str, value: f64) -> rspice_core::MeasureResult {
+    fn scalar(name: &str, value: f64, symbol: &str) -> rspice_core::MeasureResult {
         if value.is_finite() {
-            rspice_core::MeasureResult::success(name, value)
+            frequency_measurement(name, value, symbol)
         } else {
-            rspice_core::MeasureResult::failed(
+            let mut result = rspice_core::MeasureResult::failed(
                 name,
                 "the loop gain has no such point in the swept band",
-            )
+            );
+            result.units = Some(frequency_measurement_units(symbol));
+            result
         }
     }
 
     vec![
-        scalar("stb_gain_margin_db", margins.gain_margin_db),
-        scalar("stb_gain_margin_freq", margins.gain_margin_freq),
-        scalar("stb_phase_margin_deg", margins.phase_margin_deg),
-        scalar("stb_phase_margin_freq", margins.phase_margin_freq),
-        scalar("stb_dc_loop_gain_db", margins.dc_gain_db),
-        scalar("stb_unity_gain_bandwidth", margins.unity_gain_bandwidth),
-        rspice_core::MeasureResult::success("stb_crossovers", margins.num_crossovers as f64),
-        rspice_core::MeasureResult::success(
+        scalar("stb_gain_margin_db", margins.gain_margin_db, "dB"),
+        scalar("stb_gain_margin_freq", margins.gain_margin_freq, "Hz"),
+        scalar("stb_phase_margin_deg", margins.phase_margin_deg, "deg"),
+        scalar("stb_phase_margin_freq", margins.phase_margin_freq, "Hz"),
+        scalar("stb_dc_loop_gain_db", margins.dc_gain_db, "dB"),
+        scalar(
+            "stb_unity_gain_bandwidth",
+            margins.unity_gain_bandwidth,
+            "Hz",
+        ),
+        frequency_measurement("stb_crossovers", margins.num_crossovers as f64, "count"),
+        frequency_measurement(
             "stb_conditionally_stable",
             if margins.conditionally_stable {
                 1.0
             } else {
                 0.0
             },
+            "1",
         ),
     ]
 }
@@ -1419,4 +1435,68 @@ pub(super) fn run_periodic_study_consumer(
             project_pstb(data, abort)
         }
     }
+}
+
+#[test]
+fn stability_margin_units_survive_execution_and_retention() {
+    use crate::simulation::runner::worker_contract::WorkerSimulationResult;
+    let result = run_stb(
+        "Margin units\nE1 EO 0 CTRL 0 -1000\nVPROBE EO X 0\nR1 X CTRL 1k\nC1 CTRL 0 159.154943091895n\n.end\n",
+        "VPROBE".into(), 10.0, 1e7, FrequencySweep::Decade, 10, true, None,
+        &rspice_core::NoAbort,
+    ).unwrap();
+    let SimulationResult::Ac {
+        measurements,
+        waveforms,
+        ..
+    } = &result
+    else {
+        panic!("STB frequency result");
+    };
+    let phase = measurements
+        .iter()
+        .find(|m| m.name == "stb_phase_margin_deg")
+        .unwrap();
+    let degrees = phase.value.unwrap();
+    assert!(degrees > 90.0 && degrees < 100.0);
+    assert!((phase.value_in_unit("rad").unwrap().unwrap() - degrees.to_radians()).abs() < 1e-12);
+    let bandwidth = measurements
+        .iter()
+        .find(|m| m.name == "stb_unity_gain_bandwidth")
+        .unwrap();
+    assert!(
+        (bandwidth.value_in_unit("kHz").unwrap().unwrap() - bandwidth.value.unwrap() / 1000.0)
+            .abs()
+            < 1e-9
+    );
+    assert!(bandwidth.value_in_unit("V").is_err());
+    let gain_margin = measurements
+        .iter()
+        .find(|m| m.name == "stb_gain_margin_db")
+        .unwrap();
+    assert!(
+        !gain_margin.passed,
+        "a single pole never reaches -180 degrees"
+    );
+    assert_eq!(gain_margin.value_in_unit("dB").unwrap(), None);
+    assert_eq!(
+        gain_margin.units.as_ref().unwrap().value.symbol(),
+        Some("dB")
+    );
+    assert_eq!(
+        waveforms[crate::simulation::results::STB_NYQUIST_CONTOUR_WAVEFORM].y_unit,
+        "1"
+    );
+    let worker = WorkerSimulationResult::try_from(result).unwrap();
+    let received: WorkerSimulationResult =
+        serde_json::from_str(&serde_json::to_string(&worker).unwrap()).unwrap();
+    let retained = crate::simulation::controller::SimulationController::new()
+        .convert_to_analysis_result_with_metadata_owned(
+            received.into(),
+            crate::state::AnalysisType::Stb,
+            "STB margins",
+        );
+    let phase = retained.scalar_evidence("stb_phase_margin_deg");
+    assert!((phase[0].value_in_unit("rad").unwrap().unwrap() - degrees.to_radians()).abs() < 1e-12);
+    assert_eq!(retained.validate_retained_evidence(), Ok(()));
 }

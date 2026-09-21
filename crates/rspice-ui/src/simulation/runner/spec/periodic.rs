@@ -6,6 +6,7 @@ use std::path::Path;
 
 use rspice_core::abort_signal::AbortSignal;
 
+use super::frequency::frequency_measurement;
 use crate::services::simulation_runner as svc_runner;
 use crate::simulation::dialog::IntegrationMethod;
 use crate::simulation::execution::{ResolvedExecutionDependencies, TransientTrajectoryArtifact};
@@ -482,37 +483,42 @@ fn periodic_sparameter_result(
         if path.output_sideband == 0 && path.input_sideband == 0 {
             waveforms.insert(
                 base_name.clone(),
-                WaveformData::new_complex(
+                WaveformData::new_complex_in_unit(
                     base_name,
                     clone_values_with_abort(&data.frequencies, abort)?,
                     clone_values_with_abort(&real, abort)?,
                     clone_values_with_abort(&imaginary, abort)?,
+                    "1",
                 ),
             );
         }
         waveforms.insert(
             name.clone(),
-            WaveformData::new_complex(
+            WaveformData::new_complex_in_unit(
                 name,
                 clone_values_with_abort(&data.frequencies, abort)?,
                 real,
                 imaginary,
+                "1",
             ),
         );
     }
     let mut measurements = Vec::new();
     if let Some(noise) = data.noise {
-        measurements.push(rspice_core::MeasureResult::success(
+        measurements.push(frequency_measurement(
             "periodic_noise_carrier_hz",
             noise.fundamental_hz,
+            "Hz",
         ));
-        measurements.push(rspice_core::MeasureResult::success(
+        measurements.push(frequency_measurement(
             "periodic_noise_max_sideband",
             config.max_sideband as f64,
+            "count",
         ));
-        measurements.push(rspice_core::MeasureResult::success(
+        measurements.push(frequency_measurement(
             "periodic_noise_mixed_mode",
             if config.mixed_mode { 1.0 } else { 0.0 },
+            "1",
         ));
         for path in noise.paths {
             super::ensure_not_aborted(abort)?;
@@ -537,32 +543,45 @@ fn periodic_sparameter_result(
             waveforms.insert(name, waveform);
         }
         if let Some(reference) = noise.reference {
-            for (name, value) in [
-                ("periodic_noise_input_port", reference.input_port as f64),
-                ("periodic_noise_output_port", reference.output_port as f64),
+            for (name, value, unit) in [
+                (
+                    "periodic_noise_input_port",
+                    reference.input_port as f64,
+                    "count",
+                ),
+                (
+                    "periodic_noise_output_port",
+                    reference.output_port as f64,
+                    "count",
+                ),
                 (
                     "periodic_noise_input_sideband",
                     f64::from(reference.input_sideband),
+                    "count",
                 ),
                 (
                     "periodic_noise_output_sideband",
                     f64::from(reference.output_sideband),
+                    "count",
                 ),
                 (
                     "periodic_noise_reference_temperature_kelvin",
                     reference.reference_temperature_kelvin,
+                    "K",
                 ),
                 (
                     "periodic_noise_termination_temperature_kelvin",
                     reference.termination_temperature_kelvin,
+                    "K",
                 ),
             ] {
-                measurements.push(rspice_core::MeasureResult::success(name, value));
+                measurements.push(frequency_measurement(name, value, unit));
             }
             if let Some(image) = reference.image_sideband {
-                measurements.push(rspice_core::MeasureResult::success(
+                measurements.push(frequency_measurement(
                     "periodic_noise_image_sideband",
                     f64::from(image),
+                    "count",
                 ));
             }
         }
@@ -815,7 +834,7 @@ fn run_pss_spectrum(
         if waveforms
             .insert(
                 name.clone(),
-                WaveformData::new_complex(name, node_frequencies, real, imaginary),
+                WaveformData::new_complex_in_unit(name, node_frequencies, real, imaginary, "V"),
             )
             .is_some()
         {
@@ -897,7 +916,13 @@ fn project_hb_data(
             if waveforms
                 .insert(
                     name.clone(),
-                    WaveformData::new_complex(name, vec![0.0], vec![voltage], vec![0.0]),
+                    WaveformData::new_complex_in_unit(
+                        name,
+                        vec![0.0],
+                        vec![voltage],
+                        vec![0.0],
+                        "V",
+                    ),
                 )
                 .is_some()
             {
