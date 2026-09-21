@@ -157,6 +157,11 @@ impl HbSolver {
                 self.num_harmonics,
                 "prescribed integral rate",
             )?;
+            // The shared projection represents an identically zero waveform
+            // with an empty vector. A primitive still owns its DC coordinate.
+            if coefficients.is_empty() {
+                coefficients.resize(self.num_harmonics + 1, Complex64::ZERO);
+            }
             let scale = rates
                 .iter()
                 .fold(0.0_f64, |scale, value| scale.max(value.abs()));

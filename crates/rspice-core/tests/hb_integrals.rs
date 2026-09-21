@@ -340,6 +340,29 @@ fn hb_prescribed_integrals_reject_secular_drift_and_bound_projection_work() {
 }
 
 #[test]
+fn hb_prescribed_zero_rates_retain_zero_integral_coordinates() {
+    let deck =
+        Netlist::parse("Zero primitives\nB1 out 0 V=sdt(0)+sdt(sdt(0))\nR1 out 0 1k\n.end\n")
+            .unwrap();
+    let result = Engine::default()
+        .run_hb(&deck, HbConfig::new(1e3).with_harmonics(1))
+        .unwrap();
+    result.operating_point.validate().unwrap();
+    assert_eq!(result.operating_point.integral_spectra().len(), 3);
+    for integral in result.operating_point.integral_spectra() {
+        assert!(integral.coefficients.iter().all(|v| *v == Complex64::ZERO));
+    }
+    assert!(
+        result
+            .result
+            .spectral_voltages
+            .iter()
+            .flat_map(|row| &row.coefficients)
+            .all(|v| *v == Complex64::ZERO)
+    );
+}
+
+#[test]
 fn hb_integral_dependents_share_transfer_and_noise_from_fresh_hb_and_pss() {
     let rate = 1e3;
     let netlist = filter(rate, "");
