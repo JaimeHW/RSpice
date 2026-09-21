@@ -265,6 +265,19 @@ and retained `fft.fundamental_magnitude`, `fft.thd_ratio`, `fft.thd_db`, `fft.sn
 those metric values require the deck's `.OPTIONS FFT FFTOUT=1`. Missing, incomplete,
 ambiguous or non-finite observations are not replaced with zeros or nominal data.
 
+## Temperature in configured studies
+
+Configured studies resolve the selected OP or Run Set temperature before parsing
+circuit expressions and conditional topology. The same temperature is retained
+when Monte Carlo trials redraw statistical expressions or optimization candidates
+replay parameter changes. Explicit OP temperatures take precedence over the Run Set;
+OP modes that follow the Run Set inherit its temperature.
+
+A fixed study environment keeps `TEMP`, `TEMPER` and `VT` fixed instead of treating
+them as generic tolerance parameters. Existing parameter/device overrides and
+statistical trial coordinates survive replay. Supply scaling is applied once after
+the trial circuit has been materialized.
+
 ## Monte Carlo parameter bounds and truncation
 
 Custom parameter distributions support optional absolute lower and upper bounds.
