@@ -164,7 +164,7 @@ pub(super) fn route_resumes(
             .find(|task| task.authored_instance_id == *instance)
             .map_or("Monte Carlo", |task| task.label.as_str());
         return Err(invalid(format!(
-            "{label}: a selected checkpoint matches no requested Run Set point. Restore its circuit, sampler and analysis settings, include that point, or clear the selection."
+            "{label}: a selected checkpoint matches no requested Run Set point under the current evaluator. Restore compatible circuit, sampler and analysis settings and include that point, or clear the selection to start a new population."
         )));
     }
     Ok(())

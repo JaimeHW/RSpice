@@ -35,7 +35,14 @@ impl SimulationResult {
             // have no raw value, even when an output default is configured.
             measurement.raw_value.filter(|value| value.is_finite())?;
             return Some(crate::state::FamilyMeasurementEvidence {
-                unit: measurement.units.as_ref().map(|units| units.value.clone()),
+                unit: Some(
+                    measurement
+                        .units
+                        .as_ref()
+                        .map_or(rspice_core::analysis::MeasurementUnit::Unknown, |units| {
+                            units.value.clone()
+                        }),
+                ),
                 name: request.to_owned(),
                 value: Some(measurement.value.filter(|value| value.is_finite())?),
                 passed: measurement.passed,

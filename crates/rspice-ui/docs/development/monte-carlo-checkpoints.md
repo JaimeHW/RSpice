@@ -14,8 +14,12 @@ plan revisions of the selected base, its configured OP prerequisite and its
 postprocessor producer. Their full configurations and stable instance identities
 remain bound, including the original source, snapshot, result and numerical
 values of a saved OP state. The ordinary prepared-task digest still records all
-authored revisions. This compatibility contract uses evaluator domain v2; the
-earlier internal v1 journal identity is rejected rather than silently reclassified.
+authored revisions. Evaluator domain v3 (all-node OP domain v2) binds unit-aware
+observations. Earlier populations cannot seed new runs; their saved bytes and
+historical verdicts remain readable. Resume inputs also reject valued observations
+without physical unit metadata, including fully cached selections and partially
+typed journals. Clear an incompatible resume selection to start a new population;
+accepted historical trials are never silently re-run or assigned guessed units.
 
 The Studio binary envelope retains every trial's measurement verdict alongside
 its exact core values. A finite `.MEAS` value that misses GOAL/TOL remains a failed

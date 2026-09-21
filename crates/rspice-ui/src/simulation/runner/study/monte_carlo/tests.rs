@@ -291,3 +291,60 @@ fn studio_monte_carlo_checkpoint_reuses_trials_after_report_card_edits() {
     .unwrap_err();
     assert_eq!(checkpoint, before);
 }
+
+#[test]
+fn studio_monte_carlo_legacy_unitless_checkpoints_remain_readable_but_cannot_resume() {
+    use crate::simulation::runner::monte_carlo_checkpoint::MonteCarloCheckpointInput;
+    use crate::state::MonteCarloCheckpointEvidence;
+    let base = base();
+    let limits = ResourceLimits::default();
+    let mut typed = None;
+    run(&base, &mut typed, 3..5, &NoAbort, &|_| Ok(())).unwrap();
+    let typed = typed.unwrap();
+    for partially_typed in [false, true] {
+        let mut legacy = typed.clone();
+        for (index, row) in &mut legacy.observations {
+            if !partially_typed || *index == 3 {
+                for observation in row {
+                    observation.unit = None;
+                }
+            }
+        }
+        let bytes = legacy.to_bytes_with_limits(limits, &NoAbort).unwrap();
+        let restored =
+            StudyMonteCarloCheckpoint::from_bytes_with_limits(&bytes, limits, &NoAbort).unwrap();
+        assert_eq!(restored, legacy);
+        assert_eq!(
+            MonteCarloCheckpointEvidence::from_bytes(bytes.clone().into())
+                .unwrap()
+                .bytes(),
+            bytes.as_slice(),
+            "historical evidence remains byte-for-byte intact",
+        );
+        let old_value = &restored.observations[&3][0];
+        assert_eq!(old_value.value_in_unit("mV").unwrap(), old_value.value);
+        let typed_value = &typed.observations[&3][0];
+        assert!(
+            (typed_value.value_in_unit("mV").unwrap().unwrap() - old_value.value.unwrap() * 1000.0)
+                .abs()
+                < 1e-10
+        );
+        assert!(
+            MonteCarloCheckpointInput::from_bytes(bytes)
+                .unwrap_err()
+                .to_string()
+                .contains("physical unit metadata")
+        );
+        // Neither a fully cached request nor a partial resume may publish or
+        // append fresh observations with a different interpretation of units.
+        for range in [3..5, 3..6] {
+            let mut checkpoint = Some(restored.clone());
+            let error = run(&base, &mut checkpoint, range, &NoAbort, &|_| {
+                panic!("incompatible checkpoint must not publish")
+            })
+            .unwrap_err();
+            assert!(error.to_string().contains("physical unit metadata"));
+            assert_eq!(checkpoint.as_ref(), Some(&restored));
+        }
+    }
+}

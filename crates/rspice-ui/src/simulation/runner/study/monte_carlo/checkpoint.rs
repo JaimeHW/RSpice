@@ -132,6 +132,23 @@ impl StudyMonteCarloCheckpoint {
         self.numerical.completed_indices()
     }
 
+    /// Historical journals are valid evidence even when their units were not
+    /// retained. They cannot seed a new unit-aware population: interpreting old
+    /// numbers in a requested limit unit would disagree with newly solved rows.
+    pub(crate) fn validate_for_resume(&self) -> Result<(), SimulationError> {
+        if self
+            .observations
+            .values()
+            .flatten()
+            .any(|observation| observation.value.is_some() && observation.unit.is_none())
+        {
+            return Err(invalid(
+                "saved measurements lack physical unit metadata; keep this checkpoint for inspection and clear its resume selection to start a new population",
+            ));
+        }
+        Ok(())
+    }
+
     /// A completed range may be smaller than a pooled journal, but every
     /// retained member must agree with its committed numbers and verdicts.
     pub(crate) fn validate_retained_members(

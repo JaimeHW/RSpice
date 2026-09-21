@@ -356,7 +356,9 @@ pub(in crate::simulation) fn monte_carlo_evaluator_digest(
     if let Some(postprocess) = &mut base.postprocess {
         postprocess.producer_source_revision = crate::product::ObjectRevision::INITIAL;
     }
-    let mut writer = CanonicalWriter::new("rspice.monte-carlo-evaluator/v2");
+    // Unit-aware observations change how limits interpret a population. Old
+    // journals remain readable, but cannot supply trials to this evaluator.
+    let mut writer = CanonicalWriter::new("rspice.monte-carlo-evaluator/v3");
     encode_spec_options(
         &mut writer,
         &SpecExecutionOptions {

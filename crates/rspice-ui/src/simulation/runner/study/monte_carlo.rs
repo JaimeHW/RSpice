@@ -128,6 +128,7 @@ where
     let mut numerical = if let Some(continuation) = &continuation {
         if let Some(checkpoint) = continuation.checkpoint.as_ref() {
             checkpoint.validate(limits, abort)?;
+            checkpoint.validate_for_resume()?;
             let expected = engine
                 .new_monte_carlo_checkpoint(&circuit, &study, evaluation_identity, abort)
                 .map_err(|error| bridge.translate_error(error))?;

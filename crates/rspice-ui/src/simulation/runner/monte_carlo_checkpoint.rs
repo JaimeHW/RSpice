@@ -24,7 +24,8 @@ impl MonteCarloCheckpointInput {
             &bytes,
             ResourceLimits::default(),
             &NoAbort,
-        )?;
+        )?
+        .validate_for_resume()?;
         Ok(Self {
             digest: checkpoint_digest(&bytes),
             bytes,
@@ -43,11 +44,13 @@ impl MonteCarloCheckpointInput {
                 "Monte Carlo checkpoint input does not match its frozen content identity".into(),
             ));
         }
-        StudyMonteCarloCheckpoint::from_bytes_with_limits(
+        let checkpoint = StudyMonteCarloCheckpoint::from_bytes_with_limits(
             &self.bytes,
             ResourceLimits::default(),
             &NoAbort,
-        )
+        )?;
+        checkpoint.validate_for_resume()?;
+        Ok(checkpoint)
     }
     pub(super) fn take_bytes(&mut self) -> Result<Vec<u8>, SimulationError> {
         self.decode()?;

@@ -44,7 +44,8 @@ impl VoltageBasis {
 
     fn identity(&self) -> [u8; 32] {
         let mut digest = Sha256::new();
-        digest.update(b"rspice.monte-carlo-all-node-op/v1\0");
+        // Bind typed voltage observations, including their limit semantics.
+        digest.update(b"rspice.monte-carlo-all-node-op/v2\0");
         digest.update((self.nodes.len() as u64).to_be_bytes());
         for (name, excluded) in self.nodes.iter().zip(&self.event_only) {
             digest.update((name.len() as u64).to_be_bytes());
