@@ -97,7 +97,13 @@ cosine-reference phase in degrees. The harmonic index cannot exceed the selected
 PSS retention count. `scalar:pss.frequency`, `scalar:pss.period` and
 `scalar:pss.iterations` expose the solved frequency, period and shooting corrections.
 
-## Quasi-periodic operating-point handoff
+## Periodic operating-point handoff
+
+Shooting PSS uses its bound OP temperature and supply settings throughout the solve.
+PAC, PXF, PNOISE, PSTB and PSP inherit the same environment with the saved PSS state,
+including through browser-worker transport. The producer's process-bound circuit
+source follows the dependency chain. Consumers still authenticate that circuit and
+the numerical state before using the orbit.
 
 A Simulation Studio QPSS run uses its bound operating-point instance's resolved
 temperature and explicitly selected supply sources. The temperature is applied before
