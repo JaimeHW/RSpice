@@ -982,3 +982,37 @@ contract stores model packs, device assignments, and ordered mission profiles,
 but circuit stress extraction, aged circuit re-simulation, and retained result
 integration are still under implementation. No Comphy, HiSIM, or other public
 parameter set has yet been adopted as a qualified default.
+
+
+## Monte Carlo checkpoints and pooling
+
+`Engine::new_monte_carlo_checkpoint` binds an empty journal to a frozen netlist,
+sampling seed and policy, environment, ordered measurement names, and an explicit
+caller-supplied digest of the complete configured evaluator and prerequisites.
+The engine includes the source expressions, semantic circuit, AST overrides and
+numerical configuration in this population identity. Resource budgets and worker
+counts can change; the identity of the experiment cannot.
+
+`Engine::run_monte_carlo_measurements_checkpointed_with_abort` reuses completed
+rows and solves only missing trial indices. It accepts the same scalar evaluator
+as the ordinary configured study. A publication callback runs serially after each
+newly completed trial and can save the checkpoint at the caller's desired cadence.
+Completed rows remain available after cancellation, deadlines, fatal solver errors
+or publication failures. Ordinary statistical failures remain explicit completed
+rows and are not retried automatically. An interrupted trial remains unfinished.
+
+`MonteCarloCheckpoint::merge_with_limits` pools matching populations, accepts exact
+overlap only once, and rejects conflicting overlapping outcomes without modifying
+the destination. Resuming a pooled checkpoint rebuilds statistics from the exact
+trial samples in the requested range, including its failed-trial count. It does
+not average batch means or append duplicate observations. Ranges, histogram bins
+and mean-confidence settings can change in `MonteCarloStudyConfig` while the
+original circuit and evaluator contract remain frozen.
+
+`to_bytes_with_limits` and `from_bytes_with_limits` provide a versioned binary
+format with a content checksum, exact IEEE-754 value bits, trial identities and
+failure markers. Byte, trial and retained-value budgets are checked; malformed,
+nonfinite, duplicate, reordered or corrupted records are refused. These checkpoints
+currently carry numerical observations and trial failure markers. Simulation Studio
+checkpoint selection, worker publication, project retention and measurement-verdict
+metadata still require frontend integration.
