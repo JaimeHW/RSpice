@@ -2,7 +2,7 @@
 use super::*;
 use crate::analysis::quasi_periodic::{check_abort, finite};
 
-pub(super) fn validate(
+pub(crate) fn validate(
     spectra: &[Vec<Complex64>],
     unknowns: usize,
     grid: &QuasiPeriodicGrid,

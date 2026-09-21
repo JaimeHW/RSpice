@@ -6,6 +6,7 @@
 //! checked before allocating the selected backend.
 
 mod coordinates;
+pub(crate) use coordinates::validate as validate_spectra;
 mod evaluation;
 mod iterative;
 mod linear_config;
@@ -89,6 +90,13 @@ impl QuasiPeriodicSolution {
     /// Fourier coefficients in MNA-coordinate order, then signed tuple order.
     pub fn spectra(&self) -> &[Vec<Complex64>] {
         &self.spectra
+    }
+    pub(crate) fn into_spectra(self) -> Vec<Vec<Complex64>> {
+        self.spectra
+    }
+    pub(crate) fn with_preparation_iterations(mut self, iterations: usize) -> Self {
+        self.iterations += iterations;
+        self
     }
     pub fn iterations(&self) -> usize {
         self.iterations
@@ -221,8 +229,38 @@ pub(crate) fn solve_with_abort(
     limits: &ResourceLimits,
     abort: &dyn AbortSignal,
 ) -> Result<QuasiPeriodicSolution, Error> {
+    solve_with_iteration_budget(
+        circuit,
+        grid,
+        config,
+        sources,
+        seed,
+        limits,
+        config.max_iterations,
+        abort,
+    )
+}
+
+pub(crate) fn solve_with_iteration_budget(
+    circuit: &mut impl Circuit,
+    grid: Arc<QuasiPeriodicGrid>,
+    config: &QuasiPeriodicSolveConfig,
+    sources: &[Vec<Complex64>],
+    seed: Option<&[Vec<Complex64>]>,
+    limits: &ResourceLimits,
+    remaining_iterations: usize,
+    abort: &dyn AbortSignal,
+) -> Result<QuasiPeriodicSolution, Error> {
     super::check_abort(abort)?;
     config.validate()?;
+    if remaining_iterations > config.max_iterations {
+        return Err(Error::InvalidConfig(
+            "periodic iteration budget exceeds the configured maximum".into(),
+        ));
+    }
+    let mut bounded = config.clone();
+    bounded.max_iterations = remaining_iterations;
+    let config = &bounded;
     let unknowns = circuit.unknowns();
     let (base_values, value_limit) = check_workload(unknowns, &grid, &config.linear, limits)?;
     coordinates::validate(sources, unknowns, &grid, "source", abort)?;
