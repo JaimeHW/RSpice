@@ -710,6 +710,8 @@ pub enum AnalysisSpec {
     },
     /// Linearized local DC mismatch contribution.
     DcMismatch {
+        #[serde(default)]
+        moment_options: rspice_core::netlist::StatisticalMomentOptions,
         output_expression: String,
         sigma_multiplier: f64,
         /// Contributors retained in the report. Zero is the card's own

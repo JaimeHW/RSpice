@@ -128,6 +128,7 @@ impl SimulationController {
                 request: draft.to_request()?,
             },
             AnalysisDraft::DcMismatch(draft) => AnalysisSpec::DcMismatch {
+                moment_options: draft.moment_options()?,
                 output_expression: draft.output_expression.trim().to_owned(),
                 sigma_multiplier: parse_si(&draft.sigma_multiplier, "DCMATCH sigma multiplier")?,
                 contributor_limit: parse_usize(

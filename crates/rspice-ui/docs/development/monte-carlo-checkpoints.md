@@ -33,7 +33,7 @@ inputs use checked portable bytes; a request without a checkpoint destination is
 rejected before trial execution.
 
 Native execution keeps only the latest complete snapshot in a separate queue,
-independent of terminal success. Browser request protocol 32 transfers resume
+independent of terminal success. Browser request protocol 33 transfers resume
 bytes in a Uint8Array, separately from numerical dependency buffers and JSON
 metadata. Workers publish accepted snapshots through a dedicated message before
 returning their terminal result. Ingress checks byte budgets and content identity;

@@ -50,6 +50,23 @@ pub(super) fn fields(ui: &mut Ui, setup: &mut DcMismatchDraft) {
         "Normalize contributions",
         &mut setup.normalized_contributions,
     );
+    let defaults = rspice_core::netlist::StatisticalMomentOptions::default();
+    hinted_input_row(
+        ui,
+        "Moment relative tolerance",
+        &mut setup.moment_relative_tolerance,
+        &defaults.relative_tolerance.to_string(),
+    );
+    hinted_input_row(
+        ui,
+        "Moment point budget",
+        &mut setup.moment_max_points,
+        &defaults.max_points.to_string(),
+    );
+    field_note(
+        ui,
+        "For bounded statistics, integrate the conditional spreads and correlations to the requested estimated precision. The point budget applies separately to process and mismatch statistics; these points do not run circuit simulations.",
+    );
     // Where the spread comes from, said where the analysis is authored. This
     // form declares no distribution of its own: every standard deviation is
     // the design's, and the engine resolves each spread in the global

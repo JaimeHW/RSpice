@@ -1405,6 +1405,7 @@ fn command_to_queue_item(
                 config: None,
                 analysis_line: ".dcmatch".to_string(),
                 spec: AnalysisSpec::DcMismatch {
+                    moment_options: card.moments,
                     output_expression,
                     sigma_multiplier: card.sigma_multiplier,
                     contributor_limit: card.contributor_limit,

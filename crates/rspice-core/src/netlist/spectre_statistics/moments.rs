@@ -14,7 +14,8 @@ use crate::abort_signal::AbortSignal;
 const REPLICATES: usize = 8;
 
 /// Numerical integration policy for conditional statistical moments.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(default, deny_unknown_fields)]
 pub struct StatisticalMomentOptions {
     /// Relative error estimate on covariance entries, scaled by the product
     /// of their marginal standard deviations. Also checks the conditional means.

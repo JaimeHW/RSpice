@@ -7,6 +7,86 @@
 
 use super::*;
 
+#[test]
+fn dc_mismatch_moment_controls_survive_authoring_storage_decks_and_workers() {
+    use crate::simulation::plan::{AnalysisDraft, DcMismatchDraft};
+    use crate::simulation::runner::worker_contract::WorkerAnalysisSpec;
+
+    let draft = DcMismatchDraft {
+        moment_relative_tolerance: "2m".into(),
+        moment_max_points: "131072".into(),
+        output_expression: "V(OUT)".into(),
+        ..Default::default()
+    };
+    let saved = serde_json::to_value(&draft).unwrap();
+    let restored: DcMismatchDraft = serde_json::from_value(saved.clone()).unwrap();
+    assert_eq!(restored.moment_relative_tolerance, "2m");
+    let spec = SimulationController::new()
+        .build_manifest_preview_spec(&AppState::default(), &AnalysisDraft::DcMismatch(restored))
+        .unwrap()
+        .unwrap();
+    let AnalysisSpec::DcMismatch { moment_options, .. } = &spec else {
+        panic!("DC mismatch specification expected");
+    };
+    assert_eq!(moment_options.relative_tolerance, 0.002);
+    assert_eq!(moment_options.max_points, 131_072);
+    let command = SimulationController::build_dc_mismatch_command(&spec).unwrap();
+    let deck = format!("controls\nV1 in 0 1\nR1 in out 1k\nR2 out 0 1k\n{command}\n.end\n");
+    assert_eq!(specs_for(&deck), vec![spec.clone()]);
+    let worker = WorkerAnalysisSpec::try_from(&spec).unwrap();
+    let carried: WorkerAnalysisSpec =
+        serde_json::from_str(&serde_json::to_string(&worker).unwrap()).unwrap();
+    assert_eq!(AnalysisSpec::from(carried), spec);
+
+    // Old saved drafts/specifications retain the engine's default policy.
+    let mut legacy = saved;
+    legacy
+        .as_object_mut()
+        .unwrap()
+        .remove("moment_relative_tolerance");
+    legacy.as_object_mut().unwrap().remove("moment_max_points");
+    assert_eq!(
+        serde_json::from_value::<DcMismatchDraft>(legacy)
+            .unwrap()
+            .moment_options()
+            .unwrap(),
+        Default::default()
+    );
+    let mut legacy = serde_json::to_value(&spec).unwrap();
+    legacy["DcMismatch"]
+        .as_object_mut()
+        .unwrap()
+        .remove("moment_options");
+    let legacy: AnalysisSpec = serde_json::from_value(legacy).unwrap();
+    assert!(
+        !SimulationController::build_dc_mismatch_command(&legacy)
+            .unwrap()
+            .contains("MOMENT_")
+    );
+
+    for (tolerance, points) in [
+        ("0", "131072"),
+        ("0.2", "131072"),
+        ("2m", "1023"),
+        ("2m", "1.5"),
+    ] {
+        let invalid = DcMismatchDraft {
+            moment_relative_tolerance: tolerance.into(),
+            moment_max_points: points.into(),
+            ..draft.clone()
+        };
+        assert!(
+            AnalysisDraft::DcMismatch(invalid)
+                .manifest_configuration_error()
+                .is_some()
+        );
+        let invalid_deck = format!(
+            "invalid\nV1 in 0 1\nR1 in 0 1k\n.DCMATCH OUT=V(in) MOMENT_RELTOL={tolerance} MOMENT_MAX_POINTS={points}\n.end\n"
+        );
+        assert!(rspice_core::netlist::Netlist::parse(&invalid_deck).is_err());
+    }
+}
+
 /// A hand-written `.DCMATCH` card is read as a DC mismatch analysis.
 ///
 /// The card used to be refused by name, which was honest while the kind
@@ -20,11 +100,12 @@ fn a_manual_deck_with_a_dcmatch_card_is_read_as_dc_mismatch() {
              R1 in out 10k\n\
              R2 out 0 10k\n\
              .DCMATCH OUT=V(out,in) MISMATCH=no PROCESS=yes CONTRIBUTORS=3 THRESHOLD=0.25 \
-             SIGMA=6\n\
+             SIGMA=6 MOMENT_RELTOL=2m MOMENT_MAX_POINTS=131072\n\
              .end\n",
     );
     let [
         AnalysisSpec::DcMismatch {
+            moment_options,
             output_expression,
             sigma_multiplier,
             contributor_limit,
@@ -48,6 +129,8 @@ fn a_manual_deck_with_a_dcmatch_card_is_read_as_dc_mismatch() {
         "the card has no operand for the report basis, so the product default applies"
     );
     assert_eq!(*contribution_threshold, Some(0.25));
+    assert_eq!(moment_options.relative_tolerance, 0.002);
+    assert_eq!(moment_options.max_points, 131_072);
 }
 
 /// A bare card reads as the engine's own defaults, not as this crate's.
@@ -128,6 +211,7 @@ fn the_studio_dcmatch_card_round_trips_through_the_manual_deck_reader() {
         for limit in [0_usize, 3] {
             for threshold in [None, Some(0.25)] {
                 let authored = AnalysisSpec::DcMismatch {
+                    moment_options: Default::default(),
                     output_expression: probe.to_owned(),
                     sigma_multiplier: 6.0,
                     contributor_limit: limit,

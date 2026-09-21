@@ -1217,6 +1217,7 @@ pub(super) fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &Analysis
             }
         }
         AnalysisSpec::DcMismatch {
+            moment_options,
             output_expression,
             sigma_multiplier,
             contributor_limit,
@@ -1238,6 +1239,11 @@ pub(super) fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &Analysis
             // reason the transient-noise floor above appends conditionally.
             if let Some(threshold) = contribution_threshold {
                 writer.f64(*threshold);
+            }
+            if *moment_options != rspice_core::netlist::StatisticalMomentOptions::default() {
+                writer.domain("rspice.dcmatch-moment-controls/v1");
+                writer.f64(moment_options.relative_tolerance);
+                writer.usize(moment_options.max_points);
             }
         }
         // A brand-new arm, so `writer.option` is free here: there is no

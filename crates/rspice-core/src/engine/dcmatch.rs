@@ -117,12 +117,7 @@ impl Engine {
         card: &DcMatchCard,
         abort: &dyn AbortSignal,
     ) -> Result<DcMatchResult, SimulationError> {
-        self.run_dc_match_with_moment_options_and_abort(
-            netlist,
-            card,
-            StatisticalMomentOptions::default(),
-            abort,
-        )
+        self.run_dc_match_with_moment_options_and_abort(netlist, card, card.moments, abort)
     }
 
     /// DC mismatch with an explicit integration policy for bounded statistics.

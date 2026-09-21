@@ -399,6 +399,10 @@ impl Default for TransientNoiseDraft {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DcMismatchDraft {
+    #[serde(default)]
+    pub moment_relative_tolerance: String,
+    #[serde(default)]
+    pub moment_max_points: String,
     pub output_expression: String,
     pub sigma_multiplier: String,
     pub contributor_limit: String,
@@ -423,6 +427,8 @@ pub struct DcMismatchDraft {
 impl Default for DcMismatchDraft {
     fn default() -> Self {
         Self {
+            moment_relative_tolerance: String::new(),
+            moment_max_points: String::new(),
             output_expression: "V(out)".to_owned(),
             sigma_multiplier: "1".to_owned(),
             contributor_limit: rspice_core::netlist::DcMatchCard::DEFAULT_CONTRIBUTORS.to_string(),
@@ -431,6 +437,27 @@ impl Default for DcMismatchDraft {
             include_mismatch: true,
             normalized_contributions: true,
         }
+    }
+}
+
+impl DcMismatchDraft {
+    /// Resolve blank numerical controls to the engine's defaults.
+    pub fn moment_options(&self) -> Result<rspice_core::netlist::StatisticalMomentOptions, String> {
+        let mut options = rspice_core::netlist::StatisticalMomentOptions::default();
+        if !self.moment_relative_tolerance.trim().is_empty() {
+            options.relative_tolerance =
+                crate::simulation::dialog::options::parse_si_value(&self.moment_relative_tolerance)
+                    .map_err(|error| format!("Invalid moment relative tolerance: {error}"))?;
+        }
+        if !self.moment_max_points.trim().is_empty() {
+            options.max_points = self
+                .moment_max_points
+                .trim()
+                .parse()
+                .map_err(|_| "Moment integration point budget must be an integer".to_owned())?;
+        }
+        options.validate().map_err(|error| error.to_string())?;
+        Ok(options)
     }
 }
 
@@ -1425,6 +1452,7 @@ fn validate_dc_mismatch(draft: &DcMismatchDraft) -> Option<String> {
             .map_err(|_| "contributor limit must be a non-negative integer".to_owned())?;
         let contribution_threshold = dc_mismatch_share_threshold(&draft.share_threshold)?;
         crate::simulation::multi_run::AnalysisSpec::DcMismatch {
+            moment_options: draft.moment_options()?,
             output_expression: draft.output_expression.trim().to_owned(),
             sigma_multiplier,
             contributor_limit,

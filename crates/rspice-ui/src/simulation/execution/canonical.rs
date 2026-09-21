@@ -1428,8 +1428,9 @@ mod tests {
     /// unconditional `writer.f64(0.0)` — would redefine the identity of every
     /// DC mismatch plan already saved.
     #[test]
-    fn an_unauthored_share_threshold_leaves_the_plan_digest_unchanged() {
+    fn dc_mismatch_moment_controls_preserve_defaults_and_distinguish_policies() {
         let dc_mismatch = |contribution_threshold| AnalysisSpec::DcMismatch {
+            moment_options: Default::default(),
             output_expression: "V(out)".to_owned(),
             sigma_multiplier: 1.0,
             contributor_limit: 10,
@@ -1465,6 +1466,21 @@ mod tests {
         let mut absent = CanonicalWriter::new("test");
         encode_analysis_spec(&mut absent, &spec);
         assert_ne!(authored.finish(), absent.finish());
+        let digest = |spec: &AnalysisSpec| {
+            analysis_config_digest("", spec, None, &SpecExecutionOptions::default(), None)
+        };
+        for change_tolerance in [false, true] {
+            let mut changed = spec.clone();
+            let AnalysisSpec::DcMismatch { moment_options, .. } = &mut changed else {
+                unreachable!()
+            };
+            if change_tolerance {
+                moment_options.relative_tolerance *= 2.0;
+            } else {
+                moment_options.max_points *= 2;
+            }
+            assert_ne!(digest(&changed), digest(&spec));
+        }
     }
 
     /// A Monte Carlo plan that named no subset digests to exactly the bytes it

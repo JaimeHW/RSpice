@@ -290,6 +290,12 @@ pub(crate) fn describe_analysis(analysis: &AnalysisCommand) -> String {
             if card.sigma_multiplier != 1.0 {
                 description.push_str(&format!(" sigma={}", card.sigma_multiplier));
             }
+            if card.moments != rspice_core::netlist::StatisticalMomentOptions::default() {
+                description.push_str(&format!(
+                    " moment_reltol={} moment_max_points={}",
+                    card.moments.relative_tolerance, card.moments.max_points
+                ));
+            }
             description
         }
         other => format!("{other:?}"),

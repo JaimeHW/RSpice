@@ -303,7 +303,7 @@ pub(super) fn nondefault_op_config() -> crate::simulation::dialog::OpConfig {
 #[test]
 fn browser_worker_transfer_protocol_matches_rust_transport() {
     assert_eq!(WORKER_RESPONSE_TRANSPORT_PROTOCOL, 28);
-    assert_eq!(WORKER_REQUEST_TRANSPORT_PROTOCOL, 32);
+    assert_eq!(WORKER_REQUEST_TRANSPORT_PROTOCOL, 33);
     let source = include_str!("../../../../web/simulation-worker.js");
     assert!(source.contains(&format!(
         "const WORKER_PROTOCOL_VERSION = {WORKER_RESPONSE_TRANSPORT_PROTOCOL};"
@@ -502,6 +502,7 @@ fn a_wire_request_written_before_the_share_threshold_field_restores_without_one(
     .expect("the same request deserializes as a worker payload");
 
     let dc_mismatch = |contribution_threshold| AnalysisSpec::DcMismatch {
+        moment_options: Default::default(),
         output_expression: "V(out)".to_owned(),
         sigma_multiplier: 1.0,
         contributor_limit: 10,
@@ -852,6 +853,7 @@ fn worker_request_detaches_and_authenticates_op_previous_state() {
 #[test]
 fn unavailable_manifest_spec_round_trips_without_losing_typed_fields() {
     let spec = AnalysisSpec::DcMismatch {
+        moment_options: Default::default(),
         output_expression: "V(out)".to_owned(),
         sigma_multiplier: 3.0,
         contributor_limit: 25,

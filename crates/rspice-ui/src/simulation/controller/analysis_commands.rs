@@ -604,6 +604,7 @@ impl SimulationController {
         spec: &AnalysisSpec,
     ) -> Result<String, String> {
         let AnalysisSpec::DcMismatch {
+            moment_options,
             output_expression,
             sigma_multiplier,
             contributor_limit,
@@ -622,6 +623,15 @@ impl SimulationController {
             yes_or_no(*include_mismatch),
             yes_or_no(*include_process),
         );
+        moment_options
+            .validate()
+            .map_err(|error| error.to_string())?;
+        if *moment_options != rspice_core::netlist::StatisticalMomentOptions::default() {
+            command.push_str(&format!(
+                " MOMENT_RELTOL={} MOMENT_MAX_POINTS={}",
+                moment_options.relative_tolerance, moment_options.max_points
+            ));
+        }
         if let Some(threshold) = contribution_threshold {
             command.push_str(&format!(" THRESHOLD={threshold}"));
         }
@@ -1341,6 +1351,7 @@ mod tests {
             ("out", 0, true, false, 0.5, Some(1.0)),
         ] {
             let spec = AnalysisSpec::DcMismatch {
+                moment_options: Default::default(),
                 output_expression: expression.to_owned(),
                 sigma_multiplier: sigma,
                 contributor_limit: limit,
@@ -1389,6 +1400,7 @@ mod tests {
     #[test]
     fn a_contributor_limit_of_zero_keeps_every_contributor() {
         let spec = AnalysisSpec::DcMismatch {
+            moment_options: Default::default(),
             output_expression: "V(out)".to_owned(),
             sigma_multiplier: 1.0,
             contributor_limit: 0,

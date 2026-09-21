@@ -2424,12 +2424,15 @@ pub enum AnalysisCommand {
 /// Authored `.DCMATCH` card.
 ///
 /// `.DCMATCH OUT=V(node[,ref])|I(element) [MISMATCH=yes|no] [PROCESS=yes|no]
-/// [CONTRIBUTORS=<n>] [THRESHOLD=<share>] [SIGMA=<k>]`
+/// [CONTRIBUTORS=<n>] [THRESHOLD=<share>] [SIGMA=<k>]
+/// [MOMENT_RELTOL=<tolerance>] [MOMENT_MAX_POINTS=<n>]`
 ///
 /// Every field is validated by the parser, so the analysis layer converts the
 /// card rather than re-deriving what the deck asked for.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DcMatchCard {
+    /// Numerical integration policy for bounded statistical populations.
+    pub moments: super::StatisticalMomentOptions,
     /// Node for a `V(...)` probe, element name for an `I(...)` probe.
     pub output_node: String,
     /// Reference node of a differential `V(out,ref)` probe.
@@ -2463,6 +2466,7 @@ impl DcMatchCard {
     #[cfg(test)]
     pub(crate) fn voltage_probe(output_node: impl Into<String>) -> Self {
         Self {
+            moments: Default::default(),
             output_node: output_node.into(),
             reference_node: None,
             output_is_current: false,

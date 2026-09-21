@@ -12,7 +12,8 @@ use super::*;
 const CARD: AnalysisCard = AnalysisCard::DcMatch;
 
 /// Parse `.DCMATCH OUT=V(node[,ref])|I(element) [MISMATCH=yes|no]
-/// [PROCESS=yes|no] [CONTRIBUTORS=<n>] [THRESHOLD=<share>] [SIGMA=<k>]`.
+/// [PROCESS=yes|no] [CONTRIBUTORS=<n>] [THRESHOLD=<share>] [SIGMA=<k>]
+/// [MOMENT_RELTOL=<tolerance>] [MOMENT_MAX_POINTS=<n>]`.
 pub(super) fn parse_dcmatch_command(
     stream: &mut TokenStream,
     line_num: usize,
@@ -24,6 +25,8 @@ pub(super) fn parse_dcmatch_command(
     let mut contributors = None;
     let mut threshold = None;
     let mut sigma = None;
+    let mut moment_tolerance = None;
+    let mut moment_points = None;
 
     loop {
         skip_commas(stream);
@@ -47,6 +50,28 @@ pub(super) fn parse_dcmatch_command(
             ));
         };
         match keyword.as_str() {
+            "MOMENT_RELTOL" => bind_once(
+                &mut moment_tolerance,
+                card_number(
+                    stream,
+                    line_num,
+                    params,
+                    CARD,
+                    "MOMENT_RELTOL",
+                    "a relative tolerance in (0, 0.1]",
+                    |value| value > 0.0 && value <= 0.1,
+                )?,
+                CARD,
+                line_num,
+                "MOMENT_RELTOL",
+            )?,
+            "MOMENT_MAX_POINTS" => bind_once(
+                &mut moment_points,
+                card_count(stream, line_num, params, CARD, "MOMENT_MAX_POINTS", 1024)?,
+                CARD,
+                line_num,
+                "MOMENT_MAX_POINTS",
+            )?,
             "OUT" => bind_once(
                 &mut output,
                 card_dcmatch_probe(stream, line_num)?,
@@ -142,6 +167,12 @@ pub(super) fn parse_dcmatch_command(
         ));
     }
     Ok(AnalysisCommand::DcMatch(Box::new(DcMatchCard {
+        moments: crate::netlist::StatisticalMomentOptions {
+            relative_tolerance: moment_tolerance
+                .unwrap_or(crate::netlist::StatisticalMomentOptions::default().relative_tolerance),
+            max_points: moment_points
+                .unwrap_or(crate::netlist::StatisticalMomentOptions::default().max_points),
+        },
         output_node,
         reference_node,
         output_is_current,

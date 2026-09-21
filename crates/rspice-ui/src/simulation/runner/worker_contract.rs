@@ -74,9 +74,9 @@ pub(crate) struct WorkerRequest {
     pub(in crate::simulation) stream_transient_samples: bool,
 }
 
-/// 32: All-node Monte Carlo supports histogram controls and trial continuation.
+/// 33: DC mismatch carries the conditional-moment integration policy.
 #[cfg(any(target_arch = "wasm32", test))]
-pub(crate) const WORKER_REQUEST_TRANSPORT_PROTOCOL: u8 = 32;
+pub(crate) const WORKER_REQUEST_TRANSPORT_PROTOCOL: u8 = 33;
 
 /// Browser-worker request split into compact metadata and transferable
 /// floating-point buffers. The embedded request deliberately carries empty

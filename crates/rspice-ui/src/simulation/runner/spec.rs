@@ -2213,6 +2213,7 @@ R2 out 0 {r2v}\n";
 
     fn dc_mismatch_spec(sigma_multiplier: f64, contributor_limit: usize) -> AnalysisSpec {
         AnalysisSpec::DcMismatch {
+            moment_options: Default::default(),
             output_expression: "V(out)".to_owned(),
             sigma_multiplier,
             contributor_limit,
@@ -2236,6 +2237,63 @@ R2 out 0 {r2v}\n";
             &ResolvedExecutionDependencies::default(),
             &rspice_core::abort_signal::NoAbort,
         )
+    }
+
+    #[test]
+    fn dc_mismatch_moment_controls_reach_the_solver() {
+        use rspice_core::netlist::{
+            SpectreDistribution, SpectreSpread, SpectreStatisticsPlan, SpectreVariation,
+            SpectreVariationBounds, SpectreVariationScope,
+        };
+        let statistics = SpectreStatisticsPlan {
+            variations: vec![SpectreVariation {
+                line: 1,
+                scope: SpectreVariationScope::Mismatch,
+                parameter: "r".into(),
+                distribution: SpectreDistribution::Gaussian,
+                spread: SpectreSpread::StandardDeviation("10".into()),
+                percent: false,
+                bounds: Some(SpectreVariationBounds {
+                    lower: Some("990".into()),
+                    upper: Some("1010".into()),
+                    ..Default::default()
+                }),
+            }],
+            correlations: Vec::new(),
+        };
+        let deck = format!(
+            "bounded resistor\n{}\n.param r=1000\nI1 0 out 1m\nR1 out 0 {{r}}\n.end\n",
+            statistics.to_parser_directive().unwrap()
+        );
+        let mut spec = dc_mismatch_spec(1.0, 0);
+        let AnalysisSpec::DcMismatch { moment_options, .. } = &mut spec else {
+            unreachable!()
+        };
+        moment_options.relative_tolerance = 1e-12;
+        moment_options.max_points = 1024;
+        let error = run_dc_mismatch(&deck, spec.clone())
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("did not converge within 1024 integration points"),
+            "{error}"
+        );
+
+        let AnalysisSpec::DcMismatch { moment_options, .. } = &mut spec else {
+            unreachable!()
+        };
+        moment_options.relative_tolerance = 0.002;
+        moment_options.max_points = 131_072;
+        let SimulationResult::DcMismatch { evidence } = run_dc_mismatch(&deck, spec).unwrap()
+        else {
+            panic!("DC mismatch evidence expected");
+        };
+        // Normal truncated at one sigma: Var(Z) = 1 - 2 phi(1)/(2 Phi(1)-1).
+        let expected =
+            0.01 * (1.0_f64 - 2.0 * 0.241_970_724_519_143_37 / 0.682_689_492_137_085_9).sqrt();
+        assert!((evidence.sigma_total / expected - 1.0).abs() < 0.002);
+        assert!((evidence.nominal_value - 1.0).abs() < 1e-9);
+        assert_eq!(evidence.validate(), Ok(()));
     }
 
     /// The whole route, ending on numbers a hand calculation can check.
@@ -2362,6 +2420,7 @@ R2 out 0 {r2v}\n";
         let error = run_dc_mismatch(
             &statistical_divider(""),
             AnalysisSpec::DcMismatch {
+                moment_options: Default::default(),
                 output_expression: "V(nowhere)".to_owned(),
                 sigma_multiplier: 1.0,
                 contributor_limit: 10,

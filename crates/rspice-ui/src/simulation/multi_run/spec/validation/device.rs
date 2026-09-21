@@ -183,6 +183,7 @@ pub(super) fn validate(spec: &AnalysisSpec) -> Result<(), String> {
             Ok(())
         }
         AnalysisSpec::DcMismatch {
+            moment_options,
             output_expression,
             sigma_multiplier,
             include_process,
@@ -190,6 +191,9 @@ pub(super) fn validate(spec: &AnalysisSpec) -> Result<(), String> {
             contribution_threshold,
             ..
         } => {
+            moment_options
+                .validate()
+                .map_err(|error| error.to_string())?;
             // No bound of its own on `contributor_limit`: zero is the card's
             // authored spelling of "list every contributor", so a limit this
             // layer refused would refuse a card the engine accepts.
@@ -298,6 +302,7 @@ mod tests {
         scopes: (bool, bool),
     ) -> AnalysisSpec {
         AnalysisSpec::DcMismatch {
+            moment_options: Default::default(),
             output_expression: output_expression.to_owned(),
             sigma_multiplier,
             contributor_limit: 10,
@@ -322,6 +327,7 @@ mod tests {
             unreachable!("the fixture is a DC mismatch specification");
         };
         AnalysisSpec::DcMismatch {
+            moment_options: Default::default(),
             output_expression,
             sigma_multiplier,
             contributor_limit,
@@ -365,6 +371,7 @@ mod tests {
         let netlist =
             rspice_core::netlist::Netlist::parse(&deck(".op")).expect("the fixture design parses");
         let card = rspice_core::netlist::DcMatchCard {
+            moments: Default::default(),
             output_node: "OUT".to_owned(),
             reference_node: None,
             output_is_current: false,
@@ -407,6 +414,7 @@ mod tests {
             unreachable!("the fixture is a DC mismatch specification");
         };
         let spec = AnalysisSpec::DcMismatch {
+            moment_options: Default::default(),
             output_expression,
             sigma_multiplier,
             contributor_limit: 0,
