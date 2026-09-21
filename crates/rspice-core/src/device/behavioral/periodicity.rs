@@ -6,6 +6,19 @@ use super::*;
 use crate::expr::{constant_value, function_uses_implicit_time as implicit_time};
 use crate::numerics::is_integral_cycle_count;
 
+fn shooting_frequency_context(
+    dependent: bool,
+    frequency: Value,
+    dialect: ExpressionDialect,
+) -> bool {
+    // Xyce's AnalysisBase::getCurrentFreq() returns zero; transient/HB do not
+    // override it as AC/NOISE do. Shooting follows the time-domain expression
+    // context, not the orbit fundamental. A stale nonzero AC context is not a
+    // valid shooting certificate. Frequency-domain consumers have separate
+    // admission checks and must still supply their own frequency operators.
+    !dependent || (dialect == ExpressionDialect::Xyce && frequency == 0.0)
+}
+
 impl BehavioralVoltageSource {
     pub(crate) fn has_stateless_periodic_equation(&self) -> bool {
         self.program.sdt_count == 0 && !self.is_frequency_dependent()
@@ -32,14 +45,17 @@ impl BehavioralVoltageSource {
     /// Integral values are shooting coordinates. Their input equations must
     /// repeat in time; zero mean is enforced by the solved period map.
     pub(crate) fn has_periodic_shooting_equation(&self, period: Value, autonomous: bool) -> bool {
-        !self.is_frequency_dependent()
-            && time_increment_with_state(
-                &self.ast,
-                period,
-                &self.periodicity_context(),
-                autonomous,
-                true,
-            ) == Some(0.0)
+        shooting_frequency_context(
+            self.is_frequency_dependent(),
+            self.frequency,
+            self.expression_dialect,
+        ) && time_increment_with_state(
+            &self.ast,
+            period,
+            &self.periodicity_context(),
+            autonomous,
+            true,
+        ) == Some(0.0)
     }
 
     pub(crate) fn has_periodic_time_dependence(&self, period: Value, autonomous: bool) -> bool {
@@ -82,14 +98,17 @@ impl BehavioralCurrentSource {
     /// Integral values are shooting coordinates. Their input equations must
     /// repeat in time; zero mean is enforced by the solved period map.
     pub(crate) fn has_periodic_shooting_equation(&self, period: Value, autonomous: bool) -> bool {
-        !self.is_frequency_dependent()
-            && time_increment_with_state(
-                &self.ast,
-                period,
-                &self.periodicity_context(),
-                autonomous,
-                true,
-            ) == Some(0.0)
+        shooting_frequency_context(
+            self.is_frequency_dependent(),
+            self.frequency,
+            self.expression_dialect,
+        ) && time_increment_with_state(
+            &self.ast,
+            period,
+            &self.periodicity_context(),
+            autonomous,
+            true,
+        ) == Some(0.0)
     }
 
     pub(crate) fn has_periodic_time_dependence(&self, period: Value, autonomous: bool) -> bool {
@@ -534,6 +553,29 @@ fn time_increment_with_state(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn xyce_shooting_frequency_is_zero_and_never_a_stale_ac_frequency() {
+        let mut voltage =
+            BehavioralVoltageSource::new("Bv".into(), 1, 0, 1, "sdt((1+frequency)*v(out))")
+                .unwrap();
+        let mut current =
+            BehavioralCurrentSource::new("Bi".into(), 1, 0, "(1+frequency)*v(out)").unwrap();
+        assert!(!voltage.has_periodic_shooting_equation(1e-3, false));
+        assert!(!current.has_periodic_shooting_equation(1e-3, false));
+        voltage.set_expression_dialect(ExpressionDialect::Xyce);
+        current.set_expression_dialect(ExpressionDialect::Xyce);
+        for autonomous in [false, true] {
+            assert!(voltage.has_periodic_shooting_equation(1e-3, autonomous));
+            assert!(current.has_periodic_shooting_equation(1e-3, autonomous));
+        }
+        for frequency in [1e3, Value::NAN, Value::INFINITY] {
+            voltage.set_frequency(frequency);
+            current.set_frequency(frequency);
+            assert!(!voltage.has_periodic_shooting_equation(1e-3, false));
+            assert!(!current.has_periodic_shooting_equation(1e-3, false));
+        }
+    }
 
     #[test]
     fn table_source_intervals_follow_physical_time_coordinates() {

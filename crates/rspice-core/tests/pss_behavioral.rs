@@ -38,6 +38,60 @@ fn expected(name: &str, time: f64) -> f64 {
 }
 
 #[test]
+fn xyce_pss_frequency_context_matches_transient_and_retains_integral_history() {
+    use rspice_core::config::ExpressionDialect;
+    use rspice_core::engine::{SimulationConfig, SpiceDialect};
+    use rspice_core::netlist::NetlistParseOptions;
+    let netlist = Netlist::parse_with_options(
+        "Xyce shooting frequency\n.PARAM RUNTIME_R={2k+FREQ}\nvin in 0 sin(0 1 1k)\n\
+         bv out 0 v=1k*sdt((1+FREQ/1k)*v(in)-v(out))\nrout out 0 1k\n\
+         bi 0 current i=.001*(1+FREQ/1k)*v(out)\nri current 0 {RUNTIME_R}\n.end\n",
+        NetlistParseOptions {
+            expression_dialect: ExpressionDialect::Xyce,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let engine = Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce));
+    let (analysis, state) = engine
+        .run_pss_with_continuation_state(&netlist, config())
+        .unwrap();
+    for (name, gain) in [("out", 1.0), ("current", 2.0)] {
+        let row = analysis
+            .result
+            .node_names
+            .iter()
+            .position(|n| n.eq_ignore_ascii_case(name))
+            .unwrap();
+        for (&time, &actual) in analysis
+            .result
+            .time
+            .iter()
+            .zip(&analysis.result.waveforms[row].values)
+        {
+            assert!(
+                (actual - gain * expected("out", time)).abs() < gain * 2e-4,
+                "{name} at {time}: {actual}"
+            );
+        }
+    }
+    assert_eq!(analysis.monodromy.len(), 1);
+    assert!((analysis.monodromy[0][0] - (-RATE / F0).exp()).abs() < 2e-4);
+    let (continued, _) = engine
+        .run_tran_from_pss_state(&netlist, &state, 2e-4, 2e-6)
+        .unwrap();
+    for (name, gain) in [("out", 1.0), ("current", 2.0)] {
+        let wave = continued.try_voltage_waveform_named(name).unwrap();
+        for (&time, &actual) in continued.time.iter().zip(wave) {
+            assert!(
+                (actual - gain * expected("out", time)).abs() < gain * 3e-4,
+                "continued {name} at {time}: {actual}"
+            );
+        }
+    }
+}
+
+#[test]
 fn pss_behavioral_integrals_retain_independent_nested_and_current_states() {
     let engine = Engine::default();
     let netlist = circuit();
