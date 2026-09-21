@@ -33,7 +33,7 @@ inputs use checked portable bytes; a request without a checkpoint destination is
 rejected before trial execution.
 
 Native execution keeps only the latest complete snapshot in a separate queue,
-independent of terminal success. Browser request protocol 31 transfers resume
+independent of terminal success. Browser request protocol 32 transfers resume
 bytes in a Uint8Array, separately from numerical dependency buffers and JSON
 metadata. Workers publish accepted snapshots through a dedicated message before
 returning their terminal result. Ingress checks byte budgets and content identity;
@@ -54,7 +54,7 @@ their existing digests. Saving during execution keeps the committed trials;
 reopening restores an interrupted result, never a completed statistical population.
 Project and session snapshots share this result representation.
 
-Configured-study forms expose trial retention and checkpoint cadence (default:
+Monte Carlo forms expose trial retention and checkpoint cadence (default:
 every ten newly completed trials). A second section selects retained journals
 from the same authored analysis. Preparation validates the selected journals and
 pools matching populations into owned request bytes; subsequent history pruning
@@ -66,8 +66,8 @@ solver, sampler or circuit settings cannot silently discard selected trials. Ina
 JSON/RON round trips without influencing execution. A fully cached run publishes
 its journal once even when no new circuit is evaluated.
 
-Checkpoint inspection/import/export, the legacy all-node operating-point route
-and browser runtime verification still need integration. A focused three-point
+Checkpoint inspection/import/export and browser runtime verification still need
+integration. A focused three-point
 Run Set check verifies that two resumed populations solve only their missing
 trials, the third point runs fresh, and all observations match fresh runs. It also
 checks refusal of incompatible solver settings and omitted selected points.
@@ -88,3 +88,21 @@ source/AST mutation, includes, Xyce comments and parameter names. A Studio AC
 resume check verifies that changing to bootstrap confidence reuses completed
 trials, solves only missing indices and matches a fresh run's observations and
 confidence intervals.
+
+The default all-node OP study uses the same continuation path as configured
+studies. It elaborates the voltage roster without solving a nominal OP, retains
+authored node names and non-conflicting numeric aliases, and excludes event-only
+placeholder rows. The population binds the full node order and analog/event
+classification; a trial that changes that basis stops the study. Actual trials
+run the ordinary core OP solver on each materialized circuit.
+
+Histogram bins are configurable for the default voltage study as well as for
+selected bases. The option is frozen in the prepared request and transported to
+the worker. Constant observations still produce the engine's single-bin
+histogram. Histogram and confidence changes can reuse retained circuit trials.
+
+Focused checks compare resumed voltage studies against both fresh studies and
+the existing service runner for parameter and deck-statistics sampling, including
+Run Set temperature/supply, mixed-signal filtering, and authored numeric names.
+They also cover a nominal circuit with no real OP solution, changed-basis refusal,
+form validation, and the synchronized Rust/JavaScript request protocol.
