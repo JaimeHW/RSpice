@@ -257,8 +257,21 @@ impl HbSolver {
         frequency_hz: Value,
         small_signal: bool,
     ) -> Result<Vec<LinearEntry>, Error> {
-        let omega = std::f64::consts::TAU * frequency_hz;
         let mut entries = Vec::new();
+        self.visit_periodic_linear_entries(frequency_hz, small_signal, |row, col, value| {
+            entries.push((row, col, value));
+            Ok(())
+        })?;
+        Ok(entries)
+    }
+
+    pub(in crate::analysis::harmonic_balance::solver) fn visit_periodic_linear_entries(
+        &self,
+        frequency_hz: Value,
+        small_signal: bool,
+        mut visit: impl FnMut(usize, usize, Complex64) -> Result<(), Error>,
+    ) -> Result<(), Error> {
+        let omega = std::f64::consts::TAU * frequency_hz;
         let conductance = if small_signal {
             &self.periodic_g_matrix
         } else {
@@ -276,7 +289,7 @@ impl HbSolver {
                 } else {
                     Complex64::new(value, 0.0)
                 };
-                entries.push((row, col, coefficient));
+                visit(row, col, coefficient)?;
             }
         }
         for (index, branch) in self.periodic_mna_branches.iter().enumerate() {
@@ -284,19 +297,19 @@ impl HbSolver {
             let (_, pos, neg) = branch.ordinal_and_terminals();
             for (node, sign) in [(pos, 1.0), (neg, -1.0)] {
                 if node > 0 {
-                    entries.push((node - 1, row, Complex64::new(sign, 0.0)));
+                    visit(node - 1, row, Complex64::new(sign, 0.0))?;
                     if !matches!(
                         branch,
                         ExactMnaBranch::ConstitutivePort { .. }
                             | ExactMnaBranch::IntegralState { .. }
                     ) {
-                        entries.push((row, node - 1, Complex64::new(sign, 0.0)));
+                        visit(row, node - 1, Complex64::new(sign, 0.0))?;
                     }
                 }
             }
             match branch {
                 ExactMnaBranch::Inductor { inductance, .. } => {
-                    entries.push((row, row, Complex64::new(0.0, -omega * inductance)));
+                    visit(row, row, Complex64::new(0.0, -omega * inductance))?;
                 }
                 ExactMnaBranch::Resistor {
                     resistance,
@@ -308,25 +321,29 @@ impl HbSolver {
                     } else {
                         resistance
                     };
-                    entries.push((row, row, Complex64::new(-resistance, 0.0)));
+                    visit(row, row, Complex64::new(-resistance, 0.0))?;
                 }
                 _ => {}
             }
         }
         for &(row, col, value) in &self.exact_mna_static_entries {
-            entries.push((row, col, Complex64::new(value, 0.0)));
+            visit(row, col, Complex64::new(value, 0.0))?;
         }
         for &(row, col, value) in &self.exact_mna_inductance_entries {
-            entries.push((row, col, Complex64::new(0.0, -omega * value)));
+            visit(row, col, Complex64::new(0.0, -omega * value))?;
         }
         for network in &self.exact_periodic_networks {
+            let mut result = Ok(());
             network
                 .try_visit_direct_entries(omega, self.unknowns(), |row, col, value| {
-                    entries.push((row, col, value))
+                    if result.is_ok() {
+                        result = visit(row, col, value);
+                    }
                 })
                 .map_err(device_error)?;
+            result?;
         }
-        Ok(entries)
+        Ok(())
     }
 
     fn validate_quasi_periodic_circuit(&self) -> Result<(), Error> {
