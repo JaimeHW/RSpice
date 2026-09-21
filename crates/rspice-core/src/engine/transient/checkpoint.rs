@@ -20,15 +20,15 @@
 //! trap/power and optional charge-snapshot histories; complete JFET nonlinear
 //! state and explicit uninitialized-bias markers; ordinary lossless scalar
 //! transmission-line delay histories; generated Verilog-A `ddt`/`idt`
-//! histories and limiter anchors; behavioral SDT accepted histories; XSPICE
-//! model-owned checkpoint state; and the accepted LTE, Trap/Gear,
-//! static-residual/DAE, nonlinear-solver, cooldown,
-//! livelock, and global trajectory-policy runtime are captured bit-exactly.
+//! histories and limiter anchors; behavioral-source and capacitor SDT histories;
+//! XSPICE model-owned checkpoint state; and the accepted LTE, Trap/Gear,
+//! static-residual/DAE, nonlinear-solver, cooldown, livelock, and global
+//! trajectory-policy runtime are captured bit-exactly.
 //! An arbitrary accepted proposal continues exactly, while an explicitly
 //! normalized endpoint or breakpoint contract deliberately takes an order-one
 //! restart step. Exact-proposal restore is target-aware and fails closed for
-//! native compact-model, thermal, stateful capacitor-expression, nonlinear
-//! magnetic, standalone multi-winding transformer, stateful switch,
+//! native compact-model, thermal, nonlinear magnetic, standalone multi-winding
+//! transformer, stateful switch,
 //! runtime Verilog-A, or generated dynamic-charge histories that do not yet
 //! have a complete versioned contract. Sparse solver factors and scale state
 //! preserve exact promoted VBIC continuation. Distributed LTRA/TXL and coupled-line convolution runtimes also
@@ -41,6 +41,7 @@
 //! envelope with declared lengths and a BLAKE3 integrity seal.
 
 mod behavioral;
+mod capacitor_sdt;
 mod solver_state;
 use crate::device::behavioral::BehavioralAcceptedState;
 
@@ -193,7 +194,9 @@ fn checkpoint_operation_result<T>(
 /// Version 48 retains analytic outgoing GP anchor slopes for phase error control.
 /// Version 49 retains the separately selected GP Weil filter's accepted memory.
 /// Version 50 retains named behavioral-source SDT accepted histories.
-const FORMAT_VERSION: u32 = 50;
+/// Version 51 retains capacitor value-expression SDT accepted histories.
+const FORMAT_VERSION: u32 = 51;
+const CAPACITOR_SDT_FORMAT_VERSION: u32 = 51;
 const BEHAVIORAL_SDT_FORMAT_VERSION: u32 = 50;
 const BJT_WEIL_HISTORY_FORMAT_VERSION: u32 = 49;
 const BJT_PHASE_SLOPE_FORMAT_VERSION: u32 = 48;
@@ -633,6 +636,7 @@ pub struct TransientCheckpoint {
     xyce_team_resistance_noise_states: Vec<XyceTeamResistanceNoiseCheckpoint>,
     generic_switch_stores: Vec<[Value; 4]>,
     behavioral_states: Option<Vec<BehavioralAcceptedState>>,
+    capacitor_sdt_states: Option<Vec<capacitor_sdt::State>>,
     accepted_nonlinear_state_available: bool,
     accepted_nonlinear_states: AcceptedNativeNonlinearCheckpointStates,
     accepted_junction_history: AcceptedJunctionTransientHistoryCheckpoint,
@@ -5688,6 +5692,7 @@ impl TransientCheckpoint {
         mut budget: Option<&mut CheckpointParseBudget>,
     ) -> Result<(), String> {
         behavioral::validate(self.behavioral_states.as_deref(), self.time, &mut budget)?;
+        capacitor_sdt::validate(self.capacitor_sdt_states.as_deref(), self.time, &mut budget)?;
         if !self.time.is_finite() || self.time < 0.0 {
             return Err("checkpoint time must be finite and non-negative".to_string());
         }
@@ -6687,6 +6692,7 @@ impl TransientCheckpoint {
                 .capture_xyce_team_resistance_noise_checkpoints(),
             generic_switch_stores: circuit.generic_switch_transient_store_snapshots(),
             behavioral_states: Some(circuit.behavioral_sources.accepted_history()),
+            capacitor_sdt_states: Some(capacitor_sdt::capture(circuit)),
             accepted_nonlinear_state_available: true,
             accepted_nonlinear_states,
             accepted_junction_history,
@@ -6860,6 +6866,7 @@ impl TransientCheckpoint {
         circuit
             .behavioral_sources
             .validate_accepted_history(self.behavioral_states.as_deref(), self.time)?;
+        capacitor_sdt::validate_target(circuit, self.capacitor_sdt_states.as_deref())?;
         circuit.validate_xspice_checkpoint_instance_states(&self.xspice_instance_states)?;
         circuit.validate_generated_veriloga_checkpoint_states(
             &self.generated_veriloga_instance_states,
@@ -7122,6 +7129,7 @@ impl TransientCheckpoint {
         circuit
             .behavioral_sources
             .restore_accepted_history(self.behavioral_states.as_deref(), self.time)?;
+        capacitor_sdt::restore(circuit, self.capacitor_sdt_states.as_deref());
         circuit.restore_xspice_checkpoint_instance_states(&self.xspice_instance_states)?;
         circuit.restore_generated_veriloga_checkpoint_states(
             &self.generated_veriloga_instance_states,
@@ -7648,6 +7656,18 @@ impl TransientCheckpoint {
                             .saturating_add(state.integrals.len().saturating_mul(3))
                     }),
             )
+            .saturating_add(
+                self.capacitor_sdt_states
+                    .as_deref()
+                    .unwrap_or_default()
+                    .iter()
+                    .fold(1usize, |words, state| {
+                        words
+                            .saturating_add(6)
+                            .saturating_add(state.name.len().div_ceil(8))
+                            .saturating_add(state.integrals.len().saturating_mul(3))
+                    }),
+            )
             .saturating_add(self.accepted_nonlinear_states.resume_blockers.len())
             .saturating_add(
                 self.accepted_nonlinear_states
@@ -8042,6 +8062,7 @@ impl TransientCheckpoint {
             ));
         }
         behavioral::write(&mut out, self.behavioral_states.as_deref(), abort)?;
+        capacitor_sdt::write(&mut out, self.capacitor_sdt_states.as_deref(), abort)?;
         out.push_str(&format!(
             "accepted_nonlinear_state_available {}\n",
             u8::from(self.accepted_nonlinear_state_available)
@@ -9129,6 +9150,11 @@ impl TransientCheckpoint {
         } else {
             None
         };
+        let capacitor_sdt_states = if version >= CAPACITOR_SDT_FORMAT_VERSION {
+            capacitor_sdt::read(lines, budget)?
+        } else {
+            None
+        };
         let (accepted_nonlinear_state_available, accepted_nonlinear_states) = if version
             >= NATIVE_NONLINEAR_FORMAT_VERSION
         {
@@ -9386,6 +9412,7 @@ impl TransientCheckpoint {
             xyce_team_resistance_noise_states,
             generic_switch_stores,
             behavioral_states,
+            capacitor_sdt_states,
             accepted_nonlinear_state_available,
             accepted_nonlinear_states,
             accepted_junction_history,
@@ -11083,6 +11110,7 @@ mod tests {
             xyce_team_resistance_noise_states: Vec::new(),
             generic_switch_stores: vec![[-0.25, 0.125, 0.375, f64::MIN_POSITIVE]],
             behavioral_states: Some(Vec::new()),
+            capacitor_sdt_states: Some(Vec::new()),
             accepted_nonlinear_state_available: true,
             accepted_nonlinear_states: AcceptedNativeNonlinearCheckpointStates {
                 jfets: Vec::new(),
@@ -11338,6 +11366,32 @@ mod tests {
         let mut output = String::new();
         let mut lines = text.lines();
         while let Some(line) = lines.next() {
+            if version < CAPACITOR_SDT_FORMAT_VERSION
+                && line.starts_with("capacitor_sdt_state_available ")
+            {
+                continue;
+            }
+            if version < CAPACITOR_SDT_FORMAT_VERSION && line.starts_with("capacitor_sdt_states ") {
+                let count = line
+                    .split_whitespace()
+                    .nth(1)
+                    .unwrap()
+                    .parse::<usize>()
+                    .unwrap();
+                for _ in 0..count {
+                    let row = lines.next().unwrap();
+                    let integrals = row
+                        .split_whitespace()
+                        .nth(2)
+                        .unwrap()
+                        .parse::<usize>()
+                        .unwrap();
+                    for _ in 0..integrals {
+                        lines.next().unwrap();
+                    }
+                }
+                continue;
+            }
             if version < BEHAVIORAL_SDT_FORMAT_VERSION
                 && line.starts_with("behavioral_state_available ")
             {

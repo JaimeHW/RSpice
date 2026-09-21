@@ -327,6 +327,14 @@ impl SolutionDependentCapacitor {
         SolutionDependentCapacitorLinearization { value, partials }
     }
 
+    pub(crate) fn accepted_sdt_history(&self) -> Vec<crate::expr::AcceptedSdtState> {
+        self.vm.accepted_sdt_history(self.program.sdt_count)
+    }
+
+    pub(crate) fn restore_sdt_history(&mut self, history: &[crate::expr::AcceptedSdtState]) {
+        self.vm.restore_sdt_history(history);
+    }
+
     /// Commit stateful expression operators after an accepted transient step.
     pub fn accept_transient_step(&mut self, solution: &[Value], time: Value) {
         let _ = self.evaluate(solution, time);

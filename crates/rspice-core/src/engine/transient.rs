@@ -3594,11 +3594,6 @@ impl Engine {
         );
         block_if_present(
             &mut blockers,
-            circuit.capacitors.has_stateful_value_expressions(),
-            "solution-dependent capacitor accepted SDT expression state is not checkpointed",
-        );
-        block_if_present(
-            &mut blockers,
             circuit.resistors.thermal.iter().any(Option::is_some),
             "thermal resistor accepted temperature state is not checkpointed",
         );
@@ -13365,9 +13360,8 @@ D1 D 0 DMOD
             Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce))
                 .build_circuit(&stateful_capacitor)
                 .expect("stateful capacitor fixture builds");
-        assert_eq!(
-            Engine::exact_integration_runtime_resume_blockers(&stateful_capacitor, 1),
-            ["solution-dependent capacitor accepted SDT expression state is not checkpointed"]
+        assert!(
+            Engine::exact_integration_runtime_resume_blockers(&stateful_capacitor, 1).is_empty()
         );
     }
 
