@@ -11,9 +11,10 @@ mod sealed_source;
 mod snapshot;
 
 pub(in crate::simulation) use artifact::{
-    ExecutionArtifactEnvelope, ExecutionArtifactKind, PeriodicStateArtifact,
-    PreparedDependencyBinding, ResolvedExecutionDependencies, TransientTrajectoryArtifact,
-    required_artifact_kinds, validate_prepared_dependency_contract_with_options,
+    ExecutionArtifactEnvelope, ExecutionArtifactKind, PeriodicOperatingEnvironment,
+    PeriodicStateArtifact, PreparedDependencyBinding, ResolvedExecutionDependencies,
+    TransientTrajectoryArtifact, required_artifact_kinds,
+    validate_prepared_dependency_contract_with_options,
 };
 #[cfg(any(target_arch = "wasm32", test))]
 pub(in crate::simulation) use canonical::f64_sequence_digest;

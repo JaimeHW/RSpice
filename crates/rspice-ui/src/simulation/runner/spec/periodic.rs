@@ -30,11 +30,12 @@ pub(super) fn run_periodic_spec(
                 .qpss_state()
                 .map_err(|error| SimulationError::InvalidConfig(error.to_string()))?;
             let response = super::run_abort_aware_service(abort, || {
-                svc_runner::run_qpnoise_analysis_from_qpss_with_source_path_and_abort(
-                    netlist,
+                let circuit =
+                    state.materialize_consumer(netlist, source_path, dependencies, abort)?;
+                svc_runner::run_qpnoise_analysis_from_qpss_on_materialized_with_abort(
+                    &circuit,
                     &card,
                     state.operating_point(),
-                    source_path,
                     abort,
                 )
             })?;
@@ -48,11 +49,12 @@ pub(super) fn run_periodic_spec(
                 .qpss_state()
                 .map_err(|error| SimulationError::InvalidConfig(error.to_string()))?;
             let response = super::run_abort_aware_service(abort, || {
-                svc_runner::run_qpxf_analysis_from_qpss_with_source_path_and_abort(
-                    netlist,
+                let circuit =
+                    state.materialize_consumer(netlist, source_path, dependencies, abort)?;
+                svc_runner::run_qpxf_analysis_from_qpss_on_materialized_with_abort(
+                    &circuit,
                     &card,
                     state.operating_point(),
-                    source_path,
                     abort,
                 )
             })?;
@@ -66,11 +68,12 @@ pub(super) fn run_periodic_spec(
                 .qpss_state()
                 .map_err(|error| SimulationError::InvalidConfig(error.to_string()))?;
             let response = super::run_abort_aware_service(abort, || {
-                svc_runner::run_qpac_analysis_from_qpss_with_source_path_and_abort(
-                    netlist,
+                let circuit =
+                    state.materialize_consumer(netlist, source_path, dependencies, abort)?;
+                svc_runner::run_qpac_analysis_from_qpss_on_materialized_with_abort(
+                    &circuit,
                     &card,
                     state.operating_point(),
-                    source_path,
                     abort,
                 )
             })?;
@@ -82,11 +85,33 @@ pub(super) fn run_periodic_spec(
             let config = spec
                 .driven_qpss_config()
                 .map_err(SimulationError::InvalidConfig)?;
+            let artifact = dependencies.dc_operating_point_seed().map_err(|error| {
+                SimulationError::InvalidConfig(format!(
+                    "QPSS operating-point dependency is unavailable: {error}"
+                ))
+            })?;
+            let seed = if config.initial_state
+                == rspice_core::engine::QpssInitialState::DcOperatingPoint
+            {
+                Some(
+                    artifact
+                        .core_seed()
+                        .map_err(|error| SimulationError::InvalidConfig(error.to_string()))?,
+                )
+            } else {
+                None
+            };
             let data = super::run_abort_aware_service(abort, || {
-                svc_runner::run_qpss_analysis_with_source_path_and_abort(
+                let circuit = artifact.environment().materialize(
                     netlist,
-                    config,
                     source_path,
+                    dependencies,
+                    abort,
+                )?;
+                svc_runner::run_qpss_analysis_with_dc_seed_on_materialized_with_abort(
+                    &circuit,
+                    config,
+                    seed.as_ref(),
                     abort,
                 )
             })?;
@@ -641,15 +666,9 @@ fn run_pss(
             "shooting PSS operating-point dependency is unavailable: {error}"
         ))
     })?;
-    let actual_source_digest =
-        crate::workbench::documents::netlist_document::source_content_digest(netlist);
-    if artifact.effective_source_content_digest() != actual_source_digest {
-        return Err(SimulationError::InvalidConfig(format!(
-            "shooting PSS source identity {} does not match its bound operating-point source {}",
-            actual_source_digest,
-            artifact.effective_source_content_digest()
-        )));
-    }
+    dependencies
+        .validate_source_basis(netlist, artifact.effective_source_content_digest())
+        .map_err(|error| SimulationError::InvalidConfig(error.to_string()))?;
     let dc_seed = artifact.core_seed().map_err(|error| {
         SimulationError::InvalidConfig(format!(
             "shooting PSS operating-point seed is invalid: {error}"

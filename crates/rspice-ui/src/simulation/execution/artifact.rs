@@ -95,7 +95,8 @@ pub(in crate::simulation) fn required_artifact_kinds(
         AnalysisSpec::Pss {
             method: PssMethod::Shooting,
             ..
-        } => DC_SEED,
+        }
+        | AnalysisSpec::Qpss { .. } => DC_SEED,
         AnalysisSpec::Pac => for_carrier(options.pac.as_ref().map(|config| config.carrier)),
         AnalysisSpec::Pxf => for_carrier(options.pxf.as_ref().map(|config| config.carrier)),
         AnalysisSpec::Pnoise => for_carrier(options.pnoise.as_ref().map(|config| config.carrier)),
@@ -257,12 +258,12 @@ pub(in crate::simulation) fn validate_prepared_dependency_contract_with_options(
         AnalysisSpec::Pss {
             method: PssMethod::Shooting,
             ..
-        }
+        } | AnalysisSpec::Qpss { .. }
     ) {
         return match producer {
             AnalysisSpec::LegacyDcOp | AnalysisSpec::DcOp { .. } => Ok(()),
             _ => Err(ExecutionArtifactError::ContractMismatch(format!(
-                "shooting PSS cannot consume a DC operating-point seed produced by {}",
+                "periodic analysis cannot consume a DC operating-point seed produced by {}",
                 producer.run_type().display_name()
             ))),
         };

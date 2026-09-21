@@ -192,7 +192,12 @@ pub(super) fn build_manual_deck_queue(
         .iter()
         .filter(|task| matches!(task.spec, AnalysisSpec::Pss { .. }))
         .count();
-    if periodic_pss_count > 0 {
+    let qpss_count = queue
+        .iter()
+        .filter(|task| matches!(task.spec, AnalysisSpec::Qpss { .. }))
+        .count();
+    if periodic_pss_count > 0 || qpss_count > 0 {
+        let family = if qpss_count > 0 { "QPSS" } else { "PSS" };
         let op_count = queue
             .iter()
             .filter(|task| {
@@ -204,15 +209,15 @@ pub(super) fn build_manual_deck_queue(
             .count();
         if op_count > 1 {
             errors.push(format!(
-                "Manual-deck PSS requires one unambiguous operating-point seed; found {op_count} .OP analyses."
+                "Manual-deck {family} requires one unambiguous operating-point seed; found {op_count} .OP analyses."
             ));
         } else if op_count == 0 {
             match command_to_queue_item(state, &parsed, &AnalysisCommand::Op) {
                 Ok(mut item) => {
-                    item.analysis_line = ".op (implicit PSS seed)".to_owned();
+                    item.analysis_line = format!(".op (implicit {family} seed)");
                     queue.push(item);
                 }
-                Err(error) => errors.push(format!("Implicit PSS operating point: {error}")),
+                Err(error) => errors.push(format!("Implicit {family} operating point: {error}")),
             }
         }
     }

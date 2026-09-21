@@ -61,13 +61,14 @@ fn qpss_controls_survive_draft_worker_and_real_engine_execution() {
     let netlist = "QPSS card controls\nV1 input 0 DC .1 AC .2 30\nR1 input out 1k\nR2 out 0 1k\nC1 out 0 1u\nI1 0 out DC 0 AC .001 -20\n.end\n";
     let directive = config.to_spice().unwrap();
     let executable = netlist.replace(".end", &format!("{directive}\n.end"));
+    let dependencies = op_dependencies(&executable, &executable, &executable, Default::default());
     let result = run_spec_request(
         &EngineBridge::new(),
         restored,
         SpecExecutionOptions::default(),
         &executable,
         None,
-        &ResolvedExecutionDependencies::default(),
+        &dependencies,
         &rspice_core::NoAbort,
     )
     .unwrap();
@@ -168,4 +169,226 @@ fn qpss_controls_direct_mode_retains_inactive_krylov_draft_buffers() {
     assert_eq!(draft.krylov_restart, "unfinished");
     draft.linear_method = Method::Krylov;
     assert!(draft.to_spec().is_err());
+}
+
+fn op_dependencies(
+    basis: &str,
+    op_deck: &str,
+    consumer_deck: &str,
+    config: crate::simulation::dialog::OpConfig,
+) -> ResolvedExecutionDependencies {
+    use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
+    use crate::simulation::execution::{ExecutionArtifactEnvelope, PreparedDependencyBinding};
+    let snapshot = ContentDigest::from_bytes([91; 32]);
+    let binding = PreparedDependencyBinding::dc_operating_point_seed(
+        AnalysisInstanceId::new(),
+        ObjectRevision::INITIAL,
+        ContentDigest::from_bytes([92; 32]),
+    );
+    let result = EngineBridge::new()
+        .run(
+            &crate::simulation::AnalysisConfig::DcOp(config.clone()),
+            op_deck,
+        )
+        .unwrap();
+    let source = crate::workbench::documents::netlist_document::source_content_digest(basis);
+    let artifact = ExecutionArtifactEnvelope::from_dc_operating_point_result(
+        snapshot,
+        binding.producer_instance_id(),
+        binding.producer_source_revision(),
+        binding.producer_config_digest(),
+        source,
+        &config,
+        &result,
+    )
+    .unwrap()
+    .unwrap();
+    let mut dependencies = ResolvedExecutionDependencies::resolve(
+        snapshot,
+        vec![binding.clone()],
+        &HashMap::from([(binding.producer_instance_id(), artifact)]),
+    )
+    .unwrap();
+    dependencies.bind_source(consumer_deck, source);
+    let (metadata, buffers) = dependencies.encode_transfer().unwrap();
+    ResolvedExecutionDependencies::decode_transfer(&metadata, buffers).unwrap()
+}
+
+#[test]
+fn qpss_op_handoff_preserves_environment_and_consumers_across_worker_transport() {
+    use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
+    use crate::simulation::dialog::{OpConfig, OpTemperatureMode};
+    use crate::simulation::execution::{ExecutionArtifactEnvelope, PreparedDependencyBinding};
+    use crate::simulation::plan::{
+        QpnoiseSourceSelection, QuasiPeriodicAcDraft, QuasiPeriodicNoiseDraft,
+        QuasiPeriodicTransferDraft,
+    };
+    let basis = "Bound QP OP\nV1 in 0 DC .2 AC .3 30\nI1 0 out DC 0 AC .001 -20\nRS in out {1000+10*(TEMP-37)} TC1=.01\nRL out 0 1k\nC1 out 0 100n\n.options TEMP=12 TNOM=27 GMIN=1e-10\n.end\n";
+    let op_deck =
+        svc_runner::splice_before_terminal_end_card(basis, ".options GMIN=1e-7 RELTOL=1e-8");
+    let qp_deck = svc_runner::splice_before_terminal_end_card(basis, ".options GMIN=0 TEMP=12");
+    let consumer_deck =
+        svc_runner::splice_before_terminal_end_card(basis, ".options GMIN=0 TEMP=77");
+    let mut op = OpConfig {
+        temperature_celsius: 37.0,
+        temperature_mode: OpTemperatureMode::Explicit,
+        ..Default::default()
+    };
+    op.run_point.supply_voltage = Some(2.0);
+    op.run_point.nominal_supply_voltage = Some(1.0);
+    op.run_point.supply_source_names = vec!["V1".into()];
+    let dependencies = op_dependencies(basis, &op_deck, &qp_deck, op);
+    let environment = dependencies
+        .dc_operating_point_seed()
+        .unwrap()
+        .environment();
+    let run = |spec: AnalysisSpec, deck: &str, deps: &ResolvedExecutionDependencies| {
+        run_spec_request(
+            &EngineBridge::new(),
+            spec,
+            Default::default(),
+            deck,
+            None,
+            deps,
+            &rspice_core::NoAbort,
+        )
+    };
+    let producer = authored().to_spec().unwrap();
+    dependencies
+        .validate_for_spec(&producer, &Default::default())
+        .unwrap();
+    assert!(run(producer.clone(), &qp_deck, &Default::default()).is_err());
+    assert!(
+        run(
+            producer.clone(),
+            &qp_deck.replace("RS in out", "RS in 0"),
+            &dependencies
+        )
+        .is_err()
+    );
+    let mut wrong_basis = dependencies.clone();
+    wrong_basis.bind_source(&qp_deck, ContentDigest::from_bytes([99; 32]));
+    assert!(run(producer.clone(), &qp_deck, &wrong_basis).is_err());
+    let result = run(producer.clone(), &qp_deck, &dependencies).unwrap();
+    let dc = result
+        .study_measurement("tuple:0,0:real:V(out)")
+        .unwrap()
+        .value
+        .unwrap();
+    assert!(
+        (dc - 0.4 / 2.1).abs() < 1e-9,
+        "OP temperature and explicit supply must reach QPSS"
+    );
+    let current = result
+        .study_measurement("tuple:0,0:real:I(V1)")
+        .unwrap()
+        .value
+        .unwrap();
+    assert!((current + 0.4 / 2100.0).abs() < 1e-11);
+    let mut zero = producer.clone();
+    let AnalysisSpec::Qpss { controls, .. } = &mut zero else {
+        unreachable!()
+    };
+    controls.initial_state = QpssInitialState::Zero;
+    let zero = run(zero, &qp_deck, &dependencies).unwrap();
+    assert!(
+        (zero
+            .study_measurement("tuple:0,0:real:V(out)")
+            .unwrap()
+            .value
+            .unwrap()
+            - dc)
+            .abs()
+            < 1e-9
+    );
+
+    let snapshot = ContentDigest::from_bytes([91; 32]);
+    let binding = PreparedDependencyBinding::qpss_state(
+        AnalysisInstanceId::new(),
+        ObjectRevision::INITIAL,
+        ContentDigest::from_bytes([93; 32]),
+    );
+    let artifact = ExecutionArtifactEnvelope::from_qpss_result_with_environment(
+        snapshot,
+        binding.producer_instance_id(),
+        binding.producer_source_revision(),
+        binding.producer_config_digest(),
+        &producer,
+        &result,
+        Some(environment),
+    )
+    .unwrap()
+    .unwrap();
+    let mut consumers = ResolvedExecutionDependencies::resolve(
+        snapshot,
+        vec![binding.clone()],
+        &HashMap::from([(binding.producer_instance_id(), artifact)]),
+    )
+    .unwrap();
+    consumers.bind_source(
+        &consumer_deck,
+        crate::workbench::documents::netlist_document::source_content_digest(basis),
+    );
+    let (metadata, buffers) = consumers.encode_transfer().unwrap();
+    let changed = metadata.replace(
+        "\"temperature_celsius\":37.0",
+        "\"temperature_celsius\":47.0",
+    );
+    assert_ne!(changed, metadata);
+    assert!(ResolvedExecutionDependencies::decode_transfer(&changed, buffers.clone()).is_err());
+    let consumers = ResolvedExecutionDependencies::decode_transfer(&metadata, buffers).unwrap();
+    let h = rspice_core::Complex64::new(1.0 / 1100.0, 0.0)
+        / rspice_core::Complex64::new(1.0 / 1100.0 + 0.001, std::f64::consts::TAU * 100.0 * 1e-7);
+    let qp = QuasiPeriodicAcDraft {
+        explicit_offsets: "100,300,700".into(),
+        input_source: "V1".into(),
+        magnitude: "2".into(),
+        phase_degrees: "73".into(),
+        ..Default::default()
+    }
+    .to_spec()
+    .unwrap();
+    let xf = QuasiPeriodicTransferDraft {
+        explicit_frequencies: "100,300,700".into(),
+        input_source: "V1".into(),
+        ..Default::default()
+    }
+    .to_spec()
+    .unwrap();
+    let noise = QuasiPeriodicNoiseDraft {
+        explicit_frequencies: "100,300,700".into(),
+        source_selection: QpnoiseSourceSelection::Only,
+        source_names: "RS thermal".into(),
+        ..Default::default()
+    }
+    .to_spec()
+    .unwrap();
+    for (spec, observation, expected) in [
+        (
+            qp,
+            "bin:0:real:V(out,0) [k=[0, 0]]",
+            (h * rspice_core::Complex64::from_polar(2.0, 73.0_f64.to_radians())).re,
+        ),
+        (
+            xf,
+            "bin:0:real:H(V(out,0)/V(V1)) [in=[0, 0]; out=[0, 0]]",
+            h.re,
+        ),
+        (
+            noise,
+            "bin:0:real:PSD(output 1: V(out,0) [0, 0])",
+            4.0 * 1.380649e-23 * 310.15 * 1100.0 * h.norm_sqr(),
+        ),
+    ] {
+        let result = run(spec, &consumer_deck, &consumers).unwrap();
+        let actual = result
+            .study_measurement(observation)
+            .unwrap()
+            .value
+            .unwrap();
+        assert!(
+            (actual - expected).abs() < expected.abs() * 1e-7,
+            "{observation}: {actual} != {expected}"
+        );
+    }
 }

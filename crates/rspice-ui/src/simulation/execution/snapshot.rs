@@ -477,6 +477,8 @@ pub(in crate::simulation) struct PreparedTask {
     /// Exact per-point source after process-model binding. `None` selects the
     /// run-level executable source verbatim.
     executable_netlist_override: Option<String>,
+    /// Circuit source before analysis-local numerical/observation cards.
+    source_basis_digest: Option<ContentDigest>,
     /// The PVT point this task was expanded to. Only per-point expansion sets
     /// it; a task that runs once for the whole declared space has no point,
     /// and naming one would attribute its results to a corner it never solved.
@@ -526,6 +528,7 @@ impl PreparedTask {
             saved_output_contracts: Vec::new(),
             touchstone_export: None,
             executable_netlist_override: None,
+            source_basis_digest: None,
             pvt_point: None,
             declared_point: None,
             execution_environment: None,
@@ -760,6 +763,7 @@ pub(in crate::simulation) struct AuthorizedTaskDispatch {
     task: QueuedAnalysis,
     saved_output_contracts: Vec<PreparedSavedOutput>,
     executable_netlist: Arc<str>,
+    source_basis_digest: ContentDigest,
     project_veriloga_runtimes: crate::simulation::veriloga::PreparedVerilogARuntimeSet,
     touchstone_export: TouchstoneExportPolicy,
     pvt_point: Option<crate::state::AnalysisResultPvtPoint>,
@@ -857,16 +861,21 @@ impl AuthorizedTaskDispatch {
         self.declared_point.as_ref()
     }
 
+    pub(in crate::simulation) const fn source_basis_digest(&self) -> ContentDigest {
+        self.source_basis_digest
+    }
+
     pub(in crate::simulation) fn resolve_dependency_artifacts(
         self,
         artifacts: &HashMap<AnalysisInstanceId, ExecutionArtifactEnvelope>,
     ) -> Result<ResolvedTaskDispatch, ExecutionArtifactError> {
-        let dependencies = ResolvedExecutionDependencies::resolve(
+        let mut dependencies = ResolvedExecutionDependencies::resolve(
             self.snapshot_digest,
             self.dependency_bindings.clone(),
             artifacts,
         )?;
         dependencies.validate_for_spec(&self.task.spec, &self.task.spec_options)?;
+        dependencies.bind_source(&self.executable_netlist, self.source_basis_digest);
         Ok(ResolvedTaskDispatch {
             dispatch: self,
             dependencies,
@@ -1167,6 +1176,12 @@ impl PreparedRunSnapshot {
         // key, so the analysis wins over the plan without either block having
         // to know the other exists.
         for task in &mut parts.tasks {
+            let deck = task
+                .executable_netlist_override
+                .as_deref()
+                .unwrap_or(&parts.executable_netlist);
+            task.source_basis_digest =
+                Some(crate::workbench::documents::netlist_document::source_content_digest(deck));
             let Some(block) = task
                 .task
                 .numeric_override
@@ -1632,6 +1647,9 @@ impl PreparedRunSnapshot {
                     config_digest: prepared.config_digest,
                     task: prepared.task,
                     saved_output_contracts: prepared.saved_output_contracts,
+                    source_basis_digest: prepared
+                        .source_basis_digest
+                        .expect("prepared task has a source basis"),
                     executable_netlist: prepared
                         .executable_netlist_override
                         .map(Arc::<str>::from)
@@ -1772,7 +1790,12 @@ fn expand_pvt_point_tasks(
         let inherited_op_source_override = prepared
             .dependency_bindings
             .iter()
-            .find(|binding| binding.kind() == ExecutionArtifactKind::DcOperatingPointSeed)
+            .find(|binding| {
+                matches!(
+                    binding.kind(),
+                    ExecutionArtifactKind::DcOperatingPointSeed | ExecutionArtifactKind::QpssState
+                )
+            })
             .and_then(|binding| final_task.get(&binding.producer_instance_id()))
             .and_then(|(_, _, _, source)| source.clone());
         for binding in &mut prepared.dependency_bindings {
@@ -1787,7 +1810,10 @@ fn expand_pvt_point_tasks(
             AnalysisSpec::Pss {
                 method: crate::simulation::multi_run::PssMethod::Shooting,
                 ..
-            }
+            } | AnalysisSpec::Qpss { .. }
+                | AnalysisSpec::Qpac { .. }
+                | AnalysisSpec::Qpxf { .. }
+                | AnalysisSpec::Qpnoise { .. }
         ) {
             prepared.executable_netlist_override = inherited_op_source_override;
         }
@@ -2883,6 +2909,9 @@ fn snapshot_digest(
             task.executable_netlist_override.as_ref(),
             |writer, source| writer.string(source),
         );
+        writer.option(task.source_basis_digest.as_ref(), |writer, digest| {
+            writer.digest(*digest)
+        });
         writer.string(&task.label);
         writer.sequence(task.dependencies.len());
         for dependency in &task.dependencies {

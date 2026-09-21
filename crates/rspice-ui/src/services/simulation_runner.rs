@@ -28,7 +28,6 @@ mod qpnoise;
 mod qpss;
 mod qpxf;
 pub(crate) use qpac::run_qpac_analysis_from_qpss_on_materialized_with_abort;
-pub use qpac::run_qpac_analysis_from_qpss_with_source_path_and_abort;
 pub(crate) use qpnoise::run_qpnoise_analysis_from_qpss_on_materialized_with_abort;
 pub use qpnoise::run_qpnoise_analysis_from_qpss_with_source_path_and_abort;
 pub(crate) use qpss::{
@@ -36,7 +35,6 @@ pub(crate) use qpss::{
     run_qpss_analysis_with_dc_seed_on_materialized_with_abort,
 };
 pub(crate) use qpxf::run_qpxf_analysis_from_qpss_on_materialized_with_abort;
-pub use qpxf::run_qpxf_analysis_from_qpss_with_source_path_and_abort;
 mod reliability;
 pub use reliability::run_reliability_analysis_with_source_path_and_abort;
 mod soa;
@@ -78,10 +76,10 @@ use helpers::parse_runner_netlist_with_statistical_sampling_and_abort;
 use helpers::{
     build_voltage_output_expr, generate_freq_points_with_abort, is_ground_like,
     netlist_has_independent_source_named_with_abort, normalize_voltage_signal_name,
-    parse_runner_netlist_with_abort,
 };
 pub(crate) use helpers::{
-    source_with_run_temperature_with_abort, splice_before_terminal_end_card, terminal_end_card_offset,
+    parse_runner_netlist_with_abort, source_with_run_temperature_with_abort,
+    splice_before_terminal_end_card, terminal_end_card_offset,
 };
 pub(crate) use monte_carlo::{
     MonteCarloData, finish_monte_carlo_result,

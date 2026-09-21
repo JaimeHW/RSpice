@@ -439,12 +439,12 @@ impl TransientTrajectoryArtifact {
     }
 }
 
-/// Exact DC operating-point state consumed by one bound shooting-PSS task.
+/// Exact DC operating-point state consumed by a bound steady-state task.
 ///
 /// The payload retains the core MNA basis rather than presentation maps. Its
-/// source identity covers the exact per-task executable deck (including any
-/// process-corner materialization); voltage scaling and temperature are kept
-/// alongside it so PSS can reproduce the OP engine environment exactly once.
+/// source identity covers the circuit deck after process-corner materialization
+/// and before analysis-local numerical options. Voltage scaling and temperature
+/// let periodic solvers reproduce the OP physical environment exactly once.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(in crate::simulation) struct DcOperatingPointSeedArtifact {
     effective_source_content_digest: ContentDigest,
@@ -459,7 +459,102 @@ pub(in crate::simulation) struct DcOperatingPointSeedArtifact {
     solution: Vec<f64>,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(in crate::simulation) struct PeriodicOperatingEnvironment {
+    source_basis_digest: ContentDigest,
+    temperature_celsius: f64,
+    supply_voltage: Option<f64>,
+    nominal_supply_voltage: Option<f64>,
+    supply_source_names: Vec<String>,
+}
+
+impl PeriodicOperatingEnvironment {
+    fn validate(&self) -> Result<(), ExecutionArtifactError> {
+        if !self.temperature_celsius.is_finite() || self.temperature_celsius <= -273.15 {
+            return Err(ExecutionArtifactError::InvalidPayload(
+                "Periodic temperature must be finite and above absolute zero".into(),
+            ));
+        }
+        match (self.supply_voltage, self.nominal_supply_voltage) {
+            (None, None) => {}
+            (Some(supply), Some(nominal))
+                if supply.is_finite()
+                    && supply > 0.0
+                    && nominal.is_finite()
+                    && nominal > 0.0
+                    && !self.supply_source_names.is_empty() => {}
+            _ => {
+                return Err(ExecutionArtifactError::InvalidPayload(
+                    "Periodic supply point must pair positive voltages with explicit source names"
+                        .into(),
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    fn encode(&self, writer: &mut CanonicalWriter) {
+        writer.digest(self.source_basis_digest);
+        writer.f64(self.temperature_celsius);
+        writer.option(self.supply_voltage.as_ref(), |writer, value| {
+            writer.f64(*value)
+        });
+        writer.option(self.nominal_supply_voltage.as_ref(), |writer, value| {
+            writer.f64(*value)
+        });
+        writer.sequence(self.supply_source_names.len());
+        for name in &self.supply_source_names {
+            writer.string(name);
+        }
+    }
+
+    pub(in crate::simulation) fn materialize(
+        &self,
+        source: &str,
+        source_path: Option<&std::path::Path>,
+        dependencies: &ResolvedExecutionDependencies,
+        abort: &dyn rspice_core::abort_signal::AbortSignal,
+    ) -> crate::services::simulation_runner::ServiceRunResult<rspice_core::Netlist> {
+        use crate::services::simulation_runner as services;
+        self.validate()
+            .map_err(|error| services::ServiceRunError::Failure(error.to_string()))?;
+        dependencies
+            .validate_source_basis(source, self.source_basis_digest)
+            .map_err(|error| services::ServiceRunError::Failure(error.to_string()))?;
+        let temperature_source = services::source_with_run_temperature_with_abort(
+            source,
+            self.temperature_celsius,
+            abort,
+        )?;
+        let mut circuit =
+            services::parse_runner_netlist_with_abort(&temperature_source, source_path, abort)?;
+        circuit.source_text = Some(source.to_owned());
+        if let (Some(supply), Some(nominal)) = (self.supply_voltage, self.nominal_supply_voltage) {
+            services::apply_voltage_corner(
+                &mut circuit,
+                supply,
+                nominal,
+                &self.supply_source_names,
+                abort,
+            )?;
+        }
+        circuit.options.temp = Some(self.temperature_celsius);
+        Ok(circuit)
+    }
+}
+
 impl DcOperatingPointSeedArtifact {
+    pub(in crate::simulation) fn environment(&self) -> PeriodicOperatingEnvironment {
+        PeriodicOperatingEnvironment {
+            source_basis_digest: self.effective_source_content_digest,
+            temperature_celsius: self.temperature_celsius,
+            supply_voltage: self.supply_voltage,
+            nominal_supply_voltage: self.nominal_supply_voltage,
+            supply_source_names: self.supply_source_names.clone(),
+        }
+    }
+
     pub(in crate::simulation) const fn effective_source_content_digest(&self) -> ContentDigest {
         self.effective_source_content_digest
     }
@@ -1402,14 +1497,62 @@ fn normalize_waveform_name(raw: &str) -> String {
     trimmed.to_ascii_uppercase()
 }
 
+/// Both digests are fixed by snapshot preparation before the one-use dispatch.
+/// One authenticates the actual worker input; the other identifies the common
+/// circuit source before each analysis adds its own numerical controls.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DependencySourceContext {
+    executable: ContentDigest,
+    basis: ContentDigest,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub(in crate::simulation) struct ResolvedExecutionDependencies {
     snapshot_digest: Option<ContentDigest>,
     bindings: Vec<PreparedDependencyBinding>,
     artifacts: Vec<ExecutionArtifactEnvelope>,
+    #[serde(default)]
+    source: Option<DependencySourceContext>,
 }
 
 impl ResolvedExecutionDependencies {
+    pub(in crate::simulation) fn bind_source(&mut self, executable: &str, basis: ContentDigest) {
+        if self.bindings.is_empty() {
+            return;
+        }
+        self.source = Some(DependencySourceContext {
+            executable: crate::workbench::documents::netlist_document::source_content_digest(
+                executable,
+            ),
+            basis,
+        });
+    }
+
+    pub(in crate::simulation) fn validate_source_basis(
+        &self,
+        source: &str,
+        expected_basis: ContentDigest,
+    ) -> Result<(), ExecutionArtifactError> {
+        let actual = crate::workbench::documents::netlist_document::source_content_digest(source);
+        let basis = match self.source {
+            Some(context) if context.executable == actual => context.basis,
+            Some(_) => {
+                return Err(ExecutionArtifactError::ContractMismatch(
+                    "periodic consumer executable source differs from its authorized dispatch"
+                        .into(),
+                ));
+            }
+            None => actual,
+        };
+        if basis != expected_basis {
+            return Err(ExecutionArtifactError::ContractMismatch(
+                "periodic consumer circuit source differs from its bound operating point".into(),
+            ));
+        }
+        Ok(())
+    }
+
     pub(in crate::simulation) fn resolve(
         snapshot_digest: ContentDigest,
         bindings: Vec<PreparedDependencyBinding>,
@@ -1433,6 +1576,7 @@ impl ResolvedExecutionDependencies {
             snapshot_digest: Some(snapshot_digest),
             bindings,
             artifacts: resolved,
+            source: None,
         })
     }
 
@@ -1827,6 +1971,7 @@ impl ResolvedExecutionDependencies {
             })
             .collect();
         let metadata = ResolvedExecutionDependenciesTransferMetadata {
+            source: self.source,
             snapshot_digest: self.snapshot_digest,
             bindings: self.bindings.clone(),
             artifacts,
@@ -2200,6 +2345,7 @@ impl ResolvedExecutionDependencies {
         }
 
         let resolved = Self {
+            source: metadata.source,
             snapshot_digest: metadata.snapshot_digest,
             bindings: metadata.bindings,
             artifacts,
@@ -2398,6 +2544,8 @@ struct ExecutionArtifactTransferMetadata {
 #[cfg(any(target_arch = "wasm32", test))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 struct ResolvedExecutionDependenciesTransferMetadata {
+    #[serde(default)]
+    source: Option<DependencySourceContext>,
     snapshot_digest: Option<ContentDigest>,
     bindings: Vec<PreparedDependencyBinding>,
     artifacts: Vec<ExecutionArtifactTransferMetadata>,

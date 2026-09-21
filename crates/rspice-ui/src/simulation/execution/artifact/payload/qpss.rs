@@ -8,6 +8,8 @@ pub(in crate::simulation) struct QpssStateArtifact {
     operating_point: Arc<QpssOperatingPoint>,
     spectral_real: Vec<Vec<f64>>,
     spectral_imaginary: Vec<Vec<f64>>,
+    #[serde(default)]
+    environment: Option<PeriodicOperatingEnvironment>,
 }
 
 impl QpssStateArtifact {
@@ -15,7 +17,27 @@ impl QpssStateArtifact {
         &self.operating_point
     }
 
+    pub(in crate::simulation) fn materialize_consumer(
+        &self,
+        source: &str,
+        source_path: Option<&std::path::Path>,
+        dependencies: &ResolvedExecutionDependencies,
+        abort: &dyn rspice_core::abort_signal::AbortSignal,
+    ) -> crate::services::simulation_runner::ServiceRunResult<rspice_core::Netlist> {
+        match &self.environment {
+            Some(environment) => environment.materialize(source, source_path, dependencies, abort),
+            None => crate::services::simulation_runner::parse_runner_netlist_with_abort(
+                source,
+                source_path,
+                abort,
+            ),
+        }
+    }
+
     pub(super) fn validate(&self) -> Result<(), ExecutionArtifactError> {
+        if let Some(environment) = &self.environment {
+            environment.validate()?;
+        }
         self.operating_point
             .validate_retained_payload_with_abort(
                 &rspice_core::ResourceLimits::default(),
@@ -49,10 +71,17 @@ impl QpssStateArtifact {
     pub(super) fn digest(&self) -> ContentDigest {
         let mut writer = CanonicalWriter::new("rspice.qpss-operating-point/v1");
         writer.string(self.operating_point.retained_identity());
+        if let Some(environment) = &self.environment {
+            writer.domain("periodic-operating-environment/v1");
+            environment.encode(&mut writer);
+        }
         writer.finish()
     }
 
-    fn from_point(point: Arc<QpssOperatingPoint>) -> Result<Self, ExecutionArtifactError> {
+    fn from_point(
+        point: Arc<QpssOperatingPoint>,
+        environment: Option<PeriodicOperatingEnvironment>,
+    ) -> Result<Self, ExecutionArtifactError> {
         point
             .validate_retained_payload_with_abort(
                 &rspice_core::ResourceLimits::default(),
@@ -65,6 +94,7 @@ impl QpssStateArtifact {
             .map(|row| split_complex_values(row))
             .unzip();
         let state = Self {
+            environment,
             operating_point: point,
             spectral_real,
             spectral_imaginary,
@@ -75,6 +105,7 @@ impl QpssStateArtifact {
 }
 
 impl ExecutionArtifactEnvelope {
+    #[cfg(test)]
     pub(in crate::simulation) fn from_qpss_result(
         snapshot_digest: ContentDigest,
         producer_instance_id: AnalysisInstanceId,
@@ -82,6 +113,26 @@ impl ExecutionArtifactEnvelope {
         producer_config_digest: ContentDigest,
         producer_spec: &AnalysisSpec,
         result: &SimulationResult,
+    ) -> Result<Option<Self>, ExecutionArtifactError> {
+        Self::from_qpss_result_with_environment(
+            snapshot_digest,
+            producer_instance_id,
+            producer_source_revision,
+            producer_config_digest,
+            producer_spec,
+            result,
+            None,
+        )
+    }
+
+    pub(in crate::simulation) fn from_qpss_result_with_environment(
+        snapshot_digest: ContentDigest,
+        producer_instance_id: AnalysisInstanceId,
+        producer_source_revision: ObjectRevision,
+        producer_config_digest: ContentDigest,
+        producer_spec: &AnalysisSpec,
+        result: &SimulationResult,
+        environment: Option<PeriodicOperatingEnvironment>,
     ) -> Result<Option<Self>, ExecutionArtifactError> {
         let SimulationResult::Qpss {
             operating_point, ..
@@ -99,7 +150,7 @@ impl ExecutionArtifactEnvelope {
                 "QPSS result configuration differs from its prepared producer".into(),
             ));
         }
-        let state = QpssStateArtifact::from_point(Arc::clone(operating_point))?;
+        let state = QpssStateArtifact::from_point(Arc::clone(operating_point), environment)?;
         Ok(Some(Self {
             snapshot_digest,
             producer_instance_id,
@@ -146,6 +197,8 @@ pub(super) struct QpssStateTransferMetadata {
     point: rspice_core::engine::QpssOperatingPointMetadata,
     real: Vec<TransferBufferRef>,
     imaginary: Vec<TransferBufferRef>,
+    #[serde(default)]
+    environment: Option<PeriodicOperatingEnvironment>,
 }
 
 #[cfg(any(target_arch = "wasm32", test))]
@@ -156,6 +209,7 @@ impl QpssStateArtifact {
     ) -> QpssStateTransferMetadata {
         let (point, _) = self.operating_point.as_ref().clone().into_transfer_parts();
         QpssStateTransferMetadata {
+            environment: self.environment.clone(),
             point,
             real: self
                 .spectral_real
@@ -218,6 +272,7 @@ impl QpssStateTransferMetadata {
         )
         .map_err(|error| ExecutionArtifactError::InvalidPayload(error.to_string()))?;
         let state = QpssStateArtifact {
+            environment: self.environment,
             operating_point: Arc::new(point),
             spectral_real,
             spectral_imaginary,
