@@ -1491,6 +1491,9 @@ fn operating_point_payload(
                 OperatingPointInitialGuessEvidence::UserNodeVoltages
             }
             OpInitialGuess::ZeroState => OperatingPointInitialGuessEvidence::ZeroState,
+            OpInitialGuess::PreviousCompatible => {
+                OperatingPointInitialGuessEvidence::PreviousCompatible
+            }
         },
         node_initialization: match config.node_initialization {
             OpNodeInitialization::UseIcAndNodeset => {

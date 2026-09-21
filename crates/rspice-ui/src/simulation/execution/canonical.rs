@@ -514,6 +514,7 @@ fn encode_op_fields(
         OpInitialGuess::PreviousConverged => 1,
         OpInitialGuess::UserNodeVoltages => 2,
         OpInitialGuess::ZeroState => 3,
+        OpInitialGuess::PreviousCompatible => 4,
     });
     writer.u8(match node_initialization {
         OpNodeInitialization::UseIcAndNodeset => 0,
@@ -1965,6 +1966,7 @@ mod tests {
         changed!(temperature_mode, OpTemperatureMode::Explicit);
         changed!(temperature_celsius, 91.25);
         changed!(initial_guess, OpInitialGuess::ZeroState);
+        changed!(initial_guess, OpInitialGuess::PreviousCompatible);
         changed!(node_initialization, OpNodeInitialization::ForceIcValues);
         changed!(homotopy, OpHomotopy::SourceStepping);
         changed!(annotation, OpAnnotation::VoltagesOnly);

@@ -20,6 +20,39 @@ use crate::state::{
 const HYSTERESIS_FORWARD: &str = "forward";
 const HYSTERESIS_REVERSE: &str = "reverse";
 
+fn map_previous_op_solution(
+    previous: &crate::simulation::dialog::OpPreviousState,
+    nodes: &[String],
+    branches: &[String],
+    abort: &dyn AbortSignal,
+) -> Result<Vec<f64>, SimulationError> {
+    if nodes.len() != previous.node_names.len() || branches.len() != previous.branch_names.len() {
+        return Err(SimulationError::InvalidConfig("Compatible-circuit OP reuse requires the same node and branch identities; the MNA dimensions changed".into()));
+    }
+    let mut mapped = Vec::with_capacity(previous.solution.len());
+    for (kind, current, saved, offset) in [
+        ("node", nodes, previous.node_names.as_slice(), 0),
+        (
+            "branch",
+            branches,
+            previous.branch_names.as_slice(),
+            previous.node_names.len(),
+        ),
+    ] {
+        let mut indices = HashMap::with_capacity(saved.len());
+        for (index, name) in saved.iter().enumerate() {
+            ensure_not_aborted(abort)?;
+            indices.insert(name.to_ascii_uppercase(), index + offset);
+        }
+        for name in current {
+            ensure_not_aborted(abort)?;
+            let index = indices.get(&name.to_ascii_uppercase()).ok_or_else(|| SimulationError::InvalidConfig(format!("Compatible-circuit OP reuse has no saved {kind} {name:?}; the MNA identities changed")))?;
+            mapped.push(previous.solution[*index]);
+        }
+    }
+    Ok(mapped)
+}
+
 impl EngineBridge {
     /// Run DC operating point analysis.
     pub(super) fn run_dc_op(
@@ -72,56 +105,68 @@ impl EngineBridge {
         }
         apply_startup_policy(&mut execution_netlist, config);
         let engine = configured_op_engine(self, &execution_netlist, config)?;
-        if config.initial_guess == OpInitialGuess::PreviousConverged {
+        let previous_solution = if config.initial_guess.uses_previous_state() {
             let previous = config.previous_state.as_ref().ok_or_else(|| {
                 SimulationError::InvalidConfig(
-                    "previous operating-point state was not bound to this request".to_owned(),
+                    "previous operating-point state was not bound to this request".into(),
                 )
             })?;
-            let source = execution_netlist.source_text.as_deref().ok_or_else(|| {
-                SimulationError::InvalidConfig(
-                    "previous operating-point startup requires exact executable source bytes"
-                        .to_owned(),
-                )
-            })?;
-            let effective_source_digest =
-                crate::simulation::execution::operating_point_effective_source_digest(
-                    source,
-                    config.run_point.clone(),
-                );
-            if previous.source_content_digest != effective_source_digest {
-                return Err(SimulationError::InvalidConfig(
-                    "previous operating-point state belongs to a different effective PVT source"
-                        .to_owned(),
-                ));
+            if config.initial_guess == OpInitialGuess::PreviousConverged {
+                let source = execution_netlist.source_text.as_deref().ok_or_else(|| {
+                    SimulationError::InvalidConfig(
+                        "previous operating-point startup requires exact executable source bytes"
+                            .into(),
+                    )
+                })?;
+                let effective_source_digest =
+                    crate::simulation::execution::operating_point_effective_source_digest(
+                        source,
+                        config.run_point.clone(),
+                    );
+                if previous.source_content_digest != effective_source_digest {
+                    return Err(SimulationError::InvalidConfig("previous operating-point state belongs to a different effective PVT source; select compatible-circuit reuse to use it as a mapped initial guess".into()));
+                }
             }
             let circuit = engine
                 .build_circuit_with_abort(&execution_netlist, abort)
                 .map_err(|error| self.translate_error(error))?;
-            if previous.node_names != circuit.node_names_sorted()
-                || previous.branch_names != circuit.branch_names_sorted()
-                || previous.solution.len() != circuit.matrix_size()
-            {
-                return Err(SimulationError::InvalidConfig(
-                    "previous operating-point state MNA basis does not match the elaborated circuit"
-                        .to_owned(),
-                ));
+            let nodes = circuit.node_names_sorted();
+            let branches = circuit.branch_names_sorted();
+            if config.initial_guess == OpInitialGuess::PreviousConverged {
+                if previous.node_names != nodes
+                    || previous.branch_names != branches
+                    || previous.solution.len() != circuit.matrix_size()
+                {
+                    return Err(SimulationError::InvalidConfig("previous operating-point state MNA basis does not match the elaborated circuit".into()));
+                }
+                Some(previous.solution.clone())
+            } else {
+                // The saved identities remain unchanged in the configuration and
+                // result evidence. Only the initial vector is mapped; the core
+                // must solve the current circuit afresh, including every study trial.
+                Some(map_previous_op_solution(
+                    previous, &nodes, &branches, abort,
+                )?)
             }
-        }
+        } else {
+            None
+        };
         let run = match (config.initial_guess, config.node_initialization) {
             (_, OpNodeInitialization::ForceIcValues) => {
                 engine.run_dc_op_forced_ic_with_report_and_abort(&execution_netlist, abort)
             }
-            (OpInitialGuess::PreviousConverged, _) => match config.previous_state.as_ref() {
-                Some(previous) => engine.run_dc_op_with_previous_solution_and_report_and_abort(
-                    &execution_netlist,
-                    &previous.solution,
-                    abort,
-                ),
-                None => Err(rspice_core::SimulationError::Circuit(
-                    "previous operating-point state was not bound to this request".to_owned(),
-                )),
-            },
+            (OpInitialGuess::PreviousConverged | OpInitialGuess::PreviousCompatible, _) => {
+                match previous_solution.as_deref() {
+                    Some(previous) => engine.run_dc_op_with_previous_solution_and_report_and_abort(
+                        &execution_netlist,
+                        previous,
+                        abort,
+                    ),
+                    None => Err(rspice_core::SimulationError::Circuit(
+                        "previous operating-point state was not bound to this request".to_owned(),
+                    )),
+                }
+            }
             (OpInitialGuess::ZeroState, _) => {
                 engine.run_dc_op_from_zero_with_report_and_abort(&execution_netlist, abort)
             }
@@ -1007,6 +1052,113 @@ mod operating_point_contract_tests {
         assert_eq!(second.mna_node_names, first.mna_node_names);
         assert_eq!(second.mna_branch_names, first.mna_branch_names);
         assert_eq!(second.mna_solution.len(), first.mna_solution.len());
+    }
+
+    #[test]
+    fn compatible_previous_op_maps_identities_and_solves_changed_circuit() {
+        use rspice_core::abort_signal::{ImmediateAbort, NoAbort};
+        let source = "divider\nV1 in 0 10\nV2 spare 0 3\nR1 in out 1k\nR2 out 0 1k\nR3 spare 0 1k\n.op\n.end\n";
+        let bridge = EngineBridge::new();
+        let SimulationResult::DcOp(first) = bridge.run(&AnalysisConfig::dc_op(), source).unwrap()
+        else {
+            panic!("OP")
+        };
+        let mut previous = OpPreviousState {
+            source_content_digest:
+                crate::simulation::execution::operating_point_effective_source_digest(
+                    source,
+                    OpRunPointContext::default(),
+                ),
+            producer_snapshot_digest: ContentDigest::from_bytes([2; 32]),
+            producer_result_digest: ContentDigest::from_bytes([3; 32]),
+            node_names: first.mna_node_names.clone(),
+            branch_names: first.mna_branch_names.clone(),
+            solution: first.mna_solution.clone(),
+        };
+        let nodes = previous.node_names.len();
+        previous.node_names.reverse();
+        previous.branch_names.reverse();
+        previous.solution[..nodes].reverse();
+        previous.solution[nodes..].reverse();
+        for name in previous
+            .node_names
+            .iter_mut()
+            .chain(&mut previous.branch_names)
+        {
+            *name = name.to_ascii_lowercase();
+        }
+        assert_eq!(
+            map_previous_op_solution(
+                &previous,
+                &first.mna_node_names,
+                &first.mna_branch_names,
+                &NoAbort
+            )
+            .unwrap(),
+            first.mna_solution
+        );
+        assert!(matches!(
+            map_previous_op_solution(
+                &previous,
+                &first.mna_node_names,
+                &first.mna_branch_names,
+                &ImmediateAbort
+            ),
+            Err(SimulationError::Aborted)
+        ));
+        let config = OpConfig {
+            initial_guess: OpInitialGuess::PreviousCompatible,
+            node_initialization: OpNodeInitialization::IgnoreIcAndNodeset,
+            previous_state: Some(previous.clone()),
+            ..Default::default()
+        };
+        let changed_source = source.replace("R1 in out 1k", "R1 in out 3k");
+        let SimulationResult::DcOp(second) = bridge
+            .run(&AnalysisConfig::DcOp(config.clone()), &changed_source)
+            .unwrap()
+        else {
+            panic!("OP")
+        };
+        let voltage = |point: &DcOpResult| {
+            *point
+                .node_voltages
+                .iter()
+                .find(|(name, _)| name.eq_ignore_ascii_case("out"))
+                .unwrap()
+                .1
+        };
+        assert!((voltage(&first) - 5.0).abs() < 1e-7);
+        assert!((voltage(&second) - 2.5).abs() < 1e-7);
+        assert_eq!(second.configuration.previous_state, Some(previous.clone()));
+        let strict = OpConfig {
+            initial_guess: OpInitialGuess::PreviousConverged,
+            ..config.clone()
+        };
+        assert!(
+            bridge
+                .run(&AnalysisConfig::DcOp(strict), &changed_source)
+                .unwrap_err()
+                .to_string()
+                .contains("different effective PVT source")
+        );
+        for (source, diagnostic) in [
+            (
+                changed_source.replace("V2 spare", "V3 spare"),
+                "identities changed",
+            ),
+            (
+                changed_source.replace(".end", "R4 added 0 1k\n.end"),
+                "dimensions changed",
+            ),
+        ] {
+            assert!(
+                bridge
+                    .run(&AnalysisConfig::DcOp(config.clone()), &source)
+                    .unwrap_err()
+                    .to_string()
+                    .contains(diagnostic)
+            );
+        }
     }
 
     #[test]

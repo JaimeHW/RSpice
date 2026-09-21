@@ -233,6 +233,64 @@ fn operating_point_payload_fixture() -> AnalysisResultPayload {
     }
 }
 
+#[test]
+fn saved_op_selection_requires_explicit_compatible_revision_policy() {
+    let snapshot = ContentDigest::from_bytes([0x61; 32]);
+    let mut run = SimulationRun::new(1);
+    run.add_analysis(
+        AnalysisResult::new(1, AnalysisType::DcOp, "OP")
+            .with_result_payload(operating_point_payload_fixture())
+            .with_provenance(
+                AnalysisResultProvenance::new(
+                    AnalysisInstanceId::new(),
+                    ObjectRevision::INITIAL,
+                    snapshot,
+                    Vec::new(),
+                )
+                .unwrap(),
+            ),
+    );
+    seal_prepared_run(
+        &mut run,
+        AnalysisResultSourceDomain::SimulationPlan,
+        Some(SimulationPlanId::new()),
+        ObjectRevision::INITIAL,
+        ContentDigest::from_bytes([0x70; 32]),
+        PreparedSourceCheckReceipt::SchematicDrc(ContentDigest::from_bytes([0x71; 32])),
+        &[0],
+    );
+    run.mark_running().unwrap();
+    run.finish_lifecycle(SimulationRunLifecycle::Completed)
+        .unwrap();
+    let mut simulation = SimulationState::default();
+    simulation.runs = vec![run].into();
+    simulation.next_run_id = 1;
+    let persisted = ProjectSimulationResults::from_state(&simulation);
+    let json = serde_json::to_string(&persisted).unwrap();
+    let restored: ProjectSimulationResults = serde_json::from_str(&json).unwrap();
+    let simulation = restored.into_simulation_state().unwrap();
+    let same = simulation
+        .newest_retained_op_state(ObjectRevision::INITIAL, false)
+        .unwrap();
+    assert_eq!(same.producer_snapshot_digest, snapshot);
+    assert_eq!(
+        same.producer_result_digest,
+        simulation.runs[0].analyses[0].result_data_digest()
+    );
+    let revision = ObjectRevision::INITIAL.next().unwrap();
+    assert!(!simulation.has_retained_op_state(revision, false));
+    assert!(
+        simulation
+            .newest_retained_op_state(revision, false)
+            .is_none()
+    );
+    assert!(simulation.has_retained_op_state(revision, true));
+    assert_eq!(
+        simulation.newest_retained_op_state(revision, true),
+        Some(same)
+    );
+}
+
 fn clear_v6_execution_fields(results: &mut ProjectSimulationResults) {
     for run in &mut results.runs {
         run.job_id = None;

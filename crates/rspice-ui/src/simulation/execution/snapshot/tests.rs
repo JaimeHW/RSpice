@@ -1055,10 +1055,24 @@ fn retained_op_state_must_match_the_prepared_executable_source() {
     changed.executable_netlist = "deck\nR1 out 0 1k\n.op\n.end\n".to_owned();
     changed.source_digest = ContentDigest::from_bytes([9; 32]);
     changed.tasks = vec![prepared("op", "DC Operating Point", retained_task)];
+    let mut compatible = parts();
+    compatible.executable_netlist = changed.executable_netlist.clone();
+    compatible.source_digest = changed.source_digest;
+    let mut task = changed.tasks[0].task.clone();
     let error = PreparedRunSnapshot::new(changed)
         .expect_err("stale retained state must fail before dispatch");
     assert_eq!(error.stage(), PreparationStage::AnalysisPlan);
     assert!(error.message().contains("different executable source"));
+    let AnalysisSpec::DcOp { initial_guess, .. } = &mut task.spec else {
+        unreachable!()
+    };
+    *initial_guess = OpInitialGuess::PreviousCompatible;
+    let Some(AnalysisConfig::DcOp(config)) = &mut task.config else {
+        unreachable!()
+    };
+    config.initial_guess = OpInitialGuess::PreviousCompatible;
+    compatible.tasks = vec![prepared("op", "DC Operating Point", task)];
+    PreparedRunSnapshot::new(compatible).expect("explicit compatible-circuit startup permits changed source; execution validates identities");
 }
 
 #[test]

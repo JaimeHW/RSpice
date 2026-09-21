@@ -2241,8 +2241,11 @@ fn analysis_form_body(
     let previous_state = app
         .state
         .simulation
-        .newest_retained_op_state(project_revision)
-        .is_some();
+        .has_retained_op_state(project_revision, false);
+    let compatible_previous_state = app
+        .state
+        .simulation
+        .has_retained_op_state(project_revision, true);
     let soa_violations = app
         .state
         .simulation
@@ -2250,6 +2253,7 @@ fn analysis_form_body(
         .is_some();
     let op_context = analysis_form::OpContextAvailability {
         previous_state,
+        compatible_previous_state,
         soa_violations,
     };
     // Resolved from the plan, once, and handed to the form to read. The Corner

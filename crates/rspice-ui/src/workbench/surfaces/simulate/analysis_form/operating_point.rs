@@ -34,11 +34,12 @@ pub(super) const OP_TEMPERATURE_CHOICES: [&str; 4] = [
     "Inherit active run-set axis",
 ];
 
-pub(super) const OP_INITIAL_GUESS_CHOICES: [&str; 4] = [
+pub(super) const OP_INITIAL_GUESS_CHOICES: [&str; 5] = [
     "Automatic",
     "Previous converged solution",
     "User node voltages",
     "Zero state",
+    "Previous solution, compatible circuit",
 ];
 
 pub(super) const OP_NODE_INITIALIZATION_CHOICES: [&str; 4] = [
@@ -80,15 +81,18 @@ pub(super) const OP_STARTUP_CONFLICT: &str =
 pub(super) fn op_initial_guess_disabled(
     node_initialization_idx: usize,
     previous_state_available: bool,
+    compatible_previous_state_available: bool,
 ) -> Vec<(usize, &'static str)> {
     let mut disabled = Vec::new();
     for initial_guess_idx in 0..OP_INITIAL_GUESS_CHOICES.len() {
         if !op_startup_indices_compatible(initial_guess_idx, node_initialization_idx) {
             disabled.push((initial_guess_idx, OP_STARTUP_CONFLICT));
-        } else if initial_guess_idx == 1 && !previous_state_available {
+        } else if (initial_guess_idx == 1 && !previous_state_available)
+            || (initial_guess_idx == 4 && !compatible_previous_state_available)
+        {
             disabled.push((
                 initial_guess_idx,
-                "Run and retain a source-compatible OP state before selecting this policy",
+                "Run and retain an OP state before selecting this policy",
             ));
         }
     }
@@ -110,7 +114,7 @@ pub(super) const fn op_startup_indices_compatible(
 ) -> bool {
     match initial_guess_idx {
         0 => true,
-        1 | 3 => matches!(node_initialization_idx, 1 | 3),
+        1 | 3 | 4 => matches!(node_initialization_idx, 1 | 3),
         2 => matches!(node_initialization_idx, 0 | 2),
         _ => false,
     }
@@ -192,8 +196,11 @@ pub(super) fn op_temperature_row(
 pub(super) fn fields(ui: &mut Ui, setup: &mut OpDialogState, op_context: OpContextAvailability) {
     setup.ensure_initialized();
     op_temperature_row(ui, setup);
-    let initial_guess_disabled =
-        op_initial_guess_disabled(setup.node_initialization_idx, op_context.previous_state);
+    let initial_guess_disabled = op_initial_guess_disabled(
+        setup.node_initialization_idx,
+        op_context.previous_state,
+        op_context.compatible_previous_state,
+    );
     choice_row_with_disabled(
         ui,
         OP_FIELD_LABELS[1],
@@ -201,6 +208,9 @@ pub(super) fn fields(ui: &mut Ui, setup: &mut OpDialogState, op_context: OpConte
         &mut setup.initial_guess_idx,
         &initial_guess_disabled,
     );
+    if setup.initial_guess_idx == 4 {
+        ui.small("Use the latest saved OP as a starting guess across circuit changes. Node and branch names must still match; each point is solved again.");
+    }
     let node_initialization_disabled = op_node_initialization_disabled(setup.initial_guess_idx);
     choice_row_with_disabled(
         ui,

@@ -61,11 +61,14 @@ fn operating_point_startup_choices_match_the_execution_contract() {
         }
     }
     assert!(
-        op_initial_guess_disabled(1, false)
+        op_initial_guess_disabled(1, false, false)
             .iter()
             .any(|(index, _)| *index == 1),
         "previous-state policy remains disabled without bound evidence"
     );
+    let old_revision = op_initial_guess_disabled(1, false, true);
+    assert!(old_revision.iter().any(|(index, _)| *index == 1));
+    assert!(!old_revision.iter().any(|(index, _)| *index == 4));
 }
 
 #[cfg(not(target_arch = "wasm32"))]

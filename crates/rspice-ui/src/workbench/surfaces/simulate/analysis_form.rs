@@ -103,6 +103,7 @@ const FIELD_CAPTION_GAP: f32 = 8.0;
 #[derive(Debug, Clone, Copy, Default)]
 pub(super) struct OpContextAvailability {
     pub previous_state: bool,
+    pub compatible_previous_state: bool,
     pub soa_violations: bool,
 }
 

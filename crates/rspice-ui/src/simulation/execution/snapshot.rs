@@ -2443,6 +2443,8 @@ fn validate_retained_operating_point_contract(
         spec_config.run_point.clone(),
     );
     if let Some(previous) = spec_config.previous_state.as_ref()
+        && spec_config.initial_guess
+            != crate::simulation::dialog::OpInitialGuess::PreviousCompatible
         && previous.source_content_digest != effective_source_digest
     {
         return Err(

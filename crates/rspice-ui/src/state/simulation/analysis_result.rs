@@ -1143,7 +1143,8 @@ op_evidence_enum!(OperatingPointInitialGuessEvidence {
     Automatic,
     PreviousConverged,
     UserNodeVoltages,
-    ZeroState
+    ZeroState,
+    PreviousCompatible
 });
 op_evidence_enum!(OperatingPointNodeInitializationEvidence {
     UseIcAndNodeset,

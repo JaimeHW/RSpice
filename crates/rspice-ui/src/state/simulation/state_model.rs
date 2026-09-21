@@ -119,47 +119,74 @@ pub struct SimulationState {
 }
 
 impl SimulationState {
-    /// Newest complete OP state from the unchanged project revision. The
-    /// sealed source digest is carried into the task and checked again during
-    /// preflight, so this early selection cannot authorize stale topology.
+    /// Newest complete accepted OP. Compatible-circuit startup explicitly
+    /// permits older revisions; execution still checks every MNA identity.
     pub(crate) fn newest_retained_op_state(
         &self,
         project_revision: crate::product::ObjectRevision,
+        allow_changed_revision: bool,
     ) -> Option<crate::simulation::dialog::OpPreviousState> {
+        let analysis = self.retained_op_result(project_revision, allow_changed_revision)?;
+        let provenance = analysis.provenance()?;
+        let AnalysisResultPayload::OperatingPoint {
+            mna_node_names,
+            mna_branch_names,
+            mna_solution,
+            effective_source_content_digest: Some(source_content_digest),
+            ..
+        } = analysis.result_payload.as_ref()?
+        else {
+            return None;
+        };
+        Some(crate::simulation::dialog::OpPreviousState {
+            source_content_digest: *source_content_digest,
+            producer_snapshot_digest: provenance.prepared_snapshot_digest(),
+            producer_result_digest: analysis.result_data_digest(),
+            node_names: mna_node_names.clone(),
+            branch_names: mna_branch_names.clone(),
+            solution: mna_solution.clone(),
+        })
+    }
+
+    pub(crate) fn has_retained_op_state(
+        &self,
+        project_revision: crate::product::ObjectRevision,
+        allow_changed_revision: bool,
+    ) -> bool {
+        self.retained_op_result(project_revision, allow_changed_revision)
+            .is_some()
+    }
+
+    fn retained_op_result(
+        &self,
+        project_revision: crate::product::ObjectRevision,
+        allow_changed_revision: bool,
+    ) -> Option<&AnalysisResult> {
         self.runs.iter().find_map(|run| {
             let receipt = run.prepared_receipt()?;
-            if receipt.project_revision() != project_revision {
+            if !allow_changed_revision && receipt.project_revision() != project_revision {
                 return None;
             }
-            run.analyses.iter().rev().find_map(|analysis| {
-                if !analysis.success || analysis.analysis_type != AnalysisType::DcOp {
-                    return None;
+            run.analyses.iter().rev().find(|analysis| {
+                if !analysis.success
+                    || analysis.analysis_type != AnalysisType::DcOp
+                    || analysis.provenance().is_none()
+                {
+                    return false;
                 }
-                let provenance = analysis.provenance()?;
-                let AnalysisResultPayload::OperatingPoint {
+                let Some(AnalysisResultPayload::OperatingPoint {
                     mna_node_names,
                     mna_branch_names,
                     mna_solution,
-                    effective_source_content_digest: Some(effective_source_content_digest),
+                    effective_source_content_digest: Some(_),
                     ..
-                } = analysis.result_payload.as_ref()?
+                }) = analysis.result_payload.as_ref()
                 else {
-                    return None;
+                    return false;
                 };
-                if mna_solution.is_empty()
-                    || mna_node_names.len().saturating_add(mna_branch_names.len())
-                        != mna_solution.len()
-                {
-                    return None;
-                }
-                Some(crate::simulation::dialog::OpPreviousState {
-                    source_content_digest: *effective_source_content_digest,
-                    producer_snapshot_digest: provenance.prepared_snapshot_digest(),
-                    producer_result_digest: analysis.result_data_digest(),
-                    node_names: mna_node_names.clone(),
-                    branch_names: mna_branch_names.clone(),
-                    solution: mna_solution.clone(),
-                })
+                !mna_solution.is_empty()
+                    && mna_node_names.len().saturating_add(mna_branch_names.len())
+                        == mna_solution.len()
             })
         })
     }

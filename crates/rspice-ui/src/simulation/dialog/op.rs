@@ -48,14 +48,21 @@ pub enum OpInitialGuess {
     PreviousConverged,
     UserNodeVoltages,
     ZeroState,
+    /// Use a retained solution as a fresh solve's guess after matching its MNA names.
+    PreviousCompatible,
 }
 
 impl OpInitialGuess {
-    pub const ALL: [Self; 4] = [
+    pub const fn uses_previous_state(self) -> bool {
+        matches!(self, Self::PreviousConverged | Self::PreviousCompatible)
+    }
+
+    pub const ALL: [Self; 5] = [
         Self::Automatic,
         Self::PreviousConverged,
         Self::UserNodeVoltages,
         Self::ZeroState,
+        Self::PreviousCompatible,
     ];
     pub const fn display_name(self) -> &'static str {
         match self {
@@ -63,6 +70,7 @@ impl OpInitialGuess {
             Self::PreviousConverged => "Previous converged solution",
             Self::UserNodeVoltages => "User node voltages",
             Self::ZeroState => "Zero state",
+            Self::PreviousCompatible => "Previous solution, compatible circuit",
         }
     }
 }
@@ -472,7 +480,9 @@ impl OpConfig {
         }
         let startup_compatible = match self.initial_guess {
             OpInitialGuess::Automatic => true,
-            OpInitialGuess::PreviousConverged | OpInitialGuess::ZeroState => matches!(
+            OpInitialGuess::PreviousConverged
+            | OpInitialGuess::PreviousCompatible
+            | OpInitialGuess::ZeroState => matches!(
                 self.node_initialization,
                 OpNodeInitialization::IgnoreIcAndNodeset | OpNodeInitialization::ValidateOnly
             ),
@@ -494,9 +504,10 @@ impl OpConfig {
     /// Validate contextual bindings after immutable task preparation.
     pub fn validate_for_execution(&self) -> Result<(), String> {
         self.validate()?;
-        if self.initial_guess == OpInitialGuess::PreviousConverged && self.previous_state.is_none()
-        {
-            return Err("Previous converged solution requires an identity-compatible retained OP state; none is available".into());
+        if self.initial_guess.uses_previous_state() && self.previous_state.is_none() {
+            return Err(
+                "Previous-solution startup requires a retained OP state; none is available".into(),
+            );
         }
         if self.device_detail == OpDeviceDetail::ViolationsOnly
             && (self.violation_devices.is_empty() || self.violation_source_content_digest.is_none())
@@ -751,7 +762,8 @@ mod tests {
                 "Automatic",
                 "Previous converged solution",
                 "User node voltages",
-                "Zero state"
+                "Zero state",
+                "Previous solution, compatible circuit"
             ]
         );
         assert_eq!(
@@ -918,7 +930,7 @@ mod tests {
                     node_initialization,
                     ..OpConfig::default()
                 };
-                if initial_guess == OpInitialGuess::PreviousConverged {
+                if initial_guess.uses_previous_state() {
                     config.previous_state = Some(OpPreviousState {
                         source_content_digest: ContentDigest::from_bytes([1; 32]),
                         producer_snapshot_digest: ContentDigest::from_bytes([2; 32]),
@@ -930,7 +942,9 @@ mod tests {
                 }
                 let expected_valid = match initial_guess {
                     OpInitialGuess::Automatic => true,
-                    OpInitialGuess::PreviousConverged | OpInitialGuess::ZeroState => matches!(
+                    OpInitialGuess::PreviousConverged
+                    | OpInitialGuess::PreviousCompatible
+                    | OpInitialGuess::ZeroState => matches!(
                         node_initialization,
                         OpNodeInitialization::IgnoreIcAndNodeset
                             | OpNodeInitialization::ValidateOnly

@@ -302,8 +302,8 @@ pub(super) fn nondefault_op_config() -> crate::simulation::dialog::OpConfig {
 
 #[test]
 fn browser_worker_transfer_protocol_matches_rust_transport() {
-    assert_eq!(WORKER_RESPONSE_TRANSPORT_PROTOCOL, 27);
-    assert_eq!(WORKER_REQUEST_TRANSPORT_PROTOCOL, 29);
+    assert_eq!(WORKER_RESPONSE_TRANSPORT_PROTOCOL, 28);
+    assert_eq!(WORKER_REQUEST_TRANSPORT_PROTOCOL, 30);
     let source = include_str!("../../../../web/simulation-worker.js");
     assert!(source.contains(&format!(
         "const WORKER_PROTOCOL_VERSION = {WORKER_RESPONSE_TRANSPORT_PROTOCOL};"
@@ -785,61 +785,68 @@ fn worker_request_round_trips_project_veriloga_runtime_artifacts() {
 
 #[test]
 fn worker_request_detaches_and_authenticates_op_previous_state() {
-    let config = nondefault_op_config();
-    let request = WorkerRequest {
-        id: 10,
-        request: WorkerSimulationRequest::Config(Box::new(WorkerAnalysisConfig::DcOp(config))),
-        netlist: "V1 out 0 1\n.op\n.end\n".to_owned(),
-        source_path: None,
-        project_veriloga_runtimes: Default::default(),
-        dependencies: Default::default(),
-        environment: None,
-        stream_transient_samples: false,
-    };
+    use crate::simulation::dialog::OpInitialGuess;
+    for initial_guess in [
+        OpInitialGuess::PreviousConverged,
+        OpInitialGuess::PreviousCompatible,
+    ] {
+        let mut config = nondefault_op_config();
+        config.initial_guess = initial_guess;
+        let request = WorkerRequest {
+            id: 10,
+            request: WorkerSimulationRequest::Config(Box::new(WorkerAnalysisConfig::DcOp(config))),
+            netlist: "V1 out 0 1\n.op\n.end\n".to_owned(),
+            source_path: None,
+            project_veriloga_runtimes: Default::default(),
+            dependencies: Default::default(),
+            environment: None,
+            stream_transient_samples: false,
+        };
 
-    let transport = WorkerRequestTransport::from_request(request.clone()).unwrap();
-    let metadata = serde_json::to_string(&transport.request).unwrap();
-    assert_eq!(transport.request.dependency_buffer_count, 0);
-    assert_eq!(transport.buffers, vec![vec![1.25, -1.0e-3]]);
-    assert!(metadata.contains("\"solution\":{\"Buffer\""));
-    assert!(!metadata.contains("\"solution\":[1.25"));
-    assert_eq!(transport.clone().into_request().unwrap(), request);
+        let transport = WorkerRequestTransport::from_request(request.clone()).unwrap();
+        let metadata = serde_json::to_string(&transport.request).unwrap();
+        assert_eq!(transport.request.dependency_buffer_count, 0);
+        assert_eq!(transport.buffers, vec![vec![1.25, -1.0e-3]]);
+        assert!(metadata.contains("\"solution\":{\"Buffer\""));
+        assert!(!metadata.contains("\"solution\":[1.25"));
+        assert_eq!(transport.clone().into_request().unwrap(), request);
 
-    let mut tampered = transport.clone();
-    tampered.buffers[0][0] = 1.5;
-    assert!(
-        tampered
-            .into_request()
-            .unwrap_err()
-            .contains("solution digest")
-    );
+        let mut tampered = transport.clone();
+        tampered.buffers[0][0] = 1.5;
+        assert!(
+            tampered
+                .into_request()
+                .unwrap_err()
+                .contains("solution digest")
+        );
 
-    let mut oversized = transport.clone();
-    oversized
-        .request
-        .op_previous_state
-        .as_mut()
-        .unwrap()
-        .solution = WorkerF64Series::Buffer {
-        buffer: 0,
-        len: MAX_WORKER_F64_VALUES + 1,
-    };
-    assert!(oversized.into_request().unwrap_err().contains("exceeding"));
+        let mut oversized = transport.clone();
+        oversized
+            .request
+            .op_previous_state
+            .as_mut()
+            .unwrap()
+            .solution = WorkerF64Series::Buffer {
+            buffer: 0,
+            len: MAX_WORKER_F64_VALUES + 1,
+        };
+        assert!(oversized.into_request().unwrap_err().contains("exceeding"));
 
-    let mut duplicate = transport;
-    let WorkerSimulationRequest::Config(config) = &mut duplicate.request.request.request else {
-        panic!("expected configured OP request")
-    };
-    let WorkerAnalysisConfig::DcOp(config) = config.as_mut() else {
-        panic!("expected configured OP request")
-    };
-    config.previous_state = nondefault_op_config().previous_state;
-    assert!(
-        duplicate
-            .into_request()
-            .unwrap_err()
-            .contains("duplicate inline")
-    );
+        let mut duplicate = transport;
+        let WorkerSimulationRequest::Config(config) = &mut duplicate.request.request.request else {
+            panic!("expected configured OP request")
+        };
+        let WorkerAnalysisConfig::DcOp(config) = config.as_mut() else {
+            panic!("expected configured OP request")
+        };
+        config.previous_state = nondefault_op_config().previous_state;
+        assert!(
+            duplicate
+                .into_request()
+                .unwrap_err()
+                .contains("duplicate inline")
+        );
+    }
 }
 
 #[test]

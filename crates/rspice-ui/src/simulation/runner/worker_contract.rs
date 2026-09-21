@@ -72,9 +72,9 @@ pub(crate) struct WorkerRequest {
     pub(in crate::simulation) stream_transient_samples: bool,
 }
 
-/// 29: Configured HB studies retain their complete bound OP producer.
+/// 30: OP supports an explicitly selected compatible-circuit previous guess.
 #[cfg(any(target_arch = "wasm32", test))]
-pub(crate) const WORKER_REQUEST_TRANSPORT_PROTOCOL: u8 = 29;
+pub(crate) const WORKER_REQUEST_TRANSPORT_PROTOCOL: u8 = 30;
 
 /// Browser-worker request split into compact metadata and transferable
 /// floating-point buffers. The embedded request deliberately carries empty
@@ -1656,7 +1656,8 @@ impl WorkerSimulationResult {
 /// 25: Monte Carlo retains complete parameter-stream trial identities and failed observations.
 /// 26: optimization retains each weighted objective at the best candidate.
 /// 27: optimization retains validated hard-constraint evidence and feasibility.
-const WORKER_RESPONSE_TRANSPORT_PROTOCOL: u8 = 27;
+/// 28: OP configurations retain compatible-circuit previous-state policy.
+const WORKER_RESPONSE_TRANSPORT_PROTOCOL: u8 = 28;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct WorkerResponseTransport {

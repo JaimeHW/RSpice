@@ -1,6 +1,8 @@
 //! Selected physical temperature must reach parsing and every varied trial.
 use super::*;
-use crate::simulation::dialog::{OpConfig, OpTemperatureMode};
+use crate::simulation::dialog::{
+    OpConfig, OpInitialGuess, OpNodeInitialization, OpPreviousState, OpTemperatureMode,
+};
 use crate::simulation::multi_run::{
     AnalysisSpec, HbToneSpec, OptimizationAlgorithm, OptimizationGoal, OptimizationVariable,
     PssMethod,
@@ -135,11 +137,47 @@ fn deck(statistics: bool) -> String {
         if statistics { "" } else { "PARAMS R" }
     )
 }
+fn bind_compatible_previous(base: &mut StudyRunConfig, source: &str) {
+    let previous_source = source.replace("R=1000", "R=1500");
+    let SimulationResult::DcOp(point) = EngineBridge::new()
+        .run(&AnalysisConfig::dc_op(), &previous_source)
+        .unwrap()
+    else {
+        panic!("baseline OP")
+    };
+    let op = match &mut base.analysis {
+        StudyAnalysis::Basic(AnalysisConfig::DcOp(op)) => op,
+        StudyAnalysis::Hb(config) => &mut config.operating_point.config,
+        StudyAnalysis::Pss(config) => &mut config.operating_point.config,
+        StudyAnalysis::Qpss(config) => &mut config.operating_point.config,
+        _ => unreachable!(),
+    };
+    op.initial_guess = OpInitialGuess::PreviousCompatible;
+    op.node_initialization = OpNodeInitialization::IgnoreIcAndNodeset;
+    op.previous_state = Some(OpPreviousState {
+        source_content_digest:
+            crate::simulation::execution::operating_point_effective_source_digest(
+                &previous_source,
+                Default::default(),
+            ),
+        producer_snapshot_digest: crate::product::ContentDigest::from_bytes([2; 32]),
+        producer_result_digest: crate::product::ContentDigest::from_bytes([3; 32]),
+        node_names: point.mna_node_names,
+        branch_names: point.mna_branch_names,
+        solution: point.mna_solution,
+    });
+}
 #[test]
 fn study_temperature_precedes_parameter_statistics_and_optimization_replay() {
     for family in 0..4 {
         for inherited in [false, true] {
-            let base = base(family, inherited);
+            let mut base = base(family, inherited);
+            let previous_source = if family == 2 {
+                deck(false).replace("C1 out 0 100n\n", "")
+            } else {
+                deck(false)
+            };
+            bind_compatible_previous(&mut base, &previous_source);
             for statistics in [false, true] {
                 let mut source = deck(statistics);
                 if family == 2 {
@@ -185,6 +223,7 @@ fn study_temperature_precedes_parameter_statistics_and_optimization_replay() {
         }
     }
     let mut base = base(1, false);
+    bind_compatible_previous(&mut base, &deck(false));
     base.measurements.truncate(1);
     let target = 3.0 * 1000.0 / (1000.0 + 800.0 * 1.37);
     let result = super::super::spec::run_spec_request_with_environment(

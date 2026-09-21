@@ -179,12 +179,12 @@ impl SimulationController {
                     .collect();
                 config.selected_devices.sort();
                 config.selected_devices.dedup();
-                if config.initial_guess
-                    == crate::simulation::dialog::OpInitialGuess::PreviousConverged
-                {
-                    config.previous_state = state
-                        .simulation
-                        .newest_retained_op_state(state.workspace.project.revision());
+                if config.initial_guess.uses_previous_state() {
+                    config.previous_state = state.simulation.newest_retained_op_state(
+                        state.workspace.project.revision(),
+                        config.initial_guess
+                            == crate::simulation::dialog::OpInitialGuess::PreviousCompatible,
+                    );
                 }
                 if matches!(
                     config.device_detail,

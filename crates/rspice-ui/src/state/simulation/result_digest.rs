@@ -680,6 +680,7 @@ fn encode_result_payload(
                 OperatingPointInitialGuessEvidence::PreviousConverged => 1,
                 OperatingPointInitialGuessEvidence::UserNodeVoltages => 2,
                 OperatingPointInitialGuessEvidence::ZeroState => 3,
+                OperatingPointInitialGuessEvidence::PreviousCompatible => 4,
             });
             writer.u8(match node_initialization {
                 OperatingPointNodeInitializationEvidence::UseIcAndNodeset => 0,
