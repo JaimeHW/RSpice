@@ -1190,6 +1190,11 @@ impl Capacitors {
                 state.dqdx_prev = dqdx;
                 self.effective_capacitances[index] = c;
             }
+            // Seed each integral's input from the accepted origin solution.
+            // Derivative probes above are trial values, never accepted history.
+            if let Some(expression) = self.value_expression_mut(index) {
+                expression.accept_transient_step(solution, time);
+            }
         }
     }
 
@@ -1577,8 +1582,8 @@ impl Capacitors {
         self.value_expressions.iter().any(Option::is_some)
     }
 
-    /// Whether any value expression carries accepted operator state that is
-    /// not represented by the capacitor charge checkpoint contract.
+    /// Whether any value expression carries accepted integration state in
+    /// addition to the capacitor's physical charge history.
     pub(crate) fn has_stateful_value_expressions(&self) -> bool {
         self.value_expressions
             .iter()
@@ -2211,6 +2216,26 @@ mod capacitor_state_tests {
         assert_close(solution[0] + solution[1], 0.0);
         assert!((solution[0] - 1.0).abs() < 2.0e-10);
         assert!((solution[1] + 1.0).abs() < 2.0e-10);
+    }
+
+    #[test]
+    fn solution_dependent_initialization_seeds_sdt_from_accepted_inputs() {
+        let mut capacitors = Capacitors::new();
+        let expression = SolutionDependentCapacitor::new("C1".into(), "1+sdt(V(ctrl))").unwrap();
+        capacitors.add_with_value_expression("C1".into(), 2, 0, 1.0, expression);
+        capacitors
+            .bind_value_expression_references(
+                |name| (name.eq_ignore_ascii_case("ctrl")).then_some(1),
+                |_| None,
+            )
+            .unwrap();
+        capacitors.initialize_solution_dependent_from_dc(&[2.0, 0.5], 0.0);
+        // The next interval integrates an input changing from 2 to 4. The
+        // initial accepted input must not be zero or the last derivative probe.
+        let value = capacitors
+            .evaluate_effective_capacitance(0, &[4.0, 0.5], 1.0)
+            .unwrap();
+        assert_close(value, 4.0);
     }
 
     #[test]
