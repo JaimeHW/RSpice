@@ -7,6 +7,10 @@ use crate::expr::{constant_value, function_uses_implicit_time as implicit_time};
 use crate::numerics::is_integral_cycle_count;
 
 impl BehavioralVoltageSource {
+    pub(crate) fn has_memoryless_periodic_equation(&self) -> bool {
+        !self.is_frequency_dependent() && memoryless_equation(&self.ast)
+    }
+
     pub(crate) fn prescribed_time_program(&self) -> Option<(&CompiledExpr, Context<'_>)> {
         (!self.is_solution_dependent() && self.program.sdt_count == 0)
             .then(|| (&self.program, self.periodicity_context()))
@@ -36,6 +40,10 @@ impl BehavioralVoltageSource {
 }
 
 impl BehavioralCurrentSource {
+    pub(crate) fn has_memoryless_periodic_equation(&self) -> bool {
+        !self.is_frequency_dependent() && memoryless_equation(&self.ast)
+    }
+
     pub(crate) fn prescribed_time_program(&self) -> Option<(&CompiledExpr, Context<'_>)> {
         (!self.is_solution_dependent() && self.program.sdt_count == 0)
             .then(|| (&self.program, self.periodicity_context()))
@@ -61,6 +69,22 @@ impl BehavioralCurrentSource {
             .with_frequency(self.frequency)
             .with_gmin(self.gmin)
             .with_expression_dialect(self.expression_dialect)
+    }
+}
+
+// A phase-independent constitutive law can be sampled on either a single
+// periodic time grid or a quasiperiodic torus. Explicit clocks and integrals
+// need their own forcing/state contract rather than evaluation at time zero.
+fn memoryless_equation(expr: &Expr) -> bool {
+    match expr {
+        Expr::Time => false,
+        Expr::Unary { operand, .. } => memoryless_equation(operand),
+        Expr::Binary { left, right, .. } => memoryless_equation(left) && memoryless_equation(right),
+        Expr::Function { func, args } => {
+            !implicit_time(*func) && args.iter().all(memoryless_equation)
+        }
+        Expr::LookupTable { input, .. } => memoryless_equation(input),
+        _ => true,
     }
 }
 

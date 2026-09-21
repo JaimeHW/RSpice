@@ -16,6 +16,7 @@ enum PeriodicMnaRegistration {
     Vcvs(usize),
     Ccvs(usize),
     BjtBase(usize),
+    BehavioralVoltage(usize),
 }
 
 impl Engine {
@@ -26,6 +27,10 @@ impl Engine {
         num_nodes: usize,
     ) -> Result<(), SimulationError> {
         use crate::analysis::harmonic_balance::{DepletionCap, NonlinearDeviceInstance};
+
+        solver
+            .set_periodic_behavioral_sources(&circuit.behavioral_sources)
+            .map_err(|error| SimulationError::Circuit(error.to_string()))?;
 
         for bjt in &circuit.bjts.devices {
             solver
@@ -314,6 +319,33 @@ impl Engine {
         }
         let mut tline_branches = vec![None; circuit.tlines.len()];
         let mut cpl_branches = vec![None; circuit.coupled_tlines.len()];
+
+        for (index, source) in circuit
+            .behavioral_sources
+            .voltage_sources
+            .iter()
+            .enumerate()
+        {
+            let slot = source
+                .branch_ordinal
+                .checked_sub(1)
+                .and_then(|index| registrations.get_mut(index))
+                .ok_or_else(|| {
+                    SimulationError::Circuit(format!(
+                        "behavioral source '{}' has an invalid periodic branch ordinal",
+                        source.name
+                    ))
+                })?;
+            if slot
+                .replace(PeriodicMnaRegistration::BehavioralVoltage(index))
+                .is_some()
+            {
+                return Err(SimulationError::Circuit(format!(
+                    "behavioral source '{}' duplicates a periodic branch",
+                    source.name
+                )));
+            }
+        }
 
         for source_index in 0..circuit.voltage_sources.len() {
             let name = circuit
@@ -761,6 +793,25 @@ impl Engine {
                             &canonical_branch_names[slot_index],
                         )
                         .map_err(|error| SimulationError::Circuit(error.to_string()))?;
+                }
+                PeriodicMnaRegistration::BehavioralVoltage(source_index) => {
+                    let source = &circuit.behavioral_sources.voltage_sources[source_index];
+                    solver
+                        .try_add_periodic_constitutive_port_branch(
+                            source.node_pos,
+                            source.node_neg,
+                            branch_ordinal,
+                            &source.name,
+                        )
+                        .map_err(|error| SimulationError::Circuit(error.to_string()))?;
+                    let row = circuit.num_nodes() + branch_ordinal - 1;
+                    for (node, sign) in [(source.node_pos, 1.0), (source.node_neg, -1.0)] {
+                        if node > 0 {
+                            solver
+                                .try_add_exact_mna_static_entry(row, node - 1, sign, &source.name)
+                                .map_err(|error| SimulationError::Circuit(error.to_string()))?;
+                        }
+                    }
                 }
                 PeriodicMnaRegistration::VoltageSource(source_index) => {
                     let name = &circuit.voltage_sources.names[source_index];

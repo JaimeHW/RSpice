@@ -129,6 +129,34 @@ impl HbSolver {
                 });
             }
         }
+        if !self.behavioral_sources.current_sources.is_empty() {
+            let waves = self.native_state_waveforms(state)?;
+            let count = self.fft.size();
+            let mut solution = vec![0.0; waves.len()];
+            let zero_charge = vec![0.0; count];
+            for index in 0..self.behavioral_sources.current_sources.len() {
+                let mut source = self.behavioral_sources.current_sources[index].clone();
+                let mut current = vec![0.0; count];
+                for (time, sample) in current.iter_mut().enumerate() {
+                    if abort.is_aborted() {
+                        return Err(HbError::Aborted);
+                    }
+                    for (value, wave) in solution.iter_mut().zip(&waves) {
+                        *value = wave[time];
+                    }
+                    *sample = source
+                        .evaluate(&solution, 0.0)
+                        .map_err(|error| HbError::InvalidCircuit(error.to_string()))?;
+                }
+                let positive = self.lead_phasors(&current, &zero_charge)?;
+                let negative = positive.iter().map(|value| -*value).collect();
+                result.push(HbDeviceLeadSpectra {
+                    name: source.name,
+                    terminals: &["p", "n"],
+                    currents: vec![positive, negative],
+                });
+            }
+        }
         Ok(result)
     }
 }

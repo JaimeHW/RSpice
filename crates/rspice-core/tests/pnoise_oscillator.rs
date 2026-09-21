@@ -295,3 +295,67 @@ fn autonomous_sampled_pnoise_retains_timing_through_memoryless_line_ports() {
         );
     }
 }
+
+#[test]
+fn autonomous_sampled_pnoise_behavioral_limiter_matches_independent_ppv() {
+    use rspice_core::abort_signal::NoAbort;
+    use rspice_core::engine::{
+        PeriodicNoiseRequest, PeriodicNoiseSampling, PeriodicNoiseSidebands,
+    };
+    let netlist = Netlist::parse(
+        "Behavioral LC oscillator\n\
+        l1 osc 0 1u\nc1 osc 0 1u\nr1 osc 0 1k\n\
+        b1 osc 0 i=-0.051*v(osc)+0.025*v(osc)*v(osc)*v(osc)\n\
+        i1 0 osc pulse(0 1 10u 10n 10n 1u 1)\n.end\n",
+    )
+    .unwrap();
+    let engine = Engine::default();
+    let pss = engine
+        .run_pss_operating_point_with_abort(
+            &netlist,
+            PssConfig::autonomous()
+                .with_period_guess(6.3e-6)
+                .with_tstab_periods(30)
+                .with_harmonics(64)
+                .with_tolerance(1e-6)
+                .with_max_iterations(60),
+            &NoAbort,
+        )
+        .unwrap();
+    let offsets = [1e-16, 1e-15, 10.0];
+    let sampling = PeriodicNoiseSampling::Edge {
+        edge: Default::default(),
+    };
+    let sampled = engine
+        .run_pnoise_from_pss_request_with_abort(
+            &netlist,
+            &PeriodicNoiseRequest {
+                offsets: &offsets,
+                output_node: "osc",
+                output_ref: None,
+                input_source: None,
+                max_sideband: 24,
+                sidebands: PeriodicNoiseSidebands::default(),
+                sampling: Some(&sampling),
+            },
+            &pss,
+            &NoAbort,
+        )
+        .unwrap();
+    let phase = engine
+        .run_pnoise_oscillator_from_pss_with_abort(
+            &netlist,
+            pss.config().clone(),
+            &offsets,
+            &pss,
+            &NoAbort,
+        )
+        .unwrap();
+    for (&offset, density) in offsets.iter().zip(sampled.output_noise) {
+        let expected = 2.0 * phase.diffusion_constant / (std::f64::consts::TAU * offset).powi(2);
+        assert!(
+            (density / expected - 1.0).abs() < 0.05,
+            "{offset}: {density:e} vs {expected:e}"
+        );
+    }
+}

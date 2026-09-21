@@ -177,20 +177,8 @@ r1 out 0 1k
 
 #[test]
 fn harmonic_balance_names_the_missing_periodic_descriptor_capability() {
-    let cases = [
-        (
-            "\
-* a behavioral source has no exact periodic MNA descriptor
-vin in 0 sin(0 1 1meg)
-r1 in out 1k
-b1 out 0 i={v(in)*1m}
-r2 out 0 1k
-.end
-",
-            "behavioral-source equations",
-        ),
-        (
-            "\
+    let cases = [(
+        "\
 * a solution-dependent capacitor needs a periodic charge linearization
 iin 0 out dc 0
 vctrl ctrl 0 dc 0.5
@@ -198,9 +186,8 @@ c1 out 0 C={1p*(1+V(ctrl))}
 r1 out 0 1k
 .end
 ",
-            "solution-dependent capacitor charge linearizations",
-        ),
-    ];
+        "solution-dependent capacitor charge linearizations",
+    )];
 
     for (deck, expected) in cases {
         let message = hb_error(deck);

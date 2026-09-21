@@ -1,4 +1,4 @@
-//! Shared native BJT F/Q sampling over the complete periodic MNA state.
+//! Native BJT and behavioral F/Q sampling over the complete periodic MNA state.
 
 use super::*;
 use crate::device::MatrixStamper;
@@ -95,6 +95,57 @@ fn record_native_terms(
 }
 
 impl HbSolver {
+    pub(super) fn has_native_periodic_devices(&self) -> bool {
+        !self.native_bjts.is_empty() || !self.behavioral_sources.is_empty()
+    }
+
+    pub(crate) fn set_periodic_behavioral_sources(
+        &mut self,
+        sources: &crate::device::behavioral::BehavioralSources,
+    ) -> Result<(), HbError> {
+        let unknowns = self.num_nodes + self.exact_mna_branches().len();
+        let valid = |pos: usize, neg: usize, supported: bool, indices: Vec<usize>| {
+            supported
+                && pos <= self.num_nodes
+                && neg <= self.num_nodes
+                && indices.into_iter().all(|index| index < unknowns)
+        };
+        for source in &sources.current_sources {
+            if !valid(
+                source.node_pos,
+                source.node_neg,
+                source.has_memoryless_periodic_equation(),
+                source.bound_solution_indices().collect(),
+            ) {
+                return Err(HbError::InvalidCircuit(format!(
+                    "behavioral source '{}' has unsupported periodic state or MNA bindings",
+                    source.name
+                )));
+            }
+        }
+        for source in &sources.voltage_sources {
+            let branch = source
+                .branch_ordinal
+                .checked_sub(1)
+                .and_then(|index| self.exact_mna_branches().get(index));
+            if !valid(
+                source.node_pos,
+                source.node_neg,
+                source.has_memoryless_periodic_equation(),
+                source.bound_solution_indices().collect(),
+            ) || !matches!(branch, Some(ExactMnaBranch::ConstitutivePort { node_pos, node_neg, .. })
+                    if *node_pos == source.node_pos && *node_neg == source.node_neg)
+            {
+                return Err(HbError::InvalidCircuit(format!(
+                    "behavioral voltage source '{}' has unsupported periodic state or branch bindings",
+                    source.name
+                )));
+            }
+        }
+        self.behavioral_sources = sources.clone();
+        Ok(())
+    }
+
     pub(super) fn electrical_node(&self, node: usize) -> bool {
         self.non_electrical_nodes.binary_search(&node).is_err()
     }
@@ -153,6 +204,40 @@ impl HbSolver {
                 )));
             }
         }
+        for source in &mut self.behavioral_sources.current_sources {
+            source
+                .linearize_at(solution)
+                .map_err(|error| HbError::InvalidCircuit(error.to_string()))?;
+            let value = source
+                .evaluate(solution, 0.0)
+                .map_err(|error| HbError::InvalidCircuit(error.to_string()))?;
+            f.stamp_rhs(source.node_pos, -value);
+            f.stamp_rhs(source.node_neg, value);
+            for (column, partial) in source.linearized_partials() {
+                f.stamp(source.node_pos, column + 1, partial);
+                f.stamp(source.node_neg, column + 1, -partial);
+            }
+        }
+        for source in &mut self.behavioral_sources.voltage_sources {
+            source
+                .linearize_at(solution)
+                .map_err(|error| HbError::InvalidCircuit(error.to_string()))?;
+            let value = source
+                .evaluate(solution, 0.0)
+                .map_err(|error| HbError::InvalidCircuit(error.to_string()))?;
+            let row = self.num_nodes + source.branch_ordinal;
+            // The exact linear port row owns V(pos)-V(neg). This term owns
+            // only -expression, with the inverse sign in source-minus-F.
+            f.stamp_rhs(row, value);
+            for (column, partial) in source.linearized_partials() {
+                f.stamp(row, column + 1, -partial);
+            }
+        }
+        if f.invalid {
+            return Err(HbError::InvalidCircuit(
+                "behavioral periodic F/J entries are invalid".into(),
+            ));
+        }
         Ok(())
     }
 
@@ -191,7 +276,7 @@ impl HbSolver {
         &mut self,
         state: &mut HbSolverState,
     ) -> Result<(), HbError> {
-        if self.native_bjts.is_empty() {
+        if !self.has_native_periodic_devices() {
             return Ok(());
         }
         let f = self.native_dc_sample(state)?;
@@ -218,7 +303,7 @@ impl HbSolver {
         state: &HbSolverState,
         jacobian: &mut [Vec<Value>],
     ) -> Result<(), HbError> {
-        if !self.native_bjts.is_empty() {
+        if self.has_native_periodic_devices() {
             for (row, col, value) in self.native_dc_sample(state)?.jacobian {
                 jacobian[row][col] -= value;
             }
@@ -279,7 +364,7 @@ impl HbSolver {
         &mut self,
         state: &mut HbSolverState,
     ) -> Result<(), HbError> {
-        if self.native_bjts.is_empty() {
+        if !self.has_native_periodic_devices() {
             return Ok(());
         }
         let waves = self.native_state_waveforms(state)?;
@@ -347,7 +432,7 @@ impl HbSolver {
         harmonics: usize,
         charge: bool,
     ) -> Result<Vec<(usize, usize, Vec<Complex64>)>, HbError> {
-        if self.native_bjts.is_empty() {
+        if !self.has_native_periodic_devices() {
             return Ok(Vec::new());
         }
         let waves = self.native_state_waveforms(state)?;

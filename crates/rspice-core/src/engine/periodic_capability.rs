@@ -667,9 +667,9 @@ pub(crate) const fn periodic_capability_descriptor(
             envelope: Absent(ENVELOPE_LINEAR_SUBSET),
         },
         F::BehavioralSource => PeriodicCapabilityDescriptor {
-            residual_jacobian: Inapplicable,
+            residual_jacobian: Restricted("stateless time-independent behavioral equations"),
             dynamic_state: Complete,
-            small_signal: Absent("behavioral-source equations"),
+            small_signal: Restricted("stateless time-independent behavioral equations"),
             noise: Inapplicable,
             pss_state: Restricted(
                 "behavioral sources without `sdt` integrals; accepted-step memory is not \
@@ -990,6 +990,7 @@ pub(in crate::engine) fn periodic_residual_gaps(circuit: &CircuitData) -> Vec<Ca
     use PeriodicCapability::PeriodicResidualJacobian as Cap;
     use PeriodicDeviceFamily as F;
     let mut gaps = Vec::new();
+    append_behavioral_periodic_gaps(circuit, &mut gaps);
 
     let describe = |family: PeriodicDeviceFamily, count: usize, what: &str| {
         CapabilityGap::new(family, format!("{what} ({count} {})", count_noun(count)))
@@ -1157,6 +1158,7 @@ pub(in crate::engine) fn periodic_descriptor_gaps(circuit: &CircuitData) -> Vec<
     use PeriodicCapability::PeriodicSmallSignalDescriptor as Cap;
     use PeriodicDeviceFamily as F;
     let mut gaps = Vec::new();
+    append_behavioral_periodic_gaps(circuit, &mut gaps);
 
     for family in PeriodicDeviceFamily::ALL {
         if family.instance_count(circuit) == 0 {
@@ -1219,11 +1221,29 @@ pub(in crate::engine) fn periodic_descriptor_gaps(circuit: &CircuitData) -> Vec<
     normalize(gaps)
 }
 
-/// Whether every MNA branch ordinal is owned by a family with an exact
-/// periodic descriptor.
-///
-/// This is the structural backstop: it fails closed for a branch-owning family
-/// that reaches the circuit store without a declaration here.
+fn append_behavioral_periodic_gaps(circuit: &CircuitData, gaps: &mut Vec<CapabilityGap>) {
+    for (name, supported) in circuit
+        .behavioral_sources
+        .voltage_sources
+        .iter()
+        .map(|source| (&source.name, source.has_memoryless_periodic_equation()))
+        .chain(
+            circuit
+                .behavioral_sources
+                .current_sources
+                .iter()
+                .map(|source| (&source.name, source.has_memoryless_periodic_equation())),
+        )
+    {
+        if !supported {
+            gaps.push(CapabilityGap::new(PeriodicDeviceFamily::BehavioralSource,
+                format!("behavioral source '{name}' requires explicit time/frequency forcing or accepted-step memory in the periodic solver")));
+        }
+    }
+}
+
+/// Whether every MNA branch ordinal has an exact periodic descriptor owner.
+/// This also catches a branch family absent from the capability declarations.
 fn every_branch_has_a_periodic_owner(circuit: &CircuitData) -> bool {
     let mut represented = vec![false; circuit.num_branches()];
     let mark = |ordinal: usize, represented: &mut Vec<bool>| {
@@ -1257,6 +1277,9 @@ fn every_branch_has_a_periodic_owner(circuit: &CircuitData) -> bool {
             mark(branch1, &mut represented);
             mark(branch2, &mut represented);
         }
+    }
+    for source in &circuit.behavioral_sources.voltage_sources {
+        mark(source.branch_ordinal, &mut represented);
     }
     for line in &circuit.coupled_tlines {
         if let Some(branches) = line.native_branch_ordinals() {
@@ -1714,7 +1737,7 @@ mod tests {
             F::InductorCoupling | F::CoupledInductorPair => [I, C, C, I, R, A],
             F::MultiWindingTransformer => [I, C, C, I, A, A],
             F::JilesAthertonInductor | F::XyceCoreGroup => [I, C, A, I, A, A],
-            F::BehavioralSource => [I, C, A, I, R, A],
+            F::BehavioralSource => [R, C, R, I, R, A],
             F::XspiceInstance => [I, C, A, I, A, A],
             // The dynamic-state contract became instance conditional for the
             // same reason the transmission line's did: `absdelay` is a delay
