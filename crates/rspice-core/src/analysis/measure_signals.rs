@@ -9436,7 +9436,7 @@ mod tests {
             "unused_file_error",
             MeasureType::FileError {
                 signal: "V(out)".to_string(),
-                file: "virtual://measure/not-read.prn".to_string(),
+                file: "virtual://measure/not-read.prn".into(),
                 norm: crate::netlist::measure::FileErrorNorm::L2,
                 independent_column: Some(1),
                 dependent_column: 2,

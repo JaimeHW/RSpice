@@ -1125,7 +1125,7 @@ mod quoted_path_tests {
             .measurements
             .iter()
             .find_map(|measure| match &measure.measure_type {
-                MeasureType::FileError { file, .. } => Some(file.clone()),
+                MeasureType::FileError { file, .. } => Some(file.path().to_owned()),
                 _ => None,
             })
             .expect("one .MEAS ERROR");

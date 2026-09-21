@@ -4452,7 +4452,7 @@ pub(super) fn parse_meas_command(
             let options = parse_measure_file_error_options(stream, line_num, params)?;
             MeasureType::FileError {
                 signal,
-                file: options.file,
+                file: options.file.into(),
                 norm: options.norm,
                 independent_column: options.independent_column,
                 dependent_column: options.dependent_column,
@@ -9086,7 +9086,7 @@ mod tests {
         else {
             panic!("expected a file-backed ERROR measurement");
         };
-        assert_eq!(file, "fixtures/data.csv");
+        assert_eq!(file.path(), "fixtures/data.csv");
 
         let error = Netlist::parse(
             "file measure trailing operand\n\

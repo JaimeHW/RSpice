@@ -23,8 +23,13 @@ Executable measurement families are TRAN, AC, DC and NOISE. A specification boun
 to a configured Monte Carlo or optimization analysis uses its selected base
 analysis family. The selected producer must be enabled. Other result families
 can still be referenced by specifications using their existing scalar evidence.
-File-backed ERROR measurements remain subject to the existing prepared-source
-refusal; a sealed reference-data adapter is still required.
+File-backed ERROR measurements remain subject to the existing Studio
+prepared-source refusal. Core now supports captured comparison text through
+`analysis::bind_error_measurement_reference`: it validates the selected columns,
+binds immutable contents to the measurement, and evaluates without opening the
+named file. Ordinary paths preserve their prior checkpoint identity; captured
+contents participate in that identity. Studio import, project persistence and
+worker binding for these references still need to be connected.
 
 Definitions, the explicit authoring flag and producer identity survive project
 save/load. Enabling authoring changes generation and prepared-run identities;

@@ -54,6 +54,7 @@ struct MeasureLocator<'a> {
 #[derive(Clone, Copy)]
 struct FileErrorReference<'a> {
     file: &'a str,
+    reference_data: Option<&'a str>,
     norm: FileErrorNorm,
     independent_column: Option<isize>,
     dependent_column: usize,
@@ -808,7 +809,8 @@ impl MeasureEngine {
             &statement.analysis,
             signal,
             FileErrorReference {
-                file,
+                file: file.path(),
+                reference_data: file.contents(),
                 norm: *norm,
                 independent_column: *independent_column,
                 dependent_column: *dependent_column,
@@ -1232,7 +1234,8 @@ impl MeasureEngine {
                 &measurement.analysis,
                 signal,
                 FileErrorReference {
-                    file,
+                    file: file.path(),
+                    reference_data: file.contents(),
                     norm: *norm,
                     independent_column: *independent_column,
                     dependent_column: *dependent_column,
@@ -1375,6 +1378,7 @@ impl MeasureEngine {
     ) -> MeasureResult {
         let FileErrorReference {
             file,
+            reference_data,
             norm,
             independent_column,
             dependent_column,
@@ -1384,6 +1388,7 @@ impl MeasureEngine {
             signal_name,
             FileErrorReference {
                 file,
+                reference_data,
                 norm,
                 independent_column,
                 dependent_column,
@@ -1404,6 +1409,7 @@ impl MeasureEngine {
     ) -> Result<Value, String> {
         let FileErrorReference {
             file,
+            reference_data,
             norm,
             independent_column,
             dependent_column,
@@ -1422,15 +1428,18 @@ impl MeasureEngine {
             return Err(format!("Signal '{signal_name}' not found"));
         };
         let pairs = if analysis.eq_ignore_ascii_case("DC") {
-            let comparison =
-                match super::measure_file::read_error_comparison_column(file, dependent_column) {
-                    Ok(values) => values,
-                    Err(error) => {
-                        return Err(format!(
-                            "could not load ERROR comparison file '{file}': {error}"
-                        ));
-                    }
-                };
+            let comparison = match super::measure_file::read_error_comparison_column(
+                file,
+                reference_data,
+                dependent_column,
+            ) {
+                Ok(values) => values,
+                Err(error) => {
+                    return Err(format!(
+                        "could not load ERROR comparison file '{file}': {error}"
+                    ));
+                }
+            };
             if signal.len() < comparison.len() {
                 return Err(format!(
                     "ERROR comparison has {} rows but the simulation produced only {} accepted points",
@@ -1453,6 +1462,7 @@ impl MeasureEngine {
             }
             let comparison = match super::measure_file::read_error_comparison_columns(
                 file,
+                reference_data,
                 Some(independent_column),
                 dependent_column,
             ) {

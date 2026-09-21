@@ -2834,12 +2834,12 @@ impl Netlist {
             else {
                 continue;
             };
-            if file.contains("://") {
+            if file.path().contains("://") {
                 continue;
             }
-            let candidate = Path::new(file);
+            let candidate = Path::new(file.path());
             if !candidate.is_absolute() {
-                *file = base_dir.join(candidate).to_string_lossy().into_owned();
+                file.resolve_path(base_dir.join(candidate).to_string_lossy().into_owned());
             }
         }
         ensure_parse_not_aborted(abort)
@@ -4842,7 +4842,7 @@ mod tests {
             } => {
                 assert_eq!(signal, "V(ONE)");
                 assert_eq!(
-                    file,
+                    file.path(),
                     &deck_path
                         .parent()
                         .expect("deck has parent")

@@ -256,6 +256,67 @@ pub(crate) enum MeasureExpressionKind {
     Expression,
 }
 
+/// A comparison file's logical name and optional captured input. Keeping the
+/// contents on the measurement makes cloned and parallel circuits independent.
+#[derive(Clone, PartialEq, Eq)]
+pub struct MeasurementFileReference {
+    name: String,
+    contents: Option<std::sync::Arc<str>>,
+}
+
+impl MeasurementFileReference {
+    pub fn path(&self) -> &str {
+        &self.name
+    }
+    pub fn contents(&self) -> Option<&str> {
+        self.contents.as_deref()
+    }
+    pub(crate) fn bind_contents(&mut self, contents: std::sync::Arc<str>) {
+        self.contents = Some(contents);
+    }
+    pub(crate) fn resolve_path(&mut self, name: String) {
+        self.name = name;
+    }
+}
+
+impl From<String> for MeasurementFileReference {
+    fn from(name: String) -> Self {
+        Self {
+            name,
+            contents: None,
+        }
+    }
+}
+
+impl From<&str> for MeasurementFileReference {
+    fn from(name: &str) -> Self {
+        Self::from(name.to_owned())
+    }
+}
+
+impl std::fmt::Display for MeasurementFileReference {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.name)
+    }
+}
+
+impl std::fmt::Debug for MeasurementFileReference {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Checkpoint identity already hashes the measurement's Debug form. An
+        // ordinary path keeps the exact old String encoding; captured bytes
+        // extend that identity so changed reference data cannot resume old rows.
+        if let Some(contents) = &self.contents {
+            formatter
+                .debug_struct("BoundMeasurementFile")
+                .field("name", &self.name)
+                .field("contents", contents)
+                .finish()
+        } else {
+            std::fmt::Debug::fmt(&self.name, formatter)
+        }
+    }
+}
+
 /// Type of measurement to perform
 #[derive(Debug, Clone)]
 pub enum MeasureType {
@@ -339,7 +400,7 @@ pub enum MeasureType {
     /// an external Xyce PRN, CSV, or CSDF table.
     FileError {
         signal: String,
-        file: String,
+        file: MeasurementFileReference,
         norm: FileErrorNorm,
         /// Retained for non-DC interpolation support. Xyce deliberately
         /// ignores this option for DC measurements.

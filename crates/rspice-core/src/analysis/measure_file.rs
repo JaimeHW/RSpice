@@ -16,13 +16,15 @@ pub(super) struct ErrorComparisonColumns {
 
 pub(super) fn read_error_comparison_column(
     file: &str,
+    reference_data: Option<&str>,
     dependent_column: usize,
 ) -> Result<Vec<Value>, String> {
-    Ok(read_error_comparison_columns(file, None, dependent_column)?.dependent)
+    Ok(read_error_comparison_columns(file, reference_data, None, dependent_column)?.dependent)
 }
 
 pub(super) fn read_error_comparison_columns(
     file: &str,
+    reference_data: Option<&str>,
     independent_column: Option<usize>,
     dependent_column: usize,
 ) -> Result<ErrorComparisonColumns, String> {
@@ -31,10 +33,16 @@ pub(super) fn read_error_comparison_columns(
         .and_then(|extension| extension.to_str())
         .map(str::to_ascii_lowercase)
         .ok_or_else(|| "comparison filename has no UTF-8 extension".to_string())?;
-    let contents = crate::xspice::read_data_file_to_string(file)?;
+    let host_contents;
+    let contents = if let Some(contents) = reference_data {
+        contents
+    } else {
+        host_contents = crate::xspice::read_data_file_to_string(file)?;
+        &host_contents
+    };
     let parse_column = |column| match extension.as_str() {
-        "prn" | "csv" => parse_prn_or_csv_column(&contents, column),
-        "csd" => parse_csd_column(&contents, column),
+        "prn" | "csv" => parse_prn_or_csv_column(contents, column),
+        "csd" => parse_csd_column(contents, column),
         _ => Err(format!(
             "unsupported comparison format '.{extension}'; expected PRN, CSV, or CSD"
         )),
@@ -51,6 +59,57 @@ pub(super) fn read_error_comparison_columns(
         independent,
         dependent,
     })
+}
+
+/// Bind an ERROR measurement to immutable reference text. Validation uses the
+/// same format and column reader as execution, and failed binding leaves the
+/// existing reference unchanged. The filename still identifies the format and
+/// appears in diagnostics, but a bound statement never reads from that path.
+pub fn bind_error_measurement_reference(
+    statement: &mut crate::netlist::measure::MeasureStatement,
+    contents: impl Into<std::sync::Arc<str>>,
+) -> Result<(), String> {
+    let crate::netlist::measure::MeasureType::FileError {
+        file,
+        independent_column,
+        dependent_column,
+        ..
+    } = &mut statement.measure_type
+    else {
+        return Err(format!(
+            "Measurement '{}' is not an ERROR comparison",
+            statement.name
+        ));
+    };
+    let independent = if statement.analysis.eq_ignore_ascii_case("DC") {
+        None
+    } else {
+        let column = independent_column
+            .and_then(|column| usize::try_from(column).ok())
+            .ok_or_else(|| "non-DC ERROR requires a non-negative INDEPVARCOL".to_owned())?;
+        if column == *dependent_column {
+            return Err("non-DC ERROR requires different INDEPVARCOL and DEPVARCOL values".into());
+        }
+        Some(column)
+    };
+    let contents = contents.into();
+    let columns = read_error_comparison_columns(
+        file.path(),
+        Some(&contents),
+        independent,
+        *dependent_column,
+    )?;
+    if let Some(axis) = columns.independent {
+        if axis.first().is_some_and(|value| *value < 0.0)
+            || axis.windows(2).any(|pair| pair[1] < pair[0])
+        {
+            return Err(
+                "non-DC ERROR reference axis must be non-negative and nondecreasing".into(),
+            );
+        }
+    }
+    file.bind_contents(contents);
+    Ok(())
 }
 
 fn parse_prn_or_csv_column(content: &str, column: usize) -> Result<Vec<Value>, String> {
@@ -555,3 +614,6 @@ mod tests {
         assert!(parse_prn_or_csv_column(prn, 1).is_err());
     }
 }
+
+#[cfg(test)]
+mod bound_reference_tests;

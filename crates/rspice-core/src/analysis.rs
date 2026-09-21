@@ -34,6 +34,7 @@ pub mod frequency_grid;
 pub mod harmonic_balance;
 pub mod measure;
 mod measure_file;
+pub use measure_file::bind_error_measurement_reference;
 pub mod measure_signals;
 pub mod measurements;
 pub mod monte_carlo;
