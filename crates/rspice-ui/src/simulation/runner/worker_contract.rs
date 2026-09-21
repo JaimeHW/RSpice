@@ -66,6 +66,9 @@ pub(crate) struct WorkerRequest {
     pub source_path: Option<String>,
     pub project_veriloga_runtimes: crate::simulation::veriloga::PreparedVerilogARuntimeSet,
     #[serde(default)]
+    pub measurement_references:
+        crate::simulation::measurement_references::PreparedMeasurementReferences,
+    #[serde(default)]
     pub(in crate::simulation) dependencies:
         crate::simulation::execution::ResolvedExecutionDependencies,
     #[serde(default)]
@@ -74,9 +77,9 @@ pub(crate) struct WorkerRequest {
     pub(in crate::simulation) stream_transient_samples: bool,
 }
 
-/// 33: DC mismatch carries the conditional-moment integration policy.
+/// 34: ERROR measurements carry captured and validated comparison tables.
 #[cfg(any(target_arch = "wasm32", test))]
-pub(crate) const WORKER_REQUEST_TRANSPORT_PROTOCOL: u8 = 33;
+pub(crate) const WORKER_REQUEST_TRANSPORT_PROTOCOL: u8 = 34;
 
 /// Browser-worker request split into compact metadata and transferable
 /// floating-point buffers. The embedded request deliberately carries empty
@@ -163,6 +166,9 @@ impl WorkerRequestTransport {
             op_previous_state,
         } = self.request;
         request.project_veriloga_runtimes.validate()?;
+        request
+            .measurement_references
+            .validate_source(&request.netlist)?;
         if request.dependencies != Default::default() {
             return Err("worker request metadata carries duplicate inline dependencies".to_owned());
         }
@@ -310,6 +316,7 @@ impl WorkerRequest {
                 .as_ref()
                 .map(|path| path.to_string_lossy().into_owned()),
             project_veriloga_runtimes: input.project_veriloga_runtimes.clone(),
+            measurement_references: input.measurement_references.clone(),
             dependencies: input.dependencies.clone(),
             environment: input.environment.clone(),
             stream_transient_samples: input.stream_transient_samples,
@@ -323,6 +330,7 @@ impl WorkerRequest {
                 netlist: self.netlist,
                 source_path: self.source_path.map(PathBuf::from),
                 project_veriloga_runtimes: self.project_veriloga_runtimes,
+                measurement_references: self.measurement_references,
                 dependencies: self.dependencies,
                 environment: self.environment,
                 stream_transient_samples: self.stream_transient_samples,

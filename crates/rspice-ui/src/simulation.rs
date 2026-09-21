@@ -14,6 +14,7 @@ pub(crate) mod dependency_contract;
 pub(crate) mod dialog;
 pub(crate) mod engine_bridge;
 pub(crate) mod execution;
+pub(crate) mod measurement_references;
 pub(crate) mod multi_run;
 pub(crate) mod netlist_gen;
 pub(crate) mod optimizer;

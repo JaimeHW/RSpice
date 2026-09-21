@@ -18,7 +18,7 @@ These are statistical integration points, not circuit simulations.
 Saved drafts preserve the text controls; typed plans, manual-deck imports,
 execution identities, Python card descriptions, and worker requests preserve
 the resolved values. Older saved plans use the defaults. Browser request
-protocol 33 rejects older workers that could discard the controls. The response
+protocol 34 rejects older workers that could discard the controls. The response
 protocol remains 28.
 
 Unbounded moments are analytic, including the physical lognormal standard

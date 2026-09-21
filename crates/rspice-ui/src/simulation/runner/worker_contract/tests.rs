@@ -13,6 +13,78 @@ mod hb_current;
 mod result_round_trip;
 
 #[test]
+fn studio_measurement_reference_worker_validates_and_executes_captured_data() {
+    use crate::simulation::measurement_references::PreparedMeasurementReferences;
+    use crate::state::{SpecEntry, SpecificationDefinition};
+    let source = "Captured worker reference\nV1 out 0 2.5\nR1 out 0 1k\n.MEAS TRAN fit ERROR V(out) FILE=worker-reference.csv COMP_FUNCTION=INFNORM INDEPVARCOL=0 DEPVARCOL=1\n.end\n";
+    let mut definition = SpecificationDefinition::new_from_projection(&SpecEntry {
+        measurement: "fit".into(),
+        expression: String::new(),
+        min: None,
+        max: None,
+        unit: String::new(),
+        scope: crate::state::SpecPointScope::AllPoints,
+    });
+    definition.measurement_reference = Some(crate::state::workspace::MeasurementReferenceSource {
+        logical_path: "worker-reference.csv".into(),
+        contents: "TIME,V(out)\n0,2\n0.000001,2\n".into(),
+    });
+    let references = PreparedMeasurementReferences::capture(source, &[definition.clone()]).unwrap();
+    let request = WorkerRequest {
+        id: 97,
+        request: WorkerSimulationRequest::Config(Box::new(WorkerAnalysisConfig::from(
+            &AnalysisConfig::Transient(TransientAnalysisConfig {
+                stop_time: 1e-6,
+                step_time: 1e-7,
+                max_timestep: Some(1e-7),
+                ..Default::default()
+            }),
+        ))),
+        netlist: source.into(),
+        source_path: None,
+        project_veriloga_runtimes: Default::default(),
+        measurement_references: references,
+        dependencies: Default::default(),
+        environment: None,
+        stream_transient_samples: false,
+    };
+    let mut transport = WorkerRequestTransport::from_request(request.clone()).unwrap();
+    transport.request =
+        serde_json::from_str(&serde_json::to_string(&transport.request).unwrap()).unwrap();
+    let mut tampered = transport.clone();
+    let mut json = serde_json::to_value(&tampered.request).unwrap();
+    json["request"]["measurement_references"]["entries"][0]["source"]["contents"] =
+        serde_json::json!("TIME,V(out)\n0,99\n0.000001,99\n");
+    tampered.request = serde_json::from_value(json).unwrap();
+    assert!(
+        tampered
+            .into_request()
+            .unwrap_err()
+            .contains("digest mismatch")
+    );
+    let mut missing = transport.clone();
+    missing.request.request.measurement_references = Default::default();
+    assert!(missing.into_request().unwrap_err().contains("unsealed"));
+    let mut wrong_column = transport.clone();
+    wrong_column.request.request.netlist = source.replace("DEPVARCOL=1", "DEPVARCOL=7");
+    assert!(wrong_column.into_request().is_err());
+    let restored = transport.into_request().unwrap();
+    assert_eq!(restored, request);
+    let (request, input) = restored.into_runner_parts();
+    let result = crate::simulation::runner::run_simulation_thread_with_progress_observer(
+        request,
+        input,
+        Arc::new(Mutex::new(SimulationProgress::default())),
+        Arc::new(AtomicBool::new(false)),
+        Default::default(),
+    )
+    .unwrap();
+    assert!((result.measurement("fit").unwrap() - 0.5).abs() < 1e-8);
+    definition.measurement_reference.as_mut().unwrap().contents = "TIME,V(out)\n1,1\n0,2\n".into();
+    assert!(PreparedMeasurementReferences::capture(source, &[definition]).is_err());
+}
+
+#[test]
 fn pole_zero_worker_result_accepts_numeric_and_missing_gain_with_explicit_evidence() {
     let legacy: WorkerSimulationResult = serde_json::from_str(
         r#"{"PoleZero":{"poles":[[-1.0,2.0]],"zeros":[[-3.0,0.0]],"pole_evidence":{"status":"legacy_unknown"},"zero_evidence":{"status":"legacy_unknown"},"gain":4.25}}"#,
@@ -303,7 +375,7 @@ pub(super) fn nondefault_op_config() -> crate::simulation::dialog::OpConfig {
 #[test]
 fn browser_worker_transfer_protocol_matches_rust_transport() {
     assert_eq!(WORKER_RESPONSE_TRANSPORT_PROTOCOL, 28);
-    assert_eq!(WORKER_REQUEST_TRANSPORT_PROTOCOL, 33);
+    assert_eq!(WORKER_REQUEST_TRANSPORT_PROTOCOL, 34);
     let source = include_str!("../../../../web/simulation-worker.js");
     assert!(source.contains(&format!(
         "const WORKER_PROTOCOL_VERSION = {WORKER_RESPONSE_TRANSPORT_PROTOCOL};"
@@ -335,6 +407,7 @@ use std::collections::HashMap;
 #[test]
 fn worker_request_round_trips_through_json() {
     let request = WorkerRequest {
+        measurement_references: Default::default(),
         id: 7,
         request: WorkerSimulationRequest::Config(Box::new(WorkerAnalysisConfig::Transient {
             stop_time: 1e-6,
@@ -606,6 +679,7 @@ fn fourier_worker_consumes_exact_transient_dependency_artifact() {
     )
     .unwrap();
     let request = WorkerRequest {
+        measurement_references: Default::default(),
         id: 9,
         request: WorkerSimulationRequest::Spec {
             spec: Box::new(WorkerAnalysisSpec::Fourier {
@@ -663,6 +737,7 @@ fn standalone_connection_worker_transport_retains_selected_physics() {
     let (sources, deck) =
         crate::simulation::veriloga::test_support::standalone_connection_fixture();
     let request = WorkerRequest {
+        measurement_references: Default::default(),
         id: 18,
         request: WorkerSimulationRequest::Config(Box::new(WorkerAnalysisConfig::Transient {
             stop_time: 2e-9,
@@ -747,6 +822,7 @@ fn worker_request_round_trips_project_veriloga_runtime_artifacts() {
         )
         .unwrap();
     let request = WorkerRequest {
+        measurement_references: Default::default(),
         id: 8,
         request: WorkerSimulationRequest::Config(Box::new(WorkerAnalysisConfig::Transient {
             stop_time: 1e-6,
@@ -794,6 +870,7 @@ fn worker_request_detaches_and_authenticates_op_previous_state() {
         let mut config = nondefault_op_config();
         config.initial_guess = initial_guess;
         let request = WorkerRequest {
+            measurement_references: Default::default(),
             id: 10,
             request: WorkerSimulationRequest::Config(Box::new(WorkerAnalysisConfig::DcOp(config))),
             netlist: "V1 out 0 1\n.op\n.end\n".to_owned(),
@@ -2097,6 +2174,7 @@ fn configured_study_worker_transfers_and_authenticates_nested_op_seed() {
         ..Default::default()
     };
     let request = WorkerRequest {
+        measurement_references: Default::default(),
         id: 11,
         request: WorkerSimulationRequest::Spec {
             spec: Box::new(WorkerAnalysisSpec::MonteCarlo {

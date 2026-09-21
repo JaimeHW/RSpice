@@ -233,6 +233,45 @@ impl SpecificationWaiver {
     }
 }
 
+/// Retained UTF-8 comparison table. The logical path must match the ERROR
+/// card's FILE operand; its contents travel with the project and prepared run.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MeasurementReferenceSource {
+    pub logical_path: String,
+    pub contents: String,
+}
+
+impl MeasurementReferenceSource {
+    pub fn validate(&self) -> Result<(), String> {
+        validate_bounded_text(
+            "measurement reference path",
+            &self.logical_path,
+            4096,
+            false,
+        )?;
+        if self.logical_path.contains(['\r', '\n', '\0']) {
+            return Err("Measurement reference path must be a single line".into());
+        }
+        let extension = std::path::Path::new(&self.logical_path)
+            .extension()
+            .and_then(|value| value.to_str())
+            .unwrap_or_default();
+        if !["csv", "prn", "csd"]
+            .iter()
+            .any(|allowed| extension.eq_ignore_ascii_case(allowed))
+        {
+            return Err("Measurement references must be CSV, PRN or CSD tables".into());
+        }
+        if self.contents.is_empty()
+            || self.contents.len() > rspice_core::ResourceLimits::default().max_netlist_bytes
+        {
+            return Err("Measurement reference is empty or exceeds the input size limit".into());
+        }
+        Ok(())
+    }
+}
+
 /// Canonical governed definition layered over the legacy scalar-spec
 /// projection. Existing projects migrate deterministically on first access;
 /// new authoring writes both projections until the legacy field is retired.
@@ -249,6 +288,8 @@ pub struct SpecificationDefinition {
     /// expression text is descriptive until the user selects this mode.
     #[serde(default, skip_serializing_if = "measurement_is_reference")]
     pub define_measurement: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub measurement_reference: Option<MeasurementReferenceSource>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub producing_analysis: Option<AnalysisInstanceId>,
     pub comparison: SpecificationComparison,
@@ -283,6 +324,7 @@ impl SpecificationDefinition {
             measurement: entry.measurement.clone(),
             expression: entry.expression.clone(),
             define_measurement: false,
+            measurement_reference: None,
             producing_analysis: None,
             comparison: SpecificationComparison::from_legacy(entry),
             guard_band: None,
@@ -307,6 +349,7 @@ impl SpecificationDefinition {
             measurement: entry.measurement.clone(),
             expression: entry.expression.clone(),
             define_measurement: false,
+            measurement_reference: None,
             producing_analysis: None,
             comparison: SpecificationComparison::from_legacy(entry),
             guard_band: None,
@@ -378,6 +421,9 @@ impl SpecificationDefinition {
             validate_single_line_expression("measurement expression", &self.expression)?;
         }
         self.measurement_statement()?;
+        if let Some(reference) = &self.measurement_reference {
+            reference.validate()?;
+        }
         self.comparison.validate()?;
         if self
             .guard_band
@@ -430,6 +476,7 @@ impl SpecificationDefinition {
             && self.measurement == other.measurement
             && self.expression == other.expression
             && self.define_measurement == other.define_measurement
+            && self.measurement_reference == other.measurement_reference
             && self.producing_analysis == other.producing_analysis
             && self.comparison.bitwise_eq(&other.comparison)
             && self.guard_band.map(f64::to_bits) == other.guard_band.map(f64::to_bits)

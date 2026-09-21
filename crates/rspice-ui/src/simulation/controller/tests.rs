@@ -1151,6 +1151,7 @@ fn failed_prerequisite_skips_dependent_prepared_task_with_exact_provenance() {
         prerequisite.config_digest(),
     )]);
     let snapshot = PreparedRunSnapshot::new(SnapshotParts {
+        measurement_references: Default::default(),
         intent: SimulationRunIntent::SimulateRunSet,
         simulation_plan_id: Some(crate::product::SimulationPlanId::new()),
         project_revision: 3,

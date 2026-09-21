@@ -1541,6 +1541,7 @@ fn a_corner_declarations_turn_assembles_its_family_without_reaching_the_runner()
         analysis_line: ".corner".to_owned(),
     };
     let snapshot = PreparedRunSnapshot::new(SnapshotParts {
+        measurement_references: Default::default(),
         intent: SimulationRunIntent::SimulateRunSet,
         simulation_plan_id: Some(SimulationPlanId::new()),
         project_revision: 3,

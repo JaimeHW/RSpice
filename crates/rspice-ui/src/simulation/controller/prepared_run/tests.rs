@@ -24,9 +24,17 @@ static FIXTURE_NONCE: AtomicU64 = AtomicU64::new(0);
 fn standalone_connection_directive_is_an_authenticated_prepared_dependency() {
     let (sources, deck) =
         crate::simulation::veriloga::test_support::standalone_connection_fixture();
-    reject_deferred_external_sources_with_project_runtimes(&deck, &sources).unwrap();
+    reject_deferred_external_sources_with_project_runtimes(&deck, &sources, &Default::default())
+        .unwrap();
     let altered = deck.replace(" UI_CONNECTIONS", " OTHER_CONNECTIONS");
-    assert!(reject_deferred_external_sources_with_project_runtimes(&altered, &sources).is_err());
+    assert!(
+        reject_deferred_external_sources_with_project_runtimes(
+            &altered,
+            &sources,
+            &Default::default()
+        )
+        .is_err()
+    );
 }
 
 #[test]
@@ -1358,8 +1366,12 @@ fn case_altered_project_veriloga_key_is_rejected_before_dispatch() {
     let exact_runtimes = project_veriloga_runtimes_referenced_by(&state, &exact_directive)
         .expect("inspect exact project directive");
     assert_eq!(exact_runtimes.len(), 1);
-    reject_deferred_external_sources_with_project_runtimes(&exact_directive, &exact_runtimes)
-        .expect("exact project identity is permitted");
+    reject_deferred_external_sources_with_project_runtimes(
+        &exact_directive,
+        &exact_runtimes,
+        &Default::default(),
+    )
+    .expect("exact project identity is permitted");
 
     let altered_key = source_key.replacen("__rspice_project__", "__RSPICE_PROJECT__", 1);
     let altered_directive =
@@ -1373,6 +1385,7 @@ fn case_altered_project_veriloga_key_is_rejected_before_dispatch() {
     let error = reject_deferred_external_sources_with_project_runtimes(
         &altered_directive,
         &altered_runtimes,
+        &Default::default(),
     )
     .expect_err("case-altered project key must remain an external dependency");
     assert_eq!(error.stage(), PreparationStage::SourceChecks);

@@ -176,6 +176,8 @@ pub(crate) struct NetlistInput {
     netlist: String,
     source_path: Option<PathBuf>,
     project_veriloga_runtimes: crate::simulation::veriloga::PreparedVerilogARuntimeSet,
+    measurement_references:
+        crate::simulation::measurement_references::PreparedMeasurementReferences,
     dependencies: ResolvedExecutionDependencies,
     environment: Option<AnalysisExecutionEnvironment>,
     stream_transient_samples: bool,
@@ -458,8 +460,14 @@ impl SimulationRunner {
         dispatch: ResolvedTaskDispatch,
         stream_transient_samples: bool,
     ) -> Result<(), SimulationError> {
-        let (task, executable_netlist, project_veriloga_runtimes, dependencies, environment) =
-            dispatch.into_runner_parts();
+        let (
+            task,
+            executable_netlist,
+            project_veriloga_runtimes,
+            measurement_references,
+            dependencies,
+            environment,
+        ) = dispatch.into_runner_parts();
         let request = match task.config {
             Some(config) => SimulationRequest::Config(Box::new(config)),
             None => SimulationRequest::Spec {
@@ -473,6 +481,7 @@ impl SimulationRunner {
                 netlist: executable_netlist.to_string(),
                 source_path: None,
                 project_veriloga_runtimes,
+                measurement_references,
                 dependencies,
                 environment,
                 stream_transient_samples,
@@ -499,6 +508,7 @@ impl SimulationRunner {
         self.start_request(
             SimulationRequest::Config(Box::new(config)),
             NetlistInput {
+                measurement_references: Default::default(),
                 netlist,
                 source_path,
                 project_veriloga_runtimes: Default::default(),
@@ -1220,7 +1230,8 @@ pub(in crate::simulation::runner) fn run_simulation_thread_with_progress_observe
     }
 
     // Create engine bridge
-    let bridge = EngineBridge::new();
+    let bridge =
+        EngineBridge::new().with_measurement_references(input.measurement_references.clone());
 
     // Update status: building
     {
@@ -1579,6 +1590,7 @@ mod tests {
                 options: Box::new(SpecExecutionOptions::default()),
             },
             NetlistInput {
+                measurement_references: Default::default(),
                 netlist: netlist.to_owned(),
                 source_path: None,
                 project_veriloga_runtimes: Default::default(),

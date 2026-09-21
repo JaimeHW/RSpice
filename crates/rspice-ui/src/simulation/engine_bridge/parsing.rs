@@ -42,7 +42,13 @@ impl EngineBridge {
             }
         });
         ensure_not_aborted(abort)?;
-        parsed
+        let mut parsed = parsed?;
+        if !self.measurement_references.is_empty() {
+            self.measurement_references
+                .bind(&mut parsed)
+                .map_err(SimulationError::InvalidConfig)?;
+        }
+        Ok(parsed)
     }
 
     /// Build an engine instance with netlist `.OPTIONS` layered on top of

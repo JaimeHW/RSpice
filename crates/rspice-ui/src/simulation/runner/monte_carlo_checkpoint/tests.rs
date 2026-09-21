@@ -40,6 +40,7 @@ fn fixture() -> (SimulationRequest, NetlistInput) {
             }),
         },
         NetlistInput {
+            measurement_references: Default::default(),
             netlist: DECK.into(),
             source_path: None,
             project_veriloga_runtimes: Default::default(),

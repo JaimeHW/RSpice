@@ -152,6 +152,7 @@ fn parts() -> SnapshotParts {
     const TEST_NAMESPACE: uuid::Uuid =
         uuid::Uuid::from_u128(0xe6bc_c27a_6103_5327_b2ec_c759_b58a_8598);
     SnapshotParts {
+        measurement_references: Default::default(),
         intent: SimulationRunIntent::SimulateRunSet,
         simulation_plan_id: Some(SimulationPlanId::from_namespace(
             TEST_NAMESPACE,
@@ -1479,7 +1480,7 @@ fn process_and_voltage_axes_change_the_authorized_op_execution_contract() {
         let resolved = task
             .resolve_dependency_artifacts(&HashMap::new())
             .expect("OP has no typed dependencies");
-        let (queued, source, _, _, _) = resolved.into_runner_parts();
+        let (queued, source, _, _, _, _) = resolved.into_runner_parts();
         let Some(AnalysisConfig::DcOp(config)) = queued.config else {
             panic!("OP config")
         };
@@ -1736,7 +1737,7 @@ fn authorized_tasks_own_the_exact_snapshot_netlist_after_permit_consumption() {
     let resolved = authorized
         .resolve_dependency_artifacts(&HashMap::new())
         .expect("artifact-free task resolves");
-    let (_, netlist, runtimes, dependencies, _) = resolved.into_runner_parts();
+    let (_, netlist, runtimes, _, dependencies, _) = resolved.into_runner_parts();
     assert_eq!(&*netlist, "deck\n.op\n.end\n");
     assert!(runtimes.is_empty());
     dependencies

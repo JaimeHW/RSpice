@@ -108,6 +108,7 @@ pub(in crate::simulation) fn run_declaration(
         );
     }
     let parts = SnapshotParts {
+        measurement_references: Default::default(),
         intent: SimulationRunIntent::SimulateRunSet,
         simulation_plan_id: Some(SimulationPlanId::from_namespace(
             TEST_NAMESPACE,
@@ -159,7 +160,6 @@ pub(in crate::simulation) fn run_declaration(
         .authorize_dispatch(proof)
         .map_err(|error| error.to_string())?;
 
-    let bridge = crate::simulation::EngineBridge::new();
     // Points are retained through the controller's own conversion. A hand-built
     // result would decide for itself what evidence a point keeps, and the
     // family is assembled from exactly that evidence.
@@ -213,7 +213,9 @@ pub(in crate::simulation) fn run_declaration(
         let resolved = task
             .resolve_dependency_artifacts(&HashMap::new())
             .map_err(|error| error.to_string())?;
-        let (queued, netlist, _runtimes, dependencies, environment) = resolved.into_runner_parts();
+        let (queued, netlist, _runtimes, references, dependencies, environment) =
+            resolved.into_runner_parts();
+        let bridge = crate::simulation::EngineBridge::new().with_measurement_references(references);
 
         let outcome = match queued.config {
             Some(config) => bridge.run_with_abort_and_source_path_and_environment(

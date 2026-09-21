@@ -57,6 +57,8 @@ pub(in crate::simulation) use dc::resolved_op_config;
 pub struct EngineBridge {
     /// Core engine instance
     engine: rspice_core::Engine,
+    measurement_references:
+        crate::simulation::measurement_references::PreparedMeasurementReferences,
 }
 
 /// The supply corner one PVT point is solved at.
@@ -89,10 +91,19 @@ impl Default for EngineBridge {
 }
 
 impl EngineBridge {
+    pub(crate) fn with_measurement_references(
+        mut self,
+        references: crate::simulation::measurement_references::PreparedMeasurementReferences,
+    ) -> Self {
+        self.measurement_references = references;
+        self
+    }
+
     /// Create a new engine bridge with default configuration
     pub fn new() -> Self {
         Self {
             engine: rspice_core::Engine::default(),
+            measurement_references: Default::default(),
         }
     }
 
@@ -106,6 +117,7 @@ impl EngineBridge {
     ) -> Result<Self, rspice_core::SimulationConfigError> {
         Ok(Self {
             engine: rspice_core::Engine::try_new(config)?,
+            measurement_references: Default::default(),
         })
     }
 
@@ -339,6 +351,7 @@ impl EngineBridge {
         })?;
         Self {
             engine: engine.resolved_for_netlist(netlist),
+            measurement_references: Default::default(),
         }
         .dispatch_analysis(config, netlist, abort)
     }

@@ -1320,9 +1320,16 @@ impl SimulationController {
                 .map(|instance| (instance.id(), instance.draft()))
                 .collect(),
         )?;
+        let measurement_references =
+            crate::simulation::measurement_references::PreparedMeasurementReferences::capture(
+                &netlist,
+                &plan_payload.specification_definitions,
+            )
+            .map_err(|error| PreparationError::new(PreparationStage::SourceChecks, error))?;
         reject_deferred_external_sources_with_project_runtimes(
             &netlist,
             &project_veriloga_runtimes,
+            &measurement_references,
         )?;
         validate_prepared_periodic_sources(&tasks, &netlist)?;
         reject_unresolved_device_models(&netlist, has_project_technology)?;
@@ -1378,6 +1385,7 @@ impl SimulationController {
         )?;
 
         PreparedRunSnapshot::new(SnapshotParts {
+            measurement_references,
             intent: SimulationRunIntent::SimulateRunSet,
             simulation_plan_id: Some(plan.plan_id()),
             project_revision: state.workspace.project.revision().get(),
@@ -1528,9 +1536,24 @@ impl SimulationController {
         let project_veriloga_runtimes = project_veriloga_runtimes_referenced_by(state, &expanded)?
             .try_merge(external_veriloga_runtimes)
             .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
+        let definitions = state
+            .sim_setup
+            .analysis_plan
+            .as_ref()
+            .and_then(|plan| state.workspace.plan_data(plan.id()))
+            .map_or(&[][..], |payload| {
+                payload.specification_definitions.as_slice()
+            });
+        let measurement_references =
+            crate::simulation::measurement_references::PreparedMeasurementReferences::capture(
+                &expanded,
+                definitions,
+            )
+            .map_err(|error| PreparationError::new(PreparationStage::SourceChecks, error))?;
         reject_deferred_external_sources_with_project_runtimes(
             &expanded,
             &project_veriloga_runtimes,
+            &measurement_references,
         )?;
         let queued_tasks =
             manual_deck::build_manual_deck_queue(state, &expanded).map_err(|errors| {
@@ -1586,6 +1609,7 @@ impl SimulationController {
         )?;
 
         PreparedRunSnapshot::new(SnapshotParts {
+            measurement_references,
             intent: SimulationRunIntent::ManualDeck,
             simulation_plan_id: None,
             project_revision: state.workspace.project.revision().get(),
@@ -2455,14 +2479,27 @@ fn contains_external_include_directive(source: &str) -> bool {
 
 #[cfg(test)]
 fn reject_deferred_external_sources(netlist: &str) -> Result<(), PreparationError> {
-    reject_deferred_external_sources_with_project_runtimes(netlist, &Default::default())?;
+    reject_deferred_external_sources_with_project_runtimes(
+        netlist,
+        &Default::default(),
+        &Default::default(),
+    )?;
     validated_executable_hierarchy(netlist).map(|_| ())
 }
 
 fn reject_deferred_external_sources_with_project_runtimes(
     netlist: &str,
     project_runtimes: &crate::simulation::veriloga::PreparedVerilogARuntimeSet,
+    measurement_references: &crate::simulation::measurement_references::PreparedMeasurementReferences,
 ) -> Result<(), PreparationError> {
+    measurement_references
+        .validate_source(netlist)
+        .map_err(|error| {
+            PreparationError::new(
+                PreparationStage::SourceChecks,
+                format!("Executable netlist contains an unsealed external dependency: {error}"),
+            )
+        })?;
     for (line_number, logical_line) in executable_logical_lines(netlist) {
         if project_runtimes.sources().any(|runtime| {
             project_veriloga_directive_matches_exact_identity(
@@ -2474,6 +2511,9 @@ fn reject_deferred_external_sources_with_project_runtimes(
             continue;
         }
         if let Some(reason) = deferred_external_source_reason(&logical_line) {
+            if reason == "file-backed measurement reference" {
+                continue;
+            }
             return Err(PreparationError::new(
                 PreparationStage::SourceChecks,
                 format!(

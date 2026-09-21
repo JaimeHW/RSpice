@@ -41,7 +41,7 @@ async function digest(bytes) {
 
 function request(id, bins, resume = null, source = deck) {
   return {
-    protocolVersion: 33,
+    protocolVersion: 34,
     request: {
       request: {
         id, request: {Spec: {spec: {MonteCarlo: {variation_source: "parameter_tolerance", params: []}},

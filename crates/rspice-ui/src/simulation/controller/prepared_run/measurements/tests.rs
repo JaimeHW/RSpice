@@ -19,6 +19,140 @@ fn definition(name: &str, card: &str) -> SpecificationDefinition {
 }
 
 #[test]
+fn studio_measurement_reference_survives_project_preparation_and_dispatch() {
+    use crate::simulation::execution::ExecutionPermitIssuer;
+    use crate::state::workspace::MeasurementReferenceSource;
+    let mut state = super::super::tests::runnable_state();
+    let plan = state.sim_setup.analysis_plan.as_mut().unwrap();
+    let transient = plan
+        .instances()
+        .iter()
+        .find(|instance| instance.kind() == AnalysisKind::Transient)
+        .unwrap()
+        .id();
+    plan.edit(transient, |draft| {
+        let AnalysisDraft::Transient(config) = draft else {
+            unreachable!()
+        };
+        config.stop = "1u".into();
+        config.step = "100n".into();
+        config.max_step = "100n".into();
+    })
+    .unwrap();
+    let plan_id = plan.id();
+    let mut spec = definition(
+        "fit",
+        ".MEAS TRAN fit ERROR V(out) FILE=studio-reference.csv COMP_FUNCTION=INFNORM INDEPVARCOL=0 DEPVARCOL=1",
+    );
+    spec.producing_analysis = Some(transient);
+    spec.measurement_reference = Some(MeasurementReferenceSource {
+        logical_path: "studio-reference.csv".into(),
+        contents: "TIME,V(out)\n0,2.5\n0.000001,2.5\n".into(),
+    });
+    state
+        .workspace
+        .replace_active_specification_definitions(plan_id, vec![spec.clone()]);
+    let controller = SimulationController::new();
+    let snapshot = controller
+        .build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
+        .unwrap();
+    let digest = snapshot.digest();
+    let generation =
+        crate::workbench::lifecycle::project_lifecycle::generated_netlist_input_digest(&state)
+            .unwrap();
+    let source = snapshot.executable_netlist().to_owned();
+    let project = crate::workbench::lifecycle::project_lifecycle::snapshot(&state).unwrap();
+    let loaded = crate::io::project_io::load_project_text(
+        &crate::io::project_io::serialize_project_file(&project).unwrap(),
+        None,
+    )
+    .unwrap();
+    assert_eq!(
+        loaded
+            .workspace
+            .plan_data(plan_id)
+            .unwrap()
+            .specification_definitions,
+        [spec.clone()]
+    );
+
+    // Reference content is execution identity even when the netlist is unchanged.
+    spec.measurement_reference.as_mut().unwrap().contents = "TIME,V(out)\n0,0\n0.000001,0\n".into();
+    state
+        .workspace
+        .replace_active_specification_definitions(plan_id, vec![spec.clone()]);
+    let changed = controller
+        .build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
+        .unwrap();
+    assert_eq!(changed.executable_netlist(), source);
+    assert_ne!(changed.digest(), digest);
+    assert_ne!(
+        crate::workbench::lifecycle::project_lifecycle::generated_netlist_input_digest(&state)
+            .unwrap(),
+        generation
+    );
+
+    // The original snapshot still executes its captured table after editing.
+    let proof = ExecutionPermitIssuer::default()
+        .issue(digest)
+        .unwrap()
+        .consume(digest, digest)
+        .unwrap();
+    let mut measured = false;
+    for task in snapshot.authorize_dispatch(proof).unwrap().into_tasks() {
+        let (queued, netlist, _, references, _, environment) = task
+            .resolve_dependency_artifacts(&HashMap::new())
+            .unwrap()
+            .into_runner_parts();
+        if let Some(config @ AnalysisConfig::Transient(_)) = queued.config {
+            let result = EngineBridge::new()
+                .with_measurement_references(references)
+                .run_with_abort_and_source_path_and_environment(
+                    &config,
+                    &netlist,
+                    None,
+                    environment,
+                    &rspice_core::NoAbort,
+                )
+                .unwrap();
+            assert!(result.measurement("fit").unwrap().abs() < 1e-8);
+            measured = true;
+        }
+    }
+    assert!(measured);
+
+    // Manual decks own their cards but may use a plan's retained reference.
+    spec.define_measurement = false;
+    spec.expression = "Manual comparison".into();
+    state
+        .workspace
+        .replace_active_specification_definitions(plan_id, vec![spec.clone()]);
+    state.simulation.run_intent = SimulationRunIntent::ManualDeck;
+    state.workspace.netlist_source = Some("Manual reference\nV1 out 0 2.5\nR1 out 0 1k\n.tran 100n 1u\n.MEAS TRAN fit ERROR V(out) FILE=studio-reference.csv COMP_FUNCTION=INFNORM INDEPVARCOL=0 DEPVARCOL=1\n.end\n".into());
+    let manual = controller
+        .build_prepared_snapshot(&state, SimulationRunIntent::ManualDeck)
+        .unwrap();
+    assert_eq!(manual.executable_netlist().matches(".MEAS").count(), 1);
+    for reference in [
+        None,
+        Some(MeasurementReferenceSource {
+            logical_path: "wrong.csv".into(),
+            contents: "TIME,V(out)\n0,0\n1,0\n".into(),
+        }),
+    ] {
+        spec.measurement_reference = reference;
+        state
+            .workspace
+            .replace_active_specification_definitions(plan_id, vec![spec.clone()]);
+        assert!(
+            controller
+                .build_prepared_snapshot(&state, SimulationRunIntent::ManualDeck)
+                .is_err()
+        );
+    }
+}
+
+#[test]
 fn authored_plan_measurements_reach_sealed_source_results_and_saved_projects() {
     let mut state = super::super::tests::runnable_state();
     let plan = state.sim_setup.analysis_plan.as_mut().unwrap();

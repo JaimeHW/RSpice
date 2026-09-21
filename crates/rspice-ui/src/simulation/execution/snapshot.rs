@@ -772,6 +772,8 @@ pub(in crate::simulation) struct AuthorizedTaskDispatch {
     executable_netlist: Arc<str>,
     source_basis_digest: ContentDigest,
     project_veriloga_runtimes: crate::simulation::veriloga::PreparedVerilogARuntimeSet,
+    measurement_references:
+        crate::simulation::measurement_references::PreparedMeasurementReferences,
     touchstone_export: TouchstoneExportPolicy,
     pvt_point: Option<crate::state::AnalysisResultPvtPoint>,
     declared_point: Option<crate::simulation::point_family::DeclaredRunPoint>,
@@ -931,6 +933,7 @@ impl ResolvedTaskDispatch {
         QueuedAnalysis,
         Arc<str>,
         crate::simulation::veriloga::PreparedVerilogARuntimeSet,
+        crate::simulation::measurement_references::PreparedMeasurementReferences,
         ResolvedExecutionDependencies,
         Option<crate::simulation::runner::AnalysisExecutionEnvironment>,
     ) {
@@ -938,6 +941,7 @@ impl ResolvedTaskDispatch {
             self.dispatch.task,
             self.dispatch.executable_netlist,
             self.dispatch.project_veriloga_runtimes,
+            self.dispatch.measurement_references,
             self.dependencies,
             self.dispatch.execution_environment,
         )
@@ -966,6 +970,8 @@ pub(in crate::simulation) struct SnapshotParts {
     pub(in crate::simulation) specification_policy: PreparedSpecificationPolicy,
     pub(in crate::simulation) project_veriloga_runtimes:
         crate::simulation::veriloga::PreparedVerilogARuntimeSet,
+    pub(in crate::simulation) measurement_references:
+        crate::simulation::measurement_references::PreparedMeasurementReferences,
     pub(in crate::simulation) target: ExecutionTargetCapabilities,
     pub(in crate::simulation) receipt: RunSourceReceipt,
     pub(in crate::simulation) advisories: Vec<String>,
@@ -1019,6 +1025,8 @@ pub(in crate::simulation) struct PreparedRunSnapshot {
     specifications: Vec<PreparedSpecification>,
     specification_policy: PreparedSpecificationPolicy,
     project_veriloga_runtimes: crate::simulation::veriloga::PreparedVerilogARuntimeSet,
+    measurement_references:
+        crate::simulation::measurement_references::PreparedMeasurementReferences,
     target: ExecutionTargetCapabilities,
     receipt: RunSourceReceipt,
     advisories: Vec<String>,
@@ -1514,6 +1522,10 @@ impl PreparedRunSnapshot {
         parts.model_identities.sort_unstable();
         parts.model_identities.dedup();
 
+        parts
+            .measurement_references
+            .validate_source(&parts.executable_netlist)
+            .map_err(|error| PreparationError::new(PreparationStage::SourceChecks, error))?;
         let digest = snapshot_digest(
             parts.intent,
             parts.simulation_plan_id,
@@ -1530,6 +1542,7 @@ impl PreparedRunSnapshot {
             parts.receipt,
             &parts.touchstone_export,
             &parts.executable_netlist,
+            &parts.measurement_references,
         );
 
         let snapshot = Self {
@@ -1548,6 +1561,7 @@ impl PreparedRunSnapshot {
             specifications: parts.specifications,
             specification_policy: parts.specification_policy,
             project_veriloga_runtimes: parts.project_veriloga_runtimes,
+            measurement_references: parts.measurement_references,
             target: parts.target,
             receipt: parts.receipt,
             advisories: parts.advisories,
@@ -1630,6 +1644,7 @@ impl PreparedRunSnapshot {
         let executable_netlist: Arc<str> = Arc::from(self.executable_netlist);
         let default_touchstone_export = self.touchstone_export.clone();
         let project_veriloga_runtimes = self.project_veriloga_runtimes.clone();
+        let measurement_references = self.measurement_references.clone();
         let tasks = self
             .tasks
             .into_iter()
@@ -1664,6 +1679,7 @@ impl PreparedRunSnapshot {
                         .map(Arc::<str>::from)
                         .unwrap_or_else(|| Arc::clone(&executable_netlist)),
                     project_veriloga_runtimes: project_veriloga_runtimes.clone(),
+                    measurement_references: measurement_references.clone(),
                     touchstone_export,
                     pvt_point: prepared.pvt_point,
                     declared_point: prepared.declared_point,
@@ -2881,6 +2897,7 @@ fn snapshot_digest(
     receipt: RunSourceReceipt,
     touchstone_export: &TouchstoneExportPolicy,
     executable_netlist: &str,
+    measurement_references: &crate::simulation::measurement_references::PreparedMeasurementReferences,
 ) -> ContentDigest {
     let mut writer = CanonicalWriter::new("rspice.prepared-run-snapshot/v9");
     writer.domain("run-intent");
@@ -3042,6 +3059,12 @@ fn snapshot_digest(
             if definition.define_measurement {
                 writer.domain("rspice.authored-measurement/v1");
             }
+            if let Some(reference) = &definition.measurement_reference {
+                writer.domain("rspice.specification-reference/v1");
+                writer.digest(crate::simulation::measurement_references::reference_digest(
+                    reference,
+                ));
+            }
         });
     }
 
@@ -3080,6 +3103,10 @@ fn snapshot_digest(
     touchstone_export.encode(&mut writer);
     writer.domain("deterministic-executable-netlist");
     writer.string(executable_netlist);
+    if !measurement_references.is_empty() {
+        writer.domain("rspice.prepared-measurement-references/v1");
+        writer.digest(measurement_references.digest());
+    }
     writer.finish()
 }
 
