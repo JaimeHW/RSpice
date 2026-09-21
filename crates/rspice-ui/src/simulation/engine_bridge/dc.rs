@@ -1130,6 +1130,36 @@ mod operating_point_contract_tests {
         assert!((voltage(&first) - 5.0).abs() < 1e-7);
         assert!((voltage(&second) - 2.5).abs() < 1e-7);
         assert_eq!(second.configuration.previous_state, Some(previous.clone()));
+        let retained = crate::simulation::SimulationController::new()
+            .convert_to_analysis_result_with_metadata_owned(
+                SimulationResult::DcOp(second),
+                crate::state::AnalysisType::DcOp,
+                "OP",
+            );
+        let Some(crate::state::AnalysisResultPayload::OperatingPoint {
+            initial_guess,
+            previous_state: Some(evidence),
+            ..
+        }) = retained.result_payload
+        else {
+            panic!("retained OP lineage")
+        };
+        assert_eq!(
+            initial_guess,
+            crate::state::OperatingPointInitialGuessEvidence::PreviousCompatible
+        );
+        assert_eq!(
+            evidence.source_content_digest,
+            previous.source_content_digest
+        );
+        assert_eq!(
+            evidence.producer_snapshot_digest,
+            previous.producer_snapshot_digest
+        );
+        assert_eq!(
+            evidence.producer_result_digest,
+            previous.producer_result_digest
+        );
         let strict = OpConfig {
             initial_guess: OpInitialGuess::PreviousConverged,
             ..config.clone()

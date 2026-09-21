@@ -1554,6 +1554,15 @@ fn operating_point_payload(
         mna_branch_names,
         mna_solution,
         effective_source_content_digest: None,
+        previous_state: config
+            .previous_state
+            .as_ref()
+            .filter(|_| config.initial_guess.uses_previous_state())
+            .map(|previous| OperatingPointPreviousStateEvidence {
+                source_content_digest: previous.source_content_digest,
+                producer_snapshot_digest: previous.producer_snapshot_digest,
+                producer_result_digest: previous.producer_result_digest,
+            }),
         run_point_index: u64::try_from(config.run_point.index).unwrap_or(u64::MAX),
         run_point_count: u64::try_from(config.run_point.count).unwrap_or(u64::MAX),
         run_point_process: match config.run_point.process {

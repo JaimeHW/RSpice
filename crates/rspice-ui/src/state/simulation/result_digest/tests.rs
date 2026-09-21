@@ -235,6 +235,7 @@ fn operating_point_result() -> AnalysisResult {
             mna_branch_names: vec!["V1".to_owned()],
             mna_solution: vec![1.0, 0.5, -0.5e-3],
             effective_source_content_digest: Some(ContentDigest::from_bytes([8; 32])),
+            previous_state: None,
             run_point_index: 1,
             run_point_count: 2,
             run_point_process: OperatingPointProcessEvidence::TT,
@@ -242,6 +243,48 @@ fn operating_point_result() -> AnalysisResult {
             run_point_nominal_supply_voltage: None,
         },
     )
+}
+
+#[test]
+fn previous_op_lineage_is_optional_but_each_identity_is_authenticated() {
+    let legacy = operating_point_result();
+    let json = serde_json::to_value(legacy.result_payload.as_ref().unwrap()).unwrap();
+    assert!(json.get("previous_state").is_none());
+    let mut restored = legacy.clone();
+    restored.result_payload = Some(serde_json::from_value(json).unwrap());
+    assert_eq!(legacy.result_data_digest(), restored.result_data_digest());
+    for field in 0..3 {
+        let mut source = legacy.clone();
+        let Some(AnalysisResultPayload::OperatingPoint {
+            initial_guess,
+            previous_state,
+            ..
+        }) = &mut source.result_payload
+        else {
+            unreachable!()
+        };
+        *initial_guess = OperatingPointInitialGuessEvidence::PreviousCompatible;
+        *previous_state = Some(OperatingPointPreviousStateEvidence {
+            source_content_digest: ContentDigest::from_bytes([1; 32]),
+            producer_snapshot_digest: ContentDigest::from_bytes([2; 32]),
+            producer_result_digest: ContentDigest::from_bytes([3; 32]),
+        });
+        let baseline = source.result_data_digest();
+        assert_ne!(baseline, legacy.result_data_digest());
+        let Some(AnalysisResultPayload::OperatingPoint {
+            previous_state: Some(previous),
+            ..
+        }) = &mut source.result_payload
+        else {
+            unreachable!()
+        };
+        match field {
+            0 => previous.source_content_digest = ContentDigest::from_bytes([9; 32]),
+            1 => previous.producer_snapshot_digest = ContentDigest::from_bytes([9; 32]),
+            _ => previous.producer_result_digest = ContentDigest::from_bytes([9; 32]),
+        }
+        assert_ne!(baseline, source.result_data_digest());
+    }
 }
 
 #[test]

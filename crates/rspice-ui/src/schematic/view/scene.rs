@@ -1898,6 +1898,7 @@ mod tests {
             mna_branch_names: vec!["VBIAS".to_owned()],
             mna_solution: vec![1.25, 2.0e-3],
             effective_source_content_digest: None,
+            previous_state: None,
             run_point_index: 0,
             run_point_count: 1,
             run_point_process: OperatingPointProcessEvidence::TT,

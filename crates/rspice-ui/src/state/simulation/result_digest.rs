@@ -661,6 +661,7 @@ fn encode_result_payload(
             mna_branch_names,
             mna_solution,
             effective_source_content_digest,
+            previous_state,
             run_point_index,
             run_point_count,
             run_point_process,
@@ -767,6 +768,12 @@ fn encode_result_payload(
             if let Some(digest) = effective_source_content_digest {
                 writer.u8(0xa6);
                 writer.digest(*digest);
+            }
+            if let Some(previous) = previous_state {
+                writer.u8(0xa7);
+                writer.digest(previous.source_content_digest);
+                writer.digest(previous.producer_snapshot_digest);
+                writer.digest(previous.producer_result_digest);
             }
         }
         AnalysisResultPayload::PoleZero {

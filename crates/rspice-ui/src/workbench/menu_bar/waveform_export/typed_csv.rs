@@ -150,6 +150,7 @@ pub(super) fn prepare_typed_result_csv(
             mna_branch_names,
             mna_solution,
             effective_source_content_digest,
+            previous_state,
             run_point_index,
             run_point_count,
             run_point_process,
@@ -199,6 +200,27 @@ pub(super) fn prepare_typed_result_csv(
                     "effective_source_content_digest",
                     effective_source_content_digest
                         .map_or_else(String::new, |digest| digest.to_string()),
+                    "sha256",
+                ),
+                (
+                    "previous_source_content_digest",
+                    previous_state
+                        .as_ref()
+                        .map_or_else(String::new, |state| state.source_content_digest.to_string()),
+                    "sha256",
+                ),
+                (
+                    "previous_snapshot_digest",
+                    previous_state.as_ref().map_or_else(String::new, |state| {
+                        state.producer_snapshot_digest.to_string()
+                    }),
+                    "sha256",
+                ),
+                (
+                    "previous_result_digest",
+                    previous_state.as_ref().map_or_else(String::new, |state| {
+                        state.producer_result_digest.to_string()
+                    }),
                     "sha256",
                 ),
                 ("run_point_index", run_point_index.to_string(), "zero_based"),

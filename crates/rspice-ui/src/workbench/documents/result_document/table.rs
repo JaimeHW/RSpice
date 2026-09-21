@@ -119,9 +119,11 @@ fn operating_point_row_count(analysis: &AnalysisResult) -> usize {
             mna_node_names,
             mna_branch_names,
             mna_solution,
+            previous_state,
             ..
         }) => {
-            1 + selected_devices.len()
+            1 + usize::from(previous_state.is_some()) * 4
+                + selected_devices.len()
                 + violation_devices.len()
                 + mna_solution_row_count(dc_rows, mna_node_names, mna_branch_names, mna_solution)
         }
@@ -182,6 +184,8 @@ fn operating_point_row_at(analysis: &AnalysisResult, mut index: usize) -> Option
         mna_node_names,
         mna_branch_names,
         mna_solution,
+        initial_guess,
+        previous_state,
         ..
     } = analysis.result_payload.as_ref()?
     else {
@@ -197,6 +201,45 @@ fn operating_point_row_at(analysis: &AnalysisResult, mut index: usize) -> Option
         });
     }
     index -= 1;
+    if let Some(previous) = previous_state {
+        if index < 4 {
+            let (quantity, value, unit) = match index {
+                0 => (
+                    "Initial guess",
+                    match initial_guess {
+                        crate::state::OperatingPointInitialGuessEvidence::PreviousCompatible => {
+                            "Previous solution, compatible circuit".to_owned()
+                        }
+                        _ => "Previous converged solution".to_owned(),
+                    },
+                    "",
+                ),
+                1 => (
+                    "Previous source",
+                    previous.source_content_digest.to_string(),
+                    "sha256",
+                ),
+                2 => (
+                    "Previous snapshot",
+                    previous.producer_snapshot_digest.to_string(),
+                    "sha256",
+                ),
+                _ => (
+                    "Previous result",
+                    previous.producer_result_digest.to_string(),
+                    "sha256",
+                ),
+            };
+            return Some(TypedOpRow {
+                source: "Startup".to_owned(),
+                quantity: quantity.to_owned(),
+                value,
+                unit: unit.to_owned(),
+                status: "initial guess; solved again".to_owned(),
+            });
+        }
+        index -= 4;
+    }
     if index < selected_devices.len() {
         return Some(TypedOpRow {
             source: "Selection".to_owned(),
@@ -1320,6 +1363,7 @@ mod tests {
             mna_branch_names: vec!["V1".to_owned()],
             mna_solution: vec![1.0, 0.5, -0.5e-3],
             effective_source_content_digest: None,
+            previous_state: None,
             run_point_index: 0,
             run_point_count: 1,
             run_point_process: OperatingPointProcessEvidence::TT,
@@ -1340,7 +1384,28 @@ mod tests {
         let mut analysis =
             AnalysisResult::new(1, AnalysisType::DcOp, "OP").with_result_payload(mna_payload());
         analysis.dc_op = Some(DcOpResult::default());
-
+        let Some(AnalysisResultPayload::OperatingPoint {
+            initial_guess,
+            previous_state,
+            ..
+        }) = &mut analysis.result_payload
+        else {
+            panic!("OP")
+        };
+        *initial_guess = crate::state::OperatingPointInitialGuessEvidence::PreviousCompatible;
+        *previous_state = Some(crate::state::OperatingPointPreviousStateEvidence {
+            source_content_digest: crate::product::ContentDigest::from_bytes([1; 32]),
+            producer_snapshot_digest: crate::product::ContentDigest::from_bytes([2; 32]),
+            producer_result_digest: crate::product::ContentDigest::from_bytes([3; 32]),
+        });
+        assert_eq!(
+            operating_point_row_at(&analysis, 1).unwrap().value,
+            "Previous solution, compatible circuit"
+        );
+        assert_eq!(
+            operating_point_row_at(&analysis, 4).unwrap().value,
+            crate::product::ContentDigest::from_bytes([3; 32]).to_string()
+        );
         let count = operating_point_row_count(&analysis);
         for index in 0..count {
             assert!(

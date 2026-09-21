@@ -1139,6 +1139,15 @@ op_evidence_enum!(OperatingPointTemperatureEvidence {
     Explicit,
     ActiveRunSetAxis
 });
+/// Identity of the accepted OP used only as the initial guess for this solve.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OperatingPointPreviousStateEvidence {
+    pub source_content_digest: crate::product::ContentDigest,
+    pub producer_snapshot_digest: crate::product::ContentDigest,
+    pub producer_result_digest: crate::product::ContentDigest,
+}
+
 op_evidence_enum!(OperatingPointInitialGuessEvidence {
     Automatic,
     PreviousConverged,
@@ -1324,6 +1333,8 @@ pub enum AnalysisResultPayload {
         /// eligible for Previous-converged startup.
         #[serde(default)]
         effective_source_content_digest: Option<crate::product::ContentDigest>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        previous_state: Option<OperatingPointPreviousStateEvidence>,
         #[serde(default)]
         run_point_index: u64,
         #[serde(default = "default_op_run_point_count")]
@@ -1759,6 +1770,8 @@ impl AnalysisResultPayload {
                 mna_branch_names,
                 mna_solution,
                 effective_source_content_digest: _,
+                initial_guess,
+                previous_state,
                 run_point_index,
                 run_point_count,
                 run_point_supply_voltage,
@@ -1772,6 +1785,23 @@ impl AnalysisResultPayload {
                 }
                 if !temperature_celsius.is_finite() || *temperature_celsius <= -273.15 {
                     return Err("operating-point payload has an invalid temperature".to_owned());
+                }
+                if *initial_guess == OperatingPointInitialGuessEvidence::PreviousCompatible
+                    && previous_state.is_none()
+                {
+                    return Err(
+                        "compatible-circuit OP startup has no retained previous-state identity"
+                            .to_owned(),
+                    );
+                }
+                if previous_state.is_some()
+                    && !matches!(
+                        initial_guess,
+                        OperatingPointInitialGuessEvidence::PreviousConverged
+                            | OperatingPointInitialGuessEvidence::PreviousCompatible
+                    )
+                {
+                    return Err("operating-point previous-state identity requires previous-solution startup".to_owned());
                 }
                 if selected_devices.iter().any(|name| {
                     name.is_empty() || name.trim() != name || name.chars().any(char::is_whitespace)

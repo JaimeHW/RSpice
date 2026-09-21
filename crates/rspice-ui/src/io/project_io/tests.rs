@@ -225,6 +225,7 @@ fn operating_point_payload_fixture() -> AnalysisResultPayload {
         mna_branch_names: Vec::new(),
         mna_solution: vec![1.0],
         effective_source_content_digest: Some(ContentDigest::from_bytes([0x70; 32])),
+        previous_state: None,
         run_point_index: 0,
         run_point_count: 1,
         run_point_process: crate::state::OperatingPointProcessEvidence::TT,
@@ -1517,7 +1518,7 @@ fn typed_result_payloads_round_trip_and_reject_payload_tampering() {
             AnalysisResultPayload::OperatingPoint {
                 temperature_mode: crate::state::OperatingPointTemperatureEvidence::PvtRunSet,
                 temperature_celsius: 27.0,
-                initial_guess: crate::state::OperatingPointInitialGuessEvidence::PreviousConverged,
+                initial_guess: crate::state::OperatingPointInitialGuessEvidence::PreviousCompatible,
                 node_initialization:
                     crate::state::OperatingPointNodeInitializationEvidence::UseIcAndNodeset,
                 homotopy: crate::state::OperatingPointHomotopyEvidence::Adaptive,
@@ -1537,6 +1538,11 @@ fn typed_result_payloads_round_trip_and_reject_payload_tampering() {
                 effective_source_content_digest: Some(crate::product::ContentDigest::from_bytes(
                     [0x62; 32],
                 )),
+                previous_state: Some(crate::state::OperatingPointPreviousStateEvidence {
+                    source_content_digest: ContentDigest::from_bytes([1; 32]),
+                    producer_snapshot_digest: ContentDigest::from_bytes([2; 32]),
+                    producer_result_digest: ContentDigest::from_bytes([3; 32]),
+                }),
                 run_point_index: 1,
                 run_point_count: 2,
                 run_point_process: crate::state::OperatingPointProcessEvidence::SS,
