@@ -16,7 +16,11 @@ use crate::numerics::scaled_noise::*;
 use std::collections::BTreeMap;
 use std::f64::consts::PI;
 
+mod neutral_phase;
 mod noise_correlation;
+use neutral_phase::{
+    NeutralPhaseOperator, NoiseAdjointOperator, NoisePreconditioner, refine_noise_adjoint,
+};
 pub(crate) use noise_correlation::{PeriodicNoiseOutput, PeriodicNoiseProjection};
 
 type PeriodicSpectrum = (usize, usize, Vec<Complex64>);
@@ -2057,7 +2061,7 @@ impl HbSolver {
     /// allocation is precisely what the matrix-free route is meant to avoid.
     fn qualify_periodic_noise_adjoint(
         &self,
-        operator: &PeriodicConversionOperator<'_>,
+        operator: &dyn NoiseAdjointOperator,
         rhs: &[Complex64],
         outcome: super::krylov::GmresOutcome,
     ) -> Result<Vec<Complex64>, HbError> {
@@ -2069,7 +2073,7 @@ impl HbSolver {
                 &outcome.solution,
                 rhs,
                 |visitor| {
-                    operator.visit_entries(|row, column, value| {
+                    operator.visit_noise_entries(&mut |row, column, value| {
                         visitor(row, column, value);
                     });
                 },
@@ -2103,7 +2107,7 @@ impl HbSolver {
                     outcome.relative_residual,
                     error
                 );
-                let transpose = operator.to_dense_transpose();
+                let transpose = operator.noise_dense_transpose();
                 self.solve_complex_linear_system(&transpose, rhs)
             }
             Err(error) => Err(HbError::InvalidCircuit(format!(

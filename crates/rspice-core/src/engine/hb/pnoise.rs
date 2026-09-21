@@ -543,7 +543,10 @@ impl Engine {
         )
     }
 
-    /// Measure selected conversion channels from an authenticated driven PSS orbit.
+    /// Measure selected conversion channels from an authenticated PSS orbit.
+    /// Autonomous carriers require sampling: these are small-signal spectra
+    /// about the retained orbit, with unwrapped edge-time errors, rather than
+    /// the stationary carrier-broadened voltage spectrum.
     pub fn run_pnoise_from_pss_request_with_abort(
         &self,
         netlist: &Netlist,
@@ -554,7 +557,7 @@ impl Engine {
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }
-        if operating_point.config().is_autonomous() {
+        if operating_point.config().is_autonomous() && request.sampling.is_none() {
             return Err(SimulationError::Circuit(
                 "driven pnoise cannot consume an autonomous PSS operating point; use oscillator pnoise".into(),
             ));
@@ -586,6 +589,16 @@ impl Engine {
             sidebands,
         } = *request;
         let (input_sideband, output_sideband) = (sidebands.input, sidebands.output);
+        let autonomous_tolerance = match &operating_point {
+            Some(PnoiseOperatingPoint::Shooting(point)) if point.config().is_autonomous() => {
+                // Shooting closure and integration-grid accuracy have separate
+                // owners. The retained orbit is qualified to both requested
+                // budgets; a spectral phase check cannot assume the tighter
+                // endpoint tolerance also governed its time discretization.
+                Some(point.config().tolerance.max(self.voltage_reltol()))
+            }
+            _ => None,
+        };
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }
@@ -681,6 +694,7 @@ impl Engine {
         validate_resistor_noise_metadata(&circuit)?;
         let hb_config = match &operating_point {
             Some(PnoiseOperatingPoint::HarmonicBalance(_)) => hb_config,
+            Some(PnoiseOperatingPoint::Shooting(_)) if autonomous_tolerance.is_some() => hb_config,
             point => self.hb_config_for_dependent_sources(
                 &circuit,
                 hb_config,
@@ -719,7 +733,15 @@ impl Engine {
                 "pnoise lifted dimension {periodic_unknowns} MNA unknowns x {sideband_count} sidebands overflows this platform"
             ))
         })?;
-        self.ensure_matrix_unknowns(lifted_unknowns)?;
+        self.ensure_matrix_unknowns(
+            lifted_unknowns
+                .checked_add(usize::from(autonomous_tolerance.is_some()))
+                .ok_or_else(|| {
+                    SimulationError::Circuit(
+                        "pnoise phase border dimension overflows this platform".into(),
+                    )
+                })?,
+        )?;
         if let Some(summary) =
             periodic_capability::summarize(&periodic_capability::periodic_residual_gaps(&circuit))
         {
@@ -750,9 +772,32 @@ impl Engine {
         // descriptors carry the same large-signal constraints Newton solves.
         self.hb_stamp_resistors(&circuit, &mut solver);
         self.hb_stamp_capacitors(&circuit, &mut solver);
-        self.hb_stamp_voltage_sources(&circuit, &mut solver, &hb_config, &drive_tones)?;
+        if autonomous_tolerance.is_some() {
+            // A retained autonomous orbit supplies the large-signal state.
+            // Startup waveforms are not periodic drives and their RHS is not
+            // consumed by the noise linearization. Keep every ideal voltage
+            // constraint/current unknown; the neutral-mode check below rejects
+            // an orbit whose phase derivative still depends on a periodic drive.
+            for index in 0..circuit.voltage_sources.len() {
+                solver
+                    .try_add_named_voltage_source_branch_harmonics(
+                        circuit.voltage_sources.node_pos[index],
+                        circuit.voltage_sources.node_neg[index],
+                        0.0,
+                        &[],
+                        &circuit.voltage_sources.names[index],
+                    )
+                    .map_err(|error| {
+                        SimulationError::Circuit(format!(
+                            "autonomous noise voltage-constraint registration failed: {error}"
+                        ))
+                    })?;
+            }
+        } else {
+            self.hb_stamp_voltage_sources(&circuit, &mut solver, &hb_config, &drive_tones)?;
+            self.hb_stamp_current_sources(&circuit, &mut solver, &hb_config, &drive_tones)?;
+        }
         self.hb_stamp_periodic_mna_branches(&circuit, &mut solver)?;
-        self.hb_stamp_current_sources(&circuit, &mut solver, &hb_config, &drive_tones)?;
 
         let has_nonlinear = periodic_capability::has_exact_periodic_nonlinear_devices(&circuit);
         if has_nonlinear {
@@ -943,6 +988,7 @@ impl Engine {
                 .map(|sampling| sampling.projection(offset, fundamental_freq, max_sideband))
                 .unwrap_or_else(
                     || crate::analysis::harmonic_balance::PeriodicNoiseProjection {
+                        phase_response: None,
                         terms: vec![(
                             crate::analysis::harmonic_balance::PeriodicNoiseOutput {
                                 node_pos: Some(out_idx),
@@ -964,6 +1010,7 @@ impl Engine {
                     },
                     std::slice::from_ref(&projection),
                     &sources,
+                    autonomous_tolerance,
                     abort,
                     |_, covariance| {
                         per_source.push(covariance[0].re);

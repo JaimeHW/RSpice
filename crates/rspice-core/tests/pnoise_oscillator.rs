@@ -148,3 +148,84 @@ fn oscillator_phase_noise_rejects_invalid_offsets_before_solving() {
         );
     }
 }
+
+#[test]
+fn autonomous_sampled_pnoise_preserves_phase_diffusion() {
+    use rspice_core::abort_signal::NoAbort;
+    use rspice_core::engine::{
+        PeriodicNoiseRequest, PeriodicNoiseSampling, PeriodicNoiseSidebands,
+    };
+    let netlist = Netlist::parse("Sampled LC oscillator\nl1 osc 0 1u\nc1 osc 0 1u\ngneg osc 0 osc 0 -0.051\nd1 osc 0 limiter\nd2 0 osc limiter\n.model limiter d(is=1p n=1)\ni1 0 osc pulse(0 1 10u 10n 10n 1u 1)\n.options rshunt=1k temp=127\n.pnoise lin 3 1e-16 1e-15 out=osc sampling=delay refout=osc periods=1 maxsideband=64 integratednoise=yes\n.end\n").unwrap();
+    let engine = Engine::default().resolved_for_netlist(&netlist);
+    let pss = engine
+        .run_pss_operating_point_with_abort(
+            &netlist,
+            PssConfig::autonomous()
+                .with_period_guess(6.3e-6)
+                .with_tstab_periods(30)
+                .with_harmonics(128)
+                .with_tolerance(1e-6)
+                .with_max_iterations(60),
+            &NoAbort,
+        )
+        .unwrap();
+    let offsets = [1e-16, 1e-15, 1.0, 10.0];
+    let sampling = PeriodicNoiseSampling::Edge {
+        edge: Default::default(),
+    };
+    let result = engine
+        .run_pnoise_from_pss_request_with_abort(
+            &netlist,
+            &PeriodicNoiseRequest {
+                offsets: &offsets,
+                output_node: "osc",
+                output_ref: None,
+                input_source: None,
+                max_sideband: 64,
+                sidebands: PeriodicNoiseSidebands::default(),
+                sampling: Some(&sampling),
+            },
+            &pss,
+            &NoAbort,
+        )
+        .unwrap();
+    let phase = engine
+        .run_pnoise_oscillator_from_pss_with_abort(
+            &netlist,
+            pss.config().clone(),
+            &offsets,
+            &pss,
+            &NoAbort,
+        )
+        .unwrap();
+    let diffusion = phase.diffusion_constant;
+    for (&offset, &density) in offsets.iter().zip(&result.output_noise) {
+        let expected = 2.0 * diffusion / (std::f64::consts::TAU * offset).powi(2);
+        assert!(
+            (density / expected - 1.0).abs() < 0.05,
+            "{offset} Hz: {density:e} vs {expected:e}"
+        );
+    }
+    assert!((result.output_noise[0] / result.output_noise[1] - 100.0).abs() < 0.1);
+    let rspice_core::netlist::AnalysisCommand::Pnoise(card) = &netlist.analyses[0] else {
+        panic!()
+    };
+    let delay = engine
+        .run_pnoise_card_from_pss_with_abort(&netlist, card, &pss, &NoAbort)
+        .unwrap();
+    let rspice_core::engine::PeriodicNoiseResult::Driven {
+        result: delay_result,
+        ..
+    } = delay
+    else {
+        panic!("sampled autonomous noise must retain timing density")
+    };
+    assert!(delay_result.integrated_output_noise.unwrap() > 0.0);
+    let expected_delay = 2.0 * diffusion * pss.analysis().result.period.powi(2);
+    for density in delay_result.output_noise {
+        assert!(
+            (density / expected_delay - 1.0).abs() < 0.05,
+            "close-in period jitter: {density:e} vs {expected_delay:e}"
+        );
+    }
+}

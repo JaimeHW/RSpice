@@ -18,6 +18,9 @@ pub(crate) struct PeriodicNoiseOutput {
 /// voltages. Used to express port noise waves at arbitrary real references.
 #[derive(Debug, Clone)]
 pub(crate) struct PeriodicNoiseProjection {
+    /// Observation response to one radian of phase shift of the full orbit.
+    /// Required only by the autonomous phase-velocity solve.
+    pub phase_response: Option<Complex64>,
     pub terms: Vec<(PeriodicNoiseOutput, Complex64)>,
 }
 
@@ -122,6 +125,7 @@ impl HbSolver {
             .iter()
             .copied()
             .map(|output| PeriodicNoiseProjection {
+                phase_response: None,
                 terms: vec![(output, Complex64::new(1.0, 0.0))],
             })
             .collect::<Vec<_>>();
@@ -146,7 +150,7 @@ impl HbSolver {
         consume: impl FnMut(usize, &[Complex64]) -> Result<(), HbError>,
     ) -> Result<(), HbError> {
         self.solve_periodic_noise_projected_correlations_with_adjoints_each(
-            state, window, outputs, sources, abort, consume,
+            state, window, outputs, sources, None, abort, consume,
         )
         .map(|_| ())
     }
@@ -161,6 +165,7 @@ impl HbSolver {
         window: PeriodicSidebandWindow,
         outputs: &[PeriodicNoiseProjection],
         sources: &[PeriodicNoiseSource],
+        autonomous_tolerance: Option<Value>,
         abort: &dyn AbortSignal,
         mut consume: impl FnMut(usize, &[Complex64]) -> Result<(), HbError>,
     ) -> Result<Vec<Complex64>, HbError> {
@@ -282,8 +287,6 @@ impl HbSolver {
             ));
         }
 
-        let try_krylov =
-            self.config.use_krylov || size >= super::super::krylov::KRYLOV_AUTO_THRESHOLD;
         let (spectra, cap_spectra) = if self.has_nonlinear_devices() {
             (
                 self.conductance_spectra(state, span.max(self.num_harmonics))?,
@@ -309,6 +312,16 @@ impl HbSolver {
             c_spectra: &cap_spectra,
         };
         operator.validate("pnoise")?;
+        let neutral = autonomous_tolerance
+            .map(|tolerance| NeutralPhaseOperator::new(&operator, state, tolerance, abort))
+            .transpose()?;
+        let noise_operator: &dyn NoiseAdjointOperator = match &neutral {
+            Some(neutral) => neutral,
+            None => &operator,
+        };
+        let solve_size = noise_operator.dimension();
+        let try_krylov =
+            self.config.use_krylov || solve_size >= super::super::krylov::KRYLOV_AUTO_THRESHOLD;
 
         let channels = outputs.len();
         let covariance_len = channels.checked_mul(channels).ok_or_else(|| {
@@ -319,20 +332,24 @@ impl HbSolver {
         })?;
         let mut adjoints = try_zeroed_complex_values(adjoint_len, "pnoise adjoints")?;
         let preconditioner = if try_krylov {
-            Some(PeriodicPreconditioner::build(&operator, true)?)
+            Some(NoisePreconditioner {
+                base: PeriodicPreconditioner::build(&operator, true)?,
+                base_size: size,
+                bordered: neutral.is_some(),
+            })
         } else {
             None
         };
         let transpose = if try_krylov {
             None
         } else {
-            Some(operator.to_dense_transpose())
+            Some(noise_operator.noise_dense_transpose())
         };
         for (channel, output) in outputs.iter().enumerate() {
             if abort.is_aborted() {
                 return Err(HbError::Aborted);
             }
-            let mut rhs = try_zeroed_complex_values(size, "pnoise adjoint RHS")?;
+            let mut rhs = try_zeroed_complex_values(solve_size, "pnoise adjoint RHS")?;
             for (output, weight) in &output.terms {
                 let band = usize::try_from(i64::from(output.sideband) - i64::from(sideband_min))
                     .map_err(|_| {
@@ -347,22 +364,33 @@ impl HbSolver {
                     rhs[node * s + band] -= *weight;
                 }
             }
+            noise_operator.prepare_noise_rhs(&mut rhs, output.phase_response)?;
             if rhs.iter().any(|value| !complex_is_finite(*value)) {
                 return Err(HbError::InvalidCircuit(
                     "pnoise projected adjoint RHS overflowed".into(),
                 ));
             }
             let solution = if let Some(preconditioner) = &preconditioner {
-                let restart =
-                    super::super::krylov::bounded_gmres_restart(self.config.gmres_restart, size);
+                let restart = super::super::krylov::bounded_gmres_restart(
+                    self.config.gmres_restart,
+                    solve_size,
+                );
                 let outcome = super::super::krylov::gmres(
-                    &|input| operator.apply_transpose(input),
+                    &|input| noise_operator.apply_noise_transpose(input),
                     preconditioner,
                     &rhs,
                     restart,
                     6,
                 );
-                self.qualify_periodic_noise_adjoint(&operator, &rhs, outcome)?
+                let outcome = refine_noise_adjoint(
+                    noise_operator,
+                    preconditioner,
+                    &rhs,
+                    outcome,
+                    restart,
+                    abort,
+                )?;
+                self.qualify_periodic_noise_adjoint(noise_operator, &rhs, outcome)?
             } else {
                 self.solve_complex_linear_system(
                     transpose.as_ref().ok_or_else(|| {
@@ -371,7 +399,7 @@ impl HbSolver {
                     &rhs,
                 )?
             };
-            adjoints[channel * size..(channel + 1) * size].copy_from_slice(&solution);
+            adjoints[channel * size..(channel + 1) * size].copy_from_slice(&solution[..size]);
         }
         let mut covariance = try_zeroed_complex_values(covariance_len, "pnoise covariance")?;
         let gain_len = channels.checked_mul(s).ok_or_else(|| {

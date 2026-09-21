@@ -338,16 +338,17 @@ impl PreparedSampling {
         max_sideband: i32,
     ) -> PeriodicNoiseProjection {
         let delay_phase = TAU * ((offset / fundamental) * self.delay_cycles).rem_euclid(1.0);
+        // exp(j*delay_phase)-1 retains tiny phase increments. Add it only
+        // after the two unshifted observations so identical edges cancel first.
+        let delay_increment =
+            Complex64::new(-2.0 * (0.5 * delay_phase).sin().powi(2), delay_phase.sin());
         let mut terms = Vec::new();
-        for (sample, offset_phase) in [
-            (Some(&self.output), delay_phase),
-            (self.reference.as_ref(), 0.0),
-        ] {
-            let Some(sample) = sample else {
-                continue;
-            };
+        for sample in [Some(&self.output), self.reference.as_ref()]
+            .into_iter()
+            .flatten()
+        {
             for sideband in -max_sideband..=max_sideband {
-                let phase = (Value::from(sideband) * sample.phase + offset_phase).rem_euclid(TAU);
+                let phase = (Value::from(sideband) * sample.phase).rem_euclid(TAU);
                 terms.push((
                     PeriodicNoiseOutput {
                         node_pos: sample.nodes.0,
@@ -358,7 +359,31 @@ impl PreparedSampling {
                 ));
             }
         }
-        PeriodicNoiseProjection { terms }
+        if delay_increment != Complex64::ZERO {
+            for sideband in -max_sideband..=max_sideband {
+                let phase = (Value::from(sideband) * self.output.phase).rem_euclid(TAU);
+                terms.push((
+                    PeriodicNoiseOutput {
+                        node_pos: self.output.nodes.0,
+                        node_neg: self.output.nodes.1,
+                        sideband,
+                    },
+                    Complex64::from_polar(self.output.scale, phase) * delay_increment,
+                ));
+            }
+        }
+        let phase_response = match &self.evidence.request {
+            PeriodicNoiseSampling::Phase { .. } => Complex64::new(
+                self.evidence.output.slew_volts_per_second / (TAU * fundamental),
+                0.0,
+            ),
+            PeriodicNoiseSampling::Edge { .. } => Complex64::new(-1.0 / (TAU * fundamental), 0.0),
+            PeriodicNoiseSampling::Delay { .. } => -delay_increment / (TAU * fundamental),
+        };
+        PeriodicNoiseProjection {
+            terms,
+            phase_response: Some(phase_response),
+        }
     }
 }
 

@@ -180,8 +180,9 @@ fn apply_pnoise_card_reporting(
 /// Whether one authored `.PNOISE` card may be measured around this carrier.
 ///
 /// `OUTPUT` is the card's default and means "the noise at the probe". Around
-/// a free-running orbit that measurement *is* the carrier-normalized phase
-/// noise, so an autonomous carrier keeps selecting the oscillator driver —
+/// a free-running orbit, without sampling, that measurement is the
+/// carrier-normalized phase noise. An unsampled autonomous carrier keeps
+/// selecting the oscillator driver —
 /// the rule that predates `NOISEREF=` and the only one a bare `.PNOISE`
 /// beneath `.PSS AUTONOMOUS=YES` can mean. The two combinations that would
 /// answer a different question from the one the card asked are refused.
@@ -193,15 +194,17 @@ fn check_pnoise_card_carrier(
 
     if let Some(sampling) = &card.sampling {
         sampling.validate().map_err(SimulationError::Circuit)?;
-        if autonomous || card.noise_reference == PnoiseReference::Phase || card.output_sideband != 0
-        {
+        if card.noise_reference == PnoiseReference::Phase || card.output_sideband != 0 {
             return Err(SimulationError::Circuit(
-                "sampled PNOISE requires a driven carrier, output sideband zero, and output or input noise reference".into(),
+                "sampled PNOISE requires output sideband zero and output or input noise reference"
+                    .into(),
             ));
         }
     }
 
-    if (autonomous && (card.input_sideband != 0 || card.output_sideband != 0))
+    if (autonomous
+        && card.sampling.is_none()
+        && (card.input_sideband != 0 || card.output_sideband != 0))
         || (card.noise_reference != PnoiseReference::Input && card.input_sideband != 0)
     {
         return Err(SimulationError::Circuit("PNOISE conversion sidebands require driven noise; a nonzero input sideband also requires input-referred noise".into()));
@@ -212,7 +215,7 @@ fn check_pnoise_card_carrier(
              phase to diffuse, so author `.PSS AUTONOMOUS=YES` or ask for output-referred noise"
                 .to_string(),
         )),
-        (PnoiseReference::Input, true) => Err(SimulationError::Circuit(
+        (PnoiseReference::Input, true) if card.sampling.is_none() => Err(SimulationError::Circuit(
             "`.PNOISE INPUT=` refers noise to a driving source, and an autonomous carrier has \
              none; author `NOISEREF=PHASE` for an oscillator's phase noise"
                 .to_string(),
@@ -224,8 +227,8 @@ fn check_pnoise_card_carrier(
 /// Every shape a periodic-noise run produces, in one type the shared result
 /// document accepts.
 ///
-/// A driven `.PNOISE` run reports an absolute output voltage PSD in V^2/Hz
-/// with a per-source breakdown; an autonomous oscillator run reports a
+/// A periodic conversion run reports output voltage or sampled timing PSD
+/// with a per-source breakdown; an oscillator phase-noise run reports a
 /// carrier-normalized single-sideband spectrum in dBc/Hz plus the Demir phase
 /// diffusion constant. Converting either into the other's units would either
 /// invent a carrier the driven run does not have or discard the diffusion
@@ -234,7 +237,9 @@ fn check_pnoise_card_carrier(
 /// runners take it as a parameter and never put it in their own return value.
 #[derive(Debug, Clone)]
 pub enum PeriodicNoiseResult {
-    /// A driven `.PNOISE` run around a `.PSS` or `.HB` carrier.
+    /// Absolute periodic-noise density around a `.PSS` or `.HB` carrier.
+    /// This also carries sampled autonomous PSS results; the legacy variant
+    /// name remains for API compatibility. Sampling determines V²/Hz or s²/Hz.
     Driven {
         /// Authored output probe spelling, such as `V(out)`.
         output: String,
@@ -291,10 +296,10 @@ impl Engine {
     ///
     /// The card's offset sweep, output probe, input source and sideband depth
     /// are read here rather than on each frontend, and the result comes back
-    /// in the one type the shared document accepts. An autonomous carrier
-    /// selects the oscillator driver, because folding cyclostationary noise
-    /// around a free-running orbit is a different computation, not a
-    /// configuration of the driven one.
+    /// in the one type the shared document accepts. An unsampled autonomous
+    /// carrier selects the oscillator phase-noise driver. Sampling instead
+    /// uses the phase-preserving conversion solver and retains voltage or
+    /// timing density, crossing geometry and the requested input referral.
     pub fn run_pnoise_card_from_pss_with_abort(
         &self,
         netlist: &Netlist,
@@ -306,7 +311,7 @@ impl Engine {
         let output = pnoise_card_output(card);
         let autonomous = operating_point.config().is_autonomous();
         check_pnoise_card_carrier(card, autonomous)?;
-        if autonomous {
+        if autonomous && card.sampling.is_none() {
             let mut result = self.run_pnoise_oscillator_from_pss_with_abort(
                 netlist,
                 operating_point.config().clone(),

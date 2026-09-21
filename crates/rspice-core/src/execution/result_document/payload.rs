@@ -2910,9 +2910,9 @@ pub struct PNoisePayload {
     /// Integration band used for the jitter figures, in hertz.
     pub jitter_bandwidth: Option<PNoiseBandwidth>,
     pub contributors: Vec<PNoiseContributor>,
-    /// Demir phase-diffusion evidence, present only for an autonomous
-    /// oscillator run. A driven run has no free-running orbit and therefore no
-    /// diffusion constant, which is why this is absent rather than zero.
+    /// Demir phase-diffusion evidence for oscillator phase-noise mode.
+    /// Absent for ordinary or sampled conversion spectra, whose voltage or
+    /// timing densities do not carry a Lorentzian linewidth fit.
     #[serde(default)]
     pub oscillator: Option<OscillatorPhaseNoiseDocument>,
 }

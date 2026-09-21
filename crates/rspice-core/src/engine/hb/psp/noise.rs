@@ -79,7 +79,10 @@ pub(super) fn solve_noise_waves(
                 weight,
             ));
         }
-        observations.push(PeriodicNoiseProjection { terms });
+        observations.push(PeriodicNoiseProjection {
+            terms,
+            phase_response: None,
+        });
     }
     let entries = channels.checked_mul(channels).ok_or_else(|| {
         SimulationError::Circuit("PSP covariance dimensions overflow this platform".into())
