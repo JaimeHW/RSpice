@@ -22,6 +22,11 @@ fn measurement_unit_conversions_keep_dimensions_prefixes_and_offsets() {
         ("ohm", 1e-3, "mohm", 1.0),
         ("V^2/Hz", 1e-12, "(uV)^2/Hz", 1.0),
         ("V/sqrt(Hz)", 1e-9, "nV/sqrt(Hz)", 1.0),
+        ("A/√Hz", 1e-9, "nA/√(Hz)", 1.0),
+        ("ratio", 0.25, "%", 25.0),
+        ("dBc/Hz", -120.0, "dBc/Hz", -120.0),
+        ("dBc/Hz", -120.0, "(dBc/Hz)", -120.0),
+        ("(dBc/Hz)/Hz", -1.0, "(dBc/Hz)/kHz", -1000.0),
         ("A*s", 1e-9, "nC", 1.0),
         ("V/A", 1000.0, "kohm", 1.0),
         ("V/s", 1e6, "V/us", 1.0),
@@ -39,6 +44,8 @@ fn measurement_unit_conversions_keep_dimensions_prefixes_and_offsets() {
     assert!(unit("V").convert_value(1.0, "A").is_err());
     assert_eq!(unit("V").convert_value(0.35, "mV").unwrap(), 350.0);
     assert!(unit("dB").convert_value(1.0, "1").is_err());
+    assert!(unit("dBc/Hz").convert_value(-120.0, "dB/Hz").is_err());
+    assert!(unit("dBc/Hz").convert_value(-120.0, "dBc/kHz").is_err());
     assert!(MeasurementUnit::Unknown.convert_value(1.0, "1").is_err());
     assert!(unit("V").convert_value(f64::INFINITY, "V").is_err());
     for invalid in [

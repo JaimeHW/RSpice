@@ -2,8 +2,8 @@
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) struct Unit {
-    // Time, voltage, current, temperature, angle, logarithmic ratio.
-    pub(super) dimensions: [i16; 6],
+    // Time, voltage, current, temperature, angle, logarithmic ratio, phase-noise density.
+    pub(super) dimensions: [i16; 7],
     pub(super) scale: f64,
     pub(super) bias: f64,
 }
@@ -20,6 +20,8 @@ impl Unit {
             .replace('°', "deg")
             .replace('²', "^2")
             .replace('³', "^3")
+            .replace("√Hz", "sqrt(Hz)")
+            .replace("√(", "sqrt(")
             .replace(['·', '⋅'], "*");
         let mut parser = Parser {
             text: normalized.as_bytes(),
@@ -85,12 +87,13 @@ impl Unit {
     pub(super) fn canonical_symbol(self) -> String {
         for name in [
             "1", "s", "Hz", "V", "A", "ohm", "S", "W", "F", "H", "C", "J", "K", "deg", "dB",
+            "dBc/Hz",
         ] {
             if atom(name).is_some_and(|unit| unit.dimensions == self.dimensions) {
                 return name.to_owned();
             }
         }
-        let parts = ["s", "V", "A", "K", "deg", "dB"]
+        let parts = ["s", "V", "A", "K", "deg", "dB", "(dBc/Hz)"]
             .iter()
             .zip(self.dimensions)
             .filter_map(|(symbol, exponent)| match exponent {
@@ -105,24 +108,25 @@ impl Unit {
 
 fn base(symbol: &str) -> Option<Unit> {
     let (dimensions, scale, bias) = match symbol {
-        "1" | "unitless" | "dimensionless" | "count" | "bits" => ([0; 6], 1.0, 0.0),
-        "%" | "percent" => ([0; 6], 0.01, 0.0),
-        "s" | "second" | "seconds" => ([2, 0, 0, 0, 0, 0], 1.0, 0.0),
-        "Hz" | "hz" | "hertz" => ([-2, 0, 0, 0, 0, 0], 1.0, 0.0),
-        "V" | "volt" | "volts" => ([0, 2, 0, 0, 0, 0], 1.0, 0.0),
-        "A" | "amp" | "amps" | "ampere" | "amperes" => ([0, 0, 2, 0, 0, 0], 1.0, 0.0),
-        "ohm" | "ohms" => ([0, 2, -2, 0, 0, 0], 1.0, 0.0),
-        "S" | "siemens" => ([0, -2, 2, 0, 0, 0], 1.0, 0.0),
-        "W" | "watt" | "watts" => ([0, 2, 2, 0, 0, 0], 1.0, 0.0),
-        "F" | "farad" | "farads" => ([2, -2, 2, 0, 0, 0], 1.0, 0.0),
-        "H" | "henry" | "henries" => ([2, 2, -2, 0, 0, 0], 1.0, 0.0),
-        "C" | "coulomb" | "coulombs" => ([2, 0, 2, 0, 0, 0], 1.0, 0.0),
-        "J" | "joule" | "joules" => ([2, 2, 2, 0, 0, 0], 1.0, 0.0),
-        "K" | "kelvin" => ([0, 0, 0, 2, 0, 0], 1.0, 0.0),
-        "degC" | "celsius" => ([0, 0, 0, 2, 0, 0], 1.0, 273.15),
-        "deg" | "degree" | "degrees" => ([0, 0, 0, 0, 2, 0], 1.0, 0.0),
-        "rad" | "radian" | "radians" => ([0, 0, 0, 0, 2, 0], 180.0 / std::f64::consts::PI, 0.0),
-        "dB" | "db" => ([0, 0, 0, 0, 0, 2], 1.0, 0.0),
+        "1" | "ratio" | "unitless" | "dimensionless" | "count" | "bits" => ([0; 7], 1.0, 0.0),
+        "%" | "percent" => ([0; 7], 0.01, 0.0),
+        "s" | "second" | "seconds" => ([2, 0, 0, 0, 0, 0, 0], 1.0, 0.0),
+        "Hz" | "hz" | "hertz" => ([-2, 0, 0, 0, 0, 0, 0], 1.0, 0.0),
+        "V" | "volt" | "volts" => ([0, 2, 0, 0, 0, 0, 0], 1.0, 0.0),
+        "A" | "amp" | "amps" | "ampere" | "amperes" => ([0, 0, 2, 0, 0, 0, 0], 1.0, 0.0),
+        "ohm" | "ohms" => ([0, 2, -2, 0, 0, 0, 0], 1.0, 0.0),
+        "S" | "siemens" => ([0, -2, 2, 0, 0, 0, 0], 1.0, 0.0),
+        "W" | "watt" | "watts" => ([0, 2, 2, 0, 0, 0, 0], 1.0, 0.0),
+        "F" | "farad" | "farads" => ([2, -2, 2, 0, 0, 0, 0], 1.0, 0.0),
+        "H" | "henry" | "henries" => ([2, 2, -2, 0, 0, 0, 0], 1.0, 0.0),
+        "C" | "coulomb" | "coulombs" => ([2, 0, 2, 0, 0, 0, 0], 1.0, 0.0),
+        "J" | "joule" | "joules" => ([2, 2, 2, 0, 0, 0, 0], 1.0, 0.0),
+        "K" | "kelvin" => ([0, 0, 0, 2, 0, 0, 0], 1.0, 0.0),
+        "degC" | "celsius" => ([0, 0, 0, 2, 0, 0, 0], 1.0, 273.15),
+        "deg" | "degree" | "degrees" => ([0, 0, 0, 0, 2, 0, 0], 1.0, 0.0),
+        "rad" | "radian" | "radians" => ([0, 0, 0, 0, 2, 0, 0], 180.0 / std::f64::consts::PI, 0.0),
+        "dB" | "db" => ([0, 0, 0, 0, 0, 2, 0], 1.0, 0.0),
+        "dBc/Hz" => ([0, 0, 0, 0, 0, 0, 2], 1.0, 0.0),
         _ => return None,
     };
     Some(Unit {
@@ -201,7 +205,12 @@ impl Parser<'_> {
     }
     fn factor(&mut self, depth: usize) -> Option<Unit> {
         self.space();
-        let mut unit = if self.text.get(self.at..)?.starts_with(b"sqrt(") {
+        // Treat logarithmic phase-noise density as one named unit, including
+        // within parentheses. It is not dB divided by a linear bandwidth.
+        let mut unit = if self.text.get(self.at..)?.starts_with(b"dBc/Hz") {
+            self.at += 6;
+            base("dBc/Hz")?
+        } else if self.text.get(self.at..)?.starts_with(b"sqrt(") {
             self.at += 5;
             let inner = self.expression(depth + 1)?;
             if self.text.get(self.at) != Some(&b')') {
