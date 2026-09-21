@@ -64,6 +64,11 @@ pub struct ProjectSimulationResultsData {
     pub schema_version: u32,
     #[serde(default)]
     pub runs: Vec<ProjectSimulationRun>,
+    #[serde(
+        default,
+        skip_serializing_if = "crate::state::MonteCarloCheckpointLibrary::is_empty"
+    )]
+    pub imported_monte_carlo_checkpoints: crate::state::MonteCarloCheckpointLibrary,
     /// Last allocated display sequence, retained even after all runs are cleared.
     #[serde(default)]
     pub next_run_id: u64,
@@ -102,6 +107,7 @@ impl Default for ProjectSimulationResultsData {
         Self {
             schema_version: PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION,
             runs: Vec::new(),
+            imported_monte_carlo_checkpoints: Default::default(),
             next_run_id: 0,
             retained_dataset_limit: None,
             active_run_stable_id: None,
@@ -119,6 +125,7 @@ impl Default for ProjectSimulationResultsData {
 impl ProjectSimulationResultsData {
     pub fn is_empty(&self) -> bool {
         self.runs.is_empty()
+            && self.imported_monte_carlo_checkpoints.is_empty()
             && self.next_run_id == 0
             && self.active_run_stable_id.is_none()
             && self.active_dataset_id.is_none()
@@ -136,6 +143,7 @@ impl ProjectSimulationResultsData {
             // Clearing datasets preserves both their allocation history and
             // the project's retention decision across save and session restore.
             return Self {
+                imported_monte_carlo_checkpoints: state.imported_monte_carlo_checkpoints.clone(),
                 next_run_id: state.next_run_id,
                 retained_dataset_limit: state.retained_dataset_limit,
                 ..Self::default()
@@ -147,6 +155,7 @@ impl ProjectSimulationResultsData {
         Self {
             schema_version: PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION,
             runs,
+            imported_monte_carlo_checkpoints: state.imported_monte_carlo_checkpoints.clone(),
             next_run_id: state.next_run_id.max(max_run_id),
             retained_dataset_limit: state.retained_dataset_limit,
             active_run_stable_id: state.active_run().map(|run| run.run_id),
@@ -162,6 +171,17 @@ impl ProjectSimulationResultsData {
 
     fn migrate_to_current_in_place(&mut self, project_id: ProjectId) -> Result<(), String> {
         let source_schema = self.schema_version;
+        if source_schema < IMPORTED_MONTE_CARLO_CHECKPOINTS_SCHEMA_VERSION
+            && !self.imported_monte_carlo_checkpoints.is_empty()
+        {
+            return Err(
+                "result schemas before v36 cannot contain imported Monte Carlo checkpoints".into(),
+            );
+        }
+        if source_schema == MONTE_CARLO_CHECKPOINT_RESULTS_SCHEMA_VERSION {
+            self.schema_version = PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION;
+            return self.validate();
+        }
         if source_schema < MONTE_CARLO_CHECKPOINT_RESULTS_SCHEMA_VERSION
             && self
                 .runs

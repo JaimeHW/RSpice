@@ -111,12 +111,24 @@ pub(super) fn resume_inputs_from_config(
         if !seen.insert(*digest) {
             return Err("A Monte Carlo checkpoint is selected more than once".into());
         }
-        let (analysis, evidence) = state.simulation.runs.iter()
+        let history = state
+            .simulation
+            .runs
+            .iter()
             .flat_map(|run| &run.analyses)
-            .find_map(|analysis| analysis.monte_carlo_checkpoint.as_ref()
-                .filter(|checkpoint| checkpoint.digest() == *digest)
-                .map(|checkpoint| (analysis, checkpoint)))
-            .ok_or("A selected Monte Carlo checkpoint is no longer retained. Clear its selection or restore the run before preparing again.")?;
+            .find_map(|analysis| {
+                analysis
+                    .monte_carlo_checkpoint
+                    .as_ref()
+                    .filter(|checkpoint| checkpoint.digest() == *digest)
+                    .map(|checkpoint| (analysis, checkpoint))
+            });
+        let (analysis, evidence) = if let Some((analysis, evidence)) = history {
+            (Some(analysis), evidence)
+        } else {
+            (None, state.simulation.imported_monte_carlo_checkpoints.get(*digest)
+                .ok_or("A selected Monte Carlo checkpoint is no longer retained. Clear its selection, restore the run or import the checkpoint file before preparing again.")?)
+        };
         bytes = bytes.saturating_add(evidence.bytes().len());
         if bytes > limits.max_external_data_bytes {
             return Err("Selected Monte Carlo checkpoints exceed the combined byte limit".into());
@@ -126,7 +138,9 @@ pub(super) fn resume_inputs_from_config(
     let mut populations: std::collections::BTreeMap<[u8; 32], StudyMonteCarloCheckpoint> =
         Default::default();
     for (analysis, evidence) in selected {
-        evidence.validate_for(analysis)?;
+        if let Some(analysis) = analysis {
+            evidence.validate_for(analysis)?;
+        }
         let checkpoint = StudyMonteCarloCheckpoint::from_bytes_with_limits(
             evidence.bytes(),
             limits,

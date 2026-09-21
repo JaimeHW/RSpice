@@ -17,6 +17,7 @@ pub(super) struct ResultCache(RefCell<Option<CachedResults>>);
 struct CachedResults {
     history: RunHistoryRevision,
     decks: ExecutedDeckArchive,
+    imported_checkpoints: crate::state::MonteCarloCheckpointLibrary,
     next_run_id: u64,
     retained_dataset_limit: Option<usize>,
     active_run_idx: Option<usize>,
@@ -31,6 +32,7 @@ impl CachedResults {
         let SimulationState {
             runs,
             executed_decks,
+            imported_monte_carlo_checkpoints,
             next_run_id,
             retained_dataset_limit,
             active_run_idx,
@@ -54,6 +56,9 @@ impl CachedResults {
         } = state;
         self.history == runs.revision()
             && self.decks.shares_content_with(executed_decks)
+            && self
+                .imported_checkpoints
+                .shares_content_with(imported_monte_carlo_checkpoints)
             && self.next_run_id == *next_run_id
             && self.retained_dataset_limit == *retained_dataset_limit
             && self.active_run_idx == *active_run_idx
@@ -72,6 +77,7 @@ impl ResultCache {
         *cached = Some(CachedResults {
             history: state.runs.revision(),
             decks: state.executed_decks.clone(),
+            imported_checkpoints: state.imported_monte_carlo_checkpoints.clone(),
             next_run_id: state.next_run_id,
             retained_dataset_limit: state.retained_dataset_limit,
             active_run_idx: state.active_run_idx,

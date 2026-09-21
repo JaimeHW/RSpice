@@ -356,5 +356,5 @@ mod symbol_document_tests {
     }
 }
 
-pub use simulation::MonteCarloCheckpointEvidence;
+pub use simulation::{MonteCarloCheckpointEvidence, MonteCarloCheckpointLibrary};
 pub use simulation::{MonteCarloMeanConfidence, MonteCarloMeanInterval, MonteCarloMeanMethod};

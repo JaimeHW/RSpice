@@ -258,4 +258,18 @@ fn monte_carlo_checkpoint_controls_resolve_evidence_before_preparation() {
             .iter()
             .any(|error| error.contains("no longer retained"))
     );
+    let imported = crate::state::MonteCarloCheckpointEvidence::from_bytes(bytes).unwrap();
+    state
+        .simulation
+        .imported_monte_carlo_checkpoints
+        .insert("import.rspice-mc".into(), imported)
+        .unwrap();
+    let imported = controller
+        .build_queue_from_plan(&state, &frozen, &sealed)
+        .unwrap();
+    let imported = imported
+        .iter()
+        .find(|task| task.instance_id() == mc)
+        .unwrap();
+    assert_eq!(imported.monte_carlo_resumes()[0].input().digest(), digest);
 }

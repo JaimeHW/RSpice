@@ -125,7 +125,7 @@ pub use waveform::{DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES, SharedWaveformValues,
 
 mod monte_carlo_checkpoint;
 mod monte_carlo_confidence;
-pub use monte_carlo_checkpoint::MonteCarloCheckpointEvidence;
+pub use monte_carlo_checkpoint::{MonteCarloCheckpointEvidence, MonteCarloCheckpointLibrary};
 pub use monte_carlo_confidence::{
     MonteCarloMeanConfidence, MonteCarloMeanInterval, MonteCarloMeanMethod,
 };

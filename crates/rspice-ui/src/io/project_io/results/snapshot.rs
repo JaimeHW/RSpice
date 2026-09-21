@@ -119,6 +119,7 @@ impl ProjectSimulationResults {
         // After the history, because restoring it drops whatever decks this
         // session was holding for a different project.
         state.executed_decks = executed_decks;
+        state.imported_monte_carlo_checkpoints = data.imported_monte_carlo_checkpoints;
         Ok(())
     }
 

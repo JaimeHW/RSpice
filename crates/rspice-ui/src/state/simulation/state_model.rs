@@ -81,6 +81,9 @@ pub struct SimulationState {
     /// [`Self::retained_dataset_limit`])
     pub runs: crate::state::RunHistory,
 
+    /// Imported resume inputs, preserved independently of dataset pruning.
+    pub imported_monte_carlo_checkpoints: MonteCarloCheckpointLibrary,
+
     /// The exact deck every point of a recent run executed.
     ///
     /// Session-only and bounded, beside the runs rather than on them: a run is

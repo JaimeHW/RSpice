@@ -1,5 +1,8 @@
 //! Durable trial journals, independent of a completed statistical result.
 
+mod library;
+pub use library::MonteCarloCheckpointLibrary;
+
 use super::{AnalysisResult, AnalysisResultFamilyMetadata, AnalysisType};
 use crate::product::ContentDigest;
 use crate::simulation::runner::monte_carlo_checkpoint::checkpoint_digest;
