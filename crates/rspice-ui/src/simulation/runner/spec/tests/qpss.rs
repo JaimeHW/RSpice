@@ -171,7 +171,7 @@ fn qpss_controls_direct_mode_retains_inactive_krylov_draft_buffers() {
     assert!(draft.to_spec().is_err());
 }
 
-fn op_dependencies(
+pub(super) fn op_dependencies(
     basis: &str,
     op_deck: &str,
     consumer_deck: &str,

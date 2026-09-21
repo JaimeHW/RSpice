@@ -1793,11 +1793,13 @@ fn expand_pvt_point_tasks(
             .find(|binding| {
                 matches!(
                     binding.kind(),
-                    ExecutionArtifactKind::DcOperatingPointSeed | ExecutionArtifactKind::QpssState
+                    ExecutionArtifactKind::DcOperatingPointSeed
+                        | ExecutionArtifactKind::QpssState
+                        | ExecutionArtifactKind::PeriodicState
                 )
             })
             .and_then(|binding| final_task.get(&binding.producer_instance_id()))
-            .and_then(|(_, _, _, source)| source.clone());
+            .map(|(_, _, _, source)| source.clone());
         for binding in &mut prepared.dependency_bindings {
             if let Some((identity, revision, digest, _)) =
                 final_task.get(&binding.producer_instance_id())
@@ -1814,8 +1816,15 @@ fn expand_pvt_point_tasks(
                 | AnalysisSpec::Qpac { .. }
                 | AnalysisSpec::Qpxf { .. }
                 | AnalysisSpec::Qpnoise { .. }
-        ) {
-            prepared.executable_netlist_override = inherited_op_source_override;
+                | AnalysisSpec::Pac
+                | AnalysisSpec::Pxf
+                | AnalysisSpec::Pnoise
+                | AnalysisSpec::Pstb
+                | AnalysisSpec::Psp { .. }
+                | AnalysisSpec::PssSpectrum { .. }
+        ) && let Some(source) = inherited_op_source_override
+        {
+            prepared.executable_netlist_override = source;
         }
 
         // A corner run and a temperature step are not one analysis swept along

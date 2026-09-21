@@ -240,6 +240,7 @@ pub fn run_pxf_analysis_with_config_and_abort(
 
 /// Run PXF from an exact retained PSS state with direct-call source-relative
 /// include and model resolution.
+#[cfg(test)]
 pub fn run_pxf_analysis_from_pss_with_source_path_and_abort(
     netlist_text: &str,
     config: &PxfRunConfig,

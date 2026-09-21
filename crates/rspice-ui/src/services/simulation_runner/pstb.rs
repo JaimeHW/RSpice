@@ -12,13 +12,15 @@
 //! -- turning a dialog or a deck line into that card, and projecting the
 //! complete spectrum onto the modes the sheet is asked to display.
 
+#[cfg(test)]
+use super::parse_runner_netlist_with_abort;
 use super::{
     ServiceRunError, ServiceRunResult, build_resolved_periodic_engine,
     error::{ensure_not_aborted, poll_periodically},
-    parse_runner_netlist_with_abort,
 };
 use rspice_core::Value;
 use rspice_core::abort_signal::AbortSignal;
+#[cfg(test)]
 use std::path::Path;
 
 /// Explicit configuration for PSTB execution.
@@ -251,7 +253,7 @@ fn build_pstb_data(
 ///
 /// Test-only. PSTB ships as a dependent task: the frequency spec runs PSS
 /// first and hands the authenticated operating point to
-/// [`run_pstb_analysis_from_pss_with_source_path_and_abort`], so nothing in the
+/// [`run_pstb_analysis_on_materialized_with_abort`], so nothing in the
 /// product takes this path.
 #[cfg(test)]
 pub fn run_pstb_analysis_with_config_and_abort(
@@ -262,24 +264,7 @@ pub fn run_pstb_analysis_with_config_and_abort(
     run_pstb_analysis_impl(netlist_text, config, None, None, abort)
 }
 
-/// Run PSTB from an exact retained PSS state with direct-call source-relative
-/// include and model resolution.
-pub fn run_pstb_analysis_from_pss_with_source_path_and_abort(
-    netlist_text: &str,
-    config: &PstbRunConfig,
-    operating_point: &rspice_core::engine::PssOperatingPoint,
-    source_path: Option<&Path>,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<PstbData> {
-    run_pstb_analysis_impl(
-        netlist_text,
-        config,
-        source_path,
-        Some(operating_point),
-        abort,
-    )
-}
-
+#[cfg(test)]
 fn run_pstb_analysis_impl(
     netlist_text: &str,
     config: &PstbRunConfig,

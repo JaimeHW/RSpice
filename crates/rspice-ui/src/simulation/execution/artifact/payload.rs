@@ -648,6 +648,8 @@ impl DcOperatingPointSeedArtifact {
 /// Floquet data, and reactive phase-origin state bit-for-bit.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(in crate::simulation) struct PeriodicStateArtifact {
+    #[serde(default)]
+    environment: Option<PeriodicOperatingEnvironment>,
     operating_point: Arc<rspice_core::engine::PssOperatingPoint>,
     result_floquet_real: Vec<f64>,
     result_floquet_imag: Vec<f64>,
@@ -699,6 +701,23 @@ impl PeriodicStateArtifact {
 
     pub(in crate::simulation) fn operating_point(&self) -> &rspice_core::engine::PssOperatingPoint {
         &self.operating_point
+    }
+
+    pub(in crate::simulation) fn materialize_consumer(
+        &self,
+        source: &str,
+        source_path: Option<&std::path::Path>,
+        dependencies: &ResolvedExecutionDependencies,
+        abort: &dyn rspice_core::abort_signal::AbortSignal,
+    ) -> crate::services::simulation_runner::ServiceRunResult<rspice_core::Netlist> {
+        match &self.environment {
+            Some(environment) => environment.materialize(source, source_path, dependencies, abort),
+            None => crate::services::simulation_runner::parse_runner_netlist_with_abort(
+                source,
+                source_path,
+                abort,
+            ),
+        }
     }
 
     pub(in crate::simulation) fn validate_consumer_basis(
@@ -755,6 +774,9 @@ impl PeriodicStateArtifact {
     }
 
     fn validate(&self) -> Result<(), ExecutionArtifactError> {
+        if let Some(environment) = &self.environment {
+            environment.validate()?;
+        }
         let analysis = self.operating_point.analysis();
         let validation = if let Some(identity) = self.operating_point.producer_identity() {
             rspice_core::engine::PssOperatingPoint::try_from_authenticated_parts(
@@ -964,6 +986,10 @@ impl PeriodicStateArtifact {
         writer.sequence(self.operating_point.shooting_state().len());
         for value in self.operating_point.shooting_state() {
             writer.f64(*value);
+        }
+        if let Some(environment) = &self.environment {
+            writer.domain("periodic-operating-environment/v1");
+            environment.encode(&mut writer);
         }
         writer.finish()
     }
@@ -1219,6 +1245,7 @@ impl ExecutionArtifactEnvelope {
             payload: ExecutionArtifactPayload::TransientTrajectory(Arc::new(trajectory)),
         }))
     }
+    #[cfg(test)]
     pub(in crate::simulation) fn from_periodic_result(
         snapshot_digest: ContentDigest,
         producer_instance_id: AnalysisInstanceId,
@@ -1226,6 +1253,26 @@ impl ExecutionArtifactEnvelope {
         producer_config_digest: ContentDigest,
         producer_spec: &AnalysisSpec,
         result: &SimulationResult,
+    ) -> Result<Option<Self>, ExecutionArtifactError> {
+        Self::from_periodic_result_with_environment(
+            snapshot_digest,
+            producer_instance_id,
+            producer_source_revision,
+            producer_config_digest,
+            producer_spec,
+            result,
+            None,
+        )
+    }
+
+    pub(in crate::simulation) fn from_periodic_result_with_environment(
+        snapshot_digest: ContentDigest,
+        producer_instance_id: AnalysisInstanceId,
+        producer_source_revision: ObjectRevision,
+        producer_config_digest: ContentDigest,
+        producer_spec: &AnalysisSpec,
+        result: &SimulationResult,
+        environment: Option<PeriodicOperatingEnvironment>,
     ) -> Result<Option<Self>, ExecutionArtifactError> {
         let SimulationResult::Transient { periodic_state, .. } = result else {
             return Err(ExecutionArtifactError::InvalidPayload(
@@ -1247,6 +1294,7 @@ impl ExecutionArtifactEnvelope {
         let floquet_authenticated =
             pss_floquet_contract_is_authenticated(&analysis.result, analysis.monodromy.len());
         let periodic_state = PeriodicStateArtifact {
+            environment,
             operating_point: Arc::clone(operating_point),
             result_floquet_real,
             result_floquet_imag,
@@ -1846,6 +1894,7 @@ impl ResolvedExecutionDependencies {
                         );
                         ExecutionArtifactPayloadTransferMetadata::PeriodicState(Box::new(
                             PeriodicStateTransferMetadata {
+                                environment: periodic.environment.clone(),
                                 producer_identity: periodic
                                     .operating_point
                                     .producer_identity()
@@ -2231,6 +2280,7 @@ impl ResolvedExecutionDependencies {
                             ExecutionArtifactError::InvalidPayload(error.to_string())
                         })?;
                         let periodic = PeriodicStateArtifact {
+                            environment: metadata.environment,
                             operating_point: Arc::new(operating_point),
                             result_floquet_real,
                             result_floquet_imag,
@@ -2424,6 +2474,8 @@ struct PeriodicWaveformTransferMetadata {
 #[cfg(any(target_arch = "wasm32", test))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 struct PeriodicStateTransferMetadata {
+    #[serde(default)]
+    environment: Option<PeriodicOperatingEnvironment>,
     #[serde(default)]
     producer_identity: Option<rspice_core::engine::PssOperatingPointIdentity>,
     config_fundamental_freq: f64,

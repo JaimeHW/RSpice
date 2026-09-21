@@ -396,11 +396,12 @@ fn run_psp(
         ))
     })?;
     run_periodic_sparameters(request, abort, |config| {
-        svc_runner::run_psp_analysis_from_pss_with_source_path_and_abort(
-            netlist,
+        let circuit =
+            periodic_state.materialize_consumer(netlist, source_path, dependencies, abort)?;
+        svc_runner::run_psp_analysis_from_pss_on_materialized_with_abort(
+            &circuit,
             config,
             periodic_state.operating_point(),
-            source_path,
             abort,
         )
     })

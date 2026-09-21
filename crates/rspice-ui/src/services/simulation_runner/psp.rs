@@ -133,6 +133,7 @@ pub(crate) struct PspData {
 /// Ports must already be physical RF `P` elements in the producer deck. It is
 /// not numerically valid to add terminations after PSS: doing so changes both
 /// the topology and the periodic operating point that PSP is linearizing.
+#[cfg(test)]
 pub fn run_psp_analysis_from_pss_with_source_path_and_abort(
     netlist_text: &str,
     config: &PspRunConfig,

@@ -204,7 +204,22 @@ fn run_pss_analysis_internal(
     ensure_not_aborted(abort)?;
     validation.map_err(ServiceRunError::Failure)?;
 
-    let mut netlist = parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
+    let temperature_source = seed_environment
+        .as_ref()
+        .map(|environment| {
+            super::source_with_run_temperature_with_abort(
+                netlist_text,
+                environment.temperature_celsius,
+                abort,
+            )
+        })
+        .transpose()?;
+    let mut netlist = parse_runner_netlist_with_abort(
+        temperature_source.as_deref().unwrap_or(netlist_text),
+        source_path,
+        abort,
+    )?;
+    netlist.source_text = Some(netlist_text.to_owned());
 
     let seeded_temperature_kelvin = seed_environment
         .as_ref()
@@ -364,6 +379,7 @@ fn apply_seed_environment(
             ));
         }
     }
+    netlist.options.temp = Some(temperature_celsius);
     Ok(temperature_celsius + 273.15)
 }
 

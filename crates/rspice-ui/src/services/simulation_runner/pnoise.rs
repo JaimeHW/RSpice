@@ -255,6 +255,7 @@ pub fn run_pnoise_analysis_with_config_and_abort(
 
 /// Run PNOISE from an exact retained PSS state while resolving any unsealed
 /// direct-call source references relative to `source_path`.
+#[cfg(test)]
 pub fn run_pnoise_analysis_from_pss_with_source_path_and_abort(
     netlist_text: &str,
     config: &PnoiseRunConfig,

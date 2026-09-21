@@ -330,6 +330,7 @@ fn spec_variant_name(spec: &AnalysisSpec) -> &'static str {
 #[cfg(test)]
 mod tests {
     mod periodic_port_noise;
+    mod pss_handoff;
     mod qpac;
     mod qpnoise;
     mod qpss;

@@ -105,9 +105,7 @@ pub(crate) use pac_pxf::{
 pub use pac_pxf::{
     PacFrequencySweep, PacRunConfig, PxfFrequencySweep, PxfRunConfig,
     run_pac_analysis_from_hb_with_source_path_and_abort,
-    run_pac_analysis_from_pss_with_source_path_and_abort,
     run_pxf_analysis_from_hb_with_source_path_and_abort,
-    run_pxf_analysis_from_pss_with_source_path_and_abort,
 };
 pub use periodic_carrier::PeriodicCarrier;
 pub(crate) use periodic_carrier::PeriodicCarrierState;
@@ -116,21 +114,17 @@ pub(crate) use pnoise::run_pnoise_analysis_on_materialized_with_abort;
 pub use pnoise::{
     PnoiseFrequencySweep, PnoiseReference, PnoiseRunConfig,
     run_pnoise_analysis_from_hb_with_source_path_and_abort,
-    run_pnoise_analysis_from_pss_with_source_path_and_abort,
 };
 pub(crate) use psp::run_psp_analysis_from_pss_on_materialized_with_abort;
 pub(crate) use psp::{PspData, run_hbsp_analysis_from_hb_on_materialized_with_abort};
-pub use psp::{
-    PspRunConfig, PspSweep, run_hbsp_analysis_from_hb_with_source_path_and_abort,
-    run_psp_analysis_from_pss_with_source_path_and_abort,
-};
+pub use psp::{PspRunConfig, PspSweep, run_hbsp_analysis_from_hb_with_source_path_and_abort};
 pub(crate) use pss::{PssData, build_core_pss_config, run_pss_analysis_on_materialized_with_abort};
 pub use pss::{
     PssRunConfig, run_pss_analysis_with_dc_seed_and_source_path_and_abort,
     run_pss_analysis_with_source_path_and_abort,
 };
+pub use pstb::PstbRunConfig;
 pub(crate) use pstb::{PstbData, run_pstb_analysis_on_materialized_with_abort};
-pub use pstb::{PstbRunConfig, run_pstb_analysis_from_pss_with_source_path_and_abort};
 pub use qpss::{
     qpss_data_from_operating_point_with_abort, run_qpss_analysis_with_source_path_and_abort,
 };

@@ -393,11 +393,14 @@ fn run_pac(
             )
             .map_err(|error| SimulationError::InvalidConfig(error.to_string()))?;
         super::run_abort_aware_service(abort, || {
-            svc_runner::run_pac_analysis_from_pss_with_source_path_and_abort(
-                netlist,
+            let circuit =
+                periodic_state.materialize_consumer(netlist, source_path, dependencies, abort)?;
+            svc_runner::run_pac_analysis_on_materialized_with_abort(
+                &circuit,
                 &pac_cfg,
-                periodic_state.operating_point(),
-                source_path,
+                Some(svc_runner::PeriodicCarrierState::Shooting(
+                    periodic_state.operating_point(),
+                )),
                 abort,
             )
         })?
@@ -467,11 +470,14 @@ fn run_pxf(
             )
             .map_err(|error| SimulationError::InvalidConfig(error.to_string()))?;
         super::run_abort_aware_service(abort, || {
-            svc_runner::run_pxf_analysis_from_pss_with_source_path_and_abort(
-                netlist,
+            let circuit =
+                periodic_state.materialize_consumer(netlist, source_path, dependencies, abort)?;
+            svc_runner::run_pxf_analysis_on_materialized_with_abort(
+                &circuit,
                 &pxf_cfg,
-                periodic_state.operating_point(),
-                source_path,
+                Some(svc_runner::PeriodicCarrierState::Shooting(
+                    periodic_state.operating_point(),
+                )),
                 abort,
             )
         })?
@@ -561,11 +567,12 @@ fn run_pnoise(
             )
             .map_err(|error| SimulationError::InvalidConfig(error.to_string()))?;
         super::run_abort_aware_service(abort, || {
-            svc_runner::run_pnoise_analysis_from_pss_with_source_path_and_abort(
-                netlist,
+            let circuit =
+                periodic_state.materialize_consumer(netlist, source_path, dependencies, abort)?;
+            svc_runner::run_pnoise_analysis_on_materialized_with_abort(
+                &circuit,
                 &pnoise_cfg,
-                periodic_state.operating_point(),
-                source_path,
+                svc_runner::PeriodicCarrierState::Shooting(periodic_state.operating_point()),
                 abort,
             )
         })?
@@ -836,11 +843,12 @@ fn run_pstb(
         )
         .map_err(|error| SimulationError::InvalidConfig(error.to_string()))?;
     let data = super::run_abort_aware_service(abort, || {
-        svc_runner::run_pstb_analysis_from_pss_with_source_path_and_abort(
-            netlist,
+        let circuit =
+            periodic_state.materialize_consumer(netlist, source_path, dependencies, abort)?;
+        svc_runner::run_pstb_analysis_on_materialized_with_abort(
+            &circuit,
             &pstb_cfg,
-            periodic_state.operating_point(),
-            source_path,
+            Some(periodic_state.operating_point()),
             abort,
         )
     })?;

@@ -156,7 +156,8 @@ pub struct SimulationController {
     /// `PeriodicStateArtifact::validate_consumer_basis` matches on; it is the
     /// wrong number to publish as the carrier a result was measured against.
     current_periodic_carrier_hz: Option<f64>,
-    current_qpss_environment: Option<crate::simulation::execution::PeriodicOperatingEnvironment>,
+    current_periodic_environment:
+        Option<crate::simulation::execution::PeriodicOperatingEnvironment>,
     /// Frozen identity of the prepared task currently owned by the runner.
     /// Captured before the authorized dispatch token is moved into the runner.
     current_provenance: Option<AnalysisResultProvenance>,
@@ -235,7 +236,7 @@ impl SimulationController {
             current_analysis_label: None,
             current_spec_options: None,
             current_periodic_carrier_hz: None,
-            current_qpss_environment: None,
+            current_periodic_environment: None,
             current_provenance: None,
             current_config_digest: None,
             current_effective_source_content_digest: None,
@@ -613,7 +614,7 @@ impl SimulationController {
         self.current_analysis_label = None;
         self.current_spec_options = None;
         self.current_periodic_carrier_hz = None;
-        self.current_qpss_environment = None;
+        self.current_periodic_environment = None;
         self.current_provenance = None;
         self.current_config_digest = None;
         self.current_effective_source_content_digest = None;
@@ -653,7 +654,7 @@ impl SimulationController {
         self.current_analysis_label = None;
         self.current_spec_options = None;
         self.current_periodic_carrier_hz = None;
-        self.current_qpss_environment = None;
+        self.current_periodic_environment = None;
         self.current_provenance = None;
         self.current_config_digest = None;
         self.current_effective_source_content_digest = None;
@@ -873,8 +874,17 @@ impl SimulationController {
             .resolve_dependency_artifacts(&self.execution_artifacts)
             .map_err(|error| SimulationError::InvalidConfig(error.to_string()))
             .and_then(|dispatch| {
-                if matches!(self.current_spec, Some(AnalysisSpec::Qpss { .. })) {
-                    self.current_qpss_environment = Some(
+                if matches!(
+                    self.current_spec,
+                    Some(
+                        AnalysisSpec::Qpss { .. }
+                            | AnalysisSpec::Pss {
+                                method: PssMethod::Shooting,
+                                ..
+                            }
+                    )
+                ) {
+                    self.current_periodic_environment = Some(
                         dispatch
                             .dependencies
                             .dc_operating_point_seed()
@@ -1382,7 +1392,7 @@ impl SimulationController {
         self.current_analysis_label = None;
         self.current_spec_options = None;
         self.current_periodic_carrier_hz = None;
-        self.current_qpss_environment = None;
+        self.current_periodic_environment = None;
         self.current_provenance = None;
         self.current_config_digest = None;
         self.current_effective_source_content_digest = None;
@@ -1818,13 +1828,14 @@ impl SimulationController {
                             Some(provenance),
                             Some(config_digest),
                         ) if periodic_artifact_required => {
-                            ExecutionArtifactEnvelope::from_periodic_result(
+                            ExecutionArtifactEnvelope::from_periodic_result_with_environment(
                                 provenance.prepared_snapshot_digest(),
                                 provenance.source_instance_id(),
                                 provenance.source_revision(),
                                 config_digest,
                                 pss_spec,
                                 &sim_result,
+                                self.current_periodic_environment.clone(),
                             )
                             .map_err(|error| {
                                 format!(
@@ -1837,7 +1848,7 @@ impl SimulationController {
                             Some(provenance), Some(config_digest),
                         ) if qpss_artifact_required => ExecutionArtifactEnvelope::from_qpss_result_with_environment(
                             provenance.prepared_snapshot_digest(), provenance.source_instance_id(),
-                            provenance.source_revision(), config_digest, qpss_spec, &sim_result, self.current_qpss_environment.clone(),
+                            provenance.source_revision(), config_digest, qpss_spec, &sim_result, self.current_periodic_environment.clone(),
                         ).map_err(|error| format!("QPSS result could not produce its independent-tone dependency artifact: {error}")),
                         (
                             Some(hb_spec @ AnalysisSpec::HarmonicBalance { .. }),
@@ -2107,7 +2118,7 @@ impl SimulationController {
                     self.current_analysis_label = None;
                     self.current_spec_options = None;
                     self.current_periodic_carrier_hz = None;
-                    self.current_qpss_environment = None;
+                    self.current_periodic_environment = None;
                     self.current_provenance = None;
                     self.current_config_digest = None;
                     self.current_effective_source_content_digest = None;
