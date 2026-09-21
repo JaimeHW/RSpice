@@ -47,6 +47,10 @@ impl MonteCarloCheckpoint {
     pub fn population_identity(&self) -> [u8; 32] {
         self.population
     }
+    /// Number of scalar measurements in every observed trial.
+    pub fn measurement_count(&self) -> usize {
+        self.columns
+    }
     pub fn completed_trials(&self) -> usize {
         self.rows.len()
     }

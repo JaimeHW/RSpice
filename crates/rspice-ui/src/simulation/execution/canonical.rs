@@ -327,6 +327,26 @@ pub(in crate::simulation) fn analysis_config_digest(
     writer.finish()
 }
 
+/// Identity of a study evaluator, independent of its reporting histogram.
+/// The source, sampler, physical point and engine law are bound separately by
+/// the core population identity. Keep the complete configured prerequisite and
+/// measurement contract, including saved OP state and its lineage.
+pub(in crate::simulation) fn monte_carlo_evaluator_digest(
+    base: &crate::simulation::runner::study::StudyRunConfig,
+) -> ContentDigest {
+    let mut base = base.clone();
+    base.histogram_bins = 1;
+    let mut writer = CanonicalWriter::new("rspice.monte-carlo-evaluator/v1");
+    encode_spec_options(
+        &mut writer,
+        &SpecExecutionOptions {
+            study_base: Some(base),
+            ..Default::default()
+        },
+    );
+    writer.finish()
+}
+
 /// Encode every option the catalog knows, in catalog order.
 ///
 /// Driven by [`NumericOverrideOption::all`] rather than a list written out

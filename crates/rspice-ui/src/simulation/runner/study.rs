@@ -1,7 +1,9 @@
 //! Frozen configured-analysis execution on each study circuit.
 
 mod analysis;
+pub(crate) mod monte_carlo;
 pub use analysis::StudyAnalysis;
+pub(crate) use monte_carlo::run_monte_carlo;
 mod hb;
 mod optimization;
 mod periodic;
@@ -21,11 +23,11 @@ use crate::services::simulation_runner as services;
 use crate::simulation::dialog::McVariationSource;
 use crate::simulation::{config::AnalysisConfig, engine_bridge::EngineBridge, plan::AnalysisKind};
 use rspice_core::abort_signal::{AbortReason, AbortSignal, ModelRunControl};
+#[cfg(test)]
 use rspice_core::analysis::monte_carlo::Distribution;
-use rspice_core::engine::{
-    MonteCarloEnvironment, MonteCarloStudyConfig, MonteCarloVariationSource,
-};
-use rspice_core::netlist::{AnalysisCommand, MonteCarloDistribution};
+use rspice_core::engine::MonteCarloEnvironment;
+#[cfg(test)]
+use rspice_core::engine::MonteCarloStudyConfig;
 use std::path::Path;
 use std::sync::{
     Mutex,
@@ -105,168 +107,6 @@ pub(crate) fn validate_measurements(names: &[String]) -> Result<(), String> {
         }
     }
     Ok(())
-}
-
-pub(crate) fn run_monte_carlo(
-    base: &StudyRunConfig,
-    variation_source: McVariationSource,
-    source: &str,
-    source_path: Option<&Path>,
-    environment: Option<AnalysisExecutionEnvironment>,
-    abort: &dyn AbortSignal,
-) -> Result<services::MonteCarloData, SimulationError> {
-    super::spec::ensure_not_aborted(abort)?;
-    if !base.objective_terms.is_empty() || !base.constraints.is_empty() {
-        return Err(SimulationError::InvalidConfig(
-            "Objectives and constraints apply only to optimization".into(),
-        ));
-    }
-    validate_measurements(&base.measurements).map_err(SimulationError::InvalidConfig)?;
-    base.analysis
-        .validate()
-        .map_err(|errors| SimulationError::InvalidConfig(errors.join("; ")))?;
-    // Preserve these cards in the parser's retained source, so expression and
-    // native-statistics replay observes the same analysis and solver policy.
-    let (analysis, environment) = resolved_study_environment(base, environment);
-    let source = study_source_at_environment(base, source, environment.as_ref(), abort)?;
-    let bridge = EngineBridge::new();
-    let circuit = bridge.parse_netlist_with_abort_and_source_path(&source, source_path, abort)?;
-    let command = circuit
-        .analyses
-        .iter()
-        .find_map(|analysis| match analysis {
-            AnalysisCommand::MonteCarlo(command) => Some(command),
-            _ => None,
-        })
-        .ok_or_else(|| {
-            SimulationError::InvalidConfig("Configured Monte Carlo requires a .MC command".into())
-        })?;
-    validate_base_measurements(base, &circuit)?;
-    let mut study = MonteCarloStudyConfig::new(
-        command.runs,
-        command.seed.unwrap_or(0x5EED_5EED),
-        base.measurements.clone(),
-    );
-    study.first_trial = command.first_trial;
-    study.distribution = match command.distribution {
-        MonteCarloDistribution::Gaussian => Distribution::Gaussian {
-            sigma: command.relative_spread,
-        },
-        MonteCarloDistribution::Uniform => Distribution::Uniform {
-            tolerance: command.relative_spread,
-        },
-        MonteCarloDistribution::WorstCase => Distribution::WorstCase {
-            tolerance: command.relative_spread,
-        },
-    };
-    study.variation_source = match variation_source {
-        McVariationSource::ParameterTolerance => MonteCarloVariationSource::ParameterTolerance,
-        McVariationSource::DeckStatistics => MonteCarloVariationSource::DeckStatistics,
-    };
-    study.parameter_filter = command.params.clone();
-    study.histogram_bins = base.histogram_bins;
-    study.confidence_pct = command.confidence_pct;
-    study.confidence_method = command.confidence_method.into();
-    study.environment = environment;
-    let engine = rspice_core::Engine::default().resolved_for_netlist(&circuit);
-    let signal = StudyAbort {
-        parent: abort,
-        failed: AtomicBool::new(false),
-    };
-    let fatal = Mutex::new(None);
-    let first_trial_failure = Mutex::new(None);
-    let measurement_verdicts = Mutex::new(std::collections::HashMap::new());
-    let result = engine.run_monte_carlo_measurements_with_abort(
-        &circuit,
-        &study,
-        &signal,
-        |engine, trial, trial_index, abort| {
-            let result = base
-                .run_trial(engine, &analysis, trial, abort)
-                .map_err(|error| match error {
-                    SimulationError::SolverError(_)
-                    | SimulationError::ConvergenceFailed { .. }
-                    | SimulationError::Attributed { .. }
-                    | SimulationError::CircuitError(_) => {
-                        let message = error.to_string();
-                        first_trial_failure
-                            .lock()
-                            .unwrap()
-                            .get_or_insert_with(|| message.clone());
-                        rspice_core::SimulationError::Circuit(message)
-                    }
-                    other => {
-                        let mut failure = fatal.lock().unwrap();
-                        if failure.is_none() {
-                            *failure = Some(other);
-                        }
-                        signal.failed.store(true, Ordering::Release);
-                        rspice_core::SimulationError::Aborted
-                    }
-                })?;
-            let mut values = Vec::with_capacity(study.measurements.len());
-            let mut verdicts = Vec::new();
-            for name in &study.measurements {
-                let observation = result.study_measurement(name).ok_or_else(|| {
-                    let message = format!("Study measurement {name:?} is unavailable or failed");
-                    first_trial_failure
-                        .lock()
-                        .unwrap()
-                        .get_or_insert_with(|| message.clone());
-                    rspice_core::SimulationError::Circuit(message)
-                })?;
-                values.push(observation.value.expect("observed study value"));
-                if !observation.passed {
-                    verdicts.push(observation);
-                }
-            }
-            if !verdicts.is_empty() {
-                measurement_verdicts
-                    .lock()
-                    .unwrap()
-                    .insert(trial_index, verdicts);
-            }
-            Ok(values)
-        },
-    );
-    if let Some(error) = fatal.into_inner().unwrap() {
-        return Err(error);
-    }
-    super::spec::ensure_not_aborted(abort)?;
-    let result = result.map_err(|error| bridge.translate_error(error))?;
-    if result.num_failures == result.num_runs {
-        return Err(SimulationError::CircuitError(format!(
-            "All {} Monte Carlo trials failed: {}",
-            result.num_runs,
-            first_trial_failure
-                .into_inner()
-                .unwrap()
-                .unwrap_or_else(|| "no valid measurements".into())
-        )));
-    }
-    let mut data = super::spec::run_abort_aware_service(abort, || {
-        services::finish_monte_carlo_result(
-            result,
-            engine.config().resource_limits.max_result_values,
-            abort,
-        )
-    })?;
-    let mut verdicts = measurement_verdicts.into_inner().unwrap();
-    for member in &mut data.trial_measurements {
-        super::spec::ensure_not_aborted(abort)?;
-        if let Some(observations) = verdicts.remove(&member.member.index()) {
-            for observation in observations {
-                if let Some(retained) = member
-                    .measurements
-                    .iter_mut()
-                    .find(|value| value.name == observation.name)
-                {
-                    *retained = observation;
-                }
-            }
-        }
-    }
-    Ok(data)
 }
 
 struct StudyAbort<'a> {

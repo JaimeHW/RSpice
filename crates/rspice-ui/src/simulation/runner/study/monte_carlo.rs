@@ -1,0 +1,326 @@
+//! Configured Monte Carlo execution and lossless trial continuation.
+
+use super::*;
+use crate::simulation::runner::spec;
+use checkpoint::{Observations, StudyMonteCarloCheckpoint};
+use rspice_core::analysis::monte_carlo::Distribution;
+use rspice_core::engine::{MonteCarloStudyConfig, MonteCarloVariationSource};
+use rspice_core::netlist::{AnalysisCommand, MonteCarloDistribution};
+use std::sync::atomic::AtomicUsize;
+
+pub(crate) mod checkpoint;
+
+/// A continuation always evaluates the same frozen source. An explicit range
+/// changes only which original trial indices contribute to this result; rows
+/// outside it remain available in the journal. The callback receives complete,
+/// bounded snapshots and may persist or forward their portable bytes.
+pub(crate) struct MonteCarloContinuation<'a> {
+    pub checkpoint: &'a mut Option<StudyMonteCarloCheckpoint>,
+    pub trial_range: Option<std::ops::Range<usize>>,
+    pub publish_every: std::num::NonZeroUsize,
+    pub publish: &'a (dyn Fn(&StudyMonteCarloCheckpoint) -> Result<(), SimulationError> + Sync),
+}
+
+pub(crate) fn run_monte_carlo(
+    base: &StudyRunConfig,
+    variation_source: McVariationSource,
+    source: &str,
+    source_path: Option<&Path>,
+    environment: Option<AnalysisExecutionEnvironment>,
+    abort: &dyn AbortSignal,
+) -> Result<services::MonteCarloData, SimulationError> {
+    run_monte_carlo_with_continuation(
+        base,
+        variation_source,
+        source,
+        source_path,
+        environment,
+        abort,
+        None,
+    )
+}
+
+pub(crate) fn run_monte_carlo_with_continuation(
+    base: &StudyRunConfig,
+    variation_source: McVariationSource,
+    source: &str,
+    source_path: Option<&Path>,
+    environment: Option<AnalysisExecutionEnvironment>,
+    abort: &dyn AbortSignal,
+    continuation: Option<MonteCarloContinuation<'_>>,
+) -> Result<services::MonteCarloData, SimulationError> {
+    spec::ensure_not_aborted(abort)?;
+    if !base.objective_terms.is_empty() || !base.constraints.is_empty() {
+        return Err(SimulationError::InvalidConfig(
+            "Objectives and constraints apply only to optimization".into(),
+        ));
+    }
+    validate_measurements(&base.measurements).map_err(SimulationError::InvalidConfig)?;
+    base.analysis
+        .validate()
+        .map_err(|errors| SimulationError::InvalidConfig(errors.join("; ")))?;
+    // Preserve these cards in the parser's retained source, so expression and
+    // native-statistics replay observes the same analysis and solver policy.
+    let (analysis, environment) = resolved_study_environment(base, environment);
+    let source = study_source_at_environment(base, source, environment.as_ref(), abort)?;
+    let bridge = EngineBridge::new();
+    let circuit = bridge.parse_netlist_with_abort_and_source_path(&source, source_path, abort)?;
+    let command = circuit
+        .analyses
+        .iter()
+        .find_map(|analysis| match analysis {
+            AnalysisCommand::MonteCarlo(command) => Some(command),
+            _ => None,
+        })
+        .ok_or_else(|| {
+            SimulationError::InvalidConfig("Configured Monte Carlo requires a .MC command".into())
+        })?;
+    validate_base_measurements(base, &circuit)?;
+    let mut study = MonteCarloStudyConfig::new(
+        command.runs,
+        command.seed.unwrap_or(0x5EED_5EED),
+        base.measurements.clone(),
+    );
+    study.first_trial = command.first_trial;
+    study.distribution = match command.distribution {
+        MonteCarloDistribution::Gaussian => Distribution::Gaussian {
+            sigma: command.relative_spread,
+        },
+        MonteCarloDistribution::Uniform => Distribution::Uniform {
+            tolerance: command.relative_spread,
+        },
+        MonteCarloDistribution::WorstCase => Distribution::WorstCase {
+            tolerance: command.relative_spread,
+        },
+    };
+    study.variation_source = match variation_source {
+        McVariationSource::ParameterTolerance => MonteCarloVariationSource::ParameterTolerance,
+        McVariationSource::DeckStatistics => MonteCarloVariationSource::DeckStatistics,
+    };
+    study.parameter_filter = command.params.clone();
+    study.histogram_bins = base.histogram_bins;
+    study.confidence_pct = command.confidence_pct;
+    study.confidence_method = command.confidence_method.into();
+    study.environment = environment;
+    if let Some(range) = continuation
+        .as_ref()
+        .and_then(|value| value.trial_range.as_ref())
+    {
+        if range.is_empty() {
+            return Err(SimulationError::InvalidConfig(
+                "Monte Carlo continuation requires a nonempty trial range".into(),
+            ));
+        }
+        study.first_trial = range.start;
+        study.num_runs = range.end - range.start;
+    }
+    let engine = rspice_core::Engine::default().resolved_for_netlist(&circuit);
+    let signal = StudyAbort {
+        parent: abort,
+        failed: AtomicBool::new(false),
+    };
+    let fatal = Mutex::new(None);
+    let first_trial_failure = Mutex::new(None);
+    let limits = engine.config().resource_limits;
+    let evaluation_identity = if continuation.is_some() {
+        *crate::simulation::execution::monte_carlo_evaluator_digest(base).as_bytes()
+    } else {
+        [0; 32]
+    };
+    let mut numerical = if let Some(continuation) = &continuation {
+        if let Some(checkpoint) = continuation.checkpoint.as_ref() {
+            checkpoint.validate(limits, abort)?;
+            let expected = engine
+                .new_monte_carlo_checkpoint(&circuit, &study, evaluation_identity, abort)
+                .map_err(|error| bridge.translate_error(error))?;
+            if checkpoint.population_identity() != expected.population_identity() {
+                return Err(SimulationError::InvalidConfig(
+                    "Monte Carlo checkpoint does not match the frozen study population".into(),
+                ));
+            }
+            Some(checkpoint.numerical.clone())
+        } else {
+            Some(
+                engine
+                    .new_monte_carlo_checkpoint(&circuit, &study, evaluation_identity, abort)
+                    .map_err(|error| bridge.translate_error(error))?,
+            )
+        }
+    } else {
+        None
+    };
+    let measurement_verdicts = Mutex::new(
+        continuation
+            .as_ref()
+            .and_then(|value| value.checkpoint.as_ref())
+            .map(|value| value.observations.clone())
+            .unwrap_or_else(Observations::new),
+    );
+    let retaining = continuation.is_some();
+    let evaluate = |engine: &rspice_core::Engine,
+                    trial: &rspice_core::Netlist,
+                    trial_index: usize,
+                    abort: &dyn AbortSignal| {
+        let result =
+            base.run_trial(engine, &analysis, trial, abort)
+                .map_err(|error| match error {
+                    SimulationError::SolverError(_)
+                    | SimulationError::ConvergenceFailed { .. }
+                    | SimulationError::Attributed { .. }
+                    | SimulationError::CircuitError(_) => {
+                        let message = error.to_string();
+                        first_trial_failure
+                            .lock()
+                            .unwrap()
+                            .get_or_insert_with(|| message.clone());
+                        if retaining {
+                            measurement_verdicts.lock().unwrap().insert(
+                                trial_index,
+                                checkpoint::failed_observations(&study.measurements, &message),
+                            );
+                        }
+                        rspice_core::SimulationError::Circuit(message)
+                    }
+                    other => {
+                        let mut failure = fatal.lock().unwrap();
+                        if failure.is_none() {
+                            *failure = Some(other);
+                        }
+                        signal.failed.store(true, Ordering::Release);
+                        rspice_core::SimulationError::Aborted
+                    }
+                })?;
+        let mut values = Vec::with_capacity(study.measurements.len());
+        let mut verdicts = Vec::new();
+        for name in &study.measurements {
+            let observation = result.study_measurement(name).ok_or_else(|| {
+                let message = format!("Study measurement {name:?} is unavailable or failed");
+                first_trial_failure
+                    .lock()
+                    .unwrap()
+                    .get_or_insert_with(|| message.clone());
+                if retaining {
+                    measurement_verdicts.lock().unwrap().insert(
+                        trial_index,
+                        checkpoint::failed_observations(&study.measurements, &message),
+                    );
+                }
+                rspice_core::SimulationError::Circuit(message)
+            })?;
+            values.push(observation.value.expect("observed study value"));
+            if retaining || !observation.passed {
+                verdicts.push(observation);
+            }
+        }
+        if !verdicts.is_empty() {
+            measurement_verdicts
+                .lock()
+                .unwrap()
+                .insert(trial_index, verdicts);
+        }
+        Ok(values)
+    };
+    let result = if let Some(continuation) = continuation {
+        let numerical = numerical.as_mut().expect("checkpoint request");
+        let initial = numerical.completed_trials();
+        let last_published = AtomicUsize::new(initial);
+        let publication_failed = AtomicBool::new(false);
+        let capture = |numerical: &rspice_core::engine::MonteCarloCheckpoint| {
+            // Once accepted, a trial remains durable even if cancellation has
+            // just arrived. Capture is bounded by the already checked limits.
+            StudyMonteCarloCheckpoint::capture(
+                numerical,
+                &study.measurements,
+                &measurement_verdicts.lock().unwrap(),
+                limits,
+                &rspice_core::NoAbort,
+            )
+        };
+        let result = engine.run_monte_carlo_measurements_checkpointed_with_abort(
+            &circuit,
+            &study,
+            evaluation_identity,
+            numerical,
+            &signal,
+            evaluate,
+            |numerical| {
+                if numerical
+                    .completed_trials()
+                    .saturating_sub(last_published.load(Ordering::Relaxed))
+                    < continuation.publish_every.get()
+                {
+                    return Ok(());
+                }
+                match capture(numerical).and_then(|value| (continuation.publish)(&value)) {
+                    Ok(()) => {
+                        last_published.store(numerical.completed_trials(), Ordering::Relaxed);
+                        Ok(())
+                    }
+                    Err(error) => {
+                        publication_failed.store(true, Ordering::Release);
+                        fatal.lock().unwrap().get_or_insert(error);
+                        signal.failed.store(true, Ordering::Release);
+                        Err(rspice_core::SimulationError::Aborted)
+                    }
+                }
+            },
+        );
+        let checkpoint = capture(numerical)?;
+        // Update the caller-owned journal before returning a terminal error.
+        // Do not retry a failed publication behind the consumer's back.
+        *continuation.checkpoint = Some(checkpoint);
+        if !publication_failed.load(Ordering::Acquire)
+            && numerical.completed_trials() > last_published.load(Ordering::Relaxed)
+        {
+            if let Err(error) =
+                (continuation.publish)(continuation.checkpoint.as_ref().expect("captured"))
+            {
+                fatal.lock().unwrap().get_or_insert(error);
+            }
+        }
+        result
+    } else {
+        engine.run_monte_carlo_measurements_with_abort(&circuit, &study, &signal, evaluate)
+    };
+    if let Some(error) = fatal.into_inner().unwrap() {
+        return Err(error);
+    }
+    spec::ensure_not_aborted(abort)?;
+    let result = result.map_err(|error| bridge.translate_error(error))?;
+    if result.num_failures == result.num_runs {
+        return Err(SimulationError::CircuitError(format!(
+            "All {} Monte Carlo trials failed: {}",
+            result.num_runs,
+            first_trial_failure
+                .into_inner()
+                .unwrap()
+                .unwrap_or_else(|| "no valid measurements".into())
+        )));
+    }
+    let mut data = spec::run_abort_aware_service(abort, || {
+        services::finish_monte_carlo_result(
+            result,
+            engine.config().resource_limits.max_result_values,
+            abort,
+        )
+    })?;
+    let mut verdicts = measurement_verdicts.into_inner().unwrap();
+    for member in &mut data.trial_measurements {
+        spec::ensure_not_aborted(abort)?;
+        if let Some(observations) = verdicts.remove(&member.member.index()) {
+            for observation in observations {
+                if let Some(retained) = member
+                    .measurements
+                    .iter_mut()
+                    .find(|value| value.name == observation.name)
+                {
+                    *retained = observation;
+                }
+            }
+        }
+    }
+    Ok(data)
+}
+
+#[cfg(test)]
+mod tests;
