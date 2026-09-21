@@ -127,7 +127,8 @@ pub(crate) fn run_monte_carlo(
         .map_err(|errors| SimulationError::InvalidConfig(errors.join("; ")))?;
     // Preserve these cards in the parser's retained source, so expression and
     // native-statistics replay observes the same analysis and solver policy.
-    let source = base.execution_source(source)?;
+    let (analysis, environment) = resolved_study_environment(base, environment);
+    let source = study_source_at_environment(base, source, environment.as_ref(), abort)?;
     let bridge = EngineBridge::new();
     let circuit = bridge.parse_netlist_with_abort_and_source_path(&source, source_path, abort)?;
     let command = circuit
@@ -166,13 +167,7 @@ pub(crate) fn run_monte_carlo(
     study.histogram_bins = base.histogram_bins;
     study.confidence_pct = command.confidence_pct;
     study.confidence_method = command.confidence_method.into();
-    study.environment = environment.map(|point| MonteCarloEnvironment {
-        temperature_celsius: point.temperature_celsius,
-        supply_voltage: point.supply_voltage,
-        nominal_supply_voltage: point.nominal_supply_voltage,
-        supply_source_names: point.supply_source_names,
-    });
-    let analysis = analysis_for_environment(base, study.environment.as_ref());
+    study.environment = environment;
     let engine = rspice_core::Engine::default().resolved_for_netlist(&circuit);
     let signal = StudyAbort {
         parent: abort,
@@ -913,6 +908,61 @@ fn validate_base_measurements(
     Ok(())
 }
 
+fn resolved_study_environment(
+    base: &StudyRunConfig,
+    environment: Option<AnalysisExecutionEnvironment>,
+) -> (StudyAnalysis, Option<MonteCarloEnvironment>) {
+    let mut environment = environment.map(|point| MonteCarloEnvironment {
+        temperature_celsius: point.temperature_celsius,
+        supply_voltage: point.supply_voltage,
+        nominal_supply_voltage: point.nominal_supply_voltage,
+        supply_source_names: point.supply_source_names,
+    });
+    // Adapt supply exactly once using the actual Run Set. A temperature-only
+    // materialization context must not erase an OP's explicit supply settings.
+    let analysis = analysis_for_environment(base, environment.as_ref());
+    let temperature = match &analysis {
+        StudyAnalysis::Basic(AnalysisConfig::DcOp(op)) => Some(op.temperature_celsius),
+        StudyAnalysis::Pss(pss) => Some(pss.operating_point.config.temperature_celsius),
+        StudyAnalysis::Qpss(qpss) => Some(qpss.operating_point.config.temperature_celsius),
+        StudyAnalysis::Hb(hb) => Some(hb.operating_point.config.temperature_celsius),
+        _ => None,
+    };
+    if let Some(temperature_celsius) = temperature {
+        match &mut environment {
+            Some(point) => point.temperature_celsius = temperature_celsius,
+            None => {
+                environment = Some(MonteCarloEnvironment {
+                    temperature_celsius,
+                    supply_voltage: None,
+                    nominal_supply_voltage: None,
+                    supply_source_names: Vec::new(),
+                })
+            }
+        }
+    }
+    (analysis, environment)
+}
+
+fn study_source_at_environment(
+    base: &StudyRunConfig,
+    source: &str,
+    environment: Option<&MonteCarloEnvironment>,
+    abort: &dyn AbortSignal,
+) -> Result<String, SimulationError> {
+    let source = base.execution_source(source)?;
+    match environment {
+        Some(point) => super::spec::run_abort_aware_service(abort, || {
+            services::source_with_run_temperature_with_abort(
+                &source,
+                point.temperature_celsius,
+                abort,
+            )
+        }),
+        None => Ok(source),
+    }
+}
+
 fn analysis_for_environment(
     base: &StudyRunConfig,
     environment: Option<&MonteCarloEnvironment>,
@@ -1001,3 +1051,6 @@ fn validate_qpss_measurements(
 
 #[cfg(test)]
 mod quasi_periodic_tests;
+
+#[cfg(test)]
+mod temperature_tests;

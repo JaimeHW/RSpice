@@ -47,7 +47,8 @@ pub(crate) fn run_optimization(
     base.analysis
         .validate()
         .map_err(|errors| SimulationError::InvalidConfig(errors.join("; ")))?;
-    let source = base.execution_source(source)?;
+    let (analysis, environment) = resolved_study_environment(base, environment);
+    let source = study_source_at_environment(base, source, environment.as_ref(), abort)?;
     let bridge = EngineBridge::new();
     let circuit = bridge.parse_netlist_with_abort_and_source_path(&source, source_path, abort)?;
     validate_base_measurements(base, &circuit)?;
@@ -59,12 +60,6 @@ pub(crate) fn run_optimization(
             )));
         }
     }
-    let environment = environment.map(|point| MonteCarloEnvironment {
-        temperature_celsius: point.temperature_celsius,
-        supply_voltage: point.supply_voltage,
-        nominal_supply_voltage: point.nominal_supply_voltage,
-        supply_source_names: point.supply_source_names,
-    });
     if let Some(point) = &environment {
         if !point.temperature_celsius.is_finite()
             || point.temperature_celsius <= -273.15
@@ -73,7 +68,6 @@ pub(crate) fn run_optimization(
             return Err(SimulationError::InvalidConfig("Optimization Run Set requires a physical temperature and a complete supply/nominal pair".into()));
         }
     }
-    let analysis = analysis_for_environment(base, environment.as_ref());
     let engine = rspice_core::Engine::default().resolved_for_netlist(&circuit);
     let mut limits = engine.config().resource_limits;
     let retained_objectives = base
