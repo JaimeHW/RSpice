@@ -88,6 +88,26 @@ pub(super) fn splice_before_terminal_end_card_with_abort(
     Ok(result)
 }
 
+/// Resolve run temperature before parsing so TEMP/TEMPER/VT-dependent
+/// parameters and conditional source selection see the selected environment.
+/// Callers retain their original source separately for request provenance.
+pub(crate) fn source_with_run_temperature_with_abort(
+    source: &str,
+    temperature_celsius: Value,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<String> {
+    if !temperature_celsius.is_finite() || temperature_celsius <= -273.15 {
+        return Err(ServiceRunError::Failure(
+            "Run temperature must be finite and above absolute zero".into(),
+        ));
+    }
+    splice_before_terminal_end_card_with_abort(
+        source,
+        &format!(".options TEMP={temperature_celsius}"),
+        abort,
+    )
+}
+
 pub(crate) fn parse_runner_netlist_with_abort(
     netlist_text: &str,
     source_path: Option<&Path>,

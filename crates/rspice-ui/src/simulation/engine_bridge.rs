@@ -226,11 +226,41 @@ impl EngineBridge {
             ))
         })?;
         ensure_not_aborted(abort_flag)?;
+        let temperature = match input.config {
+            AnalysisConfig::DcOp(config) => Some(config.temperature_celsius),
+            _ => input
+                .environment
+                .as_ref()
+                .map(|point| point.temperature_celsius),
+        };
+        let temperature_source = temperature
+            .map(|temperature| {
+                crate::services::simulation_runner::source_with_run_temperature_with_abort(
+                    input.netlist_str,
+                    temperature,
+                    abort_flag,
+                )
+                .map_err(|error| {
+                    if error.is_aborted() {
+                        SimulationError::Aborted
+                    } else {
+                        SimulationError::InvalidConfig(error.to_string())
+                    }
+                })
+            })
+            .transpose()?;
         let mut netlist = self.parse_netlist_with_abort_and_source_path(
-            input.netlist_str,
+            temperature_source.as_deref().unwrap_or(input.netlist_str),
             input.source_path,
             abort_flag,
         )?;
+        if let Some(temperature) = temperature {
+            // The explicit run point also wins over a parsed .TEMP card.
+            netlist.options.temp = Some(temperature);
+            // Previous-state provenance names the authorized deck, not the
+            // temporary temperature card used during parameter evaluation.
+            netlist.source_text = Some(input.netlist_str.to_owned());
+        }
         if let Some(environment) = input.environment {
             if !environment.temperature_celsius.is_finite()
                 || environment.temperature_celsius <= -273.15

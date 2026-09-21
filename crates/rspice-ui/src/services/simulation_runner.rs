@@ -80,7 +80,9 @@ use helpers::{
     netlist_has_independent_source_named_with_abort, normalize_voltage_signal_name,
     parse_runner_netlist_with_abort,
 };
-pub(crate) use helpers::{splice_before_terminal_end_card, terminal_end_card_offset};
+pub(crate) use helpers::{
+    source_with_run_temperature_with_abort, splice_before_terminal_end_card, terminal_end_card_offset,
+};
 pub(crate) use monte_carlo::{
     MonteCarloData, finish_monte_carlo_result,
     run_monte_carlo_analysis_with_environment_and_source_path_and_abort,
