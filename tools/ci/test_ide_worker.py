@@ -296,7 +296,7 @@ class IdeWorkerRoutingTests(unittest.TestCase):
             "simulation requests must consume the one decoded prepared request instead of copying transfer buffers twice",
         )
 
-        qualification = (IDE_DIRS[0] / "wasm-jit-qualification.html").read_text(
+        qualification = Path(__file__).with_name("wasm-jit-qualification.html").read_text(
             encoding="utf-8"
         )
         self.assertIn('data-rspice-wasm-jit-status="pending"', qualification)

@@ -59,7 +59,7 @@ class QualificationHandler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802 - http.server's spelling
         parsed = urllib.parse.urlparse(self.path)
         fixtures = {
-            "/wasm-jit-qualification.html": pathlib.Path(__file__).resolve().parents[2] / "crates/rspice-ui/web/wasm-jit-qualification.html",
+            "/wasm-jit-qualification.html": pathlib.Path(__file__).resolve().with_name("wasm-jit-qualification.html"),
             "/wasm-jit-abi-probe.mjs": pathlib.Path(__file__).resolve().with_name("wasm_jit_abi_probe.mjs"),
         }
         if parsed.path in fixtures:
