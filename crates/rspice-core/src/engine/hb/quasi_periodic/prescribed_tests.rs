@@ -3,6 +3,108 @@ use super::*;
 use crate::analysis::quasi_periodic::{QuasiPeriodicAcConfig, QuasiPeriodicLinearMethod};
 
 #[test]
+fn qpss_filtered_integrals_preserve_network_phase_current_and_response() {
+    let rate = 1e3;
+    let f2 = rate * std::f64::consts::SQRT_2;
+    let omega = std::f64::consts::TAU * rate;
+    let netlist = Netlist::parse(&format!(
+        "Filtered torus\nVinput input middle SIN(0 1 {rate})\nVsecond middle 0 SIN(0 .4 {f2})\n\
+         Rfilter input junction 1k\nLfilter junction filtered {}\nCfilter filtered 0 {}\n\
+         BV out 0 V={omega}*sdt(v(filtered))\nRout out 0 1k noisy=0\n\
+         BI current 0 V={omega}*1k*sdt(i(Lfilter))\nRi current 0 1k noisy=0\n.end\n",
+        1e3 / omega,
+        1.0 / (1e3 * omega)
+    ))
+    .unwrap();
+    let engine = Engine::default();
+    let point = engine
+        .run_qpss(&netlist, QpssConfig::new(vec![rate, f2], vec![1, 1]))
+        .unwrap();
+    let grid = engine
+        .validate_qpss_operating_point_with_abort(&netlist, &point, &NoAbort)
+        .unwrap();
+    let close = |a: Complex64, b: Complex64| {
+        assert!((a - b).norm() < 2e-7 * b.norm().max(1e-3), "{a} != {b}")
+    };
+    for name in ["out", "current"] {
+        let row = point
+            .node_names()
+            .iter()
+            .position(|n| n.eq_ignore_ascii_case(name))
+            .unwrap();
+        let mut dc = 0.0;
+        for (tuple, ratio, amplitude) in [
+            (vec![1, 0], 1.0, 1.0),
+            (vec![0, 1], std::f64::consts::SQRT_2, 0.4),
+        ] {
+            let network = 1.0 / Complex64::new(1.0 - ratio * ratio, ratio);
+            let h = if name == "out" {
+                network / Complex64::new(0.0, ratio)
+            } else {
+                network
+            };
+            let expected = h * Complex64::new(0.0, -amplitude / 2.0);
+            close(
+                point.spectra()[row][grid.index_of(&tuple).unwrap()],
+                expected,
+            );
+            dc -= 2.0 * expected.re;
+        }
+        close(
+            point.spectra()[row][grid.dc_index()],
+            Complex64::new(dc, 0.0),
+        );
+        let tuple = vec![-1, 1];
+        let ratio = 0.13 + std::f64::consts::SQRT_2 - 1.0;
+        let network = 1.0 / Complex64::new(1.0 - ratio * ratio, ratio);
+        let expected = if name == "out" {
+            network / Complex64::new(0.0, ratio)
+        } else {
+            network
+        };
+        let ac = engine
+            .run_qpac_from_qpss(
+                &netlist,
+                QpacRequest {
+                    offsets_hz: vec![rate * 0.13],
+                    input_source: "Vinput".into(),
+                    input_lattice: tuple.clone(),
+                    output_node: name.into(),
+                    output_ref: "0".into(),
+                    output_lattice: tuple.clone(),
+                    magnitude: 1.0,
+                    phase_degrees: 0.0,
+                    solver: Default::default(),
+                },
+                &point,
+            )
+            .unwrap();
+        close(ac.output_transfer[0], expected);
+        let xf = engine
+            .run_qpxf_from_qpss(
+                &netlist,
+                QpxfRequest {
+                    frequencies_hz: vec![rate * ratio],
+                    frequency_axis: QpxfFrequencyAxis::Output,
+                    input_sources: QpxfSources::Named(vec!["Vinput".into()]),
+                    input_lattices: QpxfInputLattices::Explicit(vec![tuple.clone()]),
+                    output: QpxfOutput::Voltage {
+                        positive: name.into(),
+                        negative: "0".into(),
+                    },
+                    output_lattice: tuple,
+                    linear: Default::default(),
+                    group_delay: false,
+                    group_delay_magnitude_floor: 0.0,
+                },
+                &point,
+            )
+            .unwrap();
+        close(xf.transfers[0].values[0], expected);
+    }
+}
+
+#[test]
 fn qpss_source_driven_integrals_preserve_constants_and_small_signal_rates() {
     for (rate, method) in [
         (1e3, QuasiPeriodicLinearMethod::Direct),

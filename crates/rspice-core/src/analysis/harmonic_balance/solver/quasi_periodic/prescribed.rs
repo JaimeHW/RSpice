@@ -170,6 +170,59 @@ impl HbSolver {
                 forced[node.node] = Some(samples);
             }
         }
+        if !retained
+            && plans.iter().any(|plan| {
+                plan.dependencies_with_coordinates(|i| forced.get(i).is_some_and(Option::is_some))
+                    .is_none()
+            })
+        {
+            let sources = sources.expect("validated producer source spectra");
+            let coordinates = self.linear_driven_spectra(
+                &self.behavioral_sources,
+                grid.frequencies_hz(),
+                |row, k| sources[row][k],
+                |row| {
+                    forced.get(row).is_none_or(Option::is_none)
+                        && plans
+                            .iter()
+                            .any(|plan| plan.coordinates().any(|index| index == row))
+                },
+                limits
+                    .max_result_values
+                    .min(32_000_000)
+                    .saturating_sub(values)
+                    .saturating_sub(forced_values)
+                    .saturating_sub(grid.sample_count().saturating_mul(8)),
+                abort,
+            )?;
+            let temporary = coordinates.len().saturating_mul(4).saturating_add(
+                coordinates
+                    .iter()
+                    .flatten()
+                    .map(|row| row.len().saturating_mul(2))
+                    .sum::<usize>(),
+            );
+            forced.resize(coordinates.len(), None);
+            for (row, spectrum) in coordinates.iter().enumerate() {
+                let Some(spectrum) = spectrum else { continue };
+                if forced[row].is_some() {
+                    continue;
+                }
+                forced_values = forced_values.saturating_add(grid.sample_count());
+                budget(
+                    values
+                        .saturating_add(forced_values)
+                        .saturating_add(temporary)
+                        .saturating_add(grid.sample_count().saturating_mul(8)),
+                )?;
+                forced[row] = Some(
+                    transform
+                        .as_mut()
+                        .expect("allocated transform")
+                        .to_real_samples_with_abort(spectrum, abort)?,
+                );
+            }
+        }
         for plan in plans {
             check_abort(abort)?;
             let Some(dependencies) =
