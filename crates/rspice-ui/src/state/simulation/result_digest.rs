@@ -451,6 +451,20 @@ impl AnalysisResult {
             }
         }
 
+        // Optional extension: historical results without a journal keep their
+        // existing identities. Bind exact binary bits, including signed zero,
+        // through the validated content digest and account for the full blob.
+        if version >= RESULT_DIGEST_ENCODING_VERSION_V16
+            && let Some(checkpoint) = &self.monte_carlo_checkpoint
+        {
+            writer.string("monte-carlo-checkpoint/v1");
+            writer.digest(checkpoint.digest());
+            writer.usize(checkpoint.bytes().len());
+            writer.retained_bytes = writer
+                .retained_bytes
+                .saturating_add(checkpoint.bytes().len() as u64);
+        }
+
         writer
     }
 }

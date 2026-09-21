@@ -673,6 +673,9 @@ pub struct AnalysisResult {
     /// rows, or scalar-only results. This is immutable retained data, not a
     /// viewer cache.
     pub result_payload: Option<AnalysisResultPayload>,
+    /// Portable committed trials retained even when the task is interrupted.
+    /// This is never a substitute for a completed statistical result.
+    pub monte_carlo_checkpoint: Option<MonteCarloCheckpointEvidence>,
     /// Evaluated `.MEAS` results for this analysis (specs-matrix rows).
     pub measurements: Vec<rspice_core::MeasureResult>,
     /// Authenticated application receipts for plan-owned saved-output
@@ -712,7 +715,25 @@ impl AnalysisResult {
 
     #[must_use]
     pub fn is_live_partial(&self) -> bool {
-        !self.success && self.error_message.as_deref() == Some(LIVE_TRANSIENT_PARTIAL_MESSAGE)
+        !self.success
+            && matches!(
+                self.error_message.as_deref(),
+                Some(LIVE_TRANSIENT_PARTIAL_MESSAGE | LIVE_MONTE_CARLO_PARTIAL_MESSAGE)
+            )
+    }
+
+    pub(crate) fn live_monte_carlo_partial(
+        label: impl Into<String>,
+        checkpoint: MonteCarloCheckpointEvidence,
+    ) -> Self {
+        let mut result = Self::failed(
+            1,
+            AnalysisType::MonteCarlo,
+            label,
+            LIVE_MONTE_CARLO_PARTIAL_MESSAGE,
+        );
+        result.monte_carlo_checkpoint = Some(checkpoint);
+        result
     }
 
     /// Exact prepared-task provenance for current retained results.
@@ -777,6 +798,7 @@ impl AnalysisResult {
             noise_summary: None,
             family_metadata: None,
             result_payload: None,
+            monte_carlo_checkpoint: None,
             measurements: Vec::new(),
             saved_output_receipts: Vec::new(),
             success: true,
@@ -806,6 +828,7 @@ impl AnalysisResult {
             noise_summary: None,
             family_metadata: None,
             result_payload: None,
+            monte_carlo_checkpoint: None,
             measurements: Vec::new(),
             saved_output_receipts: Vec::new(),
             success: false,
@@ -920,6 +943,9 @@ impl AnalysisResult {
     /// Historical analyses may legitimately lack a newer payload; when both
     /// fields exist they must describe one coherent execution.
     pub fn validate_retained_evidence(&self) -> Result<(), String> {
+        if let Some(checkpoint) = &self.monte_carlo_checkpoint {
+            checkpoint.validate_for(self)?;
+        }
         let retained_basis = self
             .result_payload
             .as_ref()

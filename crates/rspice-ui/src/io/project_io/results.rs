@@ -162,6 +162,19 @@ impl ProjectSimulationResultsData {
 
     fn migrate_to_current_in_place(&mut self, project_id: ProjectId) -> Result<(), String> {
         let source_schema = self.schema_version;
+        if source_schema < MONTE_CARLO_CHECKPOINT_RESULTS_SCHEMA_VERSION
+            && self
+                .runs
+                .iter()
+                .flat_map(|run| &run.analyses)
+                .any(|analysis| analysis.monte_carlo_checkpoint.is_present())
+        {
+            return Err("result schemas before v35 cannot contain Monte Carlo checkpoints".into());
+        }
+        if source_schema == NOISE_INPUT_QUANTITY_RESULTS_SCHEMA_VERSION {
+            self.schema_version = PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION;
+            return self.validate();
+        }
         if source_schema < NOISE_INPUT_QUANTITY_RESULTS_SCHEMA_VERSION
             && self
                 .runs
@@ -1149,6 +1162,10 @@ pub struct ProjectSimulationRun {
 
 impl ProjectSimulationRun {
     pub(super) fn into_run(self) -> Result<SimulationRun, String> {
+        self.into_run_with_partial_restore(true)
+    }
+
+    fn into_run_with_partial_restore(self, normalize_live: bool) -> Result<SimulationRun, String> {
         let campaign_membership = self.campaign_membership.clone();
         let specification_verdicts = self.specification_verdicts.clone();
         let run_id = self
@@ -1233,13 +1250,14 @@ impl ProjectSimulationRun {
                 | SimulationRunLifecycle::Running
                 | SimulationRunLifecycle::Cancelling
         );
-        if was_active {
+        if was_active && normalize_live {
             for analysis in &mut analyses {
                 if analysis.is_live_partial() {
-                    analysis.error_message = Some(
+                    analysis.error_message = Some(if analysis.monte_carlo_checkpoint.is_some() {
+                        "Monte Carlo was interrupted; committed trials are retained in its checkpoint"
+                    } else {
                         "Simulation was interrupted before completion; retained waveforms are accepted partial samples"
-                            .to_owned(),
-                    );
+                    }.to_owned());
                 }
             }
         }
@@ -1484,7 +1502,9 @@ impl ProjectSimulationRun {
         })?;
         let computed_digest = self
             .clone()
-            .into_run()
+            // Authenticate the bytes that were written before restoration
+            // replaces any live status with an interrupted status.
+            .into_run_with_partial_restore(false)
             .map_err(|error| {
                 format!("runs[{run_idx}] cannot compute its dataset content digest: {error}")
             })?
@@ -1579,6 +1599,9 @@ pub struct ProjectAnalysisResult {
     /// from injecting current-schema evidence.
     #[serde(default, skip_serializing_if = "PersistedField::is_missing")]
     pub result_payload: PersistedField<AnalysisResultPayload>,
+    /// Exact portable trial journal, introduced in result schema v35.
+    #[serde(default, skip_serializing_if = "PersistedField::is_missing")]
+    pub monte_carlo_checkpoint: PersistedField<crate::state::MonteCarloCheckpointEvidence>,
     #[serde(default)]
     pub measurements: Vec<ProjectMeasurement>,
     /// Authenticated outcomes for the immutable saved-output contracts that
@@ -1740,6 +1763,12 @@ impl From<&AnalysisResultProvenance> for ProjectAnalysisResultProvenance {
 
 impl ProjectAnalysisResult {
     pub(super) fn into_analysis(self) -> Result<AnalysisResult, String> {
+        if self.monte_carlo_checkpoint.is_null() {
+            return Err(format!(
+                "analysis sequence {} has an explicitly null Monte Carlo checkpoint",
+                self.id
+            ));
+        }
         if self.convergence.is_null() {
             return Err(format!(
                 "analysis sequence {} has explicitly null convergence evidence",
@@ -1790,6 +1819,7 @@ impl ProjectAnalysisResult {
                 .map(ProjectNoiseSummary::into_noise_summary),
             family_metadata: self.family_metadata,
             result_payload: self.result_payload.into_value(),
+            monte_carlo_checkpoint: self.monte_carlo_checkpoint.into_value(),
             measurements: self
                 .measurements
                 .into_iter()
@@ -1978,6 +2008,10 @@ impl From<&AnalysisResult> for ProjectAnalysisResult {
             family_metadata: analysis.family_metadata.clone(),
             result_payload: analysis
                 .result_payload
+                .clone()
+                .map_or(PersistedField::Missing, PersistedField::Value),
+            monte_carlo_checkpoint: analysis
+                .monte_carlo_checkpoint
                 .clone()
                 .map_or(PersistedField::Missing, PersistedField::Value),
             measurements: analysis

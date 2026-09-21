@@ -65,7 +65,7 @@ impl MonteCarloCheckpointInput {
     }
 }
 
-fn checkpoint_digest(bytes: &[u8]) -> ContentDigest {
+pub(crate) fn checkpoint_digest(bytes: &[u8]) -> ContentDigest {
     crate::simulation::execution::content_digest("rspice.studio-monte-carlo-checkpoint/v1", bytes)
 }
 
@@ -120,4 +120,4 @@ pub(super) fn validate_checkpoint_bytes_size(length: usize) -> Result<(), String
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

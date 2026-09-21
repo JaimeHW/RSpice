@@ -67,6 +67,39 @@ impl StudyMonteCarloCheckpoint {
         self.numerical.completed_indices()
     }
 
+    /// A completed range may be smaller than a pooled journal, but every
+    /// retained member must agree with its committed numbers and verdicts.
+    pub(crate) fn validate_retained_members(
+        &self,
+        members: &[crate::state::FamilyMemberMeasurements],
+    ) -> Result<(), String> {
+        if members.is_empty() {
+            return Err("a completed checkpointed analysis has no trial measurements".into());
+        }
+        for member in members {
+            let observations = self
+                .observations
+                .get(&member.member.index())
+                .ok_or_else(|| {
+                    "retained Monte Carlo trial is absent from its checkpoint".to_owned()
+                })?;
+            if member.measurements.len() != observations.len()
+                || observations.iter().any(|expected| {
+                    member.evidence_for(&expected.name).is_none_or(|actual| {
+                        actual.value.map(f64::to_bits) != expected.value.map(f64::to_bits)
+                            || actual.passed != expected.passed
+                            || actual.error != expected.error
+                    })
+                })
+            {
+                return Err(
+                    "retained Monte Carlo measurements disagree with their checkpoint".into(),
+                );
+            }
+        }
+        Ok(())
+    }
+
     /// Capture only committed numerical rows. Other workers may already have
     /// evaluated a row without committing it; that row is not a checkpoint yet.
     pub(super) fn capture(

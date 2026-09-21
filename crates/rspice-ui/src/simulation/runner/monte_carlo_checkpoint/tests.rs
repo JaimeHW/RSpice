@@ -108,6 +108,28 @@ fn captured_request() -> (SimulationRequest, NetlistInput, Vec<u8>) {
     (request, input, bytes.to_vec())
 }
 
+/// One real trial shared by controller and project-persistence boundary tests.
+pub(crate) fn completed_checkpoint_fixture() -> (
+    SimulationRequest,
+    Arc<[u8]>,
+    crate::simulation::results::SimulationResult,
+) {
+    let (request, input) = fixture();
+    let queue = Arc::new(Mutex::new(None));
+    let result = execute(
+        request.clone(),
+        input,
+        Arc::new(AtomicBool::new(false)),
+        RunStreams {
+            monte_carlo_checkpoint: Some(queue.clone()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let bytes = queue.lock().unwrap().take().unwrap();
+    (request, bytes, result)
+}
+
 #[test]
 fn monte_carlo_checkpoint_dispatch_transfers_cancelled_population_and_resumes_missing_trials() {
     let (mut request, input, bytes) = captured_request();

@@ -3,6 +3,162 @@
 use super::*;
 
 #[test]
+fn monte_carlo_checkpoint_retention_project_round_trip_integrity_and_legacy_absence() {
+    use crate::simulation::runner::monte_carlo_checkpoint::tests::completed_checkpoint_fixture;
+    use crate::state::MonteCarloCheckpointEvidence;
+
+    let (_, bytes, _) = completed_checkpoint_fixture();
+    let checkpoint = MonteCarloCheckpointEvidence::from_bytes(bytes.clone()).unwrap();
+    let provenance = AnalysisResultProvenance::new_with_source_domain(
+        AnalysisResultSourceDomain::ManualDeck,
+        crate::product::manual_deck_analysis_instance_id_from_tag(
+            ContentDigest::from_bytes([82; 32]),
+            crate::state::CanonicalAnalysisKind::MonteCarlo.tag(),
+            0,
+        ),
+        ObjectRevision::INITIAL,
+        ContentDigest::from_bytes([81; 32]),
+        vec![],
+    )
+    .unwrap();
+    let mut analysis = AnalysisResult::failed(1, AnalysisType::MonteCarlo, "MC", "Aborted")
+        .with_provenance(provenance);
+    analysis.monte_carlo_checkpoint = Some(checkpoint.clone());
+    let mut run = SimulationRun::new(1);
+    run.add_analysis(analysis);
+    seal_prepared_run(
+        &mut run,
+        AnalysisResultSourceDomain::ManualDeck,
+        None,
+        ObjectRevision::INITIAL,
+        ContentDigest::from_bytes([82; 32]),
+        PreparedSourceCheckReceipt::ManualSourceCheck(ContentDigest::from_bytes([83; 32])),
+        &[crate::state::CanonicalAnalysisKind::MonteCarlo.tag()],
+    );
+    run.mark_running().unwrap();
+    run.finish_lifecycle(SimulationRunLifecycle::Aborted)
+        .unwrap();
+    let mut state = SimulationState::default();
+    state.runs = vec![run].into();
+    state.next_run_id = 1;
+    state.active_run_idx = Some(0);
+    state.active_analysis_idx = Some(0);
+    let mut libraries = LibraryManager::with_primitives();
+    let workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
+    let mut project = ProjectFile::new_with_simulation_results(
+        workspace,
+        libraries,
+        ProjectSimulationResults::from_state(&state),
+    );
+    let json = serialize_project_file(&project).unwrap();
+    let loaded = load_project_text(&json, None).unwrap();
+    assert!(
+        loaded.simulation_results_warning.is_none(),
+        "{:?}",
+        loaded.simulation_results_warning
+    );
+    let restored = loaded.simulation_results.into_simulation_state().unwrap();
+    let analysis = restored.active_analysis().unwrap();
+    assert!(!analysis.success);
+    assert_eq!(analysis.monte_carlo_checkpoint.as_ref(), Some(&checkpoint));
+    assert_eq!(
+        analysis.monte_carlo_checkpoint.as_ref().unwrap().bytes(),
+        &*bytes
+    );
+    assert_eq!(
+        analysis.result_data_digest(),
+        state.runs[0].analyses[0].result_data_digest()
+    );
+
+    for mutation in 0..5 {
+        let mut value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let analysis = &mut value["simulation_results"]["runs"][0]["analyses"][0];
+        match mutation {
+            0 => analysis["monte_carlo_checkpoint"] = serde_json::Value::Null,
+            1 => analysis["monte_carlo_checkpoint"]["data"] = serde_json::json!("AAAA"),
+            2 => {
+                analysis
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("monte_carlo_checkpoint");
+            }
+            3 => {
+                analysis["monte_carlo_checkpoint"]["digest"] =
+                    serde_json::to_value(ContentDigest::from_bytes([84; 32])).unwrap()
+            }
+            _ => value["simulation_results"]["schema_version"] = serde_json::json!(34),
+        }
+        let loaded = load_project_text(&value.to_string(), None);
+        if matches!(mutation, 1 | 3) {
+            // Structural corruption is refused by the bounded checkpoint
+            // decoder; semantic result errors are quarantined below.
+            assert!(loaded.is_err(), "corrupt checkpoint {mutation} decoded");
+            continue;
+        }
+        let loaded = loaded.unwrap();
+        assert!(
+            loaded.simulation_results.runs.is_empty(),
+            "mutation {mutation} survived"
+        );
+        assert!(loaded.simulation_results_warning.is_some());
+    }
+
+    let mut wrong_type = state.runs[0].analyses[0].clone();
+    wrong_type.analysis_type = AnalysisType::Transient;
+    assert!(wrong_type.validate_retained_evidence().is_err());
+    wrong_type.analysis_type = AnalysisType::MonteCarlo;
+    wrong_type.provenance = None;
+    assert!(wrong_type.validate_retained_evidence().is_err());
+
+    // Autosave may capture a still-running task. Authenticate its original
+    // bytes first, then restore an interrupted outcome with the same journal.
+    let mut active = state.clone();
+    active.runs[0].lifecycle = SimulationRunLifecycle::Running;
+    active.runs[0].analyses[0] = AnalysisResult::live_monte_carlo_partial("MC", checkpoint.clone())
+        .with_provenance(state.runs[0].analyses[0].provenance.clone().unwrap());
+    project.simulation_results = ProjectSimulationResults::from_state(&active);
+    let live_json = serialize_project_file(&project).unwrap();
+    let loaded = load_project_text(&live_json, None).unwrap();
+    assert!(
+        loaded.simulation_results_warning.is_none(),
+        "{:?}",
+        loaded.simulation_results_warning
+    );
+    let restored = loaded.simulation_results.into_simulation_state().unwrap();
+    assert_eq!(
+        restored.runs[0].lifecycle,
+        SimulationRunLifecycle::Interrupted
+    );
+    let partial = &restored.runs[0].analyses[0];
+    assert!(!partial.success);
+    assert!(!partial.is_live_partial());
+    assert!(
+        partial
+            .error_message
+            .as_deref()
+            .unwrap()
+            .contains("committed trials")
+    );
+    assert_eq!(partial.monte_carlo_checkpoint.as_ref(), Some(&checkpoint));
+
+    // Pre-checkpoint projects preserve both absence and the old digest.
+    state.runs[0].analyses[0].monte_carlo_checkpoint = None;
+    let mut legacy = ProjectSimulationResults::from_state(&state);
+    let digest = state.runs[0].dataset_content_digest();
+    legacy.schema_version = NOISE_INPUT_QUANTITY_RESULTS_SCHEMA_VERSION;
+    legacy
+        .migrate_to_current(project.workspace.project.id())
+        .unwrap();
+    let restored = legacy.into_simulation_state().unwrap();
+    assert!(
+        restored.runs[0].analyses[0]
+            .monte_carlo_checkpoint
+            .is_none()
+    );
+    assert_eq!(restored.runs[0].dataset_content_digest(), digest);
+}
+
+#[test]
 fn monte_carlo_project_restore_distinguishes_legacy_default_from_explicit_zero() {
     let project = project_with_execution_context();
     let serialized = serialize_project_file(&project).unwrap();

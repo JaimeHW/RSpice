@@ -123,7 +123,9 @@ pub use state_impl::EvidenceDomain;
 pub use state_model::{SimulationRunIntent, SimulationState};
 pub use waveform::{DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES, SharedWaveformValues, WaveformData};
 
+mod monte_carlo_checkpoint;
 mod monte_carlo_confidence;
+pub use monte_carlo_checkpoint::MonteCarloCheckpointEvidence;
 pub use monte_carlo_confidence::{
     MonteCarloMeanConfidence, MonteCarloMeanInterval, MonteCarloMeanMethod,
 };

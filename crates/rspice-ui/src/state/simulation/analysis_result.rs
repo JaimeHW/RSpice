@@ -23,6 +23,8 @@ pub use family_metadata::{AnalysisResultFamilyMetadata, MonteCarloVariableMetada
 
 const LIVE_TRANSIENT_PARTIAL_MESSAGE: &str =
     "Transient analysis is running; displayed samples are provisional";
+const LIVE_MONTE_CARLO_PARTIAL_MESSAGE: &str =
+    "Monte Carlo analysis is running; committed trials are checkpointed";
 
 /// Durable source domain for a prepared analysis identity.
 ///
