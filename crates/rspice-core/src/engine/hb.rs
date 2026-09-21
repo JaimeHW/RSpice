@@ -30,6 +30,7 @@ use crate::{Netlist, Value};
 use num_complex::Complex64;
 use std::collections::BTreeSet;
 
+mod currents;
 mod drive;
 mod envelope_result;
 mod noise_figure;
@@ -905,6 +906,9 @@ impl From<HbError> for SimulationError {
 pub struct HbAnalysisResult {
     /// The HB solution
     pub result: HbResult,
+    /// Constitutive device/lead currents, including displacement current.
+    /// Each positive harmonic is a peak-amplitude phasor, like node voltages.
+    pub device_currents: Vec<HbCurrentSpectrum>,
     /// Fundamental frequency
     pub fundamental_freq: Value,
     /// Number of harmonics
@@ -913,6 +917,14 @@ pub struct HbAnalysisResult {
     pub converged: bool,
     /// Exact spectral operating point consumed by HB-dependent analyses.
     pub operating_point: HbOperatingPoint,
+}
+
+/// A physical current probe on the HB result's harmonic grid.
+#[derive(Debug, Clone)]
+pub struct HbCurrentSpectrum {
+    /// `I(device)` for the primary lead or `@device[id]`, `@device[ig]`, etc.
+    pub probe: String,
+    pub coefficients: Vec<Complex64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -1805,6 +1817,15 @@ impl Engine {
             SimulationError::Circuit(format!("HB result construction failed: {error}"))
         })?;
         self.hb_attach_periodic_state(&circuit, &mut result)?;
+        let device_currents = self.hb_device_current_spectra(
+            &circuit,
+            &mut solver,
+            &state,
+            &result,
+            &config,
+            &drive_tones,
+            abort,
+        )?;
 
         let mna_branch_names = periodic_branch_names;
         let operating_point = if let Some(producer) = producer_inputs {
@@ -1846,6 +1867,7 @@ impl Engine {
         };
         Ok(HbAnalysisResult {
             result,
+            device_currents,
             fundamental_freq: config.fundamental_freq,
             num_harmonics: config.num_harmonics,
             converged: state.converged,

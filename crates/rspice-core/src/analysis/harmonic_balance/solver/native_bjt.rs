@@ -226,7 +226,7 @@ impl HbSolver {
         Ok(())
     }
 
-    fn native_state_waveforms(
+    pub(super) fn native_state_waveforms(
         &mut self,
         state: &HbSolverState,
     ) -> Result<Vec<Vec<Value>>, HbError> {

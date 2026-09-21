@@ -12,6 +12,7 @@ use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::device::veriloga::VerilogADevice;
 use num_complex::Complex64;
 
+mod currents;
 mod dc;
 mod devices;
 mod krylov;

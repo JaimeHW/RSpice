@@ -1243,6 +1243,58 @@ impl Bjt {
             .map(|branch| branch.current)
     }
 
+    /// Authored lead F/Q at the unlimited periodic bias most recently sampled.
+    /// Keep terminal identities before global node stamping merges tied leads.
+    pub(crate) fn periodic_lead_fq(
+        &self,
+        solution: &[Value],
+    ) -> Result<([Value; EXTERNAL_DIM], [Value; EXTERNAL_DIM]), String> {
+        let eval = self
+            .mna_eval
+            .ok_or_else(|| format!("BJT '{}' has no periodic bias", self.name))?;
+        let mut current = self
+            .external_terminal_branches(eval)
+            .map(|branch| branch.current);
+        for branch in self
+            .mna_delay_branches
+            .iter()
+            .chain([&self.mna_delay_thermal])
+        {
+            if let Some(terminal) = branch.pos_external {
+                current[terminal] += branch.current;
+            }
+            if let Some(terminal) = branch.neg_external {
+                current[terminal] -= branch.current;
+            }
+        }
+        let mut charge = [0.0; EXTERNAL_DIM];
+        for (index, branch) in self.mna_charge_state().0.iter().enumerate() {
+            let value = self.charge_branch_polarity(index) * branch.charge;
+            if let Some(terminal) = branch.pos_external {
+                charge[terminal] += value;
+            }
+            if let Some(terminal) = branch.neg_external {
+                charge[terminal] -= value;
+            }
+        }
+        let current = self.authored_transient_lead_currents(solution, current, 0.0)?;
+        let external_charge = self
+            .legacy_external_bc_charge(solution)
+            .map_or(0.0, |charge| charge.charge);
+        let charge = self.authored_transient_lead_impulses(charge, external_charge)?;
+        if current
+            .iter()
+            .chain(&charge)
+            .any(|value| !value.is_finite())
+        {
+            return Err(format!(
+                "BJT '{}' has non-finite periodic lead F/Q",
+                self.name
+            ));
+        }
+        Ok((current, charge))
+    }
+
     /// Prepare the native physical MNA topology for a periodic evaluator.
     /// Netlist construction already allocates every non-collapsed unknown.
     pub(crate) fn prepare_periodic_mna(&mut self, num_nodes: usize) -> Result<(), String> {

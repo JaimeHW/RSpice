@@ -251,7 +251,7 @@ impl Engine {
         }
     }
 
-    fn hb_terminal_voltage_spectrum(
+    pub(in crate::engine::hb) fn hb_terminal_voltage_spectrum(
         result: &HbResult,
         node_pos: usize,
         node_neg: usize,
