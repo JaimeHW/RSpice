@@ -12,7 +12,7 @@ use the same physical conversion. Authored GOAL/TOL and FAILVALUE contracts stay
 in their original value/raw-value units. A blank specification unit uses the
 native value. Unknown or incompatible units cannot produce a passing bound.
 
-Measurement units survive worker response protocol 30, result schema 37, and
+Measurement units survive worker response protocol 30, result schema 38, and
 Monte Carlo checkpoint envelope v2. Checkpoints without units keep their v1
 encoding. An optional result-digest extension authenticates units without changing
 historical identities. Missing historical metadata keeps the original numeric
@@ -37,8 +37,8 @@ in the console uses the producer's RMS result; it is never a sum of density samp
 Inference covers native probes, reductions, derivatives, integrals, axis
 projections, and dimensionally compatible expressions. Undeclared parameter
 units and unsupported expressions remain unknown. Raw sensitivity parameter
-dimensions, PZ transfer-gain dimensions, continuous event streams, and native
-scalar payloads outside study selections still require producer-specific coverage.
+dimensions, PZ transfer-gain dimensions, and continuous event streams still
+require producer-specific coverage.
 
 Generated STB margins retain dB, degrees, Hz, counts and dimensionless flags,
 including the intended unit of an unavailable margin. Its Nyquist contour and
@@ -47,3 +47,16 @@ noise metadata carries carrier frequency, counts and Kelvin temperatures. PSS
 node spectra and HB DC-only traces state volts at the producer boundary. These
 units use existing measurement and waveform transport/persistence; historical
 records without this metadata retain their original interpretation.
+
+Result schema 38 retains a native-scalar unit map for new payloads: PSS/PSTB
+periods, frequencies, mode counts, margins and multipliers; DC mismatch nominal
+values and sigmas; FFT metrics and fundamental magnitudes. FFT normalization
+uses the engine's physical-type rule. Generic scalars without quantity metadata
+carry explicit Unknown. Canonical and dotted names share the same retained unit;
+authored `.MEAS` values keep precedence over same-named payload scalars.
+
+The controller attaches the map only at new-result retention. Historical records
+keep it absent and preserve numeric limit interpretation and content identities.
+The optional `native-scalar-units/v1` digest extension authenticates the map and
+counts its storage. Ingress validates its exact scalar roster and unit syntax;
+older schema labels cannot introduce it, including explicit null or empty maps.

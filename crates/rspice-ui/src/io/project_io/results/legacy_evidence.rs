@@ -143,6 +143,14 @@ pub(in crate::io::project_io) fn validate_result_fields_for_source_schema(
     run: &ProjectSimulationRun,
     source_schema: u32,
 ) -> Result<(), String> {
+    if source_schema < NATIVE_SCALAR_UNIT_RESULTS_SCHEMA_VERSION
+        && run
+            .analyses
+            .iter()
+            .any(|analysis| analysis.native_scalar_units.is_present())
+    {
+        return Err("result schemas before v38 cannot contain native scalar units".into());
+    }
     validate_legacy_noise_summary_shape(run, source_schema)?;
     reject_legacy_waveform_units(run, source_schema)?;
     if source_schema < MEASUREMENT_UNIT_RESULTS_SCHEMA_VERSION

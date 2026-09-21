@@ -498,6 +498,17 @@ impl AnalysisResult {
                 }
             }
         }
+        // The absent extension leaves all historical result identities intact.
+        if version >= RESULT_DIGEST_ENCODING_VERSION_V16
+            && let Some(units) = &self.native_scalar_units
+        {
+            writer.string("native-scalar-units/v1");
+            writer.sequence(units.len());
+            for (name, unit) in units {
+                writer.string(name);
+                encode_measurement_unit(&mut writer, unit);
+            }
+        }
         writer
     }
 }

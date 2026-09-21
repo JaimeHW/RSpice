@@ -497,4 +497,72 @@ mod tests {
         });
         assert!(spectrum.validate().is_err());
     }
+    #[test]
+    fn native_scalar_units_keep_fft_normalization_and_unknown_quantities() {
+        use crate::state::{AnalysisResult, AnalysisResultPayload, AnalysisType};
+        for (physical, format, target, expected) in [
+            (
+                "voltage",
+                FftSpectrumFormatEvidence::Unnormalized,
+                "mV",
+                Some(250.0),
+            ),
+            (
+                "current",
+                FftSpectrumFormatEvidence::Unnormalized,
+                "mA",
+                Some(250.0),
+            ),
+            (
+                "voltage",
+                FftSpectrumFormatEvidence::Normalized,
+                "%",
+                Some(25.0),
+            ),
+            (
+                "parameter",
+                FftSpectrumFormatEvidence::Unnormalized,
+                "V",
+                None,
+            ),
+        ] {
+            let mut spectrum = fixture();
+            spectrum.physical_type = physical.into();
+            spectrum.format = format;
+            spectrum.metrics = Some(FftMetricsEvidence {
+                fundamental_magnitude: 0.25,
+                thd_ratio: 0.01,
+                thd_db: -40.0,
+                sndr_db: 40.0,
+                enob_bits: 6.35,
+                snr_db: 41.0,
+                sfdr_db: 45.0,
+                sfdr_spur_bin: None,
+                sfdr_spur_frequency_hz: None,
+                largest_harmonics: vec![],
+            });
+            spectrum.validate().unwrap();
+            let mut result = AnalysisResult::new(1, AnalysisType::Fourier, "FFT")
+                .with_result_payload(AnalysisResultPayload::FftSpectrum { spectrum });
+            result.retain_native_scalar_units();
+            let scalar = result.scalar_evidence("FFT.fundamental_magnitude");
+            match expected {
+                Some(expected) => {
+                    assert_eq!(scalar[0].value_in_unit(target).unwrap(), Some(expected))
+                }
+                None => assert!(scalar[0].value_in_unit(target).is_err()),
+            }
+            assert_eq!(
+                result.scalar_evidence("fft_enob_bits")[0]
+                    .value_in_unit("bits")
+                    .unwrap(),
+                Some(6.35)
+            );
+            assert!(
+                result.scalar_evidence("fft_thd_db")[0]
+                    .value_in_unit("V")
+                    .is_err()
+            );
+        }
+    }
 }

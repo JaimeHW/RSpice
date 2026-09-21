@@ -613,6 +613,12 @@ fn a_dc_mismatch_result_is_retained_as_its_typed_payload() {
         retained.result_payload,
         Some(AnalysisResultPayload::DcMismatch { evidence })
     );
+    for name in ["dcmatch_sigma_total", "DcMaTcH.SiGmA_ToTaL"] {
+        let scalar = retained.scalar_evidence(name);
+        assert!((scalar[0].value_in_unit("mV").unwrap().unwrap() - 5_f64.sqrt()).abs() < 1e-12);
+        assert!(scalar[0].value_in_unit("mA").is_err());
+    }
+    assert_eq!(retained.validate_retained_evidence(), Ok(()));
 }
 
 /// A two-contributor divider spread, shaped as the engine produces one.

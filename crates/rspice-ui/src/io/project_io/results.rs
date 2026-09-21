@@ -171,6 +171,19 @@ impl ProjectSimulationResultsData {
 
     fn migrate_to_current_in_place(&mut self, project_id: ProjectId) -> Result<(), String> {
         let source_schema = self.schema_version;
+        if source_schema < NATIVE_SCALAR_UNIT_RESULTS_SCHEMA_VERSION
+            && self
+                .runs
+                .iter()
+                .flat_map(|run| &run.analyses)
+                .any(|analysis| analysis.native_scalar_units.is_present())
+        {
+            return Err("result schemas before v38 cannot contain native scalar units".into());
+        }
+        if source_schema == MEASUREMENT_UNIT_RESULTS_SCHEMA_VERSION {
+            self.schema_version = PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION;
+            return self.validate();
+        }
         if source_schema < MEASUREMENT_UNIT_RESULTS_SCHEMA_VERSION
             && self
                 .runs
@@ -1646,6 +1659,10 @@ pub struct ProjectAnalysisResult {
     /// from injecting current-schema evidence.
     #[serde(default, skip_serializing_if = "PersistedField::is_missing")]
     pub result_payload: PersistedField<AnalysisResultPayload>,
+    /// Producer units for native scalars, introduced in result schema v38.
+    #[serde(default, skip_serializing_if = "PersistedField::is_missing")]
+    pub native_scalar_units:
+        PersistedField<std::collections::BTreeMap<String, rspice_core::analysis::MeasurementUnit>>,
     /// Exact portable trial journal, introduced in result schema v35.
     #[serde(default, skip_serializing_if = "PersistedField::is_missing")]
     pub monte_carlo_checkpoint: PersistedField<crate::state::MonteCarloCheckpointEvidence>,
@@ -1810,6 +1827,12 @@ impl From<&AnalysisResultProvenance> for ProjectAnalysisResultProvenance {
 
 impl ProjectAnalysisResult {
     pub(super) fn into_analysis(self) -> Result<AnalysisResult, String> {
+        if self.native_scalar_units.is_null() {
+            return Err(format!(
+                "analysis sequence {} has explicitly null native scalar units",
+                self.id
+            ));
+        }
         if self.monte_carlo_checkpoint.is_null() {
             return Err(format!(
                 "analysis sequence {} has an explicitly null Monte Carlo checkpoint",
@@ -1866,6 +1889,7 @@ impl ProjectAnalysisResult {
                 .map(ProjectNoiseSummary::into_noise_summary),
             family_metadata: self.family_metadata,
             result_payload: self.result_payload.into_value(),
+            native_scalar_units: self.native_scalar_units.into_value(),
             monte_carlo_checkpoint: self.monte_carlo_checkpoint.into_value(),
             measurements: self
                 .measurements
@@ -2053,6 +2077,10 @@ impl From<&AnalysisResult> for ProjectAnalysisResult {
                 .as_ref()
                 .map(ProjectNoiseSummary::from),
             family_metadata: analysis.family_metadata.clone(),
+            native_scalar_units: analysis
+                .native_scalar_units
+                .clone()
+                .map_or(PersistedField::Missing, PersistedField::Value),
             result_payload: analysis
                 .result_payload
                 .clone()

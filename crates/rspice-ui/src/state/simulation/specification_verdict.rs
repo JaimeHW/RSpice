@@ -550,9 +550,9 @@ mod tests {
     }
 
     #[test]
-    fn a_specification_can_bind_directly_to_authenticated_pss_scalar_evidence() {
+    fn native_scalar_units_convert_periodic_limits_without_changing_history() {
         let source = AnalysisInstanceId::new();
-        let analysis = AnalysisResult::new(1, AnalysisType::Pss, "PSS")
+        let mut analysis = AnalysisResult::new(1, AnalysisType::Pss, "PSS")
             .with_result_payload(AnalysisResultPayload::PssFloquet {
                 period_s: Some(2.0),
                 fundamental_frequency_hz: Some(0.5),
@@ -583,12 +583,51 @@ mod tests {
         })
         .unwrap();
 
-        let verdicts = evaluate_specifications(&[specification], &[analysis]);
+        let historical = analysis.clone();
+        analysis.retain_native_scalar_units();
+        let verdicts = evaluate_specifications(&[specification], &[analysis.clone()]);
 
         assert_eq!(verdicts.len(), 1);
         assert_eq!(verdicts[0].status(), SpecificationVerdictStatus::Pass);
         assert_eq!(verdicts[0].worst_value(), Some(0.0));
         assert_eq!(verdicts[0].evidence_count(), 1);
+        let spec = |unit: &str| {
+            PreparedSpecification::new(SpecEntry {
+                measurement: "PsS_PeRiOd".into(),
+                expression: "period".into(),
+                min: Some(1900.0),
+                max: Some(2100.0),
+                unit: unit.into(),
+                scope: SpecPointScope::AllPoints,
+            })
+            .unwrap()
+        };
+        let verdict = evaluate_specifications(&[spec("ms")], &[analysis.clone()]).remove(0);
+        assert_eq!(verdict.status(), SpecificationVerdictStatus::Pass);
+        assert_eq!(verdict.worst_value(), Some(2000.0));
+        assert_eq!(verdict.signed_margin(), Some(100.0));
+        let old = evaluate_specifications(&[spec("ms")], &[historical]).remove(0);
+        assert_eq!(old.status(), SpecificationVerdictStatus::BoundFailure);
+        assert_eq!(old.worst_value(), Some(2.0));
+        assert_eq!(
+            evaluate_specifications(&[spec("V")], &[analysis.clone()])[0].status(),
+            SpecificationVerdictStatus::MeasurementFailure
+        );
+        // An authored measurement still owns its name even when a native
+        // payload provides a scalar with the same name.
+        let mut authored = rspice_core::MeasureResult::success("pss_period", 0.003);
+        authored.units = Some(rspice_core::analysis::MeasurementUnits {
+            value: rspice_core::analysis::MeasurementUnit::Known("A".into()),
+            raw_value: rspice_core::analysis::MeasurementUnit::Known("A".into()),
+            axis: rspice_core::analysis::MeasurementUnit::Known("s".into()),
+        });
+        analysis.measurements.push(authored);
+        assert_eq!(
+            analysis.scalar_evidence("pss_period")[0]
+                .value_in_unit("mA")
+                .unwrap(),
+            Some(3.0)
+        );
     }
 
     #[test]

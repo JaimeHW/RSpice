@@ -685,6 +685,9 @@ pub struct AnalysisResult {
     /// rows, or scalar-only results. This is immutable retained data, not a
     /// viewer cache.
     pub result_payload: Option<AnalysisResultPayload>,
+    /// Exact units for native payload scalars. Absent on historical results;
+    /// explicit Unknown is distinct from their original numeric semantics.
+    pub native_scalar_units: Option<BTreeMap<String, rspice_core::analysis::MeasurementUnit>>,
     /// Portable committed trials retained even when the task is interrupted.
     /// This is never a substitute for a completed statistical result.
     pub monte_carlo_checkpoint: Option<MonteCarloCheckpointEvidence>,
@@ -780,6 +783,10 @@ impl AnalysisResult {
         self.result_payload
             .as_ref()
             .and_then(|payload| payload.scalar_evidence(name))
+            .map(|mut evidence| {
+                evidence.unit = self.native_scalar_unit(name);
+                evidence
+            })
             .into_iter()
             .collect()
     }
@@ -811,6 +818,7 @@ impl AnalysisResult {
             noise_summary: None,
             family_metadata: None,
             result_payload: None,
+            native_scalar_units: None,
             monte_carlo_checkpoint: None,
             measurements: Vec::new(),
             saved_output_receipts: Vec::new(),
@@ -841,6 +849,7 @@ impl AnalysisResult {
             noise_summary: None,
             family_metadata: None,
             result_payload: None,
+            native_scalar_units: None,
             monte_carlo_checkpoint: None,
             measurements: Vec::new(),
             saved_output_receipts: Vec::new(),
@@ -956,6 +965,7 @@ impl AnalysisResult {
     /// Historical analyses may legitimately lack a newer payload; when both
     /// fields exist they must describe one coherent execution.
     pub fn validate_retained_evidence(&self) -> Result<(), String> {
+        self.validate_native_scalar_units()?;
         if let Some(checkpoint) = &self.monte_carlo_checkpoint {
             checkpoint.validate_for(self)?;
         }

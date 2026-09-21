@@ -2080,3 +2080,111 @@ fn measurement_units_are_persisted_authenticated_and_absent_in_legacy_history() 
     downgraded.schema_version = IMPORTED_MONTE_CARLO_CHECKPOINTS_SCHEMA_VERSION;
     assert!(downgraded.migrate_to_current(ProjectId::new()).is_err());
 }
+
+#[test]
+fn native_scalar_units_persist_authenticate_and_preserve_schema_37_history() {
+    use crate::state::{
+        FloquetOrbitKindEvidence, FloquetSpectrumEvidence, FloquetStabilityVerdictEvidence,
+    };
+    use rspice_core::analysis::MeasurementUnit;
+    let historical = AnalysisResult::new(1, AnalysisType::Pss, "PSS").with_result_payload(
+        AnalysisResultPayload::PssFloquet {
+            period_s: Some(0.002),
+            fundamental_frequency_hz: Some(500.0),
+            iterations: Some(2),
+            residual_norm: Some(1e-12),
+            multipliers: vec![],
+            floquet_evidence: FloquetSpectrumEvidence::NoDynamicModes,
+            orbit_kind: FloquetOrbitKindEvidence::Driven,
+            trivial_multiplier_index: None,
+            stability_verdict: FloquetStabilityVerdictEvidence::Stable,
+        },
+    );
+    let historical_digest = historical.result_data_digest();
+    let stored = |analysis: AnalysisResult| {
+        let mut run = SimulationRun::new(1);
+        run.mark_running().unwrap();
+        run.add_analysis(analysis);
+        run.finish_lifecycle(SimulationRunLifecycle::Completed)
+            .unwrap();
+        seal_legacy_unattributed(&mut run);
+        let mut state = SimulationState::default();
+        state.runs = vec![run].into();
+        state.next_run_id = 1;
+        ProjectSimulationResults::from_state(&state)
+    };
+    let mut old = stored(historical.clone());
+    old.schema_version = MEASUREMENT_UNIT_RESULTS_SCHEMA_VERSION;
+    old.migrate_to_current(ProjectId::new()).unwrap();
+    let restored = old.into_simulation_state().unwrap();
+    let old = &restored.runs[0].analyses[0];
+    assert_eq!(old.result_data_digest(), historical_digest);
+    assert!(old.native_scalar_units.is_none());
+    assert_eq!(
+        old.scalar_evidence("pss_period")[0]
+            .value_in_unit("ms")
+            .unwrap(),
+        Some(0.002)
+    );
+
+    let mut typed = historical.clone();
+    typed.retain_native_scalar_units();
+    let digest = typed.result_data_digest();
+    assert_ne!(digest, historical_digest);
+    assert!(typed.retained_storage_bytes() > historical.retained_storage_bytes());
+    typed.validate_retained_evidence().unwrap();
+    let current = stored(typed);
+    let json = serde_json::to_string(&current).unwrap();
+    let loaded: ProjectSimulationResults = serde_json::from_str(&json).unwrap();
+    let loaded = loaded.into_simulation_state().unwrap();
+    let scalar = &loaded.runs[0].analyses[0];
+    assert_eq!(scalar.result_data_digest(), digest);
+    assert_eq!(
+        scalar.scalar_evidence("PSS.period")[0]
+            .value_in_unit("ms")
+            .unwrap(),
+        Some(2.0)
+    );
+    let mut tampered = current.clone();
+    tampered.runs[0].analyses[0]
+        .native_scalar_units
+        .as_mut()
+        .unwrap()
+        .insert("pss_period".into(), MeasurementUnit::Known("ms".into()));
+    assert!(tampered.validate().unwrap_err().contains("digest"));
+    let mut missing = scalar.clone();
+    missing
+        .native_scalar_units
+        .as_mut()
+        .unwrap()
+        .remove("pss_period");
+    assert!(
+        missing
+            .validate_retained_evidence()
+            .unwrap_err()
+            .contains("roster")
+    );
+    for field in [
+        PersistedField::Null,
+        PersistedField::Value(Default::default()),
+    ] {
+        let mut invalid = current.clone();
+        invalid.runs[0].analyses[0].native_scalar_units = field;
+        assert!(invalid.validate().is_err());
+        invalid.schema_version = MEASUREMENT_UNIT_RESULTS_SCHEMA_VERSION;
+        assert!(
+            invalid
+                .migrate_to_current(ProjectId::new())
+                .unwrap_err()
+                .contains("before v38")
+        );
+    }
+    let mut downgraded = current;
+    downgraded.schema_version = MEASUREMENT_UNIT_RESULTS_SCHEMA_VERSION;
+    assert!(
+        downgraded
+            .migrate_to_current(ProjectId::new())
+            .unwrap_err()
+            .contains("before v38")
+    );
+}

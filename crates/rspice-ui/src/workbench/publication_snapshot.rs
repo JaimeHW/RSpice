@@ -1562,6 +1562,7 @@ mod tests {
             noise_summary: None,
             family_metadata: None,
             result_payload: None,
+            native_scalar_units: None,
             monte_carlo_checkpoint: None,
             measurements: Vec::new(),
             saved_output_receipts: Vec::new(),

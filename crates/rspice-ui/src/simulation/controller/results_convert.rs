@@ -1045,6 +1045,9 @@ impl SimulationController {
             }
         };
         retained.convergence = convergence;
+        if retained.success {
+            retained.retain_native_scalar_units();
+        }
         retained
     }
 
@@ -2045,6 +2048,24 @@ mod floquet_payload_conversion_tests {
         );
 
         assert!(result.success, "{:?}", result.error_message);
+        assert_eq!(
+            result.scalar_evidence("pss.period")[0]
+                .value_in_unit("ms")
+                .unwrap(),
+            Some(1000.0)
+        );
+        assert_eq!(
+            result.scalar_evidence("pss_mode_count")[0]
+                .value_in_unit("count")
+                .unwrap(),
+            Some(3.0)
+        );
+        assert!(
+            result.scalar_evidence("pss_mode_count")[0]
+                .value_in_unit("V")
+                .is_err()
+        );
+
         assert_eq!(result.waveforms.len(), 1);
         let Some(AnalysisResultPayload::PssFloquet {
             multipliers,
@@ -2095,6 +2116,24 @@ mod floquet_payload_conversion_tests {
         );
 
         assert!(result.success, "{:?}", result.error_message);
+        assert_eq!(
+            result.scalar_evidence("pstb.period")[0]
+                .value_in_unit("ms")
+                .unwrap(),
+            Some(2000.0)
+        );
+        assert_eq!(
+            result.scalar_evidence("pstb_mode_count")[0]
+                .value_in_unit("count")
+                .unwrap(),
+            Some(3.0)
+        );
+        assert!(
+            result.scalar_evidence("pstb_mode_count")[0]
+                .value_in_unit("V")
+                .is_err()
+        );
+
         assert_eq!(result.waveforms.len(), 1);
         let Some(AnalysisResultPayload::Pstb {
             modes,

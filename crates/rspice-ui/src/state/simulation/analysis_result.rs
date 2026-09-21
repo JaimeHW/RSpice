@@ -12,6 +12,7 @@ use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
 use std::collections::{BTreeMap, HashSet};
 
 mod family_metadata;
+mod native_scalar_units;
 mod qpac;
 mod qpnoise;
 mod qpss;
