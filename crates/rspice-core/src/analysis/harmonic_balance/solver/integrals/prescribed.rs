@@ -88,25 +88,26 @@ impl HbSolver {
     pub(in crate::analysis::harmonic_balance::solver) fn refresh_driven_integrals(
         &mut self,
         abort: &dyn AbortSignal,
-    ) -> Result<(), HbError> {
+    ) -> Result<Vec<bool>, HbError> {
         let Some(max_values) = self.periodic_integral_budget else {
-            return Ok(());
+            return Ok(Vec::new());
         };
         if self
             .prescribed_integrals
             .iter()
             .all(|row| row.as_ref().is_some_and(|row| !row.is_circuit_driven()))
         {
-            return Ok(());
+            return Ok(Vec::new());
         }
         // Registration may precede nonlinear device stamping. Only inspect
         // linear row closure once the complete device registry is available.
         let sources = std::mem::take(&mut self.behavioral_sources);
-        let result = self
-            .prepare_integrals_with_linear_coordinates(&sources, max_values, false, true, abort);
+        let result =
+            self.prepare_integrals_with_inputs(&sources, max_values, false, true, None, abort);
         self.behavioral_sources = sources;
-        self.prescribed_integrals = result?;
-        Ok(())
+        let (spectra, needed) = result?;
+        self.prescribed_integrals = spectra;
+        Ok(needed)
     }
 
     pub(in crate::analysis::harmonic_balance::solver) fn prepare_prescribed_integrals(
@@ -116,17 +117,19 @@ impl HbSolver {
         retained: bool,
         abort: &dyn AbortSignal,
     ) -> Result<Vec<Option<PrescribedIntegral>>, HbError> {
-        self.prepare_integrals_with_linear_coordinates(sources, max_values, retained, false, abort)
+        self.prepare_integrals_with_inputs(sources, max_values, retained, false, None, abort)
+            .map(|(spectra, _)| spectra)
     }
 
-    fn prepare_integrals_with_linear_coordinates(
+    pub(super) fn prepare_integrals_with_inputs(
         &mut self,
         sources: &crate::device::behavioral::BehavioralSources,
         max_values: usize,
         retained: bool,
         linear_coordinates: bool,
+        driven: Option<&[Option<Vec<Complex64>>]>,
         abort: &dyn AbortSignal,
-    ) -> Result<Vec<Option<PrescribedIntegral>>, HbError> {
+    ) -> Result<(Vec<Option<PrescribedIntegral>>, Vec<bool>), HbError> {
         if abort.is_aborted() {
             return Err(HbError::Aborted);
         }
@@ -139,7 +142,19 @@ impl HbSolver {
         })?;
         let samples = self.fft.size();
         let frequency = self.config.fundamental_freq;
-        let mut retained_values = 0usize;
+        let n = self.num_nodes + self.exact_mna_branches().len();
+        let needed_size = if linear_coordinates && !retained && !plans.is_empty() {
+            n
+        } else {
+            0
+        };
+        if needed_size > max_values {
+            return Err(HbError::InvalidCircuit(
+                "driven integral input metadata exceeds the periodic allocation limit".into(),
+            ));
+        }
+        let mut needed = vec![false; needed_size];
+        let mut retained_values = needed_size;
         let mut forced: Vec<Option<Vec<Value>>> = Vec::new();
         let mut groups = Vec::new();
         if !retained && plans.iter().any(|plan| plan.dependencies().is_none()) {
@@ -157,11 +172,13 @@ impl HbSolver {
                     Ok(())
                 }
             };
-            ensure(topology)?;
+            ensure(topology.saturating_add(needed_size))?;
             let mut forest = self.forced_voltage_forest(true, abort)?;
             forest.retain_coordinates(plans.iter().flat_map(|plan| plan.coordinates()), abort)?;
             groups = forest.groups;
-            retained_values = topology.saturating_add(forest.nodes.len().saturating_mul(samples));
+            retained_values = topology
+                .saturating_add(needed_size)
+                .saturating_add(forest.nodes.len().saturating_mul(samples));
             ensure(
                 retained_values
                     .saturating_add(2 * (self.num_harmonics + 1))
@@ -295,6 +312,58 @@ impl HbSolver {
                 groups[row] = 0;
             }
         }
+        if let Some(driven) = driven {
+            if retained || driven.len() != n {
+                return Err(HbError::InvalidCircuit(
+                    "driven integral spectra do not match the physical circuit".into(),
+                ));
+            }
+            forced.resize(n, None);
+            groups.extend((groups.len()..n).map(|i| i + 1));
+            for (row, spectrum) in driven.iter().enumerate() {
+                let Some(spectrum) = spectrum else { continue };
+                if coordinate_group(&groups, &forced, row).is_none() {
+                    continue;
+                }
+                if spectrum.len() != self.num_harmonics + 1
+                    || spectrum[0].im != 0.0
+                    || spectrum
+                        .iter()
+                        .any(|v| !v.re.is_finite() || !v.im.is_finite())
+                {
+                    return Err(HbError::InvalidCircuit(
+                        "invalid nonlinear input spectrum".into(),
+                    ));
+                }
+                if forced[row].is_none() {
+                    retained_values = retained_values.saturating_add(samples);
+                }
+                if retained_values > max_values {
+                    return Err(HbError::InvalidCircuit(
+                        "nonlinear integral input waveforms exceed the periodic allocation limit"
+                            .into(),
+                    ));
+                }
+                let mut values = forced[row]
+                    .take()
+                    .unwrap_or_else(|| Vec::with_capacity(samples));
+                values.clear();
+                for sample in 0..samples {
+                    if abort.is_aborted() {
+                        return Err(HbError::Aborted);
+                    }
+                    let value = primitive_value(spectrum, sample as Value / samples as Value);
+                    if !value.is_finite() {
+                        return Err(HbError::InvalidCircuit(
+                            "nonlinear integral input projection overflowed".into(),
+                        ));
+                    }
+                    values.push(value);
+                }
+                forced[row] = Some(values);
+                groups[row] = 0;
+            }
+        }
         for plan in plans {
             if abort.is_aborted() {
                 return Err(HbError::Aborted);
@@ -305,6 +374,13 @@ impl HbSolver {
                 plan.dependencies_with_offsets(|i| coordinate_group(&groups, &forced, i))
             };
             let Some(dependencies) = dependencies else {
+                for row in plan.coordinates() {
+                    if coordinate_group(&groups, &forced, row).is_some()
+                        && let Some(needed) = needed.get_mut(row)
+                    {
+                        *needed = true;
+                    }
+                }
                 spectra.push(None);
                 continue;
             };
@@ -428,6 +504,6 @@ impl HbSolver {
                 PrescribedIntegral::Primitive(coefficients)
             }));
         }
-        Ok(spectra)
+        Ok((spectra, needed))
     }
 }

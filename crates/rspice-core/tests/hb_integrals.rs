@@ -33,6 +33,78 @@ fn transfer(rate: f64, frequency: f64) -> Complex64 {
 }
 
 #[test]
+fn hb_nonlinear_input_integrals_preserve_configuration_and_response() {
+    let rate = 1e3;
+    let omega = std::f64::consts::TAU * rate;
+    for (startup, krylov, exact, samples) in [
+        ("", false, true, 17),
+        (".options hbint tahb=0", true, true, 33),
+        (".options hbint tahb=0", false, false, 17),
+    ] {
+        let netlist = Netlist::parse(&format!(
+            "Nonlinear integral input\nItest 0 input SIN(0 1m {rate})\n\
+             Bforcing 0 input I=.001*sin(2*pi*{rate}*time)^3\n\
+             Rinput input 0 1k\nBnonlinear input 0 I=.001*v(input)^3\n\
+             Bshaped shaped 0 V=v(input)^3\nRshaped shaped 0 1k\n\
+             BV out 0 V={omega}*sdt(v(shaped))\nRout out 0 1k\n\
+             BI current 0 V=-1k*{omega}*sdt(i(Bshaped))\nRi current 0 1k\n\
+             {startup}\n.end\n"
+        ))
+        .unwrap();
+        let engine = Engine::default();
+        let mut config = HbConfig::new(rate)
+            .with_harmonics(3)
+            .with_collocation_points(samples);
+        config.tolerance = 1e-10;
+        config.abstol = 1e-14;
+        config.damping = 0.5;
+        config.min_damping = 0.125;
+        config.use_krylov = krylov;
+        config.gmres_restart = 16;
+        config.use_exact_jacobian = exact;
+        config.source_stepping = false;
+        let hb = engine.run_hb(&netlist, config).unwrap_or_else(|error| {
+            panic!("startup={startup}, krylov={krylov}, exact={exact}: {error}")
+        });
+        for name in ["out", "current"] {
+            let row = hb
+                .result
+                .spectral_voltages
+                .iter()
+                .find(|row| row.node_name.eq_ignore_ascii_case(name))
+                .unwrap();
+            close(row.coefficients[0], Complex64::new(2.0 / 3.0, 0.0));
+            close(row.coefficients[1], Complex64::new(-0.75, 0.0));
+            close(row.coefficients[3], Complex64::new(1.0 / 12.0, 0.0));
+        }
+        hb.operating_point.validate().unwrap();
+        if !startup.is_empty() {
+            continue;
+        }
+        let request = |name: &str| {
+            PacConfig::new()
+                .with_fundamental(rate)
+                .with_sweep(rate * 0.13, rate * 0.13, 1)
+                .with_sweep_type(PacSweepType::Linear)
+                .with_sidebands(-1, 1)
+                .with_input_source("Itest")
+                .with_output_node(name)
+        };
+        let shaped = engine
+            .run_pac_from_hb_with_abort(&netlist, request("shaped"), &hb.operating_point, &NoAbort)
+            .unwrap();
+        let output = engine
+            .run_pac_from_hb_with_abort(&netlist, request("out"), &hb.operating_point, &NoAbort)
+            .unwrap();
+        for sideband in -1..=1 {
+            let input = shaped.result.conversion_matrix.get(0, sideband, 0).unwrap();
+            let actual = output.result.conversion_matrix.get(0, sideband, 0).unwrap();
+            close(actual, input / Complex64::new(0.0, 0.13 + sideband as f64));
+        }
+    }
+}
+
+#[test]
 fn hb_differential_integrals_keep_nonlinear_common_mode_feedback() {
     let rate = 1e3;
     let omega = std::f64::consts::TAU * rate;

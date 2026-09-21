@@ -719,7 +719,7 @@ impl HbSolver {
         self.validate_exact_large_signal_mna()?;
         state.try_prepare_mna_branches(self.exact_mna_branches().len(), self.num_harmonics)?;
         self.bind_integral_tolerances(state);
-        self.refresh_driven_integrals(abort)?;
+        let needed_inputs = self.refresh_driven_integrals(abort)?;
 
         // GMIN is a continuation aid, never part of the authored circuit.
         // Commercial SPICE implementations may walk a shunted homotopy, but
@@ -753,6 +753,11 @@ impl HbSolver {
             // fallback strategy. Deterministic model/runtime faults have
             // already returned above.
         }
+
+        // Prepare independent nonlinear integral inputs from the resolved
+        // startup state. In particular, TAHB=0 retains the supplied orbit,
+        // while a successful DC seed must not subsequently erase this orbit.
+        self.prepare_nonlinear_integral_inputs(state, needed_inputs, abort)?;
 
         // Step 1: Try direct Newton first
         if self.newton_inner_loop(

@@ -5,6 +5,7 @@ use super::*;
 pub(super) mod forced;
 mod linear;
 mod nonlinear;
+mod periodic;
 pub(super) mod prescribed;
 
 impl HbSolver {
