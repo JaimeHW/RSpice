@@ -2528,8 +2528,10 @@ impl Engine {
             if abort.is_aborted() {
                 return Err(SimulationError::Aborted);
             }
-            // Simulate one period
+            // Simulate one nominal period and freeze its integral amplitudes
+            // before any finite-difference worker is cloned or perturbed.
             self.pss_set_reactive_state(circuit, &shooting_state.x0)?;
+            circuit.begin_integral_scale_observation();
 
             let (x_t, waveform) = self.pss_simulate_one_period::<true>(
                 circuit,
@@ -2539,6 +2541,7 @@ impl Engine {
                 abort,
             )?;
             let waveform = waveform.expect("recorded period traversal returns its waveform");
+            circuit.finish_integral_scale_observation(detected_period);
 
             shooting_state.x_t = x_t;
             shooting_state.compute_residual();
@@ -4210,6 +4213,7 @@ impl Engine {
             .behavioral_sources
             .accept_transient_step(&solution, 0.0)
             .map_err(|error| SimulationError::Circuit(error.to_string()))?;
+        circuit.record_integral_scales();
 
         let fixed_steps = if fixed_grid && let Some(mesh) = &circuit.integration_mesh {
             mesh.steps()
@@ -4446,6 +4450,7 @@ impl Engine {
                 .behavioral_sources
                 .accept_transient_step(&new_solution, t)
                 .map_err(|error| SimulationError::Circuit(error.to_string()))?;
+            circuit.record_integral_scales();
 
             // Evaluate the candidate against history from previously accepted
             // points before rotating that history. `recommend_scale` already

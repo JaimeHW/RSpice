@@ -241,3 +241,53 @@ fn pss_behavioral_integrals_support_autonomous_period_and_retained_state() {
         "{error}"
     );
 }
+
+#[test]
+fn pss_behavioral_integral_derivatives_follow_frequency_scaled_orbits() {
+    let mut reference: Option<(f64, f64)> = None;
+    for rate in [1e3, 1e9] {
+        let netlist = Netlist::parse(&format!(
+            "Scaled integral oscillator\nbx x 0 v=.1+{rate}*sdt(v(y))\n\
+            by y 0 v={rate}*sdt((1-v(x)*v(x))*v(y)-v(x))\n\
+            rx x 0 1k\nry y 0 1k\n.end\n",
+        ))
+        .unwrap();
+        let mut config = PssConfig::autonomous()
+            .with_period_guess(std::f64::consts::TAU / rate)
+            .with_oscillator_node("x")
+            .with_tstab_periods(12)
+            .with_points_per_period(128)
+            .with_tolerance(1e-8);
+        // The stored coordinates are integrals in V*s. Keep the same
+        // dimensionless absolute tolerance when changing the physical rate.
+        config.abstol = 1e-10 / rate;
+        let point = Engine::default()
+            .run_pss_operating_point_with_abort(&netlist, config, &NoAbort)
+            .unwrap_or_else(|error| panic!("rate={rate}: {error}"));
+        assert!(point.analysis().is_stable, "rate={rate}");
+        let result = &point.analysis().result;
+        let x = result
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("x"))
+            .unwrap();
+        let peak = result.waveforms[x]
+            .values
+            .iter()
+            .copied()
+            .fold(0.0_f64, |peak, value| peak.max(value.abs()));
+        let normalized_period = point.analysis().period * rate;
+        if let Some((period, amplitude)) = reference {
+            assert!(
+                (normalized_period / period - 1.0).abs() < 1e-4,
+                "rate={rate}: period {normalized_period} vs {period}"
+            );
+            assert!(
+                (peak / amplitude - 1.0).abs() < 1e-4,
+                "rate={rate}: amplitude {peak} vs {amplitude}"
+            );
+        } else {
+            reference = Some((normalized_period, peak));
+        }
+    }
+}

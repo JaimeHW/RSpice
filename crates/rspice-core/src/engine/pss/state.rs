@@ -451,6 +451,10 @@ pub(in crate::engine) struct PssCircuit {
     /// use the configured method. Derivative workers clone this choice.
     pub(super) probe_precision_floor: bool,
     basis: PssStateBasis,
+    /// Nominal-orbit amplitudes in each integral's own units. Derivative
+    /// workers inherit frozen scales and cannot retune them with trial states.
+    integral_probe_scales: Vec<Value>,
+    observing_integral_scales: bool,
     solution_scratch: Vec<Value>,
     current_balance: Vec<Value>,
     initial_flux_rates: Option<usize>,
@@ -532,6 +536,7 @@ impl PssCircuit {
             &solution_scratch[1..],
             super::super::transient::ReactiveHistorySeed::SolvedBias,
         );
+        let integral_probe_scales = vec![1.0; circuit.behavioral_sources.integral_count()];
         Ok(Self {
             circuit,
             diode_history,
@@ -544,6 +549,8 @@ impl PssCircuit {
             integration_mesh: None,
             probe_precision_floor: false,
             basis,
+            integral_probe_scales,
+            observing_integral_scales: false,
             solution_scratch,
             current_balance,
             initial_flux_rates: None,
@@ -591,16 +598,48 @@ impl PssCircuit {
             || self.basis.node_units[neg] == CoordinateUnit::Current
     }
 
+    pub(super) fn begin_integral_scale_observation(&mut self) {
+        self.integral_probe_scales.fill(0.0);
+        self.observing_integral_scales = !self.integral_probe_scales.is_empty();
+    }
+
+    pub(super) fn record_integral_scales(&mut self) {
+        if self.observing_integral_scales {
+            for (scale, value) in self
+                .integral_probe_scales
+                .iter_mut()
+                .zip(self.circuit.behavioral_sources.accepted_integrals())
+            {
+                *scale = scale.max(value.abs());
+            }
+        }
+    }
+
+    pub(super) fn finish_integral_scale_observation(&mut self, period: Value) {
+        self.observing_integral_scales = false;
+        // A dormant state still needs a nonzero derivative probe. One period
+        // of unit input supplies a time-aware fallback instead of one V*s.
+        for scale in &mut self.integral_probe_scales {
+            if *scale == 0.0 {
+                *scale = period;
+            }
+        }
+    }
+
     /// Same normalized perturbation for voltage, thermal and current states.
     /// A current's characteristic scale follows ABSTOL/VNTOL instead of an
-    /// implicit one ampere. Retained states and derivatives stay in SI units.
+    /// implicit one ampere. Integral probes use frozen nominal-orbit amplitudes.
+    /// Retained states and derivatives stay in their original units.
     pub(in crate::engine) fn perturbation_scale(
         &self,
         index: usize,
         value: Value,
         current_scale: Value,
     ) -> Value {
-        let unit = if self.is_current_coordinate(index) {
+        let physical_count = self.physical_state_dimension();
+        let unit = if index >= physical_count {
+            self.integral_probe_scales[index - physical_count]
+        } else if self.is_current_coordinate(index) {
             current_scale
         } else {
             1.0
