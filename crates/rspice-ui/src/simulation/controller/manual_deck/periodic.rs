@@ -661,9 +661,6 @@ fn parse_pnoise(
     reltol: f64,
     abstol: f64,
 ) -> Result<PnoiseRunConfig, String> {
-    if sampling.is_some() && carrier.autonomous {
-        return Err("Sampled PNOISE requires a driven periodic carrier".into());
-    }
     reject_unsupported_keys(
         card,
         &[
@@ -738,7 +735,7 @@ fn parse_pnoise(
                 .to_owned(),
         );
     }
-    if noise_ref == PnoiseReference::Input && carrier.autonomous {
+    if noise_ref == PnoiseReference::Input && carrier.autonomous && sampling.is_none() {
         return Err(
             ".PNOISE input= refers noise to a driving source, and an autonomous .PSS has none; \
              author noiseref=phase for an oscillator's phase noise"
@@ -2115,6 +2112,26 @@ mod tests {
         assert_eq!(pxf.output_sideband, 2);
         assert_eq!(pxf.max_sideband, 4);
         assert_eq!(pxf.carrier, CarrierSelector::Pss);
+    }
+
+    #[test]
+    fn autonomous_sampled_pnoise_studio_manual_deck_retains_timing_and_input_reference() {
+        let source = "sampled oscillator\nIprobe 0 osc dc 0\nR1 osc 0 1k\n.pss autonomous=yes oscnode=osc periodguess=1m\n\
+            .pnoise lin 3 10 100 out=osc sampling=edge input=Iprobe inputsideband=1 maxsideband=4 integratednoise=yes\n.end\n";
+        let netlist = Netlist::parse(source).unwrap();
+        let tasks = parse_periodic_tasks(&netlist, source).unwrap();
+        let config = tasks
+            .iter()
+            .find_map(|task| task.spec_options.pnoise.as_ref())
+            .unwrap();
+        assert_eq!(config.noise_ref, PnoiseReference::Input);
+        assert_eq!(config.input_source, "Iprobe");
+        assert_eq!(config.input_sideband, 1);
+        assert!(config.integrated_noise);
+        assert!(matches!(
+            &config.sampling,
+            Some(rspice_core::analysis::pnoise::PeriodicNoiseSampling::Edge { .. })
+        ));
     }
 
     #[test]

@@ -955,6 +955,70 @@ mod tests {
     }
 
     #[test]
+    fn autonomous_sampled_pnoise_studio_reports_timing_and_current_reference() {
+        use rspice_core::analysis::pnoise::PeriodicNoiseSampling;
+        let netlist = rspice_core::Netlist::parse("LC sampled reporting\nl1 osc 0 1u\nc1 osc 0 1u\ngneg osc 0 osc 0 -0.051\nd1 osc 0 limiter\nd2 0 osc limiter\n.model limiter d(is=1p n=1)\ni1 0 osc pulse(0 1 10u 10n 10n 1u 1)\n.options rshunt=1k temp=127\n.end\n").unwrap();
+        let engine = Engine::default().resolved_for_netlist(&netlist);
+        let pss = engine
+            .run_pss_operating_point_with_abort(
+                &netlist,
+                rspice_core::analysis::PssConfig::autonomous()
+                    .with_period_guess(6.3e-6)
+                    .with_tstab_periods(30)
+                    .with_harmonics(64)
+                    .with_max_iterations(60),
+                &NoAbort,
+            )
+            .unwrap();
+        let config = PnoiseRunConfig {
+            noise_ref: PnoiseReference::Input,
+            input_source: "i1".into(),
+            input_sideband: 1,
+            sampling: Some(PeriodicNoiseSampling::Edge {
+                edge: Default::default(),
+            }),
+            max_sideband: 24,
+            integrated_noise: true,
+            noise_summary: true,
+            output_node: "osc".into(),
+            ..Default::default()
+        };
+        let reported = run_pnoise_from_retained_state(
+            &engine,
+            &netlist,
+            &config,
+            vec![1.0, 10.0],
+            PeriodicCarrierState::Shooting(&pss),
+            &NoAbort,
+        )
+        .unwrap();
+        assert!(
+            reported
+                .timing_jitter_rms_s
+                .is_some_and(|value| value > 0.0)
+        );
+        assert_eq!(reported.output_rms, None);
+        assert_eq!(reported.phase_rms_rad, None);
+        assert_eq!(
+            reported.input_quantity,
+            Some(rspice_core::analysis::noise::NoiseInputQuantity::Current)
+        );
+        assert!(reported.input_rms.is_some_and(|value| value > 0.0));
+        assert!(
+            (reported
+                .contributors
+                .iter()
+                .map(|(_, share)| share)
+                .sum::<f64>()
+                - 100.0)
+                .abs()
+                < 1e-8
+        );
+        let evidence = reported.conversion.unwrap();
+        assert!(evidence.sampling.unwrap().request.is_timing());
+    }
+
+    #[test]
     fn retained_oscillator_noise_reports_phase_timing_and_device_shares() {
         let deck = "LC phase reporting\nl1 osc 0 1u\nc1 osc 0 1u\nb1 osc 0 i=-0.051*v(osc)+0.025*v(osc)*v(osc)*v(osc)\ni1 0 osc pulse(0 1 10u 10n 10n 1u 1)\n.options rshunt=1k temp=127\n.end\n";
         let netlist = rspice_core::Netlist::parse(deck).unwrap();

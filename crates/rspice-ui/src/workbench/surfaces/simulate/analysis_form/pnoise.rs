@@ -85,7 +85,7 @@ pub(super) fn fields(
             _ => (),
         }
         if setup.sampling.mode_idx != 0 {
-            super::field_note(ui, "Sampling requires a driven carrier and offsets at or below half its frequency. Crossings are counted from phase zero within one period. Add periods when the measured edge follows the reference in a later cycle.");
+            super::field_note(ui, "Sampling supports driven carriers and autonomous PSS. Autonomous results measure small-signal voltage or unwrapped edge timing about the solved orbit. Use positive offsets at or below half the carrier frequency. Crossings start at phase zero; add periods for an edge in a later cycle.");
         }
     });
     ui.scope(|ui| { switch_row(ui, "Integrated noise", &mut setup.integrated_noise); }).response
