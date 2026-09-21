@@ -1327,6 +1327,45 @@ pub(super) fn emit_worker_transient_sample(sample: &super::super::TransientSampl
     let _ = post_message.call1(&global, &JsValue::from(message));
 }
 
+/// Deliver the portable checkpoint as transferred bytes before terminal success.
+#[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
+fn emit_worker_monte_carlo_checkpoint(bytes: &[u8]) -> Result<(), SimulationError> {
+    use wasm_bindgen::{JsCast as _, JsValue};
+    let fail = |message: String| {
+        SimulationError::InvalidConfig(format!(
+            "Could not deliver Monte Carlo checkpoint: {message}"
+        ))
+    };
+    super::super::monte_carlo_checkpoint::validate_checkpoint_bytes_size(bytes.len())
+        .map_err(&fail)?;
+    let id = ACTIVE_WORKER_PROGRESS_ID
+        .with(|active| active.get())
+        .ok_or_else(|| fail("no active worker request".into()))?;
+    let message = js_sys::Object::new();
+    let view = js_sys::Uint8Array::new_with_length(bytes.len() as u32);
+    view.copy_from(bytes);
+    for (key, value) in [
+        ("type", JsValue::from_str("monteCarloCheckpoint")),
+        ("id", JsValue::from_f64(id as f64)),
+        ("checkpoint", JsValue::from(view.clone())),
+    ] {
+        if !js_sys::Reflect::set(&message, &JsValue::from_str(key), &value)
+            .map_err(|error| fail(format!("{error:?}")))?
+        {
+            return Err(fail(format!("could not set {key}")));
+        }
+    }
+    let transfer = js_sys::Array::new();
+    transfer.push(&view.buffer());
+    let global = js_sys::global();
+    let post = js_sys::Reflect::get(&global, &JsValue::from_str("postMessage"))
+        .and_then(|value| value.dyn_into::<js_sys::Function>())
+        .map_err(|error| fail(format!("{error:?}")))?;
+    post.call2(&global, &message, &transfer)
+        .map_err(|error| fail(format!("{error:?}")))?;
+    Ok(())
+}
+
 /// Post one line the engine logged back to the UI instance.
 ///
 /// The worker is its own wasm instance, so there is no queue on this side of
@@ -1437,6 +1476,7 @@ fn run_decoded_worker_request(
             abort_flag,
             super::super::RunStreams {
                 progress_observer: Some(emit_worker_progress_snapshot),
+                checkpoint_observer: Some(Arc::new(emit_worker_monte_carlo_checkpoint)),
                 transient_sample_observer: stream_transient_samples
                     .then_some(emit_worker_transient_sample),
                 engine_log: Some(crate::diagnostics::engine_log::RunLogSink::observed(
@@ -1602,6 +1642,36 @@ pub(super) fn worker_request_from_value(
         .map_err(|error| JsValue::from_str(&error))?;
     }
 
+    let byte_buffers = js_sys::Reflect::get(&value, &JsValue::from_str("byteBuffers"))
+        .map_err(worker_request_js_error)?
+        .dyn_into::<js_sys::Array>()
+        .map_err(|_| JsValue::from_str("worker request byteBuffers must be an array"))?;
+    if byte_buffers.length() > 1 {
+        return Err(JsValue::from_str(
+            "worker request carries too many checkpoint buffers",
+        ));
+    }
+    let mut byte_lengths = Vec::new();
+    for index in 0..byte_buffers.length() {
+        let view = byte_buffers
+            .get(index)
+            .dyn_into::<js_sys::Uint8Array>()
+            .map_err(|_| JsValue::from_str("worker request checkpoint must be a Uint8Array"))?;
+        byte_lengths.push(view.length() as usize);
+    }
+    validate_worker_request_checkpoint_lengths(numeric_values, &byte_lengths)
+        .map_err(|error| JsValue::from_str(&error))?;
+    let mut decoded_bytes = Vec::new();
+    for index in 0..byte_buffers.length() {
+        let view = byte_buffers
+            .get(index)
+            .dyn_into::<js_sys::Uint8Array>()
+            .map_err(|_| JsValue::from_str("worker request checkpoint must be a Uint8Array"))?;
+        let mut bytes = vec![0; view.length() as usize];
+        view.copy_to(&mut bytes);
+        decoded_bytes.push(bytes);
+    }
+
     let mut decoded_buffers = Vec::with_capacity(buffer_count);
     for index in 0..buffers.length() {
         let view = buffers
@@ -1621,6 +1691,7 @@ pub(super) fn worker_request_from_value(
         protocol,
         request,
         buffers: decoded_buffers,
+        byte_buffers: decoded_bytes,
     }
     .into_request()
     .map_err(|error| JsValue::from_str(&error))

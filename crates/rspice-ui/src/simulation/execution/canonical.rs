@@ -769,6 +769,17 @@ fn encode_drc_location(writer: &mut CanonicalWriter, location: &DrcLocation) {
 }
 
 fn encode_spec_options(writer: &mut CanonicalWriter, options: &SpecExecutionOptions) {
+    if let Some(checkpoint) = &options.mc_checkpoint {
+        writer.domain("monte-carlo-checkpoint-request/v1");
+        writer.usize(checkpoint.publish_every.get());
+        writer.option(checkpoint.trial_range.as_ref(), |writer, range| {
+            writer.usize(range.start);
+            writer.usize(range.end);
+        });
+        writer.option(checkpoint.resume.as_ref(), |writer, input| {
+            writer.digest(input.digest())
+        });
+    }
     writer.domain("spec-execution-options");
     writer.option(options.temp.as_ref(), |writer, config| {
         encode_f64_slice(writer, &config.temperatures_c);

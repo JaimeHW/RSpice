@@ -52,7 +52,8 @@ mod browser {
     use crate::simulation::results::SimulationResult;
     use crate::simulation::runner::worker_contract::{
         WORKER_REQUEST_TRANSPORT_PROTOCOL, WorkerProgressSnapshot, WorkerRequest,
-        WorkerRequestTransportMetadata, take_worker_request_op_previous_state,
+        WorkerRequestTransportMetadata, take_worker_request_checkpoint,
+        take_worker_request_op_previous_state, validate_worker_request_checkpoint_lengths,
         validate_worker_request_transfer_buffer_lengths, validate_worker_response_id,
         worker_response_from_value,
     };
@@ -61,6 +62,10 @@ mod browser {
         push_live_transient_sample,
     };
     use crate::simulation::status::{EngineAvailability, SimulationProgress, SimulationStatus};
+
+    use crate::simulation::runner::monte_carlo_checkpoint::{
+        CheckpointQueue, replace_checkpoint, validate_checkpoint_bytes_size,
+    };
 
     #[derive(Default)]
     struct WorkerState {
@@ -76,6 +81,7 @@ mod browser {
         /// wasm instance, and the run — which is a separate instance with its
         /// own memory — posts its lines back across the contract one at a time.
         active_engine_log: Option<Arc<Mutex<EngineLogQueue>>>,
+        active_checkpoint: Option<CheckpointQueue>,
         pending_result: Option<Result<SimulationResult, SimulationError>>,
     }
 
@@ -161,6 +167,7 @@ mod browser {
                 state.active_progress = None;
                 state.active_transient_samples = None;
                 state.active_engine_log = None;
+                state.active_checkpoint = None;
             }
             result
         }
@@ -178,6 +185,7 @@ mod browser {
             state.active_progress = None;
             state.active_transient_samples = None;
             state.active_engine_log = None;
+            state.active_checkpoint = None;
             state.pending_result = Some(Err(SimulationError::Aborted));
             drop(state);
             drop_cached_worker(&self.worker);
@@ -306,6 +314,7 @@ mod browser {
         abort_flag: Arc<AtomicBool>,
         transient_samples: Option<Arc<Mutex<LiveTransientQueue>>>,
         engine_log: Arc<Mutex<EngineLogQueue>>,
+        checkpoint: CheckpointQueue,
     ) -> Result<(), SimulationError> {
         if handle.is_running() || handle.has_unpolled_result() {
             return Err(SimulationError::AlreadyRunning);
@@ -323,6 +332,7 @@ mod browser {
             state.active_progress = Some(Arc::clone(&progress));
             state.active_transient_samples = transient_samples;
             state.active_engine_log = Some(engine_log);
+            state.active_checkpoint = Some(checkpoint);
             state.pending_result = None;
         }
 
@@ -334,6 +344,7 @@ mod browser {
                 state.active_progress = None;
                 state.active_transient_samples = None;
                 state.active_engine_log = None;
+                state.active_checkpoint = None;
                 return Err(error);
             }
         };
@@ -344,6 +355,7 @@ mod browser {
             state.active_progress = None;
             state.active_transient_samples = None;
             state.active_engine_log = None;
+            state.active_checkpoint = None;
             drop(state);
             let message = format!(
                 "failed to post simulation request to worker: {}",
@@ -371,6 +383,7 @@ mod browser {
             "progress" => handle_progress_message(state, &data),
             "transientSample" => handle_transient_sample_message(state, &data),
             "engineLog" => handle_engine_log_message(state, &data),
+            "monteCarloCheckpoint" => handle_checkpoint_message(state, worker, &data),
             "result" => handle_result_message(state, &data),
             "error" => {
                 let startup_error = Reflect::get(&data, &JsValue::from_str("id"))
@@ -498,7 +511,46 @@ mod browser {
         state.active_progress = None;
         state.active_transient_samples = None;
         state.active_engine_log = None;
+        state.active_checkpoint = None;
         state.pending_result = Some(result);
+    }
+
+    fn handle_checkpoint_message(
+        state: &Rc<RefCell<WorkerState>>,
+        worker: &Rc<RefCell<Option<web_sys::Worker>>>,
+        data: &JsValue,
+    ) {
+        let id = numeric_property(data, "id").unwrap_or(0);
+        let queue = {
+            let state = state.borrow();
+            if stale_result(state.active_request_id, id) {
+                return;
+            }
+            state.active_checkpoint.clone()
+        };
+        let Some(queue) = queue else {
+            return;
+        };
+        let decoded = (|| -> Result<Vec<u8>, String> {
+            let view = Reflect::get(data, &JsValue::from_str("checkpoint"))
+                .map_err(js_error_message)?
+                .dyn_into::<js_sys::Uint8Array>()
+                .map_err(|_| "Monte Carlo checkpoint must be a Uint8Array".to_owned())?;
+            validate_checkpoint_bytes_size(view.length() as usize)?;
+            let mut bytes = vec![0; view.length() as usize];
+            view.copy_to(&mut bytes);
+            crate::simulation::runner::study::monte_carlo::checkpoint::StudyMonteCarloCheckpoint::from_bytes_with_limits(
+                &bytes, rspice_core::ResourceLimits::default(), &rspice_core::NoAbort).map_err(|error| error.to_string())?;
+            Ok(bytes)
+        })();
+        match decoded {
+            Ok(bytes) => replace_checkpoint(&queue, Arc::from(bytes)),
+            Err(error) => fail_worker(
+                state,
+                worker,
+                format!("Invalid Monte Carlo checkpoint stream: {error}"),
+            ),
+        }
     }
 
     fn handle_transient_sample_message(state: &Rc<RefCell<WorkerState>>, data: &JsValue) {
@@ -584,6 +636,7 @@ mod browser {
         state.active_progress = None;
         state.active_transient_samples = None;
         state.active_engine_log = None;
+        state.active_checkpoint = None;
         state.pending_result = Some(Err(SimulationError::InvalidConfig(message)));
     }
 
@@ -607,6 +660,7 @@ mod browser {
         state.active_progress = None;
         state.active_transient_samples = None;
         state.active_engine_log = None;
+        state.active_checkpoint = None;
         drop(state);
         drop_cached_worker(worker);
     }
@@ -749,6 +803,8 @@ mod browser {
         mut request: WorkerRequest,
     ) -> Result<PreparedWorkerMessage, SimulationError> {
         let request_id = request.id;
+        let checkpoint_buffers =
+            take_worker_request_checkpoint(&mut request).map_err(SimulationError::InvalidConfig)?;
         // Extract every owned numerical request payload before allocating any
         // JavaScript typed array so the combined dependency + OP-state budget
         // can fail closed without a large transient allocation.
@@ -779,8 +835,24 @@ mod browser {
             ))
         })?;
 
+        validate_worker_request_checkpoint_lengths(
+            dependency_buffers
+                .iter()
+                .map(|values| values.len())
+                .sum::<usize>()
+                + op_buffers.iter().map(Vec::len).sum::<usize>(),
+            &checkpoint_buffers.iter().map(Vec::len).collect::<Vec<_>>(),
+        )
+        .map_err(SimulationError::InvalidConfig)?;
         let buffers = Array::new();
+        let byte_buffers = Array::new();
         let transfer = Array::new();
+        for bytes in checkpoint_buffers {
+            let view = js_sys::Uint8Array::new_with_length(bytes.len() as u32);
+            view.copy_from(&bytes);
+            transfer.push(&view.buffer());
+            byte_buffers.push(&view);
+        }
         for (index, values) in dependency_buffers.into_iter().enumerate() {
             let length = u32::try_from(values.len()).map_err(|_| {
                 SimulationError::InvalidConfig(format!(
@@ -847,6 +919,12 @@ mod browser {
         Reflect::set(&request_value, &JsValue::from_str("request"), &metadata)
             .map_err(reflect_error)?;
 
+        Reflect::set(
+            &request_value,
+            &JsValue::from_str("byteBuffers"),
+            &byte_buffers,
+        )
+        .map_err(reflect_error)?;
         Reflect::set(&request_value, &JsValue::from_str("buffers"), &buffers)
             .map_err(reflect_error)?;
         Reflect::set(&message, &JsValue::from_str("request"), &request_value)

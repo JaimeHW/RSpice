@@ -32,6 +32,8 @@ use super::status::{SimulationProgress, SimulationStatus};
 /// remains lossless and atomically replaces the live document.
 const MAX_PENDING_LIVE_TRANSIENT_SAMPLES: usize = 8_192;
 
+pub(crate) mod monte_carlo_checkpoint;
+use monte_carlo_checkpoint::{CheckpointObserver, CheckpointQueue, replace_checkpoint};
 mod live_impulses;
 pub(in crate::simulation) use live_impulses::{CurrentImpulseBuffer, CurrentImpulseDelta};
 use live_impulses::{LiveTransientQueue, PublishedCurrentImpulses};
@@ -55,6 +57,7 @@ pub(crate) mod study;
 #[derive(Debug, Clone, Default)]
 pub struct SpecExecutionOptions {
     pub study_base: Option<study::StudyRunConfig>,
+    pub(crate) mc_checkpoint: Option<monte_carlo_checkpoint::MonteCarloCheckpointRequest>,
     pub mc_statistics: Option<crate::simulation::dialog::mc::statistics::McStatisticsConfig>,
     pub temp: Option<crate::services::simulation_runner::TempRunConfig>,
     /// Base analysis paired with a design-parameter `.STEP`. `None` retains
@@ -201,6 +204,8 @@ pub struct SimulationRunner {
     /// value that may be coalesced.
     engine_log: Arc<Mutex<EngineLogQueue>>,
 
+    monte_carlo_checkpoint: CheckpointQueue,
+
     /// Current simulation thread handle
     thread_handle: Option<JoinHandle<Result<SimulationResult, SimulationError>>>,
 
@@ -226,6 +231,7 @@ impl SimulationRunner {
             abort_flag: Arc::new(AtomicBool::new(false)),
             transient_samples: Arc::new(Mutex::new(LiveTransientQueue::default())),
             engine_log: Arc::new(Mutex::new(EngineLogQueue::default())),
+            monte_carlo_checkpoint: Arc::new(Mutex::new(None)),
             thread_handle: None,
             pending_result: None,
             #[cfg(target_arch = "wasm32")]
@@ -318,6 +324,14 @@ impl SimulationRunner {
         crate::diagnostics::engine_log::lock_queue(&self.engine_log).drain()
     }
 
+    /// Latest complete journal, available independently of terminal success.
+    pub(in crate::simulation) fn take_monte_carlo_checkpoint(&self) -> Option<Arc<[u8]>> {
+        self.monte_carlo_checkpoint
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .take()
+    }
+
     /// Abort and discard all runner-local completion/progress state.
     ///
     /// Native worker threads cannot be force-killed, but setting the shared
@@ -331,6 +345,7 @@ impl SimulationRunner {
         self.progress = Arc::new(Mutex::new(SimulationProgress::default()));
         self.transient_samples = Arc::new(Mutex::new(LiveTransientQueue::default()));
         self.engine_log = Arc::new(Mutex::new(EngineLogQueue::default()));
+        self.monte_carlo_checkpoint = Arc::new(Mutex::new(None));
 
         #[cfg(target_arch = "wasm32")]
         {
@@ -497,6 +512,7 @@ impl SimulationRunner {
         }
 
         // Reset state
+        self.take_monte_carlo_checkpoint();
         self.abort_flag.store(false, Ordering::SeqCst);
         match self.transient_samples.lock() {
             Ok(mut samples) => samples.clear(),
@@ -521,6 +537,7 @@ impl SimulationRunner {
         #[cfg(not(target_arch = "wasm32"))]
         {
             let streams = RunStreams {
+                monte_carlo_checkpoint: Some(Arc::clone(&self.monte_carlo_checkpoint)),
                 transient_samples,
                 engine_log: Some(RunLogSink::queued(
                     Arc::clone(&self.engine_log),
@@ -547,6 +564,7 @@ impl SimulationRunner {
                 abort_flag,
                 transient_samples,
                 Arc::clone(&self.engine_log),
+                Arc::clone(&self.monte_carlo_checkpoint),
             )?;
         }
         Ok(())
@@ -598,6 +616,8 @@ pub(in crate::simulation::runner) struct RunStreams {
     pub(in crate::simulation::runner) transient_samples: Option<Arc<Mutex<LiveTransientQueue>>>,
     pub(in crate::simulation::runner) transient_sample_observer: Option<TransientSampleObserver>,
     pub(in crate::simulation::runner) engine_log: Option<RunLogSink>,
+    pub(in crate::simulation::runner) monte_carlo_checkpoint: Option<CheckpointQueue>,
+    pub(in crate::simulation::runner) checkpoint_observer: Option<CheckpointObserver>,
 }
 
 fn lock_progress<'a>(
@@ -1160,6 +1180,8 @@ pub(in crate::simulation::runner) fn run_simulation_thread_with_progress_observe
         transient_samples,
         transient_sample_observer,
         engine_log,
+        monte_carlo_checkpoint,
+        checkpoint_observer,
     } = streams;
 
     // Whatever the engine logs from here on belongs to this run, and only to
@@ -1232,6 +1254,17 @@ pub(in crate::simulation::runner) fn run_simulation_thread_with_progress_observe
         published_events: Mutex::default(),
     };
 
+    let publish_checkpoint = |bytes: &[u8]| {
+        if let Some(queue) = &monte_carlo_checkpoint {
+            replace_checkpoint(queue, Arc::from(bytes));
+        }
+        if let Some(observer) = &checkpoint_observer {
+            observer(bytes)?;
+        }
+        Ok(())
+    };
+    let checkpoint_observer = (monte_carlo_checkpoint.is_some() || checkpoint_observer.is_some())
+        .then_some(&publish_checkpoint as &(dyn Fn(&[u8]) -> Result<(), SimulationError> + Sync));
     let result = match request {
         SimulationRequest::Config(config) => {
             input
@@ -1259,7 +1292,7 @@ pub(in crate::simulation::runner) fn run_simulation_thread_with_progress_observe
         }
         SimulationRequest::Spec { spec, options } => {
             log::info!("Running simulation via spec path: {:?}", spec.run_type());
-            spec::run_spec_request_with_environment(
+            spec::run_spec_request_with_environment_and_checkpoint_observer(
                 &bridge,
                 *spec,
                 *options,
@@ -1268,6 +1301,7 @@ pub(in crate::simulation::runner) fn run_simulation_thread_with_progress_observe
                 &input.dependencies,
                 input.environment,
                 &signal,
+                checkpoint_observer,
             )?
         }
     };

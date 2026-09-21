@@ -83,7 +83,44 @@ pub(super) fn run_spec_request_with_environment(
     environment: Option<AnalysisExecutionEnvironment>,
     abort_flag: &dyn AbortSignal,
 ) -> Result<SimulationResult, SimulationError> {
+    run_spec_request_with_environment_and_checkpoint_observer(
+        bridge,
+        spec,
+        options,
+        netlist,
+        source_path,
+        dependencies,
+        environment,
+        abort_flag,
+        None,
+    )
+}
+
+pub(super) fn run_spec_request_with_environment_and_checkpoint_observer(
+    bridge: &EngineBridge,
+    spec: AnalysisSpec,
+    options: SpecExecutionOptions,
+    netlist: &str,
+    source_path: Option<&Path>,
+    dependencies: &ResolvedExecutionDependencies,
+    environment: Option<AnalysisExecutionEnvironment>,
+    abort_flag: &dyn AbortSignal,
+    checkpoint_observer: Option<&(dyn Fn(&[u8]) -> Result<(), SimulationError> + Sync)>,
+) -> Result<SimulationResult, SimulationError> {
     ensure_not_aborted(abort_flag)?;
+    if let Some(checkpoint) = &options.mc_checkpoint {
+        if !matches!(spec, AnalysisSpec::MonteCarlo { .. }) || options.study_base.is_none() {
+            return Err(SimulationError::InvalidConfig(
+                "Checkpoint continuation requires a configured Monte Carlo study".into(),
+            ));
+        }
+        checkpoint.validate()?;
+        if checkpoint_observer.is_none() {
+            return Err(SimulationError::InvalidConfig(
+                "Monte Carlo checkpoint request has no snapshot destination".into(),
+            ));
+        }
+    }
 
     if options.study_base.is_some()
         && !matches!(
@@ -131,7 +168,15 @@ pub(super) fn run_spec_request_with_environment(
 
     match spec {
         AnalysisSpec::MonteCarlo { .. } | AnalysisSpec::Parametric | AnalysisSpec::Corner => {
-            sweeps::run_sweep_spec(spec, options, netlist, source_path, environment, abort_flag)
+            sweeps::run_sweep_spec(
+                spec,
+                options,
+                netlist,
+                source_path,
+                environment,
+                abort_flag,
+                checkpoint_observer,
+            )
         }
         AnalysisSpec::Fft { request } => recorded_fft::run(&request, dependencies, abort_flag),
         AnalysisSpec::AcData {
@@ -1635,6 +1680,7 @@ R2 out 0 1k\n\
                     None,
                     None,
                     &rspice_core::abort_signal::NoAbort,
+                    None,
                 ),
                 "AnalysisSpec::DcOp",
             ),

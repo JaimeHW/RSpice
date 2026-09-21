@@ -720,6 +720,7 @@ impl SimulationController {
                     .map_err(|e| format!("invalid temperature sweep settings: {}", e))?;
                 Ok(SpecExecutionOptions {
                     mc_statistics: None,
+                    mc_checkpoint: None,
                     study_base: None,
                     temp: Some(Self::temp_run_config_from_dialog(state, &temp_cfg)?),
                     parametric_base: None,
@@ -738,6 +739,7 @@ impl SimulationController {
                     .map_err(|e| format!("invalid corner settings: {}", e))?;
                 Ok(SpecExecutionOptions {
                     mc_statistics: None,
+                    mc_checkpoint: None,
                     study_base: None,
                     temp: None,
                     parametric_base: None,
@@ -754,6 +756,7 @@ impl SimulationController {
             }
             AnalysisSpec::Pac => Ok(SpecExecutionOptions {
                 mc_statistics: None,
+                mc_checkpoint: None,
                 study_base: None,
                 temp: None,
                 parametric_base: None,
@@ -765,6 +768,7 @@ impl SimulationController {
             }),
             AnalysisSpec::Pxf => Ok(SpecExecutionOptions {
                 mc_statistics: None,
+                mc_checkpoint: None,
                 study_base: None,
                 temp: None,
                 parametric_base: None,
@@ -777,6 +781,7 @@ impl SimulationController {
             AnalysisSpec::Tf { .. } => Ok(SpecExecutionOptions::default()),
             AnalysisSpec::Pnoise => Ok(SpecExecutionOptions {
                 mc_statistics: None,
+                mc_checkpoint: None,
                 study_base: None,
                 temp: None,
                 parametric_base: None,
@@ -788,6 +793,7 @@ impl SimulationController {
             }),
             AnalysisSpec::Pstb => Ok(SpecExecutionOptions {
                 mc_statistics: None,
+                mc_checkpoint: None,
                 study_base: None,
                 temp: None,
                 parametric_base: None,
@@ -800,6 +806,7 @@ impl SimulationController {
             AnalysisSpec::Psp { .. } => Ok(SpecExecutionOptions::default()),
             _ => Ok(SpecExecutionOptions {
                 mc_statistics: None,
+                mc_checkpoint: None,
                 study_base: None,
                 temp: None,
                 parametric_base: None,

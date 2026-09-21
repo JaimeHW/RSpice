@@ -19,6 +19,7 @@ pub(super) fn run_sweep_spec(
     source_path: Option<&Path>,
     environment: Option<AnalysisExecutionEnvironment>,
     abort: &dyn AbortSignal,
+    checkpoint_observer: Option<&(dyn Fn(&[u8]) -> Result<(), SimulationError> + Sync)>,
 ) -> Result<SimulationResult, SimulationError> {
     super::ensure_not_aborted(abort)?;
     match spec {
@@ -47,6 +48,8 @@ pub(super) fn run_sweep_spec(
             run_monte_carlo(
                 variation_source,
                 options.study_base.as_ref(),
+                options.mc_checkpoint.as_ref(),
+                checkpoint_observer,
                 netlist,
                 source_path,
                 environment,
@@ -65,6 +68,10 @@ pub(super) fn run_sweep_spec(
 fn run_monte_carlo(
     variation_source: crate::simulation::dialog::McVariationSource,
     base: Option<&crate::simulation::runner::study::StudyRunConfig>,
+    checkpoint: Option<
+        &crate::simulation::runner::monte_carlo_checkpoint::MonteCarloCheckpointRequest,
+    >,
+    checkpoint_observer: Option<&(dyn Fn(&[u8]) -> Result<(), SimulationError> + Sync)>,
     netlist: &str,
     source_path: Option<&Path>,
     environment: Option<AnalysisExecutionEnvironment>,
@@ -73,14 +80,47 @@ fn run_monte_carlo(
     use crate::simulation::dialog::McVariationSource;
 
     let data = if let Some(base) = base {
-        crate::simulation::runner::study::run_monte_carlo(
-            base,
-            variation_source,
-            netlist,
-            source_path,
-            environment,
-            abort,
-        )?
+        if let Some(request) = checkpoint {
+            let observer = checkpoint_observer.ok_or_else(|| {
+                SimulationError::InvalidConfig(
+                    "Monte Carlo checkpoint destination is missing".into(),
+                )
+            })?;
+            let mut retained = request
+                .resume
+                .as_ref()
+                .map(|input| input.decode())
+                .transpose()?;
+            let publish = |value: &crate::simulation::runner::study::monte_carlo::checkpoint::StudyMonteCarloCheckpoint| {
+                let bytes = value.to_bytes_with_limits(rspice_core::ResourceLimits::default(), &rspice_core::NoAbort)?;
+                observer(&bytes)
+            };
+            crate::simulation::runner::study::monte_carlo::run_monte_carlo_with_continuation(
+                base,
+                variation_source,
+                netlist,
+                source_path,
+                environment,
+                abort,
+                Some(
+                    crate::simulation::runner::study::monte_carlo::MonteCarloContinuation {
+                        checkpoint: &mut retained,
+                        trial_range: request.trial_range.clone(),
+                        publish_every: request.publish_every,
+                        publish: &publish,
+                    },
+                ),
+            )?
+        } else {
+            crate::simulation::runner::study::run_monte_carlo(
+                base,
+                variation_source,
+                netlist,
+                source_path,
+                environment,
+                abort,
+            )?
+        }
     } else {
         let (temperature, supply, nominal_supply, supply_source_names) = environment.map_or_else(
             || (None, None, None, Vec::new()),

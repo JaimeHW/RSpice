@@ -52,7 +52,7 @@ let wasmJitCapability = {
   reason: "WASM JIT architecture qualification has not run.",
 };
 const WORKER_PROTOCOL_VERSION = 28;
-const WORKER_REQUEST_PROTOCOL_VERSION = 30;
+const WORKER_REQUEST_PROTOCOL_VERSION = 31;
 const HARDCOPY_PROTOCOL_VERSION = 1;
 
 function asErrorMessage(error) {
@@ -570,6 +570,7 @@ self.addEventListener("message", (event) => {
       if (
         !request ||
         request.protocolVersion !== WORKER_REQUEST_PROTOCOL_VERSION ||
+        !Array.isArray(request.byteBuffers) ||
         !Array.isArray(request.buffers)
       ) {
         throw new Error("Unsupported or malformed RSpice worker request transport.");

@@ -7,6 +7,8 @@
 //! browser, so this is a serialized contract rather than a shared type.
 
 mod analysis;
+mod monte_carlo_checkpoint;
+pub(crate) use monte_carlo_checkpoint::*;
 mod analysis_spec;
 mod conversions;
 mod qpac;
@@ -72,9 +74,9 @@ pub(crate) struct WorkerRequest {
     pub(in crate::simulation) stream_transient_samples: bool,
 }
 
-/// 30: OP supports an explicitly selected compatible-circuit previous guess.
+/// 31: Monte Carlo checkpoint inputs use a separate transferable byte buffer.
 #[cfg(any(target_arch = "wasm32", test))]
-pub(crate) const WORKER_REQUEST_TRANSPORT_PROTOCOL: u8 = 30;
+pub(crate) const WORKER_REQUEST_TRANSPORT_PROTOCOL: u8 = 31;
 
 /// Browser-worker request split into compact metadata and transferable
 /// floating-point buffers. The embedded request deliberately carries empty
@@ -86,6 +88,7 @@ pub(crate) struct WorkerRequestTransport {
     pub protocol: u8,
     pub request: WorkerRequestTransportMetadata,
     pub buffers: Vec<Vec<f64>>,
+    pub byte_buffers: Vec<Vec<u8>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -127,7 +130,12 @@ impl WorkerRequestTransport {
         let dependency_buffer_count = buffers.len();
         let (op_previous_state, op_buffers) = take_worker_request_op_previous_state(&mut request)?;
         buffers.extend(op_buffers);
+        let byte_buffers = take_worker_request_checkpoint(&mut request)?;
         validate_worker_request_transfer_buffers(&buffers)?;
+        validate_worker_request_checkpoint_lengths(
+            buffers.iter().map(Vec::len).sum(),
+            &byte_buffers.iter().map(Vec::len).collect::<Vec<_>>(),
+        )?;
         Ok(Self {
             protocol: WORKER_REQUEST_TRANSPORT_PROTOCOL,
             request: WorkerRequestTransportMetadata {
@@ -137,6 +145,7 @@ impl WorkerRequestTransport {
                 op_previous_state,
             },
             buffers,
+            byte_buffers,
         })
     }
 
@@ -159,6 +168,11 @@ impl WorkerRequestTransport {
         }
         reject_inline_worker_request_op_previous_state(&request)?;
         validate_worker_request_transfer_buffers(&self.buffers)?;
+        validate_worker_request_checkpoint_lengths(
+            self.buffers.iter().map(Vec::len).sum(),
+            &self.byte_buffers.iter().map(Vec::len).collect::<Vec<_>>(),
+        )?;
+        restore_worker_request_checkpoint(&mut request, self.byte_buffers)?;
         if dependency_buffer_count > self.buffers.len() {
             return Err(format!(
                 "worker request declares {dependency_buffer_count} dependency buffers but carries only {} total buffers",
