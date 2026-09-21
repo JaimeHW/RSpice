@@ -356,6 +356,33 @@ Generic parameter tolerances replay the preceding random draws without solving t
 
 The CLI and Python execution of authored `.MC` cards honor START. Core callers can use `MonteCarloRunConfig.first_trial` with `Engine::run_monte_carlo_voltages_with_abort`, or `MonteCarloStudyConfig.first_trial` for configured measurement studies. Existing convenience entry points retain their original first index of zero. Nonzero starting indices are also retained as the `first_trial` scalar in shared result documents.
 
+### Checkpoint continuation integration
+
+The configured-study runner now supports a lossless internal continuation journal
+(`simulation/runner/study/monte_carlo.rs`). It binds the core population to the
+canonical configured base, prerequisite, measurement and saved-OP contracts. A
+caller can retain completed trials, publish snapshots at a chosen trial cadence,
+resume only missing circuits, and select a new trial range against the same frozen
+source. Histogram changes reuse the observations; statistics and confidence are
+recomputed over the requested range. Source and configured-plan revision changes
+still require a new population.
+
+The Studio binary envelope retains every trial's measurement verdict alongside
+its exact core values. A finite `.MEAS` value that misses GOAL/TOL remains a failed
+measurement after resume. Sparse indices, failed trials and exact floating-point
+bits survive the portable round trip. Pooling combines matching trial populations,
+counts matching overlaps once and rejects conflicting values or verdicts.
+Decoding and merging enforce byte, trial and value budgets. Completed rows remain
+in the caller-owned journal when cancellation or checkpoint publication stops a
+run; interrupted trials remain unfinished.
+
+This is runner integration, not yet an exposed Studio checkpoint workflow. The
+form, immutable prepared request, browser worker delivery, project retention and
+checkpoint selection/import/export still need integration. Existing Studio batch
+controls continue to publish separate populations as described above. A generated
+`.MC` card is still part of the frozen source identity; changing that card is not
+currently equivalent to requesting a new range against an existing journal.
+
 ## Module map
 
 | Module | Contents |
