@@ -345,6 +345,7 @@ fn qp_study_optimization_reaches_an_explicit_lattice_target() {
                 max: 1500.0,
                 initial: 1000.0,
             }],
+            objective_unit: String::new(),
             objective_expression: None,
             objective_node: "out".into(),
             objective_ref: "0".into(),

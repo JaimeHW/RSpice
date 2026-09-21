@@ -1909,6 +1909,7 @@ mod tests {
         use crate::simulation::optimizer::{OptimizationObjectiveGoal, OptimizationObjectiveTerm};
         let objectives = vec![OptimizationObjectiveTerm {
             measurement: "gain".into(),
+            unit: "mV".into(),
             goal: OptimizationObjectiveGoal::Target,
             target: Some(2.5),
             scale: 0.5,
@@ -1927,6 +1928,7 @@ mod tests {
             objective_terms: objectives.clone(),
             constraints: vec![crate::simulation::optimizer::OptimizationConstraint {
                 measurement: "gain".into(),
+                unit: "mV".into(),
                 lower: Some(1.0),
                 upper: Some(3.0),
                 tolerance: 0.01,
@@ -1986,7 +1988,8 @@ mod tests {
         assert_eq!(base.measurements, ["gain"]);
         assert_eq!(base.objective_terms, objectives);
         assert_eq!(base.constraints[0].upper, Some(3.0));
-        for change in 0..10 {
+        assert_eq!(base.constraints[0].unit, "mV");
+        for change in 0..12 {
             let mut queued = task.queued_analysis().clone();
             let term = &mut queued
                 .spec_options
@@ -1995,6 +1998,7 @@ mod tests {
                 .unwrap()
                 .objective_terms[0];
             match change {
+                10 => term.unit = "V".into(),
                 0 => term.weight = 4.0,
                 1 => term.scale = 2.0,
                 2 => term.target = Some(7.0),
@@ -2012,6 +2016,7 @@ mod tests {
                     let constraint =
                         &mut queued.spec_options.study_base.as_mut().unwrap().constraints[0];
                     match change {
+                        11 => constraint.unit = "V".into(),
                         5 => constraint.measurement = "other".into(),
                         6 => constraint.lower = None,
                         7 => constraint.upper = Some(4.0),

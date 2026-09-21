@@ -101,6 +101,8 @@ pub struct OptimizationConfig {
     pub search: OptimizationSearchControls,
     /// Variable set to optimize.
     pub variables: Vec<OptimizationVariableConfig>,
+    /// Requested physical unit; blank keeps the producer value.
+    pub objective_unit: String,
     /// Optional scalar operating-point expression; overrides the voltage objective.
     pub objective_expression: Option<String>,
     /// Objective node (V(node,ref)) when no expression is configured.
@@ -147,6 +149,7 @@ impl Default for OptimizationConfig {
                     initial: 1.2,
                 },
             ],
+            objective_unit: String::new(),
             objective_expression: None,
             objective_node: "out".to_string(),
             objective_ref: "0".to_string(),
@@ -166,6 +169,7 @@ impl OptimizationConfig {
     /// Validate optimization settings.
     pub fn validate(&self) -> Result<(), String> {
         self.search.validate()?;
+        crate::simulation::optimizer::validate_requested_unit(&self.objective_unit)?;
         if self.variables.is_empty() {
             return Err("At least one optimization variable is required".to_string());
         }
@@ -295,8 +299,17 @@ impl OptimizationConfig {
                     self.objective_terms
                         .iter()
                         .map(|term| format!(
-                            "[{}:{:?}:target={:?}:scale={}:weight={}]",
-                            term.measurement, term.goal, term.target, term.scale, term.weight
+                            "[{}:{:?}:target={:?}:scale={}:weight={}{}]",
+                            term.measurement,
+                            term.goal,
+                            term.target,
+                            term.scale,
+                            term.weight,
+                            if term.unit.is_empty() {
+                                String::new()
+                            } else {
+                                format!(":unit={:?}", term.unit)
+                            }
                         ))
                         .collect::<Vec<_>>()
                         .join(" ")
@@ -326,6 +339,9 @@ impl OptimizationConfig {
         ));
         if let Some(expression) = &self.objective_expression {
             line.push_str(&format!(" expr={{{expression}}}"));
+        }
+        if !self.objective_unit.is_empty() {
+            line.push_str(&format!(" unit={:?}", self.objective_unit));
         }
         if let Some(target) = self.target_value {
             line.push_str(&format!(" target={:.6e}", target));
@@ -366,6 +382,9 @@ pub struct OptimizationDialogState {
     pub random_seed: String,
     /// Variables encoded as `name:min:max[:initial]`, separated by newline/comma.
     pub variables_text: String,
+    /// Requested physical unit; blank keeps the producer value.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub objective_unit: String,
     /// Optional scalar operating-point expression.
     #[serde(default)]
     pub objective_expression: String,
@@ -436,6 +455,7 @@ impl OptimizationDialogState {
             sa_cooling_rate: config.search.sa_cooling_rate.to_string(),
             random_seed: config.search.random_seed.to_string(),
             variables_text,
+            objective_unit: config.objective_unit.clone(),
             objective_expression: config.objective_expression.clone().unwrap_or_default(),
             objective_node: config.objective_node.clone(),
             objective_ref: config.objective_ref.clone(),
@@ -543,6 +563,11 @@ impl OptimizationDialogState {
             variables,
             // Inactive legacy objective buffers remain in the saved draft;
             // the bound measurement supplies the actual objective at execution.
+            objective_unit: if weighted {
+                String::new()
+            } else {
+                self.objective_unit.trim().into()
+            },
             objective_expression: (self.base_analysis.is_none()
                 && !self.objective_expression.trim().is_empty())
             .then(|| self.objective_expression.trim().to_string()),
@@ -662,8 +687,9 @@ fn parse_variable_specs(input: &str) -> Result<Vec<OptimizationVariableConfig>, 
 mod search_tests {
     use super::*;
     #[test]
-    fn optimization_expression_survives_draft_restoration_and_legacy_omission() {
+    fn optimization_units_and_expression_survive_draft_restoration_and_legacy_omission() {
         let config = OptimizationConfig {
+            objective_unit: "mW".into(),
             objective_expression: Some("-V(in)*I(V1)".into()),
             ..Default::default()
         };
@@ -674,6 +700,7 @@ mod search_tests {
         assert_eq!(json.to_config().unwrap(), config);
         assert_eq!(ron.to_config().unwrap(), config);
         assert!(config.to_spice().contains("expr={-V(in)*I(V1)}"));
+        assert!(config.to_spice().contains("unit=\"mW\""));
         let mut legacy = serde_json::to_value(&draft).unwrap();
         legacy
             .as_object_mut()
@@ -681,6 +708,13 @@ mod search_tests {
             .remove("objective_expression");
         let legacy: OptimizationDialogState = serde_json::from_value(legacy).unwrap();
         assert!(legacy.to_config().unwrap().objective_expression.is_none());
+        let mut old = serde_json::to_value(&draft).unwrap();
+        old.as_object_mut().unwrap().remove("objective_unit");
+        let legacy: OptimizationDialogState = serde_json::from_value(old).unwrap();
+        assert!(legacy.to_config().unwrap().objective_unit.is_empty());
+        let mut invalid = draft.clone();
+        invalid.objective_unit = "not-a-unit".into();
+        assert!(invalid.to_config().is_err());
     }
 
     #[test]
@@ -734,6 +768,8 @@ mod search_tests {
 #[serde(deny_unknown_fields)]
 pub struct OptimizationObjectiveDraft {
     pub measurement: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub unit: String,
     pub goal: usize,
     pub target: String,
     pub scale: String,
@@ -743,6 +779,7 @@ impl Default for OptimizationObjectiveDraft {
     fn default() -> Self {
         Self {
             measurement: String::new(),
+            unit: String::new(),
             goal: 2,
             target: "0".into(),
             scale: "1".into(),
@@ -754,6 +791,7 @@ impl OptimizationObjectiveDraft {
     fn from_config(term: &OptimizationObjectiveTerm) -> Self {
         Self {
             measurement: term.measurement.clone(),
+            unit: term.unit.clone(),
             goal: match term.goal {
                 OptimizationObjectiveGoal::Minimize => 0,
                 OptimizationObjectiveGoal::Maximize => 1,
@@ -773,6 +811,7 @@ impl OptimizationObjectiveDraft {
         };
         let term = OptimizationObjectiveTerm {
             measurement: self.measurement.trim().to_owned(),
+            unit: self.unit.trim().into(),
             goal,
             target: if goal == OptimizationObjectiveGoal::Target {
                 Some(
@@ -867,6 +906,8 @@ impl OptimizationVariableDomainDraft {
 #[serde(deny_unknown_fields)]
 pub struct OptimizationConstraintDraft {
     pub measurement: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub unit: String,
     pub lower: String,
     pub upper: String,
     pub tolerance: String,
@@ -876,6 +917,7 @@ impl Default for OptimizationConstraintDraft {
     fn default() -> Self {
         Self {
             measurement: String::new(),
+            unit: String::new(),
             lower: String::new(),
             upper: String::new(),
             tolerance: "0".into(),
@@ -887,6 +929,7 @@ impl OptimizationConstraintDraft {
     fn from_config(term: &crate::simulation::optimizer::OptimizationConstraint) -> Self {
         Self {
             measurement: term.measurement.clone(),
+            unit: term.unit.clone(),
             lower: term.lower.map(|v| v.to_string()).unwrap_or_default(),
             upper: term.upper.map(|v| v.to_string()).unwrap_or_default(),
             tolerance: term.tolerance.to_string(),
@@ -903,6 +946,7 @@ impl OptimizationConstraintDraft {
         };
         let term = crate::simulation::optimizer::OptimizationConstraint {
             measurement: self.measurement.trim().into(),
+            unit: self.unit.trim().into(),
             lower: optional(&self.lower)
                 .map_err(|error| format!("Invalid lower constraint limit: {error}"))?,
             upper: optional(&self.upper)

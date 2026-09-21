@@ -81,6 +81,13 @@ pub(super) fn fields(
         &mut setup.goal_mode,
         !weighted,
     );
+    super::hinted_input_row_enabled(
+        ui,
+        "Objective unit",
+        &mut setup.objective_unit,
+        "blank: native; e.g. mV, ns, mW",
+        !weighted,
+    );
     input_row_enabled(
         ui,
         "Target",
@@ -143,13 +150,14 @@ pub(super) fn fields(
 fn weighted_objectives(ui: &mut Ui, setup: &mut OptimizationDialogState) {
     field_note(
         ui,
-        "All objectives use the selected base analysis. Cost is the sum of weighted terms: minimize value/scale, maximize -value/scale, or target ((value-target)/scale)². Scale is in the measurement's units; weight sets relative importance. Tolerance applies to the combined cost.",
+        "All objectives use the selected base analysis. Cost is the sum of weighted terms: minimize value/scale, maximize -value/scale, or target ((value-target)/scale)². Values, targets and scales use the selected unit (blank keeps native units); weight sets relative importance. Tolerance applies to the combined cost.",
     );
     let mut remove = None;
     for (index, term) in setup.objective_terms.iter_mut().enumerate() {
         ui.push_id(("optimization-objective", index), |ui| {
             sub_header(ui, &format!("Objective {}", index + 1));
             input_row(ui, "Measurement", &mut term.measurement);
+            super::hinted_input_row(ui, "Unit", &mut term.unit, "blank: native; e.g. mV, ns, mW");
             choice_row(ui, "Goal", &["min", "max", "target"], &mut term.goal);
             input_row_enabled(ui, "Target", &mut term.target, term.goal == 2);
             engineering_input_row(ui, "Scale", &mut term.scale);
@@ -202,12 +210,13 @@ fn constraints(ui: &mut Ui, setup: &mut OptimizationDialogState) {
     sub_header(ui, "Measurement constraints");
     field_note(
         ui,
-        "Limits use the selected base analysis. Leave one bound blank for a one-sided limit; set equal bounds for equality. Tolerance is an absolute allowance in measurement units. Scale normalizes violations while searching for feasibility. A feasible design always outranks an infeasible design, regardless of objective cost.",
+        "Limits use the selected base analysis. Leave one bound blank for a one-sided limit; set equal bounds for equality. Values, bounds, tolerance and scale use the selected unit (blank keeps native units). Tolerance is an absolute allowance. Scale normalizes violations while searching for feasibility. A feasible design always outranks an infeasible design, regardless of objective cost.",
     );
     let mut remove = None;
     for (index, row) in setup.constraints.iter_mut().enumerate() {
         ui.push_id(("optimization-constraint", index), |ui| {
             input_row(ui, "Measurement", &mut row.measurement);
+            super::hinted_input_row(ui, "Unit", &mut row.unit, "blank: native; e.g. mV, ns, mW");
             input_row(ui, "Lower limit", &mut row.lower);
             input_row(ui, "Upper limit", &mut row.upper);
             input_row(ui, "Limit tolerance", &mut row.tolerance);

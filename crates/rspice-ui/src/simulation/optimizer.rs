@@ -31,6 +31,17 @@ pub use objective::{
 };
 mod types;
 
+/// Blank retains the original measurement scale.
+pub(crate) fn validate_requested_unit(unit: &str) -> Result<(), String> {
+    if unit.chars().any(char::is_control) {
+        return Err("Optimization units must not contain control characters".into());
+    }
+    if !unit.trim().is_empty() {
+        rspice_core::analysis::MeasurementUnit::known(unit)?;
+    }
+    Ok(())
+}
+
 pub use design_var::DesignVar;
 pub use types::{OptimizerAlgo, OptimizerConfig};
 /// Core engine for executing optimization runs

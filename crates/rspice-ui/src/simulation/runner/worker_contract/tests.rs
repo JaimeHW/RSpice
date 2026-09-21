@@ -374,8 +374,8 @@ pub(super) fn nondefault_op_config() -> crate::simulation::dialog::OpConfig {
 
 #[test]
 fn browser_worker_transfer_protocol_matches_rust_transport() {
-    assert_eq!(WORKER_RESPONSE_TRANSPORT_PROTOCOL, 30);
-    assert_eq!(WORKER_REQUEST_TRANSPORT_PROTOCOL, 34);
+    assert_eq!(WORKER_RESPONSE_TRANSPORT_PROTOCOL, 31);
+    assert_eq!(WORKER_REQUEST_TRANSPORT_PROTOCOL, 35);
     let source = include_str!("../../../../web/simulation-worker.js");
     assert!(source.contains(&format!(
         "const WORKER_PROTOCOL_VERSION = {WORKER_RESPONSE_TRANSPORT_PROTOCOL};"
@@ -2225,6 +2225,7 @@ fn weighted_optimization_components_survive_transfer_and_reject_corruption() {
             crate::simulation::optimizer::OptimizationConstraintObservation {
                 constraint: crate::simulation::optimizer::OptimizationConstraint {
                     measurement: "gain".into(),
+                    unit: "mV".into(),
                     lower: Some(1.0),
                     upper: Some(2.0),
                     tolerance: 0.0,
@@ -2237,6 +2238,7 @@ fn weighted_optimization_components_survive_transfer_and_reject_corruption() {
         best_objectives: vec![OptimizationObjectiveObservation {
             objective: OptimizationObjectiveTerm {
                 measurement: "gain".into(),
+                unit: "mV".into(),
                 goal: OptimizationObjectiveGoal::Target,
                 target: Some(1.0),
                 scale: 2.0,

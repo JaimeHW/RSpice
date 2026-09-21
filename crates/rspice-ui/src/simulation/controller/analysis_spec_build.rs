@@ -729,6 +729,7 @@ impl SimulationController {
                     initial: var.initial,
                 })
                 .collect(),
+            objective_unit: cfg.objective_unit,
             objective_expression: cfg.objective_expression,
             objective_node: cfg.objective_node,
             objective_ref: cfg.objective_ref,

@@ -176,6 +176,7 @@ fn pss_study_optimizer_reaches_a_harmonic_current_target() {
                 max: 1.5,
                 initial: 1.0,
             }],
+            objective_unit: String::new(),
             objective_expression: None,
             objective_node: "out".into(),
             objective_ref: "0".into(),

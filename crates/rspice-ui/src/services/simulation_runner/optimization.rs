@@ -130,6 +130,8 @@ pub struct OptimizationRunConfig {
     pub search: OptimizationSearchControls,
     /// Optimization variables.
     pub variables: Vec<OptimizationVariable>,
+    /// Requested physical unit; blank keeps the producer value.
+    pub objective_unit: String,
     /// Optional scalar operating-point expression; overrides the voltage objective.
     pub objective_expression: Option<String>,
     /// Objective node (V(node,ref)) when no expression is configured.
@@ -164,6 +166,7 @@ impl Default for OptimizationRunConfig {
                 max: 5000.0,
                 initial: 1000.0,
             }],
+            objective_unit: String::new(),
             objective_expression: None,
             objective_node: "out".to_string(),
             objective_ref: "0".to_string(),
@@ -180,8 +183,47 @@ impl Default for OptimizationRunConfig {
 }
 
 impl OptimizationRunConfig {
+    fn operating_point_objective_unit(&self) -> rspice_core::analysis::MeasurementUnit {
+        self.objective_expression.as_ref().map_or_else(
+            || rspice_core::analysis::MeasurementUnit::Known("V".into()),
+            |expression| rspice_core::analysis::expression_unit(expression, &HashMap::new()),
+        )
+    }
+
+    pub(crate) fn objective_observations(
+        &self,
+        name: &str,
+        value: f64,
+        cost: f64,
+    ) -> Vec<crate::simulation::optimizer::OptimizationObjectiveObservation> {
+        if self.objective_unit.trim().is_empty() {
+            return Vec::new();
+        }
+        use crate::simulation::optimizer::{
+            OptimizationObjectiveGoal as Goal, OptimizationObjectiveObservation,
+            OptimizationObjectiveTerm,
+        };
+        vec![OptimizationObjectiveObservation {
+            objective: OptimizationObjectiveTerm {
+                measurement: name.into(),
+                unit: self.objective_unit.clone(),
+                goal: match self.goal {
+                    OptimizationGoalMode::Minimize => Goal::Minimize,
+                    OptimizationGoalMode::Maximize => Goal::Maximize,
+                    OptimizationGoalMode::Target => Goal::Target,
+                },
+                target: self.target,
+                scale: 1.0,
+                weight: 1.0,
+            },
+            value,
+            contribution: cost,
+        }]
+    }
+
     pub(super) fn validate(&self) -> Result<(), String> {
         self.search.validate()?;
+        crate::simulation::optimizer::validate_requested_unit(&self.objective_unit)?;
         if self.variables.is_empty() {
             return Err("Optimization requires at least one variable".to_string());
         }
@@ -348,6 +390,14 @@ pub(crate) fn run_optimization_analysis_with_environment_and_source_path_and_abo
 ) -> ServiceRunResult<OptimizationData> {
     ensure_not_aborted(abort)?;
     config.validate().map_err(ServiceRunError::Failure)?;
+    let objective_unit = config.operating_point_objective_unit();
+    if !config.objective_unit.trim().is_empty() {
+        objective_unit
+            .convert_value(0.0, &config.objective_unit)
+            .map_err(|error| {
+                ServiceRunError::Failure(format!("Optimization objective unit: {error}"))
+            })?;
+    }
     if let Some(point) = environment {
         if !point.temperature_celsius.is_finite()
             || point.temperature_celsius <= -273.15
@@ -377,7 +427,14 @@ pub(crate) fn run_optimization_analysis_with_environment_and_source_path_and_abo
             environment,
             abort,
         )?;
-        evaluate_optimization_objective(&candidate, config, abort)
+        let value = evaluate_optimization_objective(&candidate, config, abort)?;
+        if config.objective_unit.trim().is_empty() {
+            Ok(value)
+        } else {
+            objective_unit
+                .convert_value(value, &config.objective_unit)
+                .map_err(ServiceRunError::Failure)
+        }
     })
 }
 
@@ -393,19 +450,34 @@ where
     F: FnMut(&HashMap<String, Value>) -> ServiceRunResult<Value>,
 {
     ensure_not_aborted(abort)?;
+    let mut limits = limits;
+    if !config.objective_unit.trim().is_empty() {
+        if limits.max_result_values < 5 {
+            return Err(ServiceRunError::resource_limit(
+                rspice_core::ResourceKind::ResultValues,
+                5,
+                limits.max_result_values,
+            ));
+        }
+        limits.max_result_values -= 5;
+    }
+    let name = config
+        .objective_expression
+        .clone()
+        .unwrap_or_else(|| format!("V({},{})", config.objective_node, config.objective_ref));
     run_optimization_with_cost_evaluator(
         config,
         limits,
         abort,
         optimizer_target_cost(config.goal),
         |variables| {
-            evaluate(variables)
-                .and_then(|value| objective_to_cost(value, config.goal, config.target))
-                .map(|cost| OptimizationEvaluation {
-                    cost,
-                    objectives: Vec::new(),
-                    constraints: Vec::new(),
-                })
+            let value = evaluate(variables)?;
+            let cost = objective_to_cost(value, config.goal, config.target)?;
+            Ok(OptimizationEvaluation {
+                cost,
+                objectives: config.objective_observations(&name, value, cost),
+                constraints: Vec::new(),
+            })
         },
     )
 }
@@ -1091,6 +1163,7 @@ mod variable_domain_tests {
                     max,
                     initial,
                 }],
+                objective_unit: String::new(),
                 objective_expression: Some(format!("{scale}*V(out)")),
                 target: Some(target),
                 cost_tolerance: 1e-10,

@@ -78,8 +78,9 @@ pub(crate) struct WorkerRequest {
 }
 
 /// 34: ERROR measurements carry captured and validated comparison tables.
+/// 35: optimization objectives and constraints carry requested physical units.
 #[cfg(any(target_arch = "wasm32", test))]
-pub(crate) const WORKER_REQUEST_TRANSPORT_PROTOCOL: u8 = 34;
+pub(crate) const WORKER_REQUEST_TRANSPORT_PROTOCOL: u8 = 35;
 
 /// Browser-worker request split into compact metadata and transferable
 /// floating-point buffers. The embedded request deliberately carries empty
@@ -1684,7 +1685,8 @@ impl WorkerSimulationResult {
 /// 28: OP configurations retain compatible-circuit previous-state policy.
 /// 29: scalar measurements preserve physical units.
 /// 30: noise spectra retain their physical or logarithmic output unit.
-const WORKER_RESPONSE_TRANSPORT_PROTOCOL: u8 = 30;
+/// 31: optimization observations retain requested physical units.
+const WORKER_RESPONSE_TRANSPORT_PROTOCOL: u8 = 31;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct WorkerResponseTransport {

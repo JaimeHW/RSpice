@@ -14,6 +14,9 @@ pub enum OptimizationObjectiveGoal {
 #[serde(deny_unknown_fields)]
 pub struct OptimizationObjectiveTerm {
     pub measurement: String,
+    /// Unit for values, targets, limits and scales; blank uses producer units.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub unit: String,
     pub goal: OptimizationObjectiveGoal,
     pub target: Option<f64>,
     /// Normalization in the measurement's physical units.
@@ -24,6 +27,7 @@ pub struct OptimizationObjectiveTerm {
 
 impl OptimizationObjectiveTerm {
     pub fn validate(&self) -> Result<(), String> {
+        super::validate_requested_unit(&self.unit)?;
         if self.measurement.trim().is_empty() || self.measurement.chars().any(char::is_control) {
             return Err("Each optimization objective needs a measurement name".into());
         }
@@ -89,8 +93,32 @@ pub fn validate_optimization_objectives(
         }
         total += expected;
     }
-    if !total.is_finite() || total.to_bits() != best_cost.to_bits() {
+    // Summing a single -0.0 contribution starts at +0.0. Both describe the
+    // same cost; all other finite values must still agree exactly.
+    if !total.is_finite() || total != best_cost {
         return Err("Optimization objective contributions disagree with the best cost".into());
     }
     Ok(())
+}
+
+#[cfg(test)]
+#[test]
+fn optimization_units_keep_zero_cost_evidence_valid() {
+    let objective = OptimizationObjectiveTerm {
+        measurement: "voltage".into(),
+        unit: "mV".into(),
+        goal: OptimizationObjectiveGoal::Maximize,
+        target: None,
+        scale: 1.0,
+        weight: 1.0,
+    };
+    let contribution = objective.contribution(0.0).unwrap();
+    assert_eq!(contribution.to_bits(), (-0.0_f64).to_bits());
+    let observation = OptimizationObjectiveObservation {
+        objective,
+        value: 0.0,
+        contribution,
+    };
+    validate_optimization_objectives(&[observation.clone()], -0.0).unwrap();
+    assert!(validate_optimization_objectives(&[observation], f64::from_bits(1)).is_err());
 }

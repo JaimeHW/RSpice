@@ -1887,6 +1887,10 @@ fn encode_family_metadata(
                 for observation in best_constraints {
                     let term = &observation.constraint;
                     writer.string(&term.measurement);
+                    if !term.unit.is_empty() {
+                        writer.string("optimization-measurement-unit/v1");
+                        writer.string(&term.unit);
+                    }
                     writer.bool(term.lower.is_some());
                     if let Some(value) = term.lower {
                         writer.f64(value);
@@ -1907,6 +1911,10 @@ fn encode_family_metadata(
                 for observation in best_objectives {
                     let term = &observation.objective;
                     writer.string(&term.measurement);
+                    if !term.unit.is_empty() {
+                        writer.string("optimization-measurement-unit/v1");
+                        writer.string(&term.unit);
+                    }
                     writer.u8(match term.goal {
                         crate::simulation::optimizer::OptimizationObjectiveGoal::Minimize => 0,
                         crate::simulation::optimizer::OptimizationObjectiveGoal::Maximize => 1,

@@ -73,6 +73,7 @@ pub(crate) fn run_optimization(
     let retained_objectives = base
         .objective_terms
         .len()
+        .max(usize::from(!config.objective_unit.trim().is_empty()))
         .saturating_mul(5)
         .saturating_add(base.constraints.len().saturating_mul(6));
     if retained_objectives > limits.max_result_values {
@@ -90,6 +91,35 @@ pub(crate) fn run_optimization(
         failed: AtomicBool::new(false),
     };
     let fatal = Mutex::new(None);
+    let measurement_value = |observation: crate::state::FamilyMeasurementEvidence,
+                             requested: &str| {
+        // Reject a dimensional mismatch once; a finite candidate whose converted
+        // magnitude overflows is still an ordinary failed candidate.
+        if !requested.trim().is_empty() {
+            observation
+                .unit
+                .as_ref()
+                .unwrap_or(&rspice_core::analysis::MeasurementUnit::Unknown)
+                .convert_value(0.0, requested)
+                .map_err(|error| {
+                    *fatal.lock().unwrap() = Some(SimulationError::InvalidConfig(format!(
+                        "Optimization measurement {:?}: {error}",
+                        observation.name
+                    )));
+                    signal.failed.store(true, Ordering::Release);
+                    services::ServiceRunError::Aborted
+                })?;
+        }
+        observation
+            .value_in_unit(requested)
+            .map_err(services::ServiceRunError::Failure)?
+            .ok_or_else(|| {
+                services::ServiceRunError::Failure(format!(
+                    "Optimization measurement {:?} is unavailable or failed",
+                    observation.name
+                ))
+            })
+    };
     let evaluate = |variables: &std::collections::HashMap<String, f64>| {
         let candidate = services::materialize_optimization_candidate(
             &engine,
@@ -116,15 +146,15 @@ pub(crate) fn run_optimization(
             })?;
         let mut constraints = Vec::with_capacity(base.constraints.len());
         for constraint in &base.constraints {
-            let value = result
+            let observation = result
                 .study_measurement(&constraint.measurement)
-                .and_then(|observation| observation.value)
                 .ok_or_else(|| {
                     services::ServiceRunError::Failure(format!(
                         "Constraint measurement {:?} is unavailable or failed",
                         constraint.measurement
                     ))
                 })?;
+            let value = measurement_value(observation, &constraint.unit)?;
             constraints.push(
                 crate::simulation::optimizer::OptimizationConstraintObservation {
                     constraint: constraint.clone(),
@@ -147,7 +177,7 @@ pub(crate) fn run_optimization(
                             objective.measurement
                         ))
                     })?;
-                let value = observation.value.expect("observed objective value");
+                let value = measurement_value(observation, &objective.unit)?;
                 let contribution = objective
                     .contribution(value)
                     .map_err(services::ServiceRunError::Failure)?;
@@ -171,19 +201,19 @@ pub(crate) fn run_optimization(
                 constraints,
             });
         }
-        let value = result
+        let observation = result
             .study_measurement(&base.measurements[0])
-            .and_then(|observation| observation.value)
             .ok_or_else(|| {
                 services::ServiceRunError::Failure(format!(
                     "Optimization measurement {:?} is unavailable or failed",
                     base.measurements[0]
                 ))
             })?;
+        let value = measurement_value(observation, &config.objective_unit)?;
         let cost = services::optimization_objective_cost(value, config.goal, config.target)?;
         Ok(services::OptimizationEvaluation {
             cost,
-            objectives: Vec::new(),
+            objectives: config.objective_observations(&base.measurements[0], value, cost),
             constraints,
         })
     };
@@ -249,6 +279,68 @@ mod tests {
     }
 
     #[test]
+    fn optimization_units_convert_configured_objectives_and_constraints() {
+        use crate::simulation::optimizer::{
+            OptimizationConstraint, OptimizationObjectiveGoal, OptimizationObjectiveTerm,
+        };
+        let deck = "Units\n.param X=0.35\nV1 out 0 {X}\nR1 out 0 1k\n.end\n";
+        for weighted in [false, true] {
+            let mut selected = base(AnalysisConfig::dc_op(), "scalar:V(out)");
+            selected.constraints = vec![OptimizationConstraint {
+                measurement: "scalar:V(out)".into(),
+                unit: "mV".into(),
+                lower: Some(340.0),
+                upper: Some(360.0),
+                tolerance: 1.0,
+                scale: 100.0,
+            }];
+            let config = services::OptimizationRunConfig {
+                objective_unit: if weighted { String::new() } else { "mV".into() },
+                target: Some(350.0),
+                max_iterations: 4,
+                variables: vec![services::OptimizationVariable {
+                    name: "X".into(),
+                    min: 0.1,
+                    max: 0.5,
+                    initial: 0.35,
+                }],
+                ..Default::default()
+            };
+            if weighted {
+                selected.objective_terms.push(OptimizationObjectiveTerm {
+                    measurement: "scalar:V(out)".into(),
+                    unit: "mV".into(),
+                    goal: OptimizationObjectiveGoal::Target,
+                    target: Some(350.0),
+                    scale: 100.0,
+                    weight: 1.0,
+                });
+            }
+            let result = run_optimization(&selected, &config, deck, None, None, &NoAbort).unwrap();
+            assert!(result.best_cost < 1e-20, "{result:?}");
+            assert_eq!(result.best_objectives[0].value, 350.0);
+            assert_eq!(result.best_constraints[0].value, 350.0);
+            assert_eq!(result.best_constraints[0].violation, 0.0);
+            selected.constraints[0].unit = "ns".into();
+            assert!(
+                matches!(run_optimization(&selected, &config, deck, None, None, &NoAbort),
+                Err(SimulationError::InvalidConfig(message)) if message.contains("incompatible"))
+            );
+            selected.constraints.clear();
+            let mut invalid = config.clone();
+            if weighted {
+                selected.objective_terms[0].unit = "A".into();
+            } else {
+                invalid.objective_unit = "A".into();
+            }
+            assert!(
+                matches!(run_optimization(&selected, &invalid, deck, None, None, &NoAbort),
+                Err(SimulationError::InvalidConfig(message)) if message.contains("incompatible"))
+            );
+        }
+    }
+
+    #[test]
     fn configured_optimization_worker_finds_ac_and_transient_targets_with_dependent_parameters() {
         let deck = "Configured optimizer\n.param RLOAD=1400 RACTUAL={2*RLOAD}\nV1 in 0 DC 1 AC 1\nR1 in out {RACTUAL}\nC1 out 0 1u\n.ic V(out)=0\n.meas AC gain FIND VM(out) AT=1k\n.meas TRAN settled FIND V(out) AT=2m\n.end\n";
         for (analysis, name, target) in [
@@ -289,6 +381,7 @@ mod tests {
                     max: 1800.0,
                     initial: 1400.0,
                 }],
+                objective_unit: String::new(),
                 objective_expression: None,
                 objective_node: "out".into(),
                 objective_ref: "0".into(),
@@ -373,6 +466,7 @@ mod tests {
                         initial: 1400.0,
                     }],
                     // Also observe the unrelated supply: it must remain unscaled.
+                    objective_unit: String::new(),
                     objective_expression: Some("I(V1)+I(VAUX)".into()),
                     objective_node: String::new(),
                     objective_ref: String::new(),
@@ -428,6 +522,7 @@ mod tests {
             selected.objective_terms = vec![
                 Term {
                     measurement: "scalar:V(a)".into(),
+                    unit: String::new(),
                     goal: Goal::Target,
                     target: Some(1.0),
                     scale: 1.0,
@@ -435,6 +530,7 @@ mod tests {
                 },
                 Term {
                     measurement: "scalar:V(b)".into(),
+                    unit: String::new(),
                     goal: Goal::Target,
                     target: Some(0.0),
                     scale,
@@ -450,6 +546,7 @@ mod tests {
                         max: 1.0,
                         initial: 0.8,
                     }],
+                    objective_unit: String::new(),
                     objective_expression: None,
                     objective_node: "a".into(),
                     objective_ref: "0".into(),
@@ -531,6 +628,7 @@ mod tests {
         }
         let mut term = Term {
             measurement: "gain".into(),
+            unit: String::new(),
             goal: Goal::Minimize,
             target: None,
             scale: 2.0,
@@ -639,6 +737,7 @@ mod tests {
             selected.measurements.push("scalar:V(b)".into());
             selected.constraints.push(Constraint {
                 measurement: "scalar:V(b)".into(),
+                unit: String::new(),
                 lower,
                 upper,
                 tolerance,
@@ -647,6 +746,7 @@ mod tests {
             if weighted {
                 selected.objective_terms.push(Term {
                     measurement: "scalar:V(a)".into(),
+                    unit: String::new(),
                     goal: Goal::Maximize,
                     target: None,
                     scale: 1.0,
@@ -668,6 +768,7 @@ mod tests {
                         max: 1.0,
                         initial: 0.8,
                     }],
+                    objective_unit: String::new(),
                     objective_expression: None,
                     objective_node: "a".into(),
                     objective_ref: "0".into(),
@@ -755,6 +856,7 @@ mod tests {
         assert!(!optimizer.is_converged(None));
         let tiny = Constraint {
             measurement: "tiny".into(),
+            unit: String::new(),
             lower: Some(1e-300),
             upper: None,
             tolerance: 0.0,
@@ -764,6 +866,7 @@ mod tests {
         for term in [
             Constraint {
                 measurement: "x".into(),
+                unit: String::new(),
                 lower: None,
                 upper: None,
                 tolerance: 0.0,
@@ -771,6 +874,7 @@ mod tests {
             },
             Constraint {
                 measurement: "x".into(),
+                unit: String::new(),
                 lower: Some(2.0),
                 upper: Some(1.0),
                 tolerance: 0.0,
@@ -778,6 +882,7 @@ mod tests {
             },
             Constraint {
                 measurement: "x".into(),
+                unit: String::new(),
                 lower: Some(0.0),
                 upper: None,
                 tolerance: -1.0,
@@ -785,6 +890,7 @@ mod tests {
             },
             Constraint {
                 measurement: "x".into(),
+                unit: String::new(),
                 lower: Some(0.0),
                 upper: None,
                 tolerance: 0.0,

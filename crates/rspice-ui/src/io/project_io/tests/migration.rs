@@ -2188,3 +2188,97 @@ fn native_scalar_units_persist_authenticate_and_preserve_schema_37_history() {
             .contains("before v38")
     );
 }
+
+#[test]
+fn optimization_units_persist_authenticate_and_preserve_schema_38_history() {
+    use crate::simulation::optimizer::{
+        OptimizationConstraint, OptimizationConstraintObservation, OptimizationObjectiveGoal,
+        OptimizationObjectiveObservation, OptimizationObjectiveTerm,
+    };
+    let historical = AnalysisResult::new(1, AnalysisType::Optimization, "Optimization")
+        .with_family_metadata(crate::state::AnalysisResultFamilyMetadata::Optimization {
+            iterations: vec![0.0],
+            best_cost: 0.0,
+            best_variables: std::collections::BTreeMap::new(),
+            converged: true,
+            best_objectives: vec![OptimizationObjectiveObservation {
+                objective: OptimizationObjectiveTerm {
+                    measurement: "voltage".into(),
+                    unit: String::new(),
+                    goal: OptimizationObjectiveGoal::Target,
+                    target: Some(350.0),
+                    scale: 100.0,
+                    weight: 1.0,
+                },
+                value: 350.0,
+                contribution: 0.0,
+            }],
+            best_constraints: vec![OptimizationConstraintObservation {
+                constraint: OptimizationConstraint {
+                    measurement: "voltage".into(),
+                    unit: String::new(),
+                    lower: Some(340.0),
+                    upper: None,
+                    tolerance: 0.0,
+                    scale: 100.0,
+                },
+                value: 350.0,
+                violation: 0.0,
+            }],
+        });
+    let stored = |analysis: AnalysisResult| {
+        let mut run = SimulationRun::new(1);
+        run.mark_running().unwrap();
+        run.add_analysis(analysis);
+        run.finish_lifecycle(SimulationRunLifecycle::Completed)
+            .unwrap();
+        seal_legacy_unattributed(&mut run);
+        let mut state = SimulationState::default();
+        state.runs = vec![run].into();
+        state.next_run_id = 1;
+        ProjectSimulationResults::from_state(&state)
+    };
+    let historic_digest = historical.result_data_digest();
+    let mut old = stored(historical.clone());
+    old.schema_version = NATIVE_SCALAR_UNIT_RESULTS_SCHEMA_VERSION;
+    old.migrate_to_current(ProjectId::new()).unwrap();
+    assert_eq!(
+        old.into_simulation_state().unwrap().runs[0].analyses[0].result_data_digest(),
+        historic_digest
+    );
+    let mut typed = historical;
+    if let Some(crate::state::AnalysisResultFamilyMetadata::Optimization {
+        best_objectives,
+        best_constraints,
+        ..
+    }) = &mut typed.family_metadata
+    {
+        best_objectives[0].objective.unit = "mV".into();
+        best_constraints[0].constraint.unit = "mV".into();
+    }
+    let digest = typed.result_data_digest();
+    assert_ne!(digest, historic_digest);
+    let current = stored(typed);
+    let loaded: ProjectSimulationResults =
+        serde_json::from_str(&serde_json::to_string(&current).unwrap()).unwrap();
+    assert_eq!(
+        loaded.into_simulation_state().unwrap().runs[0].analyses[0].result_data_digest(),
+        digest
+    );
+    let mut changed = current.clone();
+    if let Some(crate::state::AnalysisResultFamilyMetadata::Optimization {
+        best_objectives, ..
+    }) = &mut changed.runs[0].analyses[0].family_metadata
+    {
+        best_objectives[0].objective.unit = "V".into();
+    }
+    assert!(changed.validate().unwrap_err().contains("digest"));
+    let mut downgraded = current;
+    downgraded.schema_version = NATIVE_SCALAR_UNIT_RESULTS_SCHEMA_VERSION;
+    assert!(
+        downgraded
+            .migrate_to_current(ProjectId::new())
+            .unwrap_err()
+            .contains("before v39")
+    );
+}

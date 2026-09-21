@@ -1061,6 +1061,10 @@ fn encode_spec_options(writer: &mut CanonicalWriter, options: &SpecExecutionOpti
             writer.sequence(base.constraints.len());
             for term in &base.constraints {
                 writer.string(&term.measurement);
+                if !term.unit.is_empty() {
+                    writer.string("optimization-measurement-unit/v1");
+                    writer.string(&term.unit);
+                }
                 writer.option(term.lower.as_ref(), |writer, value| writer.f64(*value));
                 writer.option(term.upper.as_ref(), |writer, value| writer.f64(*value));
                 writer.f64(term.tolerance);
@@ -1072,6 +1076,10 @@ fn encode_spec_options(writer: &mut CanonicalWriter, options: &SpecExecutionOpti
             writer.sequence(base.objective_terms.len());
             for term in &base.objective_terms {
                 writer.string(&term.measurement);
+                if !term.unit.is_empty() {
+                    writer.string("optimization-measurement-unit/v1");
+                    writer.string(&term.unit);
+                }
                 writer.u8(match term.goal {
                     crate::simulation::optimizer::OptimizationObjectiveGoal::Minimize => 0,
                     crate::simulation::optimizer::OptimizationObjectiveGoal::Maximize => 1,

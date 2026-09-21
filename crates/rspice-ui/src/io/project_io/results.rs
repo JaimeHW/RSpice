@@ -171,6 +171,13 @@ impl ProjectSimulationResultsData {
 
     fn migrate_to_current_in_place(&mut self, project_id: ProjectId) -> Result<(), String> {
         let source_schema = self.schema_version;
+        for run in &self.runs {
+            legacy_evidence::reject_optimization_units_before_schema_v39(run, source_schema)?;
+        }
+        if source_schema == NATIVE_SCALAR_UNIT_RESULTS_SCHEMA_VERSION {
+            self.schema_version = PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION;
+            return self.validate();
+        }
         if source_schema < NATIVE_SCALAR_UNIT_RESULTS_SCHEMA_VERSION
             && self
                 .runs

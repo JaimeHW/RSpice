@@ -181,6 +181,8 @@ pub(crate) enum WorkerAnalysisSpec {
         #[serde(default)]
         search: crate::services::simulation_runner::OptimizationSearchControls,
         variables: Vec<OptimizationVariable>,
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        objective_unit: String,
         #[serde(default)]
         objective_expression: Option<String>,
         objective_node: String,

@@ -236,6 +236,7 @@ fn study_temperature_precedes_parameter_statistics_and_optimization_replay() {
                 max: 1500.0,
                 initial: 1000.0,
             }],
+            objective_unit: String::new(),
             objective_expression: None,
             objective_node: "out".into(),
             objective_ref: "0".into(),

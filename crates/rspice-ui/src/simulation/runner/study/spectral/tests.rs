@@ -193,6 +193,7 @@ fn spectral_optimization_changes_candidates_and_finds_the_amplitude_target() {
                 max: 1.5,
                 initial: 1.0,
             }],
+            objective_unit: String::new(),
             objective_expression: None,
             objective_node: "out".into(),
             objective_ref: "0".into(),

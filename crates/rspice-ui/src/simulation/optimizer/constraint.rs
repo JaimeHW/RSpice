@@ -6,6 +6,9 @@ use serde::{Deserialize, Serialize};
 #[serde(deny_unknown_fields)]
 pub struct OptimizationConstraint {
     pub measurement: String,
+    /// Unit for values, targets, limits and scales; blank uses producer units.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub unit: String,
     pub lower: Option<f64>,
     pub upper: Option<f64>,
     /// Absolute allowance in the measurement's physical units.
@@ -15,6 +18,7 @@ pub struct OptimizationConstraint {
 }
 impl OptimizationConstraint {
     pub fn validate(&self) -> Result<(), String> {
+        super::validate_requested_unit(&self.unit)?;
         if self.measurement.trim().is_empty() || self.measurement.chars().any(char::is_control) {
             return Err("Each constraint needs a measurement name".into());
         }

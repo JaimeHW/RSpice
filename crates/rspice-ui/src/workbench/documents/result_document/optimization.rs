@@ -237,13 +237,14 @@ pub(crate) fn export_csv(analysis: &AnalysisResult) -> Option<super::ResultSheet
             "feasible,{}\n",
             view.best_constraints.iter().all(|row| row.violation == 0.0)
         ));
-        contents.push_str("\nconstraint,measurement,lower,upper,tolerance,scale,value,normalized_violation,satisfied\n");
+        contents.push_str("\nconstraint,measurement,unit,lower,upper,tolerance,scale,value,normalized_violation,satisfied\n");
         for (index, observation) in view.best_constraints.iter().enumerate() {
             let term = &observation.constraint;
             contents.push_str(&format!(
-                "{},{},{},{},{:.17e},{:.17e},{:.17e},{:.17e},{}\n",
+                "{},{},{},{},{},{:.17e},{:.17e},{:.17e},{:.17e},{}\n",
                 index + 1,
                 super::csv_field(&term.measurement),
+                super::csv_field(&term.unit),
                 term.lower.map(|v| format!("{v:.17e}")).unwrap_or_default(),
                 term.upper.map(|v| format!("{v:.17e}")).unwrap_or_default(),
                 term.tolerance,
@@ -256,14 +257,16 @@ pub(crate) fn export_csv(analysis: &AnalysisResult) -> Option<super::ResultSheet
         contents.push_str("\nfield,value\n");
     }
     if !view.best_objectives.is_empty() {
-        contents
-            .push_str("\nobjective,measurement,goal,target,scale,weight,value,cost_contribution\n");
+        contents.push_str(
+            "\nobjective,measurement,unit,goal,target,scale,weight,value,cost_contribution\n",
+        );
         for (index, observation) in view.best_objectives.iter().enumerate() {
             let term = &observation.objective;
             contents.push_str(&format!(
-                "{},{},{:?},{},{:.17e},{:.17e},{:.17e},{:.17e}\n",
+                "{},{},{},{:?},{},{:.17e},{:.17e},{:.17e},{:.17e}\n",
                 index + 1,
                 super::csv_field(&term.measurement),
+                super::csv_field(&term.unit),
                 term.goal,
                 term.target
                     .map(|value| format!("{value:.17e}"))
@@ -377,7 +380,8 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                 (
                     format!("{}. {} ({:?})", index + 1, term.measurement, term.goal),
                     format!(
-                        "value {:.9e}; target {}; scale {:.6e}; weight {:.6e}; cost {:.9e}",
+                        "unit {}; value {:.9e}; target {}; scale {:.6e}; weight {:.6e}; cost {:.9e}",
+                        if term.unit.is_empty() { "native" } else { &term.unit },
                         observation.value,
                         term.target
                             .map(|value| format!("{value:.9e}"))
@@ -407,7 +411,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         );
         let rows = view.best_constraints.iter().enumerate().map(|(index, observation)| {
             let term = &observation.constraint;
-            (format!("{}. {}", index + 1, term.measurement), format!("value {:.9e}; limits {} to {}; tolerance {:.6e}; scale {:.6e}; violation {:.9e}", observation.value,
+            (format!("{}. {}", index + 1, term.measurement), format!("unit {}; value {:.9e}; limits {} to {}; tolerance {:.6e}; scale {:.6e}; violation {:.9e}", if term.unit.is_empty() { "native" } else { &term.unit }, observation.value,
                 term.lower.map(|v| format!("{v:.9e}")).unwrap_or_else(|| "unbounded".into()),
                 term.upper.map(|v| format!("{v:.9e}")).unwrap_or_else(|| "unbounded".into()), term.tolerance, term.scale, observation.violation))
         }).collect::<Vec<_>>();
@@ -971,6 +975,7 @@ mod tests {
         best_objectives.push(OptimizationObjectiveObservation {
             objective: OptimizationObjectiveTerm {
                 measurement: "gain".into(),
+                unit: "mV".into(),
                 goal: OptimizationObjectiveGoal::Target,
                 target: Some(1.0),
                 scale: 2.0,
@@ -984,10 +989,10 @@ mod tests {
         assert_eq!(analysis.family_metadata, restored);
         analysis.family_metadata = restored;
         let csv = export_csv(analysis).unwrap().contents;
-        assert!(
-            csv.contains("objective,measurement,goal,target,scale,weight,value,cost_contribution")
-        );
-        assert!(csv.contains("1,gain,Target,"));
+        assert!(csv.contains(
+            "objective,measurement,unit,goal,target,scale,weight,value,cost_contribution"
+        ));
+        assert!(csv.contains("1,gain,mV,Target,"));
         let AnalysisResultFamilyMetadata::Optimization {
             best_objectives, ..
         } = analysis.family_metadata.as_mut().unwrap()
@@ -1016,6 +1021,7 @@ mod tests {
         best_constraints.push(OptimizationConstraintObservation {
             constraint: OptimizationConstraint {
                 measurement: "limit".into(),
+                unit: "mA".into(),
                 lower: Some(2.0),
                 upper: None,
                 tolerance: 0.1,
@@ -1028,7 +1034,7 @@ mod tests {
         analysis.family_metadata = serde_json::from_str(&saved).unwrap();
         let csv = export_csv(analysis).unwrap().contents;
         assert!(csv.contains("feasible,false"));
-        assert!(csv.contains("constraint,measurement,lower,upper,tolerance,scale,value,normalized_violation,satisfied"));
+        assert!(csv.contains("constraint,measurement,unit,lower,upper,tolerance,scale,value,normalized_violation,satisfied"));
         let AnalysisResultFamilyMetadata::Optimization { converged, .. } =
             analysis.family_metadata.as_mut().unwrap()
         else {

@@ -168,10 +168,11 @@ fn envelope_initializer_authenticates_every_control_and_preserves_legacy_identit
 
 #[cfg(test)]
 #[test]
-fn optimization_expression_is_authenticated_without_changing_legacy_identity() {
+fn optimization_units_and_expression_are_authenticated_without_changing_legacy_identity() {
     let spec = AnalysisSpec::Optimization {
         search: Default::default(),
         variables: vec![],
+        objective_unit: String::new(),
         objective_expression: None,
         objective_node: "out".into(),
         objective_ref: "0".into(),
@@ -219,6 +220,11 @@ fn optimization_expression_is_authenticated_without_changing_legacy_identity() {
     } = &mut configured
     {
         *objective_expression = Some("-V(out)*I(V1)".into());
+    }
+    assert_ne!(before, digest(&configured));
+    let before = digest(&configured);
+    if let AnalysisSpec::Optimization { objective_unit, .. } = &mut configured {
+        *objective_unit = "mW".into();
     }
     assert_ne!(before, digest(&configured));
 }
@@ -700,6 +706,7 @@ pub(super) fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &Analysis
         AnalysisSpec::Optimization {
             search,
             variables,
+            objective_unit,
             objective_expression,
             objective_node,
             objective_ref,
@@ -767,6 +774,10 @@ pub(super) fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &Analysis
                         }
                     }
                 }
+            }
+            if !objective_unit.is_empty() {
+                writer.string("optimization-objective-unit/v1");
+                writer.string(objective_unit);
             }
             if let Some(expression) = objective_expression {
                 writer.string("optimization-expression-v1");

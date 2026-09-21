@@ -182,6 +182,7 @@ fn hb_current_study_optimization_reaches_a_current_target_and_retains_verbose() 
             max: 1.5,
             initial: 1.0,
         }],
+        objective_unit: String::new(),
         objective_expression: None,
         objective_node: "out".into(),
         objective_ref: "0".into(),

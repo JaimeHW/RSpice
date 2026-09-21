@@ -139,10 +139,25 @@ pub(super) fn require_legacy_result_digest_absence(
     Ok(())
 }
 
+pub(super) fn reject_optimization_units_before_schema_v39(
+    run: &ProjectSimulationRun,
+    source_schema: u32,
+) -> Result<(), String> {
+    if source_schema < OPTIMIZATION_UNIT_RESULTS_SCHEMA_VERSION && run.analyses.iter().any(|analysis| {
+        matches!(&analysis.family_metadata, Some(crate::state::AnalysisResultFamilyMetadata::Optimization { best_objectives, best_constraints, .. })
+            if best_objectives.iter().any(|row| !row.objective.unit.is_empty())
+                || best_constraints.iter().any(|row| !row.constraint.unit.is_empty()))
+    }) {
+        return Err("result schemas before v39 cannot contain optimization units".into());
+    }
+    Ok(())
+}
+
 pub(in crate::io::project_io) fn validate_result_fields_for_source_schema(
     run: &ProjectSimulationRun,
     source_schema: u32,
 ) -> Result<(), String> {
+    reject_optimization_units_before_schema_v39(run, source_schema)?;
     if source_schema < NATIVE_SCALAR_UNIT_RESULTS_SCHEMA_VERSION
         && run
             .analyses

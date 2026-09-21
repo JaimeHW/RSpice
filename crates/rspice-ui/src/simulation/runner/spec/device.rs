@@ -39,6 +39,7 @@ pub(super) fn run_device_spec(
         AnalysisSpec::Optimization {
             search,
             variables,
+            objective_unit,
             objective_expression,
             objective_node,
             objective_ref,
@@ -54,6 +55,7 @@ pub(super) fn run_device_spec(
             netlist,
             search,
             variables,
+            objective_unit,
             objective_expression,
             objective_node,
             objective_ref,
@@ -202,6 +204,7 @@ fn run_optimization(
     netlist: &str,
     search: svc_runner::OptimizationSearchControls,
     variables: Vec<crate::simulation::multi_run::OptimizationVariable>,
+    objective_unit: String,
     objective_expression: Option<String>,
     objective_node: String,
     objective_ref: String,
@@ -231,6 +234,7 @@ fn run_optimization(
     let cfg = svc_runner::OptimizationRunConfig {
         search,
         variables: configured_variables,
+        objective_unit,
         objective_expression,
         objective_node,
         objective_ref,

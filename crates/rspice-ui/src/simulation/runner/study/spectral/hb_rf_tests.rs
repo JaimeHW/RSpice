@@ -216,6 +216,7 @@ fn hb_rf_study_optimizer_reaches_scattering_and_integrated_noise_targets() {
                     max: 150.0,
                     initial: 100.0,
                 }],
+                objective_unit: String::new(),
                 objective_expression: None,
                 objective_node: "out".into(),
                 objective_ref: "0".into(),

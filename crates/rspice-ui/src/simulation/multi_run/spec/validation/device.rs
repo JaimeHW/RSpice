@@ -40,6 +40,7 @@ pub(super) fn validate(spec: &AnalysisSpec) -> Result<(), String> {
         AnalysisSpec::Optimization {
             search,
             variables,
+            objective_unit,
             objective_expression,
             objective_node,
             objective_ref,
@@ -53,6 +54,7 @@ pub(super) fn validate(spec: &AnalysisSpec) -> Result<(), String> {
             ..
         } => {
             search.validate()?;
+            crate::simulation::optimizer::validate_requested_unit(objective_unit)?;
             if variables.is_empty() {
                 return Err("Optimization variables must not be empty".to_string());
             }

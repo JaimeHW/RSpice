@@ -75,6 +75,48 @@ mod tests {
     use rspice_core::abort_signal::NoAbort;
 
     #[test]
+    fn optimization_units_convert_op_voltage_and_power_before_search() {
+        let deck = "Units\n.param X=0.35\nV1 out 0 {X}\nR1 out 0 1k\n.end\n";
+        for (expression, unit, target) in
+            [(None, "mV", 350.0), (Some("-V(out)*I(V1)"), "mW", 0.1225)]
+        {
+            let mut config = OptimizationRunConfig {
+                objective_expression: expression.map(str::to_owned),
+                objective_unit: unit.into(),
+                target: Some(target),
+                max_iterations: 4,
+                variables: vec![OptimizationVariable {
+                    name: "X".into(),
+                    min: 0.1,
+                    max: 0.5,
+                    initial: 0.35,
+                }],
+                ..Default::default()
+            };
+            let result = run_optimization_analysis_with_config_and_source_path_and_abort(
+                deck, &config, None, &NoAbort,
+            )
+            .unwrap();
+            assert!(result.best_cost < 1e-20, "{result:?}");
+            assert!((result.best_objectives[0].value - target).abs() < 1e-10);
+            assert_eq!(result.best_objectives[0].objective.unit, unit);
+            config.objective_unit = "ns".into();
+            let error = run_optimization_analysis_with_config_and_source_path_and_abort(
+                deck, &config, None, &NoAbort,
+            )
+            .unwrap_err();
+            assert!(error.to_string().contains("incompatible"), "{error}");
+            config.objective_unit = "V".into();
+            config.objective_expression = Some("X*V(out)".into());
+            let error = run_optimization_analysis_with_config_and_source_path_and_abort(
+                deck, &config, None, &NoAbort,
+            )
+            .unwrap_err();
+            assert!(error.to_string().contains("unknown"), "{error}");
+        }
+    }
+
+    #[test]
     fn failed_expression_trials_never_beat_large_valid_objectives() {
         let deck = "Bounded objective\n.param X=0.51\nV1 in 0 {X}\nR1 in 0 1k\n.end\n";
         for algorithm in [
@@ -83,6 +125,7 @@ mod tests {
             OptimizationAlgorithmMode::SimulatedAnnealing,
         ] {
             let config = OptimizationRunConfig {
+                objective_unit: String::new(),
                 objective_expression: Some("1e40*(1+V(in))/(V(in)>=0.5)".into()),
                 variables: vec![OptimizationVariable {
                     name: "X".into(),
@@ -120,6 +163,7 @@ mod tests {
             ("1e200*V(out)", -1e200, "cost is not finite"),
         ] {
             let config = OptimizationRunConfig {
+                objective_unit: String::new(),
                 objective_expression: Some(expression.into()),
                 target: Some(target),
                 ..Default::default()
@@ -169,6 +213,7 @@ mod tests {
     fn optimization_can_find_a_current_target_without_a_voltage_objective() {
         let deck = "Current target\n.param RLOAD=2k\nV1 in 0 1\nR1 in 0 {RLOAD}\n.end\n";
         let config = OptimizationRunConfig {
+            objective_unit: String::new(),
             objective_expression: Some("I(V1)".into()),
             objective_node: String::new(),
             objective_ref: String::new(),

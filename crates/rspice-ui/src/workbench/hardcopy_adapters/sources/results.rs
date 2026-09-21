@@ -1686,7 +1686,12 @@ pub(super) fn semantic_result_summary(
                 rows.push(vec![
                     format!("Objective {} configuration", index + 1),
                     format!(
-                        "target {}; scale {}; weight {}",
+                        "unit {}; target {}; scale {}; weight {}",
+                        if term.unit.is_empty() {
+                            "native"
+                        } else {
+                            &term.unit
+                        },
                         term.target.map(exact_number).unwrap_or_else(|| "—".into()),
                         exact_number(term.scale),
                         exact_number(term.weight)
@@ -1699,7 +1704,8 @@ pub(super) fn semantic_result_summary(
             }
             for (index, observation) in best_constraints.iter().enumerate() {
                 let term = &observation.constraint;
-                rows.push(vec![format!("Constraint {}: {}", index + 1, term.measurement), format!("{}; value {}; lower {}; upper {}; tolerance {}; scale {}; normalized violation {}",
+                rows.push(vec![format!("Constraint {}: {}", index + 1, term.measurement), format!("unit {}; {}; value {}; lower {}; upper {}; tolerance {}; scale {}; normalized violation {}",
+                    if term.unit.is_empty() { "native" } else { &term.unit },
                     if observation.violation == 0.0 { "satisfied" } else { "violated" }, exact_number(observation.value),
                     term.lower.map(exact_number).unwrap_or_else(|| "unbounded".into()), term.upper.map(exact_number).unwrap_or_else(|| "unbounded".into()),
                     exact_number(term.tolerance), exact_number(term.scale), exact_number(observation.violation))]);
