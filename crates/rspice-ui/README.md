@@ -391,9 +391,21 @@ old worker epochs and request IDs cannot publish into a new run. Browser hard
 cancellation retains the latest snapshot already received by the application;
 unpublished work is not a durable checkpoint.
 
-This is request/runner/worker integration, not yet an exposed Studio checkpoint
-workflow. Controller retention, the form, project persistence and checkpoint
-selection/import/export still need integration. The legacy all-node operating
+The controller retains each delivered journal on the exact prepared analysis,
+including cancellation and error outcomes, and drains the final snapshot before
+advancing to the next task. Checkpoints obey the run's storage ceiling. A request
+for checkpoint capture cannot report successful completion without a retained
+journal matching its completed trial measurements.
+
+Project result schema 35 stores the checked portable bytes as bounded Base64 with
+their content identity. Result and dataset digests bind the journal, and storage
+accounting includes its full binary size. Older projects preserve absence and
+their existing digests. Saving during execution keeps the committed trials;
+reopening restores an interrupted result, never a completed statistical population.
+Project and session snapshots share this result representation.
+
+The form and checkpoint selection/import/export still need integration before
+this is an exposed Studio checkpoint workflow. The legacy all-node operating
 point Monte Carlo route also needs checkpoint support. Existing Studio batch
 controls continue to publish separate populations as described above. A generated
 `.MC` card and authored plan revision are still part of the frozen population
