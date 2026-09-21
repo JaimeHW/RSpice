@@ -55,6 +55,42 @@ impl PrescribedIntegralRate<'_> {
             })
     }
 
+    /// Coordinates in the same group have a shared unknown voltage offset.
+    /// Only an exact cancellation permits sampling them relative to a local
+    /// reference. This changes neither the original circuit equations nor
+    /// the physical derivatives used by retained small-signal consumers.
+    pub(crate) fn dependencies_with_offsets(
+        &self,
+        group: impl Fn(usize) -> Option<usize>,
+    ) -> Option<Vec<usize>> {
+        if let Some(dependencies) = self.dependencies_with_coordinates(|i| group(i).is_none()) {
+            return Some(dependencies);
+        }
+        if !super::affine::invariant(&self.equation.ast, |name| {
+            let input = self.equation.inputs[*self.equation.program.node_map.get(name)?];
+            match input {
+                Input::Node(index) => Some(self.node_bindings[index].and_then(&group)),
+                Input::Branch(index) => Some(group(self.branch_bindings[index]?)),
+                Input::Integral(_) | Input::Phase(_) => Some(None),
+            }
+        }) {
+            return None;
+        }
+        Some(
+            self.equation
+                .inputs
+                .iter()
+                .filter_map(|input| {
+                    if let Input::Integral(index) = input {
+                        Some(self.source_start + index)
+                    } else {
+                        None
+                    }
+                })
+                .collect(),
+        )
+    }
+
     pub(crate) fn sample_with_coordinates(
         &self,
         time: Value,
@@ -170,5 +206,56 @@ impl BehavioralSources {
             }
         }
         Ok(plans)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn integral_offset_proof_distinguishes_exact_cancellation_from_small_dependence() {
+        for (rate, independent) in [
+            ("v(a)-v(b)", true),
+            (".1*v(a)-.1*v(b)", true),
+            ("v(a)/3-v(b)/3", true),
+            ("sin(v(a)-v(b))+(v(a)-v(b))^3", true),
+            ("v(a)-v(c)", false),
+            ("sin(v(a))-sin(v(b))", false),
+            ("v(a)-1.0000000000000002*v(b)", false),
+            ("(1e20*v(a)+v(a))-1e20*v(b)", false),
+            ("v(a)-v(b)+1e-300*v(c)", false),
+        ] {
+            let mut source =
+                BehavioralVoltageSource::new("B".into(), 4, 0, 1, &format!("sdt({rate})")).unwrap();
+            source
+                .bind_references(
+                    |name| {
+                        Some(match name {
+                            "a" => 1,
+                            "b" => 2,
+                            _ => 3,
+                        })
+                    },
+                    |_| BehavioralBranchResolution::MissingDevice,
+                )
+                .unwrap();
+            let sources = BehavioralSources {
+                voltage_sources: vec![source],
+                current_sources: vec![],
+            };
+            let plans = sources.prescribed_integral_rates().unwrap();
+            assert_eq!(
+                plans[0]
+                    .dependencies_with_offsets(|i| Some(if i < 2 { 1 } else { 3 }))
+                    .is_some(),
+                independent,
+                "{rate}"
+            );
+            assert!(
+                plans[0].dependencies().is_none(),
+                "physical derivatives are not frozen"
+            );
+        }
     }
 }

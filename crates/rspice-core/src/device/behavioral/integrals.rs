@@ -6,6 +6,7 @@ use super::*;
 use crate::expr::AcceptedSdtState;
 use std::collections::HashMap;
 
+mod affine;
 mod periodic;
 pub(crate) use periodic::BehavioralFqPoint;
 mod phases;
