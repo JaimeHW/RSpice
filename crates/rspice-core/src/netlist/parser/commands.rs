@@ -4419,6 +4419,11 @@ pub(super) fn parse_meas_command(
                     td,
                 }
             } else {
+                // The statement-wide scan records these policies but does not
+                // consume them from the original stream. PARAM has no window
+                // parser to do that, so consume its common qualifiers here.
+                while consume_meas_statement_qualifier(stream, line_num, params, false)?.is_some() {
+                }
                 MeasureType::Param { expression }
             }
         }
