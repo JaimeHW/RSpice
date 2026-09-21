@@ -81,6 +81,14 @@ need not repeat the producer's startup-mode option. Changed circuit/model data o
 tampered retained state are still rejected. Manual `.HB` decks receive one implicit
 OP when none is authored; multiple OP producers are rejected as ambiguous.
 
+Configured HB, HBSP, HBNOISE and HB-carried PAC/PXF/PNOISE studies retain the full
+selected OP configuration, including initialization, numerical options and producer
+identity. Each varied Monte Carlo or optimization candidate gets a fresh configured
+OP before default, DC or transient-assisted HB startup. Explicit zero startup uses
+the same physical supply and temperature without running OP. Study Run Set supply
+scaling is applied once; explicit OP temperature stays fixed, while OP temperature
+modes that follow the Run Set use its selected temperature.
+
 ## Harmonic balance current outputs
 
 HB results expose the engine's retained MNA branch currents as `I(device)`,
@@ -180,8 +188,8 @@ Unavailable referrals or integration results remain unavailable, rather than zer
 ## Periodic RF analyses in configured studies
 
 Monte Carlo and optimization can select PAC, PXF, PNOISE, PSTB or PSP. Each trial
-reruns the selected periodic producer on its varied circuit. Shooting chains
-first rerun the producer's bound OP configuration. PAC, PXF and PNOISE also
+reruns the selected periodic producer on its varied circuit. Shooting and seeded HB
+chains first rerun the producer's bound OP configuration. PAC, PXF and PNOISE also
 accept an explicitly bound HB producer. The study retains the complete consumer
 configuration: sweep, sidebands, source and differential output, amplitude,
 solver tolerances, noise controls, stability controls, ports and mixed mode.
