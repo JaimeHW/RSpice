@@ -356,62 +356,6 @@ Generic parameter tolerances replay the preceding random draws without solving t
 
 The CLI and Python execution of authored `.MC` cards honor START. Core callers can use `MonteCarloRunConfig.first_trial` with `Engine::run_monte_carlo_voltages_with_abort`, or `MonteCarloStudyConfig.first_trial` for configured measurement studies. Existing convenience entry points retain their original first index of zero. Nonzero starting indices are also retained as the `first_trial` scalar in shared result documents.
 
-### Checkpoint continuation integration
-
-The configured-study runner now supports a lossless internal continuation journal
-(`simulation/runner/study/monte_carlo.rs`). It binds the core population to the
-canonical configured base, prerequisite, measurement and saved-OP contracts. A
-caller can retain completed trials, publish snapshots at a chosen trial cadence,
-resume only missing circuits, and select a new trial range against the same frozen
-source. Histogram changes reuse the observations; statistics and confidence are
-recomputed over the requested range. Source and configured-plan revision changes
-still require a new population.
-
-The Studio binary envelope retains every trial's measurement verdict alongside
-its exact core values. A finite `.MEAS` value that misses GOAL/TOL remains a failed
-measurement after resume. Sparse indices, failed trials and exact floating-point
-bits survive the portable round trip. Pooling combines matching trial populations,
-counts matching overlaps once and rejects conflicting values or verdicts.
-Decoding and merging enforce byte, trial and value budgets. Completed rows remain
-in the caller-owned journal when cancellation or checkpoint publication stops a
-run; interrupted trials remain unfinished.
-
-Checkpoint capture cadence, explicit trial range and resume-input content identity
-now belong to the immutable prepared-request digest. Configured Monte Carlo
-requests reach the checkpoint runner through the normal dispatch path. Resume
-inputs use checked portable bytes; a request without a checkpoint destination is
-rejected before trial execution.
-
-Native execution keeps only the latest complete snapshot in a separate queue,
-independent of terminal success. Browser request protocol 31 transfers resume
-bytes in a Uint8Array, separately from numerical dependency buffers and JSON
-metadata. Workers publish accepted snapshots through a dedicated message before
-returning their terminal result. Ingress checks byte budgets and content identity;
-old worker epochs and request IDs cannot publish into a new run. Browser hard
-cancellation retains the latest snapshot already received by the application;
-unpublished work is not a durable checkpoint.
-
-The controller retains each delivered journal on the exact prepared analysis,
-including cancellation and error outcomes, and drains the final snapshot before
-advancing to the next task. Checkpoints obey the run's storage ceiling. A request
-for checkpoint capture cannot report successful completion without a retained
-journal matching its completed trial measurements.
-
-Project result schema 35 stores the checked portable bytes as bounded Base64 with
-their content identity. Result and dataset digests bind the journal, and storage
-accounting includes its full binary size. Older projects preserve absence and
-their existing digests. Saving during execution keeps the committed trials;
-reopening restores an interrupted result, never a completed statistical population.
-Project and session snapshots share this result representation.
-
-The form and checkpoint selection/import/export still need integration before
-this is an exposed Studio checkpoint workflow. The legacy all-node operating
-point Monte Carlo route also needs checkpoint support. Existing Studio batch
-controls continue to publish separate populations as described above. A generated
-`.MC` card and authored plan revision are still part of the frozen population
-identity; changing that card or revision is not currently equivalent to requesting
-a new range against an existing journal.
-
 ## Module map
 
 | Module | Contents |
