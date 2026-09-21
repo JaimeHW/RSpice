@@ -1,5 +1,6 @@
 //! Zero-origin primitives on the signed independent-tone lattice.
 use super::*;
+use crate::analysis::harmonic_balance::solver::integrals::forced::coordinate_group;
 use crate::analysis::quasi_periodic::{QuasiPeriodicSampleSpectrum, QuasiPeriodicTransform};
 use crate::{ResourceKind, ResourceLimitError};
 
@@ -118,6 +119,7 @@ impl HbSolver {
         let mut values = plans.len();
         let mut transform = None;
         let mut forced: Vec<Option<Vec<Value>>> = Vec::new();
+        let mut groups = Vec::new();
         let mut forced_values = 0usize;
         if !retained && plans.iter().any(|plan| plan.dependencies().is_none()) {
             let sources = sources.ok_or_else(|| {
@@ -135,12 +137,17 @@ impl HbSolver {
                 .num_nodes
                 .saturating_add(self.exact_mna_branches().len())
                 .saturating_add(1)
-                .saturating_mul(8);
+                .saturating_mul(12);
             budget(values.saturating_add(topology))?;
-            let tree = self
-                .forced_voltage_tree(false, abort)
+            let mut forest = self
+                .forced_voltage_forest(false, abort)
                 .map_err(device_error)?;
-            forced_values = topology.saturating_add(tree.len().saturating_mul(grid.sample_count()));
+            forest
+                .retain_coordinates(plans.iter().flat_map(|plan| plan.coordinates()), abort)
+                .map_err(device_error)?;
+            groups = forest.groups;
+            forced_values =
+                topology.saturating_add(forest.nodes.len().saturating_mul(grid.sample_count()));
             budget(
                 values
                     .saturating_add(forced_values)
@@ -149,7 +156,7 @@ impl HbSolver {
             let projection =
                 transform.insert(QuasiPeriodicTransform::new_with_abort(grid.clone(), abort)?);
             forced.resize(self.num_nodes, None);
-            for node in tree {
+            for node in forest.nodes {
                 check_abort(abort)?;
                 let mut samples = projection
                     .to_real_samples_with_abort(&sources[self.num_nodes + node.branch], abort)?;
@@ -160,7 +167,7 @@ impl HbSolver {
                     *value = node.sign * *value
                         + node
                             .parent
-                            .map_or(0.0, |p| forced[p].as_ref().expect("tree order")[i]);
+                            .map_or(0.0, |p| forced[p].as_ref().map_or(0.0, |values| values[i]));
                     if !value.is_finite() {
                         return Err(Error::Numerical(
                             "driven node voltage overflowed during integral preparation".into(),
@@ -172,7 +179,7 @@ impl HbSolver {
         }
         if !retained
             && plans.iter().any(|plan| {
-                plan.dependencies_with_coordinates(|i| forced.get(i).is_some_and(Option::is_some))
+                plan.dependencies_with_offsets(|i| coordinate_group(&groups, &forced, i))
                     .is_none()
             })
         {
@@ -182,7 +189,7 @@ impl HbSolver {
                 grid.frequencies_hz(),
                 |row, k| sources[row][k],
                 |row| {
-                    forced.get(row).is_none_or(Option::is_none)
+                    coordinate_group(&groups, &forced, row).is_some()
                         && plans
                             .iter()
                             .any(|plan| plan.coordinates().any(|index| index == row))
@@ -203,31 +210,39 @@ impl HbSolver {
                     .sum::<usize>(),
             );
             forced.resize(coordinates.len(), None);
+            groups.extend((groups.len()..coordinates.len()).map(|i| i + 1));
             for (row, spectrum) in coordinates.iter().enumerate() {
                 let Some(spectrum) = spectrum else { continue };
-                if forced[row].is_some() {
+                if coordinate_group(&groups, &forced, row).is_none() {
                     continue;
                 }
-                forced_values = forced_values.saturating_add(grid.sample_count());
+                if forced[row].is_none() {
+                    forced_values = forced_values.saturating_add(grid.sample_count());
+                }
                 budget(
                     values
                         .saturating_add(forced_values)
                         .saturating_add(temporary)
                         .saturating_add(grid.sample_count().saturating_mul(8)),
                 )?;
+                forced[row] = None;
                 forced[row] = Some(
                     transform
                         .as_mut()
                         .expect("allocated transform")
                         .to_real_samples_with_abort(spectrum, abort)?,
                 );
+                groups[row] = 0;
             }
         }
         for plan in plans {
             check_abort(abort)?;
-            let Some(dependencies) =
-                plan.dependencies_with_coordinates(|i| forced.get(i).is_some_and(Option::is_some))
-            else {
+            let dependencies = if retained {
+                plan.dependencies()
+            } else {
+                plan.dependencies_with_offsets(|i| coordinate_group(&groups, &forced, i))
+            };
+            let Some(dependencies) = dependencies else {
                 primitives.push(None);
                 continue;
             };
@@ -273,7 +288,12 @@ impl HbSolver {
                                 .expect("qualified dependency")
                                 .samples[sample]
                         },
-                        |i| forced[i].as_ref().expect("qualified coordinate")[sample],
+                        |i| {
+                            forced
+                                .get(i)
+                                .and_then(Option::as_ref)
+                                .map_or(0.0, |values| values[sample])
+                        },
                     )
                     .map_err(Error::InvalidCircuit)?;
                 rate_scale = rate_scale.max(value.abs());

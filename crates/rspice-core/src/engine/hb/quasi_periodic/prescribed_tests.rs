@@ -3,6 +3,100 @@ use super::*;
 use crate::analysis::quasi_periodic::{QuasiPeriodicAcConfig, QuasiPeriodicLinearMethod};
 
 #[test]
+fn qpss_differential_integrals_keep_independent_common_mode_feedback() {
+    let rate = 1e3;
+    let f2 = rate * std::f64::consts::SQRT_2;
+    let omega = std::f64::consts::TAU * rate;
+    let netlist = Netlist::parse(&format!(
+        "Differential torus\nVinput p1 n1 SIN(0 1 {rate})\nVsecond p2 n2 SIN(0 .4 {f2})\n\
+         Bcommon n1 0 V=.1*tanh(v(out)+v(cube))\nBother n2 0 V=.15*tanh(v(out)-v(cube))\n\
+         R1 p1 0 1k\nR2 n1 0 2k\nR3 p2 0 3k\nR4 n2 0 4k\n\
+         BV out 0 V={omega}*sdt(.25*v(p1)-.25*v(n1)+.5*v(p2)-.5*v(n2))\nRout out 0 1k\n\
+         BC cube 0 V={omega}*sdt((v(p1)-v(n1))^3)\nRc cube 0 1k\n.end\n"
+    ))
+    .unwrap();
+    let engine = Engine::default();
+    let point = engine
+        .run_qpss(&netlist, QpssConfig::new(vec![rate, f2], vec![3, 1]))
+        .unwrap();
+    let grid = engine
+        .validate_qpss_operating_point_with_abort(&netlist, &point, &NoAbort)
+        .unwrap();
+    let close = |a: Complex64, b: Complex64| {
+        assert!((a - b).norm() < 2e-7 * b.norm().max(1e-3), "{a} != {b}")
+    };
+    for (name, dc, first, third, second) in [
+        (
+            "out",
+            0.25 + 0.2 / std::f64::consts::SQRT_2,
+            -0.125,
+            0.0,
+            -0.1 / std::f64::consts::SQRT_2,
+        ),
+        ("cube", 2.0 / 3.0, -0.375, 1.0 / 24.0, 0.0),
+    ] {
+        let row = point
+            .node_names()
+            .iter()
+            .position(|n| n.eq_ignore_ascii_case(name))
+            .unwrap();
+        for (tuple, expected) in [
+            (vec![0, 0], dc),
+            (vec![1, 0], first),
+            (vec![3, 0], third),
+            (vec![0, 1], second),
+        ] {
+            close(
+                point.spectra()[row][grid.index_of(&tuple).unwrap()],
+                Complex64::new(expected, 0.0),
+            );
+        }
+        let tuple = vec![-1, 1];
+        let ratio = 0.13 + std::f64::consts::SQRT_2 - 1.0;
+        let expected = if name == "out" { 0.25 } else { 1.5 } / Complex64::new(0.0, ratio);
+        let ac = engine
+            .run_qpac_from_qpss(
+                &netlist,
+                QpacRequest {
+                    offsets_hz: vec![rate * 0.13],
+                    input_source: "Vinput".into(),
+                    input_lattice: tuple.clone(),
+                    output_node: name.into(),
+                    output_ref: "0".into(),
+                    output_lattice: tuple.clone(),
+                    magnitude: 1.0,
+                    phase_degrees: 0.0,
+                    solver: Default::default(),
+                },
+                &point,
+            )
+            .unwrap();
+        close(ac.output_transfer[0], expected);
+        let xf = engine
+            .run_qpxf_from_qpss(
+                &netlist,
+                QpxfRequest {
+                    frequencies_hz: vec![rate * ratio],
+                    frequency_axis: QpxfFrequencyAxis::Output,
+                    input_sources: QpxfSources::Named(vec!["Vinput".into()]),
+                    input_lattices: QpxfInputLattices::Explicit(vec![tuple.clone()]),
+                    output: QpxfOutput::Voltage {
+                        positive: name.into(),
+                        negative: "0".into(),
+                    },
+                    output_lattice: tuple,
+                    linear: Default::default(),
+                    group_delay: false,
+                    group_delay_magnitude_floor: 0.0,
+                },
+                &point,
+            )
+            .unwrap();
+        close(xf.transfers[0].values[0], expected);
+    }
+}
+
+#[test]
 fn qpss_filtered_integrals_preserve_network_phase_current_and_response() {
     let rate = 1e3;
     let f2 = rate * std::f64::consts::SQRT_2;

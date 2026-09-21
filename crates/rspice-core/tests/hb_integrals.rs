@@ -33,6 +33,63 @@ fn transfer(rate: f64, frequency: f64) -> Complex64 {
 }
 
 #[test]
+fn hb_differential_integrals_keep_nonlinear_common_mode_feedback() {
+    let rate = 1e3;
+    let omega = std::f64::consts::TAU * rate;
+    let netlist = Netlist::parse(&format!(
+        "Differential integrals\nVinput plus minus SIN(0 1 {rate})\n\
+         Bcommon minus 0 V=0.1*tanh(v(out)+v(cube))\nRplus plus 0 1k\nRminus minus 0 2k\n\
+         BV out 0 V={omega}*sdt(0.25*v(plus)-.25*v(minus))\nRout out 0 1k\n\
+         BC cube 0 V={omega}*sdt((v(plus)-v(minus))^3)\nRc cube 0 1k\n\
+         .options hbint tahb=0\n.end\n"
+    ))
+    .unwrap();
+    let engine = Engine::default();
+    let hb = engine
+        .run_hb(&netlist, HbConfig::new(rate).with_harmonics(3))
+        .unwrap();
+    for (name, dc, fundamental, third) in [
+        ("out", 0.25, -0.25, 0.0),
+        ("cube", 2.0 / 3.0, -0.75, 1.0 / 12.0),
+    ] {
+        let row = hb
+            .result
+            .spectral_voltages
+            .iter()
+            .find(|r| r.node_name.eq_ignore_ascii_case(name))
+            .unwrap();
+        close(row.coefficients[0], Complex64::new(dc, 0.0));
+        close(row.coefficients[1], Complex64::new(fundamental, 0.0));
+        close(row.coefficients[3], Complex64::new(third, 0.0));
+        let config = PacConfig::new()
+            .with_fundamental(rate)
+            .with_sweep(rate * 0.13, rate * 0.13, 1)
+            .with_sweep_type(PacSweepType::Linear)
+            .with_sidebands(-1, 1)
+            .with_input_source("Vinput")
+            .with_output_node(name);
+        let pac = engine
+            .run_pac_from_hb_with_abort(&netlist, config, &hb.operating_point, &NoAbort)
+            .unwrap();
+        for output in -1_i32..=1 {
+            for input in -1_i32..=1 {
+                let gain = if input == output {
+                    if name == "out" { 0.25 } else { 1.5 }
+                } else if name == "cube" && (input - output).abs() == 2 {
+                    -0.75
+                } else {
+                    0.0
+                };
+                close(
+                    pac.result.conversion_matrix.get(0, output, input).unwrap(),
+                    gain / Complex64::new(0.0, 0.13 + output as f64),
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn hb_filtered_integrals_preserve_network_phase_current_and_response() {
     let rate = 1e3;
     let omega = std::f64::consts::TAU * rate;

@@ -5,6 +5,7 @@
 //! Driven node identities can also anchor the large-signal trajectory; retained
 //! consumers restore their original continuous F/Q response to perturbations.
 
+use super::forced::coordinate_group;
 use super::*;
 
 #[derive(Debug)]
@@ -140,12 +141,13 @@ impl HbSolver {
         let frequency = self.config.fundamental_freq;
         let mut retained_values = 0usize;
         let mut forced: Vec<Option<Vec<Value>>> = Vec::new();
+        let mut groups = Vec::new();
         if !retained && plans.iter().any(|plan| plan.dependencies().is_none()) {
             let topology = self
                 .num_nodes
                 .saturating_add(self.exact_mna_branches().len())
                 .saturating_add(1)
-                .saturating_mul(8);
+                .saturating_mul(12);
             let ensure = |values| {
                 if values > max_values {
                     Err(HbError::InvalidCircuit(format!(
@@ -156,15 +158,17 @@ impl HbSolver {
                 }
             };
             ensure(topology)?;
-            let tree = self.forced_voltage_tree(true, abort)?;
-            retained_values = topology.saturating_add(tree.len().saturating_mul(samples));
+            let mut forest = self.forced_voltage_forest(true, abort)?;
+            forest.retain_coordinates(plans.iter().flat_map(|plan| plan.coordinates()), abort)?;
+            groups = forest.groups;
+            retained_values = topology.saturating_add(forest.nodes.len().saturating_mul(samples));
             ensure(
                 retained_values
                     .saturating_add(2 * (self.num_harmonics + 1))
                     .saturating_add(samples),
             )?;
             forced.resize(self.num_nodes, None);
-            for node in tree {
+            for node in forest.nodes {
                 if abort.is_aborted() {
                     return Err(HbError::Aborted);
                 }
@@ -183,9 +187,9 @@ impl HbSolver {
                     if abort.is_aborted() {
                         return Err(HbError::Aborted);
                     }
-                    let parent = node
-                        .parent
-                        .map_or(0.0, |p| forced[p].as_ref().expect("tree order")[sample]);
+                    let parent = node.parent.map_or(0.0, |p| {
+                        forced[p].as_ref().map_or(0.0, |values| values[sample])
+                    });
                     let value = parent
                         + node.sign
                             * primitive_value(&spectrum, sample as Value / samples as Value);
@@ -202,7 +206,7 @@ impl HbSolver {
         if linear_coordinates
             && !retained
             && plans.iter().any(|plan| {
-                plan.dependencies_with_coordinates(|i| forced.get(i).is_some_and(Option::is_some))
+                plan.dependencies_with_offsets(|i| coordinate_group(&groups, &forced, i))
                     .is_none()
             })
         {
@@ -227,7 +231,7 @@ impl HbSolver {
                         }
                     },
                     |row| {
-                        forced.get(row).is_none_or(Option::is_none)
+                        coordinate_group(&groups, &forced, row).is_some()
                             && plans
                                 .iter()
                                 .any(|plan| plan.coordinates().any(|index| index == row))
@@ -257,18 +261,24 @@ impl HbSolver {
                 )
                 .saturating_add(frequencies.len());
             forced.resize(coordinates.len(), None);
+            groups.extend((groups.len()..coordinates.len()).map(|i| i + 1));
             for (row, spectrum) in coordinates.iter().enumerate() {
                 let Some(spectrum) = spectrum else { continue };
-                if forced[row].is_some() {
+                if coordinate_group(&groups, &forced, row).is_none() {
                     continue;
                 }
-                retained_values = retained_values.saturating_add(samples);
+                if forced[row].is_none() {
+                    retained_values = retained_values.saturating_add(samples);
+                }
                 if retained_values.saturating_add(temporary) > max_values {
                     return Err(HbError::InvalidCircuit(format!(
                         "driven integral exceeds the {max_values}-value periodic allocation limit"
                     )));
                 }
-                let mut values = Vec::with_capacity(samples);
+                let mut values = forced[row]
+                    .take()
+                    .unwrap_or_else(|| Vec::with_capacity(samples));
+                values.clear();
                 for sample in 0..samples {
                     if abort.is_aborted() {
                         return Err(HbError::Aborted);
@@ -282,15 +292,19 @@ impl HbSolver {
                     values.push(value);
                 }
                 forced[row] = Some(values);
+                groups[row] = 0;
             }
         }
         for plan in plans {
             if abort.is_aborted() {
                 return Err(HbError::Aborted);
             }
-            let Some(dependencies) =
-                plan.dependencies_with_coordinates(|i| forced.get(i).is_some_and(Option::is_some))
-            else {
+            let dependencies = if retained {
+                plan.dependencies()
+            } else {
+                plan.dependencies_with_offsets(|i| coordinate_group(&groups, &forced, i))
+            };
+            let Some(dependencies) = dependencies else {
                 spectra.push(None);
                 continue;
             };
@@ -346,7 +360,12 @@ impl HbSolver {
                                 .expect("dependency qualified above")
                                 .value(cycles, Value::NAN)
                         },
-                        |index| forced[index].as_ref().expect("qualified coordinate")[sample],
+                        |index| {
+                            forced
+                                .get(index)
+                                .and_then(Option::as_ref)
+                                .map_or(0.0, |values| values[sample])
+                        },
                     )
                     .map_err(HbError::InvalidCircuit)?;
                 rates.push(rate);
