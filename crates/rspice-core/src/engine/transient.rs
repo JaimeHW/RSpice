@@ -3619,20 +3619,6 @@ impl Engine {
         );
         block_if_present(
             &mut blockers,
-            circuit
-                .behavioral_sources
-                .voltage_sources
-                .iter()
-                .any(|source| source.program.sdt_count != 0)
-                || circuit
-                    .behavioral_sources
-                    .current_sources
-                    .iter()
-                    .any(|source| source.program.sdt_count != 0),
-            "behavioral-source accepted SDT state is not checkpointed",
-        );
-        block_if_present(
-            &mut blockers,
             !circuit.vswitches.is_empty(),
             "voltage-controlled switch accepted hysteresis state is not checkpointed",
         );
@@ -13357,9 +13343,9 @@ D1 D 0 DMOD
             .build_circuit(&stateful)
             .expect("stateful behavioral fixture builds");
         let blockers = Engine::exact_integration_runtime_resume_blockers(&stateful, 1);
-        assert_eq!(
-            blockers,
-            ["behavioral-source accepted SDT state is not checkpointed"]
+        assert!(
+            blockers.is_empty(),
+            "SDT history is retained by checkpoint format 50"
         );
         assert!(Engine::exact_integration_runtime_resume_blockers(&stateful, 0).is_empty());
 

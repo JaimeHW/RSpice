@@ -20,14 +20,15 @@
 //! trap/power and optional charge-snapshot histories; complete JFET nonlinear
 //! state and explicit uninitialized-bias markers; ordinary lossless scalar
 //! transmission-line delay histories; generated Verilog-A `ddt`/`idt`
-//! histories and limiter anchors; XSPICE model-owned checkpoint state; and the
-//! accepted LTE, Trap/Gear, static-residual/DAE, nonlinear-solver, cooldown,
+//! histories and limiter anchors; behavioral SDT accepted histories; XSPICE
+//! model-owned checkpoint state; and the accepted LTE, Trap/Gear,
+//! static-residual/DAE, nonlinear-solver, cooldown,
 //! livelock, and global trajectory-policy runtime are captured bit-exactly.
 //! An arbitrary accepted proposal continues exactly, while an explicitly
 //! normalized endpoint or breakpoint contract deliberately takes an order-one
 //! restart step. Exact-proposal restore is target-aware and fails closed for
 //! native compact-model, thermal, stateful capacitor-expression, nonlinear
-//! magnetic, standalone multi-winding transformer, stateful behavioral/switch,
+//! magnetic, standalone multi-winding transformer, stateful switch,
 //! runtime Verilog-A, or generated dynamic-charge histories that do not yet
 //! have a complete versioned contract. Sparse solver factors and scale state
 //! preserve exact promoted VBIC continuation. Distributed LTRA/TXL and coupled-line convolution runtimes also
@@ -39,7 +40,9 @@
 //! wraps a zlib-compressed copy of that canonical text in a versioned binary
 //! envelope with declared lengths and a BLAKE3 integrity seal.
 
+mod behavioral;
 mod solver_state;
+use crate::device::behavioral::BehavioralAcceptedState;
 
 use crate::Value;
 use crate::abort_signal::{AbortSignal, NoAbort};
@@ -189,7 +192,9 @@ fn checkpoint_operation_result<T>(
 /// Version 47 retains known transport event orders; earlier sided events stay unknown.
 /// Version 48 retains analytic outgoing GP anchor slopes for phase error control.
 /// Version 49 retains the separately selected GP Weil filter's accepted memory.
-const FORMAT_VERSION: u32 = 49;
+/// Version 50 retains named behavioral-source SDT accepted histories.
+const FORMAT_VERSION: u32 = 50;
+const BEHAVIORAL_SDT_FORMAT_VERSION: u32 = 50;
 const BJT_WEIL_HISTORY_FORMAT_VERSION: u32 = 49;
 const BJT_PHASE_SLOPE_FORMAT_VERSION: u32 = 48;
 const TRANSPORT_EVENT_ORDER_FORMAT_VERSION: u32 = 47;
@@ -627,6 +632,7 @@ pub struct TransientCheckpoint {
     xyce_memristor_resistance_stores: Vec<Value>,
     xyce_team_resistance_noise_states: Vec<XyceTeamResistanceNoiseCheckpoint>,
     generic_switch_stores: Vec<[Value; 4]>,
+    behavioral_states: Option<Vec<BehavioralAcceptedState>>,
     accepted_nonlinear_state_available: bool,
     accepted_nonlinear_states: AcceptedNativeNonlinearCheckpointStates,
     accepted_junction_history: AcceptedJunctionTransientHistoryCheckpoint,
@@ -5681,6 +5687,7 @@ impl TransientCheckpoint {
         &self,
         mut budget: Option<&mut CheckpointParseBudget>,
     ) -> Result<(), String> {
+        behavioral::validate(self.behavioral_states.as_deref(), self.time, &mut budget)?;
         if !self.time.is_finite() || self.time < 0.0 {
             return Err("checkpoint time must be finite and non-negative".to_string());
         }
@@ -6679,6 +6686,7 @@ impl TransientCheckpoint {
             xyce_team_resistance_noise_states: circuit
                 .capture_xyce_team_resistance_noise_checkpoints(),
             generic_switch_stores: circuit.generic_switch_transient_store_snapshots(),
+            behavioral_states: Some(circuit.behavioral_sources.accepted_history()),
             accepted_nonlinear_state_available: true,
             accepted_nonlinear_states,
             accepted_junction_history,
@@ -6849,6 +6857,9 @@ impl TransientCheckpoint {
         // shapes. Named instance mismatches are the most specific evidence
         // that a checkpoint belongs to a different elaboration, whereas a
         // later vector-length mismatch may only be a consequence of it.
+        circuit
+            .behavioral_sources
+            .validate_accepted_history(self.behavioral_states.as_deref(), self.time)?;
         circuit.validate_xspice_checkpoint_instance_states(&self.xspice_instance_states)?;
         circuit.validate_generated_veriloga_checkpoint_states(
             &self.generated_veriloga_instance_states,
@@ -7108,6 +7119,9 @@ impl TransientCheckpoint {
             binding.resistance_store = resistance;
         }
         circuit.restore_generic_switch_transient_store_snapshots(&self.generic_switch_stores);
+        circuit
+            .behavioral_sources
+            .restore_accepted_history(self.behavioral_states.as_deref(), self.time)?;
         circuit.restore_xspice_checkpoint_instance_states(&self.xspice_instance_states)?;
         circuit.restore_generated_veriloga_checkpoint_states(
             &self.generated_veriloga_instance_states,
@@ -7622,6 +7636,18 @@ impl TransientCheckpoint {
                     .saturating_mul(9),
             )
             .saturating_add(self.generic_switch_stores.len().saturating_mul(4))
+            .saturating_add(
+                self.behavioral_states
+                    .as_deref()
+                    .unwrap_or_default()
+                    .iter()
+                    .fold(1usize, |words, state| {
+                        words
+                            .saturating_add(7)
+                            .saturating_add(state.name.len().div_ceil(8))
+                            .saturating_add(state.integrals.len().saturating_mul(3))
+                    }),
+            )
             .saturating_add(self.accepted_nonlinear_states.resume_blockers.len())
             .saturating_add(
                 self.accepted_nonlinear_states
@@ -8015,6 +8041,7 @@ impl TransientCheckpoint {
                 store[0], store[1], store[2], store[3]
             ));
         }
+        behavioral::write(&mut out, self.behavioral_states.as_deref(), abort)?;
         out.push_str(&format!(
             "accepted_nonlinear_state_available {}\n",
             u8::from(self.accepted_nonlinear_state_available)
@@ -9097,6 +9124,11 @@ impl TransientCheckpoint {
         } else {
             Vec::new()
         };
+        let behavioral_states = if version >= BEHAVIORAL_SDT_FORMAT_VERSION {
+            behavioral::read(lines, budget)?
+        } else {
+            None
+        };
         let (accepted_nonlinear_state_available, accepted_nonlinear_states) = if version
             >= NATIVE_NONLINEAR_FORMAT_VERSION
         {
@@ -9353,6 +9385,7 @@ impl TransientCheckpoint {
             xyce_memristor_resistance_stores,
             xyce_team_resistance_noise_states,
             generic_switch_stores,
+            behavioral_states,
             accepted_nonlinear_state_available,
             accepted_nonlinear_states,
             accepted_junction_history,
@@ -11049,6 +11082,7 @@ mod tests {
             xyce_memristor_resistance_stores: Vec::new(),
             xyce_team_resistance_noise_states: Vec::new(),
             generic_switch_stores: vec![[-0.25, 0.125, 0.375, f64::MIN_POSITIVE]],
+            behavioral_states: Some(Vec::new()),
             accepted_nonlinear_state_available: true,
             accepted_nonlinear_states: AcceptedNativeNonlinearCheckpointStates {
                 jfets: Vec::new(),
@@ -11304,6 +11338,32 @@ mod tests {
         let mut output = String::new();
         let mut lines = text.lines();
         while let Some(line) = lines.next() {
+            if version < BEHAVIORAL_SDT_FORMAT_VERSION
+                && line.starts_with("behavioral_state_available ")
+            {
+                continue;
+            }
+            if version < BEHAVIORAL_SDT_FORMAT_VERSION && line.starts_with("behavioral_states ") {
+                let count = line
+                    .split_whitespace()
+                    .nth(1)
+                    .unwrap()
+                    .parse::<usize>()
+                    .unwrap();
+                for _ in 0..count {
+                    let row = lines.next().unwrap();
+                    let integrals = row
+                        .split_whitespace()
+                        .nth(3)
+                        .unwrap()
+                        .parse::<usize>()
+                        .unwrap();
+                    for _ in 0..integrals {
+                        lines.next().unwrap();
+                    }
+                }
+                continue;
+            }
             if version < BJT_PHASE_SLOPE_FORMAT_VERSION
                 && line.starts_with("accepted_bjt_transport_slope ")
             {

@@ -356,6 +356,14 @@ struct SdtState {
     trial_integral: Value,
 }
 
+/// Only accepted history survives a restart; trial frames are reconstructed.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub(crate) struct AcceptedSdtState {
+    pub time: Value,
+    pub input: Value,
+    pub integral: Value,
+}
+
 impl Default for Vm {
     fn default() -> Self {
         Self::new()
@@ -363,6 +371,34 @@ impl Default for Vm {
 }
 
 impl Vm {
+    pub(crate) fn accepted_sdt_history(&self, count: usize) -> Vec<AcceptedSdtState> {
+        (0..count)
+            .map(|index| {
+                self.sdt_states
+                    .get(index)
+                    .map_or_else(AcceptedSdtState::default, |state| AcceptedSdtState {
+                        time: state.accepted_time,
+                        input: state.accepted_input,
+                        integral: state.accepted_integral,
+                    })
+            })
+            .collect()
+    }
+
+    pub(crate) fn restore_sdt_history(&mut self, history: &[AcceptedSdtState]) {
+        self.stack.clear();
+        self.sdt_states = history
+            .iter()
+            .map(|state| SdtState {
+                accepted_time: state.time,
+                accepted_input: state.input,
+                accepted_integral: state.integral,
+                trial_input: state.input,
+                trial_integral: state.integral,
+            })
+            .collect();
+    }
+
     /// Create a new VM with preallocated stack
     pub fn new() -> Self {
         Self {

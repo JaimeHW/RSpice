@@ -19,6 +19,8 @@ use std::path::Path;
 use thiserror::Error;
 
 mod breakpoints;
+mod history;
+pub(crate) use history::BehavioralAcceptedState;
 mod periodicity;
 mod quasi_periodic;
 mod resolution;
