@@ -21,7 +21,7 @@ fn check_abort(abort: &dyn AbortSignal) -> Result<(), Error> {
 }
 
 // Return closed components as (equation row, coordinate column) pairs.
-fn closed_components(
+pub(super) fn closed_components(
     rows: &[Vec<usize>],
     abort: &dyn AbortSignal,
 ) -> Result<Vec<Vec<(usize, usize)>>, Error> {

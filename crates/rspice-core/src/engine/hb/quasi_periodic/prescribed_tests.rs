@@ -3,6 +3,82 @@ use super::*;
 use crate::analysis::quasi_periodic::{QuasiPeriodicAcConfig, QuasiPeriodicLinearMethod};
 
 #[test]
+fn qpss_integrates_an_independent_nonlinear_input_and_preserves_response() {
+    let rate = 1e3;
+    let omega = std::f64::consts::TAU * rate;
+    let netlist = Netlist::parse(&format!(
+        "Nonlinear integral input\nItest 0 input SIN(0 1m {rate})\n\
+         Bforcing 0 input I=.001*sin(2*pi*{rate}*time)^3\n\
+         Rinput input 0 1k\nBnonlinear input 0 I=.001*v(input)^3\n\
+         Bshaped shaped 0 V=v(input)^3\nRshaped shaped 0 1k\nBV out 0 V={omega}*sdt(v(shaped))\nRout out 0 1k\n.end\n"
+    ))
+    .unwrap();
+    let engine = Engine::default();
+    let f2 = rate * std::f64::consts::SQRT_2;
+    let mut config = QpssConfig::new(vec![rate, f2], vec![3, 1]);
+    config.solver.relative_tolerance = 1e-10;
+    config.solver.current_absolute_tolerance = 1e-14;
+    let point = engine.run_qpss(&netlist, config.clone()).unwrap();
+    assert!(point.iterations() > 1 && point.iterations() <= config.solver.max_iterations);
+    let mut limited = config;
+    limited.solver.max_iterations = 1;
+    let error = engine.run_qpss(&netlist, limited).unwrap_err().to_string();
+    assert!(error.contains("after 1 iterations"), "{error}");
+    let grid = engine
+        .validate_qpss_operating_point_with_abort(&netlist, &point, &NoAbort)
+        .unwrap();
+    let row = point
+        .node_names()
+        .iter()
+        .position(|n| n.eq_ignore_ascii_case("out"))
+        .unwrap();
+    assert!((point.spectra()[row][grid.dc_index()].re - 2.0 / 3.0).abs() < 2e-8);
+    assert!((point.spectra()[row][grid.index_of(&[1, 0]).unwrap()] + 0.375).norm() < 2e-8);
+    let tuple = vec![-1, 1];
+    let ratio = 0.13 + std::f64::consts::SQRT_2 - 1.0;
+    let request = |name: &str| QpacRequest {
+        offsets_hz: vec![rate * 0.13],
+        input_source: "Itest".into(),
+        input_lattice: tuple.clone(),
+        output_node: name.into(),
+        output_ref: "0".into(),
+        output_lattice: tuple.clone(),
+        magnitude: 1.0,
+        phase_degrees: 0.0,
+        solver: Default::default(),
+    };
+    let input = engine
+        .run_qpac_from_qpss(&netlist, request("shaped"), &point)
+        .unwrap();
+    let output = engine
+        .run_qpac_from_qpss(&netlist, request("out"), &point)
+        .unwrap();
+    let expected = input.output_transfer[0] / Complex64::new(0.0, ratio);
+    assert!((output.output_transfer[0] / expected - 1.0).norm() < 1e-7);
+    let xf = engine
+        .run_qpxf_from_qpss(
+            &netlist,
+            QpxfRequest {
+                frequencies_hz: vec![rate * ratio],
+                frequency_axis: QpxfFrequencyAxis::Output,
+                input_sources: QpxfSources::Named(vec!["Itest".into()]),
+                input_lattices: QpxfInputLattices::Explicit(vec![tuple.clone()]),
+                output: QpxfOutput::Voltage {
+                    positive: "out".into(),
+                    negative: "0".into(),
+                },
+                output_lattice: tuple,
+                linear: Default::default(),
+                group_delay: false,
+                group_delay_magnitude_floor: 0.0,
+            },
+            &point,
+        )
+        .unwrap();
+    assert!((xf.transfers[0].values[0] / expected - 1.0).norm() < 1e-7);
+}
+
+#[test]
 fn qpss_differential_integrals_keep_independent_common_mode_feedback() {
     let rate = 1e3;
     let f2 = rate * std::f64::consts::SQRT_2;

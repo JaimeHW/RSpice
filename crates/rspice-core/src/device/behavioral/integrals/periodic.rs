@@ -235,6 +235,39 @@ impl BehavioralCurrentSource {
 }
 
 impl BehavioralSources {
+    pub(crate) fn visit_periodic_output_dependencies(
+        &self,
+        num_nodes: usize,
+        integral_start: usize,
+        mut visit: impl FnMut(usize, usize),
+    ) {
+        let mut start = integral_start;
+        for source in &self.voltage_sources {
+            let row = num_nodes + source.branch_ordinal - 1;
+            for col in source
+                .bound_solution_indices()
+                .chain(start..start + source.program.sdt_count)
+            {
+                visit(row, col);
+            }
+            start += source.program.sdt_count;
+        }
+        for source in &self.current_sources {
+            for node in [source.node_pos, source.node_neg] {
+                if node == 0 {
+                    continue;
+                }
+                for col in source
+                    .bound_solution_indices()
+                    .chain(start..start + source.program.sdt_count)
+                {
+                    visit(node - 1, col);
+                }
+            }
+            start += source.program.sdt_count;
+        }
+    }
+
     /// Stamp continuous source equations and each explicitly allocated SDT
     /// coordinate. The caller must allocate every coordinate; neither a zero
     /// integration constant nor a zero mean is inferred from a periodic input.
@@ -244,6 +277,22 @@ impl BehavioralSources {
         f: &mut impl MatrixStamper,
         q: &mut impl MatrixStamper,
     ) -> Result<(), String> {
+        self.stamp_periodic_fq_selected(point, f, q, None)
+    }
+
+    /// Sampling a structurally closed subsystem must not evaluate unrelated
+    /// sources at fabricated zero biases (their expressions may be undefined).
+    pub(crate) fn stamp_periodic_fq_selected(
+        &mut self,
+        point: BehavioralFqPoint<'_>,
+        f: &mut impl MatrixStamper,
+        q: &mut impl MatrixStamper,
+        selected: Option<&[bool]>,
+    ) -> Result<(), String> {
+        if selected.is_some_and(|rows| rows.len() != point.unknowns) {
+            return Err("periodic selected rows do not match the circuit basis".into());
+        }
+        let active = |row: usize| selected.is_none_or(|rows| rows[row]);
         if !point.time.is_finite()
             || point.num_nodes > point.integral_start
             || point.integral_start.checked_add(self.integral_count()) != Some(point.unknowns)
@@ -270,6 +319,15 @@ impl BehavioralSources {
                 .map(|source| source.program.sdt_count)
                 .sum::<usize>();
         for source in &mut self.current_sources {
+            if selected.is_some()
+                && ![source.node_pos, source.node_neg]
+                    .into_iter()
+                    .any(|node| node > 0 && active(node - 1))
+                && !(state_start..state_start + source.program.sdt_count).any(&active)
+            {
+                state_start += source.program.sdt_count;
+                continue;
+            }
             let sample = source.periodic_fq_sample(point, state_start, f, q)?;
             state_start += source.program.sdt_count;
             f.stamp_rhs(source.node_pos, -sample.value);
@@ -281,6 +339,13 @@ impl BehavioralSources {
         }
         state_start = point.integral_start;
         for source in &mut self.voltage_sources {
+            if selected.is_some()
+                && !active(point.num_nodes + source.branch_ordinal - 1)
+                && !(state_start..state_start + source.program.sdt_count).any(&active)
+            {
+                state_start += source.program.sdt_count;
+                continue;
+            }
             let sample = source.periodic_fq_sample(point, state_start, f, q)?;
             state_start += source.program.sdt_count;
             let row = point.num_nodes + source.branch_ordinal;

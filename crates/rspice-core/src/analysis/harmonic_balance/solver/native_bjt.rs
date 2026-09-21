@@ -304,6 +304,27 @@ impl HbSolver {
         q: &mut NativeStamp,
         small_signal: bool,
     ) -> Result<(), HbError> {
+        self.sample_native_devices_selected(
+            solution,
+            time,
+            behavioral_inputs,
+            f,
+            q,
+            small_signal,
+            None,
+        )
+    }
+
+    fn sample_native_devices_selected(
+        &mut self,
+        solution: &[Value],
+        time: Value,
+        behavioral_inputs: &[Value],
+        f: &mut NativeStamp,
+        q: &mut NativeStamp,
+        small_signal: bool,
+        selected: Option<&[bool]>,
+    ) -> Result<(), HbError> {
         if solution.len() != self.num_nodes + self.exact_mna_branches().len() {
             return Err(HbError::InvalidCircuit(
                 "native periodic sample does not match the complete MNA state".into(),
@@ -312,6 +333,13 @@ impl HbSolver {
         f.clear();
         q.clear();
         for bjt in &mut self.native_bjts {
+            if selected.is_some_and(|rows| {
+                !bjt.mna_coupling_nodes()
+                    .iter()
+                    .any(|&node| node > 0 && rows[node - 1])
+            }) {
+                continue;
+            }
             bjt.stamp_periodic_fq(solution, f, q);
             if f.invalid || q.invalid {
                 return Err(HbError::InvalidCircuit(format!(
@@ -346,20 +374,21 @@ impl HbSolver {
                 })
                 .collect::<Vec<_>>()
         };
-        self.behavioral_sources
-            .stamp_periodic_fq(
-                crate::device::behavioral::BehavioralFqPoint {
-                    inputs: behavioral_inputs,
-                    time,
-                    num_nodes: self.num_nodes,
-                    unknowns: solution.len(),
-                    integral_start,
-                    prescribed_integrals: &prescribed,
-                },
-                f,
-                q,
-            )
-            .map_err(HbError::InvalidCircuit)?;
+        let point = crate::device::behavioral::BehavioralFqPoint {
+            inputs: behavioral_inputs,
+            time,
+            num_nodes: self.num_nodes,
+            unknowns: solution.len(),
+            integral_start,
+            prescribed_integrals: &prescribed,
+        };
+        match selected {
+            Some(_) => self
+                .behavioral_sources
+                .stamp_periodic_fq_selected(point, f, q, selected),
+            None => self.behavioral_sources.stamp_periodic_fq(point, f, q),
+        }
+        .map_err(HbError::InvalidCircuit)?;
         if f.invalid || q.invalid {
             return Err(HbError::InvalidCircuit(
                 "behavioral periodic F/Q entries are invalid".into(),
@@ -383,11 +412,12 @@ impl HbSolver {
 
     /// The same native F/Q implementation, sampled at an independent-phase
     /// state. No HB time grid or common fundamental enters this boundary.
-    pub(super) fn quasi_periodic_native_sample(
+    pub(super) fn quasi_periodic_native_sample_selected(
         &mut self,
         solution: &[Value],
         phases: &[Value],
         jacobian: bool,
+        selected: Option<&[bool]>,
     ) -> Result<crate::analysis::quasi_periodic::solve::Sample, HbError> {
         if phases.len() != self.behavioral_phase_dimensions || phases.iter().any(|v| !v.is_finite())
         {
@@ -400,7 +430,9 @@ impl HbSolver {
         inputs.extend_from_slice(phases);
         let mut f = NativeStamp::new(solution.len());
         let mut q = NativeStamp::new(solution.len());
-        self.sample_native_devices(solution, 0.0, &inputs, &mut f, &mut q, false)?;
+        self.sample_native_devices_selected(
+            solution, 0.0, &inputs, &mut f, &mut q, false, selected,
+        )?;
         Ok(crate::analysis::quasi_periodic::solve::Sample {
             current: f.contributions,
             charge: q.contributions,

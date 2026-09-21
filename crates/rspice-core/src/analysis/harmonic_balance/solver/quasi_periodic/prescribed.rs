@@ -87,14 +87,128 @@ impl QuasiPrescribedIntegrals {
 }
 
 impl HbSolver {
+    pub(super) fn prepare_quasi_periodic_carrier(
+        &mut self,
+        grid: Arc<QuasiPeriodicGrid>,
+        config: &QuasiPeriodicSolveConfig,
+        sources: &[Vec<Complex64>],
+        seed: Option<&[Vec<Complex64>]>,
+        limits: &ResourceLimits,
+        abort: &dyn AbortSignal,
+    ) -> Result<(Option<Vec<Vec<Complex64>>>, ResourceLimits, usize), Error> {
+        let (remaining, needed) = self.prepare_quasi_periodic_integrals_with_inputs(
+            grid.clone(),
+            limits,
+            false,
+            Some(sources),
+            None,
+            abort,
+        )?;
+        let initially_prescribed = self
+            .quasi_prescribed_integrals
+            .as_ref()
+            .map_or(0, |cache| cache.primitives.iter().flatten().count());
+        let n = self.unknowns();
+        if !needed.iter().any(|&needed| needed) {
+            return Ok((None, remaining, 0));
+        }
+        let mut preparing = remaining.clone();
+        preparing.max_result_values = preparing.max_result_values.saturating_sub(n);
+        let driven = self.nonlinear_driven_spectra(
+            grid.clone(),
+            config,
+            sources,
+            seed,
+            &needed,
+            &preparing,
+            abort,
+        )?;
+        drop(needed);
+        let iterations = driven.iterations;
+        let driven = driven.spectra;
+        if driven.iter().all(Option::is_none) {
+            return Ok((None, remaining, iterations));
+        }
+        let driven_values = n.saturating_mul(4).saturating_add(
+            driven
+                .iter()
+                .flatten()
+                .map(|row| row.len().saturating_mul(2))
+                .sum::<usize>(),
+        );
+        let mut preparing = limits.clone();
+        preparing.max_result_values = preparing.max_result_values.saturating_sub(driven_values);
+        let mut remaining = self.prepare_quasi_periodic_integrals(
+            grid.clone(),
+            &preparing,
+            false,
+            Some(sources),
+            Some(&driven),
+            abort,
+        )?;
+        let primitive_values = preparing
+            .max_result_values
+            .saturating_sub(remaining.max_result_values);
+        let now_prescribed = self
+            .quasi_prescribed_integrals
+            .as_ref()
+            .map_or(0, |cache| cache.primitives.iter().flatten().count());
+        if now_prescribed <= initially_prescribed {
+            // A feedback integral may read an independent input and still have
+            // its constant fixed by the joint closure. Do not perturb its seed
+            // merely because one of its inputs could be solved separately.
+            remaining.max_result_values = limits.max_result_values.saturating_sub(primitive_values);
+            return Ok((None, remaining, iterations));
+        }
+        let seed_values = n.saturating_mul(grid.len().saturating_mul(2).saturating_add(4));
+        ResourceLimitError::ensure(
+            ResourceKind::ResultValues,
+            seed_values,
+            remaining.max_result_values,
+        )?;
+        // Keep the converged upstream branch selected by the caller's seed.
+        // Every downstream coordinate retains its original supplied value.
+        let mut prepared = Vec::with_capacity(n);
+        for (row, values) in driven.into_iter().enumerate() {
+            check_abort(abort)?;
+            prepared.push(values.unwrap_or_else(|| {
+                seed.map_or_else(
+                    || vec![Complex64::ZERO; grid.len()],
+                    |seed| seed[row].clone(),
+                )
+            }));
+        }
+        remaining.max_result_values = limits
+            .max_result_values
+            .saturating_sub(primitive_values)
+            .saturating_sub(seed_values);
+        Ok((Some(prepared), remaining, iterations))
+    }
+
     pub(super) fn prepare_quasi_periodic_integrals(
         &mut self,
         grid: Arc<QuasiPeriodicGrid>,
         limits: &ResourceLimits,
         retained: bool,
         sources: Option<&[Vec<Complex64>]>,
+        driven: Option<&[Option<Vec<Complex64>>]>,
         abort: &dyn AbortSignal,
     ) -> Result<ResourceLimits, Error> {
+        self.prepare_quasi_periodic_integrals_with_inputs(
+            grid, limits, retained, sources, driven, abort,
+        )
+        .map(|(limits, _)| limits)
+    }
+
+    fn prepare_quasi_periodic_integrals_with_inputs(
+        &mut self,
+        grid: Arc<QuasiPeriodicGrid>,
+        limits: &ResourceLimits,
+        retained: bool,
+        sources: Option<&[Vec<Complex64>]>,
+        driven: Option<&[Option<Vec<Complex64>>]>,
+        abort: &dyn AbortSignal,
+    ) -> Result<(ResourceLimits, Vec<bool>), Error> {
         check_abort(abort)?;
         // Reusing this registry for a producer after a consumer must not keep
         // the consumer's fixed-perturbation mode or a previous tone basis.
@@ -104,7 +218,7 @@ impl HbSolver {
             .prescribed_integral_rates()
             .map_err(Error::InvalidCircuit)?;
         if plans.is_empty() {
-            return Ok(limits.clone());
+            return Ok((limits.clone(), Vec::new()));
         }
         let budget = |values| {
             ResourceLimitError::ensure(
@@ -114,13 +228,15 @@ impl HbSolver {
             )
             .map_err(Error::from)
         };
-        budget(plans.len())?;
+        let input_values = if retained { 0 } else { self.unknowns() };
+        budget(plans.len().saturating_add(input_values))?;
+        let mut unresolved = vec![false; input_values];
         let mut primitives: Vec<Option<Primitive>> = Vec::with_capacity(plans.len());
         let mut values = plans.len();
         let mut transform = None;
         let mut forced: Vec<Option<Vec<Value>>> = Vec::new();
         let mut groups = Vec::new();
-        let mut forced_values = 0usize;
+        let mut forced_values = input_values;
         if !retained && plans.iter().any(|plan| plan.dependencies().is_none()) {
             let sources = sources.ok_or_else(|| {
                 Error::InvalidConfig(
@@ -138,7 +254,7 @@ impl HbSolver {
                 .saturating_add(self.exact_mna_branches().len())
                 .saturating_add(1)
                 .saturating_mul(12);
-            budget(values.saturating_add(topology))?;
+            budget(values.saturating_add(input_values).saturating_add(topology))?;
             let mut forest = self
                 .forced_voltage_forest(false, abort)
                 .map_err(device_error)?;
@@ -146,8 +262,9 @@ impl HbSolver {
                 .retain_coordinates(plans.iter().flat_map(|plan| plan.coordinates()), abort)
                 .map_err(device_error)?;
             groups = forest.groups;
-            forced_values =
-                topology.saturating_add(forest.nodes.len().saturating_mul(grid.sample_count()));
+            forced_values = input_values
+                .saturating_add(topology)
+                .saturating_add(forest.nodes.len().saturating_mul(grid.sample_count()));
             budget(
                 values
                     .saturating_add(forced_values)
@@ -175,6 +292,50 @@ impl HbSolver {
                     }
                 }
                 forced[node.node] = Some(samples);
+            }
+        }
+        if !retained && let Some(driven) = driven {
+            if driven.len() != self.unknowns()
+                || driven.iter().flatten().any(|row| row.len() != grid.len())
+            {
+                return Err(Error::InvalidConfig(
+                    "nonlinear input trajectories differ from the periodic basis".into(),
+                ));
+            }
+            if transform.is_none() {
+                transform = Some(QuasiPeriodicTransform::new_with_abort(grid.clone(), abort)?);
+            }
+            forced.resize(driven.len(), None);
+            groups.extend((groups.len()..driven.len()).map(|i| i + 1));
+            for (row, spectrum) in driven.iter().enumerate() {
+                let Some(spectrum) = spectrum else {
+                    continue;
+                };
+                if !plans
+                    .iter()
+                    .any(|plan| plan.coordinates().any(|index| index == row))
+                {
+                    continue;
+                }
+                if coordinate_group(&groups, &forced, row).is_none() {
+                    continue;
+                }
+                if forced[row].is_none() {
+                    forced_values = forced_values.saturating_add(grid.sample_count());
+                }
+                budget(
+                    values
+                        .saturating_add(forced_values)
+                        .saturating_add(grid.sample_count().saturating_mul(8)),
+                )?;
+                forced[row] = None;
+                forced[row] = Some(
+                    transform
+                        .as_mut()
+                        .expect("allocated transform")
+                        .to_real_samples_with_abort(spectrum, abort)?,
+                );
+                groups[row] = 0;
             }
         }
         if !retained
@@ -243,6 +404,13 @@ impl HbSolver {
                 plan.dependencies_with_offsets(|i| coordinate_group(&groups, &forced, i))
             };
             let Some(dependencies) = dependencies else {
+                if !retained {
+                    for coordinate in plan.coordinates() {
+                        if coordinate_group(&groups, &forced, coordinate).is_some() {
+                            unresolved[coordinate] = true;
+                        }
+                    }
+                }
                 primitives.push(None);
                 continue;
             };
@@ -389,7 +557,7 @@ impl HbSolver {
                 retained,
             });
         }
-        Ok(remaining)
+        Ok((remaining, unresolved))
     }
 }
 
@@ -426,7 +594,14 @@ mod tests {
             ..limits.clone()
         };
         assert!(matches!(
-            solver.prepare_quasi_periodic_integrals(grid.clone(), &limited, false, None, &NoAbort),
+            solver.prepare_quasi_periodic_integrals(
+                grid.clone(),
+                &limited,
+                false,
+                None,
+                None,
+                &NoAbort
+            ),
             Err(Error::ResourceLimit(_))
         ));
         assert!(solver.quasi_prescribed_integrals.is_none());
@@ -435,6 +610,7 @@ mod tests {
                 grid,
                 &limits,
                 false,
+                None,
                 None,
                 &CountingAbort::new(32)
             ),

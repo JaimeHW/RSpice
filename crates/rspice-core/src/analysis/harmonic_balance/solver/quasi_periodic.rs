@@ -45,14 +45,45 @@ impl HbSolver {
             return Err(Error::Aborted);
         }
         self.validate_quasi_periodic_circuit()?;
-        let limits = self.prepare_quasi_periodic_integrals(
+        let (prepared, limits, preparation_iterations) = self.prepare_quasi_periodic_carrier(
             grid.clone(),
+            config,
+            sources,
+            seed,
             limits,
-            false,
-            Some(sources),
             abort,
         )?;
-        solve::solve_with_abort(self, grid, config, sources, seed, &limits, abort)
+        let result = if preparation_iterations == 0 {
+            solve::solve_with_abort(
+                self,
+                grid,
+                config,
+                sources,
+                prepared.as_deref().or(seed),
+                &limits,
+                abort,
+            )
+        } else {
+            solve::solve_with_iteration_budget(
+                self,
+                grid,
+                config,
+                sources,
+                prepared.as_deref().or(seed),
+                &limits,
+                config.max_iterations.saturating_sub(preparation_iterations),
+                abort,
+            )
+        };
+        result
+            .map(|solution| solution.with_preparation_iterations(preparation_iterations))
+            .map_err(|error| match error {
+                Error::ConvergenceFailed { iterations, merit } => Error::ConvergenceFailed {
+                    iterations: iterations + preparation_iterations,
+                    merit,
+                },
+                other => other,
+            })
     }
 
     /// Linearize a real driven QP orbit once, then solve complex translated
@@ -100,6 +131,7 @@ impl HbSolver {
             grid.clone(),
             &working_limits,
             true,
+            None,
             None,
             abort,
         )?;
@@ -197,6 +229,7 @@ impl HbSolver {
             &working_limits,
             true,
             None,
+            None,
             abort,
         )?;
         let mut work =
@@ -238,7 +271,7 @@ impl HbSolver {
         }
         self.validate_quasi_periodic_circuit()?;
         let limits =
-            self.prepare_quasi_periodic_integrals(grid.clone(), limits, true, None, abort)?;
+            self.prepare_quasi_periodic_integrals(grid.clone(), limits, true, None, None, abort)?;
         crate::analysis::quasi_periodic::noise::visit_with_abort(
             self,
             grid,
@@ -458,6 +491,23 @@ impl Circuit for HbSolver {
         phases: &[Value],
         jacobian: bool,
     ) -> Result<Sample, Error> {
+        self.quasi_periodic_sample_selected(state, phases, jacobian, None)
+    }
+}
+
+impl HbSolver {
+    pub(in crate::analysis::harmonic_balance::solver) fn quasi_periodic_sample_selected(
+        &mut self,
+        state: &[Value],
+        phases: &[Value],
+        jacobian: bool,
+        selected: Option<&[bool]>,
+    ) -> Result<Sample, Error> {
+        if selected.is_some_and(|rows| rows.len() != state.len()) {
+            return Err(Error::InvalidCircuit(
+                "selected periodic rows do not match the full state".into(),
+            ));
+        }
         // A registry without phase inputs contains only autonomous constitutive laws.
         let phases = if self.behavioral_phase_dimensions == 0 {
             &[]
@@ -465,13 +515,21 @@ impl Circuit for HbSolver {
             phases
         };
         let mut sample = self
-            .quasi_periodic_native_sample(state, phases, jacobian)
+            .quasi_periodic_native_sample_selected(state, phases, jacobian, selected)
             .map_err(device_error)?;
         // Legacy compact devices use num_nodes as the ground sentinel.
         // Including branch-current coordinates would turn ground into the
         // first branch current when evaluating their terminal voltages.
         let voltages = &state[..self.num_nodes];
         for device in &self.nonlinear_devices {
+            if selected.is_some_and(|rows| {
+                !device
+                    .terminals
+                    .iter()
+                    .any(|&node| node < self.num_nodes && rows[node])
+            }) {
+                continue;
+            }
             sample.current.extend(
                 device
                     .evaluate(voltages)
