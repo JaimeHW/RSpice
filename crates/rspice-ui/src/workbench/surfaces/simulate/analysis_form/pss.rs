@@ -162,10 +162,10 @@ const MAX_ITERATIONS_HINT: &str = "Shooting-Newton corrections allowed on each i
                                    grid. The solve refines the grid until the orbits agree, \
                                    and every grid must converge within this limit.";
 
-const ABSOLUTE_TOLERANCE_HINT: &str = "A coordinate converges on this or on the period \
-                                       tolerance, whichever it meets first, in its own unit \
-                                       (V, A, or K). It is what lets a node resting at zero \
-                                       converge at all, where a relative error is undefined.";
+const ABSOLUTE_TOLERANCE_HINT: &str = "Each state converges when its change over one period \
+                                       meets this absolute tolerance or the relative period tolerance. \
+                                       Use the state's own units: V, A, K, or the integrand's units \
+                                       times seconds for each sdt(). This also handles states near zero.";
 
 const DAMPING_HINT: &str = "Fraction of each Newton correction that is taken. Below one it \
                             converges more slowly and survives stiffer circuits; the engine \

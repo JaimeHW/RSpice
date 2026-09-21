@@ -49,7 +49,8 @@ pub struct PssRunConfig {
     pub tstab: Value,
     /// Shooting-Newton correction limit per integration grid.
     pub max_iterations: usize,
-    /// Absolute periodicity tolerance, in each coordinate's SI unit.
+    /// Absolute periodicity tolerance, in each coordinate's own units,
+    /// including the authored integral units for behavioral SDT states.
     pub abstol: Value,
     /// Newton damping factor in `[0.1, 1.0]`.
     pub damping: Value,
