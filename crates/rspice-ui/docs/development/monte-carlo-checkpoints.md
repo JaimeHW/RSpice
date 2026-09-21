@@ -8,8 +8,14 @@ canonical configured base, prerequisite, measurement and saved-OP contracts. A
 caller can retain completed trials, publish snapshots at a chosen trial cadence,
 resume only missing circuits, and select a new trial range against the same frozen
 source. Histogram changes reuse the observations; statistics and confidence are
-recomputed over the requested range. Source and configured-plan revision changes
-still require a new population.
+recomputed over the requested range. Source and effective configuration changes
+still require a new population. The evaluator compatibility digest ignores the
+plan revisions of the selected base, its configured OP prerequisite and its
+postprocessor producer. Their full configurations and stable instance identities
+remain bound, including the original source, snapshot, result and numerical
+values of a saved OP state. The ordinary prepared-task digest still records all
+authored revisions. This compatibility contract uses evaluator domain v2; the
+earlier internal v1 journal identity is rejected rather than silently reclassified.
 
 The Studio binary envelope retains every trial's measurement verdict alongside
 its exact core values. A finite `.MEAS` value that misses GOAL/TOL remains a failed
@@ -52,6 +58,5 @@ The form and checkpoint selection/import/export still need integration before
 this is an exposed Studio checkpoint workflow. The legacy all-node operating
 point Monte Carlo route also needs checkpoint support. Existing Studio batch
 controls continue to publish separate populations as described above. A generated
-`.MC` card and authored plan revision are still part of the frozen population
-identity; changing that card or revision is not currently equivalent to requesting
-a new range against an existing journal.
+`.MC` card is still part of the frozen source identity; changing that card is not
+currently equivalent to requesting a new range against an existing journal.
