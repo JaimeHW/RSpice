@@ -14,3 +14,9 @@
 mod result;
 
 pub use result::{NoiseContributor, PhaseNoisePoint, PnoiseResult};
+
+mod sampled;
+pub use sampled::{
+    PeriodicNoiseEdge, PeriodicNoiseEdgeDirection, PeriodicNoiseSamplePoint, PeriodicNoiseSampling,
+    PeriodicNoiseSamplingEvidence,
+};
