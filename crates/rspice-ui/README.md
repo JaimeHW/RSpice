@@ -66,6 +66,21 @@ Other user-facing machinery, all verified in source:
   module, not in the application; production issuance is the platform
   backend's cold-key flow.
 
+## Harmonic balance operating point
+
+A Simulation Studio HB run uses its explicitly bound OP instance's temperature,
+supply scaling and full node-voltage/branch-current seed. The default and `TAHB=2`
+startup use that seed directly; `TAHB=1` starts its transient-assisted initialization
+from that same state. Explicit `TAHB=0` retains a zero start at the selected physical
+operating environment. OP and HB numerical overrides remain separate.
+
+The retained HB state carries the bound temperature and supply settings through
+worker transport to PAC, PXF, PNOISE, HBSP and HBNOISE. Temperature-dependent parser
+expressions resolve at that temperature before the circuit is built. A consumer
+need not repeat the producer's startup-mode option. Changed circuit/model data or
+tampered retained state are still rejected. Manual `.HB` decks receive one implicit
+OP when none is authored; multiple OP producers are rejected as ambiguous.
+
 ## Harmonic balance current outputs
 
 HB results expose the engine's retained MNA branch currents as `I(device)`,
