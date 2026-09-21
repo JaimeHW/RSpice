@@ -190,7 +190,9 @@ where
         let mut verdicts = Vec::new();
         for observation in observations {
             values.push(observation.value.expect("observed study value"));
-            if retaining || !observation.passed {
+            // The numerical summary cannot reconstruct physical units. Keep
+            // typed successful observations even when no checkpoint is requested.
+            if retaining || !observation.passed || observation.unit.is_some() {
                 verdicts.push(observation);
             }
         }
