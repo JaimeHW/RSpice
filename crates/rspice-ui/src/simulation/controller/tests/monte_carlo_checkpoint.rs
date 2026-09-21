@@ -187,3 +187,71 @@ fn monte_carlo_checkpoint_retention_obeys_budget_and_rejects_unrequested_capture
         1
     );
 }
+
+#[test]
+fn monte_carlo_checkpoint_controls_resolve_evidence_before_preparation() {
+    use crate::simulation::dialog::{
+        McDialogState,
+        mc::{McConfig, checkpoint::McCheckpointConfig},
+    };
+    use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
+    let (request, bytes, _) = completed_checkpoint_fixture();
+    let (mut controller, mut state) = controller_fixture(request);
+    controller.runner.store_checkpoint_for_test(bytes.clone());
+    controller.publish_monte_carlo_checkpoint(&mut state);
+    let digest = state
+        .simulation
+        .active_analysis()
+        .unwrap()
+        .monte_carlo_checkpoint
+        .as_ref()
+        .unwrap()
+        .digest();
+    let plan = state.sim_setup.analysis_plan.as_mut().unwrap();
+    let (op, _) = plan.insert(AnalysisKind::OperatingPoint).unwrap();
+    let (mc, _) = plan.insert(AnalysisKind::MonteCarlo).unwrap();
+    plan.edit(mc, |draft| {
+        *draft = AnalysisDraft::MonteCarlo(McDialogState::from_config(&McConfig {
+            base_analysis: Some(op),
+            measurements: vec!["scalar:V(out)".into()],
+            checkpoint: Some(McCheckpointConfig {
+                publish_every: 4.try_into().unwrap(),
+                resume: vec![digest],
+            }),
+            ..Default::default()
+        }))
+    })
+    .unwrap();
+    let frozen = plan.freeze().unwrap();
+    let sealed = state
+        .model_library_manager
+        .seal_execution_sources()
+        .unwrap();
+    let queue = controller
+        .build_queue_from_plan(&state, &frozen, &sealed)
+        .unwrap();
+    let task = queue.iter().find(|task| task.instance_id() == mc).unwrap();
+    let options = &task.queued_analysis().spec_options;
+    assert_eq!(options.study_base.as_ref().unwrap().instance_id, op);
+    let policy = options.mc_checkpoint.as_ref().unwrap();
+    assert_eq!(policy.publish_every.get(), 4);
+    assert!(
+        policy.trial_range.is_none(),
+        "authored run range stays on the MC card"
+    );
+    let input = policy.resume.as_ref().unwrap();
+    assert_eq!(input.digest(), digest);
+    state.simulation.runs.clear();
+    assert_eq!(
+        input.decode().unwrap().completed_trials(),
+        1,
+        "prepared bytes outlive retained history"
+    );
+    assert!(
+        controller
+            .build_queue_from_plan(&state, &frozen, &sealed)
+            .unwrap_err()
+            .iter()
+            .any(|error| error.contains("no longer retained"))
+    );
+}

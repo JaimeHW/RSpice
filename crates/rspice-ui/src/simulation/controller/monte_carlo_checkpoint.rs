@@ -77,3 +77,59 @@ impl SimulationController {
         Ok(())
     }
 }
+
+/// Resolve selected history into owned, checked bytes before a task is prepared.
+/// Later history pruning or UI selection changes cannot alter a queued request.
+pub(super) fn request_from_config(
+    state: &AppState,
+    config: Option<&crate::simulation::dialog::mc::checkpoint::McCheckpointConfig>,
+) -> Result<
+    Option<crate::simulation::runner::monte_carlo_checkpoint::MonteCarloCheckpointRequest>,
+    String,
+> {
+    use crate::simulation::runner::monte_carlo_checkpoint::{
+        MonteCarloCheckpointInput, MonteCarloCheckpointRequest,
+    };
+    use crate::simulation::runner::study::monte_carlo::checkpoint::StudyMonteCarloCheckpoint;
+    let Some(config) = config else {
+        return Ok(None);
+    };
+    let limits = rspice_core::ResourceLimits::default();
+    let mut pooled: Option<StudyMonteCarloCheckpoint> = None;
+    for digest in &config.resume {
+        let (analysis, evidence) = state.simulation.runs.iter()
+            .flat_map(|run| &run.analyses)
+            .find_map(|analysis| analysis.monte_carlo_checkpoint.as_ref()
+                .filter(|checkpoint| checkpoint.digest() == *digest)
+                .map(|checkpoint| (analysis, checkpoint)))
+            .ok_or("A selected Monte Carlo checkpoint is no longer retained. Clear its selection or restore the run before preparing again.")?;
+        evidence.validate_for(analysis)?;
+        let checkpoint = StudyMonteCarloCheckpoint::from_bytes_with_limits(
+            evidence.bytes(),
+            limits,
+            &rspice_core::NoAbort,
+        )
+        .map_err(|error| error.to_string())?;
+        if let Some(pooled) = &mut pooled {
+            pooled
+                .merge_with_limits(&checkpoint, limits, &rspice_core::NoAbort)
+                .map_err(|error| {
+                    format!("Selected Monte Carlo checkpoints cannot be pooled: {error}")
+                })?;
+        } else {
+            pooled = Some(checkpoint);
+        }
+    }
+    let resume = pooled
+        .map(|checkpoint| {
+            let bytes = checkpoint.to_bytes_with_limits(limits, &rspice_core::NoAbort)?;
+            MonteCarloCheckpointInput::from_bytes(bytes)
+        })
+        .transpose()
+        .map_err(|error| error.to_string())?;
+    Ok(Some(MonteCarloCheckpointRequest {
+        publish_every: config.publish_every,
+        trial_range: None,
+        resume,
+    }))
+}

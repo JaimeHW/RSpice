@@ -2359,6 +2359,9 @@ fn analysis_form_body(
             // Under the analysis's own parameters, because that is what they
             // are: a bound this analysis states, in the same grid and with the
             // same label over the same well.
+            if let AnalysisDraft::MonteCarlo(setup) = draft {
+                analysis_form::checkpoint_sources(ui, setup, &app.state.simulation, selected);
+            }
             *option_edits = analysis_form::options::fields(ui, app, draft, selected);
         })
         .response

@@ -6,6 +6,7 @@
 //! point population or an exact configured analysis selected from the plan.
 
 use serde::{Deserialize, Deserializer};
+pub mod checkpoint;
 pub mod statistics;
 use statistics::{McCorrelationDraft, McStatisticsConfig, McVariationDraft};
 
@@ -50,6 +51,7 @@ impl McVariationSource {
 /// Monte Carlo analysis configuration
 #[derive(Debug, Clone)]
 pub struct McConfig {
+    pub checkpoint: Option<checkpoint::McCheckpointConfig>,
     /// Zero-based index in the original seeded trial population.
     pub first_trial: u32,
     pub statistics: Option<McStatisticsConfig>,
@@ -84,6 +86,7 @@ pub struct McConfig {
 impl Default for McConfig {
     fn default() -> Self {
         Self {
+            checkpoint: None,
             statistics: None,
             first_trial: 0,
             num_runs: 100,
@@ -103,6 +106,9 @@ impl Default for McConfig {
 
 impl McConfig {
     pub fn validate(&self) -> Result<(), String> {
+        if self.checkpoint.is_some() && self.base_analysis.is_none() {
+            return Err("Select a configured base analysis to retain Monte Carlo trials".into());
+        }
         if let Some(statistics) = &self.statistics {
             if self.variation_source != McVariationSource::DeckStatistics {
                 return Err("Custom statistics require the native statistics sampler".into());
@@ -190,6 +196,7 @@ fn parse_parameter_subset(text: &str) -> Result<Vec<String>, String> {
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct McDialogState {
+    pub checkpoint: checkpoint::McCheckpointDraft,
     pub first_trial: String,
     pub variations: Vec<McVariationDraft>,
     pub correlations: Vec<McCorrelationDraft>,
@@ -215,6 +222,7 @@ pub struct McDialogState {
 impl Default for McDialogState {
     fn default() -> Self {
         Self {
+            checkpoint: Default::default(),
             variations: Vec::new(),
             correlations: Vec::new(),
             first_trial: default_first_trial(),
@@ -240,6 +248,8 @@ impl Default for McDialogState {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PersistedMcDialogState {
+    #[serde(default)]
+    checkpoint: checkpoint::McCheckpointDraft,
     #[serde(default = "default_first_trial")]
     first_trial: String,
     #[serde(default)]
@@ -340,6 +350,7 @@ impl<'de> Deserialize<'de> for McDialogState {
             None => persisted.seed,
         };
         Ok(Self {
+            checkpoint: persisted.checkpoint,
             variations: persisted.variations,
             correlations: persisted.correlations,
             first_trial: persisted.first_trial,
@@ -364,6 +375,7 @@ impl<'de> Deserialize<'de> for McDialogState {
 impl McDialogState {
     pub fn from_config(config: &McConfig) -> Self {
         Self {
+            checkpoint: checkpoint::McCheckpointDraft::from_config(config.checkpoint.as_ref()),
             variations: config
                 .statistics
                 .as_ref()
@@ -487,6 +499,7 @@ impl McDialogState {
             _ => return Err("Invalid mean-confidence estimator".into()),
         };
         let config = McConfig {
+            checkpoint: self.checkpoint.to_config()?,
             statistics: if self.variation_source_idx == 2 {
                 Some(McStatisticsConfig {
                     variations: self

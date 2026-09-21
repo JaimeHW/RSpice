@@ -89,6 +89,25 @@ pub(super) fn fields(
         states_spread,
     );
     confidence_fields(ui, setup);
+    super::sub_header(ui, "Retained trials");
+    super::switch_row(
+        ui,
+        "Retain trials for resume",
+        &mut setup.checkpoint.retain_trials,
+    );
+    input_row_enabled(ui, "Checkpoint every", &mut setup.checkpoint.publish_every, setup.checkpoint.retain_trials)
+        .on_hover_text("Publish a checkpoint after this many newly completed trials. Normal completion also saves the final remainder. A forced browser stop can recover only trials already published.");
+    if setup.checkpoint.retain_trials {
+        field_note(
+            ui,
+            if configured {
+                "Completed trials are kept with the run and saved with the project. Checkpoints count toward the run's storage limit."
+            } else {
+                "Select a configured base analysis above to retain trials for resume."
+            },
+        );
+    }
+
     // Which spread is drawn from is the `From` choice's own answer, and
     // the two rows above say so by going quiet. What they cannot say is
     // how far the deck's statistics reach, and a reader who expects
@@ -180,4 +199,85 @@ fn custom_statistics(ui: &mut Ui, setup: &mut McDialogState) {
     if super::action_line(ui, "+ Add correlation") {
         setup.correlations.push(Default::default());
     }
+}
+
+/// Offer retained evidence without decoding or cloning large trial buffers on
+/// every frame. The controller resolves and validates selected bytes at prepare.
+pub(in crate::workbench::surfaces::simulate) fn checkpoint_sources(
+    ui: &mut Ui,
+    setup: &mut McDialogState,
+    simulation: &crate::state::SimulationState,
+    selected: crate::product::AnalysisInstanceId,
+) {
+    if !setup.checkpoint.retain_trials {
+        return;
+    }
+    super::sub_header(ui, "Resume previous trials");
+    let mut seen = std::collections::HashSet::new();
+    let candidates = simulation
+        .runs
+        .iter()
+        .rev()
+        .flat_map(|run| {
+            run.analyses.iter().filter_map(move |analysis| {
+                if analysis.provenance()?.authored_source_instance_id() != selected {
+                    return None;
+                }
+                let checkpoint = analysis.monte_carlo_checkpoint.as_ref()?;
+                Some((
+                    checkpoint.digest(),
+                    checkpoint.population_identity(),
+                    format!(
+                        "{} · {} · {} trials",
+                        run.label,
+                        analysis.label,
+                        checkpoint.completed_trials()
+                    ),
+                ))
+            })
+        })
+        .filter(|(digest, _, _)| seen.insert(*digest))
+        .collect::<Vec<_>>();
+    if candidates.is_empty() {
+        field_note(
+            ui,
+            "No retained trials for this analysis yet. Run it with trial retention enabled to create a checkpoint.",
+        );
+    } else {
+        field_note(
+            ui,
+            "Select runs to reuse. Matching trials are counted once; only missing indices in the requested range are simulated. Combined runs must use the same circuit, sampler, analysis settings and Run Set point. Those settings are checked again before simulation.",
+        );
+    }
+    let selected_population = candidates
+        .iter()
+        .find(|(digest, _, _)| setup.checkpoint.resume.contains(digest))
+        .map(|(_, population, _)| *population);
+    for (digest, population, label) in &candidates {
+        let mut chosen = setup.checkpoint.resume.contains(digest);
+        let allowed = chosen || selected_population.is_none_or(|selected| selected == *population);
+        ui.add_enabled_ui(allowed, |ui| {
+            if super::switch_row(ui, label, &mut chosen) {
+                if chosen { setup.checkpoint.resume.push(*digest); }
+                else { setup.checkpoint.resume.retain(|id| id != digest); }
+            }
+        }).response.on_hover_text(if allowed { "Reuse these completed trials" } else { "This checkpoint belongs to a different trial population; clear the selection to choose it" });
+    }
+    if setup
+        .checkpoint
+        .resume
+        .iter()
+        .any(|digest| !seen.contains(digest))
+    {
+        field_note(
+            ui,
+            "A selected checkpoint is no longer available in this analysis's run history. Restore its run or clear the selection.",
+        );
+    }
+    if !setup.checkpoint.resume.is_empty()
+        && super::action_line(ui, "Clear selection — simulate all requested trials")
+    {
+        setup.checkpoint.resume.clear();
+    }
+    super::clear_pending_cell(ui);
 }

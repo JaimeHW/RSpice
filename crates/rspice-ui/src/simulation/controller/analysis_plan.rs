@@ -707,8 +707,13 @@ impl SimulationController {
             AnalysisSpec::MonteCarlo { .. } => {
                 let mut draft = state.sim_setup.mc.clone();
                 draft.ensure_initialized();
+                let config = draft.to_config()?;
                 Ok(SpecExecutionOptions {
-                    mc_statistics: draft.to_config()?.statistics,
+                    mc_checkpoint: monte_carlo_checkpoint::request_from_config(
+                        state,
+                        config.checkpoint.as_ref(),
+                    )?,
+                    mc_statistics: config.statistics,
                     ..Default::default()
                 })
             }
