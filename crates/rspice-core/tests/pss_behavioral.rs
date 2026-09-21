@@ -230,15 +230,15 @@ fn pss_behavioral_integrals_support_autonomous_period_and_retained_state() {
         .copied()
         .fold(0.0_f64, |peak, value| peak.max(value.abs()));
     assert!((1.9..2.1).contains(&peak), "oscillation peak {peak}");
-    // The shooting state is reusable and authenticated, but an impulse-noise
-    // projection must not silently omit its new integration coordinates.
-    let error = engine
+    // Both resistors are shunted by integral voltage sources whose inputs do
+    // not sense branch current. Their noise therefore cannot perturb the orbit.
+    let noise = engine
         .run_pnoise_oscillator_from_pss_with_abort(&netlist, config, &[1.0], &point, &NoAbort)
-        .unwrap_err()
-        .to_string();
+        .unwrap();
     assert!(
-        error.contains("noise-injection adapter for behavioral integral states"),
-        "{error}"
+        noise.diffusion_constant < 1e-35,
+        "{}",
+        noise.diffusion_constant
     );
 }
 

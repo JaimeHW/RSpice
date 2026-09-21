@@ -519,12 +519,7 @@ impl Engine {
                 self.run_pss_with_state_abort(netlist, config.clone(), abort)?;
             (pss.period, circuit, matrix, x0)
         };
-        if circuit.behavioral_sources.integral_count() != 0 {
-            return Err(SimulationError::unsupported_capability(
-                "analysis.pnoise.behavioral_integral_noise",
-                "Oscillator noise requires an explicit noise-injection adapter for behavioral integral states",
-            ));
-        }
+        let integral_count = circuit.behavioral_sources.integral_count();
         let f0 = 1.0 / period;
 
         // ------------------------------------------------------------------
@@ -532,6 +527,7 @@ impl Engine {
         // ------------------------------------------------------------------
         let mut base = super::pss::PssStateTrace::default();
         self.pss_set_reactive_state(&mut circuit, &x0)?;
+        circuit.begin_integral_scale_observation();
         let max_step = period / circuit.grid_steps(&config) as f64;
         let seed = self.pss_initial_node_solution(&mut circuit, abort)?;
         self.pss_run_tran_internal(
@@ -548,6 +544,8 @@ impl Engine {
             Some(&mut base),
             abort,
         )?;
+
+        circuit.finish_integral_scale_observation(period);
 
         let n_state = x0.len();
         let n_grid = base.times.len();
@@ -729,11 +727,19 @@ impl Engine {
 
         // ------------------------------------------------------------------
         // Noise projection: per grid point, solve the instantaneously frozen
-        // linearized network for each source's unit current injection; the
-        // state-equation entries are dv_cap/dt_freeze and di_branch/dt_freeze.
+        // linearized network for each source's unit current injection.
+        // Physical companions and SDT must use the same derivative coefficient.
+        // Integral entries come from analytic input derivatives at held state;
+        // subtracting tiny trial increments from accepted history loses them.
         // ------------------------------------------------------------------
         let dt_freeze = period * 1e-9;
-        let coeff = CompanionCoefficients::for_method(IntegrationMethod::BackwardEuler);
+        let coeff = CompanionCoefficients::for_method(if integral_count == 0 {
+            IntegrationMethod::BackwardEuler
+        } else {
+            // The behavioral VM uses a trapezoidal accepted-step update.
+            IntegrationMethod::Trapezoidal
+        });
+        let frozen_rate = coeff.coeff_g / dt_freeze;
         let temperature = self.config.temperature;
         let mut evaluation_frequencies = Vec::with_capacity(offsets.len() + 1);
         evaluation_frequencies.push(0.0);
@@ -755,6 +761,18 @@ impl Engine {
             // node solution: pss_stamp_system reads cap/inductor history.
             self.pss_set_reactive_state(&mut circuit, &base.states[k])?;
             let solution = base.solutions[k].clone();
+            if integral_count != 0 {
+                // Reset installs integration constants at t=0. Move them to the
+                // traced phase before accepting its actual input at zero dt.
+                circuit
+                    .behavioral_sources
+                    .rebase_accepted_history(base.times[k])
+                    .map_err(SimulationError::Circuit)?;
+                circuit
+                    .behavioral_sources
+                    .accept_transient_step(&solution, base.times[k])
+                    .map_err(|error| SimulationError::Circuit(error.to_string()))?;
+            }
             let mut rhs_scratch = vec![0.0; size];
             circuit.prepare_prescribed_forcing(base.times[k] + dt_freeze, abort)?;
             self.pss_stamp_system(
@@ -786,7 +804,7 @@ impl Engine {
                 &circuit,
                 &solution,
                 &private_bjts,
-                1.0 / dt_freeze,
+                frozen_rate,
                 circuit.bjt_noise_snapshots(),
             );
             let mut projection =
@@ -796,12 +814,28 @@ impl Engine {
                     bjt_projection.stamp(node_neg, -1.0, &mut injection)?;
                     let delta = matrix.solve(&injection).map_err(SimulationError::Solver)?;
 
-                    let value = v1_k
+                    let physical_count = n_state - integral_count;
+                    let physical: Value = v1_k
                         .iter()
+                        .take(physical_count)
                         .zip(circuit.project_perturbation(&delta))
-                        .map(|(adjoint, perturbation)| adjoint * perturbation / dt_freeze)
+                        .map(|(adjoint, perturbation)| adjoint * perturbation * frozen_rate)
                         .sum();
-                    Ok(value)
+                    let integral_rates = circuit
+                        .behavioral_sources
+                        .integral_rate_directions(
+                            &solution,
+                            &delta,
+                            &base.states[k][physical_count..],
+                            base.times[k],
+                        )
+                        .map_err(SimulationError::Circuit)?;
+                    let integral: Value = v1_k[physical_count..]
+                        .iter()
+                        .zip(integral_rates)
+                        .map(|(adjoint, rate)| adjoint * rate)
+                        .sum();
+                    Ok(physical + integral)
                 };
 
             Self::configure_noise_physical_constants(

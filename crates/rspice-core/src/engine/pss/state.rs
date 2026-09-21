@@ -598,7 +598,7 @@ impl PssCircuit {
             || self.basis.node_units[neg] == CoordinateUnit::Current
     }
 
-    pub(super) fn begin_integral_scale_observation(&mut self) {
+    pub(in crate::engine) fn begin_integral_scale_observation(&mut self) {
         self.integral_probe_scales.fill(0.0);
         self.observing_integral_scales = !self.integral_probe_scales.is_empty();
     }
@@ -615,7 +615,7 @@ impl PssCircuit {
         }
     }
 
-    pub(super) fn finish_integral_scale_observation(&mut self, period: Value) {
+    pub(in crate::engine) fn finish_integral_scale_observation(&mut self, period: Value) {
         self.observing_integral_scales = false;
         // A dormant state still needs a nonzero derivative probe. One period
         // of unit input supplies a time-aware fallback instead of one V*s.
@@ -1483,8 +1483,8 @@ impl PssCircuit {
     }
 
     /// Map an MNA solution perturbation into independent coordinates while
-    /// holding expression integrals fixed. The oscillator-noise route separately
-    /// refuses integral states until their impulse coupling is represented.
+    /// holding expression integrals fixed. Oscillator noise separately projects
+    /// their instantaneous input derivatives into the integral-rate coordinates.
     pub(in crate::engine) fn project_perturbation<'a>(
         &'a self,
         solution: &'a [Value],

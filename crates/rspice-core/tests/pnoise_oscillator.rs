@@ -24,6 +24,70 @@ const K_B: f64 = 1.380649e-23;
 const T_REF: f64 = 400.15;
 
 #[test]
+fn integral_oscillator_noise_matches_radial_phase_diffusion() {
+    use rspice_core::abort_signal::NoAbort;
+    // x' = w*((1-r^2)*x/10-y+eta_x),
+    // y' = w*((1-r^2)*y/10+x+eta_y). On the unit circle the
+    // normalized adjoint is (-sin,cos)/w. Independent equal voltage
+    // noise S_v on each axis therefore gives c = (S_v/2)*(1/2+1/2).
+    // One input uses a voltage; the other senses a shorted resistor's
+    // branch current, scaled by R to give the same voltage-noise PSD.
+    for (rate, physical_y) in [(1e3, false), (1e9, false), (1e3, true)] {
+        let y_equation = if physical_y {
+            format!(
+                "cy y 0 {}\nby y 0 i=-((1-v(x)*v(x)-v(y)*v(y))*v(y)/10+v(x)+1k*i(vsense))",
+                1.0 / rate
+            )
+        } else {
+            format!("by y 0 v={rate}*sdt((1-v(x)*v(x)-v(y)*v(y))*v(y)/10+v(x)+1k*i(vsense))")
+        };
+        let netlist = Netlist::parse(&format!(
+            "Radial integral noise\n\
+            bx x 0 v=.1+{rate}*sdt((1-v(x)*v(x)-v(y)*v(y))*v(x)/10-v(y)+v(nx))\n\
+            {y_equation}\nrnx nx 0 1k\nrny ny 0 1k\nvsense ny 0 0\n.options temp=127\n.end\n",
+        ))
+        .unwrap();
+        let engine = Engine::default().resolved_for_netlist(&netlist);
+        let mut config = PssConfig::autonomous()
+            .with_period_guess(std::f64::consts::TAU / rate)
+            .with_oscillator_node("x")
+            .with_tstab_periods(25)
+            .with_points_per_period(256)
+            .with_tolerance(1e-8);
+        config.abstol = 1e-10 / rate;
+        let point = engine
+            .run_pss_operating_point_with_abort(&netlist, config.clone(), &NoAbort)
+            .unwrap();
+        let offsets = [rate / 100.0, rate / 10.0];
+        let result = engine
+            .run_pnoise_oscillator_from_pss_with_abort(&netlist, config, &offsets, &point, &NoAbort)
+            .unwrap_or_else(|error| panic!("rate={rate}, physical_y={physical_y}: {error}"));
+        let expected = 2.0 * K_B * T_REF * 1e3;
+        assert!(
+            (result.diffusion_constant / expected - 1.0).abs() < 0.02,
+            "rate={rate}, physical_y={physical_y}: c={} vs {expected}",
+            result.diffusion_constant
+        );
+        for name in ["rnx", "rny"] {
+            let contribution = result
+                .phase_noise_contributors
+                .iter()
+                .find(|(device, _)| device.eq_ignore_ascii_case(name))
+                .unwrap();
+            for (index, &offset) in offsets.iter().enumerate() {
+                let expected_psd = expected / (point.analysis().period * offset).powi(2);
+                assert!(
+                    (contribution.1[index] / expected_psd - 1.0).abs() < 0.02,
+                    "rate={rate}, physical_y={physical_y}, {name}: {} vs {expected_psd}",
+                    contribution.1[index]
+                );
+            }
+        }
+        assert!((result.phase_error_psd[0] / result.phase_error_psd[1] - 100.0).abs() < 1e-9);
+    }
+}
+
+#[test]
 fn rlc_oscillator_phase_noise_matches_the_demir_constant() {
     // L = C = 1u (Z0 = 1 ohm, f0 = 159.155 kHz), tank R = 1k. The cubic
     // b-source restores the net -0.05 S small-signal startup conductance,

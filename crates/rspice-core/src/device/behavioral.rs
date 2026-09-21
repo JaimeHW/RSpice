@@ -20,6 +20,7 @@ use thiserror::Error;
 
 mod breakpoints;
 mod history;
+mod integrals;
 pub(crate) use history::BehavioralAcceptedState;
 mod periodicity;
 mod quasi_periodic;
@@ -233,6 +234,8 @@ pub struct BehavioralVoltageSource {
     ast: Expr,
     /// Compiled expression
     pub program: CompiledExpr,
+    /// Explicit accepted integral coordinates and their input equations.
+    integral_equations: Option<integrals::IntegralEquations>,
     /// VM for evaluation
     vm: Vm,
     /// Compiled-expression node references mapped to circuit solution indices
@@ -385,6 +388,7 @@ impl BehavioralVoltageSource {
             expression_excludes_voltage_output_from_transient_lte(&ast);
         let frequency_dependent = expression_depends_on_frequency(&ast);
         let program = compile(&ast);
+        let integral_equations = integrals::IntegralEquations::new(&ast, &program);
 
         Ok(Self {
             name,
@@ -393,6 +397,7 @@ impl BehavioralVoltageSource {
             branch_ordinal,
             ast,
             program,
+            integral_equations,
             vm: Vm::new(),
             node_bindings: Vec::new(),
             branch_bindings: Vec::new(),
@@ -681,6 +686,7 @@ impl BehavioralVoltageSource {
                     },
                     DerivativeTarget::Node(idx),
                 )
+                .or_else(|| self.integral_partial(time, DerivativeTarget::Node(idx)))
                 .map(Ok)
                 .unwrap_or_else(|| self.estimate_node_partial(idx, f0, time))?
             } else {
@@ -704,6 +710,7 @@ impl BehavioralVoltageSource {
                     },
                     DerivativeTarget::Branch(idx),
                 )
+                .or_else(|| self.integral_partial(time, DerivativeTarget::Branch(idx)))
                 .map(Ok)
                 .unwrap_or_else(|| self.estimate_branch_partial(idx, f0, time))?
             } else {
@@ -2037,6 +2044,8 @@ pub struct BehavioralCurrentSource {
     ast: Expr,
     /// Compiled expression
     pub program: CompiledExpr,
+    /// Explicit accepted integral coordinates and their input equations.
+    integral_equations: Option<integrals::IntegralEquations>,
     /// VM for evaluation
     vm: Vm,
     /// Compiled-expression node references mapped to circuit solution indices
@@ -2138,6 +2147,7 @@ impl BehavioralCurrentSource {
             .map_err(|e| format!("Invalid behavioral expression '{}': {}", expression, e))?;
         let frequency_dependent = expression_depends_on_frequency(&ast);
         let program = compile(&ast);
+        let integral_equations = integrals::IntegralEquations::new(&ast, &program);
 
         Ok(Self {
             name,
@@ -2145,6 +2155,7 @@ impl BehavioralCurrentSource {
             node_neg,
             ast,
             program,
+            integral_equations,
             vm: Vm::new(),
             node_bindings: Vec::new(),
             branch_bindings: Vec::new(),
@@ -2414,6 +2425,7 @@ impl BehavioralCurrentSource {
                     },
                     DerivativeTarget::Node(idx),
                 )
+                .or_else(|| self.integral_partial(time, DerivativeTarget::Node(idx)))
                 .map(Ok)
                 .unwrap_or_else(|| self.estimate_node_partial(idx, f0, time))?
             } else {
@@ -2437,6 +2449,7 @@ impl BehavioralCurrentSource {
                     },
                     DerivativeTarget::Branch(idx),
                 )
+                .or_else(|| self.integral_partial(time, DerivativeTarget::Branch(idx)))
                 .map(Ok)
                 .unwrap_or_else(|| self.estimate_branch_partial(idx, f0, time))?
             } else {
