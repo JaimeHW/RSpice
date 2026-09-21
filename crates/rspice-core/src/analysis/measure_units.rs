@@ -7,7 +7,7 @@ mod native;
 mod parse;
 pub(super) use native::annotate_native;
 
-pub use infer::measurement_units;
+pub use infer::{expression_unit, measurement_units};
 
 pub(super) fn annotate(
     statements: &[&crate::netlist::measure::MeasureStatement],

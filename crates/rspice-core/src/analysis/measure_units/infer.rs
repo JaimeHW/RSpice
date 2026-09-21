@@ -31,6 +31,23 @@ pub fn measurement_units(
         .collect()
 }
 
+/// Infer a scalar expression from probe syntax and known producer signal units.
+/// Undeclared parameter dimensions remain unknown.
+pub fn expression_unit(text: &str, signals: &HashMap<String, MeasurementUnit>) -> MeasurementUnit {
+    Inference {
+        statements: &[],
+        axis: None,
+        signals: signals
+            .iter()
+            .map(|(name, unit)| (name.to_ascii_uppercase(), unit.clone()))
+            .collect(),
+        names: HashMap::new(),
+        units: Vec::new(),
+        visiting: Vec::new(),
+    }
+    .signal(text, 0, &MeasurementUnit::Unknown)
+}
+
 struct Inference<'a> {
     statements: &'a [&'a MeasureStatement],
     axis: Option<&'a MeasurementUnit>,
