@@ -7,6 +7,8 @@
 //! expressions persist with the workspace ([`SpecEntry`]), while the docbar
 //! opens their inline editor.
 
+mod measurement_builder;
+
 use std::borrow::Cow;
 use std::collections::HashSet;
 
@@ -168,6 +170,7 @@ pub struct SpecDraft {
     pub measurement: String,
     pub expression: String,
     pub define_measurement: bool,
+    measurement_builder: Option<measurement_builder::MeasurementBuilder>,
     comparison: ComparisonDraftKind,
     /// Minimum/maximum limit, range minimum, or equality target.
     pub primary_limit: String,
@@ -214,6 +217,7 @@ impl SpecDraft {
             measurement: definition.measurement.clone(),
             expression: definition.expression.clone(),
             define_measurement: definition.define_measurement,
+            measurement_builder: None,
             comparison,
             primary_limit,
             secondary_limit,
@@ -1722,6 +1726,24 @@ fn show_editor(ui: &mut Ui, state: &mut AppState) {
                         "Reference an existing result; expression text is descriptive."
                     });
                 });
+                if draft.define_measurement {
+                    ui.push_id(("measurement-builder", idx), |ui| {
+                        if draft.measurement_builder.is_none() && ui.button("Build measurement card…").clicked() {
+                            draft.measurement_builder = Some(measurement_builder::MeasurementBuilder::for_card(&draft.expression));
+                        }
+                        let mut close = false;
+                        if let Some(builder) = &mut draft.measurement_builder {
+                            ui.group(|ui| {
+                                if let Some(card) = builder.show(ui, &draft.measurement) {
+                                    draft.expression = card;
+                                    close = true;
+                                }
+                                close |= ui.button("Close builder").clicked();
+                            });
+                        }
+                        if close { draft.measurement_builder = None; }
+                    });
+                }
                 ui.horizontal(|ui| {
                     ui.add_space(10.0);
                     egui::ComboBox::from_id_salt(("spec-comparison", idx))
