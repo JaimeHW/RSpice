@@ -97,6 +97,25 @@ cosine-reference phase in degrees. The harmonic index cannot exceed the selected
 PSS retention count. `scalar:pss.frequency`, `scalar:pss.period` and
 `scalar:pss.iterations` expose the solved frequency, period and shooting corrections.
 
+## Quasi-periodic operating-point handoff
+
+A Simulation Studio QPSS run uses its bound operating-point instance's resolved
+temperature and explicitly selected supply sources. The temperature is applied before
+parsing so temperature-dependent parameters use the same environment as the solver.
+With DC initialization enabled,
+the full OP node/branch solution seeds QPSS; with it disabled, QPSS starts from zero
+at the same physical run point. QPAC, QPXF and QPNOISE receive that physical environment
+with the retained QPSS state, including when the state crosses a browser worker.
+Manual QP decks without an authored `.OP` get one implicit OP task; multiple `.OP`
+producers must be made unambiguous before execution.
+
+The prepared handoff identifies the circuit source before analysis-local numerical
+options are appended and separately checks the actual dispatched deck. OP and QPSS
+can therefore use different solver settings on the same circuit; changing the
+circuit or the carried environment invalidates the handoff. Downstream QP analyses
+still authenticate their materialized circuit against the retained orbit, so an
+incompatible physical/numerical change requires a new QPSS solve.
+
 ## Quasi-periodic analyses in configured studies
 
 Monte Carlo and optimization can select driven QPSS, QPAC, QPXF or QPNOISE.
