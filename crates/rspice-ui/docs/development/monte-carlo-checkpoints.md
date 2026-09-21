@@ -54,9 +54,19 @@ their existing digests. Saving during execution keeps the committed trials;
 reopening restores an interrupted result, never a completed statistical population.
 Project and session snapshots share this result representation.
 
-The form and checkpoint selection/import/export still need integration before
-this is an exposed Studio checkpoint workflow. The legacy all-node operating
-point Monte Carlo route also needs checkpoint support.
+Configured-study forms expose trial retention and checkpoint cadence (default:
+every ten newly completed trials). A second section selects retained journals
+from the same authored analysis. Candidates with different population identities
+cannot be selected together. Preparation validates and pools the selected journals
+into owned request bytes; subsequent history pruning cannot mutate that request.
+Missing selections reject a new preparation. Inactive editor buffers survive
+JSON/RON round trips without influencing execution. A fully cached run publishes
+its journal once even when no new circuit is evaluated.
+
+Checkpoint inspection/import/export, the legacy all-node operating-point route
+and browser runtime verification still need integration. A selected resume pool
+belongs to one physical Run Set point; reusing distinct populations across a
+multi-point request needs separate per-point routing.
 
 Core population domain v2 permits literal `.MC` run counts, START, CONFIDENCE,
 CI, RESAMPLES and BOOTSEED to change while retaining exact trial identity. The
