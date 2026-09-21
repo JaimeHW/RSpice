@@ -1000,10 +1000,11 @@ struct ScheduledCheckpointSink<'a> {
 
 /// The interval one resolved transient run covers.
 #[derive(Clone, Copy)]
-struct TransientRunWindow {
+struct TransientRunWindow<'a> {
     tstop: Value,
     max_step: Value,
     startup_mode: TransientStartupMode,
+    dc_seed: Option<&'a super::PeriodicDcOperatingPointSeed>,
 }
 
 /// How a resumed run picks up: the checkpoint to resume from, how strictly it
@@ -2936,6 +2937,42 @@ impl Engine {
         engine.run_tran_with_abort_resolved(netlist, tstop, max_step, startup_mode, abort)
     }
 
+    /// Integrate from an exact bound DC state without another startup solve.
+    /// Periodic transient-assisted initialization owns this path; ordinary
+    /// transient and checkpoint APIs retain their existing startup contracts.
+    pub(super) fn run_tran_with_dc_seed_and_abort(
+        &self,
+        netlist: &Netlist,
+        tstop: Value,
+        max_step: Value,
+        dc_seed: &super::PeriodicDcOperatingPointSeed,
+        abort: &dyn AbortSignal,
+    ) -> Result<TransientResult, SimulationError> {
+        validate_transient_window(tstop, max_step)?;
+        self.reset_convergence_quality();
+        let engine = self.resolved_for_netlist(netlist);
+        engine.ensure_transient_request_floor(tstop, max_step)?;
+        engine
+            .run_tran_resolved_with_resume(
+                netlist,
+                netlist,
+                TransientRunWindow {
+                    tstop,
+                    max_step,
+                    startup_mode: TransientStartupMode::OperatingPoint,
+                    dc_seed: Some(dc_seed),
+                },
+                abort,
+                TransientResumePlan {
+                    resume: None,
+                    resume_validation: ResumeValidation::ExactNetlist,
+                    final_checkpoint_retention: FinalCheckpointRetention::Discarded,
+                    scheduled_checkpoint_times: &[],
+                },
+            )
+            .map(|(result, _, _)| result)
+    }
+
     fn inferred_transient_startup_mode(
         netlist: &Netlist,
     ) -> Result<TransientStartupMode, SimulationError> {
@@ -3054,6 +3091,7 @@ impl Engine {
                     tstop,
                     max_step,
                     startup_mode,
+                    dc_seed: None,
                 },
                 abort,
                 TransientResumePlan {
@@ -3179,6 +3217,7 @@ impl Engine {
                     tstop,
                     max_step,
                     startup_mode,
+                    dc_seed: None,
                 },
                 abort,
                 TransientResumePlan {
@@ -3312,6 +3351,7 @@ impl Engine {
                     tstop,
                     max_step,
                     startup_mode,
+                    dc_seed: None,
                 },
                 abort,
                 TransientResumePlan {
@@ -3456,6 +3496,7 @@ impl Engine {
                 tstop,
                 max_step,
                 startup_mode,
+                dc_seed: None,
             },
             abort,
             TransientResumePlan {
@@ -3939,7 +3980,7 @@ impl Engine {
         &self,
         netlist: &Netlist,
         checkpoint_netlist: &Netlist,
-        window: TransientRunWindow,
+        window: TransientRunWindow<'_>,
         abort: &dyn AbortSignal,
         plan: TransientResumePlan<'_>,
     ) -> Result<
@@ -3965,7 +4006,7 @@ impl Engine {
         &self,
         netlist: &Netlist,
         checkpoint_netlist: &Netlist,
-        window: TransientRunWindow,
+        window: TransientRunWindow<'_>,
         abort: &dyn AbortSignal,
         plan: TransientResumePlan<'_>,
     ) -> Result<
@@ -4034,6 +4075,9 @@ impl Engine {
             None
         };
         let circuit = self.build_transient_circuit_with_abort(netlist, window.tstop, abort)?;
+        if let Some(seed) = window.dc_seed {
+            seed.validate_for_circuit(&circuit)?;
+        }
         self.run_tran_prepared(
             netlist,
             checkpoint_netlist,
@@ -4055,7 +4099,7 @@ impl Engine {
         &self,
         netlist: &Netlist,
         checkpoint_netlist: &Netlist,
-        window: TransientRunWindow,
+        window: TransientRunWindow<'_>,
         abort: &dyn AbortSignal,
         plan: TransientResumePlan<'_>,
         prepared: PreparedTransientCircuit,
@@ -4078,7 +4122,7 @@ impl Engine {
         &self,
         netlist: &Netlist,
         checkpoint_netlist: &Netlist,
-        window: TransientRunWindow,
+        window: TransientRunWindow<'_>,
         abort: &dyn AbortSignal,
         plan: TransientResumePlan<'_>,
         prepared: PreparedTransientCircuit,
@@ -4099,6 +4143,7 @@ impl Engine {
             tstop,
             max_step,
             startup_mode,
+            dc_seed,
         } = window;
         let requested_stop = tstop;
         let TransientResumePlan {
@@ -4358,6 +4403,15 @@ impl Engine {
                     checkpoint
                         .initial_solution_mode()
                         .map_err(SimulationError::Circuit)?,
+                    None,
+                )
+            } else if let Some(seed) = dc_seed {
+                // Keep every supplied node and branch coordinate, including
+                // the reactive state. TAHB must not silently select another OP.
+                self.ensure_solved_dc_paths_to_ground(&mut circuit, &mut matrix, seed.solution())?;
+                (
+                    seed.solution().to_vec(),
+                    startup::InitialSolutionMode::DcOperatingPoint,
                     None,
                 )
             } else if uic_requested {

@@ -844,7 +844,7 @@ pub struct PssDcOperatingPointSeed {
     solution: Vec<Value>,
 }
 
-/// Shared exact MNA seed for shooting and quasiperiodic steady-state solvers.
+/// Shared exact MNA seed for shooting, harmonic balance and quasiperiodic solvers.
 /// The original shooting API name remains available for compatibility.
 pub type PeriodicDcOperatingPointSeed = PssDcOperatingPointSeed;
 

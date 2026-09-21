@@ -149,6 +149,7 @@ fn run_with_configuration(
             tstop: stop,
             max_step,
             startup_mode: Engine::inferred_transient_startup_mode(&deck).unwrap(),
+            dc_seed: None,
         },
         abort,
         TransientResumePlan {

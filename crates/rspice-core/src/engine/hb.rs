@@ -33,6 +33,8 @@ use std::collections::BTreeSet;
 mod drive;
 mod envelope_result;
 mod noise_figure;
+#[cfg(test)]
+mod op_seed_tests;
 mod pac;
 mod periodic_ac;
 mod pnoise;
@@ -1097,6 +1099,30 @@ impl Engine {
         config: HbConfig,
         abort: &dyn AbortSignal,
     ) -> Result<HbAnalysisResult, SimulationError> {
+        self.run_hb_with_initial_dc_seed(netlist, config, None, abort)
+    }
+
+    /// Run HB from the exact configured operating point. Default and TAHB=2
+    /// use its full DC node/branch spectrum; TAHB=1 integrates from this state
+    /// before transforming the startup trajectory. TAHB=0 requires the ordinary
+    /// unseeded entry point because it explicitly requests a zero spectrum.
+    pub fn run_hb_with_dc_seed_and_abort(
+        &self,
+        netlist: &Netlist,
+        config: HbConfig,
+        dc_seed: &super::PeriodicDcOperatingPointSeed,
+        abort: &dyn AbortSignal,
+    ) -> Result<HbAnalysisResult, SimulationError> {
+        self.run_hb_with_initial_dc_seed(netlist, config, Some(dc_seed), abort)
+    }
+
+    fn run_hb_with_initial_dc_seed(
+        &self,
+        netlist: &Netlist,
+        config: HbConfig,
+        dc_seed: Option<&super::PeriodicDcOperatingPointSeed>,
+        abort: &dyn AbortSignal,
+    ) -> Result<HbAnalysisResult, SimulationError> {
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }
@@ -1121,6 +1147,7 @@ impl Engine {
             circuit,
             config,
             Some(producer_identity),
+            dc_seed,
             abort,
         )
     }
@@ -1250,6 +1277,54 @@ impl Engine {
         Ok(())
     }
 
+    fn hb_apply_bound_dc_seed(
+        seed: &super::PeriodicDcOperatingPointSeed,
+        state: &mut HbSolverState,
+        nodes: &[String],
+        branches: &[String],
+        canonical_branches: usize,
+        abort: &dyn AbortSignal,
+    ) -> Result<(), SimulationError> {
+        let (voltages, currents) = seed.solution().split_at(seed.node_names().len());
+        for (names, available, values, rows, canonical_count) in [
+            (
+                nodes,
+                seed.node_names(),
+                voltages,
+                &mut state.x,
+                nodes.len(),
+            ),
+            (
+                branches,
+                seed.branch_names(),
+                currents,
+                &mut state.mna_branch_currents,
+                canonical_branches,
+            ),
+        ] {
+            for (row, name) in names.iter().enumerate() {
+                if abort.is_aborted() {
+                    return Err(SimulationError::Aborted);
+                }
+                let Some(index) = available
+                    .iter()
+                    .position(|candidate| candidate.eq_ignore_ascii_case(name))
+                else {
+                    if row >= canonical_count {
+                        // Distributed-network auxiliary coordinates have no DC
+                        // MNA counterpart and begin with an explicit zero guess.
+                        continue;
+                    }
+                    return Err(SimulationError::Circuit(format!(
+                        "HB DC seed has no coordinate '{name}'"
+                    )));
+                };
+                rows[row][0] = Complex64::new(values[index], 0.0);
+            }
+        }
+        Ok(())
+    }
+
     fn hb_interpolate_transient_value(
         times: &[Value],
         values: &[Value],
@@ -1297,6 +1372,7 @@ impl Engine {
         }
     }
 
+    #[cfg(test)]
     fn hb_seed_transient_assisted(
         &self,
         netlist: &Netlist,
@@ -1304,6 +1380,27 @@ impl Engine {
         state: &mut HbSolverState,
         node_names: &[String],
         branch_names: &[String],
+        abort: &dyn AbortSignal,
+    ) -> Result<(), SimulationError> {
+        self.hb_seed_transient_assisted_with_dc_seed(
+            netlist,
+            config,
+            state,
+            node_names,
+            branch_names,
+            None,
+            abort,
+        )
+    }
+
+    fn hb_seed_transient_assisted_with_dc_seed(
+        &self,
+        netlist: &Netlist,
+        config: &HbConfig,
+        state: &mut HbSolverState,
+        node_names: &[String],
+        branch_names: &[String],
+        dc_seed: Option<&super::PeriodicDcOperatingPointSeed>,
         abort: &dyn AbortSignal,
     ) -> Result<(), SimulationError> {
         let first_tone_frequency = config
@@ -1334,20 +1431,28 @@ impl Engine {
             )
             .into());
         }
-        let transient = self
-            .run_tran_with_startup_mode_and_abort(
+        let transient = match dc_seed {
+            Some(seed) => self.run_tran_with_dc_seed_and_abort(
+                netlist,
+                transient_period,
+                max_step,
+                seed,
+                abort,
+            ),
+            None => self.run_tran_with_startup_mode_and_abort(
                 netlist,
                 transient_period,
                 max_step,
                 TransientStartupMode::OperatingPoint,
                 abort,
-            )
-            .map_err(|error| match error {
-                SimulationError::Aborted => SimulationError::Aborted,
-                other => SimulationError::Circuit(format!(
-                    "TAHB=1 first-tone transient initial-state construction failed: {other}"
-                )),
-            })?;
+            ),
+        }
+        .map_err(|error| match error {
+            SimulationError::Aborted => SimulationError::Aborted,
+            other => SimulationError::Circuit(format!(
+                "TAHB=1 first-tone transient initial-state construction failed: {other}"
+            )),
+        })?;
         let hb_period = config.fundamental_freq.recip();
         let sample_times = (0..collocation_points)
             .map(|sample| {
@@ -1442,6 +1547,7 @@ impl Engine {
         circuit: CircuitData,
         config: HbConfig,
         producer_inputs: Option<HbOperatingPointProducerInputs>,
+        dc_seed: Option<&super::PeriodicDcOperatingPointSeed>,
         abort: &dyn AbortSignal,
     ) -> Result<HbAnalysisResult, SimulationError> {
         // Get node count (excluding ground)
@@ -1515,7 +1621,21 @@ impl Engine {
         })?;
         self.ensure_result_values(retained_scalar_values)?;
         let initial_state_strategy = Self::hb_initial_state_strategy(netlist);
-        let dc_seed_policy = Self::hb_dc_seed_policy(netlist)?;
+        if let Some(seed) = dc_seed {
+            if initial_state_strategy == HbInitialStateStrategy::Direct {
+                return Err(HbError::InvalidConfig(
+                    "TAHB=0 direct initialization cannot consume a DC seed".into(),
+                )
+                .into());
+            }
+            seed.validate_for_circuit(&circuit)?;
+        }
+        // The kernel's internal DC construction must not replace a bound OP.
+        let dc_seed_policy = if dc_seed.is_some() {
+            HbDcSeedPolicy::Disabled
+        } else {
+            Self::hb_dc_seed_policy(netlist)?
+        };
         let drive_tones = Self::hb_collect_drive_tones(&config)?;
         Self::hb_validate_drive_tone_sources(&circuit, &drive_tones)?;
 
@@ -1571,12 +1691,22 @@ impl Engine {
         // node/branch spectrum or fail closed.  Only the omitted historical
         // RSpice policy keeps its best-effort DC fallback.
         match initial_state_strategy {
-            HbInitialStateStrategy::TransientAssisted => self.hb_seed_transient_assisted(
-                netlist,
-                &config,
+            HbInitialStateStrategy::TransientAssisted => self
+                .hb_seed_transient_assisted_with_dc_seed(
+                    netlist,
+                    &config,
+                    &mut state,
+                    &node_names,
+                    &periodic_branch_names,
+                    dc_seed,
+                    abort,
+                )?,
+            _ if dc_seed.is_some() => Self::hb_apply_bound_dc_seed(
+                dc_seed.expect("the matched branch has a seed"),
                 &mut state,
                 &node_names,
                 &periodic_branch_names,
+                circuit.num_branches(),
                 abort,
             )?,
             HbInitialStateStrategy::DcOperatingPoint => self.hb_seed_dc_operating_point(

@@ -491,6 +491,7 @@ impl Engine {
             frozen_circuit,
             config.clone(),
             None,
+            None,
             abort,
         )?;
         if netlist_checkpoint_identity(netlist).as_deref()
