@@ -9,6 +9,113 @@ use crate::state::{OutputSelectionMode, SimulationRun};
 const DECK: &str =
     "Grounded probes\nV1 pos 0 DC 2 AC 1 0\nV2 neg 0 DC -1 AC 1 180\nR1 pos neg 1k\n.end\n";
 
+#[test]
+fn hb_device_current_saved_terminal_probes_preserve_hierarchy_phase_and_receipts() {
+    let outputs = [
+        ("Gate", "@/X1/M1[ig]"),
+        ("Drain", "@/X1/M1[id]"),
+        ("Drive", "I(VG)"),
+    ]
+    .map(|(name, expression)| output(SavedOutputKind::RawVoltageOrCurrent, name, expression));
+    let mut outputs: Vec<SavedOutput> =
+        serde_json::from_str(&serde_json::to_string(&outputs).unwrap()).unwrap();
+    let mut deferred = output(
+        SavedOutputKind::RawVoltageOrCurrent,
+        "Deferred gate",
+        "@/X1/M1[ig]",
+    );
+    deferred.save_policy = SavedOutputPolicy::OnDemandFromRetainedState;
+    outputs.push(deferred);
+    assert!(crate::state::workspace::validate_raw_probe("@M1[gm]").is_err());
+    assert!(crate::state::workspace::validate_raw_probe("@M1[ig]garbage").is_err());
+    let deck = "Terminal currents\nVG gate 0 SIN(-1 .001 8meg)\nX1 gate cell\n.subckt cell g\nM1 0 g 0 0 nm L=1u W=10u M=3\n.model nm NMOS LEVEL=1 VTO=.7 KP=2e-5 TOX=20n CGSO=1e-10 CGDO=1e-10 CGBO=1e-11\n.ends\n.options GMIN=0\n.end\n";
+    let spec = AnalysisSpec::HarmonicBalance {
+        tones: vec![crate::simulation::multi_run::HbToneSpec::new(8e6, 3).with_source("VG")],
+        reltol: 1e-9,
+        abstol: 1e-12,
+        max_iterations: 40,
+        damping: 1.0,
+        min_damping: 0.01,
+        oversample: 2,
+        collocation_points: None,
+        max_mixing_order: 3,
+        use_krylov: false,
+        gmres_restart: 12,
+        source_stepping: false,
+        use_exact_jacobian: true,
+        verbose: false,
+    };
+    let instance = AnalysisInstanceId::new();
+    let mut contracts = outputs
+        .iter()
+        .map(|output| {
+            PreparedSavedOutput::prepare(output, instance, &spec)
+                .unwrap()
+                .unwrap()
+        })
+        .collect::<Vec<_>>();
+    PreparedSavedOutput::bind_deck(&mut contracts, &rspice_core::Netlist::parse(deck).unwrap())
+        .unwrap();
+    let result = crate::simulation::runner::pvt_point_evidence::run_hb_spec_with_op(deck, spec);
+    let mut analysis = crate::simulation::SimulationController::new()
+        .convert_to_analysis_result_with_metadata_owned(
+            result,
+            crate::state::AnalysisType::HarmonicBalance,
+            "HB terminal outputs",
+        );
+    apply_saved_output_policy(
+        &mut analysis,
+        crate::simulation::execution::SavePolicy::PlanOwned {
+            output_selection_mode: OutputSelectionMode::ExplicitOnly,
+            retained_dataset_limit: 10,
+            maximum_storage_bytes: u64::MAX,
+            live_streaming_enabled: false,
+            retain_failure_diagnostics: true,
+        },
+        &contracts,
+    );
+    let state = crate::simulation::engine_bridge::nested_dc_tests::history(analysis);
+    let stored = crate::io::project_io::ProjectSimulationResults::from_state(&state);
+    stored.validate().unwrap();
+    let loaded: crate::io::project_io::ProjectSimulationResults =
+        serde_json::from_str(&serde_json::to_string(&stored).unwrap()).unwrap();
+    let mut state = loaded.into_simulation_state().unwrap();
+    let run = &mut state.runs[0];
+    materialize_deferred_saved_output(&mut run.analyses[0], 3).unwrap();
+    let gate = materialized(&run, "Gate", 1)[0];
+    let drain = materialized(&run, "Drain", 1)[0];
+    let drive = materialized(&run, "Drive", 1)[0];
+    let deferred = materialized(&run, "Deferred gate", 1)[0];
+    assert_eq!(deferred.y, gate.y);
+    assert_eq!(
+        deferred.complex.as_ref().unwrap().real,
+        gate.complex.as_ref().unwrap().real
+    );
+    for wave in [gate, drain, drive] {
+        assert_eq!(wave.unit.as_deref(), Some("A"));
+        assert_eq!(*wave.x, [0.0, 8e6, 16e6, 24e6]);
+    }
+    let gate = gate.complex.as_ref().unwrap();
+    let drain = drain.complex.as_ref().unwrap();
+    let drive = drive.complex.as_ref().unwrap();
+    assert!(gate.real[1] > 1e-9);
+    assert!(drain.real[1] < -1e-10);
+    for h in 0..4 {
+        assert!((gate.real[h] + drive.real[h]).abs() < 1e-13);
+        assert!((gate.imag[h] + drive.imag[h]).abs() < 1e-13);
+    }
+    run.analyses[0].saved_output_receipts[0]
+        .source_bindings
+        .as_mut()
+        .unwrap()
+        .references
+        .insert(
+            "@/x1/m1[ig]".to_owned(),
+            crate::state::SavedOutputBoundSource::Ground,
+        );
+    assert!(run.analyses[0].validate_retained_evidence().is_err());
+}
+
 fn dc(nested: bool, retraced: bool) -> AnalysisSpec {
     AnalysisSpec::DcSweep {
         source_name: "V1".to_owned(),

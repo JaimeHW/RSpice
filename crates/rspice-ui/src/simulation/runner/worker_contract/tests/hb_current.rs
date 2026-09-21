@@ -2,10 +2,11 @@ use super::*;
 use num_complex::Complex64;
 
 #[test]
-fn hb_current_spectra_preserve_phasors_units_and_direction_through_worker_transport() {
-    let deck = "HB current outputs\nVDRIVE in 0 DC 1 SIN(1 2 1k)\nR1 in mid 100\nL1 mid out 10m\nC1 out 0 1u\nR2 out 0 1k\n.options GMIN=0\n.end\n";
+fn hb_device_current_spectra_preserve_phasors_units_and_direction_through_worker_transport() {
+    let deck = "HB current outputs\nVDRIVE in 0 DC 1 SIN(1 2 1k)\nR1 in mid 100\nL1 mid out 10m\nC1 out 0 1u\nR2 out 0 1k\nVG gate 0 SIN(-1 .001 1k)\nM1 0 gate 0 0 nm L=1u W=10u\n.model nm NMOS LEVEL=1 VTO=.7 KP=2e-5 TOX=20n CGSO=1e-10 CGDO=1e-10 CGBO=1e-11\n.options GMIN=0\n.end\n";
     let spec = AnalysisSpec::HarmonicBalance {
-        tones: vec![HbToneSpec::new(1000.0, 3).with_source("VDRIVE")],
+        // Both authored sinusoidal sources participate at the same frequency.
+        tones: vec![HbToneSpec::new(1000.0, 3)],
         reltol: 1e-9,
         abstol: 1e-12,
         max_iterations: 40,
@@ -20,16 +21,7 @@ fn hb_current_spectra_preserve_phasors_units_and_direction_through_worker_transp
         use_exact_jacobian: true,
         verbose: false,
     };
-    let result = crate::simulation::runner::spec::run_spec_request(
-        &crate::simulation::engine_bridge::EngineBridge::new(),
-        spec,
-        SpecExecutionOptions::default(),
-        deck,
-        None,
-        &Default::default(),
-        &rspice_core::abort_signal::NoAbort,
-    )
-    .unwrap();
+    let result = crate::simulation::runner::pvt_point_evidence::run_hb_spec_with_op(deck, spec);
     let response = WorkerResponse {
         id: 44,
         outcome: WorkerOutcome::Success(Box::new(
@@ -63,7 +55,15 @@ fn hb_current_spectra_preserve_phasors_units_and_direction_through_worker_transp
         let wave = wave(name);
         Complex64::new(wave.y_values[index], wave.y_imag.as_ref().unwrap()[index])
     };
-    for name in ["I(VDRIVE)", "I(L1)", "I(C1)"] {
+    for name in [
+        "I(VDRIVE)",
+        "I(L1)",
+        "I(C1)",
+        "I(R1)",
+        "I(R2)",
+        "I(M1)",
+        "@M1[ig]",
+    ] {
         assert_eq!(wave(name).y_unit, "A");
         assert_eq!(&wave(name).x_values, frequencies);
     }
@@ -87,6 +87,8 @@ fn hb_current_spectra_preserve_phasors_units_and_direction_through_worker_transp
         ("I(L1)", branch),
         ("I(VDRIVE)", -branch),
         ("I(C1)", capacitor),
+        ("I(R1)", branch),
+        ("I(R2)", output / 1000.0),
         ("V(out)", output),
     ] {
         let actual = value(name, 1);
@@ -105,4 +107,12 @@ fn hb_current_spectra_preserve_phasors_units_and_direction_through_worker_transp
         .value
         .unwrap();
     assert!((measured + branch.im).abs() < 1e-9);
+    assert!((value("@M1[ig]", 1) + value("I(VG)", 1)).norm() < 1e-15);
+    assert!(value("@M1[ig]", 1).re > 1e-14);
+    let gate = result
+        .study_measurement("bin:1:real:@M1[ig]")
+        .unwrap()
+        .value
+        .unwrap();
+    assert_eq!(gate, value("@M1[ig]", 1).re);
 }

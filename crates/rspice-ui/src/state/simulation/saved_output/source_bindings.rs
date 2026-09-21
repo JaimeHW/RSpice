@@ -89,7 +89,8 @@ impl SavedOutputSourceBindings {
             _ => {}
         }
         for (reference, source) in &self.references {
-            let current = reference.starts_with("i(");
+            let current = reference.starts_with("i(")
+                || crate::state::device_current_probe(reference).is_some();
             match source {
                 SavedOutputBoundSource::Ground if current => {
                     return Err("a current source cannot bind to the ground voltage".to_owned());

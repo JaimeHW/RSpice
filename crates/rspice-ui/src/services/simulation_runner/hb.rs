@@ -31,7 +31,7 @@ pub struct HbSpectrum {
 pub struct HbData {
     /// DC operating point voltages
     pub dc_voltages: Vec<(String, Value)>,
-    /// Node voltages and exact retained branch currents on the solved harmonic grid.
+    /// Node voltages, branch currents, and device leads on the solved harmonic grid.
     pub spectra: Vec<HbSpectrum>,
     /// Exact converged state retained for HB-dependent analyses.
     pub operating_point: std::sync::Arc<rspice_core::engine::HbOperatingPoint>,
@@ -308,6 +308,16 @@ pub(crate) fn run_hb_analysis_with_dc_seed_on_materialized_with_abort(
             unit: "A",
             frequencies: hb_result.result.harmonic_frequencies.clone(),
             coefficients: reactive.current_coefficients.clone(),
+        });
+    }
+
+    for current in &hb_result.device_currents {
+        ensure_not_aborted(abort)?;
+        spectra.push(HbSpectrum {
+            name: current.probe.clone(),
+            unit: "A",
+            frequencies: hb_result.result.harmonic_frequencies.clone(),
+            coefficients: current.coefficients.clone(),
         });
     }
 

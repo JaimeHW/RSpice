@@ -205,7 +205,7 @@ pub use simulation::{SensitivityBasisEvidence, SensitivityStudyEvidence, Sensiti
 #[cfg(test)]
 pub use simulation::FftSpectrumModeEvidence;
 pub use simulation::{SavedOutputAxis, SavedOutputBoundSource, SavedOutputSourceBindings};
-pub(crate) use workspace::saved_output_references;
+pub(crate) use workspace::{device_current_probe, saved_output_references};
 // Only the two types the persisted model itself names are hoisted here. The
 // rest of the stimulus vocabulary — the definition record, the draft state
 // machine, the adoption verbs — is read through `state::stimulus_library::*`,

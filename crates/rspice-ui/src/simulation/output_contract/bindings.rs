@@ -73,6 +73,16 @@ fn candidates(
     ground: GroundPolicy,
     aliases: Option<&rspice_core::netlist::InterfaceNodeAliases>,
 ) -> Vec<Candidate> {
+    if let Some((device, quantity)) = crate::state::device_current_probe(signal) {
+        let mut result = vec![Candidate::Trace(signal.to_owned())];
+        if let Some(engine) = crate::state::ProbeTarget::engine_alias(device) {
+            let candidate = Candidate::Trace(format!("@{engine}[{quantity}]"));
+            if !result.contains(&candidate) {
+                result.push(candidate);
+            }
+        }
+        return result;
+    }
     let (current, node) = probe_identity(signal);
     let mut result = vec![Candidate::Trace(signal.to_owned())];
     let mut add = |node: &str| {

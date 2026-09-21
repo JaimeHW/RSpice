@@ -920,6 +920,12 @@ fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPay
                     }),
                     None,
                 );
+                if output.kind == crate::state::SavedOutputKind::RawVoltageOrCurrent {
+                    card_note(
+                        ui,
+                        "Use V(node), V(node+, node-), I(device), or a retained terminal current such as @M1[ig] or @Q1[ic]. HB currents include displacement current and use peak-amplitude phasors. Positive terminal current enters the device.",
+                    );
+                }
                 if output.kind == crate::state::SavedOutputKind::DerivedExpression {
                     card_note(
                         ui,

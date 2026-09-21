@@ -28,6 +28,60 @@ use super::SimulationError;
 
 const TEST_NAMESPACE: uuid::Uuid = uuid::Uuid::from_u128(0x0f22_9f3a_51b8_4cd7_9e21_7c60_5d18_a4b3);
 
+/// Real OP-to-HB execution for output/transport fixtures. Keep the mandatory
+/// dependency contract even when a test does not need a complete plan graph.
+pub(in crate::simulation) fn run_hb_spec_with_op(
+    deck: &str,
+    spec: AnalysisSpec,
+) -> super::SimulationResult {
+    use crate::simulation::execution::{
+        ExecutionArtifactEnvelope, PreparedDependencyBinding, ResolvedExecutionDependencies,
+    };
+    let bridge = crate::simulation::EngineBridge::new();
+    let config = crate::simulation::dialog::OpConfig::default();
+    let result = bridge
+        .run(
+            &crate::simulation::AnalysisConfig::DcOp(config.clone()),
+            deck,
+        )
+        .unwrap();
+    let snapshot = ContentDigest::from_bytes([91; 32]);
+    let binding = PreparedDependencyBinding::dc_operating_point_seed(
+        crate::product::AnalysisInstanceId::new(),
+        ObjectRevision::INITIAL,
+        ContentDigest::from_bytes([92; 32]),
+    );
+    let source = crate::workbench::documents::netlist_document::source_content_digest(deck);
+    let artifact = ExecutionArtifactEnvelope::from_dc_operating_point_result(
+        snapshot,
+        binding.producer_instance_id(),
+        binding.producer_source_revision(),
+        binding.producer_config_digest(),
+        source,
+        &config,
+        &result,
+    )
+    .unwrap()
+    .unwrap();
+    let mut dependencies = ResolvedExecutionDependencies::resolve(
+        snapshot,
+        vec![binding.clone()],
+        &HashMap::from([(binding.producer_instance_id(), artifact)]),
+    )
+    .unwrap();
+    dependencies.bind_source(deck, source);
+    super::spec::run_spec_request(
+        &bridge,
+        spec,
+        Default::default(),
+        deck,
+        None,
+        &dependencies,
+        &NoAbort,
+    )
+    .unwrap()
+}
+
 /// Prepare, authorize and run a corner declaration, retaining every result the
 /// expansion produced.
 pub(crate) fn run_corner_declaration(

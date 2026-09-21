@@ -539,6 +539,10 @@ pub(crate) fn saved_output_references(
         SavedOutputKind::RawVoltageOrCurrent => {
             let expression = expression.trim();
             validate_raw_probe(expression)?;
+            if device_current_probe(expression).is_some() {
+                references.insert(expression.to_ascii_lowercase());
+                return Ok(Some(references));
+            }
             let (function, arguments) = expression.split_once('(').expect("validated probe");
             for argument in arguments[..arguments.len() - 1].split(',') {
                 references.insert(
@@ -584,6 +588,9 @@ fn parse_calculator_expression(expression: &str) -> Result<(), String> {
 /// Quantity identity for a raw probe, including accepted function whitespace.
 /// This is a unit projection; argument validation remains in validate_raw_probe.
 pub(crate) fn raw_probe_unit(expression: &str) -> Option<&'static str> {
+    if device_current_probe(expression).is_some() {
+        return Some("A");
+    }
     let (function, _) = expression.trim().split_once('(')?;
     match function.trim() {
         value if value.eq_ignore_ascii_case("V") => Some("V"),
@@ -593,6 +600,12 @@ pub(crate) fn raw_probe_unit(expression: &str) -> Option<&'static str> {
 }
 
 pub(crate) fn validate_raw_probe(expression: &str) -> Result<(), String> {
+    let expression = expression.trim();
+    if expression.starts_with('@') {
+        return device_current_probe(expression).map(|_| ()).ok_or_else(|| {
+            "device current must use @device[i], @device[id], @device[ig], or another terminal current".to_owned()
+        });
+    }
     let open = expression
         .find('(')
         .ok_or_else(|| "raw output must use V(node), V(node+, node-), or I(source)".to_owned())?;
@@ -614,6 +627,20 @@ pub(crate) fn validate_raw_probe(expression: &str) -> Result<(), String> {
     } else {
         Err("raw output must use V(node), V(node+, node-), or I(source)".to_owned())
     }
+}
+
+/// A terminal-current trace, distinct from a scalar operating-point parameter.
+pub(crate) fn device_current_probe(expression: &str) -> Option<(&str, &str)> {
+    let body = expression.trim().strip_prefix('@')?;
+    let (device, quantity) = body.strip_suffix(']')?.split_once('[')?;
+    parse_probe_target(device).ok()?;
+    if !matches!(
+        quantity.to_ascii_lowercase().as_str(),
+        "i" | "id" | "ig" | "is" | "ib" | "ic" | "ie" | "isub" | "ik" | "ip" | "in" | "icp" | "icn"
+    ) {
+        return None;
+    }
+    Some((device, quantity))
 }
 
 fn validate_device_op_probe(expression: &str) -> Result<(), String> {

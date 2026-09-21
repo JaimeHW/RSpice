@@ -39,6 +39,12 @@ pub(super) fn resolve_bound_raw_probe<'a>(
     complex_domain: bool,
     resolve: impl Fn(&str) -> Result<Source<'a>, String>,
 ) -> Result<WaveformData, String> {
+    if crate::state::device_current_probe(expression).is_some() {
+        return match resolve(expression.trim())? {
+            Source::Waveform(source) => Ok(clone_with_name(source, output_name)),
+            Source::Ground => Err("device current cannot bind to voltage ground".to_owned()),
+        };
+    }
     let (function, arguments) = parse_probe(expression)?;
     let voltage = function.eq_ignore_ascii_case("V");
     if !(voltage && matches!(arguments.len(), 1 | 2)

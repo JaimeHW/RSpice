@@ -1,4 +1,4 @@
-//! Lossless instance-path edits in V/I probe calls. Arithmetic, function
+//! Lossless instance-path edits in V/I calls and terminal-current probes. Arithmetic, function
 //! arguments, quoted text outside probes, and unrelated node names stay authored.
 
 use super::{InstancePath, ProbeTarget};
@@ -10,6 +10,17 @@ pub(crate) fn remap_instance_probes_many(
     expression: &str,
     mappings: &[(InstancePath, InstancePath)],
 ) -> Result<Option<String>, String> {
+    if let Some((device, _)) = crate::state::device_current_probe(expression) {
+        return Ok(remap_argument(device, mappings, true)?.map(|replacement| {
+            let start = expression.len() - expression.trim_start().len() + 1;
+            format!(
+                "{}{}{}",
+                &expression[..start],
+                replacement,
+                &expression[start + device.len()..]
+            )
+        }));
+    }
     let mut chars = expression.char_indices().peekable();
     let mut edits = Vec::new();
     while let Some((start, character)) = chars.next() {
@@ -159,6 +170,28 @@ fn remap_argument(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hb_device_current_terminal_probe_follows_device_and_ancestor_renames() {
+        let mappings = [("/X1", "/X9"), ("/X1/M1", "/X9/M2")].map(|(from, to)| {
+            (
+                InstancePath::parse(from).unwrap(),
+                InstancePath::parse(to).unwrap(),
+            )
+        });
+        assert_eq!(
+            remap_instance_probes_many("  @/X1/M1[ig]  ", &mappings)
+                .unwrap()
+                .as_deref(),
+            Some("  @/X9/M2[ig]  ")
+        );
+        assert_eq!(
+            remap_instance_probes_many("@X1.M3[id]", &mappings)
+                .unwrap()
+                .as_deref(),
+            Some("@/X9/M3[id]")
+        );
+    }
 
     #[test]
     fn simultaneous_probe_swaps_and_nested_renames_use_original_arguments_once() {

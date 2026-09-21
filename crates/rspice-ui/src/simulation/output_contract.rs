@@ -1035,6 +1035,10 @@ fn clone_named_waveform(
 fn find_waveform<'a>(waveforms: &'a [WaveformData], requested: &str) -> Option<&'a WaveformData> {
     let requested = requested.trim();
     find_literal_waveform(waveforms, requested).or_else(|| {
+        if let Some((device, quantity)) = crate::state::device_current_probe(requested) {
+            let engine = crate::state::ProbeTarget::engine_alias(device)?;
+            return find_literal_waveform(waveforms, &format!("@{engine}[{quantity}]"));
+        }
         let (current, node) = probe_identity(requested);
         let engine = crate::state::ProbeTarget::engine_alias(node)?;
         find_literal_waveform(
@@ -1070,6 +1074,9 @@ fn find_literal_waveform<'a>(
 
 fn probe_identity(name: &str) -> (bool, &str) {
     let name = name.trim_matches('|');
+    if crate::state::device_current_probe(name).is_some() {
+        return (true, name);
+    }
     if let Some(inner) = name.get(2..).and_then(|inner| inner.strip_suffix(')')) {
         if name
             .get(..2)
