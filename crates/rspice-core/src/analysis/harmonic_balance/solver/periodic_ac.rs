@@ -1479,6 +1479,7 @@ impl HbSolver {
         )
     }
 
+    #[cfg(test)]
     pub(crate) fn solve_periodic_ac_with_branch_voltages(
         &mut self,
         state: &HbSolverState,

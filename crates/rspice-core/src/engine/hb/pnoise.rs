@@ -25,8 +25,7 @@ use crate::analysis::HbSolverState;
 // Only the unit tests below construct these records directly; the
 // production paths in this module receive them already built.
 use crate::analysis::harmonic_balance::{
-    HbConfig, PeriodicAcExcitation, PeriodicFlickerNoise, PeriodicNoiseSource,
-    PeriodicSidebandWindow, ScaledNonnegative,
+    HbConfig, PeriodicFlickerNoise, PeriodicNoiseSource, PeriodicSidebandWindow, ScaledNonnegative,
 };
 #[cfg(test)]
 use crate::circuit::ResistorValues;
@@ -869,10 +868,6 @@ impl Engine {
         let input_port = input_source
             .map(|name| Self::pac_input_port(&circuit, name, num_nodes))
             .transpose()?;
-        let input_excitation = input_port.as_ref().map(|port| PeriodicAcExcitation {
-            sideband: input_sideband,
-            injections: port.node_injections.clone(),
-        });
         let input_branch_voltage = input_port
             .as_ref()
             .and_then(|port| port.voltage_source_index)
@@ -888,9 +883,6 @@ impl Engine {
                     })
             })
             .transpose()?;
-        let input_branch_voltage_column = input_branch_voltage.as_ref().map(std::slice::from_ref);
-        let input_branch_voltages: &[&[(usize, Complex64)]] =
-            input_branch_voltage_column.as_slice();
 
         let mut result_frequencies = Vec::new();
         result_frequencies
@@ -908,7 +900,7 @@ impl Engine {
             .map_err(|error| {
                 SimulationError::Circuit(format!("pnoise output-result allocation failed: {error}"))
             })?;
-        let mut input_noise = if input_excitation.is_some() {
+        let mut input_noise = if input_port.is_some() {
             let mut values = Vec::new();
             values.try_reserve_exact(offsets.len()).map_err(|error| {
                 SimulationError::Circuit(format!("pnoise input-result allocation failed: {error}"))
@@ -962,8 +954,8 @@ impl Engine {
                     },
                 );
             let mut per_source = Vec::with_capacity(sources.len());
-            solver
-                .solve_periodic_noise_projected_correlations_each(
+            let adjoint = solver
+                .solve_periodic_noise_projected_correlations_with_adjoints_each(
                     &state,
                     PeriodicSidebandWindow {
                         offset_hz: offset,
@@ -993,46 +985,34 @@ impl Engine {
                 slot.1.push(value);
             }
 
-            if let (Some(excitation), Some(acc)) = (input_excitation.as_ref(), input_noise.as_mut())
-            {
-                let response = solver
-                    .solve_periodic_ac_with_branch_voltages(
-                        &state,
-                        PeriodicSidebandWindow {
-                            offset_hz: offset,
-                            sideband_min: -max_sideband,
-                            sideband_max: max_sideband,
-                        },
-                        std::slice::from_ref(excitation),
-                        input_branch_voltages,
+            if let (Some(port), Some(acc)) = (input_port.as_ref(), input_noise.as_mut()) {
+                let input_band = usize::try_from(
+                    i64::from(max_sideband) + i64::from(input_sideband),
+                )
+                .map_err(|_| {
+                    SimulationError::Circuit(
+                        "pnoise input-sideband index exceeds this platform".into(),
                     )
-                    .map_err(|e| {
-                        SimulationError::Circuit(format!(
-                            "pnoise input transfer failed at offset {offset:.6e} Hz: {e}"
-                        ))
-                    })?;
-                let response_for_excitation = response.first().ok_or_else(|| {
-                    SimulationError::Circuit(format!("pnoise input transfer returned no excitation response at offset {offset:.6e} Hz"))
                 })?;
-                let mut h = Complex64::ZERO;
-                for (output, weight) in &projection.terms {
-                    let selected_idx =
-                        usize::try_from(i64::from(max_sideband) + i64::from(output.sideband))
-                            .map_err(|_| {
-                                SimulationError::Circuit(
-                                    "pnoise output-sideband index exceeds this platform".into(),
-                                )
-                            })?;
-                    let voltage = |node: Option<usize>| -> Result<Complex64, SimulationError> {
-                        let Some(node) = node else {
-                            return Ok(Complex64::ZERO);
-                        };
-                        response_for_excitation.get(node).and_then(|bands| bands.get(selected_idx)).copied()
-                            .ok_or_else(|| SimulationError::Circuit(format!("pnoise input transfer returned an incomplete response at offset {offset:.6e} Hz")))
-                    };
-                    h += *weight * (voltage(output.node_pos)? - voltage(output.node_neg)?);
+                let response = |unknown: usize| -> Result<Complex64, SimulationError> {
+                    unknown.checked_mul(sideband_count)
+                        .and_then(|index| index.checked_add(input_band))
+                        .and_then(|index| adjoint.get(index))
+                        .copied()
+                        .ok_or_else(|| SimulationError::Circuit(format!(
+                            "pnoise input transfer has an incomplete adjoint at offset {offset:.6e} Hz"
+                        )))
+                };
+                // Y^T a = p implies p^T Y^-1 b = a^T b. No conjugation:
+                // the noise covariance uses these same complex gain weights.
+                let mut gain = Complex64::ZERO;
+                for &(node, amplitude) in &port.node_injections {
+                    gain += response(node)? * amplitude;
                 }
-                acc.push(checked_input_referred_pnoise(total, h, offset)?);
+                if let Some((branch, amplitude)) = input_branch_voltage {
+                    gain += response(num_nodes + branch)? * amplitude;
+                }
+                acc.push(checked_input_referred_pnoise(total, gain, offset)?);
             }
         }
 

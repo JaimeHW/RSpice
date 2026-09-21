@@ -143,8 +143,27 @@ impl HbSolver {
         outputs: &[PeriodicNoiseProjection],
         sources: &[PeriodicNoiseSource],
         abort: &dyn AbortSignal,
-        mut consume: impl FnMut(usize, &[Complex64]) -> Result<(), HbError>,
+        consume: impl FnMut(usize, &[Complex64]) -> Result<(), HbError>,
     ) -> Result<(), HbError> {
+        self.solve_periodic_noise_projected_correlations_with_adjoints_each(
+            state, window, outputs, sources, abort, consume,
+        )
+        .map(|_| ())
+    }
+
+    /// Return the certified plain-transpose adjoints used for these covariances.
+    /// The buffer is projection-major, then MNA-unknown-major and sideband-min
+    /// to sideband-max. Its dot product with an excitation RHS gives the exact
+    /// projected input gain without a second, independently solved operator.
+    pub(crate) fn solve_periodic_noise_projected_correlations_with_adjoints_each(
+        &mut self,
+        state: &HbSolverState,
+        window: PeriodicSidebandWindow,
+        outputs: &[PeriodicNoiseProjection],
+        sources: &[PeriodicNoiseSource],
+        abort: &dyn AbortSignal,
+        mut consume: impl FnMut(usize, &[Complex64]) -> Result<(), HbError>,
+    ) -> Result<Vec<Complex64>, HbError> {
         if abort.is_aborted() {
             return Err(HbError::Aborted);
         }
@@ -447,7 +466,7 @@ impl HbSolver {
         if abort.is_aborted() {
             return Err(HbError::Aborted);
         }
-        Ok(())
+        Ok(adjoints)
     }
 }
 
