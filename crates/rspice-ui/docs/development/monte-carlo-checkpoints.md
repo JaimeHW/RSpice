@@ -7,7 +7,7 @@ The configured-study runner now supports a lossless internal continuation journa
 canonical configured base, prerequisite, measurement and saved-OP contracts. A
 caller can retain completed trials, publish snapshots at a chosen trial cadence,
 resume only missing circuits, and select a new trial range against the same frozen
-source. Histogram changes reuse the observations; statistics and confidence are
+circuit. Histogram changes reuse the observations; statistics and confidence are
 recomputed over the requested range. Source and effective configuration changes
 still require a new population. The evaluator compatibility digest ignores the
 plan revisions of the selected base, its configured OP prerequisite and its
@@ -56,7 +56,21 @@ Project and session snapshots share this result representation.
 
 The form and checkpoint selection/import/export still need integration before
 this is an exposed Studio checkpoint workflow. The legacy all-node operating
-point Monte Carlo route also needs checkpoint support. Existing Studio batch
-controls continue to publish separate populations as described above. A generated
-`.MC` card is still part of the frozen source identity; changing that card is not
-currently equivalent to requesting a new range against an existing journal.
+point Monte Carlo route also needs checkpoint support.
+
+Core population domain v2 permits literal `.MC` run counts, START, CONFIDENCE,
+CI, RESAMPLES and BOOTSEED to change while retaining exact trial identity. The
+command parser records the reporting spans; source normalization requires the
+same recorded owner and exact logical card, assembled with the parser's comment
+and continuation rules. Sampler fields, parameter names, expressions, other
+source bytes and post-parse AST changes remain bound. Expressions in confidence
+fields are deliberately not normalized because they can consume random draws.
+Includes without an exact root-card match remain conservatively source-bound.
+The ordinary source used for trial replay is never rewritten. Internal core v1
+journals are rejected rather than silently migrated.
+
+Four focused core identity checks cover reporting edits, continuations, scope,
+source/AST mutation, includes, Xyce comments and parameter names. A Studio AC
+resume check verifies that changing to bootstrap confidence reuses completed
+trials, solves only missing indices and matches a fresh run's observations and
+confidence intervals.
