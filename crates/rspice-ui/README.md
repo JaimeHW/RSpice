@@ -376,12 +376,29 @@ Decoding and merging enforce byte, trial and value budgets. Completed rows remai
 in the caller-owned journal when cancellation or checkpoint publication stops a
 run; interrupted trials remain unfinished.
 
-This is runner integration, not yet an exposed Studio checkpoint workflow. The
-form, immutable prepared request, browser worker delivery, project retention and
-checkpoint selection/import/export still need integration. Existing Studio batch
+Checkpoint capture cadence, explicit trial range and resume-input content identity
+now belong to the immutable prepared-request digest. Configured Monte Carlo
+requests reach the checkpoint runner through the normal dispatch path. Resume
+inputs use checked portable bytes; a request without a checkpoint destination is
+rejected before trial execution.
+
+Native execution keeps only the latest complete snapshot in a separate queue,
+independent of terminal success. Browser request protocol 31 transfers resume
+bytes in a Uint8Array, separately from numerical dependency buffers and JSON
+metadata. Workers publish accepted snapshots through a dedicated message before
+returning their terminal result. Ingress checks byte budgets and content identity;
+old worker epochs and request IDs cannot publish into a new run. Browser hard
+cancellation retains the latest snapshot already received by the application;
+unpublished work is not a durable checkpoint.
+
+This is request/runner/worker integration, not yet an exposed Studio checkpoint
+workflow. Controller retention, the form, project persistence and checkpoint
+selection/import/export still need integration. The legacy all-node operating
+point Monte Carlo route also needs checkpoint support. Existing Studio batch
 controls continue to publish separate populations as described above. A generated
-`.MC` card is still part of the frozen source identity; changing that card is not
-currently equivalent to requesting a new range against an existing journal.
+`.MC` card and authored plan revision are still part of the frozen population
+identity; changing that card or revision is not currently equivalent to requesting
+a new range against an existing journal.
 
 ## Module map
 
