@@ -216,3 +216,69 @@ fn studio_monte_carlo_checkpoint_survives_cancellation_and_publication_failure()
     );
     assert_eq!(checkpoint, before);
 }
+
+#[test]
+fn studio_monte_carlo_checkpoint_reuses_trials_after_report_card_edits() {
+    let base = base();
+    let mut checkpoint = None;
+    run(&base, &mut checkpoint, 3..5, &NoAbort, &|_| Ok(())).unwrap();
+    let source = SOURCE.replace(
+        "START=3",
+        "START=3 CONFIDENCE=80 CI BOOTSTRAP RESAMPLES=32 BOOTSEED=77",
+    );
+    let publications = AtomicUsize::new(0);
+    let resumed = run_monte_carlo_with_continuation(
+        &base,
+        McVariationSource::ParameterTolerance,
+        &source,
+        None,
+        None,
+        &NoAbort,
+        Some(MonteCarloContinuation {
+            checkpoint: &mut checkpoint,
+            trial_range: None,
+            publish_every: NonZeroUsize::new(1).unwrap(),
+            publish: &|_| {
+                publications.fetch_add(1, Ordering::Relaxed);
+                Ok(())
+            },
+        }),
+    )
+    .unwrap();
+    assert_eq!(
+        publications.load(Ordering::Relaxed),
+        4,
+        "only missing trials solve"
+    );
+    let fresh = run_monte_carlo(
+        &base,
+        McVariationSource::ParameterTolerance,
+        &source,
+        None,
+        None,
+        &NoAbort,
+    )
+    .unwrap();
+    assert_eq!(resumed.trial_measurements, fresh.trial_measurements);
+    for (actual, expected) in resumed.variables.iter().zip(&fresh.variables) {
+        assert_eq!(actual.samples, expected.samples);
+        assert_eq!(actual.mean_confidence, expected.mean_confidence);
+    }
+    let before = checkpoint.clone();
+    run_monte_carlo_with_continuation(
+        &base,
+        McVariationSource::ParameterTolerance,
+        &source.replace("seed 37", "seed 38"),
+        None,
+        None,
+        &NoAbort,
+        Some(MonteCarloContinuation {
+            checkpoint: &mut checkpoint,
+            trial_range: None,
+            publish_every: NonZeroUsize::new(1).unwrap(),
+            publish: &|_| panic!("incompatible source must not publish"),
+        }),
+    )
+    .unwrap_err();
+    assert_eq!(checkpoint, before);
+}

@@ -1665,8 +1665,11 @@ pub(super) fn parse_mc_command(
     line_num: usize,
     params: &ParamContext,
     max_analysis_points: usize,
+    report_spans: &mut Vec<std::ops::Range<usize>>,
 ) -> Result<MonteCarloCommand, ParseError> {
+    let run_literal = monte_carlo_identity::literal_span(stream, stream.peek().span.start);
     let runs = expect_u64_value(stream, line_num, params, ".MC run count")?;
+    monte_carlo_identity::retain_literal_span(report_spans, run_literal, stream);
     if runs == 0 {
         return Err(ParseError::Syntax {
             line: line_num,
@@ -1698,6 +1701,7 @@ pub(super) fn parse_mc_command(
     };
 
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+        let field_start = stream.peek().span.start;
         let keyword = expect_ident(stream, line_num)?;
         if matches!(
             keyword.as_str(),
@@ -1712,11 +1716,14 @@ pub(super) fn parse_mc_command(
         match keyword.as_str() {
             "CONFIDENCE" => {
                 stream.consume(&TokenKind::Equals);
+                let literal = monte_carlo_identity::literal_span(stream, field_start);
                 command.confidence_pct = expect_value(stream, line_num, params)?;
+                monte_carlo_identity::retain_literal_span(report_spans, literal, stream);
             }
             "CI" => {
                 stream.consume(&TokenKind::Equals);
                 let method = expect_ident(stream, line_num)?;
+                report_spans.push(field_start..stream.peek().span.start);
                 bootstrap = match method.as_str() {
                     "STUDENTT" => false,
                     "BOOTSTRAP" => true,
@@ -1732,7 +1739,9 @@ pub(super) fn parse_mc_command(
             }
             "RESAMPLES" => {
                 stream.consume(&TokenKind::Equals);
+                let literal = monte_carlo_identity::literal_span(stream, field_start);
                 let count = expect_u64_value(stream, line_num, params, ".MC RESAMPLES")?;
+                monte_carlo_identity::retain_literal_span(report_spans, literal, stream);
                 resamples = Some(usize::try_from(count).map_err(|_| ParseError::Syntax {
                     line: line_num,
                     message: ".MC RESAMPLES exceeds the platform range".into(),
@@ -1740,11 +1749,15 @@ pub(super) fn parse_mc_command(
             }
             "BOOTSEED" => {
                 stream.consume(&TokenKind::Equals);
+                let literal = monte_carlo_identity::literal_span(stream, field_start);
                 bootstrap_seed = Some(expect_u64_value(stream, line_num, params, ".MC BOOTSEED")?);
+                monte_carlo_identity::retain_literal_span(report_spans, literal, stream);
             }
             "START" => {
                 stream.consume(&TokenKind::Equals);
+                let literal = monte_carlo_identity::literal_span(stream, field_start);
                 let first = expect_u64_value(stream, line_num, params, ".MC START")?;
+                monte_carlo_identity::retain_literal_span(report_spans, literal, stream);
                 command.first_trial = usize::try_from(first).map_err(|_| ParseError::Syntax {
                     line: line_num,
                     message: ".MC START exceeds this platform's supported index range".into(),

@@ -332,19 +332,33 @@ impl Engine {
         check_abort(abort)?;
         self.ensure_valid_configuration()?;
         let mut hash = blake3::Hasher::new();
-        hash.update(b"rspice-monte-carlo-population-v1\0");
+        hash.update(b"rspice-monte-carlo-population-v2\0");
         let mut field = |value: &[u8]| {
             hash.update(&(value.len() as u64).to_le_bytes());
             hash.update(value);
         };
         field(&evaluation_identity);
+        // Batch selection and confidence estimation never change a circuit draw.
+        // Keep the transient identity contract intact by normalizing a private copy.
+        let mut normalized = netlist.clone();
+        for analysis in &mut normalized.analyses {
+            if let crate::netlist::AnalysisCommand::MonteCarlo(command) = analysis {
+                command.runs = 1;
+                command.first_trial = 0;
+                command.confidence_pct = 95.0;
+                command.confidence_method = Default::default();
+            }
+        }
         field(
-            crate::engine::transient::netlist_checkpoint_identity(netlist)
+            crate::engine::transient::netlist_checkpoint_identity(&normalized)
                 .ok_or_else(|| invalid("circuit identity unavailable"))?
                 .as_bytes(),
         );
         // Parsed nominal values alone cannot identify statistical expressions.
-        field(netlist.source_text.as_deref().unwrap_or("").as_bytes());
+        // Only literal reporting fields authenticated by the parser may vary.
+        field(&crate::netlist::monte_carlo_identity::source_identity(
+            netlist,
+        ));
         field(format!("{:?}", netlist.spectre_statistics).as_bytes());
         field(format!("{:?}", netlist.spectre_statistical_coordinate).as_bytes());
         field(format!("{:?}", netlist.ast_overlay).as_bytes());

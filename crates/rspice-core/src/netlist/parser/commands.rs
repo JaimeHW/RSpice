@@ -20,6 +20,7 @@ pub(super) fn parse_command(
         parameter_overrides,
         logical_line,
         analyses,
+        monte_carlo_source_cards,
         lin_analysis,
         fft_analyses,
         unknown_warned,
@@ -274,7 +275,19 @@ pub(super) fn parse_command(
             analyses.push(AnalysisCommand::Step(step_cmd));
         }
         ".MC" => {
-            let mc_cmd = parse_mc_command(stream, line_num, params, max_analysis_points)?;
+            let mut report_spans = Vec::new();
+            let mc_cmd = parse_mc_command(
+                stream,
+                line_num,
+                params,
+                max_analysis_points,
+                &mut report_spans,
+            )?;
+            monte_carlo_source_cards.push(monte_carlo_identity::SourceCard::new(
+                origin,
+                logical_line,
+                &report_spans,
+            ));
             analyses.push(AnalysisCommand::MonteCarlo(mc_cmd));
         }
         ".TEMP" => {

@@ -1117,6 +1117,8 @@ pub struct Netlist {
     /// Optional original netlist text used to build this AST.
     /// Stored to support parameter re-application workflows (e.g., sensitivity).
     pub source_text: Option<String>,
+    /// Parser-authenticated report-only spans; never supplied by API callers.
+    pub(crate) monte_carlo_source_cards: Vec<parser::monte_carlo_identity::SourceCard>,
     /// Optional source path for the netlist used to resolve relative includes
     /// and model-file references during reparsing workflows.
     pub source_path: Option<PathBuf>,
@@ -3563,6 +3565,7 @@ impl Default for Netlist {
             control_script: None,
             pspice_chebyshev_source_count: 0,
             source_text: None,
+            monte_carlo_source_cards: Vec::new(),
             source_path: None,
             replay_context: None,
             ast_overlay: NetlistAstOverlay::default(),

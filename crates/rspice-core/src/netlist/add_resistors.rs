@@ -829,6 +829,7 @@ fn clone_netlist_with_abort(
         control_script: source.control_script.clone(),
         pspice_chebyshev_source_count,
         source_text: None,
+        monte_carlo_source_cards: Vec::new(),
         source_path,
         replay_context: None,
         ast_overlay: Default::default(),

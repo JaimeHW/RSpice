@@ -156,6 +156,7 @@ mod elements;
 mod hb_card;
 mod laplace_synthesis;
 mod line;
+pub(crate) mod monte_carlo_identity;
 mod periodic_cards;
 mod pspice_stim;
 mod qpac_card;
