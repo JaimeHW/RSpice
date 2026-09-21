@@ -140,7 +140,7 @@ impl Engine {
         let compact = solver
             .quasi_periodic_device_noise_sources_with_abort(
                 grid.clone(),
-                point.spectra(),
+                point.complete_spectra(),
                 self.config.temperature,
                 pnoise_physical_constants(self.config.spice_dialect),
                 &catalog.remaining(self),
@@ -244,7 +244,7 @@ impl Engine {
                         if row >= nodes {
                             Complex64::ZERO
                         } else {
-                            point.spectra()[row][k]
+                            point.complete_spectra()[row][k]
                         }
                     };
                     let value = v(pos) - v(neg);
@@ -321,7 +321,7 @@ impl Engine {
                     checked_scaled_positive_product(&[coefficient, r, r], name)?,
                     binary_scale,
                 )?;
-                let modulation = point.spectra()[nodes + branch].clone();
+                let modulation = point.complete_spectra()[nodes + branch].clone();
                 catalog.push(
                     self,
                     Source {
@@ -353,7 +353,7 @@ impl Engine {
         solver
             .visit_quasi_periodic_native_bjt_samples_with_abort(
                 grid.clone(),
-                point.spectra(),
+                point.complete_spectra(),
                 &catalog.remaining(self),
                 abort,
                 |phase, count, bjts, solution, remaining| {

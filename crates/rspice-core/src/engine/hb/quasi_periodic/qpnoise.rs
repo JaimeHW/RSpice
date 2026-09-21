@@ -89,7 +89,7 @@ impl Engine {
                 .frequencies_hz
                 .len()
                 .saturating_mul(request.outputs.len())
-                .saturating_mul(point.spectra().len())
+                .saturating_mul(point.complete_spectra().len())
                 .saturating_mul(grid.len())
                 .saturating_mul(2),
         )?;
@@ -198,7 +198,7 @@ impl Engine {
             .request
             .outputs
             .len()
-            .saturating_mul(point.spectra().len())
+            .saturating_mul(point.complete_spectra().len())
             .saturating_mul(grid.len())
             .saturating_mul(2);
         ResourceLimitError::ensure(
@@ -206,10 +206,11 @@ impl Engine {
             output_values,
             limits.max_result_values,
         )?;
-        let mut observations = vec![
-            vec![vec![Complex64::ZERO; grid.len()]; point.spectra().len()];
-            metadata.observations.len()
-        ];
+        let mut observations =
+            vec![
+                vec![vec![Complex64::ZERO; grid.len()]; point.complete_spectra().len()];
+                metadata.observations.len()
+            ];
         for (index, directions) in metadata.observations.iter().enumerate() {
             let tuple = grid
                 .index_of(&metadata.request.outputs[index].lattice)
@@ -229,13 +230,18 @@ impl Engine {
             .visit_quasi_periodic_noise_with_abort(
                 grid.clone(),
                 &config,
-                point.spectra(),
+                point.complete_spectra(),
                 &observations,
                 &sources,
                 &limits,
                 abort,
-                |_, point| {
-                    points.push(point);
+                |_, mut noise_point| {
+                    // Source injections and observables are electrical. The
+                    // covariance and certificate were computed with all states.
+                    for adjoint in &mut noise_point.adjoints {
+                        adjoint.sensitivities.truncate(point.spectra().len());
+                    }
+                    points.push(noise_point);
                     Ok(())
                 },
             )

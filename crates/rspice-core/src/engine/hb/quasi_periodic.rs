@@ -2,6 +2,8 @@
 mod bindings;
 mod card;
 mod frequency_sweep;
+#[cfg(test)]
+mod integral_tests;
 mod noise_sources;
 mod qpac;
 mod qpnoise;
@@ -160,7 +162,8 @@ impl Engine {
         let required_unknowns = circuit
             .num_nodes()
             .saturating_add(circuit.num_branches())
-            .saturating_add(Self::hb_periodic_extra_branch_count(&circuit)?);
+            .saturating_add(Self::hb_periodic_extra_branch_count(&circuit)?)
+            .saturating_add(circuit.behavioral_sources.integral_count());
         crate::analysis::quasi_periodic::solve::check_workload(
             required_unknowns,
             &grid,
@@ -170,14 +173,15 @@ impl Engine {
         .map_err(numerical_error)?;
         let mut solver = engine.qpss_circuit_solver(&circuit, &grid)?;
         let node_names = engine.hb_build_node_names(&circuit, circuit.num_nodes());
-        let branch_names = solver
+        let mut branch_names = solver
             .try_periodic_mna_branch_names()
             .map_err(|error| invalid(error.to_string()))?;
         let unknowns = node_names.len().saturating_add(branch_names.len());
+        let integral_names = branch_names.split_off(solver.physical_branch_count());
         engine.ensure_matrix_unknowns(unknowns.saturating_mul(grid.len()))?;
         engine.ensure_result_values(unknowns.saturating_mul(grid.len()).saturating_mul(6))?;
         let sources = sources::build(&engine, &circuit, &config, grid.clone(), abort)?;
-        let seed = match config.initial_state {
+        let mut seed = match config.initial_state {
             QpssInitialState::Zero => None,
             QpssInitialState::DcOperatingPoint => Some(engine.qpss_dc_seed(
                 netlist,
@@ -189,6 +193,11 @@ impl Engine {
                 abort,
             )?),
         };
+        if let Some(seed) = &mut seed {
+            // An OP contains no integral history. Zero is only the initial
+            // guess for these coordinates; the full torus equations decide it.
+            seed.resize(unknowns, vec![Complex64::ZERO; grid.len()]);
+        }
         let solution = solver
             .solve_quasi_periodic_with_abort(
                 grid,
@@ -203,7 +212,14 @@ impl Engine {
         if producer != state::Producer::capture(netlist, &engine.config, &config)? {
             return Err(invalid("semantic producer inputs changed during the solve"));
         }
-        QpssOperatingPoint::bind(producer, config, node_names, branch_names, solution)
+        QpssOperatingPoint::bind(
+            producer,
+            config,
+            node_names,
+            branch_names,
+            integral_names,
+            solution,
+        )
     }
 
     fn qpss_circuit_solver(
@@ -211,12 +227,6 @@ impl Engine {
         circuit: &CircuitData,
         grid: &QuasiPeriodicGrid,
     ) -> Result<HbSolver, SimulationError> {
-        if circuit.behavioral_sources.integral_count() != 0 {
-            return Err(SimulationError::unsupported_capability(
-                "analysis.qpss.behavioral_integral",
-                "QPSS behavioral integrals require independent-phase state lifting and retained integral spectra",
-            ));
-        }
         for gaps in [
             periodic_capability::periodic_residual_gaps(circuit),
             periodic_capability::periodic_descriptor_gaps(circuit),

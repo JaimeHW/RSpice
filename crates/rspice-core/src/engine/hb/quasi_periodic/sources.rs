@@ -271,7 +271,8 @@ pub(super) fn build(
     }
     let unknowns = circuit.num_nodes()
         + circuit.num_branches()
-        + Engine::hb_periodic_extra_branch_count(circuit)?;
+        + Engine::hb_periodic_extra_branch_count(circuit)?
+        + circuit.behavioral_sources.integral_count();
     let mut result = vec![vec![Complex64::ZERO; grid.len()]; unknowns];
     let mut projector = Projector {
         transform: QuasiPeriodicTransform::new_with_abort(grid.clone(), abort)

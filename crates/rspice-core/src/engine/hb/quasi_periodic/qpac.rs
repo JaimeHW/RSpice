@@ -119,7 +119,7 @@ impl Engine {
         } else {
             QpacInputQuantity::Current
         };
-        let mut sources = vec![vec![Complex64::ZERO; grid.len()]; point.spectra().len()];
+        let mut sources = vec![vec![Complex64::ZERO; grid.len()]; point.complete_spectra().len()];
         for (row, amplitude) in source.node_injections {
             sources[row][input_index] += amplitude;
         }
@@ -138,11 +138,11 @@ impl Engine {
         engine.ensure_result_values(metadata_values)?;
         let mut limits = engine.config.resource_limits.clone();
         limits.max_result_values = limits.max_result_values.saturating_sub(metadata_values);
-        let solutions = solver
+        let mut solutions = solver
             .solve_quasi_periodic_ac_with_abort(
                 grid.clone(),
                 &request.solver,
-                point.spectra(),
+                point.complete_spectra(),
                 &request.offsets_hz,
                 &sources,
                 &limits,
@@ -179,6 +179,11 @@ impl Engine {
             return Err(qpac_error("producer inputs changed during the analysis"));
         }
         check_abort(abort)?;
+        // The full state participates in the solve and residual certificate;
+        // published electrical responses contain only voltage/current rows.
+        for solution in &mut solutions {
+            solution.spectra.truncate(point.spectra().len());
+        }
         QpacAnalysisResult::bind(
             QpacResultMetadata {
                 version: 1,

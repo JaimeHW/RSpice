@@ -1,7 +1,9 @@
 //! Versioned producer and complete numerical-payload identity for QPSS.
 use super::*;
 
-const VERSION: u32 = 1;
+fn payload_version(integral_names: &[String]) -> u32 {
+    if integral_names.is_empty() { 1 } else { 2 }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -43,6 +45,8 @@ pub struct QpssOperatingPoint {
     config: QpssConfig,
     node_names: Vec<String>,
     branch_names: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    integral_names: Vec<String>,
     spectra: Vec<Vec<Complex64>>,
     iterations: usize,
     normalized_residual: Value,
@@ -59,6 +63,8 @@ pub struct QpssOperatingPointMetadata {
     config: QpssConfig,
     node_names: Vec<String>,
     branch_names: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    integral_names: Vec<String>,
     iterations: usize,
     normalized_residual: Value,
     retained_identity: String,
@@ -85,7 +91,13 @@ impl QpssOperatingPointMetadata {
         )
         .map_err(numerical_error)?;
         if self.node_names.is_empty()
-            || self.node_names.len().checked_add(self.branch_names.len()) != Some(row_lengths.len())
+            || self.version != payload_version(&self.integral_names)
+            || self
+                .node_names
+                .len()
+                .checked_add(self.branch_names.len())
+                .and_then(|rows| rows.checked_add(self.integral_names.len()))
+                != Some(row_lengths.len())
             || row_lengths.iter().any(|length| *length != grid.len())
         {
             return Err(invalid(
@@ -109,6 +121,25 @@ impl QpssOperatingPoint {
     /// Node coordinates first, then canonical branch currents, then any
     /// distributed-network auxiliary currents named by `branch_names`.
     pub fn spectra(&self) -> &[Vec<Complex64>] {
+        &self.spectra[..self.physical_rows()]
+    }
+    fn physical_rows(&self) -> usize {
+        self.node_names
+            .len()
+            .saturating_add(self.branch_names.len())
+            .min(self.spectra.len())
+    }
+    /// Canonical behavioral SDT identities, separate from electrical currents.
+    pub fn integral_names(&self) -> &[String] {
+        &self.integral_names
+    }
+    /// Integral values in their authored integrand-times-seconds units.
+    pub fn integral_spectra(&self) -> &[Vec<Complex64>] {
+        &self.spectra[self.physical_rows()..]
+    }
+    /// Complete numerical state: physical rows followed by integral states.
+    /// Dependent solvers and transport must retain every row.
+    pub fn complete_spectra(&self) -> &[Vec<Complex64>] {
         &self.spectra
     }
     pub fn iterations(&self) -> usize {
@@ -159,6 +190,7 @@ impl QpssOperatingPoint {
             config: self.config,
             node_names: self.node_names,
             branch_names: self.branch_names,
+            integral_names: self.integral_names,
             iterations: self.iterations,
             normalized_residual: self.normalized_residual,
             retained_identity: self.retained_identity,
@@ -178,6 +210,7 @@ impl QpssOperatingPoint {
             config: metadata.config,
             node_names: metadata.node_names,
             branch_names: metadata.branch_names,
+            integral_names: metadata.integral_names,
             spectra,
             iterations: metadata.iterations,
             normalized_residual: metadata.normalized_residual,
@@ -192,14 +225,16 @@ impl QpssOperatingPoint {
         config: QpssConfig,
         node_names: Vec<String>,
         branch_names: Vec<String>,
+        integral_names: Vec<String>,
         solution: QuasiPeriodicSolution,
     ) -> Result<Self, SimulationError> {
         let mut point = Self {
-            version: VERSION,
+            version: payload_version(&integral_names),
             producer,
             config,
             node_names,
             branch_names,
+            integral_names,
             spectra: solution.spectra().to_vec(),
             iterations: solution.iterations(),
             normalized_residual: solution.normalized_residual(),
@@ -222,6 +257,12 @@ impl QpssOperatingPoint {
         ))
         .map_err(|error| invalid(format!("retained state identity failed: {error}")))?;
         hb_identity_field(&mut hasher, "metadata", &metadata);
+        // Preserve the v1 identity byte-for-byte for existing memoryless points.
+        if !self.integral_names.is_empty() {
+            let names = serde_json::to_vec(&self.integral_names)
+                .map_err(|error| invalid(format!("integral identity failed: {error}")))?;
+            hb_identity_field(&mut hasher, "behavioral-sdt/v1", &names);
+        }
         hasher.update(&self.normalized_residual.to_bits().to_le_bytes());
         hasher.update(&(self.spectra.len() as u64).to_le_bytes());
         for spectrum in &self.spectra {
@@ -250,7 +291,12 @@ impl QpssOperatingPoint {
             return Err(invalid("retained spectrum differs from its tone lattice"));
         }
         if self.node_names.is_empty()
-            || self.spectra.len() != self.node_names.len() + self.branch_names.len()
+            || self.spectra.len()
+                != self
+                    .node_names
+                    .len()
+                    .saturating_add(self.branch_names.len())
+                    .saturating_add(self.integral_names.len())
             || !self.normalized_residual.is_finite()
             || !(0.0..=1.0).contains(&self.normalized_residual)
             || self.iterations > self.config.solver.max_iterations
@@ -259,7 +305,7 @@ impl QpssOperatingPoint {
                 "retained state has incomplete shape or convergence evidence",
             ));
         }
-        if self.version != VERSION
+        if self.version != payload_version(&self.integral_names)
             || !is_canonical_blake3_identity(&self.retained_identity)
             || self.retained_identity != self.payload_identity()?
         {
@@ -267,7 +313,7 @@ impl QpssOperatingPoint {
                 "retained operating-point identity is incompatible or altered",
             ));
         }
-        for names in [&self.node_names, &self.branch_names] {
+        for names in [&self.node_names, &self.branch_names, &self.integral_names] {
             let mut seen = BTreeSet::new();
             for name in names {
                 if name.trim().is_empty() || !seen.insert(name.to_ascii_lowercase()) {
@@ -325,11 +371,13 @@ impl Engine {
         }
         let circuit = engine.build_circuit_with_abort(netlist, abort)?;
         let solver = engine.qpss_circuit_solver(&circuit, &grid)?;
+        let names = solver
+            .try_periodic_mna_branch_names()
+            .map_err(|error| invalid(error.to_string()))?;
+        let (branches, integrals) = names.split_at(solver.physical_branch_count());
         if point.node_names != engine.hb_build_node_names(&circuit, circuit.num_nodes())
-            || point.branch_names
-                != solver
-                    .try_periodic_mna_branch_names()
-                    .map_err(|error| invalid(error.to_string()))?
+            || point.branch_names != branches
+            || point.integral_names != integrals
         {
             return Err(invalid(
                 "retained MNA coordinate map differs from the current circuit",

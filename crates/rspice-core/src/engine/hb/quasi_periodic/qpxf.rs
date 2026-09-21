@@ -76,7 +76,8 @@ impl Engine {
         let circuit = engine.build_circuit_with_abort(netlist, abort)?;
         Self::ensure_no_mixed_signal_analysis(&circuit, "QPXF")?;
         let mut solver = engine.qpss_circuit_solver(&circuit, &grid)?;
-        let mut observation = vec![vec![Complex64::ZERO; grid.len()]; point.spectra().len()];
+        let mut observation =
+            vec![vec![Complex64::ZERO; grid.len()]; point.complete_spectra().len()];
         for (row, value) in bindings::output(netlist, point, &request.output)? {
             observation[row][output_index] = value;
         }
@@ -125,11 +126,11 @@ impl Engine {
         }
         let mut limits = engine.config.resource_limits.clone();
         limits.max_result_values = limits.max_result_values.saturating_sub(metadata_values);
-        let solutions = solver
+        let mut solutions = solver
             .solve_quasi_periodic_adjoint_at_frequency_with_abort(
                 grid.clone(),
                 &request.linear,
-                point.spectra(),
+                point.complete_spectra(),
                 &request.frequencies_hz,
                 &anchor,
                 &observation,
@@ -203,6 +204,9 @@ impl Engine {
             return Err(qpxf_error("producer inputs changed during the analysis"));
         }
         check_abort(abort)?;
+        for solution in &mut solutions {
+            solution.sensitivities.truncate(point.spectra().len());
+        }
         QpxfAnalysisResult::bind(
             QpxfResultMetadata {
                 version: 1,
