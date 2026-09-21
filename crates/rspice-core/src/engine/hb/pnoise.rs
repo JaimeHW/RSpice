@@ -833,9 +833,11 @@ impl Engine {
                     &branch_names,
                     abort,
                 )?,
-                PnoiseOperatingPoint::HarmonicBalance(point) => {
-                    point.to_solver_state(&node_names, &branch_names)?
-                }
+                PnoiseOperatingPoint::HarmonicBalance(point) => point.to_solver_state(
+                    &node_names,
+                    &branch_names[..solver.physical_branch_count()],
+                    &branch_names[solver.physical_branch_count()..],
+                )?,
             }
         } else {
             HbSolverState::new(num_nodes, op_harmonics)

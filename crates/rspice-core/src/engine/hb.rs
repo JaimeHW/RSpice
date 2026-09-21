@@ -168,6 +168,7 @@ fn hb_retained_state_identity(
     spectral_state: &[Vec<Complex64>],
     mna_branch_names: &[String],
     mna_branch_spectral_state: &[Vec<Complex64>],
+    integral_spectra: &[HbIntegralSpectrum],
     iterations: usize,
     residual_norm: Value,
 ) -> String {
@@ -244,6 +245,41 @@ fn hb_retained_state_identity(
                 &format!("mna_branch[{index}].coefficient[{harmonic}].imaginary"),
                 &value.im.to_bits().to_le_bytes(),
             );
+        }
+    }
+    // Preserve authenticated artifacts that predate integral coordinates. A
+    // nonempty integral section is explicitly typed and cannot be omitted or
+    // substituted for a physical branch without changing the identity.
+    if !integral_spectra.is_empty() {
+        hb_identity_field(&mut hasher, "integral_state_kind", b"behavioral-sdt/v1");
+        hb_identity_field(
+            &mut hasher,
+            "integral_count",
+            &(integral_spectra.len() as u64).to_le_bytes(),
+        );
+        for (index, spectrum) in integral_spectra.iter().enumerate() {
+            hb_identity_field(
+                &mut hasher,
+                &format!("integral[{index}].name"),
+                spectrum.name.as_bytes(),
+            );
+            hb_identity_field(
+                &mut hasher,
+                &format!("integral[{index}].coefficient_count"),
+                &(spectrum.coefficients.len() as u64).to_le_bytes(),
+            );
+            for (harmonic, value) in spectrum.coefficients.iter().enumerate() {
+                hb_identity_field(
+                    &mut hasher,
+                    &format!("integral[{index}].coefficient[{harmonic}].real"),
+                    &value.re.to_bits().to_le_bytes(),
+                );
+                hb_identity_field(
+                    &mut hasher,
+                    &format!("integral[{index}].coefficient[{harmonic}].imaginary"),
+                    &value.im.to_bits().to_le_bytes(),
+                );
+            }
         }
     }
     hasher.finalize().to_hex().to_string()
@@ -424,6 +460,7 @@ impl HbOperatingPointIdentity {
         spectral_state: &[Vec<Complex64>],
         mna_branch_names: &[String],
         mna_branch_spectral_state: &[Vec<Complex64>],
+        integral_spectra: &[HbIntegralSpectrum],
         iterations: usize,
         residual_norm: Value,
     ) -> Self {
@@ -438,6 +475,7 @@ impl HbOperatingPointIdentity {
                 spectral_state,
                 mna_branch_names,
                 mna_branch_spectral_state,
+                integral_spectra,
                 iterations,
                 residual_norm,
             ),
@@ -467,6 +505,18 @@ impl HbOperatingPointIdentity {
     }
 }
 
+/// One behavioral SDT coordinate in the solver's canonical occurrence order.
+/// Coefficients retain the integrand's units multiplied by seconds, including
+/// the solved DC integration constant. They are not electrical branch currents.
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "veriloga", derive(serde::Serialize, serde::Deserialize))]
+pub struct HbIntegralSpectrum {
+    /// Canonical source and compiled SDT occurrence identity.
+    pub name: String,
+    /// Complex Fourier coefficients, indexed by nonnegative harmonic.
+    pub coefficients: Vec<Complex64>,
+}
+
 /// Exact converged harmonic-balance numerical state retained for dependent
 /// periodic small-signal analyses.
 ///
@@ -487,6 +537,8 @@ pub struct HbOperatingPoint {
     mna_branch_names: Vec<String>,
     #[cfg_attr(feature = "veriloga", serde(default))]
     mna_branch_spectral_state: Vec<Vec<Complex64>>,
+    #[cfg_attr(feature = "veriloga", serde(default))]
+    integral_spectra: Vec<HbIntegralSpectrum>,
     /// Versioned semantic producer authentication. `None` is a parseable
     /// legacy artifact that must never enter a dependent numerical solve.
     #[cfg_attr(feature = "veriloga", serde(default))]
@@ -524,6 +576,11 @@ impl HbOperatingPoint {
     /// oriented from the authored positive terminal to the negative terminal.
     pub fn mna_branch_spectral_state(&self) -> &[Vec<Complex64>] {
         &self.mna_branch_spectral_state
+    }
+
+    /// Behavioral integral coordinates, separate from physical branch currents.
+    pub fn integral_spectra(&self) -> &[HbIntegralSpectrum] {
+        &self.integral_spectra
     }
 
     /// Authenticated semantic identity minted by the producing HB engine.
@@ -587,12 +644,13 @@ impl HbOperatingPoint {
         iterations: usize,
         residual_norm: Value,
     ) -> Result<Self, SimulationError> {
-        Self::try_from_parts_internal(
+        Self::try_from_complete_parts(
             config,
             node_names,
             spectral_state,
             mna_branch_names,
             mna_branch_spectral_state,
+            Vec::new(),
             iterations,
             residual_norm,
             None,
@@ -617,29 +675,64 @@ impl HbOperatingPoint {
         iterations: usize,
         residual_norm: Value,
     ) -> Result<Self, SimulationError> {
-        Self::try_from_parts_internal(
+        Self::try_from_complete_parts(
             config,
             node_names,
             spectral_state,
             mna_branch_names,
             mna_branch_spectral_state,
+            Vec::new(),
             iterations,
             residual_norm,
             Some(producer_identity),
         )
     }
 
+    /// Reconstruct all retained coordinates, including behavioral integrals.
+    /// A supplied producer identity must bind the exact numerical payload;
+    /// circuit-specific identities are checked again before dependent reuse.
     #[allow(clippy::too_many_arguments)]
-    fn try_from_parts_internal(
+    pub fn try_from_complete_parts(
         config: HbConfig,
         node_names: Vec<String>,
         spectral_state: Vec<Vec<Complex64>>,
         mna_branch_names: Vec<String>,
         mna_branch_spectral_state: Vec<Vec<Complex64>>,
+        integral_spectra: Vec<HbIntegralSpectrum>,
         iterations: usize,
         residual_norm: Value,
         producer_identity: Option<HbOperatingPointIdentity>,
     ) -> Result<Self, SimulationError> {
+        let point = Self {
+            config,
+            node_names,
+            spectral_state,
+            mna_branch_names,
+            mna_branch_spectral_state,
+            integral_spectra,
+            producer_identity,
+            iterations,
+            residual_norm,
+        };
+        point.validate()?;
+        Ok(point)
+    }
+
+    /// Validate transported or deserialized state without copying its spectra.
+    /// This checks structure and producer-payload authentication, not whether
+    /// the state belongs to a particular consuming circuit.
+    pub fn validate(&self) -> Result<(), SimulationError> {
+        let Self {
+            config,
+            node_names,
+            spectral_state,
+            mna_branch_names,
+            mna_branch_spectral_state,
+            integral_spectra,
+            producer_identity,
+            residual_norm,
+            ..
+        } = self;
         config.validate().map_err(|error| {
             SimulationError::Circuit(format!(
                 "retained HB state has an invalid configuration: {error}"
@@ -648,7 +741,7 @@ impl HbOperatingPoint {
         if let Some(identity) = producer_identity.as_ref() {
             identity.validate()?;
         }
-        if !residual_norm.is_finite() || residual_norm < 0.0 {
+        if !residual_norm.is_finite() || *residual_norm < 0.0 {
             return Err(SimulationError::Circuit(
                 "retained HB state has an invalid residual norm".to_owned(),
             ));
@@ -664,7 +757,7 @@ impl HbOperatingPoint {
             SimulationError::Circuit("retained HB harmonic basis exceeds this platform".to_owned())
         })?;
         let mut seen = std::collections::HashSet::with_capacity(node_names.len());
-        for (node, spectrum) in node_names.iter().zip(&spectral_state) {
+        for (node, spectrum) in node_names.iter().zip(spectral_state) {
             if node.is_empty() || node.trim() != node {
                 return Err(SimulationError::Circuit(
                     "retained HB state contains a non-canonical node name".to_owned(),
@@ -703,7 +796,7 @@ impl HbOperatingPoint {
             )));
         }
         let mut seen_branches = std::collections::HashSet::with_capacity(mna_branch_names.len());
-        for (branch, spectrum) in mna_branch_names.iter().zip(&mna_branch_spectral_state) {
+        for (branch, spectrum) in mna_branch_names.iter().zip(mna_branch_spectral_state) {
             if branch.is_empty() || branch.trim() != branch {
                 return Err(SimulationError::Circuit(
                     "retained HB state contains a non-canonical MNA branch name".to_owned(),
@@ -734,26 +827,55 @@ impl HbOperatingPoint {
                 )));
             }
         }
-        let point = Self {
-            config,
-            node_names,
-            spectral_state,
-            mna_branch_names,
-            mna_branch_spectral_state,
-            producer_identity,
-            iterations,
-            residual_norm,
-        };
-        if let Some(identity) = point.producer_identity.as_ref()
+        let mut seen_integrals = std::collections::HashSet::with_capacity(integral_spectra.len());
+        for spectrum in integral_spectra {
+            let name = &spectrum.name;
+            if name.is_empty() || name.trim() != name {
+                return Err(SimulationError::Circuit(
+                    "retained HB state contains a non-canonical integral name".to_owned(),
+                ));
+            }
+            if !seen_integrals.insert(name.to_ascii_uppercase()) {
+                return Err(SimulationError::Circuit(format!(
+                    "retained HB state contains duplicate integral name '{name}'"
+                )));
+            }
+            if spectrum.coefficients.len() != expected_harmonics {
+                return Err(SimulationError::Circuit(format!(
+                    "retained HB integral '{name}' contains {} coefficients; the frozen basis requires {expected_harmonics}",
+                    spectrum.coefficients.len()
+                )));
+            }
+            if spectrum
+                .coefficients
+                .iter()
+                .any(|value| !value.re.is_finite() || !value.im.is_finite())
+            {
+                return Err(SimulationError::Circuit(format!(
+                    "retained HB integral '{name}' contains a non-finite coefficient"
+                )));
+            }
+            if spectrum
+                .coefficients
+                .first()
+                .is_some_and(|value| value.im != 0.0)
+            {
+                return Err(SimulationError::Circuit(format!(
+                    "retained HB integral '{name}' has a nonzero imaginary DC coefficient"
+                )));
+            }
+        }
+        if let Some(identity) = self.producer_identity.as_ref()
             && identity.retained_state_identity
                 != hb_retained_state_identity(
-                    &point.config,
-                    &point.node_names,
-                    &point.spectral_state,
-                    &point.mna_branch_names,
-                    &point.mna_branch_spectral_state,
-                    point.iterations,
-                    point.residual_norm,
+                    &self.config,
+                    &self.node_names,
+                    &self.spectral_state,
+                    &self.mna_branch_names,
+                    &self.mna_branch_spectral_state,
+                    &self.integral_spectra,
+                    self.iterations,
+                    self.residual_norm,
                 )
         {
             return Err(SimulationError::Circuit(
@@ -761,7 +883,7 @@ impl HbOperatingPoint {
                     .to_owned(),
             ));
         }
-        Ok(point)
+        Ok(())
     }
 
     fn authenticate_for_reuse(
@@ -776,23 +898,7 @@ impl HbOperatingPoint {
                     .to_owned(),
             )
         })?;
-        retained.validate()?;
-        if retained.retained_state_identity
-            != hb_retained_state_identity(
-                &self.config,
-                &self.node_names,
-                &self.spectral_state,
-                &self.mna_branch_names,
-                &self.mna_branch_spectral_state,
-                self.iterations,
-                self.residual_norm,
-            )
-        {
-            return Err(SimulationError::Circuit(
-                "retained HB numerical payload does not match its authenticated producer identity"
-                    .to_owned(),
-            ));
-        }
+        self.validate()?;
         let current = HbOperatingPointIdentity::capture(netlist, simulation_config, hb_config)?;
         if retained.semantic_netlist_identity != current.semantic_netlist_identity {
             return Err(SimulationError::Circuit(
@@ -819,7 +925,9 @@ impl HbOperatingPoint {
         &self,
         expected_node_names: &[String],
         expected_mna_branch_names: &[String],
+        expected_integral_names: &[String],
     ) -> Result<HbSolverState, SimulationError> {
+        self.validate()?;
         if self.node_names != expected_node_names {
             return Err(SimulationError::Circuit(format!(
                 "retained HB node basis does not match the elaborated circuit: expected {:?}, received {:?}",
@@ -837,11 +945,31 @@ impl HbOperatingPoint {
                 expected_mna_branch_names, self.mna_branch_names
             )));
         }
+        if !self
+            .integral_spectra
+            .iter()
+            .map(|spectrum| &spectrum.name)
+            .eq(expected_integral_names)
+        {
+            return Err(SimulationError::Circuit(format!(
+                "retained HB integral basis does not match the elaborated circuit: expected {:?}, received {:?}",
+                expected_integral_names,
+                self.integral_spectra
+                    .iter()
+                    .map(|spectrum| &spectrum.name)
+                    .collect::<Vec<_>>()
+            )));
+        }
         let mut state = HbSolverState::new(self.node_names.len(), self.config.num_harmonics);
         state.x.clone_from(&self.spectral_state);
         state
             .mna_branch_currents
             .clone_from(&self.mna_branch_spectral_state);
+        state.mna_branch_currents.extend(
+            self.integral_spectra
+                .iter()
+                .map(|spectrum| spectrum.coefficients.clone()),
+        );
         state.iteration = self.iterations;
         state.total_iterations = self.iterations;
         state.residual_norm = self.residual_norm;
@@ -1837,44 +1965,48 @@ impl Engine {
             abort,
         )?;
 
-        let mna_branch_names = periodic_branch_names;
-        let operating_point = if let Some(producer) = producer_inputs {
+        let physical_branches = solver.physical_branch_count();
+        let integral_spectra = periodic_branch_names[physical_branches..]
+            .iter()
+            .zip(&state.mna_branch_currents[physical_branches..])
+            .map(|(name, coefficients)| HbIntegralSpectrum {
+                name: name.clone(),
+                coefficients: coefficients.clone(),
+            })
+            .collect::<Vec<_>>();
+        let mna_branch_names = periodic_branch_names[..physical_branches].to_vec();
+        let mna_branch_spectral_state = state.mna_branch_currents[..physical_branches].to_vec();
+        let producer_identity = if let Some(producer) = producer_inputs {
             if producer != HbOperatingPointIdentity::capture(netlist, &self.config, &config)? {
                 return Err(SimulationError::Circuit(
                     "HB semantic producer inputs changed during the periodic solve".to_owned(),
                 ));
             }
-            let identity = HbOperatingPointIdentity::bind(
+            Some(HbOperatingPointIdentity::bind(
                 producer,
                 &config,
                 &result.node_names,
                 &state.x,
                 &mna_branch_names,
-                &state.mna_branch_currents,
+                &mna_branch_spectral_state,
+                &integral_spectra,
                 state.total_iterations.max(state.iteration),
                 state.residual_norm,
-            );
-            HbOperatingPoint::try_from_authenticated_parts_with_mna_branches(
-                identity,
-                config.clone(),
-                result.node_names.clone(),
-                state.x.clone(),
-                mna_branch_names,
-                state.mna_branch_currents.clone(),
-                state.total_iterations.max(state.iteration),
-                state.residual_norm,
-            )?
+            ))
         } else {
-            HbOperatingPoint::try_from_parts_with_mna_branches(
-                config.clone(),
-                result.node_names.clone(),
-                state.x.clone(),
-                mna_branch_names,
-                state.mna_branch_currents.clone(),
-                state.total_iterations.max(state.iteration),
-                state.residual_norm,
-            )?
+            None
         };
+        let operating_point = HbOperatingPoint::try_from_complete_parts(
+            config.clone(),
+            result.node_names.clone(),
+            state.x.clone(),
+            mna_branch_names,
+            mna_branch_spectral_state,
+            integral_spectra,
+            state.total_iterations.max(state.iteration),
+            state.residual_norm,
+            producer_identity,
+        )?;
         Ok(HbAnalysisResult {
             result,
             device_currents,
