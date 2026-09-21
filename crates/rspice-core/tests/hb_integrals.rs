@@ -171,6 +171,175 @@ fn hb_integrals_reject_constant_drift_even_below_residual_tolerance() {
 }
 
 #[test]
+fn hb_prescribed_integrals_preserve_zero_origin_and_retained_modulation() {
+    let engine = Engine::default();
+    for (frequency, krylov, options) in [
+        (1e3, false, ""),
+        (1e9, true, ".options hbint tahb=0"),
+        (1e3, false, ".options hbint tahb=1\n.save v(out)"),
+    ] {
+        let netlist = Netlist::parse(&format!(
+            "Prescribed integrals\nitest 0 input 1m\nrin input 0 1k\n\
+             bclock clock 0 v={frequency}*sdt(sin(2*pi*{frequency}*time))\n\
+             bnested nested 0 v={frequency}*sdt({frequency}*sdt(cos(2*pi*{frequency}*time)))\n\
+             bcurrent sink 0 i=.001*{frequency}*sdt(cos(2*pi*{frequency}*time))\nrsink sink 0 1k noisy=0\n\
+             bout out 0 v=(1+v(clock))*v(input)\nrout out 0 1k noisy=0\n{options}\n.end\n"
+        )).unwrap();
+        let mut config = HbConfig::new(frequency)
+            .with_harmonics(3)
+            .with_tolerance(1e-10);
+        config.use_krylov = krylov;
+        let hb = engine.run_hb(&netlist, config).unwrap();
+        let tau = std::f64::consts::TAU;
+        for (name, dc, harmonic) in [
+            ("clock", 1.0 / tau, Complex64::new(-1.0 / tau, 0.0)),
+            (
+                "nested",
+                1.0 / (tau * tau),
+                Complex64::new(-1.0 / (tau * tau), 0.0),
+            ),
+            ("sink", 0.0, Complex64::new(0.0, 1.0 / tau)),
+            ("out", 1.0 + 1.0 / tau, Complex64::new(-1.0 / tau, 0.0)),
+        ] {
+            let row = hb
+                .result
+                .spectral_voltages
+                .iter()
+                .find(|row| row.node_name.eq_ignore_ascii_case(name))
+                .unwrap();
+            close(row.coefficients[0], Complex64::new(dc, 0.0));
+            close(row.coefficients[1], harmonic);
+        }
+        assert_eq!(hb.operating_point.integral_spectra().len(), 4);
+        hb.operating_point.validate().unwrap();
+        for spectrum in hb.operating_point.integral_spectra() {
+            let origin = spectrum.coefficients[0].re
+                + 2.0 * spectrum.coefficients[1..].iter().map(|v| v.re).sum::<f64>();
+            assert!(
+                (origin * frequency).abs() < 1e-8,
+                "{} origin={origin}",
+                spectrum.name
+            );
+        }
+        // One set of dependency solves covers the shared constant-Jacobian
+        // constraints. Other iterations exercise startup and frequency scaling.
+        if frequency == 1e3 && options.is_empty() {
+            let config = PacConfig::new()
+                .with_fundamental(frequency)
+                .with_sweep(frequency, frequency, 1)
+                .with_sweep_type(PacSweepType::Linear)
+                .with_sidebands(-1, 1)
+                .with_input_source("itest")
+                .with_output_node("out");
+            let pss = engine
+                .run_pss_operating_point_with_abort(
+                    &netlist,
+                    PssConfig::new(frequency)
+                        .with_harmonics(3)
+                        .with_points_per_period(256)
+                        .with_tstab_periods(0),
+                    &NoAbort,
+                )
+                .unwrap();
+            for (pac, tolerance) in [
+                (engine.run_pac(&netlist, config.clone()).unwrap(), 2e-7),
+                (
+                    engine
+                        .run_pac_from_hb_with_abort(
+                            &netlist,
+                            config.clone(),
+                            &hb.operating_point,
+                            &NoAbort,
+                        )
+                        .unwrap(),
+                    2e-7,
+                ),
+                (
+                    engine
+                        .run_pac_from_pss_with_abort(&netlist, config, &pss, &NoAbort)
+                        .unwrap(),
+                    2e-4,
+                ),
+            ] {
+                for sideband in -1..=1 {
+                    let expected = if sideband == 0 {
+                        1e3 * (1.0 + 1.0 / tau)
+                    } else {
+                        -500.0 / tau
+                    };
+                    let actual = pac.result.conversion_matrix.get(0, sideband, 0).unwrap();
+                    assert!(
+                        (actual - expected).norm() < tolerance * expected.abs(),
+                        "{actual} vs {expected}"
+                    );
+                }
+            }
+            let noise = engine
+                .run_pnoise_from_hb_with_abort(
+                    &netlist,
+                    &[130.0],
+                    "out",
+                    None,
+                    Some("itest"),
+                    1,
+                    &hb.operating_point,
+                    &NoAbort,
+                )
+                .unwrap();
+            let expected = 4.0
+                * K_BOLTZMANN
+                * TEMP_REFERENCE
+                * 1e3
+                * ((1.0 + 1.0 / tau).powi(2) + 0.5 / (tau * tau));
+            assert!((noise.output_noise[0] / expected - 1.0).abs() < 1e-7);
+            let from_pss = engine
+                .run_pnoise_from_pss_with_abort(
+                    &netlist,
+                    &[130.0],
+                    "out",
+                    None,
+                    Some("itest"),
+                    1,
+                    &pss,
+                    &NoAbort,
+                )
+                .unwrap();
+            assert!((from_pss.output_noise[0] / expected - 1.0).abs() < 2e-4);
+        }
+    }
+}
+
+#[test]
+fn hb_prescribed_integrals_reject_secular_drift_and_bound_projection_work() {
+    for expression in ["sdt(1+sin(2*pi*1k*time))", "sdt(sdt(sin(2*pi*1k*time)))"] {
+        let netlist = Netlist::parse(&format!(
+            "Drifting primitive\nb1 out 0 v={expression}\nr1 out 0 1k\n.end\n"
+        ))
+        .unwrap();
+        let error = Engine::default()
+            .run_hb(&netlist, HbConfig::new(1e3).with_harmonics(3))
+            .expect_err("the zero-origin primitive drifts each period")
+            .to_string();
+        assert!(error.contains("nonzero mean input"), "{error}");
+    }
+    let netlist =
+        Netlist::parse("Bounded primitive\nb1 out 0 v=sdt(cos(2*pi*1k*time))\nr1 out 0 1k\n.end\n")
+            .unwrap();
+    let mut config = rspice_core::engine::SimulationConfig::default();
+    config.resource_limits.max_result_values = 120;
+    let error = Engine::new(config)
+        .run_hb(
+            &netlist,
+            HbConfig::new(1e3)
+                .with_harmonics(3)
+                .with_collocation_points(129),
+        )
+        .expect_err("primitive preparation must honor the configured memory limit")
+        .to_string();
+    assert!(error.contains("periodic allocation limit"), "{error}");
+}
+
+#[test]
 fn hb_integral_dependents_share_transfer_and_noise_from_fresh_hb_and_pss() {
     let rate = 1e3;
     let netlist = filter(rate, "");

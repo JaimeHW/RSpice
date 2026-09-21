@@ -2,6 +2,8 @@
 
 use super::*;
 
+pub(super) mod prescribed;
+
 impl HbSolver {
     pub(crate) fn physical_branch_count(&self) -> usize {
         self.exact_mna_branches()
@@ -197,6 +199,9 @@ mod tests {
                         current_sources: vec![current],
                     },
                     false,
+                    usize::MAX,
+                    false,
+                    &crate::abort_signal::NoAbort,
                 )
                 .unwrap();
             let mut state = HbSolverState::new(3, 2);

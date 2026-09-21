@@ -808,6 +808,8 @@ impl Engine {
                 num_nodes,
                 BehavioralBasis::Periodic {
                     autonomous: autonomous_tolerance.is_some(),
+                    retained: operating_point.is_some(),
+                    abort,
                 },
             )?;
         }

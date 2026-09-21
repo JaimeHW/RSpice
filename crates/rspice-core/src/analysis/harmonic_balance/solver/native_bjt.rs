@@ -103,7 +103,11 @@ impl HbSolver {
         &mut self,
         sources: &crate::device::behavioral::BehavioralSources,
         autonomous: bool,
+        max_values: usize,
+        retained: bool,
+        abort: &dyn AbortSignal,
     ) -> Result<(), HbError> {
+        self.validate_configuration()?;
         let period = self.config.fundamental_freq.recip();
         let certify = |name: &str, periodic: bool, cycles: Value, interval: Option<Value>| {
             if !periodic {
@@ -161,7 +165,9 @@ impl HbSolver {
                 source.minimum_pss_interval(false),
             )?;
         }
+        let prescribed = self.prepare_prescribed_integrals(sources, max_values, retained, abort)?;
         self.register_integral_coordinates(sources)?;
+        self.prescribed_integrals = prescribed;
         self.behavioral_sources = sources.clone();
         self.behavioral_phase_dimensions = 0;
         Ok(())
@@ -237,6 +243,7 @@ impl HbSolver {
                 })?;
         }
         self.behavioral_sources = lifted;
+        self.prescribed_integrals.clear();
         self.behavioral_phase_dimensions = grid.dimensions().len();
         Ok(())
     }
@@ -302,6 +309,22 @@ impl HbSolver {
             }
         }
         let integral_start = self.num_nodes + self.physical_branch_count();
+        let prescribed = self
+            .prescribed_integrals
+            .iter()
+            .enumerate()
+            .map(|(index, spectrum)| {
+                spectrum.as_ref().map(|spectrum| {
+                    (
+                        spectrum.value(
+                            time * self.config.fundamental_freq,
+                            solution[integral_start + index],
+                        ),
+                        self.config.fundamental_freq,
+                    )
+                })
+            })
+            .collect::<Vec<_>>();
         self.behavioral_sources
             .stamp_periodic_fq(
                 crate::device::behavioral::BehavioralFqPoint {
@@ -310,6 +333,7 @@ impl HbSolver {
                     num_nodes: self.num_nodes,
                     unknowns: solution.len(),
                     integral_start,
+                    prescribed_integrals: &prescribed,
                 },
                 f,
                 q,

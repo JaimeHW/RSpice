@@ -1911,7 +1911,11 @@ impl Engine {
                 &circuit,
                 &mut solver,
                 num_nodes,
-                BehavioralBasis::Periodic { autonomous: false },
+                BehavioralBasis::Periodic {
+                    autonomous: false,
+                    retained: false,
+                    abort,
+                },
             )?;
         }
         let periodic_branch_names = solver.try_periodic_mna_branch_names().map_err(|error| {

@@ -8,6 +8,7 @@ use std::collections::HashMap;
 
 mod periodic;
 pub(crate) use periodic::BehavioralFqPoint;
+mod prescribed;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum Input {

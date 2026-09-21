@@ -160,6 +160,7 @@ impl HbSolver {
                                 num_nodes: self.num_nodes,
                                 unknowns: solution.len(),
                                 integral_start,
+                                prescribed_integrals: &[],
                             },
                             state_start,
                         )

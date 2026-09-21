@@ -20,7 +20,11 @@ enum PeriodicMnaRegistration {
 }
 
 pub(super) enum BehavioralBasis<'a> {
-    Periodic { autonomous: bool },
+    Periodic {
+        autonomous: bool,
+        retained: bool,
+        abort: &'a dyn AbortSignal,
+    },
     QuasiPeriodic(&'a crate::analysis::quasi_periodic::QuasiPeriodicGrid),
 }
 
@@ -35,14 +39,25 @@ impl Engine {
         use crate::analysis::harmonic_balance::{DepletionCap, NonlinearDeviceInstance};
 
         match basis {
-            BehavioralBasis::Periodic { autonomous } => {
-                solver.set_periodic_behavioral_sources(&circuit.behavioral_sources, autonomous)
-            }
+            BehavioralBasis::Periodic {
+                autonomous,
+                retained,
+                abort,
+            } => solver.set_periodic_behavioral_sources(
+                &circuit.behavioral_sources,
+                autonomous,
+                self.config.resource_limits.max_result_values,
+                retained,
+                abort,
+            ),
             BehavioralBasis::QuasiPeriodic(grid) => {
                 solver.set_quasi_periodic_behavioral_sources(&circuit.behavioral_sources, grid)
             }
         }
-        .map_err(|error| SimulationError::Circuit(error.to_string()))?;
+        .map_err(|error| match error {
+            crate::analysis::HbError::Aborted => SimulationError::Aborted,
+            error => SimulationError::Circuit(error.to_string()),
+        })?;
 
         for bjt in &circuit.bjts.devices {
             solver

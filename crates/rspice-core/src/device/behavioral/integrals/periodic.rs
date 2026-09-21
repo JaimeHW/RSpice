@@ -13,6 +13,9 @@ pub(crate) struct BehavioralFqPoint<'a> {
     pub num_nodes: usize,
     pub unknowns: usize,
     pub integral_start: usize,
+    /// Prescribed primitive values and inverse-time row scales. Empty for
+    /// continuous F/Q callers that retain the original integral-rate equations.
+    pub prescribed_integrals: &'a [Option<(Value, Value)>],
 }
 
 struct Sample {
@@ -146,12 +149,22 @@ macro_rules! sample_source {
                     Input::Integral(index) => Some(state_start + index),
                 };
                 for (index, equation) in equations.rates.iter().enumerate() {
+                    let state = state_start + index;
+                    if let Some(Some((target, scale))) = point.prescribed_integrals.get(state - point.integral_start) {
+                        // A time-only primitive has a known trajectory, either
+                        // from the zero origin or an authenticated producer.
+                        // Its row keeps integrand units and its small-signal
+                        // variation is zero at every frequency, including DC.
+                        f.stamp_rhs(state + 1, scale * target);
+                        f.stamp_rhs(state + 1, -scale * point.inputs[state]);
+                        f.stamp(state + 1, state + 1, *scale);
+                        continue;
+                    }
                     let sample = equation
                         .periodic_sample(point, environment, binding, false)
                         .map_err(|error| {
                             format!("behavioral source '{}' SDT {index}: {error}", self.name)
                         })?;
-                    let state = state_start + index;
                     // dz/dt = input: F = -input and Q = z. MatrixStamper's
                     // RHS holds source-minus-F/Q; its Jacobians hold dF/dx,dQ/dx.
                     f.stamp_rhs(state + 1, sample.value);
@@ -234,6 +247,13 @@ impl BehavioralSources {
             || point.integral_start.checked_add(self.integral_count()) != Some(point.unknowns)
             || point.unknowns > point.inputs.len()
             || point.inputs.iter().any(|value| !value.is_finite())
+            || (!point.prescribed_integrals.is_empty()
+                && point.prescribed_integrals.len() != self.integral_count())
+            || point
+                .prescribed_integrals
+                .iter()
+                .flatten()
+                .any(|(value, scale)| !value.is_finite() || !scale.is_finite() || *scale <= 0.0)
         {
             return Err(
                 "behavioral periodic sample does not match its explicit integral basis".into(),
@@ -350,6 +370,7 @@ mod tests {
                 num_nodes: 2,
                 unknowns: 8,
                 integral_start: 4,
+                prescribed_integrals: &[],
             };
             sources.stamp_periodic_fq(point, &mut f, &mut q).unwrap();
             for (actual, expected) in f.rhs.iter().zip([0.0, -2.0, 0.0, 8.7, 1.0, 4.0, 0.2, 6.0]) {

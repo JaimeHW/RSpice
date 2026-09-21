@@ -1018,9 +1018,12 @@ pub struct HbSolver {
     /// Native physical BJT models retain every internal MNA state.
     native_bjts: Vec<crate::device::Bjt>,
 
-    /// Bound stateless constitutive expressions over the complete MNA basis.
+    /// Bound constitutive expressions over the complete physical/integral basis.
     behavioral_sources: crate::device::behavioral::BehavioralSources,
     behavioral_phase_dimensions: usize,
+    /// Zero-origin primitives for rates independent of physical coordinates.
+    /// Other integrals keep their continuous rate equations and solved constants.
+    prescribed_integrals: Vec<Option<integrals::prescribed::PrescribedIntegral>>,
     /// Sorted zero-based temperature/current state nodes. Electrical voltage
     /// limiting and shunt homotopy do not apply to these physical coordinates.
     non_electrical_nodes: Vec<usize>,
