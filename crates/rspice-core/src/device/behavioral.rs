@@ -22,6 +22,7 @@ mod breakpoints;
 mod history;
 mod integrals;
 pub(crate) use history::BehavioralAcceptedState;
+pub(crate) use integrals::BehavioralFqPoint;
 mod periodicity;
 mod quasi_periodic;
 mod resolution;

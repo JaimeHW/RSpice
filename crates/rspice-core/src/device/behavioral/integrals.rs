@@ -6,6 +6,9 @@ use super::*;
 use crate::expr::AcceptedSdtState;
 use std::collections::HashMap;
 
+mod periodic;
+pub(crate) use periodic::BehavioralFqPoint;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum Input {
     Node(usize),

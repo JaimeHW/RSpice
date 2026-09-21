@@ -294,44 +294,22 @@ impl HbSolver {
                 )));
             }
         }
-        for source in &mut self.behavioral_sources.current_sources {
-            source
-                .linearize_at_time(behavioral_inputs, time)
-                .map_err(|error| HbError::InvalidCircuit(error.to_string()))?;
-            let value = source
-                .evaluate(behavioral_inputs, time)
-                .map_err(|error| HbError::InvalidCircuit(error.to_string()))?;
-            f.stamp_rhs(source.node_pos, -value);
-            f.stamp_rhs(source.node_neg, value);
-            for (column, partial) in source
-                .linearized_partials()
-                .filter(|(column, _)| *column < solution.len())
-            {
-                f.stamp(source.node_pos, column + 1, partial);
-                f.stamp(source.node_neg, column + 1, -partial);
-            }
-        }
-        for source in &mut self.behavioral_sources.voltage_sources {
-            source
-                .linearize_at_time(behavioral_inputs, time)
-                .map_err(|error| HbError::InvalidCircuit(error.to_string()))?;
-            let value = source
-                .evaluate(behavioral_inputs, time)
-                .map_err(|error| HbError::InvalidCircuit(error.to_string()))?;
-            let row = self.num_nodes + source.branch_ordinal;
-            // The exact linear port row owns V(pos)-V(neg). This term owns
-            // only -expression, with the inverse sign in source-minus-F.
-            f.stamp_rhs(row, value);
-            for (column, partial) in source
-                .linearized_partials()
-                .filter(|(column, _)| *column < solution.len())
-            {
-                f.stamp(row, column + 1, -partial);
-            }
-        }
-        if f.invalid {
+        self.behavioral_sources
+            .stamp_periodic_fq(
+                crate::device::behavioral::BehavioralFqPoint {
+                    inputs: behavioral_inputs,
+                    time,
+                    num_nodes: self.num_nodes,
+                    unknowns: solution.len(),
+                    integral_start: solution.len(),
+                },
+                f,
+                q,
+            )
+            .map_err(HbError::InvalidCircuit)?;
+        if f.invalid || q.invalid {
             return Err(HbError::InvalidCircuit(
-                "behavioral periodic F/J entries are invalid".into(),
+                "behavioral periodic F/Q entries are invalid".into(),
             ));
         }
         Ok(())
