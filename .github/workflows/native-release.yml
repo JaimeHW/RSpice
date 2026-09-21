@@ -158,7 +158,7 @@ jobs:
           python tools/release/stage_managed_python.py \
             --python-executable "$managed_python" \
             --output-root "$runtime_root" \
-            --worker assets/automation_runtime/rspice_worker.py \
+            --worker crates/rspice-automation-runtime/worker/rspice_worker.py \
             --expected-version "$MANAGED_PYTHON_VERSION" \
             --source-identity "astral-sh/python-build-standalone via uv ${UV_VERSION}" \
             >> "$GITHUB_OUTPUT"
