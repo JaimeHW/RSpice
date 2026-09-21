@@ -81,8 +81,9 @@ pub(crate) struct WorkerRequest {
 /// 35: optimization objectives and constraints carry requested physical units.
 /// 36: sampled-noise configuration preserves aperture and observation timing.
 /// 37: retained HB dependencies carry separate behavioral integral spectra.
+/// 38: QPSS dependencies retain typed behavioral integral coordinates.
 #[cfg(any(target_arch = "wasm32", test))]
-pub(crate) const WORKER_REQUEST_TRANSPORT_PROTOCOL: u8 = 37;
+pub(crate) const WORKER_REQUEST_TRANSPORT_PROTOCOL: u8 = 38;
 
 /// Browser-worker request split into compact metadata and transferable
 /// floating-point buffers. The embedded request deliberately carries empty
@@ -1491,7 +1492,7 @@ impl WorkerSimulationResult {
                     .sum(),
                 f64_payload_bytes(
                     operating_point
-                        .spectra()
+                        .complete_spectra()
                         .iter()
                         .map(Vec::len)
                         .sum::<usize>()
@@ -1704,7 +1705,8 @@ impl WorkerSimulationResult {
 /// 31: optimization observations retain requested physical units.
 /// 32: sampled noise retains the sampling configuration and spectra.
 /// 33: retained HB results carry separate behavioral integral spectra.
-const WORKER_RESPONSE_TRANSPORT_PROTOCOL: u8 = 33;
+/// 34: QPSS results retain typed behavioral integral coordinates.
+const WORKER_RESPONSE_TRANSPORT_PROTOCOL: u8 = 34;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct WorkerResponseTransport {

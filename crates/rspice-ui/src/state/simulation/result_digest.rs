@@ -1248,7 +1248,7 @@ fn encode_result_payload(
             writer.string(operating_point.retained_identity());
             writer.retained_bytes = writer.retained_bytes.saturating_add(
                 operating_point
-                    .spectra()
+                    .complete_spectra()
                     .iter()
                     .map(|row| row.len() as u64 * 16)
                     .sum::<u64>(),

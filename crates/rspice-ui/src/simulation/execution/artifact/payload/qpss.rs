@@ -44,7 +44,7 @@ impl QpssStateArtifact {
                 &rspice_core::NoAbort,
             )
             .map_err(|error| ExecutionArtifactError::InvalidPayload(error.to_string()))?;
-        let rows = self.operating_point.spectra();
+        let rows = self.operating_point.complete_spectra();
         if self.spectral_real.len() != rows.len() || self.spectral_imaginary.len() != rows.len() {
             return Err(ExecutionArtifactError::InvalidPayload(
                 "QPSS cached spectral row count differs".into(),
@@ -89,7 +89,7 @@ impl QpssStateArtifact {
             )
             .map_err(|error| ExecutionArtifactError::InvalidPayload(error.to_string()))?;
         let (spectral_real, spectral_imaginary) = point
-            .spectra()
+            .complete_spectra()
             .iter()
             .map(|row| split_complex_values(row))
             .unzip();
@@ -301,7 +301,7 @@ mod tests {
         };
         let spec = draft.to_spec().unwrap();
         let data = crate::services::simulation_runner::run_qpss_analysis_with_source_path_and_abort(
-            "QPSS artifact\nV1 out 0 SIN(0 1 1k)\nR1 out 0 1k\nI1 0 out SIN(0 .001 1414.213562373095)\n.end\n",
+            "QPSS artifact\nV1 out 0 SIN(0 1 1k)\nR1 out 0 1k\nI1 0 out SIN(0 .001 1414.213562373095)\nBmemory memory 0 V=1k*sdt(v(out)-v(memory))\nRmemory memory 0 1k\n.end\n",
             spec.driven_qpss_config().unwrap(), None, &rspice_core::NoAbort,
         ).unwrap();
         let result = SimulationResult::from_qpss_operating_point(data.operating_point).unwrap();
@@ -393,6 +393,12 @@ mod tests {
             assert!(validate_prepared_dependency_contract(&consumer, &autonomous).is_err());
         }
         assert!(resolved.hb_state().is_err());
+        let point = resolved.qpss_state().unwrap().operating_point();
+        assert_eq!(point.integral_names(), ["B:BMEMORY:sdt:0"]);
+        assert_eq!(
+            resolved.qpss_state().unwrap().spectral_real.len(),
+            point.complete_spectra().len()
+        );
         let (metadata, buffers) = resolved.encode_transfer().unwrap();
         let restored = ResolvedExecutionDependencies::decode_transfer(&metadata, buffers).unwrap();
         assert_eq!(
@@ -404,6 +410,10 @@ mod tests {
         native
             .validate_for_spec(&consumers()[0], &SpecExecutionOptions::default())
             .unwrap();
+        let (metadata, mut buffers) = resolved.encode_transfer().unwrap();
+        // The last imaginary row belongs to the integral, not a displayed trace.
+        buffers.last_mut().unwrap()[0] += 1e-6;
+        assert!(ResolvedExecutionDependencies::decode_transfer(&metadata, buffers).is_err());
     }
 
     #[test]

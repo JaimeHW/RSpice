@@ -41,7 +41,7 @@ mod tests {
 
     fn result() -> SimulationResult {
         let data = crate::services::simulation_runner::run_qpss_analysis_with_source_path_and_abort(
-            "QPSS transfer\nV1 in 0 SIN(.1 .2 1k)\nR1 in out 1k\nC1 out 0 1u\nI1 0 out SIN(0 .001 1414.213562373095)\n.end\n",
+            "QPSS transfer\nV1 in 0 SIN(.1 .2 1k)\nR1 in out 1k\nC1 out 0 1u\nI1 0 out SIN(0 .001 1414.213562373095)\nBmemory memory 0 V=1k*sdt(v(out)-v(memory))\nRmemory memory 0 1k\n.end\n",
             rspice_core::engine::QpssConfig::new(vec![1000.0, 1414.213562373095], vec![1, 1]),
             None, &rspice_core::NoAbort,
         ).unwrap();
@@ -79,6 +79,12 @@ mod tests {
             panic!("wrong result family")
         };
         assert!(tuples.iter().any(|tuple| tuple == &[-1, 1]));
+        assert_eq!(operating_point.integral_names(), ["B:BMEMORY:sdt:0"]);
+        assert_eq!(
+            operating_point.complete_spectra().len(),
+            waveforms.len() + 1
+        );
+        assert!(!waveforms.iter().any(|(name, _)| name.contains("sdt:")));
         assert!(
             waveforms
                 .iter()
@@ -92,6 +98,13 @@ mod tests {
             "QPSS",
         );
         retained.validate_retained_evidence().unwrap();
+        let mut display_only = retained.clone();
+        display_only.result_payload = None;
+        let state_bytes = point.complete_spectra().iter().map(Vec::len).sum::<usize>() * 16;
+        assert!(
+            retained.retained_storage_bytes() - display_only.retained_storage_bytes()
+                >= state_bytes as u64
+        );
         let mut altered = retained.clone();
         let trace = altered
             .waveforms
