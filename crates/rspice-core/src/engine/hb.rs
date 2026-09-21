@@ -385,9 +385,14 @@ impl HbOperatingPointIdentity {
         // Startup chooses how to find the retained orbit; it does not change
         // the circuit a dependent analysis linearizes about. The exact orbit
         // and its resolved solver/source-transform configuration remain bound.
-        let semantic_netlist = if netlist.options.hb_time_domain_mode.is_some() {
+        let semantic_netlist = if netlist.options.hb_time_domain_mode.is_some()
+            || netlist.options.nonlin_hb_maxstep.is_some()
+        {
             let mut normalized = netlist.clone();
             normalized.options.hb_time_domain_mode = None;
+            // The effective iteration budget is authenticated by HbConfig. It
+            // does not alter the circuit a consumer linearizes about.
+            normalized.options.nonlin_hb_maxstep = None;
             std::borrow::Cow::Owned(normalized)
         } else {
             std::borrow::Cow::Borrowed(netlist)
@@ -1182,7 +1187,9 @@ impl Engine {
     /// This deliberately returns a derived `HbConfig` instead of modifying
     /// `Engine::config`: `NONLIN-HB MAXSTEP` is a Newton limit for the HB
     /// nonlinear system and must never leak into DC, transient, or PSS.
-    pub(super) fn hb_config_for_netlist(
+    /// Frontends may use this same resolution to authenticate a returned
+    /// operating point against the frozen producer's effective options.
+    pub fn hb_config_for_netlist(
         &self,
         netlist: &Netlist,
         mut config: HbConfig,
