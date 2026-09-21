@@ -177,11 +177,30 @@ pub(crate) fn run_monte_carlo_analysis_with_environment_and_source_path_and_abor
         )
         .map_err(|error| ServiceRunError::from_core("Monte Carlo confidence error", error))?;
 
-    finish_monte_carlo_result(
+    finish_voltage_population(
         result,
         engine.config().resource_limits.max_result_values,
         abort,
     )
+}
+
+/// The all-node OP service knows every sampled column is a voltage. Generic
+/// configured studies attach their own observations after numeric aggregation.
+fn finish_voltage_population(
+    result: rspice_core::analysis::monte_carlo::MonteCarloResult,
+    result_value_limit: usize,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<MonteCarloData> {
+    let mut data = finish_monte_carlo_result(result, result_value_limit, abort)?;
+    for (index, member) in data.trial_measurements.iter_mut().enumerate() {
+        poll_periodically(abort, index)?;
+        for observation in &mut member.measurements {
+            if observation.value.is_some() {
+                observation.unit = Some(rspice_core::analysis::MeasurementUnit::Known("V".into()));
+            }
+        }
+    }
+    Ok(data)
 }
 
 pub(crate) fn finish_monte_carlo_result(
@@ -332,7 +351,7 @@ pub(crate) fn run_statistical_monte_carlo_with_environment_and_source_path_and_a
             abort,
         )
         .map_err(|error| ServiceRunError::from_core("Monte Carlo confidence error", error))?;
-    finish_monte_carlo_result(
+    finish_voltage_population(
         result,
         engine.config().resource_limits.max_result_values,
         abort,
