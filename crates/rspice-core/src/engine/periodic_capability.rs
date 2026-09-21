@@ -675,10 +675,7 @@ pub(crate) const fn periodic_capability_descriptor(
                 "stateless behavioral equations with certified periodic forcing",
             ),
             noise: Inapplicable,
-            pss_state: Restricted(
-                "behavioral sources without `sdt` integrals; accepted-step memory is not \
-                 captured",
-            ),
+            pss_state: Complete,
             envelope: Absent(ENVELOPE_LINEAR_SUBSET),
         },
         F::XspiceInstance => PeriodicCapabilityDescriptor {
@@ -1374,24 +1371,6 @@ pub(in crate::engine) fn pss_state_gaps(circuit: &CircuitData) -> Vec<Capability
                         gaps.push(CapabilityGap::new(
                             family,
                             "solution-dependent capacitor charge/expression history",
-                        ));
-                    }
-                }
-                F::BehavioralSource => {
-                    let has_integral = circuit
-                        .behavioral_sources
-                        .voltage_sources
-                        .iter()
-                        .any(|source| source.program.sdt_count != 0)
-                        || circuit
-                            .behavioral_sources
-                            .current_sources
-                            .iter()
-                            .any(|source| source.program.sdt_count != 0);
-                    if has_integral {
-                        gaps.push(CapabilityGap::new(
-                            family,
-                            "behavioral-source accepted-step memory",
                         ));
                     }
                 }

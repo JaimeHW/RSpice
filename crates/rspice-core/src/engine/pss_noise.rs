@@ -519,6 +519,12 @@ impl Engine {
                 self.run_pss_with_state_abort(netlist, config.clone(), abort)?;
             (pss.period, circuit, matrix, x0)
         };
+        if circuit.behavioral_sources.integral_count() != 0 {
+            return Err(SimulationError::unsupported_capability(
+                "analysis.pnoise.behavioral_integral_noise",
+                "Oscillator noise requires an explicit noise-injection adapter for behavioral integral states",
+            ));
+        }
         let f0 = 1.0 / period;
 
         // ------------------------------------------------------------------

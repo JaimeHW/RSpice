@@ -15,6 +15,11 @@ impl BehavioralVoltageSource {
         self.has_stateless_periodic_equation() && memoryless_equation(&self.ast)
     }
 
+    /// At the origin, an SDT value is fixed independently of its input.
+    pub(crate) fn has_frozen_state_voltage(&self) -> bool {
+        !instantaneous_solution_dependence(&self.ast)
+    }
+
     pub(crate) fn prescribed_time_program(&self) -> Option<(&CompiledExpr, Context<'_>)> {
         (!self.is_solution_dependent() && self.program.sdt_count == 0)
             .then(|| (&self.program, self.periodicity_context()))
@@ -22,6 +27,19 @@ impl BehavioralVoltageSource {
 
     pub(crate) fn minimum_pss_interval(&self, events_resolved: bool) -> Option<Value> {
         minimum_pss_interval(&self.ast, &self.periodicity_context(), events_resolved)
+    }
+
+    /// Integral values are shooting coordinates. Their input equations must
+    /// repeat in time; zero mean is enforced by the solved period map.
+    pub(crate) fn has_periodic_shooting_equation(&self, period: Value, autonomous: bool) -> bool {
+        !self.is_frequency_dependent()
+            && time_increment_with_state(
+                &self.ast,
+                period,
+                &self.periodicity_context(),
+                autonomous,
+                true,
+            ) == Some(0.0)
     }
 
     pub(crate) fn has_periodic_time_dependence(&self, period: Value, autonomous: bool) -> bool {
@@ -61,6 +79,19 @@ impl BehavioralCurrentSource {
         minimum_pss_interval(&self.ast, &self.periodicity_context(), events_resolved)
     }
 
+    /// Integral values are shooting coordinates. Their input equations must
+    /// repeat in time; zero mean is enforced by the solved period map.
+    pub(crate) fn has_periodic_shooting_equation(&self, period: Value, autonomous: bool) -> bool {
+        !self.is_frequency_dependent()
+            && time_increment_with_state(
+                &self.ast,
+                period,
+                &self.periodicity_context(),
+                autonomous,
+                true,
+            ) == Some(0.0)
+    }
+
     pub(crate) fn has_periodic_time_dependence(&self, period: Value, autonomous: bool) -> bool {
         time_increment(&self.ast, period, &self.periodicity_context(), autonomous) == Some(0.0)
     }
@@ -77,6 +108,23 @@ impl BehavioralCurrentSource {
             .with_frequency(self.frequency)
             .with_gmin(self.gmin)
             .with_expression_dialect(self.expression_dialect)
+    }
+}
+
+fn instantaneous_solution_dependence(expr: &Expr) -> bool {
+    match expr {
+        Expr::NodeVoltage(_) | Expr::BranchCurrent(_) => true,
+        Expr::Function {
+            func: Function::Sdt,
+            ..
+        } => false,
+        Expr::Unary { operand, .. } => instantaneous_solution_dependence(operand),
+        Expr::Binary { left, right, .. } => {
+            instantaneous_solution_dependence(left) || instantaneous_solution_dependence(right)
+        }
+        Expr::Function { args, .. } => args.iter().any(instantaneous_solution_dependence),
+        Expr::LookupTable { input, .. } => instantaneous_solution_dependence(input),
+        _ => false,
     }
 }
 
@@ -389,7 +437,18 @@ fn time_increment(
     context: &Context<'_>,
     autonomous: bool,
 ) -> Option<Value> {
-    let shift = |expr| time_increment(expr, period, context, autonomous);
+    time_increment_with_state(expr, period, context, autonomous, false)
+}
+
+fn time_increment_with_state(
+    expr: &Expr,
+    period: Value,
+    context: &Context<'_>,
+    autonomous: bool,
+    integral_states: bool,
+) -> Option<Value> {
+    let shift =
+        |expr| time_increment_with_state(expr, period, context, autonomous, integral_states);
     let result = match expr {
         Expr::Time => Some(period),
         Expr::StringLiteral(_) => None,
@@ -430,6 +489,9 @@ fn time_increment(
             }
         }
         Expr::Function { func, args } => {
+            if integral_states && *func == Function::Sdt {
+                return (args.len() == 1 && shift(&args[0]) == Some(0.0)).then_some(0.0);
+            }
             if implicit_time(*func) {
                 let values = args
                     .iter()

@@ -252,7 +252,7 @@ impl PssStateBasis {
             .iter()
             .enumerate()
         {
-            if !source.is_solution_dependent() {
+            if source.has_frozen_state_voltage() {
                 add(
                     source.node_pos,
                     source.node_neg,
@@ -564,14 +564,25 @@ impl PssCircuit {
     }
 
     pub(in crate::engine) fn state_dimension(&self) -> usize {
+        self.physical_state_dimension() + self.behavioral_sources.integral_count()
+    }
+
+    fn physical_state_dimension(&self) -> usize {
         self.basis.charge_branches.len() + self.basis.currents.representatives.len()
     }
 
     pub(in crate::engine) fn state_basis_names(&self) -> Vec<String> {
-        self.basis.names(&self.circuit)
+        self.basis
+            .names(&self.circuit)
+            .into_iter()
+            .chain(self.behavioral_sources.integral_names())
+            .collect()
     }
 
     fn is_current_coordinate(&self, index: usize) -> bool {
+        if index >= self.physical_state_dimension() {
+            return false; // Expression-integral coordinates are not physical amperes.
+        }
         if index >= self.basis.charge_branches.len() {
             return true; // Independent winding currents.
         }
@@ -620,7 +631,10 @@ impl PssCircuit {
         debug_assert_eq!(values.len(), self.state_dimension());
         for (index, (value, raw)) in values
             .iter_mut()
-            .zip(self.project_perturbation(solution))
+            .zip(
+                self.project_physical_perturbation(solution)
+                    .chain(self.behavioral_sources.accepted_integrals()),
+            )
             .enumerate()
         {
             *value = if self.is_current_coordinate(index) {
@@ -649,6 +663,7 @@ impl PssCircuit {
                     .iter()
                     .map(|&index| self.inductors.i_prev[index]),
             )
+            .chain(self.behavioral_sources.accepted_integrals())
             .collect()
     }
 
@@ -658,6 +673,11 @@ impl PssCircuit {
             self.state_dimension(),
             "PSS shooting-state shape must match its basis"
         );
+        let physical_count = self.physical_state_dimension();
+        self.circuit
+            .behavioral_sources
+            .reset_integrals(&state[physical_count..])
+            .map_err(SimulationError::Circuit)?;
         if self.basis.descriptor.is_none() {
             self.solution_scratch.fill(0.0);
         }
@@ -708,7 +728,7 @@ impl PssCircuit {
                 false,
             )?;
             self.basis.currents.set_state(
-                &state[self.basis.charge_branches.len()..],
+                &state[self.basis.charge_branches.len()..physical_count],
                 &mut circuit.inductors.i_prev,
                 &mut self.current_balance,
             );
@@ -1423,9 +1443,21 @@ impl PssCircuit {
         ))
     }
 
-    /// Map an MNA solution perturbation into the same independent coordinates
-    /// used by shooting and the oscillator-noise adjoint.
+    /// Map an MNA solution perturbation into independent coordinates while
+    /// holding expression integrals fixed. The oscillator-noise route separately
+    /// refuses integral states until their impulse coupling is represented.
     pub(in crate::engine) fn project_perturbation<'a>(
+        &'a self,
+        solution: &'a [Value],
+    ) -> impl Iterator<Item = Value> + 'a {
+        self.project_physical_perturbation(solution)
+            .chain(std::iter::repeat_n(
+                0.0,
+                self.behavioral_sources.integral_count(),
+            ))
+    }
+
+    fn project_physical_perturbation<'a>(
         &'a self,
         solution: &'a [Value],
     ) -> impl Iterator<Item = Value> + 'a {

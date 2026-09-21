@@ -1585,7 +1585,7 @@ impl Engine {
             .map(|source| {
                 (
                     source.name.as_str(),
-                    source.has_periodic_time_dependence(period, autonomous),
+                    source.has_periodic_shooting_equation(period, autonomous),
                     source.max_authored_tone_cycles(period),
                     source.minimum_pss_interval(true),
                 )
@@ -1598,7 +1598,7 @@ impl Engine {
                     .map(|source| {
                         (
                             source.name.as_str(),
-                            source.has_periodic_time_dependence(period, autonomous),
+                            source.has_periodic_shooting_equation(period, autonomous),
                             source.max_authored_tone_cycles(period),
                             source.minimum_pss_interval(true),
                         )
@@ -1988,6 +1988,10 @@ impl Engine {
                 &junction_history,
                 trace.times[trace.times.len() - 1] - trace.times[trace.times.len() - 2],
             )
+            .map_err(SimulationError::Circuit)?;
+        circuit
+            .behavioral_sources
+            .rebase_accepted_history(0.0)
             .map_err(SimulationError::Circuit)?;
         let checkpoint = TransientCheckpoint::capture_with_junction_history(
             authenticated_fingerprint,
@@ -4202,6 +4206,10 @@ impl Engine {
             )));
         }
         let num_nodes = circuit.num_nodes();
+        circuit
+            .behavioral_sources
+            .accept_transient_step(&solution, 0.0)
+            .map_err(|error| SimulationError::Circuit(error.to_string()))?;
 
         let fixed_steps = if fixed_grid && let Some(mesh) = &circuit.integration_mesh {
             mesh.steps()
@@ -4433,6 +4441,11 @@ impl Engine {
                     circuit.capacitors.v_prev[cap_idx] = v_new;
                 }
             }
+
+            circuit
+                .behavioral_sources
+                .accept_transient_step(&new_solution, t)
+                .map_err(|error| SimulationError::Circuit(error.to_string()))?;
 
             // Evaluate the candidate against history from previously accepted
             // points before rotating that history. `recommend_scale` already

@@ -371,6 +371,14 @@ impl Default for Vm {
 }
 
 impl Vm {
+    pub(crate) fn accepted_integrals(&self, count: usize) -> impl Iterator<Item = Value> + '_ {
+        (0..count).map(|index| {
+            self.sdt_states
+                .get(index)
+                .map_or(0.0, |state| state.accepted_integral)
+        })
+    }
+
     pub(crate) fn accepted_sdt_history(&self, count: usize) -> Vec<AcceptedSdtState> {
         (0..count)
             .map(|index| {
