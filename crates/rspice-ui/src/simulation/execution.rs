@@ -32,9 +32,9 @@ pub(in crate::simulation) use sealed_source::{
 pub(in crate::simulation) use snapshot::bound_cards;
 pub(in crate::simulation) use snapshot::{
     AuthorizedRunDispatch, AuthorizedTaskDispatch, CrossProbeSnapshot, ExecutionTargetCapabilities,
-    ModelSourceIdentity, PSS_SPECTRUM_ROLE, PreparedRunSet, PreparedRunSnapshot, PreparedTask,
-    ResolvedTaskDispatch, RunSourceReceipt, SavePolicy, SnapshotParts, TouchstoneExportPolicy,
-    result_source_domain,
+    ModelSourceIdentity, PSS_SPECTRUM_ROLE, PreparedMonteCarloResume, PreparedRunSet,
+    PreparedRunSnapshot, PreparedTask, ResolvedTaskDispatch, RunSourceReceipt, SavePolicy,
+    SnapshotParts, TouchstoneExportPolicy, result_source_domain,
 };
 pub(crate) use snapshot::{
     PreparationError, PreparationStage, PreparedRunMetadata, execution_target_supports_cancellation,

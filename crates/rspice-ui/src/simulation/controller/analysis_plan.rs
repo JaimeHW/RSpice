@@ -171,6 +171,25 @@ impl SimulationController {
                 }
             }
 
+            let monte_carlo_resumes =
+                if let crate::simulation::plan::AnalysisDraft::MonteCarlo(draft) = instance.draft()
+                {
+                    match draft.to_config().and_then(|config| {
+                        monte_carlo_checkpoint::resume_inputs_from_config(
+                            state,
+                            config.checkpoint.as_ref(),
+                        )
+                    }) {
+                        Ok(resumes) => resumes,
+                        Err(error) => {
+                            errors.push(format!("{}: {error}", instance.display_name()));
+                            continue;
+                        }
+                    }
+                } else {
+                    Vec::new()
+                };
+
             // A PSS request that asks to retain harmonics earns a second
             // prepared task for them. It is a task in its own right, with its
             // own identity and config digest, rather than a second result
@@ -238,7 +257,8 @@ impl SimulationController {
                 instance.display_name(),
                 task,
             )
-            .with_run_at(run_at.clone());
+            .with_run_at(run_at.clone())
+            .with_monte_carlo_resumes(monte_carlo_resumes);
             if instance.kind() == crate::simulation::plan::AnalysisKind::SParameter {
                 match prepared_run::touchstone_export_policy_for_dialog(
                     &projected_state.sim_setup.sp,
@@ -710,9 +730,8 @@ impl SimulationController {
                 let config = draft.to_config()?;
                 Ok(SpecExecutionOptions {
                     mc_checkpoint: monte_carlo_checkpoint::request_from_config(
-                        state,
                         config.checkpoint.as_ref(),
-                    )?,
+                    ),
                     mc_statistics: config.statistics,
                     ..Default::default()
                 })

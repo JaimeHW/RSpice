@@ -2591,3 +2591,5 @@ fn periodic_op_handoff_snapshot_preserves_source_basis_and_distinct_numerics() {
         );
     }
 }
+
+mod monte_carlo;

@@ -246,22 +246,20 @@ pub(in crate::workbench::surfaces::simulate) fn checkpoint_sources(
     } else {
         field_note(
             ui,
-            "Select runs to reuse. Matching trials are counted once; only missing indices in the requested range are simulated. Combined runs must use the same circuit, sampler, analysis settings and Run Set point. Those settings are checked again before simulation.",
+            "Select runs to reuse. Each Run Set point uses its matching trials; points without a selected checkpoint run normally. Matching trials are counted once and missing indices are simulated. Preparation rejects selections whose circuit, sampler or analysis settings match no requested point.",
         );
     }
-    let selected_population = candidates
-        .iter()
-        .find(|(digest, _, _)| setup.checkpoint.resume.contains(digest))
-        .map(|(_, population, _)| *population);
-    for (digest, population, label) in &candidates {
+    for (digest, _population, label) in &candidates {
         let mut chosen = setup.checkpoint.resume.contains(digest);
-        let allowed = chosen || selected_population.is_none_or(|selected| selected == *population);
-        ui.add_enabled_ui(allowed, |ui| {
+        ui.push_id(digest, |ui| {
             if super::switch_row(ui, label, &mut chosen) {
-                if chosen { setup.checkpoint.resume.push(*digest); }
-                else { setup.checkpoint.resume.retain(|id| id != digest); }
+                if chosen {
+                    setup.checkpoint.resume.push(*digest);
+                } else {
+                    setup.checkpoint.resume.retain(|id| id != digest);
+                }
             }
-        }).response.on_hover_text(if allowed { "Reuse these completed trials" } else { "This checkpoint belongs to a different trial population; clear the selection to choose it" });
+        });
     }
     if setup
         .checkpoint

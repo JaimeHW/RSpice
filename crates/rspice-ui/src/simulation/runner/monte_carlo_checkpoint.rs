@@ -33,6 +33,10 @@ impl MonteCarloCheckpointInput {
     pub(crate) fn digest(&self) -> ContentDigest {
         self.digest
     }
+    pub(crate) fn byte_len(&self) -> usize {
+        self.bytes.len()
+    }
+
     pub(crate) fn decode(&self) -> Result<StudyMonteCarloCheckpoint, SimulationError> {
         if checkpoint_digest(&self.bytes) != self.digest {
             return Err(SimulationError::InvalidConfig(

@@ -78,31 +78,54 @@ impl SimulationController {
     }
 }
 
-/// Resolve selected history into owned, checked bytes before a task is prepared.
-/// Later history pruning or UI selection changes cannot alter a queued request.
+/// Capture cadence is shared across points; selected trial data is routed after
+/// the Run Set has materialized each point's source and numerical environment.
 pub(super) fn request_from_config(
+    config: Option<&crate::simulation::dialog::mc::checkpoint::McCheckpointConfig>,
+) -> Option<crate::simulation::runner::monte_carlo_checkpoint::MonteCarloCheckpointRequest> {
+    config.map(|config| {
+        crate::simulation::runner::monte_carlo_checkpoint::MonteCarloCheckpointRequest {
+            publish_every: config.publish_every,
+            trial_range: None,
+            resume: None,
+        }
+    })
+}
+
+/// Resolve selected history into checked populations before freezing a task.
+/// Different populations stay separate; matching trial journals pool exactly.
+pub(super) fn resume_inputs_from_config(
     state: &AppState,
     config: Option<&crate::simulation::dialog::mc::checkpoint::McCheckpointConfig>,
-) -> Result<
-    Option<crate::simulation::runner::monte_carlo_checkpoint::MonteCarloCheckpointRequest>,
-    String,
-> {
-    use crate::simulation::runner::monte_carlo_checkpoint::{
-        MonteCarloCheckpointInput, MonteCarloCheckpointRequest,
-    };
+) -> Result<Vec<crate::simulation::execution::PreparedMonteCarloResume>, String> {
+    use crate::simulation::runner::monte_carlo_checkpoint::MonteCarloCheckpointInput;
     use crate::simulation::runner::study::monte_carlo::checkpoint::StudyMonteCarloCheckpoint;
     let Some(config) = config else {
-        return Ok(None);
+        return Ok(Vec::new());
     };
     let limits = rspice_core::ResourceLimits::default();
-    let mut pooled: Option<StudyMonteCarloCheckpoint> = None;
+    let mut selected = Vec::new();
+    let mut bytes = 0usize;
+    let mut seen = std::collections::HashSet::new();
     for digest in &config.resume {
+        if !seen.insert(*digest) {
+            return Err("A Monte Carlo checkpoint is selected more than once".into());
+        }
         let (analysis, evidence) = state.simulation.runs.iter()
             .flat_map(|run| &run.analyses)
             .find_map(|analysis| analysis.monte_carlo_checkpoint.as_ref()
                 .filter(|checkpoint| checkpoint.digest() == *digest)
                 .map(|checkpoint| (analysis, checkpoint)))
             .ok_or("A selected Monte Carlo checkpoint is no longer retained. Clear its selection or restore the run before preparing again.")?;
+        bytes = bytes.saturating_add(evidence.bytes().len());
+        if bytes > limits.max_external_data_bytes {
+            return Err("Selected Monte Carlo checkpoints exceed the combined byte limit".into());
+        }
+        selected.push((analysis, evidence));
+    }
+    let mut populations: std::collections::BTreeMap<[u8; 32], StudyMonteCarloCheckpoint> =
+        Default::default();
+    for (analysis, evidence) in selected {
         evidence.validate_for(analysis)?;
         let checkpoint = StudyMonteCarloCheckpoint::from_bytes_with_limits(
             evidence.bytes(),
@@ -110,26 +133,25 @@ pub(super) fn request_from_config(
             &rspice_core::NoAbort,
         )
         .map_err(|error| error.to_string())?;
-        if let Some(pooled) = &mut pooled {
+        if let Some(pooled) = populations.get_mut(&checkpoint.population_identity()) {
             pooled
                 .merge_with_limits(&checkpoint, limits, &rspice_core::NoAbort)
                 .map_err(|error| {
                     format!("Selected Monte Carlo checkpoints cannot be pooled: {error}")
                 })?;
         } else {
-            pooled = Some(checkpoint);
+            populations.insert(checkpoint.population_identity(), checkpoint);
         }
     }
-    let resume = pooled
+    populations
+        .into_values()
         .map(|checkpoint| {
-            let bytes = checkpoint.to_bytes_with_limits(limits, &rspice_core::NoAbort)?;
-            MonteCarloCheckpointInput::from_bytes(bytes)
+            let bytes = checkpoint
+                .to_bytes_with_limits(limits, &rspice_core::NoAbort)
+                .map_err(|error| error.to_string())?;
+            let input =
+                MonteCarloCheckpointInput::from_bytes(bytes).map_err(|error| error.to_string())?;
+            crate::simulation::execution::PreparedMonteCarloResume::from_input(input)
         })
-        .transpose()
-        .map_err(|error| error.to_string())?;
-    Ok(Some(MonteCarloCheckpointRequest {
-        publish_every: config.publish_every,
-        trial_range: None,
-        resume,
-    }))
+        .collect()
 }

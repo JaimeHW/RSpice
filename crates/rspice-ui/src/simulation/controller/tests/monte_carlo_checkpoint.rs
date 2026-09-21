@@ -239,7 +239,11 @@ fn monte_carlo_checkpoint_controls_resolve_evidence_before_preparation() {
         policy.trial_range.is_none(),
         "authored run range stays on the MC card"
     );
-    let input = policy.resume.as_ref().unwrap();
+    assert!(
+        policy.resume.is_none(),
+        "checkpoint is selected only after the point is materialized"
+    );
+    let input = task.monte_carlo_resumes()[0].input();
     assert_eq!(input.digest(), digest);
     state.simulation.runs.clear();
     assert_eq!(

@@ -40,6 +40,8 @@ pub(in crate::simulation) mod bound_cards;
 mod declared_points;
 mod derived_identity;
 mod hierarchy_map;
+mod monte_carlo;
+pub(in crate::simulation) use monte_carlo::PreparedMonteCarloResume;
 mod participation;
 mod run_receipt;
 mod saved_outputs;
@@ -498,6 +500,8 @@ pub(in crate::simulation) struct PreparedTask {
     /// Cards only this task's deck carries. See [`bound_cards`]: they change
     /// the solve, so they are part of the payload digest.
     bound_observation_cards: Vec<String>,
+    /// Checked selections are routed only after per-point source materialization.
+    monte_carlo_resumes: Arc<[PreparedMonteCarloResume]>,
 }
 
 impl PreparedTask {
@@ -534,6 +538,7 @@ impl PreparedTask {
             execution_environment: None,
             run_at: crate::simulation::run_set::AnalysisRunAt::default(),
             bound_observation_cards: Vec::new(),
+            monte_carlo_resumes: Arc::from([]),
         }
     }
 
@@ -631,6 +636,8 @@ impl PreparedTask {
             ),
             &self.bound_observation_cards,
         );
+        let analysis_digest =
+            monte_carlo::digest_with_resumes(analysis_digest, &self.monte_carlo_resumes);
         let Some(environment) = self.execution_environment.as_ref() else {
             return analysis_digest;
         };
@@ -1209,6 +1216,8 @@ impl PreparedRunSnapshot {
             );
             bound_cards::validate_bound_observation_cards(&parts.tasks)?;
         }
+
+        monte_carlo::route_resumes(&mut parts.tasks, &parts.executable_netlist)?;
 
         let mut positions = HashMap::with_capacity(parts.tasks.len());
         for (index, task) in parts.tasks.iter().enumerate() {
