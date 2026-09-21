@@ -16,6 +16,7 @@ pub(super) fn validate_worker_qpxf_result(result: &WorkerSimulationResult) -> Re
     }
     Ok(())
 }
+#[cfg(test)]
 pub(super) fn response_bytes(response: &rspice_core::engine::QpxfAnalysisResult) -> usize {
     let complex = response
         .solutions
