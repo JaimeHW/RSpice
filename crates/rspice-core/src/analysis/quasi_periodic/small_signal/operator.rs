@@ -11,9 +11,37 @@ impl Linearization {
         linear: &[Vec<LinearEntry>],
         abort: &dyn AbortSignal,
     ) -> Result<Vec<Value>, Error> {
-        let mut divisors = vec![1.0_f64; self.unknowns];
         let omega =
             frequencies.iter().map(|f| f.abs()).fold(0.0, Value::max) * std::f64::consts::TAU;
+        let mut columns = vec![1.0_f64; self.unknowns];
+        if self.orientation == Orientation::Forward {
+            // Normalize unknown units before choosing equation units. A raw
+            // row maximum (e.g. omega^2 for a nested integral) can otherwise
+            // make inverse qualification inject an enormous artificial KVL
+            // excitation and lose the downstream KCL cancellation to roundoff.
+            for sample in std::iter::once(&self.stationary).chain(&self.derivatives) {
+                check_abort(abort)?;
+                for (terms, weight) in [(&sample.conductance, 1.0), (&sample.capacitance, omega)] {
+                    for &(_, col, value) in terms {
+                        columns[col] = columns[col].max(value.abs() * weight);
+                    }
+                }
+            }
+            for entries in linear {
+                check_abort(abort)?;
+                for &(_, col, value) in entries {
+                    columns[col] = columns[col].max(value.norm());
+                }
+            }
+        }
+        let mut divisors = vec![
+            if self.orientation == Orientation::Forward {
+                0.0_f64
+            } else {
+                1.0
+            };
+            self.unknowns
+        ];
         for sample in std::iter::once(&self.stationary).chain(&self.derivatives) {
             check_abort(abort)?;
             for (terms, weight) in [(&sample.conductance, 1.0), (&sample.capacitance, omega)] {
@@ -29,7 +57,12 @@ impl Linearization {
                             "QP small-signal equation scale overflowed".into(),
                         ));
                     }
-                    divisors[equation] = divisors[equation].max(magnitude);
+                    let column = if self.orientation == Orientation::Adjoint {
+                        row
+                    } else {
+                        col
+                    };
+                    divisors[equation] = divisors[equation].max(magnitude / columns[column]);
                 }
             }
         }
@@ -47,7 +80,17 @@ impl Linearization {
                         "QP small-signal equation scale overflowed".into(),
                     ));
                 }
-                divisors[equation] = divisors[equation].max(magnitude);
+                let column = if self.orientation == Orientation::Adjoint {
+                    row
+                } else {
+                    col
+                };
+                divisors[equation] = divisors[equation].max(magnitude / columns[column]);
+            }
+        }
+        for value in &mut divisors {
+            if *value == 0.0 {
+                *value = 1.0;
             }
         }
         Ok(divisors)

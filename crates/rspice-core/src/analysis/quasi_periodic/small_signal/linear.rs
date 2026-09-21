@@ -115,13 +115,29 @@ impl Blocks {
                 rhs[row] = direction[row * entries + k] * divisors[row];
             }
             let solved = match matrix {
-                Some(matrix) => match matrix.solve(&rhs) {
-                    Ok(solution) => solution,
-                    Err(SolverError::InaccurateSolution(_)) if self.unknowns <= 64 => {
-                        matrix.solve_dense_extended(&rhs)?
+                Some(matrix) => {
+                    let mut candidate = vec![Complex64::ZERO; self.unknowns];
+                    match matrix.solve_into(&rhs, &mut candidate) {
+                        Ok(()) => candidate,
+                        Err(SolverError::InaccurateSolution(_))
+                            if candidate.iter().all(|v| finite(*v)) =>
+                        {
+                            // This block is only a preconditioner. Its finite
+                            // approximate inverse is qualified by the complete
+                            // operator below, never published as a response.
+                            if self.unknowns <= 64 {
+                                let mut extended = Vec::new();
+                                match matrix.solve_dense_extended_into(&rhs, &mut extended) {
+                                    Ok(()) | Err(SolverError::InaccurateSolution(_)) => extended,
+                                    Err(error) => return Err(error.into()),
+                                }
+                            } else {
+                                candidate
+                            }
+                        }
+                        Err(error) => return Err(error.into()),
                     }
-                    Err(error) => return Err(error.into()),
-                },
+                }
                 None => rhs.clone(),
             };
             for (row, value) in solved.into_iter().enumerate() {
