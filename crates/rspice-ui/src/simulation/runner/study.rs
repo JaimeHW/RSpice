@@ -2,10 +2,12 @@
 
 mod analysis;
 pub use analysis::StudyAnalysis;
+mod hb;
 mod optimization;
 mod periodic;
 mod pss;
 mod qpss;
+pub use hb::StudyHbConfig;
 pub use periodic::StudyPeriodicOptions;
 pub use pss::{StudyOperatingPoint, StudyPssConfig};
 pub use qpss::StudyQpssConfig;
@@ -919,6 +921,7 @@ fn analysis_for_environment(
     let operating_point = match &mut analysis {
         StudyAnalysis::Pss(pss) => Some(&mut pss.operating_point.config),
         StudyAnalysis::Qpss(qpss) => Some(&mut qpss.operating_point.config),
+        StudyAnalysis::Hb(hb) => Some(&mut hb.operating_point.config),
         _ => None,
     };
     if let Some(op) = operating_point {

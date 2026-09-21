@@ -945,6 +945,14 @@ fn encode_spec_options(writer: &mut CanonicalWriter, options: &SpecExecutionOpti
                 encode_op_config(writer, &qpss.operating_point.config);
                 writer.string(&qpss.operating_point.numeric_options);
             }
+            crate::simulation::runner::study::StudyAnalysis::Hb(hb) => {
+                writer.domain("study-seeded-hb/v1");
+                encode_analysis_spec(writer, &hb.request);
+                writer.uuid(hb.operating_point.instance_id.as_uuid());
+                writer.u64(hb.operating_point.source_revision.get());
+                encode_op_config(writer, &hb.operating_point.config);
+                writer.string(&hb.operating_point.numeric_options);
+            }
             crate::simulation::runner::study::StudyAnalysis::Native(spec) => {
                 writer.domain("study-native-spec/v1");
                 encode_analysis_spec(writer, spec);

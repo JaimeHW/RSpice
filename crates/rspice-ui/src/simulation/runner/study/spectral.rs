@@ -62,6 +62,7 @@ impl StudyPostprocess {
             ) => spec.clone(),
             StudyAnalysis::Pss(pss) => pss.request.clone(),
             StudyAnalysis::Qpss(qpss) => qpss.request.clone(),
+            StudyAnalysis::Hb(hb) => hb.request.clone(),
             _ => {
                 return Err(SimulationError::InvalidConfig(
                     "Study requires its configured transient, PSS, HB or QPSS producer".into(),
@@ -130,6 +131,7 @@ impl StudyRunConfig {
         let operating_point = match &self.analysis {
             StudyAnalysis::Pss(pss) => Some(&pss.operating_point),
             StudyAnalysis::Qpss(qpss) => Some(&qpss.operating_point),
+            StudyAnalysis::Hb(hb) => Some(&hb.operating_point),
             _ => None,
         };
         if let Some(operating_point) = operating_point {
@@ -198,6 +200,9 @@ impl StudyRunConfig {
                 StudyAnalysis::Qpss(qpss) => qpss
                     .run_with_circuit(engine, circuit, &self.numeric_options, abort)
                     .map(|(_, result)| result),
+                StudyAnalysis::Hb(hb) => hb
+                    .run_with_circuit(engine, circuit, &self.numeric_options, abort)
+                    .map(|(_, result)| result),
                 StudyAnalysis::Native(spec) => {
                     super::super::spec::run_native_study_on_materialized(
                         spec.clone(),
@@ -221,6 +226,30 @@ impl StudyRunConfig {
             postprocess.request,
             AnalysisSpec::Hbsp { .. } | AnalysisSpec::Hbnoise { .. }
         ) {
+            if let StudyAnalysis::Hb(hb) = analysis {
+                let (physical, result) = hb.run_with_circuit(
+                    engine,
+                    circuit,
+                    &postprocess.producer_numeric_options,
+                    abort,
+                )?;
+                let SimulationResult::HarmonicBalance {
+                    operating_point, ..
+                } = result
+                else {
+                    return Err(SimulationError::SolverError(
+                        "HB study producer returned no retained orbit".into(),
+                    ));
+                };
+                let consumer =
+                    super::pss::circuit_with_options(&physical, &self.numeric_options, abort)?;
+                return super::super::spec::run_hb_consumer(
+                    postprocess.request.clone(),
+                    &consumer,
+                    &operating_point,
+                    abort,
+                );
+            }
             let StudyAnalysis::Native(producer @ AnalysisSpec::HarmonicBalance { .. }) = analysis
             else {
                 return Err(SimulationError::InvalidConfig(

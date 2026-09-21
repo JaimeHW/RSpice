@@ -138,22 +138,34 @@ fn base(kind: usize, hb: bool) -> StudyRunConfig {
         ),
     };
     let analysis = if hb {
-        StudyAnalysis::Native(AnalysisSpec::HarmonicBalance {
-            tones: vec![HbToneSpec::new(1000.0, 3)],
-            reltol: 1e-6,
-            abstol: 1e-12,
-            max_iterations: 40,
-            damping: 1.0,
-            min_damping: 0.02,
-            oversample: 3,
-            collocation_points: Some(9),
-            max_mixing_order: 3,
-            use_krylov: false,
-            gmres_restart: 12,
-            source_stepping: false,
-            use_exact_jacobian: true,
-            verbose: false,
-        })
+        StudyAnalysis::Hb(Box::new(StudyHbConfig {
+            request: AnalysisSpec::HarmonicBalance {
+                tones: vec![HbToneSpec::new(1000.0, 3)],
+                reltol: 1e-6,
+                abstol: 1e-12,
+                max_iterations: 40,
+                damping: 1.0,
+                min_damping: 0.02,
+                oversample: 3,
+                collocation_points: Some(9),
+                max_mixing_order: 3,
+                use_krylov: false,
+                gmres_restart: 12,
+                source_stepping: false,
+                use_exact_jacobian: true,
+                verbose: false,
+            },
+            operating_point: StudyOperatingPoint {
+                instance_id: AnalysisInstanceId::new(),
+                source_revision: ObjectRevision::INITIAL,
+                config: OpConfig {
+                    temperature_mode: crate::simulation::dialog::OpTemperatureMode::Explicit,
+                    temperature_celsius: 37.0,
+                    ..Default::default()
+                },
+                numeric_options: ".options GMIN=1e-7".into(),
+            },
+        }))
     } else {
         StudyAnalysis::Pss(Box::new(StudyPssConfig {
             request: AnalysisSpec::Pss {

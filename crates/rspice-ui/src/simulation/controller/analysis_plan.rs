@@ -484,7 +484,7 @@ impl SimulationController {
             return Err("Periodic study dependency is not an operating-point configuration".into());
         };
         use crate::simulation::runner::study::{
-            StudyAnalysis, StudyOperatingPoint, StudyPssConfig, StudyQpssConfig,
+            StudyAnalysis, StudyHbConfig, StudyOperatingPoint, StudyPssConfig, StudyQpssConfig,
         };
         let operating_point = StudyOperatingPoint {
             instance_id: producer.id(),
@@ -495,7 +495,12 @@ impl SimulationController {
                 .map(|options| options.to_spice_options())
                 .unwrap_or_default(),
         };
-        if matches!(spec, AnalysisSpec::Qpss { .. }) {
+        if matches!(spec, AnalysisSpec::HarmonicBalance { .. }) {
+            Ok(StudyAnalysis::Hb(Box::new(StudyHbConfig {
+                request: spec.clone(),
+                operating_point,
+            })))
+        } else if matches!(spec, AnalysisSpec::Qpss { .. }) {
             Ok(StudyAnalysis::Qpss(Box::new(StudyQpssConfig {
                 request: spec.clone(),
                 operating_point,
@@ -636,11 +641,11 @@ impl SimulationController {
             (
                 if matches!(
                     producer_spec,
-                    AnalysisSpec::Pss { .. } | AnalysisSpec::Qpss { .. }
+                    AnalysisSpec::Pss { .. }
+                        | AnalysisSpec::Qpss { .. }
+                        | AnalysisSpec::HarmonicBalance { .. }
                 ) {
                     self.compile_study_seeded_periodic(state, plan, producer, &producer_spec)?
-                } else if matches!(producer_spec, AnalysisSpec::HarmonicBalance { .. }) {
-                    crate::simulation::runner::study::StudyAnalysis::Native(producer_spec.clone())
                 } else {
                     self.analysis_spec_to_config(&producer_state, &producer_spec)?
                         .into()
@@ -658,14 +663,14 @@ impl SimulationController {
                     periodic_options,
                 }),
             )
-        } else if matches!(spec, AnalysisSpec::Pss { .. } | AnalysisSpec::Qpss { .. }) {
+        } else if matches!(
+            spec,
+            AnalysisSpec::Pss { .. }
+                | AnalysisSpec::Qpss { .. }
+                | AnalysisSpec::HarmonicBalance { .. }
+        ) {
             (
                 self.compile_study_seeded_periodic(state, plan, base, &spec)?,
-                None,
-            )
-        } else if matches!(spec, AnalysisSpec::HarmonicBalance { .. }) {
-            (
-                crate::simulation::runner::study::StudyAnalysis::Native(spec.clone()),
                 None,
             )
         } else {
@@ -1339,18 +1344,26 @@ mod tests {
             .as_ref()
             .unwrap();
         assert_eq!(base.instance_id, hb);
-        let StudyAnalysis::Native(spec) = &base.analysis else {
-            panic!("native base")
+        let StudyAnalysis::Hb(config) = &base.analysis else {
+            panic!("configured HB")
         };
+        assert_eq!(config.operating_point.instance_id, op);
+        assert_eq!(config.operating_point.source_revision, frozen.revision());
+        let spec = &config.request;
         let selected = queue.iter().find(|task| task.instance_id() == hb).unwrap();
         assert_eq!(spec, &selected.queued_analysis().spec);
         assert!(
             matches!(spec, AnalysisSpec::HarmonicBalance { tones, verbose: true, .. } if tones[0].frequency == 1000.0)
         );
         let mut changed = task.queued_analysis().clone();
-        let StudyAnalysis::Native(AnalysisSpec::HarmonicBalance {
+        let StudyAnalysis::Hb(config) =
+            &mut changed.spec_options.study_base.as_mut().unwrap().analysis
+        else {
+            unreachable!()
+        };
+        let AnalysisSpec::HarmonicBalance {
             collocation_points, ..
-        }) = &mut changed.spec_options.study_base.as_mut().unwrap().analysis
+        } = &mut config.request
         else {
             unreachable!()
         };
@@ -1462,9 +1475,12 @@ mod tests {
                 .study_base
                 .as_ref()
                 .unwrap();
-            let StudyAnalysis::Native(producer) = &base.analysis else {
-                panic!("HB producer")
+            let StudyAnalysis::Hb(config) = &base.analysis else {
+                panic!("configured HB producer")
             };
+            assert_eq!(config.operating_point.instance_id, op);
+            assert_eq!(config.operating_point.source_revision, frozen.revision());
+            let producer = &config.request;
             let selected = queue
                 .iter()
                 .find(|task| task.instance_id() == first)
@@ -1488,7 +1504,7 @@ mod tests {
                     .queued_analysis()
                     .spec
             );
-            for change in 0..4 {
+            for change in 0..8 {
                 let mut queued = task.queued_analysis().clone();
                 let base = queued.spec_options.study_base.as_mut().unwrap();
                 let post = base.postprocess.as_mut().unwrap();
@@ -1506,13 +1522,32 @@ mod tests {
                         } => reference.temperature_kelvin = 350.0,
                         _ => unreachable!(),
                     },
-                    _ => {
-                        let StudyAnalysis::Native(AnalysisSpec::HarmonicBalance { tones, .. }) =
-                            &mut base.analysis
+                    3 => {
+                        let StudyAnalysis::Hb(config) = &mut base.analysis else {
+                            unreachable!()
+                        };
+                        let AnalysisSpec::HarmonicBalance { tones, .. } = &mut config.request
                         else {
                             unreachable!()
                         };
                         tones[0].frequency = 4e6;
+                    }
+                    _ => {
+                        let StudyAnalysis::Hb(config) = &mut base.analysis else {
+                            unreachable!()
+                        };
+                        match change {
+                            4 => {
+                                config.operating_point.instance_id =
+                                    crate::product::AnalysisInstanceId::new()
+                            }
+                            5 => {
+                                config.operating_point.numeric_options = ".options GMIN=1e-5".into()
+                            }
+                            6 => config.operating_point.config.temperature_celsius += 10.0,
+                            _ => config.operating_point.config.node_initialization =
+                                crate::simulation::dialog::OpNodeInitialization::IgnoreIcAndNodeset,
+                        }
                     }
                 }
                 assert_ne!(

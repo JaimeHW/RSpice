@@ -8,7 +8,7 @@ use crate::simulation::runner::{
 };
 use rspice_core::abort_signal::{ImmediateAbort, NoAbort};
 
-const CIRCUIT: &str = "HB RF study\n.param R=100 ACTUAL={2*R}\n.temp 27\nP1 p1 0 PORT=1 Z0=50\nP2 p2 0 PORT=2 Z0=50\nRS p1 p2 {ACTUAL}\nVIN in 0 DC 0 AC 1\nRNOISE in out {ACTUAL}\n";
+const CIRCUIT: &str = "HB RF study\n.param R=100 ACTUAL={2*R}\n.temp 12\nP1 p1 0 PORT=1 Z0=50\nP2 p2 0 PORT=2 Z0=50\nRS p1 p2 {ACTUAL}\nVIN in 0 DC 0 AC 1\nRNOISE in out {ACTUAL}\n";
 
 fn base(noise: bool) -> StudyRunConfig {
     let request = if noise {
@@ -54,12 +54,18 @@ fn base(noise: bool) -> StudyRunConfig {
     };
     StudyRunConfig {
         instance_id: AnalysisInstanceId::new(), source_revision: ObjectRevision::INITIAL,
-        analysis: StudyAnalysis::Native(AnalysisSpec::HarmonicBalance {
+        analysis: StudyAnalysis::Hb(Box::new(StudyHbConfig { request: AnalysisSpec::HarmonicBalance {
             tones: vec![HbToneSpec::new(1e6, 3)], reltol: 1e-8, abstol: 1e-12,
             max_iterations: 40, damping: 1.0, min_damping: 0.02, oversample: 3,
             collocation_points: Some(9), max_mixing_order: 3, use_krylov: false,
             gmres_restart: 12, source_stepping: false, use_exact_jacobian: true, verbose: false,
-        }),
+        }, operating_point: StudyOperatingPoint {
+            instance_id: AnalysisInstanceId::new(), source_revision: ObjectRevision::INITIAL,
+            config: crate::simulation::dialog::OpConfig {
+                temperature_mode: crate::simulation::dialog::OpTemperatureMode::Explicit,
+                temperature_celsius: 27.0, ..Default::default()
+            }, numeric_options: ".options GMIN=1e-7".into(),
+        } })),
         postprocess: Some(StudyPostprocess {
             periodic_options: None,
             producer_instance_id: AnalysisInstanceId::new(), producer_source_revision: ObjectRevision::INITIAL,
@@ -78,13 +84,22 @@ fn dispatch(spec: AnalysisSpec, base: StudyRunConfig, deck: &str) -> SimulationR
         study_base: Some(base),
         ..Default::default()
     };
+    let StudyAnalysis::Hb(expected) = &options.study_base.as_ref().unwrap().analysis else {
+        unreachable!()
+    };
+    let expected = expected.clone();
     let wire = WorkerSpecExecutionOptions::from(&options);
     let wire: WorkerSpecExecutionOptions =
         serde_json::from_str(&serde_json::to_string(&wire).unwrap()).unwrap();
+    let restored: SpecExecutionOptions = wire.into();
+    let StudyAnalysis::Hb(actual) = &restored.study_base.as_ref().unwrap().analysis else {
+        panic!("configured HB")
+    };
+    assert_eq!(actual, &expected);
     crate::simulation::runner::spec::run_spec_request(
         &EngineBridge::new(),
         spec,
-        wire.into(),
+        restored,
         deck,
         None,
         &Default::default(),

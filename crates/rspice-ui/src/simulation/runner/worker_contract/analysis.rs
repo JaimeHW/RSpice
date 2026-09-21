@@ -125,6 +125,9 @@ pub(crate) enum WorkerStudyAnalysis {
     Qpss {
         qpss: Box<crate::simulation::runner::study::StudyQpssConfig>,
     },
+    Hb {
+        hb: Box<crate::simulation::runner::study::StudyHbConfig>,
+    },
 }
 
 impl WorkerStudyAnalysis {
@@ -133,6 +136,7 @@ impl WorkerStudyAnalysis {
             Self::Basic(WorkerAnalysisConfig::DcOp(config)) => Some(config),
             Self::Pss { pss } => Some(&pss.operating_point.config),
             Self::Qpss { qpss } => Some(&qpss.operating_point.config),
+            Self::Hb { hb } => Some(&hb.operating_point.config),
             _ => None,
         }
     }
@@ -141,6 +145,7 @@ impl WorkerStudyAnalysis {
             Self::Basic(WorkerAnalysisConfig::DcOp(config)) => Some(config),
             Self::Pss { pss } => Some(&mut pss.operating_point.config),
             Self::Qpss { qpss } => Some(&mut qpss.operating_point.config),
+            Self::Hb { hb } => Some(&mut hb.operating_point.config),
             _ => None,
         }
     }
@@ -153,6 +158,7 @@ impl From<&crate::simulation::runner::study::StudyAnalysis> for WorkerStudyAnaly
             StudyAnalysis::Basic(config) => Self::Basic(WorkerAnalysisConfig::from(config)),
             StudyAnalysis::Pss(pss) => Self::Pss { pss: pss.clone() },
             StudyAnalysis::Qpss(qpss) => Self::Qpss { qpss: qpss.clone() },
+            StudyAnalysis::Hb(hb) => Self::Hb { hb: hb.clone() },
             StudyAnalysis::Native(spec) => Self::Native {
                 native_spec: spec.clone(),
             },
@@ -167,6 +173,7 @@ impl From<WorkerStudyAnalysis> for crate::simulation::runner::study::StudyAnalys
             WorkerStudyAnalysis::Native { native_spec } => Self::Native(native_spec),
             WorkerStudyAnalysis::Pss { pss } => Self::Pss(pss),
             WorkerStudyAnalysis::Qpss { qpss } => Self::Qpss(qpss),
+            WorkerStudyAnalysis::Hb { hb } => Self::Hb(hb),
         }
     }
 }

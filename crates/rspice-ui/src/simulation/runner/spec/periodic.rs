@@ -1794,7 +1794,7 @@ pub(in crate::simulation::runner) fn run_native_study_on_materialized(
     project_hb_data(data, true, abort)
 }
 
-fn run_hb_consumer(
+pub(in crate::simulation::runner) fn run_hb_consumer(
     spec: AnalysisSpec,
     circuit: &rspice_core::Netlist,
     operating_point: &rspice_core::engine::HbOperatingPoint,
@@ -1868,6 +1868,21 @@ fn run_hb_consumer(
             "Expected HBSP or HBNOISE consumer".into(),
         )),
     }
+}
+
+pub(in crate::simulation::runner) fn run_hb_seeded_study_on_materialized(
+    producer: AnalysisSpec,
+    circuit: &rspice_core::Netlist,
+    seed: Option<&rspice_core::engine::PeriodicDcOperatingPointSeed>,
+    abort: &dyn AbortSignal,
+) -> Result<SimulationResult, SimulationError> {
+    let config = hb_run_config(producer, abort)?;
+    let data = super::run_abort_aware_service(abort, || {
+        svc_runner::run_hb_analysis_with_dc_seed_on_materialized_with_abort(
+            circuit, &config, seed, abort,
+        )
+    })?;
+    project_hb_data(data, true, abort)
 }
 
 pub(in crate::simulation::runner) fn run_hb_study_on_materialized(

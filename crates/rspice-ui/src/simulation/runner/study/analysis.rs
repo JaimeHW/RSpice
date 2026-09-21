@@ -9,6 +9,7 @@ pub enum StudyAnalysis {
     Native(AnalysisSpec),
     Pss(Box<super::StudyPssConfig>),
     Qpss(Box<super::StudyQpssConfig>),
+    Hb(Box<super::StudyHbConfig>),
 }
 
 #[cfg(test)]
@@ -33,6 +34,7 @@ impl StudyAnalysis {
                 .map_err(|error| vec![error]),
             Self::Pss(config) => config.validate().map_err(|error| vec![error]),
             Self::Qpss(config) => config.validate().map_err(|error| vec![error]),
+            Self::Hb(config) => config.validate().map_err(|error| vec![error]),
             Self::Native(_) => Err(vec!["Unsupported native study analysis".into()]),
         }
     }
@@ -40,14 +42,14 @@ impl StudyAnalysis {
     pub(crate) fn as_basic(&self) -> Option<&AnalysisConfig> {
         match self {
             Self::Basic(config) => Some(config),
-            Self::Native(_) | Self::Pss(_) | Self::Qpss(_) => None,
+            Self::Native(_) | Self::Pss(_) | Self::Qpss(_) | Self::Hb(_) => None,
         }
     }
 
     pub(crate) fn as_basic_mut(&mut self) -> Option<&mut AnalysisConfig> {
         match self {
             Self::Basic(config) => Some(config),
-            Self::Native(_) | Self::Pss(_) | Self::Qpss(_) => None,
+            Self::Native(_) | Self::Pss(_) | Self::Qpss(_) | Self::Hb(_) => None,
         }
     }
 }
