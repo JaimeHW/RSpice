@@ -275,6 +275,7 @@ pub(crate) fn run_hbnoise_analysis_from_hb_on_materialized_with_abort(
             .run_pnoise_from_hb_request_with_abort(
                 netlist,
                 &rspice_core::engine::PeriodicNoiseRequest {
+                    sampling: None,
                     offsets: &frequencies,
                     output_node: config.output_node.trim(),
                     output_ref,

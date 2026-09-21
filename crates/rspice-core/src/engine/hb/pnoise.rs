@@ -12,7 +12,12 @@
 
 mod bjt;
 pub(super) use bjt::NativeNoiseWaveforms;
+mod sampled;
 mod sources;
+pub use sampled::{
+    PeriodicNoiseEdge, PeriodicNoiseEdgeDirection, PeriodicNoiseSamplePoint, PeriodicNoiseSampling,
+    PeriodicNoiseSamplingEvidence,
+};
 
 use super::*;
 use crate::abort_signal::{AbortSignal, NoAbort};
@@ -36,6 +41,8 @@ pub struct PeriodicNoiseSidebands {
 /// Frequency channels and observations around one periodic operating point.
 #[derive(Debug, Clone, Copy)]
 pub struct PeriodicNoiseRequest<'a> {
+    /// Coherent phase/edge sampling. None measures the selected output sideband.
+    pub sampling: Option<&'a PeriodicNoiseSampling>,
     /// Nonnegative offset frequency; channel k is at offset + k * carrier.
     pub offsets: &'a [Value],
     pub output_node: &'a str,
@@ -48,33 +55,50 @@ pub struct PeriodicNoiseRequest<'a> {
 /// Result of periodic noise analysis.
 #[derive(Debug, Clone)]
 pub struct PnoiseAnalysisResult {
+    /// Present only for a phase-sampled or threshold-crossing observation.
+    pub sampling: Option<PeriodicNoiseSamplingEvidence>,
     /// Selected source quantity, as resolved from the circuit excitation.
     pub input_quantity: Option<crate::analysis::noise::NoiseInputQuantity>,
     /// Measured signal and output frequency channels.
     pub sidebands: PeriodicNoiseSidebands,
     /// Offset frequencies (Hz); the selected output channel is at offset + k*f0.
     pub frequencies: Vec<Value>,
-    /// Total output noise voltage PSD at each offset (V^2/Hz).
+    /// Output PSD: V^2/Hz for voltage observations, s^2/Hz for sampled timing.
     pub output_noise: Vec<Value>,
     /// Per-source contributions: `(label, psd per offset)`, summing to the
     /// total at every offset.
     pub contributors: Vec<(String, Vec<Value>)>,
     /// Input-referred noise (V^2/Hz or A^2/Hz): output noise divided by the squared
     /// magnitude of the conversion transfer from the input source (at its
-    /// selected input sideband) to the selected output sideband. Present when an input
-    /// source was named.
+    /// selected input sideband) to the same output observation, including any
+    /// sampling/timing projection. Present when an input source was named.
     pub input_noise: Option<Vec<Value>>,
     /// Large-signal fundamental (Hz).
     pub fundamental_freq: Value,
     /// Whether the operating-point solve converged.
     pub converged: bool,
-    /// Total output noise over the swept band, in volts RMS, when the run was
+    /// Total output noise over the swept band, in volts RMS (seconds RMS for
+    /// sampled timing), when the run was
     /// asked to integrate. `None` means integration was not requested or the
     /// sweep spans no band; an exactly noiseless band produces `Some(0.0)`.
     pub integrated_output_noise: Option<Value>,
     /// Total input-referred noise over the swept band, in volts or amperes RMS, when the
     /// run was asked to integrate and named an input source.
     pub integrated_input_noise: Option<Value>,
+}
+
+impl PnoiseAnalysisResult {
+    pub fn output_spectral_unit(&self) -> &'static str {
+        if self
+            .sampling
+            .as_ref()
+            .is_some_and(|sampling| sampling.request.is_timing())
+        {
+            "s^2/Hz"
+        } else {
+            "V^2/Hz"
+        }
+    }
 }
 
 enum PnoiseOperatingPoint<'a> {
@@ -410,6 +434,7 @@ impl Engine {
             netlist,
             fundamental_freq,
             &PeriodicNoiseRequest {
+                sampling: None,
                 offsets,
                 output_node,
                 output_ref,
@@ -450,6 +475,7 @@ impl Engine {
             netlist,
             operating_point.analysis().result.frequency,
             &PeriodicNoiseRequest {
+                sampling: None,
                 offsets,
                 output_node,
                 output_ref,
@@ -485,6 +511,7 @@ impl Engine {
             netlist,
             operating_point.config().fundamental_freq,
             &PeriodicNoiseRequest {
+                sampling: None,
                 offsets,
                 output_node,
                 output_ref,
@@ -551,6 +578,7 @@ impl Engine {
         abort: &dyn AbortSignal,
     ) -> Result<PnoiseAnalysisResult, SimulationError> {
         let PeriodicNoiseRequest {
+            sampling,
             offsets,
             output_node,
             output_ref,
@@ -593,6 +621,16 @@ impl Engine {
             return Err(SimulationError::Circuit(
                 "pnoise input and output sidebands must lie within the folding window".into(),
             ));
+        }
+        if let Some(sampling) = sampling {
+            sampling.validate().map_err(SimulationError::Circuit)?;
+            if output_sideband != 0
+                || offsets
+                    .iter()
+                    .any(|offset| *offset > fundamental_freq * 0.5)
+            {
+                return Err(SimulationError::Circuit("sampled PNOISE requires output sideband zero and offsets no higher than half the carrier frequency".into()));
+            }
         }
         self.ensure_analysis_points(offsets.len())?;
         let sideband_count = (max_sideband as usize).saturating_mul(2).saturating_add(1);
@@ -799,6 +837,19 @@ impl Engine {
             })
             .transpose()?;
 
+        let sampled = sampling
+            .map(|request| {
+                sampled::PreparedSampling::prepare(
+                    request,
+                    &state,
+                    &node_names,
+                    (out_idx, ref_idx),
+                    fundamental_freq,
+                    self.config.resource_limits.max_analysis_points,
+                    abort,
+                )
+            })
+            .transpose()?;
         let sources =
             self.prepare_periodic_noise_sources(&circuit, &mut solver, &state, &[], abort)?;
         let values_per_point = sources
@@ -895,22 +946,43 @@ impl Engine {
             if abort.is_aborted() {
                 return Err(SimulationError::Aborted);
             }
-            let per_source = solver
-                .solve_periodic_noise_at_sideband(
+            let projection = sampled
+                .as_ref()
+                .map(|sampling| sampling.projection(offset, fundamental_freq, max_sideband))
+                .unwrap_or_else(
+                    || crate::analysis::harmonic_balance::PeriodicNoiseProjection {
+                        terms: vec![(
+                            crate::analysis::harmonic_balance::PeriodicNoiseOutput {
+                                node_pos: Some(out_idx),
+                                node_neg: ref_idx,
+                                sideband: output_sideband,
+                            },
+                            Complex64::new(1.0, 0.0),
+                        )],
+                    },
+                );
+            let mut per_source = Vec::with_capacity(sources.len());
+            solver
+                .solve_periodic_noise_projected_correlations_each(
                     &state,
                     PeriodicSidebandWindow {
                         offset_hz: offset,
                         sideband_min: -max_sideband,
                         sideband_max: max_sideband,
                     },
-                    (out_idx, ref_idx),
-                    output_sideband,
+                    std::slice::from_ref(&projection),
                     &sources,
+                    abort,
+                    |_, covariance| {
+                        per_source.push(covariance[0].re);
+                        Ok(())
+                    },
                 )
-                .map_err(|e| {
-                    SimulationError::Circuit(format!(
-                        "pnoise solve failed at offset {offset:.6e} Hz: {e}"
-                    ))
+                .map_err(|error| match error {
+                    crate::analysis::HbError::Aborted => SimulationError::Aborted,
+                    error => SimulationError::Circuit(format!(
+                        "pnoise solve failed at offset {offset:.6e} Hz: {error}"
+                    )),
                 })?;
             if abort.is_aborted() {
                 return Err(SimulationError::Aborted);
@@ -939,38 +1011,26 @@ impl Engine {
                             "pnoise input transfer failed at offset {offset:.6e} Hz: {e}"
                         ))
                     })?;
-                let selected_idx = usize::try_from(
-                    i64::from(max_sideband) + i64::from(output_sideband),
-                )
-                .map_err(|_| {
-                    SimulationError::Circuit(
-                        "pnoise output-sideband index exceeds this platform".into(),
-                    )
-                })?;
                 let response_for_excitation = response.first().ok_or_else(|| {
-                    SimulationError::Circuit(format!(
-                        "pnoise input transfer returned no excitation response at offset {offset:.6e} Hz"
-                    ))
+                    SimulationError::Circuit(format!("pnoise input transfer returned no excitation response at offset {offset:.6e} Hz"))
                 })?;
-                let mut h = response_for_excitation
-                    .get(out_idx)
-                    .and_then(|sidebands| sidebands.get(selected_idx))
-                    .copied()
-                    .ok_or_else(|| {
-                        SimulationError::Circuit(format!(
-                            "pnoise input transfer returned an incomplete output response at offset {offset:.6e} Hz"
-                        ))
-                    })?;
-                if let Some(r) = ref_idx {
-                    h -= response_for_excitation
-                        .get(r)
-                        .and_then(|sidebands| sidebands.get(selected_idx))
-                        .copied()
-                        .ok_or_else(|| {
-                            SimulationError::Circuit(format!(
-                                "pnoise input transfer returned an incomplete reference response at offset {offset:.6e} Hz"
-                            ))
-                        })?;
+                let mut h = Complex64::ZERO;
+                for (output, weight) in &projection.terms {
+                    let selected_idx =
+                        usize::try_from(i64::from(max_sideband) + i64::from(output.sideband))
+                            .map_err(|_| {
+                                SimulationError::Circuit(
+                                    "pnoise output-sideband index exceeds this platform".into(),
+                                )
+                            })?;
+                    let voltage = |node: Option<usize>| -> Result<Complex64, SimulationError> {
+                        let Some(node) = node else {
+                            return Ok(Complex64::ZERO);
+                        };
+                        response_for_excitation.get(node).and_then(|bands| bands.get(selected_idx)).copied()
+                            .ok_or_else(|| SimulationError::Circuit(format!("pnoise input transfer returned an incomplete response at offset {offset:.6e} Hz")))
+                    };
+                    h += *weight * (voltage(output.node_pos)? - voltage(output.node_neg)?);
                 }
                 acc.push(checked_input_referred_pnoise(total, h, offset)?);
             }
@@ -991,6 +1051,7 @@ impl Engine {
         }
 
         Ok(PnoiseAnalysisResult {
+            sampling: sampled.map(|sampling| sampling.evidence),
             input_quantity: input_port.as_ref().map(|port| {
                 use crate::analysis::noise::NoiseInputQuantity;
                 if port.voltage_source_index.is_some() {

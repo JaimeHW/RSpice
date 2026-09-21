@@ -108,6 +108,7 @@ impl HbSolver {
     /// Output order is caller-owned; source indices match `sources`. Shares
     /// the conversion operator and preconditioner across all output adjoints.
     /// The callback can cancel and must not publish a partial sweep as complete.
+    #[cfg(test)]
     pub(crate) fn solve_periodic_noise_correlations_each(
         &mut self,
         state: &HbSolverState,

@@ -2138,6 +2138,7 @@ impl HbSolver {
     }
 
     /// Observe a selected output channel of the same conversion matrix.
+    #[cfg(test)]
     pub(crate) fn solve_periodic_noise_at_sideband(
         &mut self,
         state: &HbSolverState,

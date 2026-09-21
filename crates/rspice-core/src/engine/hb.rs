@@ -51,7 +51,11 @@ pub use noise_figure::{
     HbNoiseFigureRequest, PeriodicNoiseFigureResult, PeriodicNoiseFigureSpectrum,
 };
 pub use pac::PacAnalysisResult;
-pub use pnoise::{PeriodicNoiseRequest, PeriodicNoiseSidebands, PnoiseAnalysisResult};
+pub use pnoise::{
+    PeriodicNoiseEdge, PeriodicNoiseEdgeDirection, PeriodicNoiseRequest, PeriodicNoiseSamplePoint,
+    PeriodicNoiseSampling, PeriodicNoiseSamplingEvidence, PeriodicNoiseSidebands,
+    PnoiseAnalysisResult,
+};
 pub use psp::{PreparedPsp, PspAnalysisResult, PspNoiseCorrelation};
 pub use quasi_periodic::{
     QpacAnalysisResult, QpacInputQuantity, QpacRequest, QpacResultMetadata, QpnoiseAnalysisResult,

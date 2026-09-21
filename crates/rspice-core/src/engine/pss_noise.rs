@@ -309,6 +309,7 @@ impl Engine {
         let mut result = self.run_pnoise_from_pss_request_with_abort(
             netlist,
             &super::PeriodicNoiseRequest {
+                sampling: None,
                 offsets: &offsets,
                 output_node: &card.output_node,
                 output_ref: card.reference_node.as_deref(),
@@ -342,6 +343,7 @@ impl Engine {
         let mut result = self.run_pnoise_from_hb_request_with_abort(
             netlist,
             &super::PeriodicNoiseRequest {
+                sampling: None,
                 offsets: &offsets,
                 output_node: &card.output_node,
                 output_ref: card.reference_node.as_deref(),

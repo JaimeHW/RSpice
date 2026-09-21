@@ -97,6 +97,7 @@ impl Engine {
         let noise = engine.run_pnoise_from_hb_request_with_abort(
             netlist,
             &PeriodicNoiseRequest {
+                sampling: None,
                 offsets: &request.frequencies,
                 output_node: &request.output_node,
                 output_ref: request.output_ref.as_deref(),

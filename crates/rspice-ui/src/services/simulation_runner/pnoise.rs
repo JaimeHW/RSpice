@@ -464,6 +464,7 @@ fn run_pnoise_from_retained_state(
         .then(|| config.input_source.trim())
         .filter(|name| !name.is_empty());
     let request = rspice_core::engine::PeriodicNoiseRequest {
+        sampling: None,
         offsets: &frequencies,
         output_node: config.output_node.trim(),
         output_ref,
