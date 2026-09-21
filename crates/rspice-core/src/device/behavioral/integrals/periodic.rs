@@ -92,6 +92,26 @@ impl Equation {
 macro_rules! sample_source {
     ($kind:ty) => {
         impl $kind {
+            /// A constant nonzero rate has no periodic primitive, even when
+            /// it is smaller than the nonlinear residual tolerance. Establish
+            /// this from the expression, not from aliased waveform samples.
+            pub(crate) fn validate_periodic_integral_rates(&self) -> Result<(), String> {
+                let Some(equations) = &self.integral_equations else { return Ok(()); };
+                let context = self.periodicity_context();
+                for (index, equation) in equations.rates.iter().enumerate() {
+                    if equation.inputs.is_empty()
+                        && let Some(value) = crate::expr::constant_value(&equation.ast, &context)
+                        && value != 0.0
+                    {
+                        return Err(format!(
+                            "behavioral source '{}' SDT {index} has constant nonzero input {value:e}; its integral cannot be periodic",
+                            self.name,
+                        ));
+                    }
+                }
+                Ok(())
+            }
+
             fn periodic_fq_sample(
                 &mut self,
                 point: BehavioralFqPoint<'_>,

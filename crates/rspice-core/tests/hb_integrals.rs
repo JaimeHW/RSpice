@@ -151,6 +151,26 @@ fn hb_integral_forcing_enlarges_only_derived_carrier_grids() {
 }
 
 #[test]
+fn hb_integrals_reject_constant_drift_even_below_residual_tolerance() {
+    for (kind, rate) in [("v", "1"), ("i", "-1e-30"), ("v", "1e-30")] {
+        let netlist = Netlist::parse(&format!(
+            "Nonperiodic integral\nbdrift out 0 {kind}=sdt({rate})\nr1 out 0 1k\n.end\n"
+        ))
+        .unwrap();
+        let error = Engine::default()
+            .run_hb(&netlist, HbConfig::new(1e3).with_harmonics(1))
+            .expect_err("a small ramp is still nonperiodic")
+            .to_string();
+        assert!(
+            error.contains("BDRIFT")
+                && error.contains("SDT 0")
+                && error.contains("cannot be periodic"),
+            "{error}"
+        );
+    }
+}
+
+#[test]
 fn hb_integral_dependents_share_transfer_and_noise_from_fresh_hb_and_pss() {
     let rate = 1e3;
     let netlist = filter(rate, "");

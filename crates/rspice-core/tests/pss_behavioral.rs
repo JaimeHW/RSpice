@@ -138,13 +138,20 @@ fn pss_behavioral_integrals_require_periodic_input_equations_and_state_closure()
             "{expression}: {error}"
         );
     }
-    let ramp =
-        Netlist::parse("No periodic integral\nb1 out 0 v=sdt(1)\nr1 out 0 1k\n.end").unwrap();
-    let error = Engine::default()
-        .run_pss(&ramp, config())
-        .unwrap_err()
-        .to_string();
-    assert!(!error.contains("accepted-step memory"), "{error}");
+    for rate in ["1", "-1e-30"] {
+        let ramp = Netlist::parse(&format!(
+            "No periodic integral\nb1 out 0 v=sdt({rate})\nr1 out 0 1k\n.end"
+        ))
+        .unwrap();
+        let error = Engine::default()
+            .run_pss(&ramp, config())
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("B1") && error.contains("cannot be periodic"),
+            "{error}"
+        );
+    }
 }
 
 #[test]

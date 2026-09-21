@@ -1590,6 +1590,7 @@ impl Engine {
                     source.has_periodic_shooting_equation(period, autonomous),
                     source.max_authored_tone_cycles(period),
                     source.minimum_pss_interval(true),
+                    source.validate_periodic_integral_rates(),
                 )
             })
             .chain(
@@ -1603,10 +1604,11 @@ impl Engine {
                             source.has_periodic_shooting_equation(period, autonomous),
                             source.max_authored_tone_cycles(period),
                             source.minimum_pss_interval(true),
+                            source.validate_periodic_integral_rates(),
                         )
                     }),
             );
-        for (index, (name, periodic, cycles, interval)) in behavioral.enumerate() {
+        for (index, (name, periodic, cycles, interval, integral_rates)) in behavioral.enumerate() {
             if index & 0x1f == 0 && abort.is_aborted() {
                 return Err(SimulationError::Aborted);
             }
@@ -1627,6 +1629,7 @@ impl Engine {
                     ),
                 ));
             }
+            integral_rates.map_err(SimulationError::Circuit)?;
             ensure_sampling(name, cycles, interval)?;
         }
         Ok(required_steps)

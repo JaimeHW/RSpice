@@ -140,6 +140,9 @@ impl HbSolver {
         };
         self.validate_behavioral_bindings(sources)?;
         for source in &sources.current_sources {
+            source
+                .validate_periodic_integral_rates()
+                .map_err(HbError::InvalidCircuit)?;
             certify(
                 &source.name,
                 source.has_periodic_shooting_equation(period, autonomous),
@@ -148,6 +151,9 @@ impl HbSolver {
             )?;
         }
         for source in &sources.voltage_sources {
+            source
+                .validate_periodic_integral_rates()
+                .map_err(HbError::InvalidCircuit)?;
             certify(
                 &source.name,
                 source.has_periodic_shooting_equation(period, autonomous),
