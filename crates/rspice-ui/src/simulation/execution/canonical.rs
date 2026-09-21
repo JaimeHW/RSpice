@@ -187,16 +187,23 @@ pub(in crate::simulation) fn f64_sequence_digest(domain: &str, values: &[f64]) -
 /// operating point. Authenticated producer identities use the v2 domain and
 /// are part of the digest. Identityless legacy artifacts retain their exact v1
 /// encoding for backward-compatible parsing, but the core engine refuses them
-/// for dependent numerical reuse.
+/// for dependent numerical reuse. Integral-bearing states use the v3 domain
+/// and authenticate their own typed spectra independently of branch currents.
 pub(in crate::simulation) fn hb_operating_point_digest(
     point: &rspice_core::engine::HbOperatingPoint,
 ) -> ContentDigest {
     let config = point.config();
-    let mut writer = CanonicalWriter::new(if point.producer_identity().is_some() {
+    let has_integrals = !point.integral_spectra().is_empty();
+    let mut writer = CanonicalWriter::new(if has_integrals {
+        "rspice.hb-state-artifact/v3"
+    } else if point.producer_identity().is_some() {
         "rspice.hb-state-artifact/v2"
     } else {
         "rspice.hb-state-artifact/v1"
     });
+    if has_integrals {
+        writer.bool(point.producer_identity().is_some());
+    }
     if let Some(identity) = point.producer_identity() {
         writer.usize(identity.version() as usize);
         writer.string(identity.semantic_netlist_identity());
@@ -241,7 +248,7 @@ pub(in crate::simulation) fn hb_operating_point_digest(
             writer.f64(value.im);
         }
     }
-    if !point.mna_branch_names().is_empty() {
+    if has_integrals || !point.mna_branch_names().is_empty() {
         writer.sequence(point.mna_branch_names().len());
         for (branch, spectrum) in point
             .mna_branch_names()
@@ -251,6 +258,18 @@ pub(in crate::simulation) fn hb_operating_point_digest(
             writer.string(branch);
             writer.sequence(spectrum.len());
             for value in spectrum {
+                writer.f64(value.re);
+                writer.f64(value.im);
+            }
+        }
+    }
+    if has_integrals {
+        writer.string("behavioral-sdt/v1");
+        writer.sequence(point.integral_spectra().len());
+        for spectrum in point.integral_spectra() {
+            writer.string(&spectrum.name);
+            writer.sequence(spectrum.coefficients.len());
+            for value in &spectrum.coefficients {
                 writer.f64(value.re);
                 writer.f64(value.im);
             }

@@ -1111,6 +1111,10 @@ pub(in crate::simulation) struct HbStateArtifact {
     mna_branch_spectral_real: Vec<Vec<f64>>,
     #[serde(default)]
     mna_branch_spectral_imaginary: Vec<Vec<f64>>,
+    #[serde(default)]
+    integral_spectral_real: Vec<Vec<f64>>,
+    #[serde(default)]
+    integral_spectral_imaginary: Vec<Vec<f64>>,
 }
 
 impl HbStateArtifact {
@@ -1141,29 +1145,9 @@ impl HbStateArtifact {
         if let Some(environment) = &self.environment {
             environment.validate()?;
         }
-        let validation = if let Some(identity) = self.operating_point.producer_identity() {
-            rspice_core::engine::HbOperatingPoint::try_from_authenticated_parts_with_mna_branches(
-                identity.clone(),
-                self.operating_point.config().clone(),
-                self.operating_point.node_names().to_vec(),
-                self.operating_point.spectral_state().to_vec(),
-                self.operating_point.mna_branch_names().to_vec(),
-                self.operating_point.mna_branch_spectral_state().to_vec(),
-                self.operating_point.iterations(),
-                self.operating_point.residual_norm(),
-            )
-        } else {
-            rspice_core::engine::HbOperatingPoint::try_from_parts_with_mna_branches(
-                self.operating_point.config().clone(),
-                self.operating_point.node_names().to_vec(),
-                self.operating_point.spectral_state().to_vec(),
-                self.operating_point.mna_branch_names().to_vec(),
-                self.operating_point.mna_branch_spectral_state().to_vec(),
-                self.operating_point.iterations(),
-                self.operating_point.residual_norm(),
-            )
-        };
-        validation.map_err(|error| ExecutionArtifactError::InvalidPayload(error.to_string()))?;
+        self.operating_point
+            .validate()
+            .map_err(|error| ExecutionArtifactError::InvalidPayload(error.to_string()))?;
         if self.spectral_real.len() != self.operating_point.spectral_state().len()
             || self.spectral_imaginary.len() != self.operating_point.spectral_state().len()
         {
@@ -1203,6 +1187,32 @@ impl HbStateArtifact {
             let real = &self.mna_branch_spectral_real[index];
             let imaginary = &self.mna_branch_spectral_imaginary[index];
             validate_complex_cache("HB MNA branch spectral row", coefficients, real, imaginary)?;
+            numeric_values = numeric_values
+                .checked_add(real.len().saturating_mul(2))
+                .ok_or_else(|| {
+                    ExecutionArtifactError::InvalidPayload(
+                        "HB-state numeric payload size overflows this platform".to_owned(),
+                    )
+                })?;
+        }
+        if self.integral_spectral_real.len() != self.operating_point.integral_spectra().len()
+            || self.integral_spectral_imaginary.len()
+                != self.operating_point.integral_spectra().len()
+        {
+            return Err(ExecutionArtifactError::InvalidPayload(
+                "HB-state integral transfer cache row count does not match the retained state"
+                    .to_owned(),
+            ));
+        }
+        for (index, spectrum) in self.operating_point.integral_spectra().iter().enumerate() {
+            let real = &self.integral_spectral_real[index];
+            let imaginary = &self.integral_spectral_imaginary[index];
+            validate_complex_cache(
+                "HB integral spectral row",
+                &spectrum.coefficients,
+                real,
+                imaginary,
+            )?;
             numeric_values = numeric_values
                 .checked_add(real.len().saturating_mul(2))
                 .ok_or_else(|| {
@@ -1409,6 +1419,12 @@ impl ExecutionArtifactEnvelope {
                 .iter()
                 .map(|row| split_complex_values(row))
                 .unzip();
+        let (integral_spectral_real, integral_spectral_imaginary): (Vec<_>, Vec<_>) =
+            operating_point
+                .integral_spectra()
+                .iter()
+                .map(|spectrum| split_complex_values(&spectrum.coefficients))
+                .unzip();
         let state = HbStateArtifact {
             environment,
             operating_point: Arc::clone(operating_point),
@@ -1416,6 +1432,8 @@ impl ExecutionArtifactEnvelope {
             spectral_imaginary,
             mna_branch_spectral_real,
             mna_branch_spectral_imaginary,
+            integral_spectral_real,
+            integral_spectral_imaginary,
         };
         state.validate()?;
         let payload_digest = state.digest();
@@ -2055,6 +2073,23 @@ impl ResolvedExecutionDependencies {
                                 ),
                             })
                             .collect();
+                        let integral_spectra = state
+                            .operating_point
+                            .integral_spectra()
+                            .iter()
+                            .enumerate()
+                            .map(|(index, spectrum)| HbIntegralSpectrumTransferMetadata {
+                                name: spectrum.name.clone(),
+                                real: push_transfer_slice(
+                                    &mut buffers,
+                                    &state.integral_spectral_real[index],
+                                ),
+                                imaginary: push_transfer_slice(
+                                    &mut buffers,
+                                    &state.integral_spectral_imaginary[index],
+                                ),
+                            })
+                            .collect();
                         ExecutionArtifactPayloadTransferMetadata::HbState(
                             HbStateTransferMetadata {
                                 environment: state.environment.clone(),
@@ -2065,6 +2100,7 @@ impl ResolvedExecutionDependencies {
                                     .cloned(),
                                 spectra,
                                 mna_branch_spectra,
+                                integral_spectra,
                                 iterations: state.operating_point.iterations(),
                                 residual_norm: state.operating_point.residual_norm(),
                             },
@@ -2402,30 +2438,38 @@ impl ResolvedExecutionDependencies {
                             mna_branch_spectral_real.push(real);
                             mna_branch_spectral_imaginary.push(imaginary);
                         }
-                        let operating_point = if let Some(producer_identity) =
-                            metadata.producer_identity
-                        {
-                            rspice_core::engine::HbOperatingPoint::try_from_authenticated_parts_with_mna_branches(
-                                producer_identity,
-                                metadata.config,
-                                node_names,
-                                spectral_state,
-                                mna_branch_names,
-                                mna_branch_spectral_state,
-                                metadata.iterations,
-                                metadata.residual_norm,
-                            )
-                        } else {
-                            rspice_core::engine::HbOperatingPoint::try_from_parts_with_mna_branches(
-                                metadata.config,
-                                node_names,
-                                spectral_state,
-                                mna_branch_names,
-                                mna_branch_spectral_state,
-                                metadata.iterations,
-                                metadata.residual_norm,
-                            )
+                        let mut integral_spectra =
+                            Vec::with_capacity(metadata.integral_spectra.len());
+                        let mut integral_spectral_real =
+                            Vec::with_capacity(metadata.integral_spectra.len());
+                        let mut integral_spectral_imaginary =
+                            Vec::with_capacity(metadata.integral_spectra.len());
+                        for spectrum in metadata.integral_spectra {
+                            let real = take_transfer_buffer(&mut buffers, spectrum.real)?;
+                            let imaginary =
+                                take_transfer_buffer(&mut buffers, spectrum.imaginary)?;
+                            integral_spectra.push(rspice_core::engine::HbIntegralSpectrum {
+                                name: spectrum.name,
+                                coefficients: join_complex_values(
+                                    "HB integral spectral row",
+                                    &real,
+                                    &imaginary,
+                                )?,
+                            });
+                            integral_spectral_real.push(real);
+                            integral_spectral_imaginary.push(imaginary);
                         }
+                        let operating_point = rspice_core::engine::HbOperatingPoint::try_from_complete_parts(
+                            metadata.config,
+                            node_names,
+                            spectral_state,
+                            mna_branch_names,
+                            mna_branch_spectral_state,
+                            integral_spectra,
+                            metadata.iterations,
+                            metadata.residual_norm,
+                            metadata.producer_identity,
+                        )
                         .map_err(|error| {
                             ExecutionArtifactError::InvalidPayload(error.to_string())
                         })?;
@@ -2436,6 +2480,8 @@ impl ResolvedExecutionDependencies {
                             spectral_imaginary,
                             mna_branch_spectral_real,
                             mna_branch_spectral_imaginary,
+                            integral_spectral_real,
+                            integral_spectral_imaginary,
                         };
                         state.validate()?;
                         ExecutionArtifactPayload::HbState(Arc::new(state))
@@ -2610,6 +2656,14 @@ struct HbBranchSpectrumTransferMetadata {
 
 #[cfg(any(target_arch = "wasm32", test))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+struct HbIntegralSpectrumTransferMetadata {
+    name: String,
+    real: TransferBufferRef,
+    imaginary: TransferBufferRef,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 struct HbStateTransferMetadata {
     #[serde(default)]
     environment: Option<PeriodicOperatingEnvironment>,
@@ -2619,6 +2673,8 @@ struct HbStateTransferMetadata {
     spectra: Vec<HbSpectrumTransferMetadata>,
     #[serde(default)]
     mna_branch_spectra: Vec<HbBranchSpectrumTransferMetadata>,
+    #[serde(default)]
+    integral_spectra: Vec<HbIntegralSpectrumTransferMetadata>,
     iterations: usize,
     residual_norm: f64,
 }

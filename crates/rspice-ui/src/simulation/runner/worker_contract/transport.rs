@@ -177,6 +177,9 @@ pub(super) fn validate_worker_response_before_transport(
         ..
     } = result.as_ref()
     {
+        operating_point
+            .validate()
+            .map_err(|error| error.to_string())?;
         let waveform_buffer_count = waveforms.iter().try_fold(0usize, |count, waveform| {
             count
                 .checked_add(2 + usize::from(waveform.y_imag.is_some()))
@@ -188,6 +191,7 @@ pub(super) fn validate_worker_response_before_transport(
             .spectral_state()
             .len()
             .checked_add(operating_point.mna_branch_spectral_state().len())
+            .and_then(|count| count.checked_add(operating_point.integral_spectra().len()))
             .ok_or_else(|| "retained HB response buffer count overflows this platform".to_owned())?
             .checked_mul(2)
             .and_then(|count| count.checked_add(waveform_buffer_count))
@@ -215,7 +219,12 @@ pub(super) fn validate_worker_response_before_transport(
                 })?)
                 .ok_or_else(|| "retained HB response size overflows this platform".to_owned())?;
         }
-        for spectrum in operating_point.mna_branch_spectral_state() {
+        for spectrum in operating_point.mna_branch_spectral_state().iter().chain(
+            operating_point
+                .integral_spectra()
+                .iter()
+                .map(|spectrum| &spectrum.coefficients),
+        ) {
             numeric_values = numeric_values
                 .checked_add(spectrum.len().checked_mul(2).ok_or_else(|| {
                     "retained HB response size overflows this platform".to_owned()
@@ -904,6 +913,15 @@ pub(crate) struct WorkerHbBranchSpectrumTransport {
     imaginary_digest: crate::product::ContentDigest,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct WorkerHbIntegralSpectrumTransport {
+    name: String,
+    real: WorkerF64Series,
+    imaginary: WorkerF64Series,
+    real_digest: crate::product::ContentDigest,
+    imaginary_digest: crate::product::ContentDigest,
+}
+
 /// Scalar HB basis metadata plus transferable complex spectral rows.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct WorkerHbOperatingPointTransport {
@@ -912,6 +930,8 @@ pub(crate) struct WorkerHbOperatingPointTransport {
     producer_identity: Option<rspice_core::engine::HbOperatingPointIdentity>,
     spectra: Vec<WorkerHbSpectrumTransport>,
     mna_branch_spectra: Vec<WorkerHbBranchSpectrumTransport>,
+    #[serde(default)]
+    integral_spectra: Vec<WorkerHbIntegralSpectrumTransport>,
     iterations: usize,
     residual_norm: f64,
     state_digest: crate::product::ContentDigest,
@@ -972,11 +992,36 @@ impl WorkerHbOperatingPointTransport {
                 }
             })
             .collect();
+        let integral_spectra = operating_point
+            .integral_spectra()
+            .iter()
+            .map(|spectrum| {
+                let coefficients = &spectrum.coefficients;
+                let (real, imaginary): (Vec<_>, Vec<_>) = coefficients
+                    .iter()
+                    .map(|value| (value.re, value.im))
+                    .unzip();
+                WorkerHbIntegralSpectrumTransport {
+                    name: spectrum.name.clone(),
+                    real_digest: crate::simulation::execution::f64_sequence_digest(
+                        "rspice.worker-hb-integral-spectrum-real/v1",
+                        &real,
+                    ),
+                    imaginary_digest: crate::simulation::execution::f64_sequence_digest(
+                        "rspice.worker-hb-integral-spectrum-imaginary/v1",
+                        &imaginary,
+                    ),
+                    real: WorkerF64Series::from_vec(real, buffers),
+                    imaginary: WorkerF64Series::from_vec(imaginary, buffers),
+                }
+            })
+            .collect();
         Self {
             config: operating_point.config().clone(),
             producer_identity: operating_point.producer_identity().cloned(),
             spectra,
             mna_branch_spectra,
+            integral_spectra,
             iterations: operating_point.iterations(),
             residual_norm: operating_point.residual_norm(),
             state_digest: crate::simulation::execution::hb_operating_point_digest(&operating_point),
@@ -991,6 +1036,7 @@ impl WorkerHbOperatingPointTransport {
             .spectra
             .len()
             .checked_add(self.mna_branch_spectra.len())
+            .and_then(|count| count.checked_add(self.integral_spectra.len()))
             .is_none_or(|rows| rows > 65_536)
         {
             return Err("retained HB worker metadata exceeds structural limits".to_owned());
@@ -1043,28 +1089,40 @@ impl WorkerHbOperatingPointTransport {
                 imaginary,
             )?);
         }
-        let operating_point = if let Some(producer_identity) = self.producer_identity {
-            rspice_core::engine::HbOperatingPoint::try_from_authenticated_parts_with_mna_branches(
-                producer_identity,
-                self.config,
-                node_names,
-                spectral_state,
-                mna_branch_names,
-                mna_branch_spectral_state,
-                self.iterations,
-                self.residual_norm,
-            )
-        } else {
-            rspice_core::engine::HbOperatingPoint::try_from_parts_with_mna_branches(
-                self.config,
-                node_names,
-                spectral_state,
-                mna_branch_names,
-                mna_branch_spectral_state,
-                self.iterations,
-                self.residual_norm,
-            )
+        let mut integral_spectra = Vec::with_capacity(self.integral_spectra.len());
+        for spectrum in self.integral_spectra {
+            let real = spectrum.real.into_vec(buffers)?;
+            let imaginary = spectrum.imaginary.into_vec(buffers)?;
+            let real_digest = crate::simulation::execution::f64_sequence_digest(
+                "rspice.worker-hb-integral-spectrum-real/v1",
+                &real,
+            );
+            let imaginary_digest = crate::simulation::execution::f64_sequence_digest(
+                "rspice.worker-hb-integral-spectrum-imaginary/v1",
+                &imaginary,
+            );
+            if real_digest != spectrum.real_digest || imaginary_digest != spectrum.imaginary_digest
+            {
+                return Err(
+                    "retained HB worker integral spectral payload digest mismatch".to_owned(),
+                );
+            }
+            integral_spectra.push(rspice_core::engine::HbIntegralSpectrum {
+                name: spectrum.name,
+                coefficients: worker_join_complex("HB integral spectral row", real, imaginary)?,
+            });
         }
+        let operating_point = rspice_core::engine::HbOperatingPoint::try_from_complete_parts(
+            self.config,
+            node_names,
+            spectral_state,
+            mna_branch_names,
+            mna_branch_spectral_state,
+            integral_spectra,
+            self.iterations,
+            self.residual_norm,
+            self.producer_identity,
+        )
         .map_err(|error| format!("invalid retained HB worker payload: {error}"))?;
         let actual_state_digest =
             crate::simulation::execution::hb_operating_point_digest(&operating_point);
@@ -1552,6 +1610,105 @@ pub(super) fn worker_waveforms_from_transport(
 #[cfg(test)]
 mod hb_state_contract_tests {
     use super::*;
+
+    #[test]
+    fn hb_integral_transport_round_trips_and_rejects_missing_or_changed_state() {
+        let base = super::super::tests::retained_hb_operating_point();
+        let coefficients = vec![num_complex::Complex64::new(5.0e-4, 0.0); 5];
+        let point = rspice_core::engine::HbOperatingPoint::try_from_complete_parts(
+            base.config().clone(),
+            base.node_names().to_vec(),
+            base.spectral_state().to_vec(),
+            base.mna_branch_names().to_vec(),
+            base.mna_branch_spectral_state().to_vec(),
+            vec![rspice_core::engine::HbIntegralSpectrum {
+                name: "B:B1:sdt:0".to_owned(),
+                coefficients,
+            }],
+            base.iterations(),
+            base.residual_norm(),
+            None,
+        )
+        .unwrap();
+        let decoded: rspice_core::engine::HbOperatingPoint =
+            serde_json::from_value(serde_json::to_value(&point).unwrap()).unwrap();
+        decoded.validate().unwrap();
+        assert_eq!(decoded, point);
+        let result = |operating_point| WorkerSimulationResult::Hb {
+            frequencies: vec![0.0, 1.0, 2.0, 3.0, 4.0],
+            waveforms: Vec::new(),
+            measurements: Vec::new(),
+            operating_point,
+        };
+        assert_eq!(
+            result(point.clone()).estimated_numeric_payload_bytes()
+                - result(base).estimated_numeric_payload_bytes(),
+            5 * 2 * 8
+        );
+        let response = WorkerResponse {
+            id: 879,
+            outcome: WorkerOutcome::Success(Box::new(result(point.clone()))),
+        };
+        let native: WorkerResponse =
+            serde_json::from_value(serde_json::to_value(&response).unwrap()).unwrap();
+        assert!(native.into_result().is_ok());
+        let mut malformed = serde_json::to_value(&response).unwrap();
+        malformed["outcome"]["Success"]["Hb"]["operating_point"]["integral_spectra"][0]["name"] =
+            serde_json::json!("");
+        let malformed: WorkerResponse = serde_json::from_value(malformed).unwrap();
+        assert!(malformed.into_result().is_err());
+        let transfer = WorkerResponseTransport::from_response(response.clone()).unwrap();
+        assert_eq!(transfer.buffers.len(), 7);
+        assert_eq!(transfer.into_response().unwrap(), response);
+
+        let mut buffers = Vec::new();
+        let transport =
+            WorkerHbOperatingPointTransport::from_operating_point(point.clone(), &mut buffers);
+        assert_eq!(
+            transport.clone().into_operating_point(&buffers).unwrap(),
+            point
+        );
+        let mut changed = transport.clone();
+        changed.integral_spectra[0].name = "B:OTHER:sdt:0".to_owned();
+        assert!(
+            changed
+                .into_operating_point(&buffers)
+                .unwrap_err()
+                .contains("identity or configuration digest mismatch")
+        );
+        let mut missing = serde_json::to_value(&transport).unwrap();
+        missing.as_object_mut().unwrap().remove("integral_spectra");
+        let missing: WorkerHbOperatingPointTransport = serde_json::from_value(missing).unwrap();
+        assert!(
+            missing
+                .into_operating_point(&buffers)
+                .unwrap_err()
+                .contains("identity or configuration digest mismatch")
+        );
+        let WorkerF64Series::Buffer { buffer, .. } = transport.integral_spectra[0].real else {
+            panic!("integrals must use transfer buffers")
+        };
+        buffers[buffer][0] += 1.0e-9;
+        assert!(
+            transport
+                .into_operating_point(&buffers)
+                .unwrap_err()
+                .contains("integral spectral payload digest mismatch")
+        );
+
+        // An older branch-only payload still has its original digest.
+        let (legacy, buffers) = self::transport();
+        let mut legacy = serde_json::to_value(legacy).unwrap();
+        legacy.as_object_mut().unwrap().remove("integral_spectra");
+        let legacy: WorkerHbOperatingPointTransport = serde_json::from_value(legacy).unwrap();
+        assert!(
+            legacy
+                .into_operating_point(&buffers)
+                .unwrap()
+                .integral_spectra()
+                .is_empty()
+        );
+    }
 
     fn transport() -> (WorkerHbOperatingPointTransport, Vec<Vec<f64>>) {
         let mut buffers = Vec::new();

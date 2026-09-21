@@ -364,6 +364,100 @@ fn hb_result() -> SimulationResult {
 }
 
 #[test]
+fn hb_integral_artifact_round_trips_and_authenticates_separate_state_buffers() {
+    let mut result = hb_result();
+    let SimulationResult::HarmonicBalance {
+        operating_point, ..
+    } = &mut result
+    else {
+        unreachable!()
+    };
+    let point = rspice_core::engine::HbOperatingPoint::try_from_complete_parts(
+        operating_point.config().clone(),
+        operating_point.node_names().to_vec(),
+        operating_point.spectral_state().to_vec(),
+        operating_point.mna_branch_names().to_vec(),
+        operating_point.mna_branch_spectral_state().to_vec(),
+        vec![rspice_core::engine::HbIntegralSpectrum {
+            name: "B:B1:sdt:0".to_owned(),
+            coefficients: vec![num_complex::Complex64::new(5.0e-4, 0.0); 9],
+        }],
+        operating_point.iterations(),
+        operating_point.residual_norm(),
+        None,
+    )
+    .unwrap();
+    *operating_point = Arc::new(point.clone());
+    let producer = AnalysisInstanceId::new();
+    let revision = ObjectRevision::new(18).unwrap();
+    let snapshot = digest(41);
+    let config = digest(42);
+    let artifact = ExecutionArtifactEnvelope::from_hb_result(
+        snapshot,
+        producer,
+        revision,
+        config,
+        &hb_spec(),
+        &result,
+    )
+    .unwrap()
+    .unwrap();
+    let resolved = ResolvedExecutionDependencies::resolve(
+        snapshot,
+        vec![PreparedDependencyBinding::hb_state(
+            producer, revision, config,
+        )],
+        &HashMap::from([(producer, artifact)]),
+    )
+    .unwrap();
+    let (metadata, buffers) = resolved.encode_transfer().unwrap();
+    assert_eq!(
+        buffers.len(),
+        6,
+        "nodes, physical currents and integrals have distinct complex buffers"
+    );
+    let decoded =
+        ResolvedExecutionDependencies::decode_transfer(&metadata, buffers.clone()).unwrap();
+    assert_eq!(decoded, resolved);
+    assert_eq!(decoded.hb_state().unwrap().operating_point(), &point);
+    assert_eq!(
+        decoded
+            .hb_state()
+            .unwrap()
+            .operating_point()
+            .mna_branch_names(),
+        ["V1"]
+    );
+    let native: HbStateArtifact =
+        serde_json::from_value(serde_json::to_value(decoded.hb_state().unwrap()).unwrap()).unwrap();
+    native.validate().unwrap();
+    assert_eq!(native.operating_point(), &point);
+
+    let mut cache = native.clone();
+    cache.integral_spectral_real[0][0] += 1.0e-9;
+    assert!(cache.validate().is_err());
+    for change in 0..3 {
+        let mut value: serde_json::Value = serde_json::from_str(&metadata).unwrap();
+        let state = &mut value["artifacts"][0]["payload"]["HbState"];
+        let mut changed_buffers = buffers.clone();
+        match change {
+            0 => {
+                state.as_object_mut().unwrap().remove("integral_spectra");
+            }
+            1 => state["integral_spectra"][0]["name"] = serde_json::json!("B:OTHER:sdt:0"),
+            _ => changed_buffers[4][0] += 1.0e-9,
+        }
+        assert!(
+            ResolvedExecutionDependencies::decode_transfer(
+                &serde_json::to_string(&value).unwrap(),
+                changed_buffers
+            )
+            .is_err()
+        );
+    }
+}
+
+#[test]
 fn hb_state_transfer_round_trips_and_rejects_tamper() {
     let producer = AnalysisInstanceId::new();
     let revision = ObjectRevision::new(18).unwrap();

@@ -79,8 +79,10 @@ pub(crate) struct WorkerRequest {
 
 /// 34: ERROR measurements carry captured and validated comparison tables.
 /// 35: optimization objectives and constraints carry requested physical units.
+/// 36: sampled-noise configuration preserves aperture and observation timing.
+/// 37: retained HB dependencies carry separate behavioral integral spectra.
 #[cfg(any(target_arch = "wasm32", test))]
-pub(crate) const WORKER_REQUEST_TRANSPORT_PROTOCOL: u8 = 36;
+pub(crate) const WORKER_REQUEST_TRANSPORT_PROTOCOL: u8 = 37;
 
 /// Browser-worker request split into compact metadata and transferable
 /// floating-point buffers. The embedded request deliberately carries empty
@@ -383,6 +385,14 @@ impl WorkerResponse {
                 validate_worker_reliability_result(&result)
                     .map_err(SimulationError::InvalidConfig)?;
                 validate_worker_qpnoise_result(&result).map_err(SimulationError::InvalidConfig)?;
+                if let WorkerSimulationResult::Hb {
+                    operating_point, ..
+                } = result.as_ref()
+                {
+                    operating_point
+                        .validate()
+                        .map_err(|error| SimulationError::InvalidConfig(error.to_string()))?;
+                }
                 if let WorkerSimulationResult::Transient { events, .. } = result.as_ref()
                     && let Some(history) = &events.current_impulses
                 {
@@ -1502,6 +1512,12 @@ impl WorkerSimulationResult {
                         .spectral_state()
                         .iter()
                         .chain(operating_point.mna_branch_spectral_state())
+                        .chain(
+                            operating_point
+                                .integral_spectra()
+                                .iter()
+                                .map(|spectrum| &spectrum.coefficients),
+                        )
                         .map(Vec::len)
                         .sum::<usize>()
                         .saturating_mul(2),
@@ -1686,7 +1702,9 @@ impl WorkerSimulationResult {
 /// 29: scalar measurements preserve physical units.
 /// 30: noise spectra retain their physical or logarithmic output unit.
 /// 31: optimization observations retain requested physical units.
-const WORKER_RESPONSE_TRANSPORT_PROTOCOL: u8 = 32;
+/// 32: sampled noise retains the sampling configuration and spectra.
+/// 33: retained HB results carry separate behavioral integral spectra.
+const WORKER_RESPONSE_TRANSPORT_PROTOCOL: u8 = 33;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct WorkerResponseTransport {
