@@ -109,9 +109,9 @@ pub(super) fn run_spec_request_with_environment_and_checkpoint_observer(
 ) -> Result<SimulationResult, SimulationError> {
     ensure_not_aborted(abort_flag)?;
     if let Some(checkpoint) = &options.mc_checkpoint {
-        if !matches!(spec, AnalysisSpec::MonteCarlo { .. }) || options.study_base.is_none() {
+        if !matches!(spec, AnalysisSpec::MonteCarlo { .. }) {
             return Err(SimulationError::InvalidConfig(
-                "Checkpoint continuation requires a configured Monte Carlo study".into(),
+                "Checkpoint continuation requires a Monte Carlo study".into(),
             ));
         }
         checkpoint.validate()?;

@@ -53,6 +53,8 @@ pub(crate) struct WorkerSpecExecutionOptions {
     pub mc_checkpoint:
         Option<crate::simulation::runner::monte_carlo_checkpoint::MonteCarloCheckpointRequest>,
     #[serde(default)]
+    pub mc_histogram_bins: Option<usize>,
+    #[serde(default)]
     pub mc_statistics: Option<crate::simulation::dialog::mc::statistics::McStatisticsConfig>,
     pub temp: Option<WorkerTempRunConfig>,
     pub parametric_base: Option<WorkerCornerBaseMode>,
@@ -66,6 +68,7 @@ pub(crate) struct WorkerSpecExecutionOptions {
 impl From<&SpecExecutionOptions> for WorkerSpecExecutionOptions {
     fn from(value: &SpecExecutionOptions) -> Self {
         Self {
+            mc_histogram_bins: value.mc_histogram_bins,
             mc_statistics: value.mc_statistics.clone(),
             mc_checkpoint: value.mc_checkpoint.clone(),
             study_base: value.study_base.as_ref().map(WorkerStudyRunConfig::from),
@@ -86,6 +89,7 @@ impl From<&SpecExecutionOptions> for WorkerSpecExecutionOptions {
 impl From<WorkerSpecExecutionOptions> for SpecExecutionOptions {
     fn from(value: WorkerSpecExecutionOptions) -> Self {
         Self {
+            mc_histogram_bins: value.mc_histogram_bins,
             mc_statistics: value.mc_statistics,
             mc_checkpoint: value.mc_checkpoint,
             study_base: value

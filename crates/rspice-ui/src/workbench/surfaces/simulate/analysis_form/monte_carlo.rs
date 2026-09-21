@@ -36,7 +36,7 @@ pub(super) fn fields(
         "gain; settling; last:V(out)",
         configured,
     );
-    input_row_enabled(ui, "Histogram bins", &mut setup.histogram_bins, configured);
+    input_row(ui, "Histogram bins", &mut setup.histogram_bins);
     if configured {
         field_note(
             ui,
@@ -100,11 +100,7 @@ pub(super) fn fields(
     if setup.checkpoint.retain_trials {
         field_note(
             ui,
-            if configured {
-                "Completed trials are kept with the run and saved with the project. Checkpoints count toward the run's storage limit."
-            } else {
-                "Select a configured base analysis above to retain trials for resume."
-            },
+            "Completed trials are kept with the run and saved with the project. Checkpoints count toward the run's storage limit.",
         );
     }
 

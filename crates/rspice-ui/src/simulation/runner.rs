@@ -58,6 +58,8 @@ pub(crate) mod study;
 pub struct SpecExecutionOptions {
     pub study_base: Option<study::StudyRunConfig>,
     pub(crate) mc_checkpoint: Option<monte_carlo_checkpoint::MonteCarloCheckpointRequest>,
+    /// Histogram bins for the default all-node OP study. Configured bases carry their own.
+    pub mc_histogram_bins: Option<usize>,
     pub mc_statistics: Option<crate::simulation::dialog::mc::statistics::McStatisticsConfig>,
     pub temp: Option<crate::services::simulation_runner::TempRunConfig>,
     /// Base analysis paired with a design-parameter `.STEP`. `None` retains

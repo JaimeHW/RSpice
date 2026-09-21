@@ -176,7 +176,7 @@ fn now_ms() -> f64 {
 
 const DEFAULT_MONTE_CARLO_SEED: u64 = 0x5EED_5EED;
 
-fn build_engine_config(
+pub(crate) fn build_engine_config(
     netlist: &rspice_core::Netlist,
     options: Option<&crate::simulation::dialog::SimulationOptions>,
 ) -> SimulationConfig {

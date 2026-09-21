@@ -39,6 +39,7 @@ pub(super) fn run_sweep_spec(
                 variation_source,
                 options.study_base.as_ref(),
                 options.mc_checkpoint.as_ref(),
+                options.mc_histogram_bins.unwrap_or(20),
                 checkpoint_observer,
                 netlist,
                 source_path,
@@ -61,94 +62,58 @@ fn run_monte_carlo(
     checkpoint: Option<
         &crate::simulation::runner::monte_carlo_checkpoint::MonteCarloCheckpointRequest,
     >,
+    histogram_bins: usize,
     checkpoint_observer: Option<&(dyn Fn(&[u8]) -> Result<(), SimulationError> + Sync)>,
     netlist: &str,
     source_path: Option<&Path>,
     environment: Option<AnalysisExecutionEnvironment>,
     abort: &dyn AbortSignal,
 ) -> Result<SimulationResult, SimulationError> {
-    use crate::simulation::dialog::McVariationSource;
-
-    let data = if let Some(base) = base {
-        if let Some(request) = checkpoint {
-            let observer = checkpoint_observer.ok_or_else(|| {
-                SimulationError::InvalidConfig(
-                    "Monte Carlo checkpoint destination is missing".into(),
-                )
-            })?;
-            let mut retained = request
-                .resume
-                .as_ref()
-                .map(|input| input.decode())
-                .transpose()?;
-            let publish = |value: &crate::simulation::runner::study::monte_carlo::checkpoint::StudyMonteCarloCheckpoint| {
-                let bytes = value.to_bytes_with_limits(rspice_core::ResourceLimits::default(), &rspice_core::NoAbort)?;
-                observer(&bytes)
-            };
-            crate::simulation::runner::study::monte_carlo::run_monte_carlo_with_continuation(
-                base,
-                variation_source,
-                netlist,
-                source_path,
-                environment,
-                abort,
-                Some(
-                    crate::simulation::runner::study::monte_carlo::MonteCarloContinuation {
-                        checkpoint: &mut retained,
-                        trial_range: request.trial_range.clone(),
-                        publish_every: request.publish_every,
-                        publish: &publish,
-                    },
-                ),
-            )?
-        } else {
-            crate::simulation::runner::study::run_monte_carlo(
-                base,
-                variation_source,
-                netlist,
-                source_path,
-                environment,
-                abort,
-            )?
-        }
-    } else {
-        let (temperature, supply, nominal_supply, supply_source_names) = environment.map_or_else(
-            || (None, None, None, Vec::new()),
-            |environment| {
-                (
-                    Some(environment.temperature_celsius),
-                    environment.supply_voltage,
-                    environment.nominal_supply_voltage,
-                    environment.supply_source_names,
-                )
-            },
-        );
-
-        let data = super::run_abort_aware_service(abort, || match variation_source {
-            McVariationSource::ParameterTolerance => {
-                svc_runner::run_monte_carlo_analysis_with_environment_and_source_path_and_abort(
-                    netlist,
-                    source_path,
-                    temperature,
-                    supply,
-                    nominal_supply,
-                    &supply_source_names,
-                    abort,
-                )
-            }
-            McVariationSource::DeckStatistics => {
-                svc_runner::run_statistical_monte_carlo_with_environment_and_source_path_and_abort(
-                    netlist,
-                    source_path,
-                    temperature,
-                    supply,
-                    nominal_supply,
-                    &supply_source_names,
-                    abort,
-                )
-            }
+    use crate::simulation::runner::study::monte_carlo::{self, MonteCarloContinuation};
+    let run = |continuation| match base {
+        Some(base) => monte_carlo::run_monte_carlo_with_continuation(
+            base,
+            variation_source,
+            netlist,
+            source_path,
+            environment.clone(),
+            abort,
+            continuation,
+        ),
+        None => monte_carlo::voltages::run(
+            netlist,
+            source_path,
+            variation_source,
+            histogram_bins,
+            environment.clone(),
+            abort,
+            continuation,
+        ),
+    };
+    let data = if let Some(request) = checkpoint {
+        let observer = checkpoint_observer.ok_or_else(|| {
+            SimulationError::InvalidConfig("Monte Carlo checkpoint destination is missing".into())
         })?;
-        data
+        let mut retained = request
+            .resume
+            .as_ref()
+            .map(|input| input.decode())
+            .transpose()?;
+        let publish = |value: &monte_carlo::checkpoint::StudyMonteCarloCheckpoint| {
+            let bytes = value.to_bytes_with_limits(
+                rspice_core::ResourceLimits::default(),
+                &rspice_core::NoAbort,
+            )?;
+            observer(&bytes)
+        };
+        run(Some(MonteCarloContinuation {
+            checkpoint: &mut retained,
+            trial_range: request.trial_range.clone(),
+            publish_every: request.publish_every,
+            publish: &publish,
+        }))?
+    } else {
+        run(None)?
     };
     let mut variables = Vec::with_capacity(data.variables.len());
     for variable in data.variables {

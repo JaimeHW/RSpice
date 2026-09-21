@@ -789,6 +789,10 @@ fn encode_drc_location(writer: &mut CanonicalWriter, location: &DrcLocation) {
 }
 
 fn encode_spec_options(writer: &mut CanonicalWriter, options: &SpecExecutionOptions) {
+    if let Some(bins) = options.mc_histogram_bins {
+        writer.domain("monte-carlo-histogram-bins/v1");
+        writer.usize(bins);
+    }
     if let Some(checkpoint) = &options.mc_checkpoint {
         writer.domain("monte-carlo-checkpoint-request/v1");
         writer.usize(checkpoint.publish_every.get());

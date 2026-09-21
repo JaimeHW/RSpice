@@ -106,9 +106,6 @@ impl Default for McConfig {
 
 impl McConfig {
     pub fn validate(&self) -> Result<(), String> {
-        if self.checkpoint.is_some() && self.base_analysis.is_none() {
-            return Err("Select a configured base analysis to retain Monte Carlo trials".into());
-        }
         if let Some(statistics) = &self.statistics {
             if self.variation_source != McVariationSource::DeckStatistics {
                 return Err("Custom statistics require the native statistics sampler".into());
@@ -135,9 +132,9 @@ impl McConfig {
         }
         if self.base_analysis.is_some() {
             crate::simulation::runner::study::validate_measurements(&self.measurements)?;
-            if self.histogram_bins == 0 {
-                return Err("Histogram bins must be at least one".into());
-            }
+        }
+        if self.histogram_bins == 0 {
+            return Err("Histogram bins must be at least one".into());
         }
         // The spread is only asked for by one variation source. Rejecting it
         // under the other would reject a value that never reaches a solve.
@@ -535,14 +532,11 @@ impl McDialogState {
             } else {
                 Vec::new()
             },
-            histogram_bins: if self.base_analysis.is_some() {
-                self.histogram_bins
-                    .trim()
-                    .parse()
-                    .map_err(|_| "Histogram bins must be a positive integer")?
-            } else {
-                20
-            },
+            histogram_bins: self
+                .histogram_bins
+                .trim()
+                .parse()
+                .map_err(|_| "Histogram bins must be a positive integer")?,
         };
         config.validate()?;
         Ok(config)

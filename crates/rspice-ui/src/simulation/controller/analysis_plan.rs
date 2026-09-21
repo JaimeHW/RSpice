@@ -732,6 +732,10 @@ impl SimulationController {
                     mc_checkpoint: monte_carlo_checkpoint::request_from_config(
                         config.checkpoint.as_ref(),
                     ),
+                    mc_histogram_bins: config
+                        .base_analysis
+                        .is_none()
+                        .then_some(config.histogram_bins),
                     mc_statistics: config.statistics,
                     ..Default::default()
                 })
@@ -743,6 +747,7 @@ impl SimulationController {
                     .to_config(&state.sim_setup.run_set, state.sim_setup.reference_pvt)
                     .map_err(|e| format!("invalid temperature sweep settings: {}", e))?;
                 Ok(SpecExecutionOptions {
+                    mc_histogram_bins: None,
                     mc_statistics: None,
                     mc_checkpoint: None,
                     study_base: None,
@@ -762,6 +767,7 @@ impl SimulationController {
                     .to_config(&state.sim_setup.run_set, state.sim_setup.reference_pvt)
                     .map_err(|e| format!("invalid corner settings: {}", e))?;
                 Ok(SpecExecutionOptions {
+                    mc_histogram_bins: None,
                     mc_statistics: None,
                     mc_checkpoint: None,
                     study_base: None,
@@ -779,6 +785,7 @@ impl SimulationController {
                 })
             }
             AnalysisSpec::Pac => Ok(SpecExecutionOptions {
+                mc_histogram_bins: None,
                 mc_statistics: None,
                 mc_checkpoint: None,
                 study_base: None,
@@ -791,6 +798,7 @@ impl SimulationController {
                 pstb: None,
             }),
             AnalysisSpec::Pxf => Ok(SpecExecutionOptions {
+                mc_histogram_bins: None,
                 mc_statistics: None,
                 mc_checkpoint: None,
                 study_base: None,
@@ -804,6 +812,7 @@ impl SimulationController {
             }),
             AnalysisSpec::Tf { .. } => Ok(SpecExecutionOptions::default()),
             AnalysisSpec::Pnoise => Ok(SpecExecutionOptions {
+                mc_histogram_bins: None,
                 mc_statistics: None,
                 mc_checkpoint: None,
                 study_base: None,
@@ -816,6 +825,7 @@ impl SimulationController {
                 pstb: None,
             }),
             AnalysisSpec::Pstb => Ok(SpecExecutionOptions {
+                mc_histogram_bins: None,
                 mc_statistics: None,
                 mc_checkpoint: None,
                 study_base: None,
@@ -829,6 +839,7 @@ impl SimulationController {
             }),
             AnalysisSpec::Psp { .. } => Ok(SpecExecutionOptions::default()),
             _ => Ok(SpecExecutionOptions {
+                mc_histogram_bins: None,
                 mc_statistics: None,
                 mc_checkpoint: None,
                 study_base: None,

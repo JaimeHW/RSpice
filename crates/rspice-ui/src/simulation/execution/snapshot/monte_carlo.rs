@@ -111,9 +111,6 @@ pub(super) fn route_resumes(
         else {
             return Err(invalid("Checkpoint selections require a Monte Carlo task"));
         };
-        let base = options.study_base.as_ref().ok_or_else(|| {
-            invalid("Checkpoint selections require a configured Monte Carlo base")
-        })?;
         if options.mc_checkpoint.is_none() || candidates.is_some() && direct.is_some() {
             return Err(invalid(
                 "Monte Carlo checkpoint request has missing or ambiguous resume policy",
@@ -121,7 +118,8 @@ pub(super) fn route_resumes(
         }
         let population =
             crate::simulation::runner::study::monte_carlo::prepared_population_identity(
-                base,
+                options.study_base.as_ref(),
+                options.mc_histogram_bins.unwrap_or(20),
                 variation_source,
                 options.mc_statistics.as_ref(),
                 task.executable_netlist_override

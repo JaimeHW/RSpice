@@ -9,6 +9,7 @@ use rspice_core::netlist::{AnalysisCommand, MonteCarloDistribution};
 use std::sync::atomic::AtomicUsize;
 
 pub(crate) mod checkpoint;
+pub(crate) mod voltages;
 
 /// A continuation always evaluates the same frozen source. An explicit range
 /// changes only which original trial indices contribute to this result; rows
@@ -52,7 +53,7 @@ pub(crate) fn run_monte_carlo_with_continuation(
     let PreparedStudy {
         analysis,
         circuit,
-        mut study,
+        study,
         engine,
     } = prepare_study(
         base,
@@ -62,6 +63,48 @@ pub(crate) fn run_monte_carlo_with_continuation(
         environment,
         abort,
     )?;
+    let evaluation_identity =
+        *crate::simulation::execution::monte_carlo_evaluator_digest(base).as_bytes();
+    run_prepared(
+        circuit,
+        study,
+        engine,
+        evaluation_identity,
+        abort,
+        continuation,
+        |engine, trial, abort| {
+            let result = base.run_trial(engine, &analysis, trial, abort)?;
+            base.measurements
+                .iter()
+                .map(|name| {
+                    result.study_measurement(name).ok_or_else(|| {
+                        SimulationError::CircuitError(format!(
+                            "Study measurement {name:?} is unavailable or failed"
+                        ))
+                    })
+                })
+                .collect()
+        },
+    )
+}
+
+fn run_prepared<F>(
+    circuit: rspice_core::Netlist,
+    mut study: MonteCarloStudyConfig,
+    engine: rspice_core::Engine,
+    evaluation_identity: [u8; 32],
+    abort: &dyn AbortSignal,
+    continuation: Option<MonteCarloContinuation<'_>>,
+    evaluate_trial: F,
+) -> Result<services::MonteCarloData, SimulationError>
+where
+    F: Fn(
+            &rspice_core::Engine,
+            &rspice_core::Netlist,
+            &dyn AbortSignal,
+        ) -> Result<Vec<crate::state::FamilyMeasurementEvidence>, SimulationError>
+        + Sync,
+{
     let bridge = EngineBridge::new();
     if let Some(range) = continuation
         .as_ref()
@@ -82,11 +125,6 @@ pub(crate) fn run_monte_carlo_with_continuation(
     let fatal = Mutex::new(None);
     let first_trial_failure = Mutex::new(None);
     let limits = engine.config().resource_limits;
-    let evaluation_identity = if continuation.is_some() {
-        *crate::simulation::execution::monte_carlo_evaluator_digest(base).as_bytes()
-    } else {
-        [0; 32]
-    };
     let mut numerical = if let Some(continuation) = &continuation {
         if let Some(checkpoint) = continuation.checkpoint.as_ref() {
             checkpoint.validate(limits, abort)?;
@@ -121,40 +159,12 @@ pub(crate) fn run_monte_carlo_with_continuation(
                     trial: &rspice_core::Netlist,
                     trial_index: usize,
                     abort: &dyn AbortSignal| {
-        let result =
-            base.run_trial(engine, &analysis, trial, abort)
-                .map_err(|error| match error {
-                    SimulationError::SolverError(_)
-                    | SimulationError::ConvergenceFailed { .. }
-                    | SimulationError::Attributed { .. }
-                    | SimulationError::CircuitError(_) => {
-                        let message = error.to_string();
-                        first_trial_failure
-                            .lock()
-                            .unwrap()
-                            .get_or_insert_with(|| message.clone());
-                        if retaining {
-                            measurement_verdicts.lock().unwrap().insert(
-                                trial_index,
-                                checkpoint::failed_observations(&study.measurements, &message),
-                            );
-                        }
-                        rspice_core::SimulationError::Circuit(message)
-                    }
-                    other => {
-                        let mut failure = fatal.lock().unwrap();
-                        if failure.is_none() {
-                            *failure = Some(other);
-                        }
-                        signal.failed.store(true, Ordering::Release);
-                        rspice_core::SimulationError::Aborted
-                    }
-                })?;
-        let mut values = Vec::with_capacity(study.measurements.len());
-        let mut verdicts = Vec::new();
-        for name in &study.measurements {
-            let observation = result.study_measurement(name).ok_or_else(|| {
-                let message = format!("Study measurement {name:?} is unavailable or failed");
+        let observations = evaluate_trial(engine, trial, abort).map_err(|error| match error {
+            SimulationError::SolverError(_)
+            | SimulationError::ConvergenceFailed { .. }
+            | SimulationError::Attributed { .. }
+            | SimulationError::CircuitError(_) => {
+                let message = error.to_string();
                 first_trial_failure
                     .lock()
                     .unwrap()
@@ -166,7 +176,19 @@ pub(crate) fn run_monte_carlo_with_continuation(
                     );
                 }
                 rspice_core::SimulationError::Circuit(message)
-            })?;
+            }
+            other => {
+                let mut failure = fatal.lock().unwrap();
+                if failure.is_none() {
+                    *failure = Some(other);
+                }
+                signal.failed.store(true, Ordering::Release);
+                rspice_core::SimulationError::Aborted
+            }
+        })?;
+        let mut values = Vec::with_capacity(study.measurements.len());
+        let mut verdicts = Vec::new();
+        for observation in observations {
             values.push(observation.value.expect("observed study value"));
             if retaining || !observation.passed {
                 verdicts.push(observation);
@@ -369,13 +391,22 @@ fn prepare_study(
 /// The same population contract the runner checks, without executing a trial.
 /// Prepared decks already seal include contents and therefore have no source path.
 pub(crate) fn prepared_population_identity(
-    base: &StudyRunConfig,
+    base: Option<&StudyRunConfig>,
+    histogram_bins: usize,
     variation_source: McVariationSource,
     statistics: Option<&crate::simulation::dialog::mc::statistics::McStatisticsConfig>,
     source: &str,
     environment: Option<AnalysisExecutionEnvironment>,
 ) -> Result<[u8; 32], SimulationError> {
     let source = source_with_statistics(source, variation_source, statistics)?;
+    let Some(base) = base else {
+        return voltages::population_identity(
+            &source,
+            variation_source,
+            histogram_bins,
+            environment,
+        );
+    };
     let prepared = prepare_study(
         base,
         variation_source,
