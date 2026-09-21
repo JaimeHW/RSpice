@@ -136,7 +136,16 @@ impl Linearization {
         check_abort(abort)?;
         let mut matrix = matrix(size, &entries)?;
         drop(entries);
-        let solution = matrix.solve(rhs)?;
+        let solution = match matrix.solve(rhs) {
+            Ok(solution) => solution,
+            // Small exact-MNA systems can lose homogeneous equations during
+            // sparse elimination. Keep the same strict backward-error check
+            // when retrying with extended precision, as the HB solver does.
+            Err(SolverError::InaccurateSolution(_)) if size <= 64 => {
+                matrix.solve_dense_extended(rhs)?
+            }
+            Err(error) => return Err(error.into()),
+        };
         check_abort(abort)?;
         Ok(solution)
     }
