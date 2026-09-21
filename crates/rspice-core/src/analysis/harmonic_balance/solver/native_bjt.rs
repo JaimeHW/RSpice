@@ -410,16 +410,19 @@ impl HbSolver {
         Ok(f)
     }
 
-    /// The same native F/Q implementation, sampled at an independent-phase
-    /// state. No HB time grid or common fundamental enters this boundary.
-    pub(super) fn quasi_periodic_native_sample_selected(
+    /// The shared native F/Q implementation at physical time for HB, or at
+    /// zero time with explicit independent-phase inputs for QPSS.
+    pub(super) fn periodic_native_sample_selected(
         &mut self,
         solution: &[Value],
+        time: Value,
         phases: &[Value],
         jacobian: bool,
         selected: Option<&[bool]>,
     ) -> Result<crate::analysis::quasi_periodic::solve::Sample, HbError> {
-        if phases.len() != self.behavioral_phase_dimensions || phases.iter().any(|v| !v.is_finite())
+        if !time.is_finite()
+            || phases.len() != self.behavioral_phase_dimensions
+            || phases.iter().any(|v| !v.is_finite())
         {
             return Err(HbError::InvalidCircuit(
                 "behavioral phase inputs do not match the registered quasiperiodic grid".into(),
@@ -431,7 +434,7 @@ impl HbSolver {
         let mut f = NativeStamp::new(solution.len());
         let mut q = NativeStamp::new(solution.len());
         self.sample_native_devices_selected(
-            solution, 0.0, &inputs, &mut f, &mut q, false, selected,
+            solution, time, &inputs, &mut f, &mut q, false, selected,
         )?;
         Ok(crate::analysis::quasi_periodic::solve::Sample {
             current: f.contributions,

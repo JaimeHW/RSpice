@@ -21,6 +21,15 @@ pub(in crate::analysis::harmonic_balance::solver) struct NonlinearInputs {
     pub iterations: usize,
 }
 
+#[derive(Clone, Copy)]
+pub(super) enum InputBasis {
+    IndependentPhases,
+    PeriodicTime {
+        frequency_hz: Value,
+        steps: solve::NewtonStepPolicy,
+    },
+}
+
 struct Subcircuit<'a> {
     solver: &'a mut HbSolver,
     rows: Vec<usize>,
@@ -29,6 +38,7 @@ struct Subcircuit<'a> {
     column_index: Vec<usize>,
     selected: Vec<bool>,
     state: Vec<Value>,
+    basis: InputBasis,
 }
 
 impl Circuit for Subcircuit<'_> {
@@ -71,12 +81,28 @@ impl Circuit for Subcircuit<'_> {
         for (&col, &value) in self.columns.iter().zip(state) {
             self.state[col] = value;
         }
-        let sample = self.solver.quasi_periodic_sample_selected(
-            &self.state,
-            phases,
-            jacobian,
-            Some(&self.selected),
-        )?;
+        let sample = match self.basis {
+            InputBasis::IndependentPhases => self.solver.quasi_periodic_sample_selected(
+                &self.state,
+                phases,
+                jacobian,
+                Some(&self.selected),
+            )?,
+            InputBasis::PeriodicTime { frequency_hz, .. } => {
+                let [phase] = phases else {
+                    return Err(Error::InvalidCircuit(
+                        "HB input preparation requires one phase".into(),
+                    ));
+                };
+                self.solver.periodic_sample_selected(
+                    &self.state,
+                    (phase / std::f64::consts::TAU) / frequency_hz,
+                    &[],
+                    jacobian,
+                    Some(&self.selected),
+                )?
+            }
+        };
         let residual = |terms: Vec<(usize, Value)>| {
             terms
                 .into_iter()
@@ -124,6 +150,29 @@ impl HbSolver {
         seed: Option<&[Vec<Complex64>]>,
         needed: &[bool],
         limits: &ResourceLimits,
+        abort: &dyn AbortSignal,
+    ) -> Result<NonlinearInputs, Error> {
+        self.nonlinear_driven_spectra_in_basis(
+            grid,
+            config,
+            sources,
+            seed,
+            needed,
+            limits,
+            InputBasis::IndependentPhases,
+            abort,
+        )
+    }
+
+    pub(super) fn nonlinear_driven_spectra_in_basis(
+        &mut self,
+        grid: Arc<QuasiPeriodicGrid>,
+        config: &QuasiPeriodicSolveConfig,
+        sources: &[Vec<Complex64>],
+        seed: Option<&[Vec<Complex64>]>,
+        needed: &[bool],
+        limits: &ResourceLimits,
+        basis: InputBasis,
         abort: &dyn AbortSignal,
     ) -> Result<NonlinearInputs, Error> {
         check_abort(abort)?;
@@ -255,8 +304,13 @@ impl HbSolver {
                 column_index,
                 selected,
                 state: vec![0.0; n],
+                basis,
             };
-            let solution = match solve::solve_with_iteration_budget(
+            let steps = match basis {
+                InputBasis::IndependentPhases => solve::NewtonStepPolicy::default(),
+                InputBasis::PeriodicTime { steps, .. } => steps,
+            };
+            let solution = match solve::solve_with_step_policy(
                 &mut circuit,
                 grid.clone(),
                 config,
@@ -264,6 +318,7 @@ impl HbSolver {
                 initial.as_deref(),
                 &working,
                 config.max_iterations.saturating_sub(iterations),
+                steps,
                 abort,
             ) {
                 Ok(solution) => solution,
@@ -279,7 +334,12 @@ impl HbSolver {
                 }) => {
                     iterations += used;
                     if iterations >= config.max_iterations {
-                        return Err(Error::ConvergenceFailed { iterations, merit });
+                        match basis {
+                            InputBasis::IndependentPhases => {
+                                return Err(Error::ConvergenceFailed { iterations, merit });
+                            }
+                            InputBasis::PeriodicTime { .. } => break,
+                        }
                     }
                     continue;
                 }
@@ -306,6 +366,105 @@ mod tests {
     use crate::device::behavioral::{
         BehavioralBranchResolution, BehavioralCurrentSource, BehavioralSources,
     };
+
+    #[test]
+    fn periodic_nonlinear_inputs_preserve_time_seed_and_damping() {
+        let limits = ResourceLimits::default();
+        let rate = 1e3;
+        let grid = Arc::new(
+            QuasiPeriodicGrid::periodic_with_abort(rate, 3, 17, &limits, &NoAbort).unwrap(),
+        );
+        assert_eq!(grid.sample_count(), 17);
+        assert_eq!(grid.len(), 7);
+        // The public QPSS API must still reject a single tone.
+        assert!(
+            QuasiPeriodicGrid::new_with_abort(
+                QuasiPeriodicGridConfig::new(vec![rate], vec![3]),
+                &limits,
+                &NoAbort
+            )
+            .is_err()
+        );
+        let mut solver = HbSolver::new(
+            HbConfig::new(rate)
+                .with_harmonics(3)
+                .with_collocation_points(17),
+            2,
+        );
+        let mut active = BehavioralCurrentSource::new(
+            "Bactive".into(),
+            1,
+            0,
+            "(v(input)-sin(2*pi*1k*time))^3-(v(input)-sin(2*pi*1k*time))",
+        )
+        .unwrap();
+        active
+            .bind_references(|_| Some(1), |_| BehavioralBranchResolution::MissingDevice)
+            .unwrap();
+        let mut unrelated =
+            BehavioralCurrentSource::new("Bunrelated".into(), 2, 0, "ln(v(other))").unwrap();
+        unrelated
+            .bind_references(|_| Some(2), |_| BehavioralBranchResolution::MissingDevice)
+            .unwrap();
+        solver
+            .set_periodic_behavioral_sources(
+                &BehavioralSources {
+                    voltage_sources: vec![],
+                    current_sources: vec![active, unrelated],
+                },
+                false,
+                limits.max_result_values,
+                false,
+                &NoAbort,
+            )
+            .unwrap();
+        let sources = vec![vec![Complex64::ZERO; grid.len()]; 2];
+        let mut seed = sources.clone();
+        seed[0][grid.dc_index() + 1] = Complex64::new(0.0, -0.5);
+        seed[0][grid.dc_index() - 1] = Complex64::new(0.0, 0.5);
+        let mut config = QuasiPeriodicSolveConfig {
+            relative_tolerance: 1e-10,
+            ..Default::default()
+        };
+        for sign in [-1.0, 1.0] {
+            seed[0][grid.dc_index()] = Complex64::new(sign * 0.8, 0.0);
+            config.linear.method = if sign < 0.0 {
+                crate::analysis::quasi_periodic::QuasiPeriodicLinearMethod::Krylov
+            } else {
+                crate::analysis::quasi_periodic::QuasiPeriodicLinearMethod::Direct
+            };
+            let solved = solver
+                .nonlinear_driven_spectra_in_basis(
+                    grid.clone(),
+                    &config,
+                    &sources,
+                    Some(&seed),
+                    &[true, false],
+                    &limits,
+                    InputBasis::PeriodicTime {
+                        frequency_hz: rate,
+                        steps: solve::NewtonStepPolicy::HarmonicBalance {
+                            damping: 0.5,
+                            minimum_damping: 0.125,
+                        },
+                    },
+                    &NoAbort,
+                )
+                .unwrap();
+            let values = solved.spectra[0].as_ref().unwrap();
+            assert!((values[grid.dc_index()].re - sign).abs() < 1e-9);
+            assert!((values[grid.dc_index() + 1] - Complex64::new(0.0, -0.5)).norm() < 1e-9);
+            assert!(
+                solved.iterations > 20 && solved.iterations <= config.max_iterations,
+                "the configured half-step must be used: {}",
+                solved.iterations
+            );
+            assert!(
+                solved.spectra[1].is_none(),
+                "unrelated logarithm must not be sampled"
+            );
+        }
+    }
 
     #[test]
     fn independent_nonlinear_inputs_preserve_seed_and_skip_unrelated_expressions() {

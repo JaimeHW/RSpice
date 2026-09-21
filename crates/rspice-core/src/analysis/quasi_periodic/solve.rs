@@ -52,10 +52,14 @@ impl Default for QuasiPeriodicSolveConfig {
 
 impl QuasiPeriodicSolveConfig {
     pub(crate) fn validate(&self) -> Result<(), Error> {
+        self.validate_relative_tolerance(true)
+    }
+
+    fn validate_relative_tolerance(&self, below_one: bool) -> Result<(), Error> {
         self.linear.validate()?;
         if !self.relative_tolerance.is_finite()
             || self.relative_tolerance <= 0.0
-            || self.relative_tolerance >= 1.0
+            || (below_one && self.relative_tolerance >= 1.0)
             || !self.current_absolute_tolerance.is_finite()
             || self.current_absolute_tolerance <= 0.0
             || !self.voltage_absolute_tolerance.is_finite()
@@ -150,6 +154,18 @@ struct Workspace<'a> {
     voltage_rows: Vec<bool>,
     base_values: usize,
     value_limit: usize,
+}
+
+/// Private initialization policy. This does not change the serialized QPSS
+/// controls or its historical unit-step/backtracking behavior.
+#[derive(Clone, Copy, Default)]
+pub(crate) enum NewtonStepPolicy {
+    #[default]
+    QuasiPeriodic,
+    HarmonicBalance {
+        damping: Value,
+        minimum_damping: Value,
+    },
 }
 
 impl Workspace<'_> {
@@ -251,8 +267,51 @@ pub(crate) fn solve_with_iteration_budget(
     remaining_iterations: usize,
     abort: &dyn AbortSignal,
 ) -> Result<QuasiPeriodicSolution, Error> {
+    solve_with_step_policy(
+        circuit,
+        grid,
+        config,
+        sources,
+        seed,
+        limits,
+        remaining_iterations,
+        NewtonStepPolicy::default(),
+        abort,
+    )
+}
+
+pub(crate) fn solve_with_step_policy(
+    circuit: &mut impl Circuit,
+    grid: Arc<QuasiPeriodicGrid>,
+    config: &QuasiPeriodicSolveConfig,
+    sources: &[Vec<Complex64>],
+    seed: Option<&[Vec<Complex64>]>,
+    limits: &ResourceLimits,
+    remaining_iterations: usize,
+    steps: NewtonStepPolicy,
+    abort: &dyn AbortSignal,
+) -> Result<QuasiPeriodicSolution, Error> {
     super::check_abort(abort)?;
-    config.validate()?;
+    match steps {
+        NewtonStepPolicy::QuasiPeriodic => config.validate()?,
+        NewtonStepPolicy::HarmonicBalance {
+            damping,
+            minimum_damping,
+        } => {
+            config.validate_relative_tolerance(false)?;
+            if !damping.is_finite()
+                || damping <= 0.0
+                || damping > 1.0
+                || !minimum_damping.is_finite()
+                || minimum_damping <= 0.0
+                || minimum_damping > damping
+            {
+                return Err(Error::InvalidConfig(
+                    "invalid periodic Newton damping envelope".into(),
+                ));
+            }
+        }
+    }
     if remaining_iterations > config.max_iterations {
         return Err(Error::InvalidConfig(
             "periodic iteration budget exceeds the configured maximum".into(),
@@ -296,5 +355,5 @@ pub(crate) fn solve_with_iteration_budget(
         workspace.budget(0)?;
         workspace.linear.push(entries);
     }
-    workspace.newton(circuit, sources, seed, abort)
+    workspace.newton(circuit, sources, seed, steps, abort)
 }

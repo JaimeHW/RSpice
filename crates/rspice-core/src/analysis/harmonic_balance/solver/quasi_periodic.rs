@@ -503,19 +503,30 @@ impl HbSolver {
         jacobian: bool,
         selected: Option<&[bool]>,
     ) -> Result<Sample, Error> {
-        if selected.is_some_and(|rows| rows.len() != state.len()) {
-            return Err(Error::InvalidCircuit(
-                "selected periodic rows do not match the full state".into(),
-            ));
-        }
         // A registry without phase inputs contains only autonomous constitutive laws.
         let phases = if self.behavioral_phase_dimensions == 0 {
             &[]
         } else {
             phases
         };
+        self.periodic_sample_selected(state, 0.0, phases, jacobian, selected)
+    }
+
+    pub(in crate::analysis::harmonic_balance::solver) fn periodic_sample_selected(
+        &mut self,
+        state: &[Value],
+        time: Value,
+        phases: &[Value],
+        jacobian: bool,
+        selected: Option<&[bool]>,
+    ) -> Result<Sample, Error> {
+        if selected.is_some_and(|rows| rows.len() != state.len()) {
+            return Err(Error::InvalidCircuit(
+                "selected periodic rows do not match the full state".into(),
+            ));
+        }
         let mut sample = self
-            .quasi_periodic_native_sample_selected(state, phases, jacobian, selected)
+            .periodic_native_sample_selected(state, time, phases, jacobian, selected)
             .map_err(device_error)?;
         // Legacy compact devices use num_nodes as the ground sentinel.
         // Including branch-current coordinates would turn ground into the

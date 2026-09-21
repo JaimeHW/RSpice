@@ -37,9 +37,13 @@ pub struct QuasiPeriodicGridConfig {
 
 impl QuasiPeriodicGridConfig {
     pub(crate) fn validate(&self) -> Result<(), Error> {
+        self.validate_tones(2)
+    }
+
+    fn validate_tones(&self, minimum: usize) -> Result<(), Error> {
         let invalid = |message: &str| Error::InvalidConfig(message.into());
         let tones = self.frequencies_hz.len();
-        if tones < 2 || self.harmonics.len() != tones {
+        if tones < minimum || self.harmonics.len() != tones {
             return Err(invalid(
                 "at least two tone frequencies and one harmonic count per tone are required",
             ));
@@ -142,8 +146,36 @@ impl QuasiPeriodicGrid {
         abort: &dyn AbortSignal,
     ) -> Result<Self, Error> {
         check_abort(abort)?;
-        let invalid = |message: &str| Error::InvalidConfig(message.into());
         config.validate()?;
+        Self::build(config, limits, abort)
+    }
+
+    /// Internal signed basis for HB preparation. Public QPSS still requires
+    /// independent tones; a periodic circuit must not acquire a dummy tone.
+    pub(crate) fn periodic_with_abort(
+        frequency_hz: Value,
+        harmonics: usize,
+        samples: usize,
+        limits: &ResourceLimits,
+        abort: &dyn AbortSignal,
+    ) -> Result<Self, Error> {
+        check_abort(abort)?;
+        let config = QuasiPeriodicGridConfig {
+            frequencies_hz: vec![frequency_hz],
+            harmonics: vec![harmonics],
+            max_mixing_order: None,
+            sampling: QuasiPeriodicSampling::Exact(vec![samples]),
+        };
+        config.validate_tones(1)?;
+        Self::build(config, limits, abort)
+    }
+
+    fn build(
+        config: QuasiPeriodicGridConfig,
+        limits: &ResourceLimits,
+        abort: &dyn AbortSignal,
+    ) -> Result<Self, Error> {
+        let invalid = |message: &str| Error::InvalidConfig(message.into());
         let tones = config.frequencies_hz.len();
         let (samples, exact) = match &config.sampling {
             QuasiPeriodicSampling::Oversample(values) => (values, false),

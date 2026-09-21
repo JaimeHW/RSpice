@@ -41,6 +41,7 @@ impl Workspace<'_> {
         circuit: &mut impl Circuit,
         sources: &[Vec<Complex64>],
         seed: Option<&[Vec<Complex64>]>,
+        steps: NewtonStepPolicy,
         abort: &dyn AbortSignal,
     ) -> Result<QuasiPeriodicSolution, Error> {
         let mut spectra = seed
@@ -69,9 +70,18 @@ impl Workspace<'_> {
             }
             let state = coordinates::encode(&spectra);
             let mut accepted = None;
-            let mut damping = 1.0;
-            for _ in 0..=self.config.max_backtracks {
+            let (mut damping, minimum, backtracks) = match steps {
+                NewtonStepPolicy::QuasiPeriodic => (1.0, 0.0, self.config.max_backtracks),
+                NewtonStepPolicy::HarmonicBalance {
+                    damping,
+                    minimum_damping,
+                } => (damping, minimum_damping, 1075),
+            };
+            for _ in 0..=backtracks {
                 check_abort(abort)?;
+                if damping < minimum || damping == 0.0 {
+                    break;
+                }
                 let trial: Vec<_> = state
                     .iter()
                     .zip(&correction)
