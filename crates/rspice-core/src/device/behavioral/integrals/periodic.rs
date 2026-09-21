@@ -147,6 +147,7 @@ macro_rules! sample_source {
                     Input::Node(index) => self.node_bindings[index],
                     Input::Branch(index) => self.branch_bindings[index],
                     Input::Integral(index) => Some(state_start + index),
+                    Input::Phase(index) => Some(point.unknowns.saturating_add(index)),
                 };
                 for (index, equation) in equations.rates.iter().enumerate() {
                     let state = state_start + index;
@@ -224,6 +225,7 @@ impl BehavioralCurrentSource {
                     Input::Node(index) => self.node_bindings[index],
                     Input::Branch(index) => self.branch_bindings[index],
                     Input::Integral(index) => Some(state_start + index),
+                    Input::Phase(index) => Some(point.unknowns.saturating_add(index)),
                 },
                 true,
             )
@@ -318,6 +320,69 @@ mod tests {
             if row != 0 {
                 self.rhs[row - 1] += value;
             }
+        }
+    }
+
+    #[test]
+    fn quasi_periodic_waveform_lifting_keeps_one_integral_per_authored_occurrence() {
+        use crate::abort_signal::NoAbort;
+        use crate::analysis::quasi_periodic::{
+            QuasiPeriodicGrid, QuasiPeriodicGridConfig, QuasiPeriodicSampling,
+        };
+        let mut config =
+            QuasiPeriodicGridConfig::new(vec![1e3, 1e3 * std::f64::consts::SQRT_2], vec![1, 1]);
+        config.sampling = QuasiPeriodicSampling::Exact(vec![8, 8]);
+        let grid =
+            QuasiPeriodicGrid::new_with_abort(config, &crate::ResourceLimits::default(), &NoAbort)
+                .unwrap();
+        let mut source = BehavioralVoltageSource::new(
+            "BV".into(),
+            2,
+            0,
+            1,
+            "spice_pulse(0,1k*sdt(v(in)-v(out)),0,.25m,.25m,.25m,1m)",
+        )
+        .unwrap();
+        source
+            .bind_references(
+                |name| Some(if name == "in" { 1 } else { 2 }),
+                |_| BehavioralBranchResolution::MissingDevice,
+            )
+            .unwrap();
+        assert!(!source.has_quasi_periodic_equation(2));
+        source.lift_quasi_periodic(&grid, 4).unwrap();
+        assert_eq!(source.program.sdt_count, 1);
+        assert!(source.has_quasi_periodic_equation(2));
+        assert!(!source.has_quasi_periodic_equation(1));
+        let mut sources = BehavioralSources {
+            voltage_sources: vec![source],
+            current_sources: vec![],
+        };
+        for (phase, fraction) in [(0.1, 0.4), (0.3, 1.0), (0.6, 0.6), (0.9, 0.0)] {
+            let values = [2.0, 3.0, 0.0, 0.004, std::f64::consts::TAU * phase, 0.0];
+            let mut f = Stamp::new(4);
+            let mut q = Stamp::new(4);
+            sources
+                .stamp_periodic_fq(
+                    BehavioralFqPoint {
+                        inputs: &values,
+                        time: 0.0,
+                        num_nodes: 2,
+                        unknowns: 4,
+                        integral_start: 3,
+                        prescribed_integrals: &[],
+                    },
+                    &mut f,
+                    &mut q,
+                )
+                .unwrap();
+            assert!((f.rhs[2] - 4.0 * fraction).abs() < 1e-12);
+            assert!((f.jacobian[2][3] + 1e3 * fraction).abs() < 1e-9);
+            assert_eq!(f.rhs[3], -1.0);
+            assert_eq!(q.rhs[3], -0.004);
+            assert_eq!(f.jacobian[3][0], -1.0);
+            assert_eq!(f.jacobian[3][1], 1.0);
+            assert_eq!(q.jacobian[3][3], 1.0);
         }
     }
 

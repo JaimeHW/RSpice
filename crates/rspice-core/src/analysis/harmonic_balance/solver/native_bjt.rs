@@ -226,7 +226,13 @@ impl HbSolver {
     ) -> Result<(), HbError> {
         // Validate physical references before appending any independent inputs.
         self.validate_behavioral_bindings(sources)?;
-        let unknowns = self.num_nodes + self.exact_mna_branches().len();
+        let unknowns = self
+            .num_nodes
+            .checked_add(self.physical_branch_count())
+            .and_then(|count| count.checked_add(sources.integral_count()))
+            .ok_or_else(|| {
+                HbError::InvalidCircuit("QPSS integral MNA dimension exceeds this platform".into())
+            })?;
         let mut lifted = sources.clone();
         for source in &mut lifted.current_sources {
             source
@@ -242,6 +248,7 @@ impl HbSolver {
                     HbError::InvalidCircuit(format!("behavioral source '{}': {error}", source.name))
                 })?;
         }
+        self.register_integral_coordinates(sources)?;
         self.behavioral_sources = lifted;
         self.prescribed_integrals.clear();
         self.behavioral_phase_dimensions = grid.dimensions().len();

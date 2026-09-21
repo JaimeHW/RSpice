@@ -8,6 +8,7 @@ use std::collections::HashMap;
 
 mod periodic;
 pub(crate) use periodic::BehavioralFqPoint;
+mod phases;
 mod prescribed;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -15,6 +16,7 @@ enum Input {
     Node(usize),
     Branch(usize),
     Integral(usize),
+    Phase(usize),
 }
 
 #[derive(Debug, Clone)]
@@ -59,6 +61,7 @@ impl Equation {
 pub(super) struct IntegralEquations {
     rates: Vec<Equation>,
     output: Equation,
+    phase_dimensions: Option<usize>,
 }
 
 struct Lower<'a> {
@@ -131,6 +134,7 @@ impl IntegralEquations {
         Some(Self {
             output: Equation::new(output, &lower.inputs),
             rates: lower.rates,
+            phase_dimensions: None,
         })
     }
 
@@ -144,6 +148,9 @@ impl IntegralEquations {
         environment: BehavioralEnvironment,
         target: DerivativeTarget<'_>,
     ) -> Option<Value> {
+        if self.phase_dimensions.is_some() {
+            return None;
+        }
         let physical = |input| match input {
             Input::Node(i) => (
                 nodes[i],
@@ -154,6 +161,7 @@ impl IntegralEquations {
                 Value::from(matches!(target, DerivativeTarget::Branch(j) if j == i)).into(),
             ),
             Input::Integral(_) => unreachable!(),
+            Input::Phase(_) => (Value::NAN, 0.0.into()),
         };
         let mut integrals: Vec<(Value, Derivative)> = Vec::with_capacity(self.rates.len());
         for (rate, accepted) in self.rates.iter().zip(history) {
@@ -199,6 +207,9 @@ macro_rules! integral_source {
                 output: &mut Vec<Value>,
             ) -> Result<(), String> {
                 let Some(equations) = &self.integral_equations else { return Ok(()); };
+                if equations.phase_dimensions.is_some() {
+                    return Err("phase-lifted integral rates require independent-phase sampling".into());
+                }
                 let environment = BehavioralEnvironment {
                     time, frequency: self.frequency, temperature: self.temperature,
                     gmin: self.gmin, expression_dialect: self.expression_dialect,
@@ -210,6 +221,7 @@ macro_rules! integral_source {
                             Input::Integral(i) => return (integrals[i], 0.0.into()),
                             Input::Node(i) => self.node_bindings[i],
                             Input::Branch(i) => self.branch_bindings[i],
+                            Input::Phase(_) => return (Value::NAN, 0.0.into()),
                         };
                         binding.map_or((0.0, 0.0.into()), |i| (solution[i], direction[i].into()))
                     };

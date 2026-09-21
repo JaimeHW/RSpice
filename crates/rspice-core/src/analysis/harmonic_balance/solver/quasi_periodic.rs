@@ -1,4 +1,6 @@
 //! Reuse registered physical devices and exact MNA for a driven QPSS solve.
+#[cfg(test)]
+mod integral_tests;
 mod noise_sources;
 
 use super::*;
@@ -310,12 +312,12 @@ impl HbSolver {
             .behavioral_sources
             .voltage_sources
             .iter()
-            .any(|source| !source.has_memoryless_periodic_equation())
+            .any(|source| !source.has_quasi_periodic_equation(self.behavioral_phase_dimensions))
             || self
                 .behavioral_sources
                 .current_sources
                 .iter()
-                .any(|source| !source.has_memoryless_periodic_equation())
+                .any(|source| !source.has_quasi_periodic_equation(self.behavioral_phase_dimensions))
         {
             return Err(Error::InvalidCircuit(
                 "QPSS behavioral clocks require independent-phase forcing projection".into(),

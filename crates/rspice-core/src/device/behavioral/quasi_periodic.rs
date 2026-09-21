@@ -298,32 +298,87 @@ impl Lift<'_> {
 macro_rules! lift_source {
     ($kind:ty) => {
         impl $kind {
-            pub(crate) fn lift_quasi_periodic(&mut self, grid: &QuasiPeriodicGrid, unknowns: usize) -> Result<(), String> {
-                if !self.has_stateless_periodic_equation() {
-                    return Err("behavioral accepted-step memory or live-frequency equations need a quasiperiodic state model".into());
+            pub(crate) fn lift_quasi_periodic(
+                &mut self,
+                grid: &QuasiPeriodicGrid,
+                unknowns: usize,
+            ) -> Result<(), String> {
+                if self.is_frequency_dependent() {
+                    return Err(
+                        "behavioral live-frequency equations need a quasiperiodic frequency model"
+                            .into(),
+                    );
                 }
+                self.validate_periodic_integral_rates()?;
                 let mut names = Vec::new();
                 for dimension in 0..grid.dimensions().len() {
                     let mut name = format!("\0qpss_phase_{dimension}");
-                    while self.program.node_map.contains_key(&name) { name.push('_'); }
+                    while self.program.node_map.contains_key(&name) {
+                        name.push('_');
+                    }
                     names.push(name);
                 }
-                let ast = Lift { grid, context: self.periodicity_context(), phase_names: names.clone() }
-                    .lift(&self.ast)?.finish()?;
-                let nodes: HashMap<_, _> = self.program.node_map.iter()
-                    .map(|(name, &index)| (name.clone(), self.node_bindings[index])).collect();
-                let branches: HashMap<_, _> = self.program.branch_map.iter()
-                    .map(|(name, &index)| (name.clone(), self.branch_bindings[index])).collect();
+                if let Some(equations) = &self.integral_equations {
+                    let lift = Lift {
+                        grid,
+                        context: self.periodicity_context(),
+                        phase_names: names.clone(),
+                    };
+                    let equations =
+                        equations.lifted_phases(&names, |ast| lift.lift(ast)?.finish())?;
+                    self.integral_equations = Some(equations);
+                    // The original compiler's occurrence order and physical
+                    // bindings remain authoritative. Only the detached F/Q
+                    // rate/output programs read the appended phase scalars.
+                    return Ok(());
+                }
+                let ast = Lift {
+                    grid,
+                    context: self.periodicity_context(),
+                    phase_names: names.clone(),
+                }
+                .lift(&self.ast)?
+                .finish()?;
+                let nodes: HashMap<_, _> = self
+                    .program
+                    .node_map
+                    .iter()
+                    .map(|(name, &index)| (name.clone(), self.node_bindings[index]))
+                    .collect();
+                let branches: HashMap<_, _> = self
+                    .program
+                    .branch_map
+                    .iter()
+                    .map(|(name, &index)| (name.clone(), self.branch_bindings[index]))
+                    .collect();
                 self.ast = ast;
                 self.program = compile(&self.ast);
                 self.vm = Vm::new();
                 self.bind_references(
-                    |name| names.iter().position(|phase| phase == name).map(|i| unknowns + i + 1)
-                        .or_else(|| nodes.get(name).map(|binding| binding.map_or(0, |i| i + 1))),
-                    |name| branches.get(name).copied().flatten().map_or(
-                        BehavioralBranchResolution::MissingDevice, BehavioralBranchResolution::Branch),
-                ).map_err(|e| e.to_string())?;
+                    |name| {
+                        names
+                            .iter()
+                            .position(|phase| phase == name)
+                            .map(|i| unknowns + i + 1)
+                            .or_else(|| nodes.get(name).map(|binding| binding.map_or(0, |i| i + 1)))
+                    },
+                    |name| {
+                        branches.get(name).copied().flatten().map_or(
+                            BehavioralBranchResolution::MissingDevice,
+                            BehavioralBranchResolution::Branch,
+                        )
+                    },
+                )
+                .map_err(|e| e.to_string())?;
                 Ok(())
+            }
+
+            pub(crate) fn has_quasi_periodic_equation(&self, dimensions: usize) -> bool {
+                !self.is_frequency_dependent()
+                    && self.integral_equations.as_ref().map_or_else(
+                        || self.has_memoryless_periodic_equation(),
+                        |equations| equations.has_phase_basis(dimensions),
+                    )
             }
         }
     };
