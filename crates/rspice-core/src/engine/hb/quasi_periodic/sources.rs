@@ -28,32 +28,7 @@ impl Projector<'_> {
     }
 
     fn tuple(&self, frequency: Value) -> Result<Vec<i32>, SimulationError> {
-        if !frequency.is_finite() || frequency == 0.0 {
-            return Err(invalid(
-                "source clocks need explicit finite nonzero frequencies",
-            ));
-        }
-        let mut matches = self
-            .grid
-            .frequencies_hz()
-            .iter()
-            .enumerate()
-            .filter_map(|(k, f)| {
-                let scale = f.abs().max(frequency.abs());
-                ((f - frequency).abs() <= 8.0 * Value::EPSILON * scale)
-                    .then(|| self.grid.indices()[k].clone())
-            });
-        let tuple = matches.next().ok_or_else(|| {
-            invalid(format!(
-                "source clock {frequency:.16e} Hz is absent from the retained tone lattice"
-            ))
-        })?;
-        if matches.next().is_some() {
-            return Err(invalid(format!(
-                "source clock {frequency:.16e} Hz is ambiguous in the retained tone lattice"
-            )));
-        }
-        Ok(tuple)
+        self.grid.clock_tuple(frequency).map_err(numerical_error)
     }
 
     fn add_cosine(

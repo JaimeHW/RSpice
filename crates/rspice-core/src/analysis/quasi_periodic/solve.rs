@@ -123,6 +123,14 @@ pub(crate) trait Circuit {
         self.linear_entries(frequency_hz)
     }
     fn sample(&mut self, state: &[Value], jacobian: bool) -> Result<Sample, Error>;
+    fn sample_at_phases(
+        &mut self,
+        state: &[Value],
+        _phases: &[Value],
+        jacobian: bool,
+    ) -> Result<Sample, Error> {
+        self.sample(state, jacobian)
+    }
 }
 
 struct Workspace<'a> {

@@ -128,7 +128,8 @@ impl Linearization {
             for (row, value) in state.iter_mut().enumerate() {
                 *value = waves[row][time];
             }
-            let sample = circuit.sample(&state, true)?;
+            let phases = grid.phases(time).expect("bounded collocation index");
+            let sample = circuit.sample_at_phases(&state, &phases, true)?;
             base_values = base_values.saturating_add(
                 sample
                     .conductance

@@ -107,6 +107,35 @@ pub struct QuasiPeriodicGrid {
 }
 
 impl QuasiPeriodicGrid {
+    /// Resolve an authored source clock without aliasing it onto another tone.
+    pub(crate) fn clock_tuple(&self, frequency: Value) -> Result<Vec<i32>, Error> {
+        if !frequency.is_finite() || frequency == 0.0 {
+            return Err(Error::InvalidConfig(
+                "source clocks need explicit finite nonzero frequencies".into(),
+            ));
+        }
+        let mut matches = self
+            .frequencies_hz()
+            .iter()
+            .enumerate()
+            .filter_map(|(k, f)| {
+                let scale = f.abs().max(frequency.abs());
+                ((f - frequency).abs() <= 8.0 * Value::EPSILON * scale)
+                    .then(|| self.indices()[k].clone())
+            });
+        let tuple = matches.next().ok_or_else(|| {
+            Error::InvalidConfig(format!(
+                "source clock {frequency:.16e} Hz is absent from the retained tone lattice"
+            ))
+        })?;
+        if matches.next().is_some() {
+            return Err(Error::InvalidConfig(format!(
+                "source clock {frequency:.16e} Hz is ambiguous in the retained tone lattice"
+            )));
+        }
+        Ok(tuple)
+    }
+
     pub fn new_with_abort(
         config: QuasiPeriodicGridConfig,
         limits: &ResourceLimits,

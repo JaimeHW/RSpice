@@ -102,7 +102,8 @@ impl Workspace<'_> {
             for (row, value) in state.iter_mut().enumerate() {
                 *value = waves[row][time];
             }
-            let sample = circuit.sample(&state, with_jacobian)?;
+            let phases = self.grid.phases(time).expect("bounded collocation index");
+            let sample = circuit.sample_at_phases(&state, &phases, with_jacobian)?;
             if time == 0 {
                 // The previous Newton evaluation can coexist with a trial
                 // evaluation; charge both sets of physical-term waveforms.
