@@ -33,6 +33,79 @@ fn transfer(rate: f64, frequency: f64) -> Complex64 {
 }
 
 #[test]
+fn hb_chained_nonlinear_integrals_resolve_each_stage_and_retain_response() {
+    let rate = 1e3;
+    let omega = std::f64::consts::TAU * rate;
+    let circuit = |drift: &str| {
+        Netlist::parse(&format!(
+        "Chained integrals\nItest 0 input SIN(0 1m {rate})\n\
+         Bforcing 0 input I=.001*sin(2*pi*{rate}*time)^3\n\
+         Rinput input 0 1k\nBnonlinear input 0 I=.001*v(input)^3\n\
+         BA first 0 V={omega}*sdt(v(input))\nRa first 0 1k\n\
+         BB second 0 V={omega}*sdt((2*v(first)-v(first)^2)*sin(2*pi*{rate}*time){drift})\nRb second 0 1k\n\
+         BC out 0 V={omega}*sdt(v(second)*sin(2*pi*{rate}*time))\nRc out 0 1k\n\
+         .options hbint tahb=0\n.end\n"
+    )).unwrap()
+    };
+    let netlist = circuit("");
+    let engine = Engine::default();
+    let mut config = HbConfig::new(rate)
+        .with_harmonics(4)
+        .with_collocation_points(33);
+    config.use_krylov = true;
+    config.tolerance = 1e-10;
+    config.abstol = 1e-14;
+    let hb = engine.run_hb(&netlist, config.clone()).unwrap();
+    for (name, coefficients) in [
+        ("first", [1.0, -1.0, 0.0, 0.0, 0.0]),
+        ("second", [2.0 / 3.0, -0.75, 0.0, 1.0 / 12.0, 0.0]),
+        (
+            "out",
+            [15.0 / 32.0, -2.0 / 3.0, 5.0 / 24.0, 0.0, -1.0 / 96.0],
+        ),
+    ] {
+        let row = hb
+            .result
+            .spectral_voltages
+            .iter()
+            .find(|row| row.node_name.eq_ignore_ascii_case(name))
+            .unwrap();
+        for (&actual, expected) in row.coefficients.iter().zip(coefficients) {
+            close(actual, Complex64::new(expected, 0.0));
+        }
+    }
+    let request = |name: &str| {
+        PacConfig::new()
+            .with_fundamental(rate)
+            .with_sweep(rate * 0.13, rate * 0.13, 1)
+            .with_sweep_type(PacSweepType::Linear)
+            .with_sidebands(-2, 2)
+            .with_input_source("Itest")
+            .with_output_node(name)
+    };
+    let second = engine
+        .run_pac_from_hb_with_abort(&netlist, request("second"), &hb.operating_point, &NoAbort)
+        .unwrap();
+    let output = engine
+        .run_pac_from_hb_with_abort(&netlist, request("out"), &hb.operating_point, &NoAbort)
+        .unwrap();
+    let expected = (Complex64::new(0.0, 0.5)
+        * second.result.conversion_matrix.get(0, 1, 1).unwrap()
+        - Complex64::new(0.0, 0.5) * second.result.conversion_matrix.get(0, -1, 1).unwrap())
+        / Complex64::new(0.0, 0.13);
+    assert!(expected.norm() > 1e-3);
+    close(
+        output.result.conversion_matrix.get(0, 0, 1).unwrap(),
+        expected,
+    );
+    let error = engine
+        .run_hb(&circuit("+1e-7"), config)
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("nonzero mean"), "{error}");
+}
+
+#[test]
 fn hb_nonlinear_input_integrals_preserve_configuration_and_response() {
     let rate = 1e3;
     let omega = std::f64::consts::TAU * rate;

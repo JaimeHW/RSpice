@@ -20,17 +20,59 @@ impl HbSolver {
     pub(in crate::analysis::harmonic_balance::solver) fn prepare_nonlinear_integral_inputs(
         &mut self,
         state: &mut HbSolverState,
-        needed: Vec<bool>,
+        mut needed: Vec<bool>,
         abort: &dyn AbortSignal,
     ) -> Result<(), HbError> {
         if !needed.iter().any(|&value| value) {
             return Ok(());
         }
+        let Some(max_values) = self.periodic_integral_budget else {
+            return Ok(());
+        };
+        let n = self.num_nodes + self.exact_mna_branches().len();
+        if needed.len() != n || n > max_values {
+            return Err(HbError::InvalidCircuit(
+                "nonlinear integral input metadata exceeds the periodic basis or allocation limit"
+                    .into(),
+            ));
+        }
+        let mut known_inputs = vec![false; n];
+        let start = state.total_iterations;
+        while needed.iter().any(|&value| value) {
+            if abort.is_aborted() {
+                return Err(HbError::Aborted);
+            }
+            let used = state.total_iterations - start;
+            if used >= self.config.max_iterations {
+                break;
+            }
+            needed = self.prepare_nonlinear_integral_input_pass(
+                state,
+                needed,
+                &mut known_inputs,
+                self.config.max_iterations - used,
+                abort,
+            )?;
+        }
+        Ok(())
+    }
+
+    fn prepare_nonlinear_integral_input_pass(
+        &mut self,
+        state: &mut HbSolverState,
+        needed: Vec<bool>,
+        known_inputs: &mut [bool],
+        remaining_iterations: usize,
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<bool>, HbError> {
+        if !needed.iter().any(|&value| value) {
+            return Ok(Vec::new());
+        }
         if abort.is_aborted() {
             return Err(HbError::Aborted);
         }
         let Some(max_values) = self.periodic_integral_budget else {
-            return Ok(());
+            return Ok(Vec::new());
         };
         let n = self.num_nodes + self.exact_mna_branches().len();
         let h = self.num_harmonics;
@@ -74,6 +116,7 @@ impl HbSolver {
         let signed_values = n.saturating_mul((2 * h + 1).saturating_mul(4).saturating_add(8));
         let retained = cache_values
             .saturating_add(needed.len())
+            .saturating_add(known_inputs.len())
             .saturating_add(signed_values);
         ensure(retained)?;
         let mut limits = ResourceLimits {
@@ -136,7 +179,7 @@ impl HbSolver {
             relative_tolerance: self.config.tolerance,
             current_absolute_tolerance: self.config.abstol,
             voltage_absolute_tolerance: self.voltage_abstol,
-            max_iterations: self.config.max_iterations,
+            max_iterations: remaining_iterations,
             linear: QuasiPeriodicLinearConfig {
                 method: if self.config.use_krylov
                     || n.saturating_mul(grid.len()) >= super::super::krylov::KRYLOV_AUTO_THRESHOLD
@@ -179,10 +222,34 @@ impl HbSolver {
         drop(needed);
         let mut driven = driven.spectra;
         if driven.iter().all(Option::is_none) {
-            return Ok(());
+            return Ok(Vec::new());
         }
         for spectrum in driven.iter_mut().flatten() {
             spectrum.drain(..h);
+        }
+        let mut retained_inputs = driven.capacity().saturating_mul(4).saturating_add(
+            driven
+                .iter()
+                .flatten()
+                .map(|row| row.capacity().saturating_mul(2))
+                .sum::<usize>(),
+        );
+        // Keep inputs that qualified earlier primitives, including separate
+        // circuit components absent from this pass's newly needed inputs.
+        for ((target, &known), spectrum) in driven
+            .iter_mut()
+            .zip(known_inputs.iter())
+            .zip(state.x.iter().chain(&state.mna_branch_currents))
+        {
+            if target.is_none() && known {
+                retained_inputs = retained_inputs.saturating_add(spectrum.len().saturating_mul(2));
+                ensure(
+                    cache_values
+                        .saturating_add(retained_inputs)
+                        .saturating_add(known_inputs.len()),
+                )?;
+                *target = Some(spectrum.clone());
+            }
         }
         let driven_values = driven.capacity().saturating_mul(4).saturating_add(
             driven
@@ -198,16 +265,17 @@ impl HbSolver {
             &sources,
             max_values
                 .saturating_sub(cache_values)
-                .saturating_sub(driven_values),
+                .saturating_sub(driven_values)
+                .saturating_sub(known_inputs.len()),
             false,
             true,
             Some(&driven),
             abort,
         );
         self.behavioral_sources = sources;
-        let (prepared, _) = prepared?;
+        let (prepared, needed) = prepared?;
         if prepared.iter().flatten().count() <= initially_prescribed {
-            return Ok(());
+            return Ok(Vec::new());
         }
         if abort.is_aborted() {
             return Err(HbError::Aborted);
@@ -215,16 +283,31 @@ impl HbSolver {
         self.prescribed_integrals = prepared;
         // Apply only after a new primitive was qualified, preserving every
         // other supplied coordinate and the selected nonlinear branch.
-        for (target, spectrum) in state
+        for (row, (target, spectrum)) in state
             .x
             .iter_mut()
             .chain(&mut state.mna_branch_currents)
             .zip(driven)
+            .enumerate()
         {
             if let Some(spectrum) = spectrum {
                 *target = spectrum;
+                known_inputs[row] = true;
             }
         }
-        Ok(())
+        for (target, primitive) in state.mna_branch_currents[self.physical_branch_count()..]
+            .iter_mut()
+            .zip(&self.prescribed_integrals)
+        {
+            if let Some(
+                PrescribedIntegral::Primitive(values) | PrescribedIntegral::Driven(values),
+            ) = primitive
+            {
+                target.copy_from_slice(values);
+            }
+        }
+        // A continuing pass has strictly increased the qualified count;
+        // dependency depth and the one shared stage budget bound repetition.
+        Ok(needed)
     }
 }

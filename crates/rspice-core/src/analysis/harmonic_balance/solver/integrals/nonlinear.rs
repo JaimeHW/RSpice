@@ -39,6 +39,9 @@ struct Subcircuit<'a> {
     selected: Vec<bool>,
     state: Vec<Value>,
     basis: InputBasis,
+    known_integrals: &'a [bool],
+    known_samples: &'a [Option<Vec<Value>>],
+    grid: &'a QuasiPeriodicGrid,
 }
 
 impl Circuit for Subcircuit<'_> {
@@ -81,6 +84,34 @@ impl Circuit for Subcircuit<'_> {
         for (&col, &value) in self.columns.iter().zip(state) {
             self.state[col] = value;
         }
+        // Only previously qualified producer primitives are external inputs.
+        // Use their retained circuit coordinates, not omitted interpolation
+        // modes; nonlinear downstream laws must see the same state as HB/QPSS.
+        if self.known_samples.iter().any(Option::is_some) {
+            if phases.len() != self.grid.dimensions().len() {
+                return Err(Error::InvalidCircuit(
+                    "prescribed inputs require the registered phase grid".into(),
+                ));
+            }
+            let mut sample = 0;
+            let mut stride = 1;
+            for (&phase, &size) in phases.iter().zip(self.grid.dimensions()) {
+                let index = (phase * size as Value / std::f64::consts::TAU).round() as usize;
+                if index >= size || phase != std::f64::consts::TAU * index as Value / size as Value
+                {
+                    return Err(Error::InvalidCircuit(
+                        "prescribed input is outside the collocation grid".into(),
+                    ));
+                }
+                sample += index * stride;
+                stride *= size;
+            }
+            for (target, values) in self.state.iter_mut().zip(self.known_samples) {
+                if let Some(values) = values {
+                    *target = values[sample];
+                }
+            }
+        }
         let sample = match self.basis {
             InputBasis::IndependentPhases => self.solver.quasi_periodic_sample_selected(
                 &self.state,
@@ -118,7 +149,7 @@ impl Circuit for Subcircuit<'_> {
                     continue;
                 }
                 if self.column_index[col] == usize::MAX {
-                    if value != 0.0 {
+                    if value != 0.0 && !self.known_integrals[col] {
                         return Err(Error::InvalidCircuit(
                             "nonlinear input subsystem has an external derivative".into(),
                         ));
@@ -140,8 +171,8 @@ impl Circuit for Subcircuit<'_> {
 
 impl HbSolver {
     /// Return complete solved components so the caller can preserve the chosen
-    /// orbit as the full-circuit seed. Integral-dependent components are never
-    /// sampled here. Their constants still belong to the joint periodic solve.
+    /// orbit as the full-circuit seed. Only already-qualified primitives can
+    /// act as external inputs; unresolved integral feedback remains joint.
     pub(in crate::analysis::harmonic_balance::solver) fn nonlinear_driven_spectra(
         &mut self,
         grid: Arc<QuasiPeriodicGrid>,
@@ -197,11 +228,33 @@ impl HbSolver {
         };
         let mut storage = n.saturating_mul(64);
         budget(storage)?;
+        let known_integrals: Vec<_> = (0..n)
+            .map(|column| {
+                if column < physical {
+                    return false;
+                }
+                let index = column - physical;
+                match basis {
+                    InputBasis::IndependentPhases => self
+                        .quasi_prescribed_integrals
+                        .as_ref()
+                        .is_some_and(|cache| cache.known_input(index)),
+                    InputBasis::PeriodicTime { .. } => matches!(
+                        self.prescribed_integrals.get(index),
+                        Some(Some(
+                            super::prescribed::PrescribedIntegral::Primitive(_)
+                                | super::prescribed::PrescribedIntegral::Driven(_)
+                        ))
+                    ),
+                }
+            })
+            .collect();
         let mut pattern = BTreeSet::new();
-        let mut insert = |row, col| -> Result<(), Error> {
+        let mut insert = |row: usize, col: usize| -> Result<(), Error> {
             check_abort(abort)?;
             // Lifted phase coordinates are parameters, never circuit unknowns.
-            if row < physical && col < n && !pattern.contains(&(row, col)) {
+            if row < physical && col < n && !known_integrals[col] && !pattern.contains(&(row, col))
+            {
                 storage = storage.saturating_add(16);
                 budget(storage)?;
                 pattern.insert((row, col));
@@ -265,6 +318,58 @@ impl HbSolver {
         let count: usize = components.iter().map(Vec::len).sum();
         storage = storage.saturating_add(count.saturating_mul(grid.len()).saturating_mul(2));
         budget(storage)?;
+        let mut known_samples = vec![None; n];
+        if !components.is_empty() && known_integrals.iter().any(|&known| known) {
+            storage = storage.saturating_add(
+                known_integrals
+                    .iter()
+                    .filter(|&&known| known)
+                    .count()
+                    .saturating_mul(grid.sample_count()),
+            );
+            budget(
+                storage
+                    .saturating_add(grid.sample_count().saturating_mul(8))
+                    .saturating_add(grid.len().saturating_mul(2)),
+            )?;
+            let mut transform =
+                crate::analysis::quasi_periodic::QuasiPeriodicTransform::new_with_abort(
+                    grid.clone(),
+                    abort,
+                )?;
+            let mut spectrum = vec![Complex64::ZERO; grid.len()];
+            for (column, &known) in known_integrals.iter().enumerate() {
+                if !known {
+                    continue;
+                }
+                check_abort(abort)?;
+                let index = column - physical;
+                match basis {
+                    InputBasis::IndependentPhases => self
+                        .quasi_prescribed_integrals
+                        .as_ref()
+                        .expect("producer cache")
+                        .project_input(index, &mut spectrum, abort)?,
+                    InputBasis::PeriodicTime { .. } => {
+                        let primitive = self.prescribed_integrals[index]
+                            .as_ref()
+                            .expect("producer primitive");
+                        let (super::prescribed::PrescribedIntegral::Primitive(values)
+                        | super::prescribed::PrescribedIntegral::Driven(values)) = primitive
+                        else {
+                            unreachable!()
+                        };
+                        let h = grid.dc_index();
+                        spectrum[h..].copy_from_slice(values);
+                        for k in 1..=h {
+                            spectrum[h - k] = values[k].conj();
+                        }
+                    }
+                }
+                known_samples[column] =
+                    Some(transform.to_real_samples_with_abort(&spectrum, abort)?);
+            }
+        }
         let mut spectra = vec![None; n];
         let mut iterations = 0usize;
         for component in components {
@@ -305,6 +410,9 @@ impl HbSolver {
                 selected,
                 state: vec![0.0; n],
                 basis,
+                known_integrals: &known_integrals,
+                known_samples: &known_samples,
+                grid: &grid,
             };
             let steps = match basis {
                 InputBasis::IndependentPhases => solve::NewtonStepPolicy::default(),

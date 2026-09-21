@@ -3,6 +3,123 @@ use super::*;
 use crate::analysis::quasi_periodic::{QuasiPeriodicAcConfig, QuasiPeriodicLinearMethod};
 
 #[test]
+fn qpss_chained_integral_inputs_use_the_retained_mixing_basis() {
+    let rate = 1e3;
+    let second = rate * std::f64::consts::SQRT_2;
+    let omega = std::f64::consts::TAU * rate;
+    let netlist = Netlist::parse(&format!(
+        "Truncated integral input\nBA first 0 V={omega}*sdt(sin(2*pi*{rate}*time)*cos(2*pi*{second}*time))\n\
+         Ra first 0 1k\nBB out 0 V={omega}*sdt(v(first)^2*sin(2*pi*{rate}*time))\nRb out 0 1k\n.end\n"
+    )).unwrap();
+    let mut config = QpssConfig::new(vec![rate, second], vec![1, 1]);
+    config.grid.max_mixing_order = Some(1);
+    let engine = Engine::default();
+    let point = engine.run_qpss(&netlist, config).unwrap();
+    let grid = engine
+        .validate_qpss_operating_point_with_abort(&netlist, &point, &NoAbort)
+        .unwrap();
+    // The omitted +/- mixed cosines still determine the first primitive's
+    // origin constant -1. The retained physical voltage is constant -1, so
+    // its square drives an ordinary sine integral, with mean 1.
+    for (name, dc, first) in [("first", -1.0, 0.0), ("out", 1.0, -0.5)] {
+        let row = point
+            .node_names()
+            .iter()
+            .position(|n| n.eq_ignore_ascii_case(name))
+            .unwrap();
+        assert!((point.spectra()[row][grid.dc_index()].re - dc).abs() < 1e-8);
+        assert!((point.spectra()[row][grid.index_of(&[1, 0]).unwrap()] - first).norm() < 1e-8);
+    }
+}
+
+#[test]
+fn qpss_chained_nonlinear_integrals_share_budget_and_retain_response() {
+    let rate = 1e3;
+    let omega = std::f64::consts::TAU * rate;
+    let netlist = Netlist::parse(&format!(
+        "Chained torus integrals\nItest 0 input SIN(0 1m {rate})\n\
+         Bforcing 0 input I=.001*sin(2*pi*{rate}*time)^3\n\
+         Rinput input 0 1k\nBnonlinear input 0 I=.001*v(input)^3\n\
+         BA first 0 V={omega}*sdt(v(input))\nRa first 0 1k\n\
+         BB second 0 V={omega}*sdt((2*v(first)-v(first)^2)*sin(2*pi*{rate}*time))\nRb second 0 1k\n\
+         BC out 0 V={omega}*sdt(v(second)*sin(2*pi*{rate}*time))\nRc out 0 1k\n.end\n"
+    ))
+    .unwrap();
+    let engine = Engine::default();
+    let mut config = QpssConfig::new(vec![rate, rate * std::f64::consts::SQRT_2], vec![4, 1]);
+    config.solver.relative_tolerance = 1e-10;
+    config.solver.current_absolute_tolerance = 1e-14;
+    let point = engine.run_qpss(&netlist, config.clone()).unwrap();
+    let grid = engine
+        .validate_qpss_operating_point_with_abort(&netlist, &point, &NoAbort)
+        .unwrap();
+    for (name, coefficients) in [
+        ("first", [1.0, -1.0, 0.0, 0.0, 0.0]),
+        ("second", [2.0 / 3.0, -0.75, 0.0, 1.0 / 12.0, 0.0]),
+        (
+            "out",
+            [15.0 / 32.0, -2.0 / 3.0, 5.0 / 24.0, 0.0, -1.0 / 96.0],
+        ),
+    ] {
+        let row = point
+            .node_names()
+            .iter()
+            .position(|n| n.eq_ignore_ascii_case(name))
+            .unwrap();
+        for (harmonic, expected) in coefficients.into_iter().enumerate() {
+            let expected = if harmonic == 0 {
+                expected
+            } else {
+                expected * 0.5
+            };
+            assert!(
+                (point.spectra()[row][grid.index_of(&[harmonic as i32, 0]).unwrap()] - expected)
+                    .norm()
+                    < 2e-8
+            );
+        }
+    }
+    assert!(point.iterations() > 2);
+    config.solver.max_iterations = point.iterations() - 1;
+    let error = engine
+        .run_qpss(&netlist, config.clone())
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains(&format!(
+            "after {} iterations",
+            config.solver.max_iterations
+        )),
+        "{error}"
+    );
+    let request = |name: &str, output| QpacRequest {
+        offsets_hz: vec![rate * 0.13],
+        input_source: "Itest".into(),
+        input_lattice: vec![1, 0],
+        output_node: name.into(),
+        output_ref: "0".into(),
+        output_lattice: vec![output, 0],
+        magnitude: 1.0,
+        phase_degrees: 0.0,
+        solver: Default::default(),
+    };
+    let positive = engine
+        .run_qpac_from_qpss(&netlist, request("second", 1), &point)
+        .unwrap();
+    let negative = engine
+        .run_qpac_from_qpss(&netlist, request("second", -1), &point)
+        .unwrap();
+    let output = engine
+        .run_qpac_from_qpss(&netlist, request("out", 0), &point)
+        .unwrap();
+    let expected = (Complex64::new(0.0, 0.5) * positive.output_transfer[0]
+        - Complex64::new(0.0, 0.5) * negative.output_transfer[0])
+        / Complex64::new(0.0, 0.13);
+    assert!(expected.norm() > 1e-3);
+    assert!((output.output_transfer[0] / expected - 1.0).norm() < 1e-7);
+}
+
+#[test]
 fn qpss_integrates_an_independent_nonlinear_input_and_preserves_response() {
     let rate = 1e3;
     let omega = std::f64::consts::TAU * rate;

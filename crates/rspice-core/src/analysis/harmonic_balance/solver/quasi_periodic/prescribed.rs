@@ -48,6 +48,42 @@ fn primitive_value(spectrum: &QuasiPeriodicSampleSpectrum, phases: &[Value]) -> 
 }
 
 impl QuasiPrescribedIntegrals {
+    pub(in crate::analysis::harmonic_balance::solver) fn known_input(&self, index: usize) -> bool {
+        !self.retained && self.primitives.get(index).is_some_and(Option::is_some)
+    }
+
+    /// The circuit coordinate contains retained modes, even when the complete
+    /// primitive needed omitted modes to establish its zero-origin constant.
+    pub(in crate::analysis::harmonic_balance::solver) fn project_input(
+        &self,
+        index: usize,
+        target: &mut [Complex64],
+        abort: &dyn AbortSignal,
+    ) -> Result<(), Error> {
+        if !self.known_input(index) || target.len() != self.grid.len() {
+            return Err(Error::InvalidCircuit(
+                "prescribed input differs from the producer basis".into(),
+            ));
+        }
+        target.fill(Complex64::ZERO);
+        let primitive = self.primitives[index].as_ref().expect("qualified input");
+        for (i, (tuple, &value)) in primitive
+            .spectrum
+            .tuples
+            .iter()
+            .zip(&primitive.spectrum.coefficients)
+            .enumerate()
+        {
+            if i.is_multiple_of(256) {
+                check_abort(abort)?;
+            }
+            if let Some(slot) = self.grid.index_of(tuple) {
+                target[slot] = value;
+            }
+        }
+        Ok(())
+    }
+
     pub(in crate::analysis::harmonic_balance::solver) fn sample(
         &self,
         phases: &[Value],
@@ -96,7 +132,7 @@ impl HbSolver {
         limits: &ResourceLimits,
         abort: &dyn AbortSignal,
     ) -> Result<(Option<Vec<Vec<Complex64>>>, ResourceLimits, usize), Error> {
-        let (remaining, needed) = self.prepare_quasi_periodic_integrals_with_inputs(
+        let (mut remaining, mut needed) = self.prepare_quasi_periodic_integrals_with_inputs(
             grid.clone(),
             limits,
             false,
@@ -104,85 +140,131 @@ impl HbSolver {
             None,
             abort,
         )?;
-        let initially_prescribed = self
-            .quasi_prescribed_integrals
-            .as_ref()
-            .map_or(0, |cache| cache.primitives.iter().flatten().count());
         let n = self.unknowns();
-        if !needed.iter().any(|&needed| needed) {
-            return Ok((None, remaining, 0));
-        }
-        let mut preparing = remaining.clone();
-        preparing.max_result_values = preparing.max_result_values.saturating_sub(n);
-        let driven = self.nonlinear_driven_spectra(
-            grid.clone(),
-            config,
-            sources,
-            seed,
-            &needed,
-            &preparing,
-            abort,
-        )?;
-        drop(needed);
-        let iterations = driven.iterations;
-        let driven = driven.spectra;
-        if driven.iter().all(Option::is_none) {
-            return Ok((None, remaining, iterations));
-        }
-        let driven_values = n.saturating_mul(4).saturating_add(
-            driven
-                .iter()
-                .flatten()
-                .map(|row| row.len().saturating_mul(2))
-                .sum::<usize>(),
-        );
-        let mut preparing = limits.clone();
-        preparing.max_result_values = preparing.max_result_values.saturating_sub(driven_values);
-        let mut remaining = self.prepare_quasi_periodic_integrals(
-            grid.clone(),
-            &preparing,
-            false,
-            Some(sources),
-            Some(&driven),
-            abort,
-        )?;
-        let primitive_values = preparing
-            .max_result_values
-            .saturating_sub(remaining.max_result_values);
-        let now_prescribed = self
-            .quasi_prescribed_integrals
-            .as_ref()
-            .map_or(0, |cache| cache.primitives.iter().flatten().count());
-        if now_prescribed <= initially_prescribed {
-            // A feedback integral may read an independent input and still have
-            // its constant fixed by the joint closure. Do not perturb its seed
-            // merely because one of its inputs could be solved separately.
-            remaining.max_result_values = limits.max_result_values.saturating_sub(primitive_values);
-            return Ok((None, remaining, iterations));
-        }
         let seed_values = n.saturating_mul(grid.len().saturating_mul(2).saturating_add(4));
-        ResourceLimitError::ensure(
-            ResourceKind::ResultValues,
-            seed_values,
-            remaining.max_result_values,
-        )?;
-        // Keep the converged upstream branch selected by the caller's seed.
-        // Every downstream coordinate retains its original supplied value.
-        let mut prepared = Vec::with_capacity(n);
-        for (row, values) in driven.into_iter().enumerate() {
+        let input_values = |inputs: &[Option<Vec<Complex64>>]| {
+            inputs.len().saturating_mul(4).saturating_add(
+                inputs
+                    .iter()
+                    .flatten()
+                    .map(|row| row.capacity().saturating_mul(2))
+                    .sum::<usize>(),
+            )
+        };
+        let mut inputs: Vec<Option<Vec<Complex64>>> = Vec::new();
+        let mut prepared: Option<Vec<Vec<Complex64>>> = None;
+        let mut iterations = 0;
+        while needed.iter().any(|&needed| needed) && iterations < config.max_iterations {
             check_abort(abort)?;
-            prepared.push(values.unwrap_or_else(|| {
-                seed.map_or_else(
-                    || vec![Complex64::ZERO; grid.len()],
-                    |seed| seed[row].clone(),
+            let initially_prescribed = self
+                .quasi_prescribed_integrals
+                .as_ref()
+                .map_or(0, |cache| cache.primitives.iter().flatten().count());
+            let retained_seed = if prepared.is_some() { seed_values } else { 0 };
+            let mut preparing = remaining.clone();
+            preparing.max_result_values = preparing
+                .max_result_values
+                .saturating_sub(input_values(&inputs))
+                .saturating_sub(retained_seed)
+                .saturating_sub(needed.len());
+            let mut bounded = config.clone();
+            bounded.max_iterations -= iterations;
+            let driven = self
+                .nonlinear_driven_spectra(
+                    grid.clone(),
+                    &bounded,
+                    sources,
+                    prepared.as_deref().or(seed),
+                    &needed,
+                    &preparing,
+                    abort,
                 )
-            }));
+                .map_err(|error| match error {
+                    Error::ConvergenceFailed {
+                        iterations: used,
+                        merit,
+                    } => Error::ConvergenceFailed {
+                        iterations: iterations + used,
+                        merit,
+                    },
+                    other => other,
+                })?;
+            // Release the flags before the next preparation allocates its set.
+            drop(std::mem::take(&mut needed));
+            iterations += driven.iterations;
+            if driven.spectra.iter().all(Option::is_none) {
+                break;
+            }
+            if inputs.is_empty() {
+                inputs = driven.spectra;
+            } else {
+                for (target, value) in inputs.iter_mut().zip(driven.spectra) {
+                    if value.is_some() {
+                        *target = value;
+                    }
+                }
+            }
+            let driven_values = input_values(&inputs);
+            let mut preparing = limits.clone();
+            preparing.max_result_values = preparing
+                .max_result_values
+                .saturating_sub(driven_values)
+                .saturating_sub(retained_seed);
+            let (available, unresolved) = self.prepare_quasi_periodic_integrals_with_inputs(
+                grid.clone(),
+                &preparing,
+                false,
+                Some(sources),
+                Some(&inputs),
+                abort,
+            )?;
+            let primitive_values = preparing
+                .max_result_values
+                .saturating_sub(available.max_result_values);
+            remaining = limits.clone();
+            remaining.max_result_values =
+                remaining.max_result_values.saturating_sub(primitive_values);
+            needed = unresolved;
+            let now_prescribed = self
+                .quasi_prescribed_integrals
+                .as_ref()
+                .map_or(0, |cache| cache.primitives.iter().flatten().count());
+            if now_prescribed <= initially_prescribed {
+                // Solving one input does not qualify a feedback integral whose
+                // constant still belongs to the joint solve. Preserve its seed.
+                break;
+            }
+            ResourceLimitError::ensure(
+                ResourceKind::ResultValues,
+                seed_values
+                    .saturating_add(driven_values)
+                    .saturating_add(needed.len()),
+                remaining.max_result_values,
+            )?;
+            let prepared = prepared.get_or_insert_with(|| {
+                seed.map_or_else(|| vec![vec![Complex64::ZERO; grid.len()]; n], <[_]>::to_vec)
+            });
+            for (target, values) in prepared.iter_mut().zip(&inputs) {
+                check_abort(abort)?;
+                if let Some(values) = values {
+                    target.clone_from(values);
+                }
+            }
+            if let Some(cache) = &self.quasi_prescribed_integrals {
+                let physical = self.num_nodes + self.physical_branch_count();
+                for (index, target) in prepared[physical..].iter_mut().enumerate() {
+                    if cache.known_input(index) {
+                        cache.project_input(index, target, abort)?;
+                    }
+                }
+            }
+            // Every continuing pass has qualified another primitive, so both
+            // dependency depth and the shared Newton budget bound this loop.
         }
-        remaining.max_result_values = limits
-            .max_result_values
-            .saturating_sub(primitive_values)
-            .saturating_sub(seed_values);
-        Ok((Some(prepared), remaining, iterations))
+        if prepared.is_some() {
+            remaining.max_result_values = remaining.max_result_values.saturating_sub(seed_values);
+        }
+        Ok((prepared, remaining, iterations))
     }
 
     pub(super) fn prepare_quasi_periodic_integrals(
