@@ -218,7 +218,17 @@ impl HbFft {
         let norm = 1.0 / n as f64;
         let max_kept = self.positive_harmonic_limit();
         (0..=count.min(max_kept))
-            .map(|k| buffer[k] * norm)
+            .map(|k| {
+                let mut coefficient = buffer[k] * norm;
+                // Real samples have an exactly real DC sum. General-length
+                // complex FFTs can leave an imaginary roundoff term, which
+                // must not become a nonphysical HB DC equation. Preserve a
+                // non-finite term so callers can still reject FFT overflow.
+                if k == 0 && coefficient.im.is_finite() {
+                    coefficient.im = 0.0;
+                }
+                coefficient
+            })
             .collect()
     }
 
