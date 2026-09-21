@@ -152,6 +152,53 @@ macro_rules! sample_source {
 sample_source!(BehavioralVoltageSource);
 sample_source!(BehavioralCurrentSource);
 
+impl BehavioralCurrentSource {
+    /// Lead-current observation uses the same explicit state as the residual.
+    pub(crate) fn evaluate_periodic_output(
+        &mut self,
+        point: BehavioralFqPoint<'_>,
+        state_start: usize,
+    ) -> Result<Value, String> {
+        let Some(equations) = &self.integral_equations else {
+            return self
+                .evaluate(point.inputs, point.time)
+                .map_err(|error| error.to_string());
+        };
+        if state_start
+            .checked_add(self.program.sdt_count)
+            .is_none_or(|end| end > point.unknowns)
+            || point.unknowns > point.inputs.len()
+        {
+            return Err(format!(
+                "behavioral current source '{}' has an incomplete periodic integral basis",
+                self.name
+            ));
+        }
+        let environment = BehavioralEnvironment {
+            time: point.time,
+            frequency: self.frequency,
+            temperature: self.temperature,
+            gmin: self.gmin,
+            expression_dialect: self.expression_dialect,
+            logarithm_domain: LogarithmDomain::Ieee,
+        };
+        equations
+            .output
+            .periodic_sample(
+                point,
+                environment,
+                |input| match input {
+                    Input::Node(index) => self.node_bindings[index],
+                    Input::Branch(index) => self.branch_bindings[index],
+                    Input::Integral(index) => Some(state_start + index),
+                },
+                true,
+            )
+            .map(|sample| sample.value)
+            .map_err(|error| format!("behavioral current source '{}': {error}", self.name))
+    }
+}
+
 impl BehavioralSources {
     /// Stamp continuous source equations and each explicitly allocated SDT
     /// coordinate. The caller must allocate every coordinate; neither a zero

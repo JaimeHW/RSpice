@@ -142,6 +142,13 @@ impl HbSolver {
         }
 
         for (branch_idx, spectrum) in state.mna_branch_currents.iter().enumerate() {
+            if self
+                .exact_mna_branches()
+                .get(branch_idx)
+                .is_some_and(ExactMnaBranch::is_integral)
+            {
+                continue;
+            }
             result.mna_branch_currents.push(SpectralBranchCurrent {
                 device_name: branch_names[branch_idx].clone(),
                 coefficients: spectrum

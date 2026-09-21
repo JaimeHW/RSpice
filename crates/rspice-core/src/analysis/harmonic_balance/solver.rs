@@ -15,6 +15,7 @@ use num_complex::Complex64;
 mod currents;
 mod dc;
 mod devices;
+mod integrals;
 mod krylov;
 mod linear;
 mod linear_algebra;
@@ -217,15 +218,21 @@ pub struct HbSolverState {
     /// Converged flag
     pub converged: bool,
 
-    /// Spectra for branch-current unknowns retained by an actual MNA solve.
-    /// Rows are in the solver's canonical exact-MNA branch order.
+    /// Non-node spectra in the solver's canonical MNA coordinate order.
+    /// Physical branch currents form the prefix; solver-owned typed integral
+    /// coordinates, when present, form the tail and are not current outputs.
     pub mna_branch_currents: Vec<Vec<Complex64>>,
 
-    /// KVL residual spectra aligned with `mna_branch_currents`.
+    /// Residual spectra aligned with the non-node coordinates: physical KVL
+    /// equations followed by explicitly registered integral-rate equations.
     pub(crate) mna_branch_residual: Vec<Vec<Complex64>>,
 
-    /// Per-row voltage scale for the KVL convergence certificate.
+    /// Per-row contribution scales in each equation's own units.
     pub(crate) mna_branch_residual_scale: Vec<Vec<Value>>,
+
+    /// Beginning of the integral-rate rows in the non-node coordinate arrays.
+    /// Their absolute tolerance is in integrand units, not KVL volts.
+    pub(crate) integral_branch_start: Option<usize>,
 }
 
 impl HbSolverState {
@@ -251,6 +258,7 @@ impl HbSolverState {
             mna_branch_currents: Vec::new(),
             mna_branch_residual: Vec::new(),
             mna_branch_residual_scale: Vec::new(),
+            integral_branch_start: None,
         }
     }
 
@@ -438,14 +446,7 @@ impl HbSolverState {
             false,
         );
         current_rows_converged
-            && residual_rows_converged(
-                &self.mna_branch_currents,
-                &self.mna_branch_residual,
-                &self.mna_branch_residual_scale,
-                reltol,
-                voltage_abstol,
-                false,
-            )
+            && self.non_node_rows_converged(reltol, current_abstol, voltage_abstol, false)
     }
 
     /// Per-row KCL convergence restricted to the DC (k = 0) entries, for
@@ -481,14 +482,7 @@ impl HbSolverState {
             true,
         );
         current_rows_converged
-            && residual_rows_converged(
-                &self.mna_branch_currents,
-                &self.mna_branch_residual,
-                &self.mna_branch_residual_scale,
-                reltol,
-                voltage_abstol,
-                true,
-            )
+            && self.non_node_rows_converged(reltol, current_abstol, voltage_abstol, true)
     }
 
     /// Dimensionless worst-row residual certificate shared by DC and
@@ -521,15 +515,7 @@ impl HbSolverState {
             current_abstol,
             dc_only,
         )?;
-        let voltage_merit = residual_rows_merit(
-            "KVL-voltage",
-            &self.mna_branch_currents,
-            &self.mna_branch_residual,
-            &self.mna_branch_residual_scale,
-            reltol,
-            voltage_abstol,
-            dc_only,
-        )?;
+        let voltage_merit = self.non_node_merit(reltol, current_abstol, voltage_abstol, dc_only)?;
         Ok(current_merit.max(voltage_merit))
     }
 
@@ -817,11 +803,19 @@ pub(crate) enum ExactMnaBranch {
         node_pos: usize,
         node_neg: usize,
     },
+    /// Explicit non-electrical SDT coordinate. It has no terminal incidence;
+    /// its complete differential equation comes from behavioral F/Q sampling.
+    IntegralState { branch_ordinal: usize },
 }
 
 impl ExactMnaBranch {
+    fn is_integral(&self) -> bool {
+        matches!(self, Self::IntegralState { .. })
+    }
+
     fn ordinal_and_terminals(&self) -> (usize, usize, usize) {
         match self {
+            Self::IntegralState { branch_ordinal } => (*branch_ordinal, 0, 0),
             Self::VoltageSource {
                 branch_ordinal,
                 node_pos,

@@ -747,7 +747,7 @@ impl HbSolver {
         Ok(())
     }
 
-    fn try_push_periodic_mna_branch(
+    pub(super) fn try_push_periodic_mna_branch(
         &mut self,
         branch: ExactMnaBranch,
         name: &str,
@@ -1383,13 +1383,17 @@ impl HbSolver {
                     node_pos,
                     node_neg,
                 } => (*branch_ordinal, *node_pos, *node_neg, false),
+                ExactMnaBranch::IntegralState { branch_ordinal } => (*branch_ordinal, 0, 0, false),
             };
             if branch_ordinal != expected_ordinal {
                 return Err(HbError::InvalidCircuit(format!(
                     "exact linear MNA branch '{name}' has ordinal {branch_ordinal}; expected {expected_ordinal}"
                 )));
             }
-            if node_pos > self.num_nodes || node_neg > self.num_nodes || node_pos == node_neg {
+            if node_pos > self.num_nodes
+                || node_neg > self.num_nodes
+                || (node_pos == node_neg && !branch.is_integral())
+            {
                 return Err(HbError::InvalidCircuit(format!(
                     "exact linear MNA branch '{name}' has invalid terminal pair ({node_pos}, {node_neg}) for {} non-ground nodes",
                     self.num_nodes
@@ -1766,7 +1770,8 @@ impl HbSolver {
                             )
                         }
                         ExactMnaBranch::ControlledVoltageSource { .. } => (-voltage_drop, 0.0),
-                        ExactMnaBranch::ConstitutivePort { .. } => (Complex64::new(0.0, 0.0), 0.0),
+                        ExactMnaBranch::ConstitutivePort { .. }
+                        | ExactMnaBranch::IntegralState { .. } => (Complex64::new(0.0, 0.0), 0.0),
                     };
                     state.mna_branch_residual[branch_index][k] = residual;
                     state.mna_branch_residual_scale[branch_index][k] =
@@ -1891,6 +1896,7 @@ impl HbSolver {
             self.num_branches
         };
         state.try_prepare_mna_branches(m, self.num_harmonics)?;
+        self.bind_integral_tolerances(state);
         let total_unknowns = n.checked_add(m).ok_or_else(|| {
             HbError::InvalidCircuit("linear HB MNA dimension exceeds this platform".to_string())
         })?;
@@ -1942,14 +1948,22 @@ impl HbSolver {
                     if node_pos > 0 {
                         let node = node_pos - 1;
                         y_matrix[node][row] += Complex64::new(1.0, 0.0);
-                        if !matches!(branch, ExactMnaBranch::ConstitutivePort { .. }) {
+                        if !matches!(
+                            branch,
+                            ExactMnaBranch::ConstitutivePort { .. }
+                                | ExactMnaBranch::IntegralState { .. }
+                        ) {
                             y_matrix[row][node] += Complex64::new(1.0, 0.0);
                         }
                     }
                     if node_neg > 0 {
                         let node = node_neg - 1;
                         y_matrix[node][row] -= Complex64::new(1.0, 0.0);
-                        if !matches!(branch, ExactMnaBranch::ConstitutivePort { .. }) {
+                        if !matches!(
+                            branch,
+                            ExactMnaBranch::ConstitutivePort { .. }
+                                | ExactMnaBranch::IntegralState { .. }
+                        ) {
                             y_matrix[row][node] -= Complex64::new(1.0, 0.0);
                         }
                     }
@@ -1970,7 +1984,8 @@ impl HbSolver {
                             y_matrix[row][row] -= *resistance;
                         }
                         ExactMnaBranch::ControlledVoltageSource { .. } => {}
-                        ExactMnaBranch::ConstitutivePort { .. } => {}
+                        ExactMnaBranch::ConstitutivePort { .. }
+                        | ExactMnaBranch::IntegralState { .. } => {}
                     }
                 }
                 for &(row, column, value) in &self.exact_mna_static_entries {

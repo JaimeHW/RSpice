@@ -150,7 +150,8 @@ pub struct HbConfig {
     pub tolerance: Value,
 
     /// Absolute residual tolerance for node equations: amperes for electrical
-    /// and delay nodes, watts for thermal nodes. The engine supplies VNTOL
+    /// and delay nodes, watts for thermal nodes. Explicit integral-rate
+    /// equations use their integrand's units. The engine supplies VNTOL
     /// separately for voltage-valued branch equations.
     pub abstol: Value,
 

@@ -134,6 +134,14 @@ impl HbSolver {
             let count = self.fft.size();
             let mut solution = vec![0.0; waves.len()];
             let zero_charge = vec![0.0; count];
+            let integral_start = self.num_nodes + self.physical_branch_count();
+            let mut state_start = integral_start
+                + self
+                    .behavioral_sources
+                    .voltage_sources
+                    .iter()
+                    .map(|source| source.program.sdt_count)
+                    .sum::<usize>();
             for index in 0..self.behavioral_sources.current_sources.len() {
                 let mut source = self.behavioral_sources.current_sources[index].clone();
                 let mut current = vec![0.0; count];
@@ -145,12 +153,19 @@ impl HbSolver {
                         *value = wave[time];
                     }
                     *sample = source
-                        .evaluate(
-                            &solution,
-                            time as Value / count as Value / self.config.fundamental_freq,
+                        .evaluate_periodic_output(
+                            crate::device::behavioral::BehavioralFqPoint {
+                                inputs: &solution,
+                                time: time as Value / count as Value / self.config.fundamental_freq,
+                                num_nodes: self.num_nodes,
+                                unknowns: solution.len(),
+                                integral_start,
+                            },
+                            state_start,
                         )
                         .map_err(|error| HbError::InvalidCircuit(error.to_string()))?;
                 }
+                state_start += source.program.sdt_count;
                 let positive = self.lead_phasors(&current, &zero_charge)?;
                 let negative = positive.iter().map(|value| -*value).collect();
                 result.push(HbDeviceLeadSpectra {

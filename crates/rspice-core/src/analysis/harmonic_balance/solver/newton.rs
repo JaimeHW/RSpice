@@ -148,7 +148,7 @@ impl ExactHbOperator<'_> {
             if ordinal != expected_ordinal
                 || node_pos > self.num_nodes
                 || node_neg > self.num_nodes
-                || node_pos == node_neg
+                || (node_pos == node_neg && !branch.is_integral())
                 || matches!(branch, ExactMnaBranch::Inductor { inductance, .. } if !inductance.is_finite() || *inductance == 0.0)
                 || matches!(branch, ExactMnaBranch::Resistor { resistance, small_signal_resistance, .. } if !resistance.is_finite() || !small_signal_resistance.is_finite())
             {
@@ -332,7 +332,11 @@ impl ExactHbOperator<'_> {
                         Complex64::new(-1.0, 0.0),
                         &mut visitor,
                     );
-                    if !matches!(branch, ExactMnaBranch::ConstitutivePort { .. }) {
+                    if !matches!(
+                        branch,
+                        ExactMnaBranch::ConstitutivePort { .. }
+                            | ExactMnaBranch::IntegralState { .. }
+                    ) {
                         self.visit_linear_term(
                             branch_entity,
                             k,
@@ -353,7 +357,11 @@ impl ExactHbOperator<'_> {
                         Complex64::new(1.0, 0.0),
                         &mut visitor,
                     );
-                    if !matches!(branch, ExactMnaBranch::ConstitutivePort { .. }) {
+                    if !matches!(
+                        branch,
+                        ExactMnaBranch::ConstitutivePort { .. }
+                            | ExactMnaBranch::IntegralState { .. }
+                    ) {
                         self.visit_linear_term(
                             branch_entity,
                             k,
@@ -710,6 +718,7 @@ impl HbSolver {
 
         self.validate_exact_large_signal_mna()?;
         state.try_prepare_mna_branches(self.exact_mna_branches().len(), self.num_harmonics)?;
+        self.bind_integral_tolerances(state);
 
         // GMIN is a continuation aid, never part of the authored circuit.
         // Commercial SPICE implementations may walk a shunted homotopy, but
@@ -1186,7 +1195,8 @@ impl HbSolver {
                         (resistor_voltage - voltage_drop, resistor_voltage.norm())
                     }
                     ExactMnaBranch::ControlledVoltageSource { .. } => (-voltage_drop, 0.0),
-                    ExactMnaBranch::ConstitutivePort { .. } => (Complex64::new(0.0, 0.0), 0.0),
+                    ExactMnaBranch::ConstitutivePort { .. }
+                    | ExactMnaBranch::IntegralState { .. } => (Complex64::new(0.0, 0.0), 0.0),
                 };
                 if !residual.re.is_finite()
                     || !residual.im.is_finite()
@@ -1629,14 +1639,22 @@ impl HbSolver {
                 if node_pos > 0 {
                     let node_coordinate = (node_pos - 1) * h + k;
                     jac[node_coordinate][branch_coordinate] -= 1.0;
-                    if !matches!(branch, ExactMnaBranch::ConstitutivePort { .. }) {
+                    if !matches!(
+                        branch,
+                        ExactMnaBranch::ConstitutivePort { .. }
+                            | ExactMnaBranch::IntegralState { .. }
+                    ) {
                         jac[branch_coordinate][node_coordinate] -= 1.0;
                     }
                 }
                 if node_neg > 0 {
                     let node_coordinate = (node_neg - 1) * h + k;
                     jac[node_coordinate][branch_coordinate] += 1.0;
-                    if !matches!(branch, ExactMnaBranch::ConstitutivePort { .. }) {
+                    if !matches!(
+                        branch,
+                        ExactMnaBranch::ConstitutivePort { .. }
+                            | ExactMnaBranch::IntegralState { .. }
+                    ) {
                         jac[branch_coordinate][node_coordinate] += 1.0;
                     }
                 }

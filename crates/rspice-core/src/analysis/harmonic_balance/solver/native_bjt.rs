@@ -142,7 +142,7 @@ impl HbSolver {
         for source in &sources.current_sources {
             certify(
                 &source.name,
-                source.has_periodic_time_dependence(period, autonomous),
+                source.has_periodic_shooting_equation(period, autonomous),
                 source.max_authored_tone_cycles(period),
                 source.minimum_pss_interval(false),
             )?;
@@ -150,11 +150,12 @@ impl HbSolver {
         for source in &sources.voltage_sources {
             certify(
                 &source.name,
-                source.has_periodic_time_dependence(period, autonomous),
+                source.has_periodic_shooting_equation(period, autonomous),
                 source.max_authored_tone_cycles(period),
                 source.minimum_pss_interval(false),
             )?;
         }
+        self.register_integral_coordinates(sources)?;
         self.behavioral_sources = sources.clone();
         self.behavioral_phase_dimensions = 0;
         Ok(())
@@ -175,7 +176,7 @@ impl HbSolver {
             if !valid(
                 source.node_pos,
                 source.node_neg,
-                source.has_stateless_periodic_equation(),
+                !source.is_frequency_dependent(),
                 source.bound_solution_indices().collect(),
             ) {
                 return Err(HbError::InvalidCircuit(format!(
@@ -192,7 +193,7 @@ impl HbSolver {
             if !valid(
                 source.node_pos,
                 source.node_neg,
-                source.has_stateless_periodic_equation(),
+                !source.is_frequency_dependent(),
                 source.bound_solution_indices().collect(),
             ) || !matches!(branch, Some(ExactMnaBranch::ConstitutivePort { node_pos, node_neg, .. })
                     if *node_pos == source.node_pos && *node_neg == source.node_neg)
@@ -294,6 +295,7 @@ impl HbSolver {
                 )));
             }
         }
+        let integral_start = self.num_nodes + self.physical_branch_count();
         self.behavioral_sources
             .stamp_periodic_fq(
                 crate::device::behavioral::BehavioralFqPoint {
@@ -301,7 +303,7 @@ impl HbSolver {
                     time,
                     num_nodes: self.num_nodes,
                     unknowns: solution.len(),
-                    integral_start: solution.len(),
+                    integral_start,
                 },
                 f,
                 q,

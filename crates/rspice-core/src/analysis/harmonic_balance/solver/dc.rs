@@ -42,6 +42,7 @@ impl HbSolver {
         let iteration_start = state.total_iterations;
         let branch_count = self.validate_dc_exact_mna_registry()?;
         state.try_prepare_mna_branches(branch_count, self.num_harmonics)?;
+        self.bind_integral_tolerances(state);
         self.validate_dc_state(state)?;
         // The DC seed is part of the same authenticated HB solve. Respect the
         // caller's tolerances instead of silently weakening them.
@@ -256,13 +257,19 @@ impl HbSolver {
             let (node_pos, node_neg) = Self::dc_branch_terminals(branch);
             if node_pos > 0 {
                 g_dc[node_pos - 1][row] += 1.0;
-                if !matches!(branch, ExactMnaBranch::ConstitutivePort { .. }) {
+                if !matches!(
+                    branch,
+                    ExactMnaBranch::ConstitutivePort { .. } | ExactMnaBranch::IntegralState { .. }
+                ) {
                     g_dc[row][node_pos - 1] += 1.0;
                 }
             }
             if node_neg > 0 {
                 g_dc[node_neg - 1][row] -= 1.0;
-                if !matches!(branch, ExactMnaBranch::ConstitutivePort { .. }) {
+                if !matches!(
+                    branch,
+                    ExactMnaBranch::ConstitutivePort { .. } | ExactMnaBranch::IntegralState { .. }
+                ) {
                     g_dc[row][node_neg - 1] -= 1.0;
                 }
             }
@@ -508,10 +515,15 @@ impl HbSolver {
                 ExactMnaBranch::Resistor { resistance, .. } => {
                     state.mna_branch_currents[branch_index][0].re * *resistance
                 }
-                ExactMnaBranch::ConstitutivePort { .. } => 0.0,
+                ExactMnaBranch::ConstitutivePort { .. } | ExactMnaBranch::IntegralState { .. } => {
+                    0.0
+                }
                 _ => self.dc_branch_source(branch, source_scale)?,
             };
-            if matches!(branch, ExactMnaBranch::ConstitutivePort { .. }) {
+            if matches!(
+                branch,
+                ExactMnaBranch::ConstitutivePort { .. } | ExactMnaBranch::IntegralState { .. }
+            ) {
                 // The registered device or distributed network supplies the
                 // complete constitutive row after the canonical KCL incidence.
                 state.mna_branch_residual[branch_index][0] = Complex64::new(0.0, 0.0);
@@ -668,13 +680,19 @@ impl HbSolver {
             let (node_pos, node_neg) = Self::dc_branch_terminals(branch);
             if node_pos > 0 {
                 jacobian[node_pos - 1][branch_coordinate] -= 1.0;
-                if !matches!(branch, ExactMnaBranch::ConstitutivePort { .. }) {
+                if !matches!(
+                    branch,
+                    ExactMnaBranch::ConstitutivePort { .. } | ExactMnaBranch::IntegralState { .. }
+                ) {
                     jacobian[branch_coordinate][node_pos - 1] -= 1.0;
                 }
             }
             if node_neg > 0 {
                 jacobian[node_neg - 1][branch_coordinate] += 1.0;
-                if !matches!(branch, ExactMnaBranch::ConstitutivePort { .. }) {
+                if !matches!(
+                    branch,
+                    ExactMnaBranch::ConstitutivePort { .. } | ExactMnaBranch::IntegralState { .. }
+                ) {
                     jacobian[branch_coordinate][node_neg - 1] += 1.0;
                 }
             }
@@ -900,11 +918,12 @@ impl HbSolver {
                     node_pos,
                     node_neg,
                 } => (*branch_ordinal, *node_pos, *node_neg),
+                ExactMnaBranch::IntegralState { branch_ordinal } => (*branch_ordinal, 0, 0),
             };
             if branch_ordinal != expected_ordinal
                 || node_pos > self.num_nodes
                 || node_neg > self.num_nodes
-                || node_pos == node_neg
+                || (node_pos == node_neg && !branch.is_integral())
             {
                 return Err(HbError::InvalidCircuit(format!(
                     "HB DC exact-MNA branch '{name}' has ordinal {branch_ordinal} and terminals ({node_pos}, {node_neg}); expected ordinal {expected_ordinal} within {} nodes",
@@ -1047,7 +1066,7 @@ impl HbSolver {
             ExactMnaBranch::Inductor { .. } => 0.0,
             ExactMnaBranch::Resistor { .. } => 0.0,
             ExactMnaBranch::ControlledVoltageSource { .. } => 0.0,
-            ExactMnaBranch::ConstitutivePort { .. } => 0.0,
+            ExactMnaBranch::ConstitutivePort { .. } | ExactMnaBranch::IntegralState { .. } => 0.0,
         };
         if !source.is_finite() {
             return Err(HbError::InvalidCircuit(

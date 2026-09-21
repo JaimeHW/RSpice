@@ -259,7 +259,11 @@ impl HbSolver {
             for (node, sign) in [(pos, 1.0), (neg, -1.0)] {
                 if node > 0 {
                     entries.push((node - 1, row, Complex64::new(sign, 0.0)));
-                    if !matches!(branch, ExactMnaBranch::ConstitutivePort { .. }) {
+                    if !matches!(
+                        branch,
+                        ExactMnaBranch::ConstitutivePort { .. }
+                            | ExactMnaBranch::IntegralState { .. }
+                    ) {
                         entries.push((row, node - 1, Complex64::new(sign, 0.0)));
                     }
                 }
@@ -336,7 +340,11 @@ impl HbSolver {
         let mut seen = std::collections::BTreeSet::new();
         for (index, branch) in self.periodic_mna_branches.iter().enumerate() {
             let (ordinal, pos, neg) = branch.ordinal_and_terminals();
-            if ordinal != index + 1 || pos > self.num_nodes || neg > self.num_nodes || pos == neg {
+            if ordinal != index + 1
+                || pos > self.num_nodes
+                || neg > self.num_nodes
+                || (pos == neg && !branch.is_integral())
+            {
                 return Err(Error::InvalidCircuit(
                     "QPSS branch has invalid canonical MNA coordinates".into(),
                 ));
@@ -383,6 +391,10 @@ impl Circuit for HbSolver {
 
     fn voltage_equation(&self, row: usize) -> bool {
         row >= self.num_nodes
+            && self
+                .periodic_mna_branches
+                .get(row - self.num_nodes)
+                .is_some_and(|coordinate| !coordinate.is_integral())
     }
 
     fn linear_entries(&self, frequency_hz: Value) -> Result<Vec<LinearEntry>, Error> {
