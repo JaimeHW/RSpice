@@ -16,6 +16,7 @@ const OPERATIONS: &[(&str, &str)] = &[
     ("WHEN", "Crossing location"),
     ("TRIG", "Trigger to target delay"),
     ("PARAM", "Expression using measurements"),
+    ("ERROR", "Compare with reference table"),
 ];
 
 #[derive(Debug, Clone)]
@@ -98,6 +99,10 @@ pub(super) struct MeasurementBuilder {
     target: EventDraft,
     expression: String,
     options: String,
+    reference_path: String,
+    reference_column: String,
+    reference_axis_column: String,
+    reference_norm: &'static str,
 }
 
 impl Default for MeasurementBuilder {
@@ -112,6 +117,10 @@ impl Default for MeasurementBuilder {
             target: EventDraft::default(),
             expression: String::new(),
             options: String::new(),
+            reference_path: String::new(),
+            reference_column: "1".into(),
+            reference_axis_column: "0".into(),
+            reference_norm: "L2NORM",
         }
     }
 }
@@ -144,6 +153,9 @@ fn field(ui: &mut Ui, label: &str, value: &mut String, hint: &str) {
 }
 
 impl MeasurementBuilder {
+    pub(super) fn set_reference_path(&mut self, path: &str) {
+        self.reference_path = path.to_owned();
+    }
     pub(super) fn for_card(card: &str) -> Self {
         let family = card.split_whitespace().nth(1).unwrap_or_default();
         Self {
@@ -161,6 +173,26 @@ impl MeasurementBuilder {
             return Err("Measurement name must be one token".into());
         }
         let body = match self.operation {
+            "ERROR" => {
+                let path = required(&self.reference_path, "Reference name")?;
+                if path.contains('"') {
+                    return Err("Reference name cannot contain quote characters".into());
+                }
+                let mut body = format!(
+                    "ERROR {} FILE=\"{path}\" COMP_FUNCTION={} DEPVARCOL={}",
+                    required(&self.signal, "Signal")?,
+                    self.reference_norm,
+                    required(&self.reference_column, "Comparison column")?
+                );
+                if self.family != "DC" {
+                    qualifier(
+                        &mut body,
+                        "INDEPVARCOL",
+                        required(&self.reference_axis_column, "Reference axis column")?,
+                    )?;
+                }
+                body
+            }
             "PARAM" => {
                 let expression = required(&self.expression, "Expression")?;
                 if expression.contains('\'') {
@@ -192,7 +224,7 @@ impl MeasurementBuilder {
             operation => format!("{operation} {}", required(&self.signal, "Signal")?),
         };
         let mut card = format!(".MEAS {} {name} {body}", self.family);
-        if self.operation != "PARAM" {
+        if !matches!(self.operation, "PARAM" | "ERROR") {
             qualifier(&mut card, "FROM", &self.from)?;
             qualifier(&mut card, "TO", &self.to)?;
         }
@@ -232,6 +264,42 @@ impl MeasurementBuilder {
             }
         });
         match self.operation {
+            "ERROR" => {
+                ui.horizontal_wrapped(|ui| {
+                    field(
+                        ui,
+                        "Reference name",
+                        &mut self.reference_path,
+                        "reference.csv",
+                    );
+                    field(
+                        ui,
+                        "Comparison column",
+                        &mut self.reference_column,
+                        "zero-based index",
+                    );
+                    if self.family != "DC" {
+                        field(
+                            ui,
+                            "Axis column",
+                            &mut self.reference_axis_column,
+                            "zero-based index",
+                        );
+                    }
+                    egui::ComboBox::from_id_salt("comparison-norm")
+                        .selected_text(self.reference_norm)
+                        .show_ui(ui, |ui| {
+                            for (norm, label) in [
+                                ("L2NORM", "L2 · Euclidean error"),
+                                ("L1NORM", "L1 · Sum of absolute errors"),
+                                ("INFNORM", "Maximum absolute error"),
+                            ] {
+                                ui.selectable_value(&mut self.reference_norm, norm, label);
+                            }
+                        });
+                });
+                ui.small("Attach the matching reference table below. DC compares rows in order; other analyses interpolate at the reference coordinates.");
+            }
             "PARAM" => {
                 ui.horizontal_wrapped(|ui| {
                     field(ui, "Expression", &mut self.expression, "gain / reference");
@@ -245,7 +313,7 @@ impl MeasurementBuilder {
             "WHEN" => self.event.show(ui, "Crossing", false),
             _ => {}
         }
-        if self.operation != "PARAM" {
+        if !matches!(self.operation, "PARAM" | "ERROR") {
             ui.horizontal_wrapped(|ui| {
                 field(ui, "From", &mut self.from, "optional axis value");
                 field(ui, "To", &mut self.to, "optional axis value");

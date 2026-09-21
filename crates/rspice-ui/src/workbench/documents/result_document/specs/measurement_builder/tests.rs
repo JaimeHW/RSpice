@@ -1,5 +1,57 @@
 use super::*;
 
+#[test]
+fn studio_measurement_reference_builder_options_execute() {
+    let mut builder = MeasurementBuilder {
+        operation: "ERROR",
+        signal: "V(out)".into(),
+        from: "99".into(),
+        to: "100".into(),
+        ..Default::default()
+    };
+    let source = super::super::reference_import::retain(
+        "reference table.csv".into(),
+        "TIME,V(out)\n0,0\n1,0\n2,0\n".into(),
+    )
+    .unwrap();
+    builder.set_reference_path(&source.logical_path);
+    for family in ["TRAN", "AC", "DC", "NOISE"] {
+        builder.family = family;
+        for (norm, expected) in [
+            ("L1NORM", 3.0),
+            ("L2NORM", 5.0_f64.sqrt()),
+            ("INFNORM", 2.0),
+        ] {
+            builder.reference_norm = norm;
+            let card = builder.card("fit").unwrap();
+            assert!(!card.contains("FROM="));
+            assert_eq!(card.contains("INDEPVARCOL="), family != "DC");
+            let mut netlist = rspice_core::Netlist::parse(&format!(
+                "Builder\nV1 out 0 1\nR1 out 0 1k\n{card}\n.end\n"
+            ))
+            .unwrap();
+            let mut statement = netlist.measurements.remove(0);
+            rspice_core::analysis::bind_error_measurement_reference(
+                &mut statement,
+                source.contents.as_str(),
+            )
+            .unwrap();
+            let mut engine = rspice_core::analysis::MeasureEngine::new();
+            engine.add(statement);
+            let values = [0.0, 1.0, 2.0];
+            let signals = std::collections::HashMap::from([("V(out)".into(), values.as_slice())]);
+            let result = engine.evaluate(&[0.0, 1.0, 2.0], &signals).remove(0);
+            assert!(
+                (result.value.unwrap() - expected).abs() < 1e-12,
+                "{family}/{norm}: {result:?}"
+            );
+        }
+    }
+    assert!(
+        super::super::reference_import::retain("not-a-table.exe".into(), "0,0".into()).is_err()
+    );
+}
+
 fn evaluate(builder: &MeasurementBuilder, values: &[f64; 5]) -> rspice_core::MeasureResult {
     let card = builder.card("metric").unwrap();
     let source = format!(

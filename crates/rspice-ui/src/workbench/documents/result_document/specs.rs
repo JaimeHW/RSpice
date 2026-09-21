@@ -8,6 +8,7 @@
 //! opens their inline editor.
 
 mod measurement_builder;
+mod reference_import;
 
 use std::borrow::Cow;
 use std::collections::HashSet;
@@ -170,6 +171,8 @@ pub struct SpecDraft {
     pub measurement: String,
     pub expression: String,
     pub define_measurement: bool,
+    pub measurement_reference: Option<crate::state::workspace::MeasurementReferenceSource>,
+    reference_import: reference_import::ReferenceImport,
     measurement_builder: Option<measurement_builder::MeasurementBuilder>,
     comparison: ComparisonDraftKind,
     /// Minimum/maximum limit, range minimum, or equality target.
@@ -217,6 +220,8 @@ impl SpecDraft {
             measurement: definition.measurement.clone(),
             expression: definition.expression.clone(),
             define_measurement: definition.define_measurement,
+            measurement_reference: definition.measurement_reference.clone(),
+            reference_import: Default::default(),
             measurement_builder: None,
             comparison,
             primary_limit,
@@ -237,7 +242,7 @@ impl SpecDraft {
     fn parse(&self) -> Result<Option<SpecificationDefinition>, String> {
         let name = self.measurement.trim();
         if name.is_empty() {
-            if self.define_measurement {
+            if self.define_measurement || self.measurement_reference.is_some() {
                 return Err("Measurement name is required".into());
             }
             return Ok(None); // blank rows are simply dropped
@@ -291,6 +296,7 @@ impl SpecDraft {
         definition.measurement = name.to_owned();
         definition.expression = self.expression.trim().to_owned();
         definition.define_measurement = self.define_measurement;
+        definition.measurement_reference = self.measurement_reference.clone();
         definition.producing_analysis = self.producing_analysis;
         definition.comparison = comparison;
         definition.guard_band = if self.guard_band.trim().is_empty() {
@@ -1729,7 +1735,9 @@ fn show_editor(ui: &mut Ui, state: &mut AppState) {
                 if draft.define_measurement {
                     ui.push_id(("measurement-builder", idx), |ui| {
                         if draft.measurement_builder.is_none() && ui.button("Build measurement card…").clicked() {
-                            draft.measurement_builder = Some(measurement_builder::MeasurementBuilder::for_card(&draft.expression));
+                            let mut builder = measurement_builder::MeasurementBuilder::for_card(&draft.expression);
+                            if let Some(reference) = &draft.measurement_reference { builder.set_reference_path(&reference.logical_path); }
+                            draft.measurement_builder = Some(builder);
                         }
                         let mut close = false;
                         if let Some(builder) = &mut draft.measurement_builder {
@@ -1744,6 +1752,13 @@ fn show_editor(ui: &mut Ui, state: &mut AppState) {
                         if close { draft.measurement_builder = None; }
                     });
                 }
+                ui.push_id(("measurement-reference", idx), |ui| {
+                    if draft.reference_import.show(ui, &mut draft.measurement_reference) {
+                        if let (Some(builder), Some(reference)) = (&mut draft.measurement_builder, &draft.measurement_reference) {
+                            builder.set_reference_path(&reference.logical_path);
+                        }
+                    }
+                });
                 ui.horizontal(|ui| {
                     ui.add_space(10.0);
                     egui::ComboBox::from_id_salt(("spec-comparison", idx))

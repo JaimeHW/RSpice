@@ -209,6 +209,15 @@ pub(crate) fn take_saved(ctx: &Context, id: Id) -> Option<Outcome<SavedFile>> {
     take(ctx, id)
 }
 
+/// Drop delivery when the owning editor closes. An in-flight picker may still
+/// finish, but its detached mailbox can no longer deliver to a different editor.
+pub(crate) fn discard_exchange(ctx: &Context, id: Id) {
+    ctx.data_mut(|data| {
+        data.remove::<Mailbox<OpenedFile>>(id);
+        data.remove::<Mailbox<SavedFile>>(id);
+    });
+}
+
 /// Register a mailbox for `id`, refusing when one is already in flight.
 ///
 /// The refusal matters on the desktop as much as in the browser: a second
