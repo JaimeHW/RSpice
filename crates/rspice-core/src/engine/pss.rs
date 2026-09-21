@@ -39,6 +39,8 @@ use crate::numerics::integration::{
 use crate::solver::{SolverError, StaticMatrix};
 use crate::{Netlist, Value};
 
+#[cfg(test)]
+mod integral_replay_tests;
 mod state;
 pub(in crate::engine) use state::PssCircuit;
 mod mesh;

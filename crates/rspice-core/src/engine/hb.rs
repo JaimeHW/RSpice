@@ -33,6 +33,7 @@ use std::collections::BTreeSet;
 mod currents;
 mod drive;
 mod envelope_result;
+mod integral_seed;
 mod noise_figure;
 #[cfg(test)]
 mod op_seed_tests;
@@ -1109,9 +1110,11 @@ impl Engine {
     /// used by periodic small-signal kernels. This is a representation change,
     /// not an operating-point solve: every coefficient is integrated from the
     /// retained orbit and no Newton or linear large-signal solve is run.
+    #[allow(clippy::too_many_arguments)]
     fn hb_state_from_pss_operating_point(
         &self,
         operating_point: &super::PssOperatingPoint,
+        circuit: &CircuitData,
         config: &HbConfig,
         node_names: &[String],
         branch_names: &[String],
@@ -1126,6 +1129,25 @@ impl Engine {
         })?;
         let analysis = operating_point.analysis();
         let result = &analysis.result;
+        let integral_names = circuit
+            .behavioral_sources
+            .integral_names()
+            .collect::<Vec<_>>();
+        let physical_count = branch_names
+            .len()
+            .checked_sub(integral_names.len())
+            .ok_or_else(|| {
+                SimulationError::Circuit(
+                    "dependent periodic basis omits behavioral integral coordinates".to_owned(),
+                )
+            })?;
+        let (physical_branch_names, retained_integral_names) =
+            branch_names.split_at(physical_count);
+        if retained_integral_names != integral_names {
+            return Err(SimulationError::Circuit(
+                "dependent periodic integral basis does not match the circuit".to_owned(),
+            ));
+        }
         if !result.frequency.is_finite() || result.frequency <= 0.0 {
             return Err(SimulationError::Circuit(
                 "periodic operating point has an invalid fundamental frequency".to_owned(),
@@ -1141,7 +1163,11 @@ impl Engine {
         }
         for (kind, count, expected) in [
             ("node", result.waveforms.len(), node_names.len()),
-            ("branch", result.branch_waveforms.len(), branch_names.len()),
+            (
+                "branch",
+                result.branch_waveforms.len(),
+                physical_branch_names.len(),
+            ),
         ] {
             if count != expected {
                 return Err(SimulationError::Circuit(format!(
@@ -1177,14 +1203,14 @@ impl Engine {
                 node_names,
                 &result.node_names,
                 &result.waveforms,
-                &mut state.x,
+                &mut state.x[..],
             ),
             (
                 "branch",
-                branch_names,
+                physical_branch_names,
                 &result.branch_names,
                 &result.branch_waveforms,
-                &mut state.mna_branch_currents,
+                &mut state.mna_branch_currents[..physical_count],
             ),
         ] {
             let source_indices: std::collections::HashMap<_, _> = source_names
@@ -1202,6 +1228,57 @@ impl Engine {
                 // an entire narrow source pulse on the dependent collocation grid.
                 let quadrature =
                     FourierQuadrature::new(&result.time, &waveform.values, analysis.period, abort)
+                        .map_err(projection_error)?;
+                for (harmonic, coefficient) in spectrum.iter_mut().enumerate() {
+                    let (magnitude, phase) = quadrature
+                        .component(harmonic as Value * result.frequency, harmonic, abort)
+                        .map_err(projection_error)?;
+                    *coefficient = if harmonic == 0 {
+                        Complex64::new(magnitude, 0.0)
+                    } else {
+                        Complex64::from_polar(0.5 * magnitude, phase.to_radians())
+                    };
+                }
+            }
+        }
+        if !integral_names.is_empty() {
+            let initial_integrals = integral_names
+                .iter()
+                .map(|name| {
+                    operating_point
+                        .shooting_state_basis()
+                        .iter()
+                        .position(|candidate| candidate == name)
+                        .and_then(|index| operating_point.shooting_state().get(index).copied())
+                        .ok_or_else(|| {
+                            SimulationError::Circuit(format!(
+                                "retained PSS state omits integral coordinate '{name}'"
+                            ))
+                        })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let integrals = self.hb_replay_integral_samples(
+                circuit,
+                &initial_integrals,
+                &result.time,
+                result
+                    .node_names
+                    .iter()
+                    .zip(&result.waveforms)
+                    .map(|(name, waveform)| (name.as_str(), waveform.values.as_slice())),
+                result
+                    .branch_names
+                    .iter()
+                    .zip(&result.branch_waveforms)
+                    .map(|(name, waveform)| (name.as_str(), waveform.values.as_slice())),
+                abort,
+            )?;
+            for (values, spectrum) in integrals
+                .iter()
+                .zip(&mut state.mna_branch_currents[physical_count..])
+            {
+                let quadrature =
+                    FourierQuadrature::new(&result.time, values, analysis.period, abort)
                         .map_err(projection_error)?;
                 for (harmonic, coefficient) in spectrum.iter_mut().enumerate() {
                     let (magnitude, phase) = quadrature
@@ -2108,6 +2185,7 @@ mod tests {
             let state = engine
                 .hb_state_from_pss_operating_point(
                     &point,
+                    &engine.build_circuit(&netlist).unwrap(),
                     &HbConfig::new(frequency).with_harmonics(3),
                     &["IN".to_owned(), "OUT".to_owned()],
                     &point.analysis().result.branch_names,
@@ -2143,6 +2221,7 @@ mod tests {
             let state = engine
                 .hb_state_from_pss_operating_point(
                     &point,
+                    &engine.build_circuit(&netlist).unwrap(),
                     &config,
                     &names,
                     &point.analysis().result.branch_names,
@@ -2170,6 +2249,7 @@ mod tests {
             assert!(matches!(
                 engine.hb_state_from_pss_operating_point(
                     &point,
+                    &engine.build_circuit(&netlist).unwrap(),
                     &config,
                     &names,
                     &point.analysis().result.branch_names,

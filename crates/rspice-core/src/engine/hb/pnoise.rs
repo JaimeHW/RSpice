@@ -828,6 +828,7 @@ impl Engine {
             match operating_point {
                 PnoiseOperatingPoint::Shooting(point) => self.hb_state_from_pss_operating_point(
                     point,
+                    &circuit,
                     &hb_config,
                     &node_names,
                     &branch_names,
