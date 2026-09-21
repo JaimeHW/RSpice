@@ -719,6 +719,7 @@ impl HbSolver {
         self.validate_exact_large_signal_mna()?;
         state.try_prepare_mna_branches(self.exact_mna_branches().len(), self.num_harmonics)?;
         self.bind_integral_tolerances(state);
+        self.refresh_driven_integrals(abort)?;
 
         // GMIN is a continuation aid, never part of the authored circuit.
         // Commercial SPICE implementations may walk a shunted homotopy, but

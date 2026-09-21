@@ -168,6 +168,7 @@ impl HbSolver {
         let prescribed = self.prepare_prescribed_integrals(sources, max_values, retained, abort)?;
         self.register_integral_coordinates(sources)?;
         self.prescribed_integrals = prescribed;
+        self.periodic_integral_budget = (!retained).then_some(max_values);
         self.quasi_prescribed_integrals = None;
         self.behavioral_sources = sources.clone();
         self.behavioral_phase_dimensions = 0;
@@ -252,6 +253,7 @@ impl HbSolver {
         self.register_integral_coordinates(sources)?;
         self.behavioral_sources = lifted;
         self.prescribed_integrals.clear();
+        self.periodic_integral_budget = None;
         self.quasi_prescribed_integrals = None;
         self.behavioral_phase_dimensions = grid.dimensions().len();
         Ok(())

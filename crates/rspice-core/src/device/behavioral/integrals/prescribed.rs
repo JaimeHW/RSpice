@@ -12,13 +12,24 @@ pub(crate) struct PrescribedIntegralRate<'a> {
 }
 
 impl PrescribedIntegralRate<'_> {
+    pub(crate) fn coordinates(&self) -> impl Iterator<Item = usize> + '_ {
+        self.equation
+            .inputs
+            .iter()
+            .filter_map(|input| match *input {
+                Input::Node(index) => self.node_bindings[index],
+                Input::Branch(index) => self.branch_bindings[index],
+                _ => None,
+            })
+    }
+
     /// None means that the rate reads a physical circuit coordinate other than ground.
     pub(crate) fn dependencies(&self) -> Option<Vec<usize>> {
         self.dependencies_with_coordinates(|_| false)
     }
 
     /// Large-signal preparation can additionally know a coordinate through
-    /// exact independent-source constraints. Consumers must use dependencies()
+    /// independent circuit equations. Consumers must use dependencies()
     /// so these physical inputs retain their small-signal rate derivatives.
     pub(crate) fn dependencies_with_coordinates(
         &self,

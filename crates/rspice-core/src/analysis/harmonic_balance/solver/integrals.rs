@@ -3,6 +3,7 @@
 use super::*;
 
 pub(super) mod forced;
+mod linear;
 pub(super) mod prescribed;
 
 impl HbSolver {

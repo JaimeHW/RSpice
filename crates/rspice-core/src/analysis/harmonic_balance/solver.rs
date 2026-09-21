@@ -1024,6 +1024,7 @@ pub struct HbSolver {
     /// Zero-origin primitives for rates independent of physical coordinates.
     /// Other integrals keep their continuous rate equations and solved constants.
     prescribed_integrals: Vec<Option<integrals::prescribed::PrescribedIntegral>>,
+    periodic_integral_budget: Option<usize>,
     quasi_prescribed_integrals: Option<quasi_periodic::prescribed::QuasiPrescribedIntegrals>,
     /// Sorted zero-based temperature/current state nodes. Electrical voltage
     /// limiting and shunt homotopy do not apply to these physical coordinates.

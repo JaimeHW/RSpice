@@ -33,6 +33,80 @@ fn transfer(rate: f64, frequency: f64) -> Complex64 {
 }
 
 #[test]
+fn hb_filtered_integrals_preserve_network_phase_current_and_response() {
+    let rate = 1e3;
+    let omega = std::f64::consts::TAU * rate;
+    let netlist = Netlist::parse(&format!(
+        "Filtered integrals\nVinput input 0 SIN(0 1 {rate})\nRfilter input middle 1k\n\
+         Lfilter middle filtered {}\nCfilter filtered 0 {}\n\
+         BV out 0 V={omega}*sdt(v(filtered))\nRout out 0 1k noisy=0\n\
+         BI current 0 V={omega}*1k*sdt(i(Lfilter))\nRi current 0 1k noisy=0\n\
+         .options hbint tahb=0\n.end\n",
+        1e3 / omega,
+        1.0 / (1e3 * omega)
+    ))
+    .unwrap();
+    let engine = Engine::default();
+    let hb = engine
+        .run_hb(&netlist, HbConfig::new(rate).with_harmonics(2))
+        .unwrap();
+    for (name, ac) in [
+        ("out", Complex64::new(0.0, 1.0)),
+        ("current", Complex64::new(-1.0, 0.0)),
+    ] {
+        let row = hb
+            .result
+            .spectral_voltages
+            .iter()
+            .find(|r| r.node_name.eq_ignore_ascii_case(name))
+            .unwrap();
+        close(row.coefficients[0], Complex64::new(-ac.re, 0.0));
+        close(row.coefficients[1], ac);
+        let config = PacConfig::new()
+            .with_fundamental(rate)
+            .with_sweep(rate * 0.13, rate * 0.13, 1)
+            .with_sweep_type(PacSweepType::Linear)
+            .with_sidebands(-1, 1)
+            .with_input_source("Vinput")
+            .with_output_node(name);
+        let pac = engine
+            .run_pac_from_hb_with_abort(&netlist, config, &hb.operating_point, &NoAbort)
+            .unwrap();
+        for sideband in -1..=1 {
+            let ratio = 0.13 + sideband as f64;
+            let network = 1.0 / Complex64::new(1.0 - ratio * ratio, ratio);
+            let expected = if name == "out" {
+                network / Complex64::new(0.0, ratio)
+            } else {
+                network
+            };
+            close(
+                pac.result
+                    .conversion_matrix
+                    .get(0, sideband, sideband)
+                    .unwrap(),
+                expected,
+            );
+        }
+    }
+    let noise = engine
+        .run_pnoise_from_hb_with_abort(
+            &netlist,
+            &[rate * 0.13],
+            "out",
+            None,
+            Some("Vinput"),
+            1,
+            &hb.operating_point,
+            &NoAbort,
+        )
+        .unwrap();
+    let h = 1.0 / (Complex64::new(1.0 - 0.13 * 0.13, 0.13) * Complex64::new(0.0, 0.13));
+    let expected = 4.0 * K_BOLTZMANN * TEMP_REFERENCE * 1e3 * h.norm_sqr();
+    assert!((noise.output_noise[0] / expected - 1.0).abs() < 1e-7);
+}
+
+#[test]
 fn hb_source_driven_integrals_preserve_constants_and_small_signal_rates() {
     for rate in [1e3, 1e9] {
         let omega = std::f64::consts::TAU * rate;

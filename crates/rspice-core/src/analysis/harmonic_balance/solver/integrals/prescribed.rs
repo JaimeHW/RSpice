@@ -10,7 +10,7 @@ use super::*;
 #[derive(Debug)]
 pub(in crate::analysis::harmonic_balance::solver) enum PrescribedIntegral {
     Primitive(Vec<Complex64>),
-    /// Fixed by ideal source constraints only for the carrier solve.
+    /// Fixed by independent circuit equations only for the carrier solve.
     Driven(Vec<Complex64>),
     /// The authenticated producer supplied the complete trajectory. Its
     /// constant must not be reset or its orbit re-solved by a linear consumer.
@@ -84,11 +84,46 @@ pub(in crate::analysis::harmonic_balance::solver) fn primitive_value(
 }
 
 impl HbSolver {
+    pub(in crate::analysis::harmonic_balance::solver) fn refresh_driven_integrals(
+        &mut self,
+        abort: &dyn AbortSignal,
+    ) -> Result<(), HbError> {
+        let Some(max_values) = self.periodic_integral_budget else {
+            return Ok(());
+        };
+        if self
+            .prescribed_integrals
+            .iter()
+            .all(|row| row.as_ref().is_some_and(|row| !row.is_circuit_driven()))
+        {
+            return Ok(());
+        }
+        // Registration may precede nonlinear device stamping. Only inspect
+        // linear row closure once the complete device registry is available.
+        let sources = std::mem::take(&mut self.behavioral_sources);
+        let result = self
+            .prepare_integrals_with_linear_coordinates(&sources, max_values, false, true, abort);
+        self.behavioral_sources = sources;
+        self.prescribed_integrals = result?;
+        Ok(())
+    }
+
     pub(in crate::analysis::harmonic_balance::solver) fn prepare_prescribed_integrals(
         &mut self,
         sources: &crate::device::behavioral::BehavioralSources,
         max_values: usize,
         retained: bool,
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<Option<PrescribedIntegral>>, HbError> {
+        self.prepare_integrals_with_linear_coordinates(sources, max_values, retained, false, abort)
+    }
+
+    fn prepare_integrals_with_linear_coordinates(
+        &mut self,
+        sources: &crate::device::behavioral::BehavioralSources,
+        max_values: usize,
+        retained: bool,
+        linear_coordinates: bool,
         abort: &dyn AbortSignal,
     ) -> Result<Vec<Option<PrescribedIntegral>>, HbError> {
         if abort.is_aborted() {
@@ -162,6 +197,91 @@ impl HbSolver {
                     values.push(value);
                 }
                 forced[node.node] = Some(values);
+            }
+        }
+        if linear_coordinates
+            && !retained
+            && plans.iter().any(|plan| {
+                plan.dependencies_with_coordinates(|i| forced.get(i).is_some_and(Option::is_some))
+                    .is_none()
+            })
+        {
+            let frequencies: Vec<_> = (0..=self.num_harmonics)
+                .map(|k| frequency * k as Value)
+                .collect();
+            let coordinates = self
+                .linear_driven_spectra(
+                    sources,
+                    &frequencies,
+                    |row, k| {
+                        if row < self.num_nodes {
+                            self.source_spectra[row][k]
+                        } else if let ExactMnaBranch::VoltageSource {
+                            source: Some(source),
+                            ..
+                        } = &self.exact_mna_branches()[row - self.num_nodes]
+                        {
+                            Self::voltage_source_value_at_harmonic(source, k)
+                        } else {
+                            Complex64::ZERO
+                        }
+                    },
+                    |row| {
+                        forced.get(row).is_none_or(Option::is_none)
+                            && plans
+                                .iter()
+                                .any(|plan| plan.coordinates().any(|index| index == row))
+                    },
+                    max_values
+                        .saturating_sub(retained_values)
+                        .saturating_sub(frequencies.len()),
+                    abort,
+                )
+                .map_err(|error| match error {
+                    crate::analysis::quasi_periodic::QuasiPeriodicError::Aborted => {
+                        HbError::Aborted
+                    }
+                    other => {
+                        HbError::InvalidCircuit(format!("driven integral preparation: {other}"))
+                    }
+                })?;
+            let temporary = coordinates
+                .len()
+                .saturating_mul(4)
+                .saturating_add(
+                    coordinates
+                        .iter()
+                        .flatten()
+                        .map(|row| row.len().saturating_mul(2))
+                        .sum::<usize>(),
+                )
+                .saturating_add(frequencies.len());
+            forced.resize(coordinates.len(), None);
+            for (row, spectrum) in coordinates.iter().enumerate() {
+                let Some(spectrum) = spectrum else { continue };
+                if forced[row].is_some() {
+                    continue;
+                }
+                retained_values = retained_values.saturating_add(samples);
+                if retained_values.saturating_add(temporary) > max_values {
+                    return Err(HbError::InvalidCircuit(format!(
+                        "driven integral exceeds the {max_values}-value periodic allocation limit"
+                    )));
+                }
+                let mut values = Vec::with_capacity(samples);
+                for sample in 0..samples {
+                    if abort.is_aborted() {
+                        return Err(HbError::Aborted);
+                    }
+                    let value = primitive_value(spectrum, sample as Value / samples as Value);
+                    if !value.is_finite() {
+                        return Err(HbError::InvalidCircuit(
+                            "driven coordinate projection overflowed".into(),
+                        ));
+                    }
+                    values.push(value);
+                }
+                forced[row] = Some(values);
             }
         }
         for plan in plans {
