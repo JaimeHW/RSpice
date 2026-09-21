@@ -95,6 +95,48 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     );
 
     if let Some(conversion) = &summary.conversion {
+        if let Some(sampling) = &conversion.sampling {
+            section_header(ui, "Sampling", None);
+            let mut rows = vec![
+                (
+                    "Output phase",
+                    format!("{:.9}°", sampling.output.phase_degrees),
+                ),
+                ("Output voltage", fmt_si(sampling.output.voltage, "V", 6)),
+                (
+                    "Output slew",
+                    fmt_si(sampling.output.slew_volts_per_second, "V/s", 6),
+                ),
+            ];
+            if let Some(reference) = &sampling.reference {
+                rows.push((
+                    "Reference signal",
+                    format!(
+                        "V({},{})",
+                        reference.node,
+                        reference.reference.as_deref().unwrap_or("0")
+                    ),
+                ));
+                rows.push((
+                    "Reference phase",
+                    format!("{:.9}°", reference.phase_degrees),
+                ));
+                rows.push((
+                    "Reference slew",
+                    fmt_si(reference.slew_volts_per_second, "V/s", 6),
+                ));
+            }
+            if let Some(delay) = sampling.nominal_delay_seconds {
+                rows.push(("Nominal delay", fmt_si(delay, "s", 6)));
+            }
+            measurement_table(
+                ui,
+                &rows
+                    .iter()
+                    .map(|(label, value)| (*label, value.as_str()))
+                    .collect::<Vec<_>>(),
+            );
+        }
         section_header(ui, "Conversion channels", Some("offset axis"));
         let rows = [
             (
@@ -163,7 +205,11 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     }
 
     ui.add_space(8.0);
-    section_header(ui, "Ranked contributors", Some("integrated V²"));
+    section_header(
+        ui,
+        "Ranked contributors",
+        Some(&format!("integrated {}", summary.power_unit())),
+    );
     if summary.rows.is_empty() {
         super::panel_note(ui, "No per-device contributor rows were retained.");
         return;
@@ -194,11 +240,12 @@ fn contributor_table(ui: &mut Ui, summary: &NoiseSummary) {
                                 egui::WidgetType::Label,
                                 ui.is_enabled(),
                                 format!(
-                                    "Contributor rank {}, {} {}, integrated noise power {:.6e} volts squared, share {:.3} percent",
+                                    "Contributor rank {}, {} {}, integrated noise power {:.6e} {}, share {:.3} percent",
                                     rank + 1,
                                     row.device,
                                     row.mechanism,
                                     row.power,
+                                    summary.power_unit(),
                                     row.share_pct
                                 ),
                             )
@@ -385,6 +432,7 @@ mod tests {
                 .with_noise_summary(NoiseSummary {
                     input_quantity: None,
                     conversion: Some(crate::state::PeriodicNoiseConversionEvidence {
+                        sampling: None,
                         input_source: "V1".into(),
                         carrier_hz: 1e6,
                         input_sideband: 1,

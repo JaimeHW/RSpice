@@ -597,6 +597,8 @@ pub enum PeriodicNoiseOutputQuantity {
     OutputNoisePowerSpectralDensity,
     /// Single-sideband phase noise L(f) in dBc/Hz.
     PhaseNoiseDbcPerHz,
+    /// Crossing-time or edge-delay power spectral density in s²/Hz.
+    TimingNoisePowerSpectralDensity,
 }
 
 pub(super) fn require_non_empty(value: &str, label: &str) -> Result<(), String> {
@@ -1119,6 +1121,21 @@ impl AnalysisResult {
             }
             if let Some(conversion) = &noise.conversion {
                 conversion.validate(noise.band)?;
+                if let Some(sampling) = &conversion.sampling {
+                    let timing = sampling.request.is_timing();
+                    let unit = if timing { "s²/Hz" } else { "V²/Hz" };
+                    if self.analysis_type != AnalysisType::Pnoise
+                        || noise.noise_figure.is_some()
+                        || (timing && noise.total_rms.is_some())
+                        || self
+                            .waveforms
+                            .iter()
+                            .filter(|wave| wave.name == "onoise" || wave.name.starts_with("noise("))
+                            .any(|wave| wave.unit.as_deref() != Some(unit))
+                    {
+                        return Err("Sampled noise units or result family disagree with the retained sampling evidence".into());
+                    }
+                }
                 if conversion.input_source.trim().is_empty()
                     && (self.analysis_type == AnalysisType::Hbnoise
                         || self.waveforms.iter().any(|wave| wave.name == "inoise"))

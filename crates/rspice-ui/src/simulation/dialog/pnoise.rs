@@ -21,6 +21,9 @@
 use crate::services::simulation_runner::PeriodicCarrier;
 
 use super::options::parse_si_value;
+pub mod sampling;
+use rspice_core::analysis::pnoise::PeriodicNoiseSampling;
+use sampling::SamplingDraft;
 
 // =============================================================================
 // PNoise Sweep Type
@@ -74,6 +77,7 @@ pub enum NoiseReferenceType {
 /// Commercial-grade configuration matching Cadence Spectre PNoise parameters.
 #[derive(Debug, Clone)]
 pub struct PnoiseConfig {
+    pub sampling: Option<PeriodicNoiseSampling>,
     pub input_sideband: i32,
     pub output_sideband: i32,
     /// Start frequency (Hz)
@@ -105,6 +109,7 @@ pub struct PnoiseConfig {
 impl Default for PnoiseConfig {
     fn default() -> Self {
         Self {
+            sampling: None,
             input_sideband: 0,
             output_sideband: 0,
             start_freq: 1.0, // 1 Hz (for phase noise)
@@ -192,11 +197,23 @@ impl PnoiseConfig {
             cmd.push_str(&format!(" from={carrier}"));
         }
 
+        if let Some(sampling) = &self.sampling {
+            cmd.push_str(&sampling::spice_options(sampling));
+        }
         cmd
     }
 
     /// Validate configuration
     pub fn validate(&self) -> Result<(), String> {
+        if let Some(sampling) = &self.sampling {
+            sampling.validate()?;
+            if self.noise_ref == NoiseReferenceType::Phase || self.output_sideband != 0 {
+                return Err(
+                    "Sampled noise requires output or input reference and output sideband zero"
+                        .into(),
+                );
+            }
+        }
         if !self.start_freq.is_finite() || self.start_freq <= 0.0 {
             return Err("Start frequency must be finite and positive".to_string());
         }
@@ -254,6 +271,7 @@ impl PnoiseConfig {
 /// Dialog state with string buffers
 #[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct PnoiseDialogState {
+    pub sampling: SamplingDraft,
     pub input_sideband: String,
     pub output_sideband: String,
     /// Start frequency buffer
@@ -289,6 +307,8 @@ pub struct PnoiseDialogState {
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PersistedPnoiseDialogState {
+    #[serde(default)]
+    sampling: SamplingDraft,
     #[serde(default = "default_sideband")]
     input_sideband: String,
     #[serde(default = "default_sideband")]
@@ -338,6 +358,7 @@ impl<'de> serde::Deserialize<'de> for PnoiseDialogState {
     {
         let persisted = PersistedPnoiseDialogState::deserialize(deserializer)?;
         Ok(Self {
+            sampling: persisted.sampling,
             input_sideband: persisted.input_sideband,
             output_sideband: persisted.output_sideband,
             start_freq: persisted.start_freq,
@@ -361,6 +382,7 @@ impl PnoiseDialogState {
     /// Initialize from config
     pub fn from_config(config: &PnoiseConfig) -> Self {
         Self {
+            sampling: SamplingDraft::from_config(config.sampling.as_ref()),
             input_sideband: config.input_sideband.to_string(),
             output_sideband: config.output_sideband.to_string(),
             start_freq: format_freq(config.start_freq),
@@ -411,6 +433,11 @@ impl PnoiseDialogState {
             _ => NoiseReferenceType::Phase,
         };
 
+        let sampling = if noise_ref == NoiseReferenceType::Phase {
+            None
+        } else {
+            self.sampling.to_config()?
+        };
         let config = PnoiseConfig {
             input_sideband: if noise_ref == NoiseReferenceType::Input {
                 self.input_sideband
@@ -420,7 +447,7 @@ impl PnoiseDialogState {
             } else {
                 0
             },
-            output_sideband: if noise_ref != NoiseReferenceType::Phase {
+            output_sideband: if noise_ref != NoiseReferenceType::Phase && sampling.is_none() {
                 self.output_sideband
                     .trim()
                     .parse()
@@ -428,6 +455,7 @@ impl PnoiseDialogState {
             } else {
                 0
             },
+            sampling,
             start_freq: start,
             stop_freq: stop,
             num_points: points,

@@ -224,7 +224,15 @@ impl SimulationController {
             }
             crate::services::simulation_runner::PnoiseReference::Output
             | crate::services::simulation_runner::PnoiseReference::Input => {
-                PeriodicNoiseOutputQuantity::OutputNoisePowerSpectralDensity
+                if config
+                    .sampling
+                    .as_ref()
+                    .is_some_and(|sampling| sampling.is_timing())
+                {
+                    PeriodicNoiseOutputQuantity::TimingNoisePowerSpectralDensity
+                } else {
+                    PeriodicNoiseOutputQuantity::OutputNoisePowerSpectralDensity
+                }
             }
         };
         if output_quantity == PeriodicNoiseOutputQuantity::PhaseNoiseDbcPerHz

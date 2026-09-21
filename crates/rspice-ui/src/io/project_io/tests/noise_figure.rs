@@ -3,10 +3,115 @@
 use super::*;
 
 #[test]
+fn sampled_pnoise_studio_results_round_trip_and_reject_changed_geometry() {
+    use rspice_core::analysis::pnoise::{
+        PeriodicNoiseSamplePoint, PeriodicNoiseSampling, PeriodicNoiseSamplingEvidence,
+    };
+    let sampling = PeriodicNoiseSamplingEvidence {
+        carrier_frequency_hz: 1000.0,
+        request: PeriodicNoiseSampling::Edge {
+            edge: Default::default(),
+        },
+        output: PeriodicNoiseSamplePoint {
+            node: "out".into(),
+            reference: None,
+            phase_degrees: 0.0,
+            voltage: 0.0,
+            slew_volts_per_second: 1000.0,
+        },
+        reference: None,
+        nominal_delay_seconds: None,
+    };
+    let mut run = SimulationRun::new(1);
+    run.mark_running().unwrap();
+    run.finish_lifecycle(SimulationRunLifecycle::Completed)
+        .unwrap();
+    run.add_analysis(
+        AnalysisResult::new(1, AnalysisType::Pnoise, "Sampled noise")
+            .with_waveforms(vec![
+                crate::state::WaveformData::new(
+                    "onoise",
+                    vec![10.0, 100.0],
+                    vec![1e-20, 1e-20],
+                    "#fff",
+                )
+                .with_unit("s²/Hz"),
+            ])
+            .with_noise_summary(NoiseSummary {
+                conversion: Some(crate::state::PeriodicNoiseConversionEvidence {
+                    sampling: Some(sampling.clone()),
+                    input_source: String::new(),
+                    carrier_hz: 1000.0,
+                    input_sideband: 0,
+                    output_sideband: 0,
+                    max_sideband: 1,
+                }),
+                band: (10.0, 100.0),
+                ..Default::default()
+            }),
+    );
+    seal_legacy_unattributed(&mut run);
+    let mut simulation = SimulationState::default();
+    simulation.runs = vec![run].into();
+    simulation.next_run_id = 1;
+    simulation.active_run_idx = Some(0);
+    simulation.active_analysis_idx = Some(0);
+    let mut libraries = LibraryManager::with_primitives();
+    let workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
+    let project = ProjectFile::new_with_simulation_results(
+        workspace,
+        libraries,
+        ProjectSimulationResults::from_state(&simulation),
+    );
+    let json = serialize_project_file(&project).unwrap();
+    let restored = load_project_text(&json, None)
+        .unwrap()
+        .simulation_results
+        .into_simulation_state()
+        .unwrap();
+    assert_eq!(
+        restored
+            .active_analysis()
+            .unwrap()
+            .noise_summary
+            .as_ref()
+            .unwrap()
+            .conversion
+            .as_ref()
+            .unwrap()
+            .sampling,
+        Some(sampling)
+    );
+    for path in ["phase_degrees", "voltage", "slew_volts_per_second"] {
+        let mut changed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        changed["simulation_results"]["runs"][0]["analyses"][0]["noise_summary"]["conversion"]["sampling"]
+            ["output"][path] = serde_json::json!(123.0);
+        assert!(
+            load_project_text(&changed.to_string(), None)
+                .unwrap()
+                .simulation_results
+                .runs
+                .is_empty(),
+            "{path}"
+        );
+    }
+    let mut old: serde_json::Value = serde_json::from_str(&json).unwrap();
+    old["simulation_results"]["schema_version"] = serde_json::json!(39);
+    assert!(
+        load_project_text(&old.to_string(), None)
+            .unwrap()
+            .simulation_results
+            .runs
+            .is_empty()
+    );
+}
+
+#[test]
 fn hbnoise_reference_results_survive_project_load_and_reject_tampering_and_old_schema() {
     for conversion in [
         None,
         Some(crate::state::PeriodicNoiseConversionEvidence {
+            sampling: None,
             input_source: "V1".into(),
             carrier_hz: 1e6,
             input_sideband: 1,

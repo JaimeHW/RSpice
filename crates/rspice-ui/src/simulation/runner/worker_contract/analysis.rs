@@ -744,6 +744,8 @@ impl From<WorkerPxfRunConfig> for crate::services::simulation_runner::PxfRunConf
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct WorkerPnoiseRunConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sampling: Option<rspice_core::analysis::pnoise::PeriodicNoiseSampling>,
     #[serde(default)]
     pub input_sideband: i32,
     #[serde(default)]
@@ -771,6 +773,7 @@ pub(crate) struct WorkerPnoiseRunConfig {
 impl From<&crate::services::simulation_runner::PnoiseRunConfig> for WorkerPnoiseRunConfig {
     fn from(value: &crate::services::simulation_runner::PnoiseRunConfig) -> Self {
         Self {
+            sampling: value.sampling.clone(),
             input_sideband: value.input_sideband,
             output_sideband: value.output_sideband,
             pss_fundamental_freq: value.pss_fundamental_freq,
@@ -797,6 +800,7 @@ impl From<&crate::services::simulation_runner::PnoiseRunConfig> for WorkerPnoise
 impl From<WorkerPnoiseRunConfig> for crate::services::simulation_runner::PnoiseRunConfig {
     fn from(value: WorkerPnoiseRunConfig) -> Self {
         Self {
+            sampling: value.sampling.clone(),
             input_sideband: value.input_sideband,
             output_sideband: value.output_sideband,
             pss_fundamental_freq: value.pss_fundamental_freq,

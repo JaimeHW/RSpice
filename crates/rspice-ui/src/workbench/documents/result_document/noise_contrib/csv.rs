@@ -4,7 +4,7 @@ use super::super::{ResultSheetCsv, csv_field};
 use crate::state::{AnalysisResult, PeriodicNoiseConversionEvidence, SimulationRun};
 
 fn record(kind: &str, analysis: &AnalysisResult) -> Vec<String> {
-    let mut fields = vec![String::new(); 31];
+    let mut fields = vec![String::new(); 34];
     fields[0] = kind.into();
     fields[1] = analysis.id.to_string();
     fields[2] = csv_field(&analysis.label);
@@ -17,7 +17,7 @@ fn append(
     conversion: Option<&PeriodicNoiseConversionEvidence>,
     offset: Option<f64>,
 ) {
-    fields.resize(31, String::new());
+    fields.resize(34, String::new());
     fields[21] = if conversion.is_some() {
         "offset_hz"
     } else {
@@ -38,6 +38,11 @@ fn append(
             fields[27] = format!("{:.17e}", channel.output_frequency(offset));
         }
         fields[16] = csv_field(&channel.input_source);
+        if let Some(sampling) = &channel.sampling {
+            if let Ok(json) = serde_json::to_string(sampling) {
+                fields[33] = csv_field(&json);
+            }
+        }
     }
     contents.push_str(&fields.join(","));
     contents.push('\n');
@@ -48,7 +53,7 @@ pub(crate) fn export_csv(
     analysis_indices: &[usize],
 ) -> Option<ResultSheetCsv> {
     let mut contents = String::from(
-        "record,analysis_sequence,analysis_label,trace,device,mechanism,sample_index,frequency_hz,spectral_density,power_v2,share_pct,total_rms_v,input_rms_v,band_start_hz,band_end_hz,noise_figure_db,source_generator,source_resistor,source_resistance_ohm,source_temperature_kelvin,reference_temperature_kelvin,frequency_axis,carrier_hz,input_sideband,output_sideband,max_sideband,input_frequency_hz,output_frequency_hz,input_rms_a,input_rms_unknown,spectral_density_unit\n",
+        "record,analysis_sequence,analysis_label,trace,device,mechanism,sample_index,frequency_hz,spectral_density,power_v2,share_pct,total_rms_v,input_rms_v,band_start_hz,band_end_hz,noise_figure_db,source_generator,source_resistor,source_resistance_ohm,source_temperature_kelvin,reference_temperature_kelvin,frequency_axis,carrier_hz,input_sideband,output_sideband,max_sideband,input_frequency_hz,output_frequency_hz,input_rms_a,input_rms_unknown,spectral_density_unit,power_s2,timing_jitter_rms_s,sampling_evidence_json\n",
     );
     let mut rows = 0;
     for &index in analysis_indices {
@@ -59,6 +64,13 @@ pub(crate) fn export_csv(
             .and_then(|summary| summary.conversion.as_ref());
         if let Some(summary) = &analysis.noise_summary {
             let mut fields = record("summary", analysis);
+            fields[32] = analysis
+                .measurements
+                .iter()
+                .find(|measurement| measurement.name == "timing_jitter_rms_s")
+                .and_then(|measurement| measurement.value)
+                .map(|value| format!("{value:.17e}"))
+                .unwrap_or_default();
             fields[11] = summary
                 .total_rms
                 .map(|value| format!("{value:.17e}"))
@@ -98,7 +110,8 @@ pub(crate) fn export_csv(
                 let mut fields = record("contributor", analysis);
                 fields[4] = csv_field(&contributor.device);
                 fields[5] = csv_field(&contributor.mechanism);
-                fields[9] = format!("{:.17e}", contributor.power);
+                fields[if summary.is_timing() { 31 } else { 9 }] =
+                    format!("{:.17e}", contributor.power);
                 fields[10] = format!("{:.17e}", contributor.share_pct);
                 fields[13] = format!("{:.17e}", summary.band.0);
                 fields[14] = format!("{:.17e}", summary.band.1);

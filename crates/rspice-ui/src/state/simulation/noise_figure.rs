@@ -17,6 +17,8 @@ pub struct NoiseFigureEvidence {
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PeriodicNoiseConversionEvidence {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sampling: Option<rspice_core::analysis::pnoise::PeriodicNoiseSamplingEvidence>,
     /// Empty when only output noise was requested, without input referral.
     pub input_source: String,
     pub carrier_hz: f64,
@@ -27,6 +29,18 @@ pub struct PeriodicNoiseConversionEvidence {
 
 impl PeriodicNoiseConversionEvidence {
     pub fn validate(&self, band: (f64, f64)) -> Result<(), String> {
+        if let Some(sampling) = &self.sampling {
+            sampling.validate()?;
+            if sampling.carrier_frequency_hz != self.carrier_hz
+                || self.output_sideband != 0
+                || band.1 > self.carrier_hz / 2.0
+            {
+                return Err(
+                    "Sampled noise has an inconsistent carrier, output sideband or offset band"
+                        .into(),
+                );
+            }
+        }
         if (self.input_source.trim().is_empty() && self.input_sideband != 0)
             || !self.carrier_hz.is_finite()
             || self.carrier_hz <= 0.0
@@ -62,6 +76,7 @@ mod tests {
     #[test]
     fn periodic_noise_conversion_rejects_invalid_channels_and_frequency_overflow() {
         let valid = PeriodicNoiseConversionEvidence {
+            sampling: None,
             input_source: "V1".into(),
             carrier_hz: 1e6,
             input_sideband: 1,

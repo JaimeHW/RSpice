@@ -372,6 +372,7 @@ fn worker_result_round_trip() {
     let noise_summary = crate::state::NoiseSummary {
         input_quantity: None,
         conversion: Some(crate::state::PeriodicNoiseConversionEvidence {
+            sampling: None,
             input_source: "V1".into(),
             carrier_hz: 1e6,
             input_sideband: 2,

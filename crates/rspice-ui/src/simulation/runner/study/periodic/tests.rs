@@ -69,6 +69,7 @@ fn base(kind: usize, hb: bool) -> StudyRunConfig {
         2 => (
             AnalysisSpec::Pnoise,
             Some(StudyPeriodicOptions::Pnoise(PnoiseRunConfig {
+                sampling: None,
                 pss_fundamental_freq: 1000.0,
                 pss_num_harmonics: 3,
                 pss_tolerance: 1e-6,

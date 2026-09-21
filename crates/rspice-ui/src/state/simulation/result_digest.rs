@@ -1776,6 +1776,16 @@ fn encode_noise_summary(
         writer.i64(i64::from(conversion.input_sideband));
         writer.i64(i64::from(conversion.output_sideband));
         writer.i64(i64::from(conversion.max_sideband));
+        if let Some(sampling) = &conversion.sampling {
+            writer.string("pnoise-sampling-evidence-v1");
+            writer.f64(sampling.carrier_frequency_hz);
+            encode_pnoise_sampling(writer, &sampling.request);
+            encode_pnoise_sample_point(writer, &sampling.output);
+            writer.option(sampling.reference.as_ref(), encode_pnoise_sample_point);
+            writer.option(sampling.nominal_delay_seconds.as_ref(), |writer, value| {
+                writer.f64(*value)
+            });
+        }
     }
     if let Some(figure) = &summary.noise_figure {
         writer.string("source-referenced-ssb-noise-figure-v1");
@@ -1943,6 +1953,7 @@ fn encode_family_metadata(
             writer.u8(match output_quantity {
                 PeriodicNoiseOutputQuantity::OutputNoisePowerSpectralDensity => 0,
                 PeriodicNoiseOutputQuantity::PhaseNoiseDbcPerHz => 1,
+                PeriodicNoiseOutputQuantity::TimingNoisePowerSpectralDensity => 2,
             });
             writer.option(carrier_frequency_hz.as_ref(), |writer, frequency| {
                 writer.f64(*frequency)
@@ -2157,4 +2168,59 @@ fn encode_monte_carlo_mean_confidence(
         MonteCarloMeanInterval::InsufficientSamples => writer.u8(1),
         MonteCarloMeanInterval::Unrepresentable => writer.u8(2),
     }
+}
+
+fn encode_pnoise_sampling(
+    writer: &mut ResultDigestWriter,
+    sampling: &rspice_core::analysis::pnoise::PeriodicNoiseSampling,
+) {
+    use rspice_core::analysis::pnoise::{
+        PeriodicNoiseEdge, PeriodicNoiseEdgeDirection, PeriodicNoiseSampling,
+    };
+    fn edge(writer: &mut ResultDigestWriter, edge: &PeriodicNoiseEdge) {
+        writer.f64(edge.threshold_volts);
+        writer.u8(match edge.direction {
+            PeriodicNoiseEdgeDirection::Rising => 0,
+            PeriodicNoiseEdgeDirection::Falling => 1,
+            PeriodicNoiseEdgeDirection::Either => 2,
+        });
+        writer.usize(edge.occurrence);
+        writer.f64(edge.phase_tolerance_degrees);
+        writer.f64(edge.minimum_slew_volts_per_second);
+    }
+    match sampling {
+        PeriodicNoiseSampling::Phase { phase_degrees } => {
+            writer.u8(0);
+            writer.f64(*phase_degrees);
+        }
+        PeriodicNoiseSampling::Edge { edge: output } => {
+            writer.u8(1);
+            edge(writer, output);
+        }
+        PeriodicNoiseSampling::Delay {
+            edge: output,
+            reference_node,
+            reference_ref,
+            reference_edge,
+            periods,
+        } => {
+            writer.u8(2);
+            edge(writer, output);
+            writer.string(reference_node);
+            writer.option(reference_ref.as_ref(), |writer, name| writer.string(name));
+            edge(writer, reference_edge);
+            writer.u64(u64::from(*periods));
+        }
+    }
+}
+
+fn encode_pnoise_sample_point(
+    writer: &mut ResultDigestWriter,
+    point: &rspice_core::analysis::pnoise::PeriodicNoiseSamplePoint,
+) {
+    writer.string(&point.node);
+    writer.option(point.reference.as_ref(), |writer, name| writer.string(name));
+    writer.f64(point.phase_degrees);
+    writer.f64(point.voltage);
+    writer.f64(point.slew_volts_per_second);
 }

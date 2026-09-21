@@ -1114,7 +1114,7 @@ pub(super) fn semantic_result_summary(
                 columns: vec![
                     "Device".to_owned(),
                     "Mechanism".to_owned(),
-                    "Power (V²)".to_owned(),
+                    format!("Power ({})", summary.power_unit()),
                     "Share (%)".to_owned(),
                 ],
                 rows: summary

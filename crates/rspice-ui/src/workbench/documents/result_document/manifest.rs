@@ -974,6 +974,9 @@ fn family_values_label(family: &AnalysisResultFamilyMetadata) -> String {
                 crate::state::PeriodicNoiseOutputQuantity::OutputNoisePowerSpectralDensity => {
                     "output-noise PSD"
                 }
+                crate::state::PeriodicNoiseOutputQuantity::TimingNoisePowerSpectralDensity => {
+                    "timing-noise PSD in s²/Hz"
+                }
                 crate::state::PeriodicNoiseOutputQuantity::PhaseNoiseDbcPerHz => {
                     "phase noise in dBc/Hz"
                 }

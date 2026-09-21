@@ -612,6 +612,11 @@ fn pnoise_result(
     reference: svc_runner::PnoiseReference,
     abort: &dyn AbortSignal,
 ) -> Result<SimulationResult, SimulationError> {
+    let timing = data
+        .conversion
+        .as_ref()
+        .and_then(|conversion| conversion.sampling.as_ref())
+        .is_some_and(|sampling| sampling.request.is_timing());
     let mut measurements = Vec::with_capacity(data.contributors.len() + 2);
     let mut shares = HashMap::with_capacity(data.contributors.len());
     for (name, percentage) in data.contributors {
@@ -673,6 +678,8 @@ fn pnoise_result(
         output_unit: Some(rspice_core::analysis::MeasurementUnit::Known(
             if reference == svc_runner::PnoiseReference::Phase {
                 "dBc/Hz"
+            } else if timing {
+                "s²/Hz"
             } else {
                 "V²/Hz"
             }
@@ -685,6 +692,101 @@ fn pnoise_result(
         summary,
         measurements,
     })
+}
+
+#[cfg(test)]
+#[test]
+fn sampled_pnoise_studio_runs_retained_hb_and_reports_timing_and_input_units() {
+    use rspice_core::analysis::pnoise::{PeriodicNoiseEdge, PeriodicNoiseSampling};
+    use svc_runner::{
+        HbRunConfig, HbToneRunConfig, PnoiseFrequencySweep, PnoiseReference, PnoiseRunConfig,
+    };
+    let deck = "sampled studio\nI1 0 out SIN(0 1m 1k) AC 1\nR1 out 0 1k\n.end\n";
+    let hb = svc_runner::run_hb_analysis_with_source_path_and_abort(
+        deck,
+        &HbRunConfig {
+            tones: vec![HbToneRunConfig::new(1000.0, 4)],
+            ..Default::default()
+        },
+        None,
+        &rspice_core::NoAbort,
+    )
+    .unwrap();
+    for sampling in [
+        PeriodicNoiseSampling::Phase {
+            phase_degrees: 37.0,
+        },
+        PeriodicNoiseSampling::Edge {
+            edge: PeriodicNoiseEdge::default(),
+        },
+        PeriodicNoiseSampling::Delay {
+            edge: PeriodicNoiseEdge::default(),
+            reference_node: "out".into(),
+            reference_ref: None,
+            reference_edge: PeriodicNoiseEdge::default(),
+            periods: 0,
+        },
+    ] {
+        let timing = sampling.is_timing();
+        let input = !matches!(sampling, PeriodicNoiseSampling::Delay { .. });
+        let config = PnoiseRunConfig {
+            sampling: Some(sampling.clone()),
+            pss_fundamental_freq: 1000.0,
+            pss_num_harmonics: 4,
+            start_freq: 100.0,
+            stop_freq: 250.0,
+            points_per_unit: 3,
+            sweep: PnoiseFrequencySweep::Linear,
+            max_sideband: 1,
+            output_node: "out".into(),
+            input_source: "I1".into(),
+            noise_ref: if input {
+                PnoiseReference::Input
+            } else {
+                PnoiseReference::Output
+            },
+            integrated_noise: true,
+            ..Default::default()
+        };
+        let data = svc_runner::run_pnoise_analysis_from_hb_with_source_path_and_abort(
+            deck,
+            &config,
+            hb.operating_point.as_ref(),
+            None,
+            &rspice_core::NoAbort,
+        )
+        .unwrap();
+        let result = pnoise_result(data, config.noise_ref, &rspice_core::NoAbort).unwrap();
+        let SimulationResult::Noise {
+            output_unit,
+            output_noise,
+            summary,
+            measurements,
+            ..
+        } = result
+        else {
+            panic!()
+        };
+        assert_eq!(
+            output_unit,
+            Some(rspice_core::analysis::MeasurementUnit::Known(
+                if timing { "s²/Hz" } else { "V²/Hz" }.into()
+            ))
+        );
+        let summary = summary.unwrap();
+        assert_eq!(summary.total_rms.is_none(), timing);
+        assert_eq!(
+            measurements.iter().any(|m| m.name == "timing_jitter_rms_s"),
+            timing
+        );
+        assert_eq!(summary.input_quantity.is_some(), input);
+        let conversion = summary.conversion.unwrap();
+        conversion.validate(summary.band).unwrap();
+        assert_eq!(conversion.sampling.as_ref().unwrap().request, sampling);
+        if !input {
+            assert!(output_noise.iter().all(|value| *value == 0.0));
+        }
+    }
 }
 
 #[cfg(test)]

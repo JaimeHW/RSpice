@@ -917,6 +917,10 @@ fn encode_spec_options(writer: &mut CanonicalWriter, options: &SpecExecutionOpti
         writer.f64(config.reltol);
         writer.f64(config.abstol);
         encode_periodic_carrier_tail(writer, config.carrier);
+        if let Some(sampling) = &config.sampling {
+            writer.string("pnoise-sampling-v1");
+            encode_pnoise_sampling(writer, sampling);
+        }
         if config.input_sideband != 0 || config.output_sideband != 0 {
             writer.string("pnoise-conversion-sidebands-v1");
             writer.i32(config.input_sideband);
@@ -2507,6 +2511,50 @@ mod tests {
                 _ => unreachable!(),
             }
             assert!(disabled.validate().is_err());
+        }
+    }
+}
+
+fn encode_pnoise_sampling(
+    writer: &mut CanonicalWriter,
+    sampling: &rspice_core::analysis::pnoise::PeriodicNoiseSampling,
+) {
+    use rspice_core::analysis::pnoise::{
+        PeriodicNoiseEdge, PeriodicNoiseEdgeDirection, PeriodicNoiseSampling,
+    };
+    fn edge(writer: &mut CanonicalWriter, edge: &PeriodicNoiseEdge) {
+        writer.f64(edge.threshold_volts);
+        writer.u8(match edge.direction {
+            PeriodicNoiseEdgeDirection::Rising => 0,
+            PeriodicNoiseEdgeDirection::Falling => 1,
+            PeriodicNoiseEdgeDirection::Either => 2,
+        });
+        writer.usize(edge.occurrence);
+        writer.f64(edge.phase_tolerance_degrees);
+        writer.f64(edge.minimum_slew_volts_per_second);
+    }
+    match sampling {
+        PeriodicNoiseSampling::Phase { phase_degrees } => {
+            writer.u8(0);
+            writer.f64(*phase_degrees);
+        }
+        PeriodicNoiseSampling::Edge { edge: output } => {
+            writer.u8(1);
+            edge(writer, output);
+        }
+        PeriodicNoiseSampling::Delay {
+            edge: output,
+            reference_node,
+            reference_ref,
+            reference_edge,
+            periods,
+        } => {
+            writer.u8(2);
+            edge(writer, output);
+            writer.string(reference_node);
+            writer.option(reference_ref.as_ref(), |writer, name| writer.string(name));
+            edge(writer, reference_edge);
+            writer.u64(u64::from(*periods));
         }
     }
 }

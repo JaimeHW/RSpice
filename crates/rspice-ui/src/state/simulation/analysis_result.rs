@@ -334,6 +334,18 @@ pub struct NoiseContributorRow {
     pub share_pct: f64,
 }
 
+impl NoiseSummary {
+    pub fn is_timing(&self) -> bool {
+        self.conversion
+            .as_ref()
+            .and_then(|conversion| conversion.sampling.as_ref())
+            .is_some_and(|sampling| sampling.request.is_timing())
+    }
+    pub fn power_unit(&self) -> &'static str {
+        if self.is_timing() { "s²" } else { "V²" }
+    }
+}
+
 /// Ranked noise summary for a noise analysis: per-device/mechanism
 /// contributions plus the band total — the table analog designers read
 /// first.

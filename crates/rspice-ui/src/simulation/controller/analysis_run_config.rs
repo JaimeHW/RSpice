@@ -146,6 +146,7 @@ impl SimulationController {
         let (reltol, abstol) = Self::periodic_solver_tolerances(state);
 
         Ok(PnoiseRunConfig {
+            sampling: pnoise_cfg.sampling,
             input_sideband: pnoise_cfg.input_sideband,
             output_sideband: pnoise_cfg.output_sideband,
             pss_fundamental_freq: basis.fundamental_freq,

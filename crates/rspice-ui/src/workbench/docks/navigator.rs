@@ -2304,8 +2304,9 @@ impl ResultsBrowserKind {
     /// The base electrical dimensions. The facet closes with one negation over
     /// this set, so "anything that is not a volt, an amp, a watt, or a noise
     /// density" stays askable without a second unit control beside this one.
-    const BASE_UNITS: [&'static str; 11] = [
-        "V", "A", "W", "nV/√Hz", "nA/√Hz", "V/√Hz", "A/√Hz", "V^2/Hz", "A^2/Hz", "V²/Hz", "A²/Hz",
+    const BASE_UNITS: [&'static str; 15] = [
+        "V", "A", "W", "ns/√Hz", "s/√Hz", "s²/Hz", "s^2/Hz", "nV/√Hz", "nA/√Hz", "V/√Hz", "A/√Hz",
+        "V^2/Hz", "A^2/Hz", "V²/Hz", "A²/Hz",
     ];
 
     const fn label(self) -> &'static str {
@@ -2333,7 +2334,18 @@ impl ResultsBrowserKind {
             Self::Scalar | Self::Array | Self::EventStream | Self::Contribution => false,
             Self::NoiseDensity => matches!(
                 unit,
-                "nV/√Hz" | "nA/√Hz" | "V/√Hz" | "A/√Hz" | "V^2/Hz" | "A^2/Hz" | "V²/Hz" | "A²/Hz"
+                "ns/√Hz"
+                    | "s/√Hz"
+                    | "s²/Hz"
+                    | "s^2/Hz"
+                    | "nV/√Hz"
+                    | "nA/√Hz"
+                    | "V/√Hz"
+                    | "A/√Hz"
+                    | "V^2/Hz"
+                    | "A^2/Hz"
+                    | "V²/Hz"
+                    | "A²/Hz"
             ),
             Self::OtherUnits => !Self::BASE_UNITS.contains(&unit),
         }

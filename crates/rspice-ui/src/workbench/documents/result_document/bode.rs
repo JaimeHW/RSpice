@@ -634,7 +634,7 @@ pub(super) fn noise_spectrum_right_panel(ui: &mut Ui, state: &mut AppState) {
     super::stat_table(ui, &rows);
     super::panel_note(
         ui,
-        "The plot takes the square root of retained power spectral density and displays nV/√Hz for voltage or nA/√Hz for current, without altering source samples.",
+        "The plot takes the square root of retained power spectral density and displays nV/√Hz for voltage or nA/√Hz for current, or ns/√Hz for timing, without altering source samples.",
     );
 }
 

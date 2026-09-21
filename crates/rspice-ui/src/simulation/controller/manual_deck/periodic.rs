@@ -249,6 +249,10 @@ pub(super) fn parse_periodic_tasks(
         .unwrap_or(rspice_core::constants::ABSTOL);
 
     let mut tasks = Vec::new();
+    let mut pnoise_cards = netlist.analyses.iter().filter_map(|command| match command {
+        rspice_core::netlist::AnalysisCommand::Pnoise(card) => Some(card),
+        _ => None,
+    });
     for (line, head, card) in parsed {
         // The basis a dependent card binds is the basis of the family it
         // reads. A card bound to the `.HB` and handed the `.PSS`'s four
@@ -290,8 +294,10 @@ pub(super) fn parse_periodic_tasks(
                 }
             }
             ".pnoise" => {
+                let sampling = pnoise_cards.next().ok_or_else(|| vec![format!("line {line}: missing parsed PNOISE card")])?.sampling.clone();
                 let config = parse_pnoise(
                     &card,
+                    sampling,
                     &netlist.params,
                     carrier,
                     reltol,
@@ -649,11 +655,15 @@ fn parse_pac(
 
 fn parse_pnoise(
     card: &ParsedCard,
+    sampling: Option<rspice_core::analysis::pnoise::PeriodicNoiseSampling>,
     params: &ParamContext,
     carrier: PeriodicCarrier,
     reltol: f64,
     abstol: f64,
 ) -> Result<PnoiseRunConfig, String> {
+    if sampling.is_some() && carrier.autonomous {
+        return Err("Sampled PNOISE requires a driven periodic carrier".into());
+    }
     reject_unsupported_keys(
         card,
         &[
@@ -665,6 +675,20 @@ fn parse_pnoise(
             "noiseref",
             "integratednoise",
             "noisesummary",
+            "sampling",
+            "samplephase",
+            "threshold",
+            "direction",
+            "occurrence",
+            "phasetol",
+            "minslew",
+            "refout",
+            "refthreshold",
+            "refdirection",
+            "refoccurrence",
+            "refphasetol",
+            "refminslew",
+            "periods",
             "from",
         ],
         ".PNOISE",
@@ -722,6 +746,7 @@ fn parse_pnoise(
         );
     }
     let config = PnoiseRunConfig {
+        sampling,
         input_sideband: optional_i32(card, "inputsideband", 0, params)?,
         output_sideband: optional_i32(card, "outsideband", 0, params)?,
         pss_fundamental_freq: carrier.fundamental_freq,
@@ -2090,6 +2115,34 @@ mod tests {
         assert_eq!(pxf.output_sideband, 2);
         assert_eq!(pxf.max_sideband, 4);
         assert_eq!(pxf.carrier, CarrierSelector::Pss);
+    }
+
+    #[test]
+    fn sampled_pnoise_studio_manual_deck_preserves_each_request_in_order() {
+        let source = "sampled manual\nV1 out 0 SIN(0 1 1k)\nR1 out 0 1k\n.pss fund=1k\n\
+                      .pnoise lin 3 10 100 out=out sampling=phase samplephase=37\n\
+                      .pnoise lin 3 10 100 out=out sampling=delay threshold=0.3 direction=falling occurrence=2 phasetol=1u minslew=2k refout=V(clk,ref) refthreshold=0.7 refdirection=either refoccurrence=3 refphasetol=2u refminslew=3k periods=4\n.end\n";
+        let netlist = Netlist::parse(source).unwrap();
+        let expected: Vec<_> = netlist
+            .analyses
+            .iter()
+            .filter_map(|analysis| match analysis {
+                rspice_core::netlist::AnalysisCommand::Pnoise(card) => Some(card.sampling.clone()),
+                _ => None,
+            })
+            .collect();
+        let tasks = parse_periodic_tasks(&netlist, source).unwrap();
+        let actual: Vec<_> = tasks
+            .iter()
+            .filter_map(|task| {
+                task.spec_options
+                    .pnoise
+                    .as_ref()
+                    .map(|config| config.sampling.clone())
+            })
+            .collect();
+        assert_eq!(actual, expected);
+        assert_eq!(actual.len(), 2);
     }
 
     /// Every keyword this lane taught the form reaches the same typed request

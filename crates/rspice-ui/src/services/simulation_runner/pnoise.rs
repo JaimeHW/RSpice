@@ -75,6 +75,8 @@ pub enum PnoiseReference {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct PnoiseRunConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sampling: Option<rspice_core::analysis::pnoise::PeriodicNoiseSampling>,
     pub input_sideband: i32,
     pub output_sideband: i32,
     pub pss_fundamental_freq: Value,
@@ -100,6 +102,7 @@ pub struct PnoiseRunConfig {
 impl Default for PnoiseRunConfig {
     fn default() -> Self {
         Self {
+            sampling: None,
             input_sideband: 0,
             output_sideband: 0,
             pss_fundamental_freq: 1e6,
@@ -125,6 +128,15 @@ impl Default for PnoiseRunConfig {
 
 impl PnoiseRunConfig {
     pub(crate) fn validate_conversion_channels(&self) -> Result<(), String> {
+        if let Some(sampling) = &self.sampling {
+            sampling.validate()?;
+            if self.noise_ref == PnoiseReference::Phase || self.output_sideband != 0 {
+                return Err(
+                    "Sampled noise requires output or input reference and output sideband zero"
+                        .into(),
+                );
+            }
+        }
         super::validate_noise_sidebands(
             self.input_sideband,
             self.output_sideband,
@@ -464,7 +476,7 @@ fn run_pnoise_from_retained_state(
         .then(|| config.input_source.trim())
         .filter(|name| !name.is_empty());
     let request = rspice_core::engine::PeriodicNoiseRequest {
-        sampling: None,
+        sampling: config.sampling.as_ref(),
         offsets: &frequencies,
         output_node: config.output_node.trim(),
         output_ref,
@@ -484,6 +496,10 @@ fn run_pnoise_from_retained_state(
         }
         .map_err(|error| ServiceRunError::from_core("exact retained-state PNOISE", error))?;
 
+    let timing = exact
+        .sampling
+        .as_ref()
+        .is_some_and(|sampling| sampling.request.is_timing());
     let input_noise = match config.noise_ref {
         PnoiseReference::Input => Some(exact.input_noise.ok_or_else(|| {
             PnoiseRunError::Data(
@@ -504,9 +520,7 @@ fn run_pnoise_from_retained_state(
     } else {
         Vec::new()
     };
-    // The band totals the card asked for. Both are volts RMS: the driven
-    // spectra are power densities in V^2/Hz, so the integral over the swept
-    // band is a mean square and its root is the total.
+    // Integrate the actual measured quantity: voltage, timing, or input source noise.
     let (output_rms, input_rms) = if config.integrated_noise {
         let output = integrate_psd_power_with_abort(
             &frequencies,
@@ -540,6 +554,7 @@ fn run_pnoise_from_retained_state(
             Vec::new()
         },
         conversion: Some(crate::state::PeriodicNoiseConversionEvidence {
+            sampling: exact.sampling,
             input_source: input_source.unwrap_or_default().into(),
             carrier_hz: exact.fundamental_freq,
             input_sideband: config.input_sideband,
@@ -550,10 +565,10 @@ fn run_pnoise_from_retained_state(
         output_noise: exact.output_noise,
         input_noise,
         contributors,
-        output_rms,
+        output_rms: if timing { None } else { output_rms },
         input_rms,
         phase_rms_rad: None,
-        timing_jitter_rms_s: None,
+        timing_jitter_rms_s: if timing { output_rms } else { None },
     })
 }
 

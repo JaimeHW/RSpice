@@ -697,6 +697,7 @@ fn worker_spec_request_preserves_pac_pxf_execution_options() {
 #[test]
 fn worker_spec_request_preserves_pnoise_pstb_execution_options() {
     let pnoise = crate::services::simulation_runner::PnoiseRunConfig {
+        sampling: None,
         input_sideband: -2,
         output_sideband: 1,
         pss_fundamental_freq: 3.0e6,
@@ -784,6 +785,29 @@ fn worker_spec_request_preserves_pnoise_pstb_execution_options() {
         }
         other => panic!("expected PSTB spec request, got {other:?}"),
     }
+}
+
+#[test]
+fn sampled_pnoise_studio_worker_preserves_sampling_controls() {
+    use rspice_core::analysis::pnoise::{PeriodicNoiseEdge, PeriodicNoiseSampling};
+    let config = crate::services::simulation_runner::PnoiseRunConfig {
+        sampling: Some(PeriodicNoiseSampling::Delay {
+            edge: PeriodicNoiseEdge::default(),
+            reference_node: "clk".into(),
+            reference_ref: Some("vss".into()),
+            reference_edge: PeriodicNoiseEdge {
+                threshold_volts: 0.7,
+                ..Default::default()
+            },
+            periods: 3,
+        }),
+        ..Default::default()
+    };
+    let worker = super::super::analysis::WorkerPnoiseRunConfig::from(&config);
+    let decoded: super::super::analysis::WorkerPnoiseRunConfig =
+        serde_json::from_str(&serde_json::to_string(&worker).unwrap()).unwrap();
+    let restored = crate::services::simulation_runner::PnoiseRunConfig::from(decoded);
+    assert_eq!(restored, config);
 }
 
 #[test]

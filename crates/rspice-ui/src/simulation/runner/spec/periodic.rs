@@ -321,6 +321,7 @@ fn run_hbnoise(
     })?;
     let band = (band_start, band_stop);
     let conversion = crate::state::PeriodicNoiseConversionEvidence {
+        sampling: None,
         input_source: config.input_source.clone(),
         carrier_hz: operating_point.config().fundamental_freq,
         input_sideband: config.input_sideband,

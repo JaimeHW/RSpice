@@ -338,6 +338,7 @@ fn quick_noise_spectrum_plot(
                 waveform.name,
                 match waveform.unit.as_deref() {
                     Some("A²/Hz" | "A^2/Hz") => "nA/√Hz",
+                    Some("s²/Hz" | "s^2/Hz") => "ns/√Hz",
                     _ => "nV/√Hz",
                 }
             ),

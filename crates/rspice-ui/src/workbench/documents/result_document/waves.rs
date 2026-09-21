@@ -1389,7 +1389,7 @@ const NOISE_DENSITY_UNIT: &str = "nV/√Hz";
 /// A unit that already carries an SI prefix takes no second one: 1.79 µV/√Hz
 /// of output noise reads as `1786.13 nV/√Hz`, never as `1.78613 knV/√Hz`.
 fn fmt_in_unit(value: f64, unit: &str, significant_digits: usize) -> String {
-    if matches!(unit, NOISE_DENSITY_UNIT | "nA/√Hz") {
+    if matches!(unit, NOISE_DENSITY_UNIT | "nA/√Hz" | "ns/√Hz") {
         return fmt_significant(value, significant_digits, &format!(" {unit}"));
     }
     fmt_si_significant(value, unit, significant_digits)
@@ -1412,6 +1412,7 @@ fn signal_unit<'a>(
         TraceKind::PhaseRad => "rad",
         TraceKind::NoiseDensity => match retained_unit {
             Some("A²/Hz" | "A^2/Hz") => "nA/√Hz",
+            Some("s²/Hz" | "s^2/Hz") => "ns/√Hz",
             _ => NOISE_DENSITY_UNIT,
         },
         TraceKind::Value | TraceKind::Real | TraceKind::Imaginary => {
