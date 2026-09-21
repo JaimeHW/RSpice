@@ -1637,6 +1637,7 @@ impl DecibelNoiseIntegral {
             + 10.0 * (significand.log10() + Value::from(exponent) * std::f64::consts::LOG10_2)
     }
 
+    #[cfg(test)]
     pub(crate) fn phase_rms(self) -> Value {
         let Some((significand, exponent)) = self.power.parts() else {
             return 0.0;

@@ -7,10 +7,11 @@
 //! normalization v1^T(t) ds/dt = 1 identically. Projecting the tank-node
 //! current source b = (1/C, 0) gives
 //!
-//!   c = (1/T) integral S_i cos^2(w0 t) / (A w0 C)^2 dt
-//!     = S_i / (2 A^2 w0^2 C^2),       S_i = 4 k T / R,
+//!   c = (1/T) integral (S_i/2) cos^2(w0 t) / (A w0 C)^2 dt
+//!     = S_i / (4 A^2 w0^2 C^2),       S_i = 4 k T / R,
 //!
-//! and the carrier-normalized Lorentzian sideband (paper Eq. 23/24)
+//! where S_i is one-sided and the diffusion uses two-sided S_i/2
+//! (TCAS-I 2000, Eqs. 7, 24, 44). The carrier-normalized sideband (Eq. 41)
 //! L(f_m) = f0^2 c / (pi^2 f0^4 c^2 + f_m^2) falls at exactly
 //! -20 dB/decade in the white region. The gate pins c, the absolute level,
 //! and the slope.
@@ -56,8 +57,11 @@ i1 0 osc pulse(0 1 10u 10n 10n 1u 1)
             .iter()
             .map(|(_, values)| values[index])
             .sum();
-        let expected = 2.0 * 10.0_f64.powf(result.phase_noise_dbc[index] / 10.0);
+        let expected = result.phase_error_psd[index];
         assert!((sum / expected - 1.0).abs() < 1e-12);
+        let phase_expected =
+            2.0 * result.diffusion_constant / (result.period * offsets[index]).powi(2);
+        assert!((expected / phase_expected - 1.0).abs() < 1e-12);
     }
     assert_eq!(result.integrated_phase_noise, None);
     result.integrate_band().unwrap();
@@ -69,7 +73,7 @@ i1 0 osc pulse(0 1 10u 10n 10n 1u 1)
     let f0 = w0 / (2.0 * std::f64::consts::PI);
     let a2 = 4.0 * (0.051 - 1.0 / r) / (3.0 * 0.025); // describing function
     let s_i = 4.0 * K_B * T_REF / r;
-    let c_expected = s_i / (2.0 * a2 * w0 * w0 * c_tank * c_tank);
+    let c_expected = s_i / (4.0 * a2 * w0 * w0 * c_tank * c_tank);
 
     assert!(
         (result.diffusion_constant - c_expected).abs() < 0.05 * c_expected,
@@ -81,6 +85,11 @@ i1 0 osc pulse(0 1 10u 10n 10n 1u 1)
 
     // Absolute level in the white (-20 dB/dec) region: L = f0^2 c / f_m^2.
     for (i, &fm) in offsets.iter().enumerate() {
+        // Current noise times the cycle-averaged squared phase sensitivity
+        // (1 / (2 A^2 C^2)), followed by the phase integrator 1/(2 pi f)^2.
+        let phase_expected =
+            s_i / (2.0 * a2 * c_tank.powi(2) * (std::f64::consts::TAU * fm).powi(2));
+        assert!((result.phase_error_psd[i] / phase_expected - 1.0).abs() < 0.05);
         let expected_dbc = 10.0 * (f0 * f0 * c_expected / (fm * fm)).log10();
         assert!(
             (result.phase_noise_dbc[i] - expected_dbc).abs() < 1.0,

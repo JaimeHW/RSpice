@@ -3867,6 +3867,27 @@ impl AnalysisResultDocument {
                 samples: finite_samples(LOCATION, "phase_noise", &result.phase_noise_dbc)?,
             },
         )?];
+        if result.phase_error_psd.len() != point_count {
+            return Err(source_error(
+                LOCATION,
+                "the phase-error PSD does not cover every swept offset",
+            ));
+        }
+        signals.push(ResultSignal::new(
+            analysis_descriptor(
+                LOCATION,
+                "phase_error_psd",
+                "Phase-error density",
+                SignalUnit::Custom("rad^2/Hz".into()),
+                SignalValueType::Real,
+                point_count,
+            )?,
+            None,
+            SeriesAvailability::Available,
+            SeriesValues::Real {
+                samples: finite_samples(LOCATION, "phase_error_psd", &result.phase_error_psd)?,
+            },
+        )?);
         for (label, density) in &result.phase_noise_contributors {
             if density.len() != point_count {
                 return Err(source_error(

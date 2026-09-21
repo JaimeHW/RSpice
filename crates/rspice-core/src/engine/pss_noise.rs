@@ -5,23 +5,25 @@
 //! IEEE TCAS-I 47(5), 2000). The driven-circuit conversion-matrix noise
 //! analysis degenerates at an oscillator's carrier (the matrix turns
 //! singular along the neutrally stable oscillation mode); the correct object
-//! is the scalar phase diffusion constant, Eq. (16) of the paper:
+//! is the scalar phase diffusion constant, Eqs. (24) and (44) of TCAS-I:
 //!
 //! ```text
 //! c = (1/T) * integral_0^T  v1^T(t) B(t) B^T(t) v1(t) dt
 //! ```
 //!
 //! where v1(t) is the adjoint Floquet mode of the unity multiplier
-//! normalized so v1^T(t) * dx_s/dt = 1 for all t (the paper's Remark 4.3),
-//! and B maps the white-noise intensities onto the state equations. The
-//! oscillator output spectrum is then a sum of Lorentzians (Eq. (23)); the
+//! normalized so v1^T(t) * dx_s/dt = 1 for all t (Remark 5.3). B uses
+//! two-sided source intensities because Eq. (7) defines unit white noise
+//! with autocorrelation delta(t1-t2). Device noise PSDs are one-sided,
+//! so their projected powers must be halved before forming c. The
+//! oscillator output spectrum is then a sum of Lorentzians (Eq. (35)); the
 //! carrier-normalized single-sideband density around the fundamental is
 //!
 //! ```text
 //! L(f_m) = f0^2 c / (pi^2 f0^4 c^2 + f_m^2)
 //! ```
 //!
-//! whose corner sits at f_c = pi f0^2 c (the paper's Section 10 example) and
+//! whose corner sits at f_c = pi f0^2 c (Eq. (41)) and
 //! whose integral preserves the carrier power exactly.
 
 use super::pss::{PssCompanionStep, PssTraversal};
@@ -40,8 +42,11 @@ pub struct OscPnoiseResult {
     pub frequencies: Vec<Value>,
     /// Single-sideband phase noise L(f_m) in dBc/Hz.
     pub phase_noise_dbc: Vec<Value>,
+    /// One-sided phase-error PSD in rad²/Hz. Unlike the carrier-normalized
+    /// voltage spectrum, this continues to grow inside the oscillator linewidth.
+    pub phase_error_psd: Vec<Value>,
     /// The zero-frequency-equivalent phase diffusion constant c (Demir
-    /// Eq. 16 for white sources, including finite-DC colored sources).
+    /// TCAS-I Eq. (24) for white sources, including finite-DC colored sources).
     pub diffusion_constant: Value,
     /// Solved oscillation period (s).
     pub period: Value,
@@ -49,7 +54,7 @@ pub struct OscPnoiseResult {
     /// carrier-preserving value.
     pub corner_hz: Value,
     /// RMS phase error over the swept offset band in radians,
-    /// `sqrt(2 * integral L(f) df)`, when the run was asked to integrate.
+    /// `sqrt(integral S_phi(f) df)`, when the run was asked to integrate.
     /// `None` means integration was not requested or the sweep spans no band.
     pub integrated_phase_noise: Option<Value>,
     /// Per-device phase-error density in rad²/Hz, on `frequencies`.
@@ -58,11 +63,10 @@ pub struct OscPnoiseResult {
 }
 
 impl OscPnoiseResult {
-    /// Integrate both sidebands over the computed offset band using the same
-    /// stable quadrature as an authored `.PNOISE INTEGRATEDNOISE=YES` card.
+    /// Integrate phase-error power, rather than the bounded voltage spectrum.
     pub fn integrate_band(&mut self) -> Result<(), SimulationError> {
         self.integrated_phase_noise =
-            integrate_phase_noise(&self.frequencies, &self.phase_noise_dbc)?;
+            integrate_spectral_density(&self.frequencies, &self.phase_error_psd)?;
         Ok(())
     }
 }
@@ -129,8 +133,10 @@ fn checked_noise_rms(rms: Value) -> Result<Value, SimulationError> {
 /// RMS phase error over a swept single-sideband spectrum, in radians.
 ///
 /// `L(f)` is the single-sideband, carrier-normalized density in dBc/Hz, so
-/// both sidebands contribute and the mean-square phase is
-/// `2 * integral L(f) df`.
+/// outside the oscillator linewidth the small-phase approximation gives
+/// mean-square phase `2 * integral L(f) df`. This comparison helper must
+/// not be used to integrate the bounded voltage spectrum inside the linewidth.
+#[cfg(test)]
 fn integrate_phase_noise(
     offsets: &[Value],
     phase_noise_dbc: &[Value],
@@ -984,6 +990,19 @@ impl Engine {
                 *coefficient += (integral / period).powi(2);
             }
         }
+        // Device PSDs are one-sided. Demir's c is a variance growth rate,
+        // defined using unit-white autocorrelation delta(t1-t2) (TCAS-I 2000,
+        // Eqs. 7, 24, 44), so its source intensities are two-sided. Convert
+        // every total/device power together, including colored projections
+        // and correlated ports, after their phase-sensitive accumulation.
+        for coefficient in &mut coefficients {
+            *coefficient *= 0.5;
+        }
+        for values in device_integrals.values_mut() {
+            for value in values {
+                *value *= 0.5;
+            }
+        }
         let c = coefficients[0];
         if !c.is_finite() || c < 0.0 {
             return Err(SimulationError::Circuit(
@@ -1009,23 +1028,28 @@ impl Engine {
             })
             .collect();
 
+        let phase_error_psd = offsets
+            .iter()
+            .zip(coefficients.iter().skip(1))
+            .map(|(&offset, &coefficient)| oscillator_phase_error_density(f0, offset, coefficient))
+            .collect::<Result<Vec<_>, _>>()?;
+
         let mut phase_noise_contributors = device_integrals
             .into_iter()
             .map(|(name, values)| {
                 let density = offsets
                     .iter()
                     .zip(values.iter().skip(1))
-                    .map(|(&fm, &coefficient)| {
-                        2.0 * f0 * f0 * coefficient / (corner_hz * corner_hz + fm * fm)
-                    })
-                    .collect();
-                (name, density)
+                    .map(|(&fm, &coefficient)| oscillator_phase_error_density(f0, fm, coefficient))
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok((name, density))
             })
-            .collect::<Vec<_>>();
+            .collect::<Result<Vec<_>, SimulationError>>()?;
         phase_noise_contributors.sort_by(|a, b| a.0.cmp(&b.0));
         Ok(OscPnoiseResult {
             frequencies: offsets.to_vec(),
             phase_noise_dbc,
+            phase_error_psd,
             diffusion_constant: c,
             period,
             corner_hz,
@@ -1035,6 +1059,40 @@ impl Engine {
             phase_noise_contributors,
         })
     }
+}
+
+/// Phase is the integral of the PPV-projected frequency disturbance, so its
+/// PSD has the f^-2 response even where oscillator *voltage* noise broadens
+/// into a Lorentzian. In Demir's diffusion convention S_phi = 2 f0² c(f) / f².
+/// Logarithms avoid squaring a very large frequency before multiplying by a
+/// small diffusion coefficient.
+fn oscillator_phase_error_density(
+    f0: Value,
+    offset: Value,
+    coefficient: Value,
+) -> Result<Value, SimulationError> {
+    if !f0.is_finite()
+        || f0 <= 0.0
+        || !offset.is_finite()
+        || offset <= 0.0
+        || !coefficient.is_finite()
+        || coefficient < 0.0
+    {
+        return Err(SimulationError::Circuit(
+            "oscillator phase-error spectrum has an invalid frequency or diffusion coefficient"
+                .into(),
+        ));
+    }
+    if coefficient == 0.0 {
+        return Ok(0.0);
+    }
+    let value = (std::f64::consts::LN_2 + coefficient.ln() + 2.0 * (f0.ln() - offset.ln())).exp();
+    if !value.is_finite() || value == 0.0 {
+        return Err(SimulationError::Circuit(
+            "oscillator phase-error density is outside the representable range".into(),
+        ));
+    }
+    Ok(value)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -1076,6 +1134,94 @@ fn pss_noise_is_colored(noise_type: NoiseSourceType) -> bool {
 #[cfg(test)]
 mod integration_tests {
     use super::*;
+
+    #[test]
+    fn oscillator_phase_error_keeps_diffusion_inside_voltage_linewidth() {
+        use crate::execution::{
+            AnalysisInstanceId, AnalysisKind, AnalysisResultDocument, SignalUnit,
+        };
+        let carrier: Value = 1000.0;
+        let diffusion = 1e-4;
+        let corner = std::f64::consts::PI * carrier * carrier * diffusion;
+        let offsets = vec![1.0, 2.0];
+        let phase_error_psd = offsets
+            .iter()
+            .map(|&offset| oscillator_phase_error_density(carrier, offset, diffusion).unwrap())
+            .collect::<Vec<_>>();
+        let voltage = offsets
+            .iter()
+            .map(|&offset| {
+                10.0 * (carrier * carrier * diffusion / (corner * corner + offset * offset)).log10()
+            })
+            .collect::<Vec<_>>();
+        let mut result = OscPnoiseResult {
+            frequencies: offsets,
+            phase_noise_dbc: voltage,
+            phase_error_psd,
+            diffusion_constant: diffusion,
+            period: 1.0 / carrier,
+            corner_hz: corner,
+            integrated_phase_noise: None,
+            phase_noise_contributors: Vec::new(),
+        };
+        assert!((result.phase_error_psd[0] / 200.0 - 1.0).abs() < 1e-13);
+        assert!((result.phase_error_psd[1] / 50.0 - 1.0).abs() < 1e-13);
+        result.integrate_band().unwrap();
+        // The retained two-point spectrum is integrated with trapezoidal quadrature.
+        assert!((result.integrated_phase_noise.unwrap() / 125.0_f64.sqrt() - 1.0).abs() < 1e-13);
+        let voltage_equivalent =
+            integrate_phase_noise(&result.frequencies, &result.phase_noise_dbc)
+                .unwrap()
+                .unwrap();
+        assert!(result.integrated_phase_noise.unwrap() > 200.0 * voltage_equivalent);
+        let document = AnalysisResultDocument::from_pnoise(
+            AnalysisInstanceId::new(AnalysisKind::PNoise, 0),
+            &PeriodicNoiseResult::Oscillator {
+                output: "V(osc)".into(),
+                result,
+            },
+        )
+        .unwrap()
+        .build()
+        .unwrap();
+        let signal = document
+            .signals()
+            .iter()
+            .find(|signal| signal.descriptor().canonical_name() == "phase_error_psd")
+            .unwrap();
+        assert_eq!(
+            signal.descriptor().unit(),
+            &SignalUnit::Custom("rad^2/Hz".into())
+        );
+        assert_eq!(
+            AnalysisResultDocument::from_json(&document.to_json().unwrap()).unwrap(),
+            document
+        );
+    }
+
+    #[test]
+    fn oscillator_phase_error_avoids_intermediate_frequency_square_overflow() {
+        for (carrier, offset, coefficient) in [(1e200, 1e150, 1e-100), (1e-200, 1e-100, 1e200)] {
+            assert!(
+                (oscillator_phase_error_density(carrier, offset, coefficient).unwrap() / 2.0 - 1.0)
+                    .abs()
+                    < 1e-12
+            );
+        }
+        assert_eq!(
+            oscillator_phase_error_density(1e300, 1.0, 0.0).unwrap(),
+            0.0
+        );
+        for (carrier, offset, coefficient) in [
+            (0.0, 1.0, 1.0),
+            (1.0, 0.0, 1.0),
+            (1.0, 1.0, -1.0),
+            (1e300, 1.0, 1.0),
+            (1e-300, 1.0, 1.0),
+        ] {
+            assert!(oscillator_phase_error_density(carrier, offset, coefficient).is_err());
+        }
+    }
 
     #[test]
     fn periodic_noise_integration_preserves_finite_rms_range() {
