@@ -104,7 +104,6 @@ impl HbSolver {
         sources: &crate::device::behavioral::BehavioralSources,
         autonomous: bool,
     ) -> Result<(), HbError> {
-        let unknowns = self.num_nodes + self.exact_mna_branches().len();
         let period = self.config.fundamental_freq.recip();
         let certify = |name: &str, periodic: bool, cycles: Value, interval: Option<Value>| {
             if !periodic {
@@ -139,12 +138,7 @@ impl HbSolver {
             }
             Ok(())
         };
-        let valid = |pos: usize, neg: usize, supported: bool, indices: Vec<usize>| {
-            supported
-                && pos <= self.num_nodes
-                && neg <= self.num_nodes
-                && indices.into_iter().all(|index| index < unknowns)
-        };
+        self.validate_behavioral_bindings(sources)?;
         for source in &sources.current_sources {
             certify(
                 &source.name,
@@ -152,6 +146,32 @@ impl HbSolver {
                 source.max_authored_tone_cycles(period),
                 source.minimum_pss_interval(false),
             )?;
+        }
+        for source in &sources.voltage_sources {
+            certify(
+                &source.name,
+                source.has_periodic_time_dependence(period, autonomous),
+                source.max_authored_tone_cycles(period),
+                source.minimum_pss_interval(false),
+            )?;
+        }
+        self.behavioral_sources = sources.clone();
+        self.behavioral_phase_dimensions = 0;
+        Ok(())
+    }
+
+    fn validate_behavioral_bindings(
+        &self,
+        sources: &crate::device::behavioral::BehavioralSources,
+    ) -> Result<(), HbError> {
+        let unknowns = self.num_nodes + self.exact_mna_branches().len();
+        let valid = |pos: usize, neg: usize, supported: bool, indices: Vec<usize>| {
+            supported
+                && pos <= self.num_nodes
+                && neg <= self.num_nodes
+                && indices.into_iter().all(|index| index < unknowns)
+        };
+        for source in &sources.current_sources {
             if !valid(
                 source.node_pos,
                 source.node_neg,
@@ -165,12 +185,6 @@ impl HbSolver {
             }
         }
         for source in &sources.voltage_sources {
-            certify(
-                &source.name,
-                source.has_periodic_time_dependence(period, autonomous),
-                source.max_authored_tone_cycles(period),
-                source.minimum_pss_interval(false),
-            )?;
             let branch = source
                 .branch_ordinal
                 .checked_sub(1)
@@ -189,7 +203,34 @@ impl HbSolver {
                 )));
             }
         }
-        self.behavioral_sources = sources.clone();
+        Ok(())
+    }
+
+    pub(crate) fn set_quasi_periodic_behavioral_sources(
+        &mut self,
+        sources: &crate::device::behavioral::BehavioralSources,
+        grid: &crate::analysis::quasi_periodic::QuasiPeriodicGrid,
+    ) -> Result<(), HbError> {
+        // Validate physical references before appending any independent inputs.
+        self.validate_behavioral_bindings(sources)?;
+        let unknowns = self.num_nodes + self.exact_mna_branches().len();
+        let mut lifted = sources.clone();
+        for source in &mut lifted.current_sources {
+            source
+                .lift_quasi_periodic(grid, unknowns)
+                .map_err(|error| {
+                    HbError::InvalidCircuit(format!("behavioral source '{}': {error}", source.name))
+                })?;
+        }
+        for source in &mut lifted.voltage_sources {
+            source
+                .lift_quasi_periodic(grid, unknowns)
+                .map_err(|error| {
+                    HbError::InvalidCircuit(format!("behavioral source '{}': {error}", source.name))
+                })?;
+        }
+        self.behavioral_sources = lifted;
+        self.behavioral_phase_dimensions = grid.dimensions().len();
         Ok(())
     }
 
@@ -233,6 +274,7 @@ impl HbSolver {
         &mut self,
         solution: &[Value],
         time: Value,
+        behavioral_inputs: &[Value],
         f: &mut NativeStamp,
         q: &mut NativeStamp,
     ) -> Result<(), HbError> {
@@ -254,30 +296,36 @@ impl HbSolver {
         }
         for source in &mut self.behavioral_sources.current_sources {
             source
-                .linearize_at_time(solution, time)
+                .linearize_at_time(behavioral_inputs, time)
                 .map_err(|error| HbError::InvalidCircuit(error.to_string()))?;
             let value = source
-                .evaluate(solution, time)
+                .evaluate(behavioral_inputs, time)
                 .map_err(|error| HbError::InvalidCircuit(error.to_string()))?;
             f.stamp_rhs(source.node_pos, -value);
             f.stamp_rhs(source.node_neg, value);
-            for (column, partial) in source.linearized_partials() {
+            for (column, partial) in source
+                .linearized_partials()
+                .filter(|(column, _)| *column < solution.len())
+            {
                 f.stamp(source.node_pos, column + 1, partial);
                 f.stamp(source.node_neg, column + 1, -partial);
             }
         }
         for source in &mut self.behavioral_sources.voltage_sources {
             source
-                .linearize_at_time(solution, time)
+                .linearize_at_time(behavioral_inputs, time)
                 .map_err(|error| HbError::InvalidCircuit(error.to_string()))?;
             let value = source
-                .evaluate(solution, time)
+                .evaluate(behavioral_inputs, time)
                 .map_err(|error| HbError::InvalidCircuit(error.to_string()))?;
             let row = self.num_nodes + source.branch_ordinal;
             // The exact linear port row owns V(pos)-V(neg). This term owns
             // only -expression, with the inverse sign in source-minus-F.
             f.stamp_rhs(row, value);
-            for (column, partial) in source.linearized_partials() {
+            for (column, partial) in source
+                .linearized_partials()
+                .filter(|(column, _)| *column < solution.len())
+            {
                 f.stamp(row, column + 1, -partial);
             }
         }
@@ -298,7 +346,7 @@ impl HbSolver {
             .collect();
         let mut f = NativeStamp::new(solution.len());
         let mut q = NativeStamp::new(solution.len());
-        self.sample_native_devices(&solution, 0.0, &mut f, &mut q)?;
+        self.sample_native_devices(&solution, 0.0, &solution, &mut f, &mut q)?;
         Ok(f)
     }
 
@@ -307,11 +355,21 @@ impl HbSolver {
     pub(super) fn quasi_periodic_native_sample(
         &mut self,
         solution: &[Value],
+        phases: &[Value],
         jacobian: bool,
     ) -> Result<crate::analysis::quasi_periodic::solve::Sample, HbError> {
+        if phases.len() != self.behavioral_phase_dimensions || phases.iter().any(|v| !v.is_finite())
+        {
+            return Err(HbError::InvalidCircuit(
+                "behavioral phase inputs do not match the registered quasiperiodic grid".into(),
+            ));
+        }
+        let mut inputs = Vec::with_capacity(solution.len() + phases.len());
+        inputs.extend_from_slice(solution);
+        inputs.extend_from_slice(phases);
         let mut f = NativeStamp::new(solution.len());
         let mut q = NativeStamp::new(solution.len());
-        self.sample_native_devices(solution, 0.0, &mut f, &mut q)?;
+        self.sample_native_devices(solution, 0.0, &inputs, &mut f, &mut q)?;
         Ok(crate::analysis::quasi_periodic::solve::Sample {
             current: f.contributions,
             charge: q.contributions,
@@ -428,7 +486,7 @@ impl HbSolver {
                 *value = wave[time];
             }
             let sample_time = time as Value / times as Value / self.config.fundamental_freq;
-            self.sample_native_devices(&solution, sample_time, &mut f, &mut q)?;
+            self.sample_native_devices(&solution, sample_time, &solution, &mut f, &mut q)?;
             record_native_terms(&mut f_time, &f.contributions, time, times)?;
             record_native_terms(&mut q_time, &q.contributions, time, times)?;
         }
@@ -495,7 +553,7 @@ impl HbSolver {
                 *value = wave[time];
             }
             let sample_time = time as Value / times as Value / self.config.fundamental_freq;
-            self.sample_native_devices(&solution, sample_time, &mut f, &mut q)?;
+            self.sample_native_devices(&solution, sample_time, &solution, &mut f, &mut q)?;
             for &(row, col, value) in if charge { &q.jacobian } else { &f.jacobian } {
                 let sum = &mut entries
                     .entry((row, col))

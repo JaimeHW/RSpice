@@ -29,7 +29,7 @@ fn noise(
         .validate_qpss_operating_point_with_abort(netlist, point, &NoAbort)
         .unwrap();
     let circuit = engine.build_circuit_with_abort(netlist, &NoAbort).unwrap();
-    let mut solver = engine.qpss_circuit_solver(&circuit).unwrap();
+    let mut solver = engine.qpss_circuit_solver(&circuit, &grid).unwrap();
     let outputs: Vec<_> = observations
         .iter()
         .map(|(name, branch)| {

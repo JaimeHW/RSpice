@@ -324,7 +324,7 @@ impl Engine {
             ));
         }
         let circuit = engine.build_circuit_with_abort(netlist, abort)?;
-        let solver = engine.qpss_circuit_solver(&circuit)?;
+        let solver = engine.qpss_circuit_solver(&circuit, &grid)?;
         if point.node_names != engine.hb_build_node_names(&circuit, circuit.num_nodes())
             || point.branch_names
                 != solver

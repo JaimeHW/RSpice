@@ -19,19 +19,30 @@ enum PeriodicMnaRegistration {
     BehavioralVoltage(usize),
 }
 
+pub(super) enum BehavioralBasis<'a> {
+    Periodic { autonomous: bool },
+    QuasiPeriodic(&'a crate::analysis::quasi_periodic::QuasiPeriodicGrid),
+}
+
 impl Engine {
     pub(in crate::engine::hb) fn hb_stamp_supported_nonlinear_devices(
         &self,
         circuit: &CircuitData,
         solver: &mut HbSolver,
         num_nodes: usize,
-        autonomous: bool,
+        basis: BehavioralBasis<'_>,
     ) -> Result<(), SimulationError> {
         use crate::analysis::harmonic_balance::{DepletionCap, NonlinearDeviceInstance};
 
-        solver
-            .set_periodic_behavioral_sources(&circuit.behavioral_sources, autonomous)
-            .map_err(|error| SimulationError::Circuit(error.to_string()))?;
+        match basis {
+            BehavioralBasis::Periodic { autonomous } => {
+                solver.set_periodic_behavioral_sources(&circuit.behavioral_sources, autonomous)
+            }
+            BehavioralBasis::QuasiPeriodic(grid) => {
+                solver.set_quasi_periodic_behavioral_sources(&circuit.behavioral_sources, grid)
+            }
+        }
+        .map_err(|error| SimulationError::Circuit(error.to_string()))?;
 
         for bjt in &circuit.bjts.devices {
             solver

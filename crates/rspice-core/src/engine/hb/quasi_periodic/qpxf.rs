@@ -75,7 +75,7 @@ impl Engine {
         }
         let circuit = engine.build_circuit_with_abort(netlist, abort)?;
         Self::ensure_no_mixed_signal_analysis(&circuit, "QPXF")?;
-        let mut solver = engine.qpss_circuit_solver(&circuit)?;
+        let mut solver = engine.qpss_circuit_solver(&circuit, &grid)?;
         let mut observation = vec![vec![Complex64::ZERO; grid.len()]; point.spectra().len()];
         for (row, value) in bindings::output(netlist, point, &request.output)? {
             observation[row][output_index] = value;

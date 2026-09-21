@@ -168,7 +168,7 @@ impl Engine {
             &engine.config.resource_limits,
         )
         .map_err(numerical_error)?;
-        let mut solver = engine.qpss_circuit_solver(&circuit)?;
+        let mut solver = engine.qpss_circuit_solver(&circuit, &grid)?;
         let node_names = engine.hb_build_node_names(&circuit, circuit.num_nodes());
         let branch_names = solver
             .try_periodic_mna_branch_names()
@@ -206,29 +206,11 @@ impl Engine {
         QpssOperatingPoint::bind(producer, config, node_names, branch_names, solution)
     }
 
-    fn qpss_circuit_solver(&self, circuit: &CircuitData) -> Result<HbSolver, SimulationError> {
-        for (name, memoryless) in circuit
-            .behavioral_sources
-            .voltage_sources
-            .iter()
-            .map(|source| (&source.name, source.has_memoryless_periodic_equation()))
-            .chain(
-                circuit
-                    .behavioral_sources
-                    .current_sources
-                    .iter()
-                    .map(|source| (&source.name, source.has_memoryless_periodic_equation())),
-            )
-        {
-            if !memoryless {
-                return Err(SimulationError::unsupported_capability(
-                    "analysis.qpss.behavioral_forcing",
-                    format!(
-                        "QPSS behavioral source '{name}' requires independent-phase forcing or state projection"
-                    ),
-                ));
-            }
-        }
+    fn qpss_circuit_solver(
+        &self,
+        circuit: &CircuitData,
+        grid: &QuasiPeriodicGrid,
+    ) -> Result<HbSolver, SimulationError> {
         for gaps in [
             periodic_capability::periodic_residual_gaps(circuit),
             periodic_capability::periodic_descriptor_gaps(circuit),
@@ -254,7 +236,7 @@ impl Engine {
             circuit,
             &mut solver,
             circuit.num_nodes(),
-            false,
+            BehavioralBasis::QuasiPeriodic(grid),
         )?;
         Ok(solver)
     }

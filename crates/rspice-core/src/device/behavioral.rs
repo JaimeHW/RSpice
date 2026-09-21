@@ -20,6 +20,7 @@ use thiserror::Error;
 
 mod breakpoints;
 mod periodicity;
+mod quasi_periodic;
 mod resolution;
 pub(crate) use breakpoints::BehavioralBreakpointError;
 #[cfg(test)]

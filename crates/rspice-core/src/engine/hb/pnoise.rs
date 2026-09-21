@@ -805,7 +805,9 @@ impl Engine {
                 &circuit,
                 &mut solver,
                 num_nodes,
-                autonomous_tolerance.is_some(),
+                BehavioralBasis::Periodic {
+                    autonomous: autonomous_tolerance.is_some(),
+                },
             )?;
         }
         let branch_names = solver.try_periodic_mna_branch_names().map_err(|error| {

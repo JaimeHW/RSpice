@@ -1026,6 +1026,7 @@ pub struct HbSolver {
 
     /// Bound stateless constitutive expressions over the complete MNA basis.
     behavioral_sources: crate::device::behavioral::BehavioralSources,
+    behavioral_phase_dimensions: usize,
     /// Sorted zero-based temperature/current state nodes. Electrical voltage
     /// limiting and shunt homotopy do not apply to these physical coordinates.
     non_electrical_nodes: Vec<usize>,

@@ -394,8 +394,23 @@ impl Circuit for HbSolver {
     }
 
     fn sample(&mut self, state: &[Value], jacobian: bool) -> Result<Sample, Error> {
+        self.sample_at_phases(state, &[], jacobian)
+    }
+
+    fn sample_at_phases(
+        &mut self,
+        state: &[Value],
+        phases: &[Value],
+        jacobian: bool,
+    ) -> Result<Sample, Error> {
+        // A registry without phase inputs contains only autonomous constitutive laws.
+        let phases = if self.behavioral_phase_dimensions == 0 {
+            &[]
+        } else {
+            phases
+        };
         let mut sample = self
-            .quasi_periodic_native_sample(state, jacobian)
+            .quasi_periodic_native_sample(state, phases, jacobian)
             .map_err(device_error)?;
         // Legacy compact devices use num_nodes as the ground sentinel.
         // Including branch-current coordinates would turn ground into the

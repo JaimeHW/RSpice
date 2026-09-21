@@ -111,7 +111,7 @@ impl Engine {
         }
         let circuit = engine.build_circuit_with_abort(netlist, abort)?;
         Self::ensure_no_mixed_signal_analysis(&circuit, "QPAC")?;
-        let mut solver = engine.qpss_circuit_solver(&circuit)?;
+        let mut solver = engine.qpss_circuit_solver(&circuit, &grid)?;
         let source =
             Self::pac_input_port(&circuit, &request.input_source, point.node_names().len())?;
         let input_quantity = if source.voltage_source_index.is_some() {

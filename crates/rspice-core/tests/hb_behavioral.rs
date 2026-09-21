@@ -269,3 +269,220 @@ fn behavioral_quasiperiodic_mixer_preserves_independent_tone_products() {
         }
     }
 }
+
+#[test]
+fn behavioral_quasiperiodic_clocks_feed_retained_conversion_and_noise() {
+    use rspice_core::engine::*;
+    let netlist = Netlist::parse(
+        "Independent behavioral clocks\n\
+        rnoise noise 0 1k\nitest 0 noise dc 1m\n\
+        bvol out 0 v=(1+sin(2*pi*1k*time)*cos(2*pi*1414.213562373095*time))*v(noise)\n\
+        rload out 0 1k noisy=0\nbcur sink 0 i=i(bvol)\nrsink sink 0 1k noisy=0\n.end\n",
+    )
+    .unwrap();
+    let engine = Engine::default();
+    use rspice_core::analysis::quasi_periodic::QuasiPeriodicLinearMethod;
+    for method in [
+        QuasiPeriodicLinearMethod::Direct,
+        QuasiPeriodicLinearMethod::Krylov,
+    ] {
+        let linear = rspice_core::analysis::quasi_periodic::QuasiPeriodicLinearConfig {
+            method,
+            ..Default::default()
+        };
+        let point = engine
+            .run_qpss(
+                &netlist,
+                QpssConfig::new(vec![1e3, 1e3 * std::f64::consts::SQRT_2], vec![1, 1]),
+            )
+            .unwrap();
+        // Serialization preserves the authored independent clocks and their basis.
+        let point: QpssOperatingPoint =
+            serde_json::from_str(&serde_json::to_string(&point).unwrap()).unwrap();
+        let grid = engine
+            .validate_qpss_operating_point_with_abort(
+                &netlist,
+                &point,
+                &rspice_core::abort_signal::NoAbort,
+            )
+            .unwrap();
+        let row = point
+            .node_names()
+            .iter()
+            .position(|n| n.eq_ignore_ascii_case("sink"))
+            .unwrap();
+        for (tuple, value) in [
+            ([0, 0], Complex64::ONE),
+            ([1, 1], Complex64::new(0.0, -0.25)),
+            ([-1, 1], Complex64::new(0.0, 0.25)),
+        ] {
+            close(point.spectra()[row][grid.index_of(&tuple).unwrap()], value);
+        }
+        let pac = engine
+            .run_qpac_from_qpss(
+                &netlist,
+                QpacRequest {
+                    offsets_hz: vec![10.0],
+                    input_source: "itest".into(),
+                    input_lattice: vec![0, 0],
+                    output_node: "sink".into(),
+                    output_ref: "0".into(),
+                    output_lattice: vec![1, 1],
+                    magnitude: 1.0,
+                    phase_degrees: 0.0,
+                    solver: rspice_core::analysis::quasi_periodic::QuasiPeriodicAcConfig {
+                        linear: linear.clone(),
+                        ..Default::default()
+                    },
+                },
+                &point,
+            )
+            .unwrap();
+        close(pac.output_transfer[0], Complex64::new(0.0, -250.0));
+        let xf = engine
+            .run_qpxf_from_qpss(
+                &netlist,
+                QpxfRequest {
+                    frequencies_hz: vec![10.0],
+                    frequency_axis: QpxfFrequencyAxis::Offset,
+                    input_sources: QpxfSources::Named(vec!["itest".into()]),
+                    input_lattices: QpxfInputLattices::Explicit(vec![vec![0, 0]]),
+                    output: QpxfOutput::Voltage {
+                        positive: "sink".into(),
+                        negative: "0".into(),
+                    },
+                    output_lattice: vec![1, 1],
+                    linear: linear.clone(),
+                    group_delay: false,
+                    group_delay_magnitude_floor: 0.0,
+                },
+                &point,
+            )
+            .unwrap();
+        close(xf.transfers[0].values[0], Complex64::new(0.0, -250.0));
+        let noise = engine
+            .run_qpnoise_from_qpss(
+                &netlist,
+                QpnoiseRequest {
+                    frequencies_hz: vec![10.0],
+                    frequency_axis: QpnoiseFrequencyAxis::Offset,
+                    outputs: vec![QpnoiseOutput {
+                        observation: QpnoiseObservation::Voltage {
+                            positive: "sink".into(),
+                            negative: "0".into(),
+                        },
+                        lattice: vec![0, 0],
+                    }],
+                    input: Some(QpnoiseInput {
+                        source: "itest".into(),
+                        lattice: vec![0, 0],
+                    }),
+                    input_lattices: QpnoiseLattices::AllRetained,
+                    sources: QpnoiseSources::All,
+                    integration: None,
+                    contributor_ranking: false,
+                    noise_figure: None,
+                    linear: linear.clone(),
+                },
+                &point,
+            )
+            .unwrap();
+        let expected = 4.0 * K_BOLTZMANN * TEMP_REFERENCE * 1e3 * 1.25;
+        assert!((noise.total_covariances[0].values[0].re / expected - 1.0).abs() < 1e-8);
+        close(
+            noise.outputs[0].input_transfer.as_ref().unwrap()[0],
+            Complex64::new(1e3, 0.0),
+        );
+    }
+}
+
+#[test]
+fn behavioral_quasiperiodic_waveforms_and_nested_phases_match_independent_coordinates() {
+    use rspice_core::abort_signal::NoAbort;
+    use rspice_core::analysis::quasi_periodic::{QuasiPeriodicGrid, QuasiPeriodicSampling};
+    use rspice_core::engine::QpssConfig;
+    use std::f64::consts::TAU;
+    let netlist = Netlist::parse(
+        "Independent waveform coordinates\nvc ctrl 0 dc .7\n\
+        ba a 0 v=v(ctrl)*spice_sffm(.2,.6,1k,.3,1414.213562373095)+spice_sin(.4,.2,1414.213562373095,120u,0,30)\nra a 0 1k\n\
+        bp p 0 v=spice_pulse(0,v(ctrl),125u,100u,100u,400u,1m)\nrp p 0 1k\n\
+        bn n 0 v=sin(2*pi*1k*time+sin(2*pi*1414.213562373095*time)+v(ctrl))+cos(2*pi*(1k-1414.213562373095)*time)\nrn n 0 1k\n.end\n",
+    ).unwrap();
+    let mut config = QpssConfig::new(vec![1e3, 1e3 * std::f64::consts::SQRT_2], vec![1, 1]);
+    config.grid.sampling = QuasiPeriodicSampling::Exact(vec![64, 32]);
+    let grid =
+        QuasiPeriodicGrid::new_with_abort(config.grid.clone(), &Default::default(), &NoAbort)
+            .unwrap();
+    let point = Engine::default().run_qpss(&netlist, config).unwrap();
+    for node in ["a", "p", "n"] {
+        let row = point
+            .node_names()
+            .iter()
+            .position(|n| n.eq_ignore_ascii_case(node))
+            .unwrap();
+        for (k, tuple) in grid.indices().iter().enumerate() {
+            // Direct two-dimensional Fourier sum of independent analytic
+            // waveforms, not an invented common time for incommensurate tones.
+            let mut expected = Complex64::ZERO;
+            for sample in 0..grid.sample_count() {
+                let phase = grid.phases(sample).unwrap();
+                let value = match node {
+                    "a" => {
+                        0.7 * (0.2 + 0.6 * (phase[0] + 0.3 * phase[1].sin()).sin())
+                            + 0.4
+                            + 0.2
+                                * (phase[1] - TAU * 1e3 * std::f64::consts::SQRT_2 * 120e-6
+                                    + TAU / 12.0)
+                                    .sin()
+                    }
+                    "p" => {
+                        let t = (phase[0] / TAU * 1e-3 - 125e-6).rem_euclid(1e-3);
+                        0.7 * if t < 100e-6 {
+                            t / 100e-6
+                        } else if t < 500e-6 {
+                            1.0
+                        } else if t < 600e-6 {
+                            (600e-6 - t) / 100e-6
+                        } else {
+                            0.0
+                        }
+                    }
+                    _ => (phase[0] + phase[1].sin() + 0.7).sin() + (phase[0] - phase[1]).cos(),
+                };
+                expected += Complex64::from_polar(
+                    value / grid.sample_count() as f64,
+                    -(tuple[0] as f64 * phase[0] + tuple[1] as f64 * phase[1]),
+                );
+            }
+            close(point.spectra()[row][k], expected);
+        }
+    }
+}
+
+#[test]
+fn behavioral_quasiperiodic_rejects_unrepresented_or_nonstationary_clocks() {
+    use rspice_core::engine::QpssConfig;
+    for (expression, reason) in [
+        (
+            "sin(2*pi*128k*time)",
+            "absent from the retained tone lattice",
+        ),
+        ("sin(2*pi*1k*time*time)", "not affine in time"),
+        ("time", "nonperiodic explicit time"),
+        ("spice_sin(0,1,1k,0,1)", "not stationary"),
+        ("spice_pulse(0,1,0,1u,1u,1u,1m)", "collocation points"),
+    ] {
+        let netlist = Netlist::parse(&format!(
+            "Invalid behavioral torus\nb out 0 v={expression}\nr out 0 1k\n.end\n"
+        ))
+        .unwrap();
+        let error = Engine::default()
+            .run_qpss(
+                &netlist,
+                QpssConfig::new(vec![1e3, 1e3 * std::f64::consts::SQRT_2], vec![1, 1]),
+            )
+            .expect_err("unrepresented clock must not be sampled at time zero")
+            .to_string();
+        assert!(error.contains(reason), "{expression}: {error}");
+    }
+}

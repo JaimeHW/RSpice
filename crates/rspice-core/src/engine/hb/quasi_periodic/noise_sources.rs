@@ -111,7 +111,7 @@ impl Engine {
         let grid = engine.validate_qpss_operating_point_with_abort(netlist, point, abort)?;
         let circuit = engine.build_circuit_with_abort(netlist, abort)?;
         Self::ensure_no_mixed_signal_analysis(&circuit, "QPNOISE")?;
-        let mut solver = engine.qpss_circuit_solver(&circuit)?;
+        let mut solver = engine.qpss_circuit_solver(&circuit, &grid)?;
         let sources = engine.prepare_quasi_periodic_noise_sources(
             &circuit,
             &mut solver,

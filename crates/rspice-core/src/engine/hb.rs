@@ -44,6 +44,7 @@ mod quasi_periodic;
 #[cfg(test)]
 mod retained_auth_tests;
 mod stamping;
+use stamping::BehavioralBasis;
 mod state;
 
 pub use envelope_result::EnvelopeResult;
@@ -1687,7 +1688,12 @@ impl Engine {
         self.hb_stamp_periodic_mna_branches(&circuit, &mut solver)?;
         self.hb_stamp_current_sources(&circuit, &mut solver, &config, &drive_tones)?;
         if has_supported_nonlinear {
-            self.hb_stamp_supported_nonlinear_devices(&circuit, &mut solver, num_nodes, false)?;
+            self.hb_stamp_supported_nonlinear_devices(
+                &circuit,
+                &mut solver,
+                num_nodes,
+                BehavioralBasis::Periodic { autonomous: false },
+            )?;
         }
         let periodic_branch_names = solver.try_periodic_mna_branch_names().map_err(|error| {
             SimulationError::Circuit(format!(
