@@ -56,17 +56,21 @@ Project and session snapshots share this result representation.
 
 Configured-study forms expose trial retention and checkpoint cadence (default:
 every ten newly completed trials). A second section selects retained journals
-from the same authored analysis. Candidates with different population identities
-cannot be selected together. Preparation validates and pools the selected journals
-into owned request bytes; subsequent history pruning cannot mutate that request.
-Missing selections reject a new preparation. Inactive editor buffers survive
+from the same authored analysis. Preparation validates the selected journals and
+pools matching populations into owned request bytes; subsequent history pruning
+cannot mutate that request. After materializing the Run Set, preparation matches
+each point against its exact population without executing a trial. Each worker
+receives only its matching pool; unselected points run fresh. Missing selections
+or a selected population matching no requested point reject preparation. Changing
+solver, sampler or circuit settings cannot silently discard selected trials. Inactive editor buffers survive
 JSON/RON round trips without influencing execution. A fully cached run publishes
 its journal once even when no new circuit is evaluated.
 
 Checkpoint inspection/import/export, the legacy all-node operating-point route
-and browser runtime verification still need integration. A selected resume pool
-belongs to one physical Run Set point; reusing distinct populations across a
-multi-point request needs separate per-point routing.
+and browser runtime verification still need integration. A focused three-point
+Run Set check verifies that two resumed populations solve only their missing
+trials, the third point runs fresh, and all observations match fresh runs. It also
+checks refusal of incompatible solver settings and omitted selected points.
 
 Core population domain v2 permits literal `.MC` run counts, START, CONFIDENCE,
 CI, RESAMPLES and BOOTSEED to change while retaining exact trial identity. The
