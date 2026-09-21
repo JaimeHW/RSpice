@@ -81,6 +81,11 @@ need not repeat the producer's startup-mode option. Changed circuit/model data o
 tampered retained state are still rejected. Manual `.HB` decks receive one implicit
 OP when none is authored; multiple OP producers are rejected as ambiguous.
 
+HB artifact validation includes the effective `.OPTIONS NONLIN-HB MAXSTEP` from
+the frozen producer deck, including temperature-dependent expressions. Consumers
+reuse that authenticated orbit without repeating its startup or iteration-budget
+options. A different returned solver configuration is still rejected.
+
 Configured HB, HBSP, HBNOISE and HB-carried PAC/PXF/PNOISE studies retain the full
 selected OP configuration, including initialization, numerical options and producer
 identity. Each varied Monte Carlo or optimization candidate gets a fresh configured
