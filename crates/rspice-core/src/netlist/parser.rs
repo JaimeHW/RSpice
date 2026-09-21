@@ -812,6 +812,7 @@ fn parse_netlist_impl(
         xyce_syntax,
         abort,
     )?;
+    apply_replayed_temperature(&mut state)?;
 
     let mut line_num = body_start;
     let mut continuation = String::new();
@@ -1100,6 +1101,8 @@ fn parse_netlist_impl(
     if let Some(seed) = options.statistical_seed {
         state.options.seed = Some(seed);
     }
+    // Authored option cards must not undo a physical replay coordinate.
+    apply_replayed_temperature(&mut state)?;
     if let Some(policy) = state.options.remove_unused.clone() {
         apply_remove_unused_policy_with_abort(
             &mut state.elements,
@@ -4366,6 +4369,29 @@ fn is_dot_command_head(head: &str) -> bool {
     head.strip_prefix('.')
         .and_then(|rest| rest.chars().next())
         .is_some_and(|ch| ch.is_ascii_alphabetic())
+}
+
+/// A stepped/study temperature takes precedence over authored option cards
+/// before expressions are evaluated, and remains the solver's temperature.
+fn apply_replayed_temperature(state: &mut ParseState) -> Result<(), ParseError> {
+    let Some(temperature) = state
+        .parameter_overrides
+        .iter()
+        .rev()
+        .find(|parameter| !parameter.global && parameter.name.eq_ignore_ascii_case("TEMP"))
+        .map(|parameter| parameter.value)
+    else {
+        return Ok(());
+    };
+    let temperature = parse_celsius_option("TEMP", temperature, 0)?;
+    state.options.temp = Some(temperature);
+    state.params.set("TEMP", temperature);
+    state.params.set("TEMPER", temperature);
+    state.params.set(
+        "VT",
+        crate::constants::thermal_voltage(crate::constants::celsius_to_kelvin(temperature)),
+    );
+    Ok(())
 }
 
 fn prescan_temperature_options_with_abort(

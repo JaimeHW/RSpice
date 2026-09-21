@@ -598,6 +598,8 @@ impl Engine {
             })?;
         Self::reapply_ast_overlay_with_abort(&mut reparsed, &netlist.ast_overlay, abort)?;
         reparsed.ast_overlay.parameters = retained_parameters;
+        // Parameter replay changes this trial's equations, not its random coordinate.
+        reparsed.spectre_statistical_coordinate = netlist.spectre_statistical_coordinate.clone();
         let applied_device_overrides = Self::apply_device_parameter_overrides_with_abort(
             &mut reparsed,
             &device_overrides,

@@ -1206,12 +1206,20 @@ impl Engine {
         }
     }
 
-    fn step_temperature_netlist(
+    pub(super) fn step_temperature_netlist(
         &self,
         netlist: &Netlist,
         value: Value,
         abort: &dyn AbortSignal,
     ) -> Result<(Netlist, usize), SimulationError> {
+        if abort.is_aborted() {
+            return Err(SimulationError::from_abort(abort));
+        }
+        if !value.is_finite() || value <= -273.15 {
+            return Err(SimulationError::Circuit(
+                "Run temperature must be finite and above absolute zero".into(),
+            ));
+        }
         let vt = thermal_voltage_celsius(value);
         let overrides = [
             ("TEMP".to_string(), value),
@@ -2172,6 +2180,9 @@ fn apply_temperature_scalars(netlist: &mut Netlist, temp_c: Value, vt: Value) {
     netlist.params.set("TEMP", temp_c);
     netlist.params.set("TEMPER", temp_c);
     netlist.params.set("VT", vt);
+    if let Some(coordinate) = &mut netlist.spectre_statistical_coordinate {
+        coordinate.temperature_celsius = temp_c;
+    }
 }
 
 fn thermal_voltage_celsius(temp_c: Value) -> Value {

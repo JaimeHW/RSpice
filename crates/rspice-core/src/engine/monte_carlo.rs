@@ -8,6 +8,9 @@ use crate::netlist::{ElementKind, SourceSpec};
 use crate::{Netlist, Value};
 use std::collections::{HashMap, HashSet};
 
+#[cfg(test)]
+mod temperature_tests;
+
 mod measurements;
 pub use measurements::MonteCarloStudyConfig;
 mod deck_statistics;
@@ -333,6 +336,16 @@ impl Engine {
             distribution.validate()?;
         }
 
+        // Temperature participates in parameters, model expressions and source
+        // conditionals. Resolve it before sampling nominal values or replaying
+        // statistical expressions; supply scaling still occurs once per trial.
+        let temperature_netlist = environment
+            .map(|point| {
+                self.step_temperature_netlist(netlist, point.temperature_celsius, abort)
+                    .map(|(netlist, _)| netlist)
+            })
+            .transpose()?;
+        let netlist = temperature_netlist.as_ref().unwrap_or(netlist);
         let normalized_filter: Option<HashSet<String>> = parameter_filter.and_then(|params| {
             let normalized: HashSet<String> = params
                 .iter()
@@ -370,7 +383,9 @@ impl Engine {
                 .all_params()
                 .into_iter()
                 .filter(|(name, value)| {
-                    value.is_finite()
+                    // An explicit environment fixes these physical coordinates.
+                    !(environment.is_some() && ["TEMP", "TEMPER", "VT"].contains(&name.as_str()))
+                        && value.is_finite()
                         && value.abs() > 0.0
                         && netlist
                             .params
