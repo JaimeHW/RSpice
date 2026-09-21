@@ -696,6 +696,8 @@ jobs:
           --label rspice-ui-worker
       - name: Qualify browser WASM JIT solver bridge in Chromium
         run: python3 tools/ci/check_wasm_jit_browser.py
+      - name: Qualify Monte Carlo checkpoint capture and continuation in Chromium
+        run: python3 tools/ci/check_browser_monte_carlo_checkpoint.py
       - name: Build instrumented browser workbench
         run: >-
           cargo build --locked --profile web-release -p rspice-ui

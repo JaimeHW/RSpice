@@ -80,8 +80,7 @@ measurement-goal misses, trial ranges and measurement names. File-picker complet
 are drained outside the editor and imports are bound to the originating project and
 design epoch. A completion after project replacement cannot modify the new project.
 
-Browser runtime verification remains outstanding. A focused three-point
-Run Set check verifies that two resumed populations solve only their missing
+A focused three-point Run Set check verifies that two resumed populations solve only their missing
 trials, the third point runs fresh, and all observations match fresh runs. It also
 checks refusal of incompatible solver settings and omitted selected points.
 
@@ -119,3 +118,15 @@ the existing service runner for parameter and deck-statistics sampling, includin
 Run Set temperature/supply, mixed-signal filtering, and authored numeric names.
 They also cover a nominal circuit with no real OP solution, changed-basis refusal,
 form validation, and the synchronized Rust/JavaScript request protocol.
+
+`python tools/ci/check_browser_monte_carlo_checkpoint.py` exercises the shipping
+worker in an isolated headless Chrome profile. Build the `rspice-ui-worker` wasm
+image with `browser-worker` and generate its web bindings into `web/pkg` first.
+The check terminates a worker after receiving its first trial journal, transfers
+that journal to a new worker and verifies that only five missing trials execute.
+It compares the completed observations and updated histogram against a fresh
+six-trial population, checks fully cached replay, and rejects changed circuits and
+corrupted bytes. CI runs the same check against its production worker image.
+`--output` retains the verdict and tested asset hashes. This verifies worker
+execution and transfer; the native file-action checks cover picker ownership and
+project/session persistence separately.
