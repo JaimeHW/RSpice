@@ -16,7 +16,7 @@ fn coupled_line_tail_matches_independent_telegrapher_equations() {
         ..SimulationConfig::default()
     });
     let result = engine.run_tran(&netlist, 20e-9, 5e-12).unwrap();
-    let reference = include_str!("../../../tests/qualification/cpl_ibm2_telegrapher.tsv");
+    let reference = include_str!("testdata/qualification/cpl_ibm2_telegrapher.tsv");
     let columns = ["v1", "v2", "v3", "v4"].map(|node| {
         result
             .node_names
