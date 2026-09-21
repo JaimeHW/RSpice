@@ -875,6 +875,8 @@ pub(crate) enum WorkerSimulationResult {
         operating_point: rspice_core::engine::HbOperatingPoint,
     },
     Noise {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        output_unit: Option<rspice_core::analysis::MeasurementUnit>,
         frequencies: Vec<f64>,
         output_noise: Vec<f64>,
         input_noise: Option<Vec<f64>>,
@@ -1505,6 +1507,7 @@ impl WorkerSimulationResult {
                 ),
             ]),
             WorkerSimulationResult::Noise {
+                output_unit: _,
                 frequencies,
                 output_noise,
                 input_noise,
@@ -1680,7 +1683,8 @@ impl WorkerSimulationResult {
 /// 27: optimization retains validated hard-constraint evidence and feasibility.
 /// 28: OP configurations retain compatible-circuit previous-state policy.
 /// 29: scalar measurements preserve physical units.
-const WORKER_RESPONSE_TRANSPORT_PROTOCOL: u8 = 29;
+/// 30: noise spectra retain their physical or logarithmic output unit.
+const WORKER_RESPONSE_TRANSPORT_PROTOCOL: u8 = 30;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct WorkerResponseTransport {
@@ -1899,6 +1903,7 @@ impl TryFrom<SimulationResult> for WorkerSimulationResult {
                 operating_point: std::sync::Arc::unwrap_or_clone(operating_point),
             }),
             SimulationResult::Noise {
+                output_unit,
                 frequencies,
                 output_noise,
                 input_noise,
@@ -1906,6 +1911,7 @@ impl TryFrom<SimulationResult> for WorkerSimulationResult {
                 summary,
                 measurements,
             } => Ok(Self::Noise {
+                output_unit,
                 frequencies,
                 output_noise,
                 input_noise,
@@ -2272,6 +2278,7 @@ impl From<WorkerSimulationResult> for SimulationResult {
                 operating_point: std::sync::Arc::new(operating_point),
             },
             WorkerSimulationResult::Noise {
+                output_unit,
                 frequencies,
                 output_noise,
                 input_noise,
@@ -2279,6 +2286,7 @@ impl From<WorkerSimulationResult> for SimulationResult {
                 summary,
                 measurements,
             } => Self::Noise {
+                output_unit,
                 frequencies,
                 output_noise,
                 input_noise,

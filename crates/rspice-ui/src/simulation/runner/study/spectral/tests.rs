@@ -124,6 +124,20 @@ fn spectral_monte_carlo_uses_each_trial_circuit_and_exact_frozen_transient() {
             panic!("MC result")
         };
         assert_eq!(runs_completed, 4);
+        for member in &member_measurements {
+            let amplitude = member.evidence_for("bin:1:magnitude").unwrap();
+            let millivolts = amplitude.value_in_unit("mV").unwrap().unwrap();
+            assert!((millivolts - amplitude.value.unwrap() * 1000.0).abs() < 1e-9);
+            assert!(amplitude.value_in_unit("A").is_err());
+            assert!(
+                member
+                    .evidence_for("bin:1:phase")
+                    .unwrap()
+                    .value_in_unit("rad")
+                    .unwrap()
+                    .is_some()
+            );
+        }
         assert_eq!(
             member_measurements
                 .iter()

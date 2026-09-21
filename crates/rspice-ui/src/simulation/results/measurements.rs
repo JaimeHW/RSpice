@@ -6,7 +6,9 @@
 
 use super::*;
 mod quasi_periodic;
+mod units;
 pub(crate) use quasi_periodic::parse_study_tuple;
+use units::unit;
 
 impl SimulationResult {
     /// Resolve a study request without falling back from a failed `.MEAS` to
@@ -40,14 +42,18 @@ impl SimulationResult {
                 error: measurement.error.clone(),
             });
         }
+        let mut measured_unit = rspice_core::analysis::MeasurementUnit::Unknown;
         let value = if mode.eq_ignore_ascii_case("tuple") {
-            self.qpss_tuple_measurement(key)
+            let (value, physical_unit) = self.qpss_tuple_measurement(key)?;
+            measured_unit = physical_unit;
+            Some(value)
         } else if mode.eq_ignore_ascii_case("bin") {
             let (index, quantity, signal) = parse_study_bin(key).ok()?;
             let parts = match self {
                 Self::Fft { spectrum, .. }
                     if spectrum.evidence.status.is_complete() && signal.is_none() =>
                 {
+                    measured_unit = units::fft_unit(&spectrum.evidence);
                     Some((*spectrum.real.get(index)?, *spectrum.imaginary.get(index)?))
                 }
                 Self::Transient {
@@ -59,6 +65,11 @@ impl SimulationResult {
                     }
                     let result = &point.analysis().result;
                     let signal = signal?;
+                    measured_unit = if parse_wrapped_identifier(signal, "V").is_some() {
+                        unit("V")
+                    } else {
+                        unit("A")
+                    };
                     let (name, names, waves) =
                         if let Some(name) = parse_wrapped_identifier(signal, "V") {
                             (name, &result.node_names, &result.waveforms)
@@ -101,6 +112,7 @@ impl SimulationResult {
                         }
                         first
                     };
+                    measured_unit = unit(&waveform.y_unit);
                     Some((
                         *waveform.y_values.get(index)?,
                         if waveform.is_complex {
@@ -113,10 +125,14 @@ impl SimulationResult {
                     ))
                 }
                 Self::Noise { .. } if quantity.eq_ignore_ascii_case("real") => {
+                    measured_unit = self.noise_study_unit(signal?);
                     Some((*self.noise_study_series(signal?)?.get(index)?, 0.0))
                 }
                 _ => None,
             };
+            if quantity.eq_ignore_ascii_case("phase") {
+                measured_unit = unit("deg");
+            }
             parts.map(
                 |(real, imaginary)| match quantity.to_ascii_lowercase().as_str() {
                     "real" => real,
@@ -127,6 +143,7 @@ impl SimulationResult {
                 },
             )
         } else if mode.eq_ignore_ascii_case("scalar") {
+            measured_unit = self.study_scalar_unit(key);
             match self {
                 Self::DcOp(_)
                 | Self::PoleZero { .. }
@@ -178,8 +195,15 @@ impl SimulationResult {
                 | Self::Qpss { waveforms, .. }
                 | Self::Qpac { waveforms, .. }
                 | Self::Qpxf { waveforms, .. }
-                | Self::Qpnoise { waveforms, .. } => waveform_last_value_by_name(waveforms, key),
-                Self::Noise { .. } => self.noise_study_series(key)?.last().copied(),
+                | Self::Qpnoise { waveforms, .. } => {
+                    let waveform = last_waveform_by_name(waveforms, key)?;
+                    measured_unit = unit(&waveform.y_unit);
+                    waveform.y_values.last().copied()
+                }
+                Self::Noise { .. } => {
+                    measured_unit = self.noise_study_unit(key);
+                    self.noise_study_series(key)?.last().copied()
+                }
                 _ => None,
             }
         } else {
@@ -187,7 +211,7 @@ impl SimulationResult {
         };
         value.filter(|value| value.is_finite()).map(|value| {
             crate::state::FamilyMeasurementEvidence {
-                unit: None,
+                unit: Some(measured_unit),
                 name: request.to_owned(),
                 value: Some(value),
                 passed: true,
@@ -730,11 +754,17 @@ fn waveform_last_value_by_name(
     waveforms: &HashMap<String, WaveformData>,
     key: &str,
 ) -> Option<f64> {
-    let last = |name: &str| {
-        named_value(waveforms, name)
-            .and_then(|waveform| waveform.y_values.last())
-            .copied()
-    };
+    last_waveform_by_name(waveforms, key)?
+        .y_values
+        .last()
+        .copied()
+}
+
+fn last_waveform_by_name<'a>(
+    waveforms: &'a HashMap<String, WaveformData>,
+    key: &str,
+) -> Option<&'a WaveformData> {
+    let last = |name: &str| named_value(waveforms, name).filter(|wave| !wave.y_values.is_empty());
     last(key)
         .or_else(|| {
             parse_wrapped_identifier(key, "V")

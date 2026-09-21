@@ -285,6 +285,9 @@ impl EngineBridge {
         ensure_not_aborted(abort)?;
 
         Ok(SimulationResult::Noise {
+            output_unit: Some(rspice_core::analysis::MeasurementUnit::Known(
+                "V²/Hz".into(),
+            )),
             frequencies,
             output_noise,
             input_noise,

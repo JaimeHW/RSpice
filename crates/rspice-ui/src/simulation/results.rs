@@ -288,6 +288,8 @@ pub enum SimulationResult {
 
     /// Noise analysis results
     Noise {
+        /// Explicit spectrum unit; absent on imported or historical data.
+        output_unit: Option<rspice_core::analysis::MeasurementUnit>,
         /// Frequency vector
         frequencies: Vec<f64>,
         /// Output noise spectral density (V²/Hz or A²/Hz)

@@ -206,6 +206,7 @@ impl WorkerSimulationResultTransport {
                     .map(|values| WorkerF64Series::from_vec(values, buffers)),
             },
             WorkerSimulationResult::Noise {
+                output_unit,
                 frequencies,
                 output_noise,
                 input_noise,
@@ -213,6 +214,7 @@ impl WorkerSimulationResultTransport {
                 summary,
                 measurements,
             } => Self::Noise {
+                output_unit,
                 frequencies: WorkerF64Series::from_vec(frequencies, buffers),
                 output_noise: WorkerF64Series::from_vec(output_noise, buffers),
                 input_noise: input_noise.map(|values| WorkerF64Series::from_vec(values, buffers)),
@@ -568,6 +570,7 @@ impl WorkerSimulationResultTransport {
                     .transpose()?,
             }),
             Self::Noise {
+                output_unit,
                 frequencies,
                 output_noise,
                 input_noise,
@@ -575,6 +578,7 @@ impl WorkerSimulationResultTransport {
                 summary,
                 measurements,
             } => Ok(WorkerSimulationResult::Noise {
+                output_unit,
                 frequencies: frequencies.into_vec(buffers)?,
                 output_noise: output_noise.into_vec(buffers)?,
                 input_noise: input_noise

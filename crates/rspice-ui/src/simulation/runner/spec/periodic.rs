@@ -339,6 +339,9 @@ fn run_hbnoise(
         band,
     });
     Ok(SimulationResult::Noise {
+        output_unit: Some(rspice_core::analysis::MeasurementUnit::Known(
+            "V²/Hz".into(),
+        )),
         frequencies: data.frequencies,
         output_noise: data.output_noise,
         input_noise: Some(data.input_noise),

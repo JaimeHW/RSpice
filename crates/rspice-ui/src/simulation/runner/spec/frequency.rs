@@ -585,20 +585,33 @@ fn run_pnoise(
         })?
     };
 
-    pnoise_result(data, abort)
+    pnoise_result(data, pnoise_cfg.noise_ref, abort)
+}
+
+fn noise_measurement(name: &str, value: f64, symbol: &str) -> rspice_core::MeasureResult {
+    use rspice_core::analysis::{MeasurementUnit, MeasurementUnits};
+    let mut result = rspice_core::MeasureResult::success(name, value);
+    result.units = Some(MeasurementUnits {
+        value: MeasurementUnit::Known(symbol.into()),
+        raw_value: MeasurementUnit::Known(symbol.into()),
+        axis: MeasurementUnit::Known("Hz".into()),
+    });
+    result
 }
 
 fn pnoise_result(
     data: svc_runner::PnoiseData,
+    reference: svc_runner::PnoiseReference,
     abort: &dyn AbortSignal,
 ) -> Result<SimulationResult, SimulationError> {
     let mut measurements = Vec::with_capacity(data.contributors.len() + 2);
     let mut shares = HashMap::with_capacity(data.contributors.len());
     for (name, percentage) in data.contributors {
         super::ensure_not_aborted(abort)?;
-        measurements.push(rspice_core::MeasureResult::success(
+        measurements.push(noise_measurement(
             &format!("noise_share_percent({name})"),
             percentage,
+            "%",
         ));
         shares.insert(name, percentage);
     }
@@ -643,18 +656,20 @@ fn pnoise_result(
     });
 
     if let Some(value) = data.phase_rms_rad {
-        measurements.push(rspice_core::MeasureResult::success(
-            "phase_error_rms_rad",
-            value,
-        ));
+        measurements.push(noise_measurement("phase_error_rms_rad", value, "rad"));
     }
     if let Some(value) = data.timing_jitter_rms_s {
-        measurements.push(rspice_core::MeasureResult::success(
-            "timing_jitter_rms_s",
-            value,
-        ));
+        measurements.push(noise_measurement("timing_jitter_rms_s", value, "s"));
     }
     Ok(SimulationResult::Noise {
+        output_unit: Some(rspice_core::analysis::MeasurementUnit::Known(
+            if reference == svc_runner::PnoiseReference::Phase {
+                "dBc/Hz"
+            } else {
+                "V²/Hz"
+            }
+            .into(),
+        )),
         frequencies: data.frequencies,
         output_noise: data.output_noise,
         input_noise: data.input_noise,
@@ -681,16 +696,26 @@ fn pnoise_phase_contributor_shares_are_measurements_not_density_curves() {
         timing_jitter_rms_s: Some(1e-9),
     };
     let SimulationResult::Noise {
+        output_unit,
         contributors,
         measurements,
         output_noise,
         summary,
         ..
-    } = pnoise_result(data, &rspice_core::abort_signal::NoAbort).unwrap()
+    } = pnoise_result(
+        data,
+        svc_runner::PnoiseReference::Phase,
+        &rspice_core::abort_signal::NoAbort,
+    )
+    .unwrap()
     else {
         panic!("noise");
     };
     assert!(contributors.is_empty());
+    assert_eq!(
+        output_unit.as_ref().and_then(|unit| unit.symbol()),
+        Some("dBc/Hz")
+    );
     assert!(summary.is_none());
     assert_eq!(output_noise, vec![-80.0, -100.0]);
     for (name, value) in [
@@ -707,6 +732,20 @@ fn pnoise_phase_contributor_shares_are_measurements_not_density_curves() {
                 .value,
             Some(value)
         );
+    }
+    for (name, target, expected) in [
+        ("noise_share_percent(R1)", "ratio", 0.8),
+        ("phase_error_rms_rad", "deg", 0.01_f64.to_degrees()),
+        ("timing_jitter_rms_s", "ns", 1.0),
+    ] {
+        let value = measurements
+            .iter()
+            .find(|measurement| measurement.name == name)
+            .unwrap()
+            .value_in_unit(target)
+            .unwrap()
+            .unwrap();
+        assert!((value - expected).abs() < 1e-12);
     }
 }
 
@@ -1361,7 +1400,7 @@ pub(super) fn run_periodic_study_consumer(
                     circuit, config, carrier, abort,
                 )
             })?;
-            pnoise_result(data, abort)
+            pnoise_result(data, config.noise_ref, abort)
         }
         StudyPeriodicOptions::Pstb(config) => {
             let svc_runner::PeriodicCarrierState::Shooting(point) = carrier else {

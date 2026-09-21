@@ -246,6 +246,7 @@ fn noise_result_conversion_drops_traces_with_mismatched_frequency_shapes() {
 
     let analysis = controller.convert_to_analysis_result_with_metadata_owned(
         crate::simulation::SimulationResult::Noise {
+            output_unit: None,
             frequencies: vec![1.0, 10.0, 100.0],
             output_noise: vec![2.0e-18, 3.0e-18],
             input_noise: Some(vec![1.0e-18, 1.5e-18, 2.0e-18]),

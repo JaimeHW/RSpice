@@ -29,6 +29,7 @@ fn hbnoise_retains_noise_figure_as_decibels_with_its_source_reference() {
     };
     let result = SimulationController::new().convert_to_analysis_result_with_metadata_owned(
         crate::simulation::SimulationResult::Noise {
+            output_unit: None,
             frequencies: figure.frequencies.clone(),
             output_noise: vec![1e-18, 2e-18],
             input_noise: Some(vec![3e-18, 4e-18]),
@@ -87,6 +88,7 @@ fn hbnoise_retains_noise_figure_as_decibels_with_its_source_reference() {
 #[test]
 fn descending_data_axis_is_retained_monotonically_with_every_series_paired() {
     let sim_result = crate::simulation::SimulationResult::Noise {
+        output_unit: None,
         frequencies: vec![10.0, 1.0, 10.0],
         output_noise: vec![100.0, 10.0, 101.0],
         input_noise: Some(vec![200.0, 20.0, 201.0]),
@@ -122,6 +124,7 @@ fn descending_data_axis_is_retained_monotonically_with_every_series_paired() {
 #[test]
 fn descending_axis_with_misaligned_worker_series_fails_closed_without_panicking() {
     let sim_result = crate::simulation::SimulationResult::Noise {
+        output_unit: None,
         frequencies: vec![10.0, 1.0],
         output_noise: vec![100.0],
         input_noise: Some(vec![200.0]),
@@ -155,6 +158,7 @@ fn periodic_noise_result(
     // this in the product; these tests stand in for it.
     controller.current_periodic_carrier_hz = Some(2.4e9);
     let sim_result = crate::simulation::SimulationResult::Noise {
+        output_unit: None,
         frequencies: vec![1.0e3, 1.0e6],
         output_noise: vec![-90.0, -130.0],
         input_noise: None,
@@ -381,6 +385,7 @@ fn an_oscillator_publishes_the_carrier_it_converged_at_not_the_authored_guess() 
     controller.current_periodic_carrier_hz = Some(converged);
 
     let sim_result = crate::simulation::SimulationResult::Noise {
+        output_unit: None,
         frequencies: vec![1.0e3, 1.0e5],
         output_noise: vec![-90.0, -130.0],
         input_noise: None,
@@ -433,6 +438,7 @@ fn phase_noise_with_no_captured_carrier_is_refused_rather_than_labelled_with_a_g
     assert!(controller.current_periodic_carrier_hz.is_none());
 
     let sim_result = crate::simulation::SimulationResult::Noise {
+        output_unit: None,
         frequencies: vec![1.0e3, 1.0e6],
         output_noise: vec![-90.0, -130.0],
         input_noise: None,

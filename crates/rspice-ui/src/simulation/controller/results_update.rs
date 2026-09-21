@@ -224,16 +224,19 @@ impl SimulationController {
 
             SimulationResult::Noise {
                 frequencies,
-                output_noise,
+                summary,
                 measurements,
                 ..
             } => {
-                // Calculate integrated noise
-                let integrated: f64 = output_noise.iter().sum::<f64>().sqrt();
+                let integrated = summary
+                    .as_ref()
+                    .and_then(|summary| summary.total_rms)
+                    .map_or(String::new(), |rms| {
+                        format!(", integrated output: {rms:.3e} V rms")
+                    });
                 state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(
-                    "Noise: {} points, integrated output: {:.3e} V/sqrt(Hz)",
-                    frequencies.len(),
-                    integrated
+                    "Noise: {} points{integrated}",
+                    frequencies.len()
                 )));
                 echo_measurements(state, measurements);
             }

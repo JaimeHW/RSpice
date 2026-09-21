@@ -412,6 +412,7 @@ fn worker_result_round_trip() {
         band: (1.0, 1.0e6),
     };
     let noise = SimulationResult::Noise {
+        output_unit: None,
         frequencies: vec![1.0, 10.0],
         output_noise: vec![1.0e-18, 2.0e-18],
         input_noise: Some(vec![3.0e-18, 4.0e-18]),
@@ -422,6 +423,7 @@ fn worker_result_round_trip() {
     let noise = round_trip_result(noise);
     match noise {
         SimulationResult::Noise {
+            output_unit,
             frequencies,
             output_noise,
             input_noise,
@@ -429,6 +431,7 @@ fn worker_result_round_trip() {
             summary,
             measurements,
         } => {
+            assert!(output_unit.is_none());
             assert_eq!(frequencies, vec![1.0, 10.0]);
             assert_eq!(output_noise, vec![1.0e-18, 2.0e-18]);
             assert_eq!(input_noise, Some(vec![3.0e-18, 4.0e-18]));

@@ -374,7 +374,7 @@ pub(super) fn nondefault_op_config() -> crate::simulation::dialog::OpConfig {
 
 #[test]
 fn browser_worker_transfer_protocol_matches_rust_transport() {
-    assert_eq!(WORKER_RESPONSE_TRANSPORT_PROTOCOL, 29);
+    assert_eq!(WORKER_RESPONSE_TRANSPORT_PROTOCOL, 30);
     assert_eq!(WORKER_REQUEST_TRANSPORT_PROTOCOL, 34);
     let source = include_str!("../../../../web/simulation-worker.js");
     assert!(source.contains(&format!(
@@ -1568,6 +1568,7 @@ fn worker_result_payload_estimate_counts_high_volume_arrays() {
     assert_eq!(ac.estimated_numeric_payload_bytes(), 96);
 
     let noise = WorkerSimulationResult::Noise {
+        output_unit: None,
         frequencies: vec![1.0, 10.0],
         output_noise: vec![1.0e-18, 2.0e-18],
         input_noise: Some(vec![3.0e-18, 4.0e-18]),
@@ -1761,6 +1762,7 @@ fn worker_transport_round_trips_ac_and_noise_buffers() {
     let noise = WorkerResponse {
         id: 11,
         outcome: WorkerOutcome::Success(Box::new(WorkerSimulationResult::Noise {
+            output_unit: None,
             frequencies: vec![1.0, 10.0],
             output_noise: vec![1.0e-18, 2.0e-18],
             input_noise: Some(vec![3.0e-18, 4.0e-18]),
@@ -2304,4 +2306,85 @@ fn measurement_units_survive_worker_and_study_projection() {
         axis: MeasurementUnit::Unknown,
     });
     assert!(WorkerResponseTransport::from_response(response_with_measurement(invalid)).is_err());
+}
+
+#[test]
+fn study_measurement_units_preserve_noise_spectrum_identity() {
+    use rspice_core::analysis::{MeasurementUnit, noise::NoiseInputQuantity};
+    for symbol in ["V²/Hz", "dBc/Hz"] {
+        let result = SimulationResult::Noise {
+            output_unit: Some(MeasurementUnit::known(symbol).unwrap()),
+            frequencies: vec![100.0, 200.0],
+            output_noise: vec![1e-12, 2e-12],
+            input_noise: Some(vec![1e-18, 2e-18]),
+            contributors: HashMap::new(),
+            summary: Some(NoiseSummary {
+                input_quantity: Some(NoiseInputQuantity::Current),
+                total_rms: Some(1e-5),
+                input_rms: Some(1e-8),
+                band: (100.0, 200.0),
+                ..Default::default()
+            }),
+            measurements: vec![],
+        };
+        let mut response = response_with_measurement(projected_worker_measurement());
+        response.outcome =
+            WorkerOutcome::Success(Box::new(WorkerSimulationResult::try_from(result).unwrap()));
+        let mut transport = WorkerResponseTransport::from_response(response).unwrap();
+        transport.response =
+            serde_json::from_str(&serde_json::to_string(&transport.response).unwrap()).unwrap();
+        let restored = transport.into_response().unwrap().into_result().unwrap();
+        assert_eq!(
+            restored
+                .study_measurement("last:output_noise")
+                .unwrap()
+                .unit,
+            Some(MeasurementUnit::known(symbol).unwrap())
+        );
+        assert!(
+            restored
+                .study_measurement("last:output_noise")
+                .unwrap()
+                .value_in_unit("A²/Hz")
+                .is_err()
+        );
+        let referred = restored
+            .study_measurement("bin:0:real:input_noise")
+            .unwrap();
+        assert!((referred.value_in_unit("(nA)^2/Hz").unwrap().unwrap() - 1.0).abs() < 1e-14);
+        let input_rms = restored
+            .study_measurement("scalar:noise.input_rms")
+            .unwrap()
+            .value_in_unit("nA")
+            .unwrap()
+            .unwrap();
+        assert!((input_rms - 10.0).abs() < 1e-12);
+        let retained = crate::simulation::controller::SimulationController::new()
+            .convert_to_analysis_result_with_metadata_owned(
+                restored,
+                crate::state::AnalysisType::Pnoise,
+                "noise",
+            );
+        assert_eq!(
+            retained
+                .waveforms
+                .iter()
+                .find(|wave| wave.name == "onoise")
+                .unwrap()
+                .unit
+                .as_deref(),
+            Some(symbol)
+        );
+    }
+    let mut response = response_with_measurement(projected_worker_measurement());
+    response.outcome = WorkerOutcome::Success(Box::new(WorkerSimulationResult::Noise {
+        output_unit: Some(MeasurementUnit::Known("invalid unit".into())),
+        frequencies: vec![],
+        output_noise: vec![],
+        input_noise: None,
+        contributors: HashMap::new(),
+        summary: None,
+        measurements: vec![],
+    }));
+    assert!(WorkerResponseTransport::from_response(response).is_err());
 }

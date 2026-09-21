@@ -19,7 +19,7 @@ Saved drafts preserve the text controls; typed plans, manual-deck imports,
 execution identities, Python card descriptions, and worker requests preserve
 the resolved values. Older saved plans use the defaults. Browser request
 protocol 34 rejects older workers that could discard the controls. The response
-protocol is 29, which also retains scalar measurement units.
+protocol is 30, which also retains scalar measurement and noise-spectrum units.
 
 Unbounded moments are analytic, including the physical lognormal standard
 deviation. Bounded groups use the sampler's Gaussian copula with Genz conditional

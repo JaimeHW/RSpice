@@ -350,6 +350,13 @@ pub(super) fn validate_worker_response_before_transport(
 }
 
 fn validate_worker_measurements(result: &WorkerSimulationResult) -> Result<(), String> {
+    if let WorkerSimulationResult::Noise {
+        output_unit: Some(unit),
+        ..
+    } = result
+    {
+        unit.validate()?;
+    }
     let measurements = match result {
         WorkerSimulationResult::DcSweep { measurements, .. }
         | WorkerSimulationResult::Transient { measurements, .. }
@@ -1263,6 +1270,8 @@ pub(crate) enum WorkerSimulationResultTransport {
         noise_reference_temperature_kelvin: Option<f64>,
     },
     Noise {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        output_unit: Option<rspice_core::analysis::MeasurementUnit>,
         frequencies: WorkerF64Series,
         output_noise: WorkerF64Series,
         input_noise: Option<WorkerF64Series>,

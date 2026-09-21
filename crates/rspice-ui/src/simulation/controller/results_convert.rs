@@ -322,6 +322,7 @@ impl SimulationController {
             }
 
             SimulationResult::Noise {
+                output_unit,
                 frequencies,
                 output_noise,
                 input_noise,
@@ -346,6 +347,13 @@ impl SimulationController {
                     for wave in &mut result.waveforms {
                         if wave.name == "onoise" || wave.name.starts_with("noise(") {
                             wave.unit = Some("V²/Hz".into());
+                        }
+                    }
+                }
+                if let Some(unit) = output_unit.as_ref().and_then(|unit| unit.symbol()) {
+                    for wave in &mut result.waveforms {
+                        if wave.name == "onoise" || wave.name.starts_with("noise(") {
+                            wave.unit = Some(unit.to_owned());
                         }
                     }
                 }
@@ -1179,11 +1187,8 @@ impl SimulationController {
         let freq_len = shared_freqs.len();
         let mut results = Vec::new();
 
-        // These series carry no stated unit on purpose. The generic engine
-        // noise transport is the same vector for a V²/Hz output PSD and for
-        // dBc/Hz phase noise, and only the periodic-noise family metadata
-        // knows which one a run produced. Claiming one here would make every
-        // oscillator's phase noise read as a power spectral density.
+        // The caller attaches the producer's explicit output unit. Historical
+        // data may lack it because this vector also carries dBc/Hz phase noise.
         if Self::samples_match_shared_axis(&output_noise, freq_len) {
             results.push(crate::state::WaveformData::new(
                 "onoise".to_string(),
@@ -2352,6 +2357,7 @@ mod waveform_unit_conversion_tests {
     #[test]
     fn retained_noise_series_state_no_unit_so_phase_noise_is_never_called_a_psd() {
         let sim_result = crate::simulation::SimulationResult::Noise {
+            output_unit: None,
             frequencies: vec![1.0e3, 1.0e6],
             output_noise: vec![-90.0, -130.0],
             input_noise: None,

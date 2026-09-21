@@ -25,7 +25,10 @@ pub(crate) fn parse_study_tuple(key: &str) -> Result<(Vec<i32>, &str, &str), Str
 }
 
 impl SimulationResult {
-    pub(super) fn qpss_tuple_measurement(&self, key: &str) -> Option<f64> {
+    pub(super) fn qpss_tuple_measurement(
+        &self,
+        key: &str,
+    ) -> Option<(f64, rspice_core::analysis::MeasurementUnit)> {
         let Self::Qpss {
             waveforms, tuples, ..
         } = self
@@ -51,13 +54,21 @@ impl SimulationResult {
         let waveform = named_value(waveforms, signal)?;
         let real = *waveform.y_values.get(index)?;
         let imaginary = *waveform.y_imag.as_ref()?.get(index)? * sign;
-        Some(match quantity.to_ascii_lowercase().as_str() {
-            "real" => real,
-            "imag" => imaginary,
-            "magnitude" => real.hypot(imaginary),
-            "phase" => imaginary.atan2(real).to_degrees(),
-            _ => unreachable!(),
-        })
+        let physical_unit = if quantity.eq_ignore_ascii_case("phase") {
+            unit("deg")
+        } else {
+            unit(&waveform.y_unit)
+        };
+        Some((
+            match quantity.to_ascii_lowercase().as_str() {
+                "real" => real,
+                "imag" => imaginary,
+                "magnitude" => real.hypot(imaginary),
+                "phase" => imaginary.atan2(real).to_degrees(),
+                _ => unreachable!(),
+            },
+            physical_unit,
+        ))
     }
 
     pub(super) fn qpnoise_study_scalar(&self, key: &str) -> Option<f64> {
