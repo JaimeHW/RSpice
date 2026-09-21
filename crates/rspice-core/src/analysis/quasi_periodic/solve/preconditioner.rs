@@ -93,6 +93,7 @@ impl FrequencyBlocks {
     pub fn apply(
         &mut self,
         direction: &[Value],
+        divisors: &[Value],
         abort: &dyn AbortSignal,
     ) -> Result<Vec<Value>, Error> {
         check_abort(abort)?;
@@ -108,7 +109,7 @@ impl FrequencyBlocks {
             check_abort(abort)?;
             let k = dc + offset;
             for row in 0..self.unknowns {
-                rhs[row] = spectra[row][k];
+                rhs[row] = spectra[row][k] * divisors[row];
             }
             let solved = match matrix {
                 Some(matrix) => matrix.solve(&rhs)?,

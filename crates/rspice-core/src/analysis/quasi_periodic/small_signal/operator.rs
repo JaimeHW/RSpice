@@ -2,10 +2,9 @@
 use super::*;
 
 impl Linearization {
-    /// Adjoint equations inherit the units of the forward unknowns. Explicit
-    /// integral coordinates can make a column many orders larger than a node
-    /// column. Equilibrate those rows before measuring an algebraic residual;
-    /// otherwise a change of time units alone can prevent convergence.
+    /// Integral coordinates can make a forward or adjoint equation many orders
+    /// larger than a node equation. Equilibrate the algebraic solve and inverse
+    /// certificate; final physical acceptance retains its own tolerances.
     pub(super) fn equation_divisors(
         &self,
         frequencies: &[Value],
@@ -13,30 +12,42 @@ impl Linearization {
         abort: &dyn AbortSignal,
     ) -> Result<Vec<Value>, Error> {
         let mut divisors = vec![1.0_f64; self.unknowns];
-        if self.orientation == Orientation::Adjoint {
-            let omega =
-                frequencies.iter().map(|f| f.abs()).fold(0.0, Value::max) * std::f64::consts::TAU;
-            for sample in &self.derivatives {
-                check_abort(abort)?;
-                for (terms, weight) in [(&sample.conductance, 1.0), (&sample.capacitance, omega)] {
-                    for &(_, col, value) in terms {
-                        let magnitude = value.abs() * weight;
-                        if !magnitude.is_finite() {
-                            return Err(Error::Numerical("QPXF equation scale overflowed".into()));
-                        }
-                        divisors[col] = divisors[col].max(magnitude);
+        let omega =
+            frequencies.iter().map(|f| f.abs()).fold(0.0, Value::max) * std::f64::consts::TAU;
+        for sample in std::iter::once(&self.stationary).chain(&self.derivatives) {
+            check_abort(abort)?;
+            for (terms, weight) in [(&sample.conductance, 1.0), (&sample.capacitance, omega)] {
+                for &(row, col, value) in terms {
+                    let equation = if self.orientation == Orientation::Adjoint {
+                        col
+                    } else {
+                        row
+                    };
+                    let magnitude = value.abs() * weight;
+                    if !magnitude.is_finite() {
+                        return Err(Error::Numerical(
+                            "QP small-signal equation scale overflowed".into(),
+                        ));
                     }
+                    divisors[equation] = divisors[equation].max(magnitude);
                 }
             }
-            for entries in linear {
-                check_abort(abort)?;
-                for &(_, col, value) in entries {
-                    let magnitude = value.norm();
-                    if !magnitude.is_finite() {
-                        return Err(Error::Numerical("QPXF equation scale overflowed".into()));
-                    }
-                    divisors[col] = divisors[col].max(magnitude);
+        }
+        for entries in linear {
+            check_abort(abort)?;
+            for &(row, col, value) in entries {
+                let equation = if self.orientation == Orientation::Adjoint {
+                    col
+                } else {
+                    row
+                };
+                let magnitude = value.norm();
+                if !magnitude.is_finite() {
+                    return Err(Error::Numerical(
+                        "QP small-signal equation scale overflowed".into(),
+                    ));
                 }
+                divisors[equation] = divisors[equation].max(magnitude);
             }
         }
         Ok(divisors)
@@ -126,6 +137,7 @@ impl Linearization {
                     g[k] + Complex64::new(0.0, std::f64::consts::TAU * frequencies[k]) * c[k];
             }
         }
+        self.add_stationary(frequencies, direction, &mut output, abort)?;
         for (k, matrix) in linear.iter().enumerate() {
             check_abort(abort)?;
             for &(row, col, value) in matrix {

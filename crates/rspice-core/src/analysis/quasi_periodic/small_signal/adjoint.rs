@@ -61,6 +61,7 @@ impl Linearization {
         for row in &products {
             output.extend(self.transform.to_spectrum_with_abort(row, abort)?);
         }
+        self.add_stationary(frequencies, direction, &mut output, abort)?;
         for (k, matrix) in linear.iter().enumerate() {
             check_abort(abort)?;
             for &(row, col, value) in matrix {

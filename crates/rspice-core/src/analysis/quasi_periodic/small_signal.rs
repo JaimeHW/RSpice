@@ -2,6 +2,7 @@
 mod adjoint;
 mod linear;
 mod operator;
+mod stationary;
 #[cfg(test)]
 mod tests;
 
@@ -93,6 +94,7 @@ pub(crate) struct Linearization {
     unknowns: usize,
     voltage_rows: Vec<bool>,
     derivatives: Vec<Derivatives>,
+    stationary: Derivatives,
     base_values: usize,
     value_limit: usize,
 }
@@ -151,6 +153,11 @@ impl Linearization {
                 capacitance: sample.capacitance,
             });
         }
+        let first = &derivatives[0];
+        base_values = base_values
+            .saturating_add((first.conductance.len() + first.capacitance.len()).saturating_mul(8));
+        ResourceLimitError::ensure(ResourceKind::ResultValues, base_values, value_limit)?;
+        let stationary = stationary::separate(&mut derivatives, abort)?;
         Ok(Self {
             orientation: Orientation::Forward,
             config: config.clone(),
@@ -158,6 +165,7 @@ impl Linearization {
             transform,
             unknowns,
             derivatives,
+            stationary,
             base_values,
             value_limit,
             voltage_rows: (0..unknowns)

@@ -39,6 +39,19 @@ impl Blocks {
             &work.derivatives[..]
         };
         let mut means: BTreeMap<(usize, usize), (Value, Value)> = BTreeMap::new();
+        for (charge, terms) in [
+            (false, &work.stationary.conductance),
+            (true, &work.stationary.capacitance),
+        ] {
+            for &(r, c, v) in terms {
+                let pair = means.entry((r, c)).or_default();
+                if charge {
+                    pair.1 += v;
+                } else {
+                    pair.0 += v;
+                }
+            }
+        }
         for sample in samples {
             check_abort(abort)?;
             for (charge, terms) in [(false, &sample.conductance), (true, &sample.capacitance)] {
@@ -102,7 +115,13 @@ impl Blocks {
                 rhs[row] = direction[row * entries + k] * divisors[row];
             }
             let solved = match matrix {
-                Some(matrix) => matrix.solve(&rhs)?,
+                Some(matrix) => match matrix.solve(&rhs) {
+                    Ok(solution) => solution,
+                    Err(SolverError::InaccurateSolution(_)) if self.unknowns <= 64 => {
+                        matrix.solve_dense_extended(&rhs)?
+                    }
+                    Err(error) => return Err(error.into()),
+                },
                 None => rhs.clone(),
             };
             for (row, value) in solved.into_iter().enumerate() {
@@ -139,10 +158,17 @@ impl Linearization {
         drop(entries);
         let solution = match matrix.solve(rhs) {
             Ok(solution) => solution,
-            // Small exact-MNA systems can lose homogeneous equations during
-            // sparse elimination. Keep the same strict backward-error check
-            // when retrying with extended precision, as the HB solver does.
-            Err(SolverError::InaccurateSolution(_)) if size <= 64 => {
+            // Homogeneous constraints can lose accuracy during sparse
+            // elimination. The caller already bounds direct systems to 512
+            // coordinates; account for the extended real-block workspace and
+            // retain the same strict certificate on the rounded solution.
+            Err(SolverError::InaccurateSolution(_)) => {
+                ResourceLimitError::ensure(
+                    ResourceKind::ResultValues,
+                    self.base_values
+                        .saturating_add(size.saturating_mul(size).saturating_mul(24)),
+                    self.value_limit,
+                )?;
                 matrix.solve_dense_extended(rhs)?
             }
             Err(error) => return Err(error.into()),
