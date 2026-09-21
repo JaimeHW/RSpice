@@ -25,7 +25,7 @@ from typing import Callable, Sequence
 
 
 ROOT = Path(__file__).resolve().parents[2]
-PROCEDURE = "security/DRAWING_SHEET_RELEASE_QUALIFICATION.md"
+PROCEDURE = "tools/release/DRAWING_SHEET_RELEASE_QUALIFICATION.md"
 MAX_SOURCE_LINES = 2_500
 SCHEMA_VERSION = 1
 

@@ -180,7 +180,7 @@ class DrawingSheetQualificationTests(unittest.TestCase):
         (root / "scope" / "sheet.rs").write_text("fn sheet() {}\n", encoding="utf-8")
         for relative, content in (
             ("Cargo.lock", "# lock\n"),
-            ("security/DRAWING_SHEET_RELEASE_QUALIFICATION.md", "# procedure\n"),
+            ("tools/release/DRAWING_SHEET_RELEASE_QUALIFICATION.md", "# procedure\n"),
             ("tools/ci/qualify_drawing_sheet.py", "# runner\n"),
         ):
             path = root / relative
