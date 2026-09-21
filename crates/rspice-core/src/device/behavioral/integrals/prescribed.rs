@@ -15,16 +15,28 @@ impl PrescribedIntegralRate<'_> {
         self.equation
             .inputs
             .iter()
-            .map(|input| match input {
-                Input::Integral(index) => Some(self.source_start + index),
+            .try_fold(Vec::new(), |mut dependencies, input| match input {
+                Input::Integral(index) => {
+                    dependencies.push(self.source_start + index);
+                    Some(dependencies)
+                }
+                Input::Phase(_) => Some(dependencies),
                 _ => None,
             })
-            .collect()
     }
 
     pub(crate) fn sample(
         &self,
         time: Value,
+        integral: impl Fn(usize) -> Value,
+    ) -> Result<Value, String> {
+        self.sample_with_phases(time, &[], integral)
+    }
+
+    pub(crate) fn sample_with_phases(
+        &self,
+        time: Value,
+        phases: &[Value],
         integral: impl Fn(usize) -> Value,
     ) -> Result<Value, String> {
         let mut environment = self.environment;
@@ -34,6 +46,9 @@ impl PrescribedIntegralRate<'_> {
             .evaluate(
                 |input| match input {
                     Input::Integral(index) => (integral(self.source_start + index), 0.0.into()),
+                    Input::Phase(index) => {
+                        (phases.get(index).copied().unwrap_or(Value::NAN), 0.0.into())
+                    }
                     _ => (Value::NAN, 0.0.into()),
                 },
                 environment,

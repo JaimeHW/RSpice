@@ -2,6 +2,7 @@
 #[cfg(test)]
 mod integral_tests;
 mod noise_sources;
+pub(super) mod prescribed;
 
 use super::*;
 use crate::ResourceLimits;
@@ -44,7 +45,8 @@ impl HbSolver {
             return Err(Error::Aborted);
         }
         self.validate_quasi_periodic_circuit()?;
-        solve::solve_with_abort(self, grid, config, sources, seed, limits, abort)
+        let limits = self.prepare_quasi_periodic_integrals(grid.clone(), limits, false, abort)?;
+        solve::solve_with_abort(self, grid, config, sources, seed, &limits, abort)
     }
 
     /// Linearize a real driven QP orbit once, then solve complex translated
@@ -88,6 +90,8 @@ impl HbSolver {
         let mut working_limits = limits.clone();
         working_limits.max_result_values = limits.max_result_values.saturating_sub(values);
         self.validate_quasi_periodic_circuit()?;
+        let working_limits =
+            self.prepare_quasi_periodic_integrals(grid.clone(), &working_limits, true, abort)?;
         let mut work = crate::analysis::quasi_periodic::small_signal::Linearization::prepare(
             self,
             grid,
@@ -177,6 +181,8 @@ impl HbSolver {
         let mut working_limits = limits.clone();
         working_limits.max_result_values = limits.max_result_values.saturating_sub(values);
         self.validate_quasi_periodic_circuit()?;
+        let working_limits =
+            self.prepare_quasi_periodic_integrals(grid.clone(), &working_limits, true, abort)?;
         let mut work =
             crate::analysis::quasi_periodic::small_signal::Linearization::prepare_adjoint(
                 self,
@@ -215,6 +221,7 @@ impl HbSolver {
             return Err(Error::Aborted);
         }
         self.validate_quasi_periodic_circuit()?;
+        let limits = self.prepare_quasi_periodic_integrals(grid.clone(), limits, true, abort)?;
         crate::analysis::quasi_periodic::noise::visit_with_abort(
             self,
             grid,
@@ -222,7 +229,7 @@ impl HbSolver {
             orbit,
             observations,
             sources,
-            limits,
+            &limits,
             abort,
             consume,
         )

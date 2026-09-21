@@ -10,6 +10,61 @@ pub struct QuasiPeriodicSampleSpectrum {
 }
 
 impl QuasiPeriodicTransform {
+    /// Fold a full signed interpolant back onto the collocation grid. Nyquist
+    /// partners share bins and must be added, not overwritten. This keeps
+    /// prescribed-state preparation linearithmic in the sample count.
+    pub(crate) fn complete_real_samples_with_abort(
+        &mut self,
+        spectrum: &QuasiPeriodicSampleSpectrum,
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<Value>, Error> {
+        check_abort(abort)?;
+        if spectrum.tuples.len() != spectrum.coefficients.len() {
+            return Err(Error::InvalidConfig(
+                "complete spectrum has mismatched coordinates".into(),
+            ));
+        }
+        let mut values = zero_buffer(self.grid.sample_count())?;
+        for (i, (tuple, coefficient)) in spectrum
+            .tuples
+            .iter()
+            .zip(&spectrum.coefficients)
+            .enumerate()
+        {
+            if i.is_multiple_of(256) {
+                check_abort(abort)?;
+            }
+            if tuple.len() != self.grid.dimensions().len() || !finite(*coefficient) {
+                return Err(Error::InvalidConfig(
+                    "complete spectrum has invalid tone coordinates or coefficients".into(),
+                ));
+            }
+            let mut bin = 0;
+            let mut stride = 1;
+            for (&k, &size) in tuple.iter().zip(self.grid.dimensions()) {
+                if k.unsigned_abs() as usize > size / 2 {
+                    return Err(Error::InvalidConfig(
+                        "complete spectrum exceeds its collocation grid".into(),
+                    ));
+                }
+                bin += k.rem_euclid(size as i32) as usize * stride;
+                stride *= size;
+            }
+            values[bin] += coefficient;
+        }
+        self.transform(&mut values, true, abort)?;
+        let scale = values.iter().map(|v| v.re.abs()).fold(0.0_f64, Value::max);
+        if values
+            .iter()
+            .any(|v| !finite(*v) || v.im.abs() > 128.0 * Value::EPSILON * scale)
+        {
+            return Err(Error::Numerical(
+                "complete interpolant does not produce finite real phase samples".into(),
+            ));
+        }
+        Ok(values.into_iter().map(|v| v.re).collect())
+    }
+
     /// Keep every collocation bin, including harmonics above the circuit basis.
     /// An even dimension's Nyquist bin is shared equally between +/-N/2;
     /// this gives the real cosine interpolant, applied along each tone axis.
@@ -151,6 +206,12 @@ mod tests {
                     &NoAbort,
                 )
                 .unwrap();
+            let restored = transform
+                .complete_real_samples_with_abort(&spectrum, &NoAbort)
+                .unwrap();
+            for (actual, expected) in restored.iter().zip(&samples) {
+                assert!((actual - expected).abs() < 3e-14);
+            }
             assert!(
                 spectrum
                     .tuples

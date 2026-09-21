@@ -5,6 +5,8 @@ mod frequency_sweep;
 #[cfg(test)]
 mod integral_tests;
 mod noise_sources;
+#[cfg(test)]
+mod prescribed_tests;
 mod qpac;
 mod qpnoise;
 mod qpxf;
