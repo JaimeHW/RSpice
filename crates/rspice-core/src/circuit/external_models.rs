@@ -769,7 +769,7 @@ impl CircuitData {
     /// it keeps `V()` and `D()` both — the same hybrid ngspice publishes on
     /// both sides.
     #[inline]
-    pub(crate) fn event_only_net_kind(&self, node: NodeId) -> Option<EventOnlyNetKind> {
+    pub fn event_only_net_kind(&self, node: NodeId) -> Option<EventOnlyNetKind> {
         if self
             .analog_touched_nodes
             .as_ref()
