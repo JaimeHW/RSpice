@@ -382,11 +382,22 @@ impl HbOperatingPointIdentity {
         simulation_config: &super::SimulationConfig,
         hb_config: &HbConfig,
     ) -> Result<HbOperatingPointProducerInputs, SimulationError> {
-        let semantic_netlist_identity = netlist_checkpoint_identity(netlist).ok_or_else(|| {
-            SimulationError::Circuit(
-                "HB producer netlist has no canonical semantic identity".to_owned(),
-            )
-        })?;
+        // Startup chooses how to find the retained orbit; it does not change
+        // the circuit a dependent analysis linearizes about. The exact orbit
+        // and its resolved solver/source-transform configuration remain bound.
+        let semantic_netlist = if netlist.options.hb_time_domain_mode.is_some() {
+            let mut normalized = netlist.clone();
+            normalized.options.hb_time_domain_mode = None;
+            std::borrow::Cow::Owned(normalized)
+        } else {
+            std::borrow::Cow::Borrowed(netlist)
+        };
+        let semantic_netlist_identity =
+            netlist_checkpoint_identity(&semantic_netlist).ok_or_else(|| {
+                SimulationError::Circuit(
+                    "HB producer netlist has no canonical semantic identity".to_owned(),
+                )
+            })?;
         Ok(HbOperatingPointProducerInputs {
             semantic_netlist_identity,
             resolved_simulation_identity: hb_resolved_simulation_identity(simulation_config),
