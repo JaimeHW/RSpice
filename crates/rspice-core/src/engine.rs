@@ -70,8 +70,8 @@ mod health;
 mod matrix;
 mod monte_carlo;
 pub use monte_carlo::{
-    MonteCarloEnvironment, MonteCarloRunConfig, MonteCarloStudyConfig, MonteCarloVariationSource,
-    apply_supply_voltage_scale_with_abort, monte_carlo_deck_trial_seed,
+    MonteCarloCheckpoint, MonteCarloEnvironment, MonteCarloRunConfig, MonteCarloStudyConfig,
+    MonteCarloVariationSource, apply_supply_voltage_scale_with_abort, monte_carlo_deck_trial_seed,
 };
 mod node_resolver;
 pub use node_resolver::NodeResolver;

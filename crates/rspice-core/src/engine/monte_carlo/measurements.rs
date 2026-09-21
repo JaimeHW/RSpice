@@ -72,6 +72,23 @@ impl Engine {
         F: Fn(&Engine, &Netlist, usize, &dyn AbortSignal) -> Result<Vec<Value>, SimulationError>
             + Sync,
     {
+        self.run_monte_carlo_measurements_journaled_with_abort(
+            netlist, study, abort, None, evaluate,
+        )
+    }
+
+    pub(super) fn run_monte_carlo_measurements_journaled_with_abort<F>(
+        &self,
+        netlist: &Netlist,
+        study: &MonteCarloStudyConfig,
+        abort: &dyn AbortSignal,
+        journal: Option<super::MonteCarloTrialJournal<'_, Vec<Value>>>,
+        evaluate: F,
+    ) -> Result<MonteCarloResult, SimulationError>
+    where
+        F: Fn(&Engine, &Netlist, usize, &dyn AbortSignal) -> Result<Vec<Value>, SimulationError>
+            + Sync,
+    {
         if abort.is_aborted() {
             return Err(SimulationError::from_abort(abort));
         }
@@ -131,10 +148,11 @@ impl Engine {
             parameter_filter: Some(&study.parameter_filter),
             environment: study.environment.as_ref(),
         };
-        let (outcomes, sampling) = self.run_monte_carlo_trials_with_abort(
+        let (outcomes, sampling) = self.run_monte_carlo_trials_journaled_with_abort(
             netlist,
             &options,
             abort,
+            journal,
             |engine, trial, index, abort| {
                 let values = evaluate(engine, trial, index, abort)?;
                 if values.len() != study.measurements.len()

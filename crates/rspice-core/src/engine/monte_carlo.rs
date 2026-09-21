@@ -13,6 +13,15 @@ mod temperature_tests;
 
 mod measurements;
 pub use measurements::MonteCarloStudyConfig;
+mod checkpoint;
+pub use checkpoint::MonteCarloCheckpoint;
+
+/// Optional retained outcomes and a commit hook for completed (including failed)
+/// trials. A missing row is unfinished, while a present None is a failed trial.
+struct MonteCarloTrialJournal<'a, T> {
+    restore: &'a (dyn Fn(usize) -> Option<Option<T>> + Sync),
+    commit: &'a (dyn Fn(usize, &Option<T>) -> Result<(), SimulationError> + Sync),
+}
 mod deck_statistics;
 pub use deck_statistics::{MonteCarloVariationSource, monte_carlo_deck_trial_seed};
 
@@ -308,6 +317,20 @@ impl Engine {
     where
         F: Fn(&Engine, &Netlist, usize, &dyn AbortSignal) -> Result<T, SimulationError> + Sync,
     {
+        self.run_monte_carlo_trials_journaled_with_abort(netlist, options, abort, None, evaluate)
+    }
+
+    fn run_monte_carlo_trials_journaled_with_abort<T: Send, F>(
+        &self,
+        netlist: &Netlist,
+        options: &MonteCarloRunConfig<'_>,
+        abort: &dyn AbortSignal,
+        journal: Option<MonteCarloTrialJournal<'_, T>>,
+        evaluate: F,
+    ) -> Result<(Vec<Option<T>>, MonteCarloSampling), SimulationError>
+    where
+        F: Fn(&Engine, &Netlist, usize, &dyn AbortSignal) -> Result<T, SimulationError> + Sync,
+    {
         let MonteCarloRunConfig {
             first_trial,
             num_runs,
@@ -567,6 +590,28 @@ impl Engine {
         // failed runs are skipped just as before.
         // None retains the identity of a failed solve or measurement.
         type RunOutcome<T> = Result<Option<T>, SimulationError>;
+        let evaluate_run = |engine: &Engine, offset: usize| -> RunOutcome<T> {
+            let index = first_trial + offset;
+            if let Some(outcome) = journal
+                .as_ref()
+                .and_then(|journal| (journal.restore)(index))
+            {
+                return Ok(outcome);
+            }
+            let trial = materialize_run(offset)?;
+            let outcome = match evaluate(engine, &trial, index, abort) {
+                Ok(values) => Some(values),
+                Err(error @ SimulationError::Aborted)
+                | Err(error @ SimulationError::TimeLimitExceeded)
+                | Err(error @ SimulationError::ResourceLimit(_))
+                | Err(error @ SimulationError::Configuration(_)) => return Err(error),
+                Err(_) => None,
+            };
+            if let Some(journal) = &journal {
+                (journal.commit)(index, &outcome)?;
+            }
+            Ok(outcome)
+        };
 
         let workers = std::thread::available_parallelism()
             .map(|n| n.get())
@@ -579,18 +624,8 @@ impl Engine {
                 if abort.is_aborted() {
                     return Err(SimulationError::from_abort(abort));
                 }
-                let run_netlist = materialize_run(run_index)?;
-                let outcome = match evaluate(self, &run_netlist, first_trial + run_index, abort) {
-                    Ok(result) => Ok(Some(result)),
-                    Err(error @ SimulationError::Aborted)
-                    | Err(error @ SimulationError::TimeLimitExceeded)
-                    | Err(error @ SimulationError::ResourceLimit(_))
-                    | Err(error @ SimulationError::Configuration(_)) => {
-                        return Err(error.with_abort_reason(abort));
-                    }
-                    Err(_) => Ok(None),
-                };
-                run_outcomes.push(outcome);
+                run_outcomes.push(Ok(evaluate_run(self, run_index)
+                    .map_err(|error| error.with_abort_reason(abort))?));
             }
         } else {
             use std::sync::Mutex;
@@ -618,23 +653,7 @@ impl Engine {
                             if index >= num_runs {
                                 break;
                             }
-                            let run_netlist = match materialize_run(index) {
-                                Ok(run_netlist) => run_netlist,
-                                Err(error) => {
-                                    *slots[index].lock().expect("mc slot") = Some(Err(error));
-                                    stopped.store(true, Ordering::Release);
-                                    break;
-                                }
-                            };
-                            let outcome =
-                                match evaluate(&engine, &run_netlist, first_trial + index, abort) {
-                                    Ok(result) => Ok(Some(result)),
-                                    Err(error @ SimulationError::Aborted)
-                                    | Err(error @ SimulationError::TimeLimitExceeded)
-                                    | Err(error @ SimulationError::ResourceLimit(_))
-                                    | Err(error @ SimulationError::Configuration(_)) => Err(error),
-                                    Err(_) => Ok(None),
-                                };
+                            let outcome = evaluate_run(&engine, index);
                             let fatal = outcome.is_err();
                             *slots[index].lock().expect("mc slot") = Some(outcome);
                             if fatal {
