@@ -204,11 +204,13 @@ pub(in crate::workbench::surfaces::simulate) fn checkpoint_sources(
     setup: &mut McDialogState,
     simulation: &crate::state::SimulationState,
     selected: crate::product::AnalysisInstanceId,
-) {
-    if !setup.checkpoint.retain_trials {
-        return;
-    }
+) -> Option<crate::workbench::surfaces::simulate::checkpoint_exchange::Action> {
+    use crate::workbench::surfaces::simulate::checkpoint_exchange;
+    let mut action = None;
     super::sub_header(ui, "Resume previous trials");
+    if super::action_line(ui, "Import checkpoint…") {
+        action = Some(checkpoint_exchange::Action::Import);
+    }
     let mut seen = std::collections::HashSet::new();
     let candidates = simulation
         .runs
@@ -221,39 +223,80 @@ pub(in crate::workbench::surfaces::simulate) fn checkpoint_sources(
                 }
                 let checkpoint = analysis.monte_carlo_checkpoint.as_ref()?;
                 Some((
-                    checkpoint.digest(),
-                    checkpoint.population_identity(),
                     format!(
                         "{} · {} · {} trials",
                         run.label,
                         analysis.label,
                         checkpoint.completed_trials()
                     ),
+                    checkpoint.clone(),
                 ))
             })
         })
-        .filter(|(digest, _, _)| seen.insert(*digest))
+        .chain(
+            simulation
+                .imported_monte_carlo_checkpoints
+                .iter()
+                .map(|entry| {
+                    (
+                        format!(
+                            "Imported · {} · {} trials",
+                            entry.name(),
+                            entry.checkpoint().completed_trials()
+                        ),
+                        entry.checkpoint().clone(),
+                    )
+                }),
+        )
+        .filter(|(_, checkpoint)| seen.insert(checkpoint.digest()))
         .collect::<Vec<_>>();
     if candidates.is_empty() {
         field_note(
             ui,
-            "No retained trials for this analysis yet. Run it with trial retention enabled to create a checkpoint.",
+            "No checkpoints available. Run with trial retention enabled or import a checkpoint file.",
         );
     } else {
         field_note(
             ui,
-            "Select runs to reuse. Each Run Set point uses its matching trials; points without a selected checkpoint run normally. Matching trials are counted once and missing indices are simulated. Preparation rejects selections whose circuit, sampler or analysis settings match no requested point.",
+            "Each Run Set point reuses its matching selected trials; other points run fresh. Matching trials are counted once and missing indices are simulated. Preparation checks the circuit, sampler and analysis settings. Imported checkpoints are saved with the project.",
         );
+        if !setup.checkpoint.retain_trials {
+            field_note(
+                ui,
+                "Enable trial retention above to resume from selected checkpoints.",
+            );
+        }
     }
-    for (digest, _population, label) in &candidates {
-        let mut chosen = setup.checkpoint.resume.contains(digest);
+    for (label, checkpoint) in candidates {
+        let digest = checkpoint.digest();
+        let mut chosen = setup.checkpoint.resume.contains(&digest);
         ui.push_id(digest, |ui| {
-            if super::switch_row(ui, label, &mut chosen) {
-                if chosen {
-                    setup.checkpoint.resume.push(*digest);
-                } else {
-                    setup.checkpoint.resume.retain(|id| id != digest);
+            ui.add_enabled_ui(setup.checkpoint.retain_trials, |ui| {
+                if super::switch_row(ui, &label, &mut chosen) {
+                    if chosen {
+                        setup.checkpoint.resume.push(digest);
+                    } else {
+                        setup.checkpoint.resume.retain(|id| *id != digest);
+                    }
                 }
+            });
+            if super::action_line(ui, "Inspect checkpoint") {
+                action = Some(checkpoint_exchange::Action::Inspect(
+                    label,
+                    checkpoint.clone(),
+                ));
+            }
+            if super::action_line(ui, "Export checkpoint…") {
+                action = Some(checkpoint_exchange::Action::Export(checkpoint.clone()));
+            }
+            if simulation
+                .imported_monte_carlo_checkpoints
+                .get(digest)
+                .is_some()
+                && super::action_line(ui, "Remove imported copy")
+            {
+                action = Some(checkpoint_exchange::Action::Remove(digest));
+                setup.checkpoint.resume.retain(|id| *id != digest);
             }
         });
     }
@@ -265,7 +308,7 @@ pub(in crate::workbench::surfaces::simulate) fn checkpoint_sources(
     {
         field_note(
             ui,
-            "A selected checkpoint is no longer available in this analysis's run history. Restore its run or clear the selection.",
+            "A selected checkpoint is no longer available. Restore its run, import its checkpoint file, or clear the selection.",
         );
     }
     if !setup.checkpoint.resume.is_empty()
@@ -274,4 +317,5 @@ pub(in crate::workbench::surfaces::simulate) fn checkpoint_sources(
         setup.checkpoint.resume.clear();
     }
     super::clear_pending_cell(ui);
+    action
 }

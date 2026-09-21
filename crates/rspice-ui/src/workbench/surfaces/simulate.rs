@@ -3,6 +3,7 @@
 mod advanced_options;
 mod analysis_form;
 mod catalog;
+mod checkpoint_exchange;
 mod lifecycle;
 mod output_evidence;
 mod page_excitations;
@@ -367,6 +368,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
 /// plan manager commits from any workspace, and the strip that would have
 /// stated its refusal is drawn on one route.
 pub(in crate::workbench) fn show_workflow_dialogs(ctx: &egui::Context, app: &mut RSpiceApp) {
+    checkpoint_exchange::poll(ctx, app);
     simulation_workflow_dialog(ctx, app);
     analysis_catalog(ctx, app);
     drain_lifecycle_refusal(ctx, &mut app.state);
@@ -1639,6 +1641,7 @@ fn analysis_editor(
     // reason the participation action is: the frame is already borrowing `app`.
     let mut run_space_route = None;
     let mut option_edits = Vec::new();
+    let mut checkpoint_action = None;
 
     let t = Tokens::get(ui.ctx());
     let editor_response = egui::Frame::new().fill(t.color.bg_app).show(ui, |ui| {
@@ -1670,9 +1673,13 @@ fn analysis_editor(
             &mut run_space_route,
             selected.id,
             &mut option_edits,
+            &mut checkpoint_action,
         );
         (form_anchor_y, rename_requested)
     });
+    if let Some(action) = checkpoint_action {
+        checkpoint_exchange::apply(ui.ctx(), app, action);
+    }
     if let Some(page) = run_space_route {
         app.state.workbench.simulation_page = page;
     }
@@ -2236,6 +2243,7 @@ fn analysis_form_body(
     // record, through the plan transaction, after this frame has closed.
     selected: AnalysisInstanceId,
     option_edits: &mut Vec<advanced_options::OptionEdit>,
+    checkpoint_action: &mut Option<checkpoint_exchange::Action>,
 ) -> f32 {
     let project_revision = app.state.workspace.project.revision();
     let previous_state = app
@@ -2360,7 +2368,8 @@ fn analysis_form_body(
             // are: a bound this analysis states, in the same grid and with the
             // same label over the same well.
             if let AnalysisDraft::MonteCarlo(setup) = draft {
-                analysis_form::checkpoint_sources(ui, setup, &app.state.simulation, selected);
+                *checkpoint_action =
+                    analysis_form::checkpoint_sources(ui, setup, &app.state.simulation, selected);
             }
             *option_edits = analysis_form::options::fields(ui, app, draft, selected);
         })

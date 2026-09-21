@@ -47,7 +47,7 @@ advancing to the next task. Checkpoints obey the run's storage ceiling. A reques
 for checkpoint capture cannot report successful completion without a retained
 journal matching its completed trial measurements.
 
-Project result schema 35 stores the checked portable bytes as bounded Base64 with
+Project result schema 35 introduced checked portable bytes as bounded Base64 with
 their content identity. Result and dataset digests bind the journal, and storage
 accounting includes its full binary size. Older projects preserve absence and
 their existing digests. Saving during execution keeps the committed trials;
@@ -66,8 +66,21 @@ solver, sampler or circuit settings cannot silently discard selected trials. Ina
 JSON/RON round trips without influencing execution. A fully cached run publishes
 its journal once even when no new circuit is evaluated.
 
-Checkpoint inspection/import/export and browser runtime verification still need
-integration. A focused three-point
+Checkpoint files use a versioned `.rspice-mc` JSON envelope with bounded Base64
+and a checked content identity. Schema 36 adds a project-level library for imported
+journals, separate from native result history. Importing does not manufacture run
+provenance or select a journal automatically. Preparation resolves selected content
+identities from either source and applies the same population compatibility checks.
+Aggregate storage limits and duplicate detection apply to imports and project reads.
+Immutable shared ownership keeps project snapshot caching inexpensive.
+
+The Monte Carlo editor supports import, export, inspection and removal of imported
+copies. Inspection decodes on demand and shows committed and failed trial counts,
+measurement-goal misses, trial ranges and measurement names. File-picker completions
+are drained outside the editor and imports are bound to the originating project and
+design epoch. A completion after project replacement cannot modify the new project.
+
+Browser runtime verification remains outstanding. A focused three-point
 Run Set check verifies that two resumed populations solve only their missing
 trials, the third point runs fresh, and all observations match fresh runs. It also
 checks refusal of incompatible solver settings and omitted selected points.

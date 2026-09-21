@@ -23,6 +23,17 @@ pub(crate) struct StudyMonteCarloCheckpoint {
     pub(super) observations: Observations,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct CheckpointInspection {
+    pub successful_trials: usize,
+    pub failed_trials: usize,
+    pub failed_measurement_trials: usize,
+    pub ranges: Vec<String>,
+    pub additional_ranges: usize,
+    pub measurement_count: usize,
+    pub measurements: Vec<String>,
+}
+
 fn invalid(message: &str) -> SimulationError {
     SimulationError::InvalidConfig(format!("Monte Carlo checkpoint: {message}"))
 }
@@ -57,6 +68,59 @@ pub(super) fn failed_observations(names: &[String], error: &str) -> Vec<FamilyMe
 }
 
 impl StudyMonteCarloCheckpoint {
+    pub(crate) fn inspection(&self) -> CheckpointInspection {
+        let mut ranges = Vec::new();
+        let mut total_ranges = 0usize;
+        let mut start = None;
+        let mut end = 0usize;
+        let mut emit = |start, end| {
+            total_ranges += 1;
+            if ranges.len() < 16 {
+                ranges.push(if start == end {
+                    format!("{start}")
+                } else {
+                    format!("{start}–{end}")
+                });
+            }
+        };
+        let mut successful_trials = 0;
+        let mut failed_measurement_trials = 0;
+        for index in self.completed_indices() {
+            if self
+                .numerical
+                .trial(index)
+                .expect("committed trial")
+                .is_some()
+            {
+                successful_trials += 1;
+                if self.observations[&index].iter().any(|value| !value.passed) {
+                    failed_measurement_trials += 1;
+                }
+            }
+            match start {
+                None => start = Some(index),
+                Some(first) if end.checked_add(1) != Some(index) => {
+                    emit(first, end);
+                    start = Some(index);
+                }
+                _ => {}
+            }
+            end = index;
+        }
+        if let Some(start) = start {
+            emit(start, end);
+        }
+        CheckpointInspection {
+            successful_trials,
+            failed_trials: self.completed_trials() - successful_trials,
+            failed_measurement_trials,
+            additional_ranges: total_ranges.saturating_sub(ranges.len()),
+            ranges,
+            measurement_count: self.measurements.len(),
+            measurements: self.measurements.iter().take(24).cloned().collect(),
+        }
+    }
+
     pub(crate) fn population_identity(&self) -> [u8; 32] {
         self.numerical.population_identity()
     }
