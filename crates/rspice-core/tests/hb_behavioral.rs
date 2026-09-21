@@ -486,3 +486,177 @@ fn behavioral_quasiperiodic_rejects_unrepresented_or_nonstationary_clocks() {
         assert!(error.contains(reason), "{expression}: {error}");
     }
 }
+
+#[test]
+fn behavioral_quasiperiodic_signed_resets_preserve_rounding_and_independent_clocks() {
+    use rspice_core::abort_signal::NoAbort;
+    use rspice_core::analysis::quasi_periodic::{QuasiPeriodicGrid, QuasiPeriodicSampling};
+    use rspice_core::engine::QpssConfig;
+    use std::f64::consts::TAU;
+    let expressions = [
+        "mod(1k*time-.125,1)",
+        "(-1414.213562373095*time+.125)%-1",
+        "1k*time-floor(1k*time+.25)",
+        "ceil(1k*time+.25)-1k*time",
+        "(-1k*time+.125)-int(-1k*time+.125)",
+        "2k*time-round(2k*time)",
+    ];
+    let mut deck = "Signed behavioral clocks\n".to_string();
+    for (i, expression) in expressions.iter().enumerate() {
+        deck.push_str(&format!("b{i} n{i} 0 v={expression}\nr{i} n{i} 0 1k\n"));
+    }
+    deck.push_str("bcur sink 0 i=1m*mod(1k*time,1)\nrsink sink 0 1k\n.end\n");
+    let netlist = Netlist::parse(&deck).unwrap();
+    let mut config = QpssConfig::new(vec![1e3, 1e3 * std::f64::consts::SQRT_2], vec![1, 1]);
+    config.grid.sampling = QuasiPeriodicSampling::Exact(vec![32, 24]);
+    let grid =
+        QuasiPeriodicGrid::new_with_abort(config.grid.clone(), &Default::default(), &NoAbort)
+            .unwrap();
+    let point = Engine::default().run_qpss(&netlist, config).unwrap();
+    for i in 0..=expressions.len() {
+        let name = if i == expressions.len() {
+            "sink".to_owned()
+        } else {
+            format!("n{i}")
+        };
+        let row = point
+            .node_names()
+            .iter()
+            .position(|n| n.eq_ignore_ascii_case(&name))
+            .unwrap();
+        for (k, tuple) in grid.indices().iter().enumerate() {
+            let mut expected = Complex64::ZERO;
+            for sample in 0..grid.sample_count() {
+                let phase = grid.phases(sample).unwrap();
+                let a = phase[0] / TAU;
+                let b = phase[1] / TAU;
+                let value = match i {
+                    0 => (a - 0.125).rem_euclid(1.0),
+                    1 => -((b - 0.125).rem_euclid(1.0)),
+                    2 => a - (a + 0.25).floor(),
+                    3 => (a + 0.25).ceil() - a,
+                    4 => -((a - 0.125).rem_euclid(1.0)),
+                    5 => 2.0 * a - (2.0 * a).round_ties_even(),
+                    _ => -a,
+                };
+                expected += Complex64::from_polar(
+                    value / grid.sample_count() as f64,
+                    -(tuple[0] as f64 * phase[0] + tuple[1] as f64 * phase[1]),
+                );
+            }
+            close(point.spectra()[row][k], expected);
+        }
+    }
+}
+
+#[test]
+fn behavioral_quasiperiodic_table_clock_retains_control_phase_derivatives() {
+    use rspice_core::abort_signal::NoAbort;
+    use rspice_core::analysis::quasi_periodic::{QuasiPeriodicGrid, QuasiPeriodicSampling};
+    use rspice_core::engine::{QpacRequest, QpssConfig};
+    use std::f64::consts::TAU;
+    // Fixed lookup data, runtime PWL, and state-dependent table amplitudes
+    // reach different expression representations but retain the same phase law.
+    for waveform in [
+        "table(mod(1k*time+v(ctrl),1),0,0,.25,1,.5,0,.75,-1,1,0)",
+        "pwl(mod(1k*time+v(ctrl),1),0,0,.25,1,.5,0,.75,-1,1,0)",
+        "table(mod(1k*time+v(ctrl),1),0,0,.25,v(amplitude),.5,0,.75,-v(amplitude),1,0)",
+    ] {
+        let netlist = Netlist::parse(&format!(
+            "Table phase control\nrctrl ctrl 0 1k\nitest 0 ctrl dc 137u\nvamp amplitude 0 dc 1\n\
+        bvol out 0 v={waveform}*cos(2*pi*1414.213562373095*time)\n\
+        rload out 0 1k noisy=0\n.end\n"
+        ))
+        .unwrap();
+
+        let engine = Engine::default();
+        let mut config = QpssConfig::new(vec![1e3, 1e3 * std::f64::consts::SQRT_2], vec![1, 1]);
+        config.grid.sampling = QuasiPeriodicSampling::Exact(vec![64, 16]);
+        let grid =
+            QuasiPeriodicGrid::new_with_abort(config.grid.clone(), &Default::default(), &NoAbort)
+                .unwrap();
+        let point = engine.run_qpss(&netlist, config).unwrap();
+        let row = point
+            .node_names()
+            .iter()
+            .position(|n| n.eq_ignore_ascii_case("out"))
+            .unwrap();
+        let mut expected = Complex64::ZERO;
+        let mut expected_derivative = Complex64::ZERO;
+        for sample in 0..grid.sample_count() {
+            let phase = grid.phases(sample).unwrap();
+            // The control offset avoids table corners on the collocation grid.
+            let q = (phase[0] / TAU + 0.137).rem_euclid(1.0);
+            let (value, slope) = if q < 0.25 {
+                (4.0 * q, 4.0)
+            } else if q < 0.75 {
+                (2.0 - 4.0 * q, -4.0)
+            } else {
+                (4.0 * q - 4.0, 4.0)
+            };
+            let weight = Complex64::from_polar(
+                phase[1].cos() / grid.sample_count() as f64,
+                -phase[0] - phase[1],
+            );
+            expected += weight * value;
+            expected_derivative += weight * slope * 1000.0;
+        }
+        close(
+            point.spectra()[row][grid.index_of(&[1, 1]).unwrap()],
+            expected,
+        );
+        let pac = engine
+            .run_qpac_from_qpss(
+                &netlist,
+                QpacRequest {
+                    offsets_hz: vec![10.0],
+                    input_source: "itest".into(),
+                    input_lattice: vec![0, 0],
+                    output_node: "out".into(),
+                    output_ref: "0".into(),
+                    output_lattice: vec![1, 1],
+                    magnitude: 1.0,
+                    phase_degrees: 0.0,
+                    solver: Default::default(),
+                },
+                &point,
+            )
+            .unwrap();
+        close(pac.output_transfer[0], expected_derivative);
+    }
+}
+
+#[test]
+fn behavioral_quasiperiodic_clock_resolution_uses_authored_grid() {
+    use rspice_core::analysis::quasi_periodic::QuasiPeriodicSampling;
+    use rspice_core::engine::QpssConfig;
+    let engine = Engine::default();
+    let config = || QpssConfig::new(vec![1e3, 1e3 * std::f64::consts::SQRT_2], vec![1, 1]);
+    for (expression, reason) in [
+        ("mod(128k*time,1)", "absent from the retained tone lattice"),
+        ("floor(1k*time)", "nonperiodic explicit time"),
+        (
+            "1k*time-round(1k*time)",
+            "absent from the retained tone lattice",
+        ),
+        ("mod(time,0)", "nonzero modulus"),
+    ] {
+        let netlist = Netlist::parse(&format!(
+            "Clock configuration\nb out 0 v={expression}\nr out 0 1k\n.end\n"
+        ))
+        .unwrap();
+        let error = engine.run_qpss(&netlist, config()).unwrap_err().to_string();
+        assert!(error.contains(reason), "{expression}: {error}");
+    }
+    let netlist = Netlist::parse("Narrow periodic table\nb out 0 v=table(time%1m,0,0,250u,0,253.90625u,1,257.8125u,0,1m,0)\nr out 0 1k\n.end\n").unwrap();
+    let error = engine.run_qpss(&netlist, config()).unwrap_err().to_string();
+    assert!(
+        error.contains("table features") && error.contains("collocation points"),
+        "{error}"
+    );
+    let mut fine = config();
+    fine.grid.sampling = QuasiPeriodicSampling::Exact(vec![512, 8]);
+    let point = engine.run_qpss(&netlist, fine).unwrap();
+    let dc = point.spectra()[0].len() / 2;
+    close(point.spectra()[0][dc], Complex64::new(1.0 / 256.0, 0.0));
+}

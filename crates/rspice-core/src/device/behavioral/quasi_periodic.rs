@@ -8,6 +8,8 @@ use crate::expr::{constant_value, function_uses_implicit_time};
 use std::collections::HashMap;
 use std::f64::consts::{PI, TAU};
 
+mod clock;
+
 struct Lift<'a> {
     grid: &'a QuasiPeriodicGrid,
     context: Context<'a>,
@@ -198,6 +200,9 @@ impl Lift<'_> {
             Expr::Binary { op, left, right } => {
                 let a = self.lift(left)?;
                 let b = self.lift(right)?;
+                if *op == BinaryOp::Mod && a.rate != 0.0 {
+                    return self.remainder(a, b.finish()?);
+                }
                 let rate = match op {
                     BinaryOp::Add => a.rate + b.rate,
                     BinaryOp::Sub => a.rate - b.rate,
@@ -233,21 +238,52 @@ impl Lift<'_> {
                 };
                 stationary(function(*func, vec![phase]))
             }
+            Expr::Function {
+                func: Function::Mod,
+                args,
+            } if args.len() == 2 => {
+                let a = self.lift(&args[0])?;
+                let divisor = self.lift(&args[1])?.finish()?;
+                if a.rate == 0.0 {
+                    stationary(function(Function::Mod, vec![a.remainder, divisor]))
+                } else {
+                    self.remainder(a, divisor)?
+                }
+            }
+            Expr::Function {
+                func: Function::Floor | Function::Ceil | Function::Trunc | Function::Round,
+                args,
+            } if args.len() == 1 => {
+                let Expr::Function { func, .. } = expr else {
+                    unreachable!()
+                };
+                self.rounded(*func, self.lift(&args[0])?)?
+            }
             Expr::Function { func, args } => {
                 let args = args
                     .iter()
                     .map(|a| self.lift(a)?.finish())
                     .collect::<Result<Vec<_>, _>>()?;
+                if matches!(func, Function::Table | Function::Pwl) && args.len() >= 3 {
+                    self.validate_authored_table(&args)?;
+                }
                 stationary(if function_uses_implicit_time(*func) {
                     self.implicit(*func, args)?
                 } else {
                     function(*func, args)
                 })
             }
-            Expr::LookupTable { input, table } => stationary(Expr::LookupTable {
-                input: Box::new(self.lift(input)?.finish()?),
-                table: table.clone(),
-            }),
+            Expr::LookupTable { input, table } => {
+                let input = self.lift(input)?.finish()?;
+                self.validate_table_interval(
+                    &input,
+                    crate::numerics::minimum_pwl_interval(table.points.iter().copied()),
+                )?;
+                stationary(Expr::LookupTable {
+                    input: Box::new(input),
+                    table: table.clone(),
+                })
+            }
             _ => stationary(expr.clone()),
         };
         if !result.rate.is_finite() {
