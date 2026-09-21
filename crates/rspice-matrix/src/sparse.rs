@@ -5069,7 +5069,24 @@ impl ComplexMatrix {
     /// fallback for ill-conditioned AC matrices after the sparse complex
     /// backend reports an inaccurate result.
     pub fn solve_dense_extended(&self, rhs: &[Complex64]) -> Result<Vec<Complex64>, SolverError> {
-        self.solve_dense_extended_operation(rhs, ComplexSolveOp::Normal)
+        self.solve_dense_extended_operation(rhs, ComplexSolveOp::Normal, None)
+    }
+
+    /// The same certified extended solve, retaining its finite candidate on
+    /// `InaccurateSolution`, like `solve_into`. Such a candidate is not a
+    /// qualified circuit solution; it may be used as a preconditioner only
+    /// when the caller independently certifies the complete operator/result.
+    /// Other errors leave the output empty.
+    pub fn solve_dense_extended_into(
+        &self,
+        rhs: &[Complex64],
+        solution: &mut Vec<Complex64>,
+    ) -> Result<(), SolverError> {
+        solution.clear();
+        let solved =
+            self.solve_dense_extended_operation(rhs, ComplexSolveOp::Normal, Some(solution))?;
+        *solution = solved;
+        Ok(())
     }
 
     /// Solve `A^T x = b` through the extended-precision dense fallback and
@@ -5082,7 +5099,7 @@ impl ComplexMatrix {
         &self,
         rhs: &[Complex64],
     ) -> Result<Vec<Complex64>, SolverError> {
-        self.solve_dense_extended_operation(rhs, ComplexSolveOp::Transpose)
+        self.solve_dense_extended_operation(rhs, ComplexSolveOp::Transpose, None)
     }
 
     /// Solve `A^H x = b` through the extended-precision dense fallback and
@@ -5091,13 +5108,14 @@ impl ComplexMatrix {
         &self,
         rhs: &[Complex64],
     ) -> Result<Vec<Complex64>, SolverError> {
-        self.solve_dense_extended_operation(rhs, ComplexSolveOp::Adjoint)
+        self.solve_dense_extended_operation(rhs, ComplexSolveOp::Adjoint, None)
     }
 
     fn solve_dense_extended_operation(
         &self,
         rhs: &[Complex64],
         operation: ComplexSolveOp,
+        uncertified: Option<&mut Vec<Complex64>>,
     ) -> Result<Vec<Complex64>, SolverError> {
         use qd::Quad;
 
@@ -5285,6 +5303,9 @@ impl ComplexMatrix {
             snap_candidates.remove(candidate_position);
             projected_solution = best_solution;
             projected_error = best_error;
+        }
+        if let Some(candidate) = uncertified {
+            *candidate = projected_solution;
         }
         Err(SolverError::InaccurateSolution(
             backward_error.componentwise,
@@ -7925,6 +7946,18 @@ mod tests {
         let actual = matrix
             .solve_dense_extended(&rhs)
             .expect("extended complex result must pass strict certification");
+        let mut into = Vec::new();
+        matrix.solve_dense_extended_into(&rhs, &mut into).unwrap();
+        assert_eq!(actual, into);
+        assert!(
+            matrix
+                .solve_dense_extended_into(&rhs[..2], &mut into)
+                .is_err()
+        );
+        assert!(
+            into.is_empty(),
+            "an invalid solve cannot retain a stale candidate"
+        );
         for (index, (&actual, &expected)) in actual.iter().zip(&expected).enumerate() {
             let relative_error = (actual - expected).norm() / expected.norm();
             assert!(
