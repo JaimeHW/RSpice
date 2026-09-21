@@ -206,8 +206,10 @@ use crate::execution::topology::TopologyFingerprint;
 pub const ANALYSIS_RESULT_DOCUMENT_SCHEMA: &str = "rspice-analysis-result";
 
 /// Schema version this build produces.
-pub const ANALYSIS_RESULT_DOCUMENT_VERSION: u32 = 8;
+pub const ANALYSIS_RESULT_DOCUMENT_VERSION: u32 = 9;
 
+/// Version 9 adds the sampling request and resolved crossing geometry to PNoise.
+///
 /// Every schema version this build decodes, oldest first.
 ///
 /// A document in this schema is `deny_unknown_fields` throughout, so a field
@@ -242,7 +244,7 @@ pub const ANALYSIS_RESULT_DOCUMENT_VERSION: u32 = 8;
 /// Bumping for one would instead make every family's freshly produced
 /// document undecodable by every current reader, which is the compatibility
 /// break this constant exists to avoid.
-const DECODABLE_ANALYSIS_RESULT_DOCUMENT_VERSIONS: [u32; 8] = [1, 2, 3, 4, 5, 6, 7, 8];
+const DECODABLE_ANALYSIS_RESULT_DOCUMENT_VERSIONS: [u32; 9] = [1, 2, 3, 4, 5, 6, 7, 8, 9];
 
 /// First version whose transient payload may declare a digital bus.
 const FIRST_DIGITAL_BUS_DOCUMENT_VERSION: u32 = 2;
@@ -545,6 +547,15 @@ impl AnalysisResultDocument {
         // nothing, which is what makes reading version 1 sound. It also lets a
         // document declare the older version and carry the newer content, and
         // that is a document whose version stopped describing it.
+        if self.schema_version < 9
+            && let ResultPayload::PNoise(payload) = &self.payload
+            && payload.sampling.is_some()
+        {
+            return Err(ResultDocumentError::Malformed {
+                location: "sampled PNoise geometry",
+                detail: "sampled PNoise evidence requires document version 9".into(),
+            });
+        }
         if self.schema_version < FIRST_DIGITAL_BUS_DOCUMENT_VERSION
             && let ResultPayload::Tran(payload) = &self.payload
             && !payload.digital_buses.is_empty()

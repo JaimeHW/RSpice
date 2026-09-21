@@ -633,6 +633,7 @@ fn document(family: usize, shape: &Shape) -> AnalysisResultDocument {
             ResultAxisKind::OffsetFrequency,
             axis_values.clone(),
             ResultPayload::PNoise(PNoisePayload {
+                sampling: None,
                 output_node: "out".to_owned(),
                 oscillator: None,
                 jitter_bandwidth: Some(PNoiseBandwidth {

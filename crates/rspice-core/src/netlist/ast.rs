@@ -2732,6 +2732,8 @@ pub enum PnoiseReference {
 /// periodic-noise request.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PnoiseCard {
+    /// Optional coherent voltage, crossing-time, or edge-delay measurement.
+    pub sampling: Option<crate::analysis::pnoise::PeriodicNoiseSampling>,
     /// Signal channel at offset + k * fundamental (input-referred mode).
     pub input_sideband: i32,
     /// Observed noise channel at offset + k * fundamental.

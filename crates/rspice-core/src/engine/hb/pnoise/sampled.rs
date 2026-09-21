@@ -319,6 +319,7 @@ impl PreparedSampling {
         };
         Ok(Self {
             evidence: PeriodicNoiseSamplingEvidence {
+                carrier_frequency_hz: frequency,
                 request: request.clone(),
                 output: output_evidence,
                 reference: reference_evidence,

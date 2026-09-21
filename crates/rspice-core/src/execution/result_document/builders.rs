@@ -3639,6 +3639,28 @@ impl AnalysisResultDocument {
     ) -> Result<AnalysisResultDocumentBuilder, ResultDocumentError> {
         const LOCATION: &str = "driven PNoise result";
         let point_count = result.frequencies.len();
+        let timing = result
+            .sampling
+            .as_ref()
+            .is_some_and(|sampling| sampling.request.is_timing());
+        if let Some(sampling) = &result.sampling {
+            sampling
+                .validate()
+                .map_err(|detail| source_error(LOCATION, detail))?;
+            if sampling.carrier_frequency_hz != result.fundamental_freq
+                || result.sidebands.output != 0
+                || result
+                    .frequencies
+                    .iter()
+                    .any(|f| *f <= 0.0 || *f > result.fundamental_freq / 2.0)
+            {
+                return Err(source_error(
+                    LOCATION,
+                    "sampled PNoise carrier, sideband or offset band is inconsistent",
+                ));
+            }
+        }
+        let output_unit = SignalUnit::Custom(result.output_spectral_unit().into());
         if point_count == 0 {
             return Err(source_error(
                 LOCATION,
@@ -3666,7 +3688,7 @@ impl AnalysisResultDocument {
                 LOCATION,
                 "output_noise",
                 "Output noise density",
-                volt_squared_per_hertz(),
+                output_unit.clone(),
                 SignalValueType::Real,
                 point_count,
             )?,
@@ -3712,7 +3734,7 @@ impl AnalysisResultDocument {
                     LOCATION,
                     &canonical,
                     &format!("Noise from {label}"),
-                    volt_squared_per_hertz(),
+                    output_unit.clone(),
                     SignalValueType::Real,
                     point_count,
                 )?,
@@ -3759,7 +3781,11 @@ impl AnalysisResultDocument {
                 LOCATION,
                 "integrated_output_noise",
                 "Integrated output noise",
-                SignalUnit::Volt,
+                if timing {
+                    SignalUnit::Second
+                } else {
+                    SignalUnit::Volt
+                },
                 total,
             )?);
         }
@@ -3779,6 +3805,7 @@ impl AnalysisResultDocument {
             )?);
         }
         let payload = PNoisePayload {
+            sampling: result.sampling.clone(),
             output_node: output.to_owned(),
             jitter_bandwidth: None,
             contributors: Vec::new(),
@@ -3912,6 +3939,7 @@ impl AnalysisResultDocument {
             }
         }
         let payload = PNoisePayload {
+            sampling: None,
             output_node: output.to_owned(),
             jitter_bandwidth: None,
             contributors: Vec::new(),
@@ -4080,6 +4108,7 @@ impl AnalysisResultDocument {
         }
 
         let payload = PNoisePayload {
+            sampling: None,
             output_node: result.output_node.clone(),
             jitter_bandwidth: result
                 .jitter_bandwidth

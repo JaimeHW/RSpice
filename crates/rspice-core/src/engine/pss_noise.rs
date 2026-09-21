@@ -185,6 +185,16 @@ fn check_pnoise_card_carrier(
 ) -> Result<(), SimulationError> {
     use crate::netlist::PnoiseReference;
 
+    if let Some(sampling) = &card.sampling {
+        sampling.validate().map_err(SimulationError::Circuit)?;
+        if autonomous || card.noise_reference == PnoiseReference::Phase || card.output_sideband != 0
+        {
+            return Err(SimulationError::Circuit(
+                "sampled PNOISE requires a driven carrier, output sideband zero, and output or input noise reference".into(),
+            ));
+        }
+    }
+
     if (autonomous && (card.input_sideband != 0 || card.output_sideband != 0))
         || (card.noise_reference != PnoiseReference::Input && card.input_sideband != 0)
     {
@@ -309,7 +319,7 @@ impl Engine {
         let mut result = self.run_pnoise_from_pss_request_with_abort(
             netlist,
             &super::PeriodicNoiseRequest {
-                sampling: None,
+                sampling: card.sampling.as_ref(),
                 offsets: &offsets,
                 output_node: &card.output_node,
                 output_ref: card.reference_node.as_deref(),
@@ -343,7 +353,7 @@ impl Engine {
         let mut result = self.run_pnoise_from_hb_request_with_abort(
             netlist,
             &super::PeriodicNoiseRequest {
-                sampling: None,
+                sampling: card.sampling.as_ref(),
                 offsets: &offsets,
                 output_node: &card.output_node,
                 output_ref: card.reference_node.as_deref(),

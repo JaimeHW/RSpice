@@ -11,6 +11,8 @@
 use super::analysis_card_scan::*;
 use super::*;
 
+mod sampling;
+
 /// Read the shared `DEC|LIN|OCT np fstart fstop` sweep spec.
 fn card_sweep(
     stream: &mut TokenStream,
@@ -1008,6 +1010,8 @@ pub(super) fn parse_pnoise_command(
 
     let sweep = card_sweep(stream, line_num, params, CARD)?;
 
+    let mut sampling = sampling::SamplingFields::default();
+
     let mut output = None;
     let mut input_source = None;
     let mut max_sideband = None;
@@ -1032,6 +1036,9 @@ pub(super) fn parse_pnoise_command(
                 },
             ));
         };
+        if sampling.read(&keyword, stream, line_num, params)? {
+            continue;
+        }
         match keyword.as_str() {
             "OUT" => bind_once(
                 &mut output,
@@ -1179,7 +1186,19 @@ pub(super) fn parse_pnoise_command(
             },
         ));
     }
+    let sampling = sampling.build(line_num)?;
+    if sampling.is_some() && (noise_reference == PnoiseReference::Phase || output_sideband != 0) {
+        return Err(card_error(
+            CARD,
+            line_num,
+            AnalysisCardIssue::ConflictingFields {
+                first: "SAMPLING",
+                second: "NOISEREF=PHASE or OUTSIDEBAND",
+            },
+        ));
+    }
     Ok(AnalysisCommand::Pnoise(Box::new(PnoiseCard {
+        sampling,
         input_sideband,
         output_sideband,
         sweep,
@@ -1541,6 +1560,64 @@ mod tests {
         match netlist.analyses.into_iter().next_back() {
             Some(AnalysisCommand::Pnoise(card)) => card,
             other => panic!("expected .PNOISE, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn sampled_pnoise_card_accepts_all_controls_and_refuses_inapplicable_fields() {
+        use crate::analysis::pnoise::{PeriodicNoiseEdgeDirection, PeriodicNoiseSampling};
+        let card = pnoise(
+            ".pnoise dec 10 1 100 out=out sampling=delay threshold=0.3 direction=falling occurrence=2 phasetol=1u minslew=2k refout=V(clk,vss) refthreshold=0.7 refdirection=either refoccurrence=3 refphasetol=2u refminslew=3k periods=4",
+        );
+        let Some(PeriodicNoiseSampling::Delay {
+            edge,
+            reference_node,
+            reference_ref,
+            reference_edge,
+            periods,
+        }) = card.sampling
+        else {
+            panic!()
+        };
+        assert_eq!(edge.direction, PeriodicNoiseEdgeDirection::Falling);
+        assert_eq!(edge.threshold_volts, 0.3);
+        assert_eq!(edge.occurrence, 2);
+        assert_eq!(edge.phase_tolerance_degrees, 1e-6);
+        assert_eq!(edge.minimum_slew_volts_per_second, 2e3);
+        assert_eq!(
+            (reference_node.as_str(), reference_ref.as_deref()),
+            ("CLK", Some("VSS"))
+        );
+        assert_eq!(reference_edge.direction, PeriodicNoiseEdgeDirection::Either);
+        assert_eq!(reference_edge.threshold_volts, 0.7);
+        assert_eq!(reference_edge.occurrence, 3);
+        assert_eq!(reference_edge.phase_tolerance_degrees, 2e-6);
+        assert_eq!(reference_edge.minimum_slew_volts_per_second, 3e3);
+        assert_eq!(periods, 4);
+        assert_eq!(
+            pnoise(".pnoise dec 10 1 100 out=out sampling=phase samplephase=-37").sampling,
+            Some(PeriodicNoiseSampling::Phase {
+                phase_degrees: -37.0
+            })
+        );
+        for options in [
+            "samplephase=0",
+            "threshold=0",
+            "sampling=phase direction=rising",
+            "sampling=edge samplephase=0",
+            "sampling=edge periods=0",
+            "sampling=delay",
+            "sampling=phase sampling=edge",
+            "sampling=edge threshold=0 threshold=1",
+            "sampling=edge direction=up",
+            "sampling=edge occurrence=0",
+            "sampling=edge phasetol=2",
+            "sampling=edge minslew=-1",
+            "sampling=delay refout=clk periods=4294967296",
+            "sampling=edge noiseref=phase",
+            "sampling=phase outsideband=1",
+        ] {
+            card_failure(&format!(".pnoise dec 10 1 100 out=out {options}"));
         }
     }
 

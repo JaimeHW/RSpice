@@ -2902,6 +2902,9 @@ impl PstbPayload {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct PNoisePayload {
+    /// Exact phase or crossing geometry for a sampled periodic-noise run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sampling: Option<crate::analysis::pnoise::PeriodicNoiseSamplingEvidence>,
     /// Node the phase noise was referred to.
     pub output_node: String,
     /// Integration band used for the jitter figures, in hertz.
@@ -2935,6 +2938,20 @@ pub struct OscillatorPhaseNoiseDocument {
 impl PNoisePayload {
     fn validate(&self) -> Result<(), ResultDocumentError> {
         super::require_name("PNoise output node", &self.output_node)?;
+        if let Some(sampling) = &self.sampling {
+            sampling
+                .validate()
+                .map_err(|detail| ResultDocumentError::Malformed {
+                    location: "sampled PNoise geometry",
+                    detail,
+                })?;
+            if self.oscillator.is_some() {
+                return Err(ResultDocumentError::Malformed {
+                    location: "sampled PNoise geometry",
+                    detail: "a sampled voltage or timing spectrum cannot carry oscillator phase-diffusion evidence".into(),
+                });
+            }
+        }
         if let Some(oscillator) = self.oscillator {
             finite("PNoise diffusion constant", oscillator.diffusion_constant)?;
             finite("PNoise oscillation period", oscillator.period)?;
