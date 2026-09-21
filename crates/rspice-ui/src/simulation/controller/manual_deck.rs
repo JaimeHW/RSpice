@@ -196,8 +196,18 @@ pub(super) fn build_manual_deck_queue(
         .iter()
         .filter(|task| matches!(task.spec, AnalysisSpec::Qpss { .. }))
         .count();
-    if periodic_pss_count > 0 || qpss_count > 0 {
-        let family = if qpss_count > 0 { "QPSS" } else { "PSS" };
+    let hb_count = queue
+        .iter()
+        .filter(|task| matches!(task.spec, AnalysisSpec::HarmonicBalance { .. }))
+        .count();
+    if periodic_pss_count > 0 || qpss_count > 0 || hb_count > 0 {
+        let family = if qpss_count > 0 {
+            "QPSS"
+        } else if hb_count > 0 {
+            "HB"
+        } else {
+            "PSS"
+        };
         let op_count = queue
             .iter()
             .filter(|task| {

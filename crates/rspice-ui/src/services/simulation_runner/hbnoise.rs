@@ -170,6 +170,7 @@ pub struct HbnoiseData {
 }
 
 /// Run HBNOISE from an immutable retained harmonic-balance state.
+#[cfg(test)]
 pub fn run_hbnoise_analysis_from_hb_with_source_path_and_abort(
     netlist_text: &str,
     config: &HbnoiseRunConfig,

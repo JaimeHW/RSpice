@@ -1796,6 +1796,7 @@ fn expand_pvt_point_tasks(
                     ExecutionArtifactKind::DcOperatingPointSeed
                         | ExecutionArtifactKind::QpssState
                         | ExecutionArtifactKind::PeriodicState
+                        | ExecutionArtifactKind::HbState
                 )
             })
             .and_then(|binding| final_task.get(&binding.producer_instance_id()))
@@ -1813,6 +1814,9 @@ fn expand_pvt_point_tasks(
                 method: crate::simulation::multi_run::PssMethod::Shooting,
                 ..
             } | AnalysisSpec::Qpss { .. }
+                | AnalysisSpec::HarmonicBalance { .. }
+                | AnalysisSpec::Hbsp { .. }
+                | AnalysisSpec::Hbnoise { .. }
                 | AnalysisSpec::Qpac { .. }
                 | AnalysisSpec::Qpxf { .. }
                 | AnalysisSpec::Qpnoise { .. }

@@ -329,6 +329,7 @@ fn spec_variant_name(spec: &AnalysisSpec) -> &'static str {
 
 #[cfg(test)]
 mod tests {
+    mod hb_handoff;
     mod periodic_port_noise;
     mod pss_handoff;
     mod qpac;
@@ -411,13 +412,33 @@ mod tests {
 
     fn transferred_hb_dependencies(netlist: &str) -> ResolvedExecutionDependencies {
         let producer_spec = hb_producer_spec();
+        let temperature =
+            svc_runner::parse_runner_netlist_with_abort(netlist, None, &rspice_core::NoAbort)
+                .unwrap()
+                .options
+                .temp
+                .unwrap_or(27.0);
+        let op_dependencies = qpss::op_dependencies(
+            netlist,
+            netlist,
+            netlist,
+            crate::simulation::dialog::OpConfig {
+                temperature_mode: crate::simulation::dialog::OpTemperatureMode::Explicit,
+                temperature_celsius: temperature,
+                ..Default::default()
+            },
+        );
+        let environment = op_dependencies
+            .dc_operating_point_seed()
+            .unwrap()
+            .environment();
         let result = run_spec_request(
             &EngineBridge::new(),
             producer_spec.clone(),
             SpecExecutionOptions::default(),
             netlist,
             None,
-            &ResolvedExecutionDependencies::default(),
+            &op_dependencies,
             &rspice_core::abort_signal::NoAbort,
         )
         .expect("the HB producer reaches the periodic dispatcher");
@@ -425,17 +446,18 @@ mod tests {
         let revision = ObjectRevision::INITIAL;
         let snapshot = digest(0xb1);
         let config_digest = digest(0xb2);
-        let artifact = ExecutionArtifactEnvelope::from_hb_result(
+        let artifact = ExecutionArtifactEnvelope::from_hb_result_with_environment(
             snapshot,
             producer,
             revision,
             config_digest,
             &producer_spec,
             &result,
+            Some(environment),
         )
         .expect("the HB result forms a typed dependency")
         .expect("HB always retains its numerical state");
-        let resolved = ResolvedExecutionDependencies::resolve(
+        let mut resolved = ResolvedExecutionDependencies::resolve(
             snapshot,
             vec![PreparedDependencyBinding::hb_state(
                 producer,
@@ -445,6 +467,10 @@ mod tests {
             &HashMap::from([(producer, artifact)]),
         )
         .expect("the exact producer binding resolves");
+        resolved.bind_source(
+            netlist,
+            crate::workbench::documents::netlist_document::source_content_digest(netlist),
+        );
         let (metadata, buffers) = resolved
             .encode_transfer()
             .expect("HB state serializes for worker transport");

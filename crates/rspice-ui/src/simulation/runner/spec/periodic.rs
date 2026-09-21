@@ -131,7 +131,7 @@ pub(super) fn run_periodic_spec(
         }
         spec @ AnalysisSpec::HarmonicBalance { .. } => {
             let config = hb_run_config(spec, abort)?;
-            run_harmonic_balance(netlist, &config, true, source_path, abort)
+            run_harmonic_balance(netlist, &config, true, source_path, dependencies, abort)
         }
         AnalysisSpec::Envelope {
             initialization,
@@ -219,12 +219,10 @@ pub(super) fn run_periodic_spec(
                     "Harmonic-balance dependency is unavailable: {error}"
                 ))
             })?;
-            run_hb_consumer(
-                spec,
-                HbConsumerCircuit::Source(netlist, source_path),
-                state.operating_point(),
-                abort,
-            )
+            let circuit = super::run_abort_aware_service(abort, || {
+                state.materialize_consumer(netlist, source_path, dependencies, abort)
+            })?;
+            run_hb_consumer(spec, &circuit, state.operating_point(), abort)
         }
         other => Err(super::misrouted_spec_error("periodic", &other)),
     }
@@ -248,7 +246,7 @@ struct HbnoiseRunRequest {
 }
 
 fn run_hbnoise(
-    circuit: HbConsumerCircuit<'_>,
+    circuit: &rspice_core::Netlist,
     request: HbnoiseRunRequest,
     operating_point: &rspice_core::engine::HbOperatingPoint,
     abort: &dyn AbortSignal,
@@ -273,24 +271,13 @@ fn run_hbnoise(
         noise_figure: request.noise_figure,
         contributor_ranking: request.contributor_ranking,
     };
-    let data = super::run_abort_aware_service(abort, || match circuit {
-        HbConsumerCircuit::Source(netlist, path) => {
-            svc_runner::run_hbnoise_analysis_from_hb_with_source_path_and_abort(
-                netlist,
-                &config,
-                operating_point,
-                path,
-                abort,
-            )
-        }
-        HbConsumerCircuit::Materialized(netlist) => {
-            svc_runner::run_hbnoise_analysis_from_hb_on_materialized_with_abort(
-                netlist,
-                &config,
-                operating_point,
-                abort,
-            )
-        }
+    let data = super::run_abort_aware_service(abort, || {
+        svc_runner::run_hbnoise_analysis_from_hb_on_materialized_with_abort(
+            circuit,
+            &config,
+            operating_point,
+            abort,
+        )
     })?;
 
     let mut contributors = HashMap::with_capacity(data.contributors.len());
@@ -408,29 +395,18 @@ fn run_psp(
 }
 
 fn run_hbsp(
-    circuit: HbConsumerCircuit<'_>,
+    circuit: &rspice_core::Netlist,
     request: PspRunRequest,
     operating_point: &rspice_core::engine::HbOperatingPoint,
     abort: &dyn AbortSignal,
 ) -> Result<SimulationResult, SimulationError> {
-    run_periodic_sparameters(request, abort, |config| match circuit {
-        HbConsumerCircuit::Source(netlist, path) => {
-            svc_runner::run_hbsp_analysis_from_hb_with_source_path_and_abort(
-                netlist,
-                config,
-                operating_point,
-                path,
-                abort,
-            )
-        }
-        HbConsumerCircuit::Materialized(netlist) => {
-            svc_runner::run_hbsp_analysis_from_hb_on_materialized_with_abort(
-                netlist,
-                config,
-                operating_point,
-                abort,
-            )
-        }
+    run_periodic_sparameters(request, abort, |config| {
+        svc_runner::run_hbsp_analysis_from_hb_on_materialized_with_abort(
+            circuit,
+            config,
+            operating_point,
+            abort,
+        )
     })
 }
 
@@ -866,10 +842,28 @@ fn run_harmonic_balance(
     hb_cfg: &svc_runner::HbRunConfig,
     retain_harmonics: bool,
     source_path: Option<&Path>,
+    dependencies: &ResolvedExecutionDependencies,
     abort: &dyn AbortSignal,
 ) -> Result<SimulationResult, SimulationError> {
+    let artifact = dependencies.dc_operating_point_seed().map_err(|error| {
+        SimulationError::InvalidConfig(format!(
+            "HB operating-point dependency is unavailable: {error}"
+        ))
+    })?;
+    let seed = artifact
+        .core_seed()
+        .map_err(|error| SimulationError::InvalidConfig(error.to_string()))?;
     let data = super::run_abort_aware_service(abort, || {
-        svc_runner::run_hb_analysis_with_source_path_and_abort(netlist, hb_cfg, source_path, abort)
+        let circuit =
+            artifact
+                .environment()
+                .materialize(netlist, source_path, dependencies, abort)?;
+        svc_runner::run_hb_analysis_with_dc_seed_on_materialized_with_abort(
+            &circuit,
+            hb_cfg,
+            Some(&seed),
+            abort,
+        )
     })?;
 
     project_hb_data(data, retain_harmonics, abort)
@@ -1800,15 +1794,9 @@ pub(in crate::simulation::runner) fn run_native_study_on_materialized(
     project_hb_data(data, true, abort)
 }
 
-#[derive(Clone, Copy)]
-enum HbConsumerCircuit<'a> {
-    Source(&'a str, Option<&'a Path>),
-    Materialized(&'a rspice_core::Netlist),
-}
-
 fn run_hb_consumer(
     spec: AnalysisSpec,
-    circuit: HbConsumerCircuit<'_>,
+    circuit: &rspice_core::Netlist,
     operating_point: &rspice_core::engine::HbOperatingPoint,
     abort: &dyn AbortSignal,
 ) -> Result<SimulationResult, SimulationError> {
@@ -1892,12 +1880,7 @@ pub(in crate::simulation::runner) fn run_hb_study_on_materialized(
     let data = super::run_abort_aware_service(abort, || {
         svc_runner::run_hb_analysis_on_materialized_with_abort(circuit, &config, abort)
     })?;
-    run_hb_consumer(
-        consumer,
-        HbConsumerCircuit::Materialized(circuit),
-        &data.operating_point,
-        abort,
-    )
+    run_hb_consumer(consumer, circuit, &data.operating_point, abort)
 }
 
 pub(in crate::simulation::runner) fn run_pss_study_on_materialized(

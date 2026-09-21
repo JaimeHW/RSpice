@@ -1098,6 +1098,8 @@ fn encode_complex_values(writer: &mut CanonicalWriter, values: &[num_complex::Co
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(in crate::simulation) struct HbStateArtifact {
+    #[serde(default)]
+    environment: Option<PeriodicOperatingEnvironment>,
     operating_point: Arc<rspice_core::engine::HbOperatingPoint>,
     spectral_real: Vec<Vec<f64>>,
     spectral_imaginary: Vec<Vec<f64>>,
@@ -1110,11 +1112,31 @@ pub(in crate::simulation) struct HbStateArtifact {
 impl HbStateArtifact {
     const MAX_NUMERIC_VALUES: usize = 16_777_216;
 
+    pub(in crate::simulation) fn materialize_consumer(
+        &self,
+        source: &str,
+        source_path: Option<&std::path::Path>,
+        dependencies: &ResolvedExecutionDependencies,
+        abort: &dyn rspice_core::abort_signal::AbortSignal,
+    ) -> crate::services::simulation_runner::ServiceRunResult<rspice_core::Netlist> {
+        match &self.environment {
+            Some(environment) => environment.materialize(source, source_path, dependencies, abort),
+            None => crate::services::simulation_runner::parse_runner_netlist_with_abort(
+                source,
+                source_path,
+                abort,
+            ),
+        }
+    }
+
     pub(in crate::simulation) fn operating_point(&self) -> &rspice_core::engine::HbOperatingPoint {
         &self.operating_point
     }
 
     fn validate(&self) -> Result<(), ExecutionArtifactError> {
+        if let Some(environment) = &self.environment {
+            environment.validate()?;
+        }
         let validation = if let Some(identity) = self.operating_point.producer_identity() {
             rspice_core::engine::HbOperatingPoint::try_from_authenticated_parts_with_mna_branches(
                 identity.clone(),
@@ -1195,7 +1217,14 @@ impl HbStateArtifact {
     }
 
     fn digest(&self) -> ContentDigest {
-        super::super::hb_operating_point_digest(&self.operating_point)
+        let state = super::super::hb_operating_point_digest(&self.operating_point);
+        let Some(environment) = &self.environment else {
+            return state;
+        };
+        let mut writer = CanonicalWriter::new("rspice.hb-operating-environment/v1");
+        writer.digest(state);
+        environment.encode(&mut writer);
+        writer.finish()
     }
 }
 
@@ -1320,6 +1349,7 @@ impl ExecutionArtifactEnvelope {
         }))
     }
 
+    #[cfg(test)]
     pub(in crate::simulation) fn from_hb_result(
         snapshot_digest: ContentDigest,
         producer_instance_id: AnalysisInstanceId,
@@ -1327,6 +1357,26 @@ impl ExecutionArtifactEnvelope {
         producer_config_digest: ContentDigest,
         producer_spec: &AnalysisSpec,
         result: &SimulationResult,
+    ) -> Result<Option<Self>, ExecutionArtifactError> {
+        Self::from_hb_result_with_environment(
+            snapshot_digest,
+            producer_instance_id,
+            producer_source_revision,
+            producer_config_digest,
+            producer_spec,
+            result,
+            None,
+        )
+    }
+
+    pub(in crate::simulation) fn from_hb_result_with_environment(
+        snapshot_digest: ContentDigest,
+        producer_instance_id: AnalysisInstanceId,
+        producer_source_revision: ObjectRevision,
+        producer_config_digest: ContentDigest,
+        producer_spec: &AnalysisSpec,
+        result: &SimulationResult,
+        environment: Option<PeriodicOperatingEnvironment>,
     ) -> Result<Option<Self>, ExecutionArtifactError> {
         let SimulationResult::HarmonicBalance {
             operating_point, ..
@@ -1349,6 +1399,7 @@ impl ExecutionArtifactEnvelope {
                 .map(|row| split_complex_values(row))
                 .unzip();
         let state = HbStateArtifact {
+            environment,
             operating_point: Arc::clone(operating_point),
             spectral_real,
             spectral_imaginary,
@@ -1995,6 +2046,7 @@ impl ResolvedExecutionDependencies {
                             .collect();
                         ExecutionArtifactPayloadTransferMetadata::HbState(
                             HbStateTransferMetadata {
+                                environment: state.environment.clone(),
                                 config: state.operating_point.config().clone(),
                                 producer_identity: state
                                     .operating_point
@@ -2367,6 +2419,7 @@ impl ResolvedExecutionDependencies {
                             ExecutionArtifactError::InvalidPayload(error.to_string())
                         })?;
                         let state = HbStateArtifact {
+                            environment: metadata.environment,
                             operating_point: Arc::new(operating_point),
                             spectral_real,
                             spectral_imaginary,
@@ -2547,6 +2600,8 @@ struct HbBranchSpectrumTransferMetadata {
 #[cfg(any(target_arch = "wasm32", test))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 struct HbStateTransferMetadata {
+    #[serde(default)]
+    environment: Option<PeriodicOperatingEnvironment>,
     config: rspice_core::analysis::HbConfig,
     #[serde(default)]
     producer_identity: Option<rspice_core::engine::HbOperatingPointIdentity>,

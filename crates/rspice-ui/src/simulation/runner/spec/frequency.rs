@@ -369,11 +369,14 @@ fn run_pac(
             ))
         })?;
         super::run_abort_aware_service(abort, || {
-            svc_runner::run_pac_analysis_from_hb_with_source_path_and_abort(
-                netlist,
+            let circuit =
+                hb_state.materialize_consumer(netlist, source_path, dependencies, abort)?;
+            svc_runner::run_pac_analysis_on_materialized_with_abort(
+                &circuit,
                 &pac_cfg,
-                hb_state.operating_point(),
-                source_path,
+                Some(svc_runner::PeriodicCarrierState::HarmonicBalance(
+                    hb_state.operating_point(),
+                )),
                 abort,
             )
         })?
@@ -446,11 +449,14 @@ fn run_pxf(
             ))
         })?;
         super::run_abort_aware_service(abort, || {
-            svc_runner::run_pxf_analysis_from_hb_with_source_path_and_abort(
-                netlist,
+            let circuit =
+                hb_state.materialize_consumer(netlist, source_path, dependencies, abort)?;
+            svc_runner::run_pxf_analysis_on_materialized_with_abort(
+                &circuit,
                 &pxf_cfg,
-                hb_state.operating_point(),
-                source_path,
+                Some(svc_runner::PeriodicCarrierState::HarmonicBalance(
+                    hb_state.operating_point(),
+                )),
                 abort,
             )
         })?
@@ -543,11 +549,12 @@ fn run_pnoise(
             ))
         })?;
         super::run_abort_aware_service(abort, || {
-            svc_runner::run_pnoise_analysis_from_hb_with_source_path_and_abort(
-                netlist,
+            let circuit =
+                hb_state.materialize_consumer(netlist, source_path, dependencies, abort)?;
+            svc_runner::run_pnoise_analysis_on_materialized_with_abort(
+                &circuit,
                 &pnoise_cfg,
-                hb_state.operating_point(),
-                source_path,
+                svc_runner::PeriodicCarrierState::HarmonicBalance(hb_state.operating_point()),
                 abort,
             )
         })?

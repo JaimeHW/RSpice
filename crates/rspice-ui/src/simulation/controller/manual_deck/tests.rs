@@ -62,6 +62,7 @@ fn studio_hb_card_retains_solver_controls_and_automatic_grid() {
             verbose,
             ..
         },
+        AnalysisSpec::DcOp { .. } | AnalysisSpec::LegacyDcOp,
     ] = specs.as_slice()
     else {
         panic!("{specs:?}");
@@ -1198,7 +1199,7 @@ fn qpxf_manual_deck_preserves_native_sweep_and_complete_selections() {
 }
 
 #[test]
-fn qpss_op_handoff_manual_deck_inserts_one_unambiguous_seed() {
+fn periodic_op_handoff_manual_deck_inserts_one_unambiguous_seed() {
     let card = crate::simulation::plan::QpssDraft {
         tones: "1000,1414.2135623730951".into(),
         harmonics: "1,1".into(),
@@ -1211,28 +1212,33 @@ fn qpss_op_handoff_manual_deck_inserts_one_unambiguous_seed() {
     .unwrap()
     .to_spice()
     .unwrap();
-    for explicit in [false, true] {
-        let source = format!(
-            "Manual QP\nV1 out 0 1\nR1 out 0 1k\n{card}\n{}\n.end\n",
-            if explicit { ".op" } else { "" }
-        );
-        let queue = build_manual_deck_queue(&AppState::default(), &source).unwrap();
-        assert_eq!(
-            queue
-                .iter()
-                .filter(|task| matches!(
-                    task.spec,
-                    AnalysisSpec::DcOp { .. } | AnalysisSpec::LegacyDcOp
-                ))
-                .count(),
-            1
-        );
-        assert_eq!(
-            queue
-                .iter()
-                .filter(|task| matches!(task.spec, AnalysisSpec::Qpss { .. }))
-                .count(),
-            1
-        );
+    for card in [card, ".hb 1000".into()] {
+        for explicit in [false, true] {
+            let source = format!(
+                "Manual QP\nV1 out 0 1\nR1 out 0 1k\n{card}\n{}\n.end\n",
+                if explicit { ".op" } else { "" }
+            );
+            let queue = build_manual_deck_queue(&AppState::default(), &source).unwrap();
+            assert_eq!(
+                queue
+                    .iter()
+                    .filter(|task| matches!(
+                        task.spec,
+                        AnalysisSpec::DcOp { .. } | AnalysisSpec::LegacyDcOp
+                    ))
+                    .count(),
+                1
+            );
+            assert_eq!(
+                queue
+                    .iter()
+                    .filter(|task| matches!(
+                        task.spec,
+                        AnalysisSpec::Qpss { .. } | AnalysisSpec::HarmonicBalance { .. }
+                    ))
+                    .count(),
+                1
+            );
+        }
     }
 }

@@ -63,12 +63,10 @@ pub(crate) use envelope_fourier::{
 pub use error::{ServiceRunError, ServiceRunResult};
 pub(crate) use hb::{
     HbData, HbSpectrum, build_core_hb_config, run_hb_analysis_on_materialized_with_abort,
+    run_hb_analysis_with_dc_seed_on_materialized_with_abort,
 };
 pub use hb::{HbRunConfig, HbToneRunConfig, run_hb_analysis_with_source_path_and_abort};
-pub use hbnoise::{
-    HbNoiseReference, HbnoiseFrequencySweep, HbnoiseRunConfig,
-    run_hbnoise_analysis_from_hb_with_source_path_and_abort,
-};
+pub use hbnoise::{HbNoiseReference, HbnoiseFrequencySweep, HbnoiseRunConfig};
 pub(crate) use hbnoise::{integrate_psd, run_hbnoise_analysis_from_hb_on_materialized_with_abort};
 pub(crate) use hbnoise::{validate_hbnoise_frequency_options, validate_noise_sidebands};
 #[cfg(test)]
@@ -117,7 +115,7 @@ pub use pnoise::{
 };
 pub(crate) use psp::run_psp_analysis_from_pss_on_materialized_with_abort;
 pub(crate) use psp::{PspData, run_hbsp_analysis_from_hb_on_materialized_with_abort};
-pub use psp::{PspRunConfig, PspSweep, run_hbsp_analysis_from_hb_with_source_path_and_abort};
+pub use psp::{PspRunConfig, PspSweep};
 pub(crate) use pss::{PssData, build_core_pss_config, run_pss_analysis_on_materialized_with_abort};
 pub use pss::{
     PssRunConfig, run_pss_analysis_with_dc_seed_and_source_path_and_abort,

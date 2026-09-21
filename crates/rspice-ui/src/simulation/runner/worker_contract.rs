@@ -72,9 +72,9 @@ pub(crate) struct WorkerRequest {
     pub(in crate::simulation) stream_transient_samples: bool,
 }
 
-/// 27: Shooting-PSS dependencies also carry their bound operating environment.
+/// 28: HB dependencies carry their bound operating environment.
 #[cfg(any(target_arch = "wasm32", test))]
-pub(crate) const WORKER_REQUEST_TRANSPORT_PROTOCOL: u8 = 27;
+pub(crate) const WORKER_REQUEST_TRANSPORT_PROTOCOL: u8 = 28;
 
 /// Browser-worker request split into compact metadata and transferable
 /// floating-point buffers. The embedded request deliberately carries empty

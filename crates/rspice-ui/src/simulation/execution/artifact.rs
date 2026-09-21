@@ -96,7 +96,8 @@ pub(in crate::simulation) fn required_artifact_kinds(
             method: PssMethod::Shooting,
             ..
         }
-        | AnalysisSpec::Qpss { .. } => DC_SEED,
+        | AnalysisSpec::Qpss { .. }
+        | AnalysisSpec::HarmonicBalance { .. } => DC_SEED,
         AnalysisSpec::Pac => for_carrier(options.pac.as_ref().map(|config| config.carrier)),
         AnalysisSpec::Pxf => for_carrier(options.pxf.as_ref().map(|config| config.carrier)),
         AnalysisSpec::Pnoise => for_carrier(options.pnoise.as_ref().map(|config| config.carrier)),
@@ -259,6 +260,7 @@ pub(in crate::simulation) fn validate_prepared_dependency_contract_with_options(
             method: PssMethod::Shooting,
             ..
         } | AnalysisSpec::Qpss { .. }
+            | AnalysisSpec::HarmonicBalance { .. }
     ) {
         return match producer {
             AnalysisSpec::LegacyDcOp | AnalysisSpec::DcOp { .. } => Ok(()),

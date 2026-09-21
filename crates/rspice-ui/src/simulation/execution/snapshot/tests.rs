@@ -2410,130 +2410,170 @@ fn the_same_declaration_prepares_to_the_same_derived_identities() {
 }
 
 #[test]
-fn qpss_op_handoff_snapshot_preserves_source_basis_and_distinct_numerics() {
+fn periodic_op_handoff_snapshot_preserves_source_basis_and_distinct_numerics() {
     use crate::simulation::execution::ExecutionArtifactEnvelope;
     use crate::simulation::plan::{
         AnalysisKind, AnalysisNumericOverride, NumericOverrideOption, QpssDraft,
         QuasiPeriodicAcDraft,
     };
-    let source = "QP basis\nV1 out 0 1\nR1 out 0 1k\n.end\n";
-    let make_numeric = |kind, value: &str| {
-        let mut options = AnalysisNumericOverride::default();
-        options
-            .set_for_instance(kind, Default::default(), NumericOverrideOption::Gmin, value)
+    for hb in [false, true] {
+        let source = "QP basis\nV1 out 0 1\nR1 out 0 1k\n.end\n";
+        let make_numeric = |kind, value: &str| {
+            let mut options = AnalysisNumericOverride::default();
+            options
+                .set_for_instance(kind, Default::default(), NumericOverrideOption::Gmin, value)
+                .unwrap();
+            Some(options)
+        };
+        let mut op = configured_op_task(crate::simulation::dialog::OpConfig {
+            temperature_mode: crate::simulation::dialog::OpTemperatureMode::Explicit,
+            temperature_celsius: 37.0,
+            ..Default::default()
+        });
+        op.numeric_override = make_numeric(AnalysisKind::OperatingPoint, "1e-7");
+        let mut op = prepared("op", "OP", op);
+        op.executable_netlist_override = Some(source.into());
+        let (qp_spec, producer_line, producer_kind) = if hb {
+            let spec = crate::simulation::multi_run::AnalysisSpec::HarmonicBalance {
+                tones: vec![crate::simulation::multi_run::HbToneSpec::new(1000.0, 3)],
+                reltol: 1e-6,
+                abstol: 1e-12,
+                max_iterations: 40,
+                damping: 1.0,
+                min_damping: 0.01,
+                oversample: 4,
+                collocation_points: None,
+                max_mixing_order: 3,
+                use_krylov: false,
+                gmres_restart: 12,
+                source_stepping: false,
+                use_exact_jacobian: true,
+                verbose: false,
+            };
+            (spec, ".hb 1000".to_owned(), AnalysisKind::HarmonicBalance)
+        } else {
+            let spec = QpssDraft {
+                tones: "1000,1414.2135623730951".into(),
+                harmonics: "1,1".into(),
+                dc_initialization: true,
+                ..Default::default()
+            }
+            .to_spec()
             .unwrap();
-        Some(options)
-    };
-    let mut op = configured_op_task(crate::simulation::dialog::OpConfig {
-        temperature_mode: crate::simulation::dialog::OpTemperatureMode::Explicit,
-        temperature_celsius: 37.0,
-        ..Default::default()
-    });
-    op.numeric_override = make_numeric(AnalysisKind::OperatingPoint, "1e-7");
-    let mut op = prepared("op", "OP", op);
-    op.executable_netlist_override = Some(source.into());
-    let qp_spec = QpssDraft {
-        tones: "1000,1414.2135623730951".into(),
-        harmonics: "1,1".into(),
-        dc_initialization: true,
-        ..Default::default()
-    }
-    .to_spec()
-    .unwrap();
-    let qp_task = QueuedAnalysis {
-        analysis_line: qp_spec.driven_qpss_config().unwrap().to_spice().unwrap(),
-        spec: qp_spec,
-        config: None,
-        spec_options: Default::default(),
-        numeric_override: make_numeric(AnalysisKind::Qpss, "0"),
-    };
-    let mut qp = prepared_with(
-        "qp",
-        ObjectRevision::INITIAL,
-        vec![op.instance_id],
-        "QPSS",
-        qp_task,
-    );
-    qp.set_dependency_bindings(vec![PreparedDependencyBinding::dc_operating_point_seed(
-        op.instance_id,
-        op.source_revision,
-        op.config_digest,
-    )]);
-    let mut ac = prepared_with(
-        "qpac",
-        ObjectRevision::INITIAL,
-        vec![qp.instance_id],
-        "QPAC",
-        QueuedAnalysis {
-            spec: QuasiPeriodicAcDraft::default().to_spec().unwrap(),
+            let line = spec.driven_qpss_config().unwrap().to_spice().unwrap();
+            (spec, line, AnalysisKind::Qpss)
+        };
+        let qp_task = QueuedAnalysis {
+            analysis_line: producer_line,
+            spec: qp_spec,
             config: None,
             spec_options: Default::default(),
-            numeric_override: make_numeric(AnalysisKind::Qpac, "0"),
-            analysis_line: ".qpac".into(),
-        },
-    );
-    ac.set_dependency_bindings(vec![PreparedDependencyBinding::qpss_state(
-        qp.instance_id,
-        qp.source_revision,
-        qp.config_digest,
-    )]);
-    let mut inputs = parts();
-    inputs.executable_netlist = source.replace("1k", "2k");
-    inputs.tasks = vec![op, qp, ac];
-    let snapshot = PreparedRunSnapshot::new(inputs).unwrap();
-    let digest = snapshot.digest();
-    let issuer = crate::simulation::execution::ExecutionPermitIssuer::default();
-    let proof = issuer
-        .issue(digest)
+            numeric_override: make_numeric(producer_kind, "0"),
+        };
+        let mut qp = prepared_with(
+            "qp",
+            ObjectRevision::INITIAL,
+            vec![op.instance_id],
+            "QPSS",
+            qp_task,
+        );
+        qp.set_dependency_bindings(vec![PreparedDependencyBinding::dc_operating_point_seed(
+            op.instance_id,
+            op.source_revision,
+            op.config_digest,
+        )]);
+        let mut ac = prepared_with(
+            "qpac",
+            ObjectRevision::INITIAL,
+            vec![qp.instance_id],
+            "QPAC",
+            QueuedAnalysis {
+                spec: if hb {
+                    AnalysisSpec::Pac
+                } else {
+                    QuasiPeriodicAcDraft::default().to_spec().unwrap()
+                },
+                config: None,
+                spec_options: Default::default(),
+                numeric_override: make_numeric(
+                    if hb {
+                        AnalysisKind::Pac
+                    } else {
+                        AnalysisKind::Qpac
+                    },
+                    "0",
+                ),
+                analysis_line: ".qpac".into(),
+            },
+        );
+        let bind = if hb {
+            PreparedDependencyBinding::hb_state
+        } else {
+            PreparedDependencyBinding::qpss_state
+        };
+        ac.set_dependency_bindings(vec![bind(
+            qp.instance_id,
+            qp.source_revision,
+            qp.config_digest,
+        )]);
+        let mut inputs = parts();
+        inputs.executable_netlist = source.replace("1k", "2k");
+        inputs.tasks = vec![op, qp, ac];
+        let snapshot = PreparedRunSnapshot::new(inputs).unwrap();
+        let digest = snapshot.digest();
+        let issuer = crate::simulation::execution::ExecutionPermitIssuer::default();
+        let proof = issuer
+            .issue(digest)
+            .unwrap()
+            .consume(digest, digest)
+            .unwrap();
+        let mut authorized = snapshot.authorize_dispatch(proof).unwrap();
+        let op = authorized.tasks.pop_front().unwrap();
+        let qp = authorized.tasks.pop_front().unwrap();
+        let ac = authorized.tasks.pop_front().unwrap();
+        assert_eq!(op.source_basis_digest, qp.source_basis_digest);
+        assert_eq!(qp.source_basis_digest, ac.source_basis_digest);
+        assert_eq!(
+            op.source_basis_digest,
+            crate::workbench::documents::netlist_document::source_content_digest(source)
+        );
+        assert_ne!(op.executable_netlist, qp.executable_netlist);
+        assert!(ac.executable_netlist.contains("R1 out 0 1k"));
+        let config = op.config().unwrap();
+        let result = crate::simulation::EngineBridge::new()
+            .run(config, &op.executable_netlist)
+            .unwrap();
+        let AnalysisConfig::DcOp(config) = config else {
+            unreachable!()
+        };
+        let artifact = ExecutionArtifactEnvelope::from_dc_operating_point_result(
+            digest,
+            op.instance_id,
+            op.source_revision,
+            op.config_digest,
+            op.source_basis_digest,
+            config,
+            &result,
+        )
         .unwrap()
-        .consume(digest, digest)
         .unwrap();
-    let mut authorized = snapshot.authorize_dispatch(proof).unwrap();
-    let op = authorized.tasks.pop_front().unwrap();
-    let qp = authorized.tasks.pop_front().unwrap();
-    let ac = authorized.tasks.pop_front().unwrap();
-    assert_eq!(op.source_basis_digest, qp.source_basis_digest);
-    assert_eq!(qp.source_basis_digest, ac.source_basis_digest);
-    assert_eq!(
-        op.source_basis_digest,
-        crate::workbench::documents::netlist_document::source_content_digest(source)
-    );
-    assert_ne!(op.executable_netlist, qp.executable_netlist);
-    assert!(ac.executable_netlist.contains("R1 out 0 1k"));
-    let config = op.config().unwrap();
-    let result = crate::simulation::EngineBridge::new()
-        .run(config, &op.executable_netlist)
-        .unwrap();
-    let AnalysisConfig::DcOp(config) = config else {
-        unreachable!()
-    };
-    let artifact = ExecutionArtifactEnvelope::from_dc_operating_point_result(
-        digest,
-        op.instance_id,
-        op.source_revision,
-        op.config_digest,
-        op.source_basis_digest,
-        config,
-        &result,
-    )
-    .unwrap()
-    .unwrap();
-    let deck = qp.executable_netlist.clone();
-    let resolved = qp
-        .resolve_dependency_artifacts(&HashMap::from([(op.instance_id, artifact)]))
-        .unwrap();
-    resolved
-        .dependencies
-        .validate_source_basis(&deck, op.source_basis_digest)
-        .unwrap();
-    let (metadata, buffers) = resolved.dependencies.encode_transfer().unwrap();
-    let restored = ResolvedExecutionDependencies::decode_transfer(&metadata, buffers).unwrap();
-    restored
-        .validate_source_basis(&deck, op.source_basis_digest)
-        .unwrap();
-    assert!(
+        let deck = qp.executable_netlist.clone();
+        let resolved = qp
+            .resolve_dependency_artifacts(&HashMap::from([(op.instance_id, artifact)]))
+            .unwrap();
+        resolved
+            .dependencies
+            .validate_source_basis(&deck, op.source_basis_digest)
+            .unwrap();
+        let (metadata, buffers) = resolved.dependencies.encode_transfer().unwrap();
+        let restored = ResolvedExecutionDependencies::decode_transfer(&metadata, buffers).unwrap();
         restored
-            .validate_source_basis(&deck.replace("1k", "2k"), op.source_basis_digest)
-            .is_err()
-    );
+            .validate_source_basis(&deck, op.source_basis_digest)
+            .unwrap();
+        assert!(
+            restored
+                .validate_source_basis(&deck.replace("1k", "2k"), op.source_basis_digest)
+                .is_err()
+        );
+    }
 }

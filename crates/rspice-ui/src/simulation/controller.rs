@@ -878,6 +878,7 @@ impl SimulationController {
                     self.current_spec,
                     Some(
                         AnalysisSpec::Qpss { .. }
+                            | AnalysisSpec::HarmonicBalance { .. }
                             | AnalysisSpec::Pss {
                                 method: PssMethod::Shooting,
                                 ..
@@ -1854,13 +1855,14 @@ impl SimulationController {
                             Some(hb_spec @ AnalysisSpec::HarmonicBalance { .. }),
                             Some(provenance),
                             Some(config_digest),
-                        ) if hb_artifact_required => ExecutionArtifactEnvelope::from_hb_result(
+                        ) if hb_artifact_required => ExecutionArtifactEnvelope::from_hb_result_with_environment(
                             provenance.prepared_snapshot_digest(),
                             provenance.source_instance_id(),
                             provenance.source_revision(),
                             config_digest,
                             hb_spec,
                             &sim_result,
+                            self.current_periodic_environment.clone(),
                         )
                         .map_err(|error| {
                             format!(

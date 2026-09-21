@@ -151,6 +151,7 @@ pub fn run_psp_analysis_from_pss_with_source_path_and_abort(
 }
 
 /// Run HBSP from the exact retained harmonic-balance state.
+#[cfg(test)]
 pub fn run_hbsp_analysis_from_hb_with_source_path_and_abort(
     netlist_text: &str,
     config: &HbspRunConfig,

@@ -236,6 +236,17 @@ pub(crate) fn run_hb_analysis_on_materialized_with_abort(
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<HbData> {
     ensure_not_aborted(abort)?;
+    run_hb_analysis_with_dc_seed_on_materialized_with_abort(netlist, config, None, abort)
+}
+
+/// Apply a bound OP seed while preserving an explicitly authored zero start.
+pub(crate) fn run_hb_analysis_with_dc_seed_on_materialized_with_abort(
+    netlist: &rspice_core::Netlist,
+    config: &HbRunConfig,
+    seed: Option<&rspice_core::engine::PeriodicDcOperatingPointSeed>,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<HbData> {
+    ensure_not_aborted(abort)?;
     let hb_config = build_core_hb_config(config, abort)?;
     let engine = build_resolved_periodic_engine(
         netlist,
@@ -243,9 +254,15 @@ pub(crate) fn run_hb_analysis_on_materialized_with_abort(
         "HB resolved engine configuration is invalid",
     )?;
     // Run actual HB analysis
-    let hb_result = engine
-        .run_hb_with_abort(netlist, hb_config, abort)
-        .map_err(|error| ServiceRunError::from_core("HB error", error))?;
+    let seed = seed.filter(|_| {
+        netlist.options.hb_time_domain_mode
+            != Some(rspice_core::netlist::XyceHbTimeDomainMode::Direct)
+    });
+    let hb_result = match seed {
+        Some(seed) => engine.run_hb_with_dc_seed_and_abort(netlist, hb_config, seed, abort),
+        None => engine.run_hb_with_abort(netlist, hb_config, abort),
+    }
+    .map_err(|error| ServiceRunError::from_core("HB error", error))?;
     validate_hb_solution(&hb_result)?;
 
     // Extract DC operating point from spectral data
