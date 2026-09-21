@@ -1326,25 +1326,9 @@ fn an_authored_pstb_card_honours_cancellation() {
     ));
 }
 
-/// A `.PSTB` carrier can never carry a state-free periodic map, in either
-/// orbit policy — so the engine needs no guard against one, and the reader of
-/// `run_pstb_card_from_pss_with_abort` may take `order >= 1` as given.
-///
-/// Two independent facts close it, and this pins both because either one
-/// changing would put an order-zero map back in reach:
-///
-/// 1. The shooting solver refuses a circuit with no reactive element at all,
-///    so no *solved* carrier has an empty monodromy, driven or autonomous.
-/// 2. A *retained* carrier's monodromy is exactly as long as its shooting
-///    state, and its basis is exactly as long as that state too. An empty map
-///    therefore forces an empty basis, and a probe cannot be resolved against
-///    an empty basis — the run is refused before any judgement of the orbit.
-///
-/// The engine used to carry a refusal for the autonomous half of this and an
-/// implicit admission for the driven half. Neither branch could be reached,
-/// and the admission was the more misleading of the two: it read as a
-/// deliberate statement that a driven state-free carrier is a real answer,
-/// when no such carrier can be built.
+/// A driven circuit without memory has a valid periodic waveform, but an empty
+/// shooting basis cannot answer an inductor-state PSTB probe. Autonomous PSS
+/// still requires a dynamic state. Retained empty bases obey the same contract.
 #[test]
 fn a_periodic_map_with_no_dynamic_state_cannot_reach_a_pstb_card() {
     use rspice_core::analysis::PssConfig;
@@ -1358,33 +1342,40 @@ fn a_periodic_map_with_no_dynamic_state_cannot_reach_a_pstb_card() {
     let stateless = Netlist::parse(NO_REACTIVE_STATE).expect("deck parses");
     let engine = Engine::new(SimulationConfig::default());
 
-    for (label, config) in [
-        (
-            "driven",
+    let driven = engine
+        .run_pss_operating_point_with_abort(
+            &stateless,
             PssConfig::new(PSTB_FUNDAMENTAL)
                 .with_harmonics(8)
                 .with_points_per_period(64)
-                .with_tstab_periods(2),
-        ),
-        (
-            "autonomous",
+                .with_tstab_periods(0),
+            &NoAbort,
+        )
+        .expect("a driven memoryless circuit retains its periodic waveform");
+    assert!(driven.shooting_state_basis().is_empty());
+    assert!(driven.analysis().monodromy.is_empty());
+    assert!(
+        engine
+            .run_pstb_card_from_pss_with_abort(&stateless, &pstb_card("VIN"), &driven, &NoAbort)
+            .is_err()
+    );
+    let error = engine
+        .run_pss_operating_point_with_abort(
+            &stateless,
             PssConfig::autonomous()
                 .with_period_guess(1.0 / PSTB_FUNDAMENTAL)
                 .with_oscillator_node("out")
                 .with_harmonics(8)
                 .with_points_per_period(64)
-                .with_tstab_periods(2),
-        ),
-    ] {
-        let error = engine
-            .run_pss_operating_point_with_abort(&stateless, config, &NoAbort)
-            .expect_err("a circuit with no reactive element has no periodic state to shoot")
-            .to_string();
-        assert!(
-            error.contains("no charge or flux storage"),
-            "the {label} refusal must name the missing dynamic state: {error}"
-        );
-    }
+                .with_tstab_periods(0),
+            &NoAbort,
+        )
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains("Autonomous PSS requires an independent charge or flux state"),
+        "{error}"
+    );
 
     // The retained half: an order-zero map forces an order-zero basis, and a
     // probe resolved against nothing would silently name coordinate zero.

@@ -759,7 +759,7 @@ pub enum PssError {
     ConvergenceFailed { iterations: usize, residual: Value },
     /// Period detection failed for autonomous oscillator
     PeriodDetectionFailed(String),
-    /// Circuit has no reactive elements (no periodic solution possible)
+    /// Autonomous PSS has no independent dynamic state.
     NoReactiveElements,
     /// Invalid configuration
     InvalidConfig(String),
@@ -779,7 +779,10 @@ impl std::fmt::Display for PssError {
                 )
             }
             Self::PeriodDetectionFailed(msg) => write!(f, "Period detection failed: {}", msg),
-            Self::NoReactiveElements => write!(f, "Circuit has no charge or flux storage"),
+            Self::NoReactiveElements => write!(
+                f,
+                "Autonomous PSS requires an independent charge or flux state"
+            ),
             Self::InvalidConfig(msg) => write!(f, "Invalid PSS config: {}", msg),
         }
     }
@@ -2195,30 +2198,12 @@ impl Engine {
 
         let mut circuit = PssCircuit::new_with_abort(circuit, self.config.resource_limits, abort)?;
         circuit.ensure_regular_prescribed_currents(config.period(), abort)?;
-        // Validate circuit has reactive elements
+        // A driven algebraic circuit has a periodic waveform but no shooting
+        // coordinates. The existing traversal still solves and qualifies every
+        // MNA sample, and its empty monodromy reports NoDynamicModes. An
+        // autonomous oscillation, however, needs an independent dynamic state.
         let state_dimension = circuit.state_dimension();
-        if circuit
-            .capacitors
-            .capacitances
-            .iter()
-            .all(|&value| value == 0.0)
-            && circuit.inductors.is_empty()
-            && circuit
-                .diodes
-                .devices
-                .iter()
-                .all(|diode| !diode.has_charge_storage())
-            && circuit
-                .bjts
-                .devices
-                .iter()
-                .all(|bjt| bjt.charge_storage_nodes().iter().all(Option::is_none))
-            && circuit.jfets.iter().all(|jfet| {
-                jfet.classic_charge_storage_nodes()
-                    .iter()
-                    .all(Option::is_none)
-            })
-        {
+        if config.is_autonomous() && state_dimension == 0 {
             return Err(PssError::NoReactiveElements.into());
         }
         circuit.integration_steps = Self::ensure_pss_source_contract(

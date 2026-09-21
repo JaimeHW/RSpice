@@ -15,6 +15,73 @@ const R: f64 = 1.0e3;
 const C: f64 = 159.154943091895e-12; // RC corner ~ 1 MHz (w*RC = 1)
 
 #[test]
+fn pss_memoryless_circuits_retain_the_driven_orbit_and_branch_currents() {
+    use rspice_core::analysis::FloquetSpectrumEvidence;
+    use rspice_core::numerics::integration::IntegrationMethod;
+    let engine = Engine::new(
+        SimulationConfig::default().with_spice_dialect(rspice_core::engine::SpiceDialect::Ngspice),
+    );
+    // ngspice-46 const.h uses the CODATA 2014 pair for its diode law.
+    let vt = 300.15 * 1.38064852e-23 / 1.6021766208e-19;
+    for diode in [false, true] {
+        let load = if diode {
+            "D1 out 0 dm\n.model dm D(IS=1u N=1 CJO=0 TT=0)\nR1 out 0 1k"
+        } else {
+            "R1 out 0 1k"
+        };
+        let circuit = Netlist::parse(&format!("Algebraic periodic orbit\nV1 out 0 SIN(.1 .01 1meg) AC 1\n{load}\n.options TEMP=27 TNOM=27 GMIN=0 RELTOL=1e-8 VNTOL=1e-10 ABSTOL=1e-14\n.end\n")).unwrap();
+        for method in [
+            IntegrationMethod::BackwardEuler,
+            IntegrationMethod::Trapezoidal,
+            IntegrationMethod::Gear2,
+        ] {
+            let mut config = PssConfig::new(F0)
+                .with_points_per_period(32)
+                .with_tstab_periods(0);
+            config.integration_method = Some(method);
+            let point = engine
+                .run_pss_operating_point_with_abort(&circuit, config, &NoAbort)
+                .unwrap();
+            assert!(point.shooting_state().is_empty());
+            assert!(point.shooting_state_basis().is_empty());
+            assert!(point.analysis().monodromy.is_empty());
+            let result = &point.analysis().result;
+            assert_eq!(
+                result.floquet_evidence,
+                FloquetSpectrumEvidence::NoDynamicModes
+            );
+            assert_eq!(result.time.len(), 33);
+            let output = result
+                .node_names
+                .iter()
+                .position(|name| name.eq_ignore_ascii_case("out"))
+                .unwrap();
+            let branch = result
+                .branch_names
+                .iter()
+                .position(|name| name.eq_ignore_ascii_case("V1"))
+                .unwrap();
+            for (index, &time) in result.time.iter().enumerate() {
+                let voltage = 0.1 + 0.01 * (std::f64::consts::TAU * F0 * time).sin();
+                let current = voltage / 1000.0
+                    + if diode {
+                        1e-6 * (voltage / vt).exp_m1()
+                    } else {
+                        0.0
+                    };
+                assert!((result.waveforms[output].values[index] - voltage).abs() < 1e-10);
+                assert!(
+                    (result.branch_waveforms[branch].values[index] + current).abs() < 1e-10,
+                    "diode={diode} method={method:?} time={time} actual={} expected={}",
+                    result.branch_waveforms[branch].values[index],
+                    -current
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn vbic_thermal_and_delay_pss_match_physical_decay_modes() {
     use rspice_core::engine::SpiceDialect;
     // Independent RC heat balance and the two-pole VBIC delay network:
@@ -255,11 +322,22 @@ fn classic_jfet_pss_prescribed_and_tied_charge_have_no_spurious_state() {
         assert!((voltage - (-1.0 + 0.1 * (std::f64::consts::TAU * F0 * time).sin())).abs() < 1e-10);
     }
     let tied = Netlist::parse("tied JFET charge\nI1 0 out 1m\nR1 out 0 1k\nJ1 out out out jm\n.model jm NJF(CGS=1n CGD=2n)\n.end\n").unwrap();
-    let error = engine
-        .run_pss(&tied, PssConfig::new(F0))
-        .unwrap_err()
-        .to_string();
-    assert!(error.contains("no charge or flux storage"), "{error}");
+    let tied_point = engine
+        .run_pss_operating_point_with_abort(
+            &tied,
+            PssConfig::new(F0)
+                .with_points_per_period(32)
+                .with_tstab_periods(0),
+            &NoAbort,
+        )
+        .expect("tied charge terminals form a memoryless periodic circuit");
+    assert!(tied_point.shooting_state().is_empty());
+    assert!(
+        tied_point.analysis().result.waveforms[0]
+            .values
+            .iter()
+            .all(|voltage| (*voltage - 1.0).abs() < 1e-8)
+    );
     let unadapted = Netlist::parse("JFET2 history\nV1 out 0 SIN(-1 0.1 1meg)\nJ1 0 out 0 jm\n.model jm NJF(LEVEL=2 CGS=1n CGD=2n)\n.end\n").unwrap();
     let error = engine
         .run_pss(&unadapted, PssConfig::new(F0))

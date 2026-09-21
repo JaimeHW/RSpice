@@ -1250,10 +1250,17 @@ R2 out 0 1k\n\
         let netlist = "preview PSP dispatch\n\
                        P1 p1 0 SIN(0 0 1Meg) PORT=1 Z0=50\n\
                        R1 p1 p2 50\n\
-                       C1 p1 0 1e-18\n\
                        P2 p2 0 SIN(0 0 1Meg) PORT=2 Z0=50\n\
                        .end\n";
         let dependencies = transferred_pss_dependencies(netlist);
+        assert!(
+            dependencies
+                .periodic_state()
+                .unwrap()
+                .operating_point()
+                .shooting_state()
+                .is_empty()
+        );
         let psp = AnalysisSpec::Psp {
             start_freq: 1.0e4,
             stop_freq: 2.0e4,
@@ -1291,6 +1298,9 @@ R2 out 0 1k\n\
         assert_eq!(frequencies.len(), 2);
         assert!(waveforms.contains_key("S11"));
         assert!(waveforms.contains_key("S21[k=+0,m=+0]"));
+        for value in &waveforms["S21[k=+0,m=+0]"].y_values {
+            assert!((*value - 2.0 / 3.0).abs() < 1e-7);
+        }
     }
 
     /// A resistor divider run with device noise on, twice from the same seed

@@ -141,6 +141,12 @@ fn study_temperature_precedes_parameter_statistics_and_optimization_replay() {
         for inherited in [false, true] {
             let base = base(family, inherited);
             for statistics in [false, true] {
+                let mut source = deck(statistics);
+                if family == 2 {
+                    // PSS must retain a varied driven waveform even without
+                    // independent charge/flux storage in the circuit.
+                    source = source.replace("C1 out 0 100n\n", "");
+                }
                 let result = run_monte_carlo(
                     &base,
                     if statistics {
@@ -148,7 +154,7 @@ fn study_temperature_precedes_parameter_statistics_and_optimization_replay() {
                     } else {
                         McVariationSource::ParameterTolerance
                     },
-                    &deck(statistics),
+                    &source,
                     None,
                     Some(environment()),
                     &NoAbort,
