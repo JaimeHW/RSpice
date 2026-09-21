@@ -53,6 +53,38 @@ fn noise_quick_view_exports_retained_psd_as_amplitude_density_without_summary() 
 }
 
 #[test]
+fn zero_noise_density_remains_available_in_results_and_hardcopy() {
+    for (unit, amplitude_unit) in [
+        ("V²/Hz", "nV/√Hz"),
+        ("A²/Hz", "nA/√Hz"),
+        ("s²/Hz", "ns/√Hz"),
+    ] {
+        for density in [vec![0.0, 0.0, 0.0], vec![1e-18, 0.0, 4e-18]] {
+            let analysis =
+                AnalysisResult::new(9, AnalysisType::Noise, "Noise").with_waveforms(vec![
+                    WaveformData::new("onoise", vec![1.0, 10.0, 100.0], density.clone(), "#fff")
+                        .with_unit(unit),
+                ]);
+            // The screen's offering gate is also the hardcopy's offering gate.
+            assert!(ordinary_noise_spectrum_is_renderable(&analysis));
+            let state = quick_view_state(analysis, ResultViewer::NoiseContrib);
+            let resolved = resolve_quick_view(&state).unwrap();
+            let HardcopySemanticDocument::Plot(plot) = resolved.semantic_document() else {
+                panic!("expected noise amplitude-density plot");
+            };
+            assert_eq!(plot.traces.len(), 1);
+            assert_eq!(plot.traces[0].label, format!("onoise ({amplitude_unit})"));
+            let expected = [1.0_f64, 10.0, 100.0]
+                .into_iter()
+                .zip(density)
+                .map(|(frequency, power)| (frequency.to_bits(), (power.sqrt() * 1e9).to_bits()))
+                .collect::<Vec<_>>();
+            assert_eq!(plot.traces[0].source_samples, expected);
+        }
+    }
+}
+
+#[test]
 fn hbnoise_quick_view_exports_retained_psd_as_amplitude_density() {
     let analysis = AnalysisResult::new(9, AnalysisType::Hbnoise, "HBNOISE").with_waveforms(vec![
         WaveformData::new(

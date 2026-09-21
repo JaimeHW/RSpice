@@ -56,7 +56,7 @@ pub(super) fn retained_noise_waveform_is_renderable(waveform: &WaveformData) -> 
     if waveform
         .y
         .iter()
-        .any(|density| !density.is_finite() || *density <= 0.0)
+        .any(|density| !density.is_finite() || *density < 0.0)
     {
         return false;
     }

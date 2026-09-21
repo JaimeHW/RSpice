@@ -45,7 +45,7 @@ struct NoiseSpectrumModel {
 /// Which retained traces one analysis' ordinary-noise spectrum is made of.
 ///
 /// Resolving it walks every sample of every candidate density — each value
-/// finite and positive, each frequency positive and strictly ascending — and
+/// finite and nonnegative, each frequency positive and strictly ascending — and
 /// compares each contributor's frequency axis against the anchor's. That is
 /// the whole structural half of the noise sheet, and the tab strip, the
 /// spectrum card and the contributor table each asked for it independently,
@@ -142,7 +142,7 @@ fn noise_waveform_is_renderable(waveform: &crate::state::WaveformData) -> bool {
     if waveform
         .y
         .iter()
-        .any(|value| !value.is_finite() || *value <= 0.0)
+        .any(|value| !value.is_finite() || *value < 0.0)
     {
         return false;
     }
@@ -901,10 +901,10 @@ mod tests {
     }
 
     #[test]
-    fn noise_spectrum_rejects_nonpositive_or_nonmonotonic_retained_samples() {
+    fn noise_spectrum_rejects_negative_or_nonmonotonic_retained_samples() {
         let invalid_value =
-            AnalysisResult::new(1, AnalysisType::Noise, "zero").with_waveforms(vec![
-                WaveformData::new("inoise", vec![1.0, 10.0], vec![1.0e-9, 0.0], "#fff"),
+            AnalysisResult::new(1, AnalysisType::Noise, "negative").with_waveforms(vec![
+                WaveformData::new("inoise", vec![1.0, 10.0], vec![1.0e-9, -1.0e-9], "#fff"),
             ]);
         let invalid_axis =
             AnalysisResult::new(2, AnalysisType::Noise, "axis").with_waveforms(vec![
