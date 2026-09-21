@@ -453,6 +453,7 @@ mod tests {
             revision,
             config_digest,
             &producer_spec,
+            Some(netlist),
             &result,
             Some(environment),
         )

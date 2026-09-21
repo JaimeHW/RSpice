@@ -470,6 +470,10 @@ pub(in crate::simulation) struct PeriodicOperatingEnvironment {
 }
 
 impl PeriodicOperatingEnvironment {
+    pub(super) const fn temperature_celsius(&self) -> f64 {
+        self.temperature_celsius
+    }
+
     fn validate(&self) -> Result<(), ExecutionArtifactError> {
         if !self.temperature_celsius.is_finite() || self.temperature_celsius <= -273.15 {
             return Err(ExecutionArtifactError::InvalidPayload(
@@ -1364,6 +1368,7 @@ impl ExecutionArtifactEnvelope {
             producer_source_revision,
             producer_config_digest,
             producer_spec,
+            Some("Synthetic HB artifact without option overrides\n.end\n"),
             result,
             None,
         )
@@ -1375,6 +1380,7 @@ impl ExecutionArtifactEnvelope {
         producer_source_revision: ObjectRevision,
         producer_config_digest: ContentDigest,
         producer_spec: &AnalysisSpec,
+        producer_source: Option<&str>,
         result: &SimulationResult,
         environment: Option<PeriodicOperatingEnvironment>,
     ) -> Result<Option<Self>, ExecutionArtifactError> {
@@ -1386,7 +1392,12 @@ impl ExecutionArtifactEnvelope {
                 "HB producer returned a non-HB result variant".to_owned(),
             ));
         };
-        validate_hb_producer_config(producer_spec, operating_point.config())?;
+        validate_hb_producer_config(
+            producer_spec,
+            producer_source,
+            environment.as_ref(),
+            operating_point.config(),
+        )?;
         let (spectral_real, spectral_imaginary): (Vec<_>, Vec<_>) = operating_point
             .spectral_state()
             .iter()

@@ -8,7 +8,10 @@ use svc_runner::*;
 fn hb_op_handoff_preserves_environment_for_all_consumers() {
     let basis = "HB OP handoff\nVIN drive 0 SIN(0 .1 1k) AC 1\nVDD in drive DC .2\nRS in out {1000+10*(TEMP-37)} TC1=.01\nRL out 0 1k\nC1 out 0 100n\nLPROBE lp 0 .01\nRPROBE lp 0 1\nP1 p1 0 PORT=1 Z0=50\nP2 p2 0 PORT=2 Z0=50\nRSP p1 p2 {1000+10*(TEMP-37)}\n.options TEMP=12 TNOM=27 GMIN=1e-10\n.end\n";
     let op_deck = splice_before_terminal_end_card(basis, ".options GMIN=1e-7");
-    let hb_deck = splice_before_terminal_end_card(basis, ".options GMIN=0 TEMP=12");
+    let hb_deck = splice_before_terminal_end_card(
+        basis,
+        ".options GMIN=0 TEMP=12\n.options NONLIN-HB MAXSTEP={TEMP+11}",
+    );
     let consumer_deck = splice_before_terminal_end_card(basis, ".options GMIN=0 TEMP=77");
     let mut op = OpConfig {
         temperature_celsius: 37.0,
@@ -66,6 +69,7 @@ fn hb_op_handoff_preserves_environment_for_all_consumers() {
         else {
             panic!("HB result")
         };
+        assert_eq!(operating_point.config().max_iterations, 48);
         let dc = |name: &str| {
             let index = operating_point
                 .node_names()
@@ -90,11 +94,28 @@ fn hb_op_handoff_preserves_environment_for_all_consumers() {
         binding.producer_source_revision(),
         binding.producer_config_digest(),
         &producer,
+        Some(&hb_deck),
         &result,
-        Some(environment),
+        Some(environment.clone()),
     )
     .unwrap()
     .unwrap();
+    for wrong_source in [None, Some(basis), Some(consumer_deck.as_str())] {
+        assert!(
+            ExecutionArtifactEnvelope::from_hb_result_with_environment(
+                digest(74),
+                binding.producer_instance_id(),
+                binding.producer_source_revision(),
+                binding.producer_config_digest(),
+                &producer,
+                wrong_source,
+                &result,
+                Some(environment.clone()),
+            )
+            .is_err(),
+            "a worker cannot choose its own HB iteration budget"
+        );
+    }
     let mut dependencies = ResolvedExecutionDependencies::resolve(
         digest(74),
         vec![binding.clone()],

@@ -497,6 +497,8 @@ fn validate_periodic_producer_config(
 
 fn validate_hb_producer_config(
     producer_spec: &AnalysisSpec,
+    producer_source: Option<&str>,
+    environment: Option<&PeriodicOperatingEnvironment>,
     actual: &rspice_core::analysis::HbConfig,
 ) -> Result<(), ExecutionArtifactError> {
     let AnalysisSpec::HarmonicBalance {
@@ -549,6 +551,34 @@ fn validate_hb_producer_config(
         &rspice_core::abort_signal::NoAbort,
     )
     .map_err(|error| ExecutionArtifactError::ContractMismatch(error.to_string()))?;
+    // Resolve from the host's frozen deck, never from worker-returned settings.
+    // OP temperature also governs expressions in the producer's option cards.
+    let source = producer_source.ok_or_else(|| {
+        ExecutionArtifactError::ContractMismatch(
+            "HB-state artifact has no frozen producer source for numerical-option validation"
+                .into(),
+        )
+    })?;
+    let source = match environment {
+        Some(environment) => {
+            crate::services::simulation_runner::source_with_run_temperature_with_abort(
+                source,
+                environment.temperature_celsius(),
+                &rspice_core::NoAbort,
+            )
+            .map_err(|error| ExecutionArtifactError::ContractMismatch(error.to_string()))?
+        }
+        None => source.to_owned(),
+    };
+    let netlist = crate::services::simulation_runner::parse_runner_netlist_with_abort(
+        &source,
+        None,
+        &rspice_core::NoAbort,
+    )
+    .map_err(|error| ExecutionArtifactError::ContractMismatch(error.to_string()))?;
+    let expected = rspice_core::Engine::default()
+        .hb_config_for_netlist(&netlist, expected)
+        .map_err(|error| ExecutionArtifactError::ContractMismatch(error.to_string()))?;
     if actual != &expected {
         return Err(ExecutionArtifactError::ContractMismatch(
             "returned HB numerical state was produced with a configuration that does not match the frozen producer specification"

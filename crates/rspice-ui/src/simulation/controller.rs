@@ -158,6 +158,8 @@ pub struct SimulationController {
     current_periodic_carrier_hz: Option<f64>,
     current_periodic_environment:
         Option<crate::simulation::execution::PeriodicOperatingEnvironment>,
+    /// Exact prepared deck retained independently of the returned HB result.
+    current_hb_producer_source: Option<std::sync::Arc<str>>,
     /// Frozen identity of the prepared task currently owned by the runner.
     /// Captured before the authorized dispatch token is moved into the runner.
     current_provenance: Option<AnalysisResultProvenance>,
@@ -237,6 +239,7 @@ impl SimulationController {
             current_spec_options: None,
             current_periodic_carrier_hz: None,
             current_periodic_environment: None,
+            current_hb_producer_source: None,
             current_provenance: None,
             current_config_digest: None,
             current_effective_source_content_digest: None,
@@ -615,6 +618,7 @@ impl SimulationController {
         self.current_spec_options = None;
         self.current_periodic_carrier_hz = None;
         self.current_periodic_environment = None;
+        self.current_hb_producer_source = None;
         self.current_provenance = None;
         self.current_config_digest = None;
         self.current_effective_source_content_digest = None;
@@ -655,6 +659,7 @@ impl SimulationController {
         self.current_spec_options = None;
         self.current_periodic_carrier_hz = None;
         self.current_periodic_environment = None;
+        self.current_hb_producer_source = None;
         self.current_provenance = None;
         self.current_config_digest = None;
         self.current_effective_source_content_digest = None;
@@ -803,6 +808,8 @@ impl SimulationController {
         self.current_spec = Some(spec.clone());
         self.current_analysis_label = Some(analysis_name.clone());
         self.current_spec_options = Some(next_analysis.spec_options().clone());
+        self.current_hb_producer_source = matches!(spec, AnalysisSpec::HarmonicBalance { .. })
+            .then(|| std::sync::Arc::clone(next_analysis.executable_netlist()));
         self.current_provenance = Some(provenance);
         self.current_config_digest = Some(next_analysis.config_digest());
         self.current_effective_source_content_digest = Some(next_analysis.source_basis_digest());
@@ -1394,6 +1401,7 @@ impl SimulationController {
         self.current_spec_options = None;
         self.current_periodic_carrier_hz = None;
         self.current_periodic_environment = None;
+        self.current_hb_producer_source = None;
         self.current_provenance = None;
         self.current_config_digest = None;
         self.current_effective_source_content_digest = None;
@@ -1861,6 +1869,7 @@ impl SimulationController {
                             provenance.source_revision(),
                             config_digest,
                             hb_spec,
+                            self.current_hb_producer_source.as_deref(),
                             &sim_result,
                             self.current_periodic_environment.clone(),
                         )
@@ -2121,6 +2130,7 @@ impl SimulationController {
                     self.current_spec_options = None;
                     self.current_periodic_carrier_hz = None;
                     self.current_periodic_environment = None;
+                    self.current_hb_producer_source = None;
                     self.current_provenance = None;
                     self.current_config_digest = None;
                     self.current_effective_source_content_digest = None;
