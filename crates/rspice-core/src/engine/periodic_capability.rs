@@ -667,9 +667,13 @@ pub(crate) const fn periodic_capability_descriptor(
             envelope: Absent(ENVELOPE_LINEAR_SUBSET),
         },
         F::BehavioralSource => PeriodicCapabilityDescriptor {
-            residual_jacobian: Restricted("stateless time-independent behavioral equations"),
+            residual_jacobian: Restricted(
+                "stateless behavioral equations with certified periodic forcing",
+            ),
             dynamic_state: Complete,
-            small_signal: Restricted("stateless time-independent behavioral equations"),
+            small_signal: Restricted(
+                "stateless behavioral equations with certified periodic forcing",
+            ),
             noise: Inapplicable,
             pss_state: Restricted(
                 "behavioral sources without `sdt` integrals; accepted-step memory is not \
@@ -1226,18 +1230,18 @@ fn append_behavioral_periodic_gaps(circuit: &CircuitData, gaps: &mut Vec<Capabil
         .behavioral_sources
         .voltage_sources
         .iter()
-        .map(|source| (&source.name, source.has_memoryless_periodic_equation()))
+        .map(|source| (&source.name, source.has_stateless_periodic_equation()))
         .chain(
             circuit
                 .behavioral_sources
                 .current_sources
                 .iter()
-                .map(|source| (&source.name, source.has_memoryless_periodic_equation())),
+                .map(|source| (&source.name, source.has_stateless_periodic_equation())),
         )
     {
         if !supported {
             gaps.push(CapabilityGap::new(PeriodicDeviceFamily::BehavioralSource,
-                format!("behavioral source '{name}' requires explicit time/frequency forcing or accepted-step memory in the periodic solver")));
+                format!("behavioral source '{name}' requires frequency-dependent equations or accepted-step memory in the periodic solver")));
         }
     }
 }

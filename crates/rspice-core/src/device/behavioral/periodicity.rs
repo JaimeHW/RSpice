@@ -7,8 +7,12 @@ use crate::expr::{constant_value, function_uses_implicit_time as implicit_time};
 use crate::numerics::is_integral_cycle_count;
 
 impl BehavioralVoltageSource {
+    pub(crate) fn has_stateless_periodic_equation(&self) -> bool {
+        self.program.sdt_count == 0 && !self.is_frequency_dependent()
+    }
+
     pub(crate) fn has_memoryless_periodic_equation(&self) -> bool {
-        !self.is_frequency_dependent() && memoryless_equation(&self.ast)
+        self.has_stateless_periodic_equation() && memoryless_equation(&self.ast)
     }
 
     pub(crate) fn prescribed_time_program(&self) -> Option<(&CompiledExpr, Context<'_>)> {
@@ -40,8 +44,12 @@ impl BehavioralVoltageSource {
 }
 
 impl BehavioralCurrentSource {
+    pub(crate) fn has_stateless_periodic_equation(&self) -> bool {
+        self.program.sdt_count == 0 && !self.is_frequency_dependent()
+    }
+
     pub(crate) fn has_memoryless_periodic_equation(&self) -> bool {
-        !self.is_frequency_dependent() && memoryless_equation(&self.ast)
+        self.has_stateless_periodic_equation() && memoryless_equation(&self.ast)
     }
 
     pub(crate) fn prescribed_time_program(&self) -> Option<(&CompiledExpr, Context<'_>)> {

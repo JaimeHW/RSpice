@@ -1687,7 +1687,7 @@ impl Engine {
         self.hb_stamp_periodic_mna_branches(&circuit, &mut solver)?;
         self.hb_stamp_current_sources(&circuit, &mut solver, &config, &drive_tones)?;
         if has_supported_nonlinear {
-            self.hb_stamp_supported_nonlinear_devices(&circuit, &mut solver, num_nodes)?;
+            self.hb_stamp_supported_nonlinear_devices(&circuit, &mut solver, num_nodes, false)?;
         }
         let periodic_branch_names = solver.try_periodic_mna_branch_names().map_err(|error| {
             SimulationError::Circuit(format!(

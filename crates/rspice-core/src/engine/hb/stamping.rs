@@ -25,11 +25,12 @@ impl Engine {
         circuit: &CircuitData,
         solver: &mut HbSolver,
         num_nodes: usize,
+        autonomous: bool,
     ) -> Result<(), SimulationError> {
         use crate::analysis::harmonic_balance::{DepletionCap, NonlinearDeviceInstance};
 
         solver
-            .set_periodic_behavioral_sources(&circuit.behavioral_sources)
+            .set_periodic_behavioral_sources(&circuit.behavioral_sources, autonomous)
             .map_err(|error| SimulationError::Circuit(error.to_string()))?;
 
         for bjt in &circuit.bjts.devices {

@@ -302,6 +302,21 @@ impl HbSolver {
     fn validate_quasi_periodic_circuit(&self) -> Result<(), Error> {
         self.validate_nonlinear_device_parameters()
             .map_err(device_error)?;
+        if self
+            .behavioral_sources
+            .voltage_sources
+            .iter()
+            .any(|source| !source.has_memoryless_periodic_equation())
+            || self
+                .behavioral_sources
+                .current_sources
+                .iter()
+                .any(|source| !source.has_memoryless_periodic_equation())
+        {
+            return Err(Error::InvalidCircuit(
+                "QPSS behavioral clocks require independent-phase forcing projection".into(),
+            ));
+        }
         if !self.l_matrix.is_empty() {
             return Err(Error::InvalidCircuit(
                 "QPSS inductors require exact branch equations".into(),

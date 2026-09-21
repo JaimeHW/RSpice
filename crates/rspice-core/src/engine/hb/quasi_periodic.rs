@@ -207,6 +207,28 @@ impl Engine {
     }
 
     fn qpss_circuit_solver(&self, circuit: &CircuitData) -> Result<HbSolver, SimulationError> {
+        for (name, memoryless) in circuit
+            .behavioral_sources
+            .voltage_sources
+            .iter()
+            .map(|source| (&source.name, source.has_memoryless_periodic_equation()))
+            .chain(
+                circuit
+                    .behavioral_sources
+                    .current_sources
+                    .iter()
+                    .map(|source| (&source.name, source.has_memoryless_periodic_equation())),
+            )
+        {
+            if !memoryless {
+                return Err(SimulationError::unsupported_capability(
+                    "analysis.qpss.behavioral_forcing",
+                    format!(
+                        "QPSS behavioral source '{name}' requires independent-phase forcing or state projection"
+                    ),
+                ));
+            }
+        }
         for gaps in [
             periodic_capability::periodic_residual_gaps(circuit),
             periodic_capability::periodic_descriptor_gaps(circuit),
@@ -228,7 +250,12 @@ impl Engine {
         self.hb_stamp_resistors(circuit, &mut solver);
         self.hb_stamp_capacitors(circuit, &mut solver);
         self.hb_stamp_periodic_mna_branches(circuit, &mut solver)?;
-        self.hb_stamp_supported_nonlinear_devices(circuit, &mut solver, circuit.num_nodes())?;
+        self.hb_stamp_supported_nonlinear_devices(
+            circuit,
+            &mut solver,
+            circuit.num_nodes(),
+            false,
+        )?;
         Ok(solver)
     }
 

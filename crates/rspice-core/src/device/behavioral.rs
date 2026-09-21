@@ -753,8 +753,17 @@ impl BehavioralVoltageSource {
         &mut self,
         solution: &[Value],
     ) -> Result<(), BehavioralEvaluationError> {
+        self.linearize_at_time(solution, 0.0)
+    }
+
+    /// Refresh the instantaneous value and partials on a periodic time grid.
+    pub(crate) fn linearize_at_time(
+        &mut self,
+        solution: &[Value],
+        time: Value,
+    ) -> Result<(), BehavioralEvaluationError> {
         self.set_frequency(0.0);
-        self.linearize_expression(solution, 0.0)?;
+        self.linearize_expression(solution, time)?;
         Ok(())
     }
 
@@ -2476,8 +2485,17 @@ impl BehavioralCurrentSource {
         &mut self,
         solution: &[Value],
     ) -> Result<(), BehavioralEvaluationError> {
+        self.linearize_at_time(solution, 0.0)
+    }
+
+    /// Refresh the instantaneous value and partials on a periodic time grid.
+    pub(crate) fn linearize_at_time(
+        &mut self,
+        solution: &[Value],
+        time: Value,
+    ) -> Result<(), BehavioralEvaluationError> {
         self.frequency = 0.0;
-        self.linearize_expression(solution, 0.0)?;
+        self.linearize_expression(solution, time)?;
         Ok(())
     }
 

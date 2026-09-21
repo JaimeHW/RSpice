@@ -102,8 +102,43 @@ impl HbSolver {
     pub(crate) fn set_periodic_behavioral_sources(
         &mut self,
         sources: &crate::device::behavioral::BehavioralSources,
+        autonomous: bool,
     ) -> Result<(), HbError> {
         let unknowns = self.num_nodes + self.exact_mna_branches().len();
+        let period = self.config.fundamental_freq.recip();
+        let certify = |name: &str, periodic: bool, cycles: Value, interval: Option<Value>| {
+            if !periodic {
+                return Err(HbError::InvalidCircuit(format!(
+                    "behavioral source '{name}' is not certified {} over the configured period {period:e} s",
+                    if autonomous {
+                        "constant in explicit time"
+                    } else {
+                        "periodic"
+                    },
+                )));
+            }
+            if !autonomous {
+                if !cycles.is_finite() || cycles.round() > self.num_harmonics as Value {
+                    return Err(HbError::InvalidCircuit(format!(
+                        "behavioral source '{name}' requires at least {:.0} harmonics, beyond the configured {}",
+                        cycles.ceil(),
+                        self.num_harmonics,
+                    )));
+                }
+                let points = (2.0 * cycles.round() + 1.0)
+                    .max(interval.map_or(0.0, |interval| (2.0 * period / interval).ceil()));
+                if !points.is_finite()
+                    || points > self.fft.size() as Value
+                    || interval.is_some_and(|value| !value.is_finite() || value <= 0.0)
+                {
+                    return Err(HbError::InvalidCircuit(format!(
+                        "behavioral source '{name}' requires at least {points:.0} collocation points; increase HB oversampling or time points from {}",
+                        self.fft.size(),
+                    )));
+                }
+            }
+            Ok(())
+        };
         let valid = |pos: usize, neg: usize, supported: bool, indices: Vec<usize>| {
             supported
                 && pos <= self.num_nodes
@@ -111,10 +146,16 @@ impl HbSolver {
                 && indices.into_iter().all(|index| index < unknowns)
         };
         for source in &sources.current_sources {
+            certify(
+                &source.name,
+                source.has_periodic_time_dependence(period, autonomous),
+                source.max_authored_tone_cycles(period),
+                source.minimum_pss_interval(false),
+            )?;
             if !valid(
                 source.node_pos,
                 source.node_neg,
-                source.has_memoryless_periodic_equation(),
+                source.has_stateless_periodic_equation(),
                 source.bound_solution_indices().collect(),
             ) {
                 return Err(HbError::InvalidCircuit(format!(
@@ -124,6 +165,12 @@ impl HbSolver {
             }
         }
         for source in &sources.voltage_sources {
+            certify(
+                &source.name,
+                source.has_periodic_time_dependence(period, autonomous),
+                source.max_authored_tone_cycles(period),
+                source.minimum_pss_interval(false),
+            )?;
             let branch = source
                 .branch_ordinal
                 .checked_sub(1)
@@ -131,7 +178,7 @@ impl HbSolver {
             if !valid(
                 source.node_pos,
                 source.node_neg,
-                source.has_memoryless_periodic_equation(),
+                source.has_stateless_periodic_equation(),
                 source.bound_solution_indices().collect(),
             ) || !matches!(branch, Some(ExactMnaBranch::ConstitutivePort { node_pos, node_neg, .. })
                     if *node_pos == source.node_pos && *node_neg == source.node_neg)
@@ -182,15 +229,16 @@ impl HbSolver {
         Ok(())
     }
 
-    fn sample_native_bjts(
+    fn sample_native_devices(
         &mut self,
         solution: &[Value],
+        time: Value,
         f: &mut NativeStamp,
         q: &mut NativeStamp,
     ) -> Result<(), HbError> {
         if solution.len() != self.num_nodes + self.exact_mna_branches().len() {
             return Err(HbError::InvalidCircuit(
-                "native BJT sample does not match the complete MNA state".into(),
+                "native periodic sample does not match the complete MNA state".into(),
             ));
         }
         f.clear();
@@ -206,10 +254,10 @@ impl HbSolver {
         }
         for source in &mut self.behavioral_sources.current_sources {
             source
-                .linearize_at(solution)
+                .linearize_at_time(solution, time)
                 .map_err(|error| HbError::InvalidCircuit(error.to_string()))?;
             let value = source
-                .evaluate(solution, 0.0)
+                .evaluate(solution, time)
                 .map_err(|error| HbError::InvalidCircuit(error.to_string()))?;
             f.stamp_rhs(source.node_pos, -value);
             f.stamp_rhs(source.node_neg, value);
@@ -220,10 +268,10 @@ impl HbSolver {
         }
         for source in &mut self.behavioral_sources.voltage_sources {
             source
-                .linearize_at(solution)
+                .linearize_at_time(solution, time)
                 .map_err(|error| HbError::InvalidCircuit(error.to_string()))?;
             let value = source
-                .evaluate(solution, 0.0)
+                .evaluate(solution, time)
                 .map_err(|error| HbError::InvalidCircuit(error.to_string()))?;
             let row = self.num_nodes + source.branch_ordinal;
             // The exact linear port row owns V(pos)-V(neg). This term owns
@@ -250,7 +298,7 @@ impl HbSolver {
             .collect();
         let mut f = NativeStamp::new(solution.len());
         let mut q = NativeStamp::new(solution.len());
-        self.sample_native_bjts(&solution, &mut f, &mut q)?;
+        self.sample_native_devices(&solution, 0.0, &mut f, &mut q)?;
         Ok(f)
     }
 
@@ -263,7 +311,7 @@ impl HbSolver {
     ) -> Result<crate::analysis::quasi_periodic::solve::Sample, HbError> {
         let mut f = NativeStamp::new(solution.len());
         let mut q = NativeStamp::new(solution.len());
-        self.sample_native_bjts(solution, &mut f, &mut q)?;
+        self.sample_native_devices(solution, 0.0, &mut f, &mut q)?;
         Ok(crate::analysis::quasi_periodic::solve::Sample {
             current: f.contributions,
             charge: q.contributions,
@@ -379,7 +427,8 @@ impl HbSolver {
             for (value, wave) in solution.iter_mut().zip(&waves) {
                 *value = wave[time];
             }
-            self.sample_native_bjts(&solution, &mut f, &mut q)?;
+            let sample_time = time as Value / times as Value / self.config.fundamental_freq;
+            self.sample_native_devices(&solution, sample_time, &mut f, &mut q)?;
             record_native_terms(&mut f_time, &f.contributions, time, times)?;
             record_native_terms(&mut q_time, &q.contributions, time, times)?;
         }
@@ -445,7 +494,8 @@ impl HbSolver {
             for (value, wave) in solution.iter_mut().zip(&waves) {
                 *value = wave[time];
             }
-            self.sample_native_bjts(&solution, &mut f, &mut q)?;
+            let sample_time = time as Value / times as Value / self.config.fundamental_freq;
+            self.sample_native_devices(&solution, sample_time, &mut f, &mut q)?;
             for &(row, col, value) in if charge { &q.jacobian } else { &f.jacobian } {
                 let sum = &mut entries
                     .entry((row, col))

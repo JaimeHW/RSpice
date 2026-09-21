@@ -306,7 +306,7 @@ fn autonomous_sampled_pnoise_behavioral_limiter_matches_independent_ppv() {
         "Behavioral LC oscillator\n\
         l1 osc 0 1u\nc1 osc 0 1u\nr1 osc 0 1k\n\
         b1 osc 0 i=-0.051*v(osc)+0.025*v(osc)*v(osc)*v(osc)\n\
-        i1 0 osc pulse(0 1 10u 10n 10n 1u 1)\n.end\n",
+        bkick 0 osc i=spice_pulse(0,1,10u,10n,10n,1u,1)\n.end\n",
     )
     .unwrap();
     let engine = Engine::default();

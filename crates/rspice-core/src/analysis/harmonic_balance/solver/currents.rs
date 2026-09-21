@@ -145,7 +145,10 @@ impl HbSolver {
                         *value = wave[time];
                     }
                     *sample = source
-                        .evaluate(&solution, 0.0)
+                        .evaluate(
+                            &solution,
+                            time as Value / count as Value / self.config.fundamental_freq,
+                        )
                         .map_err(|error| HbError::InvalidCircuit(error.to_string()))?;
                 }
                 let positive = self.lead_phasors(&current, &zero_charge)?;

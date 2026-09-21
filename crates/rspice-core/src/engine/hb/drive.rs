@@ -86,6 +86,70 @@ impl Engine {
                 )?);
             }
         }
+        let period = config.fundamental_freq.recip();
+        let mut behavioral_points: Value = 0.0;
+        let behavioral = circuit
+            .behavioral_sources
+            .voltage_sources
+            .iter()
+            .map(|source| {
+                (
+                    source.name.as_str(),
+                    source.has_stateless_periodic_equation(),
+                    source.has_periodic_time_dependence(period, false),
+                    source.max_authored_tone_cycles(period),
+                    source.minimum_pss_interval(false),
+                )
+            })
+            .chain(
+                circuit
+                    .behavioral_sources
+                    .current_sources
+                    .iter()
+                    .map(|source| {
+                        (
+                            source.name.as_str(),
+                            source.has_stateless_periodic_equation(),
+                            source.has_periodic_time_dependence(period, false),
+                            source.max_authored_tone_cycles(period),
+                            source.minimum_pss_interval(false),
+                        )
+                    }),
+            );
+        for (index, (name, stateless, periodic, cycles, interval)) in behavioral.enumerate() {
+            if index.is_multiple_of(32) && abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
+            if !stateless {
+                continue;
+            } // The device-capability gate names the missing state.
+            if !periodic {
+                return Err(SimulationError::Circuit(format!(
+                    "behavioral source '{name}' is not certified periodic over {period:e} s"
+                )));
+            }
+            let points = (2.0 * cycles.round() + 1.0)
+                .max(interval.map_or(0.0, |interval| (2.0 * period / interval).ceil()));
+            if !cycles.is_finite()
+                || !points.is_finite()
+                || points >= usize::MAX as Value
+                || interval.is_some_and(|value| !value.is_finite() || value <= 0.0)
+            {
+                return Err(SimulationError::Circuit(format!(
+                    "behavioral source '{name}' requires an unrepresentable periodic sampling grid"
+                )));
+            }
+            config.num_harmonics = config.num_harmonics.max(cycles.round() as usize);
+            behavioral_points = behavioral_points.max(points);
+        }
+        // These dependent-analysis grids are derived from the carrier, rather
+        // than a user's explicit HB collocation choice. Keep an authored exact
+        // grid unchanged; its registration check will diagnose underresolution.
+        if config.collocation_points.is_none() {
+            config.oversample_factor = config
+                .oversample_factor
+                .max((behavioral_points / (config.num_harmonics as Value + 1.0)).ceil() as usize);
+        }
         if let Some(capacity) = retained_capacity
             && config.num_harmonics > capacity
         {
