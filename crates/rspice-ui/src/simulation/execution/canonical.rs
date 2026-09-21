@@ -6,6 +6,8 @@
 
 mod analysis_spec;
 #[cfg(test)]
+mod monte_carlo_evaluator_tests;
+#[cfg(test)]
 mod qpac_controls_tests;
 #[cfg(test)]
 mod qpnoise_controls_tests;
@@ -327,16 +329,34 @@ pub(in crate::simulation) fn analysis_config_digest(
     writer.finish()
 }
 
-/// Identity of a study evaluator, independent of its reporting histogram.
+/// Identity of a study evaluator, independent of reporting and plan revisions.
 /// The source, sampler, physical point and engine law are bound separately by
 /// the core population identity. Keep the complete configured prerequisite and
 /// measurement contract, including saved OP state and its lineage.
 pub(in crate::simulation) fn monte_carlo_evaluator_digest(
     base: &crate::simulation::runner::study::StudyRunConfig,
 ) -> ContentDigest {
+    use crate::simulation::runner::study::StudyAnalysis;
     let mut base = base.clone();
     base.histogram_bins = 1;
-    let mut writer = CanonicalWriter::new("rspice.monte-carlo-evaluator/v1");
+    // Editing checkpoint selection or a reporting control advances the whole
+    // plan revision, including unchanged prerequisites. Compatibility follows
+    // their full frozen configurations instead. Keep instance identities and
+    // every saved OP source/snapshot/result digest and numerical value intact.
+    base.source_revision = crate::product::ObjectRevision::INITIAL;
+    let operating_point = match &mut base.analysis {
+        StudyAnalysis::Pss(config) => Some(&mut config.operating_point),
+        StudyAnalysis::Qpss(config) => Some(&mut config.operating_point),
+        StudyAnalysis::Hb(config) => Some(&mut config.operating_point),
+        StudyAnalysis::Basic(_) | StudyAnalysis::Native(_) => None,
+    };
+    if let Some(operating_point) = operating_point {
+        operating_point.source_revision = crate::product::ObjectRevision::INITIAL;
+    }
+    if let Some(postprocess) = &mut base.postprocess {
+        postprocess.producer_source_revision = crate::product::ObjectRevision::INITIAL;
+    }
+    let mut writer = CanonicalWriter::new("rspice.monte-carlo-evaluator/v2");
     encode_spec_options(
         &mut writer,
         &SpecExecutionOptions {

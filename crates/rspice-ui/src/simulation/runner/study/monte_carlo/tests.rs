@@ -72,6 +72,8 @@ fn studio_monte_carlo_checkpoint_resume_preserves_verdicts_and_pools_exact_trial
     let publications = AtomicUsize::new(0);
     // A reporting-only edit can reuse the same trial population.
     base.histogram_bins = 5;
+    // The editor advances the plan revision even when only reporting changes.
+    base.source_revision = base.source_revision.next().unwrap();
     let resumed = run(&base, &mut restored, 3..9, &NoAbort, &|checkpoint| {
         publications.fetch_add(1, Ordering::Relaxed);
         assert!(checkpoint.completed_trials() >= 5);
