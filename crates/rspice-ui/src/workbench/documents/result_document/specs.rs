@@ -167,6 +167,7 @@ pub struct SpecDraft {
     pub requirement_name: String,
     pub measurement: String,
     pub expression: String,
+    pub define_measurement: bool,
     comparison: ComparisonDraftKind,
     /// Minimum/maximum limit, range minimum, or equality target.
     pub primary_limit: String,
@@ -212,6 +213,7 @@ impl SpecDraft {
             requirement_name: definition.requirement_name.clone(),
             measurement: definition.measurement.clone(),
             expression: definition.expression.clone(),
+            define_measurement: definition.define_measurement,
             comparison,
             primary_limit,
             secondary_limit,
@@ -231,6 +233,9 @@ impl SpecDraft {
     fn parse(&self) -> Result<Option<SpecificationDefinition>, String> {
         let name = self.measurement.trim();
         if name.is_empty() {
+            if self.define_measurement {
+                return Err("Measurement name is required".into());
+            }
             return Ok(None); // blank rows are simply dropped
         }
         let required_value = |text: &str, field: &str| -> Result<f64, String> {
@@ -281,6 +286,7 @@ impl SpecDraft {
         };
         definition.measurement = name.to_owned();
         definition.expression = self.expression.trim().to_owned();
+        definition.define_measurement = self.define_measurement;
         definition.producing_analysis = self.producing_analysis;
         definition.comparison = comparison;
         definition.guard_band = if self.guard_band.trim().is_empty() {
@@ -1706,6 +1712,15 @@ fn show_editor(ui: &mut Ui, state: &mut AppState) {
                     {
                         remove = Some(idx);
                     }
+                });
+                ui.horizontal_wrapped(|ui| {
+                    ui.add_space(10.0);
+                    ui.checkbox(&mut draft.define_measurement, "Define measurement when running the plan");
+                    ui.label(if draft.define_measurement {
+                        "Enter a complete .MEAS card with the measurement name above. Manual netlists use their own cards."
+                    } else {
+                        "Reference an existing result; expression text is descriptive."
+                    });
                 });
                 ui.horizontal(|ui| {
                     ui.add_space(10.0);

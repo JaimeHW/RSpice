@@ -25,6 +25,7 @@ use crate::simulation::execution::{
 
 mod deferred_sources;
 mod dependency_expansion;
+mod measurements;
 pub(crate) mod occurrence_outputs;
 mod periodic_sources;
 
@@ -668,6 +669,35 @@ impl SimulationController {
         Ok(source)
     }
 
+    /// Include explicitly authored measurements in the generated primary and
+    /// its exports. Operand validation waits for preparation, where includes
+    /// and model-owned parameters have been resolved into the execution deck.
+    pub(crate) fn append_plan_measurements_to_generated_netlist(
+        state: &AppState,
+        source: &str,
+    ) -> Result<String, PreparationError> {
+        let plan = state
+            .sim_setup
+            .stable_analysis_plan()
+            .map_err(|error| PreparationError::new(PreparationStage::AnalysisPlan, error))?;
+        let payload = state.workspace.plan_data(plan.id()).ok_or_else(|| {
+            PreparationError::new(
+                PreparationStage::AnalysisPlan,
+                "Missing active plan payload",
+            )
+        })?;
+        measurements::append_to_generated_source(
+            source,
+            &payload.specification_definitions,
+            &plan
+                .instances()
+                .iter()
+                .filter(|instance| instance.enabled())
+                .map(|instance| (instance.id(), instance.draft()))
+                .collect(),
+        )
+    }
+
     /// Validate the exact visible manual-deck document through the same
     /// dependency expansion, source checks, task construction, model binding,
     /// and execution-target contract used immediately before dispatch.
@@ -1281,7 +1311,15 @@ impl SimulationController {
                 &state.workspace.project.include_search_chain(),
                 Some(&sealed_models),
             )?;
-        netlist = expanded_netlist;
+        netlist = measurements::materialize(
+            &expanded_netlist,
+            &plan_payload.specification_definitions,
+            &plan
+                .instances()
+                .iter()
+                .map(|instance| (instance.id(), instance.draft()))
+                .collect(),
+        )?;
         reject_deferred_external_sources_with_project_runtimes(
             &netlist,
             &project_veriloga_runtimes,

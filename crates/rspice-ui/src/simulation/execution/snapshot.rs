@@ -3039,6 +3039,9 @@ fn snapshot_digest(
                 writer.string(&waiver.owner);
                 writer.string(&waiver.rationale);
             });
+            if definition.define_measurement {
+                writer.domain("rspice.authored-measurement/v1");
+            }
         });
     }
 

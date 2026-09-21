@@ -245,6 +245,10 @@ pub struct SpecificationDefinition {
     pub measurement: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub expression: String,
+    /// Explicitly author a measurement in generated simulation plans. Older
+    /// expression text is descriptive until the user selects this mode.
+    #[serde(default, skip_serializing_if = "measurement_is_reference")]
+    pub define_measurement: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub producing_analysis: Option<AnalysisInstanceId>,
     pub comparison: SpecificationComparison,
@@ -278,6 +282,7 @@ impl SpecificationDefinition {
             requirement_name: entry.measurement.clone(),
             measurement: entry.measurement.clone(),
             expression: entry.expression.clone(),
+            define_measurement: false,
             producing_analysis: None,
             comparison: SpecificationComparison::from_legacy(entry),
             guard_band: None,
@@ -301,6 +306,7 @@ impl SpecificationDefinition {
             requirement_name: entry.measurement.clone(),
             measurement: entry.measurement.clone(),
             expression: entry.expression.clone(),
+            define_measurement: false,
             producing_analysis: None,
             comparison: SpecificationComparison::from_legacy(entry),
             guard_band: None,
@@ -371,6 +377,7 @@ impl SpecificationDefinition {
         if !self.expression.trim().is_empty() {
             validate_single_line_expression("measurement expression", &self.expression)?;
         }
+        self.measurement_statement()?;
         self.comparison.validate()?;
         if self
             .guard_band
@@ -422,6 +429,7 @@ impl SpecificationDefinition {
             && self.requirement_name == other.requirement_name
             && self.measurement == other.measurement
             && self.expression == other.expression
+            && self.define_measurement == other.define_measurement
             && self.producing_analysis == other.producing_analysis
             && self.comparison.bitwise_eq(&other.comparison)
             && self.guard_band.map(f64::to_bits) == other.guard_band.map(f64::to_bits)
@@ -430,6 +438,40 @@ impl SpecificationDefinition {
             && self.source == other.source
             && self.waiver == other.waiver
             && self.unit == other.unit
+    }
+}
+
+fn measurement_is_reference(defined: &bool) -> bool {
+    !defined
+}
+
+impl SpecificationDefinition {
+    /// Complete authored card, without interpreting any historical description
+    /// as executable source. Full operand validation uses the design's parameter
+    /// context during preparation, so expressions may refer to design variables.
+    pub fn measurement_statement(&self) -> Result<Option<&str>, String> {
+        if !self.define_measurement {
+            return Ok(None);
+        }
+        let statement = self.expression.trim();
+        validate_single_line_expression("measurement statement", statement)?;
+        let mut tokens = statement.split_whitespace();
+        let directive = tokens.next().unwrap_or_default();
+        let family = tokens.next().unwrap_or_default();
+        let name = tokens.next().unwrap_or_default();
+        if !(directive.eq_ignore_ascii_case(".MEAS") || directive.eq_ignore_ascii_case(".MEASURE"))
+            || family.is_empty()
+            || tokens.next().is_none()
+        {
+            return Err("Define measurement requires a complete .MEAS card, for example .MEAS TRAN peak MAX V(out)".into());
+        }
+        if !name.eq_ignore_ascii_case(&self.measurement) {
+            return Err(format!(
+                "Measurement card name {name:?} must match {:?}",
+                self.measurement
+            ));
+        }
+        Ok(Some(statement))
     }
 }
 

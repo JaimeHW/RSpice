@@ -476,6 +476,13 @@ pub(crate) fn build_menu_netlist(
     let spice_netlist = state
         .workspace
         .bind_generated_netlist_provenance(generation.netlist);
+    let spice_netlist = match crate::simulation::controller::SimulationController::append_plan_measurements_to_generated_netlist(state, &spice_netlist) {
+        Ok(source) => source,
+        Err(error) => {
+            state.push_user_message(crate::diagnostics::ConsoleMessage::error(error.to_string()));
+            return None;
+        }
+    };
     Some(match format {
         crate::io::NetlistFormat::Spectre => {
             super::netlist_compat::spice_to_ahdl_compatible_netlist(&spice_netlist)
