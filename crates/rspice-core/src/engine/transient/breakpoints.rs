@@ -1291,6 +1291,13 @@ impl Engine {
             max_points,
             false,
         )?;
+        circuit.capacitors.collect_transient_breakpoints(
+            tstop,
+            breakpoints,
+            abort,
+            max_points,
+            false,
+        )?;
 
         for instance in &circuit.xspice_instances {
             match instance.transient_breakpoints() {

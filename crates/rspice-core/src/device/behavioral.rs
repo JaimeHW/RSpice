@@ -18,12 +18,12 @@ use crate::solver::StaticMatrix;
 use std::path::Path;
 use thiserror::Error;
 
-mod breakpoints;
+pub(crate) mod breakpoints;
 mod history;
 mod integrals;
 pub(crate) use history::BehavioralAcceptedState;
 pub(crate) use integrals::BehavioralFqPoint;
-mod periodicity;
+pub(crate) mod periodicity;
 mod quasi_periodic;
 mod resolution;
 pub(crate) use breakpoints::BehavioralBreakpointError;
@@ -1038,7 +1038,7 @@ fn expression_excludes_voltage_output_from_transient_lte(expr: &Expr) -> bool {
 /// Detect the live frequency after parameter/function expansion has produced
 /// the canonical behavioral AST. Probe names remain ordinary strings in
 /// `NodeVoltage`/`BranchCurrent`, so a node named `FREQ` is not misclassified.
-fn expression_depends_on_frequency(expr: &Expr) -> bool {
+pub(crate) fn expression_depends_on_frequency(expr: &Expr) -> bool {
     match expr {
         Expr::Frequency => true,
         Expr::Unary { operand, .. } => expression_depends_on_frequency(operand),

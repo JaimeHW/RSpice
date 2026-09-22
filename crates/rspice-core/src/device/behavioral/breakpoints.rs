@@ -402,40 +402,61 @@ impl BehavioralSources {
         max_points: usize,
         physical_corners: bool,
     ) -> Result<(), BehavioralBreakpointError> {
-        if abort.is_aborted() {
-            return Err(BehavioralBreakpointError::Aborted);
-        }
-        if self.voltage_sources.is_empty() && self.current_sources.is_empty() {
-            return Ok(());
-        }
-        let mut events = BTreeSet::new();
-        for (index, &time) in breakpoints.times().iter().enumerate() {
-            if index.is_multiple_of(256) && abort.is_aborted() {
-                return Err(BehavioralBreakpointError::Aborted);
-            }
-            events.insert(if time == 0.0 { 0 } else { time.to_bits() });
-        }
-        let mut schedule = EventSchedule {
+        collect_expression_breakpoints(
+            self.voltage_sources
+                .iter()
+                .map(|source| (&source.ast, source.periodicity_context()))
+                .chain(
+                    self.current_sources
+                        .iter()
+                        .map(|source| (&source.ast, source.periodicity_context())),
+                ),
             tstop,
-            events,
+            breakpoints,
             abort,
             max_points,
             physical_corners,
-            isolation_work: None,
-        };
-        schedule.poll()?;
-        for source in &self.voltage_sources {
-            let context = source.periodicity_context();
-            schedule.source_expression(&source.ast, &context)?;
-        }
-        for source in &self.current_sources {
-            let context = source.periodicity_context();
-            schedule.source_expression(&source.ast, &context)?;
-        }
-        schedule.poll()?;
-        breakpoints.extend(schedule.events.into_iter().map(Value::from_bits));
-        Ok(())
+        )
     }
+}
+
+pub(crate) fn collect_expression_breakpoints<'a>(
+    expressions: impl Iterator<Item = (&'a Expr, Context<'a>)>,
+    tstop: Value,
+    breakpoints: &mut BreakpointManager,
+    abort: &dyn AbortSignal,
+    max_points: usize,
+    physical_corners: bool,
+) -> Result<(), BehavioralBreakpointError> {
+    if abort.is_aborted() {
+        return Err(BehavioralBreakpointError::Aborted);
+    }
+    let mut expressions = expressions.peekable();
+    if expressions.peek().is_none() {
+        return Ok(());
+    }
+    let mut events = BTreeSet::new();
+    for (index, &time) in breakpoints.times().iter().enumerate() {
+        if index.is_multiple_of(256) && abort.is_aborted() {
+            return Err(BehavioralBreakpointError::Aborted);
+        }
+        events.insert(if time == 0.0 { 0 } else { time.to_bits() });
+    }
+    let mut schedule = EventSchedule {
+        tstop,
+        events,
+        abort,
+        max_points,
+        physical_corners,
+        isolation_work: None,
+    };
+    schedule.poll()?;
+    for (expression, context) in expressions {
+        schedule.source_expression(expression, &context)?;
+    }
+    schedule.poll()?;
+    breakpoints.extend(schedule.events.into_iter().map(Value::from_bits));
+    Ok(())
 }
 
 #[cfg(test)]

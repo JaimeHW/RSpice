@@ -1147,29 +1147,6 @@ fn continuation_fails_closed_for_unadvanced_dynamic_state_families() {
         "unexpected behavioral-state diagnostic: {behavioral_error}"
     );
 
-    let solution_dependent_capacitor = Netlist::parse_with_options(
-        "* expression-valued capacitor charge is outside the shooting state\n\
-         V1 in 0 SIN(0 1 1meg)\n\
-         R1 in out 1k\n\
-         C1 out 0 C={100p*(1+0.1*V(out))}\n\
-         .end\n",
-        NetlistParseOptions {
-            expression_dialect: rspice_core::config::ExpressionDialect::Xyce,
-            ..Default::default()
-        },
-    )
-    .expect("solution-dependent capacitor deck parses");
-    let solution_dependent_error =
-        Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce))
-            .run_pss_with_continuation_state(&solution_dependent_capacitor, compact_pss_config())
-            .expect_err("solution-dependent capacitor history must fail before solving");
-    assert!(
-        solution_dependent_error
-            .to_string()
-            .contains("solution-dependent capacitor charge/expression history"),
-        "unexpected solution-dependent capacitor diagnostic: {solution_dependent_error}"
-    );
-
     let thermal_resistor = Netlist::parse(
         "* electrothermal accepted temperature is outside the shooting state\n\
          V1 in 0 SIN(0 1 1meg)\n\

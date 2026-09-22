@@ -536,7 +536,11 @@ impl PssCircuit {
             &solution_scratch[1..],
             super::super::transient::ReactiveHistorySeed::SolvedBias,
         );
-        let integral_probe_scales = vec![1.0; circuit.behavioral_sources.integral_count()];
+        let integral_probe_scales = vec![
+            1.0;
+            circuit.behavioral_sources.integral_count()
+                + circuit.capacitors.integral_count()
+        ];
         Ok(Self {
             circuit,
             diode_history,
@@ -571,7 +575,9 @@ impl PssCircuit {
     }
 
     pub(in crate::engine) fn state_dimension(&self) -> usize {
-        self.physical_state_dimension() + self.behavioral_sources.integral_count()
+        self.physical_state_dimension()
+            + self.behavioral_sources.integral_count()
+            + self.capacitors.integral_count()
     }
 
     fn physical_state_dimension(&self) -> usize {
@@ -583,6 +589,7 @@ impl PssCircuit {
             .names(&self.circuit)
             .into_iter()
             .chain(self.behavioral_sources.integral_names())
+            .chain(self.capacitors.integral_names())
             .collect()
     }
 
@@ -605,11 +612,12 @@ impl PssCircuit {
 
     pub(super) fn record_integral_scales(&mut self) {
         if self.observing_integral_scales {
-            for (scale, value) in self
-                .integral_probe_scales
-                .iter_mut()
-                .zip(self.circuit.behavioral_sources.accepted_integrals())
-            {
+            for (scale, value) in self.integral_probe_scales.iter_mut().zip(
+                self.circuit
+                    .behavioral_sources
+                    .accepted_integrals()
+                    .chain(self.circuit.capacitors.accepted_integrals()),
+            ) {
                 *scale = scale.max(value.abs());
             }
         }
@@ -672,7 +680,8 @@ impl PssCircuit {
             .iter_mut()
             .zip(
                 self.project_physical_perturbation(solution)
-                    .chain(self.behavioral_sources.accepted_integrals()),
+                    .chain(self.behavioral_sources.accepted_integrals())
+                    .chain(self.capacitors.accepted_integrals()),
             )
             .enumerate()
         {
@@ -703,6 +712,7 @@ impl PssCircuit {
                     .map(|&index| self.inductors.i_prev[index]),
             )
             .chain(self.behavioral_sources.accepted_integrals())
+            .chain(self.capacitors.accepted_integrals())
             .collect()
     }
 
@@ -713,10 +723,24 @@ impl PssCircuit {
             "PSS shooting-state shape must match its basis"
         );
         let physical_count = self.physical_state_dimension();
+        let behavioral_end = physical_count + self.behavioral_sources.integral_count();
         self.circuit
             .behavioral_sources
-            .reset_integrals(&state[physical_count..])
+            .reset_integrals(&state[physical_count..behavioral_end])
             .map_err(SimulationError::Circuit)?;
+        self.circuit
+            .capacitors
+            .reset_integrals(&state[behavioral_end..])
+            .map_err(SimulationError::Circuit)?;
+        for history in self
+            .circuit
+            .capacitors
+            .value_expression_states
+            .iter_mut()
+            .flatten()
+        {
+            *history = Default::default();
+        }
         if self.basis.descriptor.is_none() {
             self.solution_scratch.fill(0.0);
         }
@@ -798,8 +822,11 @@ impl PssCircuit {
         Ok(())
     }
 
-    pub(super) fn seed_semiconductor_history(&mut self, solution: &[Value]) {
+    pub(super) fn seed_charge_history(&mut self, solution: &[Value]) {
         self.solution_scratch[1..].copy_from_slice(solution);
+        self.circuit
+            .capacitors
+            .initialize_solution_dependent_from_dc(solution, 0.0);
         self.bjt_history = Engine::initialize_bjt_history(
             &self.circuit,
             solution,
@@ -987,16 +1014,47 @@ impl PssCircuit {
         };
         let nodes = self.circuit.num_nodes();
         let mut stamps = Vec::new();
+        for index in 0..self.circuit.capacitors.len() {
+            if let Some(linearization) = self
+                .circuit
+                .capacitors
+                .linearize_effective_capacitance(index, solution, 0.0)
+            {
+                let capacitance = linearization.value;
+                if !capacitance.is_finite() || capacitance < 0.0 {
+                    return Err(SimulationError::Circuit(format!(
+                        "capacitor '{}' has invalid initialization capacitance {capacitance}",
+                        self.circuit.capacitors.names[index]
+                    )));
+                }
+                self.circuit.capacitors.effective_capacitances[index] = capacitance;
+            }
+        }
         let coeff = CompanionCoefficients::for_method(IntegrationMethod::BackwardEuler);
         matrix.with_probe_values(|charge, unused_rhs| {
             self.circuit
                 .capacitors
                 .stamp_transient_norton_companions(charge, unused_rhs, 1.0, &coeff);
+            for (index, expression) in self.circuit.capacitors.value_expressions.iter().enumerate()
+            {
+                if expression.is_some()
+                    && self.circuit.capacitors.ic_branch_indices[index].is_none()
+                {
+                    self.circuit.capacitors.stamps[index].stamp_direct(
+                        charge,
+                        self.circuit.capacitors.effective_capacitances[index],
+                    );
+                }
+            }
             for (index, branch) in self.circuit.capacitors.ic_branch_indices.iter().enumerate() {
                 if let Some(branch) = branch {
                     let row = nodes + branch - 1;
                     let stamp = &self.circuit.capacitors.stamps[index];
-                    let capacitance = self.circuit.capacitors.capacitances[index];
+                    let capacitance = if self.circuit.capacitors.value_expression(index).is_some() {
+                        self.circuit.capacitors.effective_capacitances[index]
+                    } else {
+                        self.circuit.capacitors.capacitances[index]
+                    };
                     for (node, sign) in [(stamp.pp.row, -1.0), (stamp.nn.row, 1.0)] {
                         if node != 0 {
                             charge.add(row, node - 1, sign * capacitance);
@@ -1219,6 +1277,11 @@ impl PssCircuit {
         let caps = &self.circuit.capacitors;
         let voltage = |values: &[Value], node| if node == 0 { 0.0 } else { values[node - 1] };
         for (index, stamp) in caps.stamps.iter().enumerate() {
+            // Expression companions are stamped and physically re-evaluated
+            // with the nonlinear network, not reconstructed as constant C*dV.
+            if caps.value_expression(index).is_some() {
+                continue;
+            }
             self.capacitor_trial_currents[index] = if let Some(branch) =
                 caps.ic_branch_indices[index]
                 && self.charge_source_rates.is_empty()
@@ -1492,7 +1555,7 @@ impl PssCircuit {
         self.project_physical_perturbation(solution)
             .chain(std::iter::repeat_n(
                 0.0,
-                self.behavioral_sources.integral_count(),
+                self.behavioral_sources.integral_count() + self.capacitors.integral_count(),
             ))
     }
 

@@ -879,6 +879,67 @@ pub(crate) struct SolutionDependentCompanionStep<'a> {
 }
 
 impl Capacitors {
+    pub(crate) fn collect_transient_breakpoints(
+        &self,
+        tstop: Value,
+        breakpoints: &mut crate::numerics::integration::BreakpointManager,
+        abort: &dyn crate::abort_signal::AbortSignal,
+        max_points: usize,
+        physical_corners: bool,
+    ) -> Result<(), crate::device::behavioral::BehavioralBreakpointError> {
+        crate::device::behavioral::breakpoints::collect_expression_breakpoints(
+            self.value_expressions.iter().flatten().map(|expression| {
+                (
+                    expression.periodic_expression(),
+                    expression.periodicity_context(),
+                )
+            }),
+            tstop,
+            breakpoints,
+            abort,
+            max_points,
+            physical_corners,
+        )
+    }
+
+    pub(crate) fn integral_count(&self) -> usize {
+        self.value_expressions
+            .iter()
+            .flatten()
+            .map(|expression| expression.program.sdt_count)
+            .sum()
+    }
+
+    pub(crate) fn accepted_integrals(&self) -> impl Iterator<Item = Value> + '_ {
+        self.value_expressions
+            .iter()
+            .flatten()
+            .flat_map(|expression| expression.accepted_integrals())
+    }
+
+    pub(crate) fn integral_names(&self) -> impl Iterator<Item = String> + '_ {
+        self.value_expressions
+            .iter()
+            .flatten()
+            .flat_map(|expression| {
+                (0..expression.program.sdt_count)
+                    .map(move |index| format!("C:{}:sdt:{index}", expression.name))
+            })
+    }
+
+    pub(crate) fn reset_integrals(&mut self, values: &[Value]) -> Result<(), String> {
+        if values.len() != self.integral_count() || values.iter().any(|v| !v.is_finite()) {
+            return Err("capacitor SDT shooting state has invalid dimensions or values".into());
+        }
+        let mut offset = 0;
+        for expression in self.value_expressions.iter_mut().flatten() {
+            let end = offset + expression.program.sdt_count;
+            expression.reset_integrals(&values[offset..end])?;
+            offset = end;
+        }
+        Ok(())
+    }
+
     pub fn new() -> Self {
         Self::default()
     }

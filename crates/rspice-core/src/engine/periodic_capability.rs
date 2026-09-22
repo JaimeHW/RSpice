@@ -406,10 +406,7 @@ pub(crate) const fn periodic_capability_descriptor(
                  not represented by the exact periodic MNA descriptor",
             ),
             noise: Inapplicable,
-            pss_state: Restricted(
-                "a constant capacitance; solution-dependent capacitor charge/expression history \
-                 is not advanced by the shooting period map",
-            ),
+            pss_state: Complete,
             envelope: Restricted(
                 "an ordinary two-terminal capacitor with a constant value and no internal or \
                  IC-constrained branch",
@@ -1407,14 +1404,6 @@ pub(in crate::engine) fn pss_state_gaps(circuit: &CircuitData) -> Vec<Capability
                         gaps.push(CapabilityGap::new(
                             family,
                             "thermal resistor accepted temperature state",
-                        ));
-                    }
-                }
-                F::Capacitor => {
-                    if circuit.capacitors.has_solution_dependent_values() {
-                        gaps.push(CapabilityGap::new(
-                            family,
-                            "solution-dependent capacitor charge/expression history",
                         ));
                     }
                 }

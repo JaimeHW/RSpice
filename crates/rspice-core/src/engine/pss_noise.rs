@@ -520,6 +520,12 @@ impl Engine {
             (pss.period, circuit, matrix, x0)
         };
         let integral_count = circuit.behavioral_sources.integral_count();
+        if circuit.capacitors.has_solution_dependent_values() {
+            return Err(SimulationError::unsupported_capability(
+                "analysis.pnoise.capacitor_charge_linearization",
+                "Oscillator noise requires retained capacitor charge derivatives and expression-integral rate sensitivities at each orbit sample",
+            ));
+        }
         let f0 = 1.0 / period;
 
         // ------------------------------------------------------------------

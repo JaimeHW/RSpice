@@ -12,6 +12,8 @@ use crate::expr::{
 use crate::{NodeId, Value};
 use std::path::Path;
 
+mod periodic;
+
 const DERIVATIVE_REL_STEP: Value = 1.0e-6;
 const DERIVATIVE_ABS_STEP: Value = 1.0e-9;
 

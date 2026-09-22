@@ -1607,6 +1607,22 @@ impl Engine {
                             source.validate_periodic_integral_rates(),
                         )
                     }),
+            )
+            .chain(
+                circuit
+                    .capacitors
+                    .value_expressions
+                    .iter()
+                    .flatten()
+                    .map(|expression| {
+                        (
+                            expression.name.as_str(),
+                            expression.has_periodic_shooting_equation(period, autonomous),
+                            expression.max_authored_tone_cycles(period),
+                            expression.minimum_pss_interval(),
+                            expression.validate_periodic_integral_rates(),
+                        )
+                    }),
             );
         for (index, (name, periodic, cycles, interval, integral_rates)) in behavioral.enumerate() {
             if index & 0x1f == 0 && abort.is_aborted() {
@@ -1620,7 +1636,7 @@ impl Engine {
                         "analysis.pss.driven_source_waveform"
                     },
                     format!(
-                        "PSS behavioral source '{name}' has no structural certificate for {} with period {period:e} s",
+                        "PSS behavioral expression '{name}' has no structural certificate for {} with period {period:e} s",
                         if autonomous {
                             "constant explicit-time dependence throughout the free-running orbit"
                         } else {
@@ -1998,6 +2014,9 @@ impl Engine {
             .behavioral_sources
             .rebase_accepted_history(0.0)
             .map_err(SimulationError::Circuit)?;
+        for expression in circuit.capacitors.value_expressions.iter_mut().flatten() {
+            expression.rebase_accepted_history(0.0);
+        }
         let checkpoint = TransientCheckpoint::capture_with_junction_history(
             authenticated_fingerprint,
             Some(authenticated_netlist_identity),
@@ -2800,7 +2819,7 @@ impl Engine {
 
     /// Initialize reactive element state from DC solution
     fn pss_initialize_reactive_state(&self, circuit: &mut PssCircuit, dc_solution: &[Value]) {
-        circuit.seed_semiconductor_history(dc_solution);
+        circuit.seed_charge_history(dc_solution);
         let PssCircuit {
             circuit,
             diode_history,
@@ -3083,7 +3102,7 @@ impl Engine {
                 solution.truncate(size);
                 // Cross-coupled device charge also depends on algebraic node
                 // biases resolved by this consistency solve.
-                circuit.seed_semiconductor_history(&solution);
+                circuit.seed_charge_history(&solution);
                 Ok(solution)
             }
             None => Err(SimulationError::ConvergenceFailed(
@@ -4042,6 +4061,20 @@ impl Engine {
             circuit
                 .capacitors
                 .stamp_transient_branch_companions(matrix, rhs, dt, coeff, num_nodes);
+            circuit
+                .capacitors
+                .stamp_solution_dependent_transient_companion(
+                    matrix,
+                    rhs,
+                    linearize_at,
+                    crate::circuit::SolutionDependentCompanionStep {
+                        time: t_next,
+                        dt,
+                        coeff,
+                        num_nodes,
+                    },
+                )
+                .map_err(SimulationError::Circuit)?;
         } else if !initial_charge_rates {
             // Only independent voltage constraints carry reactions in this
             // initialization solve. Dependent IC-capacitor current slots are
@@ -4424,6 +4457,9 @@ impl Engine {
                 let trial_currents = &circuit.capacitor_trial_currents;
                 let circuit = &mut circuit.circuit;
                 for (cap_idx, cap) in circuit.capacitors.stamps.iter().enumerate() {
+                    if circuit.capacitors.value_expression(cap_idx).is_some() {
+                        continue;
+                    }
                     let np = cap.pp.row;
                     let nn = cap.nn.row;
                     let v_new = if np == 0 { 0.0 } else { new_solution[np - 1] }
@@ -4451,6 +4487,16 @@ impl Engine {
                 }
             }
 
+            let nodes = circuit.num_nodes();
+            circuit
+                .capacitors
+                .update_solution_dependent_state_with_coefficients(
+                    &new_solution,
+                    t,
+                    dt,
+                    &coeff,
+                    nodes,
+                );
             circuit
                 .behavioral_sources
                 .accept_transient_step(&new_solution, t)

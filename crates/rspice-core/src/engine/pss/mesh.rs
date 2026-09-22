@@ -158,8 +158,23 @@ impl Engine {
             self.config.resource_limits.max_analysis_points,
             true,
         )?;
+        circuit.capacitors.collect_transient_breakpoints(
+            period,
+            &mut breakpoints,
+            abort,
+            self.config.resource_limits.max_analysis_points,
+            true,
+        )?;
         let events = breakpoints.times();
-        if events.is_empty() && !circuit.behavioral_sources.needs_time_resolution(period) {
+        if events.is_empty()
+            && !circuit.behavioral_sources.needs_time_resolution(period)
+            && !circuit
+                .capacitors
+                .value_expressions
+                .iter()
+                .flatten()
+                .any(|expression| expression.needs_time_resolution(period))
+        {
             return Ok(None);
         }
         let capacity = steps
