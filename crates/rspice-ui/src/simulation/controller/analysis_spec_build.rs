@@ -49,6 +49,8 @@ impl SimulationController {
                     sweep,
                     ports: parse_manifest_ports(&draft.ports)?,
                     max_sideband: parse_usize(&draft.max_sideband, "HBSP max sideband")?,
+                    reltol: parse_positive_value(&draft.reltol, "HBSP relative tolerance")?,
+                    abstol: parse_positive_value(&draft.abstol, "HBSP absolute tolerance")?,
                     mixed_mode: draft.mixed_mode,
                     noise_parameters: draft.noise_parameters,
                     noise_reference: draft.noise_reference()?,
@@ -84,6 +86,8 @@ impl SimulationController {
                     sweep,
                     ports: parse_manifest_ports(&draft.ports)?,
                     max_sideband: parse_usize(&draft.max_sideband, "PSP max sideband")?,
+                    reltol: parse_positive_value(&draft.reltol, "PSP relative tolerance")?,
+                    abstol: parse_positive_value(&draft.abstol, "PSP absolute tolerance")?,
                     mixed_mode: draft.mixed_mode,
                     noise_parameters: draft.noise_parameters,
                     noise_reference: draft.noise_reference()?,
@@ -977,6 +981,14 @@ fn parse_si(text: &str, field: &str) -> Result<f64, String> {
         .map_err(|error| format!("invalid {field}: {error}"))
 }
 
+fn parse_positive_value(text: &str, field: &str) -> Result<f64, String> {
+    let value = parse_si(text, field)?;
+    if !value.is_finite() || value <= 0.0 {
+        return Err(format!("{field} must be finite and positive"));
+    }
+    Ok(value)
+}
+
 fn parse_usize(text: &str, field: &str) -> Result<usize, String> {
     text.trim()
         .parse::<usize>()
@@ -1226,6 +1238,31 @@ mod manifest_tests {
                     | (AnalysisKind::Fft, AnalysisSpec::Fft { .. })
             ));
             assert!(spec.validate().is_ok());
+        }
+    }
+
+    #[test]
+    fn periodic_network_tolerances_reach_both_typed_specs() {
+        let controller = SimulationController::new();
+        for kind in [AnalysisKind::Hbsp, AnalysisKind::Psp] {
+            let mut draft = AnalysisDraft::for_kind(kind);
+            let (AnalysisDraft::Hbsp(network) | AnalysisDraft::Psp(network)) = &mut draft else {
+                unreachable!("the loop only creates periodic network drafts")
+            };
+            network.reltol = "2.5e-6".into();
+            network.abstol = "7e-13".into();
+            let spec = controller
+                .build_manifest_preview_spec(&AppState::default(), &draft)
+                .expect("periodic network draft parses")
+                .expect("periodic network draft has a typed spec");
+            match spec {
+                AnalysisSpec::Hbsp { reltol, abstol, .. }
+                | AnalysisSpec::Psp { reltol, abstol, .. } => {
+                    assert_eq!(reltol, 2.5e-6);
+                    assert_eq!(abstol, 7e-13);
+                }
+                _ => unreachable!("the loop only creates periodic network specs"),
+            }
         }
     }
 

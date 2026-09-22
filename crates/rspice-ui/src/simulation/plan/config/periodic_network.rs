@@ -10,6 +10,12 @@ pub struct PeriodicNetworkDraft {
     pub sweep: FrequencySweepDraft,
     pub ports: Vec<NetworkPortDraft>,
     pub max_sideband: String,
+    /// Relative convergence tolerance for the periodic small-signal solve.
+    #[serde(default = "default_periodic_network_reltol")]
+    pub reltol: String,
+    /// Absolute convergence tolerance for the periodic small-signal solve.
+    #[serde(default = "default_periodic_network_abstol")]
+    pub abstol: String,
     pub mixed_mode: bool,
     pub noise_parameters: bool,
     #[serde(default)]
@@ -28,11 +34,21 @@ impl Default for PeriodicNetworkDraft {
             // A ±4 sideband span needs harmonic coupling through order 8,
             // which fits the default nine-harmonic HB producer.
             max_sideband: "4".to_owned(),
+            reltol: default_periodic_network_reltol(),
+            abstol: default_periodic_network_abstol(),
             mixed_mode: false,
             noise_parameters: false,
             noise: PeriodicNetworkNoiseDraft::default(),
         }
     }
+}
+
+fn default_periodic_network_reltol() -> String {
+    "1e-3".into()
+}
+
+fn default_periodic_network_abstol() -> String {
+    "1e-12".into()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -128,6 +144,8 @@ pub(super) fn validate_periodic_network(draft: &PeriodicNetworkDraft) -> Option<
         {
             return Err("maximum sideband must be an integer from 0 to 2147483647".to_owned());
         }
+        parse_positive(&draft.reltol, "relative tolerance")?;
+        parse_positive(&draft.abstol, "absolute tolerance")?;
         for (index, port) in draft.ports.iter().enumerate() {
             if port.node_pos.trim().is_empty() || port.node_neg.trim().is_empty() {
                 return Err(format!("port {} requires both nodes", index + 1));

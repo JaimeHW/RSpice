@@ -1285,6 +1285,8 @@ fn encode_manifest_network(writer: &mut CanonicalWriter, spec: &AnalysisSpec) {
         sweep,
         ports,
         max_sideband,
+        reltol,
+        abstol,
         mixed_mode,
         noise_parameters,
         noise_reference,
@@ -1296,6 +1298,8 @@ fn encode_manifest_network(writer: &mut CanonicalWriter, spec: &AnalysisSpec) {
             sweep,
             ports,
             max_sideband,
+            reltol,
+            abstol,
             mixed_mode,
             noise_parameters,
             noise_reference,
@@ -1307,6 +1311,8 @@ fn encode_manifest_network(writer: &mut CanonicalWriter, spec: &AnalysisSpec) {
             sweep,
             ports,
             max_sideband,
+            reltol,
+            abstol,
             mixed_mode,
             noise_parameters,
             noise_reference,
@@ -1317,6 +1323,8 @@ fn encode_manifest_network(writer: &mut CanonicalWriter, spec: &AnalysisSpec) {
             *sweep,
             ports,
             *max_sideband,
+            *reltol,
+            *abstol,
             *mixed_mode,
             *noise_parameters,
             noise_reference.as_ref(),
@@ -1334,6 +1342,8 @@ fn encode_manifest_network(writer: &mut CanonicalWriter, spec: &AnalysisSpec) {
         writer.option(port.z0.as_ref(), |w, value| w.f64(*value));
     }
     writer.usize(max_sideband);
+    writer.f64(reltol);
+    writer.f64(abstol);
     writer.bool(mixed_mode);
     writer.bool(noise_parameters);
     if let Some(reference) = noise_reference {

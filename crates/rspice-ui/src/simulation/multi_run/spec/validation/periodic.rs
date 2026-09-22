@@ -304,6 +304,8 @@ pub(super) fn validate(spec: &AnalysisSpec) -> Result<(), String> {
             mixed_mode,
             noise_parameters,
             noise_reference,
+            reltol,
+            abstol,
             ..
         } => {
             validate_periodic_network(
@@ -316,6 +318,7 @@ pub(super) fn validate(spec: &AnalysisSpec) -> Result<(), String> {
             if *mixed_mode {
                 validate_periodic_mixed_mode_ports(ports)?;
             }
+            validate_periodic_network_tolerances(*reltol, *abstol, "HBSP")?;
             if let Some(reference) = noise_reference {
                 if !noise_parameters {
                     return Err("noise reference requires port noise to be enabled".into());
@@ -337,6 +340,8 @@ pub(super) fn validate(spec: &AnalysisSpec) -> Result<(), String> {
             mixed_mode,
             noise_parameters,
             noise_reference,
+            reltol,
+            abstol,
             ..
         } => {
             validate_periodic_network(
@@ -349,6 +354,7 @@ pub(super) fn validate(spec: &AnalysisSpec) -> Result<(), String> {
             if *mixed_mode {
                 validate_periodic_mixed_mode_ports(ports)?;
             }
+            validate_periodic_network_tolerances(*reltol, *abstol, "PSP")?;
             if let Some(reference) = noise_reference {
                 if !noise_parameters {
                     return Err("noise reference requires port noise to be enabled".into());
@@ -406,6 +412,24 @@ pub(super) fn validate(spec: &AnalysisSpec) -> Result<(), String> {
         AnalysisSpec::Qpnoise { .. } => spec.qpnoise_card().map(|_| ()),
         other => Err(super::misrouted_specification("periodic", other)),
     }
+}
+
+fn validate_periodic_network_tolerances(
+    reltol: f64,
+    abstol: f64,
+    analysis: &str,
+) -> Result<(), String> {
+    if !reltol.is_finite() || reltol <= 0.0 {
+        return Err(format!(
+            "{analysis} relative tolerance must be finite and positive"
+        ));
+    }
+    if !abstol.is_finite() || abstol <= 0.0 {
+        return Err(format!(
+            "{analysis} absolute tolerance must be finite and positive"
+        ));
+    }
+    Ok(())
 }
 
 pub(super) fn validate_qpss(

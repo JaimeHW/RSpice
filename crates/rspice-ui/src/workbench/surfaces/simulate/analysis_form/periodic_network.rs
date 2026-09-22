@@ -29,6 +29,8 @@ pub(super) fn fields(
         "Frequencies are offsets from the periodic carrier. Set start equal to stop for one spot frequency.",
     );
     input_row(ui, "Max sideband", &mut setup.max_sideband);
+    input_row(ui, "Relative tolerance", &mut setup.reltol);
+    input_row(ui, "Absolute tolerance", &mut setup.abstol);
     switch_row(ui, "Mixed-mode matrix", &mut setup.mixed_mode);
     switch_row(ui, "Noise correlations", &mut setup.noise_parameters);
     if setup.noise_parameters {

@@ -130,6 +130,8 @@ fn base(kind: usize, hb: bool) -> StudyRunConfig {
                     })
                     .collect(),
                 max_sideband: 1,
+                reltol: 1.0e-3,
+                abstol: 1.0e-12,
                 mixed_mode: false,
                 noise_parameters: false,
                 noise_reference: None,

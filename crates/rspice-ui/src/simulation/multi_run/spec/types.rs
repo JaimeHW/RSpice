@@ -112,6 +112,14 @@ const fn default_true() -> bool {
     true
 }
 
+const fn default_periodic_network_reltol() -> f64 {
+    1.0e-3
+}
+
+const fn default_periodic_network_abstol() -> f64 {
+    1.0e-12
+}
+
 fn default_noise_reference_node() -> String {
     "0".to_owned()
 }
@@ -611,6 +619,10 @@ pub enum AnalysisSpec {
         sweep: FrequencySweep,
         ports: Vec<SpPort>,
         max_sideband: usize,
+        #[serde(default = "default_periodic_network_reltol")]
+        reltol: f64,
+        #[serde(default = "default_periodic_network_abstol")]
+        abstol: f64,
         mixed_mode: bool,
         noise_parameters: bool,
         #[serde(default)]
@@ -644,6 +656,10 @@ pub enum AnalysisSpec {
         sweep: FrequencySweep,
         ports: Vec<SpPort>,
         max_sideband: usize,
+        #[serde(default = "default_periodic_network_reltol")]
+        reltol: f64,
+        #[serde(default = "default_periodic_network_abstol")]
+        abstol: f64,
         mixed_mode: bool,
         noise_parameters: bool,
         #[serde(default)]

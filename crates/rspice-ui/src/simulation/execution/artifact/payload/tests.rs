@@ -498,6 +498,8 @@ fn hb_state_transfer_round_trips_and_rejects_tamper() {
             },
         ],
         max_sideband: 1,
+        reltol: 1.0e-3,
+        abstol: 1.0e-12,
         mixed_mode: false,
         noise_parameters: false,
         noise_reference: None,

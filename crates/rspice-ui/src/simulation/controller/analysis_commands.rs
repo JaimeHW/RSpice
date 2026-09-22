@@ -376,13 +376,15 @@ impl SimulationController {
             points_per_unit,
             sweep,
             max_sideband,
+            reltol,
+            abstol,
             ..
         } = spec
         else {
             return Err("failed to build PSP command".to_string());
         };
         Ok(format!(
-            "* RSPICE PSP {} {} {:.16e} {:.16e} MAXSIDEBAND={}",
+            "* RSPICE PSP {} {} {:.16e} {:.16e} MAXSIDEBAND={} RELTOL={:.16e} ABSTOL={:.16e}",
             match sweep {
                 FrequencySweep::Decade => "DEC",
                 FrequencySweep::Octave => "OCT",
@@ -391,7 +393,9 @@ impl SimulationController {
             points_per_unit,
             start_freq,
             stop_freq,
-            max_sideband
+            max_sideband,
+            reltol,
+            abstol
         ))
     }
 
@@ -404,13 +408,15 @@ impl SimulationController {
             points_per_unit,
             sweep,
             max_sideband,
+            reltol,
+            abstol,
             ..
         } = spec
         else {
             return Err("failed to build HBSP command".to_string());
         };
         Ok(format!(
-            "* RSPICE HBSP {} {} {:.16e} {:.16e} MAXSIDEBAND={}",
+            "* RSPICE HBSP {} {} {:.16e} {:.16e} MAXSIDEBAND={} RELTOL={:.16e} ABSTOL={:.16e}",
             match sweep {
                 FrequencySweep::Decade => "DEC",
                 FrequencySweep::Octave => "OCT",
@@ -419,7 +425,9 @@ impl SimulationController {
             points_per_unit,
             start_freq,
             stop_freq,
-            max_sideband
+            max_sideband,
+            reltol,
+            abstol
         ))
     }
 
@@ -1009,6 +1017,8 @@ mod tests {
             sweep: FrequencySweep::Decade,
             ports: Vec::new(),
             max_sideband: 3,
+            reltol: 1.0e-3,
+            abstol: 1.0e-12,
             mixed_mode: false,
             noise_parameters: false,
             noise_reference: None,
@@ -1023,6 +1033,8 @@ mod tests {
             sweep: FrequencySweep::Octave,
             ports: Vec::new(),
             max_sideband: 2,
+            reltol: 1.0e-3,
+            abstol: 1.0e-12,
             mixed_mode: true,
             noise_parameters: true,
             noise_reference: None,
@@ -1274,14 +1286,14 @@ mod tests {
         assert_eq!(
             SimulationController::build_psp_command(&psp_spec()),
             Ok(
-                "* RSPICE PSP DEC 11 1.0000000000000000e6 1.0000000000000000e9 MAXSIDEBAND=3"
+                "* RSPICE PSP DEC 11 1.0000000000000000e6 1.0000000000000000e9 MAXSIDEBAND=3 RELTOL=1.0000000000000000e-3 ABSTOL=9.9999999999999998e-13"
                     .to_owned()
             )
         );
         assert_eq!(
             SimulationController::build_hbsp_command(&hbsp_spec()),
             Ok(
-                "* RSPICE HBSP OCT 7 1.0000000000000000e3 1.0000000000000000e5 MAXSIDEBAND=2"
+                "* RSPICE HBSP OCT 7 1.0000000000000000e3 1.0000000000000000e5 MAXSIDEBAND=2 RELTOL=1.0000000000000000e-3 ABSTOL=9.9999999999999998e-13"
                     .to_owned()
             )
         );
