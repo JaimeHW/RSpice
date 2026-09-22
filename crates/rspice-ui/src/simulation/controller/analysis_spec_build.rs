@@ -18,6 +18,16 @@ impl SimulationController {
             return Err(error);
         }
         let spec = match draft {
+            AnalysisDraft::Disto(draft) => AnalysisSpec::Disto {
+                start_freq: parse_spice_value_checked(&draft.sweep.fstart)
+                    .map_err(|e| format!("invalid DISTO start frequency: {e}"))?,
+                stop_freq: parse_spice_value_checked(&draft.sweep.fstop)
+                    .map_err(|e| format!("invalid DISTO stop frequency: {e}"))?,
+                points_per_unit: Self::parse_positive_points(&draft.sweep.points, "disto_points")?,
+                sweep: Self::map_frequency_sweep(draft.sweep.sweep),
+                f2_over_f1: Self::parse_optional_spice_value(&draft.f2_over_f1)
+                    .map_err(|e| format!("invalid DISTO f2/f1 ratio: {e}"))?,
+            },
             AnalysisDraft::Noise(draft) => {
                 let mut config = draft.to_config()?;
                 config.temperature_kelvin =
@@ -1074,6 +1084,41 @@ mod manifest_tests {
                 && input_source == "VIN_EXACT"
                 && frequencies == vec![3.0, 7.0, 11.0]
                 && (temperature - 398.15).abs() < 1.0e-12
+        ));
+    }
+
+    #[test]
+    fn disto_manifest_freezes_its_owned_sweep_without_singleton_fallback() {
+        let controller = SimulationController::new();
+        let mut state = AppState::default();
+        state.sim_setup.ac.fstart = "900".to_owned();
+        state.sim_setup.ac.fstop = "2k".to_owned();
+        state.sim_setup.ac.points = "7".to_owned();
+        state.sim_setup.disto_f2_over_f1 = "0.2".to_owned();
+
+        let mut draft = crate::simulation::plan::DistoDraft::default();
+        draft.sweep.fstart = "3k".to_owned();
+        draft.sweep.fstop = "30k".to_owned();
+        draft.sweep.points = "41".to_owned();
+        draft.sweep.sweep = 2;
+        draft.f2_over_f1 = "0.8".to_owned();
+
+        let spec = controller
+            .build_manifest_preview_spec(&state, &AnalysisDraft::Disto(draft))
+            .expect("exact DISTO draft parses")
+            .expect("DISTO draft has an exact spec");
+        assert!(matches!(
+            spec,
+            AnalysisSpec::Disto {
+                start_freq,
+                stop_freq,
+                points_per_unit,
+                sweep: FrequencySweep::Linear,
+                f2_over_f1: Some(ratio),
+            } if start_freq == 3_000.0
+                && stop_freq == 30_000.0
+                && points_per_unit == 41
+                && ratio == 0.8
         ));
     }
 

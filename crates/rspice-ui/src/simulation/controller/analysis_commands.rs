@@ -74,7 +74,7 @@ impl SimulationController {
             AnalysisSpec::Fourier { .. } => self.build_fourier_command(state),
             AnalysisSpec::Optimization { .. } => self.build_optimization_command(state),
             AnalysisSpec::Soa { .. } => self.build_soa_command(state),
-            AnalysisSpec::Disto { .. } => self.build_disto_command(state),
+            AnalysisSpec::Disto { .. } => Self::build_disto_command(spec),
             AnalysisSpec::Pac => self.build_pac_command(state),
             AnalysisSpec::Pnoise => self.build_pnoise_command(state),
             AnalysisSpec::Pxf => self.build_pxf_command(state),
@@ -334,8 +334,7 @@ impl SimulationController {
         Ok(pstb_cfg.to_spice())
     }
 
-    pub(super) fn build_disto_command(&self, state: &AppState) -> Result<String, String> {
-        let spec = self.build_disto_spec(state)?;
+    pub(super) fn build_disto_command(spec: &AnalysisSpec) -> Result<String, String> {
         if let AnalysisSpec::Disto {
             start_freq,
             stop_freq,
