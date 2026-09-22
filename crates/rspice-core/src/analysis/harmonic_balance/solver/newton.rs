@@ -148,7 +148,7 @@ impl ExactHbOperator<'_> {
             if ordinal != expected_ordinal
                 || node_pos > self.num_nodes
                 || node_neg > self.num_nodes
-                || (node_pos == node_neg && !branch.is_integral())
+                || (node_pos == node_neg && !branch.is_auxiliary())
                 || matches!(branch, ExactMnaBranch::Inductor { inductance, .. } if !inductance.is_finite() || *inductance == 0.0)
                 || matches!(branch, ExactMnaBranch::Resistor { resistance, small_signal_resistance, .. } if !resistance.is_finite() || !small_signal_resistance.is_finite())
             {
@@ -335,7 +335,7 @@ impl ExactHbOperator<'_> {
                     if !matches!(
                         branch,
                         ExactMnaBranch::ConstitutivePort { .. }
-                            | ExactMnaBranch::IntegralState { .. }
+                            | ExactMnaBranch::AuxiliaryState { .. }
                     ) {
                         self.visit_linear_term(
                             branch_entity,
@@ -360,7 +360,7 @@ impl ExactHbOperator<'_> {
                     if !matches!(
                         branch,
                         ExactMnaBranch::ConstitutivePort { .. }
-                            | ExactMnaBranch::IntegralState { .. }
+                            | ExactMnaBranch::AuxiliaryState { .. }
                     ) {
                         self.visit_linear_term(
                             branch_entity,
@@ -1202,7 +1202,7 @@ impl HbSolver {
                     }
                     ExactMnaBranch::ControlledVoltageSource { .. } => (-voltage_drop, 0.0),
                     ExactMnaBranch::ConstitutivePort { .. }
-                    | ExactMnaBranch::IntegralState { .. } => (Complex64::new(0.0, 0.0), 0.0),
+                    | ExactMnaBranch::AuxiliaryState { .. } => (Complex64::new(0.0, 0.0), 0.0),
                 };
                 if !residual.re.is_finite()
                     || !residual.im.is_finite()
@@ -1648,7 +1648,7 @@ impl HbSolver {
                     if !matches!(
                         branch,
                         ExactMnaBranch::ConstitutivePort { .. }
-                            | ExactMnaBranch::IntegralState { .. }
+                            | ExactMnaBranch::AuxiliaryState { .. }
                     ) {
                         jac[branch_coordinate][node_coordinate] -= 1.0;
                     }
@@ -1659,7 +1659,7 @@ impl HbSolver {
                     if !matches!(
                         branch,
                         ExactMnaBranch::ConstitutivePort { .. }
-                            | ExactMnaBranch::IntegralState { .. }
+                            | ExactMnaBranch::AuxiliaryState { .. }
                     ) {
                         jac[branch_coordinate][node_coordinate] += 1.0;
                     }

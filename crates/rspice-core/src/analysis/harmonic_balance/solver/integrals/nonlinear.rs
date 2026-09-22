@@ -250,10 +250,15 @@ impl HbSolver {
             })
             .collect();
         let mut pattern = BTreeSet::new();
+        let rate_start = self.num_nodes + self.capacitor_rate_start();
+        let independent_coordinate = |coordinate| coordinate < physical || coordinate >= rate_start;
         let mut insert = |row: usize, col: usize| -> Result<(), Error> {
             check_abort(abort)?;
             // Lifted phase coordinates are parameters, never circuit unknowns.
-            if row < physical && col < n && !known_integrals[col] && !pattern.contains(&(row, col))
+            if independent_coordinate(row)
+                && col < n
+                && !known_integrals[col]
+                && !pattern.contains(&(row, col))
             {
                 storage = storage.saturating_add(16);
                 budget(storage)?;
@@ -287,6 +292,20 @@ impl HbSolver {
                 }
             }
         }
+        for (index, capacitor) in self.periodic_capacitors.iter().enumerate() {
+            let rate = rate_start + index;
+            insert(rate, rate)?;
+            for node in [capacitor.pos, capacitor.neg] {
+                if node == 0 {
+                    continue;
+                }
+                insert(rate, node - 1)?;
+                insert(node - 1, rate)?;
+                for column in capacitor.expression.bound_solution_indices() {
+                    insert(node - 1, column)?;
+                }
+            }
+        }
         let mut result = Ok(());
         self.behavioral_sources.visit_periodic_output_dependencies(
             self.num_nodes,
@@ -311,7 +330,9 @@ impl HbSolver {
         let components: Vec<_> = super::linear::closed_components(&rows, abort)?
             .into_iter()
             .filter(|component| {
-                component.iter().all(|&(_, col)| col < physical)
+                component
+                    .iter()
+                    .all(|&(_, col)| independent_coordinate(col))
                     && component.iter().any(|&(_, col)| needed[col])
             })
             .collect();

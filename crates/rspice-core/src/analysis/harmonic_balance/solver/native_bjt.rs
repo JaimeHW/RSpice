@@ -96,7 +96,9 @@ fn record_native_terms(
 
 impl HbSolver {
     pub(super) fn has_native_periodic_devices(&self) -> bool {
-        !self.native_bjts.is_empty() || !self.behavioral_sources.is_empty()
+        !self.native_bjts.is_empty()
+            || !self.behavioral_sources.is_empty()
+            || !self.periodic_capacitors.is_empty()
     }
 
     pub(crate) fn set_periodic_behavioral_sources(
@@ -260,6 +262,7 @@ impl HbSolver {
             .num_nodes
             .checked_add(self.physical_branch_count())
             .and_then(|count| count.checked_add(sources.integral_count()))
+            .and_then(|count| count.checked_add(self.periodic_capacitors.len()))
             .ok_or_else(|| {
                 HbError::InvalidCircuit("QPSS integral MNA dimension exceeds this platform".into())
             })?;
@@ -360,6 +363,25 @@ impl HbSolver {
         }
         f.clear();
         q.clear();
+        let rate_start = self.num_nodes + self.capacitor_rate_start();
+        for (index, capacitor) in self.periodic_capacitors.iter_mut().enumerate() {
+            let rate = rate_start + index;
+            if selected.is_some_and(|rows| {
+                !rows[rate]
+                    && ![capacitor.pos, capacitor.neg]
+                        .into_iter()
+                        .any(|node| node > 0 && rows[node - 1])
+            }) {
+                continue;
+            }
+            capacitor.stamp(solution, time, self.config.fundamental_freq, rate, f, q);
+            if f.invalid || q.invalid {
+                return Err(HbError::InvalidCircuit(format!(
+                    "capacitor '{}' produced invalid F/Q entries",
+                    capacitor.expression.name
+                )));
+            }
+        }
         for bjt in &mut self.native_bjts {
             if selected.is_some_and(|rows| {
                 !bjt.mna_coupling_nodes()

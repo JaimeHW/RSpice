@@ -129,15 +129,17 @@ impl QpssOperatingPoint {
             .saturating_add(self.branch_names.len())
             .min(self.spectra.len())
     }
-    /// Canonical behavioral SDT identities, separate from electrical currents.
+    /// Canonical auxiliary identities, separate from electrical currents.
     pub fn integral_names(&self) -> &[String] {
         &self.integral_names
     }
-    /// Integral values in their authored integrand-times-seconds units.
+    /// SDT values retain integrand-times-seconds units. Capacitor voltage-rate
+    /// coordinates retain dV/dt divided by the registry's fixed 1 Hz reference,
+    /// in volts. The accessor name remains stable for payload compatibility.
     pub fn integral_spectra(&self) -> &[Vec<Complex64>] {
         &self.spectra[self.physical_rows()..]
     }
-    /// Complete numerical state: physical rows followed by integral states.
+    /// Complete numerical state: physical rows followed by auxiliary states.
     /// Dependent solvers and transport must retain every row.
     pub fn complete_spectra(&self) -> &[Vec<Complex64>] {
         &self.spectra

@@ -402,8 +402,8 @@ pub(crate) const fn periodic_capability_descriptor(
             residual_jacobian: Inapplicable,
             dynamic_state: Complete,
             small_signal: Restricted(
-                "a constant capacitance; a solution-dependent capacitor charge linearization is \
-                 not represented by the exact periodic MNA descriptor",
+                "constant or memoryless expression capacitance; integral memory requires \
+                 additional periodic response coordinates",
             ),
             noise: Inapplicable,
             pss_state: Complete,
@@ -972,13 +972,14 @@ fn absent_detail(
 /// The harmonic solver only builds its nonlinear Newton state when a family
 /// with an implemented exact residual is present.
 pub(in crate::engine) fn has_exact_periodic_nonlinear_devices(circuit: &CircuitData) -> bool {
-    PeriodicDeviceFamily::ALL.iter().any(|&family| {
-        family.instance_count(circuit) > 0
-            && matches!(
-                capability_support(family, PeriodicCapability::PeriodicResidualJacobian),
-                Complete | Restricted(_)
-            )
-    })
+    circuit.capacitors.has_solution_dependent_values()
+        || PeriodicDeviceFamily::ALL.iter().any(|&family| {
+            family.instance_count(circuit) > 0
+                && matches!(
+                    capability_support(family, PeriodicCapability::PeriodicResidualJacobian),
+                    Complete | Restricted(_)
+                )
+        })
 }
 
 /// Gaps in the exact periodic residual/Jacobian contract.
@@ -1189,10 +1190,29 @@ fn periodic_descriptor_gaps_in_context(circuit: &CircuitData, carrier: bool) -> 
             Absent(missing) => gaps.push(CapabilityGap::new(family, missing)),
             Restricted(_) => match family {
                 F::Capacitor => {
-                    if circuit.capacitors.has_solution_dependent_values() {
+                    if circuit
+                        .capacitors
+                        .value_expressions
+                        .iter()
+                        .flatten()
+                        .any(|expression| expression.program.sdt_count != 0)
+                    {
                         gaps.push(CapabilityGap::new(
                             family,
-                            "solution-dependent capacitor charge linearizations",
+                            "capacitor expression-integral response coordinates",
+                        ));
+                    }
+                    if !carrier
+                        && circuit
+                            .capacitors
+                            .value_expressions
+                            .iter()
+                            .flatten()
+                            .any(|expression| !expression.has_periodic_response_context())
+                    {
+                        gaps.push(CapabilityGap::new(
+                            family,
+                            "live-frequency capacitor response equations",
                         ));
                     }
                 }

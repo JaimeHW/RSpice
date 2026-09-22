@@ -334,7 +334,7 @@ impl HbSolver {
                     if !matches!(
                         branch,
                         ExactMnaBranch::ConstitutivePort { .. }
-                            | ExactMnaBranch::IntegralState { .. }
+                            | ExactMnaBranch::AuxiliaryState { .. }
                     ) {
                         visit(row, node - 1, Complex64::new(sign, 0.0))?;
                     }
@@ -425,7 +425,7 @@ impl HbSolver {
             if ordinal != index + 1
                 || pos > self.num_nodes
                 || neg > self.num_nodes
-                || (pos == neg && !branch.is_integral())
+                || (pos == neg && !branch.is_auxiliary())
             {
                 return Err(Error::InvalidCircuit(
                     "QPSS branch has invalid canonical MNA coordinates".into(),
@@ -476,7 +476,10 @@ impl Circuit for HbSolver {
             && self
                 .periodic_mna_branches
                 .get(row - self.num_nodes)
-                .is_some_and(|coordinate| !coordinate.is_integral())
+                .is_some_and(|coordinate| {
+                    !coordinate.is_auxiliary()
+                        || row >= self.num_nodes + self.capacitor_rate_start()
+                })
     }
 
     fn linear_entries(&self, frequency_hz: Value) -> Result<Vec<LinearEntry>, Error> {

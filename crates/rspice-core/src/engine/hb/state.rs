@@ -2,7 +2,6 @@
 
 use super::*;
 use crate::abort_signal::{AbortSignal, NoAbort};
-#[cfg(feature = "veriloga")]
 use crate::analysis::harmonic_balance::HbContinuationLimitation;
 use crate::analysis::harmonic_balance::{HbReactiveKind, HbReactiveSpectrum};
 use crate::circuit::CircuitData;
@@ -673,6 +672,7 @@ impl Engine {
         &self,
         circuit: &CircuitData,
         result: &mut HbResult,
+        currents: &[HbCurrentSpectrum],
     ) -> Result<(), SimulationError> {
         let omega0 = TAU * result.fundamental_freq;
 
@@ -680,14 +680,28 @@ impl Engine {
             let voltage_coefficients =
                 Self::hb_terminal_voltage_spectrum(result, stamp.pp.row, stamp.nn.row);
             let capacitance = circuit.capacitors.capacitances[index];
-            let current_coefficients = voltage_coefficients
-                .iter()
-                .enumerate()
-                .map(|(harmonic, &voltage)| {
-                    let omega = harmonic as Value * omega0;
-                    Complex64::new(0.0, omega * capacitance) * voltage
-                })
-                .collect();
+            let current_coefficients = if circuit.capacitors.value_expressions[index].is_some() {
+                let probe = format!("I({})", circuit.capacitors.names[index]);
+                currents
+                    .iter()
+                    .find(|current| current.probe.eq_ignore_ascii_case(&probe))
+                    .ok_or_else(|| {
+                        SimulationError::Circuit(format!(
+                            "HB result lost expression capacitor current '{probe}'"
+                        ))
+                    })?
+                    .coefficients
+                    .clone()
+            } else {
+                voltage_coefficients
+                    .iter()
+                    .enumerate()
+                    .map(|(harmonic, &voltage)| {
+                        let omega = harmonic as Value * omega0;
+                        Complex64::new(0.0, omega * capacitance) * voltage
+                    })
+                    .collect()
+            };
             result.reactive_spectra.push(HbReactiveSpectrum {
                 device_name: circuit.capacitors.names[index].clone(),
                 kind: HbReactiveKind::Capacitor,
@@ -695,6 +709,12 @@ impl Engine {
                 current_coefficients,
                 dc_current_is_exact: true,
             });
+        }
+
+        if circuit.capacitors.has_solution_dependent_values() {
+            result
+                .continuation_limitations
+                .push(HbContinuationLimitation::CapacitorChargeHistoryNotRetained);
         }
 
         for index in 0..circuit.inductors.len() {

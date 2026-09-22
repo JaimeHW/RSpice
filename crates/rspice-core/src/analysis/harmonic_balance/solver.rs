@@ -12,6 +12,7 @@ use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::device::veriloga::VerilogADevice;
 use num_complex::Complex64;
 
+mod capacitors;
 mod currents;
 mod dc;
 mod devices;
@@ -219,7 +220,7 @@ pub struct HbSolverState {
     pub converged: bool,
 
     /// Non-node spectra in the solver's canonical MNA coordinate order.
-    /// Physical branch currents form the prefix; solver-owned typed integral
+    /// Physical branch currents form the prefix; solver-owned typed auxiliary
     /// coordinates, when present, form the tail and are not current outputs.
     pub mna_branch_currents: Vec<Vec<Complex64>>,
 
@@ -233,6 +234,8 @@ pub struct HbSolverState {
     /// Beginning of the integral-rate rows in the non-node coordinate arrays.
     /// Their absolute tolerance is in integrand units, not KVL volts.
     pub(crate) integral_branch_start: Option<usize>,
+    /// Voltage-valued normalized capacitor rates follow expression integrals.
+    pub(crate) capacitor_rate_branch_start: Option<usize>,
 }
 
 impl HbSolverState {
@@ -259,6 +262,7 @@ impl HbSolverState {
             mna_branch_residual: Vec::new(),
             mna_branch_residual_scale: Vec::new(),
             integral_branch_start: None,
+            capacitor_rate_branch_start: None,
         }
     }
 
@@ -803,19 +807,19 @@ pub(crate) enum ExactMnaBranch {
         node_pos: usize,
         node_neg: usize,
     },
-    /// Explicit non-electrical SDT coordinate. It has no terminal incidence;
-    /// its complete differential equation comes from behavioral F/Q sampling.
-    IntegralState { branch_ordinal: usize },
+    /// Explicit descriptor coordinate without terminal incidence. Its complete
+    /// differential equation comes from native device F/Q sampling.
+    AuxiliaryState { branch_ordinal: usize },
 }
 
 impl ExactMnaBranch {
-    fn is_integral(&self) -> bool {
-        matches!(self, Self::IntegralState { .. })
+    fn is_auxiliary(&self) -> bool {
+        matches!(self, Self::AuxiliaryState { .. })
     }
 
     fn ordinal_and_terminals(&self) -> (usize, usize, usize) {
         match self {
-            Self::IntegralState { branch_ordinal } => (*branch_ordinal, 0, 0),
+            Self::AuxiliaryState { branch_ordinal } => (*branch_ordinal, 0, 0),
             Self::VoltageSource {
                 branch_ordinal,
                 node_pos,
@@ -1017,6 +1021,7 @@ pub struct HbSolver {
     nonlinear_devices: Vec<HbNonlinearDevice>,
     /// Native physical BJT models retain every internal MNA state.
     native_bjts: Vec<crate::device::Bjt>,
+    periodic_capacitors: Vec<capacitors::PeriodicCapacitor>,
 
     /// Bound constitutive expressions over the complete physical/integral basis.
     behavioral_sources: crate::device::behavioral::BehavioralSources,

@@ -145,7 +145,7 @@ impl HbSolver {
             if self
                 .exact_mna_branches()
                 .get(branch_idx)
-                .is_some_and(ExactMnaBranch::is_integral)
+                .is_some_and(ExactMnaBranch::is_auxiliary)
             {
                 continue;
             }

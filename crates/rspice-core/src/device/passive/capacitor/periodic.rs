@@ -40,6 +40,14 @@ impl SolutionDependentCapacitor {
         periodicity::minimum_pss_interval(&self.ast, &self.periodicity_context(), true)
     }
 
+    pub(crate) fn minimum_periodic_collocation_interval(&self) -> Option<Value> {
+        periodicity::minimum_pss_interval(&self.ast, &self.periodicity_context(), false)
+    }
+
+    pub(crate) fn has_periodic_response_context(&self) -> bool {
+        !crate::device::behavioral::expression_depends_on_frequency(&self.ast)
+    }
+
     pub(crate) fn needs_time_resolution(&self, period: Value) -> bool {
         periodicity::needs_time_features(&self.ast, period, &self.periodicity_context())
     }

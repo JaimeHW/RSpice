@@ -295,7 +295,10 @@ impl BehavioralSources {
         let active = |row: usize| selected.is_none_or(|rows| rows[row]);
         if !point.time.is_finite()
             || point.num_nodes > point.integral_start
-            || point.integral_start.checked_add(self.integral_count()) != Some(point.unknowns)
+            || point
+                .integral_start
+                .checked_add(self.integral_count())
+                .is_none_or(|end| end > point.unknowns)
             || point.unknowns > point.inputs.len()
             || point.inputs.iter().any(|value| !value.is_finite())
             || (!point.prescribed_integrals.is_empty()

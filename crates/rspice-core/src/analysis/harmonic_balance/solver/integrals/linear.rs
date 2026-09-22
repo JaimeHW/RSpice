@@ -150,6 +150,10 @@ impl HbSolver {
                 exclude_node(node);
             }
         }
+        for capacitor in &self.periodic_capacitors {
+            exclude_node(capacitor.pos);
+            exclude_node(capacitor.neg);
+        }
         // Legacy nodal inductors do not use the exact branch registry.
         // Conservatively exclude their rows instead of substituting a DC short.
         for &(row, _, _) in &self.l_matrix {

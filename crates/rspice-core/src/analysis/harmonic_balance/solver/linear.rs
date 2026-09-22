@@ -399,6 +399,7 @@ impl HbSolver {
             source_spectra: vec![vec![Complex64::new(0.0, 0.0); num_harmonics + 1]; num_nodes],
             nonlinear_devices: Vec::new(),
             native_bjts: Vec::new(),
+            periodic_capacitors: Vec::new(),
             behavioral_sources: Default::default(),
             behavioral_phase_dimensions: 0,
             prescribed_integrals: Vec::new(),
@@ -437,6 +438,7 @@ impl HbSolver {
             source_spectra: Vec::new(),
             nonlinear_devices: Vec::new(),
             native_bjts: Vec::new(),
+            periodic_capacitors: Vec::new(),
             behavioral_sources: Default::default(),
             behavioral_phase_dimensions: 0,
             prescribed_integrals: Vec::new(),
@@ -1389,7 +1391,7 @@ impl HbSolver {
                     node_pos,
                     node_neg,
                 } => (*branch_ordinal, *node_pos, *node_neg, false),
-                ExactMnaBranch::IntegralState { branch_ordinal } => (*branch_ordinal, 0, 0, false),
+                ExactMnaBranch::AuxiliaryState { branch_ordinal } => (*branch_ordinal, 0, 0, false),
             };
             if branch_ordinal != expected_ordinal {
                 return Err(HbError::InvalidCircuit(format!(
@@ -1398,7 +1400,7 @@ impl HbSolver {
             }
             if node_pos > self.num_nodes
                 || node_neg > self.num_nodes
-                || (node_pos == node_neg && !branch.is_integral())
+                || (node_pos == node_neg && !branch.is_auxiliary())
             {
                 return Err(HbError::InvalidCircuit(format!(
                     "exact linear MNA branch '{name}' has invalid terminal pair ({node_pos}, {node_neg}) for {} non-ground nodes",
@@ -1777,7 +1779,7 @@ impl HbSolver {
                         }
                         ExactMnaBranch::ControlledVoltageSource { .. } => (-voltage_drop, 0.0),
                         ExactMnaBranch::ConstitutivePort { .. }
-                        | ExactMnaBranch::IntegralState { .. } => (Complex64::new(0.0, 0.0), 0.0),
+                        | ExactMnaBranch::AuxiliaryState { .. } => (Complex64::new(0.0, 0.0), 0.0),
                     };
                     state.mna_branch_residual[branch_index][k] = residual;
                     state.mna_branch_residual_scale[branch_index][k] =
@@ -1957,7 +1959,7 @@ impl HbSolver {
                         if !matches!(
                             branch,
                             ExactMnaBranch::ConstitutivePort { .. }
-                                | ExactMnaBranch::IntegralState { .. }
+                                | ExactMnaBranch::AuxiliaryState { .. }
                         ) {
                             y_matrix[row][node] += Complex64::new(1.0, 0.0);
                         }
@@ -1968,7 +1970,7 @@ impl HbSolver {
                         if !matches!(
                             branch,
                             ExactMnaBranch::ConstitutivePort { .. }
-                                | ExactMnaBranch::IntegralState { .. }
+                                | ExactMnaBranch::AuxiliaryState { .. }
                         ) {
                             y_matrix[row][node] -= Complex64::new(1.0, 0.0);
                         }
@@ -1991,7 +1993,7 @@ impl HbSolver {
                         }
                         ExactMnaBranch::ControlledVoltageSource { .. } => {}
                         ExactMnaBranch::ConstitutivePort { .. }
-                        | ExactMnaBranch::IntegralState { .. } => {}
+                        | ExactMnaBranch::AuxiliaryState { .. } => {}
                     }
                 }
                 for &(row, column, value) in &self.exact_mna_static_entries {

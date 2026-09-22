@@ -12,7 +12,7 @@ impl HbSolver {
     pub(crate) fn physical_branch_count(&self) -> usize {
         self.exact_mna_branches()
             .iter()
-            .position(ExactMnaBranch::is_integral)
+            .position(ExactMnaBranch::is_auxiliary)
             .unwrap_or(self.exact_mna_branches().len())
     }
 
@@ -21,12 +21,15 @@ impl HbSolver {
         sources: &crate::device::behavioral::BehavioralSources,
     ) -> Result<(), HbError> {
         let physical = self.physical_branch_count();
-        let names = sources.integral_names().collect::<Vec<_>>();
+        let names = sources
+            .integral_names()
+            .chain(self.periodic_capacitors.iter().map(|cap| cap.rate_name()))
+            .collect::<Vec<_>>();
         if physical != self.exact_mna_branches().len() {
             if self.exact_mna_branch_names()[physical..] != names
                 || self.exact_mna_branches()[physical..]
                     .iter()
-                    .any(|row| !row.is_integral())
+                    .any(|row| !row.is_auxiliary())
             {
                 return Err(HbError::InvalidCircuit(
                     "periodic integral basis changed after registration".into(),
@@ -55,7 +58,7 @@ impl HbSolver {
         }
         for (index, name) in names.iter().enumerate() {
             self.try_push_periodic_mna_branch(
-                ExactMnaBranch::IntegralState {
+                ExactMnaBranch::AuxiliaryState {
                     branch_ordinal: physical + index + 1,
                 },
                 name,
@@ -68,6 +71,8 @@ impl HbSolver {
         let physical = self.physical_branch_count();
         state.integral_branch_start =
             (physical != self.exact_mna_branches().len()).then_some(physical);
+        state.capacitor_rate_branch_start =
+            (!self.periodic_capacitors.is_empty()).then_some(self.capacitor_rate_start());
     }
 }
 
@@ -81,24 +86,30 @@ impl HbSolverState {
     ) -> bool {
         let count = self.mna_branch_currents.len();
         let start = self.integral_branch_start.unwrap_or(count);
-        if start > count
+        let rates = self.capacitor_rate_branch_start.unwrap_or(count);
+        if start > rates
+            || rates > count
             || self.mna_branch_residual.len() != count
             || self.mna_branch_residual_scale.len() != count
         {
             return false;
         }
-        [(0..start, voltage_abstol), (start..count, abstol)]
-            .into_iter()
-            .all(|(rows, tolerance)| {
-                residual_rows_converged(
-                    &self.mna_branch_currents[rows.clone()],
-                    &self.mna_branch_residual[rows.clone()],
-                    &self.mna_branch_residual_scale[rows],
-                    reltol,
-                    tolerance,
-                    dc_only,
-                )
-            })
+        [
+            (0..start, voltage_abstol),
+            (start..rates, abstol),
+            (rates..count, voltage_abstol),
+        ]
+        .into_iter()
+        .all(|(rows, tolerance)| {
+            residual_rows_converged(
+                &self.mna_branch_currents[rows.clone()],
+                &self.mna_branch_residual[rows.clone()],
+                &self.mna_branch_residual_scale[rows],
+                reltol,
+                tolerance,
+                dc_only,
+            )
+        })
     }
 
     pub(super) fn non_node_merit(
@@ -110,7 +121,9 @@ impl HbSolverState {
     ) -> Result<Value, HbError> {
         let count = self.mna_branch_currents.len();
         let start = self.integral_branch_start.unwrap_or(count);
-        if start > count
+        let rates = self.capacitor_rate_branch_start.unwrap_or(count);
+        if start > rates
+            || rates > count
             || self.mna_branch_residual.len() != count
             || self.mna_branch_residual_scale.len() != count
         {
@@ -121,7 +134,8 @@ impl HbSolverState {
         let mut merit: Value = 0.0;
         for (rows, tolerance, label) in [
             (0..start, voltage_abstol, "KVL-voltage"),
-            (start..count, abstol, "integral-rate"),
+            (start..rates, abstol, "integral-rate"),
+            (rates..count, voltage_abstol, "capacitor-voltage-rate"),
         ] {
             merit = merit.max(residual_rows_merit(
                 label,

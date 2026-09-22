@@ -129,6 +129,37 @@ impl HbSolver {
                 });
             }
         }
+        if !self.periodic_capacitors.is_empty() {
+            let waves = self.native_state_waveforms(state)?;
+            let count = self.fft.size();
+            let mut solution = vec![0.0; waves.len()];
+            let zero_charge = vec![0.0; count];
+            let rate_start = self.num_nodes + self.capacitor_rate_start();
+            for index in 0..self.periodic_capacitors.len() {
+                let mut capacitor = self.periodic_capacitors[index].clone();
+                let mut current = vec![0.0; count];
+                for (sample, current) in current.iter_mut().enumerate() {
+                    if abort.is_aborted() {
+                        return Err(HbError::Aborted);
+                    }
+                    for (value, wave) in solution.iter_mut().zip(&waves) {
+                        *value = wave[sample];
+                    }
+                    let time = sample as Value / count as Value / self.config.fundamental_freq;
+                    *current = capacitor.multiplier
+                        * capacitor.expression.evaluate(&solution, time)
+                        * self.config.fundamental_freq
+                        * solution[rate_start + index];
+                }
+                let positive = self.lead_phasors(&current, &zero_charge)?;
+                let negative = positive.iter().map(|value| -*value).collect();
+                result.push(HbDeviceLeadSpectra {
+                    name: capacitor.expression.name,
+                    terminals: &["p", "n"],
+                    currents: vec![positive, negative],
+                });
+            }
+        }
         if !self.behavioral_sources.current_sources.is_empty() {
             let waves = self.native_state_waveforms(state)?;
             let count = self.fft.size();

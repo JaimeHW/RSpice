@@ -179,14 +179,14 @@ r1 out 0 1k
 fn harmonic_balance_names_the_missing_periodic_descriptor_capability() {
     let cases = [(
         "\
-* a solution-dependent capacitor needs a periodic charge linearization
+* capacitor integral memory needs additional periodic response coordinates
 iin 0 out dc 0
 vctrl ctrl 0 dc 0.5
-c1 out 0 C={1p*(1+V(ctrl))}
+c1 out 0 C={1p*(1+SDT(V(ctrl)))}
 r1 out 0 1k
 .end
 ",
-        "solution-dependent capacitor charge linearizations",
+        "capacitor expression-integral response coordinates",
     )];
 
     for (deck, expected) in cases {

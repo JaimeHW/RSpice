@@ -259,7 +259,7 @@ impl HbSolver {
                 g_dc[node_pos - 1][row] += 1.0;
                 if !matches!(
                     branch,
-                    ExactMnaBranch::ConstitutivePort { .. } | ExactMnaBranch::IntegralState { .. }
+                    ExactMnaBranch::ConstitutivePort { .. } | ExactMnaBranch::AuxiliaryState { .. }
                 ) {
                     g_dc[row][node_pos - 1] += 1.0;
                 }
@@ -268,7 +268,7 @@ impl HbSolver {
                 g_dc[node_neg - 1][row] -= 1.0;
                 if !matches!(
                     branch,
-                    ExactMnaBranch::ConstitutivePort { .. } | ExactMnaBranch::IntegralState { .. }
+                    ExactMnaBranch::ConstitutivePort { .. } | ExactMnaBranch::AuxiliaryState { .. }
                 ) {
                     g_dc[row][node_neg - 1] -= 1.0;
                 }
@@ -515,14 +515,14 @@ impl HbSolver {
                 ExactMnaBranch::Resistor { resistance, .. } => {
                     state.mna_branch_currents[branch_index][0].re * *resistance
                 }
-                ExactMnaBranch::ConstitutivePort { .. } | ExactMnaBranch::IntegralState { .. } => {
+                ExactMnaBranch::ConstitutivePort { .. } | ExactMnaBranch::AuxiliaryState { .. } => {
                     0.0
                 }
                 _ => self.dc_branch_source(branch, source_scale)?,
             };
             if matches!(
                 branch,
-                ExactMnaBranch::ConstitutivePort { .. } | ExactMnaBranch::IntegralState { .. }
+                ExactMnaBranch::ConstitutivePort { .. } | ExactMnaBranch::AuxiliaryState { .. }
             ) {
                 // The registered device or distributed network supplies the
                 // complete constitutive row after the canonical KCL incidence.
@@ -682,7 +682,7 @@ impl HbSolver {
                 jacobian[node_pos - 1][branch_coordinate] -= 1.0;
                 if !matches!(
                     branch,
-                    ExactMnaBranch::ConstitutivePort { .. } | ExactMnaBranch::IntegralState { .. }
+                    ExactMnaBranch::ConstitutivePort { .. } | ExactMnaBranch::AuxiliaryState { .. }
                 ) {
                     jacobian[branch_coordinate][node_pos - 1] -= 1.0;
                 }
@@ -691,7 +691,7 @@ impl HbSolver {
                 jacobian[node_neg - 1][branch_coordinate] += 1.0;
                 if !matches!(
                     branch,
-                    ExactMnaBranch::ConstitutivePort { .. } | ExactMnaBranch::IntegralState { .. }
+                    ExactMnaBranch::ConstitutivePort { .. } | ExactMnaBranch::AuxiliaryState { .. }
                 ) {
                     jacobian[branch_coordinate][node_neg - 1] += 1.0;
                 }
@@ -918,12 +918,12 @@ impl HbSolver {
                     node_pos,
                     node_neg,
                 } => (*branch_ordinal, *node_pos, *node_neg),
-                ExactMnaBranch::IntegralState { branch_ordinal } => (*branch_ordinal, 0, 0),
+                ExactMnaBranch::AuxiliaryState { branch_ordinal } => (*branch_ordinal, 0, 0),
             };
             if branch_ordinal != expected_ordinal
                 || node_pos > self.num_nodes
                 || node_neg > self.num_nodes
-                || (node_pos == node_neg && !branch.is_integral())
+                || (node_pos == node_neg && !branch.is_auxiliary())
             {
                 return Err(HbError::InvalidCircuit(format!(
                     "HB DC exact-MNA branch '{name}' has ordinal {branch_ordinal} and terminals ({node_pos}, {node_neg}); expected ordinal {expected_ordinal} within {} nodes",
@@ -1066,7 +1066,7 @@ impl HbSolver {
             ExactMnaBranch::Inductor { .. } => 0.0,
             ExactMnaBranch::Resistor { .. } => 0.0,
             ExactMnaBranch::ControlledVoltageSource { .. } => 0.0,
-            ExactMnaBranch::ConstitutivePort { .. } | ExactMnaBranch::IntegralState { .. } => 0.0,
+            ExactMnaBranch::ConstitutivePort { .. } | ExactMnaBranch::AuxiliaryState { .. } => 0.0,
         };
         if !source.is_finite() {
             return Err(HbError::InvalidCircuit(

@@ -38,6 +38,17 @@ impl Engine {
     ) -> Result<(), SimulationError> {
         use crate::analysis::harmonic_balance::{DepletionCap, NonlinearDeviceInstance};
 
+        let (autonomous, quasi_periodic, retained) = match &basis {
+            BehavioralBasis::Periodic {
+                autonomous,
+                retained,
+                ..
+            } => (*autonomous, false, *retained),
+            BehavioralBasis::QuasiPeriodic(_) => (false, true, false),
+        };
+        solver
+            .set_periodic_capacitors(&circuit.capacitors, autonomous, quasi_periodic, retained)
+            .map_err(|error| SimulationError::Circuit(error.to_string()))?;
         match basis {
             BehavioralBasis::Periodic {
                 autonomous,
@@ -302,6 +313,9 @@ impl Engine {
         solver: &mut HbSolver,
     ) {
         for i in 0..circuit.capacitors.len() {
+            if circuit.capacitors.value_expressions[i].is_some() {
+                continue;
+            }
             let np = circuit.capacitors.stamps[i].pp.row;
             let nn = circuit.capacitors.stamps[i].nn.row;
             let c = circuit.capacitors.capacitances[i];

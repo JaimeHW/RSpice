@@ -506,13 +506,14 @@ impl HbOperatingPointIdentity {
     }
 }
 
-/// One behavioral SDT coordinate in the solver's canonical occurrence order.
-/// Coefficients retain the integrand's units multiplied by seconds, including
-/// the solved DC integration constant. They are not electrical branch currents.
+/// One auxiliary descriptor coordinate, separate from electrical currents.
+/// SDT coordinates retain integrand-times-seconds units and their solved DC
+/// constant. `C:<instance>:voltage_rate` holds dV/dt divided by the carrier
+/// frequency, in volts. The type name is retained for payload compatibility.
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "veriloga", derive(serde::Serialize, serde::Deserialize))]
 pub struct HbIntegralSpectrum {
-    /// Canonical source and compiled SDT occurrence identity.
+    /// Canonical SDT occurrence or capacitor voltage-rate identity.
     pub name: String,
     /// Complex Fourier coefficients, indexed by nonnegative harmonic.
     pub coefficients: Vec<Complex64>,
@@ -579,7 +580,7 @@ impl HbOperatingPoint {
         &self.mna_branch_spectral_state
     }
 
-    /// Behavioral integral coordinates, separate from physical branch currents.
+    /// Auxiliary descriptor coordinates, separate from physical branch currents.
     pub fn integral_spectra(&self) -> &[HbIntegralSpectrum] {
         &self.integral_spectra
     }
@@ -1133,9 +1134,16 @@ impl Engine {
             .behavioral_sources
             .integral_names()
             .collect::<Vec<_>>();
+        let rate_names = circuit
+            .capacitors
+            .value_expressions
+            .iter()
+            .flatten()
+            .map(|expression| format!("C:{}:voltage_rate", expression.name))
+            .collect::<Vec<_>>();
         let physical_count = branch_names
             .len()
-            .checked_sub(integral_names.len())
+            .checked_sub(integral_names.len() + rate_names.len())
             .ok_or_else(|| {
                 SimulationError::Circuit(
                     "dependent periodic basis omits behavioral integral coordinates".to_owned(),
@@ -1143,7 +1151,10 @@ impl Engine {
             })?;
         let (physical_branch_names, retained_integral_names) =
             branch_names.split_at(physical_count);
-        if retained_integral_names != integral_names {
+        if !retained_integral_names
+            .iter()
+            .eq(integral_names.iter().chain(&rate_names))
+        {
             return Err(SimulationError::Circuit(
                 "dependent periodic integral basis does not match the circuit".to_owned(),
             ));
@@ -1290,6 +1301,27 @@ impl Engine {
                         Complex64::from_polar(0.5 * magnitude, phase.to_radians())
                     };
                 }
+            }
+        }
+        let rate_start = physical_count + integral_names.len();
+        for (index, capacitor) in circuit
+            .capacitors
+            .value_expressions
+            .iter()
+            .enumerate()
+            .filter(|(_, expression)| expression.is_some())
+            .map(|(index, _)| index)
+            .enumerate()
+        {
+            let stamp = &circuit.capacitors.stamps[capacitor];
+            for harmonic in 0..=config.num_harmonics {
+                let voltage = |node: usize| {
+                    node.checked_sub(1)
+                        .map_or(Complex64::ZERO, |node| state.x[node][harmonic])
+                };
+                state.mna_branch_currents[rate_start + index][harmonic] =
+                    Complex64::new(0.0, std::f64::consts::TAU * harmonic as Value)
+                        * (voltage(stamp.pp.row) - voltage(stamp.nn.row));
             }
         }
         state.iteration = analysis.iterations.max(1);
@@ -1831,6 +1863,16 @@ impl Engine {
             .num_branches()
             .checked_add(Self::hb_periodic_extra_branch_count(&circuit)?)
             .and_then(|count| count.checked_add(circuit.behavioral_sources.integral_count()))
+            .and_then(|count| {
+                count.checked_add(
+                    circuit
+                        .capacitors
+                        .value_expressions
+                        .iter()
+                        .flatten()
+                        .count(),
+                )
+            })
             .ok_or_else(|| {
                 SimulationError::Circuit(
                     "HB canonical and distributed-network branch count overflows this platform"
@@ -1960,7 +2002,7 @@ impl Engine {
                     &config,
                     &mut state,
                     &node_names,
-                    &periodic_branch_names,
+                    &periodic_branch_names[..solver.capacitor_rate_start()],
                     dc_seed,
                     abort,
                 )?,
@@ -2049,7 +2091,6 @@ impl Engine {
         let mut result = solver.build_result(&state).map_err(|error| {
             SimulationError::Circuit(format!("HB result construction failed: {error}"))
         })?;
-        self.hb_attach_periodic_state(&circuit, &mut result)?;
         let device_currents = self.hb_device_current_spectra(
             &circuit,
             &mut solver,
@@ -2059,6 +2100,7 @@ impl Engine {
             &drive_tones,
             abort,
         )?;
+        self.hb_attach_periodic_state(&circuit, &mut result, &device_currents)?;
 
         let physical_branches = solver.physical_branch_count();
         let integral_spectra = periodic_branch_names[physical_branches..]
@@ -2563,7 +2605,7 @@ mod tests {
             .mna_branch_currents
             .retain(|branch| !branch.device_name.eq_ignore_ascii_case("LSTATE"));
         let error = engine
-            .hb_attach_periodic_state(&circuit, &mut missing)
+            .hb_attach_periodic_state(&circuit, &mut missing, &[])
             .expect_err("missing exact inductor branch state must fail closed");
         assert!(
             error
@@ -2581,7 +2623,7 @@ mod tests {
             .coefficients
             .pop();
         let error = engine
-            .hb_attach_periodic_state(&circuit, &mut malformed)
+            .hb_attach_periodic_state(&circuit, &mut malformed, &[])
             .expect_err("truncated exact inductor branch state must fail closed");
         assert!(error.to_string().contains("is malformed"));
     }

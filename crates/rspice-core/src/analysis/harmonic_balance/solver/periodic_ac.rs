@@ -533,7 +533,7 @@ impl PeriodicConversionOperator<'_> {
                     self.num_nodes
                 )));
             }
-            if node_pos == node_neg && !branch.is_integral() {
+            if node_pos == node_neg && !branch.is_auxiliary() {
                 return Err(HbError::InvalidCircuit(format!(
                     "{context} MNA branch #{branch_index} has identical terminals"
                 )));
@@ -702,7 +702,7 @@ impl PeriodicConversionOperator<'_> {
                     if !matches!(
                         branch,
                         ExactMnaBranch::ConstitutivePort { .. }
-                            | ExactMnaBranch::IntegralState { .. }
+                            | ExactMnaBranch::AuxiliaryState { .. }
                     ) {
                         visitor(branch_coordinate, node_coordinate, Complex64::new(1.0, 0.0));
                     }
@@ -717,7 +717,7 @@ impl PeriodicConversionOperator<'_> {
                     if !matches!(
                         branch,
                         ExactMnaBranch::ConstitutivePort { .. }
-                            | ExactMnaBranch::IntegralState { .. }
+                            | ExactMnaBranch::AuxiliaryState { .. }
                     ) {
                         visitor(
                             branch_coordinate,
@@ -911,7 +911,7 @@ impl PeriodicConversionOperator<'_> {
                 block[node * n + row] += Complex64::new(1.0, 0.0);
                 if !matches!(
                     branch,
-                    ExactMnaBranch::ConstitutivePort { .. } | ExactMnaBranch::IntegralState { .. }
+                    ExactMnaBranch::ConstitutivePort { .. } | ExactMnaBranch::AuxiliaryState { .. }
                 ) {
                     block[row * n + node] += Complex64::new(1.0, 0.0);
                 }
@@ -921,7 +921,7 @@ impl PeriodicConversionOperator<'_> {
                 block[node * n + row] -= Complex64::new(1.0, 0.0);
                 if !matches!(
                     branch,
-                    ExactMnaBranch::ConstitutivePort { .. } | ExactMnaBranch::IntegralState { .. }
+                    ExactMnaBranch::ConstitutivePort { .. } | ExactMnaBranch::AuxiliaryState { .. }
                 ) {
                     block[row * n + node] -= Complex64::new(1.0, 0.0);
                 }
