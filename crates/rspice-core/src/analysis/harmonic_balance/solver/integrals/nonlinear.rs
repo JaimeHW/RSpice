@@ -292,8 +292,11 @@ impl HbSolver {
                 }
             }
         }
+        let mut capacitor_state = physical + self.behavioral_sources.integral_count();
         for (index, capacitor) in self.periodic_capacitors.iter().enumerate() {
             let rate = rate_start + index;
+            let start = capacitor_state;
+            capacitor_state += capacitor.expression.program.sdt_count;
             insert(rate, rate)?;
             for node in [capacitor.pos, capacitor.neg] {
                 if node == 0 {
@@ -301,7 +304,11 @@ impl HbSolver {
                 }
                 insert(rate, node - 1)?;
                 insert(node - 1, rate)?;
-                for column in capacitor.expression.bound_solution_indices() {
+                for column in capacitor
+                    .expression
+                    .bound_solution_indices()
+                    .chain(start..capacitor_state)
+                {
                     insert(node - 1, column)?;
                 }
             }

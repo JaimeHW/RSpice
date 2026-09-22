@@ -176,30 +176,25 @@ r1 out 0 1k
 }
 
 #[test]
-fn harmonic_balance_names_the_missing_periodic_descriptor_capability() {
-    let cases = [(
-        "\
-* capacitor integral memory needs additional periodic response coordinates
+fn harmonic_balance_accepts_capacitor_integral_descriptor() {
+    let deck = "\
+* capacitor memory is part of the periodic descriptor
 iin 0 out dc 0
-vctrl ctrl 0 dc 0.5
+vctrl ctrl 0 sin(0 0.5 1meg)
 c1 out 0 C={1p*(1+SDT(V(ctrl)))}
 r1 out 0 1k
 .end
-",
-        "capacitor expression-integral response coordinates",
-    )];
-
-    for (deck, expected) in cases {
-        let message = hb_error(deck);
-        assert!(
-            message.contains("exact HB MNA is unavailable"),
-            "the periodic descriptor preflight must own this rejection: {message}"
-        );
-        assert!(
-            message.contains(expected),
-            "the rejection must name the missing capability '{expected}': {message}"
-        );
-    }
+";
+    let result = engine()
+        .run_hb(&parse(deck), HbConfig::new(F0).with_harmonics(2))
+        .unwrap();
+    assert!(
+        result
+            .operating_point
+            .integral_spectra()
+            .iter()
+            .any(|row| row.name == "C:C1:sdt:0")
+    );
 }
 
 #[test]

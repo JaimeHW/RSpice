@@ -295,10 +295,21 @@ impl HbSolver {
         // Reusing this registry for a producer after a consumer must not keep
         // the consumer's fixed-perturbation mode or a previous tone basis.
         self.quasi_prescribed_integrals = None;
-        let plans = self
+        let mut plans = self
             .behavioral_sources
             .prescribed_integral_rates()
             .map_err(Error::InvalidCircuit)?;
+        let capacitor_expressions = self
+            .periodic_capacitors
+            .iter()
+            .filter(|cap| cap.expression.program.sdt_count != 0)
+            .map(|cap| cap.expression.clone())
+            .collect::<Vec<_>>();
+        for expression in &capacitor_expressions {
+            expression
+                .append_prescribed_integral_rates(&mut plans)
+                .map_err(Error::InvalidCircuit)?;
+        }
         if plans.is_empty() {
             return Ok((limits.clone(), Vec::new()));
         }

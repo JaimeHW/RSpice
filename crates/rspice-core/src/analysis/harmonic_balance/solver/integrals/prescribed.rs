@@ -226,9 +226,22 @@ impl HbSolver {
         if abort.is_aborted() {
             return Err(HbError::Aborted);
         }
-        let plans = sources
+        let mut plans = sources
             .prescribed_integral_rates()
             .map_err(HbError::InvalidCircuit)?;
+        // Borrow rate plans from an independent snapshot while the solver
+        // discovers physical producer components and performs FFTs.
+        let capacitor_expressions = self
+            .periodic_capacitors
+            .iter()
+            .filter(|cap| cap.expression.program.sdt_count != 0)
+            .map(|cap| cap.expression.clone())
+            .collect::<Vec<_>>();
+        for expression in &capacitor_expressions {
+            expression
+                .append_prescribed_integral_rates(&mut plans)
+                .map_err(HbError::InvalidCircuit)?;
+        }
         let mut spectra: Vec<Option<PrescribedIntegral>> = Vec::new();
         spectra.try_reserve_exact(plans.len()).map_err(|e| {
             HbError::InvalidCircuit(format!("prescribed integral basis allocation failed: {e}"))

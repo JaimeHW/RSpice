@@ -23,6 +23,11 @@ impl HbSolver {
         let physical = self.physical_branch_count();
         let names = sources
             .integral_names()
+            .chain(
+                self.periodic_capacitors
+                    .iter()
+                    .flat_map(|cap| cap.expression.integral_names()),
+            )
             .chain(self.periodic_capacitors.iter().map(|cap| cap.rate_name()))
             .collect::<Vec<_>>();
         if physical != self.exact_mna_branches().len() {

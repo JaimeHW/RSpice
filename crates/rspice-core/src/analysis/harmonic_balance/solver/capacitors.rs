@@ -18,14 +18,19 @@ impl PeriodicCapacitor {
 
     pub(super) fn stamp(
         &mut self,
-        solution: &[Value],
-        time: Value,
+        point: crate::device::behavioral::BehavioralFqPoint<'_>,
         frequency: Value,
-        rate: usize,
+        coordinates: (usize, usize),
         f: &mut impl MatrixStamper,
         q: &mut impl MatrixStamper,
-    ) {
-        let sample = self.expression.linearize(solution, time);
+    ) -> Result<(), String> {
+        let (integral_start, rate) = coordinates;
+        let solution = point.inputs;
+        self.expression
+            .stamp_periodic_integrals(point, integral_start, f, q)?;
+        let sample = self
+            .expression
+            .sample_periodic_capacitance(point, integral_start)?;
         let capacitance = self.multiplier * sample.value;
         let current = capacitance * frequency * solution[rate];
         for (node, sign) in [(self.pos, 1.0), (self.neg, -1.0)] {
@@ -49,6 +54,7 @@ impl PeriodicCapacitor {
             q.stamp_rhs(rate + 1, -sign * voltage / frequency);
             q.stamp(rate + 1, node, sign / frequency);
         }
+        Ok(())
     }
 }
 
@@ -76,11 +82,9 @@ impl HbSolver {
             let fail = |reason| {
                 HbError::InvalidCircuit(format!("capacitor '{}': {reason}", expression.name))
             };
-            if expression.program.sdt_count != 0 {
-                return Err(fail(
-                    "periodic expression-integral response coordinates are unavailable",
-                ));
-            }
+            expression
+                .validate_periodic_integral_rates()
+                .map_err(HbError::InvalidCircuit)?;
             if capacitors.ic_branch_indices[index].is_some() {
                 return Err(fail("periodic IC branch equations are unavailable"));
             }
@@ -130,6 +134,12 @@ impl HbSolver {
     }
 
     pub(crate) fn capacitor_rate_start(&self) -> usize {
-        self.physical_branch_count() + self.behavioral_sources.integral_count()
+        self.physical_branch_count()
+            + self.behavioral_sources.integral_count()
+            + self
+                .periodic_capacitors
+                .iter()
+                .map(|cap| cap.expression.program.sdt_count)
+                .sum::<usize>()
     }
 }

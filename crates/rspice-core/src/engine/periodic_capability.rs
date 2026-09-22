@@ -402,8 +402,8 @@ pub(crate) const fn periodic_capability_descriptor(
             residual_jacobian: Inapplicable,
             dynamic_state: Complete,
             small_signal: Restricted(
-                "constant or memoryless expression capacitance; integral memory requires \
-                 additional periodic response coordinates",
+                "constant or expression capacitance with explicit integral coordinates; \
+                 live-frequency response requires additional equations",
             ),
             noise: Inapplicable,
             pss_state: Complete,
@@ -1190,18 +1190,6 @@ fn periodic_descriptor_gaps_in_context(circuit: &CircuitData, carrier: bool) -> 
             Absent(missing) => gaps.push(CapabilityGap::new(family, missing)),
             Restricted(_) => match family {
                 F::Capacitor => {
-                    if circuit
-                        .capacitors
-                        .value_expressions
-                        .iter()
-                        .flatten()
-                        .any(|expression| expression.program.sdt_count != 0)
-                    {
-                        gaps.push(CapabilityGap::new(
-                            family,
-                            "capacitor expression-integral response coordinates",
-                        ));
-                    }
                     if !carrier
                         && circuit
                             .capacitors

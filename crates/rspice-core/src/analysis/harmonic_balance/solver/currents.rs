@@ -135,6 +135,8 @@ impl HbSolver {
             let mut solution = vec![0.0; waves.len()];
             let zero_charge = vec![0.0; count];
             let rate_start = self.num_nodes + self.capacitor_rate_start();
+            let integral_start = self.num_nodes + self.physical_branch_count();
+            let mut state_start = integral_start + self.behavioral_sources.integral_count();
             for index in 0..self.periodic_capacitors.len() {
                 let mut capacitor = self.periodic_capacitors[index].clone();
                 let mut current = vec![0.0; count];
@@ -147,12 +149,27 @@ impl HbSolver {
                     }
                     let time = sample as Value / count as Value / self.config.fundamental_freq;
                     *current = capacitor.multiplier
-                        * capacitor.expression.evaluate(&solution, time)
+                        * capacitor
+                            .expression
+                            .sample_periodic_capacitance(
+                                crate::device::behavioral::BehavioralFqPoint {
+                                    inputs: &solution,
+                                    time,
+                                    num_nodes: self.num_nodes,
+                                    unknowns: solution.len(),
+                                    integral_start,
+                                    prescribed_integrals: &[],
+                                },
+                                state_start,
+                            )
+                            .map_err(HbError::InvalidCircuit)?
+                            .value
                         * self.config.fundamental_freq
                         * solution[rate_start + index];
                 }
                 let positive = self.lead_phasors(&current, &zero_charge)?;
                 let negative = positive.iter().map(|value| -*value).collect();
+                state_start += capacitor.expression.program.sdt_count;
                 result.push(HbDeviceLeadSpectra {
                     name: capacitor.expression.name,
                     terminals: &["p", "n"],

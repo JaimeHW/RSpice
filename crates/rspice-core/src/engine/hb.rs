@@ -1133,6 +1133,7 @@ impl Engine {
         let integral_names = circuit
             .behavioral_sources
             .integral_names()
+            .chain(circuit.capacitors.integral_names())
             .collect::<Vec<_>>();
         let rate_names = circuit
             .capacitors
@@ -1863,16 +1864,7 @@ impl Engine {
             .num_branches()
             .checked_add(Self::hb_periodic_extra_branch_count(&circuit)?)
             .and_then(|count| count.checked_add(circuit.behavioral_sources.integral_count()))
-            .and_then(|count| {
-                count.checked_add(
-                    circuit
-                        .capacitors
-                        .value_expressions
-                        .iter()
-                        .flatten()
-                        .count(),
-                )
-            })
+            .and_then(|count| count.checked_add(circuit.capacitors.periodic_auxiliary_count()))
             .ok_or_else(|| {
                 SimulationError::Circuit(
                     "HB canonical and distributed-network branch count overflows this platform"

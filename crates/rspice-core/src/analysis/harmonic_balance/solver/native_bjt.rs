@@ -263,6 +263,14 @@ impl HbSolver {
             .checked_add(self.physical_branch_count())
             .and_then(|count| count.checked_add(sources.integral_count()))
             .and_then(|count| count.checked_add(self.periodic_capacitors.len()))
+            .and_then(|count| {
+                count.checked_add(
+                    self.periodic_capacitors
+                        .iter()
+                        .map(|cap| cap.expression.program.sdt_count)
+                        .sum(),
+                )
+            })
             .ok_or_else(|| {
                 HbError::InvalidCircuit("QPSS integral MNA dimension exceeds this platform".into())
             })?;
@@ -363,25 +371,6 @@ impl HbSolver {
         }
         f.clear();
         q.clear();
-        let rate_start = self.num_nodes + self.capacitor_rate_start();
-        for (index, capacitor) in self.periodic_capacitors.iter_mut().enumerate() {
-            let rate = rate_start + index;
-            if selected.is_some_and(|rows| {
-                !rows[rate]
-                    && ![capacitor.pos, capacitor.neg]
-                        .into_iter()
-                        .any(|node| node > 0 && rows[node - 1])
-            }) {
-                continue;
-            }
-            capacitor.stamp(solution, time, self.config.fundamental_freq, rate, f, q);
-            if f.invalid || q.invalid {
-                return Err(HbError::InvalidCircuit(format!(
-                    "capacitor '{}' produced invalid F/Q entries",
-                    capacitor.expression.name
-                )));
-            }
-        }
         for bjt in &mut self.native_bjts {
             if selected.is_some_and(|rows| {
                 !bjt.mna_coupling_nodes()
@@ -431,6 +420,36 @@ impl HbSolver {
             unknowns: solution.len(),
             integral_start,
             prescribed_integrals: &prescribed,
+        };
+        let rate_start = self.num_nodes + self.capacitor_rate_start();
+        let behavioral_count = self.behavioral_sources.integral_count();
+        let mut capacitor_integral_start = integral_start + behavioral_count;
+        for (index, capacitor) in self.periodic_capacitors.iter_mut().enumerate() {
+            let rate = rate_start + index;
+            let start = capacitor_integral_start;
+            capacitor_integral_start += capacitor.expression.program.sdt_count;
+            if selected.is_some_and(|rows| {
+                !rows[rate]
+                    && !(start..capacitor_integral_start).any(|row| rows[row])
+                    && ![capacitor.pos, capacitor.neg]
+                        .into_iter()
+                        .any(|node| node > 0 && rows[node - 1])
+            }) {
+                continue;
+            }
+            capacitor
+                .stamp(point, self.config.fundamental_freq, (start, rate), f, q)
+                .map_err(HbError::InvalidCircuit)?;
+            if f.invalid || q.invalid {
+                return Err(HbError::InvalidCircuit(format!(
+                    "capacitor '{}' produced invalid F/Q entries",
+                    capacitor.expression.name
+                )));
+            }
+        }
+        let point = crate::device::behavioral::BehavioralFqPoint {
+            prescribed_integrals: &prescribed[..prescribed.len().min(behavioral_count)],
+            ..point
         };
         match selected {
             Some(_) => self

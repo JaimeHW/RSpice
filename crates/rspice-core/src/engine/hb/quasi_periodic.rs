@@ -166,14 +166,7 @@ impl Engine {
             .saturating_add(circuit.num_branches())
             .saturating_add(Self::hb_periodic_extra_branch_count(&circuit)?)
             .saturating_add(circuit.behavioral_sources.integral_count())
-            .saturating_add(
-                circuit
-                    .capacitors
-                    .value_expressions
-                    .iter()
-                    .flatten()
-                    .count(),
-            );
+            .saturating_add(circuit.capacitors.periodic_auxiliary_count());
         crate::analysis::quasi_periodic::solve::check_workload(
             required_unknowns,
             &grid,

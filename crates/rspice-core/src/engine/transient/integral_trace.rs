@@ -17,7 +17,11 @@ impl TransientIntegralTrace {
     }
 
     pub(super) fn initialize(&mut self, circuit: &crate::circuit::CircuitData) {
-        self.names = circuit.behavioral_sources.integral_names().collect();
+        self.names = circuit
+            .behavioral_sources
+            .integral_names()
+            .chain(circuit.capacitors.integral_names())
+            .collect();
         self.values = self.names.iter().map(|_| Vec::new()).collect();
     }
 
@@ -25,16 +29,19 @@ impl TransientIntegralTrace {
         &mut self,
         circuit: &crate::circuit::CircuitData,
     ) -> Result<usize, SimulationError> {
-        if circuit.behavioral_sources.integral_count() != self.values.len() {
+        if circuit.behavioral_sources.integral_count() + circuit.capacitors.integral_count()
+            != self.values.len()
+        {
             return Err(SimulationError::Circuit(
                 "transient integral-state capture basis changed".into(),
             ));
         }
-        for (row, value) in self
-            .values
-            .iter_mut()
-            .zip(circuit.behavioral_sources.accepted_integrals())
-        {
+        for (row, value) in self.values.iter_mut().zip(
+            circuit
+                .behavioral_sources
+                .accepted_integrals()
+                .chain(circuit.capacitors.accepted_integrals()),
+        ) {
             if !value.is_finite() {
                 return Err(SimulationError::Circuit(
                     "transient integral-state capture contains a non-finite accepted value".into(),

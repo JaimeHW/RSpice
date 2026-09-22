@@ -48,7 +48,8 @@ impl Engine {
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }
-        let integral_count = circuit.behavioral_sources.integral_count();
+        let source_integrals = circuit.behavioral_sources.integral_count();
+        let integral_count = source_integrals + circuit.capacitors.integral_count();
         if initial_integrals.len() != integral_count
             || initial_integrals.iter().any(|value| !value.is_finite())
         {
@@ -111,7 +112,11 @@ impl Engine {
             .current_sources
             .retain(|source| source.program.sdt_count != 0);
         sources
-            .reset_integrals(initial_integrals)
+            .reset_integrals(&initial_integrals[..source_integrals])
+            .map_err(SimulationError::Circuit)?;
+        let mut capacitors = circuit.capacitors.clone();
+        capacitors
+            .reset_integrals(&initial_integrals[source_integrals..])
             .map_err(SimulationError::Circuit)?;
         for (sample, &time) in times.iter().enumerate() {
             if abort.is_aborted() {
@@ -129,7 +134,19 @@ impl Engine {
             sources
                 .accept_transient_step(&solution, time)
                 .map_err(|error| SimulationError::Circuit(error.to_string()))?;
-            for (row, value) in rows.iter_mut().zip(sources.accepted_integrals()) {
+            for expression in capacitors
+                .value_expressions
+                .iter_mut()
+                .flatten()
+                .filter(|expression| expression.program.sdt_count != 0)
+            {
+                expression.accept_transient_step(&solution, time);
+            }
+            for (row, value) in rows.iter_mut().zip(
+                sources
+                    .accepted_integrals()
+                    .chain(capacitors.accepted_integrals()),
+            ) {
                 if !value.is_finite() {
                     return Err(SimulationError::Circuit(
                         "behavioral integral replay produced a non-finite coordinate".to_owned(),
