@@ -14,6 +14,92 @@ fn close(actual: Complex64, expected: Complex64) {
 }
 
 #[test]
+fn xyce_hb_frequency_context_preserves_filter_and_primitive_equations() {
+    use rspice_core::abort_signal::NoAbort;
+    use rspice_core::config::ExpressionDialect;
+    use rspice_core::engine::{SimulationConfig, SpiceDialect};
+    use rspice_core::netlist::NetlistParseOptions;
+    let netlist = Netlist::parse_with_options(
+        "Xyce HB frequency\n.PARAM RUNTIME_R={2k+FREQ}\nvin in 0 sin(0 1 1k)\n\
+         bv out 0 v=1k*sdt((1+FREQ/1k)*v(in)-v(out))\nrout out 0 1k\n\
+         bi 0 current i=.001*(1+FREQ/1k)*v(out)\nri current 0 {RUNTIME_R}\n\
+         bp prim 0 v=(1+FREQ/1k)*sdt(2*pi*1k*sin(2*pi*(1k+FREQ)*time))\nrp prim 0 1k\n\
+         .options hbint tahb=0\n.end\n",
+        NetlistParseOptions {
+            expression_dialect: ExpressionDialect::Xyce,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let engine = Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce));
+    for krylov in [false, true] {
+        let mut config = HbConfig::new(1e3)
+            .with_harmonics(3)
+            .with_collocation_points(17);
+        config.use_krylov = krylov;
+        config.tolerance = 1e-10;
+        config.abstol = 1e-14;
+        let hb = engine
+            .run_hb(&netlist, config)
+            .unwrap_or_else(|error| panic!("krylov={krylov}: {error}"));
+        assert!(hb.converged);
+        // Xyce's time-domain/HB context is zero, independent of harmonic or
+        // fundamental. The filter transfer is 1000/(1000+j*2*pi*1000).
+        let out = Complex64::new(0.0, -1.0) / Complex64::new(1.0, std::f64::consts::TAU);
+        for (name, dc, first) in [
+            ("out", 0.0, out),
+            ("current", 0.0, 2.0 * out),
+            ("prim", 1.0, -Complex64::ONE),
+        ] {
+            let row = hb
+                .result
+                .spectral_voltages
+                .iter()
+                .find(|row| row.node_name.eq_ignore_ascii_case(name))
+                .unwrap();
+            for (harmonic, &actual) in row.coefficients.iter().enumerate() {
+                close(
+                    actual,
+                    match harmonic {
+                        0 => Complex64::new(dc, 0.0),
+                        1 => first,
+                        _ => Complex64::ZERO,
+                    },
+                );
+            }
+        }
+        let pac = PacConfig::new()
+            .with_fundamental(1e3)
+            .with_sweep(130.0, 130.0, 1)
+            .with_sweep_type(PacSweepType::Linear)
+            .with_sidebands(-1, 1)
+            .with_input_source("vin")
+            .with_output_node("out");
+        for error in [
+            engine
+                .run_pac_from_hb_with_abort(&netlist, pac, &hb.operating_point, &NoAbort)
+                .unwrap_err()
+                .to_string(),
+            engine
+                .run_pnoise_from_hb_with_abort(
+                    &netlist,
+                    &[130.0],
+                    "out",
+                    None,
+                    Some("vin"),
+                    1,
+                    &hb.operating_point,
+                    &NoAbort,
+                )
+                .unwrap_err()
+                .to_string(),
+        ] {
+            assert!(error.contains("frequency-dependent equations"), "{error}");
+        }
+    }
+}
+
+#[test]
 fn behavioral_periodic_hb_retains_nonlinear_voltage_and_branch_controlled_current() {
     let netlist = Netlist::parse(
         "Nonlinear behavioral harmonics\n\

@@ -24,6 +24,56 @@ mod tests {
     use crate::device::behavioral::{BehavioralSources, BehavioralVoltageSource};
 
     #[test]
+    fn hb_prescribed_integral_residual_preserves_tight_tolerance_at_high_frequency() {
+        let rate = 1e9;
+        let mut config = HbConfig::new(rate)
+            .with_harmonics(3)
+            .with_collocation_points(17);
+        config.tolerance = 1e-10;
+        config.abstol = 1e-14;
+        let mut solver = HbSolver::new(config, 1);
+        solver
+            .try_add_periodic_constitutive_port_branch(1, 0, 1, "BP")
+            .unwrap();
+        solver
+            .try_add_exact_mna_static_entry(1, 0, 1.0, "BP")
+            .unwrap();
+        solver.add_resistor(1, 0, 1e3);
+        let sources = BehavioralSources {
+            voltage_sources: vec![
+                BehavioralVoltageSource::new(
+                    "BP".into(),
+                    1,
+                    0,
+                    1,
+                    &format!("sdt(2*pi*{rate}*sin(2*pi*{rate}*time))"),
+                )
+                .unwrap(),
+            ],
+            current_sources: vec![],
+        };
+        solver
+            .set_periodic_behavioral_sources(&sources, false, 1_000_000, false, &NoAbort)
+            .unwrap();
+        let mut state = HbSolverState::new(1, 3);
+        solver
+            .solve_newton_with_abort(&mut state, &NoAbort)
+            .unwrap();
+        assert!((state.x[0][0].re - 1.0).abs() < 1e-10);
+        assert!((state.x[0][1] + 0.5).norm() < 1e-10);
+        assert!(state.x[0][2..].iter().all(|value| value.norm() < 1e-10));
+        // The row retains rate units and both contribution magnitudes. A
+        // perturbation at an otherwise absent harmonic must remain visible.
+        state.mna_branch_currents[1][2] += 1e-6;
+        state.mna_branch_residual[1].fill(Complex64::ZERO);
+        state.mna_branch_residual_scale[1].fill(0.0);
+        solver.add_prescribed_integral_residual(&mut state).unwrap();
+        assert!((state.mna_branch_residual[1][2].re + 1e3).abs() < 1e-7);
+        assert!((state.mna_branch_residual_scale[1][2] - 1e3).abs() < 1e-7);
+        assert!(!state.rows_converged(1e-10, 1e-14));
+    }
+
+    #[test]
     fn prescribed_integral_preparation_cancels_during_collocation() {
         let sources = BehavioralSources {
             voltage_sources: vec![
@@ -85,6 +135,49 @@ pub(in crate::analysis::harmonic_balance::solver) fn primitive_value(
 }
 
 impl HbSolver {
+    pub(in crate::analysis::harmonic_balance::solver) fn add_prescribed_integral_residual(
+        &self,
+        state: &mut HbSolverState,
+    ) -> Result<(), HbError> {
+        let physical = self.physical_branch_count();
+        let frequency = self.config.fundamental_freq;
+        for (index, prescribed) in self.prescribed_integrals.iter().enumerate() {
+            let Some(prescribed) = prescribed else {
+                continue;
+            };
+            let row = physical + index;
+            let actual = &state.mna_branch_currents[row];
+            let target = match prescribed {
+                PrescribedIntegral::Primitive(coefficients)
+                | PrescribedIntegral::Driven(coefficients) => coefficients,
+                PrescribedIntegral::Retained => actual,
+            };
+            if actual.len() != self.num_harmonics + 1 || target.len() != actual.len() {
+                return Err(HbError::InvalidCircuit(
+                    "prescribed integral spectral basis is inconsistent".into(),
+                ));
+            }
+            // Both trajectories are already represented in this exact basis.
+            // A trigonometric evaluation and FFT roundtrip can leave spurious
+            // rate residuals in empty harmonics, especially at high frequency.
+            // Keep the original inverse-time row scale and each term's norm.
+            for (harmonic, (&target, &actual)) in target.iter().zip(actual).enumerate() {
+                let left = frequency * target;
+                let right = frequency * actual;
+                let residual = &mut state.mna_branch_residual[row][harmonic];
+                let scale = &mut state.mna_branch_residual_scale[row][harmonic];
+                *residual += left - right;
+                *scale += left.norm() + right.norm();
+                if !residual.re.is_finite() || !residual.im.is_finite() || !scale.is_finite() {
+                    return Err(HbError::InvalidCircuit(
+                        "prescribed integral spectral residual is non-finite".into(),
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub(in crate::analysis::harmonic_balance::solver) fn refresh_driven_integrals(
         &mut self,
         abort: &dyn AbortSignal,

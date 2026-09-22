@@ -3,6 +3,120 @@ use super::*;
 use crate::analysis::quasi_periodic::{QuasiPeriodicAcConfig, QuasiPeriodicLinearMethod};
 
 #[test]
+fn xyce_qpss_frequency_context_preserves_lifted_clocks_and_response_dependency() {
+    use crate::config::ExpressionDialect;
+    use crate::engine::{SimulationConfig, SpiceDialect};
+    use crate::netlist::NetlistParseOptions;
+    let rate = 1e3;
+    let second = rate * std::f64::consts::SQRT_2;
+    let omega = std::f64::consts::TAU * rate;
+    let netlist = Netlist::parse_with_options(&format!(
+        "Xyce torus frequency\n.PARAM RUNTIME_R={{2k+FREQ}}\nvin in 0 sin(0 1 {rate})\n\
+         bv out 0 v={rate}*sdt((1+FREQ/{rate})*v(in)-v(out))\nrout out 0 1k\n\
+         bi 0 current i=.001*(1+FREQ/{rate})*v(out)\nri current 0 {{RUNTIME_R}}\n\
+         bp prim 0 v=(1+FREQ/{rate})*sdt({omega}*sin(2*pi*({rate}+FREQ)*time))\nrp prim 0 1k\n\
+         bm mix 0 v=(1+FREQ/{rate})*sin(2*pi*({rate}+FREQ)*time)*cos(2*pi*{second}*time)\nrm mix 0 1k\n.end\n"
+    ), NetlistParseOptions {
+        expression_dialect: ExpressionDialect::Xyce,
+        ..Default::default()
+    }).unwrap();
+    let engine = Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce));
+    let mut config = QpssConfig::new(vec![rate, second], vec![1, 1]);
+    config.solver.relative_tolerance = 1e-10;
+    config.solver.current_absolute_tolerance = 1e-14;
+    let point = engine.run_qpss(&netlist, config).unwrap();
+    let (metadata, rows) = point.into_transfer_parts();
+    let point = QpssOperatingPoint::from_transfer_parts_with_abort(
+        metadata,
+        rows,
+        &engine.config.resource_limits,
+        &NoAbort,
+    )
+    .unwrap();
+    let grid = engine
+        .validate_qpss_operating_point_with_abort(&netlist, &point, &NoAbort)
+        .unwrap();
+    let node = |name: &str| {
+        point
+            .node_names()
+            .iter()
+            .position(|n| n.eq_ignore_ascii_case(name))
+            .unwrap()
+    };
+    for (k, tuple) in grid.indices().iter().enumerate() {
+        let sine = if tuple[0].abs() == 1 && tuple[1] == 0 {
+            Complex64::new(0.0, -0.5 * tuple[0] as Value)
+        } else {
+            Complex64::ZERO
+        };
+        let out =
+            sine * rate / Complex64::new(rate, std::f64::consts::TAU * grid.frequencies_hz()[k]);
+        let primitive = if k == grid.dc_index() {
+            1.0
+        } else if tuple[0].abs() == 1 && tuple[1] == 0 {
+            -0.5
+        } else {
+            0.0
+        };
+        let mix = if tuple[0].abs() == 1 && tuple[1].abs() == 1 {
+            Complex64::new(0.0, -0.25 * tuple[0] as Value)
+        } else {
+            Complex64::ZERO
+        };
+        for (name, expected) in [
+            ("out", out),
+            ("current", 2.0 * out),
+            ("prim", Complex64::new(primitive, 0.0)),
+            ("mix", mix),
+        ] {
+            let actual = point.spectra()[node(name)][k];
+            assert!(
+                (actual - expected).norm() < 1e-8,
+                "{name} {tuple:?}: {actual} vs {expected}"
+            );
+        }
+    }
+    let error = engine
+        .run_qpac_from_qpss(
+            &netlist,
+            QpacRequest {
+                offsets_hz: vec![130.0],
+                input_source: "vin".into(),
+                input_lattice: vec![0, 0],
+                output_node: "out".into(),
+                output_ref: "0".into(),
+                output_lattice: vec![0, 0],
+                magnitude: 1.0,
+                phase_degrees: 0.0,
+                solver: Default::default(),
+            },
+            &point,
+        )
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("frequency-dependent equations"), "{error}");
+
+    // Direct kernel users also must not reuse the carrier's zero context as
+    // a response operator, even after stateless and SDT clocks were lifted.
+    let circuit = engine.build_circuit_with_abort(&netlist, &NoAbort).unwrap();
+    let mut solver = engine.qpss_circuit_solver(&circuit, &grid, false).unwrap();
+    let excitation = vec![vec![Complex64::ZERO; grid.len()]; point.complete_spectra().len()];
+    let error = solver
+        .solve_quasi_periodic_ac_with_abort(
+            grid,
+            &Default::default(),
+            point.complete_spectra(),
+            &[130.0],
+            &excitation,
+            &engine.config.resource_limits,
+            &NoAbort,
+        )
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("frequency-dependent equations"), "{error}");
+}
+
+#[test]
 fn qpss_chained_integral_inputs_use_the_retained_mixing_basis() {
     let rate = 1e3;
     let second = rate * std::f64::consts::SQRT_2;

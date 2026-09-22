@@ -143,6 +143,9 @@ impl HbSolver {
             Ok(())
         };
         self.validate_behavioral_bindings(sources)?;
+        if retained {
+            Self::validate_behavioral_response_frequency(sources)?;
+        }
         for source in &sources.current_sources {
             source
                 .validate_periodic_integral_rates()
@@ -190,7 +193,7 @@ impl HbSolver {
             if !valid(
                 source.node_pos,
                 source.node_neg,
-                !source.is_frequency_dependent(),
+                source.has_periodic_carrier_frequency_context(),
                 source.bound_solution_indices().collect(),
             ) {
                 return Err(HbError::InvalidCircuit(format!(
@@ -207,7 +210,7 @@ impl HbSolver {
             if !valid(
                 source.node_pos,
                 source.node_neg,
-                !source.is_frequency_dependent(),
+                source.has_periodic_carrier_frequency_context(),
                 source.bound_solution_indices().collect(),
             ) || !matches!(branch, Some(ExactMnaBranch::ConstitutivePort { node_pos, node_neg, .. })
                     if *node_pos == source.node_pos && *node_neg == source.node_neg)
@@ -215,6 +218,31 @@ impl HbSolver {
                 return Err(HbError::InvalidCircuit(format!(
                     "behavioral voltage source '{}' has unsupported periodic state or branch bindings",
                     source.name
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    pub(super) fn validate_behavioral_response_frequency(
+        sources: &crate::device::behavioral::BehavioralSources,
+    ) -> Result<(), HbError> {
+        // A valid carrier context is not a translated-frequency response
+        // operator. Keep the original dependency after independent-phase lift.
+        for (name, dependent) in sources
+            .current_sources
+            .iter()
+            .map(|source| (&source.name, source.is_frequency_dependent()))
+            .chain(
+                sources
+                    .voltage_sources
+                    .iter()
+                    .map(|source| (&source.name, source.is_frequency_dependent())),
+            )
+        {
+            if dependent {
+                return Err(HbError::InvalidCircuit(format!(
+                    "behavioral source '{name}' requires frequency-dependent equations in the periodic response solver"
                 )));
             }
         }
@@ -547,17 +575,28 @@ impl HbSolver {
         let mut q = NativeStamp::new(size);
         let mut f_time = Vec::new();
         let mut q_time = Vec::new();
+        let integral_start = self.num_nodes + self.physical_branch_count();
         for time in 0..times {
             for (value, wave) in solution.iter_mut().zip(&waves) {
                 *value = wave[time];
             }
             let sample_time = time as Value / times as Value / self.config.fundamental_freq;
             self.sample_native_devices(&solution, sample_time, &solution, &mut f, &mut q, false)?;
+            // Known primitive rows are already exact spectral constraints.
+            // Transform only physical equations and unresolved integral rates.
+            let sampled_row = |(row, _): &(usize, Value)| {
+                row.checked_sub(integral_start)
+                    .and_then(|index| self.prescribed_integrals.get(index))
+                    .is_none_or(Option::is_none)
+            };
+            f.contributions.retain(sampled_row);
+            q.contributions.retain(sampled_row);
             record_native_terms(&mut f_time, &f.contributions, time, times)?;
             record_native_terms(&mut q_time, &q.contributions, time, times)?;
         }
         self.add_native_waveform_terms(state, f_time, false)?;
-        self.add_native_waveform_terms(state, q_time, true)
+        self.add_native_waveform_terms(state, q_time, true)?;
+        self.add_prescribed_integral_residual(state)
     }
 
     fn add_native_waveform_terms(
@@ -606,6 +645,9 @@ impl HbSolver {
         charge: bool,
         small_signal: bool,
     ) -> Result<Vec<(usize, usize, Vec<Complex64>)>, HbError> {
+        if small_signal {
+            Self::validate_behavioral_response_frequency(&self.behavioral_sources)?;
+        }
         if !self.has_native_periodic_devices() {
             return Ok(Vec::new());
         }
@@ -655,6 +697,42 @@ impl HbSolver {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn xyce_hb_carrier_registration_does_not_certify_response_frequency() {
+        use crate::config::ExpressionDialect;
+        use crate::device::behavioral::{BehavioralCurrentSource, BehavioralSources};
+        let mut source = BehavioralCurrentSource::new("BI".into(), 1, 0, "1+frequency").unwrap();
+        source.set_expression_dialect(ExpressionDialect::Xyce);
+        let mut sources = BehavioralSources::new();
+        sources.current_sources.push(source);
+        let mut solver = HbSolver::new(HbConfig::new(1e3).with_harmonics(1), 1);
+        solver.add_resistor(1, 0, 1.0);
+        solver
+            .set_periodic_behavioral_sources(&sources, false, 1_000_000, false, &NoAbort)
+            .unwrap();
+        let state = HbSolverState::new(1, 1);
+        assert!(solver.native_bjt_spectra(&state, 1, false, false).is_ok());
+        for error in [
+            solver
+                .native_bjt_spectra(&state, 1, false, true)
+                .unwrap_err(),
+            solver
+                .set_periodic_behavioral_sources(&sources, false, 1_000_000, true, &NoAbort)
+                .unwrap_err(),
+        ] {
+            assert!(
+                error.to_string().contains("frequency-dependent equations"),
+                "{error}"
+            );
+        }
+        sources.current_sources[0].set_frequency(1e3);
+        assert!(
+            solver
+                .set_periodic_behavioral_sources(&sources, false, 1_000_000, false, &NoAbort)
+                .is_err()
+        );
+    }
 
     #[test]
     fn native_terms_preserve_harmonic_scales_without_dc_masking() {
