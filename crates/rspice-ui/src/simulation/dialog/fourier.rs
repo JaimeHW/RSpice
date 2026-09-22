@@ -149,6 +149,12 @@ pub struct FourierDialogState {
     #[serde(default = "default_period_text")]
     pub periods: String,
     pub output_node: String,
+    /// Reference node for the primary voltage output; empty means ground.
+    ///
+    /// Older drafts did not expose this field and therefore deserialize with
+    /// the canonical empty reference.
+    #[serde(default)]
+    pub output_ref: String,
     /// The outputs authored beside the first one, each one row. A draft saved
     /// before the list existed carries none, which is the one-output card it
     /// was.
@@ -169,6 +175,7 @@ impl FourierDialogState {
             harmonics: config.num_harmonics.to_string(),
             periods: config.num_periods.to_string(),
             output_node: config.output_node.clone(),
+            output_ref: config.output_ref.clone(),
             additional_outputs: config.additional_outputs.clone(),
             start_time: format_time(config.start_time),
             stop_time: format_time(config.stop_time),
@@ -192,7 +199,7 @@ impl FourierDialogState {
                 .parse()
                 .map_err(|_| "Periods must be a positive integer")?,
             output_node: self.output_node.clone(),
-            output_ref: String::new(),
+            output_ref: self.output_ref.trim().to_owned(),
             additional_outputs: self
                 .additional_outputs
                 .iter()
@@ -263,6 +270,7 @@ mod tests {
     fn the_fourier_card_carries_every_output_it_was_given() {
         let mut config = FourierConfig::new(1.0e3, 9).with_window(0.0, 5.0e-3);
         config.output_node = "out".to_owned();
+        config.output_ref = "ref".to_owned();
         config.additional_outputs = vec![
             "V(mid,out)".to_owned(),
             " I(V1) ".to_owned(),
@@ -272,7 +280,7 @@ mod tests {
         let card = config.to_spice();
         assert_eq!(
             card,
-            ".four 1000 9 V(out) V(mid,out) I(V1) V(in) PERIODS=1 FROM=0 TO=0.005"
+            ".four 1000 9 V(out,ref) V(mid,out) I(V1) V(in) PERIODS=1 FROM=0 TO=0.005"
         );
 
         let netlist = rspice_core::Netlist::parse(&format!(
@@ -304,6 +312,23 @@ mod tests {
             vec!["V(OUT)", "V(MID,OUT)", "I(V1)", "V(IN)"],
             "{outputs:?}"
         );
+    }
+
+    #[test]
+    fn a_fourier_primary_reference_round_trips_through_the_draft() {
+        let mut config = FourierConfig::default();
+        config.output_node = "out".to_owned();
+        config.output_ref = "sense".to_owned();
+        let state = FourierDialogState::from_config(&config);
+        let restored = state.to_config().expect("the differential output is valid");
+        assert_eq!(restored.output_ref, "sense");
+        assert_eq!(restored.outputs(), vec!["V(out,sense)".to_owned()]);
+
+        let legacy: FourierDialogState = serde_json::from_str(
+            r#"{"fundamental":"1Meg","harmonics":"10","output_node":"out","start_time":"0","stop_time":"10u","compute_thd":true,"normalize":true}"#,
+        )
+        .expect("a pre-reference draft restores");
+        assert!(legacy.output_ref.is_empty());
     }
 
     /// A draft that names one output restores as a list of exactly one, and a

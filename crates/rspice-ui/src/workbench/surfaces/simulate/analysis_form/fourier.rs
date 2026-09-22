@@ -38,6 +38,7 @@ pub(super) fn fields(
         "Complete fundamental periods ending at To; From is the earliest allowed start.",
     );
     input_row(ui, "Output", &mut setup.output_node);
+    input_row(ui, "Output ref", &mut setup.output_ref);
     quantity_input_row(
         ui,
         "From",
