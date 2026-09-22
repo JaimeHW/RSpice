@@ -39,6 +39,7 @@ use crate::numerics::integration::{
 use crate::solver::{SolverError, StaticMatrix};
 use crate::{Netlist, Value};
 
+mod integral_gauge;
 #[cfg(test)]
 mod integral_replay_tests;
 mod state;
@@ -3480,8 +3481,16 @@ impl Engine {
             }
         }
 
-        // Solve: (J) * delta = -f0 using simple Gaussian elimination
-        let delta = self.pss_solve_linear_system(&jacobian, &state.residual)?;
+        circuit.certify_integral_sensitivities(&mut jacobian, true, abort)?;
+        // Preserve free integral constants while correcting the physical orbit.
+        let delta = self.pss_solve_with_integral_constants(
+            circuit,
+            state,
+            &jacobian,
+            &state.residual,
+            config,
+            abort,
+        )?;
 
         Ok((delta, jacobian))
     }
@@ -3554,7 +3563,9 @@ impl Engine {
         let mut rhs = state.residual.clone();
         rhs.push(0.0); // phase condition has zero residual by construction
 
-        let solution = self.pss_solve_linear_system(&jacobian, &rhs)?;
+        circuit.certify_integral_sensitivities(&mut jacobian, true, abort)?;
+        let solution =
+            self.pss_solve_with_integral_constants(circuit, state, &jacobian, &rhs, config, abort)?;
         let delta_state = solution[..n].to_vec();
         let delta_t = solution[n];
 
@@ -3606,6 +3617,7 @@ impl Engine {
             }
         }
 
+        circuit.certify_integral_sensitivities(&mut monodromy, false, abort)?;
         Ok(monodromy)
     }
 

@@ -580,7 +580,7 @@ impl PssCircuit {
             + self.capacitors.integral_count()
     }
 
-    fn physical_state_dimension(&self) -> usize {
+    pub(super) fn physical_state_dimension(&self) -> usize {
         self.basis.charge_branches.len() + self.basis.currents.representatives.len()
     }
 
