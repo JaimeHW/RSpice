@@ -461,6 +461,7 @@ fn analysis_spec_round_trips_supported_variants() {
         AnalysisSpec::Soa {
             import_model_voltage_ratings: false,
             rules: vec![crate::services::simulation_runner::SoaRuleConfig {
+                duration_mode: Default::default(),
                 minimum_duration_s: None,
                 power_derating: None,
                 voltage_basis: Default::default(),

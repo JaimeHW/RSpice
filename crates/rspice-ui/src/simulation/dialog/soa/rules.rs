@@ -1,7 +1,7 @@
 //! Persisted authoring rows for scoped SOA voltage, current, power and temperature limits.
 
 use super::*;
-use crate::services::safety::SoAParameter;
+use crate::services::safety::{SoAParameter, SoaDurationMode};
 use crate::services::simulation_runner::SoaRuleConfig;
 
 const PARAMETERS: [SoAParameter; 83] = [
@@ -94,6 +94,10 @@ const PARAMETERS: [SoAParameter; 83] = [
 #[serde(deny_unknown_fields)]
 pub struct SoaRuleDraft {
     #[serde(default)]
+    pub cumulative_duration: bool,
+    #[serde(default)]
+    pub recovery_time: String,
+    #[serde(default)]
     pub minimum_duration: String,
     #[serde(default)]
     pub derate_power: bool,
@@ -119,6 +123,8 @@ fn default_derating_slope() -> String {
 impl Default for SoaRuleDraft {
     fn default() -> Self {
         Self {
+            cumulative_duration: false,
+            recovery_time: String::new(),
             minimum_duration: String::new(),
             derate_power: false,
             derating_temperature_celsius: default_derating_temperature(),
@@ -240,6 +246,13 @@ impl SoaRuleDraft {
 
     pub(super) fn from_config(config: &SoaRuleConfig) -> Self {
         Self {
+            cumulative_duration: matches!(config.duration_mode, SoaDurationMode::Cumulative { .. }),
+            recovery_time: match config.duration_mode {
+                SoaDurationMode::Cumulative {
+                    recovery_time_s: Some(value),
+                } => value.to_string(),
+                _ => String::new(),
+            },
             minimum_duration: config
                 .minimum_duration_s
                 .map(|value| value.to_string())
@@ -288,38 +301,52 @@ impl SoaRuleDraft {
         } else {
             authored
         };
-        let config =
-            SoaRuleConfig {
-                minimum_duration_s: if self.minimum_duration.trim().is_empty() {
-                    None
-                } else {
-                    Some(parse_si_value(&self.minimum_duration).map_err(|error| {
-                        format!("Invalid minimum SOA excursion duration: {error}")
-                    })?)
-                },
-                power_derating: if self.is_power() && self.derate_power {
-                    Some(crate::services::safety::SoaPowerDerating {
-                        reference_temperature_kelvin: rspice_core::constants::celsius_to_kelvin(
-                            parse_si_value(&self.derating_temperature_celsius).map_err(|e| {
-                                format!("Invalid SOA derating reference temperature: {e}")
-                            })?,
-                        ),
-                        watts_per_kelvin: parse_si_value(&self.derating_watts_per_kelvin)
-                            .map_err(|e| format!("Invalid SOA derating slope: {e}"))?,
-                    })
-                } else {
-                    None
-                },
-                voltage_basis: if self.is_voltage() && self.intrinsic_voltage {
-                    crate::services::safety::SoaVoltageBasis::IntrinsicNodes
-                } else {
-                    Default::default()
-                },
-                parameter,
-                max_value: maximum,
-                devices: self.devices.split_whitespace().map(str::to_owned).collect(),
-                models: self.models.split_whitespace().map(str::to_owned).collect(),
-            };
+        let config = SoaRuleConfig {
+            duration_mode: if self.cumulative_duration && !self.minimum_duration.trim().is_empty() {
+                SoaDurationMode::Cumulative {
+                    recovery_time_s: if self.recovery_time.trim().is_empty() {
+                        None
+                    } else {
+                        Some(
+                            parse_si_value(&self.recovery_time)
+                                .map_err(|error| format!("Invalid SOA recovery time: {error}"))?,
+                        )
+                    },
+                }
+            } else {
+                SoaDurationMode::PerExcursion
+            },
+            minimum_duration_s: if self.minimum_duration.trim().is_empty() {
+                None
+            } else {
+                Some(
+                    parse_si_value(&self.minimum_duration)
+                        .map_err(|error| format!("Invalid SOA duration threshold: {error}"))?,
+                )
+            },
+            power_derating: if self.is_power() && self.derate_power {
+                Some(crate::services::safety::SoaPowerDerating {
+                    reference_temperature_kelvin: rspice_core::constants::celsius_to_kelvin(
+                        parse_si_value(&self.derating_temperature_celsius).map_err(|e| {
+                            format!("Invalid SOA derating reference temperature: {e}")
+                        })?,
+                    ),
+                    watts_per_kelvin: parse_si_value(&self.derating_watts_per_kelvin)
+                        .map_err(|e| format!("Invalid SOA derating slope: {e}"))?,
+                })
+            } else {
+                None
+            },
+            voltage_basis: if self.is_voltage() && self.intrinsic_voltage {
+                crate::services::safety::SoaVoltageBasis::IntrinsicNodes
+            } else {
+                Default::default()
+            },
+            parameter,
+            max_value: maximum,
+            devices: self.devices.split_whitespace().map(str::to_owned).collect(),
+            models: self.models.split_whitespace().map(str::to_owned).collect(),
+        };
         config.validate()?;
         Ok(config)
     }

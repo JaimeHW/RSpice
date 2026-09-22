@@ -626,7 +626,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
             ui,
             &[
                 (
-                    "Minimum excursion",
+                    "Duration threshold",
                     format!("{:.17e} s", duration.minimum_duration_s),
                     false,
                 ),
@@ -646,7 +646,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
                     true,
                 ),
                 (
-                    "Short excursions",
+                    "Unqualified excursions",
                     duration.rejected_excursions.to_string(),
                     false,
                 ),
@@ -657,9 +657,39 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
                 ),
             ],
         );
+        if let Some(cumulative) = duration.cumulative {
+            stat_table(
+                ui,
+                &[
+                    ("Duration policy", "Cumulative exposure".into(), false),
+                    (
+                        "Recovery time constant",
+                        cumulative
+                            .recovery_time_s
+                            .map(|value| format!("{value:.17e} s"))
+                            .unwrap_or_else(|| "No recovery".into()),
+                        false,
+                    ),
+                    (
+                        "Peak exposure",
+                        format!("{:.17e} s", cumulative.peak_exposure_s),
+                        true,
+                    ),
+                    (
+                        "Exposure at window end",
+                        format!("{:.17e} s", cumulative.final_exposure_s),
+                        false,
+                    ),
+                ],
+            );
+            panel_note(
+                ui,
+                "Exposure starts at zero, accumulates above the limit, and optionally decays between excursions. Each excursion's ending exposure determines its verdict; earlier excursions keep their own verdicts.",
+            );
+        }
         panel_note(
             ui,
-            "The worst point is selected by reported severity, then utilization. Excursion widths use linear threshold crossings inside the checked window; the full stress history includes short excursions.",
+            "The worst point is selected by reported severity, then utilization. Excursion widths use linear threshold crossings inside the checked window; the full stress history includes unqualified excursions.",
         );
     }
     panel_note(ui, &evaluation.description);
@@ -819,16 +849,17 @@ fn worst_interval_text(
     };
     let worst_index = nearest_sample_index(waveform.x.as_slice(), evaluation.worst_time_s);
     if let Some(duration) = evaluation.duration {
-        use crate::services::safety::{SoaLimitTrace, qualify_soa_duration};
+        use crate::services::safety::{SoaLimitTrace, qualify_soa_duration_with_mode};
         let limit_trace = limits.map_or(
             SoaLimitTrace::Constant(evaluation.limit_value),
             SoaLimitTrace::Samples,
         );
-        if let Ok(scan) = qualify_soa_duration(
+        if let Ok(scan) = qualify_soa_duration_with_mode(
             waveform.x.as_slice(),
             waveform.y.as_slice(),
             limit_trace,
             duration.minimum_duration_s,
+            duration.mode(),
             &rspice_core::abort_signal::NoAbort,
         ) && let Some(excursion) = scan.excursions.iter().find(|excursion| {
             (excursion.first_sample..=excursion.last_sample).contains(&worst_index)
@@ -841,7 +872,7 @@ fn worst_interval_text(
                     if excursion.qualified {
                         "Qualified"
                     } else {
-                        "Short"
+                        "Unqualified"
                     },
                     excursion.start_s,
                     excursion.end_s

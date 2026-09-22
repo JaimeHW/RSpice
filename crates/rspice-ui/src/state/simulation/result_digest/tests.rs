@@ -935,6 +935,7 @@ fn reliability_and_soa_evidence_are_field_sensitive_v4_content_identity() {
         unreachable!()
     };
     evaluations[0].duration = Some(crate::services::safety::SoaDurationEvidence {
+        cumulative: None,
         minimum_duration_s: 1e-9,
         total_exceedance_s: 3e-9,
         longest_excursion_s: 2e-9,

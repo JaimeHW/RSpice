@@ -698,6 +698,7 @@ fn soa_directional_limits_survive_studio_preparation_worker_requests_and_saved_r
         let (positive, negative) = base.directional_pair().unwrap();
         for parameter in [base, positive, negative] {
             config.rules.push(SoaRuleConfig {
+                duration_mode: Default::default(),
                 minimum_duration_s: None,
                 power_derating: None,
                 voltage_basis: Default::default(),
@@ -717,6 +718,7 @@ fn soa_directional_limits_survive_studio_preparation_worker_requests_and_saved_r
         }
     }
     config.rules.push(SoaRuleConfig {
+        duration_mode: Default::default(),
         minimum_duration_s: None,
         power_derating: None,
         voltage_basis: Default::default(),
@@ -887,6 +889,7 @@ fn soa_temperature_limits_survive_studio_worker_execution_and_saved_results() {
         check_vbe_max: false,
         check_vce_max: false,
         rules: vec![SoaRuleConfig {
+            duration_mode: Default::default(),
             minimum_duration_s: None,
             power_derating: None,
             voltage_basis: Default::default(),
@@ -995,6 +998,7 @@ fn soa_body_and_backgate_limits_follow_model_pins_through_studio_and_saved_resul
         let (positive, negative) = base.directional_pair().unwrap();
         for parameter in [base, positive, negative] {
             config.rules.push(SoaRuleConfig {
+                duration_mode: Default::default(),
                 minimum_duration_s: None,
                 power_derating: None,
                 voltage_basis: Default::default(),
@@ -1151,6 +1155,7 @@ fn soa_diode_and_bjt_substrate_limits_survive_studio_worker_and_saved_results() 
         let (positive, negative) = base.directional_pair().unwrap();
         for parameter in [base, positive, negative] {
             config.rules.push(SoaRuleConfig {
+                duration_mode: Default::default(),
                 minimum_duration_s: None,
                 power_derating: None,
                 voltage_basis: Default::default(),
@@ -1163,6 +1168,7 @@ fn soa_diode_and_bjt_substrate_limits_survive_studio_worker_and_saved_results() 
     }
     for (parameter, max_value) in [(SoAParameter::Pdiss, 0.1), (SoAParameter::Temp, 400.0)] {
         config.rules.push(SoaRuleConfig {
+            duration_mode: Default::default(),
             minimum_duration_s: None,
             power_derating: None,
             voltage_basis: Default::default(),
@@ -1334,6 +1340,7 @@ fn soa_intrinsic_voltage_rules_survive_studio_worker_and_saved_results() {
         ("MF", SoAParameter::Vbs, SoaVoltageBasis::IntrinsicNodes),
     ] {
         config.rules.push(SoaRuleConfig {
+            duration_mode: Default::default(),
             minimum_duration_s: None,
             power_derating: None,
             parameter,
@@ -1465,6 +1472,7 @@ fn soa_model_voltage_ratings_survive_studio_worker_and_saved_results() {
         check_vbe_max: false,
         check_vce_max: false,
         rules: vec![SoaRuleConfig {
+            duration_mode: Default::default(),
             minimum_duration_s: None,
             power_derating: None,
             parameter: SoAParameter::VgsPositive,
@@ -1643,6 +1651,7 @@ fn soa_derating_survives_studio_worker_thermal_transient_and_saved_results() {
         check_vbe_max: false,
         check_vce_max: false,
         rules: vec![SoaRuleConfig {
+            duration_mode: Default::default(),
             minimum_duration_s: Some(1e-12),
             power_derating: Some(curve),
             voltage_basis: Default::default(),
@@ -1994,6 +2003,33 @@ fn soa_thresholds_survive_studio_worker_execution_and_saved_results() {
 
 #[test]
 fn soa_duration_survives_studio_worker_execution_and_saved_results() {
+    check_soa_duration_round_trip(Default::default(), 2e-9, true);
+}
+
+#[test]
+fn soa_duration_cumulative_survives_studio_worker_execution_and_saved_results() {
+    use crate::services::safety::SoaDurationMode;
+    check_soa_duration_round_trip(
+        SoaDurationMode::Cumulative {
+            recovery_time_s: None,
+        },
+        4e-9,
+        true,
+    );
+    check_soa_duration_round_trip(
+        SoaDurationMode::Cumulative {
+            recovery_time_s: Some(1e-10),
+        },
+        4e-9,
+        false,
+    );
+}
+
+fn check_soa_duration_round_trip(
+    mode: crate::services::safety::SoaDurationMode,
+    minimum: f64,
+    second_qualified: bool,
+) {
     use crate::services::{safety::SoAParameter, simulation_runner::SoaRuleConfig};
     use crate::simulation::dialog::soa::{SoaConfig, SoaDialogState};
     use crate::simulation::plan::AnalysisDraft;
@@ -2006,7 +2042,8 @@ fn soa_duration_survives_studio_worker_execution_and_saved_results() {
         check_vbe_max: false,
         check_vce_max: false,
         rules: vec![SoaRuleConfig {
-            minimum_duration_s: Some(2e-9),
+            duration_mode: mode,
+            minimum_duration_s: Some(minimum),
             power_derating: None,
             voltage_basis: Default::default(),
             parameter: SoAParameter::Vds,
@@ -2017,15 +2054,29 @@ fn soa_duration_survives_studio_worker_execution_and_saved_results() {
         ..Default::default()
     };
     let mut draft = SoaDialogState::from_config(&config);
-    draft.rules[0].minimum_duration = "2n".into();
+    draft.rules[0].minimum_duration = format!("{}n", minimum * 1e9);
     assert_eq!(draft.to_config().unwrap(), config);
     assert!(config.to_spice().contains("min_duration=(VDS"));
+    assert_eq!(
+        config.to_spice().contains("cumulative_duration=(VDS"),
+        !mode.is_default()
+    );
+    draft.rules[0].recovery_time = "0".into();
+    assert_eq!(draft.to_config().is_ok(), mode.is_default());
+    // Inactive controls keep their authored buffers without preventing execution.
+    draft.rules[0].minimum_duration.clear();
+    assert!(
+        draft.to_config().unwrap().rules[0]
+            .duration_mode
+            .is_default()
+    );
     draft.rules[0].minimum_duration = "0".into();
     assert!(draft.to_config().is_err());
     let draft = SoaDialogState::from_config(&config);
     let draft: SoaDialogState = ron::from_str(&ron::to_string(&draft).unwrap()).unwrap();
     let mut old = serde_json::to_value(&config.rules[0]).unwrap();
     old.as_object_mut().unwrap().remove("minimum_duration_s");
+    old.as_object_mut().unwrap().remove("duration_mode");
     assert!(
         serde_json::from_value::<SoaRuleConfig>(old)
             .unwrap()
@@ -2070,14 +2121,22 @@ fn soa_duration_survives_studio_worker_execution_and_saved_results() {
     };
     let evaluation = &evaluations[0];
     let duration = evaluation.duration.unwrap();
-    assert_eq!(duration.qualified_excursions, 1);
-    assert_eq!(duration.rejected_excursions, 1);
+    assert_eq!(duration.mode(), mode);
+    assert_eq!(duration.qualified_excursions, u64::from(second_qualified));
+    assert_eq!(
+        duration.rejected_excursions,
+        if second_qualified { 1 } else { 2 }
+    );
     assert!((duration.total_exceedance_s - 4.5e-9).abs() < 1e-16);
     assert!((duration.longest_excursion_s - 3e-9).abs() < 1e-16);
-    assert!((evaluation.worst_actual_value - 2.).abs() < 1e-8);
+    assert!((evaluation.worst_actual_value - if second_qualified { 2. } else { 4. }).abs() < 1e-8);
     assert_eq!(
         evaluation.verdict,
-        crate::state::SoaRuleVerdictEvidence::Critical
+        if second_qualified {
+            crate::state::SoaRuleVerdictEvidence::Critical
+        } else {
+            crate::state::SoaRuleVerdictEvidence::Warning
+        }
     );
     assert!(violations.iter().any(|event| event.actual_value > 3.9
         && event.severity == crate::state::SoaViolationSeverityEvidence::Warning));
@@ -2099,6 +2158,38 @@ fn soa_duration_survives_studio_worker_execution_and_saved_results() {
         .unwrap()
         .longest_excursion_s += 1e-9;
     assert!(tampered.validate_retained_evidence().is_err());
+    if let Some(cumulative) = duration.cumulative {
+        let peak = cumulative
+            .recovery_time_s
+            .map_or(4.5e-9, |tau| 3e-9 + 1.5e-9 * (-0.75e-9 / tau).exp());
+        let final_exposure = cumulative
+            .recovery_time_s
+            .map_or(peak, |tau| peak * (-0.5e-9 / tau).exp());
+        assert!((cumulative.peak_exposure_s - peak).abs() < 1e-16);
+        assert!((cumulative.final_exposure_s - final_exposure).abs() < 1e-16);
+        for field in 0..3 {
+            let mut tampered = retained.clone();
+            let Some(crate::state::AnalysisResultPayload::Soa { evaluations, .. }) =
+                &mut tampered.result_payload
+            else {
+                unreachable!()
+            };
+            let cumulative = evaluations[0]
+                .duration
+                .as_mut()
+                .unwrap()
+                .cumulative
+                .as_mut()
+                .unwrap();
+            match field {
+                0 => cumulative.recovery_time_s = Some(1e-9),
+                1 => cumulative.peak_exposure_s *= 0.9,
+                _ => cumulative.final_exposure_s *= 0.9,
+            }
+            assert_ne!(tampered.result_data_digest(), retained.result_data_digest());
+            assert!(tampered.validate_retained_evidence().is_err());
+        }
+    }
     let mut simulation = crate::state::SimulationState::default();
     simulation.runs.push(run.clone());
     simulation.next_run_id = 2;

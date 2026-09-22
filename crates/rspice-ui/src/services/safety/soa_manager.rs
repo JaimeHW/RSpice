@@ -432,6 +432,8 @@ pub enum SoaVoltageBasis {
 /// A specific limit definition for a device type or model
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SoALimit {
+    #[serde(default, skip_serializing_if = "super::SoaDurationMode::is_default")]
+    pub duration_mode: super::SoaDurationMode,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub minimum_duration_s: Option<f64>,
     #[serde(default)]
@@ -591,12 +593,7 @@ impl SoAManager {
                     limit.parameter
                 ));
             }
-            if limit
-                .minimum_duration_s
-                .is_some_and(|value| !value.is_finite() || value <= 0.0)
-            {
-                return Err("SOA minimum excursion duration must be finite and positive".into());
-            }
+            limit.duration_mode.validate(limit.minimum_duration_s)?;
             if let Some(curve) = limit.power_derating {
                 curve.validate()?;
                 if limit.parameter != SoAParameter::Pdiss {
@@ -741,16 +738,22 @@ impl SoAManager {
         time: &[f64],
         abort: &dyn rspice_core::abort_signal::AbortSignal,
     ) -> Result<bool, rspice_core::SimulationError> {
-        use super::{SoaLimitTrace, qualify_soa_duration, soa_duration_verdict};
+        use super::{SoaLimitTrace, qualify_soa_duration_with_mode, soa_duration_verdict};
         use rspice_core::SimulationError;
         let policies: Vec<_> = self
             .device_defs
             .iter()
             .flat_map(|(device, definition)| {
                 definition.limits.iter().filter_map(move |limit| {
-                    limit
-                        .minimum_duration_s
-                        .map(|minimum| (device.clone(), limit.parameter, limit.max_value, minimum))
+                    limit.minimum_duration_s.map(|minimum| {
+                        (
+                            device.clone(),
+                            limit.parameter,
+                            limit.max_value,
+                            minimum,
+                            limit.duration_mode,
+                        )
+                    })
                 })
             })
             .collect();
@@ -758,7 +761,7 @@ impl SoAManager {
             return Ok(false);
         }
         let mut keys: HashMap<&str, std::collections::HashSet<SoAParameter>> = HashMap::new();
-        for (device, parameter, _, _) in &policies {
+        for (device, parameter, _, _, _) in &policies {
             keys.entry(device.as_str()).or_default().insert(*parameter);
         }
         let mut retained = Vec::new();
@@ -774,7 +777,7 @@ impl SoAManager {
             }
         }
         self.violations = retained;
-        for (device, parameter, maximum, minimum) in policies {
+        for (device, parameter, maximum, minimum, mode) in policies {
             let key = (device.clone(), parameter);
             let stress = self.stress_history.get(&key).ok_or_else(|| {
                 SimulationError::Circuit("SOA duration is missing its stress history".into())
@@ -785,7 +788,7 @@ impl SoAManager {
                 .map_or(SoaLimitTrace::Constant(maximum), |history| {
                     SoaLimitTrace::Samples(&history.limits_w)
                 });
-            let scan = qualify_soa_duration(time, stress, limits, minimum, abort)?;
+            let scan = qualify_soa_duration_with_mode(time, stress, limits, minimum, mode, abort)?;
             let mut worst = 0;
             let mut verdict = soa_duration_verdict(
                 self.thresholds,
@@ -889,6 +892,7 @@ mod tests {
                 "M1",
                 SoADefinition {
                     limits: vec![SoALimit {
+                        duration_mode: Default::default(),
                         minimum_duration_s: None,
                         power_derating: None,
                         voltage_basis: Default::default(),
@@ -906,6 +910,7 @@ mod tests {
                     "M1",
                     SoADefinition {
                         limits: vec![SoALimit {
+                            duration_mode: Default::default(),
                             minimum_duration_s: None,
                             power_derating: None,
                             voltage_basis: Default::default(),
@@ -968,6 +973,7 @@ fn soa_derating_selects_highest_utilization_and_retains_zero_limit_events() {
             "Q1",
             SoADefinition {
                 limits: vec![SoALimit {
+                    duration_mode: Default::default(),
                     minimum_duration_s: None,
                     power_derating: Some(curve),
                     voltage_basis: Default::default(),

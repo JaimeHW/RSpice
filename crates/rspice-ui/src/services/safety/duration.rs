@@ -3,9 +3,50 @@ use super::{SoARuleVerdict, SoaThresholds};
 use rspice_core::{SimulationError, abort_signal::AbortSignal};
 use serde::{Deserialize, Serialize};
 
+/// Retrospective duration screening; recovery applies only between excursions.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub enum SoaDurationMode {
+    #[default]
+    PerExcursion,
+    Cumulative {
+        recovery_time_s: Option<f64>,
+    },
+}
+impl SoaDurationMode {
+    pub fn is_default(&self) -> bool {
+        *self == Self::PerExcursion
+    }
+
+    pub fn validate(self, minimum_duration_s: Option<f64>) -> Result<(), String> {
+        if minimum_duration_s.is_some_and(|value| !value.is_finite() || value <= 0.0) {
+            return Err("SOA duration threshold must be finite and positive".into());
+        }
+        if let Self::Cumulative { recovery_time_s } = self {
+            if minimum_duration_s.is_none() {
+                return Err("Cumulative SOA exposure requires a duration threshold".into());
+            }
+            if recovery_time_s.is_some_and(|value| !value.is_finite() || value <= 0.0) {
+                return Err("SOA recovery time must be finite and positive".into());
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SoaCumulativeDurationEvidence {
+    pub recovery_time_s: Option<f64>,
+    pub peak_exposure_s: f64,
+    pub final_exposure_s: f64,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SoaDurationEvidence {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cumulative: Option<SoaCumulativeDurationEvidence>,
     pub minimum_duration_s: f64,
     pub total_exceedance_s: f64,
     pub longest_excursion_s: f64,
@@ -14,7 +55,28 @@ pub struct SoaDurationEvidence {
     pub clipped_excursions: u64,
 }
 impl SoaDurationEvidence {
+    pub fn mode(self) -> SoaDurationMode {
+        self.cumulative
+            .map_or(SoaDurationMode::PerExcursion, |value| {
+                SoaDurationMode::Cumulative {
+                    recovery_time_s: value.recovery_time_s,
+                }
+            })
+    }
+
     pub fn validate(self) -> Result<(), String> {
+        self.mode().validate(Some(self.minimum_duration_s))?;
+        if let Some(cumulative) = self.cumulative {
+            if !cumulative.peak_exposure_s.is_finite()
+                || cumulative.peak_exposure_s < 0.0
+                || cumulative.peak_exposure_s > self.total_exceedance_s
+                || !cumulative.final_exposure_s.is_finite()
+                || cumulative.final_exposure_s < 0.0
+                || cumulative.final_exposure_s > cumulative.peak_exposure_s
+            {
+                return Err("SOA cumulative duration evidence is invalid".into());
+            }
+        }
         if !self.minimum_duration_s.is_finite()
             || self.minimum_duration_s <= 0.0
             || !self.total_exceedance_s.is_finite()
@@ -65,11 +127,33 @@ pub struct SoaDurationScan {
 /// Qualifications are retrospective: the complete excursion's width decides
 /// whether its above-limit samples are violations. Observation-window edges
 /// clip the width; no duration outside that window is inferred.
-pub fn qualify_soa_duration(
+#[cfg(test)]
+fn qualify_soa_duration(
     time: &[f64],
     stress: &[f64],
     limits: SoaLimitTrace<'_>,
     minimum_duration_s: f64,
+    abort: &dyn AbortSignal,
+) -> Result<SoaDurationScan, SimulationError> {
+    qualify_soa_duration_with_mode(
+        time,
+        stress,
+        limits,
+        minimum_duration_s,
+        SoaDurationMode::PerExcursion,
+        abort,
+    )
+}
+
+/// Accumulated exposure starts at zero at the observation-window boundary.
+/// It increases with above-limit time, optionally decays exponentially in gaps,
+/// and qualifies each whole excursion using its exposure at that excursion's end.
+pub fn qualify_soa_duration_with_mode(
+    time: &[f64],
+    stress: &[f64],
+    limits: SoaLimitTrace<'_>,
+    minimum_duration_s: f64,
+    mode: SoaDurationMode,
     abort: &dyn AbortSignal,
 ) -> Result<SoaDurationScan, SimulationError> {
     let invalid = |message: &str| SimulationError::Circuit(message.into());
@@ -81,6 +165,8 @@ pub fn qualify_soa_duration(
         }
         .into());
     }
+    mode.validate(Some(minimum_duration_s))
+        .map_err(SimulationError::Circuit)?;
     if time.is_empty()
         || time.len() != stress.len()
         || matches!(limits, SoaLimitTrace::Samples(values) if values.len() != time.len())
@@ -148,6 +234,16 @@ pub fn qualify_soa_duration(
         });
     }
     let mut evidence = SoaDurationEvidence {
+        cumulative: match mode {
+            SoaDurationMode::PerExcursion => None,
+            SoaDurationMode::Cumulative { recovery_time_s } => {
+                Some(SoaCumulativeDurationEvidence {
+                    recovery_time_s,
+                    peak_exposure_s: 0.0,
+                    final_exposure_s: 0.0,
+                })
+            }
+        },
         minimum_duration_s,
         total_exceedance_s: 0.0,
         longest_excursion_s: 0.0,
@@ -157,7 +253,8 @@ pub fn qualify_soa_duration(
     };
     let mut qualified_samples = vec![false; time.len()];
     let mut correction = 0.0;
-    for (index, excursion) in excursions.iter().enumerate() {
+    let mut previous_end = time[0];
+    for (index, excursion) in excursions.iter_mut().enumerate() {
         if index % 256 == 0 && abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }
@@ -167,6 +264,19 @@ pub fn qualify_soa_duration(
         correction = (total - evidence.total_exceedance_s) - increment;
         evidence.total_exceedance_s = total;
         evidence.longest_excursion_s = evidence.longest_excursion_s.max(duration);
+        if let Some(cumulative) = &mut evidence.cumulative {
+            cumulative.final_exposure_s = if let Some(tau) = cumulative.recovery_time_s {
+                let gap = excursion.start_s - previous_end;
+                // Rounding cannot let recovered exposure exceed total exposure.
+                (cumulative.final_exposure_s * (-gap / tau).exp() + duration).min(total)
+            } else {
+                total
+            };
+            cumulative.peak_exposure_s =
+                cumulative.peak_exposure_s.max(cumulative.final_exposure_s);
+            excursion.qualified = cumulative.final_exposure_s >= minimum_duration_s;
+        }
+        previous_end = excursion.end_s;
         if excursion.qualified {
             evidence.qualified_excursions += 1;
         } else {
@@ -184,6 +294,11 @@ pub fn qualify_soa_duration(
                 }
                 chunk.fill(true);
             }
+        }
+    }
+    if let Some(cumulative) = &mut evidence.cumulative {
+        if let Some(tau) = cumulative.recovery_time_s {
+            cumulative.final_exposure_s *= (-(time[time.len() - 1] - previous_end) / tau).exp();
         }
     }
     evidence.validate().map_err(SimulationError::Circuit)?;
@@ -215,6 +330,104 @@ pub fn soa_duration_verdict(
     } else {
         verdict
     }
+}
+
+#[cfg(test)]
+#[test]
+fn soa_duration_cumulative_exposure_recovers_only_between_excursions() {
+    use rspice_core::abort_signal::NoAbort;
+    // Excursions [0.25, 1.75] and [2.5, 5.5]: widths 1.5 and 3, gap 0.75.
+    let time = [0., 1., 2., 3., 4., 5., 6.];
+    let stress = [0., 4., 0., 2., 2., 2., 0.];
+    for (recovery_time_s, qualified) in [(None, 1), (Some(0.1), 0), (Some(3.), 1)] {
+        let scan = qualify_soa_duration_with_mode(
+            &time,
+            &stress,
+            SoaLimitTrace::Constant(1.),
+            4.,
+            SoaDurationMode::Cumulative { recovery_time_s },
+            &NoAbort,
+        )
+        .unwrap();
+        let evidence = scan.evidence.cumulative.unwrap();
+        let peak = recovery_time_s.map_or(4.5, |tau| 3. + 1.5 * (-0.75 / tau).exp());
+        let final_exposure = recovery_time_s.map_or(peak, |tau| peak * (-0.5 / tau).exp());
+        assert!((evidence.peak_exposure_s - peak).abs() < 1e-14);
+        assert!((evidence.final_exposure_s - final_exposure).abs() < 1e-14);
+        assert_eq!(scan.evidence.qualified_excursions, qualified);
+        assert_eq!(scan.evidence.rejected_excursions, 2 - qualified);
+        assert!(
+            !scan.qualified_samples[1],
+            "later exposure must not reclassify the first pulse"
+        );
+        assert_eq!(scan.qualified_samples[4], qualified == 1);
+    }
+    // Starting inside an excursion cannot infer earlier stress, and a long gap
+    // lets a later excursion fall below threshold even after a qualified one.
+    let clipped = qualify_soa_duration_with_mode(
+        &[5., 6., 7., 8., 20., 21.],
+        &[2., 2., 0., 0., 0., 2.],
+        SoaLimitTrace::Constant(1.),
+        1.,
+        SoaDurationMode::Cumulative {
+            recovery_time_s: Some(1.),
+        },
+        &NoAbort,
+    )
+    .unwrap();
+    assert_eq!(clipped.evidence.clipped_excursions, 2);
+    assert!(clipped.excursions[0].qualified);
+    assert!(!clipped.excursions[1].qualified);
+    assert!(
+        (clipped.evidence.cumulative.unwrap().final_exposure_s - (0.5 + 1.5 * (-14_f64).exp()))
+            .abs()
+            < 1e-14
+    );
+    let no_stress = qualify_soa_duration_with_mode(
+        &[0., 1.],
+        &[0., 0.],
+        SoaLimitTrace::Constant(1.),
+        1.,
+        SoaDurationMode::Cumulative {
+            recovery_time_s: None,
+        },
+        &NoAbort,
+    )
+    .unwrap();
+    assert_eq!(no_stress.evidence.cumulative.unwrap().peak_exposure_s, 0.);
+    for recovery_time_s in [Some(0.), Some(-1.), Some(f64::INFINITY), Some(f64::NAN)] {
+        assert!(
+            SoaDurationMode::Cumulative { recovery_time_s }
+                .validate(Some(1.))
+                .is_err()
+        );
+    }
+    assert!(
+        SoaDurationMode::Cumulative {
+            recovery_time_s: None
+        }
+        .validate(None)
+        .is_err()
+    );
+    struct Abort;
+    impl AbortSignal for Abort {
+        fn is_aborted(&self) -> bool {
+            true
+        }
+    }
+    assert!(matches!(
+        qualify_soa_duration_with_mode(
+            &time,
+            &stress,
+            SoaLimitTrace::Constant(1.),
+            4.,
+            SoaDurationMode::Cumulative {
+                recovery_time_s: None
+            },
+            &Abort,
+        ),
+        Err(SimulationError::Aborted)
+    ));
 }
 
 #[cfg(test)]
@@ -254,6 +467,7 @@ fn soa_duration_qualifies_interpolated_excursions_and_reclassifies_worst_point()
                 "M1",
                 SoADefinition {
                     limits: vec![SoALimit {
+                        duration_mode: Default::default(),
                         minimum_duration_s: Some(2.),
                         power_derating: None,
                         voltage_basis: Default::default(),

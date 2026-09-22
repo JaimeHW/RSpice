@@ -159,6 +159,17 @@ impl SoaConfig {
                     duration
                 ));
             }
+            if let crate::services::safety::SoaDurationMode::Cumulative { recovery_time_s } =
+                rule.duration_mode
+            {
+                card.push_str(&format!(
+                    " cumulative_duration=({} recovery={})",
+                    rule.parameter.stress_code(),
+                    recovery_time_s
+                        .map(|value| format!("{value}s"))
+                        .unwrap_or_else(|| "off".into())
+                ));
+            }
             if let Some(curve) = rule.power_derating {
                 card.push_str(&format!(
                     " derating=({} reference_k={} watts_per_k={})",
@@ -418,6 +429,7 @@ mod tests {
     fn soa_authored_observation_settings_survive_restore_and_full_precision_cards() {
         let config = SoaConfig {
             rules: vec![SoaRuleConfig {
+                duration_mode: Default::default(),
                 minimum_duration_s: None,
                 power_derating: None,
                 voltage_basis: Default::default(),

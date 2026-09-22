@@ -294,6 +294,7 @@ fn soa_legacy_identity_is_preserved_and_every_scoped_rule_field_is_authenticated
         unreachable!()
     };
     rules.push(SoaRuleConfig {
+        duration_mode: Default::default(),
         minimum_duration_s: None,
         power_derating: None,
         voltage_basis: Default::default(),
@@ -330,6 +331,30 @@ fn soa_legacy_identity_is_preserved_and_every_scoped_rule_field_is_authenticated
     };
     rules[0].minimum_duration_s = Some(2e-9);
     assert_ne!(digest(&timed), digest(&longer));
+    let mut cumulative = timed.clone();
+    let AnalysisSpec::Soa { rules, .. } = &mut cumulative else {
+        unreachable!()
+    };
+    rules[0].duration_mode = crate::services::safety::SoaDurationMode::Cumulative {
+        recovery_time_s: None,
+    };
+    assert_ne!(digest(&timed), digest(&cumulative));
+    let mut recovering = cumulative.clone();
+    let AnalysisSpec::Soa { rules, .. } = &mut recovering else {
+        unreachable!()
+    };
+    rules[0].duration_mode = crate::services::safety::SoaDurationMode::Cumulative {
+        recovery_time_s: Some(1e-9),
+    };
+    assert_ne!(digest(&cumulative), digest(&recovering));
+    let mut faster = recovering.clone();
+    let AnalysisSpec::Soa { rules, .. } = &mut faster else {
+        unreachable!()
+    };
+    rules[0].duration_mode = crate::services::safety::SoaDurationMode::Cumulative {
+        recovery_time_s: Some(0.5e-9),
+    };
+    assert_ne!(digest(&recovering), digest(&faster));
     let mut derated = configured.clone();
     let AnalysisSpec::Soa { rules, .. } = &mut derated else {
         unreachable!()
@@ -875,6 +900,25 @@ pub(super) fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &Analysis
                     writer.option(rule.minimum_duration_s.as_ref(), |writer, value| {
                         writer.f64(*value)
                     });
+                }
+            }
+            if rules.iter().any(|rule| !rule.duration_mode.is_default()) {
+                writer.string("soa-cumulative-duration-v1");
+                writer.sequence(rules.len());
+                for rule in rules {
+                    match rule.duration_mode {
+                        crate::services::safety::SoaDurationMode::PerExcursion => {
+                            writer.bool(false)
+                        }
+                        crate::services::safety::SoaDurationMode::Cumulative {
+                            recovery_time_s,
+                        } => {
+                            writer.bool(true);
+                            writer.option(recovery_time_s.as_ref(), |writer, value| {
+                                writer.f64(*value)
+                            });
+                        }
+                    }
                 }
             }
             if rules.iter().any(|rule| rule.power_derating.is_some()) {

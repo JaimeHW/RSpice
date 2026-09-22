@@ -98,6 +98,7 @@ impl Import<'_> {
             return;
         }
         let limit = SoALimit {
+            duration_mode: Default::default(),
             minimum_duration_s: None,
             power_derating: None,
             parameter,
@@ -372,6 +373,7 @@ fn soa_model_voltage_override_preserves_opposite_direction_and_reports_missing_r
         check_vbe_max: false,
         check_vce_max: false,
         rules: vec![SoaRuleConfig {
+            duration_mode: Default::default(),
             minimum_duration_s: None,
             power_derating: None,
             parameter: VgbPositive,

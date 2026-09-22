@@ -73,7 +73,7 @@ pub(super) fn fields(
     );
     field_note(
         ui,
-        "Leave blank to disable that severity band. Warning accepts 0–100%; critical accepts 100% or higher. Values above the actual limit produce a violation once any scoped minimum excursion duration is met. These thresholds apply to every rule, including imported and temperature-derated limits.",
+        "Leave blank to disable that severity band. Warning accepts 0–100%; critical accepts 100% or higher. Values above the actual limit produce a violation when the rule's duration policy qualifies the excursion. These thresholds apply to every rule, including imported and temperature-derated limits.",
     );
     switch_row(
         ui,
@@ -119,8 +119,17 @@ pub(super) fn fields(
                 &crate::simulation::dialog::soa::SoaRuleDraft::PARAMETER_LABELS,
                 &mut rule.parameter,
             );
-            quantity_input_row(ui, "Minimum excursion duration", &mut rule.minimum_duration, QuantityInputKind::Time, policy, locale);
-            field_note(ui, "Blank reports every exceedance. Otherwise only excursions at least this long become violations or critical events; shorter excursions remain warnings when warnings are enabled. Duration uses linearly interpolated stress/limit crossings within the checked time window. The complete excursion is classified after the run.");
+            quantity_input_row(ui, "Duration threshold", &mut rule.minimum_duration, QuantityInputKind::Time, policy, locale);
+            field_note(ui, "Blank reports every exceedance. With a threshold, unqualified excursions remain warnings when warnings are enabled. Crossings are linearly interpolated within the checked time window; each complete excursion is classified after the run.");
+            ui.add_enabled_ui(!rule.minimum_duration.trim().is_empty(), |ui| {
+                switch_row(ui, "Accumulate repeated excursions", &mut rule.cumulative_duration);
+                if rule.cumulative_duration {
+                    quantity_input_row(ui, "Recovery time constant", &mut rule.recovery_time, QuantityInputKind::Time, policy, locale);
+                    field_note(ui, "Exposure starts at zero and adds time above the limit. Blank recovery retains all exposure; a time constant makes it decay exponentially between excursions. An excursion qualifies when its ending exposure reaches the threshold. Earlier excursions keep their own verdicts. This is a screening rule, not a device lifetime prediction.");
+                } else {
+                    field_note(ui, "Each excursion must last at least the duration threshold to qualify as a violation or critical event.");
+                }
+            });
             if rule.is_voltage() {
                 switch_row(ui, "Observe intrinsic voltage", &mut rule.intrinsic_voltage);
                 field_note(ui, "Intrinsic voltages use the model's electrical nodes behind lead resistance, including floating bodies. Polarity follows the named node order. Default checks use external pins.");

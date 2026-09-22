@@ -1,8 +1,8 @@
 //! Recompute excursion qualifications from the complete retained samples.
 use super::*;
 use crate::services::safety::{
-    SoARuleVerdict, SoaLimitTrace, compare_soa_stress, qualify_soa_duration, soa_duration_verdict,
-    soa_power_limit_waveform_name, soa_stress_waveform_name,
+    SoARuleVerdict, SoaLimitTrace, compare_soa_stress, qualify_soa_duration_with_mode,
+    soa_duration_verdict, soa_power_limit_waveform_name, soa_stress_waveform_name,
 };
 
 pub(super) struct DurationSamples {
@@ -51,11 +51,12 @@ pub(super) fn validate(
     } else {
         SoaLimitTrace::Constant(evaluation.limit_value)
     };
-    let scan = qualify_soa_duration(
+    let scan = qualify_soa_duration_with_mode(
         time,
         stress,
         limits,
         duration.minimum_duration_s,
+        duration.mode(),
         &rspice_core::abort_signal::NoAbort,
     )
     .map_err(|error| error.to_string())?;

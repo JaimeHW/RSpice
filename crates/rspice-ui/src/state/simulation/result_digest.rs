@@ -1179,6 +1179,30 @@ fn encode_result_payload(
                     });
                 }
             }
+            if evaluations.iter().any(|evaluation| {
+                evaluation
+                    .duration
+                    .and_then(|duration| duration.cumulative)
+                    .is_some()
+            }) {
+                writer.string("soa-cumulative-duration-evidence-v1");
+                writer.sequence(evaluations.len());
+                for evaluation in evaluations {
+                    writer.option(
+                        evaluation
+                            .duration
+                            .and_then(|duration| duration.cumulative)
+                            .as_ref(),
+                        |writer, cumulative| {
+                            writer.option(cumulative.recovery_time_s.as_ref(), |writer, value| {
+                                writer.f64(*value)
+                            });
+                            writer.f64(cumulative.peak_exposure_s);
+                            writer.f64(cumulative.final_exposure_s);
+                        },
+                    );
+                }
+            }
         }
         // Tag 12: DC mismatch evidence holds 11. Appended, never reused: these
         // bytes identify every retained result already on disk, and two

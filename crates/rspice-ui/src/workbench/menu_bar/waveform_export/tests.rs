@@ -2586,6 +2586,28 @@ fn soa_derating_csv_preserves_each_sample_temperature_and_limit() {
 
 #[test]
 fn soa_duration_csv_preserves_short_spikes_and_qualified_excursions() {
+    check_soa_duration_csv(None);
+}
+
+#[test]
+fn soa_duration_cumulative_csv_preserves_policy_and_exposure() {
+    use crate::services::safety::SoaCumulativeDurationEvidence;
+    check_soa_duration_csv(Some(SoaCumulativeDurationEvidence {
+        recovery_time_s: None,
+        peak_exposure_s: 4.5,
+        final_exposure_s: 4.5,
+    }));
+    let peak = 3. + 1.5 * (-0.25_f64).exp();
+    check_soa_duration_csv(Some(SoaCumulativeDurationEvidence {
+        recovery_time_s: Some(3.),
+        peak_exposure_s: peak,
+        final_exposure_s: peak * (-0.5_f64 / 3.).exp(),
+    }));
+}
+
+fn check_soa_duration_csv(
+    cumulative: Option<crate::services::safety::SoaCumulativeDurationEvidence>,
+) {
     let mut stress = waveform(
         "SOA_VDS(M1)",
         vec![0., 1., 2., 3., 4., 5., 6.],
@@ -2593,7 +2615,8 @@ fn soa_duration_csv_preserves_short_spikes_and_qualified_excursions() {
     );
     stress.unit = Some("V".into());
     let duration = crate::services::safety::SoaDurationEvidence {
-        minimum_duration_s: 2.,
+        cumulative,
+        minimum_duration_s: if cumulative.is_some() { 4. } else { 2. },
         total_exceedance_s: 4.5,
         longest_excursion_s: 3.,
         qualified_excursions: 1,
@@ -2655,7 +2678,10 @@ fn soa_duration_csv_preserves_short_spikes_and_qualified_excursions() {
         .map(|line| line.split(',').collect::<Vec<_>>())
         .collect();
     assert_eq!(rows.len(), 13);
-    assert!(rows.iter().all(|row| row.len() == 16));
+    assert!(
+        rows.iter()
+            .all(|row| row.len() == if cumulative.is_some() { 20 } else { 16 })
+    );
     assert_eq!(rows[0][10], "minimum_duration_s");
     assert_eq!(rows.iter().filter(|row| row[0] == "sample").count(), 7);
     assert!(
@@ -2663,8 +2689,28 @@ fn soa_duration_csv_preserves_short_spikes_and_qualified_excursions() {
             .any(|row| row[0] == "sample" && row[4].parse::<f64>().unwrap() == 4.)
     );
     for row in rows.iter().skip(1) {
-        assert_eq!(row[10].parse::<f64>().unwrap(), 2.);
+        assert_eq!(row[10].parse::<f64>().unwrap(), duration.minimum_duration_s);
         assert_eq!(row[11].parse::<f64>().unwrap(), 4.5);
         assert_eq!(row[12].parse::<f64>().unwrap(), 3.);
+        if let Some(cumulative) = cumulative {
+            assert_eq!(rows[0][14], "unqualified_excursions");
+            assert_eq!(
+                rows[0][16..],
+                [
+                    "duration_policy",
+                    "recovery_time_s",
+                    "peak_exposure_s",
+                    "final_exposure_s"
+                ]
+            );
+            assert_eq!(row[16], "cumulative");
+            if let Some(tau) = cumulative.recovery_time_s {
+                assert_eq!(row[17].parse::<f64>().unwrap(), tau);
+            } else {
+                assert_eq!(row[17], "off");
+            }
+            assert_eq!(row[18].parse::<f64>().unwrap(), cumulative.peak_exposure_s);
+            assert_eq!(row[19].parse::<f64>().unwrap(), cumulative.final_exposure_s);
+        }
     }
 }

@@ -20,5 +20,6 @@ pub use power_derating::{
 
 mod duration;
 pub use duration::{
-    SoaDurationEvidence, SoaLimitTrace, qualify_soa_duration, soa_duration_verdict,
+    SoaCumulativeDurationEvidence, SoaDurationEvidence, SoaDurationMode, SoaLimitTrace,
+    qualify_soa_duration_with_mode, soa_duration_verdict,
 };

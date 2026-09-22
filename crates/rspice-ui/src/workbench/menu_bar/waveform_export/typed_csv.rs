@@ -744,6 +744,12 @@ pub(super) fn prepare_typed_result_csv(
             let has_duration = evaluations
                 .iter()
                 .any(|evaluation| evaluation.duration.is_some());
+            let has_cumulative = evaluations.iter().any(|evaluation| {
+                evaluation
+                    .duration
+                    .and_then(|duration| duration.cumulative)
+                    .is_some()
+            });
             let custom_thresholds = evaluations
                 .iter()
                 .any(|evaluation| !evaluation.thresholds.is_default());
@@ -770,25 +776,45 @@ pub(super) fn prepare_typed_result_csv(
                         }
                     }
                 };
-            let append_duration =
-                |contents: &mut String,
-                 duration: Option<crate::services::safety::SoaDurationEvidence>| {
-                    if has_duration {
-                        if let Some(duration) = duration {
-                            contents.push_str(&format!(
-                                ",{:.17e},{:.17e},{:.17e},{},{},{}",
-                                duration.minimum_duration_s,
-                                duration.total_exceedance_s,
-                                duration.longest_excursion_s,
-                                duration.qualified_excursions,
-                                duration.rejected_excursions,
-                                duration.clipped_excursions
-                            ));
-                        } else {
-                            contents.push_str(",,,,,,");
-                        }
+            let append_duration = |contents: &mut String,
+                                   duration: Option<
+                crate::services::safety::SoaDurationEvidence,
+            >| {
+                if has_duration {
+                    if let Some(duration) = duration {
+                        contents.push_str(&format!(
+                            ",{:.17e},{:.17e},{:.17e},{},{},{}",
+                            duration.minimum_duration_s,
+                            duration.total_exceedance_s,
+                            duration.longest_excursion_s,
+                            duration.qualified_excursions,
+                            duration.rejected_excursions,
+                            duration.clipped_excursions
+                        ));
+                    } else {
+                        contents.push_str(",,,,,,");
                     }
-                };
+                }
+                if has_cumulative {
+                    if let Some(cumulative) = duration.and_then(|duration| duration.cumulative) {
+                        contents.push_str(&format!(
+                            ",cumulative,{},{:.17e},{:.17e}",
+                            cumulative
+                                .recovery_time_s
+                                .map(|value| format!("{value:.17e}"))
+                                .unwrap_or_else(|| "off".into()),
+                            cumulative.peak_exposure_s,
+                            cumulative.final_exposure_s
+                        ));
+                    } else {
+                        contents.push_str(if duration.is_some() {
+                            ",per_excursion,,,"
+                        } else {
+                            ",instantaneous,,,"
+                        });
+                    }
+                }
+            };
             let mut contents = String::from(
                 "record,device,parameter,limit_value,actual_value,time_s,sample_count,unit,description,verdict",
             );
@@ -799,7 +825,17 @@ pub(super) fn prepare_typed_result_csv(
                 contents.push_str(",warning_fraction,critical_fraction");
             }
             if has_duration {
-                contents.push_str(",minimum_duration_s,total_exceedance_s,longest_excursion_s,qualified_excursions,short_excursions,clipped_excursions");
+                contents.push_str(",minimum_duration_s,total_exceedance_s,longest_excursion_s,qualified_excursions");
+                contents.push_str(if has_cumulative {
+                    ",unqualified_excursions"
+                } else {
+                    ",short_excursions"
+                });
+                contents.push_str(",clipped_excursions");
+            }
+            if has_cumulative {
+                contents
+                    .push_str(",duration_policy,recovery_time_s,peak_exposure_s,final_exposure_s");
             }
             contents.push('\n');
             for evaluation in evaluations {
