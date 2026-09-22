@@ -2155,6 +2155,8 @@ pub enum FftWindowTag {
     HalfCycleSine6,
     Cosine2,
     Cosine4,
+    Gaussian,
+    Kaiser,
 }
 
 impl From<FftWindow> for FftWindowTag {
@@ -2174,6 +2176,8 @@ impl From<FftWindow> for FftWindowTag {
             FftWindow::HalfCycleSine6 => Self::HalfCycleSine6,
             FftWindow::Cosine2 => Self::Cosine2,
             FftWindow::Cosine4 => Self::Cosine4,
+            FftWindow::Gaussian => Self::Gaussian,
+            FftWindow::Kaiser => Self::Kaiser,
         }
     }
 }
@@ -2195,6 +2199,8 @@ impl From<FftWindowTag> for FftWindow {
             FftWindowTag::HalfCycleSine6 => Self::HalfCycleSine6,
             FftWindowTag::Cosine2 => Self::Cosine2,
             FftWindowTag::Cosine4 => Self::Cosine4,
+            FftWindowTag::Gaussian => Self::Gaussian,
+            FftWindowTag::Kaiser => Self::Kaiser,
         }
     }
 }

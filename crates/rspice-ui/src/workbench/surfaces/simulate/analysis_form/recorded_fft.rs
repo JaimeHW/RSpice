@@ -4,7 +4,7 @@
 //! engine's rule for `NP` is a power of two in `4 ..= 1048576`, so the lengths
 //! are offered rather than parsed; the window list is the engine's own enum,
 //! spelled with the card keyword, so the control and the card are the same
-//! word. There is no `ALFA` row: no window the engine implements reads it.
+//! word. Gaussian and Kaiser windows expose the engine's `ALFA` parameter.
 
 use egui::Ui;
 
@@ -83,6 +83,11 @@ pub(super) fn fields(
         .unwrap_or(0);
     if super::choice_row(ui, "Window", &window_labels, &mut window) {
         setup.window = window_keyword(FFT_WINDOWS[window]).to_owned();
+    }
+
+    if matches!(setup.window.as_str(), "GAUSS" | "KAISER") {
+        input_row(ui, "ALFA", &mut setup.alfa);
+        field_note(ui, "Gaussian/Kaiser shape parameter (1..=20; default 3)");
     }
 
     let mut format = format_index(setup);

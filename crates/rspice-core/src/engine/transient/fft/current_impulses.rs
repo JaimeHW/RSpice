@@ -74,7 +74,12 @@ pub(super) fn add_to_bins(
                 } else {
                     fraction * analysis.points as Value
                 };
-                let window = window_coefficient_at_position(analysis.window, position, denominator);
+                let window = window_coefficient_at_position_with_alpha(
+                    analysis.window,
+                    position,
+                    denominator,
+                    analysis.alpha,
+                );
                 if window == 0.0 {
                     continue;
                 }

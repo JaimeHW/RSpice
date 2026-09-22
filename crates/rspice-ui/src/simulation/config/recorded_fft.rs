@@ -24,7 +24,7 @@ pub use crate::state::FftSpectrumFormatEvidence as FftFormatChoice;
 /// in this crate. `window_keyword` has no wildcard arm, so a window added to
 /// `rspice_core::netlist::FftWindow` fails this crate's build instead of
 /// quietly becoming unofferable.
-pub const FFT_WINDOWS: [FftWindow; 14] = [
+pub const FFT_WINDOWS: [FftWindow; 16] = [
     FftWindow::Rectangular,
     FftWindow::Bartlett,
     FftWindow::BartlettHann,
@@ -39,6 +39,8 @@ pub const FFT_WINDOWS: [FftWindow; 14] = [
     FftWindow::HalfCycleSine6,
     FftWindow::Cosine2,
     FftWindow::Cosine4,
+    FftWindow::Gaussian,
+    FftWindow::Kaiser,
 ];
 
 /// The canonical `.FFT WINDOW=` keyword for one engine window.
@@ -59,6 +61,8 @@ pub const fn window_keyword(window: FftWindow) -> &'static str {
         FftWindow::HalfCycleSine6 => "HALFCYCLESINE6",
         FftWindow::Cosine2 => "COSINE2",
         FftWindow::Cosine4 => "COSINE4",
+        FftWindow::Gaussian => "GAUSS",
+        FftWindow::Kaiser => "KAISER",
     }
 }
 
@@ -94,8 +98,7 @@ pub struct FftRequest {
     pub format: Option<FftFormatChoice>,
     /// The canonical window keyword, as [`window_keyword`] spells it.
     pub window: String,
-    /// HSPICE `ALFA`. No window the engine implements reads it, so no control
-    /// authors one; a hand-written card's value survives here and is recorded.
+    /// HSPICE `ALFA`, used by the Gaussian and Kaiser windows.
     #[serde(default)]
     pub alfa: Option<f64>,
     #[serde(default)]
@@ -272,10 +275,12 @@ impl FftRequest {
         {
             return Err(format!("FMIN {minimum} exceeds FMAX {maximum}"));
         }
-        if let Some(alfa) = self.alfa
-            && !alfa.is_finite()
-        {
-            return Err(format!(".FFT ALFA must be finite, found {alfa}"));
+        if let Some(alfa) = self.alfa {
+            if !alfa.is_finite() || !(1.0..=20.0).contains(&alfa) {
+                return Err(format!(
+                    ".FFT ALFA must be finite and between 1 and 20, found {alfa}"
+                ));
+            }
         }
         Ok(())
     }
@@ -370,7 +375,28 @@ mod tests {
         // The offered set is the whole enum: `window_keyword` has no wildcard,
         // so a new engine window fails to compile, and this count is what stops
         // one from being added to the enum and left out of the array.
-        assert_eq!(seen.len(), 14);
+        assert_eq!(seen.len(), 16);
+    }
+
+    #[test]
+    fn gaussian_and_kaiser_requests_round_trip_their_alfa() {
+        for (window, alfa) in [("GAUSS", 4.0), ("KAISER", 12.0)] {
+            let request = FftRequest {
+                output: "V(OUT)".to_owned(),
+                window: window.to_owned(),
+                alfa: Some(alfa),
+                ..FftRequest::default()
+            };
+            let parsed = parse_one(&request.to_card());
+            let expected_window = if window == "GAUSS" {
+                FftWindow::Gaussian
+            } else {
+                FftWindow::Kaiser
+            };
+            assert_eq!(parsed.window, expected_window);
+            assert_eq!(parsed.alpha, alfa);
+            assert_eq!(FftRequest::from_core(&parsed), request);
+        }
     }
 
     #[test]

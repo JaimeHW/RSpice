@@ -189,6 +189,15 @@ fn validate_request(
             format!("FMIN {minimum} exceeds FMAX {maximum}"),
         ));
     }
+    if !analysis.alpha.is_finite() || !(1.0..=20.0).contains(&analysis.alpha) {
+        return Err(request_error(
+            index,
+            format!(
+                "ALFA must be finite and between 1 and 20, found {}",
+                analysis.alpha
+            ),
+        ));
+    }
     Ok(())
 }
 
@@ -278,7 +287,8 @@ fn evaluate_one(
         if sample.is_multiple_of(64) && abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }
-        let window = window_coefficient(analysis.window, sample, denominator);
+        let window =
+            window_coefficient_with_alpha(analysis.window, sample, denominator, analysis.alpha);
         window_sum += window;
         if !status.is_complete() {
             continue;
@@ -657,11 +667,21 @@ fn interpolate_at(
     Some(values[interval] + fraction * (values[next] - values[interval]))
 }
 
-fn window_coefficient(window: FftWindow, index: usize, denominator: Value) -> Value {
-    window_coefficient_at_position(window, index as Value, denominator)
+fn window_coefficient_with_alpha(
+    window: FftWindow,
+    index: usize,
+    denominator: Value,
+    alpha: Value,
+) -> Value {
+    window_coefficient_at_position_with_alpha(window, index as Value, denominator, alpha)
 }
 
-fn window_coefficient_at_position(window: FftWindow, index: Value, denominator: Value) -> Value {
+fn window_coefficient_at_position_with_alpha(
+    window: FftWindow,
+    index: Value,
+    denominator: Value,
+    alpha: Value,
+) -> Value {
     if window == FftWindow::Rectangular {
         return 1.0;
     }
@@ -693,7 +713,33 @@ fn window_coefficient_at_position(window: FftWindow, index: Value, denominator: 
         FftWindow::HalfCycleSine3 => (PI * x).sin().powi(3),
         FftWindow::HalfCycleSine6 => (PI * x).sin().powi(6),
         FftWindow::Cosine4 => 0.375 - 0.5 * cosine(1.0) + 0.125 * cosine(2.0),
+        // The Xyce/HSPICE ALFA convention is the inverse normalized
+        // standard deviation: alpha=3 gives exp(-4.5) at each endpoint.
+        FftWindow::Gaussian => (-0.5 * (alpha * (2.0 * x - 1.0)).powi(2)).exp(),
+        // Kaiser-Bessel window, with ALFA as its beta parameter.
+        FftWindow::Kaiser => {
+            let radial = (1.0 - (2.0 * x - 1.0).powi(2)).max(0.0).sqrt();
+            modified_bessel_i0(alpha * radial) / modified_bessel_i0(alpha)
+        }
     }
+}
+
+/// Modified Bessel function I0 evaluated with its rapidly convergent power
+/// series. `.FFT ALFA` is bounded to 1..=20, so this avoids overflow while
+/// retaining substantially more precision than the transform needs.
+fn modified_bessel_i0(value: Value) -> Value {
+    let half_squared = (value * 0.5).powi(2);
+    let mut term = 1.0;
+    let mut sum = 1.0;
+    for order in 1..=64 {
+        let order_value = order as Value;
+        term *= half_squared / (order_value * order_value);
+        sum += term;
+        if term <= sum * 1.0e-16 {
+            break;
+        }
+    }
+    sum
 }
 
 /// Compute the coherent gain of the exact FFT window convention used by the
@@ -705,10 +751,32 @@ pub fn transient_fft_window_coherent_gain(
     points: usize,
     abort: &dyn AbortSignal,
 ) -> Result<Value, SimulationError> {
+    transient_fft_window_coherent_gain_with_alpha(
+        window,
+        FftAnalysis::DEFAULT_ALPHA,
+        mode,
+        points,
+        abort,
+    )
+}
+
+/// Compute coherent gain using an explicit `.FFT ALFA` value.
+pub fn transient_fft_window_coherent_gain_with_alpha(
+    window: FftWindow,
+    alpha: Value,
+    mode: XyceFftMode,
+    points: usize,
+    abort: &dyn AbortSignal,
+) -> Result<Value, SimulationError> {
     if points < 4 || !points.is_power_of_two() {
         return Err(SimulationError::Circuit(
             "FFT coherent gain requires a power-of-two point count of at least four".to_owned(),
         ));
+    }
+    if !alpha.is_finite() || !(1.0..=20.0).contains(&alpha) {
+        return Err(SimulationError::Circuit(format!(
+            "FFT window ALFA must be finite and between 1 and 20, found {alpha}"
+        )));
     }
     let denominator = if mode.uses_periodic_windows() {
         points as Value
@@ -720,7 +788,7 @@ pub fn transient_fft_window_coherent_gain(
         if index.is_multiple_of(64) && abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }
-        window_sum += window_coefficient(window, index, denominator);
+        window_sum += window_coefficient_with_alpha(window, index, denominator, alpha);
     }
     let coherent_gain = window_sum / points as Value;
     if !coherent_gain.is_finite() || coherent_gain <= 0.0 {
@@ -810,10 +878,12 @@ mod tests {
             FftWindow::HalfCycleSine6,
             FftWindow::Cosine2,
             FftWindow::Cosine4,
+            FftWindow::Gaussian,
+            FftWindow::Kaiser,
         ];
         for window in windows {
             let coefficients = (0..64)
-                .map(|index| window_coefficient(window, index, 63.0))
+                .map(|index| window_coefficient_with_alpha(window, index, 63.0, 3.0))
                 .collect::<Vec<_>>();
             assert!(
                 coefficients
@@ -824,6 +894,28 @@ mod tests {
             for pair in coefficients.iter().zip(coefficients.iter().rev()) {
                 assert!((pair.0 - pair.1).abs() < 1.0e-14, "{window:?}");
             }
+        }
+    }
+
+    #[test]
+    fn gaussian_and_kaiser_alpha_change_the_window_shape() {
+        let gaussian_default = window_coefficient_with_alpha(FftWindow::Gaussian, 0, 63.0, 3.0);
+        let gaussian_narrow = window_coefficient_with_alpha(FftWindow::Gaussian, 0, 63.0, 6.0);
+        assert!(gaussian_narrow < gaussian_default);
+
+        let kaiser_default = window_coefficient_with_alpha(FftWindow::Kaiser, 0, 63.0, 3.0);
+        let kaiser_narrow = window_coefficient_with_alpha(FftWindow::Kaiser, 0, 63.0, 12.0);
+        assert!(kaiser_narrow < kaiser_default);
+        for alpha in [1.0, 3.0, 20.0] {
+            let gain = transient_fft_window_coherent_gain_with_alpha(
+                FftWindow::Kaiser,
+                alpha,
+                XyceFftMode::HspiceCompatible,
+                64,
+                &NoAbort,
+            )
+            .expect("qualified Kaiser gain");
+            assert!(gain.is_finite() && gain > 0.0);
         }
     }
 

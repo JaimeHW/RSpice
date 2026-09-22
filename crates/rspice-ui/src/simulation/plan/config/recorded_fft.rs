@@ -8,11 +8,6 @@
 //! the engine fails this crate's build rather than quietly becoming
 //! unofferable.
 //!
-//! `ALFA` has no control: no window the engine implements reads it (Xyce
-//! leaves Gaussian and Kaiser unimplemented for the same reason), and a
-//! control with no effect is a promise the reader goes looking for. A
-//! hand-written `ALFA=` survives on the specification and is recorded.
-
 use serde::{Deserialize, Serialize};
 
 use crate::simulation::config::{FFT_DEFAULT_POINTS, FftFormatChoice, FftRequest, window_keyword};
@@ -31,6 +26,9 @@ pub struct FftDraft {
     pub points: usize,
     /// `WINDOW=`, stored as the engine's canonical keyword.
     pub window: String,
+    /// `ALFA=`, used by the Gaussian and Kaiser windows. Empty keeps the
+    /// engine default of 3.
+    pub alfa: String,
     /// `FORMAT=`: empty writes no keyword and keeps the mode's own default.
     pub format: String,
     /// `FREQ=`, the bin the metrics call the fundamental.
@@ -49,6 +47,7 @@ impl Default for FftDraft {
             stop: String::new(),
             points: FFT_DEFAULT_POINTS,
             window: window_keyword(rspice_core::netlist::FftWindow::Rectangular).to_owned(),
+            alfa: String::new(),
             format: String::new(),
             fundamental: String::new(),
             fmin: String::new(),
@@ -84,8 +83,7 @@ impl FftDraft {
             points: self.points,
             format,
             window: self.window.trim().to_ascii_uppercase(),
-            // No control authors one; a card read from a deck keeps its own.
-            alfa: None,
+            alfa: optional_quantity(&self.alfa, "FFT ALFA")?,
             fundamental: optional_quantity(&self.fundamental, "FFT FREQ")?,
             fmin: optional_quantity(&self.fmin, "FFT FMIN")?,
             fmax: optional_quantity(&self.fmax, "FFT FMAX")?,
@@ -122,6 +120,7 @@ mod tests {
         assert_eq!(restored.output, defaults.output);
         assert_eq!(restored.points, FFT_DEFAULT_POINTS);
         assert_eq!(restored.window, "RECT");
+        assert!(restored.alfa.is_empty());
         assert!(restored.format.is_empty());
         assert!(restored.start.is_empty() && restored.stop.is_empty());
         assert!(
@@ -166,5 +165,18 @@ mod tests {
             .expect_err("an unreadable STOP is refused");
         assert!(error.starts_with("FFT STOP: "), "{error}");
         assert_eq!(draft.summary(), error);
+    }
+
+    #[test]
+    fn the_plan_wires_gaussian_alfa_into_the_engine_request() {
+        let draft = FftDraft {
+            window: "GAUSS".to_owned(),
+            alfa: "6".to_owned(),
+            ..FftDraft::default()
+        };
+        let request = draft.to_request().expect("Gaussian ALFA is valid");
+        assert_eq!(request.window, "GAUSS");
+        assert_eq!(request.alfa, Some(6.0));
+        assert_eq!(request.to_card(), ".fft V(out) NP=1024 WINDOW=GAUSS ALFA=6");
     }
 }

@@ -4967,6 +4967,25 @@ mod tests {
     }
 
     #[test]
+    fn fft_gaussian_and_kaiser_windows_preserve_alfa() {
+        let netlist = Netlist::parse(
+            "fft shape windows\n\
+             V1 out 0 0\n\
+             .fft v(out) np=8 window=gauss alfa=4\n\
+             .fft v(out) np=8 window=kaiser alfa=12\n\
+             .end\n",
+        )
+        .expect("Gaussian and Kaiser windows parse");
+
+        assert_eq!(netlist.fft_analyses[0].window, FftWindow::Gaussian);
+        assert_eq!(netlist.fft_analyses[0].window_name, "GAUSS");
+        assert_eq!(netlist.fft_analyses[0].alpha, 4.0);
+        assert_eq!(netlist.fft_analyses[1].window, FftWindow::Kaiser);
+        assert_eq!(netlist.fft_analyses[1].window_name, "KAISER");
+        assert_eq!(netlist.fft_analyses[1].alpha, 12.0);
+    }
+
+    #[test]
     fn xyce_fft_options_are_typed_without_unknown_option_diagnostics() {
         let netlist = Netlist::parse(
             "typed fft options\n\
@@ -5016,7 +5035,6 @@ mod tests {
             (".fft v(out) np=", "missing its value"),
             (".fft v(out) bogo=2", "Unknown .FFT qualifier"),
             (".fft v(out) format=bogo", "Invalid FORMAT"),
-            (".fft v(out) window=gauss", "Invalid WINDOW"),
             (".fft v(out) np=0", ".FFT NP must be positive"),
             (".fft v(out) v(alt)", "requires '='"),
             (".fft {}", "expression must not be empty"),

@@ -4076,6 +4076,8 @@ fn parse_fft_window(value: &str, line_num: usize) -> Result<FftWindow, ParseErro
         "HALFCYCLESINE6" => FftWindow::HalfCycleSine6,
         "COSINE2" => FftWindow::Cosine2,
         "COSINE4" => FftWindow::Cosine4,
+        "GAUSS" | "GAUSSIAN" => FftWindow::Gaussian,
+        "KAISER" => FftWindow::Kaiser,
         _ => {
             return Err(ParseError::Syntax {
                 line: line_num,

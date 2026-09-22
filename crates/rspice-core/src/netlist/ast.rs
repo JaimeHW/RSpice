@@ -2130,6 +2130,10 @@ pub enum FftWindow {
     HalfCycleSine6,
     Cosine2,
     Cosine4,
+    /// Gaussian window with `ALFA` controlling the standard deviation.
+    Gaussian,
+    /// Kaiser-Bessel window with `ALFA` as the beta parameter.
+    Kaiser,
 }
 
 /// Typed `.FFT` post-processing request.
