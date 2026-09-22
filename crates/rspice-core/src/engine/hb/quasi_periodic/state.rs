@@ -370,7 +370,7 @@ impl Engine {
             ));
         }
         let circuit = engine.build_circuit_with_abort(netlist, abort)?;
-        let solver = engine.qpss_circuit_solver(&circuit, &grid)?;
+        let solver = engine.qpss_circuit_solver(&circuit, &grid, false)?;
         let names = solver
             .try_periodic_mna_branch_names()
             .map_err(|error| invalid(error.to_string()))?;

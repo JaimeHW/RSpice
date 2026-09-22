@@ -988,10 +988,21 @@ pub(in crate::engine) fn has_exact_periodic_nonlinear_devices(circuit: &CircuitD
 ///
 /// This is the nonlinear-device half of the HB/PAC/PNoise admission gate.
 pub(in crate::engine) fn periodic_residual_gaps(circuit: &CircuitData) -> Vec<CapabilityGap> {
+    periodic_residual_gaps_in_context(circuit, false)
+}
+
+/// Carrier expressions follow their large-signal dialect frequency context.
+pub(in crate::engine) fn periodic_carrier_residual_gaps(
+    circuit: &CircuitData,
+) -> Vec<CapabilityGap> {
+    periodic_residual_gaps_in_context(circuit, true)
+}
+
+fn periodic_residual_gaps_in_context(circuit: &CircuitData, carrier: bool) -> Vec<CapabilityGap> {
     use PeriodicCapability::PeriodicResidualJacobian as Cap;
     use PeriodicDeviceFamily as F;
     let mut gaps = Vec::new();
-    append_behavioral_periodic_gaps(circuit, &mut gaps);
+    append_behavioral_periodic_gaps(circuit, &mut gaps, carrier);
 
     let describe = |family: PeriodicDeviceFamily, count: usize, what: &str| {
         CapabilityGap::new(family, format!("{what} ({count} {})", count_noun(count)))
@@ -1156,10 +1167,21 @@ pub(in crate::engine) fn periodic_residual_gaps(circuit: &CircuitData) -> Vec<Ca
 
 /// Gaps in the exact periodic MNA / PAC descriptor contract.
 pub(in crate::engine) fn periodic_descriptor_gaps(circuit: &CircuitData) -> Vec<CapabilityGap> {
+    periodic_descriptor_gaps_in_context(circuit, false)
+}
+
+/// Exact carrier MNA still requires every device's physical descriptor.
+pub(in crate::engine) fn periodic_carrier_descriptor_gaps(
+    circuit: &CircuitData,
+) -> Vec<CapabilityGap> {
+    periodic_descriptor_gaps_in_context(circuit, true)
+}
+
+fn periodic_descriptor_gaps_in_context(circuit: &CircuitData, carrier: bool) -> Vec<CapabilityGap> {
     use PeriodicCapability::PeriodicSmallSignalDescriptor as Cap;
     use PeriodicDeviceFamily as F;
     let mut gaps = Vec::new();
-    append_behavioral_periodic_gaps(circuit, &mut gaps);
+    append_behavioral_periodic_gaps(circuit, &mut gaps, carrier);
 
     for family in PeriodicDeviceFamily::ALL {
         if family.instance_count(circuit) == 0 {
@@ -1222,18 +1244,40 @@ pub(in crate::engine) fn periodic_descriptor_gaps(circuit: &CircuitData) -> Vec<
     normalize(gaps)
 }
 
-fn append_behavioral_periodic_gaps(circuit: &CircuitData, gaps: &mut Vec<CapabilityGap>) {
+fn append_behavioral_periodic_gaps(
+    circuit: &CircuitData,
+    gaps: &mut Vec<CapabilityGap>,
+    carrier: bool,
+) {
     for (name, supported) in circuit
         .behavioral_sources
         .voltage_sources
         .iter()
-        .map(|source| (&source.name, !source.is_frequency_dependent()))
+        .map(|source| {
+            (
+                &source.name,
+                if carrier {
+                    source.has_periodic_carrier_frequency_context()
+                } else {
+                    !source.is_frequency_dependent()
+                },
+            )
+        })
         .chain(
             circuit
                 .behavioral_sources
                 .current_sources
                 .iter()
-                .map(|source| (&source.name, !source.is_frequency_dependent())),
+                .map(|source| {
+                    (
+                        &source.name,
+                        if carrier {
+                            source.has_periodic_carrier_frequency_context()
+                        } else {
+                            !source.is_frequency_dependent()
+                        },
+                    )
+                }),
         )
     {
         if !supported {

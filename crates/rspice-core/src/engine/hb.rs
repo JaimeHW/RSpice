@@ -1812,16 +1812,16 @@ impl Engine {
         // No reactive-element gate: junction devices carry their own charge
         // storage, and HB on a resistive nonlinear circuit is legitimate
         // distortion analysis (every harmonic system is solvable regardless).
-        if let Some(summary) =
-            periodic_capability::summarize(&periodic_capability::periodic_residual_gaps(&circuit))
-        {
+        if let Some(summary) = periodic_capability::summarize(
+            &periodic_capability::periodic_carrier_residual_gaps(&circuit),
+        ) {
             return Err(HbError::UnsupportedNonlinearDevices(summary).into());
         }
         let has_supported_nonlinear =
             periodic_capability::has_exact_periodic_nonlinear_devices(&circuit);
-        if let Some(summary) =
-            periodic_capability::summarize(&periodic_capability::periodic_descriptor_gaps(&circuit))
-        {
+        if let Some(summary) = periodic_capability::summarize(
+            &periodic_capability::periodic_carrier_descriptor_gaps(&circuit),
+        ) {
             return Err(SimulationError::unsupported_capability(
                 "analysis.hb.periodic_mna",
                 format!("exact HB MNA is unavailable because the circuit contains {summary}"),

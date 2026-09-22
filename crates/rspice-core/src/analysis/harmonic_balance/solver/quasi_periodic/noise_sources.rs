@@ -38,7 +38,7 @@ impl HbSolver {
         abort: &dyn AbortSignal,
     ) -> Result<Vec<QuasiPeriodicNoiseSource>, Error> {
         abort_if_requested(abort)?;
-        self.validate_quasi_periodic_circuit()?;
+        self.validate_quasi_periodic_response()?;
         if !temperature.is_finite()
             || temperature <= 0.0
             || !constants.boltzmann.is_finite()
@@ -192,7 +192,7 @@ impl HbSolver {
         if self.native_bjts.is_empty() {
             return Ok(());
         }
-        self.validate_quasi_periodic_circuit()?;
+        self.validate_quasi_periodic_response()?;
         if orbit.len() != self.unknowns() {
             return Err(noise_error(
                 "native noise orbit differs from complete MNA basis",

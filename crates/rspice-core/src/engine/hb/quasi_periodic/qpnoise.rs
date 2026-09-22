@@ -96,7 +96,7 @@ impl Engine {
         let circuit = engine.build_circuit_with_abort(netlist, abort)?;
         Self::ensure_no_mixed_signal_analysis(&circuit, "QPNOISE")?;
         engine.validate_cyclostationary_noise_circuit(&circuit, "qpnoise")?;
-        let mut solver = engine.qpss_circuit_solver(&circuit, &grid)?;
+        let mut solver = engine.qpss_circuit_solver(&circuit, &grid, true)?;
         let input_source = request
             .input
             .as_ref()

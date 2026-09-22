@@ -303,7 +303,7 @@ macro_rules! lift_source {
                 grid: &QuasiPeriodicGrid,
                 unknowns: usize,
             ) -> Result<(), String> {
-                if self.is_frequency_dependent() {
+                if !self.has_periodic_carrier_frequency_context() {
                     return Err(
                         "behavioral live-frequency equations need a quasiperiodic frequency model"
                             .into(),
@@ -374,9 +374,9 @@ macro_rules! lift_source {
             }
 
             pub(crate) fn has_quasi_periodic_equation(&self, dimensions: usize) -> bool {
-                !self.is_frequency_dependent()
+                self.has_periodic_carrier_frequency_context()
                     && self.integral_equations.as_ref().map_or_else(
-                        || self.has_memoryless_periodic_equation(),
+                        || self.has_memoryless_carrier_equation(),
                         |equations| equations.has_phase_basis(dimensions),
                     )
             }

@@ -6,7 +6,7 @@ use super::*;
 use crate::expr::{constant_value, function_uses_implicit_time as implicit_time};
 use crate::numerics::is_integral_cycle_count;
 
-fn shooting_frequency_context(
+fn carrier_frequency_context(
     dependent: bool,
     frequency: Value,
     dialect: ExpressionDialect,
@@ -14,18 +14,24 @@ fn shooting_frequency_context(
     // Xyce's AnalysisBase::getCurrentFreq() returns zero; transient/HB do not
     // override it as AC/NOISE do. Shooting follows the time-domain expression
     // context, not the orbit fundamental. A stale nonzero AC context is not a
-    // valid shooting certificate. Frequency-domain consumers have separate
+    // valid carrier certificate. Frequency-domain consumers have separate
     // admission checks and must still supply their own frequency operators.
     !dependent || (dialect == ExpressionDialect::Xyce && frequency == 0.0)
 }
 
 impl BehavioralVoltageSource {
-    pub(crate) fn has_stateless_periodic_equation(&self) -> bool {
-        self.program.sdt_count == 0 && !self.is_frequency_dependent()
+    pub(crate) fn has_periodic_carrier_frequency_context(&self) -> bool {
+        carrier_frequency_context(
+            self.is_frequency_dependent(),
+            self.frequency,
+            self.expression_dialect,
+        )
     }
 
-    pub(crate) fn has_memoryless_periodic_equation(&self) -> bool {
-        self.has_stateless_periodic_equation() && memoryless_equation(&self.ast)
+    pub(super) fn has_memoryless_carrier_equation(&self) -> bool {
+        self.program.sdt_count == 0
+            && self.has_periodic_carrier_frequency_context()
+            && memoryless_equation(&self.ast)
     }
 
     /// At the origin, an SDT value is fixed independently of its input.
@@ -45,17 +51,14 @@ impl BehavioralVoltageSource {
     /// Integral values are shooting coordinates. Their input equations must
     /// repeat in time; zero mean is enforced by the solved period map.
     pub(crate) fn has_periodic_shooting_equation(&self, period: Value, autonomous: bool) -> bool {
-        shooting_frequency_context(
-            self.is_frequency_dependent(),
-            self.frequency,
-            self.expression_dialect,
-        ) && time_increment_with_state(
-            &self.ast,
-            period,
-            &self.periodicity_context(),
-            autonomous,
-            true,
-        ) == Some(0.0)
+        self.has_periodic_carrier_frequency_context()
+            && time_increment_with_state(
+                &self.ast,
+                period,
+                &self.periodicity_context(),
+                autonomous,
+                true,
+            ) == Some(0.0)
     }
 
     pub(crate) fn has_periodic_time_dependence(&self, period: Value, autonomous: bool) -> bool {
@@ -78,12 +81,18 @@ impl BehavioralVoltageSource {
 }
 
 impl BehavioralCurrentSource {
-    pub(crate) fn has_stateless_periodic_equation(&self) -> bool {
-        self.program.sdt_count == 0 && !self.is_frequency_dependent()
+    pub(crate) fn has_periodic_carrier_frequency_context(&self) -> bool {
+        carrier_frequency_context(
+            self.is_frequency_dependent(),
+            self.frequency,
+            self.expression_dialect,
+        )
     }
 
-    pub(crate) fn has_memoryless_periodic_equation(&self) -> bool {
-        self.has_stateless_periodic_equation() && memoryless_equation(&self.ast)
+    pub(super) fn has_memoryless_carrier_equation(&self) -> bool {
+        self.program.sdt_count == 0
+            && self.has_periodic_carrier_frequency_context()
+            && memoryless_equation(&self.ast)
     }
 
     pub(crate) fn prescribed_time_program(&self) -> Option<(&CompiledExpr, Context<'_>)> {
@@ -98,17 +107,14 @@ impl BehavioralCurrentSource {
     /// Integral values are shooting coordinates. Their input equations must
     /// repeat in time; zero mean is enforced by the solved period map.
     pub(crate) fn has_periodic_shooting_equation(&self, period: Value, autonomous: bool) -> bool {
-        shooting_frequency_context(
-            self.is_frequency_dependent(),
-            self.frequency,
-            self.expression_dialect,
-        ) && time_increment_with_state(
-            &self.ast,
-            period,
-            &self.periodicity_context(),
-            autonomous,
-            true,
-        ) == Some(0.0)
+        self.has_periodic_carrier_frequency_context()
+            && time_increment_with_state(
+                &self.ast,
+                period,
+                &self.periodicity_context(),
+                autonomous,
+                true,
+            ) == Some(0.0)
     }
 
     pub(crate) fn has_periodic_time_dependence(&self, period: Value, autonomous: bool) -> bool {

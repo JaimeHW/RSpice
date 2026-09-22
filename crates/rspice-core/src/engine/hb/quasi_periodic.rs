@@ -173,7 +173,7 @@ impl Engine {
             &engine.config.resource_limits,
         )
         .map_err(numerical_error)?;
-        let mut solver = engine.qpss_circuit_solver(&circuit, &grid)?;
+        let mut solver = engine.qpss_circuit_solver(&circuit, &grid, false)?;
         let node_names = engine.hb_build_node_names(&circuit, circuit.num_nodes());
         let mut branch_names = solver
             .try_periodic_mna_branch_names()
@@ -228,11 +228,20 @@ impl Engine {
         &self,
         circuit: &CircuitData,
         grid: &QuasiPeriodicGrid,
+        response: bool,
     ) -> Result<HbSolver, SimulationError> {
-        for gaps in [
-            periodic_capability::periodic_residual_gaps(circuit),
-            periodic_capability::periodic_descriptor_gaps(circuit),
-        ] {
+        let gaps = if response {
+            [
+                periodic_capability::periodic_residual_gaps(circuit),
+                periodic_capability::periodic_descriptor_gaps(circuit),
+            ]
+        } else {
+            [
+                periodic_capability::periodic_carrier_residual_gaps(circuit),
+                periodic_capability::periodic_carrier_descriptor_gaps(circuit),
+            ]
+        };
+        for gaps in gaps {
             if let Some(summary) = periodic_capability::summarize(&gaps) {
                 return Err(SimulationError::unsupported_capability(
                     "analysis.qpss.device",

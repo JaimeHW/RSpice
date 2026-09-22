@@ -126,7 +126,7 @@ impl HbSolver {
         // Charge the retained sweep alongside the numerical workspace.
         let mut working_limits = limits.clone();
         working_limits.max_result_values = limits.max_result_values.saturating_sub(values);
-        self.validate_quasi_periodic_circuit()?;
+        self.validate_quasi_periodic_response()?;
         let working_limits = self.prepare_quasi_periodic_integrals(
             grid.clone(),
             &working_limits,
@@ -223,7 +223,7 @@ impl HbSolver {
         )?;
         let mut working_limits = limits.clone();
         working_limits.max_result_values = limits.max_result_values.saturating_sub(values);
-        self.validate_quasi_periodic_circuit()?;
+        self.validate_quasi_periodic_response()?;
         let working_limits = self.prepare_quasi_periodic_integrals(
             grid.clone(),
             &working_limits,
@@ -269,7 +269,7 @@ impl HbSolver {
         if abort.is_aborted() {
             return Err(Error::Aborted);
         }
-        self.validate_quasi_periodic_circuit()?;
+        self.validate_quasi_periodic_response()?;
         let limits =
             self.prepare_quasi_periodic_integrals(grid.clone(), limits, true, None, None, abort)?;
         crate::analysis::quasi_periodic::noise::visit_with_abort(
@@ -377,6 +377,12 @@ impl HbSolver {
             result?;
         }
         Ok(())
+    }
+
+    fn validate_quasi_periodic_response(&self) -> Result<(), Error> {
+        Self::validate_behavioral_response_frequency(&self.behavioral_sources)
+            .map_err(device_error)?;
+        self.validate_quasi_periodic_circuit()
     }
 
     fn validate_quasi_periodic_circuit(&self) -> Result<(), Error> {
