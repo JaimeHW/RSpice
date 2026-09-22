@@ -88,12 +88,12 @@ impl HbSolver {
             if capacitors.ic_branch_indices[index].is_some() {
                 return Err(fail("periodic IC branch equations are unavailable"));
             }
-            if !expression.has_periodic_shooting_equation(period, autonomous || quasi_periodic) {
-                return Err(fail(if quasi_periodic {
-                    "explicit-time capacitance requires independent-phase lifting"
-                } else {
-                    "capacitance is not certified periodic over the configured period"
-                }));
+            // QPSS validates clocks while lifting onto its actual tone grid,
+            // after all physical and integral coordinates have been counted.
+            if !quasi_periodic && !expression.has_periodic_shooting_equation(period, autonomous) {
+                return Err(fail(
+                    "capacitance is not certified periodic over the configured period",
+                ));
             }
             if retained && !expression.has_periodic_response_context() {
                 return Err(fail(

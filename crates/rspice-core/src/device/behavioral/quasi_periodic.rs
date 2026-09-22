@@ -295,6 +295,35 @@ impl Lift<'_> {
 
 // Apply identical binding rules to voltage and current sources without
 // converting ground into a phase input or renumbering physical references.
+impl integrals::IntegralEquations {
+    pub(crate) fn lift_quasi_periodic(
+        &self,
+        grid: &QuasiPeriodicGrid,
+        context: Context<'_>,
+        program: &CompiledExpr,
+    ) -> Result<Self, String> {
+        let names = phase_names(grid, program);
+        let lift = Lift {
+            grid,
+            context,
+            phase_names: names.clone(),
+        };
+        self.lifted_phases(&names, |ast| lift.lift(ast)?.finish())
+    }
+}
+
+fn phase_names(grid: &QuasiPeriodicGrid, program: &CompiledExpr) -> Vec<String> {
+    (0..grid.dimensions().len())
+        .map(|dimension| {
+            let mut name = format!("\0qpss_phase_{dimension}");
+            while program.node_map.contains_key(&name) {
+                name.push('_');
+            }
+            name
+        })
+        .collect()
+}
+
 macro_rules! lift_source {
     ($kind:ty) => {
         impl $kind {
@@ -310,28 +339,19 @@ macro_rules! lift_source {
                     );
                 }
                 self.validate_periodic_integral_rates()?;
-                let mut names = Vec::new();
-                for dimension in 0..grid.dimensions().len() {
-                    let mut name = format!("\0qpss_phase_{dimension}");
-                    while self.program.node_map.contains_key(&name) {
-                        name.push('_');
-                    }
-                    names.push(name);
-                }
                 if let Some(equations) = &self.integral_equations {
-                    let lift = Lift {
+                    let equations = equations.lift_quasi_periodic(
                         grid,
-                        context: self.periodicity_context(),
-                        phase_names: names.clone(),
-                    };
-                    let equations =
-                        equations.lifted_phases(&names, |ast| lift.lift(ast)?.finish())?;
+                        self.periodicity_context(),
+                        &self.program,
+                    )?;
                     self.integral_equations = Some(equations);
                     // The original compiler's occurrence order and physical
                     // bindings remain authoritative. Only the detached F/Q
                     // rate/output programs read the appended phase scalars.
                     return Ok(());
                 }
+                let names = phase_names(grid, &self.program);
                 let ast = Lift {
                     grid,
                     context: self.periodicity_context(),

@@ -289,7 +289,20 @@ impl HbSolver {
                     HbError::InvalidCircuit(format!("behavioral source '{}': {error}", source.name))
                 })?;
         }
+        let mut capacitors = self.periodic_capacitors.clone();
+        for capacitor in &mut capacitors {
+            capacitor
+                .expression
+                .lift_quasi_periodic(grid)
+                .map_err(|error| {
+                    HbError::InvalidCircuit(format!(
+                        "capacitor '{}': {error}",
+                        capacitor.expression.name
+                    ))
+                })?;
+        }
         self.register_integral_coordinates(sources)?;
+        self.periodic_capacitors = capacitors;
         self.behavioral_sources = lifted;
         self.prescribed_integrals.clear();
         self.periodic_integral_budget = None;

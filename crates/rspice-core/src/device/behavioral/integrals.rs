@@ -126,6 +126,12 @@ impl IntegralEquations {
         if program.sdt_count == 0 {
             return None;
         }
+        Some(Self::from_expression(ast, program))
+    }
+
+    /// Detached equations also represent memoryless expressions when clocks
+    /// need read-only phase inputs without changing physical bindings.
+    pub(crate) fn from_expression(ast: &Expr, program: &CompiledExpr) -> Self {
         let mut lower = Lower {
             original: program,
             inputs: HashMap::new(),
@@ -134,11 +140,11 @@ impl IntegralEquations {
         };
         let output = lower.lower(ast);
         assert_eq!(lower.rates.len(), program.sdt_count);
-        Some(Self {
+        Self {
             output: Equation::new(output, &lower.inputs),
             rates: lower.rates,
             phase_dimensions: None,
-        })
+        }
     }
 
     /// Differentiate the actual trapezoidal VM update while holding accepted

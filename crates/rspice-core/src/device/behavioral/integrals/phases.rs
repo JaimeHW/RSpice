@@ -43,7 +43,7 @@ impl IntegralEquations {
         })
     }
 
-    pub(in crate::device::behavioral) fn has_phase_basis(&self, dimensions: usize) -> bool {
+    pub(crate) fn has_phase_basis(&self, dimensions: usize) -> bool {
         self.phase_dimensions == Some(dimensions)
     }
 }

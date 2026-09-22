@@ -382,6 +382,15 @@ impl HbSolver {
     fn validate_quasi_periodic_response(&self) -> Result<(), Error> {
         Self::validate_behavioral_response_frequency(&self.behavioral_sources)
             .map_err(device_error)?;
+        if self
+            .periodic_capacitors
+            .iter()
+            .any(|cap| !cap.expression.has_periodic_response_context())
+        {
+            return Err(Error::InvalidCircuit(
+                "live-frequency capacitance has no periodic response equation".into(),
+            ));
+        }
         self.validate_quasi_periodic_circuit()
     }
 
@@ -398,6 +407,10 @@ impl HbSolver {
                 .current_sources
                 .iter()
                 .any(|source| !source.has_quasi_periodic_equation(self.behavioral_phase_dimensions))
+            || self.periodic_capacitors.iter().any(|cap| {
+                !cap.expression
+                    .has_quasi_periodic_equation(self.behavioral_phase_dimensions)
+            })
         {
             return Err(Error::InvalidCircuit(
                 "QPSS behavioral clocks require independent-phase forcing projection".into(),

@@ -7,6 +7,35 @@ use crate::device::behavioral::periodicity;
 use crate::expr::{AcceptedSdtState, Function};
 
 impl SolutionDependentCapacitor {
+    pub(crate) fn lift_quasi_periodic(
+        &mut self,
+        grid: &crate::analysis::quasi_periodic::QuasiPeriodicGrid,
+    ) -> Result<(), String> {
+        if !self.has_periodic_carrier_frequency_context() {
+            return Err("live-frequency capacitance needs a quasiperiodic frequency model".into());
+        }
+        self.validate_periodic_integral_rates()?;
+        let equations = self.integral_equations.clone().unwrap_or_else(|| {
+            crate::device::behavioral::integrals::IntegralEquations::from_expression(
+                &self.ast,
+                &self.program,
+            )
+        });
+        // Keep the original AST, occurrence order and physical bindings. Only
+        // detached F/Q programs consume the appended independent phases.
+        self.integral_equations =
+            Some(equations.lift_quasi_periodic(grid, self.periodicity_context(), &self.program)?);
+        Ok(())
+    }
+
+    pub(crate) fn has_quasi_periodic_equation(&self, dimensions: usize) -> bool {
+        self.has_periodic_carrier_frequency_context()
+            && self
+                .integral_equations
+                .as_ref()
+                .is_some_and(|equations| equations.has_phase_basis(dimensions))
+    }
+
     fn integral_bindings(&self, time: Value, state_start: usize) -> IntegralBindings<'_> {
         IntegralBindings {
             name: &self.name,
@@ -84,18 +113,23 @@ impl SolutionDependentCapacitor {
         &self.ast
     }
 
-    pub(crate) fn has_periodic_shooting_equation(&self, period: Value, autonomous: bool) -> bool {
+    fn has_periodic_carrier_frequency_context(&self) -> bool {
         periodicity::carrier_frequency_context(
             crate::device::behavioral::expression_depends_on_frequency(&self.ast),
             self.frequency,
             self.expression_dialect,
-        ) && periodicity::time_increment_with_state(
-            &self.ast,
-            period,
-            &self.periodicity_context(),
-            autonomous,
-            true,
-        ) == Some(0.0)
+        )
+    }
+
+    pub(crate) fn has_periodic_shooting_equation(&self, period: Value, autonomous: bool) -> bool {
+        self.has_periodic_carrier_frequency_context()
+            && periodicity::time_increment_with_state(
+                &self.ast,
+                period,
+                &self.periodicity_context(),
+                autonomous,
+                true,
+            ) == Some(0.0)
     }
 
     pub(crate) fn max_authored_tone_cycles(&self, period: Value) -> Value {
