@@ -3,7 +3,7 @@ use super::evaluation::Evaluation;
 use super::preconditioner::FrequencyBlocks;
 use super::*;
 use crate::analysis::quasi_periodic::check_abort;
-use crate::numerics::krylov::{GmresError, try_gmres_with_abort};
+use crate::numerics::krylov::{GmresError, GmresOutcome, try_gmres_with_abort};
 
 fn real(values: &[Complex64]) -> Result<Vec<Value>, Error> {
     if values
@@ -81,17 +81,17 @@ impl Workspace<'_> {
         Ok(result)
     }
 
-    fn iterative_solve(
+    fn iterative_candidate(
         &mut self,
         evaluation: &Evaluation,
         blocks: &mut FrequencyBlocks,
         divisors: &[Value],
         rhs: &[Value],
         abort: &dyn AbortSignal,
-    ) -> Result<Vec<Value>, Error> {
+    ) -> Result<GmresOutcome, Error> {
         let settings = self.config.linear.clone();
         let rhs = complex(rhs.to_vec());
-        let outcome = try_gmres_with_abort(
+        try_gmres_with_abort(
             &mut |value| {
                 self.equilibrated_action(evaluation, &real(value)?, divisors, abort)
                     .map(complex)
@@ -107,14 +107,7 @@ impl Workspace<'_> {
             GmresError::Aborted => Error::Aborted,
             GmresError::Operator(error) => error,
             GmresError::InvalidData(reason) => Error::Numerical(reason.into()),
-        })?;
-        if !outcome.converged {
-            return Err(Error::Numerical(format!(
-                "QPSS Krylov solve did not converge after {} steps (relative residual {:e}); increase restart vectors or cycles, or use the direct solver for small systems",
-                outcome.iterations, outcome.relative_residual
-            )));
-        }
-        real(&outcome.solution)
+        })
     }
 
     /// Certify ||D J B D^-1 - I||_infinity < 1/2. Columns are generated and
@@ -141,7 +134,13 @@ impl Workspace<'_> {
                 check_abort(abort)?;
                 rhs[column] = 1.0;
                 let inverse_column = if use_krylov {
-                    self.iterative_solve(evaluation, blocks, divisors, &rhs, abort)?
+                    let candidate =
+                        self.iterative_candidate(evaluation, blocks, divisors, &rhs, abort)?;
+                    // These columns prove invertibility; they are not Newton
+                    // corrections. Even a finite unconverged candidate can
+                    // prove ||D J B D^-1-I|| < 1/2. Certify that bound below
+                    // instead of demanding needless inverse-column precision.
+                    real(&candidate.solution)?
                 } else {
                     blocks.apply(&rhs, divisors, abort)?
                 };
@@ -184,6 +183,13 @@ impl Workspace<'_> {
                 *value /= divisors[row];
             }
         }
-        self.iterative_solve(evaluation, &mut blocks, &divisors, &rhs, abort)
+        let outcome = self.iterative_candidate(evaluation, &mut blocks, &divisors, &rhs, abort)?;
+        if !outcome.converged {
+            return Err(Error::Numerical(format!(
+                "QPSS Krylov correction did not converge after {} steps (relative residual {:e}); increase restart vectors or cycles, or use the direct solver for small systems",
+                outcome.iterations, outcome.relative_residual
+            )));
+        }
+        real(&outcome.solution)
     }
 }

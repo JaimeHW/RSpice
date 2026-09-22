@@ -507,7 +507,9 @@ pub(crate) fn try_gmres_with_abort<E>(
 
             let residual_estimate = g[j + 1].norm();
             if residual_estimate / b_norm < relative_tolerance {
-                happy_breakdown = true;
+                // Verify against A*x below. Loss of orthogonality or operator
+                // roundoff can make the estimate optimistic; if progress was
+                // made, the measured residual can seed the next allowed cycle.
                 break;
             }
             if w_norm == 0.0 {
