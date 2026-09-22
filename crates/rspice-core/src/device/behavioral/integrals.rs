@@ -9,8 +9,10 @@ use std::collections::HashMap;
 mod affine;
 mod periodic;
 pub(crate) use periodic::BehavioralFqPoint;
+pub(crate) use periodic::{IntegralBindings, PeriodicExpressionSample};
 mod phases;
 mod prescribed;
+pub(crate) use prescribed::PrescribedIntegralRate;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum Input {
@@ -59,7 +61,7 @@ impl Equation {
 }
 
 #[derive(Debug, Clone)]
-pub(super) struct IntegralEquations {
+pub(crate) struct IntegralEquations {
     rates: Vec<Equation>,
     output: Equation,
     phase_dimensions: Option<usize>,
@@ -120,7 +122,7 @@ impl Lower<'_> {
 }
 
 impl IntegralEquations {
-    pub(super) fn new(ast: &Expr, program: &CompiledExpr) -> Option<Self> {
+    pub(crate) fn new(ast: &Expr, program: &CompiledExpr) -> Option<Self> {
         if program.sdt_count == 0 {
             return None;
         }

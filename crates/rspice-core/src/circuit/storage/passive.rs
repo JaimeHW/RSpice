@@ -921,9 +921,18 @@ impl Capacitors {
         self.value_expressions
             .iter()
             .flatten()
-            .flat_map(|expression| {
-                (0..expression.program.sdt_count)
-                    .map(move |index| format!("C:{}:sdt:{index}", expression.name))
+            .flat_map(|expression| expression.integral_names())
+    }
+
+    /// Each periodic expression owns its SDTs and one voltage-rate coordinate.
+    pub(crate) fn periodic_auxiliary_count(&self) -> usize {
+        self.value_expressions
+            .iter()
+            .flatten()
+            .fold(0usize, |count, expression| {
+                count
+                    .saturating_add(expression.program.sdt_count)
+                    .saturating_add(1)
             })
     }
 

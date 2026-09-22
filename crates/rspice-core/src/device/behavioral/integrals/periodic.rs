@@ -18,9 +18,110 @@ pub(crate) struct BehavioralFqPoint<'a> {
     pub prescribed_integrals: &'a [Option<(Value, Value)>],
 }
 
-struct Sample {
-    value: Value,
-    partials: Vec<(usize, Value)>,
+pub(crate) struct PeriodicExpressionSample {
+    pub value: Value,
+    pub partials: Vec<(usize, Value)>,
+}
+
+use PeriodicExpressionSample as Sample;
+
+/// Explicit bindings let sources and passive expressions share the same SDT
+/// equations while preserving their own expression-domain policies.
+#[derive(Clone, Copy)]
+pub(crate) struct IntegralBindings<'a> {
+    pub name: &'a str,
+    pub environment: BehavioralEnvironment,
+    pub nodes: &'a [Option<usize>],
+    pub branches: &'a [Option<usize>],
+    pub state_start: usize,
+}
+
+impl IntegralBindings<'_> {
+    fn coordinate(&self, input: Input, unknowns: usize) -> Option<usize> {
+        match input {
+            Input::Node(index) => self.nodes[index],
+            Input::Branch(index) => self.branches[index],
+            Input::Integral(index) => Some(self.state_start + index),
+            Input::Phase(index) => Some(unknowns.saturating_add(index)),
+        }
+    }
+}
+
+impl IntegralEquations {
+    pub(crate) fn periodic_output(
+        &self,
+        point: BehavioralFqPoint<'_>,
+        bindings: IntegralBindings<'_>,
+    ) -> Result<PeriodicExpressionSample, String> {
+        if bindings.state_start < point.integral_start
+            || bindings
+                .state_start
+                .checked_add(self.rates.len())
+                .is_none_or(|end| end > point.unknowns)
+            || point.unknowns > point.inputs.len()
+        {
+            return Err(format!(
+                "expression '{}' has an incomplete periodic integral basis",
+                bindings.name
+            ));
+        }
+        self.output
+            .periodic_sample(
+                point,
+                bindings.environment,
+                |input| bindings.coordinate(input, point.unknowns),
+                true,
+            )
+            .map_err(|error| format!("expression '{}': {error}", bindings.name))
+    }
+
+    pub(crate) fn stamp_periodic_integrals(
+        &self,
+        point: BehavioralFqPoint<'_>,
+        bindings: IntegralBindings<'_>,
+        f: &mut impl MatrixStamper,
+        q: &mut impl MatrixStamper,
+    ) -> Result<(), String> {
+        if bindings.state_start < point.integral_start
+            || bindings
+                .state_start
+                .checked_add(self.rates.len())
+                .is_none_or(|end| end > point.unknowns)
+            || point.unknowns > point.inputs.len()
+        {
+            return Err(format!(
+                "expression '{}' has an incomplete periodic integral basis",
+                bindings.name
+            ));
+        }
+        for (index, equation) in self.rates.iter().enumerate() {
+            let state = bindings.state_start + index;
+            if let Some(Some((target, scale))) =
+                point.prescribed_integrals.get(state - point.integral_start)
+            {
+                f.stamp_rhs(state + 1, scale * target);
+                f.stamp_rhs(state + 1, -scale * point.inputs[state]);
+                f.stamp(state + 1, state + 1, *scale);
+                continue;
+            }
+            let sample = equation
+                .periodic_sample(
+                    point,
+                    bindings.environment,
+                    |input| bindings.coordinate(input, point.unknowns),
+                    false,
+                )
+                .map_err(|error| format!("expression '{}' SDT {index}: {error}", bindings.name))?;
+            // dz/dt = input. RHS contains -F/-Q; matrix entries are dF/dx,dQ/dx.
+            f.stamp_rhs(state + 1, sample.value);
+            for (column, partial) in sample.partials {
+                f.stamp(state + 1, column + 1, -partial);
+            }
+            q.stamp_rhs(state + 1, -point.inputs[state]);
+            q.stamp(state + 1, state + 1, 1.0);
+        }
+        Ok(())
+    }
 }
 
 impl Equation {
@@ -143,42 +244,12 @@ macro_rules! sample_source {
                     expression_dialect: self.expression_dialect,
                     logarithm_domain: LogarithmDomain::Ieee,
                 };
-                let binding = |input| match input {
-                    Input::Node(index) => self.node_bindings[index],
-                    Input::Branch(index) => self.branch_bindings[index],
-                    Input::Integral(index) => Some(state_start + index),
-                    Input::Phase(index) => Some(point.unknowns.saturating_add(index)),
+                let bindings = IntegralBindings {
+                    name: &self.name, environment, nodes: &self.node_bindings,
+                    branches: &self.branch_bindings, state_start,
                 };
-                for (index, equation) in equations.rates.iter().enumerate() {
-                    let state = state_start + index;
-                    if let Some(Some((target, scale))) = point.prescribed_integrals.get(state - point.integral_start) {
-                        // A time-only primitive has a known trajectory, either
-                        // from the zero origin or an authenticated producer.
-                        // Its row keeps integrand units and its small-signal
-                        // variation is zero at every frequency, including DC.
-                        f.stamp_rhs(state + 1, scale * target);
-                        f.stamp_rhs(state + 1, -scale * point.inputs[state]);
-                        f.stamp(state + 1, state + 1, *scale);
-                        continue;
-                    }
-                    let sample = equation
-                        .periodic_sample(point, environment, binding, false)
-                        .map_err(|error| {
-                            format!("behavioral source '{}' SDT {index}: {error}", self.name)
-                        })?;
-                    // dz/dt = input: F = -input and Q = z. MatrixStamper's
-                    // RHS holds source-minus-F/Q; its Jacobians hold dF/dx,dQ/dx.
-                    f.stamp_rhs(state + 1, sample.value);
-                    for (column, partial) in sample.partials {
-                        f.stamp(state + 1, column + 1, -partial);
-                    }
-                    q.stamp_rhs(state + 1, -point.inputs[state]);
-                    q.stamp(state + 1, state + 1, 1.0);
-                }
-                equations
-                    .output
-                    .periodic_sample(point, environment, binding, true)
-                    .map_err(|error| format!("behavioral source '{}': {error}", self.name))
+                equations.stamp_periodic_integrals(point, bindings, f, q)?;
+                equations.periodic_output(point, bindings)
             }
         }
     };

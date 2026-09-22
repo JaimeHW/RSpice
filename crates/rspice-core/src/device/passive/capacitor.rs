@@ -51,6 +51,7 @@ pub struct SolutionDependentCapacitor {
     pub program: CompiledExpr,
     /// Parsed expression used by the shared analytic derivative evaluator.
     ast: Expr,
+    integral_equations: Option<crate::device::behavioral::integrals::IntegralEquations>,
     vm: Vm,
     node_bindings: Vec<Option<usize>>,
     branch_bindings: Vec<Option<usize>>,
@@ -109,11 +110,14 @@ impl SolutionDependentCapacitor {
                 )
             })?;
         let program = compile(&ast);
+        let integral_equations =
+            crate::device::behavioral::integrals::IntegralEquations::new(&ast, &program);
 
         Ok(Self {
             name,
             expression: expression.to_string(),
             program,
+            integral_equations,
             ast,
             vm: Vm::new(),
             node_bindings: Vec::new(),

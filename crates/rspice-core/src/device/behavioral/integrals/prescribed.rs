@@ -11,6 +11,31 @@ pub(crate) struct PrescribedIntegralRate<'a> {
     branch_bindings: &'a [Option<usize>],
 }
 
+impl IntegralEquations {
+    pub(crate) fn append_prescribed_rates<'a>(
+        &'a self,
+        prefix: &str,
+        bindings: IntegralBindings<'a>,
+        plans: &mut Vec<PrescribedIntegralRate<'a>>,
+    ) -> Result<(), String> {
+        plans
+            .try_reserve(self.rates.len())
+            .map_err(|error| format!("integral rate-plan allocation failed: {error}"))?;
+        let source_start = plans.len();
+        for (index, equation) in self.rates.iter().enumerate() {
+            plans.push(PrescribedIntegralRate {
+                name: format!("{prefix}:{}:sdt:{index}", bindings.name),
+                equation,
+                environment: bindings.environment,
+                source_start,
+                node_bindings: bindings.nodes,
+                branch_bindings: bindings.branches,
+            });
+        }
+        Ok(())
+    }
+}
+
 impl PrescribedIntegralRate<'_> {
     pub(crate) fn coordinates(&self) -> impl Iterator<Item = usize> + '_ {
         self.equation

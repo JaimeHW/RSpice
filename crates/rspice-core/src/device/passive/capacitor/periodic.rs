@@ -1,9 +1,77 @@
 //! Shooting admission and accepted expression coordinates for capacitance laws.
 use super::*;
+use crate::device::behavioral::integrals::{
+    BehavioralFqPoint, IntegralBindings, PeriodicExpressionSample, PrescribedIntegralRate,
+};
 use crate::device::behavioral::periodicity;
 use crate::expr::{AcceptedSdtState, Function};
 
 impl SolutionDependentCapacitor {
+    fn integral_bindings(&self, time: Value, state_start: usize) -> IntegralBindings<'_> {
+        IntegralBindings {
+            name: &self.name,
+            nodes: &self.node_bindings,
+            branches: &self.branch_bindings,
+            state_start,
+            environment: BehavioralEnvironment {
+                time,
+                frequency: self.frequency,
+                temperature: self.temperature,
+                gmin: self.gmin,
+                expression_dialect: self.expression_dialect,
+                logarithm_domain: LogarithmDomain::Guarded,
+            },
+        }
+    }
+
+    pub(crate) fn integral_names(&self) -> impl Iterator<Item = String> + '_ {
+        (0..self.program.sdt_count).map(|index| format!("C:{}:sdt:{index}", self.name))
+    }
+
+    pub(crate) fn append_prescribed_integral_rates<'a>(
+        &'a self,
+        plans: &mut Vec<PrescribedIntegralRate<'a>>,
+    ) -> Result<(), String> {
+        if let Some(equations) = &self.integral_equations {
+            equations.append_prescribed_rates("C", self.integral_bindings(0.0, 0), plans)?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn sample_periodic_capacitance(
+        &mut self,
+        point: BehavioralFqPoint<'_>,
+        state_start: usize,
+    ) -> Result<PeriodicExpressionSample, String> {
+        if let Some(equations) = &self.integral_equations {
+            equations.periodic_output(point, self.integral_bindings(point.time, state_start))
+        } else {
+            let sample = self.linearize(point.inputs, point.time);
+            Ok(PeriodicExpressionSample {
+                value: sample.value,
+                partials: sample.partials,
+            })
+        }
+    }
+
+    pub(crate) fn stamp_periodic_integrals(
+        &self,
+        point: BehavioralFqPoint<'_>,
+        state_start: usize,
+        f: &mut impl MatrixStamper,
+        q: &mut impl MatrixStamper,
+    ) -> Result<(), String> {
+        if let Some(equations) = &self.integral_equations {
+            equations.stamp_periodic_integrals(
+                point,
+                self.integral_bindings(point.time, state_start),
+                f,
+                q,
+            )?;
+        }
+        Ok(())
+    }
+
     pub(crate) fn periodicity_context(&self) -> Context<'_> {
         Context::transient(&[], &[], 0.0)
             .with_temperature(self.temperature)
