@@ -3106,11 +3106,15 @@ pub enum HbContinuationLimitationTag {
     NonlinearVoltageSourcesUseNortonEquivalent,
     InductorDcCurrentUsesShortSurrogate,
     VerilogAInternalStateNotRetained,
+    CapacitorChargeHistoryNotRetained,
 }
 
 impl From<&HbContinuationLimitation> for HbContinuationLimitationTag {
     fn from(limitation: &HbContinuationLimitation) -> Self {
         match limitation {
+            HbContinuationLimitation::CapacitorChargeHistoryNotRetained => {
+                Self::CapacitorChargeHistoryNotRetained
+            }
             HbContinuationLimitation::NonlinearVoltageSourcesUseNortonEquivalent => {
                 Self::NonlinearVoltageSourcesUseNortonEquivalent
             }
@@ -3127,6 +3131,9 @@ impl From<&HbContinuationLimitation> for HbContinuationLimitationTag {
 impl From<HbContinuationLimitationTag> for HbContinuationLimitation {
     fn from(limitation: HbContinuationLimitationTag) -> Self {
         match limitation {
+            HbContinuationLimitationTag::CapacitorChargeHistoryNotRetained => {
+                Self::CapacitorChargeHistoryNotRetained
+            }
             HbContinuationLimitationTag::NonlinearVoltageSourcesUseNortonEquivalent => {
                 Self::NonlinearVoltageSourcesUseNortonEquivalent
             }

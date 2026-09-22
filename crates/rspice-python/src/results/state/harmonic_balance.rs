@@ -67,6 +67,9 @@ fn hb_reactive_kind_from_label(label: &str) -> PyResult<HbReactiveKind> {
 /// later one that reorders the enum.
 pub(crate) fn hb_limitation_label(limitation: &HbContinuationLimitation) -> &'static str {
     match limitation {
+        HbContinuationLimitation::CapacitorChargeHistoryNotRetained => {
+            "capacitor_charge_history_not_retained"
+        }
         HbContinuationLimitation::NonlinearVoltageSourcesUseNortonEquivalent => {
             "nonlinear_voltage_sources_use_norton_equivalent"
         }
@@ -81,6 +84,9 @@ pub(crate) fn hb_limitation_label(limitation: &HbContinuationLimitation) -> &'st
 
 pub(crate) fn hb_limitation_from_label(label: &str) -> PyResult<HbContinuationLimitation> {
     match label {
+        "capacitor_charge_history_not_retained" => {
+            Ok(HbContinuationLimitation::CapacitorChargeHistoryNotRetained)
+        }
         "nonlinear_voltage_sources_use_norton_equivalent" => {
             Ok(HbContinuationLimitation::NonlinearVoltageSourcesUseNortonEquivalent)
         }

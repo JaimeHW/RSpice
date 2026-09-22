@@ -59,6 +59,9 @@ pub enum HbContinuationLimitation {
     /// A Verilog-A device may own dynamic state that node-voltage spectra do
     /// not describe. Consumers must not assume that state can be restored.
     VerilogAInternalStateNotRetained,
+    /// Variable capacitance has path-dependent accepted charge history that
+    /// an instantaneous voltage/current phase projection does not reconstruct.
+    CapacitorChargeHistoryNotRetained,
 }
 
 /// One reactive element evaluated at a carrier phase.
