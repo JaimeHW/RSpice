@@ -804,8 +804,8 @@ pub struct TransientFftResult {
     pub window: FftWindow,
     /// Canonical source spelling retained by the parser.
     pub window_name: String,
-    /// HSPICE-compatible `ALFA` value (retained; unsupported Gaussian/Kaiser
-    /// windows do not currently consume it).
+    /// HSPICE-compatible `ALFA` value, consumed by Gaussian and Kaiser
+    /// windows and retained for all other window selections.
     pub alpha: Value,
     /// Mean window coefficient used for coherent-gain compensation.
     pub coherent_gain: Value,
