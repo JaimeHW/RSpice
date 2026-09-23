@@ -1,5 +1,6 @@
 //! Owned two-sided events in an ordinary scalar line's accepted history.
 use super::*;
+mod promotion;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TransmissionLineTimeSide {

@@ -11,6 +11,77 @@ fn event(time: Value) -> TransmissionLineHistoryEvent {
 }
 
 #[test]
+fn sampled_delay_event_promotion_preserves_rates_and_rejects_partial_state() {
+    for outgoing_at_event in [false, true] {
+        let time = -1.0_f64;
+        let incoming = if outgoing_at_event {
+            time.next_down()
+        } else {
+            time
+        };
+        let outgoing = if outgoing_at_event {
+            time
+        } else {
+            time.next_up()
+        };
+        let mut line = TransmissionLine::new("T1".into(), 1, 0, 2, 0, 50.0, 2.25);
+        for (t, value) in [
+            (-2.0, -1.0),
+            (-1.5, 0.0),
+            (incoming, 2.0_f64.mul_add(incoming + 1.0, 1.0)),
+            (outgoing, 3.0_f64.mul_add(outgoing + 1.0, 4.0)),
+            (-0.75, 4.75),
+            (-0.25, 6.25),
+            (0.0, 7.0),
+        ] {
+            line.update_history(t, value, 0.0, -2.0 * value, 0.0);
+        }
+        let before = line.checkpoint_state().unwrap();
+        line.promote_sampled_history_events(&[]).unwrap();
+        assert_eq!(line.checkpoint_state().unwrap(), before);
+        // Validate every declared edge before changing even the first one.
+        assert!(
+            line.promote_sampled_history_events(&[
+                [time, incoming, outgoing],
+                [-0.5, (-0.5_f64).next_down(), -0.5],
+            ])
+            .is_err()
+        );
+        assert_eq!(line.checkpoint_state().unwrap(), before);
+        line.promote_sampled_history_events(&[[time, incoming, outgoing]])
+            .unwrap();
+        assert_eq!(
+            line.next_history_event_arrival_after(0.0).unwrap(),
+            Some(1.25)
+        );
+        for (side, value, slope) in [
+            (TransmissionLineTimeSide::Incoming, 1.0, 2.0),
+            (TransmissionLineTimeSide::Outgoing, 4.0, 3.0),
+        ] {
+            assert!((line.lossless_wave_on_side(1.25, true, side) - value).abs() < 1e-14);
+            assert!(
+                (line.lossless_wave_slope_on_side(1.25, true, side).unwrap() - slope).abs() < 1e-14
+            );
+            assert!(
+                (line.lossless_wave_slope_on_side(1.25, false, side).unwrap() + 2.0 * slope).abs()
+                    < 1e-14
+            );
+        }
+        for (t, value) in [(1.0, 0.5), (1.375, 4.375), (2.0, 6.25)] {
+            assert!(
+                (line.lossless_wave_on_side(t, true, TransmissionLineTimeSide::Outgoing) - value)
+                    .abs()
+                    < 1e-14
+            );
+        }
+        let saved = line.checkpoint_state().unwrap();
+        assert_eq!(saved.state_history.len(), before.state_history.len() - 1);
+        line.restore_checkpoint_state(&saved).unwrap();
+        assert_eq!(line.checkpoint_state().unwrap(), saved);
+    }
+}
+
+#[test]
 fn sided_line_event_preserves_limits_interpolation_and_exact_arrivals() {
     for mode in [
         DelayedInterpolationMode::Linear,
