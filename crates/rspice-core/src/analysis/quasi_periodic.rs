@@ -22,7 +22,9 @@ pub use small_signal::{
 };
 pub use solve::{
     QuasiPeriodicAutonomousConfig, QuasiPeriodicLinearConfig, QuasiPeriodicLinearMethod,
-    QuasiPeriodicSolution, QuasiPeriodicSolveConfig, SpectralEnvelopeMethod, SpectralEnvelopeState,
+    QuasiPeriodicSolution, QuasiPeriodicSolveConfig, SpectralEnvelopeAdvance,
+    SpectralEnvelopeControl, SpectralEnvelopeMethod, SpectralEnvelopeState,
+    advance_spectral_envelope_with_abort,
 };
 pub use transform::{QuasiPeriodicSampleSpectrum, QuasiPeriodicTransform};
 

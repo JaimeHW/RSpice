@@ -5,6 +5,10 @@
 //! flux, rather than recomputing it with the next step's circuit parameters.
 use super::*;
 use crate::analysis::quasi_periodic::{check_abort, finite};
+mod adaptive;
+pub use adaptive::{
+    SpectralEnvelopeAdvance, SpectralEnvelopeControl, advance_spectral_envelope_with_abort,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SpectralEnvelopeMethod {
@@ -46,6 +50,12 @@ impl SpectralEnvelopeState {
     /// Zero at initialization, otherwise the order actually used for this step.
     pub fn order(&self) -> usize {
         self.order
+    }
+    /// Restart the multistep stencil after a source discontinuity. The
+    /// accepted physical state and its charge/flux remain intact; this does
+    /// not itself solve an algebraic jump or choose a source's event side.
+    pub fn restart_integration_history(&mut self) {
+        self.older = None;
     }
 }
 

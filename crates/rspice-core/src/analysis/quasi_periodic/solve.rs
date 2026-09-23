@@ -12,7 +12,10 @@ pub(crate) use autonomous::solve_autonomous_with_abort;
 pub(crate) use coordinates::validate as validate_spectra;
 mod evaluation;
 pub(crate) mod envelope;
-pub use envelope::{SpectralEnvelopeMethod, SpectralEnvelopeState};
+pub use envelope::{
+    SpectralEnvelopeAdvance, SpectralEnvelopeControl, SpectralEnvelopeMethod,
+    SpectralEnvelopeState, advance_spectral_envelope_with_abort,
+};
 mod iterative;
 mod linear_config;
 mod preconditioner;
