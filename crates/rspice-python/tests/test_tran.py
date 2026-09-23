@@ -386,22 +386,30 @@ Q1 out base emitter 0 active
         for state in ("dt", "xf1", "xf2"):
             assert np.max(np.abs(actual.voltage_waveform(f"Q1.__{state}.internal"))) > 1e-8
 
-    def test_unresumable_checkpoint_is_refused_during_run_preflight(self, engine):
+    def test_behavioral_integral_checkpoint_resumes_from_accepted_state(self, engine):
         netlist = rspice.Netlist.parse(
-            """* checkpoint capability blocker
+            """* checkpointed behavioral integral
 V1 in 0 1
 B1 out 0 V={SDT(V(in))}
 R1 out 0 1k
 .end
 """
         )
-        with pytest.raises(
-            rspice.SimulationError,
-            match="checkpoint capability preflight failed.*behavioral-source accepted SDT state",
-        ):
-            engine.run_tran_checkpointed(
-                netlist, stop_time=10e-9, max_step=1e-9
-            )
+        first, checkpoint = engine.run_tran_checkpointed(
+            netlist, stop_time=10e-9, max_step=1e-9
+        )
+        resumed, _ = engine.resume_tran(
+            netlist, checkpoint, stop_time=20e-9, max_step=1e-9
+        )
+        full = engine.run_tran(netlist, stop_time=20e-9, max_step=1e-9)
+        assert first.time[-1] == pytest.approx(checkpoint.time)
+        assert resumed.time[0] == pytest.approx(checkpoint.time)
+        np.testing.assert_allclose(
+            resumed.voltage_waveform("out")[-1],
+            full.voltage_waveform("out")[-1],
+            rtol=1e-8,
+            atol=1e-15,
+        )
 
     def test_segmented_resume_matches_uninterrupted_final_state(self, engine):
         netlist = rspice.Netlist.parse(RC_STEP)
