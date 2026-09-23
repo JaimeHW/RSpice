@@ -1,4 +1,4 @@
-//! Structural event rows for lumped linear storage and independent sources.
+//! Structural event rows for declared lumped storage and independent sources.
 use super::*;
 use crate::analysis::quasi_periodic::SpectralEnvelopeEventEquation as Row;
 use crate::engine::periodic_capability::PeriodicDeviceFamily as Family;
@@ -33,6 +33,7 @@ pub(super) fn prepare(
                     | Family::Vccs
                     | Family::InductorCoupling
                     | Family::CoupledInductorPair
+                    | Family::Diode
             )
         {
             return Err(invalid(format!(
@@ -92,6 +93,15 @@ pub(super) fn prepare(
         check_abort(abort)?;
         if circuit.capacitors.capacitances[index] != 0.0 {
             connect(stamp.pp.row, stamp.nn.row)?;
+        }
+    }
+    for diode in &circuit.diodes.devices {
+        check_abort(abort)?;
+        if diode.has_charge_storage() {
+            // Use the native junction terminals, including an elaborated
+            // internal anode when series resistance is present. Charge-free
+            // junctions must not join otherwise independent storage groups.
+            connect(diode.node_anode, diode.node_cathode)?;
         }
     }
     for index in 0..circuit.voltage_sources.len() {
