@@ -3,6 +3,8 @@
 use super::*;
 use crate::numerics::integration::TwoTerminalChargeHistory;
 
+mod delay;
+use delay::PssDelayBasis;
 mod current;
 use current::PssCurrentBasis;
 mod voltage;
@@ -597,6 +599,7 @@ pub(in crate::engine) struct PssCircuit {
     /// use the configured method. Derivative workers clone this choice.
     pub(super) probe_precision_floor: bool,
     basis: PssStateBasis,
+    pub(super) delay_basis: PssDelayBasis,
     /// Nominal-orbit amplitudes in each integral's own units. Derivative
     /// workers inherit frozen scales and cannot retune them with trial states.
     integral_probe_scales: Vec<Value>,
@@ -709,6 +712,7 @@ impl PssCircuit {
             integration_mesh: None,
             probe_precision_floor: false,
             basis,
+            delay_basis: PssDelayBasis::default(),
             integral_probe_scales,
             observing_integral_scales: false,
             solution_scratch,
@@ -734,6 +738,7 @@ impl PssCircuit {
         self.physical_state_dimension()
             + self.behavioral_sources.integral_count()
             + self.capacitors.integral_count()
+            + self.delay_basis.dimension()
     }
 
     pub(super) fn physical_state_dimension(&self) -> usize {
@@ -746,6 +751,7 @@ impl PssCircuit {
             .into_iter()
             .chain(self.behavioral_sources.integral_names())
             .chain(self.capacitors.integral_names())
+            .chain(self.delay_basis.names(&self.circuit))
             .collect()
     }
 
@@ -809,7 +815,9 @@ impl PssCircuit {
         charge_scale: Value,
     ) -> Value {
         let physical_count = self.physical_state_dimension();
-        let unit = if index >= physical_count {
+        let unit = if index >= physical_count + self.integral_probe_scales.len() {
+            1.0 // Travelling-wave coordinates have voltage units.
+        } else if index >= physical_count {
             self.integral_probe_scales[index - physical_count]
         } else if self.is_current_coordinate(index) {
             current_scale
@@ -869,7 +877,8 @@ impl PssCircuit {
             .zip(
                 self.project_physical_coordinates(solution, None)
                     .chain(self.behavioral_sources.accepted_integrals())
-                    .chain(self.capacitors.accepted_integrals()),
+                    .chain(self.capacitors.accepted_integrals())
+                    .chain(self.delay_basis.extract(&self.circuit)),
             )
             .enumerate()
         {
@@ -917,6 +926,7 @@ impl PssCircuit {
             )
             .chain(self.behavioral_sources.accepted_integrals())
             .chain(self.capacitors.accepted_integrals())
+            .chain(self.delay_basis.extract(&self.circuit))
             .collect()
     }
 
@@ -928,13 +938,16 @@ impl PssCircuit {
         );
         let physical_count = self.physical_state_dimension();
         let behavioral_end = physical_count + self.behavioral_sources.integral_count();
+        let integral_end = behavioral_end + self.capacitors.integral_count();
+        self.delay_basis
+            .set(&mut self.circuit, &state[integral_end..])?;
         self.circuit
             .behavioral_sources
             .reset_integrals(&state[physical_count..behavioral_end])
             .map_err(SimulationError::Circuit)?;
         self.circuit
             .capacitors
-            .reset_integrals(&state[behavioral_end..])
+            .reset_integrals(&state[behavioral_end..integral_end])
             .map_err(SimulationError::Circuit)?;
         for history in self
             .circuit
@@ -1929,7 +1942,9 @@ impl PssCircuit {
         self.project_physical_coordinates(solution, Some(linearize_at))
             .chain(std::iter::repeat_n(
                 0.0,
-                self.behavioral_sources.integral_count() + self.capacitors.integral_count(),
+                self.behavioral_sources.integral_count()
+                    + self.capacitors.integral_count()
+                    + self.delay_basis.dimension(),
             ))
     }
 

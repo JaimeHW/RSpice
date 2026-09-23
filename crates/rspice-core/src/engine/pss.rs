@@ -810,7 +810,7 @@ impl From<PssError> for SimulationError {
 pub(crate) struct PssStateTrace {
     /// Grid times, starting at 0.
     pub times: Vec<Value>,
-    /// Reactive state (cap voltages then inductor currents) per grid point.
+    /// Storage, expression-integral and delayed-wave coordinates per grid point.
     pub states: Vec<Vec<Value>>,
     /// Full node/branch solution per grid point.
     pub solutions: Vec<Vec<Value>>,
@@ -2023,6 +2023,10 @@ impl Engine {
         for expression in circuit.capacitors.value_expressions.iter_mut().flatten() {
             expression.rebase_accepted_history(0.0);
         }
+        for line in &mut circuit.circuit.tlines {
+            line.rebase_lossless_history(0.0)
+                .map_err(SimulationError::Circuit)?;
+        }
         let checkpoint = TransientCheckpoint::capture_with_junction_history(
             authenticated_fingerprint,
             Some(authenticated_netlist_identity),
@@ -2236,10 +2240,6 @@ impl Engine {
         // coordinates. The existing traversal still solves and qualifies every
         // MNA sample, and its empty monodromy reports NoDynamicModes. An
         // autonomous oscillation, however, needs an independent dynamic state.
-        let state_dimension = circuit.state_dimension();
-        if config.is_autonomous() && state_dimension == 0 {
-            return Err(PssError::NoReactiveElements.into());
-        }
         circuit.integration_steps = Self::ensure_pss_source_contract(
             &circuit,
             config.period(),
@@ -2247,8 +2247,27 @@ impl Engine {
             config.is_autonomous(),
             abort,
         )?;
+        let delay_steps = circuit
+            .tlines
+            .iter()
+            .filter(|line| !line.is_memoryless_two_port())
+            .map(|line| (2.0 * config.period() / line.delay()).ceil() as usize)
+            .max()
+            .unwrap_or(0);
+        self.ensure_analysis_points(delay_steps)?;
+        circuit.integration_steps = circuit.integration_steps.max(delay_steps);
         circuit.integration_mesh =
             self.pss_source_mesh(&circuit, &config, circuit.integration_steps, abort)?;
+        circuit.configure_delay_basis(
+            config.period(),
+            circuit.grid_steps(&config),
+            self.config.resource_limits,
+            abort,
+        )?;
+        let state_dimension = circuit.state_dimension();
+        if config.is_autonomous() && state_dimension == 0 {
+            return Err(PssError::NoReactiveElements.into());
+        }
         self.ensure_result_values(
             circuit
                 .grid_steps(&config)
@@ -2298,7 +2317,7 @@ impl Engine {
         // Phase 1: Stabilization (tstab)
         // ==================================================================
         let period = config.period();
-        let (stabilized_waveform, current_state) = self.pss_run_stabilization(
+        let (stabilized_waveform, mut current_state) = self.pss_run_stabilization(
             &mut circuit,
             &mut matrix,
             &initial_solution,
@@ -2320,6 +2339,30 @@ impl Engine {
             period
         };
 
+        // Period detection may move an autonomous seed far from its authored
+        // guess. Resolve the method-of-steps grid before Newton fixes it.
+        let detected_delay_steps = circuit
+            .tlines
+            .iter()
+            .filter(|line| !line.is_memoryless_two_port())
+            .map(|line| (2.0 * detected_period / line.delay()).ceil() as usize)
+            .max()
+            .unwrap_or(0);
+        if detected_delay_steps > circuit.integration_steps {
+            self.ensure_analysis_points(detected_delay_steps)?;
+            circuit.integration_steps = detected_delay_steps;
+            circuit.integration_mesh =
+                self.pss_source_mesh(&circuit, &config, detected_delay_steps, abort)?;
+            circuit.configure_delay_basis(
+                config.period(),
+                circuit.grid_steps(&config),
+                self.config.resource_limits,
+                abort,
+            )?;
+            current_state = circuit.extract_state();
+            self.ensure_pss_refinement_capacity(&circuit, 0, circuit.grid_steps(&config), false)?;
+        }
+
         // Qualify the discrete orbit against a fully solved refined grid.
         // Source defaults remain authored by config, while the worker-owned
         // integration_steps is shared by every perturbation on a given mesh.
@@ -2334,6 +2377,7 @@ impl Engine {
         loop {
             let steps = circuit.grid_steps(&config);
             let coarse_mesh = circuit.integration_mesh.clone();
+            let coarse_delay_basis = circuit.delay_basis.clone();
             let finer_steps = match &coarse_mesh {
                 Some(mesh) => mesh.refinement_steps(abort)?,
                 None => steps.checked_mul(2).ok_or_else(|| {
@@ -2350,6 +2394,18 @@ impl Engine {
                 indices
             });
             circuit.integration_steps = finer_steps;
+            let fine_initial_state = if circuit
+                .tlines
+                .iter()
+                .any(|line| !line.is_memoryless_two_port())
+            {
+                self.pss_set_reactive_state(&mut circuit, &coarse.state.x0)?;
+                circuit.delay_basis = circuit.delay_basis.refined(self.config.resource_limits)?;
+                circuit.extract_state()
+            } else {
+                coarse.state.x0.clone()
+            };
+            self.ensure_pss_refinement_capacity(&circuit, steps, finer_steps, false)?;
             let has_precision_floor = circuit
                 .integration_mesh
                 .as_ref()
@@ -2367,7 +2423,7 @@ impl Engine {
                     &mut circuit,
                     &mut matrix,
                     &config,
-                    ShootingState::new(coarse.state.x0.clone(), coarse.state.period),
+                    ShootingState::new(fine_initial_state, coarse.state.period),
                     abort,
                 )
                 .map_err(|error| match error {
@@ -2423,6 +2479,7 @@ impl Engine {
             if error <= 1.0 {
                 circuit.integration_steps = steps;
                 circuit.integration_mesh = coarse_mesh;
+                circuit.delay_basis = coarse_delay_basis;
                 break;
             }
             coarse = fine;
@@ -2468,9 +2525,14 @@ impl Engine {
         // For a driven linear circuit the period map is affine in x0: its
         // Jacobian is independent of bias and already describes this orbit.
         self.pss_set_reactive_state(&mut circuit, &shooting_state.x0)?;
-        let linear_jacobian = (!config.is_autonomous() && !circuit.has_nonlinear_devices())
-            .then_some(preconditioner_jacobian)
-            .flatten();
+        let linear_jacobian = (!config.is_autonomous()
+            && !circuit.has_nonlinear_devices()
+            && !circuit
+                .tlines
+                .iter()
+                .any(|line| line.has_state_dependent_lossless_interpolation()))
+        .then_some(preconditioner_jacobian)
+        .flatten();
         let monodromy = if let Some(mut jacobian) = linear_jacobian {
             for (index, row) in jacobian.iter_mut().enumerate() {
                 row[index] += 1.0;
@@ -2831,6 +2893,7 @@ impl Engine {
     /// Initialize reactive element state from DC solution
     fn pss_initialize_reactive_state(&self, circuit: &mut PssCircuit, dc_solution: &[Value]) {
         circuit.seed_charge_history(dc_solution);
+        Self::initialize_tline_history(&mut circuit.circuit, dc_solution, 0.0);
         let PssCircuit {
             circuit,
             diode_history,
@@ -4088,17 +4151,9 @@ impl Engine {
             .update_transient_rhs(rhs, t_next, |br_ordinal| num_nodes + br_ordinal);
         circuit.current_sources.stamp_transient_rhs(rhs, t_next);
 
-        // Memoryless transmission lines: the LEN=0 ideal through connection
-        // and the finite-length RG two-port both load a constant matrix with
-        // no history term, so the shooting period map integrates them exactly.
-        // Lines with propagation delay own retained history the period map
-        // cannot carry and are refused by their declared `PssStateMap`
-        // capability before reaching here.
-        for tline in &circuit.tlines {
-            if tline.is_memoryless_two_port() {
-                Self::stamp_tline_companions_for_memoryless_line(matrix, rhs, tline);
-            }
-        }
+        // Every shooting trial reads immutable accepted delay history. Only a
+        // converged step appends new outgoing waves to that worker's circuit.
+        Self::stamp_tline_companions(circuit, matrix, rhs, t_next, &[]);
 
         // Retain the transient charge law and physical branch-current
         // convention, using the fixed-history step Jacobian for shooting.
@@ -4358,9 +4413,57 @@ impl Engine {
         };
         let fixed_dt = tstop / fixed_steps as Value;
 
-        let initial_step = (max_step / 10.0).min(tstop / 100.0);
-        let mut timestep =
-            TimestepController::new(initial_step, self.config.min_timestep, max_step);
+        // Retained trajectories and native delay windows share the same run
+        // budget. In particular, continuation captures every shooting state;
+        // its storage is larger than an ordinary node-only waveform.
+        let trajectory_width = if trace.is_some() {
+            circuit
+                .state_dimension()
+                .saturating_add(circuit.matrix_size())
+                .saturating_add(1)
+        } else {
+            0
+        }
+        .saturating_add(if retain_waveform {
+            circuit.matrix_size().saturating_add(2)
+        } else {
+            0
+        });
+        let initial_delay_values = circuit.tlines.iter().fold(0usize, |sum, line| {
+            sum.saturating_add(line.history_sample_count().saturating_mul(11))
+        });
+        if fixed_grid {
+            self.ensure_result_values(
+                fixed_steps
+                    .saturating_add(1)
+                    .saturating_mul(trajectory_width)
+                    .saturating_add(initial_delay_values)
+                    .saturating_add(
+                        fixed_steps
+                            .saturating_mul(
+                                circuit
+                                    .tlines
+                                    .iter()
+                                    .filter(|line| !line.is_memoryless_two_port())
+                                    .count(),
+                            )
+                            .saturating_mul(11),
+                    ),
+            )?;
+        }
+
+        let delay_step_limit = circuit
+            .tlines
+            .iter()
+            .filter(|line| !line.is_memoryless_two_port())
+            .map(|line| line.delay())
+            .fold(Value::INFINITY, Value::min);
+        let initial_step = (max_step / 10.0).min(tstop / 100.0).min(delay_step_limit);
+        let mut timestep = TimestepController::new(
+            initial_step,
+            self.config.min_timestep,
+            max_step.min(delay_step_limit),
+        );
         // Stabilization uses adaptive breakpoint scheduling. Shooting and its
         // derivative workers already share an immutable source-aware mesh;
         // rebuilding the adaptive schedule cannot change those fixed steps.
@@ -4472,7 +4575,7 @@ impl Engine {
             } else {
                 let remaining = tstop - t;
                 let (limited_dt, _) = breakpoints.limit_step(t, timestep.dt());
-                let dt = limited_dt.min(remaining);
+                let dt = limited_dt.min(remaining).min(delay_step_limit);
                 let t_next = if dt == remaining { tstop } else { t + dt };
                 (dt, t_next)
             };
@@ -4480,6 +4583,12 @@ impl Engine {
                 return Err(SimulationError::Circuit(format!(
                     "PSS transient traversal produced an invalid step dt={dt:.17e} from t={t:.17e} toward tstop={tstop:.17e}"
                 )));
+            }
+
+            if dt > delay_step_limit * (1.0 + 32.0 * Value::EPSILON) {
+                return Err(SimulationError::Circuit(
+                    "PSS shooting interval exceeds a transmission-line delay; increase points per period for this period range".into()
+                ));
             }
 
             // First step runs backward Euler: it reads no capacitor-current or
@@ -4548,6 +4657,27 @@ impl Engine {
             t = t_next;
             first_step = false;
 
+            if !fixed_grid {
+                let delay_values = circuit
+                    .tlines
+                    .iter()
+                    .filter(|line| !line.is_memoryless_two_port())
+                    .fold(0usize, |sum, line| {
+                        sum.saturating_add(
+                            line.history_sample_count()
+                                .saturating_add(1)
+                                .saturating_mul(11),
+                        )
+                    });
+                self.ensure_analysis_points(total_iterations)?;
+                self.ensure_result_values(
+                    total_iterations
+                        .saturating_add(1)
+                        .saturating_mul(trajectory_width)
+                        .saturating_add(delay_values),
+                )?;
+            }
+
             // Update capacitor history with the same companion that built this
             // step. IC capacitors own a solved physical-current branch;
             // Norton currents retain the unrounded Newton correction.
@@ -4609,6 +4739,7 @@ impl Engine {
                 .accept_transient_step(&new_solution, t)
                 .map_err(|error| SimulationError::Circuit(error.to_string()))?;
             circuit.record_integral_scales();
+            circuit.accept_delay_history(&new_solution, t);
 
             // Evaluate the candidate against history from previously accepted
             // points before rotating that history. `recommend_scale` already
@@ -5844,7 +5975,7 @@ mod tests {
     }
 
     #[test]
-    fn continuation_state_rejects_unadvanced_delay_history() {
+    fn pss_delay_capability_retains_distributed_history_guard() {
         let mut circuit = PssCircuit::new(CircuitData::new()).unwrap();
         circuit.tlines.push(crate::device::TransmissionLine::new(
             "T1".to_string(),
@@ -5856,13 +5987,11 @@ mod tests {
             1.0e-9,
         ));
 
+        Engine::ensure_pss_state_supported(&circuit).unwrap();
+        circuit.tlines[0].set_distributed_rlgc(1.0, 1.0, 0.0, 1.0, 1.0);
         let error = Engine::ensure_pss_state_supported(&circuit)
-            .expect_err("transmission-line continuation must fail closed");
-        assert!(
-            error
-                .to_string()
-                .contains("transmission-line delay history")
-        );
+            .expect_err("distributed-line convolution still needs its own state basis");
+        assert!(error.to_string().contains("transmission-line convolution"));
     }
 
     #[test]

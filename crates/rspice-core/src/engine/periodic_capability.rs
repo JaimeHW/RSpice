@@ -604,9 +604,7 @@ pub(crate) const fn periodic_capability_descriptor(
             ),
             noise: Inapplicable,
             pss_state: Restricted(
-                "a memoryless line (finite-length RG, or the LEN=0 ideal through connection) has \
-                 no propagation history to carry; every other line's delay history is not \
-                 captured",
+                "memoryless RG/LEN=0 lines and exact lossless scalar lines with a full sampled delay-state basis",
             ),
             envelope: Restricted(
                 "memoryless RG/LEN=0 lines and exact lossless delay lines with retained pre-origin wave history",
@@ -806,6 +804,15 @@ fn tline_has_exact_periodic_descriptor(line: &crate::device::TransmissionLine) -
         && line.loss_time_constant() == 0.0
         && line.dc_series_resistance() == 0.0
         && !line.has_distributed_rlgc()
+}
+
+fn tline_has_sampled_periodic_history(line: &crate::device::TransmissionLine) -> bool {
+    line.is_memoryless_two_port()
+        || (tline_has_exact_periodic_descriptor(line)
+            && !line.has_distributed_rlgc()
+            && line.impedance() >= 1e-12
+            && line.delay().is_finite()
+            && line.delay() > 0.0)
 }
 
 /// The MNA branch ordinals a scalar line owns in the exact periodic system.
@@ -1409,11 +1416,11 @@ pub(in crate::engine) fn pss_state_gaps(circuit: &CircuitData) -> Vec<Capability
                     if circuit
                         .tlines
                         .iter()
-                        .any(|line| !line.is_memoryless_two_port())
+                        .any(|line| !tline_has_sampled_periodic_history(line))
                     {
                         gaps.push(CapabilityGap::new(
                             family,
-                            "transmission-line delay history",
+                            "transmission-line convolution or lossy history without a shooting basis; scalar lossless history requires finite positive TD and Z0 >= 1e-12",
                         ));
                     }
                 }
@@ -1520,13 +1527,7 @@ pub(in crate::engine) fn dynamic_state_descriptor_gaps(
                 }
                 F::TransmissionLine => {
                     for line in &circuit.tlines {
-                        if !line.is_memoryless_two_port()
-                            && (!tline_has_exact_periodic_descriptor(line)
-                                || line.has_distributed_rlgc()
-                                || line.impedance() < 1e-12
-                                || !line.delay().is_finite()
-                                || line.delay() <= 0.0)
-                        {
+                        if !tline_has_sampled_periodic_history(line) {
                             gaps.push(CapabilityGap::new(
                                 family,
                                 format!("transmission line '{}': {condition}", line.name),

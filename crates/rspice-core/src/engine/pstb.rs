@@ -206,10 +206,14 @@ impl Engine {
                 });
             }
         }
-        let circuit = super::pss::PssCircuit::new_with_abort(
+        let mut circuit = super::pss::PssCircuit::new_with_abort(
             engine.build_circuit_with_abort(netlist, abort)?,
             engine.config.resource_limits,
             abort,
+        )?;
+        circuit.restore_delay_basis(
+            operating_point.shooting_state_basis(),
+            engine.config.resource_limits,
         )?;
         if circuit
             .inductor_probe_names()

@@ -295,6 +295,22 @@ impl PeriodicNoiseResult {
 }
 
 impl Engine {
+    fn ensure_pss_noise_delay_supported(
+        circuit: &crate::circuit::CircuitData,
+    ) -> Result<(), SimulationError> {
+        if circuit
+            .tlines
+            .iter()
+            .any(|line| !line.is_memoryless_two_port())
+        {
+            return Err(SimulationError::unsupported_capability(
+                "analysis.pss.noise.delay_history",
+                "oscillator noise requires the adjoint boundary injection for transmission-line delay histories".to_string(),
+            ));
+        }
+        Ok(())
+    }
+
     /// Run one authored `.PNOISE` card against a retained shooting-`.PSS`
     /// operating point.
     ///
@@ -486,6 +502,7 @@ impl Engine {
                 self.config.resource_limits,
             );
             Self::ensure_no_mixed_signal_analysis(&circuit, "PSS noise analysis")?;
+            Self::ensure_pss_noise_delay_supported(&circuit)?;
             let matrix = self.build_matrix(&circuit)?;
             circuit.link_indices(&matrix);
             operating_point.authenticate_for_reuse(netlist, &self.config, &config)?;
@@ -523,6 +540,7 @@ impl Engine {
                 self.run_pss_with_state_abort(netlist, config.clone(), abort)?;
             (pss.period, circuit, matrix, x0)
         };
+        Self::ensure_pss_noise_delay_supported(&circuit)?;
         let source_integral_count = circuit.behavioral_sources.integral_count();
         let integral_count = source_integral_count + circuit.capacitors.integral_count();
         let f0 = 1.0 / period;

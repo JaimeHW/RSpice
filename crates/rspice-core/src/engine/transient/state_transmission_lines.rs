@@ -4,7 +4,7 @@ use super::*;
 
 impl Engine {
     #[inline]
-    pub(super) fn stamp_tline_companions(
+    pub(in crate::engine) fn stamp_tline_companions(
         circuit: &crate::circuit::CircuitData,
         matrix: &mut crate::solver::StaticMatrix,
         rhs: &mut [Value],
@@ -12,10 +12,8 @@ impl Engine {
         _tline_dc_refs: &[(Value, Value)],
     ) {
         for tl in &circuit.tlines {
-            if tl.is_zero_length_pass_through() {
-                Self::stamp_zero_length_branch_runtime(matrix, rhs, tl);
-            } else if tl.ltra_rg_two_port().is_some() {
-                Self::stamp_rg_branch_runtime(matrix, rhs, tl);
+            if tl.is_memoryless_two_port() {
+                Self::stamp_tline_companions_for_memoryless_line(matrix, rhs, tl);
             } else if tl.has_txl_runtime() {
                 if let Some(stamp) = tl.txl_transient_stamp(time) {
                     Self::stamp_txl_branch_runtime(matrix, rhs, tl, stamp);
@@ -188,7 +186,7 @@ impl Engine {
     }
 
     #[inline]
-    pub(super) fn initialize_tline_history(
+    pub(in crate::engine) fn initialize_tline_history(
         circuit: &mut crate::circuit::CircuitData,
         initial_solution: &[Value],
         initial_time: Value,
