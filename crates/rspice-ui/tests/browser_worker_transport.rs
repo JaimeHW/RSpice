@@ -56,7 +56,7 @@ fn run(seed: u64, source: &str) -> serde_json::Value {
         .expect("worker must return valid Monte Carlo results");
     let response = structured_clone(&response);
     let response: serde_json::Value = serde_wasm_bindgen::from_value(response).unwrap();
-    assert_eq!(response["protocolVersion"], 34);
+    assert_eq!(response["protocolVersion"], 35);
     assert_eq!(response["response"]["id"].as_u64(), Some(1));
     let result = response["response"]["outcome"]["Success"]["Inline"]["MonteCarlo"].clone();
     assert_eq!(result["seed"].as_u64(), Some(seed), "{response}");
@@ -128,7 +128,7 @@ fn transient_quality_survives_the_worker_and_structured_clone_before_output_crop
         js_sys::Reflect::get(&response, &"protocolVersion".into())
             .unwrap()
             .as_f64(),
-        Some(34.0)
+        Some(35.0)
     );
     let buffers = js_sys::Reflect::get(&response, &"buffers".into())
         .unwrap()
@@ -179,7 +179,7 @@ fn nested_dc_curves_and_exact_traversal_survive_the_worker_and_structured_clone(
         js_sys::Reflect::get(&response, &"protocolVersion".into())
             .unwrap()
             .as_f64(),
-        Some(34.0)
+        Some(35.0)
     );
     let buffers = js_sys::Reflect::get(&response, &"buffers".into())
         .unwrap()
