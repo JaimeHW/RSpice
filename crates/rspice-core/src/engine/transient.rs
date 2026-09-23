@@ -813,7 +813,7 @@ mod history;
 use history::*;
 pub(in crate::engine) use history::{
     AcceptedJunctionHistories, BjtTransientHistory, Bsim3TransientHistory, Bsim4TransientHistory,
-    JfetTransientHistory, MosfetTransientHistory,
+    JfetTransientHistory, MosfetPeriodicChargeIncrements, MosfetTransientHistory,
 };
 
 #[derive(Debug, Clone, Copy)]

@@ -984,6 +984,15 @@ pub(super) struct CapacitorAcceptedState {
     pub(super) current: Value,
 }
 
+/// Path integrals supplying the two preceding accepted Meyer charge changes.
+#[derive(Debug, Clone, Copy, Default)]
+pub(in crate::engine) struct MosfetPeriodicChargeIncrements {
+    /// Integrals of physical G-S/G-D/G-B displacement over [-2dt,-dt].
+    pub(in crate::engine) older_to_previous: [Value; 3],
+    /// Integrals of physical G-S/G-D/G-B displacement over [-dt,0].
+    pub(in crate::engine) previous_to_current: [Value; 3],
+}
+
 /// Legacy BSIM stores intrinsic/overlap flows [-Qs, -Qd, -Qb] in the
 /// three gate histories; body-junction charge retains its separate histories.
 #[derive(Debug, Clone, Default, PartialEq)]

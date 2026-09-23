@@ -2,6 +2,8 @@
 use super::state::MosfetCompanionBiasSource;
 use super::*;
 
+mod periodic;
+
 pub(super) struct MosfetHistoryStep<'a> {
     pub solution: &'a [Value],
     pub coeff: &'a CompanionCoefficients,
