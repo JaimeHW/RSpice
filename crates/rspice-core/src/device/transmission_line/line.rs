@@ -597,7 +597,44 @@ impl TransmissionLine {
     where
         F: Fn(&TlineStateSample) -> Value + Copy,
     {
-        let linear = || Self::linear_interpolate(prev, next, target, selector);
+        Self::delayed_interpolate_with_slope(mode, prev2, prev, next, target, selector).0
+    }
+
+    /// Differentiate the selected native interpolant, including its mixed/TRA
+    /// fallback. A Hermite-buffer slope describes a different interpolant.
+    fn delayed_interpolate_with_slope<F>(
+        mode: DelayedInterpolationMode,
+        prev2: Option<&TlineStateSample>,
+        prev: &TlineStateSample,
+        next: &TlineStateSample,
+        target: Value,
+        selector: F,
+    ) -> (Value, Value)
+    where
+        F: Fn(&TlineStateSample) -> Value + Copy,
+    {
+        let linear = || {
+            let slope = if next.time == prev.time {
+                0.0
+            } else {
+                (selector(next) - selector(prev)) / (next.time - prev.time)
+            };
+            (
+                Self::linear_interpolate(prev, next, target, selector),
+                slope,
+            )
+        };
+        let quadratic = || {
+            let value = Self::quadratic_interpolate(prev2, prev, next, target, selector)?;
+            let previous = prev2?;
+            let before = (selector(prev) - selector(previous)) / (prev.time - previous.time);
+            let after = (selector(next) - selector(prev)) / (next.time - prev.time);
+            // Newton's quadratic derivative, with dimensionless ratios before
+            // multiplication to avoid squaring physical time intervals.
+            let offset = (target - prev.time) / (next.time - previous.time)
+                + (target - next.time) / (next.time - previous.time);
+            Some((value, offset.mul_add(after - before, after)))
+        };
         // Adjacent represented clocks carry opposite sides of an ideal edge.
         // A quadratic stencil spanning that unresolved interval amplifies the
         // jump into a spurious overshoot on the outgoing smooth interval.
@@ -606,18 +643,33 @@ impl TransmissionLine {
         }
         match mode {
             DelayedInterpolationMode::Linear => linear(),
-            DelayedInterpolationMode::Quadratic => {
-                Self::quadratic_interpolate(prev2, prev, next, target, selector)
-                    .unwrap_or_else(linear)
-            }
+            DelayedInterpolationMode::Quadratic => quadratic().unwrap_or_else(linear),
             DelayedInterpolationMode::Mixed => {
-                if let Some(quadratic) =
-                    Self::quadratic_interpolate(prev2, prev, next, target, selector)
-                {
+                if let Some(quadratic) = quadratic() {
                     let prev_value = selector(prev);
                     let next_value = selector(next);
-                    if quadratic >= prev_value.min(next_value)
-                        && quadratic <= prev_value.max(next_value)
+                    // At a retained knot choose the branch reached inside
+                    // this interval. Equality at the endpoint alone must not
+                    // give an overshooting quadratic's slope to a linear
+                    // fallback segment. The endpoint value itself is equal.
+                    let endpoint_direction = if target == prev.time {
+                        1.0
+                    } else if target == next.time {
+                        -1.0
+                    } else {
+                        0.0
+                    };
+                    let mut inward_slope = endpoint_direction * quadratic.1;
+                    if endpoint_direction != 0.0 && inward_slope == 0.0
+                        && let Some(previous) = prev2
+                    {
+                        inward_slope = (next_value - prev_value) / (next.time - prev.time)
+                            - (prev_value - selector(previous)) / (prev.time - previous.time);
+                    }
+                    if quadratic.0 >= prev_value.min(next_value)
+                        && quadratic.0 <= prev_value.max(next_value)
+                        && !(quadratic.0 == prev_value.min(next_value) && inward_slope < 0.0)
+                        && !(quadratic.0 == prev_value.max(next_value) && inward_slope > 0.0)
                     {
                         return quadratic;
                     }
@@ -649,13 +701,15 @@ impl TransmissionLine {
                     // Match Xyce TRA's pathological-flat-segment guard before
                     // applying its linear interpolation from t2 to t3.
                     if (next_value - current_value).abs() < Value::EPSILON {
-                        0.5 * (next_value + current_value)
+                        (0.5 * (next_value + current_value), 0.0)
                     } else {
-                        current_value + next_slope * (target - prev.time)
+                        (
+                            current_value + next_slope * (target - prev.time),
+                            next_slope,
+                        )
                     }
                 } else {
-                    Self::quadratic_interpolate(Some(previous), prev, next, target, selector)
-                        .unwrap_or_else(linear)
+                    quadratic().unwrap_or_else(linear)
                 }
             }
         }

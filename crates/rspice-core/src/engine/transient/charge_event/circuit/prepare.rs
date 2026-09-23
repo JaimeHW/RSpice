@@ -43,7 +43,7 @@ impl<'a> PreparedEventCircuit<'a> {
             }
             use PeriodicDeviceFamily::{
                 Bjt, Capacitor, CoupledInductorPair, CurrentSource, Inductor, InductorCoupling,
-                Resistor, ResistorBranch, VoltageSource,
+                Resistor, ResistorBranch, TransmissionLine, VoltageSource,
             };
             if !matches!(
                 family,
@@ -56,6 +56,7 @@ impl<'a> PreparedEventCircuit<'a> {
                     | Bjt
                     | InductorCoupling
                     | CoupledInductorPair
+                    | TransmissionLine
             ) {
                 return Err(error(format!(
                     "{} require a prepared physical event sampler",
@@ -176,6 +177,18 @@ impl<'a> PreparedEventCircuit<'a> {
                 check_abort(abort)?;
             }
             terminals(stamp.pp.row, stamp.nn.row)?;
+        }
+        for line in &circuit.tlines {
+            check_abort(abort)?;
+            if !line.supports_sided_history_events() || line.ltra_branch_matrix_indices().is_some()
+            {
+                return Err(error(format!(
+                    "transmission line '{}' requires a prepared distributed or branch event sampler",
+                    line.name
+                )));
+            }
+            terminals(line.node1_pos, line.node1_neg)?;
+            terminals(line.node2_pos, line.node2_neg)?;
         }
         for (index, stamp) in c.stamps.iter().enumerate() {
             if index % 64 == 0 {

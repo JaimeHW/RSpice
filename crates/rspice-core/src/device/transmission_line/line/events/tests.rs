@@ -151,3 +151,107 @@ fn sided_line_event_preserves_finite_slopes_and_initial_anchor() {
     assert_eq!(line.delayed_forward_raw_at(0.5), 0.0);
     line.checkpoint_state().unwrap();
 }
+
+#[test]
+fn line_event_slopes_follow_native_interpolation_and_solved_limits() {
+    for mode in [
+        DelayedInterpolationMode::Linear,
+        DelayedInterpolationMode::Quadratic,
+        DelayedInterpolationMode::Mixed,
+        DelayedInterpolationMode::XyceTra,
+    ] {
+        let mut line = TransmissionLine::new("T1".into(), 1, 0, 2, 0, 50.0, 4.0);
+        line.lossless_interpolation_mode = mode;
+        for t in [0.0, 1.0, 2.0] {
+            line.update_history(t, t * t, 0.0, -t * t, 0.0);
+        }
+        // Linear has slope 3; the other modes select t^2 here, with slope 2t.
+        let expected = if matches!(mode, DelayedInterpolationMode::Linear) {
+            3.0
+        } else {
+            2.5
+        };
+        for (forward, sign) in [(true, 1.0), (false, -1.0)] {
+            assert_eq!(
+                line.lossless_wave_slope_on_side(5.25, forward, TransmissionLineTimeSide::Outgoing)
+                    .unwrap(),
+                sign * expected
+            );
+        }
+        line.accept_history_event(TransmissionLineHistoryEvent {
+            time: 3.0,
+            incoming: [9.0, 0.0, -9.0, 0.0],
+            outgoing: [19.0, 0.0, -19.0, 0.0],
+            incoming_wave_slopes: [6.0, -6.0],
+            outgoing_wave_slopes: [2.0, -2.0],
+        })
+        .unwrap();
+        for (side, expected) in [
+            (TransmissionLineTimeSide::Incoming, 6.0),
+            (TransmissionLineTimeSide::Outgoing, 2.0),
+        ] {
+            assert_eq!(
+                line.lossless_wave_slope_on_side(7.0, true, side).unwrap(),
+                expected
+            );
+        }
+        line.update_history(4.0, 21.0, 0.0, -21.0, 0.0);
+        assert_eq!(
+            line.lossless_wave_slope_on_side(7.5, true, TransmissionLineTimeSide::Outgoing)
+                .unwrap(),
+            2.0
+        );
+    }
+    // Mixed rejects a quadratic overshoot and TRA selects its flat-segment
+    // fallback. Their slopes must follow that same choice, not the parabola.
+    for mode in [
+        DelayedInterpolationMode::Quadratic,
+        DelayedInterpolationMode::Mixed,
+        DelayedInterpolationMode::XyceTra,
+    ] {
+        let mut line = TransmissionLine::new("T1".into(), 1, 0, 2, 0, 50.0, 4.0);
+        line.lossless_interpolation_mode = mode;
+        for (t, v) in [(0.0, 200.0), (1.0, 0.0), (2.0, 0.0)] {
+            line.update_history(t, v, 0.0, 0.0, 0.0);
+        }
+        let expected = if matches!(mode, DelayedInterpolationMode::Quadratic) {
+            -50.0
+        } else {
+            0.0
+        };
+        assert_eq!(
+            line.lossless_wave_slope_on_side(5.25, true, TransmissionLineTimeSide::Outgoing)
+                .unwrap(),
+            expected
+        );
+        if matches!(mode, DelayedInterpolationMode::Mixed) {
+            for (time, side) in [
+                (5.0, TransmissionLineTimeSide::Outgoing),
+                (6.0, TransmissionLineTimeSide::Incoming),
+            ] {
+                assert_eq!(
+                    line.lossless_wave_slope_on_side(time, true, side).unwrap(),
+                    0.0
+                );
+            }
+        }
+    }
+    // The receiver clock rounds upward: both derivatives still belong to
+    // the exact launch, not to an unrelated nearby interpolation segment.
+    let mut line = TransmissionLine::new("T1".into(), 1, 0, 2, 0, 50.0, 1.0);
+    line.update_history(0.0, 0.0, 0.0, 0.0, 0.0);
+    let mut edge = event(2.0_f64.powi(-54));
+    edge.incoming_wave_slopes = [2.0, -3.0];
+    edge.outgoing_wave_slopes = [5.0, -7.0];
+    line.accept_history_event(edge).unwrap();
+    for (side, expected) in [
+        (TransmissionLineTimeSide::Incoming, 2.0),
+        (TransmissionLineTimeSide::Outgoing, 5.0),
+    ] {
+        assert_eq!(
+            line.lossless_wave_slope_on_side(1.0_f64.next_up(), true, side)
+                .unwrap(),
+            expected
+        );
+    }
+}

@@ -61,6 +61,18 @@ fn arrival(time: Value, delay: Value) -> Value {
 }
 
 impl TransmissionLine {
+    pub(crate) fn supports_sided_history_events(&self) -> bool {
+        self.td.is_finite()
+            && self.td > 0.0
+            && self.z0.is_finite()
+            && self.z0 >= 1e-12
+            && self.txl.is_none()
+            && !self.has_distributed_rlgc()
+            && !self.is_memoryless_two_port()
+            && self.attenuation == 1.0
+            && self.loss_time_constant == 0.0
+    }
+
     pub(super) fn history_event_at(&self, time: Value) -> Option<&HistoryEvent> {
         self.history_events
             .get(
@@ -142,16 +154,7 @@ impl TransmissionLine {
         &mut self,
         event: TransmissionLineHistoryEvent,
     ) -> Result<(), String> {
-        if !self.td.is_finite()
-            || self.td <= 0.0
-            || !self.z0.is_finite()
-            || self.z0 <= 0.0
-            || self.txl.is_some()
-            || self.has_distributed_rlgc()
-            || self.is_memoryless_two_port()
-            || self.attenuation != 1.0
-            || self.loss_time_constant != 0.0
-        {
+        if !self.supports_sided_history_events() {
             return Err(
                 "sided transmission-line events require an ordinary lossless scalar delay".into(),
             );
@@ -282,6 +285,16 @@ impl TransmissionLine {
         forward: bool,
         side: TransmissionLineTimeSide,
     ) -> Option<Value> {
+        self.history_event_value_and_slope(time, forward, side)
+            .map(|sample| sample.0)
+    }
+
+    fn history_event_value_and_slope(
+        &self,
+        time: Value,
+        forward: bool,
+        side: TransmissionLineTimeSide,
+    ) -> Option<(Value, Value)> {
         if self.history_events.is_empty() {
             return None;
         }
@@ -294,7 +307,10 @@ impl TransmissionLine {
         if let Some(event) = self.history_events.get(index)
             && arrival(event.incoming.time, self.td) == time
         {
-            return Some(self.lossless_wave_at_on_side(event.incoming.time, forward, side));
+            return Some((
+                self.lossless_wave_at_on_side(event.incoming.time, forward, side),
+                event.slope(forward, side),
+            ));
         }
         let recovered = time - high;
         let low = (time - (high + recovered)) + (recovered - self.td);
@@ -305,14 +321,90 @@ impl TransmissionLine {
                 side
             };
             let value = self.lossless_wave_at_on_side(high, forward, selected);
-            let rates = if selected == TransmissionLineTimeSide::Incoming {
-                event.incoming_wave_slopes
-            } else {
-                event.outgoing_wave_slopes
-            };
-            return Some(rates[usize::from(!forward)].mul_add(low, value));
+            let slope = event.slope(forward, selected);
+            return Some((slope.mul_add(low, value), slope));
         }
         None
+    }
+
+    /// Finite derivative of the same delayed wave used by the native Norton
+    /// stamp. Event limits use solved rates; ordinary samples use the selected
+    /// native polynomial, never a jump divided by its neighboring clock gap.
+    pub fn lossless_wave_slope_on_side(
+        &self,
+        time: Value,
+        forward: bool,
+        side: TransmissionLineTimeSide,
+    ) -> Result<Value, String> {
+        if !self.supports_sided_history_events() || !time.is_finite() {
+            return Err("invalid scalar lossless-line slope query".into());
+        }
+        let slope =
+            if let Some((_, slope)) = self.history_event_value_and_slope(time, forward, side) {
+                slope
+            } else {
+                self.lossless_wave_slope_at(time - self.td, forward, side)
+            };
+        if slope.is_finite() {
+            Ok(slope)
+        } else {
+            Err(format!(
+                "transmission line '{}': nonfinite delayed wave slope",
+                self.name
+            ))
+        }
+    }
+
+    fn lossless_wave_slope_at(
+        &self,
+        target: Value,
+        forward: bool,
+        side: TransmissionLineTimeSide,
+    ) -> Value {
+        if let Some(event) = self.history_event_at(target) {
+            return event.slope(forward, side);
+        }
+        let initial = self.initial_state();
+        if self.state_history.is_empty()
+            || target < initial.time
+            || (target == initial.time && side == TransmissionLineTimeSide::Incoming)
+        {
+            return 0.0;
+        }
+        let next = self.state_history.partition_point(|sample| {
+            sample.time < target
+                || (sample.time == target && side == TransmissionLineTimeSide::Outgoing)
+        });
+        let Some(next_sample) = self.state_history.get(next) else {
+            // Native sampling holds the last accepted value outside history.
+            return 0.0;
+        };
+        let Some(previous) = next.checked_sub(1).and_then(|i| self.state_history.get(i)) else {
+            return 0.0;
+        };
+        let next_sample = self
+            .history_event_at(next_sample.time)
+            .map_or(next_sample, |event| &event.incoming);
+        let previous2 = if self.history_event_at(previous.time).is_some() {
+            None
+        } else {
+            next.checked_sub(2).and_then(|i| self.state_history.get(i))
+        };
+        Self::delayed_interpolate_with_slope(
+            self.lossless_interpolation_mode,
+            previous2,
+            previous,
+            next_sample,
+            target,
+            |sample| {
+                if forward {
+                    sample.v1 + self.z0 * sample.i1
+                } else {
+                    sample.v2 + self.z0 * sample.i2
+                }
+            },
+        )
+        .1
     }
 
     pub(super) fn incoming_buffer_sample(
@@ -329,6 +421,16 @@ impl TransmissionLine {
             };
             (wave, event.incoming_wave_slopes[usize::from(!forward)])
         })
+    }
+}
+
+impl HistoryEvent {
+    fn slope(&self, forward: bool, side: TransmissionLineTimeSide) -> Value {
+        let slopes = match side {
+            TransmissionLineTimeSide::Incoming => self.incoming_wave_slopes,
+            TransmissionLineTimeSide::Outgoing => self.outgoing_wave_slopes,
+        };
+        slopes[usize::from(!forward)]
     }
 }
 

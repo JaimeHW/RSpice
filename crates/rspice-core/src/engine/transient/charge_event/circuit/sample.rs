@@ -76,6 +76,44 @@ impl PreparedEventCircuit<'_> {
                 self.circuit.resistors.conductances[index],
             );
         }
+        let line_side = match source_side {
+            SourceTimeSide::LeftLimit => crate::device::TransmissionLineTimeSide::Incoming,
+            SourceTimeSide::RightLimit => crate::device::TransmissionLineTimeSide::Outgoing,
+            SourceTimeSide::Published => unreachable!("validated physical event side"),
+        };
+        for line in &self.circuit.tlines {
+            check_abort(abort)?;
+            if line.history_storage_values() == 0
+                || time - line.delay() > line.accepted_history_time()
+            {
+                return Err(error(format!(
+                    "transmission line '{}': physical event exceeds its accepted delay history",
+                    line.name
+                )));
+            }
+            for (p, n, forward) in [
+                (line.node1_pos, line.node1_neg, false),
+                (line.node2_pos, line.node2_neg, true),
+            ] {
+                let conductance = line.conductance();
+                branch(&mut sample.f, state, p, n, conductance);
+                let forcing = conductance * line.lossless_wave_on_side(time, forward, line_side);
+                let forcing_rate = conductance
+                    * line
+                        .lossless_wave_slope_on_side(time, forward, line_side)
+                        .map_err(error)?;
+                for (row, sign) in [(p, 1.0), (n, -1.0)] {
+                    sample.f.stamp_rhs(row, sign * forcing);
+                    if row != 0 {
+                        sample.f_time[row - 1] = sum([
+                            (sample.f_time[row - 1], 1.0),
+                            (forcing_rate, -sign),
+                        ]
+                        .into_iter())?;
+                    }
+                }
+            }
+        }
         for (index, stamp) in self.circuit.capacitors.stamps.iter().enumerate() {
             if index % 64 == 0 {
                 check_abort(abort)?;
