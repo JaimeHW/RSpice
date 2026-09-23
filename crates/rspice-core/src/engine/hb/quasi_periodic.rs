@@ -269,6 +269,10 @@ impl Engine {
         Ok(solver)
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "numerical API keeps independent circuit, spectral, and resource inputs explicit"
+    )]
     fn qpss_dc_seed(
         &self,
         netlist: &Netlist,

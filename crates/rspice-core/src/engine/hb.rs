@@ -1666,6 +1666,10 @@ impl Engine {
         )
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "numerical API keeps independent circuit, spectral, and resource inputs explicit"
+    )]
     fn hb_seed_transient_assisted_with_dc_seed(
         &self,
         netlist: &Netlist,

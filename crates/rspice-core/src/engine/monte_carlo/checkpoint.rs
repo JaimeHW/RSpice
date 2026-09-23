@@ -392,6 +392,10 @@ impl Engine {
     /// resource failure or publication failure. The publication hook runs serially
     /// after each newly completed trial and can persist at a caller-chosen cadence.
     /// Statistical failures are retained; interrupted/fatal trials remain missing.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "public checkpoint API retains explicit trial and persistence inputs"
+    )]
     pub fn run_monte_carlo_measurements_checkpointed_with_abort<F, P>(
         &self,
         netlist: &Netlist,
