@@ -486,7 +486,7 @@ pub(crate) const fn periodic_capability_descriptor(
             small_signal: Complete,
             noise: Restricted("native BSIM4 TNOIMOD=0/1 and FNOIMOD=0/1"),
             pss_state: Complete,
-            envelope: Absent(ENVELOPE_LINEAR_SUBSET),
+            envelope: Complete,
         },
         F::B3SoiDd => PeriodicCapabilityDescriptor {
             residual_jacobian: Absent("native B3SOI DD"),
@@ -1750,7 +1750,7 @@ mod tests {
             F::Bjt => [R, R, C, C, R, R],
             F::Mosfet => [R, C, C, R, A, A],
             F::Bsim3v3 => [C, C, C, C, C, C],
-            F::Bsim4v8 => [C, C, C, R, C, A],
+            F::Bsim4v8 => [C, C, C, R, C, C],
             F::B3SoiDd | F::B3SoiFd | F::B3SoiPd => [A, C, I, A, A, A],
             F::Ekv26 | F::Ekv3 | F::Vdmos => [I, C, A, A, A, A],
             F::Jfet => [R, C, C, R, R, R],

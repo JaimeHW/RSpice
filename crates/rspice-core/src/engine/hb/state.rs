@@ -34,6 +34,9 @@ pub enum HbEnvelopeStateGuarantee {
     /// Complete native BSIM3 terminal and NQS history together with supported
     /// junction, behavioral-source, and physical R/L/C state.
     ExactBsim3RlcMnaV1,
+    /// Complete native BSIM4 terminal, split gate/body, and NQS history
+    /// together with supported BSIM3, junction, behavioral, and R/L/C state.
+    ExactBsim4RlcMnaV1,
     /// Complete physical/SDT state for expression capacitances and the other
     /// supported devices, with a new charge origin and first-order restart.
     ExpressionChargeRestartV1,
@@ -358,10 +361,11 @@ impl Engine {
         if !result.is_valid()
             || result.continuation_limitations.iter().any(|limitation| {
                 // Generic phase projections omit expression-capacitor SDT
-                // and BSIM3 integration history. This initializer reconstructs
+                // and BSIM3/BSIM4 integration history. This initializer reconstructs
                 // those states before creating the authenticated checkpoint.
                 *limitation != HbContinuationLimitation::CapacitorChargeHistoryNotRetained
                     && *limitation != HbContinuationLimitation::Bsim3ChargeHistoryNotRetained
+                    && *limitation != HbContinuationLimitation::Bsim4ChargeHistoryNotRetained
             })
         {
             return Err(SimulationError::Circuit(
@@ -553,6 +557,7 @@ impl Engine {
             && circuit.jfets.is_empty()
             && circuit.bjts.is_empty()
             && circuit.bsim3v3.is_empty()
+            && circuit.bsim4v8.is_empty()
         {
             None
         } else {
@@ -632,6 +637,13 @@ impl Engine {
                 history_step,
             )
             .map_err(SimulationError::Circuit)?;
+            let bsim4_history = Self::initialize_periodic_bsim4_history(
+                &mut circuit,
+                [&solutions[1], &solutions[2], &solutions[3]],
+                &node_rates,
+                history_step,
+            )
+            .map_err(SimulationError::Circuit)?;
             Some(
                 Self::capture_accepted_junction_transient_history_checkpoint(
                     &circuit,
@@ -640,7 +652,7 @@ impl Engine {
                     &jfet_history,
                     &vec![None; circuit.bjts.len()],
                     &bsim3_history,
-                    &Default::default(),
+                    &bsim4_history,
                 ),
             )
         };
@@ -724,6 +736,8 @@ impl Engine {
             .map_err(SimulationError::Circuit)?;
         let guarantee = if original_circuit.capacitors.has_solution_dependent_values() {
             HbEnvelopeStateGuarantee::ExpressionChargeRestartV1
+        } else if !original_circuit.bsim4v8.is_empty() {
+            HbEnvelopeStateGuarantee::ExactBsim4RlcMnaV1
         } else if !original_circuit.bsim3v3.is_empty() {
             HbEnvelopeStateGuarantee::ExactBsim3RlcMnaV1
         } else if !original_circuit.diodes.is_empty()

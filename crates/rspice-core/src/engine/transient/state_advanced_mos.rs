@@ -681,6 +681,46 @@ impl Engine {
         Ok(history)
     }
 
+    /// Reconstruct accepted native BSIM4 charge state at a solved periodic
+    /// origin, including both NQS storage lanes and analytic charge rates.
+    pub(in crate::engine) fn initialize_periodic_bsim4_history(
+        circuit: &mut crate::circuit::CircuitData,
+        solutions: [&[Value]; 3],
+        node_rates: &[Value],
+        history_step: Value,
+    ) -> Result<Bsim4TransientHistory, String> {
+        if solutions.iter().any(|solution| {
+            solution.len() != circuit.matrix_size()
+                || solution.iter().any(|value| !value.is_finite())
+        }) || node_rates.len() != circuit.num_nodes()
+            || node_rates.iter().any(|rate| !rate.is_finite())
+            || !history_step.is_finite()
+            || history_step <= 0.0
+        {
+            return Err("periodic BSIM4 history has invalid sample dimensions or rates".into());
+        }
+        let mut history = Bsim4TransientHistory::default();
+        for device in &mut circuit.bsim4v8.devices {
+            let (older, _) = device.periodic_history_sample(solutions[0], node_rates)?;
+            let (previous, _) = device.periodic_history_sample(solutions[1], node_rates)?;
+            let (current, rates) = device.periodic_history_sample(solutions[2], node_rates)?;
+            for (column, (_, values)) in history.columns_mut().into_iter().enumerate() {
+                let state = column / 4;
+                values.push(match column % 4 {
+                    0 => current[state],
+                    1 => previous[state],
+                    2 => older[state],
+                    _ => rates[state],
+                });
+            }
+            device.seed_accepted_periodic_bias(solutions[2]);
+        }
+        history.accepted_dt_prev = history_step;
+        history.accepted_dt_prev_prev = history_step;
+        history.validate(circuit.bsim4v8.len())?;
+        Ok(history)
+    }
+
     /// Stamp the BSIM3 transient charge companion for every instance: the
     /// mode-assembled `gc**·ag0` capacitance matrix plus the `ceqq*`
     /// equivalent charge currents. `NQSMOD=1` also stamps the hidden
