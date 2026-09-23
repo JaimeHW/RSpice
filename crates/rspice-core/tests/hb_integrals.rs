@@ -896,12 +896,17 @@ fn hb_integral_port_scattering_matches_filter_transfer() {
             close(matrix.get(1 + sideband, 4 + sideband), Complex64::ZERO);
         }
     }
-    let error = engine
+    let qpss = engine
         .run_qpss(
             &netlist,
             QpssConfig::new(vec![100.0, 141.4213562373095], vec![1, 1]),
         )
-        .expect_err("QPSS needs its own retained integral basis")
-        .to_string();
-    assert!(error.contains("independent-phase state lifting"), "{error}");
+        .expect("QPSS retains the behavioral integral on its independent-phase basis");
+    assert_eq!(qpss.integral_names(), ["B:BV:sdt:0"]);
+    assert!(
+        qpss.spectra()
+            .iter()
+            .flatten()
+            .all(|value| value.norm() < 1e-12)
+    );
 }
