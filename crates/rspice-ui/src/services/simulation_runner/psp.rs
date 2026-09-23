@@ -225,6 +225,10 @@ impl PeriodicOperatingPoint<'_> {
     }
 }
 
+#[allow(
+    dead_code,
+    reason = "retained periodic S-parameter source-path adapter"
+)]
 fn run_periodic_sparameter_analysis(
     netlist_text: &str,
     config: &PspRunConfig,

@@ -262,6 +262,10 @@ pub fn run_pxf_analysis_from_pss_with_source_path_and_abort(
 /// `Engine::run_pxf_card_from_hb_with_abort` reads the same path through the
 /// same conversion matrix its shooting sibling reads; the readout below is
 /// therefore the one readout, not a second one for this carrier.
+#[allow(
+    dead_code,
+    reason = "retained HB carrier PXF adapter for callers and tests"
+)]
 pub fn run_pxf_analysis_from_hb_with_source_path_and_abort(
     netlist_text: &str,
     config: &PxfRunConfig,

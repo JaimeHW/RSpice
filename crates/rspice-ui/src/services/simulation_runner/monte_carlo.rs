@@ -90,6 +90,10 @@ pub fn run_monte_carlo_analysis_with_source_path_and_abort(
 }
 
 /// Run parameter-tolerance Monte Carlo under one exact Run Set environment.
+#[allow(
+    dead_code,
+    reason = "retained Monte Carlo adapter for callers and tests"
+)]
 pub(crate) fn run_monte_carlo_analysis_with_environment_and_source_path_and_abort(
     netlist_text: &str,
     source_path: Option<&Path>,
@@ -186,6 +190,7 @@ pub(crate) fn run_monte_carlo_analysis_with_environment_and_source_path_and_abor
 
 /// The all-node OP service knows every sampled column is a voltage. Generic
 /// configured studies attach their own observations after numeric aggregation.
+#[allow(dead_code, reason = "retained Monte Carlo population adapter")]
 fn finish_voltage_population(
     result: rspice_core::analysis::monte_carlo::MonteCarloResult,
     result_value_limit: usize,
@@ -285,6 +290,7 @@ pub fn run_statistical_monte_carlo_with_source_path_and_abort(
 /// Run deck-statistical Monte Carlo under one exact Run Set environment.
 /// Every trial is reparsed to redraw statistical expressions, so the
 /// environment is applied to every reparsed deck before its operating point.
+#[allow(dead_code, reason = "retained statistical Monte Carlo adapter")]
 pub(crate) fn run_statistical_monte_carlo_with_environment_and_source_path_and_abort(
     netlist_text: &str,
     source_path: Option<&Path>,

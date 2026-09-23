@@ -21,6 +21,10 @@ pub struct QpssData {
     pub operating_point: Arc<QpssOperatingPoint>,
 }
 
+#[allow(
+    dead_code,
+    reason = "retained QPSS source-path adapter for callers and tests"
+)]
 pub fn run_qpss_analysis_with_source_path_and_abort(
     netlist_text: &str,
     config: QpssConfig,

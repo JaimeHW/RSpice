@@ -217,6 +217,10 @@ pub fn run_hb_analysis_with_abort(
 /// Run Harmonic Balance analysis with source-path resolution and cooperative
 /// cancellation through validation, layout construction, solving, and result
 /// conversion.
+#[allow(
+    dead_code,
+    reason = "retained source-path HB adapter for callers and tests"
+)]
 pub fn run_hb_analysis_with_source_path_and_abort(
     netlist_text: &str,
     config: &HbRunConfig,

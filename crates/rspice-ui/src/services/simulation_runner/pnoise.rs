@@ -292,6 +292,10 @@ pub fn run_pnoise_analysis_from_pss_with_source_path_and_abort(
 /// unknown, so it has no free phase to diffuse, and a phase-referred request
 /// is refused before this point by the plan's dependency contract and by the
 /// engine's own `check_pnoise_card_carrier`.
+#[allow(
+    dead_code,
+    reason = "retained HB carrier PNOISE adapter for callers and tests"
+)]
 pub fn run_pnoise_analysis_from_hb_with_source_path_and_abort(
     netlist_text: &str,
     config: &PnoiseRunConfig,
@@ -308,6 +312,7 @@ pub fn run_pnoise_analysis_from_hb_with_source_path_and_abort(
     )
 }
 
+#[allow(dead_code, reason = "retained source-path PNOISE adapter")]
 fn run_pnoise_analysis_impl(
     netlist_text: &str,
     config: &PnoiseRunConfig,

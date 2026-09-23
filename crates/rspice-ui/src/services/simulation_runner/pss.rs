@@ -61,6 +61,7 @@ pub struct PssRunConfig {
 }
 
 impl PssRunConfig {
+    #[allow(dead_code, reason = "retained PSS configuration constructor")]
     pub fn new(
         fundamental_freq: Value,
         tone_sources: Vec<String>,
@@ -117,6 +118,10 @@ pub fn run_pss_analysis_with_abort(
 ///
 /// Finds the periodic steady-state solution of a circuit with autonomous or
 /// driven oscillations, using the shooting method with Newton iteration.
+#[allow(
+    dead_code,
+    reason = "retained PSS source-path adapter for callers and tests"
+)]
 pub fn run_pss_analysis_with_source_path_and_abort(
     netlist_text: &str,
     fundamental_freq: Value,
@@ -145,6 +150,7 @@ pub fn run_pss_analysis_with_source_path_and_abort(
 
 /// Run a fully materialized shooting-PSS request with source-path resolution
 /// and cooperative cancellation.
+#[allow(dead_code, reason = "retained configured PSS source-path adapter")]
 pub fn run_pss_analysis_with_config_and_source_path_and_abort(
     netlist_text: &str,
     config: &PssRunConfig,

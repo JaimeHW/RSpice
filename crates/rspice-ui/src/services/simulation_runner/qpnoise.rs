@@ -9,6 +9,10 @@ use rspice_core::engine::{QpnoiseAnalysisResult, QpssOperatingPoint};
 use rspice_core::netlist::QpnoiseCard;
 use std::path::Path;
 
+#[allow(
+    dead_code,
+    reason = "retained QPNOISE source-path adapter for callers and tests"
+)]
 pub fn run_qpnoise_analysis_from_qpss_with_source_path_and_abort(
     netlist_text: &str,
     card: &QpnoiseCard,

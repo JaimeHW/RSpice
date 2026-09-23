@@ -62,13 +62,13 @@ pub(crate) use envelope_fourier::{
     split_fourier_output, validate_fourier_output_accessor,
 };
 pub use error::{ServiceRunError, ServiceRunResult};
+#[cfg(test)]
+pub use hb::run_hb_analysis_with_source_path_and_abort;
 pub(crate) use hb::{
     HbData, HbSpectrum, build_core_hb_config, run_hb_analysis_on_materialized_with_abort,
     run_hb_analysis_with_dc_seed_on_materialized_with_abort,
 };
 pub use hb::{HbRunConfig, HbToneRunConfig};
-#[cfg(test)]
-pub use hb::run_hb_analysis_with_source_path_and_abort;
 pub use hbnoise::{HbNoiseReference, HbnoiseFrequencySweep, HbnoiseRunConfig};
 pub(crate) use hbnoise::{integrate_psd, run_hbnoise_analysis_from_hb_on_materialized_with_abort};
 pub(crate) use hbnoise::{validate_hbnoise_frequency_options, validate_noise_sidebands};
@@ -82,9 +82,7 @@ pub(crate) use helpers::{
     parse_runner_netlist_with_abort, source_with_run_temperature_with_abort,
     splice_before_terminal_end_card, terminal_end_card_offset,
 };
-pub(crate) use monte_carlo::{
-    MonteCarloData, finish_monte_carlo_result,
-};
+pub(crate) use monte_carlo::{MonteCarloData, finish_monte_carlo_result};
 #[cfg(test)]
 pub(crate) use monte_carlo::{
     run_monte_carlo_analysis_with_environment_and_source_path_and_abort,
@@ -106,9 +104,7 @@ pub(crate) use pac_pxf::{
     PacData, PxfData, run_pac_analysis_on_materialized_with_abort,
     run_pxf_analysis_on_materialized_with_abort,
 };
-pub use pac_pxf::{
-    PacFrequencySweep, PacRunConfig, PxfFrequencySweep, PxfRunConfig,
-};
+pub use pac_pxf::{PacFrequencySweep, PacRunConfig, PxfFrequencySweep, PxfRunConfig};
 #[cfg(test)]
 pub use pac_pxf::{
     run_pac_analysis_from_hb_with_source_path_and_abort,
@@ -117,12 +113,10 @@ pub use pac_pxf::{
 pub use periodic_carrier::PeriodicCarrier;
 pub(crate) use periodic_carrier::PeriodicCarrierState;
 pub(crate) use pnoise::PnoiseData;
-pub(crate) use pnoise::run_pnoise_analysis_on_materialized_with_abort;
-pub use pnoise::{
-    PnoiseFrequencySweep, PnoiseReference, PnoiseRunConfig,
-};
 #[cfg(test)]
 pub use pnoise::run_pnoise_analysis_from_hb_with_source_path_and_abort;
+pub(crate) use pnoise::run_pnoise_analysis_on_materialized_with_abort;
+pub use pnoise::{PnoiseFrequencySweep, PnoiseReference, PnoiseRunConfig};
 pub(crate) use psp::run_psp_analysis_from_pss_on_materialized_with_abort;
 pub(crate) use psp::{PspData, run_hbsp_analysis_from_hb_on_materialized_with_abort};
 pub use psp::{PspRunConfig, PspSweep};
@@ -184,6 +178,7 @@ fn now_ms() -> f64 {
         .unwrap_or(0.0)
 }
 
+#[allow(dead_code, reason = "retained by Monte Carlo compatibility runners")]
 const DEFAULT_MONTE_CARLO_SEED: u64 = 0x5EED_5EED;
 
 pub(crate) fn build_engine_config(

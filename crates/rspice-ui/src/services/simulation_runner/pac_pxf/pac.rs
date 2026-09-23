@@ -528,6 +528,10 @@ pub fn run_pac_analysis_from_pss_with_source_path_and_abort(
 /// One result-conversion path serves both: the engine's `.PAC` result is the
 /// same object with the same axes whichever family froze the large-signal
 /// solution, so the sideband traces below are assembled once.
+#[allow(
+    dead_code,
+    reason = "retained HB carrier PAC adapter for callers and tests"
+)]
 pub fn run_pac_analysis_from_hb_with_source_path_and_abort(
     netlist_text: &str,
     config: &PacRunConfig,
@@ -544,6 +548,7 @@ pub fn run_pac_analysis_from_hb_with_source_path_and_abort(
     )
 }
 
+#[allow(dead_code, reason = "retained carrier PAC source-path adapter")]
 fn run_pac_analysis_from_carrier_with_source_path_and_abort(
     netlist_text: &str,
     config: &PacRunConfig,
