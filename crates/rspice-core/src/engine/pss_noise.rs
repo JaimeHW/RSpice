@@ -587,6 +587,7 @@ impl Engine {
                     j,
                     x0[j],
                     self.current_abstol() / self.voltage_abstol(),
+                    self.config.convergence_config.charge_abstol / self.voltage_abstol(),
                 );
 
             let mut x_plus = x0.clone();
@@ -841,7 +842,7 @@ impl Engine {
                     let physical: Value = v1_k
                         .iter()
                         .take(physical_count)
-                        .zip(circuit.project_perturbation(&delta))
+                        .zip(circuit.project_perturbation(&delta, &solution))
                         .map(|(adjoint, perturbation)| adjoint * perturbation * frozen_rate)
                         .sum();
                     let capacitor_start = physical_count + source_integral_count;

@@ -114,7 +114,7 @@ impl PssAcceptedStepHistory {
 const PSS_FD_STEP: Value = 1e-8;
 const PSS_KRYLOV_STATE_THRESHOLD: usize = 12;
 const PSS_KRYLOV_REL_TOL: Value = 1e-9;
-const PSS_OPERATING_POINT_IDENTITY_VERSION: u32 = 94;
+const PSS_OPERATING_POINT_IDENTITY_VERSION: u32 = 95;
 
 fn pss_identity_field(hasher: &mut blake3::Hasher, name: &str, bytes: &[u8]) {
     hasher.update(&(name.len() as u64).to_le_bytes());
@@ -2775,7 +2775,12 @@ impl Engine {
             .map(|(index, pair)| {
                 (
                     pair,
-                    circuit.solution_abstol(index, self.voltage_abstol(), self.current_abstol()),
+                    circuit.solution_abstol(
+                        index,
+                        self.voltage_abstol(),
+                        self.current_abstol(),
+                        self.config.convergence_config.charge_abstol,
+                    ),
                 )
             })
             .chain(
@@ -3160,6 +3165,7 @@ impl Engine {
                     j,
                     x0[j],
                     self.current_abstol() / self.voltage_abstol(),
+                    self.config.convergence_config.charge_abstol / self.voltage_abstol(),
                 );
 
             let mut x_plus = x0.to_vec();
@@ -3266,6 +3272,7 @@ impl Engine {
                         index,
                         *state,
                         self.current_abstol() / self.voltage_abstol(),
+                        self.config.convergence_config.charge_abstol / self.voltage_abstol(),
                     )
             })
             .fold(0.0_f64, Value::max);
@@ -3797,6 +3804,7 @@ impl Engine {
                                             index,
                                             self.voltage_abstol(),
                                             self.current_abstol(),
+                                            self.config.convergence_config.charge_abstol,
                                         ) + self.voltage_reltol() * old.abs().max(new.abs()))
                         },
                     );
@@ -3950,6 +3958,8 @@ impl Engine {
                 // a current constraint, so its absolute tolerance has amps.
                 if row < nodes || circuit.is_initial_current_row(row) {
                     self.current_abstol()
+                } else if circuit.is_initial_charge_row(row) {
+                    self.config.convergence_config.charge_abstol / 1e-9
                 } else {
                     self.voltage_abstol()
                 }
@@ -4582,6 +4592,7 @@ impl Engine {
                     &mut lte_solution,
                     self.voltage_abstol(),
                     self.current_abstol(),
+                    self.config.convergence_config.charge_abstol,
                 );
                 let (lte, _) = lte_estimator.estimate(&lte_solution, dt);
                 lte_estimator.record(&lte_solution, dt);

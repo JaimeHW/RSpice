@@ -45,12 +45,19 @@ fn bsim3_pss_overlap_storage_matches_rc_waveform_and_physical_mode() {
 
 #[test]
 fn bsim3_pss_coupled_native_charge_matches_hb_and_resumes() {
-    for (kind, polarity, capmod, method) in [
-        ("NMOS", 1.0, 0, IntegrationMethod::Trapezoidal),
-        ("PMOS", -1.0, 3, IntegrationMethod::Gear2),
+    for (kind, polarity, capmod, nqs, method) in [
+        ("NMOS", 1.0, 0, 0, IntegrationMethod::Trapezoidal),
+        ("PMOS", -1.0, 3, 0, IntegrationMethod::Gear2),
+        ("NMOS", 1.0, 2, 1, IntegrationMethod::Trapezoidal),
+        ("PMOS", -1.0, 3, 1, IntegrationMethod::Gear2),
     ] {
+        let storage = if nqs == 1 && polarity > 0.0 {
+            "CGDO=0 CGSO=0 CGBO=0 CF=0 CGDL=0 CGSL=0 CJ=0 CJSW=0 CJSWG=0"
+        } else {
+            "CGDO=7.9e-10 CGSO=6.3e-10 CJ=9.5e-4 CJSW=2.4e-10"
+        };
         let netlist = Netlist::parse(&format!(
-            "BSIM3 PSS\nVDD supply 0 {}\nVIN in 0 SIN({} {} 1G)\nRD supply out 500\nRG in gate 100\nRS source 0 10\nM1 out gate source 0 mm L=.18u W=10u AD=4p AS=4p PD=20u PS=20u M=2 OFF\n.model mm {kind}(LEVEL=49 TOX=4.1n VTH0={} U0=270 K1=.59 K2=.0026 CAPMOD={capmod} RSH=10 CGDO=7.9e-10 CGSO=6.3e-10 CJ=9.5e-4 CJSW=2.4e-10)\n.options hbint tahb=0\n.end\n",
+            "BSIM3 PSS\nVDD supply 0 {}\nVIN in 0 SIN({} {} 1G)\nRD supply out 500\nRG in gate 100\nRS source 0 10\nM1 out gate source 0 mm L=.18u W=10u AD=4p AS=4p PD=20u PS=20u M=2 OFF\n.model mm {kind}(LEVEL=49 TOX=4.1n VTH0={} U0=270 K1=.59 K2=.0026 CAPMOD={capmod} NQSMOD={nqs} RSH=10 {storage})\n.options hbint tahb=0\n.end\n",
             polarity * 1.8, polarity * 0.7, polarity * 0.01, polarity * 0.37,
         )).unwrap();
         let engine = Engine::new(SimulationConfig {
@@ -69,7 +76,14 @@ fn bsim3_pss_coupled_native_charge_matches_hb_and_resumes() {
         config.integration_method = Some(method);
         let (analysis, state) = engine
             .run_pss_with_continuation_state(&netlist, config)
-            .unwrap_or_else(|error| panic!("{kind} CAPMOD={capmod}: {error}"));
+            .unwrap_or_else(|error| panic!("{kind} CAPMOD={capmod} NQSMOD={nqs}: {error}"));
+        if nqs == 1 && polarity > 0.0 {
+            assert_eq!(
+                analysis.monodromy.len(),
+                1,
+                "only the stored channel charge is dynamic"
+            );
+        }
         for (name, values) in analysis
             .result
             .node_names

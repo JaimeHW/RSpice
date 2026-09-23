@@ -752,7 +752,7 @@ mod charge_stamper;
 // acceptance owner routes incoming/outgoing solves through it.
 #[cfg_attr(not(test), allow(dead_code))]
 mod charge_event;
-use charge_stamper::StaticMatrixChargeStamper;
+pub(in crate::engine) use charge_stamper::StaticMatrixChargeStamper;
 mod damped_status;
 mod device_noise;
 mod globalization;

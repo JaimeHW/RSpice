@@ -2,6 +2,86 @@
 use super::*;
 
 impl Bsim3v3Device {
+    /// The NQS storage coordinate is Q/(M*1e-9), not the raw deficit unknown.
+    /// Holding it fixed still permits algebraic terminal voltages to change.
+    /// Derivatives follow periodic_coupling_nodes, including the hidden node.
+    pub(crate) fn shooting_nqs_state(&self, solution: &[Value]) -> (Value, [Value; 5]) {
+        let op = self
+            .core
+            .eval(self.raw_branch_voltages(solution), self.gmin, true)
+            .expect("validated BSIM3 charge model");
+        let charge = op.charge.as_ref().unwrap();
+        let (drain, source) = if op.mode > 0 {
+            (charge.cqdb, charge.cqsb)
+        } else {
+            (charge.cqsb, charge.cqdb)
+        };
+        (
+            Self::node_voltage(solution, self.node_charge_deficit)
+                - self.core.mtype * charge.qcheq / TRNQS_SCALING,
+            [
+                -drain / TRNQS_SCALING,
+                -charge.cqgb / TRNQS_SCALING,
+                -source / TRNQS_SCALING,
+                -charge.cqbb / TRNQS_SCALING,
+                1.0,
+            ],
+        )
+    }
+
+    pub(crate) fn shooting_nqs_seed(&self, state: Value, solution: &[Value]) -> Value {
+        let (current, _) = self.shooting_nqs_state(solution);
+        Self::node_voltage(solution, self.node_charge_deficit) + state - current
+    }
+
+    /// Initial consistency uses dQ/dt in shooting coordinates. For NQS only
+    /// terminal overlap/junction charge remains, and the hidden row is exactly
+    /// M*1e-9*w'. Its equilibrium-charge coupling belongs to the nonlinear
+    /// storage constraint, not a second terminal charge state.
+    pub(crate) fn stamp_shooting_initial_charge(
+        &self,
+        solution: &[Value],
+        matrix: &mut impl MatrixStamper,
+    ) {
+        let (charge, mode) = self.charge_at(solution);
+        if !self.uses_trnqs() {
+            self.stamp_charge_matrix(&Self::charge_matrix(&charge, mode), 1.0, matrix);
+            return;
+        }
+        let overlap = Bsim3v3ChargeMatrix {
+            gcggb: charge.cgdo + charge.cgso + charge.cgbo,
+            gcgdb: -charge.cgdo,
+            gcgsb: -charge.cgso,
+            gcdgb: -charge.cgdo,
+            gcddb: charge.capbd + charge.cgdo,
+            gcsgb: -charge.cgso,
+            gcssb: charge.capbs + charge.cgso,
+            gcbgb: -charge.cgbo,
+            gcbdb: -charge.capbd,
+            gcbsb: -charge.capbs,
+            ..Default::default()
+        };
+        self.stamp_charge_matrix(&overlap, 1.0, matrix);
+        matrix.stamp(
+            self.node_charge_deficit,
+            self.node_charge_deficit,
+            self.multiplier * TRNQS_SCALING,
+        );
+    }
+
+    pub(crate) fn stamp_shooting_initial_relaxation(
+        &self,
+        solution: &[Value],
+        matrix: &mut impl MatrixStamper,
+    ) {
+        if self.uses_trnqs() {
+            let (charge, mode) = self.charge_at(solution);
+            self.stamp_trnqs_charge_companion(
+                &charge, mode, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, solution, matrix,
+            );
+        }
+    }
+
     /// Voltage dependencies of the terminal storage law. These are coordinate
     /// edges, not a decomposition into reciprocal two-terminal capacitors.
     /// Suppressed intrinsic charge and zero overlap/junction parameters must

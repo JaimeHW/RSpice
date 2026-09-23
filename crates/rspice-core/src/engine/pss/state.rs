@@ -39,6 +39,7 @@ enum CoordinateUnit {
     Voltage,
     Temperature,
     Current,
+    ScaledCharge,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -62,6 +63,10 @@ enum ChargeBranch {
         port: usize,
         pos: usize,
         neg: usize,
+    },
+    Bsim3Nqs {
+        device: usize,
+        node: usize,
     },
 }
 
@@ -347,6 +352,14 @@ impl PssStateBasis {
                     });
                 }
             }
+            if mos.uses_trnqs() {
+                let node = mos.node_charge_deficit;
+                // This node form represents stored charge only during the
+                // coordinate projection; set_state restores its raw deficit.
+                if add(node, 0, ForestValue::State(charge_branches.len()))? {
+                    charge_branches.push(ChargeBranch::Bsim3Nqs { device, node });
+                }
+            }
         }
         let mut visited = vec![false; forest_node_count];
         let mut forest = Vec::new();
@@ -373,6 +386,11 @@ impl PssStateBasis {
             }
         }
         let mut node_units = vec![CoordinateUnit::Voltage; node_count];
+        for mos in &circuit.bsim3v3.devices {
+            if mos.uses_trnqs() {
+                node_units[mos.node_charge_deficit] = CoordinateUnit::ScaledCharge;
+            }
+        }
         for bjt in &circuit.bjts.devices {
             if bjt.node_rth != 0 {
                 node_units[bjt.node_rth] = CoordinateUnit::Temperature;
@@ -432,6 +450,9 @@ impl PssStateBasis {
                         ["vgd", "vgs", "vgb", "vdb", "vsb"][port]
                     )
                 }
+                ChargeBranch::Bsim3Nqs { device, .. } => {
+                    format!("M:{}:qchannel/1e-9", circuit.bsim3v3.devices[device].name)
+                }
             })
             .chain(
                 self.currents
@@ -455,6 +476,7 @@ impl PssStateBasis {
             ChargeBranch::Bjt { pos, neg, .. }
             | ChargeBranch::Jfet { pos, neg, .. }
             | ChargeBranch::Bsim3 { pos, neg, .. } => (pos, neg),
+            ChargeBranch::Bsim3Nqs { node, .. } => (node, 0),
         }
     }
 }
@@ -641,6 +663,13 @@ impl PssCircuit {
             || self.basis.node_units[neg] == CoordinateUnit::Current
     }
 
+    fn is_charge_coordinate(&self, index: usize) -> bool {
+        matches!(
+            self.basis.charge_branches.get(index),
+            Some(ChargeBranch::Bsim3Nqs { .. })
+        )
+    }
+
     pub(in crate::engine) fn begin_integral_scale_observation(&mut self) {
         self.integral_probe_scales.fill(0.0);
         self.observing_integral_scales = !self.integral_probe_scales.is_empty();
@@ -679,22 +708,33 @@ impl PssCircuit {
         index: usize,
         value: Value,
         current_scale: Value,
+        charge_scale: Value,
     ) -> Value {
         let physical_count = self.physical_state_dimension();
         let unit = if index >= physical_count {
             self.integral_probe_scales[index - physical_count]
         } else if self.is_current_coordinate(index) {
             current_scale
+        } else if self.is_charge_coordinate(index) {
+            charge_scale / 1e-9
         } else {
             1.0
         };
         unit.max(value.abs())
     }
 
-    pub(super) fn solution_abstol(&self, index: usize, node: Value, current: Value) -> Value {
+    pub(super) fn solution_abstol(
+        &self,
+        index: usize,
+        node: Value,
+        current: Value,
+        charge: Value,
+    ) -> Value {
         if index >= self.num_nodes() || self.basis.node_units[index + 1] == CoordinateUnit::Current
         {
             current
+        } else if self.basis.node_units[index + 1] == CoordinateUnit::ScaledCharge {
+            charge / 1e-9
         } else {
             node
         }
@@ -723,12 +763,13 @@ impl PssCircuit {
         values: &mut [Value],
         node_abstol: Value,
         current_abstol: Value,
+        charge_abstol: Value,
     ) {
         debug_assert_eq!(values.len(), self.state_dimension());
         for (index, (value, raw)) in values
             .iter_mut()
             .zip(
-                self.project_physical_perturbation(solution)
+                self.project_physical_coordinates(solution, None)
                     .chain(self.behavioral_sources.accepted_integrals())
                     .chain(self.capacitors.accepted_integrals()),
             )
@@ -736,6 +777,8 @@ impl PssCircuit {
         {
             *value = if self.is_current_coordinate(index) {
                 raw * (node_abstol / current_abstol)
+            } else if self.is_charge_coordinate(index) {
+                raw * (node_abstol * 1e-9 / charge_abstol)
             } else {
                 raw
             };
@@ -753,6 +796,11 @@ impl PssCircuit {
                 | ChargeBranch::Jfet { pos, neg, .. }
                 | ChargeBranch::Bsim3 { pos, neg, .. } => {
                     self.solution_scratch[pos] - self.solution_scratch[neg]
+                }
+                ChargeBranch::Bsim3Nqs { device, .. } => {
+                    self.circuit.bsim3v3.devices[device]
+                        .shooting_nqs_state(&self.solution_scratch[1..])
+                        .0
                 }
             })
             .chain(
@@ -813,6 +861,12 @@ impl PssCircuit {
                 edge.value
                     .evaluate(&mut self.circuit, state, self.basis.charge_branches.len())?;
             self.solution_scratch[edge.to] = self.solution_scratch[edge.from] + edge.sign * value;
+        }
+        for (index, branch) in self.basis.charge_branches.iter().enumerate() {
+            if let ChargeBranch::Bsim3Nqs { device, node } = *branch {
+                self.solution_scratch[node] = self.circuit.bsim3v3.devices[device]
+                    .shooting_nqs_seed(state[index], &self.solution_scratch[1..]);
+            }
         }
         self.current_source_times = [0.0; 2];
         let circuit = &mut self.circuit;
@@ -988,6 +1042,11 @@ impl PssCircuit {
                 | ChargeBranch::Bsim3 { pos, neg, .. } => {
                     self.solution_scratch[pos] - self.solution_scratch[neg]
                 }
+                ChargeBranch::Bsim3Nqs { device, .. } => {
+                    self.circuit.bsim3v3.devices[device]
+                        .shooting_nqs_state(&self.solution_scratch[1..])
+                        .0
+                }
             };
             // An IC capacitor already owns a physical current unknown. Reuse
             // it for the voltage constraint rather than leaving its original
@@ -997,7 +1056,8 @@ impl PssCircuit {
                 ChargeBranch::Diode(_)
                 | ChargeBranch::Bjt { .. }
                 | ChargeBranch::Jfet { .. }
-                | ChargeBranch::Bsim3 { .. } => None,
+                | ChargeBranch::Bsim3 { .. }
+                | ChargeBranch::Bsim3Nqs { .. } => None,
             };
             let branch = existing_branch.unwrap_or_else(|| self.circuit.allocate_branch());
             self.circuit.voltage_sources.add(
@@ -1028,7 +1088,16 @@ impl PssCircuit {
         if let Some(rates) = &self.initial_charge_rates {
             for (index, &branch) in rates.branches.iter().enumerate() {
                 let (pos, neg) = self.basis.voltage_nodes(&self.circuit, index);
-                for node in [pos, neg] {
+                let nodes = if let ChargeBranch::Bsim3Nqs { device, .. } =
+                    self.basis.charge_branches[index]
+                {
+                    self.circuit.bsim3v3.devices[device]
+                        .periodic_coupling_nodes()
+                        .to_vec()
+                } else {
+                    vec![pos, neg]
+                };
+                for node in nodes {
                     if node != 0 {
                         entries.push((self.num_nodes() + branch - 1, node - 1));
                     }
@@ -1076,6 +1145,12 @@ impl PssCircuit {
         };
         let nodes = self.circuit.num_nodes();
         let mut stamps = Vec::new();
+        for device in &self.circuit.bsim3v3.devices {
+            device.stamp_shooting_initial_relaxation(
+                solution,
+                &mut super::super::transient::StaticMatrixChargeStamper { matrix, rhs },
+            );
+        }
         for index in 0..self.circuit.capacitors.len() {
             if let Some(linearization) = self
                 .circuit
@@ -1160,15 +1235,15 @@ impl PssCircuit {
                 &self.jfet_history,
                 false,
             );
-            Engine::stamp_bsim3_transient_companions(
-                &self.circuit,
-                charge,
-                unused_rhs,
-                solution,
-                &coeff,
-                1.0,
-                &self.bsim3_history,
-            );
+            for device in &self.circuit.bsim3v3.devices {
+                device.stamp_shooting_initial_charge(
+                    solution,
+                    &mut super::super::transient::StaticMatrixChargeStamper {
+                        matrix: charge,
+                        rhs: unused_rhs,
+                    },
+                );
+            }
             rates.project(charge.values_mut(), &self.circuit, rhs, &mut stamps)
         })?;
         for (row, col, value) in stamps {
@@ -1176,6 +1251,23 @@ impl PssCircuit {
         }
         for (index, &branch) in rates.branches.iter().enumerate() {
             let row = nodes + branch - 1;
+            if let ChargeBranch::Bsim3Nqs { device, .. } = self.basis.charge_branches[index] {
+                let device = &self.circuit.bsim3v3.devices[device];
+                let target = device.shooting_nqs_state(&self.solution_scratch[1..]).0;
+                let (current, derivatives) = device.shooting_nqs_state(solution);
+                rhs[row] = target - current;
+                for (node, derivative) in device
+                    .periodic_coupling_nodes()
+                    .into_iter()
+                    .zip(derivatives)
+                {
+                    if node != 0 {
+                        matrix.add(row, node - 1, derivative);
+                        rhs[row] += derivative * solution[node - 1];
+                    }
+                }
+                continue;
+            }
             let (pos, neg) = self.basis.voltage_nodes(&self.circuit, index);
             for (node, sign) in [(pos, 1.0), (neg, -1.0)] {
                 if node != 0 {
@@ -1252,6 +1344,14 @@ impl PssCircuit {
                         .into_iter()
                         .any(|node| self.basis.node_units[node] == CoordinateUnit::Current)
                 })
+    }
+
+    pub(super) fn is_initial_charge_row(&self, row: usize) -> bool {
+        self.initial_charge_rates.as_ref().is_some_and(|rates| {
+            rates.branches.iter().enumerate().any(|(index, &branch)| {
+                row == self.num_nodes() + branch - 1 && self.is_charge_coordinate(index)
+            })
+        })
     }
 
     pub(super) fn initialize_prescribed_currents(&mut self) -> Result<(), SimulationError> {
@@ -1625,21 +1725,36 @@ impl PssCircuit {
     pub(in crate::engine) fn project_perturbation<'a>(
         &'a self,
         solution: &'a [Value],
+        linearize_at: &'a [Value],
     ) -> impl Iterator<Item = Value> + 'a {
-        self.project_physical_perturbation(solution)
+        self.project_physical_coordinates(solution, Some(linearize_at))
             .chain(std::iter::repeat_n(
                 0.0,
                 self.behavioral_sources.integral_count() + self.capacitors.integral_count(),
             ))
     }
 
-    fn project_physical_perturbation<'a>(
+    fn project_physical_coordinates<'a>(
         &'a self,
         solution: &'a [Value],
+        linearize_at: Option<&'a [Value]>,
     ) -> impl Iterator<Item = Value> + 'a {
         let voltage = move |node| if node == 0 { 0.0 } else { solution[node - 1] };
         (0..self.basis.charge_branches.len())
             .map(move |index| {
+                if let ChargeBranch::Bsim3Nqs { device, .. } = self.basis.charge_branches[index] {
+                    let device = &self.circuit.bsim3v3.devices[device];
+                    let Some(linearize_at) = linearize_at else {
+                        return device.shooting_nqs_state(solution).0;
+                    };
+                    let (_, derivatives) = device.shooting_nqs_state(linearize_at);
+                    return device
+                        .periodic_coupling_nodes()
+                        .into_iter()
+                        .zip(derivatives)
+                        .map(|(node, derivative)| voltage(node) * derivative)
+                        .sum();
+                }
                 let (pos, neg) = self.basis.voltage_nodes(&self.circuit, index);
                 voltage(pos) - voltage(neg)
             })
@@ -1658,6 +1773,68 @@ impl PssCircuit {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bsim3_nqs_state_preserves_charge_with_algebraic_terminal_motion() {
+        let engine = Engine::default();
+        for (kind, polarity) in [("NMOS", 1.0), ("PMOS", -1.0)] {
+            let netlist = Netlist::parse(&format!(
+                "NQS stored coordinate\nVDD supply 0 {}\nVIN in 0 {}\nRD supply d 500\nRG in g 100\nRS s 0 10\nM1 d g s 0 mm L=.18u W=10u M=2\n.model mm {kind}(LEVEL=49 VTH0={} CAPMOD=2 NQSMOD=1 CGDO=0 CGSO=0 CGBO=0 CF=0 CGDL=0 CGSL=0 CJ=0 CJSW=0 CJSWG=0)\n.end\n",
+                polarity * 1.8, polarity * 0.7, polarity * 0.4,
+            )).unwrap();
+            let mut circuit = PssCircuit::new(engine.build_circuit(&netlist).unwrap()).unwrap();
+            assert_eq!(circuit.state_dimension(), 1);
+            let device = &circuit.bsim3v3.devices[0];
+            let nodes = device.periodic_coupling_nodes();
+            let mut seed = vec![0.0; circuit.matrix_size()];
+            for (node, voltage) in nodes.into_iter().zip([1.2, 0.72, 0.01, 0.0, 1e-6]) {
+                if node != 0 {
+                    seed[node - 1] = polarity * voltage;
+                }
+            }
+            circuit.seed_charge_history(&seed);
+            let state = circuit.extract_state();
+            let mut direction = vec![0.0; seed.len()];
+            for (node, value) in nodes.into_iter().zip([0.3, -0.2, 0.1, 0.0, 1e-5]) {
+                if node != 0 {
+                    direction[node - 1] = value;
+                }
+            }
+            let projected = circuit
+                .project_perturbation(&direction, &seed)
+                .next()
+                .unwrap();
+            let h = 1e-5;
+            let shifted = |sign: Value| {
+                seed.iter()
+                    .zip(&direction)
+                    .map(|(&value, &delta)| value + sign * h * delta)
+                    .collect::<Vec<_>>()
+            };
+            let device = &circuit.bsim3v3.devices[0];
+            let fd = (device.shooting_nqs_state(&shifted(1.0)).0
+                - device.shooting_nqs_state(&shifted(-1.0)).0)
+                / (2.0 * h);
+            assert!((projected - fd).abs() < 1e-8 * projected.abs().max(1e-8));
+            assert_eq!(circuit.perturbation_scale(0, 0.0, 1e-6, 1e-8), 10.0);
+            assert_eq!(
+                circuit.solution_abstol(nodes[4] - 1, 1e-6, 1e-12, 1e-14),
+                1e-14 / 1e-9
+            );
+            circuit.set_state(&state).unwrap();
+            let solution = engine
+                .pss_initial_node_solution(&mut circuit, &NoAbort)
+                .unwrap();
+            assert!(
+                (solution[nodes[0] - 1] - seed[nodes[0] - 1]).abs() > 0.01,
+                "drain voltage must remain algebraic"
+            );
+            assert!(
+                (circuit.extract_state()[0] - state[0]).abs() < 1e-12,
+                "initial consistency must preserve stored charge"
+            );
+        }
+    }
 
     #[test]
     fn vcvs_constraints_restore_differential_cascaded_charge_states() {
@@ -1830,11 +2007,14 @@ mod tests {
             circuit.set_state(&state).unwrap();
             assert_eq!(circuit.extract_state(), state);
             let perturbation = circuit
-                .project_perturbation(&circuit.solution_scratch[1..])
+                .project_perturbation(
+                    &circuit.solution_scratch[1..],
+                    &circuit.solution_scratch[1..],
+                )
                 .collect::<Vec<_>>();
             assert_eq!(perturbation, state);
-            assert_eq!(circuit.perturbation_scale(0, 0.0, 1e-6), 1.0);
-            assert_eq!(circuit.perturbation_scale(1, 0.0, 1e-6), 1e-6);
+            assert_eq!(circuit.perturbation_scale(0, 0.0, 1e-6, 1e-8), 1.0);
+            assert_eq!(circuit.perturbation_scale(1, 0.0, 1e-6, 1e-8), 1e-6);
             circuit.add_initial_constraints(&NoAbort).unwrap();
             let rows = (circuit.num_nodes()..circuit.matrix_size())
                 .filter(|&row| circuit.is_initial_current_row(row))

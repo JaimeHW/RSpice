@@ -134,6 +134,7 @@ impl Engine {
                     index,
                     value,
                     self.current_abstol() / self.voltage_abstol(),
+                    self.config.convergence_config.charge_abstol / self.voltage_abstol(),
                 )
             })
             .collect::<Vec<_>>();

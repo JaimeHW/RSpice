@@ -8,9 +8,9 @@ use super::*;
 /// through the generic trait (the B3SOIDD charge companion). Maps 1-indexed
 /// device NodeIds to the 0-indexed matrix/RHS, matching `CircuitData`'s own
 /// stamper convention.
-pub(super) struct StaticMatrixChargeStamper<'a> {
-    pub(super) matrix: &'a mut crate::solver::StaticMatrix,
-    pub(super) rhs: &'a mut [Value],
+pub(in crate::engine) struct StaticMatrixChargeStamper<'a> {
+    pub(in crate::engine) matrix: &'a mut crate::solver::StaticMatrix,
+    pub(in crate::engine) rhs: &'a mut [Value],
 }
 
 impl crate::device::MatrixStamper for StaticMatrixChargeStamper<'_> {
