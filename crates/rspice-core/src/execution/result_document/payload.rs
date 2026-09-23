@@ -3232,6 +3232,8 @@ pub enum EnvelopeGuaranteeTag {
     ExactLinearRlcMnaV1,
     /// Complete behavioral-source integral memory and physical R/L/C state.
     ExactBehavioralRlcMnaV1,
+    /// Complete supported junction, behavioral-source and physical R/L/C state.
+    ExactJunctionRlcMnaV1,
 }
 
 impl From<HbEnvelopeStateGuarantee> for EnvelopeGuaranteeTag {
@@ -3240,6 +3242,7 @@ impl From<HbEnvelopeStateGuarantee> for EnvelopeGuaranteeTag {
             HbEnvelopeStateGuarantee::ExactLinearRcMnaV1 => Self::ExactLinearRcMnaV1,
             HbEnvelopeStateGuarantee::ExactLinearRlcMnaV1 => Self::ExactLinearRlcMnaV1,
             HbEnvelopeStateGuarantee::ExactBehavioralRlcMnaV1 => Self::ExactBehavioralRlcMnaV1,
+            HbEnvelopeStateGuarantee::ExactJunctionRlcMnaV1 => Self::ExactJunctionRlcMnaV1,
         }
     }
 }
@@ -3250,6 +3253,7 @@ impl From<EnvelopeGuaranteeTag> for HbEnvelopeStateGuarantee {
             EnvelopeGuaranteeTag::ExactLinearRcMnaV1 => Self::ExactLinearRcMnaV1,
             EnvelopeGuaranteeTag::ExactLinearRlcMnaV1 => Self::ExactLinearRlcMnaV1,
             EnvelopeGuaranteeTag::ExactBehavioralRlcMnaV1 => Self::ExactBehavioralRlcMnaV1,
+            EnvelopeGuaranteeTag::ExactJunctionRlcMnaV1 => Self::ExactJunctionRlcMnaV1,
         }
     }
 }

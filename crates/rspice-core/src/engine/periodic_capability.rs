@@ -349,7 +349,7 @@ use CapabilitySupport::{Absent, Complete, Inapplicable, Restricted};
 /// Shared phrase for the envelope initializer's supported subset. The gap query
 /// reports the offending family by name; this states why it is a gap.
 const ENVELOPE_LINEAR_SUBSET: &str = "the exact envelope initializer supports linear R/L/C networks, fixed mutual \
-     inductance, and independent, controlled or behavioral sources";
+     inductance, diodes, and independent, controlled or behavioral sources";
 const CYCLOSTATIONARY_FLICKER: &str = "stationary thermal/shot noise is exact; a nonzero flicker coefficient needs cyclostationary \
      colored-noise folding rather than a DC-bias substitution";
 const RESISTOR_CYCLOSTATIONARY_FLICKER: &str = "thermal noise and AF=2 signed-current flicker modulation are exact; other AF values \
@@ -444,7 +444,7 @@ pub(crate) const fn periodic_capability_descriptor(
             small_signal: Complete,
             noise: Restricted(CYCLOSTATIONARY_FLICKER),
             pss_state: Complete,
-            envelope: Absent(ENVELOPE_LINEAR_SUBSET),
+            envelope: Complete,
         },
         F::Bjt => PeriodicCapabilityDescriptor {
             residual_jacobian: Restricted(
@@ -1733,7 +1733,7 @@ mod tests {
             F::Inductor => [I, C, C, I, C, C],
             F::VoltageSource | F::CurrentSource => [I, I, C, I, C, C],
             F::Vcvs | F::Vccs | F::Cccs | F::Ccvs => [I, I, C, I, C, C],
-            F::Diode => [R, C, C, R, C, A],
+            F::Diode => [R, C, C, R, C, C],
             // Authored GP PTF adds an irrational delay to the formerly
             // complete charge descriptor; VBIC's finite delay states remain.
             F::Bjt => [R, R, C, C, R, A],

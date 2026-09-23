@@ -54,6 +54,9 @@ fn guarantee_label(guarantee: rspice_core::engine::HbEnvelopeStateGuarantee) -> 
         rspice_core::engine::HbEnvelopeStateGuarantee::ExactBehavioralRlcMnaV1 => {
             "exact-behavioral-rlc-mna-v1"
         }
+        rspice_core::engine::HbEnvelopeStateGuarantee::ExactJunctionRlcMnaV1 => {
+            "exact-junction-rlc-mna-v1"
+        }
     }
 }
 

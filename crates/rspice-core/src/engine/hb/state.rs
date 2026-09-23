@@ -28,6 +28,9 @@ pub enum HbEnvelopeStateGuarantee {
     /// Complete R/L/C and behavioral-source state, including every retained
     /// SDT value and its accepted input at the continuation origin.
     ExactBehavioralRlcMnaV1,
+    /// Complete state for supported native junctions, R/L/C networks and
+    /// behavioral sources, including physical junction charge and current.
+    ExactJunctionRlcMnaV1,
 }
 
 /// Authenticated HB carrier state that can restart transient integration at
@@ -251,7 +254,7 @@ impl Engine {
             Some(blockers) => Err(SimulationError::unsupported_capability(
                 "analysis.hb.envelope.continuation",
                 format!(
-                    "HB Envelope continuation is unavailable because the circuit contains {blockers}; the exact initializer supports linear R/L/C networks, fixed mutual inductance, and independent, controlled or behavioral sources"
+                    "HB Envelope continuation is unavailable because the circuit contains {blockers}; the exact initializer supports linear R/L/C networks, fixed mutual inductance, diodes, and independent, controlled or behavioral sources"
                 ),
             )),
         }
@@ -489,6 +492,58 @@ impl Engine {
             .accept_transient_step(solutions.last().unwrap(), 0.0)
             .map_err(|error| SimulationError::Circuit(error.to_string()))?;
 
+        let junction_history = if circuit.diodes.is_empty() {
+            None
+        } else {
+            circuit.set_semiconductor_junction_gmin(
+                self.effective_device_junction_gmin(self.config.convergence_config.gmin_target),
+            );
+            let mut history = crate::numerics::integration::TwoTerminalChargeHistory::default();
+            for diode in &mut circuit.diodes.devices {
+                let voltage = diode.terminal_voltage(&solutions[3]);
+                let previous_voltage = diode.terminal_voltage(&solutions[2]);
+                let older_voltage = diode.terminal_voltage(&solutions[1]);
+                let (charge, capacitance) = diode.junction_charge_and_capacitance(voltage);
+                // Public spectra contain physical peak phasors. Differentiating
+                // them at phase zero gives the terminal rate without a finite
+                // difference or a timestep-dependent charge approximation.
+                let voltage_rate: Value = Self::hb_terminal_voltage_spectrum(
+                    result,
+                    diode.node_anode,
+                    diode.node_cathode,
+                )
+                .iter()
+                .enumerate()
+                .skip(1)
+                .map(|(harmonic, coefficient)| {
+                    -(TAU * config.fundamental_freq * harmonic as Value) * coefficient.im
+                })
+                .sum();
+                history.vd_prev.push(voltage);
+                history.vd_prev_prev.push(previous_voltage);
+                history.qd_prev.push(charge);
+                history
+                    .qd_prev_prev
+                    .push(diode.junction_charge_and_capacitance(previous_voltage).0);
+                history
+                    .qd_prev_prev_prev
+                    .push(diode.junction_charge_and_capacitance(older_voltage).0);
+                history.cqd_prev.push(capacitance * voltage_rate);
+                diode.seed_accepted_periodic_bias(voltage);
+            }
+            history.accepted_dt_prev = history_step;
+            history.accepted_dt_prev_prev = history_step;
+            Some(
+                Self::capture_accepted_junction_transient_history_checkpoint(
+                    &circuit,
+                    &crate::engine::transient::BjtTransientHistory::default(),
+                    &history,
+                    &crate::engine::transient::JfetTransientHistory::default(),
+                    &[],
+                ),
+            )
+        };
+
         let lte_reference = self
             .config
             .transient_lte_reference
@@ -501,7 +556,7 @@ impl Engine {
         for solution in &solutions {
             lte_estimator.record(solution, history_step);
         }
-        let checkpoint = TransientCheckpoint::capture(
+        let checkpoint = TransientCheckpoint::capture_with_junction_history(
             netlist_fingerprint(netlist),
             Some(authenticated_netlist_identity.to_string()),
             &self.config,
@@ -512,6 +567,7 @@ impl Engine {
                 startup_mode: crate::engine::TransientStartupMode::OperatingPoint,
             },
             Some(&lte_estimator),
+            junction_history,
         )
         .map_err(SimulationError::Circuit)?;
         Ok((checkpoint, history_step))
@@ -519,8 +575,8 @@ impl Engine {
 
     /// Solve an authenticated carrier-periodic HB state with selected slow
     /// source waveforms frozen at their exact time-zero values, then create a
-    /// complete transient continuation state for supported R/L/C networks and
-    /// behavioral equations, including their integral memory.
+    /// complete transient continuation state for supported R/L/C networks,
+    /// diodes and behavioral equations, including their charge/integral memory.
     pub fn run_hb_envelope_continuation_state(
         &self,
         netlist: &Netlist,
@@ -565,7 +621,9 @@ impl Engine {
         Self::transient_checkpoint_capability_for_circuit(&original_circuit, abort)?
             .require_resumable()
             .map_err(SimulationError::Circuit)?;
-        let guarantee = if !original_circuit.behavioral_sources.is_empty() {
+        let guarantee = if !original_circuit.diodes.is_empty() {
+            HbEnvelopeStateGuarantee::ExactJunctionRlcMnaV1
+        } else if !original_circuit.behavioral_sources.is_empty() {
             HbEnvelopeStateGuarantee::ExactBehavioralRlcMnaV1
         } else if original_circuit.inductors.is_empty()
             && original_circuit.resistor_branches.is_empty()

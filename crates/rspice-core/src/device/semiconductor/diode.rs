@@ -486,6 +486,25 @@ pub(crate) struct AcceptedDiodeNonlinearCheckpoint {
 }
 
 impl Diode {
+    /// Install a solved periodic bias as the accepted Newton anchor. It is
+    /// already a physical solution, so the next load must not use OFF/vcrit
+    /// operating-point startup or a fabricated zero-voltage limiter history.
+    pub(crate) fn seed_accepted_periodic_bias(&mut self, voltage: Value) {
+        let (current, conductance) = self.current_and_conductance(voltage);
+        self.prev_vd = voltage;
+        self.prev_vd_old = voltage;
+        self.prev_id = current;
+        self.prev_gd = conductance;
+        self.candidate_eval_valid = true;
+        self.junction_history_valid.set(true);
+        self.last_limited_vd.set(voltage);
+        self.limited.set(false);
+        self.last_stamp_vd.set(voltage);
+        self.last_stamp_id
+            .set(current + self.junction_gmin * voltage);
+        self.last_stamp_gd.set(conductance + self.junction_gmin);
+    }
+
     pub(crate) fn nonlinear_state_snapshot(&self) -> DiodeNonlinearState {
         DiodeNonlinearState {
             prev_vd: self.prev_vd,

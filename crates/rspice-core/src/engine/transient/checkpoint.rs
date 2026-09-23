@@ -6401,6 +6401,7 @@ impl TransientCheckpoint {
 
     /// Capture the integrator state from a circuit at time `time` with the
     /// current accepted `solution`.
+    #[cfg(test)]
     pub(crate) fn capture(
         fingerprint: u64,
         netlist_identity: Option<String>,

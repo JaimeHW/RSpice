@@ -524,8 +524,8 @@ fn hb_envelope_source_selection_and_circuit_subset_fail_closed() {
             "unsupported capacitor history\nV1 in 0 SIN(0 1 1meg)\nR1 in out 1k\nC1 out 0 C={1p*(1+V(out)^2)}\n.end\n",
         ),
         (
-            "nonlinear",
-            "unsupported diode\nV1 in 0 SIN(0 0.01 1meg)\nR1 in out 1k\nD1 out 0 DMOD\nC1 out 0 1p\n.model DMOD D\n.end\n",
+            "MOS charge history",
+            "unsupported MOS history\nV1 in 0 SIN(1 .01 1meg)\nR1 in out 1k\nM1 out in 0 0 MM\n.model MM NMOS\n.end\n",
         ),
     ] {
         let unsupported = Netlist::parse(deck).expect("unsupported deck parses");

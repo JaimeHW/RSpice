@@ -251,7 +251,7 @@ c1 out 0 100p
 }
 
 #[test]
-fn hb_envelope_continuation_names_every_family_outside_the_linear_subset() {
+fn hb_envelope_continuation_names_every_family_without_a_state_initializer() {
     let supported = "\
 * Linear R/L/C and independent or controlled sources support exact projection
 Vcarrier carrier 0 SIN(0 1 1meg)
@@ -283,9 +283,21 @@ Cout out 0 160p
         "Cout out 0 160p",
         "Cout out 0 160p\nDout out 0 DM\n.model DM D",
     );
+    assert_admitted(
+        engine().run_hb_envelope_continuation_state(
+            &parse(&with_diode),
+            HbConfig::new(F0).with_harmonics(2),
+            &["Vmod".to_string()],
+        ),
+        "a diode envelope deck",
+    );
+    let with_mos = supported.replace(
+        "Cout out 0 160p",
+        "Cout out 0 160p\nMout out carrier 0 0 MM\n.model MM NMOS",
+    );
     let message = engine()
         .run_hb_envelope_continuation_state(
-            &parse(&with_diode),
+            &parse(&with_mos),
             HbConfig::new(F0).with_harmonics(2),
             &["Vmod".to_string()],
         )
@@ -296,7 +308,7 @@ Cout out 0 160p
         "the envelope preflight must own this rejection: {message}"
     );
     assert!(
-        message.contains("diodes"),
+        message.contains("classic MOS devices"),
         "the rejection must name the family outside the subset: {message}"
     );
 }
