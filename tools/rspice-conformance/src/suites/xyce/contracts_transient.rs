@@ -584,7 +584,7 @@ impl XyceTestRunner {
             else {
                 continue;
             };
-            if file.contains("://") {
+            if file.path().contains("://") {
                 return Err(format!(
                     "{LABEL} file-backed ERROR '{}' does not admit virtual FILE path '{file}'",
                     measurement.name
@@ -641,7 +641,7 @@ impl XyceTestRunner {
                     resolved.display()
                 ));
             }
-            *file = resolved.to_string_lossy().into_owned();
+            *file = resolved.to_string_lossy().into_owned().into();
         }
         Ok(())
     }
@@ -733,7 +733,7 @@ impl XyceTestRunner {
                         measurement.name
                     ));
                 };
-                let resolved_path = Path::new(file);
+                let resolved_path = Path::new(file.path());
                 if !resolved_path.is_absolute()
                     || independent_column == *dependent_column
                     || !resolved_path.is_file()
