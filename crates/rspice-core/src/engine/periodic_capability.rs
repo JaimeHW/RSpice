@@ -480,7 +480,7 @@ pub(crate) const fn periodic_capability_descriptor(
                  explicit descriptor state",
             ),
             small_signal: Restricted("BSIM3 AC-only NQS needs a periodic response operator"),
-            noise: Absent("native periodic BSIM3 noise-source modulation"),
+            noise: Complete,
             pss_state: Absent("BSIM3 charge history"),
             envelope: Absent(ENVELOPE_LINEAR_SUBSET),
         },
@@ -1762,7 +1762,7 @@ mod tests {
             // complete charge descriptor; VBIC's finite delay states remain.
             F::Bjt => [R, R, C, C, R, R],
             F::Mosfet => [R, C, C, R, A, A],
-            F::Bsim3v3 => [C, R, R, A, A, A],
+            F::Bsim3v3 => [C, R, R, C, A, A],
             F::Bsim4v8 => [A, R, I, A, A, A],
             F::B3SoiDd | F::B3SoiFd | F::B3SoiPd => [A, C, I, A, A, A],
             F::Ekv26 | F::Ekv3 | F::Vdmos => [I, C, A, A, A, A],

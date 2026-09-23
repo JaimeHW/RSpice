@@ -1,4 +1,4 @@
-//! Native BJT noise mechanisms sampled on the authenticated physical orbit.
+//! Native device noise mechanisms sampled on the authenticated physical orbit.
 
 use super::*;
 use crate::analysis::harmonic_balance::normalize_scaled_noise_waveform;
@@ -86,8 +86,20 @@ fn scaled_native_density(
                 })?;
             Ok(density)
         }
+        NoiseSourceType::Bsim3Flicker => {
+            if !source.ef.is_finite() || !temperature.is_finite() || temperature <= 0.0 {
+                return Err(SimulationError::Circuit(format!(
+                    "pnoise source '{name}' has invalid BSIM3 flicker parameters"
+                )));
+            }
+            // Both strong/weak-inversion terms in b3noi.c have the same
+            // f^-EF dependence. Their harmonic mean therefore separates into
+            // one bias-dependent amplitude and one stationary power law.
+            let density = Engine::evaluated_noise_density(source, 1.0, temperature)?;
+            checked_scaled_positive_product(&[density], name)
+        }
         _ => Err(SimulationError::Circuit(format!(
-            "pnoise native BJT source '{name}' has an unsupported noise law"
+            "pnoise native source '{name}' has an unsupported noise law"
         ))),
     }
 }
@@ -117,12 +129,13 @@ impl NativeNoiseWaveforms {
         engine: &Engine,
         time: usize,
         count: usize,
-        bjts: &[crate::device::Bjt],
+        devices: (&[crate::device::Bjt], &[crate::device::Bsim3v3Device]),
         solution: &[Value],
         abort: &dyn AbortSignal,
     ) -> Result<(), SimulationError> {
         self.elementary.clear();
         self.temperatures.clear();
+        let (bjts, bsim3) = devices;
         for bjt in bjts {
             if abort.is_aborted() {
                 return Err(SimulationError::Aborted);
@@ -141,6 +154,17 @@ impl NativeNoiseWaveforms {
                 )));
             }
         }
+        for device in bsim3 {
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
+            let sources = Engine::collect_bsim3v3_noise_sources(device)?;
+            for source in &sources {
+                self.temperatures
+                    .insert(source.identity.clone(), device.core.model_temp.temp);
+            }
+            self.elementary.extend(sources);
+        }
         Engine::configure_noise_physical_constants(
             &mut self.elementary,
             &mut [],
@@ -151,8 +175,11 @@ impl NativeNoiseWaveforms {
                 return Err(SimulationError::Aborted);
             }
             let name = Engine::noise_source_label(&source.identity);
-            let frequency_exponent =
-                (source.noise_type == NoiseSourceType::Flicker).then_some(source.ef);
+            let frequency_exponent = matches!(
+                source.noise_type,
+                NoiseSourceType::Flicker | NoiseSourceType::Bsim3Flicker
+            )
+            .then_some(source.ef);
             let temperature = self
                 .temperatures
                 .get(&source.identity)
@@ -169,7 +196,7 @@ impl NativeNoiseWaveforms {
                     .checked_add(1)
                     .and_then(|n| n.checked_mul(count))
                     .ok_or_else(|| {
-                        SimulationError::Circuit("native BJT noise waveform size overflows".into())
+                        SimulationError::Circuit("native noise waveform size overflows".into())
                     })?;
                 crate::ResourceLimitError::ensure(
                     crate::ResourceKind::ResultValues,
@@ -209,7 +236,7 @@ impl NativeNoiseWaveforms {
 }
 
 impl Engine {
-    pub(in crate::engine::hb) fn native_bjt_periodic_noise_sources(
+    pub(in crate::engine::hb) fn native_periodic_noise_sources(
         &self,
         solver: &mut HbSolver,
         state: &HbSolverState,
@@ -219,9 +246,9 @@ impl Engine {
         let mut frames =
             NativeNoiseWaveforms::new(ambient, self.config.resource_limits.max_result_values);
         solver
-            .visit_native_bjt_samples(state, abort, |time, count, bjts, solution| {
+            .visit_native_noise_samples(state, abort, |time, count, devices, solution| {
                 frames
-                    .sample(self, time, count, bjts, solution, abort)
+                    .sample(self, time, count, devices, solution, abort)
                     .map_err(|error| match error {
                         SimulationError::Aborted => crate::analysis::HbError::Aborted,
                         error => crate::analysis::HbError::InvalidCircuit(error.to_string()),
@@ -230,7 +257,7 @@ impl Engine {
             .map_err(|error| match error {
                 crate::analysis::HbError::Aborted => SimulationError::Aborted,
                 error => SimulationError::Circuit(format!(
-                    "native BJT periodic-noise sampling failed: {error}"
+                    "native periodic-noise sampling failed: {error}"
                 )),
             })?;
 

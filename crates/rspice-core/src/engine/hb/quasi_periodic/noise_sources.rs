@@ -351,12 +351,12 @@ impl Engine {
     ) -> Result<(), SimulationError> {
         let mut frames = None;
         solver
-            .visit_quasi_periodic_native_bjt_samples_with_abort(
+            .visit_quasi_periodic_native_noise_samples_with_abort(
                 grid.clone(),
                 point.complete_spectra(),
                 &catalog.remaining(self),
                 abort,
-                |phase, count, bjts, solution, remaining| {
+                |phase, count, devices, solution, remaining| {
                     let frames = frames.get_or_insert_with(|| {
                         NativeNoiseWaveforms::new(
                             self.config.temperature,
@@ -364,7 +364,7 @@ impl Engine {
                         )
                     });
                     frames
-                        .sample(self, phase, count, bjts, solution, abort)
+                        .sample(self, phase, count, devices, solution, abort)
                         .map_err(core_error)
                 },
             )

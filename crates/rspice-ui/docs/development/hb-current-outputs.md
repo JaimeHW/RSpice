@@ -30,8 +30,12 @@ its own channel, junction, substrate and displacement currents. `CAPMOD=0..3`,
 native model meanings. `NQSMOD=1` includes the channel charge-deficit state in
 HB and QPSS. AC-only `ACNQSMOD=1` does not change the carrier equations; periodic
 response analyses currently reject that option because their AC-only NQS
-operator is not implemented. BSIM3 periodic noise and PSS/Envelope charge-history
-continuation remain unavailable. Saved HB results carry that continuation limit.
+operator is not implemented. Periodic noise supports `NOIMOD=1..6`, including
+channel thermal noise, empirical and physical flicker laws, `KF/AF/EF`, and
+source/drain resistor noise. The native `ID` and `FN` mechanisms retain their
+identities as the bias varies; colored noise includes amplitude modulation and
+sideband correlations. PSS/Envelope charge-history continuation remains
+unavailable. Saved HB results carry that continuation limit.
 
 The current observer covers the native devices already admitted by HB. It does
 not enable previously unsupported model families or provide Verilog-A terminal

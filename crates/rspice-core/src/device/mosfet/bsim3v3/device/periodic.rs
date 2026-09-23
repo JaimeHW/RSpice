@@ -28,6 +28,14 @@ impl Bsim3v3Device {
             .eval(self.raw_branch_voltages(solution), self.gmin, true)
     }
 
+    /// Refresh the native noise-law snapshot at an unlimited orbit sample.
+    /// This is not an accepted transient step and does not advance its limiter.
+    pub(crate) fn update_periodic_noise_probe(&mut self, solution: &[Value]) -> Result<(), String> {
+        self.op = self.periodic_op(solution)?;
+        self.bias = self.raw_branch_voltages(solution);
+        Ok(())
+    }
+
     /// Drain partition of the relaxing channel current (b3ld.c). At vanishing
     /// channel charge the model's XPART limit replaces the singular quotient.
     fn periodic_nqs_drain_partition(&self, charge: &Bsim3v3Charge, mode: i32) -> Value {

@@ -174,7 +174,7 @@ impl HbSolver {
     }
     /// Visit native physical probes on every independent phase. The callback
     /// receives the remaining value budget after the live real-orbit workspace.
-    pub(crate) fn visit_quasi_periodic_native_bjt_samples_with_abort(
+    pub(crate) fn visit_quasi_periodic_native_noise_samples_with_abort(
         &mut self,
         grid: Arc<QuasiPeriodicGrid>,
         orbit: &[Vec<Complex64>],
@@ -183,13 +183,13 @@ impl HbSolver {
         mut visit: impl FnMut(
             usize,
             usize,
-            &[crate::device::Bjt],
+            (&[crate::device::Bjt], &[crate::device::Bsim3v3Device]),
             &[Value],
             &ResourceLimits,
         ) -> Result<(), Error>,
     ) -> Result<(), Error> {
         abort_if_requested(abort)?;
-        if self.native_bjts.is_empty() {
+        if self.native_bjts.is_empty() && self.native_bsim3.is_empty() {
             return Ok(());
         }
         self.validate_quasi_periodic_response()?;
@@ -205,7 +205,11 @@ impl HbSolver {
         )?;
         ResourceLimitError::ensure(
             ResourceKind::AnalysisPoints,
-            grid.sample_count().saturating_mul(self.native_bjts.len()),
+            grid.sample_count().saturating_mul(
+                self.native_bjts
+                    .len()
+                    .saturating_add(self.native_bsim3.len()),
+            ),
             limits.max_analysis_points,
         )?;
         let resident = self
@@ -241,10 +245,16 @@ impl HbSolver {
                 abort_if_requested(abort)?;
                 bjt.update_mna_static_probe(&solution);
             }
+            for device in &mut self.native_bsim3 {
+                abort_if_requested(abort)?;
+                device
+                    .update_periodic_noise_probe(&solution)
+                    .map_err(noise_error)?;
+            }
             visit(
                 phase,
                 grid.sample_count(),
-                &self.native_bjts,
+                (&self.native_bjts, &self.native_bsim3),
                 &solution,
                 &remaining,
             )?;

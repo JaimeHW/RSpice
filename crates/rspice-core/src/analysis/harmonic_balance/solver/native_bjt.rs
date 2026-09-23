@@ -72,7 +72,9 @@ fn record_native_terms(
         for &(row, _) in terms {
             let mut values = Vec::new();
             values.try_reserve_exact(count).map_err(|error| {
-                HbError::InvalidCircuit(format!("native device waveform allocation failed: {error}"))
+                HbError::InvalidCircuit(format!(
+                    "native device waveform allocation failed: {error}"
+                ))
             })?;
             values.resize(count, 0.0);
             waveforms.push((row, values));
@@ -634,13 +636,18 @@ impl HbSolver {
 
     /// Visit native models at each unlimited physical bias of the retained
     /// periodic state, including branch-current and non-electrical coordinates.
-    pub(crate) fn visit_native_bjt_samples(
+    pub(crate) fn visit_native_noise_samples(
         &mut self,
         state: &HbSolverState,
         abort: &dyn AbortSignal,
-        mut visit: impl FnMut(usize, usize, &[crate::device::Bjt], &[Value]) -> Result<(), HbError>,
+        mut visit: impl FnMut(
+            usize,
+            usize,
+            (&[crate::device::Bjt], &[crate::device::Bsim3v3Device]),
+            &[Value],
+        ) -> Result<(), HbError>,
     ) -> Result<(), HbError> {
-        if self.native_bjts.is_empty() {
+        if self.native_bjts.is_empty() && self.native_bsim3.is_empty() {
             return Ok(());
         }
         let waves = self.native_state_waveforms(state)?;
@@ -659,7 +666,20 @@ impl HbSolver {
                 }
                 bjt.update_mna_static_probe(&solution);
             }
-            visit(time, count, &self.native_bjts, &solution)?;
+            for device in &mut self.native_bsim3 {
+                if abort.is_aborted() {
+                    return Err(HbError::Aborted);
+                }
+                device
+                    .update_periodic_noise_probe(&solution)
+                    .map_err(HbError::InvalidCircuit)?;
+            }
+            visit(
+                time,
+                count,
+                (&self.native_bjts, &self.native_bsim3),
+                &solution,
+            )?;
         }
         Ok(())
     }

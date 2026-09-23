@@ -226,6 +226,113 @@ fn qpnoise_native_bjt_matches_stationary_noise_and_retains_nonlinear_modulation_
 }
 
 #[test]
+fn bsim3_periodic_noise_qpss_preserves_physical_flicker_and_bias_modulation() {
+    const MODELS: &str = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/src/device/mosfet/bsim3v3/testdata/models018.lib"
+    ));
+    let engine = Engine::default();
+    for driven in [false, true] {
+        let amplitude = if driven { 0.03 } else { 0.0 };
+        let netlist = Netlist::parse(&format!(
+            "BSIM3 QPNOISE\n\
+            vdd supply 0 dc 1.8\nrd supply out 3k noisy=0\n\
+            vin in mid dc 0.95 ac 1 sin(0.95 {amplitude} 1000)\n\
+            vsecond mid 0 dc 0 sin(0 {amplitude} 1414.2135623730951)\n\
+            m1 out in 0 0 n018 w=1u l=0.18u m=2\n\
+            {}\n.end\n",
+            MODELS.replace("level=49", "level=49 noimod=2 ef=0.9")
+        ))
+        .unwrap();
+        let point = engine.run_qpss(&netlist, config()).unwrap();
+        let sources = engine
+            .qpss_noise_sources_with_abort(&netlist, &point, &NoAbort)
+            .unwrap();
+        assert_eq!(sources.len(), 2, "{sources:?}");
+        assert!(sources.iter().all(|s| s.name.starts_with("M1:")));
+        let (modulation, tuples) = sources
+            .iter()
+            .find_map(|source| {
+                if let Spectrum::PowerLaw {
+                    exponent,
+                    modulation,
+                    modulation_lattices: Some(tuples),
+                    ..
+                } = &source.spectrum
+                {
+                    assert_eq!(*exponent, 0.9);
+                    Some((modulation, tuples))
+                } else {
+                    None
+                }
+            })
+            .unwrap();
+        let grid = engine
+            .validate_qpss_operating_point_with_abort(&netlist, &point, &NoAbort)
+            .unwrap();
+        assert!(tuples.len() > grid.len());
+        if driven {
+            let maximum = modulation
+                .iter()
+                .map(|v| v.norm())
+                .fold(0.0_f64, Value::max);
+            assert!(
+                tuples
+                    .iter()
+                    .zip(modulation)
+                    .any(|(tuple, value)| grid.index_of(tuple).is_none()
+                        && value.norm() > maximum * 1e-6)
+            );
+            assert!(sources.iter().any(|source| matches!(&source.spectrum,
+                Spectrum::White { density, .. } if density.iter().any(|v| (*v - density[0]).abs() > 1e-4))));
+            // A driven orbit must also project to finite, positive output noise.
+            let projected = noise(
+                &engine,
+                &netlist,
+                &point,
+                &sources,
+                &[("out", false)],
+                vec![10.0],
+            );
+            assert!(
+                projected[0]
+                    .source_covariances
+                    .iter()
+                    .all(|c| c.values[0].re.is_finite() && c.values[0].re > 0.0)
+            );
+        } else {
+            let projected = noise(
+                &engine,
+                &netlist,
+                &point,
+                &sources,
+                &[("out", false)],
+                vec![10.0, 100.0],
+            );
+            let reference = engine
+                .run_noise_named_with_input_source_and_abort(
+                    &netlist,
+                    "out",
+                    None,
+                    "vin",
+                    &[10.0, 100.0],
+                    engine.config.temperature,
+                    &NoAbort,
+                )
+                .unwrap();
+            for (point, reference) in projected.iter().zip(reference) {
+                let total: Value = point
+                    .source_covariances
+                    .iter()
+                    .map(|c| c.values[0].re)
+                    .sum();
+                close(total, reference.output_noise_density);
+            }
+        }
+    }
+}
+
+#[test]
 fn qpnoise_catalog_includes_physical_shunts_and_observes_cancellation() {
     let netlist = Netlist::parse("physical shunt\nV1 out 0 1\n.options RSHUNT=1k\n.end\n").unwrap();
     let engine = Engine::new(Default::default());

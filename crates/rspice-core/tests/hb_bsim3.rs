@@ -251,3 +251,49 @@ fn bsim3_periodic_two_tone_qpss_preserves_independent_frequency_response() {
         close(actual, ac[tone].voltages[out], 2e-4);
     }
 }
+
+#[test]
+fn bsim3_periodic_noise_matches_stationary_noise_for_every_model_selector() {
+    let offsets = [1e3, 1e5];
+    let engine = Engine::new(rspice_core::engine::SimulationConfig {
+        temperature: 348.15,
+        ..Default::default()
+    });
+    for selector in 1..=6 {
+        let models = MODELS
+            .replace(
+                "level=49",
+                &format!("level=49 noimod={selector} kf=2e-24 af=1.2 ef=0.9"),
+            )
+            .replace("rsh=0", "rsh=20");
+        let netlist = Netlist::parse(&format!(
+            "Native BSIM3 periodic noise\n\
+            vdd supply 0 dc 1.8\nrd supply out 3k\n\
+            vin in 0 dc 0.95 ac 1 sin(0.95 0 1meg)\n\
+            m1 out in 0 0 n018 w=1u l=0.18u nrd=3 nrs=4 m=2\n\
+            {models}\n.end\n"
+        ))
+        .unwrap();
+        let reference = engine
+            .run_noise_named_with_input_source_and_abort(
+                &netlist,
+                "out",
+                None,
+                "vin",
+                &offsets,
+                348.15,
+                &rspice_core::NoAbort,
+            )
+            .unwrap();
+        let periodic = engine
+            .run_pnoise(&netlist, 1e6, &offsets, "out", None, Some("vin"), 0)
+            .unwrap();
+        for (&actual, expected) in periodic.output_noise.iter().zip(&reference) {
+            assert!(
+                (actual / expected.output_noise_density - 1.0).abs() < 2e-6,
+                "NOIMOD={selector}: periodic={actual:e}, stationary={:e}",
+                expected.output_noise_density
+            );
+        }
+    }
+}

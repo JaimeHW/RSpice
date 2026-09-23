@@ -344,12 +344,7 @@ impl Engine {
                     ))
                 })?,
         );
-        sources.extend(self.native_bjt_periodic_noise_sources(
-            solver,
-            state,
-            temperature,
-            abort,
-        )?);
+        sources.extend(self.native_periodic_noise_sources(solver, state, temperature, abort)?);
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }

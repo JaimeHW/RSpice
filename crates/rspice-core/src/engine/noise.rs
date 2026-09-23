@@ -1229,7 +1229,7 @@ impl Engine {
         Ok(())
     }
 
-    fn collect_bsim3v3_noise_sources(
+    pub(in crate::engine) fn collect_bsim3v3_noise_sources(
         device: &crate::device::mosfet::bsim3v3::Bsim3v3Device,
     ) -> Result<Vec<NoiseSource>, SimulationError> {
         let mut sources = Vec::new();
