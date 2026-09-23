@@ -33,12 +33,23 @@ C1 ctrl 0 159.154943091895n
 """
 
 
-def start_sigint_timer(delay, done):
+def start_sigint_timer(delay, done, engine):
     def fire_sigint():
-        if not done.wait(delay):
-            # `raise_signal` is portable across POSIX and Windows and is
-            # delivered to Python's main thread when the binding polls signal
-            # handlers while waiting for the simulation worker.
+        if done.wait(delay):
+            return
+        # Wait until the binding owns an active call. A signal raised before
+        # entry or after completion can escape pytest's interrupt assertion.
+        deadline = time.monotonic() + 10.0
+        while not done.is_set() and not engine.is_running and time.monotonic() < deadline:
+            done.wait(0.001)
+        if done.is_set() or not engine.is_running:
+            return
+        # On POSIX, direct the signal to Python's main thread. The free-
+        # threaded macOS runtime can otherwise deliver a worker-raised signal
+        # after the call's KeyboardInterrupt assertion has exited.
+        if hasattr(signal, "pthread_kill"):
+            signal.pthread_kill(threading.main_thread().ident, signal.SIGINT)
+        else:
             signal.raise_signal(signal.SIGINT)
 
     killer = threading.Thread(target=fire_sigint)
@@ -216,7 +227,7 @@ class TestCancellation:
 
         # This workload runs for minutes if not cancelled.
         done = threading.Event()
-        killer = start_sigint_timer(0.5, done)
+        killer = start_sigint_timer(0.5, done, engine)
         start = time.monotonic()
         try:
             with pytest.raises(KeyboardInterrupt):
@@ -234,7 +245,7 @@ class TestCancellation:
         netlist = rspice.Netlist.parse(NONLINEAR_DC_SWEEP)
 
         done = threading.Event()
-        killer = start_sigint_timer(0.05, done)
+        killer = start_sigint_timer(0.05, done, engine)
         start = time.monotonic()
         try:
             with pytest.raises(KeyboardInterrupt):
@@ -263,7 +274,7 @@ class TestCancellation:
         netlist = rspice.Netlist.parse("\n".join(lines))
 
         done = threading.Event()
-        killer = start_sigint_timer(0.05, done)
+        killer = start_sigint_timer(0.05, done, engine)
         start = time.monotonic()
         try:
             with pytest.raises(KeyboardInterrupt):
@@ -296,7 +307,7 @@ class TestCancellation:
         frequencies = [1.0e3] * 50_000
 
         done = threading.Event()
-        killer = start_sigint_timer(0.01, done)
+        killer = start_sigint_timer(0.01, done, engine)
         start = time.monotonic()
         try:
             with pytest.raises(KeyboardInterrupt):
@@ -311,7 +322,7 @@ class TestCancellation:
         netlist = rspice.Netlist.parse(STB_LOOP)
 
         done = threading.Event()
-        killer = start_sigint_timer(0.01, done)
+        killer = start_sigint_timer(0.01, done, engine)
         start = time.monotonic()
         try:
             with pytest.raises(KeyboardInterrupt):
