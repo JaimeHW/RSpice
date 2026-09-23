@@ -1,6 +1,8 @@
 //! Dot-command parsing for analyses, options, measurements, params, and functions.
 
-use super::analysis_card_scan::*;
+use super::analysis_card_scan::{
+    at_card_end, bind_once, card_bool, card_error, card_name, take_keyword,
+};
 use super::scoping::ModelDefinitionDeferrals;
 use crate::config::DampingStrategy;
 use crate::netlist::lexer::Token;
