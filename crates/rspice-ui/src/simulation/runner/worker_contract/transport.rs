@@ -281,7 +281,9 @@ pub(super) fn validate_worker_response_before_transport(
         return Ok(());
     }
     let WorkerSimulationResult::Pss {
-        operating_point, ..
+        operating_point,
+        reporting_times,
+        ..
     } = result.as_ref()
     else {
         return Ok(());
@@ -303,20 +305,26 @@ pub(super) fn validate_worker_response_before_transport(
         )
     };
     validation.map_err(|error| format!("invalid retained PSS worker response: {error}"))?;
+    pss_display_projection(operating_point, reporting_times)?;
     let transfer_buffer_count = analysis
         .result
         .waveforms
         .len()
         .checked_add(analysis.result.branch_waveforms.len())
         .and_then(|count| count.checked_add(analysis.monodromy.len()))
-        .and_then(|count| count.checked_add(6))
+        .and_then(|count| count.checked_add(6 + usize::from(!reporting_times.is_empty())))
         .ok_or_else(|| "retained PSS response buffer count overflows this platform".to_owned())?;
     if transfer_buffer_count > MAX_WORKER_TRANSFER_BUFFERS {
         return Err(format!(
             "retained PSS response requires {transfer_buffer_count} transfer buffers, exceeding the {MAX_WORKER_TRANSFER_BUFFERS}-buffer limit"
         ));
     }
-    let mut numeric_values = analysis.result.time.len();
+    let mut numeric_values = analysis
+        .result
+        .time
+        .len()
+        .checked_add(reporting_times.len())
+        .ok_or_else(|| "retained PSS response size overflows this platform".to_owned())?;
     for waveform in analysis
         .result
         .waveforms
@@ -1270,6 +1278,8 @@ pub(crate) enum WorkerSimulationResultTransport {
     Pss {
         measurements: Vec<WorkerMeasurement>,
         operating_point: WorkerPssOperatingPointTransport,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reporting_times: Option<WorkerF64Series>,
     },
     Pstb {
         period: f64,

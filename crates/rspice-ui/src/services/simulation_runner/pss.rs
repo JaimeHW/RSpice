@@ -19,6 +19,8 @@ use rspice_core::engine::{Engine, PssDcOperatingPointSeed};
 use std::path::Path;
 use std::sync::Arc;
 
+mod output;
+
 /// PSS analysis data
 #[derive(Debug, Clone)]
 pub struct PssData {
@@ -318,8 +320,15 @@ pub(crate) fn run_pss_analysis_on_materialized_with_abort(
             "PSS solver returned an invalid period".to_string(),
         ));
     }
-    let mut time = Vec::with_capacity(pss_result.result.time.len());
-    for (sample_idx, sample) in pss_result.result.time.iter().enumerate() {
+    let projection = output::projection(
+        &pss_result.result.time,
+        &netlist.options,
+        engine.config().resource_limits,
+        pss_result.result.node_names.len() + pss_result.result.branch_names.len(),
+        abort,
+    )?;
+    let mut time = Vec::with_capacity(projection.times().len());
+    for (sample_idx, sample) in projection.times().iter().enumerate() {
         poll_periodically(abort, sample_idx)?;
         time.push(*sample);
     }
@@ -341,11 +350,9 @@ pub(crate) fn run_pss_analysis_on_materialized_with_abort(
         )
     {
         ensure_not_aborted(abort)?;
-        let mut values = Vec::with_capacity(waveform.values.len());
-        for (sample_idx, sample) in waveform.values.iter().enumerate() {
-            poll_periodically(abort, sample_idx)?;
-            values.push(*sample);
-        }
+        let values = projection
+            .project(&waveform.values)
+            .map_err(ServiceRunError::Failure)?;
         waveforms.push((format!("{prefix}({name})"), values));
     }
     if waveforms.is_empty() {

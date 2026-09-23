@@ -1995,17 +1995,51 @@ pub(super) fn worker_waveforms(waveforms: HashMap<String, WaveformData>) -> Vec<
     waveforms
 }
 
+pub(super) fn pss_display_projection(
+    operating_point: &rspice_core::engine::PssOperatingPoint,
+    reporting_times: &[f64],
+) -> Result<rspice_core::analysis::transient::TransientOutputProjection, String> {
+    let result = &operating_point.analysis().result;
+    let times = if reporting_times.is_empty() {
+        &result.time
+    } else {
+        reporting_times
+    };
+    let channels = result
+        .node_names
+        .iter()
+        .filter(|name| name.as_str() != "0" && !name.eq_ignore_ascii_case("gnd"))
+        .count()
+        .saturating_add(result.branch_names.len());
+    // Reconstruction allocates an x and y series for each displayed channel.
+    let values = times
+        .len()
+        .saturating_mul(channels.saturating_mul(2).saturating_add(1));
+    if values > MAX_WORKER_F64_VALUES {
+        return Err(format!(
+            "PSS display requires {values} numerical values, exceeding the {MAX_WORKER_F64_VALUES}-value limit"
+        ));
+    }
+    rspice_core::analysis::transient::TransientOutputProjection::interpolate_times(
+        &result.time,
+        times,
+        MAX_WORKER_F64_VALUES,
+    )
+}
+
 pub(super) fn validate_pss_display_contract(
     time: &[f64],
     waveforms: &HashMap<String, WaveformData>,
     operating_point: &rspice_core::engine::PssOperatingPoint,
 ) -> Result<(), SimulationError> {
     let result = &operating_point.analysis().result;
-    if time != result.time.as_slice() {
+    if time.is_empty() {
         return Err(SimulationError::InvalidConfig(
-            "PSS display time axis does not match its retained numerical orbit".to_owned(),
+            "PSS display time axis is empty".into(),
         ));
     }
+    let projection =
+        pss_display_projection(operating_point, time).map_err(SimulationError::InvalidConfig)?;
     let expected_count = result
         .node_names
         .iter()
@@ -2038,15 +2072,18 @@ pub(super) fn validate_pss_display_contract(
                 "PSS display is missing retained-orbit waveform '{display_name}'"
             ))
         })?;
+        let expected = projection
+            .project(&periodic.values)
+            .map_err(SimulationError::InvalidConfig)?;
         if display.name != display_name
-            || display.x_values.as_slice() != result.time.as_slice()
-            || display.y_values.as_slice() != periodic.values.as_slice()
+            || display.x_values.as_slice() != time
+            || display.y_values != expected
             || display.y_unit != unit
             || display.is_complex
             || display.y_imag.is_some()
         {
             return Err(SimulationError::InvalidConfig(format!(
-                "PSS display waveform '{display_name}' does not exactly match its retained numerical orbit"
+                "PSS display waveform '{display_name}' does not match the reporting projection of its retained numerical orbit"
             )));
         }
     }
@@ -2056,9 +2093,12 @@ pub(super) fn validate_pss_display_contract(
 pub(super) fn simulation_result_from_worker_pss(
     measurements: Vec<WorkerMeasurement>,
     operating_point: rspice_core::engine::PssOperatingPoint,
+    reporting_times: Vec<f64>,
 ) -> SimulationResult {
+    let projection = pss_display_projection(&operating_point, &reporting_times)
+        .expect("PSS reporting grid is validated at worker ingress");
     let result = &operating_point.analysis().result;
-    let time = result.time.clone();
+    let time = projection.times().to_vec();
     let mut waveforms =
         HashMap::with_capacity(result.waveforms.len() + result.branch_waveforms.len());
     for (name, periodic, prefix, unit) in result
@@ -2081,7 +2121,9 @@ pub(super) fn simulation_result_from_worker_pss(
             WaveformData::new_time_domain_in_unit(
                 display_name,
                 time.clone(),
-                periodic.values.clone(),
+                projection
+                    .project(&periodic.values)
+                    .expect("retained PSS waveform lengths are authenticated"),
                 unit,
             ),
         );

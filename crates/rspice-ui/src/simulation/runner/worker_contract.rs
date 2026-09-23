@@ -406,6 +406,15 @@ impl WorkerResponse {
                 validate_worker_reliability_result(&result)
                     .map_err(SimulationError::InvalidConfig)?;
                 validate_worker_qpnoise_result(&result).map_err(SimulationError::InvalidConfig)?;
+                if let WorkerSimulationResult::Pss {
+                    operating_point,
+                    reporting_times,
+                    ..
+                } = result.as_ref()
+                {
+                    pss_display_projection(operating_point, reporting_times)
+                        .map_err(SimulationError::InvalidConfig)?;
+                }
                 if let WorkerSimulationResult::Hb {
                     operating_point, ..
                 } = result.as_ref()
@@ -847,6 +856,9 @@ pub(crate) enum WorkerSimulationResult {
     Pss {
         measurements: Vec<WorkerMeasurement>,
         operating_point: rspice_core::engine::PssOperatingPoint,
+        /// Empty selects the complete retained orbit (including legacy responses).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        reporting_times: Vec<f64>,
     },
     Ac {
         convergence: Option<crate::state::TransientConvergenceEvidence>,
@@ -1424,7 +1436,9 @@ impl WorkerSimulationResult {
             WorkerSimulationResult::Pss {
                 measurements,
                 operating_point,
+                reporting_times,
             } => sum_payload_bytes([
+                f64_payload_bytes(reporting_times.len()),
                 measurements_payload_bytes(measurements),
                 pss_operating_point_payload_bytes(operating_point),
             ]),
@@ -1787,7 +1801,13 @@ impl TryFrom<SimulationResult> for WorkerSimulationResult {
                         ));
                     }
                     validate_pss_display_contract(&time, &waveforms, &operating_point)?;
+                    let reporting_times = if time == operating_point.analysis().result.time {
+                        Vec::new()
+                    } else {
+                        time
+                    };
                     Ok(Self::Pss {
+                        reporting_times,
                         measurements: worker_measurements(measurements),
                         operating_point: std::sync::Arc::unwrap_or_clone(operating_point),
                     })
@@ -2203,7 +2223,8 @@ impl From<WorkerSimulationResult> for SimulationResult {
             WorkerSimulationResult::Pss {
                 measurements,
                 operating_point,
-            } => simulation_result_from_worker_pss(measurements, operating_point),
+                reporting_times,
+            } => simulation_result_from_worker_pss(measurements, operating_point, reporting_times),
             WorkerSimulationResult::Ac {
                 convergence,
                 frequencies,

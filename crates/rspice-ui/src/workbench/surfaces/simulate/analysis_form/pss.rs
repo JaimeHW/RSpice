@@ -106,7 +106,10 @@ pub(super) fn fields(
     )
     .on_hover_text(tone_hint(setup.osc_mode));
     input_row(ui, PSS_FIELD_LABELS[3], &mut setup.tstab_periods);
-    input_row(ui, PSS_FIELD_LABELS[4], &mut setup.points_per_period);
+    input_row(ui, PSS_FIELD_LABELS[4], &mut setup.points_per_period).on_hover_text(
+        "Initial integration points per period; the solver refines this grid for accuracy. \
+         Output schedules sample the solved orbit, with linear interpolation between solver points.",
+    );
     engineering_input_row(ui, PSS_FIELD_LABELS[5], &mut setup.tolerance);
     enabled_choice_row(ui, PSS_FIELD_LABELS[6], &mut setup.osc_mode);
     // The oscillator field is a stable member of the grid. Toggling autonomous

@@ -81,8 +81,11 @@ impl WorkerSimulationResultTransport {
             WorkerSimulationResult::Pss {
                 measurements,
                 operating_point,
+                reporting_times,
             } => Self::Pss {
                 measurements,
+                reporting_times: (!reporting_times.is_empty())
+                    .then(|| WorkerF64Series::from_vec(reporting_times, buffers)),
                 operating_point: WorkerPssOperatingPointTransport::from_operating_point(
                     operating_point,
                     buffers,
@@ -436,8 +439,13 @@ impl WorkerSimulationResultTransport {
             Self::Pss {
                 measurements,
                 operating_point,
+                reporting_times,
             } => Ok(WorkerSimulationResult::Pss {
                 measurements,
+                reporting_times: reporting_times
+                    .map(|series| series.into_vec(buffers))
+                    .transpose()?
+                    .unwrap_or_default(),
                 operating_point: operating_point.into_operating_point(buffers)?,
             }),
             Self::Pstb {

@@ -7,6 +7,7 @@ fn worker_transport_extracts_every_retained_pss_numeric_array_from_metadata() {
     let response = WorkerResponse {
         id: 78,
         outcome: WorkerOutcome::Success(Box::new(WorkerSimulationResult::Pss {
+            reporting_times: Vec::new(),
             measurements: Vec::new(),
             operating_point: super::super::tests::retained_pss_operating_point(),
         })),
@@ -66,6 +67,7 @@ fn worker_pss_branch_currents_round_trip_and_reject_tamper() {
     let response = WorkerResponse {
         id: 178,
         outcome: WorkerOutcome::Success(Box::new(WorkerSimulationResult::Pss {
+            reporting_times: Vec::new(),
             measurements: Vec::new(),
             operating_point: point.clone(),
         })),
@@ -88,7 +90,7 @@ fn worker_pss_branch_currents_round_trip_and_reject_tamper() {
         point.analysis().result.branch_waveforms[0].values
     );
     assert_eq!(transport.clone().into_response().unwrap(), response);
-    let display = simulation_result_from_worker_pss(Vec::new(), point);
+    let display = simulation_result_from_worker_pss(Vec::new(), point, Vec::new());
     let SimulationResult::Transient {
         waveforms,
         periodic_state: Some(point),
@@ -108,6 +110,56 @@ fn worker_pss_branch_currents_round_trip_and_reject_tamper() {
             .unwrap_err()
             .contains("numerical payload does not match")
     );
+}
+
+#[test]
+fn worker_pss_reporting_grid_validates_display_and_worker_ingress() {
+    let point = super::super::tests::retained_pss_operating_point();
+    let source = &point.analysis().result.time;
+    let reporting_times = vec![source[0] + (source.last().unwrap() - source[0]) * 0.37];
+    let display =
+        simulation_result_from_worker_pss(Vec::new(), point.clone(), reporting_times.clone());
+    let mut altered = display.clone();
+    let SimulationResult::Transient { waveforms, .. } = &mut altered else {
+        unreachable!()
+    };
+    waveforms.values_mut().next().unwrap().y_values[0] += 1.0;
+    assert!(WorkerSimulationResult::try_from(altered).is_err());
+    let response = WorkerResponse::from_result_for_transfer(279, Ok(display));
+    let transport = WorkerResponseTransport::from_response(response.clone()).unwrap();
+    let WorkerOutcomeTransport::Success(WorkerSimulationResultTransport::Pss {
+        reporting_times: Some(WorkerF64Series::Buffer { buffer, .. }),
+        ..
+    }) = &transport.response.outcome
+    else {
+        panic!("reporting times need a transfer buffer")
+    };
+    let buffer = *buffer;
+    assert_eq!(transport.buffers[buffer], reporting_times);
+    assert_eq!(transport.clone().into_response().unwrap(), response);
+    for invalid in [f64::NAN, -1.0, source.last().unwrap() + 1.0] {
+        let mut malformed = transport.clone();
+        malformed.buffers[buffer][0] = invalid;
+        assert!(malformed.into_response().is_err());
+        let mut native = response.clone();
+        let WorkerOutcome::Success(worker) = &mut native.outcome else {
+            unreachable!()
+        };
+        let WorkerSimulationResult::Pss {
+            reporting_times, ..
+        } = worker.as_mut()
+        else {
+            unreachable!()
+        };
+        reporting_times[0] = invalid;
+        assert!(native.into_result().is_err());
+    }
+    for invalid in [
+        vec![reporting_times[0]; 2],
+        vec![*source.last().unwrap(), source[0]],
+    ] {
+        assert!(pss_display_projection(&point, &invalid).is_err());
+    }
 }
 
 #[test]
