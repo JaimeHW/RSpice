@@ -87,6 +87,16 @@ fn sampled_delay_endpoint_event_requires_owned_finite_rates() {
     let checkpoint = line.checkpoint_state().unwrap();
     line.restore_checkpoint_state(&checkpoint).unwrap();
     assert_eq!(line.checkpoint_state().unwrap(), checkpoint);
+    // An exact pre-event coordinate can round onto the event during a
+    // period translation; it still owns the incoming value and finite rate.
+    for (offset, side, expected) in [
+        (-2.0_f64.powi(-55), TransmissionLineTimeSide::Outgoing, 3.0),
+        (2.0_f64.powi(-55), TransmissionLineTimeSide::Incoming, 7.0),
+    ] {
+        assert!(
+            (line.lossless_shifted_wave_at(1.0, 1.0, offset, true, side) - expected).abs() < 1e-14
+        );
+    }
 }
 
 #[test]

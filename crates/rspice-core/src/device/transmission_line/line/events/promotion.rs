@@ -2,6 +2,31 @@
 use super::*;
 
 impl TransmissionLine {
+    /// Resolve an explicitly owned transition at the newest incoming history
+    /// coordinate. The outgoing physical state and rates come from the owner;
+    /// the independent incoming history supplies its own same-side rate.
+    pub(crate) fn resolve_history_endpoint_event(
+        &mut self,
+        outgoing: [Value; 4],
+        outgoing_wave_slopes: [Value; 2],
+    ) -> Result<(), String> {
+        let incoming = self
+            .state_history
+            .back()
+            .copied()
+            .ok_or_else(|| "missing incoming delay endpoint".to_owned())?;
+        let incoming_wave_slopes = [true, false].map(|forward| {
+            self.lossless_wave_slope_at(incoming.time, forward, TransmissionLineTimeSide::Incoming)
+        });
+        self.accept_history_event(TransmissionLineHistoryEvent {
+            time: incoming.time,
+            incoming: [incoming.v1, incoming.i1, incoming.v2, incoming.i2],
+            outgoing,
+            incoming_wave_slopes,
+            outgoing_wave_slopes,
+        })
+    }
+
     /// Each row is [event clock, incoming sample clock, outgoing sample clock].
     /// The owner supplies provenance; closeness/equality of samples is never a
     /// declaration. Smooth interpolation on each side supplies finite rates.

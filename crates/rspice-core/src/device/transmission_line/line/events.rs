@@ -336,6 +336,36 @@ impl TransmissionLine {
             .map(|sample| sample.0)
     }
 
+    /// Preserve the exact side when a history-coordinate translation rounds
+    /// onto an event. The selected grid clock may have been rounded outward.
+    pub(crate) fn lossless_shifted_wave_at(
+        &self,
+        clock: Value,
+        origin: Value,
+        offset: Value,
+        forward: bool,
+        side: TransmissionLineTimeSide,
+    ) -> Value {
+        let high = origin + offset;
+        let recovered = high - origin;
+        let low = (origin - (high - recovered)) + (offset - recovered);
+        let remainder = (high - clock) + low;
+        if let Some(event) = self.history_event_at(clock) {
+            let side = if remainder < 0.0 {
+                TransmissionLineTimeSide::Incoming
+            } else if remainder > 0.0 {
+                TransmissionLineTimeSide::Outgoing
+            } else {
+                side
+            };
+            return event.slope(forward, side).mul_add(
+                remainder,
+                self.lossless_wave_at_on_side(clock, forward, side),
+            );
+        }
+        self.lossless_wave_at_on_side(clock, forward, side)
+    }
+
     fn history_event_value_and_slope(
         &self,
         time: Value,
