@@ -335,6 +335,7 @@ pub(super) const CARRIER_OWNS_HB_INITIAL_STATE: &str =
     "this analysis reuses the bound HB solution; configure initial state on that HB analysis";
 pub(super) const ENVELOPE_HAS_NO_HB_INITIALIZER: &str =
     "select HB under Initial periodic solve to configure its initial state";
+pub(super) const PSS_RETAINS_COMPLETE_ORBIT: &str = "PSS always retains every orbit signal for dependent analyses; reporting times only change display sampling";
 pub(super) const TRANSIENT_OWNS_STEP_CEILING: &str =
     "the transient's own Max step field owns this, and one bound cannot have two copies";
 /// `.OPTIONS METHOD` on a PSS analysis.
@@ -628,6 +629,9 @@ impl NumericOverrideOption {
             return Some(reason);
         }
         match self {
+            Self::RetainEverySignal if matches!(kind, AnalysisKind::Pss) => {
+                Some(PSS_RETAINS_COMPLETE_ORBIT)
+            }
             Self::MaximumTimestep if matches!(kind, AnalysisKind::Transient) => {
                 Some(TRANSIENT_OWNS_STEP_CEILING)
             }

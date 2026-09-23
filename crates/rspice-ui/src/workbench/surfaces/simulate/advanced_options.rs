@@ -283,6 +283,9 @@ pub(super) fn refused_effective(
     options: &SimulationOptions,
 ) -> String {
     match option {
+        NumericOverrideOption::RetainEverySignal if matches!(draft, AnalysisDraft::Pss(_)) => {
+            "on".to_owned()
+        }
         NumericOverrideOption::Itl1 => ownership.accuracy.map_or_else(
             || NO_REFUSED_VALUE.to_owned(),
             super::page_solver::tier_iteration_budget,

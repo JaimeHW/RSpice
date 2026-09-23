@@ -11,6 +11,63 @@ fn snapshot(plan: &SimulationPlan) -> String {
 }
 
 #[test]
+fn pss_retention_restore_preserves_reporting_and_receipts() {
+    let mut plan = SimulationPlan::empty();
+    let (pss, _) = plan.insert(AnalysisKind::Pss).unwrap();
+    let (empty_pss, _) = plan.insert(AnalysisKind::Pss).unwrap();
+    let (transient, _) = plan.insert(AnalysisKind::Transient).unwrap();
+    let retention: AnalysisNumericOverride =
+        serde_json::from_str(r#"{"retain_every_signal":false}"#).unwrap();
+    for id in [pss, empty_pss, transient] {
+        let index = plan.index_of(id).unwrap();
+        plan.instances[index].numeric_override = Some(retention.clone());
+    }
+    let index = plan.index_of(pss).unwrap();
+    plan.instances[index]
+        .numeric_override
+        .as_mut()
+        .unwrap()
+        .set_for_instance(
+            AnalysisKind::Pss,
+            crate::simulation::plan::SolverOwnership::NONE,
+            NumericOverrideOption::StrobeInterval,
+            "10n",
+        )
+        .unwrap();
+    let mut restored: SimulationPlan = serde_json::from_str(&snapshot(&plan)).unwrap();
+    let receipts = serde_json::to_value(&restored.receipts).unwrap();
+    restored.prepare_after_restore();
+    let record = restored.instance(pss).unwrap().numeric_override().unwrap();
+    assert!(
+        record
+            .value(NumericOverrideOption::RetainEverySignal)
+            .is_none()
+    );
+    assert_eq!(
+        record.value(NumericOverrideOption::StrobeInterval),
+        Some("10n".into())
+    );
+    assert!(
+        restored
+            .instance(empty_pss)
+            .unwrap()
+            .numeric_override()
+            .is_none()
+    );
+    assert_eq!(
+        restored.instance(transient).unwrap().numeric_override(),
+        Some(&retention)
+    );
+    assert_eq!(serde_json::to_value(&restored.receipts).unwrap(), receipts);
+    let once = snapshot(&restored);
+    restored.prepare_after_restore();
+    assert_eq!(snapshot(&restored), once);
+    restored
+        .edit(pss, |_| ())
+        .expect("restored PSS stays editable");
+}
+
+#[test]
 fn restore_retires_only_unused_hb_consumer_startup_overrides() {
     use crate::simulation::plan::SolverOwnership;
     let mut plan = SimulationPlan::empty();

@@ -504,3 +504,39 @@ fn an_authored_step_ceiling_is_reported_after_the_plan_clamps_it() {
     assert_eq!(origin_of(&rows, O::MaximumTimestep), OVERRIDE_ORIGIN);
     assert_eq!(effective_of(&rows, O::MaximumTimestep), "1p");
 }
+
+#[test]
+fn pss_retention_is_reported_as_required_while_reporting_times_remain_configurable() {
+    let draft = AnalysisDraft::for_kind(AnalysisKind::Pss);
+    let options = SimulationOptions::default();
+    let rows = rows_for(AnalysisKind::Pss, None);
+    assert_eq!(effective_of(&rows, O::RetainEverySignal), "on");
+    let offered: Vec<_> = form_rows(AnalysisKind::Pss, &draft, None, &options)
+        .into_iter()
+        .flat_map(|section| section.rows)
+        .map(|row| row.option)
+        .collect();
+    assert!(!offered.contains(&O::RetainEverySignal));
+    assert!(offered.contains(&O::StrobeInterval));
+    assert!(offered.contains(&O::OutputTimePoints));
+    let mut record = AnalysisNumericOverride::default();
+    for value in ["on", "off"] {
+        let error = record
+            .set_for_instance(
+                AnalysisKind::Pss,
+                SolverOwnership::NONE,
+                O::RetainEverySignal,
+                value,
+            )
+            .unwrap_err();
+        assert!(error.contains("always retains"));
+        record
+            .set_for_instance(
+                AnalysisKind::Transient,
+                SolverOwnership::NONE,
+                O::RetainEverySignal,
+                value,
+            )
+            .unwrap();
+    }
+}

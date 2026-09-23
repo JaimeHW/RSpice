@@ -1136,6 +1136,16 @@ impl SimulationPlan {
                     instance.numeric_override = None;
                 }
             }
+            // PSS has always retained the full orbit for its consumers. Its
+            // old retention switch changed nothing; retire only that field.
+            if instance.kind == AnalysisKind::Pss
+                && let Some(record) = instance.numeric_override.as_mut()
+            {
+                record.clear(NumericOverrideOption::RetainEverySignal);
+                if record.is_empty() {
+                    instance.numeric_override = None;
+                }
+            }
             // Schema migrations may retire a dependency role. Retaining such
             // an edge would make an otherwise valid saved plan structurally
             // corrupt, so restore prunes only roles the current typed draft no
