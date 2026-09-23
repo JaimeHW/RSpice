@@ -36,7 +36,9 @@ source/drain resistor noise. The native `ID` and `FN` mechanisms retain their
 identities as the bias varies; colored noise includes amplitude modulation and
 sideband correlations. Envelope reconstructs BSIM3 terminal and NQS charge
 history from its solved carrier and supports portable checkpoint continuation.
-PSS still requires a shooting-state adapter. Generic saved HB phase projections
+PSS supports quasi-static BSIM3 terminal charge, including coupled charge,
+overlap and junction storage, and portable transient continuation. BSIM3 NQS
+shooting still requires a stored-channel-charge coordinate. Generic saved HB phase projections
 retain the BSIM3 continuation limit; the authenticated Envelope initializer
 supplies the additional history.
 

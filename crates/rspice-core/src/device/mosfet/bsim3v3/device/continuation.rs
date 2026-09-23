@@ -2,6 +2,39 @@
 use super::*;
 
 impl Bsim3v3Device {
+    /// Voltage dependencies of the terminal storage law. These are coordinate
+    /// edges, not a decomposition into reciprocal two-terminal capacitors.
+    /// Suppressed intrinsic charge and zero overlap/junction parameters must
+    /// not create artificial shooting states.
+    pub(crate) fn shooting_terminal_storage_nodes(&self) -> [Option<(NodeId, NodeId)>; 5] {
+        let p = &self.core.size;
+        let intrinsic = self.core.model.xpart >= 0.0 && !self.uses_trnqs();
+        let overlap_extension = self.core.model.cap_mod != 0;
+        let (bd, bdsw, bdswg, bs, bssw, bsswg) = eval::junction_zero_bias_caps_acm0_or_1(
+            &self.core.model,
+            &self.core.model_temp,
+            p,
+            &self.core.inst,
+        );
+        let active = [
+            intrinsic || p.cgdo != 0.0 || (overlap_extension && p.cgdl != 0.0),
+            intrinsic || p.cgso != 0.0 || (overlap_extension && p.cgsl != 0.0),
+            intrinsic || p.cgbo != 0.0,
+            bd != 0.0 || bdsw != 0.0 || bdswg != 0.0,
+            bs != 0.0 || bssw != 0.0 || bsswg != 0.0,
+        ];
+        let nodes = [
+            (self.node_gate, self.node_drain),
+            (self.node_gate, self.node_source),
+            (self.node_gate, self.node_bulk),
+            (self.node_drain, self.node_bulk),
+            (self.node_source, self.node_bulk),
+        ];
+        std::array::from_fn(|index| {
+            (active[index] && nodes[index].0 != nodes[index].1).then_some(nodes[index])
+        })
+    }
+
     /// Per-instance, device-polarity CKTstate charges and their physical time
     /// derivatives. NQS keeps equilibrium channel charge and stored deficit
     /// separate, just as the native transient integration does.

@@ -407,6 +407,11 @@ impl PssVoltageConstraintBuilder {
                 self.port(pos, neg, abort)?;
             }
         }
+        for mos in &circuit.bsim3v3.devices {
+            for (pos, neg) in mos.shooting_terminal_storage_nodes().into_iter().flatten() {
+                self.port(pos, neg, abort)?;
+            }
+        }
         let mut words = circuit.num_nodes().saturating_mul(3);
         self.reserve_retained_words(words)?;
         let mut node_forms = Vec::with_capacity(circuit.num_nodes());

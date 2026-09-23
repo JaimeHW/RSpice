@@ -809,7 +809,9 @@ pub use fft::{
 
 mod history;
 use history::*;
-pub(in crate::engine) use history::{BjtTransientHistory, JfetTransientHistory};
+pub(in crate::engine) use history::{
+    BjtTransientHistory, Bsim3TransientHistory, JfetTransientHistory,
+};
 
 #[derive(Debug, Clone, Copy)]
 struct DerivedTransientBranchCurrent {

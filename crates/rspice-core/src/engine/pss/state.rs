@@ -57,6 +57,12 @@ enum ChargeBranch {
         pos: usize,
         neg: usize,
     },
+    Bsim3 {
+        device: usize,
+        port: usize,
+        pos: usize,
+        neg: usize,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -190,7 +196,7 @@ impl PssStateBasis {
             return Ok(basis);
         }
         let node_count = circuit.num_nodes() + 1;
-        let mut voltage_constraints = if circuit.vcvs.is_empty() {
+        let mut voltage_constraints = if circuit.vcvs.is_empty() && circuit.bsim3v3.is_empty() {
             None
         } else {
             let mut constraints = PssVoltageConstraintBuilder::new(node_count, limits)?;
@@ -324,6 +330,24 @@ impl PssStateBasis {
                 }
             }
         }
+        for (device, mos) in circuit.bsim3v3.devices.iter().enumerate() {
+            for (port, nodes) in mos
+                .shooting_terminal_storage_nodes()
+                .into_iter()
+                .enumerate()
+            {
+                if let Some((pos, neg)) = nodes
+                    && add(pos, neg, ForestValue::State(charge_branches.len()))?
+                {
+                    charge_branches.push(ChargeBranch::Bsim3 {
+                        device,
+                        port,
+                        pos,
+                        neg,
+                    });
+                }
+            }
+        }
         let mut visited = vec![false; forest_node_count];
         let mut forest = Vec::new();
         let mut pending = Vec::new();
@@ -401,6 +425,13 @@ impl PssStateBasis {
                         ["qgs", "qgd"][charge]
                     )
                 }
+                ChargeBranch::Bsim3 { device, port, .. } => {
+                    format!(
+                        "M:{}:{}",
+                        circuit.bsim3v3.devices[device].name,
+                        ["vgd", "vgs", "vgb", "vdb", "vsb"][port]
+                    )
+                }
             })
             .chain(
                 self.currents
@@ -421,7 +452,9 @@ impl PssStateBasis {
                 let diode = &circuit.diodes.devices[index];
                 (diode.node_anode, diode.node_cathode)
             }
-            ChargeBranch::Bjt { pos, neg, .. } | ChargeBranch::Jfet { pos, neg, .. } => (pos, neg),
+            ChargeBranch::Bjt { pos, neg, .. }
+            | ChargeBranch::Jfet { pos, neg, .. }
+            | ChargeBranch::Bsim3 { pos, neg, .. } => (pos, neg),
         }
     }
 }
@@ -435,6 +468,7 @@ pub(in crate::engine) struct PssCircuit {
     pub(super) diode_history: TwoTerminalChargeHistory,
     pub(super) bjt_history: super::super::transient::BjtTransientHistory,
     pub(super) jfet_history: super::super::transient::JfetTransientHistory,
+    pub(super) bsim3_history: super::super::transient::Bsim3TransientHistory,
     pub(super) bjt_snapshot_cache: Vec<Option<crate::device::semiconductor::BjtChargeSnapshot>>,
     /// Trial currents computed before a small Newton voltage correction is
     /// rounded into the absolute solution. Read only on accepted steps.
@@ -536,6 +570,7 @@ impl PssCircuit {
             &solution_scratch[1..],
             super::super::transient::ReactiveHistorySeed::SolvedBias,
         );
+        let bsim3_history = Engine::initialize_bsim3_history(&circuit, &solution_scratch[1..]);
         let integral_probe_scales = vec![
             1.0;
             circuit.behavioral_sources.integral_count()
@@ -546,6 +581,7 @@ impl PssCircuit {
             diode_history,
             bjt_history,
             jfet_history,
+            bsim3_history,
             bjt_snapshot_cache,
             capacitor_trial_currents,
             inductor_trial_offsets,
@@ -664,6 +700,19 @@ impl PssCircuit {
         }
     }
 
+    /// These auxiliary unknowns are voltage rates, not branch currents. Their
+    /// convergence is certified by the physical displacement-current residual;
+    /// tiny charge coefficients can amplify harmless current roundoff into a
+    /// large rate change while the fixed node voltages have already converged.
+    pub(super) fn is_initial_charge_rate(&self, index: usize) -> bool {
+        self.initial_charge_rates.as_ref().is_some_and(|rates| {
+            rates
+                .branches
+                .iter()
+                .any(|&branch| index == self.num_nodes() + branch - 1)
+        })
+    }
+
     /// Candidate values in the independent shooting-state basis, normalized
     /// for the stabilization estimator's voltage-unit absolute tolerance.
     /// Algebraic reactions (including voltage-source currents) are not states:
@@ -700,7 +749,9 @@ impl PssCircuit {
             .map(|branch| match *branch {
                 ChargeBranch::Capacitor(index) => self.capacitors.v_prev[index],
                 ChargeBranch::Diode(index) => self.diode_history.vd_prev[index],
-                ChargeBranch::Bjt { pos, neg, .. } | ChargeBranch::Jfet { pos, neg, .. } => {
+                ChargeBranch::Bjt { pos, neg, .. }
+                | ChargeBranch::Jfet { pos, neg, .. }
+                | ChargeBranch::Bsim3 { pos, neg, .. } => {
                     self.solution_scratch[pos] - self.solution_scratch[neg]
                 }
             })
@@ -819,6 +870,10 @@ impl PssCircuit {
             &self.solution_scratch[1..],
             super::super::transient::ReactiveHistorySeed::SolvedBias,
         );
+        for device in &mut circuit.bsim3v3.devices {
+            device.seed_accepted_periodic_bias(&self.solution_scratch[1..]);
+        }
+        self.bsim3_history = Engine::initialize_bsim3_history(circuit, &self.solution_scratch[1..]);
         Ok(())
     }
 
@@ -838,6 +893,10 @@ impl PssCircuit {
             solution,
             super::super::transient::ReactiveHistorySeed::SolvedBias,
         );
+        for device in &mut self.circuit.bsim3v3.devices {
+            device.seed_accepted_periodic_bias(solution);
+        }
+        self.bsim3_history = Engine::initialize_bsim3_history(&self.circuit, solution);
     }
 
     pub(in crate::engine) fn bjt_noise_snapshots(
@@ -924,7 +983,9 @@ impl PssCircuit {
             let value = match self.basis.charge_branches[index] {
                 ChargeBranch::Capacitor(index) => self.capacitors.v_prev[index],
                 ChargeBranch::Diode(index) => self.diode_history.vd_prev[index],
-                ChargeBranch::Bjt { pos, neg, .. } | ChargeBranch::Jfet { pos, neg, .. } => {
+                ChargeBranch::Bjt { pos, neg, .. }
+                | ChargeBranch::Jfet { pos, neg, .. }
+                | ChargeBranch::Bsim3 { pos, neg, .. } => {
                     self.solution_scratch[pos] - self.solution_scratch[neg]
                 }
             };
@@ -933,9 +994,10 @@ impl PssCircuit {
             // row empty beside an unnecessary auxiliary branch.
             let existing_branch = match self.basis.charge_branches[index] {
                 ChargeBranch::Capacitor(index) => self.capacitors.ic_branch_indices[index],
-                ChargeBranch::Diode(_) | ChargeBranch::Bjt { .. } | ChargeBranch::Jfet { .. } => {
-                    None
-                }
+                ChargeBranch::Diode(_)
+                | ChargeBranch::Bjt { .. }
+                | ChargeBranch::Jfet { .. }
+                | ChargeBranch::Bsim3 { .. } => None,
             };
             let branch = existing_branch.unwrap_or_else(|| self.circuit.allocate_branch());
             self.circuit.voltage_sources.add(
@@ -1097,6 +1159,15 @@ impl PssCircuit {
                 },
                 &self.jfet_history,
                 false,
+            );
+            Engine::stamp_bsim3_transient_companions(
+                &self.circuit,
+                charge,
+                unused_rhs,
+                solution,
+                &coeff,
+                1.0,
+                &self.bsim3_history,
             );
             rates.project(charge.values_mut(), &self.circuit, rhs, &mut stamps)
         })?;

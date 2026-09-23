@@ -462,7 +462,7 @@ impl Engine {
     }
 
     #[inline]
-    pub(super) fn initialize_bsim3_history(
+    pub(in crate::engine) fn initialize_bsim3_history(
         circuit: &crate::circuit::CircuitData,
         solution: &[Value],
     ) -> Bsim3TransientHistory {
@@ -686,7 +686,7 @@ impl Engine {
     /// equivalent charge currents. `NQSMOD=1` also stamps the hidden
     /// charge-deficit row from b3ld.c.
     #[inline]
-    pub(super) fn stamp_bsim3_transient_companions(
+    pub(in crate::engine) fn stamp_bsim3_transient_companions(
         circuit: &crate::circuit::CircuitData,
         matrix: &mut crate::solver::StaticMatrix,
         rhs: &mut [Value],
@@ -754,7 +754,7 @@ impl Engine {
 
     /// Commit the BSIM3 charge history after an accepted timestep.
     #[inline]
-    pub(super) fn update_bsim3_history(
+    pub(in crate::engine) fn update_bsim3_history(
         circuit: &crate::circuit::CircuitData,
         voltages: &[Value],
         coeff: &CompanionCoefficients,

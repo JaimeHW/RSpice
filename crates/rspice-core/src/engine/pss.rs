@@ -114,7 +114,7 @@ impl PssAcceptedStepHistory {
 const PSS_FD_STEP: Value = 1e-8;
 const PSS_KRYLOV_STATE_THRESHOLD: usize = 12;
 const PSS_KRYLOV_REL_TOL: Value = 1e-9;
-const PSS_OPERATING_POINT_IDENTITY_VERSION: u32 = 93;
+const PSS_OPERATING_POINT_IDENTITY_VERSION: u32 = 94;
 
 fn pss_identity_field(hasher: &mut blake3::Hasher, name: &str, bytes: &[u8]) {
     hasher.update(&(name.len() as u64).to_le_bytes());
@@ -2003,7 +2003,7 @@ impl Engine {
             &circuit.diode_history,
             &circuit.jfet_history,
             &circuit.bjt_snapshot_cache,
-            &Default::default(),
+            &circuit.bsim3_history,
         );
         let junction_history =
             Self::normalize_accepted_junction_transient_history_checkpoint_for_order_one(
@@ -3791,12 +3791,13 @@ impl Engine {
                         |(index, (&old, &new))| {
                             old.is_finite()
                                 && new.is_finite()
-                                && (new - old).abs()
-                                    <= circuit.solution_abstol(
-                                        index,
-                                        self.voltage_abstol(),
-                                        self.current_abstol(),
-                                    ) + self.voltage_reltol() * old.abs().max(new.abs())
+                                && (circuit.is_initial_charge_rate(index)
+                                    || (new - old).abs()
+                                        <= circuit.solution_abstol(
+                                            index,
+                                            self.voltage_abstol(),
+                                            self.current_abstol(),
+                                        ) + self.voltage_reltol() * old.abs().max(new.abs()))
                         },
                     );
                     // The correction solve certifies A*delta against its
@@ -4049,6 +4050,7 @@ impl Engine {
             diode_history,
             bjt_history,
             jfet_history,
+            bsim3_history,
             bjt_snapshot_cache,
             ..
         } = pss;
@@ -4218,6 +4220,15 @@ impl Engine {
                 },
                 jfet_history,
                 false,
+            );
+            Self::stamp_bsim3_transient_companions(
+                circuit,
+                matrix,
+                rhs,
+                linearize_at,
+                coeff,
+                dt,
+                bsim3_history,
             );
         }
         // B sources remain part of the physical transient equation even when
@@ -4604,6 +4615,7 @@ impl Engine {
                     diode_history,
                     bjt_history,
                     jfet_history,
+                    bsim3_history,
                     bjt_snapshot_cache,
                     ..
                 } = circuit;
@@ -4623,6 +4635,7 @@ impl Engine {
                     Some(bjt_snapshot_cache),
                 )?;
                 Self::accept_jfet_history(circuit, jfet_history, &new_solution, &coeff, dt, false);
+                Self::update_bsim3_history(circuit, &new_solution, &coeff, dt, bsim3_history);
             }
 
             circuit.accept_node_solution(&new_solution);

@@ -481,7 +481,7 @@ pub(crate) const fn periodic_capability_descriptor(
             ),
             small_signal: Restricted("BSIM3 AC-only NQS needs a periodic response operator"),
             noise: Complete,
-            pss_state: Absent("BSIM3 charge history"),
+            pss_state: Restricted("BSIM3 NQS shooting requires a stored-channel-charge coordinate"),
             envelope: Complete,
         },
         F::Bsim4v8 => PeriodicCapabilityDescriptor {
@@ -1377,6 +1377,19 @@ pub(in crate::engine) fn pss_state_gaps(circuit: &CircuitData) -> Vec<Capability
             Inapplicable | Complete => {}
             Absent(missing) => gaps.push(CapabilityGap::new(family, missing)),
             Restricted(_) => match family {
+                F::Bsim3v3 => {
+                    if circuit
+                        .bsim3v3
+                        .devices
+                        .iter()
+                        .any(|device| device.uses_trnqs())
+                    {
+                        gaps.push(CapabilityGap::new(
+                            family,
+                            "BSIM3 NQS shooting requires a stored-channel-charge coordinate",
+                        ));
+                    }
+                }
                 F::Jfet => {
                     if circuit.jfets.iter().any(|jfet| {
                         jfet.params.channel_model != crate::device::JfetChannelModel::ShichmanHodges
@@ -1762,7 +1775,7 @@ mod tests {
             // complete charge descriptor; VBIC's finite delay states remain.
             F::Bjt => [R, R, C, C, R, R],
             F::Mosfet => [R, C, C, R, A, A],
-            F::Bsim3v3 => [C, R, R, C, A, C],
+            F::Bsim3v3 => [C, R, R, C, R, C],
             F::Bsim4v8 => [A, R, I, A, A, A],
             F::B3SoiDd | F::B3SoiFd | F::B3SoiPd => [A, C, I, A, A, A],
             F::Ekv26 | F::Ekv3 | F::Vdmos => [I, C, A, A, A, A],

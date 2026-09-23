@@ -2183,7 +2183,7 @@ fn junction_depletion(
     }
 }
 
-fn junction_zero_bias_caps_acm0_or_1(
+pub(super) fn junction_zero_bias_caps_acm0_or_1(
     model: &Bsim3v3Model,
     mt: &Bsim3v3ModelTemp,
     p: &Bsim3v3SizeDep,
