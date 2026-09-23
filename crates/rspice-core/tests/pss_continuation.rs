@@ -1,6 +1,6 @@
 use rspice_core::analysis::PssConfig;
 use rspice_core::engine::{Engine, SimulationConfig, SpiceDialect};
-use rspice_core::netlist::{Netlist, NetlistParseOptions};
+use rspice_core::netlist::Netlist;
 use rspice_core::numerics::integration::IntegrationMethod;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
