@@ -2036,7 +2036,9 @@ impl ResolvedExecutionDependencies {
                         ))
                     }
                     ExecutionArtifactPayload::QpssState(state) => {
-                        ExecutionArtifactPayloadTransferMetadata::QpssState(state.encode_transfer(&mut buffers))
+                        ExecutionArtifactPayloadTransferMetadata::QpssState(Box::new(
+                            state.encode_transfer(&mut buffers),
+                        ))
                     }
                     ExecutionArtifactPayload::HbState(state) => {
                         let spectra = state
@@ -2699,7 +2701,7 @@ enum ExecutionArtifactPayloadTransferMetadata {
     TransientTrajectory(Box<TransientTrajectoryTransferMetadata>),
     PeriodicState(Box<PeriodicStateTransferMetadata>),
     HbState(HbStateTransferMetadata),
-    QpssState(qpss::QpssStateTransferMetadata),
+    QpssState(Box<qpss::QpssStateTransferMetadata>),
     DcOperatingPointSeed(DcOperatingPointSeedTransferMetadata),
 }
 
