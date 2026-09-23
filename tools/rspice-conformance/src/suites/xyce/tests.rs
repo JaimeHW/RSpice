@@ -7265,7 +7265,9 @@ fn scalar_tran_measurement_admission_rejects_unrepresented_semantics_and_resolve
         .measurements
         .iter()
         .find_map(|measurement| match &measurement.measure_type {
-            rspice_core::analysis::MeasureType::FileError { file, .. } => Some(PathBuf::from(file.path())),
+            rspice_core::analysis::MeasureType::FileError { file, .. } => {
+                Some(PathBuf::from(file.path()))
+            }
             _ => None,
         })
         .expect("root ERROR measurement file");
@@ -7333,7 +7335,9 @@ R1 out 0 1\n\
         .measurements
         .iter()
         .find_map(|measurement| match &measurement.measure_type {
-            rspice_core::analysis::MeasureType::FileError { file, .. } => Some(PathBuf::from(file.path())),
+            rspice_core::analysis::MeasureType::FileError { file, .. } => {
+                Some(PathBuf::from(file.path()))
+            }
             _ => None,
         })
         .expect("included ERROR measurement file");
