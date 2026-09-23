@@ -159,7 +159,7 @@ class TestSensitivity:
             assert trace.phase_unavailability == ["zero-output"] * 2
             assert trace.phase_degrees_unavailability == ["zero-output"] * 2
             assert trace.db_unavailability == ["zero-output"] * 2
-        assert ac.document()["schemaVersion"] == 7
+        assert ac.document()["schemaVersion"] == 9
         with pytest.raises(ValueError, match="rerun"):
             rspice.ElementSensitivity._unpickle(("V1", "V1", "VoltageSource", "dc"), 0.0, 1.0, 0.0)
 
