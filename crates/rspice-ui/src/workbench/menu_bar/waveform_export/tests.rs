@@ -2652,8 +2652,7 @@ fn soa_current_envelope_csv_retains_voltage_limits_and_authored_curves() {
     assert_eq!(csv.lines().filter(|l| l.starts_with("sample,")).count(), 3);
     assert!(
         csv.lines()
-            .filter(|l| l.starts_with("sample,"))
-            .last()
+            .rfind(|l| l.starts_with("sample,"))
             .unwrap()
             .contains(&format!(",{:.17e},", 12.0))
     );
