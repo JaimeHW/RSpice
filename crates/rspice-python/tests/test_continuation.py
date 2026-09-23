@@ -69,7 +69,8 @@ class TestOperatingPointReuse:
         second = engine.run_pnoise(
             driven, FUNDAMENTAL, [1e3], "out", pss=operating_point
         )
-        assert len(first.frequencies) == 3
+        # Three points per decade plus the inclusive upper endpoint.
+        assert len(first.frequencies) == 4
         assert len(second.frequencies) == 1
 
 
