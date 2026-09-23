@@ -205,13 +205,17 @@ pub const XYCE_Q_ELECTRON: Value = 1.6021918e-19;
 
 /// Boltzmann constant as ngspice 46's `const.h` carries it (J/K).
 ///
-/// Native BJT loading and primitive noise use the SPICE3 pair retained in
-/// `const.h`. Keep this explicit even though Xyce 7.10 has the same values.
-pub(crate) const NGSPICE_K_BOLTZMANN: Value = 1.3806226e-23;
+/// ngspice froze the CODATA 2014 pair, which its native Gummel-Poon
+/// temperature equations and `nevalsrc.c` both read. The difference from the
+/// exact SI pair above is seventh-digit in `kT/q`, and every junction
+/// exponentiates it: at 0.7 V it moves a transconductance by one part in
+/// 1e5. Which pair applies is a dialect decision, so it is named once here
+/// and read by every equation that must reproduce ngspice's numbers.
+pub(crate) const NGSPICE_K_BOLTZMANN: Value = 1.38064852e-23;
 
 /// Elementary charge as ngspice 46's `const.h` carries it (C). See
 /// [`NGSPICE_K_BOLTZMANN`].
-pub(crate) const NGSPICE_Q_ELECTRON: Value = 1.6021918e-19;
+pub(crate) const NGSPICE_Q_ELECTRON: Value = 1.6021766208e-19;
 
 /// Physical constants used while evaluating primitive noise sources.
 ///
