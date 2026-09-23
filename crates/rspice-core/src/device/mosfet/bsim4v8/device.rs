@@ -1808,7 +1808,7 @@ impl Bsim4v8Device {
             matrix,
             dp,
             dp,
-            m * (op.gds + gjbd - gdtotd + rev_sum + gbdpdp - gidtotd + op.ggidld),
+            m * (op.gds + op.gbd - gdtotd + rev_sum + gbdpdp - gidtotd + op.ggidld),
         );
         stamp(matrix, dp, d, -m * gdtot);
         stamp(
@@ -1845,7 +1845,7 @@ impl Bsim4v8Device {
             matrix,
             sp,
             sp,
-            m * (op.gds + gjbs + fwd_sum + gbspsp - gistots - gstots + op.ggisls),
+            m * (op.gds + op.gbs + fwd_sum + gbspsp - gistots - gstots + op.ggisls),
         );
         stamp(matrix, sp, s, -m * gstot);
         stamp(
