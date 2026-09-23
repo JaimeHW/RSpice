@@ -1147,7 +1147,7 @@ impl Engine {
             })
     }
 
-    pub(in crate::engine::hb) fn hb_response_auxiliary_count(circuit: &CircuitData) -> usize {
+    pub(in crate::engine::hb) fn hb_device_auxiliary_count(circuit: &CircuitData) -> usize {
         circuit
             .bsim3v3
             .devices
@@ -1160,6 +1160,14 @@ impl Engine {
                     .devices
                     .iter()
                     .filter(|device| device.uses_ac_nqs())
+                    .count(),
+            )
+            .saturating_add(
+                circuit
+                    .mosfets
+                    .devices
+                    .iter()
+                    .filter(|device| !device.uses_legacy_bsim())
                     .count(),
             )
             .saturating_mul(3)

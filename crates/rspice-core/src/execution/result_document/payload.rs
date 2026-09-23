@@ -3109,6 +3109,7 @@ pub enum HbContinuationLimitationTag {
     CapacitorChargeHistoryNotRetained,
     Bsim3ChargeHistoryNotRetained,
     Bsim4ChargeHistoryNotRetained,
+    ClassicMosChargeHistoryNotRetained,
 }
 
 impl From<&HbContinuationLimitation> for HbContinuationLimitationTag {
@@ -3119,6 +3120,9 @@ impl From<&HbContinuationLimitation> for HbContinuationLimitationTag {
             }
             HbContinuationLimitation::Bsim4ChargeHistoryNotRetained => {
                 Self::Bsim4ChargeHistoryNotRetained
+            }
+            HbContinuationLimitation::ClassicMosChargeHistoryNotRetained => {
+                Self::ClassicMosChargeHistoryNotRetained
             }
             HbContinuationLimitation::CapacitorChargeHistoryNotRetained => {
                 Self::CapacitorChargeHistoryNotRetained
@@ -3144,6 +3148,9 @@ impl From<HbContinuationLimitationTag> for HbContinuationLimitation {
             }
             HbContinuationLimitationTag::Bsim4ChargeHistoryNotRetained => {
                 Self::Bsim4ChargeHistoryNotRetained
+            }
+            HbContinuationLimitationTag::ClassicMosChargeHistoryNotRetained => {
+                Self::ClassicMosChargeHistoryNotRetained
             }
             HbContinuationLimitationTag::CapacitorChargeHistoryNotRetained => {
                 Self::CapacitorChargeHistoryNotRetained

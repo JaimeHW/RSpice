@@ -68,6 +68,9 @@ pub enum HbContinuationLimitation {
     /// Native BSIM4 gate/body charge and NQS integration histories need an
     /// explicit transient initializer, including the split internal nodes.
     Bsim4ChargeHistoryNotRetained,
+    /// Native Meyer capacitance and legacy BSIM charge histories require an
+    /// explicit accepted-state initializer for transient continuation.
+    ClassicMosChargeHistoryNotRetained,
 }
 
 /// One reactive element evaluated at a carrier phase.

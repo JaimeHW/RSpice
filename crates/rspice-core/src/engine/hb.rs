@@ -73,7 +73,7 @@ pub use quasi_periodic::{
 };
 pub use state::{HbEnvelopeContinuationState, HbEnvelopeStateGuarantee};
 
-const HB_OPERATING_POINT_IDENTITY_VERSION: u32 = 43;
+const HB_OPERATING_POINT_IDENTITY_VERSION: u32 = 44;
 
 fn hb_identity_field(hasher: &mut blake3::Hasher, name: &str, bytes: &[u8]) {
     hasher.update(&(name.len() as u64).to_le_bytes());
@@ -1156,9 +1156,20 @@ impl Engine {
                     .flat_map(|device| device.ac_nqs_response_names()),
             )
             .collect::<Vec<_>>();
+        let mos_rate_names = circuit
+            .mosfets
+            .devices
+            .iter()
+            .flat_map(|device| device.periodic_rate_names().into_iter().flatten())
+            .collect::<Vec<_>>();
         let physical_count = branch_names
             .len()
-            .checked_sub(integral_names.len() + rate_names.len() + response_names.len())
+            .checked_sub(
+                integral_names.len()
+                    + rate_names.len()
+                    + response_names.len()
+                    + mos_rate_names.len(),
+            )
             .ok_or_else(|| {
                 SimulationError::Circuit(
                     "dependent periodic basis omits behavioral integral coordinates".to_owned(),
@@ -1169,7 +1180,8 @@ impl Engine {
         if !retained_integral_names.iter().eq(integral_names
             .iter()
             .chain(&rate_names)
-            .chain(&response_names))
+            .chain(&response_names)
+            .chain(&mos_rate_names))
         {
             return Err(SimulationError::Circuit(
                 "dependent periodic integral basis does not match the circuit".to_owned(),
@@ -1338,6 +1350,27 @@ impl Engine {
                 state.mna_branch_currents[rate_start + index][harmonic] =
                     Complex64::new(0.0, std::f64::consts::TAU * harmonic as Value)
                         * (voltage(stamp.pp.row) - voltage(stamp.nn.row));
+            }
+        }
+        let mut mos_rate = rate_start + rate_names.len() + response_names.len();
+        for device in &circuit.mosfets.devices {
+            if device.uses_legacy_bsim() {
+                continue;
+            }
+            for negative in [device.node_source, device.node_drain, device.node_bulk] {
+                for harmonic in 0..=config.num_harmonics {
+                    let voltage = |node: usize| {
+                        node.checked_sub(1)
+                            .map_or(Complex64::ZERO, |node| state.x[node][harmonic])
+                    };
+                    let omega = std::f64::consts::TAU * result.frequency * harmonic as Value;
+                    state.mna_branch_currents[mos_rate][harmonic] = Complex64::new(
+                        0.0,
+                        omega * crate::device::Mosfet::PERIODIC_RATE_TIME_SCALE,
+                    ) * (voltage(device.node_gate)
+                        - voltage(negative));
+                }
+                mos_rate += 1;
             }
         }
         state.iteration = analysis.iterations.max(1);
@@ -1884,7 +1917,7 @@ impl Engine {
             .checked_add(Self::hb_periodic_extra_branch_count(&circuit)?)
             .and_then(|count| count.checked_add(circuit.behavioral_sources.integral_count()))
             .and_then(|count| count.checked_add(circuit.capacitors.periodic_auxiliary_count()))
-            .and_then(|count| count.checked_add(Self::hb_response_auxiliary_count(&circuit)))
+            .and_then(|count| count.checked_add(Self::hb_device_auxiliary_count(&circuit)))
             .ok_or_else(|| {
                 SimulationError::Circuit(
                     "HB canonical and distributed-network branch count overflows this platform"

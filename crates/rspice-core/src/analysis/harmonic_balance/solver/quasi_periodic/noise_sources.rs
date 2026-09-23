@@ -187,6 +187,7 @@ impl HbSolver {
                 &[crate::device::Bjt],
                 &[crate::device::Bsim3v3Device],
                 &[crate::device::Bsim4v8Device],
+                &[crate::device::Mosfet],
             ),
             &[Value],
             &ResourceLimits,
@@ -196,6 +197,7 @@ impl HbSolver {
         if self.native_bjts.is_empty()
             && self.native_bsim3.is_empty()
             && self.native_bsim4.is_empty()
+            && self.native_mos.is_empty()
         {
             return Ok(());
         }
@@ -216,7 +218,8 @@ impl HbSolver {
                 self.native_bjts
                     .len()
                     .saturating_add(self.native_bsim3.len())
-                    .saturating_add(self.native_bsim4.len()),
+                    .saturating_add(self.native_bsim4.len())
+                    .saturating_add(self.native_mos.len()),
             ),
             limits.max_analysis_points,
         )?;
@@ -265,10 +268,18 @@ impl HbSolver {
                     .update_periodic_noise_probe(&solution)
                     .map_err(noise_error)?;
             }
+            for device in &mut self.native_mos {
+                device.update_periodic_noise_probe(&solution);
+            }
             visit(
                 phase,
                 grid.sample_count(),
-                (&self.native_bjts, &self.native_bsim3, &self.native_bsim4),
+                (
+                    &self.native_bjts,
+                    &self.native_bsim3,
+                    &self.native_bsim4,
+                    &self.native_mos,
+                ),
                 &solution,
                 &remaining,
             )?;

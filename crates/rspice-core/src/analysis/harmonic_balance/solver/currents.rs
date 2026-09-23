@@ -199,6 +199,47 @@ impl HbSolver {
                 });
             }
         }
+        if !self.native_mos.is_empty() {
+            let count = self.fft.size();
+            let waves = self.native_state_waveforms(state)?;
+            let mut solution = vec![0.0; waves.len()];
+            let mut rate_start = self.num_nodes + self.mos_rate_branch_start();
+            for index in 0..self.native_mos.len() {
+                let device = self.native_mos[index].clone();
+                let rates = (!device.uses_legacy_bsim()).then(|| {
+                    let nodes = [rate_start + 1, rate_start + 2, rate_start + 3];
+                    rate_start += 3;
+                    nodes
+                });
+                let mut f = vec![vec![0.0; count]; 4];
+                let mut q = f.clone();
+                for time in 0..count {
+                    if abort.is_aborted() {
+                        return Err(HbError::Aborted);
+                    }
+                    for (value, wave) in solution.iter_mut().zip(&waves) {
+                        *value = wave[time];
+                    }
+                    let (currents, charges) = device
+                        .periodic_terminal_fq(&solution, rates)
+                        .map_err(HbError::InvalidCircuit)?;
+                    for terminal in 0..4 {
+                        f[terminal][time] = currents[terminal];
+                        q[terminal][time] = charges[terminal];
+                    }
+                }
+                let currents = f
+                    .iter()
+                    .zip(&q)
+                    .map(|(f, q)| self.lead_phasors(f, q))
+                    .collect::<Result<_, _>>()?;
+                result.push(HbDeviceLeadSpectra {
+                    name: device.name.clone(),
+                    terminals: &["d", "g", "s", "b"],
+                    currents,
+                });
+            }
+        }
         if !self.periodic_capacitors.is_empty() {
             let waves = self.native_state_waveforms(state)?;
             let count = self.fft.size();

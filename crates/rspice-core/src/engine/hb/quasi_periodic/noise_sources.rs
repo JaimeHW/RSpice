@@ -221,7 +221,11 @@ impl Engine {
             let q = checked_scaled_positive_product(&[4.0, kb, temperature, g], name)?;
             catalog.push(
                 self,
-                white(format!("{name} thermal"), injections.clone(), q),
+                white(
+                    Self::periodic_resistor_thermal_noise_name(circuit, i),
+                    injections.clone(),
+                    q,
+                ),
             )?;
             if let Some(crate::circuit::ResistorFlickerNoise {
                 coefficient,

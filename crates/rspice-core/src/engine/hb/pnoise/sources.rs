@@ -165,7 +165,7 @@ impl Engine {
                 &format!("pnoise resistor '{name}' thermal-noise density"),
             )?;
             sources.push(PeriodicNoiseSource {
-                name: format!("{name} thermal"),
+                name: Self::periodic_resistor_thermal_noise_name(circuit, i),
                 node_pos: Self::hb_node_to_solver_index(np, num_nodes),
                 node_neg: Self::hb_node_to_solver_index(nn, num_nodes),
                 psd: vec![Complex64::new(thermal_density.mantissa, 0.0)],

@@ -123,7 +123,7 @@ impl Engine {
                     .collect(),
             )?;
         }
-        let mut nonlinear =
+        let nonlinear =
             solver
                 .nonlinear_lead_spectra(state, abort)
                 .map_err(|error| match error {
@@ -132,38 +132,6 @@ impl Engine {
                         SimulationError::Circuit(format!("HB current observation failed: {error}"))
                     }
                 })?;
-        // MOS overlap charge is stamped in the solver's linear capacitance
-        // operator. Add it to the corresponding physical lead observations.
-        for mos in &circuit.mosfets.devices {
-            if abort.is_aborted() {
-                return Err(SimulationError::Aborted);
-            }
-            let leads = nonlinear
-                .iter_mut()
-                .find(|lead| lead.name.eq_ignore_ascii_case(&mos.name))
-                .ok_or_else(|| {
-                    SimulationError::Circuit(format!(
-                        "HB current '{}' lost its resolved device",
-                        mos.name
-                    ))
-                })?;
-            let (cgs, cgd, cgb) = mos.overlap_capacitances();
-            for (terminal, node, capacitance) in [
-                (2, mos.node_source, cgs),
-                (0, mos.node_drain, cgd),
-                (3, mos.node_bulk, cgb),
-            ] {
-                let voltage = Self::hb_terminal_voltage_spectrum(result, mos.node_gate, node);
-                for (harmonic, voltage) in voltage.into_iter().enumerate() {
-                    let current = Complex64::new(
-                        0.0,
-                        std::f64::consts::TAU * result.harmonic_frequencies[harmonic] * capacitance,
-                    ) * voltage;
-                    leads.currents[1][harmonic] += current;
-                    leads.currents[terminal][harmonic] -= current;
-                }
-            }
-        }
         for leads in nonlinear {
             if abort.is_aborted() {
                 return Err(SimulationError::Aborted);

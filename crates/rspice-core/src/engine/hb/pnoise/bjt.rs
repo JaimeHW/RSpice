@@ -133,13 +133,14 @@ impl NativeNoiseWaveforms {
             &[crate::device::Bjt],
             &[crate::device::Bsim3v3Device],
             &[crate::device::Bsim4v8Device],
+            &[crate::device::Mosfet],
         ),
         solution: &[Value],
         abort: &dyn AbortSignal,
     ) -> Result<(), SimulationError> {
         self.elementary.clear();
         self.temperatures.clear();
-        let (bjts, bsim3, bsim4) = devices;
+        let (bjts, bsim3, bsim4, mosfets) = devices;
         for bjt in bjts {
             if abort.is_aborted() {
                 return Err(SimulationError::Aborted);
@@ -179,6 +180,17 @@ impl NativeNoiseWaveforms {
                     .insert(source.identity.clone(), device.core.model_temp.temp);
             }
             self.elementary.extend(sources);
+        }
+        for device in mosfets {
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
+            Engine::append_classic_mos_noise_sources(
+                device,
+                engine.config.spice_dialect,
+                &mut self.elementary,
+                &mut self.temperatures,
+            )?;
         }
         Engine::configure_noise_physical_constants(
             &mut self.elementary,

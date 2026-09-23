@@ -99,6 +99,65 @@ struct ComplexBinAccumulator {
 }
 
 impl Engine {
+    pub(in crate::engine) fn append_classic_mos_noise_sources(
+        mos: &crate::device::Mosfet,
+        dialect: crate::config::SpiceDialect,
+        noise_sources: &mut Vec<NoiseSource>,
+        absolute_temperatures: &mut std::collections::HashMap<
+            crate::analysis::NoiseSourceIdentity,
+            Value,
+        >,
+    ) -> Result<(), SimulationError> {
+        let conductance = mos.channel_noise_conductance(dialect).map_err(|reason| {
+            SimulationError::Circuit(format!("Noise source '{}:ID': {reason}", mos.name))
+        })?;
+        if conductance != 0.0 {
+            let label = format!("{}:ID", mos.name);
+            let resistance = Self::noise_resistance_from_conductance(&label, conductance)?
+                .ok_or_else(|| {
+                    SimulationError::Circuit(format!(
+                        "Noise source '{label}' unexpectedly has zero conductance"
+                    ))
+                })?;
+            let mut source = NoiseSource::thermal(
+                mos.name.clone(),
+                mos.node_drain,
+                mos.node_source,
+                resistance,
+            )
+            .with_identity(crate::analysis::NoiseSourceIdentity::mechanism(
+                &mos.name, "ID",
+            ));
+            source.temperature_offset = mos.noise_temperature_offset;
+            if let Some(temperature) = mos.noise_absolute_temperature {
+                absolute_temperatures.insert(source.identity.clone(), temperature);
+            }
+            noise_sources.push(source);
+        }
+
+        // The device selects its family's flicker law and normalization.
+        let flicker = mos.flicker_noise_source_terms(dialect).map_err(|reason| {
+            SimulationError::Circuit(format!("Noise source '{}:FN': {reason}", mos.name))
+        })?;
+        if let Some(flicker) = flicker {
+            let mut source = NoiseSource::flicker_with_frequency_exponent(
+                mos.name.clone(),
+                mos.node_drain,
+                mos.node_source,
+                flicker.coefficient,
+                flicker.af,
+                flicker.ef,
+                flicker.current,
+            )
+            .with_identity(crate::analysis::NoiseSourceIdentity::mechanism(
+                &mos.name, "FN",
+            ));
+            source.parameter_exponent = flicker.binary_scale;
+            noise_sources.push(source);
+        }
+        Ok(())
+    }
+
     #[cfg(any(test, feature = "veriloga", feature = "veriloga-builtins-base"))]
     fn add_complex_bin(
         accumulator: &mut ComplexBinAccumulator,
@@ -2804,53 +2863,12 @@ impl Engine {
         // `m1:thermal`, which no `DNO(M1)` can resolve and which no
         // whole-device sum can reach.
         for mos in &circuit.mosfets.devices {
-            let conductance = mos.channel_noise_conductance(dialect).map_err(|reason| {
-                SimulationError::Circuit(format!("Noise source '{}:ID': {reason}", mos.name))
-            })?;
-            if conductance != 0.0 {
-                let label = format!("{}:ID", mos.name);
-                let resistance = Self::noise_resistance_from_conductance(&label, conductance)?
-                    .ok_or_else(|| {
-                        SimulationError::Circuit(format!(
-                            "Noise source '{label}' unexpectedly has zero conductance"
-                        ))
-                    })?;
-                let mut source = NoiseSource::thermal(
-                    mos.name.clone(),
-                    mos.node_drain,
-                    mos.node_source,
-                    resistance,
-                )
-                .with_identity(crate::analysis::NoiseSourceIdentity::mechanism(
-                    &mos.name, "ID",
-                ));
-                source.temperature_offset = mos.noise_temperature_offset;
-                if let Some(temperature) = mos.noise_absolute_temperature {
-                    absolute_temperatures.insert(source.identity.clone(), temperature);
-                }
-                noise_sources.push(source);
-            }
-
-            // The device selects its family's flicker law and normalization.
-            let flicker = mos.flicker_noise_source_terms(dialect).map_err(|reason| {
-                SimulationError::Circuit(format!("Noise source '{}:FN': {reason}", mos.name))
-            })?;
-            if let Some(flicker) = flicker {
-                let mut source = NoiseSource::flicker_with_frequency_exponent(
-                    mos.name.clone(),
-                    mos.node_drain,
-                    mos.node_source,
-                    flicker.coefficient,
-                    flicker.af,
-                    flicker.ef,
-                    flicker.current,
-                )
-                .with_identity(crate::analysis::NoiseSourceIdentity::mechanism(
-                    &mos.name, "FN",
-                ));
-                source.parameter_exponent = flicker.binary_scale;
-                noise_sources.push(source);
-            }
+            Self::append_classic_mos_noise_sources(
+                mos,
+                dialect,
+                &mut noise_sources,
+                &mut absolute_temperatures,
+            )?;
         }
 
         // JFET channel thermal noise, gate shot noise, and flicker noise. Each

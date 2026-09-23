@@ -230,7 +230,7 @@ pub(super) fn build(
         + Engine::hb_periodic_extra_branch_count(circuit)?
         + circuit.behavioral_sources.integral_count()
         + circuit.capacitors.periodic_auxiliary_count()
-        + Engine::hb_response_auxiliary_count(circuit);
+        + Engine::hb_device_auxiliary_count(circuit);
     let mut result = vec![vec![Complex64::ZERO; grid.len()]; unknowns];
     let mut projector = Projector {
         transform: QuasiPeriodicTransform::new_with_abort(grid.clone(), abort)

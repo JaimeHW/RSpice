@@ -106,76 +106,9 @@ impl Engine {
         }
 
         for mos in &circuit.mosfets.devices {
-            let (noise_gamma, gdsnoi) = mos
-                .channel_noise_parameters(self.config.spice_dialect)
-                .map_err(|reason| {
-                    SimulationError::Circuit(format!("Noise source '{}:ID': {reason}", mos.name))
-                })?;
-            let drain = Self::hb_node_to_solver_index(mos.node_drain, num_nodes);
-            let gate = Self::hb_node_to_solver_index(mos.node_gate, num_nodes);
-            let source = Self::hb_node_to_solver_index(mos.node_source, num_nodes);
-            let bulk = Self::hb_node_to_solver_index(mos.node_bulk, num_nodes);
-            let leff = mos.l - 2.0 * mos.ld;
-            let beta = mos.kp * mos.w / leff * mos.multiplicity;
-            let instance = match mos.mos_type {
-                crate::device::MosType::Nmos => NonlinearDeviceInstance::nmos(
-                    drain, gate, source, bulk, mos.vto, beta, mos.lambda,
-                ),
-                // The solver works in the polarity frame: the effective
-                // threshold is -VTO, which keeps depletion PMOS negative.
-                crate::device::MosType::Pmos => NonlinearDeviceInstance::pmos(
-                    drain, gate, source, bulk, -mos.vto, beta, mos.lambda,
-                ),
-            };
-            // Effective bulk-junction zero-bias capacitances: explicit
-            // CBD/CBS overrides, else bottom density times area, plus the
-            // sidewall density times perimeter folded at the bottom grading.
-            let cbs0 = mos.source_zero_bias_bottom_junction_capacitance()
-                + mos.source_zero_bias_sidewall_junction_capacitance();
-            let cbd0 = mos.drain_zero_bias_bottom_junction_capacitance()
-                + mos.drain_zero_bias_sidewall_junction_capacitance();
-            let is_s = mos.effective_body_junction_saturation_current(mos.source_area);
-            let is_d = mos.effective_body_junction_saturation_current(mos.drain_area);
-            // Intrinsic channel charge: total oxide capacitance over the
-            // effective (lateral-diffusion-shortened) channel.
-            let instance = instance
-                .with_thermal_voltage(mos.vt)
-                .with_body_effect(mos.gamma, mos.phi)
-                .with_channel_noise_gamma(noise_gamma)
-                .with_channel_noise_gdsnoi(gdsnoi)
-                .with_intrinsic_gate(mos.oxide_capacitance_total())
-                .with_bulk_junctions(
-                    DepletionCap::new(cbs0, mos.pb, mos.mj, mos.fc),
-                    DepletionCap::new(cbd0, mos.pb, mos.mj, mos.fc),
-                    is_s,
-                    is_d,
-                );
-            if let Some(temp_k) = mos.noise_absolute_temperature {
-                solver.add_named_nonlinear_device_with_absolute_noise_temperature(
-                    mos.name.clone(),
-                    instance,
-                    temp_k,
-                );
-            } else {
-                solver.add_named_nonlinear_device_with_noise_temperature_offset(
-                    mos.name.clone(),
-                    instance,
-                    mos.noise_temperature_offset,
-                );
-            }
-
-            // Gate overlap capacitances are bias-independent in level 1:
-            // stamp them as ordinary linear capacitors.
-            let (cgs_ov, cgd_ov, cgb_ov) = mos.overlap_capacitances();
-            if cgs_ov > 0.0 {
-                self.hb_stamp_admittance(solver, mos.node_gate, mos.node_source, cgs_ov, false);
-            }
-            if cgd_ov > 0.0 {
-                self.hb_stamp_admittance(solver, mos.node_gate, mos.node_drain, cgd_ov, false);
-            }
-            if cgb_ov > 0.0 {
-                self.hb_stamp_admittance(solver, mos.node_gate, mos.node_bulk, cgb_ov, false);
-            }
+            solver
+                .add_native_mos(mos.clone())
+                .map_err(|error| SimulationError::Circuit(error.to_string()))?;
         }
 
         for jfet in &circuit.jfets {

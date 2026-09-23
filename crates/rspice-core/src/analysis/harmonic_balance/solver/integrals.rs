@@ -39,6 +39,11 @@ impl HbSolver {
                     .iter()
                     .flat_map(|device| device.ac_nqs_response_names()),
             )
+            .chain(
+                self.native_mos
+                    .iter()
+                    .flat_map(|device| device.periodic_rate_names().into_iter().flatten()),
+            )
             .collect::<Vec<_>>();
         if physical != self.exact_mna_branches().len() {
             if self.exact_mna_branch_names()[physical..] != names
@@ -86,8 +91,9 @@ impl HbSolver {
         let physical = self.physical_branch_count();
         state.integral_branch_start =
             (physical != self.exact_mna_branches().len()).then_some(physical);
-        state.capacitor_rate_branch_start =
-            (!self.periodic_capacitors.is_empty()).then_some(self.capacitor_rate_start());
+        state.capacitor_rate_branch_start = (self.capacitor_rate_start()
+            < self.exact_mna_branches().len())
+        .then_some(self.capacitor_rate_start());
         state.current_equation_branches = (0..self.exact_mna_branches().len())
             .filter(|branch| {
                 self.is_capacitor_current_row(self.num_nodes + branch)

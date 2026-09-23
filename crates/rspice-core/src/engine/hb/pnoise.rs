@@ -383,6 +383,28 @@ fn checked_input_referred_pnoise(
 }
 
 impl Engine {
+    pub(in crate::engine::hb) fn periodic_resistor_thermal_noise_name(
+        circuit: &CircuitData,
+        index: usize,
+    ) -> String {
+        let name = &circuit.resistors.names[index];
+        if let Some((owner, suffix)) = name.rsplit_once(".__") {
+            if let Some(device) = circuit
+                .mosfets
+                .devices
+                .iter()
+                .find(|device| device.name.eq_ignore_ascii_case(owner))
+            {
+                for mechanism in ["RD", "RS"] {
+                    if suffix.eq_ignore_ascii_case(mechanism) {
+                        return format!("{}:{mechanism}", device.name);
+                    }
+                }
+            }
+        }
+        format!("{name} thermal")
+    }
+
     /// Run periodic noise analysis at `output_node` (optionally referenced
     /// to `output_ref` for a differential output) over `offsets`.
     ///
@@ -720,7 +742,7 @@ impl Engine {
             .checked_add(Self::hb_periodic_extra_branch_count(&circuit)?)
             .and_then(|count| count.checked_add(circuit.behavioral_sources.integral_count()))
             .and_then(|count| count.checked_add(circuit.capacitors.periodic_auxiliary_count()))
-            .and_then(|count| count.checked_add(Self::hb_response_auxiliary_count(&circuit)))
+            .and_then(|count| count.checked_add(Self::hb_device_auxiliary_count(&circuit)))
             .ok_or_else(|| {
                 SimulationError::Circuit(
                     "pnoise canonical and distributed-network branch count overflows this platform"

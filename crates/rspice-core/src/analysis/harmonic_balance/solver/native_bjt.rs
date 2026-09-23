@@ -101,10 +101,16 @@ impl HbSolver {
         self.capacitor_rate_start() + self.periodic_capacitors.len()
     }
 
+    pub(super) fn mos_rate_branch_start(&self) -> usize {
+        self.ac_response_branch_start()
+            + self.native_bsim3.iter().filter(|d| d.uses_ac_nqs()).count() * 3
+            + self.native_bsim4.iter().filter(|d| d.uses_ac_nqs()).count() * 3
+    }
+
     pub(super) fn is_ac_response_current_row(&self, row: usize) -> bool {
         let start = self.num_nodes + self.ac_response_branch_start();
         row >= start
-            && row < self.num_nodes + self.exact_mna_branches().len()
+            && row < self.num_nodes + self.mos_rate_branch_start()
             && (row - start).is_multiple_of(3)
     }
 
@@ -112,6 +118,7 @@ impl HbSolver {
         !self.native_bjts.is_empty()
             || !self.native_bsim3.is_empty()
             || !self.native_bsim4.is_empty()
+            || !self.native_mos.is_empty()
             || !self.behavioral_sources.is_empty()
             || !self.periodic_capacitors.is_empty()
     }
@@ -426,6 +433,28 @@ impl HbSolver {
         Ok(())
     }
 
+    pub(crate) fn add_native_mos(&mut self, device: crate::device::Mosfet) -> Result<(), HbError> {
+        if device
+            .periodic_coupling_nodes()
+            .iter()
+            .any(|&node| node > self.num_nodes)
+        {
+            return Err(HbError::InvalidCircuit(format!(
+                "MOSFET '{}' has unregistered periodic nodes",
+                device.name
+            )));
+        }
+        for name in device.periodic_rate_names().into_iter().flatten() {
+            let branch_ordinal = self.exact_mna_branches().len() + 1;
+            self.try_push_periodic_mna_branch(
+                ExactMnaBranch::AuxiliaryState { branch_ordinal },
+                &name,
+            )?;
+        }
+        self.native_mos.push(device);
+        Ok(())
+    }
+
     fn sample_native_devices(
         &mut self,
         solution: &[Value],
@@ -557,6 +586,31 @@ impl HbSolver {
                 return Err(HbError::InvalidCircuit(format!(
                     "BSIM4 '{}' produced invalid physical F/Q entries",
                     device.name,
+                )));
+            }
+        }
+        for device in &self.native_mos {
+            let auxiliary = (!device.uses_legacy_bsim()).then(|| {
+                let nodes = [response_start + 1, response_start + 2, response_start + 3];
+                response_start += 3;
+                nodes
+            });
+            if selected.is_some_and(|rows| {
+                !device
+                    .periodic_coupling_nodes()
+                    .iter()
+                    .any(|&node| node > 0 && rows[node - 1])
+                    && !auxiliary.is_some_and(|nodes| nodes.into_iter().any(|node| rows[node - 1]))
+            }) {
+                continue;
+            }
+            device
+                .stamp_periodic_physical_fq(solution, auxiliary, f, q)
+                .map_err(HbError::InvalidCircuit)?;
+            if f.invalid || q.invalid {
+                return Err(HbError::InvalidCircuit(format!(
+                    "MOSFET '{}' produced invalid physical F/Q entries",
+                    device.name
                 )));
             }
         }
@@ -763,6 +817,7 @@ impl HbSolver {
                 &[crate::device::Bjt],
                 &[crate::device::Bsim3v3Device],
                 &[crate::device::Bsim4v8Device],
+                &[crate::device::Mosfet],
             ),
             &[Value],
         ) -> Result<(), HbError>,
@@ -770,6 +825,7 @@ impl HbSolver {
         if self.native_bjts.is_empty()
             && self.native_bsim3.is_empty()
             && self.native_bsim4.is_empty()
+            && self.native_mos.is_empty()
         {
             return Ok(());
         }
@@ -805,10 +861,18 @@ impl HbSolver {
                     .update_periodic_noise_probe(&solution)
                     .map_err(HbError::InvalidCircuit)?;
             }
+            for device in &mut self.native_mos {
+                device.update_periodic_noise_probe(&solution);
+            }
             visit(
                 time,
                 count,
-                (&self.native_bjts, &self.native_bsim3, &self.native_bsim4),
+                (
+                    &self.native_bjts,
+                    &self.native_bsim3,
+                    &self.native_bsim4,
+                    &self.native_mos,
+                ),
                 &solution,
             )?;
         }

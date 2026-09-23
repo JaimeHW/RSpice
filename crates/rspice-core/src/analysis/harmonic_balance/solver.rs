@@ -1035,6 +1035,7 @@ pub struct HbSolver {
     native_bjts: Vec<crate::device::Bjt>,
     native_bsim3: Vec<crate::device::mosfet::bsim3v3::Bsim3v3Device>,
     native_bsim4: Vec<crate::device::mosfet::bsim4v8::Bsim4v8Device>,
+    native_mos: Vec<crate::device::Mosfet>,
     periodic_capacitors: Vec<capacitors::PeriodicCapacitor>,
 
     /// Bound constitutive expressions over the complete physical/integral basis.

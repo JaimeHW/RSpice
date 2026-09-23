@@ -167,7 +167,7 @@ impl Engine {
             .checked_add(Self::hb_periodic_extra_branch_count(&circuit)?)
             .and_then(|count| count.checked_add(circuit.behavioral_sources.integral_count()))
             .and_then(|count| count.checked_add(circuit.capacitors.periodic_auxiliary_count()))
-            .and_then(|count| count.checked_add(Self::hb_response_auxiliary_count(&circuit)))
+            .and_then(|count| count.checked_add(Self::hb_device_auxiliary_count(&circuit)))
             .ok_or_else(|| {
                 SimulationError::Circuit(
                     "PAC canonical and distributed-network branch count overflows this platform"

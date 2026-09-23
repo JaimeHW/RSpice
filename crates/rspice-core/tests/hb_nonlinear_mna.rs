@@ -314,17 +314,6 @@ d1 out 0 dmod
         ),
         (
             "\
-* MOS2 equations cannot be routed through the HB MOS1 kernel
-vd d 0 dc 1
-vg g 0 dc 1
-m1 d g 0 0 mmod l=1u w=10u
-.model mmod nmos (level=2 vto=0.5 kp=1m)
-.end
-",
-            "non-LEVEL=1",
-        ),
-        (
-            "\
 * Parker-Skellern JFET2 cannot be routed through Shichman-Hodges
 vd d 0 dc 1
 vg g 0 dc 0

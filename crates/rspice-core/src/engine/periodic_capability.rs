@@ -463,12 +463,11 @@ pub(crate) const fn periodic_capability_descriptor(
         },
         F::Mosfet => PeriodicCapabilityDescriptor {
             residual_jacobian: Restricted(
-                "LEVEL=1 devices with representable physical parameters, the ngspice \
-                 reverse-clamp bulk junction, and no sidewall charge on a nonzero perimeter",
+                "native classic levels 1/2/3/6/9 and legacy BSIM levels 4/5",
             ),
             dynamic_state: Complete,
             small_signal: Complete,
-            noise: Restricted(CYCLOSTATIONARY_FLICKER),
+            noise: Complete,
             pss_state: Complete,
             envelope: Absent(ENVELOPE_LINEAR_SUBSET),
         },
@@ -756,12 +755,9 @@ fn diode_has_representable_exact_periodic_parameters(diode: &crate::device::Diod
         && diode.exact_hb_breakdown_parameter_error().is_none()
 }
 
-/// Whether a classic MOS device's authored equations reduce exactly to the
-/// LEVEL=1 form the exact periodic residual implements.
+/// Native periodic current, Meyer rate, and legacy charge equations.
 fn mos_has_exact_periodic_residual_form(mos: &crate::device::Mosfet) -> bool {
-    mos.level == 1
-        && mos.body_junction_model == crate::device::MosBodyJunctionModel::NgspiceReverseClamp
-        && !(mos.cjsw != 0.0 && (mos.source_perimeter != 0.0 || mos.drain_perimeter != 0.0))
+    matches!(mos.level, 1..=6 | 9)
 }
 
 /// Whether a JFET reduces exactly to the unscaled Shichman-Hodges form.
@@ -1075,7 +1071,7 @@ fn periodic_residual_gaps_in_context(circuit: &CircuitData, carrier: bool) -> Ve
             gaps.push(describe(
                 F::Mosfet,
                 reduced,
-                "classic MOS devices requiring non-LEVEL=1, non-ngspice bulk-junction, or sidewall-charge equations not represented by exact HB",
+                "classic MOS devices outside the native levels 1/2/3/4/5/6/9 periodic equations",
             ));
         }
     }
@@ -1748,7 +1744,7 @@ mod tests {
             // Authored GP PTF adds an irrational delay to the formerly
             // complete charge descriptor; VBIC's finite delay states remain.
             F::Bjt => [R, R, C, C, R, R],
-            F::Mosfet => [R, C, C, R, C, A],
+            F::Mosfet => [R, C, C, C, C, A],
             F::Bsim3v3 => [C, C, C, C, C, C],
             F::Bsim4v8 => [C, C, C, R, C, C],
             F::B3SoiDd | F::B3SoiFd | F::B3SoiPd => [A, C, I, A, A, A],

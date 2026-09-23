@@ -319,6 +319,21 @@ impl HbSolver {
                 }
             }
         }
+        let mut mos_rate = self.num_nodes + self.mos_rate_branch_start();
+        for device in &self.native_mos {
+            let mut nodes = device.periodic_coupling_nodes().to_vec();
+            if !device.uses_legacy_bsim() {
+                nodes.extend([mos_rate + 1, mos_rate + 2, mos_rate + 3]);
+                mos_rate += 3;
+            }
+            for &row in &nodes {
+                for &col in &nodes {
+                    if row > 0 && col > 0 {
+                        insert(row - 1, col - 1)?;
+                    }
+                }
+            }
+        }
         let response_start = self.num_nodes + self.ac_response_branch_start();
         for row in response_start..self.num_nodes + self.exact_mna_branches().len() {
             insert(row, row)?;

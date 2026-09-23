@@ -441,6 +441,7 @@ impl NonlinearDeviceInstance {
     /// total oxide capacitance Cox' * W * Leff. Enables the
     /// charge-conserving square-law channel charge (Ward-Dutton partition)
     /// and the gate-bulk accumulation/depletion wedge.
+    #[cfg(test)]
     pub(crate) fn with_intrinsic_gate(mut self, cox_wl: Value) -> Self {
         self.params.cox_wl = cox_wl;
         self
@@ -451,6 +452,7 @@ impl NonlinearDeviceInstance {
     /// shared linear continuation) and store depletion charge; sidewall
     /// capacitance is folded into the zero-bias values at the bottom
     /// grading coefficient (separate MJSW treatment pending).
+    #[cfg(test)]
     pub(crate) fn with_bulk_junctions(
         mut self,
         cap_sb: DepletionCap,
@@ -468,6 +470,7 @@ impl NonlinearDeviceInstance {
     /// Set the MOSFET body-effect parameters: threshold shifts by
     /// `gamma*(sqrt(phi + vsb) - sqrt(phi))` with the source-bulk voltage
     /// measured in the polarity frame from the effective source.
+    #[cfg(test)]
     pub(crate) fn with_body_effect(mut self, gamma: Value, phi: Value) -> Self {
         self.params.gamma = gamma;
         self.params.phi = phi;
@@ -516,14 +519,10 @@ impl NonlinearDeviceInstance {
         }
     }
 
-    pub(crate) fn with_channel_noise_gdsnoi(mut self, gdsnoi: Option<Value>) -> Self {
-        self.params.channel_noise_gdsnoi = gdsnoi;
-        self
-    }
-
     /// Set the exact white channel-noise coefficient used by the resolved
     /// model card. Zero disables the channel source without affecting the
     /// solved channel law.
+    #[cfg(test)]
     pub(crate) fn with_channel_noise_gamma(mut self, gamma: Value) -> Self {
         self.params.channel_noise_gamma = gamma;
         self
