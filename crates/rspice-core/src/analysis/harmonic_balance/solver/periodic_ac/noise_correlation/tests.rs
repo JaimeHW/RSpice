@@ -70,7 +70,14 @@ fn periodic_noise_covariance_matches_analytic_rc_port_and_sideband_correlations(
         solver.add_capacitance(0, 0, 0.1);
         solver.add_capacitance(1, 1, 0.2);
         let noise = source();
-        let actual = covariance(&mut solver, window, &outputs, &[noise.clone()], &NoAbort).unwrap();
+        let actual = covariance(
+            &mut solver,
+            window,
+            &outputs,
+            std::slice::from_ref(&noise),
+            &NoAbort,
+        )
+        .unwrap();
         let transfer = |output: &PeriodicNoiseOutput| {
             let omega = 2.0 * PI * (window.offset_hz + output.sideband as Value);
             let a = Complex64::new(3.0, omega * 0.1);
