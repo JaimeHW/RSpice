@@ -232,14 +232,14 @@ impl Bsim4v8Device {
             },
         );
         for (a, b, current) in self.periodic_current_terms(&op, solution, rate) {
-            stamp_rhs(f, nodes[a], -current);
-            stamp_rhs(f, nodes[b], current);
+            f.stamp_rhs(nodes[a], -current);
+            f.stamp_rhs(nodes[b], current);
         }
         for (node, charge) in nodes
             .into_iter()
             .zip(self.periodic_port_charges(charge, solution))
         {
-            stamp_rhs(q, node, -charge);
+            q.stamp_rhs(node, -charge);
         }
         if !self.uses_trnqs() {
             self.stamp_ac_charge_matrix(charge, op.mode, 1.0, q);
@@ -268,9 +268,9 @@ impl Bsim4v8Device {
         );
         let scale = self.core.mtype * self.multiplier;
         let qdef = self.trnqs_qdef(solution);
-        stamp_rhs(f, self.node_charge_deficit, -scale * qdef * rate);
-        stamp_rhs(q, self.node_charge_deficit, -scale * TRNQS_SCALING * qdef);
-        stamp_rhs(q, self.node_charge_deficit, scale * charge.qchqs);
+        f.stamp_rhs(self.node_charge_deficit, -scale * qdef * rate);
+        q.stamp_rhs(self.node_charge_deficit, -scale * TRNQS_SCALING * qdef);
+        q.stamp_rhs(self.node_charge_deficit, scale * charge.qchqs);
         self.stamp_ac_charge_matrix(&Self::trnqs_overlap_charge(charge), op.mode, 1.0, q);
         let gate = -(charge.cggb + charge.cbgb);
         let drain = -(charge.cgdb + charge.cbdb);

@@ -3,6 +3,7 @@ use super::*;
 struct Sample {
     matrix: Vec<Vec<Value>>,
     rhs: Vec<Value>,
+    terms: Vec<usize>,
 }
 
 impl Sample {
@@ -10,6 +11,7 @@ impl Sample {
         Self {
             matrix: vec![vec![0.0; n]; n],
             rhs: vec![0.0; n],
+            terms: Vec::new(),
         }
     }
     fn residual(&self, state: &[Value]) -> Vec<Value> {
@@ -30,6 +32,7 @@ impl MatrixStamper for Sample {
     fn stamp_rhs(&mut self, row: usize, value: Value) {
         if row > 0 {
             self.rhs[row - 1] += value;
+            self.terms.push(row);
         }
     }
 }
@@ -189,6 +192,15 @@ fn bsim4_periodic_physical_fq_matches_native_companion_and_derivatives() {
                         (f, q)
                     };
                     let (f, q) = sample(&state);
+                    let (zero_f, zero_q) = sample(&vec![0.0; state.len()]);
+                    assert_eq!(
+                        f.terms, zero_f.terms,
+                        "zero currents retain their contributor slots"
+                    );
+                    assert_eq!(
+                        q.terms, zero_q.terms,
+                        "zero charges retain their contributor slots"
+                    );
                     let (charge, mode) = device.charge_at_with_probe(&state, true);
                     let bias = device.raw_branch_voltages(&state);
                     let junction = device.raw_junction_bias(&state);
@@ -257,6 +269,8 @@ fn bsim4_periodic_physical_fq_matches_native_companion_and_derivatives() {
                         for (label, actual, plus, minus, floor) in
                             [("F", &f, &fp, &fm, 1e-9), ("Q", &q, &qp, &qm, 2e-19)]
                         {
+                            assert_eq!(actual.terms, plus.terms);
+                            assert_eq!(actual.terms, minus.terms);
                             for row in 0..state.len() {
                                 let fd = -(plus.rhs[row] - minus.rhs[row]) / (2.0 * h);
                                 let analytic = actual.matrix[row][column];
