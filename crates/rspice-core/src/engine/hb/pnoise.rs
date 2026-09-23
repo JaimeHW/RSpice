@@ -11,6 +11,7 @@
 //! bias current.
 
 mod bjt;
+mod bsim4;
 pub(super) use bjt::NativeNoiseWaveforms;
 mod sampled;
 mod sources;

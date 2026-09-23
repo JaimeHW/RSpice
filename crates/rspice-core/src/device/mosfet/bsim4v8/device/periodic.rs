@@ -49,6 +49,14 @@ impl Bsim4v8Device {
         )
     }
 
+    /// Noise laws use this raw orbit snapshot without accepting a transient
+    /// step or updating the Newton limiter and integration histories.
+    pub(crate) fn update_periodic_noise_probe(&mut self, solution: &[Value]) -> Result<(), String> {
+        self.op = self.periodic_op(solution)?;
+        self.bias = self.raw_branch_voltages(solution);
+        Ok(())
+    }
+
     fn periodic_nqs_rate(&self, charge: &Bsim4v8Charge) -> Result<Value, String> {
         if !self.uses_trnqs() {
             return Ok(0.0);

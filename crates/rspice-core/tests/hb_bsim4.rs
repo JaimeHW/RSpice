@@ -366,3 +366,158 @@ fn bsim4_periodic_driven_ac_nqs_sidebands_agree_between_hb_and_qpss() {
         close(response.output_transfer[0], expected, 2e-3);
     }
 }
+
+#[test]
+fn bsim4_periodic_elementary_noise_matches_stationary_model_mechanisms() {
+    let offsets = [1e3, 1e5, 1e9];
+    let engine = Engine::new(rspice_core::engine::SimulationConfig {
+        temperature: 348.15,
+        ..Default::default()
+    });
+    for (tnoi, fnoi, network, pmos) in [
+        (0, 0, "rgatemod=1 rshg=1000", false),
+        (0, 1, "rdsmod=1 rgatemod=2 rbodymod=1 rshg=1000", true),
+        (1, 0, "rgatemod=3 rbodymod=2 rshg=1000", true),
+        (1, 1, "rdsmod=1 rgatemod=3 rbodymod=1 rshg=1000", false),
+    ] {
+        let netlist = Netlist::parse(&amplifier(&format!(
+            "tnoimod={tnoi} fnoimod={fnoi} kf=2e-24 af=1.2 ef=0.9 igcmod=1 igbmod=1 acnqsmod=1 {network}"
+        ), pmos, if pmos { "ac 1 sin(-0.7 0 1meg)" } else { "ac 1 sin(0.7 0 1meg)" })).unwrap();
+        let reference = engine
+            .run_noise_named_with_input_source_and_abort(
+                &netlist,
+                "out",
+                None,
+                "vin",
+                &offsets,
+                348.15,
+                &rspice_core::NoAbort,
+            )
+            .unwrap();
+        let hb = engine
+            .run_hb(
+                &netlist,
+                HbConfig::new(1e6).with_harmonics(3).with_tolerance(1e-9),
+            )
+            .unwrap();
+        let periodic = engine
+            .run_pnoise_from_hb_with_abort(
+                &netlist,
+                &offsets,
+                "out",
+                None,
+                Some("vin"),
+                0,
+                &hb.operating_point,
+                &rspice_core::NoAbort,
+            )
+            .unwrap();
+        for (index, expected) in reference.iter().enumerate() {
+            assert!(
+                (periodic.output_noise[index] / expected.output_noise_density - 1.0).abs() < 2e-5,
+                "TNOI={tnoi} FNOI={fnoi} pmos={pmos} f={} periodic={} stationary={}",
+                offsets[index],
+                periodic.output_noise[index],
+                expected.output_noise_density
+            );
+            for contribution in &expected.contributions {
+                if !contribution.identity.device.eq_ignore_ascii_case("m1") {
+                    continue;
+                }
+                let label = format!(
+                    "{}:{}",
+                    contribution.identity.device,
+                    contribution.identity.mechanism.as_ref().unwrap()
+                );
+                let actual = periodic
+                    .contributors
+                    .iter()
+                    .find(|(name, _)| name.eq_ignore_ascii_case(&label))
+                    .unwrap_or_else(|| panic!("missing native mechanism {label}"))
+                    .1[index];
+                assert!(
+                    (actual - contribution.output_contribution).abs()
+                        < 1e-34 + 2e-5 * contribution.output_contribution,
+                    "{label} TNOI={tnoi} FNOI={fnoi} pmos={pmos} f={}: {actual:e} vs {:e}",
+                    offsets[index],
+                    contribution.output_contribution
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn bsim4_periodic_driven_noise_agrees_between_hb_and_qpss() {
+    use rspice_core::engine::{
+        QpnoiseFrequencyAxis, QpnoiseInput, QpnoiseLattices, QpnoiseObservation, QpnoiseOutput,
+        QpnoiseRequest, QpnoiseSources, QpssConfig,
+    };
+    let f = 1e8;
+    let offsets = [1.03e7];
+    let netlist = Netlist::parse(&amplifier(
+        "tnoimod=1 fnoimod=1 rdsmod=1 rgatemod=3 rbodymod=1 rshg=1000 acnqsmod=1",
+        false,
+        &format!("sin(0.7 0.03 {f})"),
+    ))
+    .unwrap();
+    let engine = Engine::default();
+    let hb = engine
+        .run_hb(
+            &netlist,
+            HbConfig::new(f).with_harmonics(6).with_tolerance(1e-9),
+        )
+        .unwrap();
+    let periodic = engine
+        .run_pnoise_from_hb_with_abort(
+            &netlist,
+            &offsets,
+            "out",
+            None,
+            Some("vin"),
+            3,
+            &hb.operating_point,
+            &rspice_core::NoAbort,
+        )
+        .unwrap();
+    let mut config = QpssConfig::new(vec![f, f * std::f64::consts::SQRT_2], vec![3, 1]);
+    config.grid.sampling =
+        rspice_core::analysis::quasi_periodic::QuasiPeriodicSampling::Exact(vec![16, 8]);
+    config.solver.relative_tolerance = 1e-9;
+    let point = engine.run_qpss(&netlist, config).unwrap();
+    let quasi = engine
+        .run_qpnoise_from_qpss(
+            &netlist,
+            QpnoiseRequest {
+                frequencies_hz: offsets.to_vec(),
+                frequency_axis: QpnoiseFrequencyAxis::Offset,
+                outputs: vec![QpnoiseOutput {
+                    observation: QpnoiseObservation::Voltage {
+                        positive: "out".into(),
+                        negative: "0".into(),
+                    },
+                    lattice: vec![0, 0],
+                }],
+                input: Some(QpnoiseInput {
+                    source: "vin".into(),
+                    lattice: vec![0, 0],
+                }),
+                input_lattices: QpnoiseLattices::AllRetained,
+                sources: QpnoiseSources::All,
+                integration: None,
+                contributor_ranking: false,
+                noise_figure: None,
+                linear: Default::default(),
+            },
+            &point,
+        )
+        .unwrap();
+    assert!(
+        (quasi.total_covariances[0].values[0].re / periodic.output_noise[0] - 1.0).abs() < 3e-3
+    );
+    for mechanism in ["ID", "FN", "RD", "RS", "RG", "RBPB"] {
+        assert!(periodic.contributors.iter().any(|(name, values)| {
+            name.eq_ignore_ascii_case(&format!("m1:{mechanism}")) && values[0] > 0.0
+        }));
+    }
+}

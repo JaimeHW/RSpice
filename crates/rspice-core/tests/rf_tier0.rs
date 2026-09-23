@@ -108,14 +108,15 @@ fn hb_linear_rc_matches_the_ac_transfer_function() {
 
 #[test]
 fn pnoise_rejects_native_bsim4_before_noise_folding() {
-    let netlist = Netlist::parse(&bsim4_rf_deck()).expect("deck parses");
+    let netlist = Netlist::parse(&bsim4_rf_deck().replace("level=54", "level=54 tnoimod=2"))
+        .expect("deck parses");
     let err = engine()
         .run_pnoise(&netlist, 1.0e6, &[1.0e3], "g", None, Some("vg"), 1)
-        .expect_err("native BSIM4 is not adapted into PNoise yet");
+        .expect_err("native BSIM4 correlated gate/drain noise is not adapted yet");
 
     assert!(
         err.to_string()
-            .contains("native BSIM4 orbit-dependent noise sources"),
+            .contains("TNOIMOD=2 periodic correlated gate/drain noise"),
         "{err}"
     );
 }

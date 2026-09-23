@@ -183,13 +183,20 @@ impl HbSolver {
         mut visit: impl FnMut(
             usize,
             usize,
-            (&[crate::device::Bjt], &[crate::device::Bsim3v3Device]),
+            (
+                &[crate::device::Bjt],
+                &[crate::device::Bsim3v3Device],
+                &[crate::device::Bsim4v8Device],
+            ),
             &[Value],
             &ResourceLimits,
         ) -> Result<(), Error>,
     ) -> Result<(), Error> {
         abort_if_requested(abort)?;
-        if self.native_bjts.is_empty() && self.native_bsim3.is_empty() {
+        if self.native_bjts.is_empty()
+            && self.native_bsim3.is_empty()
+            && self.native_bsim4.is_empty()
+        {
             return Ok(());
         }
         self.validate_quasi_periodic_response()?;
@@ -208,7 +215,8 @@ impl HbSolver {
             grid.sample_count().saturating_mul(
                 self.native_bjts
                     .len()
-                    .saturating_add(self.native_bsim3.len()),
+                    .saturating_add(self.native_bsim3.len())
+                    .saturating_add(self.native_bsim4.len()),
             ),
             limits.max_analysis_points,
         )?;
@@ -251,10 +259,16 @@ impl HbSolver {
                     .update_periodic_noise_probe(&solution)
                     .map_err(noise_error)?;
             }
+            for device in &mut self.native_bsim4 {
+                abort_if_requested(abort)?;
+                device
+                    .update_periodic_noise_probe(&solution)
+                    .map_err(noise_error)?;
+            }
             visit(
                 phase,
                 grid.sample_count(),
-                (&self.native_bjts, &self.native_bsim3),
+                (&self.native_bjts, &self.native_bsim3, &self.native_bsim4),
                 &solution,
                 &remaining,
             )?;

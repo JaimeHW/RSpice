@@ -589,7 +589,7 @@ impl Engine {
 
     /// Multiply two physical scale factors without allowing overflow or
     /// underflow to turn an active noise mechanism into invalid/zero state.
-    fn checked_noise_product(
+    pub(in crate::engine) fn checked_noise_product(
         label: &str,
         lhs: Value,
         rhs: Value,
@@ -616,7 +616,7 @@ impl Engine {
     /// Convert a physical conductance into the resistance representation used
     /// by `NoiseSource::thermal`. Exact zero means the mechanism is absent;
     /// every positive finite and representable conductance is retained.
-    fn noise_resistance_from_conductance(
+    pub(in crate::engine) fn noise_resistance_from_conductance(
         label: &str,
         conductance: Value,
     ) -> Result<Option<Value>, SimulationError> {
@@ -1378,7 +1378,7 @@ impl Engine {
     /// `FN`, `RD`, `RS`, `RG`), which is what the checked-in Xyce NOISE decks
     /// spell in `DNO(M1,RD)`; the body network and the correlated pair have no
     /// sibling, so they keep b4noi.c's own names.
-    fn collect_bsim4v8_noise_sources(
+    pub(in crate::engine) fn collect_bsim4v8_noise_sources(
         device: &crate::device::mosfet::bsim4v8::Bsim4v8Device,
     ) -> Result<(Vec<NoiseSource>, Vec<CorrelatedNoisePair>), SimulationError> {
         let mut sources = Vec::new();

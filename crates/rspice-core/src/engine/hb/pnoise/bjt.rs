@@ -86,13 +86,13 @@ fn scaled_native_density(
                 })?;
             Ok(density)
         }
-        NoiseSourceType::Bsim3Flicker => {
+        NoiseSourceType::Bsim3Flicker | NoiseSourceType::Bsim4Flicker => {
             if !source.ef.is_finite() || !temperature.is_finite() || temperature <= 0.0 {
                 return Err(SimulationError::Circuit(format!(
-                    "pnoise source '{name}' has invalid BSIM3 flicker parameters"
+                    "pnoise source '{name}' has invalid native MOS flicker parameters"
                 )));
             }
-            // Both strong/weak-inversion terms in b3noi.c have the same
+            // Both strong/weak-inversion terms in b3noi.c/b4noi.c have the same
             // f^-EF dependence. Their harmonic mean therefore separates into
             // one bias-dependent amplitude and one stationary power law.
             let density = Engine::evaluated_noise_density(source, 1.0, temperature)?;
@@ -129,13 +129,17 @@ impl NativeNoiseWaveforms {
         engine: &Engine,
         time: usize,
         count: usize,
-        devices: (&[crate::device::Bjt], &[crate::device::Bsim3v3Device]),
+        devices: (
+            &[crate::device::Bjt],
+            &[crate::device::Bsim3v3Device],
+            &[crate::device::Bsim4v8Device],
+        ),
         solution: &[Value],
         abort: &dyn AbortSignal,
     ) -> Result<(), SimulationError> {
         self.elementary.clear();
         self.temperatures.clear();
-        let (bjts, bsim3) = devices;
+        let (bjts, bsim3, bsim4) = devices;
         for bjt in bjts {
             if abort.is_aborted() {
                 return Err(SimulationError::Aborted);
@@ -165,6 +169,17 @@ impl NativeNoiseWaveforms {
             }
             self.elementary.extend(sources);
         }
+        for device in bsim4 {
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
+            let sources = Engine::collect_bsim4_periodic_noise_sources(device, solution)?;
+            for source in &sources {
+                self.temperatures
+                    .insert(source.identity.clone(), device.core.model_temp.temp);
+            }
+            self.elementary.extend(sources);
+        }
         Engine::configure_noise_physical_constants(
             &mut self.elementary,
             &mut [],
@@ -177,7 +192,9 @@ impl NativeNoiseWaveforms {
             let name = Engine::noise_source_label(&source.identity);
             let frequency_exponent = matches!(
                 source.noise_type,
-                NoiseSourceType::Flicker | NoiseSourceType::Bsim3Flicker
+                NoiseSourceType::Flicker
+                    | NoiseSourceType::Bsim3Flicker
+                    | NoiseSourceType::Bsim4Flicker
             )
             .then_some(source.ef);
             let temperature = self

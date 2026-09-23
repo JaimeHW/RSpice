@@ -759,11 +759,18 @@ impl HbSolver {
         mut visit: impl FnMut(
             usize,
             usize,
-            (&[crate::device::Bjt], &[crate::device::Bsim3v3Device]),
+            (
+                &[crate::device::Bjt],
+                &[crate::device::Bsim3v3Device],
+                &[crate::device::Bsim4v8Device],
+            ),
             &[Value],
         ) -> Result<(), HbError>,
     ) -> Result<(), HbError> {
-        if self.native_bjts.is_empty() && self.native_bsim3.is_empty() {
+        if self.native_bjts.is_empty()
+            && self.native_bsim3.is_empty()
+            && self.native_bsim4.is_empty()
+        {
             return Ok(());
         }
         let waves = self.native_state_waveforms(state)?;
@@ -790,10 +797,18 @@ impl HbSolver {
                     .update_periodic_noise_probe(&solution)
                     .map_err(HbError::InvalidCircuit)?;
             }
+            for device in &mut self.native_bsim4 {
+                if abort.is_aborted() {
+                    return Err(HbError::Aborted);
+                }
+                device
+                    .update_periodic_noise_probe(&solution)
+                    .map_err(HbError::InvalidCircuit)?;
+            }
             visit(
                 time,
                 count,
-                (&self.native_bjts, &self.native_bsim3),
+                (&self.native_bjts, &self.native_bsim3, &self.native_bsim4),
                 &solution,
             )?;
         }

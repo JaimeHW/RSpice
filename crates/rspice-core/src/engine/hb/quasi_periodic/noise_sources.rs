@@ -194,7 +194,9 @@ impl Engine {
         }
         for i in 0..circuit.resistors.len() {
             check_abort(abort)?;
-            if !circuit.resistors.noisy[i] {
+            if !circuit.resistors.noisy[i]
+                || Self::bsim4_owns_periodic_resistor_noise(circuit, &circuit.resistors.names[i])
+            {
                 continue;
             }
             let name = &circuit.resistors.names[i];

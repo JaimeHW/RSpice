@@ -129,6 +129,7 @@ impl Engine {
                 return Err(SimulationError::Aborted);
             }
             if !circuit.resistors.noisy[i]
+                || Self::bsim4_owns_periodic_resistor_noise(circuit, &circuit.resistors.names[i])
                 || excluded_resistors
                     .iter()
                     .any(|name| name.eq_ignore_ascii_case(&circuit.resistors.names[i]))
