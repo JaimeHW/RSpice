@@ -272,6 +272,10 @@ pub(crate) fn solve_with_abort(
     )
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "numerical API keeps independent circuit, spectral, and resource inputs explicit"
+)]
 pub(crate) fn solve_with_iteration_budget(
     circuit: &mut impl Circuit,
     grid: Arc<QuasiPeriodicGrid>,
@@ -295,6 +299,10 @@ pub(crate) fn solve_with_iteration_budget(
     )
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "numerical API keeps independent circuit, spectral, and resource inputs explicit"
+)]
 pub(crate) fn solve_with_step_policy(
     circuit: &mut impl Circuit,
     grid: Arc<QuasiPeriodicGrid>,

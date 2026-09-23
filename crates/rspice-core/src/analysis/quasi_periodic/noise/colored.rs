@@ -3,6 +3,10 @@ use super::*;
 use std::collections::BTreeMap;
 
 impl QuasiPeriodicNoiseProjector {
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "numerical API keeps independent circuit, spectral, and resource inputs explicit"
+    )]
     pub(super) fn colored(
         &self,
         gains: &[projection::Spectrum],

@@ -26,6 +26,10 @@ pub struct QuasiPeriodicNoisePoint {
     pub source_covariances: Vec<QuasiPeriodicNoiseCovariance>,
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "numerical API keeps independent circuit, spectral, and resource inputs explicit"
+)]
 pub(crate) fn visit_with_abort(
     circuit: &mut impl Circuit,
     grid: Arc<QuasiPeriodicGrid>,
