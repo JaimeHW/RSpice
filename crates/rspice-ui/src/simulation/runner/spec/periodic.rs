@@ -965,7 +965,9 @@ fn run_envelope(
         )
     })?;
     let mut waveforms = HashMap::with_capacity(data.waveforms.len());
-    for (name, values) in data.waveforms {
+    for waveform in data.waveforms {
+        let name = waveform.name;
+        let values = waveform.values;
         super::ensure_not_aborted(abort)?;
         let waveform_time = clone_values_with_abort(&data.time, abort)?;
         let mut real = Vec::with_capacity(values.len());
@@ -977,7 +979,7 @@ fn run_envelope(
         }
         waveforms.insert(
             name.clone(),
-            WaveformData::new_complex_time_domain(name, waveform_time, real, imaginary),
+            WaveformData::new_complex_in_unit(name, waveform_time, real, imaginary, waveform.unit),
         );
     }
 
@@ -1491,6 +1493,130 @@ fn fourier_output_unit(output_expression: &str) -> &'static str {
 #[allow(clippy::items_after_test_module)]
 mod tests {
     use super::*;
+
+    fn envelope_current_config(
+        method: crate::simulation::multi_run::EnvelopeInitialPeriodicSolve,
+    ) -> svc_runner::EnvelopeRunConfig {
+        svc_runner::EnvelopeRunConfig {
+            initialization: svc_runner::EnvelopeInitializationConfig {
+                pss_stabilization_periods: 0,
+                pss_points_per_period: Some(64),
+                ..Default::default()
+            },
+            fundamental_freq: 1e6,
+            additional_carrier_tones: Vec::new(),
+            stop_time: 4e-6,
+            num_harmonics: 1,
+            envelope_step: Some(0.5e-6),
+            modulation_sources: vec!["Vmod".into()],
+            initial_periodic_solve: method,
+            adaptive_mode: crate::simulation::multi_run::EnvelopeAdaptiveMode::FixedEnvelopeStep,
+            extraction_path: crate::simulation::multi_run::EnvelopeExtractionPath::Projection,
+        }
+    }
+
+    #[test]
+    fn envelope_current_branches_survive_all_initializers_and_worker_transport() {
+        use crate::simulation::multi_run::EnvelopeInitialPeriodicSolve as Init;
+        let deck = "Current envelopes\nV1 in mod SIN(0 1 1Meg)\nVmod mod 0 PWL(0 0 4u 0)\nR1 in out 1k\nR2 out 0 1k\n.save I(V1) I(R1)\n.end\n";
+        for method in [
+            Init::TransientSpectralEstimate,
+            Init::HarmonicBalance,
+            Init::PeriodicSteadyState,
+        ] {
+            let result = run_envelope(
+                deck,
+                envelope_current_config(method),
+                None,
+                &rspice_core::abort_signal::NoAbort,
+            )
+            .unwrap();
+            let result =
+                crate::simulation::runner::worker_contract::round_trip_response_for_test(result);
+            let SimulationResult::Transient {
+                time, waveforms, ..
+            } = result
+            else {
+                panic!("envelope result")
+            };
+            assert_eq!(waveforms.len(), 2);
+            assert!(!time.is_empty());
+            for (name, sign) in [("ENV(I(V1))", 1.0), ("ENV(I(R1))", -1.0)] {
+                let wave = waveforms
+                    .values()
+                    .find(|wave| wave.name.eq_ignore_ascii_case(name))
+                    .unwrap();
+                assert_eq!(wave.y_unit, "A");
+                assert!(wave.is_complex);
+                assert_eq!(wave.x_values, time);
+                for (real, imag) in wave.y_values.iter().zip(wave.y_imag.as_ref().unwrap()) {
+                    assert!(
+                        real.abs() < 1e-7 && (imag - sign * 0.5e-3).abs() < 1e-7,
+                        "{method:?} {name}: {real} + j{imag}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn envelope_current_preserves_native_device_lead_units_and_values() {
+        let deck = "MOS current envelope\nVd d 0 5\nVg g 0 SIN(2 0.01 1Meg)\nVmod mod 0 PWL(0 0 4u 0)\nM1 d g 0 0 N W=1u L=1u\n.model N NMOS LEVEL=1 VTO=1 KP=1m\n.save @M1[id]\n.end\n";
+        let result = run_envelope(
+            deck,
+            envelope_current_config(
+                crate::simulation::multi_run::EnvelopeInitialPeriodicSolve::TransientSpectralEstimate,
+            ),
+            None,
+            &rspice_core::abort_signal::NoAbort,
+        )
+        .unwrap();
+        let SimulationResult::Transient { waveforms, .. } = result else {
+            panic!("envelope result")
+        };
+        assert_eq!(waveforms.len(), 1);
+        let wave = waveforms.values().next().unwrap();
+        assert!(wave.name.eq_ignore_ascii_case("ENV(@M1[id])"));
+        assert_eq!(wave.y_unit, "A");
+        for (real, imag) in wave.y_values.iter().zip(wave.y_imag.as_ref().unwrap()) {
+            assert!(
+                real.abs() < 2e-8 && (imag + 1e-5).abs() < 2e-8,
+                "{real} + j{imag}"
+            );
+        }
+    }
+
+    #[test]
+    fn envelope_current_includes_ideal_capacitor_charge_in_source_current() {
+        // The matched, unexcited line selects the core physical-event path,
+        // which records exact charge impulses separately from finite samples.
+        let deck = "Impulse current envelope\nV1 in 0 PWL(0 1 .5u 1 .5u 0 1u 0 1u 1 1.5u 1 1.5u 0 2u 0 2u 1 2.5u 1 2.5u 0 3u 0 3u 1 3.5u 1 3.5u 0 4u 0 4u 1)\nVmod mod 0 PWL(0 0 4u 0)\nC1 in 0 1n\nRnear near 0 50\nT1 near 0 far 0 Z0=50 TD=8u\nRfar far 0 50\n.save I(V1) I(C1)\n.end\n";
+        let result = run_envelope(
+            deck,
+            envelope_current_config(
+                crate::simulation::multi_run::EnvelopeInitialPeriodicSolve::TransientSpectralEstimate,
+            ),
+            None,
+            &rspice_core::abort_signal::NoAbort,
+        )
+        .unwrap();
+        let SimulationResult::Transient { waveforms, .. } = result else {
+            panic!("envelope result")
+        };
+        for (name, expected) in [("ENV(I(V1))", -4e-3), ("ENV(I(C1))", 4e-3)] {
+            let wave = waveforms
+                .values()
+                .find(|wave| wave.name.eq_ignore_ascii_case(name))
+                .unwrap();
+            assert_eq!(wave.y_unit, "A");
+            for (real, imag) in wave.y_values.iter().zip(wave.y_imag.as_ref().unwrap()) {
+                assert!(
+                    (real - expected).abs() < 1e-7 && imag.abs() < 1e-7,
+                    "{name}: {real} + j{imag}"
+                );
+            }
+        }
+    }
 
     #[test]
     fn fourier_results_preserve_voltage_and_current_dimensions() {

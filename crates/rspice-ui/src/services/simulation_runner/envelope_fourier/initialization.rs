@@ -294,9 +294,11 @@ mod tests {
                     .initialization
                     .is_some()
             );
-            for ((frequency, amplitude), (name, values)) in
+            for ((frequency, amplitude), waveform) in
                 [(2e3, 0.8), (3e3, 0.3)].into_iter().zip(&result.waveforms)
             {
+                let super::super::EnvelopeWaveform { name, values, unit } = waveform;
+                assert_eq!(*unit, "V");
                 assert!(name.eq_ignore_ascii_case(&format!("ENV(V(out)@{frequency:.12e}Hz)")));
                 let expected = num_complex::Complex64::new(0.0, -amplitude)
                     / num_complex::Complex64::new(1.0, std::f64::consts::TAU * frequency * 1e-5);
@@ -398,9 +400,9 @@ mod tests {
             let out = &completed
                 .waveforms
                 .iter()
-                .find(|(name, _)| name.eq_ignore_ascii_case("ENV(V(out))"))
+                .find(|waveform| waveform.name.eq_ignore_ascii_case("ENV(V(out))"))
                 .unwrap()
-                .1;
+                .values;
             assert!(
                 out.iter().all(|value| (*value - expected).norm() < 1e-3),
                 "{method:?}: {out:?}"

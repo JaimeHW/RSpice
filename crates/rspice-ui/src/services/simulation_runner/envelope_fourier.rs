@@ -17,10 +17,13 @@ use rspice_core::Value;
 use rspice_core::abort_signal::AbortSignal;
 #[cfg(test)]
 use rspice_core::abort_signal::NoAbort;
+mod current;
 mod initialization;
+mod trajectory;
 pub use initialization::{EnvelopeInitializationConfig, EnvelopeShootingIntegration};
 use rspice_core::engine::Engine;
 use std::path::Path;
+use trajectory::EnvelopeTrajectory;
 
 /// Conservative upper bound for dense least-squares work performed by one
 /// projection extraction. The estimate deliberately over-counts elimination so
@@ -115,13 +118,21 @@ impl EnvelopeRunConfig {
     }
 }
 
+/// One carrier envelope with the unit of its physical signal.
+#[derive(Debug, Clone)]
+pub struct EnvelopeWaveform {
+    pub name: String,
+    pub unit: &'static str,
+    pub values: Vec<Complex64>,
+}
+
 /// Envelope analysis output.
 #[derive(Debug, Clone)]
 pub struct EnvelopeData {
     pub time: Vec<Value>,
     /// Complex carrier envelopes using
-    /// `v(t) = Re{envelope(t) * exp(j*omega*t)}`.
-    pub waveforms: Vec<(String, Vec<Complex64>)>,
+    /// `signal(t) = Re{envelope(t) * exp(j*omega*t)}`.
+    pub waveforms: Vec<EnvelopeWaveform>,
     pub convergence: Option<std::sync::Arc<crate::state::TransientConvergenceEvidence>>,
 }
 
@@ -180,13 +191,7 @@ pub fn run_envelope_analysis_with_source_path_and_abort(
 
     let transient = match config.initial_periodic_solve {
         EnvelopeInitialPeriodicSolve::TransientSpectralEstimate => {
-            run_transient_analysis_with_source_path_and_abort(
-                netlist_text,
-                config.stop_time,
-                step_time,
-                source_path,
-                abort,
-            )?
+            trajectory::run_transient(&parsed, config, step_time, abort)?
         }
         EnvelopeInitialPeriodicSolve::PeriodicSteadyState => {
             run_pss_initialized_envelope_transient(&parsed, config, step_time, abort)?
@@ -200,9 +205,9 @@ pub fn run_envelope_analysis_with_source_path_and_abort(
             "Envelope analysis produced no transient samples".to_string(),
         ));
     }
-    if transient.voltages.is_empty() {
+    if transient.signals.is_empty() {
         return Err(ServiceRunError::Failure(
-            "Envelope analysis found no non-ground node waveforms".to_string(),
+            "Envelope analysis found no retained analog waveforms".to_string(),
         ));
     }
 
@@ -212,7 +217,7 @@ pub fn run_envelope_analysis_with_source_path_and_abort(
         transient.time.len(),
         requested_output_time.len(),
         carrier_tones.len(),
-        transient.voltages.len(),
+        transient.signals.len(),
     )?;
     let output_time = centered_projection_output_times(
         &requested_output_time,
@@ -223,7 +228,7 @@ pub fn run_envelope_analysis_with_source_path_and_abort(
     )?;
     let waveform_count = carrier_tones
         .len()
-        .checked_mul(transient.voltages.len())
+        .checked_mul(transient.signals.len())
         .ok_or_else(|| {
             ServiceRunError::Failure("Envelope result waveform count overflowed".to_string())
         })?;
@@ -235,8 +240,14 @@ pub fn run_envelope_analysis_with_source_path_and_abort(
         )));
     }
     let mut waveforms =
-        Vec::with_capacity(transient.voltages.len().saturating_mul(carrier_tones.len()));
-    for (name, values) in transient.voltages {
+        Vec::with_capacity(transient.signals.len().saturating_mul(carrier_tones.len()));
+    for signal in transient.signals {
+        let trajectory::EnvelopeSignal {
+            name,
+            unit,
+            values,
+            current,
+        } = signal;
         ensure_not_aborted(abort)?;
         if values.is_empty() {
             continue;
@@ -247,6 +258,7 @@ pub fn run_envelope_analysis_with_source_path_and_abort(
                 &values,
                 &output_time,
                 &carrier_tones,
+                current.as_ref(),
                 abort,
             )?,
         };
@@ -257,7 +269,11 @@ pub fn run_envelope_analysis_with_source_path_and_abort(
             } else {
                 format!("ENV({name}@{carrier:.12e}Hz)")
             };
-            waveforms.push((label, env));
+            waveforms.push(EnvelopeWaveform {
+                name: label,
+                unit,
+                values: env,
+            });
         }
     }
     if waveforms.is_empty() {
@@ -396,7 +412,7 @@ fn run_pss_initialized_envelope_transient(
     config: &EnvelopeRunConfig,
     step_time: Value,
     abort: &dyn AbortSignal,
-) -> ServiceRunResult<TransientData> {
+) -> ServiceRunResult<EnvelopeTrajectory> {
     let pss_config = config
         .initialization
         .pss_config(
@@ -420,8 +436,7 @@ fn run_pss_initialized_envelope_transient(
     let (result, _) = engine
         .run_tran_from_pss_state_with_abort(netlist, &state, config.stop_time, step_time, abort)
         .map_err(|error| ServiceRunError::from_core("Envelope PSS continuation error", error))?;
-    let node_names = result.node_names.clone();
-    let mut data = TransientData::from_result_with_abort(result, &node_names, abort)?;
+    let mut data = EnvelopeTrajectory::from_result(result, netlist, abort)?;
     let mut quality = crate::state::TransientConvergenceEvidence::capture(
         engine.convergence_quality(),
         &data.time,
@@ -443,7 +458,7 @@ fn run_hb_initialized_envelope_transient(
     config: &EnvelopeRunConfig,
     step_time: Value,
     abort: &dyn AbortSignal,
-) -> ServiceRunResult<TransientData> {
+) -> ServiceRunResult<EnvelopeTrajectory> {
     let hb_config = config
         .initialization
         .hb_config(
@@ -474,8 +489,7 @@ fn run_hb_initialized_envelope_transient(
             abort,
         )
         .map_err(|error| ServiceRunError::from_core("Envelope HB continuation error", error))?;
-    let node_names = result.node_names.clone();
-    let mut data = TransientData::from_result_with_abort(result, &node_names, abort)?;
+    let mut data = EnvelopeTrajectory::from_result(result, netlist, abort)?;
     let mut quality = crate::state::TransientConvergenceEvidence::capture(
         engine.convergence_quality(),
         &data.time,
@@ -504,6 +518,7 @@ fn compute_carrier_envelopes_with_abort(
     values: &[Value],
     output_time: &[Value],
     carrier_frequencies: &[Value],
+    current: Option<&rspice_core::CurrentImpulseTrace>,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<Vec<Vec<Complex64>>> {
     ensure_not_aborted(abort)?;
@@ -537,7 +552,16 @@ fn compute_carrier_envelopes_with_abort(
     let first_time = time[0];
     let last_time = *time.last().expect("length checked");
     let trajectory_span = last_time - first_time;
-    validate_projection_workload(time.len(), output_time.len(), carrier_frequencies.len(), 1)?;
+    let observed_points = time
+        .len()
+        .checked_add(current.map_or(0, |trace| trace.points.len().saturating_add(1)))
+        .ok_or_else(|| ServiceRunError::Failure("Envelope observation count overflowed".into()))?;
+    validate_projection_workload(
+        observed_points,
+        output_time.len(),
+        carrier_frequencies.len(),
+        1,
+    )?;
     let projection_window = carrier_projection_window(carrier_frequencies, abort)?;
     let span_tolerance = 128.0
         * Value::EPSILON
@@ -554,6 +578,18 @@ fn compute_carrier_envelopes_with_abort(
     let basis = carrier_projection_basis(carrier_frequencies.len());
     let prefix_values =
         build_projection_prefixes(time, values, carrier_frequencies, &basis, abort)?;
+    let current_prefixes = current
+        .map(|trace| {
+            current::projection_prefixes(
+                trace,
+                time,
+                carrier_frequencies,
+                &basis,
+                projection_window,
+                abort,
+            )
+        })
+        .transpose()?;
     let projected_value_count = output_time
         .len()
         .checked_mul(carrier_frequencies.len())
@@ -586,6 +622,18 @@ fn compute_carrier_envelopes_with_abort(
         }
         let window_start = center - half_window;
         let window_stop = window_start + projection_window;
+        // The same (start, stop] event ownership as Fourier: a boundary
+        // impulse belongs to exactly one adjoining observation window.
+        let current_range = current.map(|trace| {
+            (
+                trace
+                    .points
+                    .partition_point(|point| point.time <= window_start),
+                trace
+                    .points
+                    .partition_point(|point| point.time <= window_stop),
+            )
+        });
         let mut normal = vec![vec![0.0; basis.len()]; basis.len()];
         let mut rhs = vec![0.0; basis.len()];
         for row in 0..basis.len() {
@@ -605,6 +653,14 @@ fn compute_carrier_envelopes_with_abort(
                 carrier_frequencies,
                 basis[row],
             )?) / projection_window;
+            if let (Some(prefixes), Some((first, last))) = (&current_prefixes, current_range) {
+                rhs[row] += prefixes[row][last] - prefixes[row][first];
+                if !rhs[row].is_finite() {
+                    return Err(ServiceRunError::Failure(
+                        "Envelope current moment is not finite".into(),
+                    ));
+                }
+            }
             for column in 0..=row {
                 poll_periodically(abort, column)?;
                 let value = projection_basis_product_integral(
@@ -1606,20 +1662,27 @@ mod tests {
                 .expect("carrier extraction must honor the retained voltage selection")
         };
         let all = run("");
-        assert_eq!(all.waveforms.len(), 2);
+        assert_eq!(
+            all.waveforms
+                .iter()
+                .filter(|waveform| waveform.unit == "V")
+                .count(),
+            2
+        );
         for (selection, amplitude) in [("out", 0.5), ("in", 1.0)] {
             let selected = run(&format!(".save V({selection})"));
             assert_eq!(selected.time, all.time);
             assert!(!selected.time.is_empty());
             assert_eq!(selected.waveforms.len(), 1);
-            let (name, values) = &selected.waveforms[0];
+            let EnvelopeWaveform { name, values, unit } = &selected.waveforms[0];
+            assert_eq!(*unit, "V");
             assert!(name.eq_ignore_ascii_case(&format!("ENV(V({selection}))")));
             let reference = &all
                 .waveforms
                 .iter()
-                .find(|(candidate, _)| candidate == name)
+                .find(|waveform| &waveform.name == name)
                 .unwrap()
-                .1;
+                .values;
             assert_eq!(values.len(), selected.time.len());
             for (actual, expected) in values.iter().zip(reference) {
                 assert!((actual - expected).norm() < 1e-12);
@@ -1643,7 +1706,8 @@ mod tests {
             .map(|time| (2.0 * PI * time).sin())
             .collect::<Vec<_>>();
 
-        let result = compute_carrier_envelopes_with_abort(&time, &values, &[0.5], &[1.0], &abort);
+        let result =
+            compute_carrier_envelopes_with_abort(&time, &values, &[0.5], &[1.0], None, &abort);
 
         assert!(matches!(result, Err(ServiceRunError::Aborted)));
     }
@@ -1732,9 +1796,15 @@ mod tests {
             duration - 0.5 / carrier,
         ];
 
-        let envelopes =
-            compute_carrier_envelopes_with_abort(&time, &values, &output, &[carrier], &NoAbort)
-                .expect("nonuniform carrier projection should succeed");
+        let envelopes = compute_carrier_envelopes_with_abort(
+            &time,
+            &values,
+            &output,
+            &[carrier],
+            None,
+            &NoAbort,
+        )
+        .expect("nonuniform carrier projection should succeed");
         let envelope = &envelopes[0];
 
         assert_eq!(envelope.len(), output.len());
@@ -1765,9 +1835,10 @@ mod tests {
             .collect::<Vec<_>>();
         let output = [6.0e-3];
 
-        let envelopes =
-            compute_carrier_envelopes_with_abort(&time, &values, &output, &carriers, &NoAbort)
-                .expect("joint carrier projection should resolve both tones");
+        let envelopes = compute_carrier_envelopes_with_abort(
+            &time, &values, &output, &carriers, None, &NoAbort,
+        )
+        .expect("joint carrier projection should resolve both tones");
 
         assert!((envelopes[0][0].norm() - 2.4).abs() < 2.0e-4);
         assert!((envelopes[1][0].norm() - 0.65).abs() < 2.0e-4);
@@ -1792,6 +1863,7 @@ mod tests {
             &values,
             &[duration * 0.5],
             &[carrier],
+            None,
             &NoAbort,
         )
         .expect("complex carrier projection should succeed");
@@ -1848,9 +1920,15 @@ mod tests {
             .collect::<Vec<_>>();
         let values = vec![0.0; time.len()];
 
-        let error =
-            compute_carrier_envelopes_with_abort(&time, &values, &[1.0e-3], &carriers, &NoAbort)
-                .expect_err("short trajectory cannot discriminate nearly coincident tones");
+        let error = compute_carrier_envelopes_with_abort(
+            &time,
+            &values,
+            &[1.0e-3],
+            &carriers,
+            None,
+            &NoAbort,
+        )
+        .expect_err("short trajectory cannot discriminate nearly coincident tones");
 
         assert!(error.to_string().contains("required to resolve"));
     }
