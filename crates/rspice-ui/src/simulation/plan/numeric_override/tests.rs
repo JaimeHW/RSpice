@@ -492,20 +492,20 @@ fn the_global_and_timeint_reltols_resolve_onto_their_own_fields() {
     let mut record = AnalysisNumericOverride::default();
     record
         .set_for_instance(
-            AnalysisKind::Fourier,
+            AnalysisKind::Envelope,
             SolverOwnership::NONE,
             NumericOverrideOption::Reltol,
             "1e-5",
         )
-        .expect("a Fourier measurement carries a Newton bound");
+        .expect("an Envelope analysis carries a Newton bound");
     record
         .set_for_instance(
-            AnalysisKind::Fourier,
+            AnalysisKind::Envelope,
             SolverOwnership::NONE,
             NumericOverrideOption::LteReltol,
             "4e-9",
         )
-        .expect("a Fourier measurement advances time");
+        .expect("an Envelope analysis advances time");
 
     let resolved = resolve(&record);
     assert_eq!(resolved.convergence_config.voltage_reltol, 1e-5);
@@ -568,7 +568,7 @@ fn an_empty_record_adds_nothing_to_a_deck() {
 #[test]
 fn a_step_ceiling_is_emitted_through_the_timeint_package() {
     for kind in [
-        AnalysisKind::Fourier,
+        AnalysisKind::Envelope,
         AnalysisKind::Reliability,
         AnalysisKind::Optimization,
     ] {
@@ -603,7 +603,7 @@ fn the_global_card_precedes_the_packaged_one() {
     let mut record = AnalysisNumericOverride::default();
     record
         .set_for_instance(
-            AnalysisKind::Fourier,
+            AnalysisKind::Envelope,
             SolverOwnership::NONE,
             NumericOverrideOption::Reltol,
             "1e-5",
@@ -611,7 +611,7 @@ fn the_global_card_precedes_the_packaged_one() {
         .expect("authorable");
     record
         .set_for_instance(
-            AnalysisKind::Fourier,
+            AnalysisKind::Envelope,
             SolverOwnership::NONE,
             NumericOverrideOption::MinTimestep,
             "2e-18",
@@ -767,7 +767,7 @@ fn the_time_stepped_options_are_refused_by_a_kind_that_never_steps() {
     // And a kind that does step carries all of them but the one the transient
     // form owns.
     let stepping =
-        NumericOverrideOption::applicable_to_instance(AnalysisKind::Fourier, SolverOwnership::NONE);
+        NumericOverrideOption::applicable_to_instance(AnalysisKind::Envelope, SolverOwnership::NONE);
     assert!(stepping.contains(&NumericOverrideOption::Chgtol));
     assert!(stepping.contains(&NumericOverrideOption::MaximumTimestep));
 }
@@ -1086,17 +1086,17 @@ fn an_option_card_per_package_keeps_the_parsers_scope_from_leaking() {
     // instead of package order would put it after a scoped header.
     for (kind, option, authored) in [
         (
-            AnalysisKind::Fourier,
+            AnalysisKind::Envelope,
             NumericOverrideOption::LteReltol,
             "4e-9",
         ),
         (
-            AnalysisKind::Fourier,
+            AnalysisKind::Envelope,
             NumericOverrideOption::TransientNewtonUpdateBound,
             "0.125",
         ),
         (
-            AnalysisKind::Fourier,
+            AnalysisKind::Envelope,
             NumericOverrideOption::RetainEverySignal,
             "on",
         ),
@@ -1105,7 +1105,7 @@ fn an_option_card_per_package_keeps_the_parsers_scope_from_leaking() {
             NumericOverrideOption::HbInitialState,
             "DC operating point",
         ),
-        (AnalysisKind::Fourier, NumericOverrideOption::Reltol, "1e-5"),
+        (AnalysisKind::Envelope, NumericOverrideOption::Reltol, "1e-5"),
     ] {
         record
             .set_for_instance(kind, SolverOwnership::NONE, option, authored)

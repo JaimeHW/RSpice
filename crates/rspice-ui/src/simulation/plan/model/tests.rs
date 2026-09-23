@@ -11,6 +11,45 @@ fn snapshot(plan: &SimulationPlan) -> String {
 }
 
 #[test]
+fn fourier_restore_retires_unused_overrides_and_preserves_its_producer() {
+    let mut plan = SimulationPlan::empty();
+    let (transient, _) = plan.insert(AnalysisKind::Transient).unwrap();
+    let (fourier, _) = plan.insert(AnalysisKind::Fourier).unwrap();
+    plan.bind_dependency(fourier, AnalysisKind::Transient, transient)
+        .unwrap();
+    let legacy: AnalysisNumericOverride =
+        serde_json::from_str(r#"{"reltol":0.0001,"itl4":200,"strobe_interval":0.000001}"#).unwrap();
+    for id in [transient, fourier] {
+        let index = plan.index_of(id).unwrap();
+        plan.instances[index].numeric_override = Some(legacy.clone());
+    }
+    let mut restored: SimulationPlan = serde_json::from_str(&snapshot(&plan)).unwrap();
+    let receipts = serde_json::to_value(&restored.receipts).unwrap();
+    let before = restored.instance(fourier).unwrap();
+    let draft = serde_json::to_value(&before.draft).unwrap();
+    let dependencies = serde_json::to_value(&before.dependencies).unwrap();
+    restored.prepare_after_restore();
+    let after = restored.instance(fourier).unwrap();
+    assert!(after.numeric_override().is_none());
+    assert_eq!(serde_json::to_value(&after.draft).unwrap(), draft);
+    assert_eq!(
+        serde_json::to_value(&after.dependencies).unwrap(),
+        dependencies
+    );
+    assert_eq!(
+        restored.instance(transient).unwrap().numeric_override(),
+        Some(&legacy)
+    );
+    assert_eq!(serde_json::to_value(&restored.receipts).unwrap(), receipts);
+    let once = snapshot(&restored);
+    restored.prepare_after_restore();
+    assert_eq!(snapshot(&restored), once);
+    restored
+        .edit(fourier, |_| ())
+        .expect("restored Fourier remains editable");
+}
+
+#[test]
 fn pss_retention_restore_preserves_reporting_and_receipts() {
     let mut plan = SimulationPlan::empty();
     let (pss, _) = plan.insert(AnalysisKind::Pss).unwrap();

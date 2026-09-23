@@ -781,27 +781,16 @@ fn every_authored_advanced_option_moves_the_prepared_task_identity() {
 /// plausible number, produced by a plausible run, that nothing would report as
 /// wrong.
 ///
-/// A Fourier measurement is the carrier because it is a transient run under
-/// another name: it advances time, so the bound reaches its solve, and it does
-/// not own a Max step field of its own, so it may hold the override. It binds
-/// the transient the fixture plan already carries.
+/// SOA runs its own transient stress solve and can author this ceiling.
 #[test]
 fn the_step_ceiling_a_transient_cannot_carry_is_judged_through_a_kind_that_can() {
     use crate::simulation::plan::{
-        AnalysisInstance, AnalysisKind, AnalysisNumericOverride, NumericOverrideOption,
-        SolverOwnership,
+        AnalysisKind, AnalysisNumericOverride, NumericOverrideOption, SolverOwnership,
     };
 
     const CEILING: NumericOverrideOption = NumericOverrideOption::MaximumTimestep;
 
     let mut state = super::prepared_run::tests::runnable_state();
-    let transient = state
-        .sim_setup
-        .enabled_analysis_instances()
-        .find(|instance| instance.kind() == AnalysisKind::Transient)
-        .map(AnalysisInstance::id)
-        .expect("a fresh plan holds one enabled transient");
-
     // The premise, stated before it is worked around: the option is refused to
     // the kind the sweep above uses, and refused by name.
     let refusal = CEILING
@@ -813,17 +802,15 @@ fn the_step_ceiling_a_transient_cannot_carry_is_judged_through_a_kind_that_can()
     );
     assert!(
         CEILING
-            .refusal_for_instance(AnalysisKind::Fourier, SolverOwnership::NONE)
+            .refusal_for_instance(AnalysisKind::Soa, SolverOwnership::NONE)
             .is_none(),
-        "a Fourier measurement steps time and owns no step ceiling of its own"
+        "SOA advances its own stress trajectory"
     );
 
-    let fourier = {
+    let soa = {
         let plan = state.sim_setup.analysis_plan.as_mut().expect("stable plan");
-        let (fourier, _) = plan.insert(AnalysisKind::Fourier).expect("Fourier inserts");
-        plan.bind_dependency(fourier, AnalysisKind::Transient, transient)
-            .expect("the measurement binds the transient it reads");
-        fourier
+        let (soa, _) = plan.insert(AnalysisKind::Soa).expect("Soa inserts");
+        soa
     };
 
     let digest_of = |state: &AppState| -> Vec<u8> {
@@ -847,18 +834,18 @@ fn the_step_ceiling_a_transient_cannot_carry_is_judged_through_a_kind_that_can()
     let mut record = AnalysisNumericOverride::default();
     record
         .set_for_instance(
-            AnalysisKind::Fourier,
+            AnalysisKind::Soa,
             SolverOwnership::NONE,
             CEILING,
             "700p",
         )
-        .expect("the measurement may author a step ceiling");
+        .expect("SOA may author a step ceiling");
     state
         .sim_setup
         .analysis_plan
         .as_mut()
         .expect("stable plan")
-        .set_numeric_override(fourier, Some(record))
+        .set_numeric_override(soa, Some(record))
         .expect("the override commits");
 
     assert_ne!(

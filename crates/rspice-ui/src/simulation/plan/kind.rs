@@ -625,7 +625,6 @@ impl AnalysisKind {
             Self::Transient
                 | Self::Pss
                 | Self::Envelope
-                | Self::Fourier
                 | Self::Soa
                 | Self::TransientNoise
                 | Self::MonteCarlo
@@ -871,7 +870,6 @@ mod tests {
                 "temp",
                 "corner",
                 "envelope",
-                "fourier",
                 "reliability",
                 "opt",
                 "soa",

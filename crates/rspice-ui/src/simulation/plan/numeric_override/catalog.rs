@@ -329,6 +329,8 @@ pub(super) const NOT_TIME_STEPPED: &str =
     "this analysis never advances time, so a time-integration bound would not reach its solve";
 pub(super) const FFT_HAS_NO_SOLVE_OF_ITS_OWN: &str =
     "an FFT analysis runs no solve of its own; state the option on the transient it is bound to";
+pub(super) const FOURIER_HAS_NO_SOLVE_OF_ITS_OWN: &str =
+    "Fourier analyzes the bound transient result; configure solver and time-reporting options on that transient analysis";
 pub(super) const NOT_HARMONIC_BALANCE: &str =
     "only a harmonic-balance solve reads this package, and this analysis does not run one";
 pub(super) const CARRIER_OWNS_HB_INITIAL_STATE: &str =
@@ -619,6 +621,9 @@ impl NumericOverrideOption {
         // solve, so there is no solve here for a bound to reach.
         if matches!(kind, AnalysisKind::Fft) {
             return Some(FFT_HAS_NO_SOLVE_OF_ITS_OWN);
+        }
+        if matches!(kind, AnalysisKind::Fourier) {
+            return Some(FOURIER_HAS_NO_SOLVE_OF_ITS_OWN);
         }
         if self == Self::HbInitialState
             && matches!(kind, AnalysisKind::Hbsp | AnalysisKind::Hbnoise)

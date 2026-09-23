@@ -22,6 +22,36 @@ fn rows_for(
     )
 }
 
+#[test]
+fn fourier_solver_controls_belong_to_the_bound_transient() {
+    let kind = AnalysisKind::Fourier;
+    let draft = AnalysisDraft::for_kind(kind);
+    let options = SimulationOptions::default();
+    assert!(!kind.advances_time());
+    assert!(
+        form_rows(kind, &draft, None, &options)
+            .into_iter()
+            .all(|section| section.rows.is_empty())
+    );
+    let rows = rows_for(kind, None);
+    let mut record = AnalysisNumericOverride::default();
+    for option in O::all() {
+        let reason = option.refusal_for(kind).unwrap();
+        assert!(reason.contains("bound transient"));
+        assert_eq!(origin_of(&rows, option), reason);
+        assert!(
+            record
+                .set_for_instance(kind, SolverOwnership::NONE, option, "1")
+                .unwrap_err()
+                .contains(reason)
+        );
+    }
+    assert!(record.is_empty());
+    for option in [O::Reltol, O::Itl4, O::StrobeInterval, O::OutputTimePoints] {
+        assert!(option.refusal_for(AnalysisKind::Transient).is_none());
+    }
+}
+
 /// An operating-point draft carrying the two controls that own solver options.
 ///
 /// Built rather than injected: the panel is handed a draft and derives the
@@ -109,7 +139,7 @@ fn an_untouched_analysis_reports_the_plan_as_the_owner() {
     // default stands and the row says that rather than inventing a number.
     // Asked of a kind that actually steps: on an AC sweep the same row is a
     // refusal, which the refusal test covers.
-    let stepping = rows_for(AnalysisKind::Fourier, None);
+    let stepping = rows_for(AnalysisKind::Envelope, None);
     assert_eq!(origin_of(&stepping, O::LteReltol), ENGINE_ORIGIN);
 }
 

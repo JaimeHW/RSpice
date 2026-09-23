@@ -542,12 +542,12 @@ mod tests {
         let mut record = crate::simulation::plan::AnalysisNumericOverride::default();
         record
             .set_for_instance(
-                crate::simulation::plan::AnalysisKind::Fourier,
+                crate::simulation::plan::AnalysisKind::Soa,
                 crate::simulation::plan::SolverOwnership::NONE,
                 crate::simulation::plan::NumericOverrideOption::MaximumTimestep,
                 "700p",
             )
-            .expect("a Fourier measurement runs a transient");
+            .expect("SOA runs a stress transient");
 
         let deck = format!(
             "two ceilings\nV1 1 0 1\nR1 1 0 1k\n{}\n{}\n.op\n.end\n",
@@ -624,9 +624,8 @@ mod tests {
             ..SimulationOptions::default()
         };
 
-        // A Fourier measurement runs a transient, so it carries every option
-        // except the step ceiling the transient form owns.
-        let kind = AnalysisKind::Fourier;
+        // SOA runs its own stress transient and uses the shared numeric controls.
+        let kind = AnalysisKind::Soa;
         let mut record = AnalysisNumericOverride::default();
         for option in NumericOverrideOption::applicable_to_instance(
             kind,

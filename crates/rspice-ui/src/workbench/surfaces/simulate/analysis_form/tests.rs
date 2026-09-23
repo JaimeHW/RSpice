@@ -1602,9 +1602,9 @@ fn a_form_never_paints_a_quantity_it_already_owns() {
     // And a kind whose transient really does read the key still carries it.
     assert_eq!(
         crate::simulation::plan::NumericOverrideOption::IntegrationMethod
-            .refusal_for(AnalysisKind::Fourier),
+            .refusal_for(AnalysisKind::Soa),
         None,
-        "a Fourier measurement runs a transient, which integrates with .OPTIONS METHOD"
+        "SOA stress runs a transient, which integrates with .OPTIONS METHOD"
     );
 }
 

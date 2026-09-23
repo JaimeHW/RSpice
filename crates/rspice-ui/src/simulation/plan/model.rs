@@ -1125,6 +1125,12 @@ impl SimulationPlan {
             self.instances[index].draft.prepare_after_restore();
             let required_roles = Self::resolved_prerequisite_roles(&self.instances, index);
             let instance = &mut self.instances[index];
+            // Fourier now reads its bound transient artifact exclusively.
+            // These legacy options never changed the source solve. Do not
+            // transfer them to a potentially shared producer or its receipts.
+            if instance.kind == AnalysisKind::Fourier {
+                instance.numeric_override = None;
+            }
             // These consumers now reuse a bound HB state. Their old startup
             // override was never read and must not block editing a restored
             // plan or be silently transferred to its shared carrier producer.
