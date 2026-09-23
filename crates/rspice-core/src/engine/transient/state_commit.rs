@@ -985,6 +985,10 @@ impl Engine {
 
         // Update transmission-line delayed-wave history from the accepted state.
         for (idx, tl) in circuit.tlines.iter_mut().enumerate() {
+            if let Some(event) = physical_event {
+                tl.commit_history_event(event.lines[idx].sample);
+                continue;
+            }
             let previous_forward = tl.launched_forward_wave();
             let previous_backward = tl.launched_backward_wave();
             let v1 = Self::differential_voltage(accepted_solution, tl.node1_pos, tl.node1_neg);

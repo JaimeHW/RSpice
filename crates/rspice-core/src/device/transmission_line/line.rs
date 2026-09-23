@@ -202,6 +202,8 @@ pub struct TransmissionLine {
     state_history: VecDeque<TlineStateSample>,
     /// Incoming limits and slopes anchored to the outgoing state clocks.
     history_events: VecDeque<HistoryEvent>,
+    /// Local acceptance revision; restored checkpoints begin a new revision.
+    history_revision: u64,
     /// Optional distributed RLC transient kernel configuration.
     distributed_rlc: Option<DistributedRlcKernel>,
     /// Optional distributed RC transient kernel configuration.
@@ -748,6 +750,7 @@ impl TransmissionLine {
             initial_state: None,
             state_history: VecDeque::new(),
             history_events: VecDeque::new(),
+            history_revision: 0,
             distributed_rlc: None,
             distributed_rc: None,
             distributed_rlc_cache: Cell::new(None),
@@ -1967,6 +1970,7 @@ impl TransmissionLine {
 
     /// Update history buffers with current state
     pub fn update_history(&mut self, time: Value, v1: Value, i1: Value, v2: Value, i2: Value) {
+        self.history_revision = self.history_revision.wrapping_add(1);
         let raw_forward = v1 + self.z0 * i1;
         let raw_backward = v2 + self.z0 * i2;
 
@@ -2080,6 +2084,7 @@ impl TransmissionLine {
 
     /// Reset for new simulation
     pub fn reset(&mut self) {
+        self.history_revision = self.history_revision.wrapping_add(1);
         self.history_forward.clear();
         self.history_backward.clear();
         self.launched_forward = 0.0;

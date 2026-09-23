@@ -1,6 +1,8 @@
 use super::*;
 use crate::abort_signal::NoAbort;
 
+mod transmission_line;
+
 fn options() -> charge_event::EventOptions {
     charge_event::EventOptions {
         limits: crate::resource::ResourceLimits::default(),

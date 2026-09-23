@@ -6,6 +6,7 @@ use super::*;
 use crate::circuit::SourceTimeSide;
 use charge_event::circuit::{EventPhase, PreparedEventCircuit};
 mod impulses;
+mod lines;
 mod orders;
 mod startup;
 pub(in crate::engine::transient) use impulses::PhysicalDeviceImpulses;
@@ -29,6 +30,7 @@ pub(in crate::engine::transient) struct PreparedPhysicalEvent {
     dt: Value,
     pub(super) bjt: PreparedBjtHistory,
     pub(super) capacitors: Vec<CapacitorAcceptedState>,
+    pub(super) lines: Vec<lines::PreparedLineEvent>,
     left_limits: Vec<Option<Value>>,
     phase_anchors: Vec<Option<(usize, Value, Value)>>,
     device_impulses: PhysicalDeviceImpulses,
@@ -135,6 +137,7 @@ impl PreparedPhysicalEvent {
                 .all(|(a, b)| a.to_bits() == b.to_bits())
             || self.bjt.values.len() != circuit.bjts.len()
             || self.capacitors.len() != circuit.capacitors.len()
+            || self.lines.len() != circuit.tlines.len()
             || context.incoming_arrival
             || context.input_left_limits != Some(self.left_limits.as_slice())
             || self.phase_anchors != phase_anchors(history)
@@ -142,6 +145,9 @@ impl PreparedPhysicalEvent {
             return Err(failure(
                 "prepared event does not match the final solution, time or history context",
             ));
+        }
+        for (line, prepared) in circuit.tlines.iter().zip(&self.lines) {
+            prepared.validate(line)?;
         }
         // Revalidate retained phase ownership at the joint acceptance barrier.
         // An intervening history advance cannot consume a stale preparation.
@@ -275,9 +281,9 @@ impl Engine {
         // A continuity certificate cannot repair an inaccurate incoming limit
         // by changing its coordinates. Audit the incoming equations first,
         // including ideal-source constraints and finite-rate regularity.
-        if classified.continuous {
+        let incoming_state = if classified.continuous || (!startup && !circuit.tlines.is_empty()) {
             let left = sampler.topology(step.time, SourceTimeSide::LeftLimit, options, abort)?;
-            left.solve_continuous(
+            Some(left.solve_continuous(
                 step.incoming,
                 &incoming_q,
                 options,
@@ -292,8 +298,10 @@ impl Engine {
                         abort,
                     )
                 },
-            )?;
-        }
+            )?)
+        } else {
+            None
+        };
         let mut chart_trials = 0;
         let state = loop {
             if chart_trials == options.iterations {
@@ -341,6 +349,14 @@ impl Engine {
             };
             phase_current_couplings.push(coupling);
         }
+        let lines = lines::prepare(
+            circuit,
+            &step,
+            incoming_state.as_ref(),
+            &state,
+            options,
+            abort,
+        )?;
         let mut device_impulses = PhysicalDeviceImpulses::prepare(
             classified.continuous,
             circuit.capacitors.len(),
@@ -568,6 +584,7 @@ impl Engine {
             dt: step.dt,
             bjt,
             capacitors,
+            lines,
             left_limits,
             phase_anchors: phase_anchors(history),
             device_impulses,

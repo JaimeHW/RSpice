@@ -254,4 +254,21 @@ fn line_event_slopes_follow_native_interpolation_and_solved_limits() {
             expected
         );
     }
+    line.reset();
+    edge.time = 0.0;
+    line.accept_history_event(edge).unwrap();
+    line.update_history(1.0, 6.0, 0.0, -9.0, 0.0);
+    line.rebase_lossless_history(0.0).unwrap();
+    // t-TD rounds to the old event, but its positive low word is strictly
+    // after that arrival: even an incoming query must use the outgoing wave.
+    let time = 2.0_f64.powi(-54);
+    assert_eq!(
+        line.lossless_wave_on_side(time, true, TransmissionLineTimeSide::Incoming),
+        5.0_f64.mul_add(time, 1.0)
+    );
+    assert_eq!(
+        line.lossless_wave_slope_on_side(time, true, TransmissionLineTimeSide::Incoming)
+            .unwrap(),
+        5.0
+    );
 }

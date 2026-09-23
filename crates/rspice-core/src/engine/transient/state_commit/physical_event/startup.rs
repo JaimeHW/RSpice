@@ -301,6 +301,9 @@ impl Engine {
         }
         // No fallible work remains. Preserve finite dQ/dt and terminal
         // currents; an ordinary integration-history reset would erase them.
+        for (line, prepared) in circuit.tlines.iter_mut().zip(point.lines) {
+            line.commit_history_event(prepared.sample);
+        }
         for (index, value) in point.capacitors.into_iter().enumerate() {
             circuit.capacitors.v_prev[index] = value.voltage;
             circuit.capacitors.v_prev_prev[index] = value.voltage;

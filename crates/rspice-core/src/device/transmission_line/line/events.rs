@@ -154,6 +154,26 @@ impl TransmissionLine {
         &mut self,
         event: TransmissionLineHistoryEvent,
     ) -> Result<(), String> {
+        self.validate_history_event(&event)?;
+        self.commit_history_event(event);
+        Ok(())
+    }
+
+    pub(crate) fn history_revision(&self) -> u64 {
+        self.history_revision
+    }
+
+    pub(crate) fn accepted_port_history(&self) -> Option<[Value; 5]> {
+        self.state_history
+            .back()
+            .copied()
+            .map(Self::checkpoint_sample)
+    }
+
+    pub(crate) fn validate_history_event(
+        &self,
+        event: &TransmissionLineHistoryEvent,
+    ) -> Result<(), String> {
         if !self.supports_sided_history_events() {
             return Err(
                 "sided transmission-line events require an ordinary lossless scalar delay".into(),
@@ -214,6 +234,29 @@ impl TransmissionLine {
                 );
             }
         }
+        Ok(())
+    }
+
+    /// Commit a validated event on the same unchanged history. All fallible
+    /// preparation, including other devices, must precede this barrier.
+    pub(crate) fn commit_history_event(&mut self, event: TransmissionLineHistoryEvent) {
+        self.history_revision = self.history_revision.wrapping_add(1);
+        let incoming = Self::sample_from_checkpoint([
+            event.time,
+            event.incoming[0],
+            event.incoming[1],
+            event.incoming[2],
+            event.incoming[3],
+        ]);
+        let retained = HistoryEvent {
+            incoming,
+            incoming_wave_slopes: event.incoming_wave_slopes,
+            outgoing_wave_slopes: event.outgoing_wave_slopes,
+        };
+        let replacing = self
+            .state_history
+            .back()
+            .is_some_and(|last| last.time == event.time);
         let was_empty = self.state_history.is_empty();
         if replacing {
             let outgoing = self.state_history.back_mut().unwrap();
@@ -250,7 +293,6 @@ impl TransmissionLine {
         );
         self.history_events.push_back(retained);
         self.distributed_rlc_cache.set(None);
-        Ok(())
     }
 
     /// Next exactly owned delayed event, including a slope-only corner.
@@ -317,6 +359,8 @@ impl TransmissionLine {
         if let Some(event) = self.history_event_at(high) {
             let selected = if low < 0.0 {
                 TransmissionLineTimeSide::Incoming
+            } else if low > 0.0 {
+                TransmissionLineTimeSide::Outgoing
             } else {
                 side
             };
