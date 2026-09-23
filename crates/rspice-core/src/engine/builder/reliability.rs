@@ -2,6 +2,8 @@
 
 use super::*;
 use crate::netlist::{InstanceModelOverlay, ModelDef};
+mod native_mos;
+use native_mos::Family;
 
 /// Resolve through the same geometry-bin selector used by the MOS builder.
 /// Only parameters with an audited native mapping are accepted. In particular,
@@ -12,10 +14,12 @@ pub(in crate::engine) fn reliability_model_parameters(
     requested_model: &str,
     parameters: impl IntoIterator<Item = String>,
     temperature: f64,
+    dialect: SpiceDialect,
 ) -> Result<InstanceModelOverlay, SimulationError> {
     let model = selected_model(netlist, element, requested_model, temperature)?;
     let level = model_param(&model.params, &["LEVEL"]).unwrap_or(1.0);
-    if !matches!(level, 1.0 | 2.0 | 3.0)
+    let family = Family::select(model, dialect);
+    if family == Family::Unsupported
         || !["NMOS", "PMOS"]
             .iter()
             .any(|name| model.model_type.eq_ignore_ascii_case(name))
@@ -28,19 +32,21 @@ pub(in crate::engine) fn reliability_model_parameters(
     let mut resolved = BTreeMap::new();
     for parameter in parameters {
         let key = parameter.to_ascii_uppercase();
-        if !matches!(key.as_str(), "VTO" | "KP" | "GAMMA" | "PHI") {
+        if !family.supports(&key, model) {
             return Err(refusal(format!(
-                "Aged re-simulation has no qualified parameter mapping for '{}:{parameter}'; classic MOS supports VTO, KP, GAMMA and PHI",
+                "Aged re-simulation has no qualified parameter mapping for '{}:{parameter}' in its native model family and resistance mode",
                 model.name
             )));
         }
-        let value = model_param(&model.params, &[&key]).ok_or_else(|| {
+        let value = model_param(&model.params, &[&key]).or_else(|| {
+            (key == "VTH0").then(|| model_param(&model.params, &["VTHO"])).flatten()
+        }).ok_or_else(|| {
             refusal(format!(
                 "Aging parameter '{}:{key}' needs an explicit, resolved numeric fresh model value",
                 model.name
             ))
         })?;
-        validate_value(&key, value)?;
+        validate_value(family, &key, value)?;
         resolved.insert(key, value);
     }
     Ok(InstanceModelOverlay {
@@ -90,10 +96,11 @@ fn selected_model<'a>(
     )
 }
 
-fn validate_value(parameter: &str, value: f64) -> Result<(), SimulationError> {
+fn validate_value(family: Family, parameter: &str, value: f64) -> Result<(), SimulationError> {
     if !value.is_finite()
-        || (matches!(parameter, "KP" | "GAMMA") && value < 0.0)
-        || (parameter == "PHI" && value <= 0.0)
+        || (family == Family::Classic
+            && ((matches!(parameter, "KP" | "GAMMA") && value < 0.0)
+                || (parameter == "PHI" && value <= 0.0)))
     {
         Err(refusal(format!(
             "Aged model parameter {parameter}={value} is outside its native domain"
@@ -107,6 +114,7 @@ pub(super) fn apply_instance_model_overlays(
     netlist: &mut Netlist,
     elements: &mut [Element],
     temperature: f64,
+    dialect: SpiceDialect,
     abort: &dyn AbortSignal,
 ) -> Result<(), SimulationError> {
     let overrides = netlist.ast_overlay.instance_models.clone();
@@ -126,6 +134,7 @@ pub(super) fn apply_instance_model_overlays(
             &overlay.requested_model,
             overlay.parameters.keys().cloned(),
             temperature,
+            dialect,
         )?;
         if !fresh
             .selected_model
@@ -137,8 +146,10 @@ pub(super) fn apply_instance_model_overlays(
         }
         let mut model =
             selected_model(netlist, element, &overlay.requested_model, temperature)?.clone();
+        let family = Family::select(&model, dialect);
+        let native = native_mos::resolve(family, &model, element, netlist, temperature)?;
         for (key, value) in &overlay.parameters {
-            validate_value(key, *value)?;
+            validate_value(family, key, *value)?;
             model
                 .params
                 .retain(|(name, _)| !name.eq_ignore_ascii_case(key));
@@ -146,6 +157,9 @@ pub(super) fn apply_instance_model_overlays(
                 .expr_params
                 .retain(|(name, _)| !name.eq_ignore_ascii_case(key));
             model.params.push((key.clone(), *value));
+        }
+        if let Some(native) = native {
+            native_mos::apply(&native, &mut model, &overlay.parameters)?;
         }
         let mut suffix = 0usize;
         loop {
@@ -165,6 +179,36 @@ pub(super) fn apply_instance_model_overlays(
         netlist.models.push(model);
     }
     Ok(())
+}
+
+/// Use the same selected model and dialect dispatch as electrical evaluation.
+/// Native bulk BSIM3/4 ignore instance TEMP/DTEMP in their qualified ports.
+pub(in crate::engine) fn reliability_mos_uses_circuit_temperature(
+    netlist: &Netlist,
+    element: &Element,
+    requested_model: &str,
+    temperature: f64,
+    dialect: SpiceDialect,
+) -> Result<bool, SimulationError> {
+    let ElementKind::Mosfet {
+        instance_params, ..
+    } = &element.kind
+    else {
+        return Ok(false);
+    };
+    let model = find_binned_model_def(
+        netlist,
+        &element.name,
+        requested_model,
+        instance_params,
+        temperature,
+    )?;
+    Ok(model.is_some_and(|model| {
+        matches!(
+            Family::select(model, dialect),
+            Family::Bsim3(_) | Family::Bsim4
+        )
+    }))
 }
 
 fn refusal(message: impl Into<String>) -> SimulationError {

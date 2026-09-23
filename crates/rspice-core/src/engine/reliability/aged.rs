@@ -117,7 +117,9 @@ impl Engine {
         for checkpoint in &stress.checkpoints {
             for device in &checkpoint.devices {
                 for contribution in &device.contributions {
-                    retained = retained.saturating_add(3 + contribution.parameters.len());
+                    retained = retained.saturating_add(
+                        3 + contribution.parameters.len() + contribution.trap_occupancies.len(),
+                    );
                 }
             }
         }
@@ -209,6 +211,7 @@ impl Engine {
                 &binding.compact_model,
                 changes.keys().cloned(),
                 self.config.temperature,
+                self.config.spice_dialect,
             )?;
             for (parameter, (update, shift)) in changes {
                 let fresh_value = overlay.parameters[&parameter];

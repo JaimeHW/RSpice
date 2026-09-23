@@ -182,6 +182,8 @@ impl Engine {
             abort,
         )
         .map_err(parse_error)?;
+        let mut model_context = netlist.clone();
+        model_context.models.extend(flattened.scoped_models.clone());
         let mut targets = Vec::new();
         for binding in &study.bindings {
             check_abort(abort)?;
@@ -195,7 +197,19 @@ impl Engine {
                         binding.device
                     ))
                 })?;
-            let target = StressTarget::new(element, binding, self.config.temperature)?;
+            let circuit_temperature = super::builder::reliability_mos_uses_circuit_temperature(
+                &model_context,
+                element,
+                &binding.compact_model,
+                self.config.temperature,
+                self.config.spice_dialect,
+            )?;
+            let target = StressTarget::new(
+                element,
+                binding,
+                self.config.temperature,
+                circuit_temperature,
+            )?;
             if !target.fet
                 && binding.aging_models.iter().any(|id| {
                     study.model_pack.models.iter().any(|model| {
@@ -382,6 +396,7 @@ impl<'a> StressTarget<'a> {
         element: &Element,
         binding: &'a ReliabilityBinding,
         ambient_k: f64,
+        circuit_temperature: bool,
     ) -> Result<Self, SimulationError> {
         let (model, instance_params, fet, current_parameter) = match &element.kind {
             ElementKind::Mosfet {
@@ -431,9 +446,13 @@ impl<'a> StressTarget<'a> {
                 .find(|(name, _)| name.eq_ignore_ascii_case(key))
                 .map(|(_, value)| *value)
         };
-        let temperature_k = instance("TEMP")
-            .map(crate::constants::celsius_to_kelvin)
-            .unwrap_or(ambient_k + instance("DTEMP").unwrap_or(0.0));
+        let temperature_k = if circuit_temperature {
+            ambient_k
+        } else {
+            instance("TEMP")
+                .map(crate::constants::celsius_to_kelvin)
+                .unwrap_or(ambient_k + instance("DTEMP").unwrap_or(0.0))
+        };
         if !temperature_k.is_finite() || temperature_k <= 0.0 {
             return Err(invalid("Device stress temperature is invalid"));
         }

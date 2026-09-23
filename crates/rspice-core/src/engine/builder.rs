@@ -54,6 +54,7 @@ pub use model_resolution::{
     XYCE_DEFAULT_CAPACITOR_AGE_DEGRADATION, validate_native_xyce_ltra_model_contract,
 };
 pub(in crate::engine) use reliability::reliability_model_parameters;
+pub(in crate::engine) use reliability::reliability_mos_uses_circuit_temperature;
 mod behavioral;
 mod boundary_supply;
 mod builtin_models;
@@ -5386,6 +5387,7 @@ impl Engine {
                 &mut instance_model_netlist,
                 &mut flat_elements,
                 self.config.temperature,
+                self.config.spice_dialect,
                 abort,
             )?;
             &instance_model_netlist
