@@ -9,7 +9,7 @@ use crate::expr::{AcceptedSdtState, Function};
 impl SolutionDependentCapacitor {
     pub(crate) fn lift_quasi_periodic(
         &mut self,
-        grid: &crate::analysis::quasi_periodic::QuasiPeriodicGrid,
+        grid: &impl crate::device::behavioral::QuasiPeriodicClockBasis,
     ) -> Result<(), String> {
         if !self.has_periodic_carrier_frequency_context() {
             return Err("live-frequency capacitance needs a quasiperiodic frequency model".into());

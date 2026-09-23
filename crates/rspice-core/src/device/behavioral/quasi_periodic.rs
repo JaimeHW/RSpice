@@ -3,15 +3,21 @@
 //! never become MNA unknowns or physical Jacobian columns.
 
 use super::*;
-use crate::analysis::quasi_periodic::QuasiPeriodicGrid;
 use crate::expr::{constant_value, function_uses_implicit_time};
 use std::collections::HashMap;
 use std::f64::consts::{PI, TAU};
 
 mod clock;
 
+/// Only the clock coordinates needed to lift device expressions. The analysis
+/// grid implements this interface without making device models depend on it.
+pub(crate) trait QuasiPeriodicClockBasis {
+    fn clock_tuple(&self, frequency: Value) -> Result<Vec<i32>, String>;
+    fn dimensions(&self) -> &[usize];
+}
+
 struct Lift<'a> {
-    grid: &'a QuasiPeriodicGrid,
+    grid: &'a dyn QuasiPeriodicClockBasis,
     context: Context<'a>,
     phase_names: Vec<String>,
 }
@@ -74,10 +80,7 @@ impl Lift<'_> {
         if frequency == 0.0 {
             return Ok(Expr::Const(0.0));
         }
-        let tuple = self
-            .grid
-            .clock_tuple(frequency)
-            .map_err(|e| e.to_string())?;
+        let tuple = self.grid.clock_tuple(frequency)?;
         Ok(tuple
             .iter()
             .zip(&self.phase_names)
@@ -298,7 +301,7 @@ impl Lift<'_> {
 impl integrals::IntegralEquations {
     pub(crate) fn lift_quasi_periodic(
         &self,
-        grid: &QuasiPeriodicGrid,
+        grid: &impl QuasiPeriodicClockBasis,
         context: Context<'_>,
         program: &CompiledExpr,
     ) -> Result<Self, String> {
@@ -312,7 +315,7 @@ impl integrals::IntegralEquations {
     }
 }
 
-fn phase_names(grid: &QuasiPeriodicGrid, program: &CompiledExpr) -> Vec<String> {
+fn phase_names(grid: &impl QuasiPeriodicClockBasis, program: &CompiledExpr) -> Vec<String> {
     (0..grid.dimensions().len())
         .map(|dimension| {
             let mut name = format!("\0qpss_phase_{dimension}");
@@ -329,7 +332,7 @@ macro_rules! lift_source {
         impl $kind {
             pub(crate) fn lift_quasi_periodic(
                 &mut self,
-                grid: &QuasiPeriodicGrid,
+                grid: &impl QuasiPeriodicClockBasis,
                 unknowns: usize,
             ) -> Result<(), String> {
                 if !self.has_periodic_carrier_frequency_context() {

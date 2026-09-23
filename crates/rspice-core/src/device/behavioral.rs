@@ -25,6 +25,7 @@ pub(crate) use history::BehavioralAcceptedState;
 pub(crate) use integrals::BehavioralFqPoint;
 pub(crate) mod periodicity;
 mod quasi_periodic;
+pub(crate) use quasi_periodic::QuasiPeriodicClockBasis;
 mod resolution;
 pub(crate) use breakpoints::BehavioralBreakpointError;
 #[cfg(test)]

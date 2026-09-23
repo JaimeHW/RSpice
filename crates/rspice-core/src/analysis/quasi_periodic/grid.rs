@@ -110,6 +110,16 @@ pub struct QuasiPeriodicGrid {
     bins: Vec<usize>,
 }
 
+impl crate::device::behavioral::QuasiPeriodicClockBasis for QuasiPeriodicGrid {
+    fn clock_tuple(&self, frequency: Value) -> Result<Vec<i32>, String> {
+        QuasiPeriodicGrid::clock_tuple(self, frequency).map_err(|error| error.to_string())
+    }
+
+    fn dimensions(&self) -> &[usize] {
+        QuasiPeriodicGrid::dimensions(self)
+    }
+}
+
 impl QuasiPeriodicGrid {
     /// Resolve an authored source clock without aliasing it onto another tone.
     pub(crate) fn clock_tuple(&self, frequency: Value) -> Result<Vec<i32>, Error> {
