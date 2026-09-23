@@ -173,6 +173,10 @@ impl HbSolver {
     /// Return complete solved components so the caller can preserve the chosen
     /// orbit as the full-circuit seed. Only already-qualified primitives can
     /// act as external inputs; unresolved integral feedback remains joint.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "numerical API keeps independent circuit, spectral, and resource inputs explicit"
+    )]
     pub(in crate::analysis::harmonic_balance::solver) fn nonlinear_driven_spectra(
         &mut self,
         grid: Arc<QuasiPeriodicGrid>,
@@ -195,6 +199,10 @@ impl HbSolver {
         )
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "numerical API keeps independent circuit, spectral, and resource inputs explicit"
+    )]
     pub(super) fn nonlinear_driven_spectra_in_basis(
         &mut self,
         grid: Arc<QuasiPeriodicGrid>,

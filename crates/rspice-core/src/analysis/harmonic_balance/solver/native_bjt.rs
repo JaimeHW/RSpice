@@ -367,6 +367,10 @@ impl HbSolver {
         )
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "numerical API keeps independent circuit, spectral, and resource inputs explicit"
+    )]
     fn sample_native_devices_selected(
         &mut self,
         solution: &[Value],

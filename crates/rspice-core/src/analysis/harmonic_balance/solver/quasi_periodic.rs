@@ -162,6 +162,10 @@ impl HbSolver {
     /// Linearize a real driven QP orbit once, then solve complex translated
     /// phasors at each requested offset. The source rows are arbitrary complex
     /// amplitudes on the full signed lattice, with no conjugate reflection.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "numerical API keeps independent circuit, spectral, and resource inputs explicit"
+    )]
     pub fn solve_quasi_periodic_ac_with_abort(
         &mut self,
         grid: Arc<QuasiPeriodicGrid>,
@@ -223,6 +227,10 @@ impl HbSolver {
     }
 
     /// Adjoint sweep on the common offset axis (the zero tone tuple).
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "numerical API keeps independent circuit, spectral, and resource inputs explicit"
+    )]
     pub fn solve_quasi_periodic_adjoint_with_abort(
         &mut self,
         grid: Arc<QuasiPeriodicGrid>,
@@ -250,6 +258,10 @@ impl HbSolver {
     /// Every small-signal source/tuple transfer is then λᴴ b. Complete exact
     /// MNA and all signed tuples participate, including frequency-dependent
     /// linear networks and native F/Q derivatives.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "numerical API keeps independent circuit, spectral, and resource inputs explicit"
+    )]
     pub fn solve_quasi_periodic_adjoint_at_frequency_with_abort(
         &mut self,
         grid: Arc<QuasiPeriodicGrid>,
@@ -328,6 +340,10 @@ impl HbSolver {
     /// Sources must be sampled on this exact grid and supplied by the engine's
     /// physical noise catalog. This numerical entry point does not authenticate
     /// netlists or construct device noise laws.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "numerical API keeps independent circuit, spectral, and resource inputs explicit"
+    )]
     pub fn visit_quasi_periodic_noise_with_abort(
         &mut self,
         grid: Arc<QuasiPeriodicGrid>,

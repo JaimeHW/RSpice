@@ -159,6 +159,10 @@ impl HbSolver {
     /// The buffer is projection-major, then MNA-unknown-major and sideband-min
     /// to sideband-max. Its dot product with an excitation RHS gives the exact
     /// projected input gain without a second, independently solved operator.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "numerical API keeps independent circuit, spectral, and resource inputs explicit"
+    )]
     pub(crate) fn solve_periodic_noise_projected_correlations_with_adjoints_each(
         &mut self,
         state: &HbSolverState,
