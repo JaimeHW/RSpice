@@ -58,6 +58,12 @@ enum ChargeBranch {
         pos: usize,
         neg: usize,
     },
+    Mosfet {
+        device: usize,
+        port: usize,
+        pos: usize,
+        neg: usize,
+    },
     Bsim3 {
         device: usize,
         port: usize,
@@ -212,6 +218,7 @@ impl PssStateBasis {
         }
         let node_count = circuit.num_nodes() + 1;
         let mut voltage_constraints = if circuit.vcvs.is_empty()
+            && circuit.mosfets.is_empty()
             && circuit.bsim3v3.is_empty()
             && circuit.bsim4v8.is_empty()
         {
@@ -342,6 +349,24 @@ impl PssStateBasis {
                     charge_branches.push(ChargeBranch::Jfet {
                         device,
                         charge,
+                        pos,
+                        neg,
+                    });
+                }
+            }
+        }
+        for (device, mos) in circuit.mosfets.devices.iter().enumerate() {
+            for (port, nodes) in mos
+                .shooting_terminal_storage_nodes()
+                .into_iter()
+                .enumerate()
+            {
+                if let Some((pos, neg)) = nodes
+                    && add(pos, neg, ForestValue::State(charge_branches.len()))?
+                {
+                    charge_branches.push(ChargeBranch::Mosfet {
+                        device,
+                        port,
                         pos,
                         neg,
                     });
@@ -487,6 +512,13 @@ impl PssStateBasis {
                         ["qgs", "qgd"][charge]
                     )
                 }
+                ChargeBranch::Mosfet { device, port, .. } => {
+                    format!(
+                        "M:{}:{}",
+                        circuit.mosfets.devices[device].name,
+                        ["vgs", "vgd", "vgb", "vbs", "vbd"][port]
+                    )
+                }
                 ChargeBranch::Bsim3 { device, port, .. } => {
                     format!(
                         "M:{}:{}",
@@ -529,6 +561,7 @@ impl PssStateBasis {
             }
             ChargeBranch::Bjt { pos, neg, .. }
             | ChargeBranch::Jfet { pos, neg, .. }
+            | ChargeBranch::Mosfet { pos, neg, .. }
             | ChargeBranch::Bsim3 { pos, neg, .. }
             | ChargeBranch::Bsim4 { pos, neg, .. } => (pos, neg),
             ChargeBranch::Bsim3Nqs { node, .. } | ChargeBranch::Bsim4Nqs { node, .. } => (node, 0),
@@ -545,6 +578,7 @@ pub(in crate::engine) struct PssCircuit {
     pub(super) diode_history: TwoTerminalChargeHistory,
     pub(super) bjt_history: super::super::transient::BjtTransientHistory,
     pub(super) jfet_history: super::super::transient::JfetTransientHistory,
+    pub(super) mosfet_history: super::super::transient::MosfetTransientHistory,
     pub(super) bsim3_history: super::super::transient::Bsim3TransientHistory,
     pub(super) bsim4_history: super::super::transient::Bsim4TransientHistory,
     pub(super) bjt_snapshot_cache: Vec<Option<crate::device::semiconductor::BjtChargeSnapshot>>,
@@ -648,6 +682,11 @@ impl PssCircuit {
             &solution_scratch[1..],
             super::super::transient::ReactiveHistorySeed::SolvedBias,
         );
+        let mosfet_history = Engine::initialize_mosfet_history(
+            &circuit,
+            &solution_scratch[1..],
+            super::super::transient::ReactiveHistorySeed::SolvedBias,
+        );
         let bsim3_history = Engine::initialize_bsim3_history(&circuit, &solution_scratch[1..]);
         let bsim4_history = Engine::initialize_bsim4_history(&circuit, &solution_scratch[1..]);
         let integral_probe_scales = vec![
@@ -660,6 +699,7 @@ impl PssCircuit {
             diode_history,
             bjt_history,
             jfet_history,
+            mosfet_history,
             bsim3_history,
             bsim4_history,
             bjt_snapshot_cache,
@@ -852,6 +892,7 @@ impl PssCircuit {
                 ChargeBranch::Diode(index) => self.diode_history.vd_prev[index],
                 ChargeBranch::Bjt { pos, neg, .. }
                 | ChargeBranch::Jfet { pos, neg, .. }
+                | ChargeBranch::Mosfet { pos, neg, .. }
                 | ChargeBranch::Bsim3 { pos, neg, .. }
                 | ChargeBranch::Bsim4 { pos, neg, .. } => {
                     self.solution_scratch[pos] - self.solution_scratch[neg]
@@ -992,6 +1033,14 @@ impl PssCircuit {
             &self.solution_scratch[1..],
             super::super::transient::ReactiveHistorySeed::SolvedBias,
         );
+        for device in &mut circuit.mosfets.devices {
+            device.seed_accepted_periodic_bias(&self.solution_scratch[1..]);
+        }
+        self.mosfet_history = Engine::initialize_mosfet_history(
+            circuit,
+            &self.solution_scratch[1..],
+            super::super::transient::ReactiveHistorySeed::SolvedBias,
+        );
         for device in &mut circuit.bsim3v3.devices {
             device.seed_accepted_periodic_bias(&self.solution_scratch[1..]);
         }
@@ -1015,6 +1064,14 @@ impl PssCircuit {
         );
         self.bjt_snapshot_cache.fill(None);
         self.jfet_history = Engine::initialize_jfet_history(
+            &self.circuit,
+            solution,
+            super::super::transient::ReactiveHistorySeed::SolvedBias,
+        );
+        for device in &mut self.circuit.mosfets.devices {
+            device.seed_accepted_periodic_bias(solution);
+        }
+        self.mosfet_history = Engine::initialize_mosfet_history(
             &self.circuit,
             solution,
             super::super::transient::ReactiveHistorySeed::SolvedBias,
@@ -1115,6 +1172,7 @@ impl PssCircuit {
                 ChargeBranch::Diode(index) => self.diode_history.vd_prev[index],
                 ChargeBranch::Bjt { pos, neg, .. }
                 | ChargeBranch::Jfet { pos, neg, .. }
+                | ChargeBranch::Mosfet { pos, neg, .. }
                 | ChargeBranch::Bsim3 { pos, neg, .. }
                 | ChargeBranch::Bsim4 { pos, neg, .. } => {
                     self.solution_scratch[pos] - self.solution_scratch[neg]
@@ -1138,6 +1196,7 @@ impl PssCircuit {
                 ChargeBranch::Diode(_)
                 | ChargeBranch::Bjt { .. }
                 | ChargeBranch::Jfet { .. }
+                | ChargeBranch::Mosfet { .. }
                 | ChargeBranch::Bsim3 { .. }
                 | ChargeBranch::Bsim3Nqs { .. }
                 | ChargeBranch::Bsim4 { .. }
@@ -1333,6 +1392,20 @@ impl PssCircuit {
                 &self.jfet_history,
                 false,
             );
+            for device in &self.circuit.mosfets.devices {
+                // These storage ports fix all native MOS charge controls.
+                // Evaluate their exact shooting values: algebraic roundoff
+                // around Vbs=0 must not flip a legacy BSIM charge derivative
+                // between the forward- and reverse-body branches.
+                device.stamp_shooting_initial_charge(
+                    &self.solution_scratch[1..],
+                    &mut super::super::transient::StaticMatrixChargeStamper {
+                        matrix: charge,
+                        rhs: unused_rhs,
+                    },
+                    true,
+                );
+            }
             for device in &self.circuit.bsim3v3.devices {
                 device.stamp_shooting_initial_charge(
                     solution,

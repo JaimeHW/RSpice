@@ -16,6 +16,7 @@ use crate::{NodeId, Value};
 /// current at Vds≈0 while retaining C1 continuity for Newton.
 mod capacitance;
 mod checkpoint;
+mod continuation;
 pub(crate) use checkpoint::AcceptedMosfetNonlinearCheckpoint;
 mod construction;
 mod current;

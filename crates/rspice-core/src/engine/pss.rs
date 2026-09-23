@@ -114,7 +114,7 @@ impl PssAcceptedStepHistory {
 const PSS_FD_STEP: Value = 1e-8;
 const PSS_KRYLOV_STATE_THRESHOLD: usize = 12;
 const PSS_KRYLOV_REL_TOL: Value = 1e-9;
-const PSS_OPERATING_POINT_IDENTITY_VERSION: u32 = 97;
+const PSS_OPERATING_POINT_IDENTITY_VERSION: u32 = 98;
 
 fn pss_identity_field(hasher: &mut blake3::Hasher, name: &str, bytes: &[u8]) {
     hasher.update(&(name.len() as u64).to_le_bytes());
@@ -2006,7 +2006,7 @@ impl Engine {
                 vbic_snapshot_cache: &circuit.bjt_snapshot_cache,
                 bsim3_history: &circuit.bsim3_history,
                 bsim4_history: &circuit.bsim4_history,
-                mosfet_history: &Default::default(),
+                mosfet_history: &circuit.mosfet_history,
             },
         );
         let junction_history =
@@ -4064,6 +4064,7 @@ impl Engine {
             diode_history,
             bjt_history,
             jfet_history,
+            mosfet_history,
             bsim3_history,
             bsim4_history,
             bjt_snapshot_cache,
@@ -4235,6 +4236,18 @@ impl Engine {
                 },
                 jfet_history,
                 false,
+            );
+            Self::stamp_mosfet_shooting_companions(
+                super::transient::TransientCompanionStamp {
+                    circuit,
+                    matrix,
+                    rhs,
+                    voltages: linearize_at,
+                    coeff,
+                    dt,
+                },
+                mosfet_history,
+                physical_probe,
             );
             Self::stamp_bsim3_transient_companions(
                 super::transient::TransientCompanionStamp {
@@ -4647,6 +4660,7 @@ impl Engine {
                     diode_history,
                     bjt_history,
                     jfet_history,
+                    mosfet_history,
                     bsim3_history,
                     bsim4_history,
                     bjt_snapshot_cache,
@@ -4668,6 +4682,16 @@ impl Engine {
                     Some(bjt_snapshot_cache),
                 )?;
                 Self::accept_jfet_history(circuit, jfet_history, &new_solution, &coeff, dt, false);
+                for device in &mut circuit.mosfets.devices {
+                    device.seed_accepted_periodic_bias(&new_solution);
+                }
+                Self::accept_mosfet_shooting_history(
+                    circuit,
+                    mosfet_history,
+                    &new_solution,
+                    &coeff,
+                    dt,
+                );
                 Self::update_bsim3_history(circuit, &new_solution, &coeff, dt, bsim3_history);
                 Self::update_bsim4_history(
                     circuit,

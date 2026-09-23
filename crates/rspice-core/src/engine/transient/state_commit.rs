@@ -653,7 +653,7 @@ impl Engine {
     }
 
     #[inline]
-    fn install_cached_mosfet_gate_companion_charges(
+    pub(super) fn install_cached_mosfet_gate_companion_charges(
         charges: &MosfetGateCompanionCharges,
         qgs: &mut Value,
         cqgs: &mut Value,
@@ -669,7 +669,7 @@ impl Engine {
 
     /// Include the companion's linear movement when its accepted charge
     /// coordinate still differs from the solved node drop after limiting.
-    fn accepted_mosfet_gate_currents(
+    pub(super) fn accepted_mosfet_gate_currents(
         mos: &crate::device::Mosfet,
         solution: &[Value],
         coeff: &CompanionCoefficients,
@@ -1512,184 +1512,18 @@ impl Engine {
         } else {
             circuit.mosfets.devices.as_slice()
         };
-        for (idx, mos) in serial_mosfet_devices.iter().enumerate() {
-            let displacement = &mut mosfet_history.accepted_displacement_currents[idx];
-            *displacement = [0.0; 5];
-            let (_, raw_vds, raw_vbs) = mos.unlimited_branch_voltages_at(accepted_solution);
-            let (vgs, vds, vbs) = mos.eval_branch_voltages_at(accepted_solution);
-            let vgd = vgs - vds;
-            let vgb = vgs - vbs;
-            // The truncation walk already evaluated the Meyer halves on this
-            // accepted solution; reuse them when the caller captured them.
-            let (cgs_half, cgd_half, cgb_half) = match mosfet_caps {
-                Some(cache) => cache[idx],
-                None => mos.transient_capacitance_halves_at(vgs, vds, vbs),
-            };
-            let previous_cap_halves = (
-                mosfet_history.capgs_prev_half[idx],
-                mosfet_history.capgd_prev_half[idx],
-                mosfet_history.capgb_prev_half[idx],
-            );
-            mosfet_history.vgs_prev[idx] = vgs;
-            mosfet_history.capgs_prev_half[idx] = cgs_half;
-            mosfet_history.vgd_prev[idx] = vgd;
-            mosfet_history.capgd_prev_half[idx] = cgd_half;
-            mosfet_history.vgb_prev[idx] = vgb;
-            mosfet_history.capgb_prev_half[idx] = cgb_half;
-            if !suppress_gate_charge_history {
-                let exact_charges = mos.legacy_gate_charge_at(vgs, vds, vbs).map(|charge| {
-                    Self::integrate_mosfet_gate_charges(
-                        charge.charges,
-                        coeff,
-                        dt,
-                        [
-                            BranchChargeHistory {
-                                q_prev: mosfet_history.qgs_prev_prev[idx],
-                                q_prev_prev: mosfet_history.qgs_prev_prev_prev[idx],
-                                cq_prev: mosfet_history.cqgs_prev[idx],
-                            },
-                            BranchChargeHistory {
-                                q_prev: mosfet_history.qgd_prev_prev[idx],
-                                q_prev_prev: mosfet_history.qgd_prev_prev_prev[idx],
-                                cq_prev: mosfet_history.cqgd_prev[idx],
-                            },
-                            BranchChargeHistory {
-                                q_prev: mosfet_history.qgb_prev_prev[idx],
-                                q_prev_prev: mosfet_history.qgb_prev_prev_prev[idx],
-                                cq_prev: mosfet_history.cqgb_prev[idx],
-                            },
-                        ],
-                    )
-                });
-                if let Some(charges) = exact_charges
-                    .as_ref()
-                    .or_else(|| mosfet_gate_companion_charges.map(|charges| &charges[idx]))
-                {
-                    Self::install_cached_mosfet_gate_companion_charges(
-                        charges,
-                        &mut mosfet_history.qgs_prev[idx],
-                        &mut mosfet_history.cqgs_prev[idx],
-                        &mut mosfet_history.qgd_prev[idx],
-                        &mut mosfet_history.cqgd_prev[idx],
-                        &mut mosfet_history.qgb_prev[idx],
-                        &mut mosfet_history.cqgb_prev[idx],
-                    );
-                } else {
-                    let (cgs_ov, cgd_ov, cgb_ov) = mos.overlap_capacitances();
-                    let cgs = cgs_half + previous_cap_halves.0 + cgs_ov;
-                    let cgd = cgd_half + previous_cap_halves.1 + cgd_ov;
-                    let cgb = cgb_half + previous_cap_halves.2 + cgb_ov;
-                    let (_geq_gs, _ieq_gs, qgs_curr, cqgs_curr) = Self::jfet_companion_terms(
-                        coeff,
-                        dt,
-                        cgs,
-                        vgs,
-                        mosfet_history.vgs_prev_prev[idx],
-                        BranchChargeHistory {
-                            q_prev: mosfet_history.qgs_prev_prev[idx],
-                            q_prev_prev: mosfet_history.qgs_prev_prev_prev[idx],
-                            cq_prev: mosfet_history.cqgs_prev[idx],
-                        },
-                    );
-                    mosfet_history.qgs_prev[idx] = qgs_curr;
-                    mosfet_history.cqgs_prev[idx] = cqgs_curr;
-
-                    let (_geq_gd, _ieq_gd, qgd_curr, cqgd_curr) = Self::jfet_companion_terms(
-                        coeff,
-                        dt,
-                        cgd,
-                        vgd,
-                        mosfet_history.vgd_prev_prev[idx],
-                        BranchChargeHistory {
-                            q_prev: mosfet_history.qgd_prev_prev[idx],
-                            q_prev_prev: mosfet_history.qgd_prev_prev_prev[idx],
-                            cq_prev: mosfet_history.cqgd_prev[idx],
-                        },
-                    );
-                    mosfet_history.qgd_prev[idx] = qgd_curr;
-                    mosfet_history.cqgd_prev[idx] = cqgd_curr;
-
-                    let (_geq_gb, _ieq_gb, qgb_curr, cqgb_curr) = Self::jfet_companion_terms(
-                        coeff,
-                        dt,
-                        cgb,
-                        vgb,
-                        mosfet_history.vgb_prev_prev[idx],
-                        BranchChargeHistory {
-                            q_prev: mosfet_history.qgb_prev_prev[idx],
-                            q_prev_prev: mosfet_history.qgb_prev_prev_prev[idx],
-                            cq_prev: mosfet_history.cqgb_prev[idx],
-                        },
-                    );
-                    mosfet_history.qgb_prev[idx] = qgb_curr;
-                    mosfet_history.cqgb_prev[idx] = cqgb_curr;
-                }
-            }
-
-            if !suppress_gate_charge_history {
-                displacement[..3].copy_from_slice(&Self::accepted_mosfet_gate_currents(
-                    mos,
-                    accepted_solution,
-                    coeff,
-                    dt,
-                    [(cgs_half, cgd_half, cgb_half), previous_cap_halves],
-                    [
-                        mosfet_history.cqgs_prev[idx],
-                        mosfet_history.cqgd_prev[idx],
-                        mosfet_history.cqgb_prev[idx],
-                    ],
-                ));
-            }
-
-            let body_charge_mask = mos.body_junction_charge_mask();
-            if body_charge_mask & 1 != 0 {
-                let vbs_j = mos.body_source_charge_branch_voltage(vbs);
-                let (qbs_exact, cbs) = mos.body_source_junction_charge_and_capacitance_at(vbs);
-                let (geq_bs, _ieq_bs, qbs_curr, cqbs_curr) = nonlinear_charge_companion_terms(
-                    coeff,
-                    dt,
-                    cbs,
-                    vbs_j,
-                    qbs_exact,
-                    BranchChargeHistory {
-                        q_prev: mosfet_history.qbs_prev[idx],
-                        q_prev_prev: mosfet_history.qbs_prev_prev[idx],
-                        cq_prev: mosfet_history.cqbs_prev[idx],
-                    },
-                );
-                mosfet_history.vbs_j_prev_prev[idx] = mosfet_history.vbs_j_prev[idx];
-                mosfet_history.vbs_j_prev[idx] = vbs_j;
-                mosfet_history.qbs_prev_prev[idx] = mosfet_history.qbs_prev[idx];
-                mosfet_history.qbs_prev[idx] = qbs_curr;
-                mosfet_history.cqbs_prev[idx] = cqbs_curr;
-                displacement[3] =
-                    cqbs_curr + geq_bs * (mos.body_source_charge_branch_voltage(raw_vbs) - vbs_j);
-            }
-
-            if body_charge_mask & 2 != 0 {
-                let vbd_j = mos.body_drain_charge_branch_voltage(vds, vbs);
-                let (qbd_exact, cbd) = mos.body_drain_junction_charge_and_capacitance_at(vds, vbs);
-                let (geq_bd, _ieq_bd, qbd_curr, cqbd_curr) = nonlinear_charge_companion_terms(
-                    coeff,
-                    dt,
-                    cbd,
-                    vbd_j,
-                    qbd_exact,
-                    BranchChargeHistory {
-                        q_prev: mosfet_history.qbd_prev[idx],
-                        q_prev_prev: mosfet_history.qbd_prev_prev[idx],
-                        cq_prev: mosfet_history.cqbd_prev[idx],
-                    },
-                );
-                mosfet_history.vbd_j_prev_prev[idx] = mosfet_history.vbd_j_prev[idx];
-                mosfet_history.vbd_j_prev[idx] = vbd_j;
-                mosfet_history.qbd_prev_prev[idx] = mosfet_history.qbd_prev[idx];
-                mosfet_history.qbd_prev[idx] = qbd_curr;
-                mosfet_history.cqbd_prev[idx] = cqbd_curr;
-                displacement[4] = cqbd_curr
-                    + geq_bd * (mos.body_drain_charge_branch_voltage(raw_vds, raw_vbs) - vbd_j);
-            }
-        }
+        Self::accept_mosfet_histories_after_rotation(
+            serial_mosfet_devices,
+            mosfet_history,
+            MosfetHistoryStep {
+                solution: accepted_solution,
+                coeff,
+                dt,
+                suppress_gate_charge: suppress_gate_charge_history,
+                capacitances: mosfet_caps,
+                charges: mosfet_gate_companion_charges,
+            },
+        );
         mosfet_history.accepted_dt_prev_prev = mosfet_history.accepted_dt_prev;
         mosfet_history.accepted_dt_prev = dt;
         if physical_event.is_some() && self.config.spice_dialect != SpiceDialect::Xyce {

@@ -407,6 +407,11 @@ impl PssVoltageConstraintBuilder {
                 self.port(pos, neg, abort)?;
             }
         }
+        for mos in &circuit.mosfets.devices {
+            for (pos, neg) in mos.shooting_terminal_storage_nodes().into_iter().flatten() {
+                self.port(pos, neg, abort)?;
+            }
+        }
         for mos in &circuit.bsim3v3.devices {
             for (pos, neg) in mos.shooting_terminal_storage_nodes().into_iter().flatten() {
                 self.port(pos, neg, abort)?;

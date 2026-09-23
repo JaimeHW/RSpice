@@ -58,6 +58,8 @@ pub(super) enum AcceptedJunctionHistoryRestart {
 
 #[derive(Clone, Copy)]
 pub(super) enum MosfetCompanionBiasSource {
+    /// Physical residual probes bypass all Newton voltage limiting.
+    Physical,
     /// Derive both gate and evaluated branches from the supplied solution.
     Solution,
     /// Reuse a verified update cache and form gate branches at physical bias.
@@ -818,7 +820,7 @@ impl Engine {
     }
 
     #[inline]
-    pub(super) fn initialize_mosfet_history(
+    pub(in crate::engine) fn initialize_mosfet_history(
         circuit: &crate::circuit::CircuitData,
         solution: &[Value],
         seed: ReactiveHistorySeed,
@@ -1850,6 +1852,10 @@ impl Engine {
         let mut charges = [(0.0, 0.0); 3];
         let mut caps = (0.0, 0.0, 0.0);
         let ((vgs, vgd, vgb), (vgs_eval, vds_eval, vbs_eval)) = match bias_source {
+            MosfetCompanionBiasSource::Physical => {
+                let (vgs, vds, vbs) = mos.unlimited_branch_voltages_at(voltages);
+                ((vgs, vgs - vds, vgs - vbs), (vgs, vds, vbs))
+            }
             MosfetCompanionBiasSource::Solution => (
                 mos.gate_charge_branch_voltages_at(voltages),
                 mos.eval_branch_voltages_at(voltages),

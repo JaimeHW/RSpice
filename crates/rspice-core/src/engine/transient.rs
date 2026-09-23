@@ -807,11 +807,13 @@ pub use fft::{
     transient_fft_window_coherent_gain_with_alpha,
 };
 
+mod mosfet;
+use mosfet::MosfetHistoryStep;
 mod history;
 use history::*;
 pub(in crate::engine) use history::{
     AcceptedJunctionHistories, BjtTransientHistory, Bsim3TransientHistory, Bsim4TransientHistory,
-    JfetTransientHistory,
+    JfetTransientHistory, MosfetTransientHistory,
 };
 
 #[derive(Debug, Clone, Copy)]

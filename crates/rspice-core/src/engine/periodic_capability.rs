@@ -469,7 +469,7 @@ pub(crate) const fn periodic_capability_descriptor(
             dynamic_state: Complete,
             small_signal: Complete,
             noise: Restricted(CYCLOSTATIONARY_FLICKER),
-            pss_state: Absent("classic MOSFET charge history"),
+            pss_state: Complete,
             envelope: Absent(ENVELOPE_LINEAR_SUBSET),
         },
         F::Bsim3v3 => PeriodicCapabilityDescriptor {
@@ -1748,7 +1748,7 @@ mod tests {
             // Authored GP PTF adds an irrational delay to the formerly
             // complete charge descriptor; VBIC's finite delay states remain.
             F::Bjt => [R, R, C, C, R, R],
-            F::Mosfet => [R, C, C, R, A, A],
+            F::Mosfet => [R, C, C, R, C, A],
             F::Bsim3v3 => [C, C, C, C, C, C],
             F::Bsim4v8 => [C, C, C, R, C, C],
             F::B3SoiDd | F::B3SoiFd | F::B3SoiPd => [A, C, I, A, A, A],
