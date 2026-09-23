@@ -327,6 +327,7 @@ fn physical_startup_publishes_one_sided_gp_anchor_and_finite_currents() {
                 &Default::default(),
                 &[None],
                 &Default::default(),
+                &Default::default(),
             );
             Engine::validate_accepted_junction_transient_history_checkpoint(&circuit, &checkpoint)
                 .unwrap();

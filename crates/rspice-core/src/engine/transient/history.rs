@@ -310,6 +310,9 @@ pub(in crate::engine) struct AcceptedJunctionTransientHistoryCheckpoint {
     pub(super) bsim3_states:
         Vec<crate::device::mosfet::bsim3v3::device::checkpoint::AcceptedBsim3NonlinearCheckpoint>,
     pub(super) bsim3_history: Bsim3TransientHistory,
+    pub(super) bsim4_states:
+        Vec<crate::device::mosfet::bsim4v8::device::checkpoint::AcceptedBsim4NonlinearCheckpoint>,
+    pub(super) bsim4_history: Bsim4TransientHistory,
     pub(super) jfet_names: Vec<String>,
     pub(super) jfet_runtime_tags: Vec<String>,
     pub(super) jfet_history: JfetTransientHistory,
@@ -327,6 +330,7 @@ pub(in crate::engine) struct AcceptedJunctionTransientHistoryCheckpoint {
 #[derive(Debug, Default)]
 pub(super) struct RestoredJunctionTransientHistories {
     pub(super) bsim3: Bsim3TransientHistory,
+    pub(super) bsim4: Bsim4TransientHistory,
     pub(super) bjt: BjtTransientHistory,
     pub(super) diode: DiodeTransientHistory,
     pub(super) jfet: JfetTransientHistory,
@@ -419,6 +423,7 @@ impl Engine {
         jfet_history: &JfetTransientHistory,
         vbic_snapshot_cache: &[Option<BjtChargeSnapshot>],
         bsim3_history: &Bsim3TransientHistory,
+        bsim4_history: &Bsim4TransientHistory,
     ) -> AcceptedJunctionTransientHistoryCheckpoint {
         let mut resume_blockers = Vec::new();
         let mut encoded_snapshot_cache = Vec::with_capacity(vbic_snapshot_cache.len());
@@ -459,6 +464,19 @@ impl Engine {
                 })
                 .collect(),
             bsim3_history: bsim3_history.clone(),
+            bsim4_states: circuit
+                .bsim4v8
+                .devices
+                .iter()
+                .filter_map(|device| match device.accepted_nonlinear_checkpoint() {
+                    Ok(state) => Some(state),
+                    Err(error) => {
+                        resume_blockers.push(error);
+                        None
+                    }
+                })
+                .collect(),
+            bsim4_history: bsim4_history.clone(),
             jfet_names: circuit.jfets.iter().map(|jfet| jfet.name.clone()).collect(),
             jfet_runtime_tags: circuit
                 .jfets
@@ -547,6 +565,13 @@ impl Engine {
             device.validate_accepted_nonlinear_checkpoint(state)?;
         }
         checkpoint.bsim3_history.validate(circuit.bsim3v3.len())?;
+        if checkpoint.bsim4_states.len() != circuit.bsim4v8.len() {
+            return Err("BSIM4 accepted state count does not match the target circuit".to_string());
+        }
+        for (device, state) in circuit.bsim4v8.devices.iter().zip(&checkpoint.bsim4_states) {
+            device.validate_accepted_nonlinear_checkpoint(state)?;
+        }
+        checkpoint.bsim4_history.validate(circuit.bsim4v8.len())?;
         if checkpoint.jfet_names.len() != circuit.jfets.len()
             || checkpoint.jfet_runtime_tags.len() != circuit.jfets.len()
         {
@@ -858,6 +883,9 @@ impl Engine {
             .bsim3_history
             .normalize_for_order_one(accepted_dt_seed);
         normalized
+            .bsim4_history
+            .normalize_for_order_one(accepted_dt_seed);
+        normalized
             .jfet_history
             .normalize_for_order_one(accepted_dt_seed);
         Self::validate_accepted_junction_transient_history_checkpoint(circuit, &normalized)?;
@@ -883,6 +911,7 @@ impl Engine {
         }
         Ok(RestoredJunctionTransientHistories {
             bsim3: checkpoint.bsim3_history.clone(),
+            bsim4: checkpoint.bsim4_history.clone(),
             bjt: checkpoint.bjt_history.clone(),
             diode: checkpoint.diode_history.clone(),
             jfet: checkpoint.jfet_history.clone(),
@@ -1169,8 +1198,8 @@ impl Bsim3TransientHistory {
 /// intrinsic bulk charge and b4ld.c also integrates separate junction states
 /// `qbs`/`qbd`; when `rgateMod=3`, it also integrates middle-gate overlap
 /// charge `qgmid`. `b4trunc.c` runs `CKTterr` over those extra states too.
-#[derive(Debug, Clone, Default)]
-pub(super) struct Bsim4TransientHistory {
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(in crate::engine) struct Bsim4TransientHistory {
     pub(super) qg_prev: Vec<Value>,
     pub(super) qg_prev_prev: Vec<Value>,
     pub(super) qg_prev_prev_prev: Vec<Value>,
@@ -1205,6 +1234,118 @@ pub(super) struct Bsim4TransientHistory {
     pub(super) cqcdump_prev: Vec<Value>,
     pub(super) accepted_dt_prev: Value,
     pub(super) accepted_dt_prev_prev: Value,
+}
+
+impl Bsim4TransientHistory {
+    pub(super) fn columns(&self) -> [(&'static str, &Vec<Value>); 32] {
+        [
+            ("qg_prev", &self.qg_prev),
+            ("qg_prev_prev", &self.qg_prev_prev),
+            ("qg_prev_prev_prev", &self.qg_prev_prev_prev),
+            ("cqg_prev", &self.cqg_prev),
+            ("qgmid_prev", &self.qgmid_prev),
+            ("qgmid_prev_prev", &self.qgmid_prev_prev),
+            ("qgmid_prev_prev_prev", &self.qgmid_prev_prev_prev),
+            ("cqgmid_prev", &self.cqgmid_prev),
+            ("qb_prev", &self.qb_prev),
+            ("qb_prev_prev", &self.qb_prev_prev),
+            ("qb_prev_prev_prev", &self.qb_prev_prev_prev),
+            ("cqb_prev", &self.cqb_prev),
+            ("qd_prev", &self.qd_prev),
+            ("qd_prev_prev", &self.qd_prev_prev),
+            ("qd_prev_prev_prev", &self.qd_prev_prev_prev),
+            ("cqd_prev", &self.cqd_prev),
+            ("qbs_prev", &self.qbs_prev),
+            ("qbs_prev_prev", &self.qbs_prev_prev),
+            ("qbs_prev_prev_prev", &self.qbs_prev_prev_prev),
+            ("cqbs_prev", &self.cqbs_prev),
+            ("qbd_prev", &self.qbd_prev),
+            ("qbd_prev_prev", &self.qbd_prev_prev),
+            ("qbd_prev_prev_prev", &self.qbd_prev_prev_prev),
+            ("cqbd_prev", &self.cqbd_prev),
+            ("qcheq_prev", &self.qcheq_prev),
+            ("qcheq_prev_prev", &self.qcheq_prev_prev),
+            ("qcheq_prev_prev_prev", &self.qcheq_prev_prev_prev),
+            ("cqcheq_prev", &self.cqcheq_prev),
+            ("qcdump_prev", &self.qcdump_prev),
+            ("qcdump_prev_prev", &self.qcdump_prev_prev),
+            ("qcdump_prev_prev_prev", &self.qcdump_prev_prev_prev),
+            ("cqcdump_prev", &self.cqcdump_prev),
+        ]
+    }
+    pub(super) fn columns_mut(&mut self) -> [(&'static str, &mut Vec<Value>); 32] {
+        [
+            ("qg_prev", &mut self.qg_prev),
+            ("qg_prev_prev", &mut self.qg_prev_prev),
+            ("qg_prev_prev_prev", &mut self.qg_prev_prev_prev),
+            ("cqg_prev", &mut self.cqg_prev),
+            ("qgmid_prev", &mut self.qgmid_prev),
+            ("qgmid_prev_prev", &mut self.qgmid_prev_prev),
+            ("qgmid_prev_prev_prev", &mut self.qgmid_prev_prev_prev),
+            ("cqgmid_prev", &mut self.cqgmid_prev),
+            ("qb_prev", &mut self.qb_prev),
+            ("qb_prev_prev", &mut self.qb_prev_prev),
+            ("qb_prev_prev_prev", &mut self.qb_prev_prev_prev),
+            ("cqb_prev", &mut self.cqb_prev),
+            ("qd_prev", &mut self.qd_prev),
+            ("qd_prev_prev", &mut self.qd_prev_prev),
+            ("qd_prev_prev_prev", &mut self.qd_prev_prev_prev),
+            ("cqd_prev", &mut self.cqd_prev),
+            ("qbs_prev", &mut self.qbs_prev),
+            ("qbs_prev_prev", &mut self.qbs_prev_prev),
+            ("qbs_prev_prev_prev", &mut self.qbs_prev_prev_prev),
+            ("cqbs_prev", &mut self.cqbs_prev),
+            ("qbd_prev", &mut self.qbd_prev),
+            ("qbd_prev_prev", &mut self.qbd_prev_prev),
+            ("qbd_prev_prev_prev", &mut self.qbd_prev_prev_prev),
+            ("cqbd_prev", &mut self.cqbd_prev),
+            ("qcheq_prev", &mut self.qcheq_prev),
+            ("qcheq_prev_prev", &mut self.qcheq_prev_prev),
+            ("qcheq_prev_prev_prev", &mut self.qcheq_prev_prev_prev),
+            ("cqcheq_prev", &mut self.cqcheq_prev),
+            ("qcdump_prev", &mut self.qcdump_prev),
+            ("qcdump_prev_prev", &mut self.qcdump_prev_prev),
+            ("qcdump_prev_prev_prev", &mut self.qcdump_prev_prev_prev),
+            ("cqcdump_prev", &mut self.cqcdump_prev),
+        ]
+    }
+    pub(super) fn validate(&self, count: usize) -> Result<(), String> {
+        for (name, values) in self.columns() {
+            validate_history_vector_shapes("BSIM4", count, &[(name, values.len())])?;
+            validate_history_finite_values(name, values.iter().copied())?;
+        }
+        validate_history_dt("bsim4.accepted_dt_prev", self.accepted_dt_prev)?;
+        validate_history_dt("bsim4.accepted_dt_prev_prev", self.accepted_dt_prev_prev)
+    }
+
+    pub(super) fn normalize_for_order_one(&mut self, dt: Value) {
+        self.qg_prev_prev.clone_from(&self.qg_prev);
+        self.qg_prev_prev_prev.clone_from(&self.qg_prev);
+        self.cqg_prev.fill(0.0);
+        self.qb_prev_prev.clone_from(&self.qb_prev);
+        self.qb_prev_prev_prev.clone_from(&self.qb_prev);
+        self.cqb_prev.fill(0.0);
+        self.qd_prev_prev.clone_from(&self.qd_prev);
+        self.qd_prev_prev_prev.clone_from(&self.qd_prev);
+        self.cqd_prev.fill(0.0);
+        self.qcheq_prev_prev.clone_from(&self.qcheq_prev);
+        self.qcheq_prev_prev_prev.clone_from(&self.qcheq_prev);
+        self.cqcheq_prev.fill(0.0);
+        self.qcdump_prev_prev.clone_from(&self.qcdump_prev);
+        self.qcdump_prev_prev_prev.clone_from(&self.qcdump_prev);
+        self.cqcdump_prev.fill(0.0);
+        self.qgmid_prev_prev.clone_from(&self.qgmid_prev);
+        self.qgmid_prev_prev_prev.clone_from(&self.qgmid_prev);
+        self.cqgmid_prev.fill(0.0);
+        self.qbs_prev_prev.clone_from(&self.qbs_prev);
+        self.qbs_prev_prev_prev.clone_from(&self.qbs_prev);
+        self.cqbs_prev.fill(0.0);
+        self.qbd_prev_prev.clone_from(&self.qbd_prev);
+        self.qbd_prev_prev_prev.clone_from(&self.qbd_prev);
+        self.cqbd_prev.fill(0.0);
+        self.accepted_dt_prev = dt;
+        self.accepted_dt_prev_prev = dt;
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -1318,6 +1459,7 @@ D1 b 0 DM
             &JfetTransientHistory::default(),
             &snapshot_cache,
             &Default::default(),
+            &Default::default(),
         );
         assert!(checkpoint.available);
         assert!(checkpoint.resume_blockers.is_empty());
@@ -1342,6 +1484,7 @@ D1 b 0 DM
 
         let RestoredJunctionTransientHistories {
             bsim3: _,
+            bsim4: _,
             bjt: restored_bjt,
             diode: restored_diode,
             jfet: restored_jfet,
@@ -1374,6 +1517,7 @@ D1 b 0 DM
             &diode_history,
             &JfetTransientHistory::default(),
             &snapshot_cache,
+            &Default::default(),
             &Default::default(),
         );
         let mut expected_bjt = bjt_history.clone();
@@ -1411,6 +1555,7 @@ D1 b 0 DM
             &diode_history,
             &JfetTransientHistory::default(),
             &snapshot_cache,
+            &Default::default(),
             &Default::default(),
         );
 

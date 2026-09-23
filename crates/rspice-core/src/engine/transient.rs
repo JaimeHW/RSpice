@@ -993,6 +993,7 @@ struct ScheduledCheckpointIntegration<'a> {
 /// The device histories it must carry.
 struct ScheduledCheckpointHistories<'a> {
     bsim3_history: &'a Bsim3TransientHistory,
+    bsim4_history: &'a Bsim4TransientHistory,
     jfet_history: &'a JfetTransientHistory,
     bjt_history: &'a BjtTransientHistory,
     diode_history: &'a DiodeTransientHistory,
@@ -3559,11 +3560,6 @@ impl Engine {
         );
         block_if_present(
             &mut blockers,
-            circuit.has_bsim4v8_devices(),
-            "BSIM4v8 accepted transient integration history is not checkpointed",
-        );
-        block_if_present(
-            &mut blockers,
             !circuit.ekv26s.is_empty(),
             "EKV2.6 accepted transient integration history is not checkpointed",
         );
@@ -3764,6 +3760,7 @@ impl Engine {
         } = sink;
         let ScheduledCheckpointHistories {
             bsim3_history,
+            bsim4_history,
             jfet_history,
             bjt_history,
             diode_history,
@@ -3820,6 +3817,7 @@ impl Engine {
                 jfet_history,
                 vbic_snapshot_cache,
                 bsim3_history,
+                bsim4_history,
             );
         let restart_normalized = at_integration_endpoint
             || integration_continuation
@@ -5787,8 +5785,12 @@ impl Engine {
         let mut bsim3_history = Self::initialize_bsim3_history(&circuit, &solution);
         bsim3_history.accepted_dt_prev = accepted_dt_seed;
         bsim3_history.accepted_dt_prev_prev = accepted_dt_prev_seed;
+        let mut bsim4_history = Self::initialize_bsim4_history(&circuit, &solution);
+        bsim4_history.accepted_dt_prev = accepted_dt_seed;
+        bsim4_history.accepted_dt_prev_prev = accepted_dt_prev_seed;
         if let Some(restored) = restored_accepted_junction_history {
             bsim3_history = restored.bsim3;
+            bsim4_history = restored.bsim4;
             bjt_history = restored.bjt;
             diode_history = restored.diode;
             jfet_history = restored.jfet;
@@ -5952,9 +5954,6 @@ impl Engine {
         let mut b3soi_history = Self::initialize_b3soi_history(&circuit, &solution);
         b3soi_history.accepted_dt_prev = accepted_dt_seed;
         b3soi_history.accepted_dt_prev_prev = accepted_dt_prev_seed;
-        let mut bsim4_history = Self::initialize_bsim4_history(&circuit, &solution);
-        bsim4_history.accepted_dt_prev = accepted_dt_seed;
-        bsim4_history.accepted_dt_prev_prev = accepted_dt_prev_seed;
         let mut ekv26_history = Self::initialize_ekv26_history(&circuit, &solution);
         ekv26_history.accepted_dt_prev = accepted_dt_seed;
         ekv26_history.accepted_dt_prev_prev = accepted_dt_prev_seed;
@@ -6198,6 +6197,7 @@ impl Engine {
             },
             ScheduledCheckpointHistories {
                 bsim3_history: &bsim3_history,
+                bsim4_history: &bsim4_history,
                 jfet_history: &jfet_history,
                 bjt_history: &bjt_history,
                 diode_history: &diode_history,
@@ -10574,6 +10574,7 @@ impl Engine {
                         },
                         ScheduledCheckpointHistories {
                             bsim3_history: &bsim3_history,
+                            bsim4_history: &bsim4_history,
                             jfet_history: &jfet_history,
                             bjt_history: &bjt_history,
                             diode_history: &diode_history,
@@ -11302,6 +11303,7 @@ impl Engine {
                 },
                 ScheduledCheckpointHistories {
                     bsim3_history: &bsim3_history,
+                    bsim4_history: &bsim4_history,
                     jfet_history: &jfet_history,
                     bjt_history: &bjt_history,
                     diode_history: &diode_history,
@@ -11458,6 +11460,7 @@ impl Engine {
                     &jfet_history,
                     &vbic_snapshot_cache,
                     &bsim3_history,
+                    &bsim4_history,
                 );
             let final_accepted_junction_history =
                 if final_accepted_junction_history.resume_blockers.is_empty() {

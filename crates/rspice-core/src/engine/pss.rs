@@ -2004,6 +2004,7 @@ impl Engine {
             &circuit.jfet_history,
             &circuit.bjt_snapshot_cache,
             &circuit.bsim3_history,
+            &Default::default(),
         );
         let junction_history =
             Self::normalize_accepted_junction_transient_history_checkpoint_for_order_one(

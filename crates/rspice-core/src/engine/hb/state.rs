@@ -640,6 +640,7 @@ impl Engine {
                     &jfet_history,
                     &vec![None; circuit.bjts.len()],
                     &bsim3_history,
+                    &Default::default(),
                 ),
             )
         };
