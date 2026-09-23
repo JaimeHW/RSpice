@@ -68,6 +68,13 @@ fn optional_quantity(field: &str, label: &str) -> Result<Option<f64>, String> {
 }
 
 impl FftDraft {
+    pub(crate) fn uses_shape_parameter(&self) -> bool {
+        matches!(
+            self.window.trim().to_ascii_uppercase().as_str(),
+            "GAUSS" | "KAISER"
+        )
+    }
+
     /// Project this draft onto the request the engine reads.
     pub fn to_request(&self) -> Result<FftRequest, String> {
         let format = match self.format.trim() {
@@ -83,7 +90,11 @@ impl FftDraft {
             points: self.points,
             format,
             window: self.window.trim().to_ascii_uppercase(),
-            alfa: optional_quantity(&self.alfa, "FFT ALFA")?,
+            alfa: if self.uses_shape_parameter() {
+                optional_quantity(&self.alfa, "FFT ALFA")?
+            } else {
+                None
+            },
             fundamental: optional_quantity(&self.fundamental, "FFT FREQ")?,
             fmin: optional_quantity(&self.fmin, "FFT FMIN")?,
             fmax: optional_quantity(&self.fmax, "FFT FMAX")?,
@@ -169,7 +180,7 @@ mod tests {
 
     #[test]
     fn the_plan_wires_gaussian_alfa_into_the_engine_request() {
-        let draft = FftDraft {
+        let mut draft = FftDraft {
             window: "GAUSS".to_owned(),
             alfa: "6".to_owned(),
             ..FftDraft::default()
@@ -178,5 +189,21 @@ mod tests {
         assert_eq!(request.window, "GAUSS");
         assert_eq!(request.alfa, Some(6.0));
         assert_eq!(request.to_card(), ".fft V(out) NP=1024 WINDOW=GAUSS ALFA=6");
+        assert!(request.engine_key().unwrap().contains("ALFA=6"));
+        draft.alfa = "unfinished shape".into();
+        assert!(draft.to_request().is_err());
+        for window in crate::simulation::config::FFT_WINDOWS {
+            draft.window = window_keyword(window).to_ascii_lowercase();
+            let json = serde_json::to_value(&draft).unwrap();
+            let restored: FftDraft = serde_json::from_value(json.clone()).unwrap();
+            assert_eq!(serde_json::to_value(&restored).unwrap(), json);
+            if restored.uses_shape_parameter() {
+                assert!(restored.to_request().is_err());
+            } else {
+                let request = restored.to_request().unwrap();
+                assert_eq!(request.alfa, None);
+                assert!(!request.engine_key().unwrap().contains("ALFA="));
+            }
+        }
     }
 }

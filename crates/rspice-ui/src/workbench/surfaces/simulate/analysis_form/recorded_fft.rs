@@ -79,13 +79,13 @@ pub(super) fn fields(
     let window_labels = FFT_WINDOWS.map(window_keyword);
     let mut window = FFT_WINDOWS
         .iter()
-        .position(|candidate| window_keyword(*candidate) == setup.window)
+        .position(|candidate| window_keyword(*candidate).eq_ignore_ascii_case(setup.window.trim()))
         .unwrap_or(0);
     if super::choice_row(ui, "Window", &window_labels, &mut window) {
         setup.window = window_keyword(FFT_WINDOWS[window]).to_owned();
     }
 
-    if matches!(setup.window.as_str(), "GAUSS" | "KAISER") {
+    if setup.uses_shape_parameter() {
         input_row(ui, "ALFA", &mut setup.alfa);
         field_note(ui, "Gaussian/Kaiser shape parameter (1..=20; default 3)");
     }
