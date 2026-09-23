@@ -462,19 +462,25 @@ fn iteration_budgets(ui: &mut Ui, app: &mut RSpiceApp) {
                 "DC · iterations per solve · a tiered analysis uses its tier's",
                 |draft| &mut draft.itl1,
             );
-            budget_row(
-                ui,
-                app,
-                "ITL4",
-                "transient · iterations per accepted timestep",
-                |draft| &mut draft.itl4,
-            );
-            budget_row(
-                ui,
-                app,
-                "TRTOL",
-                "transient · truncation error the step controller will accept",
-                |draft| &mut draft.trtol,
+            let native_time_controls =
+                app.state.sim_setup.options.compatibility != SimulationCompatibility::Xyce;
+            ui.add_enabled_ui(native_time_controls, |ui| {
+                budget_row(
+                    ui,
+                    app,
+                    "ITL4",
+                    "transient · iterations per accepted timestep",
+                    |draft| &mut draft.itl4,
+                );
+                budget_row(
+                    ui,
+                    app,
+                    "TRTOL",
+                    "transient · truncation error the step controller will accept",
+                    |draft| &mut draft.trtol,
+                );
+            }).response.on_hover_text(
+                "Xyce uses each analysis's NONLIN-TRAN MAXSTEP budget and TIMEINT truncation tolerances."
             );
             budget_row(
                 ui,

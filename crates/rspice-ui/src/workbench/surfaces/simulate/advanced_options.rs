@@ -146,6 +146,33 @@ fn owned_solver_value(option: NumericOverrideOption, ownership: SolverOwnership)
     })
 }
 
+/// An explicit numerical policy can make a valid package inapplicable.
+/// Inherited policy remains source-owned, so keep its conditional controls
+/// available and identify Xyce-specific fields by their labels.
+pub(super) fn compatibility_refusal(
+    option: NumericOverrideOption,
+    options: &SimulationOptions,
+) -> Option<&'static str> {
+    use crate::simulation::dialog::SimulationCompatibility as C;
+    use NumericOverrideOption as O;
+    match (options.compatibility, option) {
+        (
+            C::BestAvailable | C::Ngspice,
+            O::TransientNewtonReltol
+            | O::TransientNewtonAbstol
+            | O::TransientNewtonUpdateBound
+            | O::TransientNewtonResidualBound
+            | O::TransientNewtonBudget
+            | O::TransientNoxSolver,
+        ) => Some("Xyce-specific control; select Xyce compatibility on the Solver page to use it"),
+        (C::Xyce, O::Itl4) => Some("Xyce uses the analysis's NONLIN-TRAN MAXSTEP Newton budget"),
+        (C::Xyce, O::Trtol) => {
+            Some("Xyce uses the TIMEINT truncation tolerances without the ngspice TRTOL multiplier")
+        }
+        _ => None,
+    }
+}
+
 fn row(
     option: NumericOverrideOption,
     kind: AnalysisKind,
@@ -160,7 +187,10 @@ fn row(
     // A refusal outranks an authored value on purpose. A record restored from
     // an older project can hold an option this instance stopped accepting, and
     // the honest report is that the solve ignores it — not the number it holds.
-    if let Some(reason) = option.refusal_for_instance(kind, ownership) {
+    if let Some(reason) = option
+        .refusal_for_instance(kind, ownership)
+        .or_else(|| compatibility_refusal(option, options))
+    {
         return AdvancedOptionRow {
             option,
             effective: refused_effective(option, draft, ownership, options),
@@ -393,6 +423,7 @@ pub(super) fn form_rows(
         .map(|mut section| {
             section.rows.retain(|row| {
                 authorable.contains(&row.option)
+                    && compatibility_refusal(row.option, options).is_none()
                     && offered_on_the_form(
                         row.option,
                         kind,

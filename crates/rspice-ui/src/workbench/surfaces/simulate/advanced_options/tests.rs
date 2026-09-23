@@ -540,3 +540,63 @@ fn pss_retention_is_reported_as_required_while_reporting_times_remain_configurab
             .unwrap();
     }
 }
+
+#[test]
+fn explicit_simulation_compatibility_offers_only_consumed_step_controls() {
+    use crate::simulation::dialog::SimulationCompatibility as C;
+    let xyce_only = [
+        O::TransientNewtonReltol,
+        O::TransientNewtonAbstol,
+        O::TransientNewtonUpdateBound,
+        O::TransientNewtonResidualBound,
+        O::TransientNewtonBudget,
+        O::TransientNoxSolver,
+    ];
+    for kind in [AnalysisKind::Transient, AnalysisKind::Pss] {
+        let draft = AnalysisDraft::for_kind(kind);
+        let mut record = AnalysisNumericOverride::default();
+        record
+            .set_for_instance(kind, SolverOwnership::NONE, O::TransientNewtonBudget, "47")
+            .unwrap();
+        record
+            .set_for_instance(kind, SolverOwnership::NONE, O::Itl4, "211")
+            .unwrap();
+        let before = serde_json::to_value(&record).unwrap();
+        for compatibility in C::ALL {
+            let options = SimulationOptions {
+                compatibility,
+                ..Default::default()
+            };
+            let offered: Vec<_> = form_rows(kind, &draft, Some(&record), &options)
+                .into_iter()
+                .flat_map(|section| section.rows)
+                .map(|row| row.option)
+                .collect();
+            let uses_xyce = matches!(compatibility, C::Xyce | C::Inherit);
+            for option in xyce_only {
+                assert_eq!(
+                    offered.contains(&option),
+                    uses_xyce,
+                    "{kind:?} {compatibility:?} {option:?}"
+                );
+            }
+            assert_eq!(offered.contains(&O::Itl4), compatibility != C::Xyce);
+            assert_eq!(offered.contains(&O::Trtol), compatibility != C::Xyce);
+            assert!(offered.contains(&O::TransientDeviceConvergence));
+            assert!(offered.contains(&O::LteReltol));
+            let rows = rows_with(kind, &draft, Some(&record), &options);
+            if !uses_xyce {
+                assert!(origin_of(&rows, O::TransientNewtonBudget).contains("Xyce-specific"));
+            }
+            if compatibility == C::Xyce {
+                assert!(origin_of(&rows, O::Itl4).contains("MAXSTEP"));
+                assert_eq!(effective_of(&rows, O::TransientNewtonBudget), "47");
+            }
+            assert_eq!(
+                serde_json::to_value(&record).unwrap(),
+                before,
+                "switching policy must retain authored settings for switching back"
+            );
+        }
+    }
+}
