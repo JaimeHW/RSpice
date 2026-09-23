@@ -405,7 +405,7 @@ r1 out 0 1k
     let result = Engine::new(SimulationConfig::default())
         .run_pac(&netlist, config)
         .expect("the exact charge Jacobian supports PAC");
-    let actual = result.result.sideband_data[0][0].node_voltages[0];
+    let actual = result.result.get_sideband_data(0, 0).unwrap().node_voltages[0];
     let omega_c_r = 2.0 * std::f64::consts::PI * 1.0e4 * 1.5e-12 * 1.0e3;
     let expected = Complex64::new(1.0e3, 0.0) / Complex64::new(1.0, omega_c_r);
     assert!((actual - expected).norm() < 1e-6, "{actual} != {expected}");
