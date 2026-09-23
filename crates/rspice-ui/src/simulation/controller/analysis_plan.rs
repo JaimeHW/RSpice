@@ -514,6 +514,7 @@ impl SimulationController {
         matches!(
             spec,
             AnalysisSpec::Tf { .. }
+                | AnalysisSpec::AcData { .. }
                 | AnalysisSpec::Disto { .. }
                 | AnalysisSpec::Pnoise
                 | AnalysisSpec::Pxf

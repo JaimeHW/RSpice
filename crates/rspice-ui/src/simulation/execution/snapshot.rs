@@ -618,6 +618,21 @@ impl PreparedTask {
         &self.task
     }
 
+    /// Generated AC tables belong to their analysis, even when instances share a name.
+    pub(in crate::simulation) fn authored_ac_data_cards(&self) -> Option<&str> {
+        if matches!(&self.task.spec, AnalysisSpec::AcData { table_options, .. } if !table_options.from_netlist)
+            && self.task.analysis_line.lines().any(|line| {
+                line.split_whitespace()
+                    .next()
+                    .is_some_and(|word| word.eq_ignore_ascii_case(".DATA"))
+            })
+        {
+            Some(&self.task.analysis_line)
+        } else {
+            None
+        }
+    }
+
     #[cfg(test)]
     pub(in crate::simulation) const fn pvt_point(
         &self,
@@ -1213,11 +1228,21 @@ impl PreparedRunSnapshot {
             task.executable_netlist_override = Some(splice_before_terminal_end_card(deck, &block));
         }
 
-        // And the observation cards a bound FFT analysis put on its transient,
-        // into that transient's deck and no other. A manual deck already holds
-        // its own `.fft` cards, so nothing is attached on that path and this
-        // loop does nothing there.
+        // Generated AC tables and bound FFT cards are scoped to their owners.
+        // Manual decks already hold their own cards and are preserved here.
         if parts.intent == SimulationRunIntent::SimulateRunSet {
+            for task in &mut parts.tasks {
+                if let Some(cards) = task.authored_ac_data_cards() {
+                    let deck = task
+                        .executable_netlist_override
+                        .as_deref()
+                        .unwrap_or(&parts.executable_netlist);
+                    if !deck.contains(cards) {
+                        task.executable_netlist_override =
+                            Some(splice_before_terminal_end_card(deck, cards));
+                    }
+                }
+            }
             bound_cards::splice_bound_observation_cards(
                 &mut parts.tasks,
                 &parts.executable_netlist,

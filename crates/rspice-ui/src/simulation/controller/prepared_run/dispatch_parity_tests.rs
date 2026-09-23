@@ -25,6 +25,105 @@ fn plan_mut(state: &mut AppState) -> &mut SimulationPlan {
         .expect("a fresh project owns a stable analysis plan")
 }
 
+#[test]
+fn independent_ac_data_instances_keep_their_own_parameter_tables() {
+    use crate::simulation::plan::AnalysisDraft;
+    let mut state = preflight_ready_state();
+    let ids = only(
+        &mut state,
+        &[
+            AnalysisKind::OperatingPoint,
+            AnalysisKind::AcData,
+            AnalysisKind::AcData,
+        ],
+    );
+    for component in &mut state.schematic.components {
+        match component.name.as_str() {
+            "VCC" => {
+                component.kind = crate::state::ComponentType::VoltageSourceAc;
+                component.value = "1".into();
+            }
+            "R1" | "R2" => component.value = "1k".into(),
+            _ => {}
+        }
+    }
+    state.sync_active_schematic_to_workspace();
+    for (index, id) in ids[1..].iter().enumerate() {
+        plan_mut(&mut state)
+            .edit(*id, |draft| {
+                let AnalysisDraft::AcData(draft) = draft else {
+                    unreachable!()
+                };
+                draft.frequencies = "1k, 0".into();
+                if index == 0 {
+                    draft.parameter_columns.push(Default::default());
+                    draft.parameter_columns[0].name = "R1:R".into();
+                    draft.parameter_columns[0].values = "1k, 3k".into();
+                }
+            })
+            .unwrap();
+    }
+    let mut controller = SimulationController::new();
+    let snapshot = controller
+        .build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
+        .unwrap();
+    controller.authorize_snapshot(snapshot).unwrap();
+    let dispatch = controller
+        .consume_snapshot_for_dispatch(&mut state)
+        .unwrap();
+    assert!(!dispatch.executable_netlist().contains(".DATA"));
+    let mut ac_count = 0;
+    for task in dispatch.into_tasks() {
+        if !matches!(task.spec(), AnalysisSpec::AcData { .. }) {
+            assert!(!task.executable_netlist().contains(".DATA"));
+            continue;
+        }
+        let parsed = rspice_core::Netlist::parse(task.executable_netlist()).unwrap();
+        assert_eq!(parsed.data_tables.len(), 1);
+        assert_eq!(
+            parsed.data_tables[0].params.len(),
+            if ac_count == 0 { 2 } else { 1 }
+        );
+        let AnalysisSpec::AcData {
+            table_name,
+            frequencies,
+            table_options,
+        } = task.spec()
+        else {
+            unreachable!()
+        };
+        let result = crate::simulation::EngineBridge::new()
+            .run_ac_data_with_source_path(
+                task.executable_netlist(),
+                None,
+                table_name,
+                frequencies.clone(),
+                table_options,
+                &rspice_core::NoAbort,
+            )
+            .unwrap();
+        let crate::simulation::results::SimulationResult::Ac {
+            frequencies,
+            waveforms,
+            ..
+        } = result
+        else {
+            panic!("AC result")
+        };
+        assert_eq!(frequencies, [1000.0, 0.0]);
+        let expected = if ac_count == 0 {
+            [0.5, 0.25]
+        } else {
+            [0.5, 0.5]
+        };
+        for (actual, expected) in waveforms["V(OUT)"].y_values.iter().zip(expected) {
+            assert!((actual - expected).abs() < 1e-10, "{actual} != {expected}");
+        }
+        ac_count += 1;
+    }
+    assert_eq!(ac_count, 2);
+}
+
 /// The kind, preceded by everything it declares a prerequisite on, transitively
 /// and without repeats.
 fn with_prerequisites(kind: AnalysisKind) -> Vec<AnalysisKind> {

@@ -1251,9 +1251,12 @@ impl SimulationController {
         // An FFT card is excluded from the run-level deck on purpose: it is
         // spliced into the deck of the transient it is bound to, and into no
         // other, because it changes the solve it rides on.
+        // Authored AC tables likewise belong only to their own task; repeated
+        // default table names must not mix the rows of independent analyses.
         let analysis_lines = tasks
             .iter()
             .filter(|task| !matches!(task.queued_analysis().spec, AnalysisSpec::Fft { .. }))
+            .filter(|task| task.authored_ac_data_cards().is_none())
             .map(|task| task.queued_analysis().analysis_line.clone())
             .collect::<Vec<_>>();
         let analysis_instances = plan
