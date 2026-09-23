@@ -235,6 +235,10 @@ fn check_pnoise_card_carrier(
 /// evidence, so the two stay distinct and the document projection handles
 /// both. The authored output probe travels with the result because the
 /// runners take it as a parameter and never put it in their own return value.
+#[expect(
+    clippy::large_enum_variant,
+    reason = "public result variants retain their established inline payload types"
+)]
 #[derive(Debug, Clone)]
 pub enum PeriodicNoiseResult {
     /// Absolute periodic-noise density around a `.PSS` or `.HB` carrier.
