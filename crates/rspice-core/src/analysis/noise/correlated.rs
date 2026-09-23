@@ -14,11 +14,40 @@ use crate::numerics::scaled_noise::{ScaledComplex, ScaledComplexAccumulator};
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Bsim4CorrelatedNoiseSample {
+    #[serde(with = "portable_port")]
     pub drain_port: [usize; 2],
+    #[serde(with = "portable_port")]
     pub gate_port: [usize; 2],
     pub drain_amplitude: Value,
     pub gate_amplitude: Value,
     pub gate_time_constant: Value,
+}
+
+// The solver sentinel is platform-sized. Retained evidence uses null for
+// ground, so JSON, packed-result identities and exports agree on 32/64-bit
+// hosts and do not require JavaScript to preserve an integer above 2^53.
+mod portable_port {
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    pub(super) fn serialize<S: Serializer>(
+        port: &[usize; 2],
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        port.map(|node| (node != usize::MAX).then_some(node))
+            .serialize(serializer)
+    }
+
+    pub(super) fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<[usize; 2], D::Error> {
+        let port = <[Option<usize>; 2]>::deserialize(deserializer)?;
+        if port.contains(&Some(usize::MAX)) {
+            return Err(serde::de::Error::custom(
+                "ground must use null, not a platform-sized sentinel",
+            ));
+        }
+        Ok(port.map(|node| node.unwrap_or(usize::MAX)))
+    }
 }
 
 impl Bsim4CorrelatedNoiseSample {
@@ -107,6 +136,27 @@ pub(crate) fn coherent_sum(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bsim4_correlated_ports_use_portable_ground_encoding() {
+        let sample = Bsim4CorrelatedNoiseSample {
+            drain_port: [3, usize::MAX],
+            gate_port: [5, 3],
+            drain_amplitude: 0.25,
+            gate_amplitude: 1.0,
+            gate_time_constant: 1e-12,
+        };
+        let encoded = serde_json::to_value(&sample).unwrap();
+        assert_eq!(encoded["drain_port"], serde_json::json!([3, null]));
+        assert_eq!(encoded["gate_port"], serde_json::json!([5, 3]));
+        assert_eq!(
+            serde_json::from_value::<Bsim4CorrelatedNoiseSample>(encoded.clone()).unwrap(),
+            sample
+        );
+        let mut malformed = encoded;
+        malformed["drain_port"] = serde_json::json!([3, usize::MAX]);
+        assert!(serde_json::from_value::<Bsim4CorrelatedNoiseSample>(malformed).is_err());
+    }
 
     #[test]
     fn induced_gate_shape_retains_quadrature_sign_and_high_frequency_limit() {

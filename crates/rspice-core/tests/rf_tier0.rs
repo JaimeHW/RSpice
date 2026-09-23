@@ -107,17 +107,22 @@ fn hb_linear_rc_matches_the_ac_transfer_function() {
 }
 
 #[test]
-fn pnoise_rejects_native_bsim4_before_noise_folding() {
+fn pnoise_correlated_bsim4_preserves_an_ideal_voltage_clamp() {
     let netlist = Netlist::parse(&bsim4_rf_deck().replace("level=54", "level=54 tnoimod=2"))
         .expect("deck parses");
-    let err = engine()
+    let result = engine()
         .run_pnoise(&netlist, 1.0e6, &[1.0e3], "g", None, Some("vg"), 1)
-        .expect_err("native BSIM4 correlated gate/drain noise is not adapted yet");
-
+        .expect("native BSIM4 correlated gate/drain noise is folded");
     assert!(
-        err.to_string()
-            .contains("TNOIMOD=2 periodic correlated gate/drain noise"),
-        "{err}"
+        result
+            .contributors
+            .iter()
+            .any(|(name, _)| name.eq_ignore_ascii_case("m1:CORL"))
+    );
+    assert_eq!(
+        result.output_noise,
+        vec![0.0],
+        "ideal gate source clamps voltage noise"
     );
 }
 

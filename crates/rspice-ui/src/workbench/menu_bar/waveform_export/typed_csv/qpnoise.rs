@@ -143,6 +143,23 @@ pub(super) fn prepare(response: &QpnoiseAnalysisResult) -> Option<PreparedTypedR
             );
         }
         match &source.spectrum {
+            QuasiPeriodicNoiseSpectrum::Bsim4Correlated { waveform } => {
+                table.row("source_law", None, None, &[(9, label.clone()), (23, format!(
+                    "bsim4_correlated; covariance * 2^{}; shared channel/gate process; phase sample order from grid",
+                    waveform.binary_scale_exponent))]);
+                for (sample, value) in waveform.samples.iter().enumerate() {
+                    table.row(
+                        "source_correlated_sample",
+                        None,
+                        None,
+                        &[
+                            (9, label.clone()),
+                            (13, sample.to_string()),
+                            (23, serde_json::to_string(value).ok()?),
+                        ],
+                    );
+                }
+            }
             QuasiPeriodicNoiseSpectrum::White {
                 density,
                 binary_scale_exponent,

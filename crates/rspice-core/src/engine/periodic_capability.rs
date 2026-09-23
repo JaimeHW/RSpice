@@ -483,7 +483,7 @@ pub(crate) const fn periodic_capability_descriptor(
             residual_jacobian: Complete,
             dynamic_state: Complete,
             small_signal: Complete,
-            noise: Restricted("native BSIM4 TNOIMOD=0/1 and FNOIMOD=0/1"),
+            noise: Complete,
             pss_state: Complete,
             envelope: Complete,
         },
@@ -1567,19 +1567,6 @@ pub(in crate::engine) fn cyclostationary_noise_gaps(circuit: &CircuitData) -> Ve
     use PeriodicCapability::NoiseSources as Cap;
     use PeriodicDeviceFamily as F;
     let mut gaps = Vec::new();
-    if matches!(capability_support(F::Bsim4v8, Cap), Restricted(_)) {
-        for device in &circuit.bsim4v8.devices {
-            if device.core.model.tnoi_mod == 2 {
-                gaps.push(CapabilityGap::new(
-                    F::Bsim4v8,
-                    format!(
-                        "BSIM4 '{}' TNOIMOD=2 periodic correlated gate/drain noise",
-                        device.name
-                    ),
-                ));
-            }
-        }
-    }
 
     // Carrier admission does not imply noise support. A newly integrated
     // nonlinear family must never disappear from the noise-source catalog.
@@ -1746,7 +1733,7 @@ mod tests {
             F::Bjt => [R, R, C, C, R, R],
             F::Mosfet => [R, C, C, C, C, C],
             F::Bsim3v3 => [C, C, C, C, C, C],
-            F::Bsim4v8 => [C, C, C, R, C, C],
+            F::Bsim4v8 => [C, C, C, C, C, C],
             F::B3SoiDd | F::B3SoiFd | F::B3SoiPd => [A, C, I, A, A, A],
             F::Ekv26 | F::Ekv3 | F::Vdmos => [I, C, A, A, A, A],
             F::Jfet => [R, C, C, R, R, R],

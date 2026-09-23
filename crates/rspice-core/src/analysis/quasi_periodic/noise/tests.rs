@@ -55,6 +55,84 @@ fn close(actual: Complex64, expected: Complex64) {
     );
 }
 
+#[test]
+fn bsim4_correlated_quasiperiodic_noise_retains_signed_multitone_cross_phase() {
+    use crate::analysis::noise::{Bsim4CorrelatedNoiseSample, Bsim4CorrelatedNoiseWaveform};
+    let grid = grid(2);
+    let selected = [
+        (0, [0, 0], Complex64::ONE),
+        (1, [0, 0], Complex64::new(0.3, 0.7)),
+        (0, [1, 0], Complex64::new(-0.2, 0.5)),
+    ];
+    let adjoints = selected
+        .iter()
+        .map(|&(node, tuple, weight)| {
+            let mut a = adjoint(&grid, 2);
+            a.frequency_lattice = vec![1, 0];
+            a.sensitivities[node][grid.index_of(&tuple).unwrap()] = weight;
+            a
+        })
+        .collect::<Vec<_>>();
+    let samples = (0..grid.sample_count())
+        .map(|i| {
+            let phase = grid.phases(i).unwrap();
+            Bsim4CorrelatedNoiseSample {
+                drain_port: [0, usize::MAX],
+                gate_port: [1, usize::MAX],
+                drain_amplitude: 1.0 + 0.5 * phase[0].cos(),
+                gate_amplitude: 2.0 + 0.5 * phase[1].sin(),
+                gate_time_constant: 1.0 / std::f64::consts::TAU,
+            }
+        })
+        .collect();
+    let source = QuasiPeriodicNoiseSource {
+        name: "correlated channel/gate".into(),
+        injections: vec![],
+        spectrum: QuasiPeriodicNoiseSpectrum::Bsim4Correlated {
+            waveform: Bsim4CorrelatedNoiseWaveform {
+                samples,
+                binary_scale_exponent: -4,
+            },
+        },
+    };
+    let actual = projector(&grid, 2)
+        .source_covariance_with_abort(&adjoints, &source, &NoAbort)
+        .unwrap();
+    let transfer = |output: usize, m: [i32; 2]| {
+        let (node, k, weight) = selected[output];
+        let d = [k[0] - m[0], k[1] - m[1]];
+        let amplitude = if node == 0 {
+            match d {
+                [0, 0] => Complex64::ONE,
+                [-1, 0] | [1, 0] => Complex64::new(0.25, 0.0),
+                _ => Complex64::ZERO,
+            }
+        } else {
+            let envelope = match d {
+                [0, 0] => Complex64::new(2.0, 0.0),
+                [0, 1] => Complex64::new(0.0, -0.25),
+                [0, -1] => Complex64::new(0.0, 0.25),
+                _ => Complex64::ZERO,
+            };
+            let f = 0.37 + 2.0 * (m[0] - 1) as Value + std::f64::consts::SQRT_2 * m[1] as Value;
+            envelope * Complex64::new(0.0, f / (1.0 + f * f).sqrt())
+        };
+        weight.conj() * amplitude
+    };
+    for r in 0..3 {
+        for c in 0..3 {
+            let mut expected = Complex64::ZERO;
+            for m0 in -1..=2 {
+                for m1 in -1..=1 {
+                    expected += transfer(r, [m0, m1]) * transfer(c, [m0, m1]).conj() / 16.0;
+                }
+            }
+            close(actual.values[r * 3 + c], expected);
+        }
+    }
+    assert!(actual.values[1].im.abs() > 0.01);
+}
+
 struct Rc;
 impl Circuit for Rc {
     fn unknowns(&self) -> usize {

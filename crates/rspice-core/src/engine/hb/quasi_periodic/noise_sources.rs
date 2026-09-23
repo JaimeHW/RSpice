@@ -70,10 +70,13 @@ impl Catalog {
         limits
     }
     fn push(&mut self, engine: &Engine, source: Source) -> Result<(), SimulationError> {
-        if source.injections.is_empty() {
+        if source.injections.is_empty()
+            && !matches!(source.spectrum, Spectrum::Bsim4Correlated { .. })
+        {
             return Ok(());
         }
         let spectrum = match &source.spectrum {
+            Spectrum::Bsim4Correlated { waveform } => waveform.samples.len().saturating_mul(7),
             Spectrum::White { density, .. } => density.len(),
             Spectrum::PowerLaw {
                 modulation,
@@ -378,9 +381,19 @@ impl Engine {
         let Some(frames) = frames else {
             return Ok(());
         };
-        let mut frame_values = frames.waveforms.iter().fold(0usize, |n, w| {
-            n.saturating_add(w.samples.len().saturating_mul(2))
-        });
+        let mut frame_values = frames
+            .waveforms
+            .iter()
+            .fold(0usize, |n, w| {
+                n.saturating_add(w.samples.len().saturating_mul(2))
+            })
+            .saturating_add(
+                frames
+                    .correlated
+                    .len()
+                    .saturating_mul(grid.sample_count())
+                    .saturating_mul(10),
+            );
         catalog.check(
             self,
             frame_values.saturating_add(grid.sample_count().saturating_mul(8)),
@@ -454,6 +467,23 @@ impl Engine {
                     name: frame.name,
                     injections,
                     spectrum,
+                },
+            )?;
+        }
+        for frame in frames.correlated {
+            check_abort(abort)?;
+            frame_values = frame_values.saturating_sub(grid.sample_count().saturating_mul(10));
+            catalog.check(
+                self,
+                frame_values.saturating_add(grid.sample_count().saturating_mul(12)),
+            )?;
+            let (name, waveform) = frame.finish()?;
+            catalog.push(
+                self,
+                Source {
+                    name,
+                    injections: vec![],
+                    spectrum: Spectrum::Bsim4Correlated { waveform },
                 },
             )?;
         }

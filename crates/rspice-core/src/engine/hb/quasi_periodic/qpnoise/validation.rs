@@ -35,6 +35,9 @@ pub(super) fn retained_values(
         values = values
             .saturating_add(source.injections.len().saturating_mul(3))
             .saturating_add(match &source.spectrum {
+                QuasiPeriodicNoiseSpectrum::Bsim4Correlated { waveform } => {
+                    waveform.samples.len().saturating_mul(7)
+                }
                 QuasiPeriodicNoiseSpectrum::White { density, .. } => density.len(),
                 QuasiPeriodicNoiseSpectrum::PowerLaw {
                     modulation,

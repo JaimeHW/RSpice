@@ -199,6 +199,11 @@ impl AnalysisResultPayload {
                 .saturating_add(source.name.len())
                 .saturating_add(source.injections.len().saturating_mul(32));
             bytes = bytes.saturating_add(match &source.spectrum {
+                Spectrum::Bsim4Correlated { waveform } => {
+                    waveform.samples.len().saturating_mul(std::mem::size_of::<
+                        rspice_core::analysis::noise::Bsim4CorrelatedNoiseSample,
+                    >())
+                }
                 Spectrum::White { density, .. } => density.len().saturating_mul(8),
                 Spectrum::PowerLaw {
                     modulation,

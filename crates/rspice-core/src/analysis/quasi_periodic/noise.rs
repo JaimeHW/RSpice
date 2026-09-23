@@ -8,6 +8,7 @@
 //! Both are the multidimensional conversion/covariance formulation described
 //! at https://qucs.sourceforge.net/tech/node36.html. No common period is used.
 mod colored;
+mod correlated;
 mod modulation;
 mod projection;
 mod sweep;
@@ -33,6 +34,11 @@ use std::{collections::HashSet, sync::Arc};
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum QuasiPeriodicNoiseSpectrum {
+    /// Shared BSIM4 channel/gate process on the full producer phase grid.
+    /// Its sample ports replace the source's (empty) constant injections.
+    Bsim4Correlated {
+        waveform: crate::analysis::noise::Bsim4CorrelatedNoiseWaveform,
+    },
     /// A single stationary density, or one nonnegative density per torus sample.
     /// Values are multiplied by 2^binary_scale_exponent after transfer products.
     White {
@@ -159,11 +165,17 @@ impl QuasiPeriodicNoiseProjector {
     ) -> Result<QuasiPeriodicNoiseCovariance, Error> {
         check_abort(abort)?;
         self.validate(adjoints, source, abort)?;
+        if let QuasiPeriodicNoiseSpectrum::Bsim4Correlated { waveform } = &source.spectrum {
+            return self.correlated(adjoints, waveform, abort);
+        }
         let gains = adjoints
             .iter()
             .map(|a| projection::project(&self.grid, &self.selected, a, &source.injections, abort))
             .collect::<Result<Vec<_>, _>>()?;
         match &source.spectrum {
+            QuasiPeriodicNoiseSpectrum::Bsim4Correlated { .. } => {
+                unreachable!("handled before scalar projection")
+            }
             QuasiPeriodicNoiseSpectrum::White {
                 density,
                 binary_scale_exponent,
@@ -199,7 +211,11 @@ impl QuasiPeriodicNoiseProjector {
             return Err(invalid("at least one output adjoint is required"));
         };
         self.check_values(adjoints.len(), 0)?;
-        if source.name.trim().is_empty() || source.injections.is_empty() {
+        let correlated = matches!(
+            source.spectrum,
+            QuasiPeriodicNoiseSpectrum::Bsim4Correlated { .. }
+        );
+        if source.name.trim().is_empty() || (source.injections.is_empty() != correlated) {
             return Err(invalid(
                 "noise mechanisms require a name and nonempty injection direction",
             ));
@@ -246,6 +262,16 @@ impl QuasiPeriodicNoiseProjector {
             }
         }
         match &source.spectrum {
+            QuasiPeriodicNoiseSpectrum::Bsim4Correlated { waveform } => {
+                if waveform.samples.len() != self.grid.sample_count() {
+                    return Err(invalid("correlated waveform differs from its phase grid"));
+                }
+                self.check_values(adjoints.len(), waveform.samples.len().saturating_mul(7))?;
+                for sample in &waveform.samples {
+                    check_abort(abort)?;
+                    sample.validate(self.coordinates).map_err(invalid)?;
+                }
+            }
             QuasiPeriodicNoiseSpectrum::White { density, .. } => {
                 if (density.len() != 1 && density.len() != self.grid.sample_count())
                     || invalid_values(density, |q| !q.is_finite() || *q < 0.0, abort)?

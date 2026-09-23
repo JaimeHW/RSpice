@@ -564,6 +564,9 @@ fn qpnoise_packed_transport_preserves_colored_lattices_and_rejects_corruption() 
     let mut tuple_offset = 0;
     for source in &metadata.sources {
         match source.spectrum {
+            QpnoiseSpectrumLayout::Bsim4Correlated { sample_count, .. } => {
+                tuple_offset += 7 * sample_count
+            }
             QpnoiseSpectrumLayout::White { density_count, .. } => tuple_offset += density_count,
             QpnoiseSpectrumLayout::PowerLaw {
                 mode_count,

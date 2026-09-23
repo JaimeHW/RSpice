@@ -9,6 +9,10 @@ use crate::analysis::quasi_periodic::QuasiPeriodicAdjointSolution;
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum QpnoiseSpectrumLayout {
+    Bsim4Correlated {
+        sample_count: usize,
+        binary_scale_exponent: i32,
+    },
     White {
         density_count: usize,
         binary_scale_exponent: i32,
@@ -54,6 +58,9 @@ impl QpnoiseTransferMetadata {
         );
         for source in &self.sources {
             count = count.saturating_add(match source.spectrum {
+                QpnoiseSpectrumLayout::Bsim4Correlated { sample_count, .. } => {
+                    sample_count.saturating_mul(7)
+                }
                 QpnoiseSpectrumLayout::White { density_count, .. } => density_count,
                 QpnoiseSpectrumLayout::PowerLaw {
                     mode_count,
@@ -157,6 +164,9 @@ impl QpnoiseTransferMetadata {
         for source in &self.sources {
             check_abort(abort)?;
             let valid = match source.spectrum {
+                QpnoiseSpectrumLayout::Bsim4Correlated { sample_count, .. } => {
+                    sample_count == grid.sample_count() && source.injections.is_empty()
+                }
                 QpnoiseSpectrumLayout::White { density_count, .. } => {
                     density_count == 1 || density_count == grid.sample_count()
                 }
@@ -198,6 +208,12 @@ impl QpnoiseAnalysisResult {
                 name: source.name.clone(),
                 injections: source.injections.clone(),
                 spectrum: match &source.spectrum {
+                    QuasiPeriodicNoiseSpectrum::Bsim4Correlated { waveform } => {
+                        QpnoiseSpectrumLayout::Bsim4Correlated {
+                            sample_count: waveform.samples.len(),
+                            binary_scale_exponent: waveform.binary_scale_exponent,
+                        }
+                    }
                     QuasiPeriodicNoiseSpectrum::White {
                         density,
                         binary_scale_exponent,
@@ -245,6 +261,24 @@ impl QpnoiseAnalysisResult {
             .map_err(|e| qpnoise_error(format!("packed allocation failed: {e}")))?;
         for source in sources {
             match source.spectrum {
+                QuasiPeriodicNoiseSpectrum::Bsim4Correlated { waveform } => {
+                    for sample in waveform.samples {
+                        for node in sample.drain_port.into_iter().chain(sample.gate_port) {
+                            packed.push(if node == usize::MAX {
+                                -1.0
+                            } else {
+                                node as Value
+                            })?;
+                        }
+                        for value in [
+                            sample.drain_amplitude,
+                            sample.gate_amplitude,
+                            sample.gate_time_constant,
+                        ] {
+                            packed.push(value)?;
+                        }
+                    }
+                }
                 QuasiPeriodicNoiseSpectrum::White { density, .. } => {
                     for value in density {
                         packed.push(value)?;
@@ -306,6 +340,51 @@ impl QpnoiseAnalysisResult {
         for source in metadata.sources {
             check_abort(abort)?;
             let spectrum = match source.spectrum {
+                QpnoiseSpectrumLayout::Bsim4Correlated {
+                    sample_count,
+                    binary_scale_exponent,
+                } => {
+                    use crate::analysis::noise::{
+                        Bsim4CorrelatedNoiseSample, Bsim4CorrelatedNoiseWaveform,
+                    };
+                    let coordinates =
+                        metadata.result.node_names.len() + metadata.result.branch_names.len();
+                    let mut samples = Vec::with_capacity(sample_count);
+                    for _ in 0..sample_count {
+                        let mut ports = [usize::MAX; 4];
+                        for node in &mut ports {
+                            let value = packed.next()?;
+                            if value == -1.0 {
+                                continue;
+                            }
+                            if !value.is_finite()
+                                || value < 0.0
+                                || value.fract() != 0.0
+                                || value >= coordinates as Value
+                            {
+                                return Err(qpnoise_error(
+                                    "packed correlated port is not an exact MNA coordinate",
+                                ));
+                            }
+                            *node = value as usize;
+                        }
+                        let sample = Bsim4CorrelatedNoiseSample {
+                            drain_port: [ports[0], ports[1]],
+                            gate_port: [ports[2], ports[3]],
+                            drain_amplitude: packed.next()?,
+                            gate_amplitude: packed.next()?,
+                            gate_time_constant: packed.next()?,
+                        };
+                        sample.validate(coordinates).map_err(qpnoise_error)?;
+                        samples.push(sample);
+                    }
+                    QuasiPeriodicNoiseSpectrum::Bsim4Correlated {
+                        waveform: Bsim4CorrelatedNoiseWaveform {
+                            samples,
+                            binary_scale_exponent,
+                        },
+                    }
+                }
                 QpnoiseSpectrumLayout::White {
                     density_count,
                     binary_scale_exponent,

@@ -369,17 +369,34 @@ fn bsim4_periodic_driven_ac_nqs_sidebands_agree_between_hb_and_qpss() {
 
 #[test]
 fn bsim4_periodic_elementary_noise_matches_stationary_model_mechanisms() {
-    let offsets = [1e3, 1e5, 1e9];
+    bsim4_noise_stationary_cases(
+        &[
+            (0, 0, "rgatemod=1 rshg=1000", false),
+            (0, 1, "rdsmod=1 rgatemod=2 rbodymod=1 rshg=1000", true),
+            (1, 0, "rgatemod=3 rbodymod=2 rshg=1000", true),
+            (1, 1, "rdsmod=1 rgatemod=3 rbodymod=1 rshg=1000", false),
+        ],
+        &[1e3, 1e5, 1e9],
+    );
+}
+
+#[test]
+fn bsim4_correlated_noise_matches_stationary_model_mechanisms() {
+    bsim4_noise_stationary_cases(
+        &[
+            (2, 0, "rdsmod=1 rgatemod=3 rbodymod=1 rshg=1000", false),
+            (2, 1, "rgatemod=2 rbodymod=2 rshg=1000", true),
+        ],
+        &[1e3, 1e9, 1e11],
+    );
+}
+
+fn bsim4_noise_stationary_cases(cases: &[(i32, i32, &str, bool)], offsets: &[f64]) {
     let engine = Engine::new(rspice_core::engine::SimulationConfig {
         temperature: 348.15,
         ..Default::default()
     });
-    for (tnoi, fnoi, network, pmos) in [
-        (0, 0, "rgatemod=1 rshg=1000", false),
-        (0, 1, "rdsmod=1 rgatemod=2 rbodymod=1 rshg=1000", true),
-        (1, 0, "rgatemod=3 rbodymod=2 rshg=1000", true),
-        (1, 1, "rdsmod=1 rgatemod=3 rbodymod=1 rshg=1000", false),
-    ] {
+    for &(tnoi, fnoi, network, pmos) in cases {
         let netlist = Netlist::parse(&amplifier(&format!(
             "tnoimod={tnoi} fnoimod={fnoi} kf=2e-24 af=1.2 ef=0.9 igcmod=1 igbmod=1 acnqsmod=1 {network}"
         ), pmos, if pmos { "ac 1 sin(-0.7 0 1meg)" } else { "ac 1 sin(0.7 0 1meg)" })).unwrap();
@@ -449,6 +466,15 @@ fn bsim4_periodic_elementary_noise_matches_stationary_model_mechanisms() {
 
 #[test]
 fn bsim4_periodic_driven_noise_agrees_between_hb_and_qpss() {
+    bsim4_driven_noise_agreement(1);
+}
+
+#[test]
+fn bsim4_correlated_noise_agrees_between_hb_and_qpss_and_roundtrips() {
+    bsim4_driven_noise_agreement(2);
+}
+
+fn bsim4_driven_noise_agreement(tnoi: i32) {
     use rspice_core::engine::{
         QpnoiseFrequencyAxis, QpnoiseInput, QpnoiseLattices, QpnoiseObservation, QpnoiseOutput,
         QpnoiseRequest, QpnoiseSources, QpssConfig,
@@ -456,7 +482,7 @@ fn bsim4_periodic_driven_noise_agrees_between_hb_and_qpss() {
     let f = 1e8;
     let offsets = [1.03e7];
     let netlist = Netlist::parse(&amplifier(
-        "tnoimod=1 fnoimod=1 rdsmod=1 rgatemod=3 rbodymod=1 rshg=1000 acnqsmod=1",
+        &format!("tnoimod={tnoi} fnoimod=1 rdsmod=1 rgatemod=3 rbodymod=1 rshg=1000 acnqsmod=1"),
         false,
         &format!("sin(0.7 0.03 {f})"),
     ))
@@ -515,6 +541,51 @@ fn bsim4_periodic_driven_noise_agrees_between_hb_and_qpss() {
     assert!(
         (quasi.total_covariances[0].values[0].re / periodic.output_noise[0] - 1.0).abs() < 3e-3
     );
+    if tnoi == 2 {
+        assert!(
+            periodic
+                .contributors
+                .iter()
+                .any(|(name, values)| name.eq_ignore_ascii_case("m1:CORL") && values[0] > 0.0)
+        );
+        let limits = rspice_core::ResourceLimits::default();
+        let (metadata, values) = quasi
+            .clone()
+            .into_transfer_parts_with_abort(&limits, &rspice_core::NoAbort)
+            .unwrap();
+        let restored = rspice_core::engine::QpnoiseAnalysisResult::from_transfer_parts_with_abort(
+            metadata.clone(),
+            values.clone(),
+            &limits,
+            &rspice_core::NoAbort,
+        )
+        .unwrap();
+        assert_eq!(restored, quasi);
+        let mut start = 0;
+        for source in &metadata.sources {
+            use rspice_core::engine::QpnoiseSpectrumLayout as Layout;
+            match source.spectrum {
+                Layout::White { density_count, .. } => start += density_count,
+                Layout::PowerLaw {
+                    mode_count,
+                    explicit_lattices,
+                    ..
+                } => start += mode_count * (2 + if explicit_lattices { 2 } else { 0 }),
+                Layout::Bsim4Correlated { .. } => break,
+            }
+        }
+        let mut invalid = values;
+        invalid[start] = 0.5;
+        assert!(
+            rspice_core::engine::QpnoiseAnalysisResult::from_transfer_parts_with_abort(
+                metadata,
+                invalid,
+                &limits,
+                &rspice_core::NoAbort
+            )
+            .is_err()
+        );
+    }
     for mechanism in ["ID", "FN", "RD", "RS", "RG", "RBPB"] {
         assert!(periodic.contributors.iter().any(|(name, values)| {
             name.eq_ignore_ascii_case(&format!("m1:{mechanism}")) && values[0] > 0.0

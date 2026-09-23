@@ -115,6 +115,9 @@ pub(crate) fn visit_with_abort(
     for source in sources {
         check_abort(abort)?;
         let spectrum = match &source.spectrum {
+            QuasiPeriodicNoiseSpectrum::Bsim4Correlated { waveform } => {
+                waveform.samples.len().saturating_mul(7)
+            }
             QuasiPeriodicNoiseSpectrum::White { density, .. } => density.len(),
             QuasiPeriodicNoiseSpectrum::PowerLaw {
                 modulation,
@@ -149,6 +152,12 @@ pub(crate) fn visit_with_abort(
     )?;
     let mut workspace = projector.workspace_values(observations.len(), 0);
     for source in sources {
+        if let QuasiPeriodicNoiseSpectrum::Bsim4Correlated { waveform } = &source.spectrum {
+            workspace = workspace.max(projector.workspace_values(
+                observations.len(),
+                projector.correlated_workspace(observations.len(), waveform, abort)?,
+            ));
+        }
         if let QuasiPeriodicNoiseSpectrum::PowerLaw { modulation, .. } = &source.spectrum {
             workspace = workspace.max(
                 projector.workspace_values(
