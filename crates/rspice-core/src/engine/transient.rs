@@ -117,7 +117,7 @@ fn direct_xyce_dae_norms(residual: &[Value]) -> Result<(Value, Value), Simulatio
 /// must retain the candidate-difference path even when the underlying linear
 /// system happened to use correction form.
 #[inline]
-fn select_xyce_transient_update_norm(
+pub(in crate::engine) fn select_xyce_transient_update_norm(
     uses_damped_newton: bool,
     solved_correction_norm: Option<Value>,
     candidate_difference_norm: impl FnOnce() -> Option<Value>,

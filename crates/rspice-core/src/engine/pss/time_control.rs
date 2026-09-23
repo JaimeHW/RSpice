@@ -48,6 +48,141 @@ mod tests {
     use super::*;
 
     #[test]
+    fn pss_nox_selection_uses_the_selected_solver_update_quantity() {
+        // The mathematical correction is smaller than an ULP of this large
+        // bias. DampedNewton must retain it when applying DELTAXTOL; NOX
+        // deliberately tests the rounded candidate difference instead.
+        for nox in [false, true] {
+            let netlist = Netlist::parse(&format!(
+                "PSS Newton selection\nI1 0 out 1e16\nR1 out 0 3\n.options RSPICE_DIALECT=XYCE ABSTOL=10 VNTOL=10\n.options NONLIN-TRAN RELTOL=1e-30 ABSTOL=1e-30 DELTAXTOL=1 RHSTOL=10 MAXSTEP=3 NOX={}\n.end\n", usize::from(nox)
+            )).unwrap();
+            let engine = Engine::default().resolved_for_netlist(&netlist);
+            let mut circuit = PssCircuit::new(engine.build_circuit(&netlist).unwrap()).unwrap();
+            let mut matrix = engine.build_matrix(&circuit).unwrap();
+            circuit.link_indices(&matrix);
+            let start = vec![3e16; circuit.matrix_size()];
+            let coeff = CompanionCoefficients::backward_euler();
+            let result = engine
+                .pss_newton_trial(
+                    &mut circuit,
+                    &mut matrix,
+                    PssCompanionStep {
+                        coeff: &coeff,
+                        t_next: 1e-6,
+                        dt: 1e-6,
+                        initialization: false,
+                    },
+                    &start,
+                    &NoAbort,
+                )
+                .unwrap();
+            assert_eq!(result.is_some(), nox, "NOX={nox}: {result:?}");
+        }
+    }
+
+    #[test]
+    fn pss_xyce_newton_tolerances_each_change_actual_acceptance() {
+        let solve = |controls: &str| {
+            let netlist = Netlist::parse(&format!(
+                "PSS Newton tolerances\nB1 out 0 I={{V(out)^2-2}}\nR1 out 0 1e12\n.options RSPICE_DIALECT=XYCE RELTOL=0.01 VNTOL=1m ABSTOL=0.01\n.options NONLIN-TRAN MAXSTEP=20 ENFORCEDEVICECONV=0 {controls}\n.end\n"
+            )).unwrap();
+            let engine = Engine::default().resolved_for_netlist(&netlist);
+            let mut circuit = PssCircuit::new(engine.build_circuit(&netlist).unwrap()).unwrap();
+            let mut matrix = engine.build_matrix(&circuit).unwrap();
+            circuit.link_indices(&matrix);
+            let start = vec![1.0; circuit.matrix_size()];
+            let coeff = CompanionCoefficients::backward_euler();
+            let polls = crate::abort_signal::CountingAbort::new(1000);
+            let solution = engine
+                .pss_newton_trial(
+                    &mut circuit,
+                    &mut matrix,
+                    PssCompanionStep {
+                        coeff: &coeff,
+                        t_next: 1e-6,
+                        dt: 1e-6,
+                        initialization: false,
+                    },
+                    &start,
+                    &polls,
+                )
+                .unwrap()
+                .unwrap();
+            (solution[0], polls.count())
+        };
+        for (loose, strict) in [
+            (
+                "RELTOL=1 ABSTOL=1e-14 DELTAXTOL=1 RHSTOL=1",
+                "RELTOL=1e-10 ABSTOL=1e-14 DELTAXTOL=1 RHSTOL=1",
+            ),
+            (
+                "RELTOL=1e-14 ABSTOL=1 DELTAXTOL=1 RHSTOL=1",
+                "RELTOL=1e-14 ABSTOL=1e-10 DELTAXTOL=1 RHSTOL=1",
+            ),
+            (
+                "RELTOL=1 ABSTOL=1 DELTAXTOL=1 RHSTOL=1",
+                "RELTOL=1 ABSTOL=1 DELTAXTOL=1e-12 RHSTOL=1",
+            ),
+            (
+                "RELTOL=1 ABSTOL=1 DELTAXTOL=1 RHSTOL=1",
+                "RELTOL=1 ABSTOL=1 DELTAXTOL=1 RHSTOL=1e-12",
+            ),
+        ] {
+            let loose_result = solve(loose);
+            let strict_result = solve(strict);
+            assert!(
+                strict_result.1 > loose_result.1,
+                "{strict}: {loose_result:?} -> {strict_result:?}"
+            );
+            assert!((strict_result.0 - 2.0_f64.sqrt()).abs() < 1e-10);
+            assert!(
+                (strict_result.0 - 2.0_f64.sqrt()).abs() < (loose_result.0 - 2.0_f64.sqrt()).abs()
+            );
+        }
+    }
+
+    #[test]
+    fn pss_xyce_rhstol_preserves_physical_prescribed_current_windings() {
+        let netlist = Netlist::parse(
+            "PSS winding residual\nI1 0 a SIN(1000 1m 1meg 0 0 37)\nL1 a b 100u\nR1 b 0 0.0001\n.options RSPICE_DIALECT=XYCE\n.options NONLIN-TRAN RHSTOL=1n\n.end\n"
+        ).unwrap();
+        let engine = Engine::default().resolved_for_netlist(&netlist);
+        let mut circuit = PssCircuit::new(engine.build_circuit(&netlist).unwrap()).unwrap();
+        circuit.set_state(&[]).unwrap();
+        let seed = engine
+            .pss_initial_node_solution(&mut circuit, &NoAbort)
+            .unwrap();
+        let mut matrix = engine.build_matrix(&circuit).unwrap();
+        circuit.link_indices(&matrix);
+        let result = engine
+            .pss_run_tran_internal(
+                &mut circuit,
+                &mut matrix,
+                seed,
+                PssTraversal {
+                    tstop: 10e-9,
+                    max_step: 2e-9,
+                    fixed_grid: true,
+                    integration_method: Some(IntegrationMethod::Trapezoidal),
+                    retain_waveform: true,
+                },
+                None,
+                &NoAbort,
+            )
+            .unwrap()
+            .unwrap();
+        let winding = result
+            .branch_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("L1"))
+            .unwrap();
+        for (&time, &current) in result.time.iter().zip(&result.branch_currents[winding]) {
+            let phase = std::f64::consts::TAU * 1e6 * time + 37.0_f64.to_radians();
+            assert!((current - (1000.0 + 1e-3 * phase.sin())).abs() < 1e-10);
+        }
+    }
+
+    #[test]
     fn pss_timepoint_budget_uses_transient_options_in_each_dialect() {
         // A staircase control requires successive Newton updates; its local
         // derivative is zero. The DC limit deliberately permits every case,

@@ -117,8 +117,8 @@ impl PssAcceptedStepHistory {
 const PSS_FD_STEP: Value = 1e-8;
 const PSS_KRYLOV_STATE_THRESHOLD: usize = 12;
 const PSS_KRYLOV_REL_TOL: Value = 1e-9;
-// Timepoint Newton uses the resolved transient iteration policy.
-const PSS_OPERATING_POINT_IDENTITY_VERSION: u32 = 103;
+// Timepoint Newton uses resolved transient budgets and status tests.
+const PSS_OPERATING_POINT_IDENTITY_VERSION: u32 = 104;
 
 fn pss_identity_field(hasher: &mut blake3::Hasher, name: &str, bytes: &[u8]) {
     hasher.update(&(name.len() as u64).to_le_bytes());
@@ -3836,6 +3836,14 @@ impl Engine {
         let mut proposal = Vec::with_capacity(size);
         let correction_form = !step.initialization
             && (!circuit.inductors.is_empty() || !circuit.capacitors.is_empty());
+        let update_weights = (!step.initialization)
+            .then(|| self.transient_newton_update_weights(start, start))
+            .flatten();
+        let enforce_device_convergence =
+            step.initialization || self.transient_enforce_device_convergence();
+        let uses_damped_newton =
+            update_weights.is_some() && !self.config.transient_nonlinear_nox.unwrap_or(false);
+        let solves_correction = correction_form || uses_damped_newton;
 
         if !step.initialization
             && circuit.project_forced_solution(step.t_next, &mut new_solution)?
@@ -3843,15 +3851,23 @@ impl Engine {
             if circuit.has_nonlinear_devices() {
                 circuit.update_nonlinear(&new_solution);
             }
-            if self.pss_check_physical_candidate(
-                circuit,
-                matrix,
-                step,
-                &new_solution,
-                &mut rhs,
-                &mut proposal,
-                true,
-            )? {
+            // A projected descriptor is still a timepoint candidate. Apply
+            // Xyce's configured update status after a Newton solve rather
+            // than bypassing it through the exact-descriptor shortcut.
+            if update_weights.is_none()
+                && (!enforce_device_convergence
+                    || !circuit.has_nonlinear_devices()
+                    || circuit.nonlinear_converged(self.device_convergence_criteria()))
+                && self.pss_check_physical_candidate(
+                    circuit,
+                    matrix,
+                    step,
+                    &new_solution,
+                    &mut rhs,
+                    &mut proposal,
+                    true,
+                )?
+            {
                 if abort.is_aborted() {
                     return Err(SimulationError::Aborted);
                 }
@@ -3864,7 +3880,7 @@ impl Engine {
         } else {
             self.transient_newton_iteration_budget(false)
         };
-        for _iter in 0..iteration_budget {
+        for _ in 0..iteration_budget {
             if abort.is_aborted() {
                 return Err(SimulationError::Aborted);
             }
@@ -3882,22 +3898,33 @@ impl Engine {
                 self.pss_stamp_system(circuit, matrix, &mut rhs, step, &new_solution, false, None)?;
             }
 
-            let solved = if correction_form {
+            let mut solved_correction_norm = None;
+            let solved = if solves_correction {
                 // Form the static residual before adding large C/dt terms.
                 // Charge/flux differences then supply reactive corrections
                 // without cancelling absolute companion values.
                 matrix.correction_rhs_into(&rhs, &new_solution, &mut proposal)?;
-                circuit.stamp_capacitor_correction(matrix, &mut proposal, &new_solution, step);
-                circuit.stabilize_inductor_correction_rhs(
-                    &mut proposal,
-                    &new_solution,
-                    step,
-                    false,
-                )?;
+                if correction_form {
+                    circuit.stamp_capacitor_correction(matrix, &mut proposal, &new_solution, step);
+                    circuit.stabilize_inductor_correction_rhs(
+                        &mut proposal,
+                        &new_solution,
+                        step,
+                        false,
+                    )?;
+                }
                 let solved = matrix.solve_into(&proposal, &mut rhs);
                 if solved.is_ok() {
-                    circuit.capture_capacitor_trial_currents(&new_solution, &rhs, step);
-                    circuit.capture_inductor_trial_offsets(&new_solution, &rhs);
+                    if correction_form {
+                        circuit.capture_capacitor_trial_currents(&new_solution, &rhs, step);
+                        circuit.capture_inductor_trial_offsets(&new_solution, &rhs);
+                    }
+                    if uses_damped_newton {
+                        solved_correction_norm = self.transient_newton_weighted_correction_norm(
+                            &rhs,
+                            update_weights.as_deref(),
+                        );
+                    }
                     for (value, &previous) in rhs.iter_mut().zip(&new_solution) {
                         *value += previous;
                     }
@@ -3912,25 +3939,40 @@ impl Engine {
             };
             match solved {
                 Ok(()) => {
-                    let voltage_converged = new_solution.iter().zip(&proposal).enumerate().all(
-                        |(index, (&old, &new))| {
-                            old.is_finite()
-                                && new.is_finite()
-                                && (circuit.is_initial_charge_rate(index)
-                                    || (new - old).abs()
-                                        <= circuit.solution_abstol(
-                                            index,
-                                            self.voltage_abstol(),
-                                            self.current_abstol(),
-                                            self.config.convergence_config.charge_abstol,
-                                        ) + self.voltage_reltol() * old.abs().max(new.abs()))
-                        },
-                    );
+                    let physical_update_converged =
+                        new_solution.iter().zip(&proposal).enumerate().all(
+                            |(index, (&old, &new))| {
+                                old.is_finite()
+                                    && new.is_finite()
+                                    && (circuit.is_initial_charge_rate(index)
+                                        || (new - old).abs()
+                                            <= circuit.solution_abstol(
+                                                index,
+                                                self.voltage_abstol(),
+                                                self.current_abstol(),
+                                                self.config.convergence_config.charge_abstol,
+                                            ) + self.voltage_reltol() * old.abs().max(new.abs()))
+                            },
+                        );
+                    let voltage_converged = physical_update_converged
+                        && (update_weights.is_none()
+                            || super::transient::select_xyce_transient_update_norm(
+                                uses_damped_newton,
+                                solved_correction_norm,
+                                || {
+                                    self.transient_newton_weighted_update_norm(
+                                        &new_solution,
+                                        &proposal,
+                                        update_weights.as_deref(),
+                                    )
+                                },
+                            )
+                            .is_some_and(|norm| norm < self.transient_nonlinear_deltaxtol()));
                     // The correction solve certifies A*delta against its
                     // physical residual. The absolute companion RHS is no
                     // longer in `rhs` on that path; certify the fresh physical
                     // candidate below, rather than comparing unlike systems.
-                    let linearized_residual_converged = correction_form
+                    let linearized_residual_converged = solves_correction
                         || self
                             .pss_residual_convergence_met(circuit, matrix, &proposal, &rhs, step);
 
@@ -3940,7 +3982,8 @@ impl Engine {
                         circuit.update_nonlinear(&new_solution);
                     }
 
-                    let device_converged = !circuit.has_nonlinear_devices()
+                    let device_converged = !enforce_device_convergence
+                        || !circuit.has_nonlinear_devices()
                         || circuit.nonlinear_converged(self.device_convergence_criteria());
 
                     if voltage_converged
@@ -4011,10 +4054,26 @@ impl Engine {
         if !self.pss_residual_convergence_met(circuit, matrix, solution, rhs, step) {
             return Ok(false);
         }
-        if correction_form && !circuit.inductors.is_empty() {
+        let check_winding_residual = correction_form && !circuit.inductors.is_empty();
+        let check_transient_residual =
+            !step.initialization && self.config.spice_dialect == crate::SpiceDialect::Xyce;
+        if check_winding_residual || check_transient_residual {
             matrix.correction_rhs_into(rhs, solution, scratch)?;
-            circuit.stabilize_inductor_correction_rhs(scratch, solution, step, true)?;
-            if !self.pss_inductor_residual_convergence_met(circuit, solution, scratch, step.coeff) {
+            if check_winding_residual {
+                // Replace winding rows with their cancellation-free physical
+                // voltage residual before applying the raw RHSTOL norm.
+                circuit.stabilize_inductor_correction_rhs(scratch, solution, step, true)?;
+                if !self
+                    .pss_inductor_residual_convergence_met(circuit, solution, scratch, step.coeff)
+                {
+                    return Ok(false);
+                }
+            }
+            if check_transient_residual
+                && scratch.iter().any(|residual| {
+                    !residual.is_finite() || residual.abs() >= self.transient_nonlinear_rhstol()
+                })
+            {
                 return Ok(false);
             }
         }
