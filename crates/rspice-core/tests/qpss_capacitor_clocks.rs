@@ -52,17 +52,17 @@ fn response(grid: &QuasiPeriodicGrid, offset: f64, drive: &[Complex64]) -> Vec<C
     }
     for pivot in 0..n {
         let divisor = matrix[pivot][pivot];
-        for column in pivot..=n {
-            matrix[pivot][column] /= divisor;
+        for value in matrix[pivot].iter_mut().skip(pivot) {
+            *value /= divisor;
         }
-        for row in 0..n {
+        let pivot_row = matrix[pivot].clone();
+        for (row, values) in matrix.iter_mut().enumerate().take(n) {
             if row == pivot {
                 continue;
             }
-            let factor = matrix[row][pivot];
-            for column in pivot..=n {
-                let entry = matrix[pivot][column];
-                matrix[row][column] -= factor * entry;
+            let factor = values[pivot];
+            for (value, &entry) in values.iter_mut().zip(&pivot_row).skip(pivot) {
+                *value -= factor * entry;
             }
         }
     }

@@ -70,17 +70,17 @@ fn response(input: i32, depth: usize) -> Vec<Complex64> {
     }
     for pivot in 0..5 {
         let divisor = a[pivot][pivot];
-        for column in pivot..=5 {
-            a[pivot][column] /= divisor;
+        for value in a[pivot].iter_mut().skip(pivot) {
+            *value /= divisor;
         }
-        for row in 0..5 {
+        let pivot_row = a[pivot].clone();
+        for (row, values) in a.iter_mut().enumerate().take(5) {
             if row == pivot {
                 continue;
             }
-            let factor = a[row][pivot];
-            for column in pivot..=5 {
-                let entry = a[pivot][column];
-                a[row][column] -= factor * entry;
+            let factor = values[pivot];
+            for (value, &entry) in values.iter_mut().zip(&pivot_row).skip(pivot) {
+                *value -= factor * entry;
             }
         }
     }
