@@ -1,10 +1,11 @@
 //! Analytic repetition counts with retained-sample acceleration quadrature.
 //!
-//! All supported clocks accumulate irreversible effective age. This permits
-//! combining identical complete mission cycles without simulating every cycle.
+//! Irreversible clocks combine exposures; recoverable populations instead
+//! compose chronological state transitions before repeating a complete cycle.
 //! Each phase's representative waveform restarts at that phase's boundary.
 
 use super::*;
+mod recovery;
 
 pub(super) fn integrate(
     request: &ReliabilityRunRequest,
@@ -64,45 +65,55 @@ pub(super) fn integrate(
                     .find(|model| &model.id == model_id)
                     .ok_or_else(|| invalid("Bound model disappeared during mission integration"))?;
                 let mut clock = AgingClock::new(model).map_err(aging_error)?;
-                for ((phase, data), &(cycles, partial)) in request
-                    .study
-                    .mission
-                    .iter()
-                    .zip(phases)
-                    .zip(&phase_exposures)
-                {
-                    check_abort(abort)?;
-                    let samples = &data.devices[device_index].samples;
-                    if cycles > 0.0 {
-                        integrate_window(
-                            &mut clock,
-                            model.mechanism,
-                            &data.time_s,
-                            samples,
-                            phase.duration_s,
-                            cycles,
-                            request.min_stress_voltage,
-                            abort,
-                        )?;
-                    }
-                    if partial > 0.0 {
-                        integrate_window(
-                            &mut clock,
-                            model.mechanism,
-                            &data.time_s,
-                            samples,
-                            partial,
-                            1.0,
-                            request.min_stress_voltage,
-                            abort,
-                        )?;
+                if matches!(
+                    model.law,
+                    crate::analysis::reliability::AgingLaw::TabulatedTwoState { .. }
+                ) {
+                    clock =
+                        recovery::integrate(model, request, phases, device_index, seconds, abort)?;
+                } else {
+                    for ((phase, data), &(cycles, partial)) in request
+                        .study
+                        .mission
+                        .iter()
+                        .zip(phases)
+                        .zip(&phase_exposures)
+                    {
+                        check_abort(abort)?;
+                        let samples = &data.devices[device_index].samples;
+                        if cycles > 0.0 {
+                            integrate_window(
+                                &mut clock,
+                                model.mechanism,
+                                &data.time_s,
+                                samples,
+                                phase.duration_s,
+                                cycles,
+                                request.min_stress_voltage,
+                                abort,
+                            )?;
+                        }
+                        if partial > 0.0 {
+                            integrate_window(
+                                &mut clock,
+                                model.mechanism,
+                                &data.time_s,
+                                samples,
+                                partial,
+                                1.0,
+                                request.min_stress_voltage,
+                                abort,
+                            )?;
+                        }
                     }
                 }
                 let mut evaluated = clock.evaluate().map_err(aging_error)?;
                 // Summing quadrature intervals introduces rounding in the clock's
                 // diagnostic elapsed time; the requested checkpoint owns this axis.
                 evaluated.elapsed_seconds = seconds;
-                retained = retained.saturating_add(3 + evaluated.parameters.len());
+                retained = retained.saturating_add(
+                    3 + evaluated.parameters.len() + evaluated.trap_occupancies.len(),
+                );
                 crate::resource::ResourceLimitError::ensure(
                     crate::resource::ResourceKind::ResultValues,
                     retained,

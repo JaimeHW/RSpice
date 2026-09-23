@@ -63,7 +63,7 @@ pub struct ReliabilityAgedPoint {
     pub operating_point: ReliabilityOperatingPoint,
 }
 
-/// Stress is held at its fresh-circuit value while irreversible clocks advance.
+/// Stress is held at its fresh-circuit value while aging and recovery advance.
 /// Every checkpoint is applied to the original model, never the prior aged one.
 /// EM consumes fitted lifetime only and does not invent a resistance change.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -68,8 +68,8 @@ pub struct ReliabilityStressResult {
 impl Engine {
     /// Solve every mission phase, then integrate the chosen fits at each age.
     /// Stress is extracted from the fresh circuit and remains fixed throughout
-    /// this stage. Transient integration is trapezoidal in acceleration, not
-    /// an aging calculation at averaged terminal voltages.
+    /// this stage. Irreversible exposure uses trapezoidal acceleration. Trapping
+    /// uses chronological endpoint half steps of the kinetic equation.
     pub fn run_reliability_stress_with_abort(
         &self,
         netlist: &Netlist,

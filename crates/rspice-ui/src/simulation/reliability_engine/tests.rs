@@ -52,6 +52,30 @@ pub(crate) fn spec(study: Option<ReliabilityStudy>) -> AnalysisSpec {
     }
 }
 
+pub(crate) fn recovery_fixture() -> ReliabilityStudy {
+    let mut study = fixture();
+    study.transient_stress = None;
+    study.mission[0].duration_s = 1.0;
+    study.mission[1].duration_s = 1.0;
+    for (index, phase) in study.mission.iter_mut().enumerate() {
+        phase.parameters.insert("VDD".into(), 1.0);
+        phase.parameters.insert("GATE".into(), index as f64);
+    }
+    study.model_pack.models[0].law = serde_json::from_value(serde_json::json!({
+        "kind":"tabulated_two_state", "table":{
+            "gate_source_v":[-2.0,-1.0,0.0,2.0], "drain_source_v":[-2.0,2.0],
+            "temperature_k":[200.0,500.0], "interpolation":"linear",
+            "traps":[{"id":"interface", "initial_occupancy":0.0,
+                "capture_rates_per_s":[2.0,2.0,0.0,0.0, 2.0,2.0,0.0,0.0, 2.0,2.0,0.0,0.0, 2.0,2.0,0.0,0.0],
+                "emission_rates_per_s":[0.0,0.0,3.0,3.0, 0.0,0.0,3.0,3.0, 0.0,0.0,3.0,3.0, 0.0,0.0,3.0,3.0],
+                "parameters":[{"parameter":"VTO", "update":"additive", "shift_per_occupancy":-0.1}]}]
+        }
+    })).unwrap();
+    study
+}
+
+pub(crate) const RECOVERY_DECK: &str = "PMOS trapping\n.param VDD=1 GATE=0\nVS s 0 {VDD}\nVG g 0 {GATE}\nVD d 0 0.1\nM1 d g s s PM W=10u L=1u\n.model PM PMOS (LEVEL=1 VTO=-0.2 KP=100u)\n.end\n";
+
 #[test]
 fn reliability_study_survives_draft_project_and_worker_round_trips() {
     let study = fixture();

@@ -40,8 +40,8 @@ impl ReliabilityRunResult {
         Ok(sink.hash.finalize().to_hex().to_string())
     }
 
-    /// Validate dimensions and numeric domains, then recompute irreversible
-    /// clocks from the retained primary stress samples. Electrical solutions
+    /// Validate dimensions and numeric domains, then recompute aging clocks
+    /// and recoverable populations from retained stress samples. Electrical solutions
     /// are retained observations; this does not re-simulate or certify a fit.
     pub fn validate_retained_payload_with_abort(
         &self,
@@ -161,7 +161,9 @@ impl ReliabilityRunResult {
         for checkpoint in &self.stress.checkpoints {
             for device in &checkpoint.devices {
                 for contribution in &device.contributions {
-                    retained = retained.saturating_add(3 + contribution.parameters.len());
+                    retained = retained.saturating_add(
+                        3 + contribution.parameters.len() + contribution.trap_occupancies.len(),
+                    );
                 }
             }
         }

@@ -31,8 +31,12 @@ pub struct AgingEvaluation {
     pub model_id: String,
     pub mechanism: AgingMechanism,
     pub elapsed_seconds: f64,
+    /// Effective reference exposure for irreversible laws; elapsed history for
+    /// trapping tables, which have no single equivalent-age coordinate.
     pub equivalent_seconds: f64,
     pub parameters: Vec<AgingParameterChange>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub trap_occupancies: Vec<AgingTrapOccupancy>,
     /// Linear consumed lifetime, not a failure probability or resistance shift.
     pub electromigration_lifetime_fraction: Option<f64>,
 }
@@ -45,6 +49,7 @@ pub struct AgingClock<'a> {
     elapsed_compensation: f64,
     equivalent_seconds: f64,
     equivalent_compensation: f64,
+    traps: Option<super::traps::TrapHistory>,
 }
 
 impl<'a> AgingClock<'a> {
@@ -56,11 +61,18 @@ impl<'a> AgingClock<'a> {
             elapsed_compensation: 0.0,
             equivalent_seconds: 0.0,
             equivalent_compensation: 0.0,
+            traps: match &model.law {
+                AgingLaw::TabulatedTwoState { table } => {
+                    Some(super::traps::TrapHistory::new(table))
+                }
+                _ => None,
+            },
         })
     }
 
     /// Commit one interval. Failed or cancelled advances leave the clock intact.
-    /// Reversed/zero gate stress contributes no power-law aging and no recovery.
+    /// Reversed/zero gate stress contributes no power-law aging. Trapping tables
+    /// use their characterized rates at every bias, including recovery bias.
     /// All observations, including inactive intervals, must be within calibration.
     pub fn advance(
         &mut self,
@@ -107,6 +119,20 @@ impl<'a> AgingClock<'a> {
         if !elapsed.is_finite() {
             return Err(AgingError::Numeric("elapsed time".into()));
         }
+        if let AgingLaw::TabulatedTwoState { table } = &self.model.law {
+            let mut candidate = self.clone();
+            candidate
+                .traps
+                .as_mut()
+                .expect("trapping clock")
+                .advance(table, duration_s, stress, active, abort)?;
+            candidate.set_trapping_elapsed(elapsed, elapsed_increment)?;
+            if abort.is_aborted() {
+                return Err(AgingError::Aborted);
+            }
+            *self = candidate;
+            return Ok(());
+        }
         let increment = if duration_s == 0.0 || !active {
             0.0
         } else if let Some(log_acceleration) = self.log_acceleration(stress) {
@@ -152,8 +178,64 @@ impl<'a> AgingClock<'a> {
         self.evaluation_at(self.elapsed_seconds, self.equivalent_seconds)
     }
 
+    /// Append a complete chronological trapping history an integral number of
+    /// times without enumerating cycles. Both histories must use this exact
+    /// immutable model. The appended history starts from the current occupancy,
+    /// not from its own initial occupancy. Failed/cancelled appends are atomic.
+    /// f64 represents large integral repetition counts without a u64 limit.
+    pub fn append_repeated_history(
+        &mut self,
+        history: &Self,
+        repetitions: f64,
+        abort: &dyn AbortSignal,
+    ) -> Result<(), AgingError> {
+        if abort.is_aborted() {
+            return Err(AgingError::Aborted);
+        }
+        if !std::ptr::eq(self.model, history.model)
+            || self.traps.is_none()
+            || !repetitions.is_finite()
+            || repetitions < 0.0
+            || repetitions.fract() != 0.0
+        {
+            return Err(AgingError::Invalid("repeated history requires the same trapping model and a nonnegative integral repetition count".into()));
+        }
+        let increment = history.elapsed_seconds * repetitions - self.elapsed_compensation;
+        let elapsed = self.elapsed_seconds + increment;
+        if !elapsed.is_finite() {
+            return Err(AgingError::Numeric("repeated trapping duration".into()));
+        }
+        let mut candidate = self.clone();
+        candidate.traps.as_mut().unwrap().append(
+            history.traps.as_ref().unwrap(),
+            repetitions,
+            abort,
+        )?;
+        candidate.set_trapping_elapsed(elapsed, increment)?;
+        if abort.is_aborted() {
+            return Err(AgingError::Aborted);
+        }
+        *self = candidate;
+        Ok(())
+    }
+
+    fn set_trapping_elapsed(&mut self, elapsed: f64, increment: f64) -> Result<(), AgingError> {
+        if elapsed > self.model.validity.max_equivalent_seconds {
+            return Err(AgingError::OutsideCalibration(format!(
+                "trapping history {elapsed} s exceeds {} s",
+                self.model.validity.max_equivalent_seconds
+            )));
+        }
+        self.elapsed_compensation = (elapsed - self.elapsed_seconds) - increment;
+        self.elapsed_seconds = elapsed;
+        self.equivalent_seconds = elapsed;
+        self.evaluate()?;
+        Ok(())
+    }
+
     fn log_acceleration(&self, stress: AgingStress) -> Option<f64> {
         match &self.model.law {
+            AgingLaw::TabulatedTwoState { .. } => None,
             AgingLaw::EquivalentTimePower {
                 reference_gate_magnitude_v,
                 reference_drain_magnitude_v,
@@ -219,9 +301,16 @@ impl<'a> AgingClock<'a> {
             elapsed_seconds,
             equivalent_seconds,
             parameters: Vec::new(),
+            trap_occupancies: Vec::new(),
             electromigration_lifetime_fraction: None,
         };
         match &self.model.law {
+            AgingLaw::TabulatedTwoState { table } => {
+                self.traps
+                    .as_ref()
+                    .expect("trapping clock")
+                    .evaluate(table, &mut result)?;
+            }
             AgingLaw::EquivalentTimePower {
                 reference_time_s,
                 time_exponent,

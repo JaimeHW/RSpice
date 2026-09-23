@@ -76,7 +76,8 @@ pub struct ReliabilityRunRequest {
     pub enable_hci: bool,
     pub enable_nbti: bool,
     pub enable_em: bool,
-    /// Suspend transistor aging below this gate-stress magnitude; EM is independent.
+    /// Suspend irreversible transistor aging / trap capture below this gate
+    /// magnitude. Trapping emission/recovery continues; EM is independent.
     pub min_stress_voltage: f64,
 }
 
@@ -151,6 +152,18 @@ impl ReliabilityStudy {
                 }
                 if let AgingLaw::EquivalentTimePower { parameters, .. } = &model.law {
                     for parameter in parameters {
+                        let prior = parameter_modes
+                            .insert(parameter.parameter.to_ascii_lowercase(), parameter.update);
+                        if prior.is_some_and(|prior| prior != parameter.update) {
+                            return Err(format!(
+                                "{} mixes additive and relative updates of {}",
+                                binding.device, parameter.parameter
+                            ));
+                        }
+                    }
+                }
+                if let AgingLaw::TabulatedTwoState { table } = &model.law {
+                    for parameter in table.traps.iter().flat_map(|trap| &trap.parameters) {
                         let prior = parameter_modes
                             .insert(parameter.parameter.to_ascii_lowercase(), parameter.update);
                         if prior.is_some_and(|prior| prior != parameter.update) {

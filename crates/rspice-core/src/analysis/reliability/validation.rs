@@ -32,6 +32,23 @@ fn text(value: &str, label: &str) -> Result<(), AgingError> {
     Ok(())
 }
 
+pub(super) fn parameter(name: &str, scale: f64) -> Result<(), AgingError> {
+    if name.is_empty()
+        || name.len() > 128
+        || !name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+    {
+        return Err(AgingError::Invalid(
+            "parameter names must be alphanumeric identifiers".into(),
+        ));
+    }
+    if !scale.is_finite() || scale == 0.0 {
+        return Err(AgingError::Invalid(format!(
+            "{name} needs a finite nonzero shift scale"
+        )));
+    }
+    Ok(())
+}
+
 impl AgingRange {
     fn validate(&self, label: &str) -> Result<(), AgingError> {
         if !self.min.is_finite() || !self.max.is_finite() || self.min > self.max {
@@ -101,6 +118,14 @@ impl AgingModel {
         nonnegative(v.current_density_a_per_m2.min, "minimum current density")?;
         positive(v.max_equivalent_seconds, "maximum equivalent exposure")?;
         match &self.law {
+            AgingLaw::TabulatedTwoState { table } => {
+                if self.mechanism != AgingMechanism::Nbti {
+                    return Err(AgingError::Invalid(
+                        "two-state trapping is an NBTI model".into(),
+                    ));
+                }
+                table.validate(v)?;
+            }
             AgingLaw::EquivalentTimePower {
                 reference_time_s,
                 reference_gate_magnitude_v,

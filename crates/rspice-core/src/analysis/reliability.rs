@@ -15,10 +15,14 @@ use serde::{Deserialize, Serialize};
 
 mod evaluate;
 mod study;
+mod traps;
 mod validation;
 pub use study::{
     ReliabilityBinding, ReliabilityMissionPhase, ReliabilityRunRequest, ReliabilityStudy,
     ReliabilityTransientWindow,
+};
+pub use traps::{
+    AgingRateInterpolation, AgingTrap, AgingTrapOccupancy, AgingTrapParameter, AgingTrapTable,
 };
 
 pub use evaluate::{AgingClock, AgingEvaluation, AgingParameterChange, AgingStress};
@@ -78,6 +82,7 @@ pub struct AgingValidity {
     pub temperature_k: AgingRange,
     pub current_density_a_per_m2: AgingRange,
     /// Largest effective exposure in seconds at the law's reference condition.
+    /// For a trapping table, this bounds elapsed history (including recovery).
     pub max_equivalent_seconds: f64,
 }
 
@@ -112,6 +117,11 @@ pub struct AgingParameterScale {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum AgingLaw {
+    /// Independent two-state populations with characterized capture/emission
+    /// rates. Recovery and mission order are retained; there is no scalar age
+    /// equivalence. The table, initial occupancies and parameter couplings must
+    /// all describe the same process and fresh compact-model baseline.
+    TabulatedTwoState { table: AgingTrapTable },
     EquivalentTimePower {
         reference_time_s: f64,
         reference_gate_magnitude_v: f64,

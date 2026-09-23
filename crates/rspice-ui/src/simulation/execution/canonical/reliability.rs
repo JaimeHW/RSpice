@@ -42,6 +42,43 @@ pub(super) fn encode(w: &mut CanonicalWriter, study: &ReliabilityStudy) {
         }
         w.f64(model.validity.max_equivalent_seconds);
         match &model.law {
+            AgingLaw::TabulatedTwoState { table } => {
+                w.u8(2);
+                for axis in [
+                    &table.gate_source_v,
+                    &table.drain_source_v,
+                    &table.temperature_k,
+                ] {
+                    w.sequence(axis.len());
+                    for value in axis {
+                        w.f64(*value);
+                    }
+                }
+                w.u8(match table.interpolation {
+                    AgingRateInterpolation::Linear => 0,
+                    AgingRateInterpolation::Logarithmic => 1,
+                });
+                w.sequence(table.traps.len());
+                for trap in &table.traps {
+                    w.string(&trap.id);
+                    w.f64(trap.initial_occupancy);
+                    for rates in [&trap.capture_rates_per_s, &trap.emission_rates_per_s] {
+                        w.sequence(rates.len());
+                        for rate in rates {
+                            w.f64(*rate);
+                        }
+                    }
+                    w.sequence(trap.parameters.len());
+                    for parameter in &trap.parameters {
+                        w.string(&parameter.parameter);
+                        w.f64(parameter.shift_per_occupancy);
+                        w.u8(match parameter.update {
+                            AgingParameterUpdate::Additive => 0,
+                            AgingParameterUpdate::Relative => 1,
+                        });
+                    }
+                }
+            }
             AgingLaw::EquivalentTimePower {
                 reference_time_s,
                 reference_gate_magnitude_v,
@@ -178,19 +215,23 @@ mod tests {
 
     #[test]
     fn reliability_study_identity_covers_numeric_fields_provenance_and_mission_order() {
-        let study = fixture();
-        let original = digest(&spec(Some(study.clone())));
-        let mut checked = 0;
-        for mutation in mutations(&serde_json::to_value(&study).unwrap()) {
-            if let Ok(changed) = serde_json::from_value::<ReliabilityStudy>(mutation) {
-                assert_ne!(original, digest(&spec(Some(changed))));
-                checked += 1;
+        for study in [
+            fixture(),
+            crate::simulation::reliability_engine::tests::recovery_fixture(),
+        ] {
+            let original = digest(&spec(Some(study.clone())));
+            let mut checked = 0;
+            for mutation in mutations(&serde_json::to_value(&study).unwrap()) {
+                if let Ok(changed) = serde_json::from_value::<ReliabilityStudy>(mutation) {
+                    assert_ne!(original, digest(&spec(Some(changed))));
+                    checked += 1;
+                }
             }
+            assert!(checked > 35);
+            let mut reversed = study;
+            reversed.mission.reverse();
+            assert_ne!(original, digest(&spec(Some(reversed))));
         }
-        assert!(checked > 35);
-        let mut reversed = study;
-        reversed.mission.reverse();
-        assert_ne!(original, digest(&spec(Some(reversed))));
         let legacy_spec = spec(None);
         let mut legacy = CanonicalWriter::new("test");
         legacy.domain("analysis-spec");
