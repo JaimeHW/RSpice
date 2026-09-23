@@ -15,6 +15,8 @@ use crate::numerics::integration::LteEstimator;
 use std::collections::BTreeSet;
 use std::f64::consts::TAU;
 
+mod mosfet;
+
 /// Explicit state-completeness contract for an HB-derived Envelope warm start.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HbEnvelopeStateGuarantee {
@@ -37,6 +39,9 @@ pub enum HbEnvelopeStateGuarantee {
     /// Complete native BSIM4 terminal, split gate/body, and NQS history
     /// together with supported BSIM3, junction, behavioral, and R/L/C state.
     ExactBsim4RlcMnaV1,
+    /// Complete native classic MOS capacitance/charge histories, integrated
+    /// along the carrier orbit, with supported BSIM/junction/R/L/C state.
+    ExactClassicMosRlcMnaV1,
     /// Complete physical/SDT state for expression capacitances and the other
     /// supported devices, with a new charge origin and first-order restart.
     ExpressionChargeRestartV1,
@@ -263,7 +268,7 @@ impl Engine {
             Some(blockers) => Err(SimulationError::unsupported_capability(
                 "analysis.hb.envelope.continuation",
                 format!(
-                    "HB Envelope continuation is unavailable because the circuit contains {blockers}; the initializer supports R/L/C networks with expression capacitance, fixed mutual inductance, supported diodes/BJTs/JFETs, native BSIM3, and independent, controlled or behavioral sources"
+                    "HB Envelope continuation is unavailable because the circuit contains {blockers}; the initializer supports R/L/C networks with expression capacitance, fixed mutual inductance, supported diodes/BJTs/JFETs, native classic MOS/BSIM3/BSIM4, and independent, controlled or behavioral sources"
                 ),
             )),
         }
@@ -349,6 +354,7 @@ impl Engine {
         Ok(solution)
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn hb_envelope_checkpoint(
         &self,
         netlist: &Netlist,
@@ -357,15 +363,17 @@ impl Engine {
         config: &HbConfig,
         result: &HbResult,
         operating_point: &HbOperatingPoint,
+        abort: &dyn AbortSignal,
     ) -> Result<(TransientCheckpoint, Value), SimulationError> {
         if !result.is_valid()
             || result.continuation_limitations.iter().any(|limitation| {
                 // Generic phase projections omit expression-capacitor SDT
-                // and BSIM3/BSIM4 integration history. This initializer reconstructs
+                // and native MOS integration history. This initializer reconstructs
                 // those states before creating the authenticated checkpoint.
                 *limitation != HbContinuationLimitation::CapacitorChargeHistoryNotRetained
                     && *limitation != HbContinuationLimitation::Bsim3ChargeHistoryNotRetained
                     && *limitation != HbContinuationLimitation::Bsim4ChargeHistoryNotRetained
+                    && *limitation != HbContinuationLimitation::ClassicMosChargeHistoryNotRetained
             })
         {
             return Err(SimulationError::Circuit(
@@ -565,6 +573,7 @@ impl Engine {
             && circuit.bjts.is_empty()
             && circuit.bsim3v3.is_empty()
             && circuit.bsim4v8.is_empty()
+            && circuit.mosfets.is_empty()
         {
             None
         } else {
@@ -651,6 +660,16 @@ impl Engine {
                 history_step,
             )
             .map_err(SimulationError::Circuit)?;
+            let increments =
+                self.hb_periodic_meyer_increments(&circuit, result, phase_step, abort)?;
+            let mosfet_history = Self::initialize_periodic_mosfet_history(
+                &mut circuit,
+                [&solutions[1], &solutions[2], &solutions[3]],
+                &node_rates,
+                history_step,
+                &increments,
+            )
+            .map_err(SimulationError::Circuit)?;
             Some(
                 Self::capture_accepted_junction_transient_history_checkpoint(
                     &circuit,
@@ -661,7 +680,7 @@ impl Engine {
                         vbic_snapshot_cache: &vec![None; circuit.bjts.len()],
                         bsim3_history: &bsim3_history,
                         bsim4_history: &bsim4_history,
-                        mosfet_history: &Default::default(),
+                        mosfet_history: &mosfet_history,
                     },
                 ),
             )
@@ -746,6 +765,8 @@ impl Engine {
             .map_err(SimulationError::Circuit)?;
         let guarantee = if original_circuit.capacitors.has_solution_dependent_values() {
             HbEnvelopeStateGuarantee::ExpressionChargeRestartV1
+        } else if !original_circuit.mosfets.is_empty() {
+            HbEnvelopeStateGuarantee::ExactClassicMosRlcMnaV1
         } else if !original_circuit.bsim4v8.is_empty() {
             HbEnvelopeStateGuarantee::ExactBsim4RlcMnaV1
         } else if !original_circuit.bsim3v3.is_empty() {
@@ -799,6 +820,7 @@ impl Engine {
             &config,
             &analysis.result,
             &analysis.operating_point,
+            abort,
         )?;
         let resolved_simulation_identity = simulation_checkpoint_identity(&engine.config);
         Ok((

@@ -469,7 +469,7 @@ pub(crate) const fn periodic_capability_descriptor(
             small_signal: Complete,
             noise: Complete,
             pss_state: Complete,
-            envelope: Absent(ENVELOPE_LINEAR_SUBSET),
+            envelope: Complete,
         },
         F::Bsim3v3 => PeriodicCapabilityDescriptor {
             residual_jacobian: Complete,
@@ -1744,7 +1744,7 @@ mod tests {
             // Authored GP PTF adds an irrational delay to the formerly
             // complete charge descriptor; VBIC's finite delay states remain.
             F::Bjt => [R, R, C, C, R, R],
-            F::Mosfet => [R, C, C, C, C, A],
+            F::Mosfet => [R, C, C, C, C, C],
             F::Bsim3v3 => [C, C, C, C, C, C],
             F::Bsim4v8 => [C, C, C, R, C, C],
             F::B3SoiDd | F::B3SoiFd | F::B3SoiPd => [A, C, I, A, A, A],

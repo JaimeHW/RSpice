@@ -3259,6 +3259,8 @@ pub enum EnvelopeGuaranteeTag {
     ExactBsim3RlcMnaV1,
     /// Native BSIM4 split terminal/NQS and other supported device state.
     ExactBsim4RlcMnaV1,
+    /// Native Meyer/legacy BSIM charge histories and other supported state.
+    ExactClassicMosRlcMnaV1,
     /// Physical and SDT state with a first-order expression-charge restart.
     ExpressionChargeRestartV1,
 }
@@ -3272,6 +3274,7 @@ impl From<HbEnvelopeStateGuarantee> for EnvelopeGuaranteeTag {
             HbEnvelopeStateGuarantee::ExactJunctionRlcMnaV1 => Self::ExactJunctionRlcMnaV1,
             HbEnvelopeStateGuarantee::ExactBsim3RlcMnaV1 => Self::ExactBsim3RlcMnaV1,
             HbEnvelopeStateGuarantee::ExactBsim4RlcMnaV1 => Self::ExactBsim4RlcMnaV1,
+            HbEnvelopeStateGuarantee::ExactClassicMosRlcMnaV1 => Self::ExactClassicMosRlcMnaV1,
             HbEnvelopeStateGuarantee::ExpressionChargeRestartV1 => Self::ExpressionChargeRestartV1,
         }
     }
@@ -3286,6 +3289,7 @@ impl From<EnvelopeGuaranteeTag> for HbEnvelopeStateGuarantee {
             EnvelopeGuaranteeTag::ExactJunctionRlcMnaV1 => Self::ExactJunctionRlcMnaV1,
             EnvelopeGuaranteeTag::ExactBsim3RlcMnaV1 => Self::ExactBsim3RlcMnaV1,
             EnvelopeGuaranteeTag::ExactBsim4RlcMnaV1 => Self::ExactBsim4RlcMnaV1,
+            EnvelopeGuaranteeTag::ExactClassicMosRlcMnaV1 => Self::ExactClassicMosRlcMnaV1,
             EnvelopeGuaranteeTag::ExpressionChargeRestartV1 => Self::ExpressionChargeRestartV1,
         }
     }
