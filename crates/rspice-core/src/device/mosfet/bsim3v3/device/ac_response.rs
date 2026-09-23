@@ -261,14 +261,13 @@ mod tests {
                             let entry = |row: usize, col: usize| {
                                 Complex64::new(f.0[row][col], omega * q.0[row][col])
                             };
-                            for row in 0..4 {
-                                for col in 0..4 {
+                            for (row, expected_row) in expected.iter().enumerate().take(4) {
+                                for (col, &target) in expected_row.iter().enumerate().take(4) {
                                     let mut actual = entry(row, col);
                                     for aux in 5..8 {
                                         actual -=
                                             entry(row, aux) * entry(aux, col) / entry(aux, aux);
                                     }
-                                    let target = expected[row][col];
                                     assert!(
                                         (actual - target).norm() < 1e-12 + 1e-9 * target.norm(),
                                         "pmos={pmos} capmod={capmod} nqs={nqs} drain={drain} omega={omega} row={row} col={col}: {actual} vs {target}"
