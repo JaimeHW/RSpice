@@ -101,7 +101,8 @@ pub struct AnalysisInstanceId {
 }
 
 impl AnalysisInstanceId {
-    pub(crate) const fn new(kind: AnalysisKind, ordinal: u32) -> Self {
+    /// Construct an authored analysis identity from its zero-based card ordinal.
+    pub const fn new(kind: AnalysisKind, ordinal: u32) -> Self {
         Self { kind, ordinal }
     }
 
