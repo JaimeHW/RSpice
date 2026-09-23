@@ -393,7 +393,7 @@ fn point_node_values(
     base_mode: &CornerBaseMode,
 ) -> Result<Option<Vec<(String, f64)>>, String> {
     let mut values = match base_mode {
-        CornerBaseMode::Op => {
+        CornerBaseMode::Op | CornerBaseMode::ConfiguredOp(_) => {
             let Some(values) = operating_point_node_values(analysis) else {
                 return Ok(None);
             };

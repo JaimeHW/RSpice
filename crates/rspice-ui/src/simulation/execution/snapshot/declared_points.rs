@@ -362,7 +362,7 @@ fn point_base_analysis_request(
     use crate::simulation::multi_run::FrequencySweep;
 
     match base_mode {
-        CornerBaseMode::Op => {
+        CornerBaseMode::Op | CornerBaseMode::ConfiguredOp(_) => {
             let config = OpConfig {
                 temperature_mode: OpTemperatureMode::Explicit,
                 temperature_celsius: point.temperature_celsius,
@@ -374,7 +374,10 @@ fn point_base_analysis_request(
                     nominal_supply_voltage,
                     supply_source_names: point.supply_source_names.clone(),
                 },
-                ..OpConfig::default()
+                ..match base_mode {
+                    CornerBaseMode::ConfiguredOp(config) => *config.clone(),
+                    _ => OpConfig::default(),
+                }
             };
             let spec = operating_point_spec(&config);
             (

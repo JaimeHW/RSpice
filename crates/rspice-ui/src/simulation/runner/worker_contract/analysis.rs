@@ -409,6 +409,7 @@ impl From<WorkerCornerRunConfig> for crate::services::simulation_runner::CornerR
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) enum WorkerCornerBaseMode {
     Op,
+    ConfiguredOp(Box<crate::simulation::dialog::OpConfig>),
     DcSweep {
         #[serde(default)]
         modes: crate::simulation::config::DcSweepModes,
@@ -452,6 +453,9 @@ impl From<&crate::services::simulation_runner::CornerBaseMode> for WorkerCornerB
     fn from(value: &crate::services::simulation_runner::CornerBaseMode) -> Self {
         match value {
             crate::services::simulation_runner::CornerBaseMode::Op => Self::Op,
+            crate::services::simulation_runner::CornerBaseMode::ConfiguredOp(config) => {
+                Self::ConfiguredOp(config.clone())
+            }
             crate::services::simulation_runner::CornerBaseMode::DcSweep {
                 modes,
                 source_name,
@@ -525,6 +529,7 @@ impl From<WorkerCornerBaseMode> for crate::services::simulation_runner::CornerBa
     fn from(value: WorkerCornerBaseMode) -> Self {
         match value {
             WorkerCornerBaseMode::Op => Self::Op,
+            WorkerCornerBaseMode::ConfiguredOp(config) => Self::ConfiguredOp(config),
             WorkerCornerBaseMode::DcSweep {
                 modes,
                 source_name,

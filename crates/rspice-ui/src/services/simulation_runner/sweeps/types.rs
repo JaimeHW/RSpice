@@ -171,6 +171,8 @@ pub enum CornerBaseMode {
     /// Run DC operating point directly at each corner.
     #[default]
     Op,
+    /// Preserve the selected operating-point card's startup and reporting controls.
+    ConfiguredOp(Box<crate::simulation::dialog::OpConfig>),
     /// Run DC sweep and record the final converged point at each corner.
     DcSweep {
         modes: super::DcSweepModes,
@@ -385,6 +387,7 @@ fn require_model_section(
 pub(super) fn validate_base_mode(context: &str, base_mode: &CornerBaseMode) -> Result<(), String> {
     match base_mode {
         CornerBaseMode::Op => {}
+        CornerBaseMode::ConfiguredOp(config) => config.validate_for_execution()?,
         CornerBaseMode::DcSweep {
             source_name,
             start,

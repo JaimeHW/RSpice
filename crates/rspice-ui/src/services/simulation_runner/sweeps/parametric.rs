@@ -199,6 +199,27 @@ fn run_base_analysis(
             let result = engine.run_dc_op_with_abort(netlist, abort)?;
             Ok(analog_node_voltages(&result))
         }
+        CornerBaseMode::ConfiguredOp(config) => {
+            let result =
+                crate::simulation::engine_bridge::EngineBridge::run_materialized_with_abort(
+                    engine,
+                    &crate::simulation::AnalysisConfig::DcOp(*config.clone()),
+                    netlist,
+                    abort,
+                )
+                .map_err(|error| match error {
+                    crate::simulation::runner::SimulationError::Aborted => {
+                        rspice_core::SimulationError::Aborted
+                    }
+                    error => rspice_core::SimulationError::Circuit(error.to_string()),
+                })?;
+            let crate::simulation::results::SimulationResult::DcOp(result) = result else {
+                unreachable!("an operating-point request returns operating-point data")
+            };
+            let mut values = result.node_voltages.into_iter().collect::<Vec<_>>();
+            values.sort_by(|left, right| left.0.cmp(&right.0));
+            Ok(values.into_iter().unzip())
+        }
         CornerBaseMode::DcSweep {
             modes,
             source_name,

@@ -1145,6 +1145,10 @@ fn encode_corner_base_mode(writer: &mut CanonicalWriter, mode: &CornerBaseMode) 
     writer.domain("corner-base-mode");
     match mode {
         CornerBaseMode::Op => writer.u8(0),
+        CornerBaseMode::ConfiguredOp(config) => {
+            writer.u8(6);
+            encode_op_config(writer, config);
+        }
         CornerBaseMode::DcSweep {
             modes,
             source_name,

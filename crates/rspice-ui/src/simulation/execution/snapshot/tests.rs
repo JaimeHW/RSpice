@@ -29,6 +29,107 @@ fn configured_op_task(config: crate::simulation::dialog::OpConfig) -> QueuedAnal
     }
 }
 
+#[test]
+fn pvt_selected_operating_point_controls_reach_each_worker_and_solve() {
+    use crate::services::simulation_runner::CornerBaseMode;
+    use crate::simulation::dialog::{OpConfig, OpInitialGuess, OpNodeInitialization};
+    use crate::simulation::runner::worker_contract::{WorkerAnalysisConfig, WorkerCornerBaseMode};
+    let base = OpConfig {
+        initial_guess: OpInitialGuess::UserNodeVoltages,
+        node_initialization: OpNodeInitialization::ForceIcValues,
+        ..Default::default()
+    };
+    for temperature in [false, true] {
+        let mut input = parts();
+        input.executable_netlist =
+            "configured OP points\nVDD in 0 1\nR1 in out 1k\nR2 out 0 1k\n.ic V(out)=0.8\n.end\n"
+                .into();
+        let mut declaration = if temperature {
+            temperature_task(vec![27.0, 125.0])
+        } else {
+            corner_task(
+                vec![crate::services::simulation_runner::CornerProcess::TT],
+                vec![1.0],
+                vec![27.0, 125.0],
+                true,
+            )
+        };
+        let mode = CornerBaseMode::ConfiguredOp(Box::new(base.clone()));
+        let wire = WorkerCornerBaseMode::from(&mode);
+        let restored: WorkerCornerBaseMode =
+            serde_json::from_str(&serde_json::to_string(&wire).unwrap()).unwrap();
+        if temperature {
+            declaration.spec_options.temp.as_mut().unwrap().base_mode = restored.into();
+        } else {
+            declaration.spec_options.corner.as_mut().unwrap().base_mode = restored.into();
+        }
+        input.tasks = vec![prepared(
+            "configured-pvt-op",
+            "Configured OP study",
+            declaration,
+        )];
+        let mut altered = parts();
+        altered.executable_netlist = input.executable_netlist.clone();
+        altered.tasks = input.tasks.clone();
+        let snapshot = PreparedRunSnapshot::new(input).unwrap();
+        let options = &mut altered.tasks[0].task.spec_options;
+        let mode = options
+            .temp
+            .as_mut()
+            .map(|contract| &mut contract.base_mode)
+            .or_else(|| {
+                options
+                    .corner
+                    .as_mut()
+                    .map(|contract| &mut contract.base_mode)
+            })
+            .unwrap();
+        let CornerBaseMode::ConfiguredOp(config) = mode else {
+            unreachable!()
+        };
+        config.node_initialization = OpNodeInitialization::UseIcAndNodeset;
+        altered.tasks[0].config_digest = altered.tasks[0].payload_digest();
+        assert_ne!(
+            snapshot.digest(),
+            PreparedRunSnapshot::new(altered).unwrap().digest()
+        );
+        let points: Vec<_> = snapshot
+            .tasks
+            .iter()
+            .filter(|task| task.declared_point.is_some())
+            .collect();
+        assert_eq!(points.len(), 2);
+        for (index, task) in points.iter().enumerate() {
+            let config = task.task.config.as_ref().unwrap();
+            let wire = WorkerAnalysisConfig::from(config);
+            let restored: WorkerAnalysisConfig =
+                serde_json::from_value(serde_json::to_value(&wire).unwrap()).unwrap();
+            let restored = AnalysisConfig::from(restored);
+            let result = crate::simulation::EngineBridge::new()
+                .run(
+                    &restored,
+                    task.executable_netlist_override.as_ref().unwrap(),
+                )
+                .unwrap();
+            let crate::simulation::results::SimulationResult::DcOp(result) = result else {
+                panic!("OP result")
+            };
+            assert!((result.voltage("out").unwrap() - 0.8).abs() < 1e-10);
+            assert_eq!(result.configuration.initial_guess, base.initial_guess);
+            assert_eq!(
+                result.configuration.node_initialization,
+                base.node_initialization
+            );
+            assert_eq!(
+                result.configuration.temperature_celsius,
+                [27.0, 125.0][index]
+            );
+            assert_eq!(result.configuration.run_point.index, index);
+            assert_eq!(result.configuration.run_point.count, 2);
+        }
+    }
+}
+
 fn transient_task() -> QueuedAnalysis {
     let config = crate::simulation::config::TransientAnalysisConfig {
         stop_time: 1.0e-6,
