@@ -78,7 +78,7 @@ fn envelope_restores_feedback_and_nested_integrals_and_reactivates_modulation() 
             assert!((value - expected).abs() < 1e-9, "power at {time}");
             // Branch current must include the capacitor contribution after
             // the modulation waveform is reactivated at slow-time zero.
-            if time < 0.09e-3 || time > 0.21e-3 {
+            if !(0.09e-3..=0.21e-3).contains(&time) {
                 let derivative = -2.0 * input * 0.2 * TAU * 1e3 * (TAU * 1e3 * time).sin();
                 assert!(
                     (current + expected / 1e3 + 1e-9 * derivative).abs() < 2e-8,
