@@ -482,11 +482,7 @@ pub(crate) const fn periodic_capability_descriptor(
         },
         F::Bsim4v8 => PeriodicCapabilityDescriptor {
             residual_jacobian: Absent("native BSIM4"),
-            dynamic_state: Restricted(
-                "AC-NQS is a rational charge-deficit effect and needs a hidden charge-deficit \
-                 state instead of G+sC descriptor extraction, so only ACNQSMOD=0 has a finite \
-                 explicit descriptor state",
-            ),
+            dynamic_state: Complete,
             small_signal: Inapplicable,
             noise: Absent("periodic BSIM4 noise sources need the exact periodic BSIM4 residual"),
             pss_state: Absent("BSIM4 charge and NQS history"),
@@ -1524,16 +1520,6 @@ pub(in crate::engine) fn dynamic_state_descriptor_gaps(
                         }
                     }
                 }
-                F::Bsim4v8 => {
-                    for dev in &circuit.bsim4v8.devices {
-                        if dev.core.model.acnqs_mod != 0 {
-                            gaps.push(CapabilityGap::new(
-                                family,
-                                format!("BSIM4 '{}' with ACNQSMOD=1: {condition}", dev.name),
-                            ));
-                        }
-                    }
-                }
                 F::TransmissionLine => {
                     for line in &circuit.tlines {
                         if !line.is_memoryless_two_port() {
@@ -1737,7 +1723,7 @@ mod tests {
             F::Bjt => [R, R, C, C, R, R],
             F::Mosfet => [R, C, C, R, A, A],
             F::Bsim3v3 => [C, C, C, C, C, C],
-            F::Bsim4v8 => [A, R, I, A, A, A],
+            F::Bsim4v8 => [A, C, I, A, A, A],
             F::B3SoiDd | F::B3SoiFd | F::B3SoiPd => [A, C, I, A, A, A],
             F::Ekv26 | F::Ekv3 | F::Vdmos => [I, C, A, A, A, A],
             F::Jfet => [R, C, C, R, R, R],

@@ -2293,22 +2293,54 @@ fn acnqsmod1_rgatemod3_common_source_ac_matches_ngspice46() {
 }
 
 #[test]
-fn acnqsmod1_is_rejected_for_pole_zero_until_charge_deficit_state_exists() {
-    let deck = acnqsmod1_common_source_deck();
-    let netlist = Netlist::parse(&deck).expect("deck parses");
-    let circuit = engine().build_circuit(&netlist).expect("circuit builds");
-    let input = circuit.get_node_by_name("in").expect("input node");
-    let output = circuit.get_node_by_name("out").expect("output node");
-    let err = engine()
-        .run_pz(&netlist, input, output)
-        .expect_err("ACNQSMOD=1 is rational and must not use G+sC PZ extraction");
-    let message = err.to_string();
-    assert!(
-        message.contains("Pole-zero")
-            && message.contains("ACNQSMOD=1")
-            && message.contains("charge-deficit"),
-        "typed PZ rejection should name ACNQSMOD=1 and the missing state: {message}"
-    );
+fn acnqsmod1_pole_zero_response_matches_native_topologies() {
+    for deck in [
+        acnqsmod1_common_source_deck(),
+        acnqsmod1_trnqsmod1_common_source_ac_deck(),
+        acnqsmod1_rdsmod1_common_source_deck(),
+        acnqsmod1_rdsmod1_rgatemod2_common_source_deck(),
+        acnqsmod1_rgatemod1_common_source_deck(),
+        acnqsmod1_rgatemod2_common_source_deck(),
+        acnqsmod1_rgatemod3_common_source_deck(),
+        acnqsmod1_rbodymod1_high_resistance_common_source_ac_deck(),
+        acnqsmod1_rbodymod2_common_source_ac_deck(),
+    ] {
+        let netlist = Netlist::parse(&deck).expect("deck parses");
+        let circuit = engine().build_circuit(&netlist).expect("circuit builds");
+        let input = circuit
+            .get_node_by_name("in")
+            .or_else(|| circuit.get_node_by_name("g"))
+            .expect("input node");
+        let output = circuit.get_node_by_name("out").expect("output node");
+        let pz = engine()
+            .run_pz_ports(&netlist, input, None, output, None, false, true, true)
+            .unwrap_or_else(|error| panic!("{}: {error}", deck.lines().next().unwrap()));
+        let dc = pz.dc_gain.expect("finite DC voltage gain");
+        for ac in engine().run_ac(&netlist, &[1e3, 1e8, 1e10, 1e12]).unwrap() {
+            let s = num_complex::Complex64::new(0.0, std::f64::consts::TAU * ac.frequency);
+            let mut transfer = num_complex::Complex64::new(dc, 0.0);
+            for zero in &pz.zeros {
+                transfer *= 1.0 - s / zero;
+            }
+            for pole in &pz.poles {
+                transfer /= 1.0 - s / pole;
+            }
+            let out = ac
+                .node_names
+                .iter()
+                .position(|name| name.eq_ignore_ascii_case("out"))
+                .unwrap();
+            let expected = ac.voltages[out];
+            assert!(
+                (transfer - expected).norm() <= 1e-9 + 2e-5 * expected.norm(),
+                "{}, f={}: PZ={transfer}, AC={expected}; poles={:?}; zeros={:?}",
+                deck.lines().next().unwrap(),
+                ac.frequency,
+                pz.poles,
+                pz.zeros
+            );
+        }
+    }
 }
 
 #[test]

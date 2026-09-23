@@ -8,7 +8,7 @@ use crate::device::semiconductor::{
 };
 use crate::{CircuitData, Netlist, Value};
 
-mod bsim3;
+mod ac_nqs;
 
 impl Engine {
     /// Reduce a sparse `G + sC` descriptor to a dense state-space model whose
@@ -735,7 +735,7 @@ impl Engine {
         }
         let matrix_size = circuit
             .matrix_size()
-            .saturating_add(Self::bsim3_pz_response_state_count(&circuit));
+            .saturating_add(Self::pz_ac_nqs_state_count(&circuit));
         self.ensure_result_shape(matrix_size, matrix_size.saturating_mul(8).saturating_add(1))?;
 
         // Reuse the AC linearization path so pole-zero analysis sees the same
@@ -800,7 +800,7 @@ impl Engine {
         config.compute_poles = compute_poles;
         config.compute_zeros = compute_zeros;
 
-        // VBIC and AC-only BSIM3 introduce descriptor states outside the
+        // VBIC and AC-only BSIM3/BSIM4 introduce descriptor states outside the
         // frozen AC matrix. Their expansion precedes eigenvalue extraction.
         let has_external_vbic_descriptor_states = circuit
             .bjts
@@ -808,7 +808,7 @@ impl Engine {
             .iter()
             .any(|bjt| bjt.uses_vbic_dynamic_charges());
         if !has_external_vbic_descriptor_states
-            && Self::bsim3_pz_response_state_count(&circuit) == 0
+            && Self::pz_ac_nqs_state_count(&circuit) == 0
             && let Some(result) =
                 Self::try_sparse_pz_state_space(&g_descriptor, &c_descriptor, &config, abort)?
         {
@@ -830,7 +830,7 @@ impl Engine {
         let mut g_matrix = Matrix::from_dense(g_descriptor.to_dense_real());
         let mut c_matrix = Matrix::from_dense(c_descriptor.to_dense_imag());
         Self::stamp_vbic_pz_descriptor_states(&circuit, &dc_solution, &mut g_matrix, &mut c_matrix);
-        Self::stamp_bsim3_pz_descriptor_states(
+        Self::stamp_ac_nqs_pz_descriptor_states(
             &circuit,
             &dc_solution,
             &mut g_matrix,

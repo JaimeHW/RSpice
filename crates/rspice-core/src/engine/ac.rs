@@ -1947,9 +1947,11 @@ impl Engine {
         }
         // BSIM4: identical discipline (b4acld.c repeats the DC
         // conductance groups, GIDL/GISL included, on the real axis).
-        circuit
-            .bsim4v8
-            .stamp_all(&mut stamper, &mut rhs_dummy, op_voltages);
+        for dev in &circuit.bsim4v8.devices {
+            if !dev.uses_ac_nqs() || include_reduced_dynamic_stamps {
+                dev.stamp_nonlinear(op_voltages, &mut stamper, &mut rhs_dummy);
+            }
+        }
         // EKV26 native AC uses the DC current Jacobian for real small-signal
         // conductances and the intrinsic terminal-charge Jacobian below.
         circuit
@@ -2194,11 +2196,18 @@ impl Engine {
     }
 
     #[inline]
-    fn stamp_bsim4_trnqs_ac_charge_node_anchors(matrix: &mut ComplexMatrix, circuit: &CircuitData) {
+    fn stamp_bsim4_trnqs_ac_charge_node_anchors(
+        matrix: &mut ComplexMatrix,
+        circuit: &CircuitData,
+        include_reduced_dynamic_stamps: bool,
+    ) {
         if circuit.bsim4v8.is_empty() {
             return;
         }
         for dev in &circuit.bsim4v8.devices {
+            if dev.uses_ac_nqs() && !include_reduced_dynamic_stamps {
+                continue;
+            }
             dev.stamp_trnqs_ac_charge_node_anchor_delta(|row, col, value| {
                 if row > 0 && col > 0 {
                     matrix.add(row - 1, col - 1, value);
@@ -2251,7 +2260,7 @@ impl Engine {
     /// factorization across calls, so a sweep pays the structure cost once
     /// instead of once per point.
     /// PZ disables reduced dynamic stamps and supplies the explicit VBIC and
-    /// AC-only BSIM3 descriptor states after assembling this base operator.
+    /// AC-only BSIM3/BSIM4 descriptor states after assembling this base operator.
     pub(super) fn try_fill_small_signal_matrix_with_vbic_delay_mode(
         circuit: &CircuitData,
         ac_matrix: &mut ComplexMatrix,
@@ -2522,6 +2531,9 @@ impl Engine {
                 }
             }
             for dev in &circuit.bsim4v8.devices {
+                if dev.uses_ac_nqs() && !include_reduced_dynamic_stamps {
+                    continue;
+                }
                 let (charge, mode) = dev.charge_at(op_voltages);
                 dev.stamp_ac_charge_matrix(&charge, mode, omega, &mut stamper);
             }
@@ -2539,9 +2551,13 @@ impl Engine {
         }
         if include_reduced_dynamic_stamps {
             Self::stamp_bsim3_ac_nqs_corrections(ac_matrix, circuit, op_voltages, omega);
+            Self::stamp_bsim4_ac_nqs_corrections(ac_matrix, circuit, op_voltages, omega);
         }
-        Self::stamp_bsim4_ac_nqs_corrections(ac_matrix, circuit, op_voltages, omega);
-        Self::stamp_bsim4_trnqs_ac_charge_node_anchors(ac_matrix, circuit);
+        Self::stamp_bsim4_trnqs_ac_charge_node_anchors(
+            ac_matrix,
+            circuit,
+            include_reduced_dynamic_stamps,
+        );
 
         // Voltage sources for AC (MNA branch equations)
         for i in 0..circuit.voltage_sources.len() {
@@ -2866,7 +2882,7 @@ impl Engine {
         op_voltages: &[Value],
         omega: Value,
     ) -> Result<ComplexMatrix, SimulationError> {
-        // PZ adds explicit VBIC and AC-only BSIM3 states in pole_zero.rs.
+        // PZ adds explicit VBIC and AC-only BSIM3/BSIM4 states in pole_zero.rs.
         // Their frequency-dependent reductions must not enter the base G/C.
         let mut ac_matrix = ComplexMatrix::from_real_structure(matrix);
         Self::try_fill_small_signal_matrix_with_vbic_delay_mode(
