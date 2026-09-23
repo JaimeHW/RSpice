@@ -361,9 +361,7 @@ VCLAMP out 0 dc 0
 
 #[test]
 fn pac_exact_mna_fails_closed_for_unrepresented_branch_coupling() {
-    let cases = [
-        (
-            "\
+    let deck = "\
 * current switch requires the actual control branch current spectrum
 iin 0 out dc 0
 vctrl ctrl 0 dc 0
@@ -371,38 +369,46 @@ w1 out 0 vctrl csw
 .model csw iswitch (ron=1 roff=1meg ion=1 ioff=0)
 r1 out 0 1k
 .end
-",
-            "current-controlled switches",
-        ),
-        (
-            "\
+";
+    let netlist = Netlist::parse(deck).expect("unsupported deck still parses");
+    let config = PacConfig::new()
+        .with_fundamental(F0)
+        .with_sweep(1.0e4, 1.0e4, 1)
+        .with_sweep_type(rspice_core::analysis::pac::PacSweepType::Linear)
+        .with_sidebands(0, 0)
+        .with_input_source("iin")
+        .with_output_node("out");
+    let error = Engine::new(SimulationConfig::default())
+        .run_pac(&netlist, config)
+        .expect_err("an incomplete branch model must not publish PAC data");
+    assert!(error.to_string().contains("current-controlled switches"));
+}
+
+#[test]
+fn pac_linearizes_solution_dependent_capacitance() {
+    let deck = "\
 * solution-dependent capacitance requires its charge linearization
 iin 0 out dc 0
 vctrl ctrl 0 dc 0.5
 c1 out 0 C={1p*(1+V(ctrl))}
 r1 out 0 1k
 .end
-",
-            "solution-dependent capacitor",
-        ),
-    ];
-    for (deck, expected) in cases {
-        let netlist = Netlist::parse(deck).expect("unsupported deck still parses");
-        let config = PacConfig::new()
-            .with_fundamental(F0)
-            .with_sweep(1.0e4, 1.0e4, 1)
-            .with_sweep_type(rspice_core::analysis::pac::PacSweepType::Linear)
-            .with_sidebands(0, 0)
-            .with_input_source("iin")
-            .with_output_node("out");
-        let error = Engine::new(SimulationConfig::default())
-            .run_pac(&netlist, config)
-            .expect_err("an incomplete branch model must not publish PAC data");
-        assert!(
-            error.to_string().contains(expected),
-            "failure must identify the unsupported branch family: {error}"
-        );
-    }
+";
+    let netlist = Netlist::parse(deck).unwrap();
+    let config = PacConfig::new()
+        .with_fundamental(F0)
+        .with_sweep(1.0e4, 1.0e4, 1)
+        .with_sweep_type(rspice_core::analysis::pac::PacSweepType::Linear)
+        .with_sidebands(0, 0)
+        .with_input_source("iin")
+        .with_output_node("out");
+    let result = Engine::new(SimulationConfig::default())
+        .run_pac(&netlist, config)
+        .expect("the exact charge Jacobian supports PAC");
+    let actual = result.result.sideband_data[0][0].node_voltages[0];
+    let omega_c_r = 2.0 * std::f64::consts::PI * 1.0e4 * 1.5e-12 * 1.0e3;
+    let expected = Complex64::new(1.0e3, 0.0) / Complex64::new(1.0, omega_c_r);
+    assert!((actual - expected).norm() < 1e-6, "{actual} != {expected}");
 }
 
 #[test]
