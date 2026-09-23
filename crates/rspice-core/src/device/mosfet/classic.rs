@@ -21,6 +21,7 @@ pub(crate) use checkpoint::AcceptedMosfetNonlinearCheckpoint;
 mod construction;
 mod current;
 mod junctions;
+mod meyer;
 mod mos2;
 mod mos3;
 mod nonlinear;
