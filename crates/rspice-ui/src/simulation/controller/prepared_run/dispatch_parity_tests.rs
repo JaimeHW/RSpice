@@ -9,9 +9,10 @@
 //! guarantee without anyone remembering to add a case.
 
 use super::*;
+mod catalog;
 mod soa_curves;
 
-use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
+use crate::product::AnalysisInstanceId;
 use crate::simulation::plan::{AnalysisKind, SimulationPlan};
 use crate::state::{CanonicalAnalysisKind, PreparedRunTaskReceipt};
 
@@ -190,16 +191,6 @@ fn only(state: &mut AppState, kinds: &[AnalysisKind]) -> Vec<AnalysisInstanceId>
 /// The one independent source the fixture design owns.
 const FIXTURE_TONE_SOURCE: &str = "VCC";
 
-/// How many of the 29 kinds with no execution blocker compile a queue from
-/// their default draft on this fixture, measured.
-///
-/// The other four ask for something no default can invent — an output node, an
-/// input source — and never reach a queue, so they make no tag claim to check.
-/// This is a floor on coverage rather than a count of the catalogue: it may
-/// rise freely, and a change that lowers it has narrowed what the ratchet
-/// watches and should say so out loud rather than coast.
-const EXECUTABLE_KINDS_THIS_FIXTURE_COMPILES: usize = 26;
-
 /// Point a PSS instance at the source the fixture design actually has.
 fn name_the_fixture_tone_source(plan: &mut SimulationPlan, pss: AnalysisInstanceId) {
     plan.edit(pss, |draft| {
@@ -221,6 +212,7 @@ fn drive_pss_from_the_fixture_supply(state: &mut AppState) {
         .find(|component| component.name == FIXTURE_TONE_SOURCE)
         .expect("the fixture design owns a supply named VCC");
     // The PSS draft's default fundamental is 1 kHz.
+    supply.kind = crate::state::ComponentType::VoltageSourceSin;
     supply.value = "SIN(0 1 1k)".to_owned();
     state.sync_active_schematic_to_workspace();
 }
@@ -263,76 +255,6 @@ fn task_receipts(state: &AppState) -> Vec<PreparedRunTaskReceipt> {
             .unwrap_or_else(|error| panic!("tag {tag} must produce a task receipt: {error}"))
         })
         .collect()
-}
-
-/// The directive the page shows, the ratchet parses and the queue dispatches
-/// are one string.
-///
-/// [`SimulationController::analysis_draft_directive`] is the whole three-step
-/// build — draft-shaped preview spec, legacy-index fallback, SPICE line — read
-/// against one projected state. It is what the Analyses page displays as an
-/// instance's plan statement, and what `directive_parse_ratchet` proves the
-/// engine reads back. The queue builder spelled those same three steps out by
-/// hand and handed the *first* of them the unprojected application state while
-/// the other two read the projection.
-///
-/// Nothing had diverged yet, and only by accident: `build_manifest_preview_spec`
-/// reads exactly one field of the state, the reference PVT temperature, and no
-/// projection rewrites it. The first draft-shaped builder to read a legacy slot
-/// would have queued a directive the page never showed. Preparation parses the
-/// whole deck before anything runs, so that failure arrives as the entire plan
-/// refusing rather than as one analysis misbehaving.
-#[test]
-fn the_queued_directive_is_the_one_the_plan_displays() {
-    let controller = SimulationController::new();
-    let mut compared = 0_usize;
-    for kind in AnalysisKind::ALL {
-        if kind.execution_blocker().is_some() {
-            continue;
-        }
-        let mut state = preflight_ready_state();
-        only(&mut state, &with_prerequisites(kind));
-        drive_pss_from_the_fixture_supply(&mut state);
-        // A kind whose default draft cannot invent an output node or an input
-        // source never reaches a queue, and makes no claim to check.
-        let Ok(queue) = compiled_queue(&state) else {
-            continue;
-        };
-        let plan = controller
-            .build_analysis_plan(&state)
-            .unwrap_or_else(|errors| panic!("{kind:?} plan: {}", errors.join("; ")));
-        for instance in plan.instances() {
-            let Some(task) = queue
-                .iter()
-                .find(|task| task.instance_id() == instance.id())
-            else {
-                continue;
-            };
-            // Exactly what `surfaces::simulate::plan_statement_for` does for
-            // the row the operator is reading.
-            let mut displayed = state.clone();
-            displayed
-                .sim_setup
-                .apply_analysis_draft_projection(instance.draft());
-            let statement = controller
-                .analysis_draft_directive(&displayed, instance.draft())
-                .unwrap_or_else(|error| {
-                    panic!("{:?} displays no statement: {error}", instance.kind())
-                });
-            assert_eq!(
-                task.queued_analysis().analysis_line,
-                statement,
-                "{:?} dispatches a directive the page does not show",
-                instance.kind()
-            );
-            compared += 1;
-        }
-    }
-    assert!(
-        compared >= EXECUTABLE_KINDS_THIS_FIXTURE_COMPILES,
-        "only {compared} queued analyses were compared against their displayed statement; \
-         this pin is only worth what it covers"
-    );
 }
 
 #[test]
@@ -468,7 +390,7 @@ fn a_kind_without_a_solver_is_still_refused_by_its_own_blocker() {
         blocked += 1;
     }
     assert_eq!(
-        blocked, 3,
+        blocked, 0,
         "the engine-blocked catalogue changed; re-read what the blockers now cover"
     );
 }
@@ -568,95 +490,6 @@ fn an_hb_rooted_plan_prepares_a_whole_receipt() {
             .unwrap_or_else(|error| panic!("preflight reports a {kind:?} plan runnable: {error}"));
         assert_eq!(metadata.task_count, receipt.tasks().len());
     }
-}
-
-#[test]
-fn every_executable_kind_compiles_to_a_tag_the_receipt_layer_accepts() {
-    // The ratchet. A kind with no execution blocker is advertised as runnable,
-    // so every task it compiles to must produce a task receipt. This is what
-    // makes a future kind's tag land on both sides of the protocol at once
-    // instead of a year later, after a preflight has already lied.
-    let mut checked = 0_usize;
-    for kind in AnalysisKind::ALL {
-        if kind.execution_blocker().is_some() {
-            continue;
-        }
-        let mut state = preflight_ready_state();
-        only(&mut state, &with_prerequisites(kind));
-
-        let tags = match queued_tags(&state) {
-            Ok(tags) => tags,
-            // A default draft that needs an authored output or source is not a
-            // tag-protocol failure, and this test is not the place to author
-            // one. What must never happen is a compiled task whose tag the
-            // receipt layer refuses, and an uncompiled plan has none.
-            Err(_) => continue,
-        };
-        assert!(!tags.is_empty(), "{kind:?} compiled to no task at all");
-        for tag in tags {
-            PreparedRunTaskReceipt::new(
-                AnalysisInstanceId::new(),
-                ObjectRevision::INITIAL,
-                Vec::new(),
-                tag,
-                ContentDigest::from_bytes([tag; 32]),
-            )
-            .unwrap_or_else(|error| {
-                panic!("{kind:?} dispatches tag {tag}, which no receipt accepts: {error}")
-            });
-        }
-        checked += 1;
-    }
-    assert!(
-        checked >= EXECUTABLE_KINDS_THIS_FIXTURE_COMPILES,
-        "the ratchet must cover the executable catalogue, not a handful of kinds ({checked})"
-    );
-}
-
-#[test]
-fn a_plan_kinds_declared_tag_is_the_tag_its_task_actually_carries() {
-    // Persisted receipt validation checks a task's tag against the kind of the
-    // plan analysis it names, so that declaration and what dispatch stamps
-    // must be the same number. They were two lists; this is the test that says
-    // they are one. A kind whose default draft needs authoring never reaches
-    // the queue, and an uncompiled plan makes no claim to check.
-    let mut checked = 0_usize;
-    for kind in AnalysisKind::ALL {
-        if kind.execution_blocker().is_some() {
-            continue;
-        }
-        let mut state = preflight_ready_state();
-        let ids = only(&mut state, &with_prerequisites(kind));
-        let own_instance = *ids.last().expect("the kind under test is inserted last");
-
-        let controller = SimulationController::new();
-        let Ok(plan) = controller.build_analysis_plan(&state) else {
-            continue;
-        };
-        let Ok(sealed) = state
-            .model_library_manager
-            .seal_execution_sources_for_plan(&state.sim_setup.model_bindings)
-        else {
-            continue;
-        };
-        let Ok(tasks) = controller.build_queue_from_plan(&state, &plan, &sealed) else {
-            continue;
-        };
-        let own_task = tasks
-            .iter()
-            .find(|task| task.instance_id() == own_instance)
-            .unwrap_or_else(|| panic!("{kind:?} compiles a task of its own"));
-        assert_eq!(
-            crate::simulation::execution::analysis_kind_tag(&own_task.queued_analysis().spec),
-            kind.canonical_kind().tag(),
-            "{kind:?} dispatches a tag its own plan-kind declaration does not name"
-        );
-        checked += 1;
-    }
-    assert!(
-        checked >= EXECUTABLE_KINDS_THIS_FIXTURE_COMPILES,
-        "only {checked} kinds were checked"
-    );
 }
 
 #[test]
