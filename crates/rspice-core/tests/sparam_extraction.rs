@@ -24,15 +24,24 @@ fn configured_ports_are_resolved_after_hierarchy_and_shared_with_noise() {
     ] {
         let netlist =
             Netlist::parse(&format!("* RF fallback\n{declaration}R1 p 0 100\n.end\n")).unwrap();
-        let run = Engine::default()
-            .run_sp_over_grid_with_default_ports_and_abort(
+        let engine = Engine::default();
+        let run = if declaration.is_empty() {
+            engine.run_sp_over_grid_with_default_ports_and_abort(
                 &netlist,
                 &[10.0, 20.0],
                 true,
                 &defaults,
                 &rspice_core::NoAbort,
             )
-            .unwrap();
+        } else {
+            engine.run_sp_over_grid_with_abort(
+                &netlist,
+                &[10.0, 20.0],
+                true,
+                &rspice_core::NoAbort,
+            )
+        }
+        .unwrap();
         let expected_z0 = if declaration.is_empty() { 50.0 } else { 75.0 };
         assert_eq!(run.ports.len(), 1);
         assert_eq!(run.ports[0].z0, expected_z0);
