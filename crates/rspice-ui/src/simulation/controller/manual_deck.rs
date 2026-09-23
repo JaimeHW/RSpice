@@ -1095,7 +1095,7 @@ fn command_to_queue_item(
                     // none; the Studio's own drafts always state one, so the
                     // resolved bound is carried here rather than invented.
                     max_timestep: max_step.unwrap_or(*step),
-                    seed: resolved_transient_noise_seed(&noise, netlist.options.seed),
+                    seed: Some(resolved_transient_noise_seed(&noise, netlist.options.seed)),
                     noise_fmax: noise.fmax,
                     noise_fmin: noise.fmin,
                     scale: noise.scale,

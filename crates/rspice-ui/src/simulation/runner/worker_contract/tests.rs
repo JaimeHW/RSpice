@@ -527,7 +527,7 @@ fn a_wire_request_written_before_the_noise_floor_field_restores_without_one() {
         step_time: 1.0e-9,
         start_time: 0.0,
         max_timestep: 1.0e-9,
-        seed: 97,
+        seed: Some(97),
         noise_fmax: 5.0e8,
         noise_fmin,
         scale: 1.0,

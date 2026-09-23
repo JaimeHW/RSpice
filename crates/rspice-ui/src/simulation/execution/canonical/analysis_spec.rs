@@ -1325,7 +1325,7 @@ pub(super) fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &Analysis
             writer.f64(*step_time);
             writer.f64(*start_time);
             writer.f64(*max_timestep);
-            writer.u64(*seed);
+            writer.u64(seed.unwrap_or(0));
             writer.f64(*noise_fmax);
             writer.f64(*scale);
             writer.bool(*uic);
@@ -1337,6 +1337,11 @@ pub(super) fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &Analysis
             // branches conditionally instead of wrapping them in an option.
             if let Some(noise_fmin) = noise_fmin {
                 writer.f64(*noise_fmin);
+            }
+            // Keep existing explicit-seed identities unchanged while separating
+            // inherited seeds from an explicit zero, with or without a floor.
+            if seed.is_none() {
+                writer.string("inherited-transient-noise-seed");
             }
         }
         AnalysisSpec::DcMismatch {

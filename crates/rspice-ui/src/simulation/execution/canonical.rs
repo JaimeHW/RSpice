@@ -1357,7 +1357,7 @@ mod tests {
             step_time: 1.0e-9,
             start_time: 2.0e-7,
             max_timestep: 2.5e-10,
-            seed: 97,
+            seed: Some(97),
             noise_fmax: 5.0e8,
             noise_fmin,
             scale: 0.5,
@@ -1392,6 +1392,25 @@ mod tests {
         let mut absent = CanonicalWriter::new("test");
         encode_analysis_spec(&mut absent, &spec);
         assert_ne!(authored.finish(), absent.finish());
+
+        for floor in [None, Some(1.0e3)] {
+            let mut inherited = transient_noise(floor);
+            let AnalysisSpec::TransientNoise { seed, .. } = &mut inherited else {
+                unreachable!()
+            };
+            *seed = None;
+            let mut explicit_zero = inherited.clone();
+            let AnalysisSpec::TransientNoise { seed, .. } = &mut explicit_zero else {
+                unreachable!()
+            };
+            *seed = Some(0);
+            let digest = |spec: &AnalysisSpec| {
+                let mut writer = CanonicalWriter::new("test");
+                encode_analysis_spec(&mut writer, spec);
+                writer.finish()
+            };
+            assert_ne!(digest(&inherited), digest(&explicit_zero));
+        }
     }
 
     /// A sensitivity plan restored from a project saved before filters

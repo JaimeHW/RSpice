@@ -192,7 +192,7 @@ fn a_manual_deck_with_noisefmax_is_read_as_transient_noise() {
     assert_eq!(*step_time, 1.0e-9);
     assert_eq!(*start_time, 0.0);
     assert_eq!(*max_timestep, 2.0e-9);
-    assert_eq!(*seed, 97);
+    assert_eq!(*seed, Some(97));
     assert_eq!(*noise_fmax, 5.0e8);
     assert_eq!(*noise_fmin, Some(1.0e3));
     assert_eq!(*scale, 0.5);
@@ -228,13 +228,13 @@ fn the_studio_card_round_trips_through_the_manual_deck_reader() {
     use crate::simulation::controller::SimulationController;
 
     for noise_fmin in [None, Some(1.0e3)] {
-        for scale in [1.0, 0.5] {
+        for scale in [1.0, 0.5, 0.0] {
             let authored = AnalysisSpec::TransientNoise {
                 stop_time: 1.0e-6,
                 step_time: 1.0e-9,
                 start_time: 2.0e-7,
                 max_timestep: 2.5e-10,
-                seed: 97,
+                seed: Some(0),
                 noise_fmax: 5.0e8,
                 noise_fmin,
                 scale,
@@ -365,7 +365,7 @@ fn a_deck_without_a_noise_seed_carries_the_engine_resolved_default() {
     let [AnalysisSpec::TransientNoise { seed, .. }] = specs.as_slice() else {
         panic!("a silent-seed noisy card still plans transient noise: {specs:?}");
     };
-    assert_eq!(*seed, ENGINE_DEFAULT_NOISE_SEED);
+    assert_eq!(*seed, Some(ENGINE_DEFAULT_NOISE_SEED));
 
     // The engine's own answer, measured: the same deck with this seed
     // stated must play the realization the silent deck played.

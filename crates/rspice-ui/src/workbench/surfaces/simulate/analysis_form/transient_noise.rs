@@ -8,7 +8,7 @@ use crate::quantity::QuantityInputKind;
 use crate::simulation::plan::TransientNoiseDraft;
 
 use super::{
-    QuantityPresentationPolicy, UiNumberLocale, hinted_quantity_input_row, input_row,
+    QuantityPresentationPolicy, UiNumberLocale, hinted_input_row, hinted_quantity_input_row,
     quantity_input_row, switch_row,
 };
 
@@ -51,7 +51,7 @@ pub(super) fn fields(
         policy,
         locale,
     );
-    input_row(ui, "Seed", &mut setup.seed);
+    hinted_input_row(ui, "Seed", &mut setup.seed, "blank = inherit; 0 is a seed");
     quantity_input_row(
         ui,
         "Noise fmax",
@@ -73,7 +73,12 @@ pub(super) fn fields(
         policy,
         locale,
     );
-    input_row(ui, "Noise scale", &mut setup.scale);
+    hinted_input_row(
+        ui,
+        "Noise scale",
+        &mut setup.scale,
+        "0 = deterministic baseline",
+    );
     switch_row(
         ui,
         "Use initial conditions",

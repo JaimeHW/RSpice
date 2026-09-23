@@ -716,7 +716,8 @@ pub enum AnalysisSpec {
         step_time: f64,
         start_time: f64,
         max_timestep: f64,
-        seed: u64,
+        /// None inherits `.OPTIONS SEED` or the engine's repeatable default.
+        seed: Option<u64>,
         noise_fmax: f64,
         /// Lowest flicker frequency the run represents, in hertz. `None` is
         /// the engine's derivation of `1/tstop`, and is the value a

@@ -1629,7 +1629,7 @@ mod tests {
             step_time: 1.0e-9,
             start_time: 0.0,
             max_timestep: 1.0e-9,
-            seed: 4_242,
+            seed: Some(4_242),
             noise_fmax: 1.0e9,
             noise_fmin: None,
             scale: 1.0,

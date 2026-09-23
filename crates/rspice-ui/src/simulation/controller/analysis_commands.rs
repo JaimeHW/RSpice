@@ -478,10 +478,8 @@ impl SimulationController {
     /// not display, and the noise keywords are the only thing this card adds
     /// to the one the Transient kind already writes.
     ///
-    /// `NOISESEED=` is always written, even at the draft's default. A run
-    /// dispatched from the Studio has to be reproducible by construction: the
-    /// seed the form shows is the seed that ran, and a card that left the
-    /// engine to resolve one would name a realization the form never stated.
+    /// An explicit seed is written verbatim, including zero. An inherited
+    /// seed omits `NOISESEED` so `.OPTIONS SEED` or the engine default applies.
     /// `NOISESCALE=1` is omitted for the same reason the positional start is:
     /// it is the card's own default and says nothing.
     ///
@@ -526,7 +524,9 @@ impl SimulationController {
         if let Some(noise_fmin) = noise_fmin {
             command.push_str(&format!(" NOISEFMIN={noise_fmin}"));
         }
-        command.push_str(&format!(" NOISESEED={seed}"));
+        if let Some(seed) = seed {
+            command.push_str(&format!(" NOISESEED={seed}"));
+        }
         if *scale != 1.0 {
             command.push_str(&format!(" NOISESCALE={scale}"));
         }
@@ -586,8 +586,7 @@ impl SimulationController {
     /// report's trimming controls and the multiple of sigma it quotes.
     ///
     /// Every keyword but `THRESHOLD` is always written. A Studio-dispatched
-    /// run states what it ran — the same reason `NOISESEED=` is always
-    /// written — so the card cannot change meaning because an engine default
+    /// run states what it ran so the card cannot change meaning because an engine default
     /// moved under a saved plan. `THRESHOLD=` is written only when the form
     /// authored one: the engine's default share is exactly zero, so an
     /// unauthored threshold and `THRESHOLD=0` are the same analysis and share
@@ -1067,7 +1066,7 @@ mod tests {
             step_time: 1.0e-9,
             start_time: 2.0e-7,
             max_timestep: 2.5e-10,
-            seed: 97,
+            seed: Some(97),
             noise_fmax: 5.0e8,
             noise_fmin: None,
             scale: 0.5,
@@ -1182,7 +1181,7 @@ mod tests {
                 .unwrap_or_else(|| panic!("the card turns transient noise on: {card}"));
             assert_eq!(noise.fmax, noise_fmax, "{card}");
             assert_eq!(noise.fmin, noise_fmin, "{card}");
-            assert_eq!(noise.seed, Some(seed), "{card}");
+            assert_eq!(noise.seed, seed, "{card}");
             assert_eq!(noise.scale, scale, "{card}");
         }
     }

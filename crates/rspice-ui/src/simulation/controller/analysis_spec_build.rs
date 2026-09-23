@@ -111,11 +111,7 @@ impl SimulationController {
                 step_time: parse_si(&draft.step_time, "TNOISE step time")?,
                 start_time: parse_si(&draft.start_time, "TNOISE start time")?,
                 max_timestep: parse_si(&draft.max_step, "TNOISE max step")?,
-                seed: draft
-                    .seed
-                    .trim()
-                    .parse::<u64>()
-                    .map_err(|_| "TNOISE seed must be an unsigned integer".to_owned())?,
+                seed: draft.parsed_seed()?,
                 noise_fmax: parse_si(&draft.noise_fmax, "TNOISE maximum noise frequency")?,
                 // Empty is not a missing value: it is the run asking the
                 // engine for its own `1/tstop` floor, which is the widest

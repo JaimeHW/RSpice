@@ -13,6 +13,151 @@ use std::cell::RefCell;
 use std::path::Path;
 
 #[test]
+fn transient_noise_seed_inheritance_and_zero_scale_reach_the_solver() {
+    use crate::simulation::plan::{AnalysisDraft, TransientNoiseDraft};
+    use crate::simulation::runner::worker_contract::WorkerAnalysisSpec;
+
+    let controller = SimulationController::new();
+    let state = AppState::default();
+    let draft = |seed: &str, scale: &str| TransientNoiseDraft {
+        stop_time: "64n".into(),
+        step_time: "1n".into(),
+        start_time: "0".into(),
+        max_step: "1n".into(),
+        seed: seed.into(),
+        noise_fmax: "1G".into(),
+        noise_fmin: "1M".into(),
+        scale: scale.into(),
+        use_initial_conditions: false,
+    };
+    let run = |seed: &str, scale: &str| {
+        let json = serde_json::to_value(draft(seed, scale)).unwrap();
+        let restored: TransientNoiseDraft = serde_json::from_value(json.clone()).unwrap();
+        let mut restored = AnalysisDraft::TransientNoise(restored);
+        restored.prepare_after_restore();
+        assert!(restored.manifest_configuration_error().is_none());
+        let AnalysisDraft::TransientNoise(settings) = &restored else {
+            unreachable!()
+        };
+        assert_eq!(serde_json::to_value(settings).unwrap(), json);
+        let spec = controller
+            .build_manifest_preview_spec(&state, &restored)
+            .unwrap()
+            .unwrap();
+        spec.validate().unwrap();
+        let wire = WorkerAnalysisSpec::try_from(&spec).unwrap();
+        let wire: WorkerAnalysisSpec =
+            serde_json::from_value(serde_json::to_value(wire).unwrap()).unwrap();
+        let restored = AnalysisSpec::from(wire);
+        assert_eq!(spec, restored);
+        let card = SimulationController::build_transient_noise_command(&restored).unwrap();
+        assert_eq!(card.contains("NOISESEED="), !seed.trim().is_empty());
+        let source = format!(
+            "transient noise controls\n.options seed=0\nV1 in 0 1\nR1 in out 10k\nR2 out 0 10k\n{card}\n.end\n"
+        );
+        let parsed = rspice_core::Netlist::parse(&source).unwrap();
+        let noise = parsed.options.transient_noise.unwrap();
+        assert_eq!(noise.seed, settings.parsed_seed().unwrap());
+        assert_eq!(noise.scale, scale.parse::<f64>().unwrap());
+        let result = crate::simulation::runner::pvt_point_evidence::run_declaration(
+            &source,
+            "Transient noise",
+            QueuedAnalysis {
+                spec: restored,
+                config: None,
+                spec_options: Default::default(),
+                analysis_line: card,
+                numeric_override: None,
+            },
+            27.0,
+            crate::simulation::execution::SavePolicy::RetainEngineProducedResults,
+            &[],
+        )
+        .unwrap();
+        assert_eq!(result.analyses.len(), 1);
+        let analysis = &result.analyses[0];
+        assert!(analysis.success, "{:?}", analysis.error_message);
+        assert_eq!(analysis.analysis_type, AnalysisType::TransientNoise);
+        let output = analysis
+            .waveforms
+            .iter()
+            .find(|waveform| {
+                waveform.name.eq_ignore_ascii_case("out")
+                    || waveform.name.eq_ignore_ascii_case("V(out)")
+            })
+            .unwrap();
+        let time = output.x.iter().copied().collect::<Vec<_>>();
+        let values = output.y.iter().copied().collect::<Vec<_>>();
+        assert!(!time.is_empty());
+        assert_eq!(time.len(), values.len());
+        assert!(values.iter().all(|value| value.is_finite()));
+        (time, values)
+    };
+
+    let inherited = run("", "1");
+    let explicit_zero = run("0", "1");
+    let another_seed = run("1", "1");
+    let deterministic = run("0", "0");
+    let doubled = run("0", "2");
+    assert_eq!(
+        inherited, explicit_zero,
+        "blank seed inherits .OPTIONS SEED=0"
+    );
+    assert_ne!(
+        explicit_zero.1, another_seed.1,
+        "zero is a real random seed"
+    );
+    assert_eq!(explicit_zero.0, doubled.0);
+    assert_eq!(explicit_zero.0, deterministic.0);
+    assert!(
+        explicit_zero
+            .1
+            .iter()
+            .any(|value| (value - 0.5).abs() > 1e-8)
+    );
+    for ((single, double), silent) in explicit_zero.1.iter().zip(&doubled.1).zip(&deterministic.1) {
+        assert!(
+            (silent - 0.5).abs() < 1e-10,
+            "zero scale preserves the DC divider solution"
+        );
+        assert!(((double - silent) - 2.0 * (single - silent)).abs() < 1e-10);
+    }
+
+    for seed in ["", "0", "18446744073709551615"] {
+        assert!(
+            controller
+                .build_manifest_preview_spec(
+                    &state,
+                    &AnalysisDraft::TransientNoise(draft(seed, "0"))
+                )
+                .is_ok()
+        );
+    }
+    for seed in ["-1", "1.5", "18446744073709551616", "unfinished"] {
+        assert!(
+            controller
+                .build_manifest_preview_spec(
+                    &state,
+                    &AnalysisDraft::TransientNoise(draft(seed, "1"))
+                )
+                .is_err(),
+            "{seed}"
+        );
+    }
+    for scale in ["-1", "NaN", "inf"] {
+        assert!(
+            controller
+                .build_manifest_preview_spec(
+                    &state,
+                    &AnalysisDraft::TransientNoise(draft("0", scale))
+                )
+                .is_err(),
+            "{scale}"
+        );
+    }
+}
+
+#[test]
 fn sensitivity_dc_limit_and_disabled_ac_fields_reach_the_solver_and_results() {
     use crate::simulation::dialog::sens::{SensConfig, SensDialogState};
     use crate::simulation::plan::AnalysisDraft;

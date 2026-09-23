@@ -64,7 +64,6 @@ pub(super) fn validate(spec: &AnalysisSpec) -> Result<(), String> {
             step_time,
             start_time,
             max_timestep,
-            seed,
             noise_fmax,
             noise_fmin,
             scale,
@@ -82,14 +81,9 @@ pub(super) fn validate(spec: &AnalysisSpec) -> Result<(), String> {
             if !max_timestep.is_finite() || *max_timestep <= 0.0 || max_timestep > stop_time {
                 return Err("TNOISE max_timestep must be finite, > 0, and <= stop_time".to_owned());
             }
-            if *seed == 0
-                || !noise_fmax.is_finite()
-                || *noise_fmax <= 0.0
-                || !scale.is_finite()
-                || *scale <= 0.0
-            {
+            if !noise_fmax.is_finite() || *noise_fmax <= 0.0 || !scale.is_finite() || *scale < 0.0 {
                 return Err(
-                    "TNOISE requires a nonzero seed, positive fmax, and positive scale".to_owned(),
+                    "TNOISE requires positive finite fmax and nonnegative finite scale".to_owned(),
                 );
             }
             // An absent floor is the engine's `1/tstop` derivation and refuses

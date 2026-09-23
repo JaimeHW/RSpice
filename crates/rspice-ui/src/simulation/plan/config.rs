@@ -365,6 +365,7 @@ pub struct TransientNoiseDraft {
     pub step_time: String,
     pub start_time: String,
     pub max_step: String,
+    /// Empty inherits `.OPTIONS SEED` or the engine's reproducible default.
     pub seed: String,
     pub noise_fmax: String,
     /// Lowest flicker frequency the run represents, in hertz. Empty is the
@@ -392,6 +393,20 @@ impl Default for TransientNoiseDraft {
             noise_fmin: String::new(),
             scale: "1".to_owned(),
             use_initial_conditions: false,
+        }
+    }
+}
+
+impl TransientNoiseDraft {
+    pub(crate) fn parsed_seed(&self) -> Result<Option<u64>, String> {
+        let seed = self.seed.trim();
+        if seed.is_empty() {
+            Ok(None)
+        } else {
+            seed.parse::<u64>().map(Some).map_err(|_| {
+                "TNOISE seed must be an integer from 0 to 18446744073709551615, or blank to inherit"
+                    .to_owned()
+            })
         }
     }
 }
@@ -1467,7 +1482,7 @@ fn validate_transient_noise(draft: &TransientNoiseDraft) -> Option<String> {
         if step > stop || max_step > stop {
             return Err("time steps must not exceed stop time".to_owned());
         }
-        parse_positive_usize(&draft.seed, "random seed")?;
+        draft.parsed_seed()?;
         let fmax = parse_positive(&draft.noise_fmax, "maximum noise frequency")?;
         // An empty floor is the engine's `1/tstop` derivation, not a missing
         // value, so it is not an error. An authored one has to sit inside the
@@ -1480,7 +1495,7 @@ fn validate_transient_noise(draft: &TransientNoiseDraft) -> Option<String> {
                 );
             }
         }
-        parse_positive(&draft.scale, "noise scale")?;
+        parse_nonnegative(&draft.scale, "noise scale")?;
         Ok(())
     })()
     .err()
@@ -2124,7 +2139,8 @@ mod tests {
 
         let mut tnoise = TransientNoiseDraft::default();
         tnoise.seed = "0".to_owned();
-        assert!(validate_transient_noise(&tnoise).is_some());
+        tnoise.scale = "0".to_owned();
+        assert!(validate_transient_noise(&tnoise).is_none());
 
         // An empty noise floor is the engine's derivation and refuses
         // nothing; an authored one has to sit under the ceiling.
