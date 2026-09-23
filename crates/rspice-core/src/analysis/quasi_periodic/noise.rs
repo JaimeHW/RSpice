@@ -20,7 +20,10 @@ use super::{
     QuasiPeriodicAdjointSolution, QuasiPeriodicError as Error, QuasiPeriodicGrid,
     QuasiPeriodicTransform, check_abort, finite,
 };
-use crate::numerics::scaled_noise::*;
+use crate::numerics::scaled_noise::{
+    ScaledComplex, ScaledComplexAccumulator, scale_complex_component_exactly,
+    scaled_complex_product3, scaled_flicker_cross_term, validate_scaled_complex,
+};
 use crate::{
     Complex64, ResourceKind, ResourceLimitError, ResourceLimits, Value, abort_signal::AbortSignal,
 };

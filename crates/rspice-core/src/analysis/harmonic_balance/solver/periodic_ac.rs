@@ -12,7 +12,10 @@
 //! memoryless device set the HB runtime supports.
 
 use super::*;
-use crate::numerics::scaled_noise::*;
+use crate::numerics::scaled_noise::{
+    ScaledComplex, ScaledComplexAccumulator, scaled_complex_product3, scaled_flicker_cross_term,
+    scaled_flicker_term, validate_scaled_complex,
+};
 use std::collections::BTreeMap;
 use std::f64::consts::PI;
 
