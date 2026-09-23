@@ -191,7 +191,10 @@ impl Workspace<'_> {
         Ok(correction)
     }
 
-    #[expect(clippy::too_many_arguments, reason = "the bordered solve keeps its numerical inputs explicit")]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the bordered solve keeps its numerical inputs explicit"
+    )]
     fn bordered_krylov(
         &mut self,
         evaluation: &Evaluation,
@@ -310,7 +313,10 @@ fn workspace<'a>(
     Ok(work)
 }
 
-#[expect(clippy::too_many_arguments, reason = "the autonomous solve keeps its numerical inputs explicit")]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the autonomous solve keeps its numerical inputs explicit"
+)]
 pub(crate) fn solve_autonomous_with_abort(
     circuit: &mut impl Circuit,
     grid: Arc<QuasiPeriodicGrid>,
