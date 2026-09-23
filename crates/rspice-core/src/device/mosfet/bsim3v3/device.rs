@@ -29,6 +29,7 @@ use crate::device::traits::{MatrixStamper, NonlinearConvergenceCriteria, Nonline
 use crate::{Complex64, NodeId, Value};
 
 pub(crate) mod checkpoint;
+mod continuation;
 mod periodic;
 
 const TRNQS_SCALING: Value = 1.0e-9;

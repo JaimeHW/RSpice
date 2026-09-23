@@ -34,8 +34,11 @@ operator is not implemented. Periodic noise supports `NOIMOD=1..6`, including
 channel thermal noise, empirical and physical flicker laws, `KF/AF/EF`, and
 source/drain resistor noise. The native `ID` and `FN` mechanisms retain their
 identities as the bias varies; colored noise includes amplitude modulation and
-sideband correlations. PSS/Envelope charge-history continuation remains
-unavailable. Saved HB results carry that continuation limit.
+sideband correlations. Envelope reconstructs BSIM3 terminal and NQS charge
+history from its solved carrier and supports portable checkpoint continuation.
+PSS still requires a shooting-state adapter. Generic saved HB phase projections
+retain the BSIM3 continuation limit; the authenticated Envelope initializer
+supplies the additional history.
 
 The current observer covers the native devices already admitted by HB. It does
 not enable previously unsupported model families or provide Verilog-A terminal

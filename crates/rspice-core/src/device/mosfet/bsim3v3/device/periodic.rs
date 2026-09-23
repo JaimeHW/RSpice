@@ -277,6 +277,54 @@ mod tests {
     }
 
     #[test]
+    fn bsim3_continuation_history_rates_and_limiter_origin_match_native_charge() {
+        for pmos in [false, true] {
+            for nqs in [false, true] {
+                for drain in [0.8, -0.3] {
+                    let mut device = device(pmos, 2, nqs, 0.4);
+                    let state =
+                        [drain, 1.1, 0.1, -0.5, 2e-6].map(|value| value * device.core.mtype);
+                    let rates = [0.03, -0.05, 0.07, -0.11, 0.13];
+                    let h = 1e-6;
+                    let plus = std::array::from_fn::<_, 5, _>(|i| state[i] + h * rates[i]);
+                    let minus = std::array::from_fn::<_, 5, _>(|i| state[i] - h * rates[i]);
+                    let (charges, current) =
+                        device.periodic_history_sample(&state, &rates).unwrap();
+                    let (qp, _) = device.periodic_history_sample(&plus, &rates).unwrap();
+                    let (qm, _) = device.periodic_history_sample(&minus, &rates).unwrap();
+                    for i in 0..5 {
+                        let finite_difference = (qp[i] - qm[i]) / (2.0 * h);
+                        assert!(
+                            (finite_difference - current[i]).abs()
+                                < 1e-22 + 3e-6 * current[i].abs(),
+                            "pmos={pmos} nqs={nqs} drain={drain} state={i}: {} vs {finite_difference}",
+                            current[i]
+                        );
+                    }
+                    device.seed_accepted_periodic_bias(&state);
+                    let (native, _) = device.charge_at(&state);
+                    // Native inverse-mode limiting reconstructs branch
+                    // differences, allowing ordinary subtraction roundoff.
+                    for (actual, expected) in
+                        [native.qg_state(), native.qb_state(), native.qd_state()]
+                            .into_iter()
+                            .zip(&charges[..3])
+                    {
+                        assert!(
+                            (actual - expected).abs()
+                                <= 32.0 * Value::EPSILON * actual.abs().max(expected.abs())
+                        );
+                    }
+                    let saved = device.accepted_nonlinear_checkpoint().unwrap();
+                    assert!(saved.flags[0] && saved.flags[1]);
+                    assert!(!saved.flags[2] && !saved.flags[4]);
+                    assert_eq!(device.bias, device.converged_ref);
+                }
+            }
+        }
+    }
+
+    #[test]
     fn bsim3_periodic_fq_derivatives_conserve_charge_in_both_modes_and_polarities() {
         for pmos in [false, true] {
             for nqs in [false, true] {
