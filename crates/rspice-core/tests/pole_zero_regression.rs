@@ -29,6 +29,32 @@ fn assert_root_present(actual: &[Complex64], expected: Complex64, relative_toler
 }
 
 #[test]
+fn voltage_port_dc_gain_uses_the_selected_source_equation() {
+    for source_orientation in [None, Some(1.0), Some(-1.0)] {
+        let mut g = vec![vec![1e-3, -1e-3], vec![-1e-3, 2e-3]];
+        let mut c = vec![vec![0.0, 0.0], vec![0.0, 1e-6]];
+        let mut config = PoleZeroConfig::poles_and_zeros(0, 1);
+        config.input_is_current = false;
+        if let Some(sign) = source_orientation {
+            g[0].push(sign);
+            g[1].push(0.0);
+            g.push(vec![sign, 0.0, 0.0]);
+            for row in &mut c {
+                row.push(0.0);
+            }
+            c.push(vec![0.0; 3]);
+            config.input_voltage_branch = Some(2);
+            config.input_voltage_gain = sign;
+        }
+        let result = PoleZeroAnalyzer::new(PzMatrix::from_dense(g), PzMatrix::from_dense(c))
+            .analyze(&config)
+            .unwrap();
+        let gain = result.dc_gain.expect("finite divider gain");
+        assert!((gain - 0.5).abs() < 1e-12, "{source_orientation:?}: {gain}");
+    }
+}
+
+#[test]
 fn coupled_descriptor_preserves_complex_conjugate_poles() {
     // det(G + sC) = (s + 1)^2 + 4, hence s = -1 +/- j2.
     // A diagonal -Gii/Cii approximation would incorrectly return two copies

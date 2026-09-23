@@ -114,6 +114,16 @@ impl PoleZeroAnalyzer {
         config: &PoleZeroConfig,
     ) -> Option<Value> {
         let (input_vec, output_vec) = self.build_port_vectors(config)?;
+        if !config.input_is_current {
+            // Drive the same ideal voltage-source equation used for poles
+            // and zeros, including an existing reversed source branch.
+            // A nodal current drive would leave that source at zero volts.
+            let (analyzer, drive, output) =
+                self.build_voltage_input_transfer_system(config, &output_vec)?;
+            let x = analyzer.solve_linear(&analyzer.g_matrix, &drive)?;
+            let gain = output.iter().zip(x).map(|(l, v)| l * v).sum::<Value>();
+            return gain.is_finite().then_some(gain);
+        }
         let x = self.solve_linear(&self.g_matrix, &input_vec)?;
         let vout = output_vec
             .iter()
@@ -121,21 +131,7 @@ impl PoleZeroAnalyzer {
             .map(|(l, v)| l * v)
             .sum::<Value>();
 
-        if config.input_is_current {
-            return vout.is_finite().then_some(vout);
-        }
-
-        let vin = input_vec
-            .iter()
-            .zip(x.iter())
-            .map(|(m, v)| m * v)
-            .sum::<Value>();
-        if !vout.is_finite() || !vin.is_finite() || vin == 0.0 {
-            return None;
-        }
-
-        let gain = vout / vin;
-        gain.is_finite().then_some(gain)
+        vout.is_finite().then_some(vout)
     }
 
     /// Solve linear system using Gaussian elimination
