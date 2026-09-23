@@ -275,13 +275,12 @@ impl FftRequest {
         {
             return Err(format!("FMIN {minimum} exceeds FMAX {maximum}"));
         }
-        if let Some(alfa) = self.alfa {
-            if !alfa.is_finite() || !(1.0..=20.0).contains(&alfa) {
+        if let Some(alfa) = self.alfa
+            && (!alfa.is_finite() || !(1.0..=20.0).contains(&alfa)) {
                 return Err(format!(
                     ".FFT ALFA must be finite and between 1 and 20, found {alfa}"
                 ));
             }
-        }
         Ok(())
     }
 }

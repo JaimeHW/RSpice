@@ -24,10 +24,9 @@ impl SimulationController {
         bytes: std::sync::Arc<[u8]>,
     ) -> Result<(), String> {
         if !matches!(self.current_spec, Some(AnalysisSpec::MonteCarlo { .. }))
-            || !self
+            || self
                 .current_spec_options
-                .as_ref()
-                .is_some_and(|options| options.mc_checkpoint.is_some())
+                .as_ref().is_none_or(|options| options.mc_checkpoint.is_none())
         {
             return Err(
                 "the active analysis did not request Monte Carlo checkpoint capture".into(),

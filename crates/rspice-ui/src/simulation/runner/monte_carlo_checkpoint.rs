@@ -88,14 +88,13 @@ pub(crate) struct MonteCarloCheckpointRequest {
 impl MonteCarloCheckpointRequest {
     pub(crate) fn validate(&self) -> Result<(), SimulationError> {
         let limits = ResourceLimits::default();
-        if let Some(range) = &self.trial_range {
-            if range.is_empty() || range.end - range.start > limits.max_batch_runs {
+        if let Some(range) = &self.trial_range
+            && (range.is_empty() || range.end - range.start > limits.max_batch_runs) {
                 return Err(SimulationError::InvalidConfig(
                     "Monte Carlo checkpoint range must be nonempty and within the batch limit"
                         .into(),
                 ));
             }
-        }
         if let Some(input) = &self.resume {
             input.decode()?;
         }
