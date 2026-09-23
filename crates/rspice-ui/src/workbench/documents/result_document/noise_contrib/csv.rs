@@ -39,9 +39,10 @@ fn append(
         }
         fields[16] = csv_field(&channel.input_source);
         if let Some(sampling) = &channel.sampling
-            && let Ok(json) = serde_json::to_string(sampling) {
-                fields[33] = csv_field(&json);
-            }
+            && let Ok(json) = serde_json::to_string(sampling)
+        {
+            fields[33] = csv_field(&json);
+        }
     }
     contents.push_str(&fields.join(","));
     contents.push('\n');
