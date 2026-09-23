@@ -243,10 +243,10 @@ fn classic_mos_signed_noise_reaches_output_and_port_analyses() {
         SpiceDialect::Ngspice,
         SpiceDialect::Xyce,
     ] {
-        let constants = if dialect == SpiceDialect::Xyce {
-            NoisePhysicalConstants::XYCE_7_10
-        } else {
-            NoisePhysicalConstants::MODERN
+        let constants = match dialect {
+            SpiceDialect::Xyce => NoisePhysicalConstants::XYCE_7_10,
+            SpiceDialect::Ngspice => NoisePhysicalConstants::NGSPICE_46,
+            _ => NoisePhysicalConstants::MODERN,
         };
         let engine = Engine::new(SimulationConfig::default().with_spice_dialect(dialect));
         for (kind, p) in [("NMOS", 1.0), ("PMOS", -1.0)] {
@@ -389,10 +389,10 @@ fn mos1_nlev3_channel_noise_matches_charge_in_triode_and_saturation() {
         config.convergence_config.gmin_target = 0.0;
         config.convergence_config.junction_gmin_target = 0.0;
         let engine = Engine::new(config);
-        let kb = if dialect == SpiceDialect::Xyce {
-            NoisePhysicalConstants::XYCE_7_10.boltzmann
-        } else {
-            NoisePhysicalConstants::MODERN.boltzmann
+        let kb = match dialect {
+            SpiceDialect::Xyce => NoisePhysicalConstants::XYCE_7_10.boltzmann,
+            SpiceDialect::Ngspice => NoisePhysicalConstants::NGSPICE_46.boltzmann,
+            _ => NoisePhysicalConstants::MODERN.boltzmann,
         };
         for (kind, p) in [("NMOS", 1.0), ("PMOS", -1.0)] {
             for inverse in [false, true] {
