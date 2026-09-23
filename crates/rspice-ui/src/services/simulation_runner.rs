@@ -29,6 +29,7 @@ mod qpss;
 mod qpxf;
 pub(crate) use qpac::run_qpac_analysis_from_qpss_on_materialized_with_abort;
 pub(crate) use qpnoise::run_qpnoise_analysis_from_qpss_on_materialized_with_abort;
+#[cfg(test)]
 pub use qpnoise::run_qpnoise_analysis_from_qpss_with_source_path_and_abort;
 pub(crate) use qpss::{
     run_qpss_analysis_on_materialized_with_abort,
@@ -65,7 +66,9 @@ pub(crate) use hb::{
     HbData, HbSpectrum, build_core_hb_config, run_hb_analysis_on_materialized_with_abort,
     run_hb_analysis_with_dc_seed_on_materialized_with_abort,
 };
-pub use hb::{HbRunConfig, HbToneRunConfig, run_hb_analysis_with_source_path_and_abort};
+pub use hb::{HbRunConfig, HbToneRunConfig};
+#[cfg(test)]
+pub use hb::run_hb_analysis_with_source_path_and_abort;
 pub use hbnoise::{HbNoiseReference, HbnoiseFrequencySweep, HbnoiseRunConfig};
 pub(crate) use hbnoise::{integrate_psd, run_hbnoise_analysis_from_hb_on_materialized_with_abort};
 pub(crate) use hbnoise::{validate_hbnoise_frequency_options, validate_noise_sidebands};
@@ -81,6 +84,9 @@ pub(crate) use helpers::{
 };
 pub(crate) use monte_carlo::{
     MonteCarloData, finish_monte_carlo_result,
+};
+#[cfg(test)]
+pub(crate) use monte_carlo::{
     run_monte_carlo_analysis_with_environment_and_source_path_and_abort,
     run_statistical_monte_carlo_with_environment_and_source_path_and_abort,
 };
@@ -102,6 +108,9 @@ pub(crate) use pac_pxf::{
 };
 pub use pac_pxf::{
     PacFrequencySweep, PacRunConfig, PxfFrequencySweep, PxfRunConfig,
+};
+#[cfg(test)]
+pub use pac_pxf::{
     run_pac_analysis_from_hb_with_source_path_and_abort,
     run_pxf_analysis_from_hb_with_source_path_and_abort,
 };
@@ -111,8 +120,9 @@ pub(crate) use pnoise::PnoiseData;
 pub(crate) use pnoise::run_pnoise_analysis_on_materialized_with_abort;
 pub use pnoise::{
     PnoiseFrequencySweep, PnoiseReference, PnoiseRunConfig,
-    run_pnoise_analysis_from_hb_with_source_path_and_abort,
 };
+#[cfg(test)]
+pub use pnoise::run_pnoise_analysis_from_hb_with_source_path_and_abort;
 pub(crate) use psp::run_psp_analysis_from_pss_on_materialized_with_abort;
 pub(crate) use psp::{PspData, run_hbsp_analysis_from_hb_on_materialized_with_abort};
 pub use psp::{PspRunConfig, PspSweep};
@@ -123,9 +133,9 @@ pub use pss::{
 };
 pub use pstb::PstbRunConfig;
 pub(crate) use pstb::{PstbData, run_pstb_analysis_on_materialized_with_abort};
-pub use qpss::{
-    qpss_data_from_operating_point_with_abort, run_qpss_analysis_with_source_path_and_abort,
-};
+pub use qpss::qpss_data_from_operating_point_with_abort;
+#[cfg(test)]
+pub use qpss::run_qpss_analysis_with_source_path_and_abort;
 // DC sweep, noise, pole-zero, and sensitivity have no entry here, and that is
 // the module boundary rather than an omission. The seven fundamental analyses
 // -- DC op, DC sweep, transient, AC, noise, pole-zero, sensitivity -- ship

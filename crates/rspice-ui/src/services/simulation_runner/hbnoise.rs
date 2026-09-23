@@ -5,6 +5,7 @@
 //! cyclostationary adjoint solve to `rspice-core`.
 
 use std::collections::HashSet;
+#[cfg(test)]
 use std::path::Path;
 
 use rspice_core::Value;
@@ -15,8 +16,10 @@ use super::error::{ensure_not_aborted, poll_periodically};
 use super::{
     ServiceRunError, ServiceRunResult, build_resolved_periodic_engine,
     generate_freq_points_with_abort, is_ground_like,
-    netlist_has_independent_source_named_with_abort, parse_runner_netlist_with_abort,
+    netlist_has_independent_source_named_with_abort,
 };
+#[cfg(test)]
+use super::parse_runner_netlist_with_abort;
 
 /// Frequency sweep type for HBNOISE.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
