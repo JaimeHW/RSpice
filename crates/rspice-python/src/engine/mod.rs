@@ -19,11 +19,10 @@
 
 use numpy::{PyArray1, ToPyArray};
 use pyo3::prelude::*;
-use rspice_core::analysis::AcSensitivityOutput;
-use rspice_core::analysis::PssConfig;
 use rspice_core::analysis::harmonic_balance::{HbConfig, HbTone};
 use rspice_core::analysis::pac::{PacConfig, PacSweepType};
 use rspice_core::analysis::stb::StbConfig;
+use rspice_core::analysis::{AcSensitivityOutput, PssConfig};
 use rspice_core::netlist::{
     AnalysisCommand, DcSecondSweep, DcSweepMode, DcSweepSpec, FreqVariation,
     MonteCarloDistribution, PoleZeroAnalysisType, PoleZeroTransferType,
