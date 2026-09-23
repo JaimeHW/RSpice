@@ -413,8 +413,9 @@ fn offered_on_the_form(
     use NumericOverrideOption as O;
 
     match option {
-        // The transient's own `Max step` field writes this one.
-        O::MaximumTimestep => authored,
+        // The catalogue excludes the transient, whose own Max step field
+        // writes this bound. Other time-stepped analyses can author it here.
+        O::MaximumTimestep => true,
         O::IntegrationMethod
         | O::Trtol
         | O::LteReltol

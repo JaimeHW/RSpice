@@ -17,6 +17,51 @@ use crate::simulation::plan::{AnalysisKind, NumericOverrideOption as O, SolverOw
 use crate::workbench::state::SimulationPage;
 
 #[test]
+fn time_stepped_forms_can_author_and_clear_their_step_ceiling() {
+    for kind in [
+        AnalysisKind::Pss,
+        AnalysisKind::Envelope,
+        AnalysisKind::Reliability,
+        AnalysisKind::Optimization,
+    ] {
+        let (mut app, instance) = studio(kind);
+        assert!(
+            offered(&app, instance)
+                .iter()
+                .any(|(option, _)| *option == O::MaximumTimestep)
+        );
+        commit(
+            &mut app,
+            instance,
+            &[OptionEdit::Set(O::MaximumTimestep, "2n".into())],
+        );
+        assert_eq!(
+            authored(&app, instance, O::MaximumTimestep).as_deref(),
+            Some("2n")
+        );
+        let plan = app.state.sim_setup.stable_analysis_plan().unwrap();
+        let options = plan
+            .instance(instance)
+            .unwrap()
+            .numeric_override()
+            .unwrap()
+            .to_spice_options();
+        let netlist =
+            rspice_core::Netlist::parse(&format!("step ceiling\nR1 n 0 1k\n{options}\n.end\n"))
+                .unwrap();
+        let engine = rspice_core::Engine::default().resolved_for_netlist(&netlist);
+        assert_eq!(engine.config().transient_timeint_max_timestep, Some(2e-9));
+        commit(&mut app, instance, &[OptionEdit::Clear(O::MaximumTimestep)]);
+        assert_eq!(authored(&app, instance, O::MaximumTimestep), None);
+        assert!(
+            offered(&app, instance)
+                .iter()
+                .any(|(option, _)| *option == O::MaximumTimestep)
+        );
+    }
+}
+
+#[test]
 fn hb_startup_field_tracks_selected_envelope_initializer() {
     let mut draft = AnalysisDraft::for_kind(AnalysisKind::Envelope);
     for method in [0, 1, 2] {
