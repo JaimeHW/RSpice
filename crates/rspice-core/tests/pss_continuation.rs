@@ -1104,7 +1104,7 @@ fn charged_diode_continuation_preserves_the_periodic_orbit_from_time_zero() {
 }
 
 #[test]
-fn continuation_fails_closed_for_unadvanced_dynamic_state_families() {
+fn continuation_retains_supported_behavioral_state_and_refuses_unadvanced_families() {
     let engine = Engine::new(SimulationConfig::default());
 
     let coupled = Netlist::parse(
@@ -1129,7 +1129,7 @@ fn continuation_fails_closed_for_unadvanced_dynamic_state_families() {
     );
 
     let behavioral = Netlist::parse(
-        "* behavioral accepted-step expression memory is not in shooting x\n\
+        "* behavioral accepted-step expression memory is retained in shooting x\n\
          V1 in 0 SIN(0 1 1meg)\n\
          B1 out 0 V={SDT(V(in))}\n\
          R1 out 0 1k\n\
@@ -1137,15 +1137,16 @@ fn continuation_fails_closed_for_unadvanced_dynamic_state_families() {
          .end\n",
     )
     .expect("behavioral deck parses");
-    let behavioral_error = engine
+    let (behavioral_pss, behavioral_state) = engine
         .run_pss_with_continuation_state(&behavioral, compact_pss_config())
-        .expect_err("behavioral accepted-step memory must fail before solving");
-    assert!(
-        behavioral_error
-            .to_string()
-            .contains("behavioral-source accepted-step memory"),
-        "unexpected behavioral-state diagnostic: {behavioral_error}"
+        .expect("behavioral integral state is represented in the PSS continuation");
+    assert_eq!(
+        behavioral_pss.result.time.last().copied(),
+        Some(behavioral_state.period())
     );
+    engine
+        .run_tran_from_pss_state(&behavioral, &behavioral_state, 100e-9, 10e-9)
+        .expect("the retained behavioral state resumes transient integration");
 
     let thermal_resistor = Netlist::parse(
         "* electrothermal accepted temperature is outside the shooting state\n\
