@@ -21,8 +21,9 @@ fn unusable_explicit_checkpoint_is_refused_before_write_and_preserves_destinatio
         &deck,
         "checkpoint preflight blocker\n\
          V1 in 0 1\n\
-         B1 out 0 V={SDT(V(in))}\n\
+         S1 out 0 in 0 switchmod\n\
          R1 out 0 1k\n\
+         .model switchmod sw (ron=1 roff=1meg vt=0.5 vh=0.1)\n\
          .TRAN 1n 10n\n\
          .END\n",
     )
@@ -51,7 +52,7 @@ fn unusable_explicit_checkpoint_is_refused_before_write_and_preserves_destinatio
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         stderr.contains("checkpoint capability preflight failed")
-            && stderr.contains("behavioral-source accepted SDT state is not checkpointed"),
+            && stderr.contains("voltage-controlled switch"),
         "CLI must surface core checkpoint capability failure: {stderr}"
     );
     assert_eq!(
