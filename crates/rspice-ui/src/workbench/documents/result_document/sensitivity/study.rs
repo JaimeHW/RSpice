@@ -421,7 +421,7 @@ fn paint_frequency_profile(
     // than bridged, because a line drawn through a point the engine refused
     // would state a derivative it never computed.
     let mut chain: Vec<egui::Pos2> = Vec::new();
-    let mut flush = |chain: &mut Vec<egui::Pos2>| {
+    let flush = |chain: &mut Vec<egui::Pos2>| {
         if chain.len() >= 2 {
             painter.add(egui::Shape::line(
                 std::mem::take(chain),

@@ -1838,11 +1838,10 @@ fn show_editor(ui: &mut Ui, state: &mut AppState) {
                     });
                 }
                 ui.push_id(("measurement-reference", idx), |ui| {
-                    if draft.reference_import.show(ui, &mut draft.measurement_reference) {
-                        if let (Some(builder), Some(reference)) = (&mut draft.measurement_builder, &draft.measurement_reference) {
+                    if draft.reference_import.show(ui, &mut draft.measurement_reference)
+                        && let (Some(builder), Some(reference)) = (&mut draft.measurement_builder, &draft.measurement_reference) {
                             builder.set_reference_path(&reference.logical_path);
                         }
-                    }
                 });
                 ui.horizontal(|ui| {
                     ui.add_space(10.0);

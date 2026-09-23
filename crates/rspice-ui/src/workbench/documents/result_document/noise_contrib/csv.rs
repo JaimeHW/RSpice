@@ -38,11 +38,10 @@ fn append(
             fields[27] = format!("{:.17e}", channel.output_frequency(offset));
         }
         fields[16] = csv_field(&channel.input_source);
-        if let Some(sampling) = &channel.sampling {
-            if let Ok(json) = serde_json::to_string(sampling) {
+        if let Some(sampling) = &channel.sampling
+            && let Ok(json) = serde_json::to_string(sampling) {
                 fields[33] = csv_field(&json);
             }
-        }
     }
     contents.push_str(&fields.join(","));
     contents.push('\n');

@@ -434,8 +434,7 @@ fn build(
                 .iter()
                 .enumerate()
                 .all(|(row, trial)| trial.index == row))
-        || (rows_are_members
-            && !variables.is_empty()
+        || (!variables.is_empty()
             && variables.iter().all(|variable| {
                 member_measurements
                     .iter()

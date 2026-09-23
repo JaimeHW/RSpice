@@ -94,8 +94,8 @@ impl ReferenceImport {
             {
                 self.start(ui, None);
             }
-            if let Some(source) = reference.as_ref() {
-                if ui
+            if let Some(source) = reference.as_ref()
+                && ui
                     .add_enabled(
                         self.pending.is_none(),
                         egui::Button::new("Export reference…"),
@@ -104,7 +104,6 @@ impl ReferenceImport {
                 {
                     self.start(ui, Some(source));
                 }
-            }
             if reference.is_some() && ui.button("Remove reference").clicked() {
                 self.pending = None;
                 *reference = None;
