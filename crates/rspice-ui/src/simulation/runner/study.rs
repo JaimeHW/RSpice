@@ -3,6 +3,7 @@
 mod analysis;
 pub(crate) mod monte_carlo;
 pub use analysis::StudyAnalysis;
+#[cfg(test)]
 pub(crate) use monte_carlo::run_monte_carlo;
 mod hb;
 mod optimization;

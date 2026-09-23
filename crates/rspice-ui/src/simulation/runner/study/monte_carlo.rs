@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::simulation::runner::spec;
-use checkpoint::{Observations, StudyMonteCarloCheckpoint};
+use checkpoint::StudyMonteCarloCheckpoint;
 use rspice_core::analysis::monte_carlo::Distribution;
 use rspice_core::engine::{MonteCarloStudyConfig, MonteCarloVariationSource};
 use rspice_core::netlist::{AnalysisCommand, MonteCarloDistribution};
@@ -153,7 +153,7 @@ where
             .as_ref()
             .and_then(|value| value.checkpoint.as_ref())
             .map(|value| value.observations.clone())
-            .unwrap_or_else(Observations::new),
+            .unwrap_or_default(),
     );
     let retaining = continuation.is_some();
     let evaluate = |engine: &rspice_core::Engine,
@@ -260,13 +260,11 @@ where
             && numerical.completed_trials() > 0
             && (numerical.completed_trials() > last_published.load(Ordering::Relaxed)
                 || last_published.load(Ordering::Relaxed) == initial)
-        {
-            if let Err(error) =
+            && let Err(error) =
                 (continuation.publish)(continuation.checkpoint.as_ref().expect("captured"))
             {
                 fatal.lock().unwrap().get_or_insert(error);
             }
-        }
         result
     } else {
         engine.run_monte_carlo_measurements_with_abort(&circuit, &study, &signal, evaluate)

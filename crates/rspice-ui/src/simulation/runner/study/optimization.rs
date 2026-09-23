@@ -60,14 +60,13 @@ pub(crate) fn run_optimization(
             )));
         }
     }
-    if let Some(point) = &environment {
-        if !point.temperature_celsius.is_finite()
+    if let Some(point) = &environment
+        && (!point.temperature_celsius.is_finite()
             || point.temperature_celsius <= -273.15
-            || point.supply_voltage.is_some() != point.nominal_supply_voltage.is_some()
+            || point.supply_voltage.is_some() != point.nominal_supply_voltage.is_some())
         {
             return Err(SimulationError::InvalidConfig("Optimization Run Set requires a physical temperature and a complete supply/nominal pair".into()));
         }
-    }
     let engine = rspice_core::Engine::default().resolved_for_netlist(&circuit);
     let mut limits = engine.config().resource_limits;
     let retained_objectives = base
