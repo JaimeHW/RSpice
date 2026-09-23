@@ -125,6 +125,10 @@ impl Linearization {
             .collect::<Result<Vec<_>, _>>()?;
         let mut derivatives = Vec::with_capacity(grid.sample_count());
         let mut state = vec![0.0; unknowns];
+        #[expect(
+            clippy::needless_range_loop,
+            reason = "the collocation index addresses every state waveform and grid phase"
+        )]
         for time in 0..grid.sample_count() {
             check_abort(abort)?;
             for (row, value) in state.iter_mut().enumerate() {

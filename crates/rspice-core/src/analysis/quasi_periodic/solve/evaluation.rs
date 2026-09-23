@@ -99,6 +99,10 @@ impl Workspace<'_> {
         let mut charge = Vec::new();
         let mut jacobian = Vec::new();
         let mut retained = 0usize;
+        #[expect(
+            clippy::needless_range_loop,
+            reason = "the collocation index addresses every state waveform and grid phase"
+        )]
         for time in 0..count {
             check_abort(abort)?;
             for (row, value) in state.iter_mut().enumerate() {
