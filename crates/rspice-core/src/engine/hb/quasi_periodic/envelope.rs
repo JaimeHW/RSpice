@@ -10,6 +10,11 @@ use crate::engine::PeriodicDcOperatingPointSeed;
 use crate::engine::transient::source_events::{PhysicalSourceEvents, PhysicalSourceOwner};
 mod events;
 mod event_topology;
+mod mission;
+pub use mission::{
+    NetlistEnvelopeMission, NetlistEnvelopeSample, NetlistEnvelopeTransition,
+    SpectralEnvelopeMissionConfig, SpectralEnvelopeStepping,
+};
 pub use events::EnvelopeSourceEvent;
 pub use events::NetlistEnvelopeEvent;
 

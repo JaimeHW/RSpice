@@ -2,6 +2,7 @@ use super::*;
 use crate::abort_signal::ImmediateAbort;
 use crate::config::SimulationConfig;
 mod transition;
+mod mission;
 
 fn config(names: &[&str]) -> SpectralEnvelopeConfig {
     SpectralEnvelopeConfig {

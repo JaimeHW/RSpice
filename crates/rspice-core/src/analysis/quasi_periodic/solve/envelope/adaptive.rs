@@ -14,7 +14,7 @@ pub struct SpectralEnvelopeControl {
 }
 
 impl SpectralEnvelopeControl {
-    fn validate(&self, previous: &SpectralEnvelopeState) -> Result<(), Error> {
+    pub(crate) fn validate(&self, unknowns: usize) -> Result<(), Error> {
         if !self.minimum_step.is_finite()
             || self.minimum_step <= 0.0
             || !self.maximum_step.is_finite()
@@ -22,7 +22,7 @@ impl SpectralEnvelopeControl {
             || !self.relative_tolerance.is_finite()
             || self.relative_tolerance < 0.0
             || self.relative_tolerance >= 1.0
-            || self.absolute_tolerances.len() != previous.spectra().len()
+            || self.absolute_tolerances.len() != unknowns
             || self
                 .absolute_tolerances
                 .iter()
@@ -128,7 +128,7 @@ where
     ) -> Result<SpectralEnvelopeState, Error>,
 {
     check_abort(abort)?;
-    control.validate(previous)?;
+    control.validate(previous.spectra().len())?;
     if !requested_step.is_finite()
         || requested_step <= 0.0
         || !deadline.is_finite()

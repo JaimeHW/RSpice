@@ -62,16 +62,18 @@ pub use psp::{PreparedPsp, PspAnalysisResult, PspNoiseCorrelation};
 pub use quasi_periodic::{
     EnvelopeCarrierBasis, EnvelopeSourceEvent, EnvelopeSourceSide, NetlistEnvelopeAdvance,
     NetlistEnvelopeEvent, NetlistEnvelopeState, PreparedSpectralEnvelope, SpectralEnvelopeConfig,
-    QpacAnalysisResult, QpacInputQuantity, QpacRequest, QpacResultMetadata, QpnoiseAnalysisResult,
-    QpnoiseContributorRank, QpnoiseFrequencyAxis, QpnoiseInput, QpnoiseIntegrated,
-    QpnoiseIntegration, QpnoiseIntegrationMethod, QpnoiseLattices, QpnoiseNoiseFigure,
-    QpnoiseObservation, QpnoiseOutput, QpnoiseOutputSpectrum, QpnoiseQuantity, QpnoiseReference,
-    QpnoiseRequest, QpnoiseResultMetadata, QpnoiseSourceLayout, QpnoiseSources,
-    QpnoiseSpectrumLayout, QpnoiseTransferMetadata, QpnoiseUnavailable, QpnoiseValue, QpssConfig,
-    QpssInitialState, QpssOperatingPoint, QpssOperatingPointMetadata, QpssOscillator,
-    QpssOscillatorSeed, QpssSourceTone, QpxfAnalysisResult, QpxfFrequencyAxis, QpxfGroupDelay,
-    QpxfInputLattices, QpxfInputSource, QpxfOutput, QpxfQuantity, QpxfRequest, QpxfResultMetadata,
-    QpxfSources, QpxfTransfer,
+    NetlistEnvelopeMission, NetlistEnvelopeSample, NetlistEnvelopeTransition,
+    SpectralEnvelopeMissionConfig, SpectralEnvelopeStepping, QpacAnalysisResult, QpacInputQuantity,
+    QpacRequest, QpacResultMetadata, QpnoiseAnalysisResult, QpnoiseContributorRank,
+    QpnoiseFrequencyAxis, QpnoiseInput, QpnoiseIntegrated, QpnoiseIntegration,
+    QpnoiseIntegrationMethod, QpnoiseLattices, QpnoiseNoiseFigure, QpnoiseObservation,
+    QpnoiseOutput, QpnoiseOutputSpectrum, QpnoiseQuantity, QpnoiseReference, QpnoiseRequest,
+    QpnoiseResultMetadata, QpnoiseSourceLayout, QpnoiseSources, QpnoiseSpectrumLayout,
+    QpnoiseTransferMetadata, QpnoiseUnavailable, QpnoiseValue, QpssConfig, QpssInitialState,
+    QpssOperatingPoint, QpssOperatingPointMetadata, QpssOscillator, QpssOscillatorSeed,
+    QpssSourceTone, QpxfAnalysisResult, QpxfFrequencyAxis, QpxfGroupDelay, QpxfInputLattices,
+    QpxfInputSource, QpxfOutput, QpxfQuantity, QpxfRequest, QpxfResultMetadata, QpxfSources,
+    QpxfTransfer,
 };
 pub use state::{HbEnvelopeContinuationState, HbEnvelopeStateGuarantee};
 
