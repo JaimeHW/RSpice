@@ -4232,12 +4232,14 @@ impl Engine {
                 false,
             );
             Self::stamp_bsim3_transient_companions(
-                circuit,
-                matrix,
-                rhs,
-                linearize_at,
-                coeff,
-                dt,
+                super::transient::TransientCompanionStamp {
+                    circuit,
+                    matrix,
+                    rhs,
+                    voltages: linearize_at,
+                    coeff,
+                    dt,
+                },
                 bsim3_history,
                 physical_probe,
             );

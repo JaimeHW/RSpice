@@ -1691,12 +1691,14 @@ impl Engine {
             );
         }
         Self::stamp_bsim3_transient_companions(
-            circuit,
-            matrix,
-            rhs,
-            solution,
-            &companion_coeff,
-            dt,
+            TransientCompanionStamp {
+                circuit,
+                matrix,
+                rhs,
+                voltages: solution,
+                coeff: &companion_coeff,
+                dt,
+            },
             ctx.bsim3_history,
             evaluation_mode
                 == crate::device::veriloga_builtins::GeneratedEvaluationMode::StaticProbe,

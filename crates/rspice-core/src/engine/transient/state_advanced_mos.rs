@@ -687,15 +687,18 @@ impl Engine {
     /// charge-deficit row from b3ld.c.
     #[inline]
     pub(in crate::engine) fn stamp_bsim3_transient_companions(
-        circuit: &crate::circuit::CircuitData,
-        matrix: &mut crate::solver::StaticMatrix,
-        rhs: &mut [Value],
-        voltages: &[Value],
-        coeff: &CompanionCoefficients,
-        dt: Value,
+        stamp: TransientCompanionStamp<'_, '_>,
         history: &Bsim3TransientHistory,
         physical_probe: bool,
     ) {
+        let TransientCompanionStamp {
+            circuit,
+            matrix,
+            rhs,
+            voltages,
+            coeff,
+            dt,
+        } = stamp;
         if !circuit.has_bsim3v3_devices() {
             return;
         }
