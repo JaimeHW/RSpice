@@ -174,6 +174,23 @@ pub(crate) fn qualified_real_eigenspectrum(
     matrix: &[Vec<Value>],
     abort: &dyn AbortSignal,
 ) -> Result<QualifiedOrdinarySpectrum, OrdinarySpectrumError> {
+    match qualified_eigenspectrum_impl(matrix, abort, false) {
+        // Nearly defective real Schur blocks can lose accuracy during the
+        // real-to-complex eigenvector back substitution. Retry a
+        // complex Schur solve, then apply the identical residual certificate
+        // in the original coordinates. Never relax the qualification bound.
+        Err(OrdinarySpectrumError::NumericalQualification { .. }) => {
+            qualified_eigenspectrum_impl(matrix, abort, true)
+        }
+        result => result,
+    }
+}
+
+fn qualified_eigenspectrum_impl(
+    matrix: &[Vec<Value>],
+    abort: &dyn AbortSignal,
+    complex_schur: bool,
+) -> Result<QualifiedOrdinarySpectrum, OrdinarySpectrumError> {
     ensure_not_aborted(abort)?;
     let n = matrix.len();
     if n == 0 {
@@ -220,7 +237,14 @@ pub(crate) fn qualified_real_eigenspectrum(
     }
 
     ensure_not_aborted(abort)?;
-    let eigen = Eigen::<f64>::new_from_real(faer_matrix.as_ref());
+    let eigen = if complex_schur {
+        let complex = Mat::from_fn(n, n, |row, col| {
+            Complex64::new(faer_matrix[(row, col)], 0.0)
+        });
+        Eigen::<f64>::new(complex.as_ref())
+    } else {
+        Eigen::<f64>::new_from_real(faer_matrix.as_ref())
+    };
     ensure_not_aborted(abort)?;
     let eigen = eigen.map_err(|_| OrdinarySpectrumError::SolverFailure)?;
 
