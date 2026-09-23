@@ -49,7 +49,7 @@ pub(crate) fn run_qpss_analysis_with_dc_seed_on_materialized_with_abort(
 ) -> ServiceRunResult<QpssData> {
     ensure_not_aborted(abort)?;
     let engine = build_resolved_periodic_engine(
-        &netlist,
+        netlist,
         config.solver.relative_tolerance,
         "QPSS resolved engine configuration is invalid",
     )?;
@@ -59,7 +59,7 @@ pub(crate) fn run_qpss_analysis_with_dc_seed_on_materialized_with_abort(
     }
     .map_err(|error| ServiceRunError::from_core("QPSS", error))?;
     engine
-        .validate_qpss_operating_point_with_abort(&netlist, &point, abort)
+        .validate_qpss_operating_point_with_abort(netlist, &point, abort)
         .map_err(|error| ServiceRunError::from_core("QPSS retained state", error))?;
     qpss_data_from_operating_point_with_abort(Arc::new(point), abort)
 }

@@ -288,7 +288,7 @@ pub(crate) fn run_pstb_analysis_on_materialized_with_abort(
     ensure_not_aborted(abort)?;
     config.validate().map_err(ServiceRunError::Failure)?;
     let engine = build_resolved_periodic_engine(
-        &netlist,
+        netlist,
         config.pss_tolerance,
         "PSTB resolved producer configuration is invalid",
     )?;
@@ -303,7 +303,7 @@ pub(crate) fn run_pstb_analysis_on_materialized_with_abort(
             // refuses a carrier whose spectral capacity is below its MAXHARM.
             owned_carrier = engine
                 .run_pss_operating_point_with_abort(
-                    &netlist,
+                    netlist,
                     rspice_core::analysis::PssConfig::new(config.pss_fundamental_freq)
                         .with_harmonics(config.pss_num_harmonics.max(config.max_harmonics))
                         .with_tolerance(config.pss_tolerance)
@@ -317,7 +317,7 @@ pub(crate) fn run_pstb_analysis_on_materialized_with_abort(
     };
 
     let stability = engine
-        .run_pstb_card_from_pss_with_abort(&netlist, &card, carrier, abort)
+        .run_pstb_card_from_pss_with_abort(netlist, &card, carrier, abort)
         .map_err(|error| ServiceRunError::from_core("PSTB error", error))?;
     build_pstb_data(stability, config.num_multipliers, abort)
 }

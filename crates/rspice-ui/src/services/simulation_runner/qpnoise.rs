@@ -31,11 +31,11 @@ pub(crate) fn run_qpnoise_analysis_from_qpss_on_materialized_with_abort(
     // The producer's engine settings authenticate the orbit. QPNOISE's authored
     // adjoint tolerance configures its translated solve, not a new producer.
     let engine = build_resolved_periodic_engine(
-        &netlist,
+        netlist,
         point.config().solver.relative_tolerance,
         "QPNOISE resolved engine configuration is invalid",
     )?;
     engine
-        .run_qpnoise_card_from_qpss_with_abort(&netlist, card, point, abort)
+        .run_qpnoise_card_from_qpss_with_abort(netlist, card, point, abort)
         .map_err(|error| ServiceRunError::from_core("QPNOISE", error))
 }

@@ -320,7 +320,7 @@ fn run_pnoise_analysis_impl(
     if let Some(carrier) = carrier {
         carrier
             .accepted_by(config.carrier, ".PNOISE")
-            .map_err(|reason| ServiceRunError::Failure(reason))?;
+            .map_err(ServiceRunError::Failure)?;
     }
     ensure_not_aborted(abort)?;
 
@@ -357,7 +357,7 @@ pub(crate) fn run_pnoise_analysis_on_materialized_with_abort(
     if config.noise_ref == PnoiseReference::Input {
         let source_name = config.input_source.trim();
         if !source_name.is_empty()
-            && !netlist_has_independent_source_named_with_abort(&netlist, source_name, abort)?
+            && !netlist_has_independent_source_named_with_abort(netlist, source_name, abort)?
         {
             return Err(PnoiseRunError::Resolution(format!(
                 "PNOISE input source '{}' is not an independent voltage/current source in the netlist",
@@ -367,7 +367,7 @@ pub(crate) fn run_pnoise_analysis_on_materialized_with_abort(
     }
 
     let engine = build_resolved_periodic_engine(
-        &netlist,
+        netlist,
         carrier.engine_tolerance(config.pss_tolerance),
         "PNOISE resolved producer configuration is invalid",
     )?;

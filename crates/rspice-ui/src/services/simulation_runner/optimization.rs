@@ -398,16 +398,15 @@ pub(crate) fn run_optimization_analysis_with_environment_and_source_path_and_abo
                 ServiceRunError::Failure(format!("Optimization objective unit: {error}"))
             })?;
     }
-    if let Some(point) = environment {
-        if !point.temperature_celsius.is_finite()
+    if let Some(point) = environment
+        && (!point.temperature_celsius.is_finite()
             || point.temperature_celsius <= -273.15
-            || point.supply_voltage.is_some() != point.nominal_supply_voltage.is_some()
+            || point.supply_voltage.is_some() != point.nominal_supply_voltage.is_some())
         {
             return Err(ServiceRunError::Failure(
                 "Optimization Run Set requires a physical temperature and a complete supply/nominal pair".into(),
             ));
         }
-    }
     let netlist = parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
     for variable in &config.variables {
         if netlist.params.get(&variable.name).is_none() {
@@ -887,8 +886,8 @@ pub(crate) fn materialize_optimization_candidate(
         })?
         .into_parts()
         .1;
-    if let Some(point) = environment {
-        if let (Some(supply), Some(nominal)) = (point.supply_voltage, point.nominal_supply_voltage)
+    if let Some(point) = environment
+        && let (Some(supply), Some(nominal)) = (point.supply_voltage, point.nominal_supply_voltage)
         {
             super::apply_voltage_corner(
                 &mut candidate,
@@ -898,7 +897,6 @@ pub(crate) fn materialize_optimization_candidate(
                 abort,
             )?;
         }
-    }
     Ok(candidate)
 }
 

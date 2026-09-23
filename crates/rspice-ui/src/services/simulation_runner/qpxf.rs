@@ -15,11 +15,11 @@ pub(crate) fn run_qpxf_analysis_from_qpss_on_materialized_with_abort(
     // The producer's engine settings authenticate the orbit. QPXF's authored
     // adjoint tolerance configures its translated solve, not a new producer.
     let engine = build_resolved_periodic_engine(
-        &netlist,
+        netlist,
         point.config().solver.relative_tolerance,
         "QPXF resolved engine configuration is invalid",
     )?;
     engine
-        .run_qpxf_card_from_qpss_with_abort(&netlist, card, point, abort)
+        .run_qpxf_card_from_qpss_with_abort(netlist, card, point, abort)
         .map_err(|error| ServiceRunError::from_core("QPXF", error))
 }
