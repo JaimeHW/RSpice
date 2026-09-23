@@ -8,7 +8,10 @@
 //! every keyword card shares live in [`super::analysis_card_scan`]; this
 //! module adds the ones only the periodic family defines.
 
-use super::analysis_card_scan::*;
+use super::analysis_card_scan::{
+    at_card_end, at_keyword, bind_once, card_bool, card_count, card_error, card_name, card_number,
+    card_output_probe, card_signed, take_keyword,
+};
 use super::*;
 
 mod sampling;
@@ -1565,7 +1568,7 @@ mod tests {
 
     #[test]
     fn sampled_pnoise_card_accepts_all_controls_and_refuses_inapplicable_fields() {
-        use crate::analysis::pnoise::{PeriodicNoiseEdgeDirection, PeriodicNoiseSampling};
+        use crate::netlist::{PeriodicNoiseEdgeDirection, PeriodicNoiseSampling};
         let card = pnoise(
             ".pnoise dec 10 1 100 out=out sampling=delay threshold=0.3 direction=falling occurrence=2 phasetol=1u minslew=2k refout=V(clk,vss) refthreshold=0.7 refdirection=either refoccurrence=3 refphasetol=2u refminslew=3k periods=4",
         );
