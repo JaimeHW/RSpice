@@ -16,6 +16,7 @@ mod capacitors;
 mod currents;
 mod dc;
 mod devices;
+mod envelope;
 mod integrals;
 mod krylov;
 mod linear;

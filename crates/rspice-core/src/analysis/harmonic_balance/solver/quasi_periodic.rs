@@ -574,7 +574,7 @@ impl HbSolver {
         self.validate_quasi_periodic_circuit()
     }
 
-    fn validate_quasi_periodic_circuit(&self) -> Result<(), Error> {
+    pub(super) fn validate_quasi_periodic_circuit(&self) -> Result<(), Error> {
         self.validate_nonlinear_device_parameters()
             .map_err(device_error)?;
         if self
