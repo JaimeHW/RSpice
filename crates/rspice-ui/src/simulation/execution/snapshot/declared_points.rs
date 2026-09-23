@@ -470,7 +470,14 @@ fn point_base_analysis_request(
                 uic: *uic,
             },
             None,
-            format!(".tran {step_time} {stop_time} {start_time}"),
+            crate::simulation::config::TransientAnalysisConfig {
+                stop_time: *stop_time,
+                step_time: *step_time,
+                start_time: *start_time,
+                max_timestep: *max_timestep,
+                uic: *uic,
+            }
+            .to_spice(),
         ),
         CornerBaseMode::Ac {
             start_freq,

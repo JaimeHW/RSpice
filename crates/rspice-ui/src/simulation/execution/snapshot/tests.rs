@@ -2173,6 +2173,51 @@ fn transient_corner_parts() -> SnapshotParts {
     corner_run
 }
 
+#[test]
+fn pvt_base_transient_window_reaches_each_point_and_its_displayed_card() {
+    use crate::services::simulation_runner::CornerBaseMode;
+    let mode = CornerBaseMode::TransientWindow {
+        stop_time: 100e-9,
+        step_time: 1e-9,
+        start_time: 20e-9,
+        max_timestep: Some(0.5e-9),
+        uic: true,
+    };
+    for temperature in [false, true] {
+        let mut input = transient_corner_parts();
+        let mut declaration = if temperature {
+            temperature_task(vec![27.0, 125.0])
+        } else {
+            transient_corner_task()
+        };
+        if temperature {
+            declaration.spec_options.temp.as_mut().unwrap().base_mode = mode.clone();
+        } else {
+            declaration.spec_options.corner.as_mut().unwrap().base_mode = mode.clone();
+        }
+        input.tasks = vec![prepared("pvt", "PVT transient", declaration)];
+        let snapshot = PreparedRunSnapshot::new(input).unwrap();
+        let points: Vec<_> = snapshot
+            .tasks
+            .iter()
+            .filter(|task| task.declared_point.is_some())
+            .collect();
+        assert_eq!(points.len(), 2);
+        for task in points {
+            assert!(matches!(task.task.spec,
+                AnalysisSpec::Transient { stop_time, step_time, start_time, max_timestep, uic }
+                if stop_time == 100e-9 && step_time == 1e-9 && start_time == 20e-9
+                    && max_timestep == Some(0.5e-9) && uic));
+            let deck = format!("PVT card\n{}\n.end\n", task.task.analysis_line);
+            let parsed = rspice_core::Netlist::parse(&deck).unwrap();
+            assert!(matches!(parsed.analyses.as_slice(),
+                [rspice_core::netlist::AnalysisCommand::Tran { step, stop, start, max_step, uic }]
+                if *step == 1e-9 && *stop == 100e-9 && *start == Some(20e-9)
+                    && *max_step == Some(0.5e-9) && *uic));
+        }
+    }
+}
+
 /// A corner run's base analysis is the thing declared over the points, so each
 /// point has to become a task of that analysis kind. Until it did, a corner
 /// transient produced one scalar per node and no `.MEAS` result at all.

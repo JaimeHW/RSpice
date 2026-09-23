@@ -267,12 +267,7 @@ impl SimulationController {
             TempBaseAnalysis::Dc => {
                 CornerBaseMode::from_dc_config(&state.sim_setup.dc.to_config()?)
             }
-            TempBaseAnalysis::Transient => CornerBaseMode::Transient {
-                stop_time: parse_spice_value_checked(&state.sim_setup.tran.stop)
-                    .map_err(|e| format!("invalid temperature transient stop time: {}", e))?,
-                step_time: parse_spice_value_checked(&state.sim_setup.tran.step)
-                    .map_err(|e| format!("invalid temperature transient step time: {}", e))?,
-            },
+            TempBaseAnalysis::Transient => Self::transient_study_base_mode(state)?,
             TempBaseAnalysis::Ac => {
                 let sweep = match Self::map_frequency_sweep(state.sim_setup.ac.sweep) {
                     FrequencySweep::Decade => CornerFrequencySweep::Decade,
@@ -349,12 +344,7 @@ impl SimulationController {
             CornerBaseAnalysis::Dc => {
                 CornerBaseMode::from_dc_config(&state.sim_setup.dc.to_config()?)
             }
-            CornerBaseAnalysis::Transient => CornerBaseMode::Transient {
-                stop_time: parse_spice_value_checked(&state.sim_setup.tran.stop)
-                    .map_err(|e| format!("invalid corner transient stop time: {}", e))?,
-                step_time: parse_spice_value_checked(&state.sim_setup.tran.step)
-                    .map_err(|e| format!("invalid corner transient step time: {}", e))?,
-            },
+            CornerBaseAnalysis::Transient => Self::transient_study_base_mode(state)?,
             CornerBaseAnalysis::Ac => {
                 let sweep = match Self::map_frequency_sweep(state.sim_setup.ac.sweep) {
                     FrequencySweep::Decade => CornerFrequencySweep::Decade,
@@ -389,6 +379,43 @@ impl SimulationController {
         })
     }
 
+    fn transient_study_base_mode(
+        state: &AppState,
+    ) -> Result<crate::services::simulation_runner::CornerBaseMode, String> {
+        use crate::services::simulation_runner::CornerBaseMode;
+        let draft = &state.sim_setup.tran;
+        let config = crate::simulation::config::TransientAnalysisConfig {
+            stop_time: parse_spice_value_checked(&draft.stop)
+                .map_err(|e| format!("invalid study transient stop time: {e}"))?,
+            step_time: parse_spice_value_checked(&draft.step)
+                .map_err(|e| format!("invalid study transient step time: {e}"))?,
+            start_time: parse_spice_value_checked(&draft.start)
+                .map_err(|e| format!("invalid study transient start time: {e}"))?,
+            max_timestep: Self::parse_optional_spice_value(&draft.max_step)
+                .map_err(|e| format!("invalid study transient max step: {e}"))?,
+            uic: draft.uic,
+        };
+        config.validate().map_err(|errors| errors.join("; "))?;
+        // Keep the historical request identity when no window/IC control is
+        // authored, while retaining every configured field when one is.
+        Ok(
+            if config.start_time == 0.0 && config.max_timestep.is_none() && !config.uic {
+                CornerBaseMode::Transient {
+                    stop_time: config.stop_time,
+                    step_time: config.step_time,
+                }
+            } else {
+                CornerBaseMode::TransientWindow {
+                    stop_time: config.stop_time,
+                    step_time: config.step_time,
+                    start_time: config.start_time,
+                    max_timestep: config.max_timestep,
+                    uic: config.uic,
+                }
+            },
+        )
+    }
+
     pub(super) fn periodic_solver_tolerances(state: &AppState) -> (f64, f64) {
         let opts = &state.sim_setup.options;
         (opts.reltol, opts.abstol)
@@ -416,5 +443,73 @@ impl SimulationController {
     ) -> (f64, f64) {
         let (plan_reltol, plan_abstol) = Self::periodic_solver_tolerances(state);
         (reltol.unwrap_or(plan_reltol), abstol.unwrap_or(plan_abstol))
+    }
+}
+
+#[cfg(test)]
+mod pvt_base_tests {
+    use super::*;
+    use crate::services::simulation_runner::CornerBaseMode;
+    use crate::simulation::runner::worker_contract::WorkerCornerBaseMode;
+
+    #[test]
+    fn pvt_base_transient_window_survives_configuration_and_worker_transport() {
+        let mut state = AppState::default();
+        state.sim_setup.tran.stop = "1m".into();
+        state.sim_setup.tran.step = "10u".into();
+        let temperature = crate::simulation::dialog::temp::TempConfig {
+            base_analysis: crate::simulation::dialog::temp::TempBaseAnalysis::Transient,
+            ..Default::default()
+        };
+        let corner = crate::simulation::dialog::corner::CornerConfig::default();
+        let sealed = state
+            .model_library_manager
+            .seal_execution_sources_for_plan(&state.sim_setup.model_bindings)
+            .unwrap();
+        assert!(matches!(
+            SimulationController::temp_run_config_from_dialog(&state, &temperature)
+                .unwrap()
+                .base_mode,
+            CornerBaseMode::Transient { .. }
+        ));
+
+        state.sim_setup.tran.start = "200u".into();
+        state.sim_setup.tran.max_step = "2u".into();
+        state.sim_setup.tran.uic = true;
+        for mode in [
+            SimulationController::temp_run_config_from_dialog(&state, &temperature)
+                .unwrap()
+                .base_mode,
+            SimulationController::corner_run_config_from_dialog(&state, &corner, &sealed)
+                .unwrap()
+                .base_mode,
+        ] {
+            let packet = WorkerCornerBaseMode::from(&mode);
+            let json = serde_json::to_string(&packet).unwrap();
+            let restored: WorkerCornerBaseMode = serde_json::from_str(&json).unwrap();
+            assert_eq!(restored, packet);
+            let CornerBaseMode::TransientWindow {
+                stop_time,
+                step_time,
+                start_time,
+                max_timestep,
+                uic,
+            } = CornerBaseMode::from(restored)
+            else {
+                panic!("all transient settings must be retained")
+            };
+            for (actual, expected) in [(stop_time, 1e-3), (step_time, 1e-5), (start_time, 2e-4)] {
+                assert!((actual / expected - 1.0).abs() < 1e-14);
+            }
+            assert_eq!(max_timestep, Some(2e-6));
+            assert!(uic);
+        }
+
+        // Invalid inherited fields must fail on the study form as they do on Transient.
+        state.sim_setup.tran.max_step = "-2u".into();
+        assert!(SimulationController::temp_run_config_from_dialog(&state, &temperature).is_err());
+        assert!(
+            SimulationController::corner_run_config_from_dialog(&state, &corner, &sealed).is_err()
+        );
     }
 }
