@@ -295,9 +295,21 @@ Cout out 0 160p
         "Cout out 0 160p",
         "Cout out 0 160p\nMout out carrier 0 0 MM\n.model MM NMOS",
     );
+    assert_admitted(
+        engine().run_hb_envelope_continuation_state(
+            &parse(&with_mos),
+            HbConfig::new(F0).with_harmonics(2),
+            &["Vmod".to_string()],
+        ),
+        "a classic MOS envelope deck",
+    );
+    let with_switch = supported.replace(
+        "Cout out 0 160p",
+        "Cout out 0 160p\nSout out 0 carrier 0 SM\n.model SM SW(VT=0 VH=0.1 RON=1 ROFF=1meg)",
+    );
     let message = engine()
         .run_hb_envelope_continuation_state(
-            &parse(&with_mos),
+            &parse(&with_switch),
             HbConfig::new(F0).with_harmonics(2),
             &["Vmod".to_string()],
         )
@@ -308,7 +320,7 @@ Cout out 0 160p
         "the envelope preflight must own this rejection: {message}"
     );
     assert!(
-        message.contains("classic MOS devices"),
+        message.contains("voltage-controlled switches"),
         "the rejection must name the family outside the subset: {message}"
     );
 }
