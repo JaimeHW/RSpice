@@ -109,12 +109,11 @@ pub use net_highlight::NetHighlightState;
 pub use net_label::{Junction, NetLabel, NetLabelKind};
 pub use placement_authority::PlacementAuthority;
 pub use point::Point;
-pub use port::{
-    PendingPortSequence, PortContract, PortDirection,
-    PortDiscipline, PortSignalType, PortSpec,
-};
 #[cfg(test)]
 pub use port::{PendingPortPlacement, PortDirectionType};
+pub use port::{
+    PendingPortSequence, PortContract, PortDirection, PortDiscipline, PortSignalType, PortSpec,
+};
 pub use probe::SchematicProbe;
 pub use replacement::{
     SchematicReplacementAuthority, SchematicReplacementCompatibility, SchematicReplacementError,

@@ -26,7 +26,8 @@ impl SimulationController {
         if !matches!(self.current_spec, Some(AnalysisSpec::MonteCarlo { .. }))
             || self
                 .current_spec_options
-                .as_ref().is_none_or(|options| options.mc_checkpoint.is_none())
+                .as_ref()
+                .is_none_or(|options| options.mc_checkpoint.is_none())
         {
             return Err(
                 "the active analysis did not request Monte Carlo checkpoint capture".into(),

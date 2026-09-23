@@ -1115,9 +1115,9 @@ impl AnalysisResult {
                     wave.name == "inoise" && wave.unit.as_deref() != Some(quantity.density_unit())
                 }) || (noise.noise_figure.is_some()
                     && quantity != rspice_core::analysis::noise::NoiseInputQuantity::Voltage))
-                {
-                    return Err("Noise input quantity disagrees with its retained evidence".into());
-                }
+            {
+                return Err("Noise input quantity disagrees with its retained evidence".into());
+            }
             if let Some(conversion) = &noise.conversion {
                 conversion.validate(noise.band)?;
                 if let Some(sampling) = &conversion.sampling {
