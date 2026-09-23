@@ -16,6 +16,8 @@ use super::super::multi_run::AnalysisSpec;
 use super::super::results::SimulationResult;
 use super::{AnalysisExecutionEnvironment, SimulationError, SpecExecutionOptions};
 
+type CheckpointObserver<'a> = dyn Fn(&[u8]) -> Result<(), SimulationError> + Sync + 'a;
+
 mod config;
 mod device;
 mod frequency;
@@ -73,6 +75,7 @@ pub(super) fn run_spec_request(
     )
 }
 
+#[allow(dead_code, reason = "retained for study and PVT execution adapters")]
 pub(super) fn run_spec_request_with_environment(
     bridge: &EngineBridge,
     spec: AnalysisSpec,
@@ -105,7 +108,7 @@ pub(super) fn run_spec_request_with_environment_and_checkpoint_observer(
     dependencies: &ResolvedExecutionDependencies,
     environment: Option<AnalysisExecutionEnvironment>,
     abort_flag: &dyn AbortSignal,
-    checkpoint_observer: Option<&(dyn Fn(&[u8]) -> Result<(), SimulationError> + Sync)>,
+    checkpoint_observer: Option<&CheckpointObserver<'_>>,
 ) -> Result<SimulationResult, SimulationError> {
     ensure_not_aborted(abort_flag)?;
     if let Some(checkpoint) = &options.mc_checkpoint {

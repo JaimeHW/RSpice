@@ -19,7 +19,7 @@ pub(super) fn run_sweep_spec(
     source_path: Option<&Path>,
     environment: Option<AnalysisExecutionEnvironment>,
     abort: &dyn AbortSignal,
-    checkpoint_observer: Option<&(dyn Fn(&[u8]) -> Result<(), SimulationError> + Sync)>,
+    checkpoint_observer: Option<&super::CheckpointObserver<'_>>,
 ) -> Result<SimulationResult, SimulationError> {
     super::ensure_not_aborted(abort)?;
     match spec {
@@ -63,7 +63,7 @@ fn run_monte_carlo(
         &crate::simulation::runner::monte_carlo_checkpoint::MonteCarloCheckpointRequest,
     >,
     histogram_bins: usize,
-    checkpoint_observer: Option<&(dyn Fn(&[u8]) -> Result<(), SimulationError> + Sync)>,
+    checkpoint_observer: Option<&super::CheckpointObserver<'_>>,
     netlist: &str,
     source_path: Option<&Path>,
     environment: Option<AnalysisExecutionEnvironment>,
